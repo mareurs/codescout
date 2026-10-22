@@ -100,14 +100,24 @@ carries the filtered result and:
   when the stream fit the capture, a lower bound of it whenever
   `unfiltered_truncated` is set;
 - `unfiltered_truncated` and `unfiltered_buffered_lines` when the
-  stream was cut.
+  stream was cut;
+- `producer_exit_code` — the exit status of `A`, when `A` is a plain
+  command (a leading `cd x &&` list is fine). It is not recorded when
+  `A` holds any `(` `)` `{` `}` (so `${VAR}` and `$( )` count), a
+  backtick, a `#` or a `$'…'`; when `A` starts with `!`, `time` or
+  `exec`; or when it is a compound `if`/`for`/`while`. Example:
+  `cargo test` returned 101 even when `grep` returned 0. A producer
+  stopped because the filter closed the pipe reports 141 (SIGPIPE):
+  that is a stop, not a failure.
+  The key is absent when the status is unknown, and after a timeout.
+  Absent never means the producer passed.
 
 An early-exit filter (`head`, `sed -n 1,5p`, `grep -m1`) leaves
 part of the stream unread: it does not stop `A` at once, a drain
 after the filter keeps it running and reads at most 4 MiB more, and
 then the pipe closes and `A` stops. The `exit_code` of the
-call is the filter's, as in any pipe without `pipefail`: the
-producer's own exit status is not reported.
+call is the filter's, as in any pipe without `pipefail`: read
+`producer_exit_code` for the producer's.
 
 On `timeout_secs` the server kills the process group and returns the
 usual `timed_out` shape plus `capture_incomplete: true`, the

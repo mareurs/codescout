@@ -168,7 +168,7 @@ not hash, diff, or positionally parse it without allowing for that.
   `unfiltered_output` handle to the first command's stdout (up to 4 MiB;
   `unfiltered_truncated` marks a cut, and `unfiltered_output_lines` is then a lower bound of the
   stream, for any filter: the capture file itself stops a little over 4 MiB). Query it with
-  `grep FAILED @cmd_id`. Server-side enforcement still blocks (`IL3 violation`) an unbounded
+  `grep FAILED @cmd_id`. `exit_code` is the filter's and `producer_exit_code` the producer's. Server-side enforcement still blocks (`IL3 violation`) an unbounded
   pipe the capture cannot be spliced into — for example a last stage that is not a terminal
   filter, a `;`/`&&`/`||`/newline list, comment or heredoc after the first pipe
   (`cmd | tail -20; echo $?`, `cmd | grep X || true`), a nested or `|&` pipe, a buffer ref;

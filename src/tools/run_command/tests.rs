@@ -3734,6 +3734,16 @@ async fn late_keys_are_inside_the_gate_at_the_exact_edge() {
                 .to_string()
                 .len(),
         ),
+        (
+            "producer_exit_code",
+            Box::new(|| LateKeys {
+                producer_exit_code: Some(101),
+                ..Default::default()
+            }),
+            json!({"exit_code": 0, "stdout": "", "producer_exit_code": 101})
+                .to_string()
+                .len(),
+        ),
     ] {
         let n = 10_003 - key_len;
         let at = run(n, make()).await;
@@ -6287,6 +6297,195 @@ async fn a_capture_under_the_store_limit_is_kept_whole() {
         "the handle must serve every line of the stream: {counted}"
     );
 }
+
+/// A pipeline's own status is its last stage's, so a failing `cargo test | grep FAILED` answered
+/// `exit_code: 0`. The splice records the producer's status beside it: `producer_exit_code` is what
+/// the command before the first pipe returned, and `exit_code` stays the filter's (R28).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_pipe_reports_the_producers_exit_code_beside_the_filters() {
+    let (_dir, ctx) = project_ctx().await;
+    for (command, exit_code, producer, stdout, handle) in [
+        // A failing producer behind a filter that succeeds: the case this key exists for.
+        ("sh -c 'seq 1 3; exit 3' | head -1", 0, 3, "1\n", true),
+        // Both fail, differently: each status is its own. The producer printed nothing, so there is
+        // no capture to hand out, and the status is reported all the same.
+        ("sh -c 'exit 2' | grep x", 1, 2, "", false),
+        // A passing producer is reported too, so an absent key never means "passed".
+        ("seq 1 3 | head -1", 0, 0, "1\n", true),
+        // A chain: the producer is the command before the FIRST pipe.
+        (
+            "sh -c 'seq 1 5; exit 4' | grep 2 | head -1",
+            0,
+            4,
+            "2\n",
+            true,
+        ),
+        // A list before the pipe: only its last command is wrapped, and `cd` still moves the pipeline.
+        (
+            "cd / && sh -c 'ls -d tmp; exit 5' | grep tmp",
+            0,
+            5,
+            "tmp\n",
+            true,
+        ),
+        // The caller's `set -C` must not stop the status file being written.
+        (
+            "set -C; sh -c 'seq 1 3; exit 3' | head -1",
+            0,
+            3,
+            "1\n",
+            true,
+        ),
+    ] {
+        let result = RunCommand
+            .call(json!({ "command": command }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["exit_code"], exit_code, "{command}: {result}");
+        assert!(result.get("stderr").is_none(), "{command}: {result}");
+        assert_eq!(
+            result["producer_exit_code"], producer,
+            "{command}: {result}"
+        );
+        assert_eq!(
+            result["stdout"].as_str().unwrap_or_default(),
+            stdout,
+            "{command}: {result}"
+        );
+        assert_eq!(
+            result["unfiltered_output"].is_string(),
+            handle,
+            "{command}: {result}"
+        );
+    }
+}
+
+/// The status is a bonus and never costs the capture: a producer that is not a plain command, or a
+/// compound command whose wrapped text the shell rejects, runs as written with its capture and no
+/// `producer_exit_code`; a command with no pipe has none either.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_producer_that_cannot_be_wrapped_keeps_its_capture_without_a_status() {
+    let (_dir, ctx) = project_ctx().await;
+    for command in [
+        "(sh -c 'seq 1 3; exit 5'; true) | head -1",
+        "{ sh -c 'seq 1 3; exit 5'; true; } | head -1",
+        "if true; then sh -c 'seq 1 3; exit 6'; fi | head -1",
+        "for i in 1 2; do seq $i; done | head -1",
+    ] {
+        let result = RunCommand
+            .call(json!({ "command": command }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["stdout"], "1\n", "{command}: {result}");
+        assert!(
+            result["unfiltered_output"].is_string(),
+            "{command}: {result}"
+        );
+        assert!(
+            result.get("producer_exit_code").is_none(),
+            "{command}: {result}"
+        );
+    }
+    let bare = RunCommand
+        .call(json!({ "command": "echo hi" }), &ctx)
+        .await
+        .unwrap();
+    assert!(bare.get("producer_exit_code").is_none(), "{bare}");
+}
+
+/// A producer that outruns the bounded drain is stopped when the filter closes the pipe: its status is
+/// 141 (`128 + SIGPIPE`), a stop and not a failure. The doc on `read_producer_status` says so.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_producer_stopped_by_the_closed_pipe_reports_sigpipe() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "seq 1 3000000 | head -1" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["stdout"], "1\n", "{result}");
+    assert_eq!(result["producer_exit_code"], 141, "{result}");
+    assert_eq!(result["unfiltered_truncated"], true, "{result}");
+}
+
+/// The caller's `set -o pipefail` must still see the producer fail. A wrapper group that ended in
+/// the `echo` that records the status would leave with status 0 and flip `exit_code` from the
+/// producer's failure to success for exactly the caller who asked for the stricter behaviour; the
+/// group leaves with the command's own status instead. Skipped where the shell has no `pipefail`.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_wrapped_producer_still_fails_the_pipeline_under_pipefail() {
+    let has_pipefail = std::process::Command::new("sh")
+        .args(["-c", "set -o pipefail"])
+        .status()
+        .is_ok_and(|status| status.success());
+    if !has_pipefail {
+        eprintln!("skipped: this `sh` has no `set -o pipefail`");
+        return;
+    }
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "set -o pipefail; sh -c 'seq 1 3; exit 3' | head -1" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["exit_code"], 3, "{result}");
+    assert_eq!(result["producer_exit_code"], 3, "{result}");
+    assert_eq!(result["stdout"], "1\n", "{result}");
+}
+
+/// A status the shell never wrote is absent, not 0: a `cd` that fails skips the pipeline, and an
+/// `exec` producer replaces the group's shell before the line that records it. An empty status file
+/// reads as "unknown".
+#[cfg(unix)]
+#[tokio::test]
+async fn a_status_the_shell_never_wrote_is_absent_and_not_zero() {
+    let (_dir, ctx) = project_ctx().await;
+    for command in [
+        "cd /nonexistent-codescout-dir && seq 3 | head -1",
+        "exec seq 3 | head -1",
+    ] {
+        let result = RunCommand
+            .call(json!({ "command": command }), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            result.get("producer_exit_code").is_none(),
+            "{command}: {result}"
+        );
+    }
+}
+
+/// The status file is created beside the capture, named in the spliced command, and removed with the
+/// injection, like the capture: nothing is left in the temp directory.
+#[cfg(unix)]
+#[test]
+fn the_producer_status_file_lives_and_dies_with_the_injection() {
+    let dir = tempfile::tempdir().unwrap();
+    let injected = super::inner::inject_tee_in("seq 1 3 | head -1", false, dir.path()).unwrap();
+    let status = injected.producer_status.as_ref().expect("a status file");
+    assert!(
+        injected.command.starts_with(&format!(
+            "{{ seq 1 3; s=$?; echo $s >| '{}'; exit $s; }} | ( trap",
+            status.0
+        )),
+        "{}",
+        injected.command
+    );
+    let count = |d: &std::path::Path| std::fs::read_dir(d).unwrap().count();
+    assert_eq!(count(dir.path()), 2, "the capture file and the status file");
+    drop(injected);
+    assert_eq!(
+        count(dir.path()),
+        0,
+        "both files are removed with the injection"
+    );
+}
+
 /// The splice wraps the filter in a group that drains what the filter leaves unread, so an
 /// early-exit filter (`head -1`) cannot close the pipe and stop the producer mid-stream. The
 /// newline before `s=$?` (not `;`) keeps a trailing `# comment` in the filter from swallowing the
@@ -6302,11 +6501,17 @@ fn inject_tee_in_wraps_the_filter_in_a_draining_group() {
         .expect("a terminal filter must be captured")
         .0
         .clone();
+    let st = injected
+        .producer_status
+        .as_ref()
+        .expect("a plain producer records its status")
+        .0
+        .clone();
     let limit = super::output::CAPTURE_STORE_LIMIT_BYTES;
     assert_eq!(
         injected.command,
         format!(
-            "seq 1 3 | ( trap '' XFSZ; ulimit -f 8320 2>/dev/null; exec tee '{cap}' 2>/dev/null ) \
+            "{{ seq 1 3; s=$?; echo $s >| '{st}'; exit $s; }} | ( trap '' XFSZ; ulimit -f 8320 2>/dev/null; exec tee '{cap}' 2>/dev/null ) \
              | {{ head -1\ns=$?; head -c {limit} >/dev/null; exit $s; }}"
         ),
         "the filter must run inside the bounded draining group, the tee under its file bound"
@@ -7157,10 +7362,16 @@ fn inject_tee_in_splices_a_chain_at_its_first_pipe() {
         .expect("a terminal filter must be captured")
         .0
         .clone();
+    let st = injected
+        .producer_status
+        .as_ref()
+        .expect("a plain producer records its status")
+        .0
+        .clone();
     assert_eq!(
         injected.command,
         format!(
-            "seq 1 3 | ( trap '' XFSZ; ulimit -f {} 2>/dev/null; exec tee '{cap}' 2>/dev/null ) \
+            "{{ seq 1 3; s=$?; echo $s >| '{st}'; exit $s; }} | ( trap '' XFSZ; ulimit -f {} 2>/dev/null; exec tee '{cap}' 2>/dev/null ) \
              | {{ grep 2 | head -1\ns=$?; head -c {} >/dev/null; exit $s; }}",
             crate::tools::command_summary::capture_file_blocks(
                 super::output::CAPTURE_STORE_LIMIT_BYTES
@@ -7327,7 +7538,13 @@ fn the_spliced_capture_file_is_bounded_while_the_filter_reads_the_whole_stream()
     let cap = dir.path().join("cap");
     let cmd = "seq 1 3000000 | grep -c 7";
     let limit = super::output::CAPTURE_STORE_LIMIT_BYTES;
-    let text = splice_tee(cmd, cmd.find('|').unwrap(), cap.to_str().unwrap(), limit);
+    let text = splice_tee(
+        cmd,
+        cmd.find('|').unwrap(),
+        cap.to_str().unwrap(),
+        limit,
+        None,
+    );
     assert!(
         text.contains(&format!(
             "| ( trap '' XFSZ; ulimit -f {} 2>/dev/null; exec tee '",

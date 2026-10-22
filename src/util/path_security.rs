@@ -1831,6 +1831,41 @@ pub(crate) fn is_one_pipeline(command: &str) -> bool {
     pipeline_segments(trimmed) == [trimmed]
         && split_outside_quotes(trimmed, &["<<", "#"]) == [trimmed]
 }
+/// Where, in `prefix` (the text before a pipeline's first `|`), the command that writes to that
+/// pipe begins, when it can be wrapped as `{ <command>; s=$?; echo $s >| <file>; exit $s; }` to record its exit
+/// status. `None` when it cannot be told apart safely, and the caller then splices without the
+/// wrapper: the response simply carries no `producer_exit_code`.
+///
+/// The producer is the LAST command of the list before the pipe (`cd /tmp && cargo test | …`
+/// pipes `cargo test`, and `cd` runs in the caller's shell), so the wrapper goes around that
+/// segment alone and the text before it stays verbatim. [`pipeline_segments`] models quotes and
+/// backslashes, not nesting, so a segment is refused when it could be the tail of something larger:
+/// a bracket or brace (`(a; b) | …`, `{ a; b; } | …`, `$( )`), a backtick, a `#` comment, a `<<`
+/// heredoc, a `$'…'` string, a trailing `\`, an unbalanced quote. `! cmd` is refused because the
+/// wrapper would record the negated status, and `time cmd` because it would time the producer alone
+/// where bash times the whole pipeline (`time ! cmd` would move the negation too). A compound command (`if … fi | …`) is NOT refused
+/// here: its last segment is a bare `fi`, the wrapped text does not parse, and the caller's shell
+/// parse check falls back to the plain splice.
+pub(crate) fn producer_command_start(prefix: &str) -> Option<usize> {
+    let text = prefix.trim_end();
+    let last = pipeline_segments(text).pop()?;
+    if !text.ends_with(last.as_str()) {
+        return None;
+    }
+    if last.contains(['(', ')', '{', '}', '`', '#'])
+        || last.contains("<<")
+        || last.contains("$'")
+        || last.ends_with('\\')
+        || !quotes_balanced(&last)
+        || last
+            .split_whitespace()
+            .next()
+            .is_some_and(|word| matches!(word, "!" | "time"))
+    {
+        return None;
+    }
+    Some(text.len() - last.len())
+}
 
 /// Whether every single and double quote in `s` is closed, by the rules `split_outside_quotes`
 /// applies (a backslash escapes the next character outside single quotes).
@@ -5570,6 +5605,43 @@ mod tests {
             assert_eq!(is_one_pipeline(command), want, "{command:?}");
         }
     }
+    #[test]
+    fn producer_command_start_finds_the_last_plain_command_before_the_pipe() {
+        // (prefix before the first pipe, the text the producer starts at, or None when the status
+        // cannot be recorded around it).
+        for (prefix, want) in [
+            ("seq 1 3", Some("seq 1 3")),
+            ("seq 1 3 ", Some("seq 1 3")),
+            ("FOO=1 cargo test 2>&1", Some("FOO=1 cargo test 2>&1")),
+            // A list before the pipe: the producer is its last command, the head stays as written.
+            ("cd /tmp && seq 1 3", Some("seq 1 3")),
+            ("a || b", Some("b")),
+            ("a; b", Some("b")),
+            ("a\nb", Some("b")),
+            ("a & b", Some("b")),
+            ("echo 'x;y' && seq 3", Some("seq 3")),
+            // The segment could be the tail of something larger, or the wrapper would mean more.
+            ("(a; b)", None),
+            ("{ a; b; }", None),
+            ("echo $(a; b)", None),
+            ("echo `a; b`", None),
+            ("seq 3 # note", None),
+            ("cat <<EOF", None),
+            ("echo $'a'", None),
+            ("seq 3 \\", None),
+            ("echo 'open", None),
+            ("! seq 3", None),
+            // `time` would time the producer alone where bash times the whole pipeline.
+            ("time seq 3", None),
+            ("time ! true", None),
+            ("", None),
+            ("a &&", None),
+        ] {
+            let want = want.map(|text| prefix.trim_end().len() - text.len());
+            assert_eq!(producer_command_start(prefix), want, "{prefix:?}");
+        }
+    }
+
     /// `split_outside_quotes` models single and double quotes and backslashes only. ANSI-C quoting
     /// (`$'…'`), quotes nested inside `$(…)` or backticks, and a comment hidden behind either, all
     /// shift its quote state, so a LIST read as one pipeline and an appended pager read the last

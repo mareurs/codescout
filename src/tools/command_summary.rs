@@ -528,9 +528,9 @@ pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
 }
 
 /// Where to splice the unfiltered-output `tee` into `cmd`, or `None` when the command cannot be
-/// captured and must run UNTOUCHED. The ONE function that decides it: `inject_tee_in` splices at
-/// the offset it returns and `run_command`'s foreground refusal asks whether it returns `Some`, so
-/// the splice and the refusal cannot disagree. `cmd` is the command text as it will run; heredoc
+/// captured and must run UNTOUCHED. [`plan_tee_splice`] is the ONE function that decides it, and this
+/// returns its pipe offset: `inject_tee_in` splices from the plan and `run_command`'s foreground
+/// refusal asks whether this returns `Some`, so the splice and the refusal cannot disagree. `cmd` is the command text as it will run; heredoc
 /// bodies are masked here for the structural scan only
 /// ([`crate::util::path_security::mask_heredoc_bodies`] keeps every offset).
 ///
@@ -548,7 +548,8 @@ pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
 ///    ([`crate::util::path_security::is_one_pipeline`]): the group holds exactly the rest of that
 ///    pipeline, and nothing after a `;` / `&&` / newline;
 /// 5. the chosen pipe is not `|&` (stderr is piped too, and the command is left untouched);
-/// 6. the shell PARSES both `cmd` and the spliced text ([`splice_tee`] with a dummy path). The
+/// 6. the shell PARSES both `cmd` and the spliced text ([`splice_tee`] with a dummy path: the
+///    producer-wrapped shape first, the plain shape when only that one parses). The
 ///    scan above is not a shell parser (a `|` in a double-quoted string inside a `$( )`, a stray
 ///    `}` or `)` in a group each fool it), and a splice the shell rejects turns a working command
 ///    into a syntax error, so this is the backstop for that whole class. The check runs
@@ -559,6 +560,26 @@ pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
 /// wrote it, with no capture, because a capture of a different segment's stream would leave the
 /// trimmed producer's output lost while the response offered a handle to something else.
 pub fn tee_splice_point(cmd: &str) -> Option<usize> {
+    plan_tee_splice(cmd).map(|plan| plan.pipe_pos)
+}
+
+/// How [`tee_splice_point`] decided to capture a command.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct SplicePlan {
+    /// The `|` that starts the filter group: what [`tee_splice_point`] returns.
+    pub(crate) pipe_pos: usize,
+    /// Where the command that writes to that pipe begins, `Some` when it can be wrapped in a group
+    /// that records its exit status ([`ProducerStatus`]): it is a plain command
+    /// ([`crate::util::path_security::producer_command_start`]) AND the shell parses the wrapped
+    /// text. `None` leaves the producer as written, and the response carries no `producer_exit_code`.
+    pub(crate) producer_start: Option<usize>,
+}
+
+/// The decision behind [`tee_splice_point`]: see there for the conditions that make it `Some`. It adds
+/// where the producer command starts, for the status wrapper. A wrapper the shell rejects (a compound
+/// command such as `if … fi | head`) is dropped and the plain splice kept: the status is a bonus and
+/// must never turn a capturable command into an uncaptured one.
+pub(crate) fn plan_tee_splice(cmd: &str) -> Option<SplicePlan> {
     if crate::util::path_security::contains_buffer_ref(cmd) {
         return None;
     }
@@ -576,10 +597,25 @@ pub fn tee_splice_point(cmd: &str) -> Option<usize> {
     }
     // The structural candidate exists; ask the shell whether it is real. The splice is checked with
     // the same shape the real one has, so a parse failure here is the one the command would hit.
-    if !shell_parses(cmd) || !shell_parses(&splice_tee(cmd, first, "/dev/null", 0)) {
+    if !shell_parses(cmd) {
         return None;
     }
-    Some(first)
+    if let Some(start) = crate::util::path_security::producer_command_start(&masked[..first]) {
+        let producer = ProducerStatus {
+            start,
+            path: "/dev/null",
+        };
+        if shell_parses(&splice_tee(cmd, first, "/dev/null", 0, Some(producer))) {
+            return Some(SplicePlan {
+                pipe_pos: first,
+                producer_start: Some(start),
+            });
+        }
+    }
+    shell_parses(&splice_tee(cmd, first, "/dev/null", 0, None)).then_some(SplicePlan {
+        pipe_pos: first,
+        producer_start: None,
+    })
 }
 
 /// `cmd` with the unfiltered-output capture spliced in at `pipe_pos` (the `|` that
@@ -591,6 +627,9 @@ pub fn tee_splice_point(cmd: &str) -> Option<usize> {
 /// runs. The newline before `s=$?` (not `;`) is load-bearing: a trailing `# comment` in the filter
 /// would otherwise swallow the closing brace.
 ///
+/// With `producer`, `A` is `<head>{ <command>; s=$?; echo $s >| '<path>'; exit $s; }` ([`ProducerStatus`]): the shell
+/// then records the producer's exit status, which a pipeline otherwise loses to its last stage.
+///
 /// The `tee` runs under `ulimit -f`, so the capture FILE stops a little over `store_limit` for
 /// EVERY filter, while `tee` keeps copying the whole stream to the filter: past the bound its
 /// writes to the file fail with EFBIG, `trap '' XFSZ` (inherited through `exec`) keeps the signal
@@ -598,16 +637,49 @@ pub fn tee_splice_point(cmd: &str) -> Option<usize> {
 /// this a whole-stream filter (`git log --all -p | grep x`, 268 MB measured) filled the capture
 /// file, on a tmpfs `/tmp` that is RAM. A shell where `ulimit -f` fails (the `2>/dev/null` hides
 /// it) leaves the file unbounded and the command working; `read_capture`'s read bound covers that.
-pub(crate) fn splice_tee(cmd: &str, pipe_pos: usize, tee_path: &str, store_limit: usize) -> String {
+pub(crate) fn splice_tee(
+    cmd: &str,
+    pipe_pos: usize,
+    tee_path: &str,
+    store_limit: usize,
+    producer: Option<ProducerStatus<'_>>,
+) -> String {
+    let before = cmd[..pipe_pos].trim_end();
+    // The producer wrapped to record its status, when asked and when the offset falls on a character
+    // boundary of the text it was computed from; otherwise the producer as written.
+    let producer_side = match producer
+        .and_then(|p| Some((before.get(..p.start)?, before.get(p.start..)?, p.path)))
+    {
+        Some((head, command, path)) => {
+            format!("{head}{{ {command}; s=$?; echo $s >| '{path}'; exit $s; }}")
+        }
+        None => before.to_string(),
+    };
     format!(
         "{} | ( trap '' XFSZ; ulimit -f {} 2>/dev/null; exec tee '{}' 2>/dev/null ) | {{ {}\ns=$?; \
          head -c {} >/dev/null; exit $s; }}",
-        cmd[..pipe_pos].trim_end(),
+        producer_side,
         capture_file_blocks(store_limit),
         tee_path,
         cmd[pipe_pos + 1..].trim_start(),
         store_limit
     )
+}
+
+/// Where the producer's exit status goes: [`splice_tee`] wraps the command that writes to the first
+/// pipe, which starts at byte `start` of the text before the pipe, as `{ <command>; s=$?; echo $s >|
+/// '<path>'; exit $s; }`. The group is the producer's own stage of the pipeline and leaves with the
+/// command's own status, so only the status is recorded: the command runs where and with what it did
+/// before, and the pipeline's exit status is still the shell's own (the filter's, or under the
+/// caller's `set -o pipefail` the last failure). A bare `echo` last would make the group's status 0
+/// and hide the producer's failure from `pipefail`. `>|` writes the file the caller's `set -C` would
+/// otherwise refuse to overwrite.
+pub(crate) struct ProducerStatus<'a> {
+    /// Byte offset in the trimmed text before the pipe where the producer command begins
+    /// ([`crate::util::path_security::producer_command_start`]).
+    pub(crate) start: usize,
+    /// The file the status is written to: a path [`super::run_command`] created and vetted, quoted here.
+    pub(crate) path: &'a str,
 }
 
 /// The headroom over the store limit the capture file may grow to (see [`capture_file_blocks`]):
@@ -3042,7 +3114,7 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         assert!(shell_parses(fooled), "the premise: the original parses");
         let at = fooled.find("a|b").unwrap() + 1;
         assert!(
-            !shell_parses(&splice_tee(fooled, at, "/dev/null", 0)),
+            !shell_parses(&splice_tee(fooled, at, "/dev/null", 0, None)),
             "the premise: splicing there does not parse"
         );
         assert_eq!(tee_splice_point(fooled), None);
@@ -3053,7 +3125,8 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             normal,
             normal.find("| grep").unwrap(),
             "/dev/null",
-            0
+            0,
+            None
         )));
     }
 
@@ -3122,6 +3195,69 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             let want = want.map(|marker| cmd.find(marker).expect(marker));
             assert_eq!(tee_splice_point(cmd), want, "{cmd}");
         }
+    }
+
+    /// The plan names where the producer begins only when its status can be recorded around it. A
+    /// compound command passes the structural check (its last segment is a bare `fi` or `done`), the
+    /// shell rejects the wrapped text, and the plan keeps the plain splice: the capture is not lost.
+    #[cfg(unix)]
+    #[test]
+    fn plan_tee_splice_finds_the_producer_the_status_wrapper_goes_around() {
+        // (command, the text the producer starts at, or None when it runs as written)
+        for (cmd, want) in [
+            ("seq 1 3 | head -1", Some("seq 1 3")),
+            (
+                "cd /tmp && seq 1 1000 | grep 7 | head -2",
+                Some("seq 1 1000"),
+            ),
+            ("FOO=1 seq 3 | head -1", Some("FOO=1 seq 3")),
+            ("(seq 3; seq 2) | head -1", None),
+            ("{ seq 3; seq 2; } | head -1", None),
+            ("! seq 3 | head -1", None),
+            ("if true; then seq 3; fi | head -1", None),
+            ("for i in 1 2; do seq $i; done | head -1", None),
+        ] {
+            let plan = plan_tee_splice(cmd).unwrap_or_else(|| panic!("no capture: {cmd}"));
+            assert_eq!(Some(plan.pipe_pos), tee_splice_point(cmd), "{cmd}");
+            let want = want.map(|text| cmd.find(text).expect(text));
+            assert_eq!(plan.producer_start, want, "{cmd}");
+        }
+    }
+
+    /// With a status file the splice wraps the producer command alone, behind the head of the list it
+    /// belongs to; without one, or at an offset that is not a character boundary, it is the plain shape.
+    #[test]
+    fn splice_tee_wraps_only_the_producer_when_given_a_status_file() {
+        let cmd = "cd /tmp && seq 1 3 | grep 2 | head -1";
+        let pipe = cmd.find("| grep").unwrap();
+        let start = cmd.find("seq").unwrap();
+        let status = ProducerStatus { start, path: "/st" };
+        let wrapped = splice_tee(cmd, pipe, "/cap", 0, Some(status));
+        assert!(
+            wrapped.starts_with(
+                "cd /tmp && { seq 1 3; s=$?; echo $s >| '/st'; exit $s; } | ( trap '' XFSZ;"
+            ),
+            "{wrapped}"
+        );
+        assert!(wrapped.contains("| { grep 2 | head -1\ns=$?;"), "{wrapped}");
+        let plain = splice_tee(cmd, pipe, "/cap", 0, None);
+        assert!(
+            plain.starts_with("cd /tmp && seq 1 3 | ( trap '' XFSZ;"),
+            "{plain}"
+        );
+        assert!(!plain.contains("echo $?"), "{plain}");
+        // Byte 1 of `é | head` is inside the `é`: no wrapper rather than a panic.
+        let off_boundary = splice_tee(
+            "é | head",
+            3,
+            "/cap",
+            0,
+            Some(ProducerStatus {
+                start: 1,
+                path: "/st",
+            }),
+        );
+        assert!(!off_boundary.contains("echo $?"), "{off_boundary}");
     }
 
     /// R19 + R23: the timeout path replays a filter only when the replay is provably pure. Every rule
