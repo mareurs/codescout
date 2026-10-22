@@ -161,9 +161,22 @@ not hash, diff, or positionally parse it without allowing for that.
   buffers live only in codescout's server process — they resolve exclusively
   through codescout's own `read_file`, `run_command`, or `grep`. Any other
   tool reports the handle as a missing file, because it is not one.
-- **Piping unbounded `run_command` output to log-trimmers** (`cargo
-  test 2>&1 | grep FAILED`). Server-side enforcement blocks this.
-  Run bare, then `grep FAILED @cmd_id` against the buffer.
+- **Piping an unbounded `run_command` into a trimmer when the pipe cannot keep a
+  capture.** A foreground pipe whose last stage is a terminal filter (`grep`, `head`,
+  `tail`, `sort`, `sed`, `awk`, … — 13 in all, listed in `get_guide("iron-laws-detail")`) is
+  run through a capture (`cargo test 2>&1 | grep FAILED`): you get the filtered result and an
+  `unfiltered_output` handle to the first command's stdout (up to 4 MiB;
+  `unfiltered_truncated` marks a cut, and `unfiltered_output_lines` is then a lower bound of the
+  stream, for any filter: the capture file itself stops a little over 4 MiB). Query it with
+  `grep FAILED @cmd_id`. Server-side enforcement still blocks (`IL3 violation`) an unbounded
+  pipe the capture cannot be spliced into — for example a last stage that is not a terminal
+  filter, a `;`/`&&`/`||`/newline list, comment or heredoc after the first pipe
+  (`cmd | tail -20; echo $?`, `cmd | grep X || true`), a nested or `|&` pipe, a buffer ref;
+  more cases are in `iron-laws-detail` — and every such pipe under `run_in_background`,
+  which keeps no unfiltered stream. Run bare, then `grep FAILED @cmd_id` against the buffer.
+  On `timeout_secs` the process group is killed and, when the filter is provably pure, it is
+  run on the partial capture and the result flagged `capture_incomplete`; otherwise
+  `filter_not_run` says why. That call can take up to `timeout_secs` + 5 s.
 - **Treating the summary as authoritative.** It's a preview, not the
   whole result. Pull from the buffer before drawing conclusions.
 - **Trying to round-trip oversized data back into a tool argument.** A

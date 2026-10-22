@@ -1850,6 +1850,32 @@ fn quotes_balanced(s: &str) -> bool {
     !in_single && !in_double
 }
 
+/// The first pipeline [`detect_il3_violation`] refuses, as `(segment, lead)`: the offending
+/// `;`/`&&`/`||`-separated segment and the unbounded producer's own command, both trimmed. `None`
+/// when no segment violates IL3. The detection lives here, once, so a caller that words the
+/// refusal differently from `detect_il3_violation` (the foreground one in `run_command`) cannot
+/// disagree with it about WHICH pipes are refused.
+pub fn il3_offender(command: &str) -> Option<(String, String)> {
+    // Analyse shell *structure*, not the raw string: drop heredoc bodies (data, not
+    // syntax) and consider each `;`/`&&`/`||`-separated command on its own. Both
+    // were real false positives — a commit message describing a pipe, and a
+    // `;`-chain whose first word happened to be `git`.
+    let stripped = strip_heredoc_bodies(command);
+
+    // Carry the offending SEGMENT out alongside its lead, and quote the segment
+    // rather than the whole `command`, so a multi-statement script is localized.
+    // Quoting the whole input rendered a five-line script with a `for` loop as
+    // "the thing piped to a log-trimmer" — including a trailing `git branch
+    // --contains` with no pipe in it at all, leaving the reader to find the
+    // offending pipe themselves. The segment comes from the heredoc-stripped
+    // text, so a heredoc's body is elided from the echo; that is the syntax the
+    // decision was actually made on.
+    let (segment, lead) = pipeline_segments(&stripped)
+        .into_iter()
+        .find_map(|seg| il3_offending_lead(&seg).map(|lead| (seg, lead)))?;
+    Some((segment.trim().to_string(), lead.trim().to_string()))
+}
+
 /// Detect Iron Law 3 violation: piping a **live, potentially-unbounded**
 /// command's output to a **trimmer** that hides a subset of it
 /// (`tail`/`head`/`grep`/`less`/`sed`/`awk`/`sort`/`uniq`/`fmt`).
@@ -1858,6 +1884,15 @@ fn quotes_balanced(s: &str) -> bool {
 /// slice reaches the agent, but the full output is gone. Re-running just to grep
 /// wastes a tool call. Server-side enforcement covers all MCP clients (Claude
 /// Code, Copilot, Gemini, …).
+///
+/// **The message is worded for a BACKGROUND run.** A background run sends its stdout
+/// straight to a log and keeps no unfiltered stream, so what its pipe drops is gone.
+/// A foreground pipe the capture serves (`tee_splice_point`: last stage a terminal filter,
+/// first top-level pipe followed by one pipeline, no buffer ref) runs through the capture, and the
+/// stream of its first command, up to 4 MiB, is kept as `unfiltered_output`; one it cannot serve is
+/// still refused, in the words of `run_command`'s `pipe_refusal`, which asks [`il3_offender`] (the
+/// detection below) which pipe it is. Route (b) of the message (the foreground) is offered only for
+/// a pipe the capture serves (`capture_can_serve`).
 ///
 /// *(The doc comment here used to name `codescout-companion/hooks/il3-deny-hook.sh`
 /// as a mirror to keep in sync. That file still exists but is no longer wired:
@@ -1896,38 +1931,24 @@ fn quotes_balanced(s: &str) -> bool {
 ///
 /// Returns `Some(hint)` when the command violates IL3; `None` otherwise.
 pub fn detect_il3_violation(command: &str) -> Option<String> {
-    // Analyse shell *structure*, not the raw string: drop heredoc bodies (data, not
-    // syntax) and consider each `;`/`&&`/`||`-separated command on its own. Both
-    // were real false positives — a commit message describing a pipe, and a
-    // `;`-chain whose first word happened to be `git`.
-    let stripped = strip_heredoc_bodies(command);
-
-    // Carry the offending SEGMENT out alongside its lead, and quote the segment
-    // rather than the whole `command`, so a multi-statement script is localized.
-    // Quoting the whole input rendered a five-line script with a `for` loop as
-    // "the thing piped to a log-trimmer" — including a trailing `git branch
-    // --contains` with no pipe in it at all, leaving the reader to find the
-    // offending pipe themselves. The segment comes from the heredoc-stripped
-    // text, so a heredoc's body is elided from the echo; that is the syntax the
-    // decision was actually made on.
-    let (segment, lead) = pipeline_segments(&stripped)
-        .into_iter()
-        .find_map(|seg| il3_offending_lead(&seg).map(|lead| (seg, lead)))?;
-    let segment = segment.trim();
-    let lead = lead.trim();
+    let (segment, lead) = il3_offender(command)?;
+    let (segment, lead) = (segment.as_str(), lead.as_str());
+    // Route (b) is offered only when the foreground would take the SAME pipe: the foreground refuses
+    // exactly the pipes the capture cannot serve, so a route that ignored this sent the caller to a
+    // second refusal.
+    let foreground = if crate::tools::run_command::capture_can_serve(command) {
+        "\n  (b) run the same pipe in the FOREGROUND (drop run_in_background): it runs through a\n      \
+         capture, and the stream of its first command, up to 4 MiB, is kept as `unfiltered_output`."
+    } else {
+        ""
+    };
 
     Some(format!(
-        "IL3 violation — piped `{segment}` to a log-trimmer. BLOCKED.\n\n\
-         The @cmd_* buffer system saves context tokens:\n  \
-         1. run_command(\"{lead}\")               — full output stored as @cmd_xxx\n  \
-         2. grep PATTERN @cmd_xxx                 — query the buffer at any granularity\n  \
-                                                    (also: tail -20 @cmd_xxx, head -50 @cmd_xxx)\n\n\
-         ⚠ That buffer is CAPPED. When the response carries `unfiltered_truncated: true`\n\
-         it holds only a PREFIX, and nothing in the buffer marks where it was cut — so a\n\
-         grep over it can report `0` for something present, and a hash of it\n\
-         (`git patch-id`, `sha256sum`) is a valid-looking WRONG digest. For whole-input\n\
-         work, redirect to a file instead:\n  \
-         git show <sha> > /tmp/x.patch && git patch-id --stable < /tmp/x.patch\n\n\
+        "IL3 violation — piped `{segment}` to a log-trimmer in a BACKGROUND run. BLOCKED.\n\n\
+         A background run keeps only what its pipe passes: its log gets the FILTERED\n\
+         output, and what the trimmer drops is gone. {either}\n  \
+         (a) run_command(\"{lead}\", run_in_background=true)  — the log holds the full output\n      \
+         as @bg_xxx; then grep PATTERN @bg_xxx (also: tail -20 @bg_xxx, head -50 @bg_xxx){foreground}\n\n\
          Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep) is allowed,\n\
          as are pure aggregators on the RHS (wc, grep -c). A pipeline that collapses\n\
          ANYWHERE (wc, grep -c, sha256sum, git patch-id) is allowed whatever follows it,\n\
@@ -1940,17 +1961,30 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
          Single-line plumbing (rev-parse, patch-id, merge-base, describe) is always bounded,\n\
          as is plumbing bounded by its argument count (check-ignore without --stdin,\n\
          cat-file -t/-s/-e). One path does NOT bound `git diff -- <file>` or\n\
-         `git ls-files <path>` — a pathspec expands and a single diff has no size limit.\n\n\
-         Rerun the command bare and query the returned @cmd_* buffer."
+         `git ls-files <path>` — a pathspec expands and a single diff has no size limit.",
+        either = if foreground.is_empty() { "Instead:" } else { "Either:" },
     ))
+}
+
+/// The one pattern for a buffer handle in a command text (`@cmd_*`, `@bg_*`, `@file_*`, `@tool_*`,
+/// `@ack_*`), shared by the IL-3 buffer-op allowance and [`contains_buffer_ref`].
+fn buffer_ref_regex() -> &'static Regex {
+    static BUFFER_REF: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    BUFFER_REF.get_or_init(|| {
+        Regex::new(r"@(cmd|bg|file|tool|ack)_[A-Za-z0-9_]+").expect("buffer ref regex compiles")
+    })
+}
+
+/// Whether `command` mentions a buffer handle anywhere. `resolve_refs` may then rewrite it and mark
+/// the call `buffer_only`, which turns the unfiltered-output capture off, so a caller that must
+/// agree with the capture (`tee_splice_point`) treats such a command as one it cannot serve.
+pub(crate) fn contains_buffer_ref(command: &str) -> bool {
+    buffer_ref_regex().is_match(command)
 }
 
 /// The offending left-hand side of a single command segment, if it violates IL3.
 fn il3_offending_lead(segment: &str) -> Option<String> {
-    static IL3_BUFFER_REF: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let buf_re = IL3_BUFFER_REF.get_or_init(|| {
-        Regex::new(r"@(cmd|bg|file|tool|ack)_[A-Za-z0-9_]+").expect("IL3_BUFFER_REF regex compiles")
-    });
+    let buf_re = buffer_ref_regex();
 
     // Quote-aware. A `|` inside a quoted argument is data, not a pipe, and splitting
     // on it fabricates stages the shell will never create — see
@@ -7033,23 +7067,44 @@ EOF"#;
     }
 
     #[test]
-    fn il3_error_warns_that_the_buffer_it_recommends_is_capped() {
-        // The remedy this error prescribes routes the caller to an @cmd_* buffer
-        // that may hold only a prefix. For a grep that is a partial answer; for a
-        // hash it is a confident wrong one, in the exact workflow
-        // `get_guide("tracker-conventions")` mandates.
+    fn il3_error_says_a_background_run_keeps_only_what_its_pipe_passes() {
+        // The refusal now applies to a BACKGROUND run only (a foreground pipe is run with a capture).
+        // Its message must say why, and offer the routes: the bare background run queried through its
+        // `@bg_*` log (a file on disk, not a capped buffer, so no prefix warning belongs here), and the
+        // pipe in the foreground, where the stream is kept (up to 4 MiB) as `unfiltered_output`, but
+        // ONLY when the foreground takes that pipe (`capture_can_serve`).
         let hint = detect_il3_violation("cargo test | grep FAILED").expect("should block");
+        assert!(hint.starts_with("IL3 violation"), "{hint}");
+        assert!(hint.contains("BACKGROUND"), "must name the case: {hint}");
         assert!(
-            hint.contains("unfiltered_truncated"),
-            "must name the flag: {hint}"
+            hint.contains("run_command(\"cargo test\", run_in_background=true)"),
+            "must offer the bare background run: {hint}"
+        );
+        assert!(hint.contains("@bg_"), "must name the log to query: {hint}");
+        assert!(
+            hint.contains("FOREGROUND") && hint.contains("unfiltered_output"),
+            "must offer the foreground route and what it keeps: {hint}"
         );
         assert!(
-            hint.contains("WRONG"),
-            "must not soften the hash failure: {hint}"
+            hint.contains("up to 4 MiB"),
+            "the capture is bounded: {hint}"
         );
         assert!(
-            hint.contains("git show <sha> > /tmp/x.patch"),
-            "must offer the redirect pattern as the whole-input remedy: {hint}"
+            !hint.contains("unfiltered_truncated"),
+            "the capped-buffer warning does not apply to a background log: {hint}"
+        );
+        // A pipe the foreground refuses too (last stage not a terminal filter): the foreground route is
+        // not offered, only the bare background run.
+        let refused_both = "cargo test | grep FAILED | cat";
+        assert!(!crate::tools::run_command::capture_can_serve(refused_both));
+        let hint = detect_il3_violation(refused_both).expect("should block");
+        assert!(
+            !hint.contains("FOREGROUND") && !hint.contains("unfiltered_output"),
+            "no route to a second refusal: {hint}"
+        );
+        assert!(
+            hint.contains("run_command(\"cargo test\", run_in_background=true)"),
+            "{hint}"
         );
     }
 

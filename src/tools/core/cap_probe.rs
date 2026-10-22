@@ -1294,6 +1294,52 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test hands
+        // `attach_partial_capture` a filter stderr of 5,000 units in four escape classes (ASCII,
+        // `"`, `\x01`, `€`) beside a 1 MB stdout and a 600 B hint, and asserts the marker, both
+        // ends kept, an escaped length within `FILTER_STDERR_BYTE_BUDGET` 500 and a response that
+        // fits the inline limit. Nothing else bounds the field: it is whatever the filter wrote to
+        // stderr. Marker written by production in `util::text::elide_middle_escaped`, called from
+        // `bound_filter_stderr`.
+        id: "run_command.filter_stderr_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("bytes shown"),
+            mutation: Mutation::Killed,
+            cited_test: "a_wide_filter_stderr_is_cut_behind_a_marker_and_the_response_fits",
+        },
+    },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test runs
+        // `seq 1 620000 | grep 99999` (a 4,228,895-byte unfiltered stream: over the store limit and
+        // under the capture FILE's `ulimit -f` bound, so the file holds it whole) through the real
+        // tool against `CAPTURE_STORE_LIMIT_BYTES` 4 MiB and asserts `unfiltered_truncated`, the
+        // count of the FULL capture (620,000), a kept count strictly between 600,000 and 620,000,
+        // and the truncation sentinel as the stored handle's last line. Before the limit the cut
+        // was `MAX_INLINE_TOKENS * 4` (10 KB): a 100,000-line stream kept ~2,200 lines. Marker
+        // written by production in `attachments` from the `Truncation` that `store_capture` returns.
+        id: "run_command.capture_store_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.unfiltered_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "a_capture_over_the_store_limit_is_cut_and_marked",
+        },
+    },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test writes
+        // a capture file 2 MiB over `CAPTURE_READ_LIMIT_BYTES` (5 MiB) and asserts `read_capture`
+        // returns exactly that many bytes with `cut` set, then, through `handle_successful_output`,
+        // `unfiltered_truncated` and an `unfiltered_output_lines` equal to the lines READ (a lower
+        // bound of the file's). The mutant `file.take(u64::MAX)` (the whole file read, as
+        // `read_to_string` did) fails it (2026-10-22). Marker written by production in
+        // `attachments` from the `Truncation` that `store_capture` returns.
+        id: "run_command.capture_read_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.unfiltered_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "a_capture_file_over_the_read_limit_is_read_bounded_and_flagged",
+        },
+    },
+    ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test names
         // `JOBS_LISTED_MAX` + 4 live background jobs in one foreground command through the real
         // tool and asserts the first eight are listed in the command's order, the note counts the

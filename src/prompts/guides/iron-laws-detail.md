@@ -76,16 +76,70 @@ imports.
 
 ## Iron Law 3: `run_command` output → buffer, not pipe
 
-**Rule:** never pipe `run_command` to a log-trimmer (`| grep`,
-`| head`, `| tail`, `| sort`). Run the command bare; query the
-returned `@cmd_*` buffer in a follow-up call.
+**Rule:** run an unbounded command bare and query the returned
+`@cmd_*` buffer in a follow-up call. The one exception is a
+**foreground** pipe that ends in a terminal filter — see below.
 
-**Gate fires when** the command's right-hand side contains an
-unbounded pipe (`cargo`, `npm`, `pytest`, `git`, `rg`, `fd`,
-`grep -r`, bare `find`). Error message includes:
+**A foreground pipe that ends in a terminal filter is allowed.** The
+terminal filters are `grep`, `egrep`, `fgrep`, `rg`, `head`, `tail`,
+`sed`, `awk`, `cut`, `wc`, `sort`, `uniq`, `tr`. When the last stage
+is one of them and the first top-level pipe is followed by one plain
+pipeline (nothing after it but `|` stages), the server runs
+`A | ( ulimit -f N; exec tee <capture> ) | { REST; drain; }`. A
+filter that reads to the end (`grep`, `sort`, `tail`) receives the
+whole stream, and `A` runs until it ends or `timeout_secs` expires;
+only an early-exit filter stops `A` near the capture limit (below).
+The capture FILE is bounded for every filter: a little over 4 MiB in,
+`tee` stops writing it and keeps feeding the filter. The response
+carries the filtered result and:
 
-> IL3 violation — piped `<cmd>` to a log-trimmer. BLOCKED.
-> Rerun the command bare and query the returned @cmd_* buffer.
+- `unfiltered_output` — a `@cmd_*` handle to `A`'s own stdout
+  (redacted, kept up to 4 MiB), queried like any buffer:
+  `grep PATTERN @cmd_xxx`;
+- `unfiltered_output_lines` — its line count: the whole stream's
+  when the stream fit the capture, a lower bound of it whenever
+  `unfiltered_truncated` is set;
+- `unfiltered_truncated` and `unfiltered_buffered_lines` when the
+  stream was cut.
+
+An early-exit filter (`head`, `sed -n 1,5p`, `grep -m1`) leaves
+part of the stream unread: it does not stop `A` at once, a drain
+after the filter keeps it running and reads at most 4 MiB more, and
+then the pipe closes and `A` stops. The `exit_code` of the
+call is the filter's, as in any pipe without `pipefail`: the
+producer's own exit status is not reported.
+
+On `timeout_secs` the server kills the process group and returns the
+usual `timed_out` shape plus `capture_incomplete: true`, the
+`unfiltered_*` keys and the filter's result on the partial capture
+(`stdout`) when the filter is provably pure. A filter that is not is
+never re-run: the response then carries `filter_not_run` with the
+reason. A replayed filter that did not finish in time gives
+`filter_grace_expired` instead, and one that finished and failed adds
+`filter_exit_code` / `filter_stderr`.
+A timed-out filtered call can take up to `timeout_secs` + 5 s.
+
+**Gate fires when** the command's left side is an unbounded producer
+(`cargo`, `npm`, `pytest`, `git`, `rg`, `fd`, `grep -r`, bare
+`find`) piped to a trimmer AND the capture cannot be spliced in.
+That is the case when, for example, the last stage is not a terminal
+filter; a `;`, `&&`, `||` or newline list, a comment, a heredoc, `$(`
+or a backtick follows the first top-level pipe (`cmd | tail -20;
+echo $?`, `cmd | grep X || true`); the first pipe is nested in
+`( )` / `$( )` / `{ }` / backticks; the pipe is `|&`; the command
+names a buffer (`@cmd_*`); or the spliced command does not parse in
+the shell. A prefix list before the first pipe is fine
+(`cd d && cmd | grep X`). **Every such pipe in a
+`run_in_background` call is refused too**, whatever its last stage,
+because a background run sends its stdout straight to a log and keeps
+no unfiltered stream. Error message starts:
+
+> IL3 violation — piped `<cmd>` to a log-trimmer …. BLOCKED.
+
+The foreground message names the cases above and offers two ways
+out: rewrite it as one plain pipeline ending in a filter, or run the
+command bare and query the `@cmd_*` buffer. The background message
+offers the bare run (`@bg_*` log) or the same pipe in the foreground.
 
 **Bounded LHS is allowed.** `ls`, `cat`, `stat`, `du`, `diff`,
 `awk`, `sed`, non-recursive `grep` — the output is naturally
@@ -150,8 +204,9 @@ they return the file's bytes.
 
 **Why this matters:** every `@cmd_*` buffer is queryable for the
 rest of the session via `grep PATTERN @cmd_xxx`, `tail -N @cmd_xxx`,
-`read_file(@cmd_xxx, start_line=N, end_line=M)`. Piping to a trimmer
-throws away the full output before it lands in the buffer.
+`read_file(@cmd_xxx, start_line=N, end_line=M)`. A pipe the capture
+cannot serve throws away the full output before it lands in a buffer;
+a pipe it serves keeps it as `unfiltered_output`.
 
 ## Iron Law 4: markdown reads → `read_file` (heading-addressed)
 

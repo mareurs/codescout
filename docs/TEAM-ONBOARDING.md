@@ -99,12 +99,16 @@ plus a summary. The full result is on the server — query it (`grep FAILED @cmd
 `read_file("@tool_xyz", json_path="$.items[*].id")`) instead of re-running the tool. The
 response's `hint` field names the most useful follow-up call; trust it.
 
-**Gates.** Shell commands that pipe unbounded output into a trimmer are blocked (run bare, then
-query the buffer). Content-readers (`cat`, `grep`, `sed`) aimed at source files are blocked
-(use `symbols`). Dangerous commands need an `@ack_*` handle. These are not permissions theater —
-each gate exists because the pattern it blocks produced a specific documented failure (e.g. the
-pipe gate exists partly because `cargo test | grep` once masked a non-zero exit and a truncated
-buffer produced a valid-looking wrong hash). The refusal message always tells you the sanctioned
+**Gates.** Shell commands that pipe unbounded output into a trimmer are blocked when the server
+cannot keep a capture of the stream (run bare, then query the buffer); a foreground pipe whose
+last stage is a filter such as `| grep` is allowed and keeps the first command's output (up to
+4 MiB) as `unfiltered_output`. Content-readers (`cat`, `grep`, `sed`) aimed at source files are
+blocked (use `symbols`). Dangerous commands need an `@ack_*` handle. These are not permissions
+theater — each gate exists because the pattern it blocks produced a specific documented failure
+(e.g. the pipe gate exists partly because a pipe reports its last stage's exit code, so
+`cargo test | grep` once masked a non-zero exit, and a truncated buffer produced a valid-looking
+wrong hash). The allowed pipe still reports the filter's `exit_code`, not the first command's:
+when the exit status matters, run bare. The refusal message always tells you the sanctioned
 alternative.
 
 ## Layer 2: the knowledge system

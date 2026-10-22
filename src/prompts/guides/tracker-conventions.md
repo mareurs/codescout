@@ -157,7 +157,8 @@ pointer (objects absent from the object DB, not merely unreferenced; subject-key
 recovery returned 2–153 ambiguous candidates), and 37 more were one rebase away. Across
 3594 commits there were **zero genuine patch-id collisions**; all 104 duplicates were the
 same change on two branches, which is the anchor working. Resolve one with redirects, not
-pipes — Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+pipes — a pipe from an unbounded `git log -p` into a trimmer is refused by Iron Law 3 when the
+capture cannot be kept (always in the background), and a capture keeps at most 4 MiB of it:
 
 ```
 git log --all -p > /tmp/all.patch

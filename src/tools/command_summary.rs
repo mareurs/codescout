@@ -295,22 +295,21 @@ pub fn detect_command_type(command: &str) -> CommandType {
     }
 }
 
-/// Returns the byte offset of the `|` pipe character that separates a command
-/// from a terminal filter stage (grep, head, tail, sed, awk, cut, wc, sort,
-/// uniq, tr, rg, egrep, fgrep).
-///
-/// Returns `None` if the command has no pipe, or if the last pipe stage is not
-/// a known terminal filter. Pipe characters inside quoted strings are ignored.
-pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
-    const TERMINAL_FILTERS: &[&str] = &[
-        "grep", "egrep", "fgrep", "rg", "head", "tail", "sed", "awk", "cut", "wc", "sort", "uniq",
-        "tr",
-    ];
-
-    let mut last_pipe: Option<usize> = None;
+/// Byte offsets of every unquoted `|` that joins two pipeline stages, in order, each with its
+/// NESTING DEPTH. Quote-aware (single, double, backslash); `||` is not a pipe. Depth counts what
+/// the shell nests a pipe inside: parentheses (so `( )`, `$( )`, `$(( ))`, `<( )` and `>( )`), a
+/// backtick substitution, and a `{ … }` group. A pipe at depth 0 is a stage of the command's own
+/// pipeline; one at depth > 0 belongs to a subshell or substitution, and splicing a `tee` and a
+/// `{` group at it breaks the nesting (`(seq 1 5 | tee cap | { grep 2) | head`). Depth saturates at
+/// 0 on a stray closer, so an unbalanced `)` cannot hide a later depth-0 pipe by going negative.
+/// Shared by [`detect_terminal_filter`] and [`tee_splice_point`] so there is one scanner.
+fn unquoted_pipes(cmd: &str) -> Vec<(usize, usize)> {
+    let mut pipes = Vec::new();
     let mut in_single = false;
     let mut in_double = false;
+    let mut in_backtick = false;
     let mut escape_next = false;
+    let mut nesting = 0usize;
 
     for (i, ch) in cmd.char_indices() {
         if escape_next {
@@ -321,35 +320,496 @@ pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
             '\\' if !in_single => escape_next = true,
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,
+            '`' if !in_single && !in_double => in_backtick = !in_backtick,
+            '(' | '{' if !in_single && !in_double => nesting += 1,
+            ')' | '}' if !in_single && !in_double => nesting = nesting.saturating_sub(1),
             '|' if !in_single && !in_double => {
                 // Skip `||` (logical OR) — not a pipeline pipe.
                 let next_char = cmd[i + 1..].chars().next();
                 let prev_char = if i > 0 { cmd[..i].chars().last() } else { None };
                 if next_char != Some('|') && prev_char != Some('|') {
-                    last_pipe = Some(i);
+                    pipes.push((i, nesting + usize::from(in_backtick)));
                 }
             }
             _ => {}
         }
     }
+    pipes
+}
 
-    let pipe_pos = last_pipe?;
+/// The commands a pipeline may end in for `run_command` to capture its unfiltered stream
+/// ([`detect_terminal_filter`]), and the only commands a filter may be made of for the timeout path
+/// to run it again over that capture ([`filter_is_replayable`]).
+const TERMINAL_FILTERS: &[&str] = &[
+    "grep", "egrep", "fgrep", "rg", "head", "tail", "sed", "awk", "cut", "wc", "sort", "uniq", "tr",
+];
 
-    // Extract the first token of the stage after the pipe
-    let after_pipe = cmd[pipe_pos + 1..].trim_start();
-    let token = after_pipe
+/// What one terminal filter may be given for the timeout path to run it again (R23): an ALLOWLIST,
+/// because a deny-list cannot be complete. GNU `getopt_long` accepts any unambiguous prefix of a
+/// long option, so `sort --out=f` is `--output=f`, and a check for the spelled-out name misses it.
+/// Only the exact spellings below are accepted; anything else is "not known to be pure".
+struct PureFlags {
+    /// The command, by bare name.
+    name: &'static str,
+    /// Short flags that take no value. A cluster (`-nv`) passes when each letter does.
+    short: &'static str,
+    /// Short flags that take a value, attached (`-m5`) or as the next word (`-m 5`).
+    short_value: &'static str,
+    /// Long options, each the WHOLE word as spelled (`--color=never`).
+    long: &'static [&'static str],
+    /// `-NUM` (all digits) is a count: grep's context, head's and tail's line count.
+    numeric: bool,
+    /// The value flag that supplies the pattern or script (`-e`): once given, no operand is.
+    pattern_flag: Option<char>,
+    /// Most non-option words: grep's pattern, sed's script, tr's sets. Any other names a file.
+    max_operands: usize,
+    /// `-e` values and operands are sed scripts and must pass [`sed_script_is_pure`].
+    sed_script: bool,
+}
+
+const GREP_LONG: &[&str] = &[
+    "--color=never",
+    "--color=auto",
+    "--color=always",
+    "--line-buffered",
+    "--ignore-case",
+    "--invert-match",
+    "--count",
+    "--only-matching",
+    "--extended-regexp",
+    "--fixed-strings",
+    "--word-regexp",
+    "--line-regexp",
+];
+
+const GREP_FLAGS: PureFlags = PureFlags {
+    name: "grep",
+    short: "ivnocwxEFPahHsq",
+    short_value: "mABCe",
+    long: GREP_LONG,
+    numeric: true,
+    pattern_flag: Some('e'),
+    max_operands: 1,
+    sed_script: false,
+};
+
+/// Every terminal filter but `awk` (a programming language, never replayable), with what it may be
+/// given. Narrower than each tool's manual on purpose: a missing flag costs a replay, a wrong one
+/// writes a file.
+const PURE_FILTERS: &[PureFlags] = &[
+    GREP_FLAGS,
+    PureFlags {
+        name: "egrep",
+        ..GREP_FLAGS
+    },
+    PureFlags {
+        name: "fgrep",
+        ..GREP_FLAGS
+    },
+    PureFlags {
+        name: "rg",
+        short: "ivnNocwxFSs",
+        short_value: "mABCe",
+        long: &[
+            "--no-filename",
+            "--no-line-number",
+            "--color=never",
+            "--color=auto",
+            "--color=always",
+        ],
+        numeric: false,
+        pattern_flag: Some('e'),
+        max_operands: 1,
+        sed_script: false,
+    },
+    PureFlags {
+        name: "head",
+        short: "q",
+        short_value: "nc",
+        long: &[],
+        numeric: true,
+        pattern_flag: None,
+        max_operands: 0,
+        sed_script: false,
+    },
+    PureFlags {
+        name: "tail",
+        short: "q",
+        short_value: "nc",
+        long: &[],
+        numeric: true,
+        pattern_flag: None,
+        max_operands: 0,
+        sed_script: false,
+    },
+    PureFlags {
+        name: "sort",
+        short: "nrufbdghVs",
+        short_value: "kt",
+        long: &[],
+        numeric: false,
+        pattern_flag: None,
+        max_operands: 0,
+        sed_script: false,
+    },
+    PureFlags {
+        name: "uniq",
+        short: "cdui",
+        short_value: "fsw",
+        long: &[],
+        numeric: false,
+        pattern_flag: None,
+        max_operands: 0,
+        sed_script: false,
+    },
+    PureFlags {
+        name: "cut",
+        short: "s",
+        short_value: "dfcb",
+        long: &["--complement"],
+        numeric: false,
+        pattern_flag: None,
+        max_operands: 0,
+        sed_script: false,
+    },
+    PureFlags {
+        name: "wc",
+        short: "lwcmL",
+        short_value: "",
+        long: &[],
+        numeric: false,
+        pattern_flag: None,
+        max_operands: 0,
+        sed_script: false,
+    },
+    PureFlags {
+        name: "tr",
+        short: "dscC",
+        short_value: "",
+        long: &[],
+        numeric: false,
+        pattern_flag: None,
+        max_operands: 2,
+        sed_script: false,
+    },
+    PureFlags {
+        name: "sed",
+        short: "nErs",
+        short_value: "e",
+        long: &[],
+        numeric: false,
+        pattern_flag: Some('e'),
+        max_operands: 1,
+        sed_script: true,
+    },
+];
+
+/// The command a pipeline stage runs: its first whitespace-separated word with any path prefix
+/// stripped, so `/usr/bin/grep` is `grep`.
+fn stage_command_name(stage: &str) -> &str {
+    let token = stage
+        .trim_start()
         .split(|c: char| c.is_whitespace())
         .next()
         .unwrap_or("");
+    token.rsplit('/').next().unwrap_or(token)
+}
 
-    // Strip any path prefix so "/usr/bin/grep" matches "grep"
-    let name = token.rsplit('/').next().unwrap_or(token);
+/// Returns the byte offset of the `|` pipe character that separates a command
+/// from a terminal filter stage (one of [`TERMINAL_FILTERS`]).
+///
+/// Returns `None` if the command has no pipe, or if the last pipe stage is not
+/// a known terminal filter. Pipe characters inside quoted strings are ignored.
+pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
+    let (pipe_pos, _depth) = *unquoted_pipes(cmd).last()?;
+    TERMINAL_FILTERS
+        .contains(&stage_command_name(&cmd[pipe_pos + 1..]))
+        .then_some(pipe_pos)
+}
 
-    if TERMINAL_FILTERS.contains(&name) {
-        Some(pipe_pos)
-    } else {
-        None
+/// Where to splice the unfiltered-output `tee` into `cmd`, or `None` when the command cannot be
+/// captured and must run UNTOUCHED. The ONE function that decides it: `inject_tee_in` splices at
+/// the offset it returns and `run_command`'s foreground refusal asks whether it returns `Some`, so
+/// the splice and the refusal cannot disagree. `cmd` is the command text as it will run; heredoc
+/// bodies are masked here for the structural scan only
+/// ([`crate::util::path_security::mask_heredoc_bodies`] keeps every offset).
+///
+/// The offset is the `|` that starts the filter group, and the capture is the stream that enters
+/// it, so it must be the producer's own stdout. `Some` only when ALL of these hold:
+///
+/// 1. `cmd` holds no buffer ref: `resolve_refs` may then mark the call `buffer_only`, which turns
+///    the capture off, so a command that mentions one is never promised a capture;
+/// 2. the last stage of the whole text is a terminal filter ([`detect_terminal_filter`]), and that
+///    last pipe is at nesting depth 0;
+/// 3. the pipe chosen is the FIRST unquoted `|` at depth 0 (see [`unquoted_pipes`]: parentheses,
+///    `$( )`, `<( )`, backticks and `{ }` groups nest), so the splice does not land inside a
+///    subshell or substitution;
+/// 4. the text after the chosen pipe is one pipeline
+///    ([`crate::util::path_security::is_one_pipeline`]): the group holds exactly the rest of that
+///    pipeline, and nothing after a `;` / `&&` / newline;
+/// 5. the chosen pipe is not `|&` (stderr is piped too, and the command is left untouched);
+/// 6. the shell PARSES both `cmd` and the spliced text ([`splice_tee`] with a dummy path). The
+///    scan above is not a shell parser (a `|` in a double-quoted string inside a `$( )`, a stray
+///    `}` or `)` in a group each fool it), and a splice the shell rejects turns a working command
+///    into a syntax error, so this is the backstop for that whole class. The check runs
+///    `set -n` + the text through the platform shell, which parses and executes nothing, and only
+///    when conditions 1 to 5 hold.
+///
+/// There is no fallback to another pipe. When a condition fails the command runs as the caller
+/// wrote it, with no capture, because a capture of a different segment's stream would leave the
+/// trimmed producer's output lost while the response offered a handle to something else.
+pub fn tee_splice_point(cmd: &str) -> Option<usize> {
+    if crate::util::path_security::contains_buffer_ref(cmd) {
+        return None;
     }
+    let masked = crate::util::path_security::mask_heredoc_bodies(cmd);
+    let pipes = unquoted_pipes(&masked);
+    let &(_, last_depth) = pipes.last()?;
+    detect_terminal_filter(&masked)?;
+    if last_depth != 0 {
+        return None;
+    }
+    let &(first, _) = pipes.iter().find(|&&(_, depth)| depth == 0)?;
+    let rest = masked[first + 1..].trim_end();
+    if rest.starts_with('&') || !crate::util::path_security::is_one_pipeline(rest) {
+        return None;
+    }
+    // The structural candidate exists; ask the shell whether it is real. The splice is checked with
+    // the same shape the real one has, so a parse failure here is the one the command would hit.
+    if !shell_parses(cmd) || !shell_parses(&splice_tee(cmd, first, "/dev/null", 0)) {
+        return None;
+    }
+    Some(first)
+}
+
+/// `cmd` with the unfiltered-output capture spliced in at `pipe_pos` (the `|` that
+/// [`tee_splice_point`] returned):
+/// `A | ( trap '' XFSZ; ulimit -f <N> 2>/dev/null; exec tee '<tee_path>' 2>/dev/null ) | { B` + a
+/// newline + `s=$?; head -c <store_limit> >/dev/null; exit $s; }`, with `N` =
+/// [`capture_file_blocks`]`(store_limit)`. The ONE place that builds the shape, for the real splice
+/// (`inject_tee_in`) and for the parse check in [`tee_splice_point`], so what is checked is what
+/// runs. The newline before `s=$?` (not `;`) is load-bearing: a trailing `# comment` in the filter
+/// would otherwise swallow the closing brace.
+///
+/// The `tee` runs under `ulimit -f`, so the capture FILE stops a little over `store_limit` for
+/// EVERY filter, while `tee` keeps copying the whole stream to the filter: past the bound its
+/// writes to the file fail with EFBIG, `trap '' XFSZ` (inherited through `exec`) keeps the signal
+/// from killing it, and its `2>/dev/null` keeps the complaint out of the command's stderr. Before
+/// this a whole-stream filter (`git log --all -p | grep x`, 268 MB measured) filled the capture
+/// file, on a tmpfs `/tmp` that is RAM. A shell where `ulimit -f` fails (the `2>/dev/null` hides
+/// it) leaves the file unbounded and the command working; `read_capture`'s read bound covers that.
+pub(crate) fn splice_tee(cmd: &str, pipe_pos: usize, tee_path: &str, store_limit: usize) -> String {
+    format!(
+        "{} | ( trap '' XFSZ; ulimit -f {} 2>/dev/null; exec tee '{}' 2>/dev/null ) | {{ {}\ns=$?; \
+         head -c {} >/dev/null; exit $s; }}",
+        cmd[..pipe_pos].trim_end(),
+        capture_file_blocks(store_limit),
+        tee_path,
+        cmd[pipe_pos + 1..].trim_start(),
+        store_limit
+    )
+}
+
+/// The headroom over the store limit the capture file may grow to (see [`capture_file_blocks`]):
+/// enough that a capture cut by the file bound is always over the store limit, so the handle is
+/// marked `unfiltered_truncated`, and small next to the limit itself.
+// cap-class: NOT_A_CAP — slack over CAPTURE_STORE_LIMIT_BYTES: a capture cut at the file bound is always over the store limit, so the caller meets the store cut and its `unfiltered_truncated`
+pub(crate) const CAPTURE_FILE_HEADROOM_BYTES: usize = 64 * 1024;
+
+/// The `ulimit -f` value [`splice_tee`] sets for a store limit of `store_limit` bytes:
+/// `ceil((store_limit + CAPTURE_FILE_HEADROOM_BYTES) / 512)`. POSIX counts `ulimit -f` in 512-byte
+/// blocks (dash, and bash as `sh`), so the file stops at `N * 512` bytes; a bash outside POSIX
+/// mode counts 1024-byte units, which doubles the bound (about 8 MiB): still bounded and still over
+/// the store limit.
+pub(crate) const fn capture_file_blocks(store_limit: usize) -> usize {
+    (store_limit + CAPTURE_FILE_HEADROOM_BYTES).div_ceil(512)
+}
+
+/// Whether the filter of a timed-out command may be run AGAIN, alone, over its partial capture:
+/// `Ok` only when the replay can neither see a different context nor repeat a side effect. `Err`
+/// names the rule that failed; the timeout path reports it as `filter_not_run` and runs nothing.
+///
+/// `prefix` is the command text before the spliced pipe (the producer side) and `filter` the text
+/// after it (`TeeInjection::filter`). In the original run the filter group sits in the SAME shell
+/// script as the producer side; the replay runs `filter` by itself in the same directory. So:
+///
+/// 1. `prefix` is one pipeline ([`crate::util::path_security::is_one_pipeline`]): a `cd`, a `;`,
+///    `&&` or `||` list, or a `P=…;` assignment there can change what the filter reads or expands
+///    (`P=77; seq 1 9 | grep "$P"`), and none of it exists in the replay;
+/// 2. `filter` has no `$`, backtick, `>` or `<` (an expansion, substitution or redirection), and
+///    does not name `system`, `getline`, `--in-place` or `--output` (defense in depth: rule 4 is
+///    what decides);
+/// 3. EVERY stage of `filter` (split at its depth-0 pipes by [`unquoted_pipes`]) is one of
+///    [`TERMINAL_FILTERS`], named BARE (`./sort` or `/usr/bin/grep` may be any program): only the
+///    last stage had to be one for the capture, and a middle `xargs curl -X POST` would run again;
+/// 4. every option of every stage is in that command's ALLOWLIST ([`PURE_FILTERS`]), spelled
+///    exactly, with no operand beyond the pattern, script or sets it reads: a deny-list missed
+///    `sort --out=f` (getopt_long takes `--out` for `--output`). `awk` has no entry: it is a
+///    programming language (`system()`, `getline`, redirection, gawk's `-d`/`-p`/`-o` writers).
+///
+/// Conservative by design: an `Err` costs the caller the filtered view of the partial capture (the
+/// handle is still returned); a wrong `Ok` returns another command's result or repeats its effects.
+pub(crate) fn filter_is_replayable(prefix: &str, filter: &str) -> Result<(), String> {
+    use crate::util::path_security::is_one_pipeline;
+    const PREFIX_IS_A_LIST: &str = "the command before the first pipe is not one pipeline, and a \
+         `cd`, `;`, `&&`, `||` or assignment there sets context the filter would not have alone";
+    const EXPANDS_OR_REDIRECTS: &str = "the filter contains `$`, a backtick, `>` or `<`: an \
+         expansion or redirection that would not run the same way alone";
+    const NAMES_AN_EFFECT: &str = "the filter names `system`, `getline`, `--in-place` or \
+         `--output`, which can run a command or write a file";
+    if !is_one_pipeline(prefix) {
+        return Err(PREFIX_IS_A_LIST.into());
+    }
+    if !is_one_pipeline(filter) {
+        return Err("the filter is not one pipeline".into());
+    }
+    if filter.contains(['$', '`', '>', '<']) {
+        return Err(EXPANDS_OR_REDIRECTS.into());
+    }
+    if ["system", "getline", "--in-place", "--output"]
+        .iter()
+        .any(|word| filter.contains(word))
+    {
+        return Err(NAMES_AN_EFFECT.into());
+    }
+    let mut starts = vec![0];
+    starts.extend(
+        unquoted_pipes(filter)
+            .into_iter()
+            .filter(|&(_, depth)| depth == 0)
+            .map(|(pos, _)| pos + 1),
+    );
+    let mut ends: Vec<usize> = starts[1..].iter().map(|start| start - 1).collect();
+    ends.push(filter.len());
+    for (&start, &end) in starts.iter().zip(&ends) {
+        let tokens = crate::platform::posix_tokenize(&filter[start..end])
+            .map_err(|_| "a filter stage could not be split into words".to_string())?;
+        let Some((head, args)) = tokens.split_first() else {
+            return Err("the filter has an empty stage".into());
+        };
+        stage_is_replayable(head, args)?;
+    }
+    Ok(())
+}
+
+/// Rules 3 and 4 of [`filter_is_replayable`] for one stage: `head` is its command word as written,
+/// `args` the words after it.
+fn stage_is_replayable(head: &str, args: &[String]) -> Result<(), String> {
+    const NOT_A_TERMINAL_FILTER: &str = "a filter stage is not one of the terminal filters \
+         (grep, egrep, fgrep, rg, head, tail, sed, awk, cut, wc, sort, uniq, tr), and running it \
+         again could repeat what it does";
+    if head.contains('/') {
+        return Err(format!(
+            "the filter stage `{head}` is path-qualified, so it may be a different program than \
+             the command it is named for"
+        ));
+    }
+    if head == "awk" {
+        return Err("awk is a programming language and cannot be shown to be pure".into());
+    }
+    let Some(spec) = PURE_FILTERS.iter().find(|entry| entry.name == head) else {
+        return Err(NOT_A_TERMINAL_FILTER.into());
+    };
+    let not_pure = |flag: &str| format!("flag `{flag}` of `{head}` is not known to be pure");
+    let script = |text: &str| {
+        if !spec.sed_script || sed_script_is_pure(text) {
+            Ok(())
+        } else {
+            Err(format!(
+                "the sed script `{text}` has a `w`, `W`, `e`, `r` or `R`, a command that can \
+                 write, run or read a file"
+            ))
+        }
+    };
+    let (mut operands, mut pattern_given, mut options_done) = (0usize, false, false);
+    let mut words = args.iter();
+    while let Some(arg) = words.next() {
+        if options_done || arg == "-" || !arg.starts_with('-') {
+            script(arg)?;
+            operands += 1;
+            continue;
+        }
+        if arg == "--" {
+            options_done = true;
+            continue;
+        }
+        if arg.starts_with("--") {
+            if !spec.long.contains(&arg.as_str()) {
+                return Err(not_pure(arg));
+            }
+            continue;
+        }
+        let cluster = &arg[1..];
+        if spec.numeric && cluster.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        for (at, letter) in cluster.char_indices() {
+            if spec.short_value.contains(letter) {
+                let attached = &cluster[at + letter.len_utf8()..];
+                let value = if attached.is_empty() {
+                    words
+                        .next()
+                        .ok_or_else(|| format!("flag `-{letter}` of `{head}` has no value"))?
+                        .as_str()
+                } else {
+                    attached
+                };
+                if spec.pattern_flag == Some(letter) {
+                    pattern_given = true;
+                    script(value)?;
+                }
+                break;
+            }
+            if !spec.short.contains(letter) {
+                return Err(not_pure(arg));
+            }
+        }
+    }
+    let allowed = if pattern_given { 0 } else { spec.max_operands };
+    if operands > allowed {
+        return Err(format!(
+            "`{head}` has an operand beyond the {allowed} it reads from its input, and an operand \
+             names a file it would read or write"
+        ));
+    }
+    Ok(())
+}
+
+/// A sed script with none of `w`, `W`, `e`, `r` or `R`: the commands (and `s///` flags) that write
+/// a file, run a command, or read another file. Refused by LETTER, anywhere in the script, not at
+/// command positions: telling a command letter from one inside a regex or replacement needs a sed
+/// parser, and a false refusal only costs a replay.
+fn sed_script_is_pure(script: &str) -> bool {
+    !script.contains(['w', 'W', 'e', 'r', 'R'])
+}
+
+/// Whether the shell accepts `text` as a syntactically valid command, WITHOUT running it: the
+/// platform shell ([`crate::platform::shell_command_configured`], `sh` on Unix and Git Bash on
+/// Windows) is given `set -n` and a newline before `text`, so it reads and parses every line and
+/// executes none (`touch f | tee x` creates no `f`). A shell that cannot be started counts as "does
+/// not parse": nothing would run the command either, and a capture is never worth a guess.
+///
+/// The platform builder returns a `tokio` command, which cannot be waited on from this sync
+/// function, so its program, arguments and environment are copied into a `std` one. That is the
+/// whole of what the builders set on Windows; on Unix the process group and `SIGPIPE` reset they
+/// add do not matter to a parse.
+fn shell_parses(text: &str) -> bool {
+    let configured = crate::platform::shell_command_configured(&format!("set -n\n{text}"));
+    let configured = configured.as_std();
+    let mut probe = std::process::Command::new(configured.get_program());
+    probe.args(configured.get_args());
+    for (key, value) in configured.get_envs() {
+        match value {
+            Some(value) => probe.env(key, value),
+            None => probe.env_remove(key),
+        };
+    }
+    probe
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 /// Returns `true` when the combined output is large enough to benefit from
@@ -2523,5 +2983,295 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         // |& is bash's stderr pipe — the & becomes part of the filter name
         // ("&grep"), which doesn't match any known filter, so correctly returns None
         assert!(detect_terminal_filter("cmd |& grep foo").is_none());
+    }
+    #[test]
+    fn first_pipe_is_the_producers_pipe_in_a_chain() {
+        let cmd = "seq 1 3 | grep 2 | head -1";
+        assert_eq!(tee_splice_point(cmd), Some(8));
+        // A single pipe: first and last coincide.
+        let single = "seq 1 3 | head -1";
+        assert_eq!(tee_splice_point(single), detect_terminal_filter(single));
+        // Quote-aware: the quoted `|` is data, the first real pipe is the splice point.
+        let quoted = "echo 'a|b' | grep a | head -1";
+        assert_eq!(tee_splice_point(quoted), quoted.find("| grep"));
+        // `||` is not a pipe.
+        let or = "a || b | grep x | head -1";
+        assert_eq!(tee_splice_point(or), or.find("| grep"));
+    }
+
+    #[test]
+    fn first_pipe_does_not_qualify_a_command_whose_last_stage_is_not_a_filter() {
+        assert_eq!(tee_splice_point("a | grep x | cargo run"), None);
+        assert_eq!(tee_splice_point("cargo build"), None);
+    }
+
+    #[test]
+    fn first_pipe_leaves_a_stderr_pipe_chain_untouched() {
+        // `|&` as the FIRST pipe: stderr is piped too, so the command is left alone.
+        assert_eq!(tee_splice_point("a |& grep x | head -1"), None);
+    }
+
+    #[test]
+    fn a_list_after_the_first_pipe_means_no_splice_and_no_fallback() {
+        // The text after the first pipe holds a second command list: grouping it behind the tee would
+        // feed `c` the producer's stream. There is no fallback to the last pipe either (that captured
+        // a different segment's stream while the first command's trimmed output was lost): the command
+        // runs untouched.
+        assert_eq!(tee_splice_point("a | b; c | head -1"), None);
+        assert_eq!(tee_splice_point("a | b && c | head -1"), None);
+        assert_eq!(tee_splice_point("a | grep x | head -1; echo done"), None);
+        assert_eq!(tee_splice_point("a | grep x | cat; echo | head -1"), None);
+    }
+    /// R18: the structural scan is not a shell parser, so `tee_splice_point` asks the shell. A
+    /// candidate whose ORIGINAL does not parse, or whose SPLICE does not, is not spliced; a normal
+    /// one is.
+    #[cfg(unix)]
+    #[test]
+    fn the_parse_guard_declines_what_the_shell_would_reject() {
+        // Passes every structural condition (one pipeline after the first pipe, a filter last,
+        // balanced quotes) but the original has a stray `)`: it does not parse, so it is not spliced.
+        let unparsable = "seq 3 | head -1 )";
+        assert!(
+            !shell_parses(unparsable),
+            "the premise: the shell rejects it"
+        );
+        assert_eq!(tee_splice_point(unparsable), None);
+        // The original parses, the splice does not (the scan reads the `|` inside the nested string
+        // as top-level): not spliced.
+        let fooled = r#"echo "$(printf '%s' "a|b")" | head -1"#;
+        assert!(shell_parses(fooled), "the premise: the original parses");
+        let at = fooled.find("a|b").unwrap() + 1;
+        assert!(
+            !shell_parses(&splice_tee(fooled, at, "/dev/null", 0)),
+            "the premise: splicing there does not parse"
+        );
+        assert_eq!(tee_splice_point(fooled), None);
+        // A normal candidate: spliced, and its splice parses.
+        let normal = "seq 3 | grep 2 | head -1";
+        assert_eq!(tee_splice_point(normal), normal.find("| grep"));
+        assert!(shell_parses(&splice_tee(
+            normal,
+            normal.find("| grep").unwrap(),
+            "/dev/null",
+            0
+        )));
+    }
+
+    /// The parse check must not RUN anything: `set -n` reads and parses and executes nothing. A
+    /// command that would create a file creates none while `tee_splice_point` decides, and does when
+    /// run for real (so the sentinel is evidence).
+    #[cfg(unix)]
+    #[test]
+    fn the_parse_guard_never_runs_the_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let sentinel = dir.path().join("SENTINEL");
+        let cmd = format!("touch '{}' | grep x | head -1", sentinel.display());
+        assert!(
+            tee_splice_point(&cmd).is_some(),
+            "the premise: a real candidate"
+        );
+        assert!(
+            !sentinel.exists(),
+            "the parse check must not execute the command"
+        );
+        // Control: run for real, the sentinel appears.
+        std::process::Command::new("sh")
+            .args(["-c", &cmd])
+            .status()
+            .unwrap();
+        assert!(
+            sentinel.exists(),
+            "the control: the command does create it when run"
+        );
+    }
+
+    #[test]
+    fn tee_splice_point_decides_from_the_depth_zero_pipes() {
+        // (command, the text the splice `|` starts, or None when the command runs untouched)
+        for (cmd, want) in [
+            ("seq 1 3 | head -1", Some("| head")),
+            ("seq 1 3 | grep 2 | head -1", Some("| grep")),
+            ("echo 'a|b' | grep a | head -1", Some("| grep")),
+            ("a || b | grep x | head -1", Some("| grep")),
+            ("a |& grep x | head -1", None),
+            ("a | grep x | cargo run", None),
+            ("cargo build", None),
+            // A group or substitution that holds a pipe nests it: splice at a pipe outside it only.
+            ("(seq 1 5 | grep 2) | head -1", Some("| head")),
+            ("(seq 1 5 | head -1)", None),
+            ("echo $(seq 3 | head -1)", None),
+            ("echo $(seq 1 5 | wc -l) | grep 5 | head -1", Some("| grep")),
+            ("echo $((1|2)) | grep 3 | head -1", Some("| grep")),
+            ("diff <(seq 3 | sort) <(seq 3) | head -1", Some("| head")),
+            ("echo `seq 3 | head -1`", None),
+            ("echo `seq 3 | wc -l` | grep 3 | head -1", Some("| grep")),
+            ("{ seq 1 5 | grep 4; } | head -1", Some("| head")),
+            ("{ seq 1 5 | head -1; }", None),
+            // A prefix list is fine: the first pipe is at depth 0 and the rest is one pipeline.
+            ("cd /tmp && seq 1 1000 | grep 7 | head -2", Some("| grep")),
+            // A `;` / `&&` after the first pipe is a list, not one pipeline.
+            ("a | grep x | head -1; echo done", None),
+            ("a | b && c | head -1", None),
+            // A buffer ref: `resolve_refs` may turn the capture off, so none is promised.
+            ("seq 3 | grep 1 | head -1; grep y @cmd_abc", None),
+            ("cat @cmd_abc | grep 1 | head -1", None),
+            // The scan reads a pipe here as top-level, and the shell rejects the splice (R18): none.
+            (r#"echo "$(printf '%s' "a|b")" | head -1"#, None),
+            ("(echo }; seq 3 | grep 1) | head -1", None),
+        ] {
+            let want = want.map(|marker| cmd.find(marker).expect(marker));
+            assert_eq!(tee_splice_point(cmd), want, "{cmd}");
+        }
+    }
+
+    /// R19 + R23: the timeout path replays a filter only when the replay is provably pure. Every rule
+    /// has rows, each refused row names the reason of the rule that must fire, the reviewers' shapes
+    /// are all refused, and the plain filters stay replayable.
+    #[test]
+    fn filter_is_replayable_refuses_every_shape_whose_replay_could_differ_or_repeat_an_effect() {
+        let ok = |prefix: &str, filter: &str| filter_is_replayable(prefix, filter).is_ok();
+        // Plain filters, with a plain producer.
+        for filter in [
+            "grep 77",
+            "grep -o 'a.b' | head -3",
+            "sort -n | uniq -c | head -5",
+            "sed -n 1,5p",
+            "cut -d, -f2 | sort -u",
+            "wc -l",
+            "tr a-z A-Z | head",
+            "sort | uniq -c | head",
+            "grep -v x | sort -u | head -n 5",
+            "sed -n '1,5p'",
+            "cut -d, -f2 | tr a-z A-Z",
+            "uniq -c -f 2",
+            "rg -n foo",
+            "grep -o x | sort",
+            "grep -e x -e y",
+            "head -5",
+            "tail -n +3",
+            "grep -C2 -m 5 foo",
+            "grep --color=never foo",
+            "sort -k2,2n -t,",
+        ] {
+            assert!(
+                ok("seq 1 10", filter),
+                "{filter:?} must be replayable: {:?}",
+                filter_is_replayable("seq 1 10", filter)
+            );
+        }
+        assert!(
+            ok("sh -c 'seq 1 9; sleep 30'", "grep 7"),
+            "a quoted list is one word"
+        );
+        assert!(
+            ok("cargo test 2>&1", "grep FAILED"),
+            "a producer redirect is not a list"
+        );
+
+        // The reason each rule gives, as a substring of its text.
+        const PREFIX: &str = "before the first pipe";
+        const NOT_ONE: &str = "the filter is not one pipeline";
+        const EXPAND: &str = "expansion or redirection";
+        const NAMES: &str = "names `system`";
+        const NOT_TERMINAL: &str = "terminal filters";
+        const FLAG: &str = "is not known to be pure";
+        const AWK: &str = "programming language";
+        const PATH: &str = "path-qualified";
+        const OPERAND: &str = "operand";
+        const SED: &str = "sed script";
+        for (prefix, filter, reason) in [
+            // Rule 1: the producer side sets context the replay would not have.
+            ("P=77; (seq 1 1000; sleep 30)", "grep \"$P\"", PREFIX),
+            ("P=77; seq 1 9", "grep 7", PREFIX),
+            ("cd sub && cat f", "grep -f pats", PREFIX),
+            ("export LC_ALL=C; seq 1 9", "sort", PREFIX),
+            ("false || seq 1 9", "grep 7", PREFIX),
+            ("(seq 1 1000; sleep 30)", "grep 77", PREFIX),
+            // The filter itself must be one pipeline (`is_one_pipeline` refuses every backtick).
+            ("seq 1 9", "grep x; rm y", NOT_ONE),
+            ("seq 1 9", "grep `cat pat`", NOT_ONE),
+            // Rule 2: expansion, redirection, named effects.
+            ("seq 1 9", "grep \"$P\"", EXPAND),
+            ("seq 1 9", "grep x > out", EXPAND),
+            ("seq 1 9", "grep -f - <pats", EXPAND),
+            ("seq 1 9", "awk '{print $1}' | head", EXPAND),
+            ("seq 1 9", "awk '{system(\"rm x\")}'", NAMES),
+            ("seq 1 9", "awk '{getline l}'", NAMES),
+            ("seq 1 9", "sed --in-place s/a/b/", NAMES),
+            ("seq 1 9", "sort --output=f", NAMES),
+            // Rule 3: every stage is a terminal filter.
+            ("cat urls", "xargs -n1 curl -X POST | grep ok", NOT_TERMINAL),
+            (
+                "seq 1 9",
+                "xargs -I{} touch touched{} | grep x",
+                NOT_TERMINAL,
+            ),
+            ("seq 1 9", "tee copy | grep x", NOT_TERMINAL),
+            ("seq 1 9", "grep x | (head -1)", NOT_TERMINAL),
+            ("seq 1 9", "LC_ALL=C sort", NOT_TERMINAL),
+            ("seq 1 9", "grep x |& head", NOT_TERMINAL),
+            // R23: a bare name is required; `/usr/bin/grep` was replayable before R23, on purpose
+            // no longer: a path names some program, not necessarily the coreutil.
+            ("seq 1 9", "./sort", PATH),
+            ("seq 1 9", "/usr/bin/grep x", PATH),
+            ("seq 1 9", "tools/grep x | bin/head", PATH),
+            // R23: awk is never replayable.
+            ("seq 1 9", "awk '{print}'", AWK),
+            ("seq 1 9", "awk -d 'NR==1'", AWK),
+            ("seq 1 9", "awk --profile 1", AWK),
+            ("seq 1 9", "awk -F: -v n=2 'NR==n'", AWK),
+            ("seq 1 9", "awk -f prog.awk", AWK),
+            ("seq 1 9", "awk '{print | \"sh\"}'", AWK),
+            // R23: the allowlist. Abbreviated long options (getopt_long accepts any unambiguous
+            // prefix) and every flag not listed for its command are refused.
+            ("seq 1 9", "sort --out=f", FLAG),
+            ("seq 1 9", "sort --comp=gzip", FLAG),
+            ("seq 1 9", "sort --compress-program=gzip", FLAG),
+            ("seq 1 9", "sort -o f", FLAG),
+            ("seq 1 9", "sort -uo out", FLAG),
+            ("seq 1 9", "sort -T /tmp", FLAG),
+            ("seq 1 9", "sed --in s/x/xx/ f", FLAG),
+            ("seq 1 9", "sed --fi=script", FLAG),
+            ("seq 1 9", "sed -i s/a/b/ f", FLAG),
+            ("seq 1 9", "sed -i.bak s/a/b/ f", FLAG),
+            ("seq 1 9", "sed -ni p", FLAG),
+            ("seq 1 9", "sed -f script", FLAG),
+            ("seq 1 9", "tail -f", FLAG),
+            ("seq 1 9", "tail --follow", FLAG),
+            ("seq 1 9", "rg --pre ./x foo", FLAG),
+            ("seq 1 9", "grep --colo=never foo", FLAG),
+            // R23: operands beyond what the command reads from its input name files.
+            ("seq 1 9", "uniq in out", OPERAND),
+            ("seq 1 9", "uniq - out", OPERAND),
+            ("seq 1 9", "uniq -c -f 2 -", OPERAND),
+            ("seq 1 9", "sort file", OPERAND),
+            ("seq 1 9", "grep x file", OPERAND),
+            ("seq 1 9", "grep -e x file", OPERAND),
+            // A sed script holding a letter of a command that writes, runs or reads a file.
+            ("seq 1 9", "sed 's/a/b/w out'", SED),
+            ("seq 1 9", "sed '1e touch x'", SED),
+            ("seq 1 9", "sed -e 'W out'", SED),
+            ("seq 1 9", "sed '1r other'", SED),
+        ] {
+            let got = filter_is_replayable(prefix, filter);
+            assert!(
+                got.as_ref().is_err_and(|why| why.contains(reason)),
+                "{prefix:?} | {filter:?} must be refused for {reason:?}, got {got:?}"
+            );
+        }
+        // A refused flag is named, with its command.
+        assert_eq!(
+            filter_is_replayable("seq 1 9", "sort --out=f").unwrap_err(),
+            "flag `--out=f` of `sort` is not known to be pure"
+        );
+        // Every terminal filter but awk has an allowlist entry, so no capturable filter falls through
+        // to a default.
+        for name in TERMINAL_FILTERS {
+            assert_eq!(
+                PURE_FILTERS.iter().any(|entry| entry.name == *name),
+                *name != "awk",
+                "{name}"
+            );
+        }
     }
 }

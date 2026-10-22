@@ -268,6 +268,61 @@ pub(crate) fn declared_effect(input: &Value) -> Option<&'static str> {
         Some(_) => None,
     }
 }
+/// The terminal filters, as `detect_terminal_filter` knows them. Only worded into the foreground
+/// refusal below; `pipe_refusal_names_every_terminal_filter_the_capture_knows` keeps the two in step.
+const TERMINAL_FILTER_NAMES: &str =
+    "grep, egrep, fgrep, rg, head, tail, sed, awk, cut, wc, sort, uniq, tr";
+
+/// Whether the unfiltered-output capture can serve `command`: asked of the SAME function the tee
+/// splice asks (`inject_tee_in`: `tee_splice_point`), so a command this calls capturable is one
+/// `inject_tee_in` splices, except in one case: when the capture's temp file cannot be created
+/// (a full or unwritable temp directory) the splice is skipped on purpose, the command runs
+/// un-teed, and the response says so in `unfiltered_output_skipped`. That is a best-effort failure,
+/// not a refusal, so a command the refusal let through can still run with no capture then. In the
+/// other direction (`buffer_only` needs a buffer ref in the text, which `tee_splice_point` rejects)
+/// the two cannot disagree.
+pub(crate) fn capture_can_serve(command: &str) -> bool {
+    crate::tools::command_summary::tee_splice_point(command).is_some()
+}
+
+/// The IL-3 refusal for `command`, or `None` when it is allowed to run. The ONE place that decides
+/// it, so `RunCommand::call` and the pager hints (`output::can_append_stage`) agree.
+///
+/// - **Background:** the verdict of `detect_il3_violation`, worded for a background run. A
+///   background run sends its stdout straight to a log and keeps no unfiltered stream, so what the
+///   pipe's trimmer drops is gone, whatever its last stage is.
+/// - **Foreground:** refused only when `detect_il3_violation` fires AND the capture cannot be spliced
+///   into the command (`capture_can_serve`, which asks the tee's own `tee_splice_point`). A command
+///   it serves runs through the capture and keeps the producer's stream, up to 4 MiB, as
+///   `unfiltered_output`, so there is nothing to refuse. One it does not serve runs untouched, with
+///   no capture, so the trimmer's loss would be real and the refusal stands. That is every command
+///   whose last stage is not a terminal filter, or whose first top-level pipe is followed by a
+///   `;` / `&&` / `||` list or a newline, a comment, a heredoc, `$(` or a backtick, or whose pipe is
+///   nested in a group or substitution, or is `|&`, or that names a buffer ref, or whose splice the
+///   shell does not parse.
+pub(super) fn pipe_refusal(command: &str, run_in_background: bool) -> Option<String> {
+    if run_in_background {
+        return crate::util::path_security::detect_il3_violation(command);
+    }
+    let (segment, lead) = crate::util::path_security::il3_offender(command)?;
+    if capture_can_serve(command) {
+        return None;
+    }
+    Some(format!(
+        "IL3 violation — piped `{segment}` to a log-trimmer, and the capture cannot be spliced into \
+         this command. BLOCKED.\n\n\
+         A foreground pipe keeps the stream of its first command (up to 4 MiB) as `unfiltered_output` \
+         only when its LAST stage is a terminal filter ({TERMINAL_FILTER_NAMES}) and the first \
+         top-level pipe is followed by nothing but the rest of that one pipeline. The capture is not \
+         kept when that pipe is followed by a `;`, `&&` or `||` list, a newline, a comment, a heredoc, \
+         `$(` or a backtick; when the pipe sits inside a group, `$(...)` or `<(...)`; when it is `|&`; \
+         when the command names a buffer (@cmd_*, @bg_*, @file_*, @tool_*, @ack_*); or when the \
+         spliced command would not parse. Here what the trimmer drops is gone. Either:\n  \
+         (a) rewrite it as one plain pipeline ending in its filter: the stream of the first command \
+         is then kept as `unfiltered_output`\n  \
+         (b) run_command(\"{lead}\") bare, then query the @cmd_* buffer: grep PATTERN @cmd_xxx"
+    ))
+}
 
 #[async_trait::async_trait]
 impl Tool for RunCommand {
@@ -280,7 +335,7 @@ impl Tool for RunCommand {
     }
 
     fn description(&self) -> &str {
-        "Run a shell command in the project root. Large output is buffered as @cmd_* refs."
+        "Run a shell command in the project root. Large output → @cmd_* refs."
     }
 
     fn long_docs(&self) -> Option<&str> {
@@ -290,7 +345,11 @@ impl Tool for RunCommand {
              Short output (< 50 lines) is returned inline.\n\
              Long output is stored as `@cmd_xxxx` and a smart summary is returned.\n\
              Query the buffer in a follow-up: `run_command(\"grep FAILED @cmd_xxxx\")`.\n\
-             Never pipe output inline — use the buffer ref instead.\n\
+             A foreground `cmd | grep/head/tail…` (last stage a terminal filter, no `;`/`&&`/`||` \
+             list after the first pipe) returns the filtered result plus `unfiltered_output`, a \
+             handle to `cmd`'s stdout (up to 4 MiB); `exit_code` is the filter's. A pipe from an \
+             unbounded command into a trimmer that the capture cannot serve is refused, and so is \
+             every such pipe in the background: run it bare and query the `@cmd_*` buffer.\n\
              \n\
              ## Key parameters\n\
              \n\
@@ -328,12 +387,12 @@ impl Tool for RunCommand {
                     "type": "string",
                     "description": "Shell command. May reference @cmd_* buffers (e.g. grep FAILED @cmd_abc)."
                 },
-                "timeout_secs": { "type": "integer", "default": 30, "description": "Max seconds (default 30)." },
-                "cwd": { "type": "string", "description": "Subdirectory relative to project root." },
-                "acknowledge_risk": { "type": "boolean", "description": "Bypass dangerous-command check. Prefer @ack_* handle from the rejected response." },
-                "run_in_background": { "type": "boolean", "description": "Detach and return immediately. Use for long-running or backgrounded (&) commands." },
-                "interactive": { "type": "boolean", "description": "Spawn process with interactive stdin/stdout. Elicits input after each output chunk. Use for REPLs, prompts, and interactive CLIs." },
-                "effect": { "type": "string", "enum": ["read", "write"], "default": "write", "description": "What the command does to files. Recorded in telemetry; takes no lock." }
+                "timeout_secs": { "type": "integer", "default": 30, "description": "Max seconds. A timed-out `cmd | filter` returns the filter on the partial capture if replayable (capture_incomplete); may take timeout_secs + 5 s." },
+                "cwd": { "type": "string", "description": "Subdirectory of project root." },
+                "acknowledge_risk": { "type": "boolean", "description": "Bypass dangerous-command check. Prefer @ack_* handle from the rejection." },
+                "run_in_background": { "type": "boolean", "description": "Detach, return immediately. For long-running or `&` commands." },
+                "interactive": { "type": "boolean", "description": "Interactive stdin/stdout; elicits input per output chunk. For REPLs/prompts." },
+                "effect": { "type": "string", "enum": ["read", "write"], "default": "write", "description": "Effect on files. Telemetry only; takes no lock." }
             }
         })
     }
@@ -423,9 +482,15 @@ impl Tool for RunCommand {
 
             // --- Step 1: Resolve @cmd_ buffer references ---
             // IL3 gate runs BEFORE resolve_refs so buffer refs are still visible —
-            // `grep PATTERN @cmd_xxx | sort` is allowed (buffer-op), but
-            // `cargo test | grep FAILED` is not. See `detect_il3_violation`.
-            if let Some(hint) = crate::util::path_security::detect_il3_violation(command) {
+            // `grep PATTERN @cmd_xxx | sort` is allowed (buffer-op). `pipe_refusal` decides the
+            // rest: a BACKGROUND pipe is refused (its log keeps only what the pipe passes). A
+            // foreground pipe is refused when the detector fires AND the capture cannot be spliced
+            // into it: last stage not a terminal filter, a list/comment/heredoc/`$(` after the
+            // first pipe, a pipe nested in a group or substitution, `|&`, a buffer ref, or a
+            // splice the shell does not parse. Such a command would run with no capture, so what
+            // its trimmer drops would be lost. Every other foreground pipe is run through a
+            // capture that keeps the first command's stream, up to 4 MiB (`unfiltered_output`).
+            if let Some(hint) = pipe_refusal(command, run_in_background) {
                 return Err(super::RecoverableError::new(hint).into());
             }
             let (resolved_command, temp_files, buffer_only, refreshed_handles) =

@@ -6194,6 +6194,9 @@ mod tests {
             // surfaces a tool rename touches. Not a tool and never will be.
             "onboarding_prompt",
             "protected_memories",
+            // A `run_command` response key, named by Iron Law 3 in the server_instructions
+            // slice: the handle a foreground pipe ending in a terminal filter leaves behind.
+            "unfiltered_output",
             "untracked",
             "url",
         ];
@@ -12823,11 +12826,12 @@ mod guide_hint_tests {
     async fn a_refusal_carries_the_gate_condition_once_per_family() {
         let (_dir, server) = make_server().await;
 
-        // IL-3: refused pre-execution, so nothing actually runs.
+        // IL-3: a BACKGROUND pipe is refused pre-execution, so nothing actually runs. (Foreground
+        // would run `cargo test`.)
         let first = server
             .call_tool_by_name(
                 "run_command",
-                json!({"command": "cargo test | grep FAILED"}),
+                json!({"command": "cargo test | grep FAILED", "run_in_background": true}),
             )
             .await
             .expect("dispatch ok");
@@ -12858,7 +12862,10 @@ mod guide_hint_tests {
 
         // Same family again: the condition is not repeated.
         let second = server
-            .call_tool_by_name("run_command", json!({"command": "cargo build | head -5"}))
+            .call_tool_by_name(
+                "run_command",
+                json!({"command": "cargo build | head -5", "run_in_background": true}),
+            )
             .await
             .expect("dispatch ok");
         assert_eq!(
@@ -12890,7 +12897,7 @@ mod guide_hint_tests {
         let refused = server
             .call_tool_by_name(
                 "run_command",
-                json!({"command": "cargo test | grep FAILED"}),
+                json!({"command": "cargo test | grep FAILED", "run_in_background": true}),
             )
             .await
             .expect("dispatch ok");
@@ -15373,6 +15380,10 @@ mod guide_hint_tests {
         async fn call(server: &CodeScoutServer, principal: Option<&str>, command: &str) -> usize {
             let mut arguments = serde_json::Map::new();
             arguments.insert("command".to_string(), json!(command));
+            // A background pipe is refused; a foreground one ending in a filter would run `cargo test`.
+            if command.contains(" | ") {
+                arguments.insert("run_in_background".to_string(), json!(true));
+            }
             if let Some(p) = principal {
                 arguments.insert(
                     crate::tools::session_key::PRINCIPAL_ARG_KEY.to_string(),

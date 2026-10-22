@@ -27,6 +27,23 @@ impl Drop for AbortOnDrop {
     }
 }
 
+/// RAII guard: SIGKILLs a whole process group when dropped, unless disarmed by setting it to
+/// `None` once the child was waited on to completion. `kill_on_drop` kills only the shell; this is
+/// what reaps its pipeline when a future holding the wait is dropped (cancellation, a timeout).
+#[cfg(unix)]
+struct PgidKillGuard(Option<i32>);
+
+#[cfg(unix)]
+impl Drop for PgidKillGuard {
+    fn drop(&mut self) {
+        if let Some(pgid) = self.0 {
+            // SAFETY: pgid was created with process_group(0); SIGKILL is
+            // safe to send to our own group. No-op if already reaped.
+            unsafe { libc::killpg(pgid, libc::SIGKILL) };
+        }
+    }
+}
+
 fn resolve_work_dir(root: &Path, cwd_param: Option<&str>) -> anyhow::Result<std::path::PathBuf> {
     if let Some(rel) = cwd_param {
         let candidate = root.join(rel);
@@ -170,6 +187,20 @@ pub(super) struct TeeInjection {
     /// `None` both when there was nothing to capture (no terminal filter) and when the
     /// capture is in place — only a capture that was wanted and could not be made sets it.
     pub(super) skipped: Option<String>,
+    /// Everything after the spliced `|` (`B | C` in `A | tee cap | B | C`; just `B` for a single
+    /// pipe), `None` when nothing is captured. `tee_splice_point` picks the pipe: the first one at
+    /// nesting depth 0, so the capture is the producer's own stream, and only when the text after
+    /// it is ONE pipeline whose last stage is a terminal filter. So this is the rest of that
+    /// pipeline and nothing else: no `;` / `&&` tail and no heredoc body, and no fallback to
+    /// another pipe when those fail (the command then runs untouched and this is `None`).
+    /// Only the LAST stage is known to be a terminal filter, and the text before the pipe can set
+    /// context the filter ran in, so being capturable does NOT make it safe to run again: the
+    /// timeout path re-runs it over the partial capture only when
+    /// `command_summary::filter_is_replayable(prefix, filter)` says so.
+    pub(super) filter: Option<String>,
+    /// The text before the spliced `|` (`A`), `Some` exactly when `filter` is: what
+    /// `filter_is_replayable` judges the producer side by.
+    pub(super) prefix: Option<String>,
 }
 
 #[cfg(test)]
@@ -213,23 +244,21 @@ pub(super) fn inject_tee_in(
     buffer_only: bool,
     tmp_dir: &std::path::Path,
 ) -> anyhow::Result<TeeInjection> {
-    use super::super::command_summary::detect_terminal_filter;
+    use super::super::command_summary::tee_splice_point;
     let untouched = |skipped: Option<String>| TeeInjection {
         command: resolved_command.to_string(),
         capture: None,
         skipped,
+        filter: None,
+        prefix: None,
     };
     if buffer_only {
         return Ok(untouched(None));
     }
-    // A `|` inside a heredoc BODY is data destined for a file, not pipeline syntax, and
-    // `detect_terminal_filter` — quote-aware but with no notion of a heredoc — read it as
-    // a pipeline stage, so the splice below landed in written content. Detect on a masked
-    // copy: masking blanks body bytes in place, so `pipe_pos` still addresses the original
-    // and the splice is unchanged. See
+    // `tee_splice_point` scans a heredoc-masked copy: a `|` inside a heredoc BODY is data
+    // destined for a file, not pipeline syntax, and the splice used to land in written content. See
     // docs/issues/archive/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md.
-    let masked = crate::util::path_security::mask_heredoc_bodies(resolved_command);
-    let Some(pipe_pos) = detect_terminal_filter(&masked) else {
+    let Some(pipe_pos) = tee_splice_point(resolved_command) else {
         return Ok(untouched(None));
     };
     let skip = |why: &dyn std::fmt::Display| {
@@ -272,17 +301,131 @@ pub(super) fn inject_tee_in(
     // not anticipate (a future temp-dir naming scheme, a space in the path).
     // `'` itself is excluded by the allowlist, so the quoting cannot be
     // escaped from.
-    let command = format!(
-        "{} | tee '{}' | {}",
-        resolved_command[..pipe_pos].trim_end(),
-        tmpfile,
-        resolved_command[pipe_pos + 1..].trim_start()
+    // The tee goes at the splice point (`tee_splice_point`: the first pipe at nesting depth 0, only
+    // when the rest is one pipeline ending in a terminal filter and the shell parses both the
+    // command and the spliced text), so in a chain
+    // (`cargo test | grep x | head -20`) the capture is the producer's own stream and the
+    // whole chain runs inside the group. A command that does not qualify never reaches here:
+    // it runs untouched, with no capture and no fallback to another pipe.
+    // The filter side is wrapped in a group that, once the filter exits, drains up to the
+    // capture store limit of what it left unread and then exits with the FILTER's status.
+    // Without the drain an early-exit filter (`head -N`) closes the pipe, `tee` takes SIGPIPE,
+    // and the capture is cut to what arrived before that — which the response then reported
+    // as the whole stream. The drain is bounded because the handle keeps no more than that
+    // limit anyway. A FAST endless producer (`yes | head -1`) still ends at once: the group
+    // exits after the bound, the pipe closes and the producer stops. A SLOW one (fewer bytes
+    // than the bound before `timeout_secs`) never reaches the bound, so it runs to the
+    // timeout, where the result is flagged `capture_incomplete`: the filter run once over the
+    // partial capture when `filter_is_replayable` allows it, else the capture's handle with
+    // `filter_not_run`. Pinned by `a_slow_endless_producer_into_head_runs_to_the_timeout`.
+    // POSIX only: `sh -c` may be dash. The shape (`splice_tee`) puts the newline before `s=$?` (not
+    // `;`) so a trailing `# comment` in the filter cannot swallow the closing brace. The group
+    // sits on the filter's side of the pipe, so the producer's stderr is not piped into it.
+    // The `tee` runs under `ulimit -f` (`splice_tee`), so the capture FILE is bounded for every
+    // filter, a whole-stream one (`grep`, `tail`) included, while the filter still reads it all.
+    let filter = resolved_command[pipe_pos + 1..].trim_start().to_string();
+    let prefix = resolved_command[..pipe_pos].to_string();
+    let command = super::super::command_summary::splice_tee(
+        resolved_command,
+        pipe_pos,
+        &tmpfile,
+        super::output::CAPTURE_STORE_LIMIT_BYTES,
     );
     Ok(TeeInjection {
         command,
         capture: Some(TmpfileGuard(tmpfile)),
         skipped: None,
+        filter: Some(filter),
+        prefix: Some(prefix),
     })
+}
+
+/// Seconds the filter of a timed-out command gets to run once over the partial capture.
+pub(super) const TIMEOUT_FILTER_GRACE_SECS: u64 = 5;
+
+/// Run `filter` once through the platform shell with the capture file at `capture_path` as its
+/// stdin. The timeout path calls this after it killed the producer, and only for a filter
+/// `command_summary::filter_is_replayable` passed, so a timed-out filtered command returns what its
+/// filter makes of the partial capture.
+///
+/// Every outcome is distinct ([`FilterRun`]): the filter's stdout, stderr and exit code when it
+/// ended within `grace`; `GraceExpired` when it did not; `NotRun` with the reason when it could not
+/// be started. The filter's whole process group is killed whenever the wait does not complete:
+/// on expiry, and when the future is dropped during the grace (the call was cancelled). That is
+/// the foreground spawn's [`PgidKillGuard`] on Unix and its kill-on-close job on Windows;
+/// `kill_on_drop` alone ends only the shell and leaves the filter's stages running.
+pub(super) async fn run_filter_on_capture(
+    filter: &str,
+    capture_path: &str,
+    work_dir: &Path,
+    grace: std::time::Duration,
+) -> FilterRun {
+    let stdin = match std::fs::File::open(capture_path) {
+        Ok(file) => file,
+        Err(e) => {
+            tracing::warn!(path = %capture_path, error = %e, "tee capture unreadable for the filter");
+            return FilterRun::NotRun("the capture file could not be opened for the filter".into());
+        }
+    };
+    let mut cmd = crate::platform::shell_command_configured(filter);
+    if let Err(e) = crate::tools::invocation_context::apply_to_shell(&mut cmd) {
+        tracing::warn!(error = %e, "the filter of a timed-out command could not be configured");
+        return FilterRun::NotRun("the filter's shell could not be configured".into());
+    }
+    cmd.current_dir(work_dir)
+        .stdin(std::process::Stdio::from(stdin))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            tracing::warn!(error = %e, "the filter of a timed-out command could not be started");
+            return FilterRun::NotRun("the filter could not be started".into());
+        }
+    };
+    // `process_group(0)` in the platform builder: the group id is the shell's pid. Armed until the
+    // wait completes, so a drop of this future at any await below kills the group.
+    #[cfg(unix)]
+    let mut guard = PgidKillGuard(child.id().map(|id| id as i32));
+    // Dropped with this future, which closes the job and ends the filter's tree.
+    #[cfg(windows)]
+    let _job_guard = crate::platform::kill_on_close_job(&child);
+    match tokio::time::timeout(grace, child.wait_with_output()).await {
+        Ok(Ok(output)) => {
+            // Waited to completion: the group may be gone and its id reused, so do not kill it.
+            #[cfg(unix)]
+            {
+                guard.0 = None;
+            }
+            FilterRun::Ran {
+                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                exit_code: output.status.code().unwrap_or(-1),
+            }
+        }
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "the filter of a timed-out command failed");
+            FilterRun::NotRun("waiting on the filter failed".into())
+        }
+        // The guard, still armed, kills the group as this returns.
+        Err(_) => FilterRun::GraceExpired,
+    }
+}
+
+/// What running a timed-out command's filter over its partial capture produced.
+#[derive(Debug, PartialEq)]
+pub(super) enum FilterRun {
+    /// The filter ended within its grace. Raw text: the caller scrubs it.
+    Ran {
+        stdout: String,
+        stderr: String,
+        exit_code: i32,
+    },
+    /// The filter was still running when its grace expired, and was killed.
+    GraceExpired,
+    /// Nothing ran, or nothing usable came back, for this reason (`filter_not_run`).
+    NotRun(String),
 }
 
 /// Classify a command into a known-slow bucket. Returns a short label used
@@ -485,6 +628,8 @@ pub(crate) async fn run_command_inner(
         command: effective_command,
         capture: unfiltered_tmpfile,
         skipped: tee_skipped,
+        filter: tee_filter,
+        prefix: tee_prefix,
     } = inject_tee(resolved_command, buffer_only)?;
 
     // --- Step 5: Execute command ---
@@ -500,9 +645,13 @@ pub(crate) async fn run_command_inner(
     // the pipeline (curl, grep, tee, etc.), but killpg() reaps the whole group.
     //
     // We also reset SIGPIPE to SIG_DFL in pre_exec.  Claude Code's Node.js parent sets
-    // SIGPIPE=SIG_IGN; every spawned process inherits it.  With SIG_IGN, a `| head -N`
-    // pipeline never terminates via SIGPIPE: tee ignores the broken pipe from head and
-    // keeps draining curl's output into the tmpfile until the download completes.
+    // SIGPIPE=SIG_IGN; every spawned process inherits it, so with SIG_IGN a pipeline whose
+    // reader exits early (`yes | head -1`) would never end: the writer gets EPIPE it ignores
+    // and keeps going.  The reset keeps that ending for pipelines we do not splice.  For a
+    // spliced `| tee cap | { filter; drain; }` the bounded drain, not SIGPIPE, decides how far
+    // the producer runs: the group reads up to the capture store limit after the filter exits,
+    // so a finite stream within it is captured whole. A fast endless one ends when that bound
+    // is read and the pipe closes; a slow one runs to the timeout (see `inject_tee_in`).
     #[cfg(unix)]
     let (child_output_fut, child_pgid) = {
         // Base config (sh -c, GIT_PAGER, process_group(0), SIGPIPE reset,
@@ -524,16 +673,6 @@ pub(crate) async fn run_command_inner(
         let fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = std::io::Result<std::process::Output>> + Send>,
         > = Box::pin(async move {
-            struct PgidKillGuard(Option<i32>);
-            impl Drop for PgidKillGuard {
-                fn drop(&mut self) {
-                    if let Some(pgid) = self.0 {
-                        // SAFETY: pgid was created with process_group(0); SIGKILL is
-                        // safe to send to our own group. No-op if already reaped.
-                        unsafe { libc::killpg(pgid, libc::SIGKILL) };
-                    }
-                }
-            }
             let mut guard = PgidKillGuard(pgid_for_guard);
             let result = child.wait_with_output().await;
             // Successful completion: disarm the guard by clearing the pgid so
@@ -703,12 +842,93 @@ pub(crate) async fn run_command_inner(
                      pass a higher timeout_secs (try {next_timeout}s)."
                 ),
             };
-            Ok(json!({
+            let mut response = json!({
                 "timed_out": true,
                 "stderr": format!("Command timed out after {} seconds", timeout_secs),
                 "exit_code": null,
                 "hint": hint,
-            }))
+            });
+            // A filtered command's producer was killed with its capture on disk: run the filter
+            // once over that partial capture, within a grace of its own, and return what it makes
+            // of it, flagged `capture_incomplete` — but only a filter whose replay is provably
+            // pure (`filter_is_replayable`); any other gets `filter_not_run` and the handle. No
+            // filter, an unreadable capture or an empty one: the bare shape above, as before.
+            if let (Some(filter), Some(prefix), Some(capture)) = (
+                tee_filter.as_deref(),
+                tee_prefix.as_deref(),
+                &unfiltered_tmpfile,
+            ) {
+                if let Some(super::output::CaptureRead {
+                    text: content,
+                    redacted: capture_redacted,
+                    cut: capture_cut,
+                }) = super::output::read_capture(capture)
+                {
+                    if !content.is_empty() {
+                        let (run, filter_redacted) =
+                            match super::super::command_summary::filter_is_replayable(
+                                prefix, filter,
+                            ) {
+                                // The filter reads the file as it is on disk; its streams are scrubbed
+                                // here, the stored capture by `read_capture` above.
+                                Ok(()) => match run_filter_on_capture(
+                                    filter,
+                                    &capture.0,
+                                    &work_dir,
+                                    std::time::Duration::from_secs(TIMEOUT_FILTER_GRACE_SECS),
+                                )
+                                .await
+                                {
+                                    FilterRun::Ran {
+                                        stdout,
+                                        stderr,
+                                        exit_code,
+                                    } => {
+                                        let stdout = redact_credentials(&stdout);
+                                        let stderr = redact_credentials(&stderr);
+                                        let count = stdout.count + stderr.count;
+                                        (
+                                            FilterRun::Ran {
+                                                stdout: stdout.text.into_owned(),
+                                                stderr: stderr.text.into_owned(),
+                                                exit_code,
+                                            },
+                                            count,
+                                        )
+                                    }
+                                    other => (other, 0),
+                                },
+                                Err(reason) => (FilterRun::NotRun(reason), 0),
+                            };
+                        let unfiltered = super::output::store_capture(
+                            content,
+                            capture_cut,
+                            original_command,
+                            -1,
+                            ctx,
+                        );
+                        // The envelope keys go on BEFORE the stdout room is measured, as the
+                        // normal path's gate measures them; `call` then leaves them as they are.
+                        if unfiltered.is_some() {
+                            if let Some(obj) = response.as_object_mut() {
+                                obj.extend(super::envelope_keys(
+                                    ctx,
+                                    original_command,
+                                    notes.timeout_hint.as_deref(),
+                                ));
+                            }
+                        }
+                        super::output::attach_partial_capture(
+                            &mut response,
+                            run,
+                            unfiltered,
+                            capture_redacted + filter_redacted,
+                            original_command,
+                        );
+                    }
+                }
+            }
+            Ok(response)
         }
     }
 }
