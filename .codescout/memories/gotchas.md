@@ -523,9 +523,11 @@ first: `env | grep -i EMBED` in the shell that ran it.
 `tool_name` has never contained "bash", while `run_command` is 37% of 47,727
 recorded calls (2026-08-03..08-27). So shell work routed through `Bash` does not
 appear in `/analyze-usage`, `docs/trackers/tool-usage-patterns.md`, or the
-`pika_observations` table. Native `Bash` also does not get `run_command`'s IL-3
-unbounded-pipe block (piping `cargo test` to `grep` masked a non-zero exit here,
-reporting success on a failing run) or its dangerous-command `@ack_*` gate.
+`pika_observations` table. Native `Bash` also does not get `run_command`'s pipe handling or its
+dangerous-command `@ack_*` gate. (`run_command` ALLOWS a foreground `cargo test 2>&1 | grep X`:
+it reports the FILTER's `exit_code`, as any pipe without `pipefail` does, so a failing run can
+still read as success, and it keeps the producer's stream, up to 4 MiB, as `unfiltered_output`.
+The IL-3 refusal remains for a background pipe and for a pipe the capture cannot be spliced into.)
 
 **CONCLUDED 2026-09-20 — native `Bash`, `Write` and `Edit` are DENIED.** They were
 added to `permissions.deny` in `settings.json` for all three profiles (`~/.claude`,

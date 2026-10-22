@@ -85,23 +85,27 @@ terminal filters are `grep`, `egrep`, `fgrep`, `rg`, `head`, `tail`,
 `sed`, `awk`, `cut`, `wc`, `sort`, `uniq`, `tr`. When the last stage
 is one of them and the first top-level pipe is followed by one plain
 pipeline (nothing after it but `|` stages), the server runs
-`A | tee <capture> | { REST; drain; }`: the first command `A` runs
-until it ends, the capture limit is reached or `timeout_secs` expires,
-and a filter that reads to the end (`grep`, `sort`, `tail`) receives
-the whole stream. The response carries the filtered result and:
+`A | ( ulimit -f N; exec tee <capture> ) | { REST; drain; }`. A
+filter that reads to the end (`grep`, `sort`, `tail`) receives the
+whole stream, and `A` runs until it ends or `timeout_secs` expires;
+only an early-exit filter stops `A` near the capture limit (below).
+The capture FILE is bounded for every filter: a little over 4 MiB in,
+`tee` stops writing it and keeps feeding the filter. The response
+carries the filtered result and:
 
 - `unfiltered_output` — a `@cmd_*` handle to `A`'s own stdout
   (redacted, kept up to 4 MiB), queried like any buffer:
   `grep PATTERN @cmd_xxx`;
-- `unfiltered_output_lines` — its line count;
+- `unfiltered_output_lines` — its line count: the whole stream's
+  when the stream fit the capture, a lower bound of it whenever
+  `unfiltered_truncated` is set;
 - `unfiltered_truncated` and `unfiltered_buffered_lines` when the
   stream was cut.
 
-Only an early-exit filter (`head`, `sed -n 1,5p`, `grep -m1`) leaves
-part of the stream unread: it does not stop `A`, a drain after the
-filter keeps it running and reads at most 4 MiB more into the
-capture, so `unfiltered_output_lines` is then a lower bound of the
-stream, and `unfiltered_truncated` marks it. The `exit_code` of the
+An early-exit filter (`head`, `sed -n 1,5p`, `grep -m1`) leaves
+part of the stream unread: it does not stop `A` at once, a drain
+after the filter keeps it running and reads at most 4 MiB more, and
+then the pipe closes and `A` stops. The `exit_code` of the
 call is the filter's, as in any pipe without `pipefail`: the
 producer's own exit status is not reported.
 
