@@ -3175,7 +3175,6 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             ("echo $(seq 3 | head -1)", None),
             ("echo $(seq 1 5 | wc -l) | grep 5 | head -1", Some("| grep")),
             ("echo $((1|2)) | grep 3 | head -1", Some("| grep")),
-            ("diff <(seq 3 | sort) <(seq 3) | head -1", Some("| head")),
             ("echo `seq 3 | head -1`", None),
             ("echo `seq 3 | wc -l` | grep 3 | head -1", Some("| grep")),
             ("{ seq 1 5 | grep 4; } | head -1", Some("| head")),
@@ -3195,6 +3194,11 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             let want = want.map(|marker| cmd.find(marker).expect(marker));
             assert_eq!(tee_splice_point(cmd), want, "{cmd}");
         }
+        // `<( )` is not POSIX. Rule 6: a `sh` that rejects it (dash, the Ubuntu `sh`) leaves the command
+        // untouched, and one that parses it (bash) splices at the `|` outside both substitutions.
+        let cmd = "diff <(seq 3 | sort) <(seq 3) | head -1";
+        let want = shell_parses("true <(true)").then(|| cmd.find("| head").expect("| head"));
+        assert_eq!(tee_splice_point(cmd), want, "{cmd}");
     }
 
     /// The plan names where the producer begins only when its status can be recorded around it. A

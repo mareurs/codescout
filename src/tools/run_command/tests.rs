@@ -7488,7 +7488,8 @@ async fn a_whole_stream_filter_sees_every_line_while_its_capture_is_bounded() {
     let (_dir, ctx) = project_ctx().await;
     let result = RunCommand
         .call(
-            json!({ "command": "seq 1 3000000 | tail -1", "timeout_secs": 60 }),
+            // `-f %.0f`: BSD `seq` prints 3000000 as `3e+06` under its default `%g`.
+            json!({ "command": "seq -f %.0f 1 3000000 | tail -1", "timeout_secs": 60 }),
             &ctx,
         )
         .await
@@ -7536,7 +7537,9 @@ fn the_spliced_capture_file_is_bounded_while_the_filter_reads_the_whole_stream()
     );
 
     let cap = dir.path().join("cap");
-    let cmd = "seq 1 3000000 | grep -c 7";
+    // `-f %.0f`: BSD `seq` prints every value from 1000000 up in `%g` form (`1e+06`), so the
+    // count of lines holding a `7` would differ from the one computed below.
+    let cmd = "seq -f %.0f 1 3000000 | grep -c 7";
     let limit = super::output::CAPTURE_STORE_LIMIT_BYTES;
     let text = splice_tee(
         cmd,
@@ -8072,7 +8075,6 @@ async fn a_pipe_nested_in_a_group_or_substitution_runs_as_it_does_bare() {
         ("(seq 1 5 | grep 2) | head -1", "2\n"),
         ("echo $(seq 1 5 | wc -l) | grep 5 | head -1", "5\n"),
         ("echo $((1|2)) | grep 3 | head -1", "3\n"),
-        ("diff <(seq 3 | sort) <(seq 3) | head -1", ""),
         ("{ seq 1 5 | grep 4; } | head -1", "4\n"),
     ] {
         let result = RunCommand
@@ -8086,6 +8088,28 @@ async fn a_pipe_nested_in_a_group_or_substitution_runs_as_it_does_bare() {
             "`{command}`: {result}"
         );
     }
+    // `<( )` is not POSIX. A `sh` that parses it (bash) must run the command as it does bare.
+    // One that rejects it (dash, the Ubuntu `sh`) must leave the command untouched, so it fails
+    // exactly as the bare command does: a nonzero exit and nothing on stdout.
+    let command = "diff <(seq 3 | sort) <(seq 3) | head -1";
+    let sh_parses_it = std::process::Command::new("sh")
+        .args(["-c", "set -n\ntrue <(true)"])
+        .status()
+        .is_ok_and(|status| status.success());
+    let result = RunCommand
+        .call(json!({ "command": command, "timeout_secs": 20 }), &ctx)
+        .await
+        .unwrap_or_else(|e| panic!("`{command}` must run, not be refused: {e}"));
+    assert_eq!(
+        result["exit_code"] == 0,
+        sh_parses_it,
+        "`{command}` (sh parses `<( )`: {sh_parses_it}): {result}"
+    );
+    assert_eq!(
+        result["stdout"].as_str().unwrap_or_default(),
+        "",
+        "`{command}`: {result}"
+    );
 }
 
 /// With no pipe at nesting depth 0 there is nothing to splice at: the command runs untouched, so
