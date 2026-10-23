@@ -1031,6 +1031,10 @@ pub(crate) struct LateKeys {
     /// Prepended to `stdout` where the response has one (`CallNotes::stdout_prefix`). Priced by
     /// the gate in the escaped bytes of the stdout it joins.
     pub stdout_prefix: String,
+    /// The producer's exit status the spliced wrapper recorded ([`read_producer_status`]): the
+    /// `producer_exit_code` key. `None` when none was recorded: no capture, a producer that is not a
+    /// plain command, a status file that could not be made or read.
+    pub producer_exit_code: Option<i32>,
 }
 
 /// What `"stdout":""` adds to a response that had no `stdout` key. The tee block inserts it when a
@@ -1209,6 +1213,29 @@ pub(super) fn read_capture(tmp: &TmpfileGuard) -> Option<CaptureRead> {
             None
         }
     }
+}
+
+/// The exit status of the producer, which the spliced wrapper `{ <command>; s=$?; echo $s >| '<file>'; exit $s; }`
+/// wrote to `file` when the producer ended. A pipeline's own status is its last stage's, so for
+/// `cargo test | grep FAILED` the response's `exit_code` is grep's; this is what `cargo test` returned.
+/// `None` when the file holds no status: the producer was killed before it could be written (a
+/// timeout), the shell never reached the `echo`, or the file cannot be read. A status that is not a
+/// shell exit status (outside 0 to 255) is not trusted either.
+///
+/// A producer stopped by the filter closing the pipe has status 141 (`128 + SIGPIPE`): that is not a
+/// failure of the command, and happens only when the stream outran the bounded drain (4 MiB).
+pub(super) fn read_producer_status(file: &TmpfileGuard) -> Option<i32> {
+    use std::io::Read;
+    let mut text = String::new();
+    // A status is at most three digits and a newline; the bound keeps a file that holds anything
+    // else from being read whole.
+    std::fs::File::open(&file.0)
+        .ok()?
+        .take(16)
+        .read_to_string(&mut text)
+        .ok()?;
+    let code: i32 = text.trim().parse().ok()?;
+    (0..=255).contains(&code).then_some(code)
 }
 
 /// What [`read_capture`] read of a capture file.
@@ -1642,7 +1669,7 @@ pub(crate) async fn handle_successful_output_with(
 
     // Every key attached after the streams, built ONCE: the gate measures it, the end of this
     // function applies it. The two cannot drift because there is one map.
-    let late = attachments(
+    let mut late = attachments(
         &[
             ("shell_cause", &shell_cause),
             ("wip_authors", &wip_authors),
@@ -1654,6 +1681,11 @@ pub(crate) async fn handle_successful_output_with(
         &late_keys.tee_skipped,
         &late_keys.envelope,
     );
+    // Added to the one map the gate measures, so the summary-or-inline gate prices it. Not an
+    // `attachments` parameter: it is not part of the capture's own keys, which that function builds.
+    if let Some(code) = late_keys.producer_exit_code {
+        late.insert("producer_exit_code".into(), json!(code));
+    }
 
     // --- Step 6: Decide whether to buffer + summarize ---
     //

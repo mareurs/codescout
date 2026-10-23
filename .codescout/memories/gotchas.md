@@ -526,7 +526,7 @@ appear in `/analyze-usage`, `docs/trackers/tool-usage-patterns.md`, or the
 `pika_observations` table. Native `Bash` also does not get `run_command`'s pipe handling or its
 dangerous-command `@ack_*` gate. (`run_command` ALLOWS a foreground `cargo test 2>&1 | grep X`:
 it reports the FILTER's `exit_code`, as any pipe without `pipefail` does, so a failing run can
-still read as success, and it keeps the producer's stream, up to 4 MiB, as `unfiltered_output`.
+still read as success (its own status is `producer_exit_code`), and it keeps the producer's stream, up to 4 MiB, as `unfiltered_output`.
 The IL-3 refusal remains for a background pipe and for a pipe the capture cannot be spliced into.)
 
 **CONCLUDED 2026-09-20 — native `Bash`, `Write` and `Edit` are DENIED.** They were

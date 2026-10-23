@@ -177,6 +177,22 @@ pub(super) fn tee_path_is_safe(path: &str) -> bool {
         })
 }
 
+/// A temp file for the producer's exit status, under the same rules as the capture file (unpredictable
+/// name, forward-slash path, [`tee_path_is_safe`]), or `None` when it cannot be made. The caller then
+/// splices without the status wrapper: this file is a bonus and never a reason to refuse a command.
+fn producer_status_file(tmp_dir: &std::path::Path) -> Option<TmpfileGuard> {
+    let path = tempfile::Builder::new()
+        .prefix("codescout-producer-status-")
+        .tempfile_in(tmp_dir)
+        .ok()?
+        .into_temp_path();
+    let shell_path = crate::platform::shell_path_str(&path);
+    path.keep().ok()?;
+    // The guard owns the file from here, so an unsafe path drops it and removes it again.
+    let guard = TmpfileGuard(shell_path);
+    tee_path_is_safe(&guard.0).then_some(guard)
+}
+
 /// What tee injection decided for one command.
 pub(super) struct TeeInjection {
     /// The command to run: spliced with a `tee` capture, or the original untouched.
@@ -201,6 +217,11 @@ pub(super) struct TeeInjection {
     /// The text before the spliced `|` (`A`), `Some` exactly when `filter` is: what
     /// `filter_is_replayable` judges the producer side by.
     pub(super) prefix: Option<String>,
+    /// Deletes the file the producer's exit status was asked to be written to when dropped. `Some`
+    /// only when the splice wrapped the producer in a group that records `$?` there
+    /// (`SplicePlan::producer_start` was `Some` and the file could be made); read back with
+    /// `output::read_producer_status` once the command has ended.
+    pub(super) producer_status: Option<TmpfileGuard>,
 }
 
 #[cfg(test)]
@@ -244,13 +265,14 @@ pub(super) fn inject_tee_in(
     buffer_only: bool,
     tmp_dir: &std::path::Path,
 ) -> anyhow::Result<TeeInjection> {
-    use super::super::command_summary::tee_splice_point;
+    use super::super::command_summary::{plan_tee_splice, ProducerStatus};
     let untouched = |skipped: Option<String>| TeeInjection {
         command: resolved_command.to_string(),
         capture: None,
         skipped,
         filter: None,
         prefix: None,
+        producer_status: None,
     };
     if buffer_only {
         return Ok(untouched(None));
@@ -258,9 +280,10 @@ pub(super) fn inject_tee_in(
     // `tee_splice_point` scans a heredoc-masked copy: a `|` inside a heredoc BODY is data
     // destined for a file, not pipeline syntax, and the splice used to land in written content. See
     // docs/issues/archive/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md.
-    let Some(pipe_pos) = tee_splice_point(resolved_command) else {
+    let Some(plan) = plan_tee_splice(resolved_command) else {
         return Ok(untouched(None));
     };
+    let pipe_pos = plan.pipe_pos;
     let skip = |why: &dyn std::fmt::Display| {
         untouched(Some(format!(
             "the unfiltered-output capture was skipped: its temp file could not be created in \
@@ -325,11 +348,23 @@ pub(super) fn inject_tee_in(
     // filter, a whole-stream one (`grep`, `tail`) included, while the filter still reads it all.
     let filter = resolved_command[pipe_pos + 1..].trim_start().to_string();
     let prefix = resolved_command[..pipe_pos].to_string();
+    // The status file is a bonus like the capture: a producer that is not a plain command, or a file
+    // that cannot be made, leaves the producer as written and the response without
+    // `producer_exit_code`. It never refuses the command and never skips the capture.
+    let producer_status = plan
+        .producer_start
+        .and_then(|start| Some((start, producer_status_file(tmp_dir)?)));
     let command = super::super::command_summary::splice_tee(
         resolved_command,
         pipe_pos,
         &tmpfile,
         super::output::CAPTURE_STORE_LIMIT_BYTES,
+        producer_status
+            .as_ref()
+            .map(|(start, file)| ProducerStatus {
+                start: *start,
+                path: &file.0,
+            }),
     );
     Ok(TeeInjection {
         command,
@@ -337,6 +372,7 @@ pub(super) fn inject_tee_in(
         skipped: None,
         filter: Some(filter),
         prefix: Some(prefix),
+        producer_status: producer_status.map(|(_, file)| file),
     })
 }
 
@@ -630,6 +666,7 @@ pub(crate) async fn run_command_inner(
         skipped: tee_skipped,
         filter: tee_filter,
         prefix: tee_prefix,
+        producer_status,
     } = inject_tee(resolved_command, buffer_only)?;
 
     // --- Step 5: Execute command ---
@@ -783,6 +820,10 @@ pub(crate) async fn run_command_inner(
             let stdout = redact_credentials(&stdout_text);
             let stderr = redact_credentials(&stderr_text);
             let redacted = stdout.count + stderr.count;
+            // Read here, after the child exited: the wrapper wrote it when the producer ended.
+            let producer_exit_code = producer_status
+                .as_ref()
+                .and_then(super::output::read_producer_status);
             let result = handle_successful_output_with(
                 original_command,
                 stdout.text.into_owned(),
@@ -806,6 +847,7 @@ pub(crate) async fn run_command_inner(
                         notes.timeout_hint.as_deref(),
                     ),
                     stdout_prefix: notes.stdout_prefix.clone(),
+                    producer_exit_code,
                 },
             )
             .await?;
