@@ -1,15 +1,16 @@
 ---
-id: 6e26e94075e6a47d
+id: e12c30b5e0159852
 kind: bug
-status: open
+status: fixed
 title: capture-feature tests assume a bash sh and GNU seq, and fail on the Ubuntu and macOS CI runners
 owners:
 - marius
 tags:
 - cluster/repro-env-diverges-from-gate-env
-closed: null
+closed: 2026-10-23
 opened: 2026-10-23
 severity: medium
+unverified: TRACKED 99b56275f0439c09 — the Windows lib tests do not build, so these four tests have not run on Windows.
 ---
 
 # BUG: capture-feature tests assume a bash `sh` and GNU `seq`, and fail on the Ubuntu and macOS CI runners
@@ -61,19 +62,26 @@ macOS, `3e+06`: measured from the CI log and the test source. The command is `se
 1. **Hypothesis:** the capture splice itself misbehaves on dash. **Test:** read the panic text. **Verdict:** rejected for the two Ubuntu failures; the shell rejects the test's own command before any splice runs.
 
 ## Fix
-Written 2026-10-23, uncommitted when this entry was edited. Two changes, tests only; no production code moved.
+Written 2026-10-23. Two changes, tests only; no production code moved.
+
+**Fix commit:** `2acc553ad` on `experiments` (patch-id `c6ce785053e3df5b9d4ad73209d4a56fa22637f8`, from `git show 2acc553ad | git patch-id --stable`; the commit also carries the first version of this file). Pushed 2026-10-23.
 
 - **The two `seq` tests** (`src/tools/run_command/tests.rs`, `a_whole_stream_filter_sees_every_line_while_its_capture_is_bounded` and `the_spliced_capture_file_is_bounded_while_the_filter_reads_the_whole_stream`): `seq 1 3000000` became `seq -f %.0f 1 3000000`. GNU and BSD `seq` both print plain integers under that format.
 - **The two `<( )` tests** (`tee_splice_point_decides_from_the_depth_zero_pipes` in `src/tools/command_summary.rs`, `a_pipe_nested_in_a_group_or_substitution_runs_as_it_does_bare` in `src/tools/run_command/tests.rs`): the `diff <(seq 3 | sort) <(seq 3) | head -1` row left its table and became an explicit block that takes the host `sh` as the oracle. A `sh` that parses `<( )` must splice (first test) and run the command with exit 0 (second test). A `sh` that rejects it must leave the command untouched (first test) and fail it the way the bare command fails: a nonzero exit and empty stdout (second test). Neither shell world is skipped.
 
+## Fix provenance
+
+- **SHA:** `2acc553adadb126f88518f0dff7bff8583b16715` (`experiments`)
+- **patch-id:** `c6ce785053e3df5b9d4ad73209d4a56fa22637f8`
+
 ## Tests added
-No new test. The four existing tests changed as under Fix. Measured 2026-10-23, `scripts/with-slot.sh cargo test --lib -- <the four names>`: 4 passed under the local `sh` (bash). 4 passed again with the `sh` of `ubuntu:24.04` (dash copied out of the image, first on `PATH`). Red control: the pre-fix tests at `5018dd327` under the same dash shim fail the two `<( )` tests at the same lines and with the same text as CI (`command_summary.rs:3196` `left: None right: Some(30)`; `tests.rs:8082` `sh: 1: Syntax error: "(" unexpected`). Not run on macOS: the two `seq` tests are unverified there.
+No new test. The four existing tests changed as under Fix. CI verification, run 39931340086 on `2acc553ad`: `Test (ubuntu-latest / no-features)` and `Test (ubuntu-latest / local-embed)` are green again (red on 39915517190). The `Test (macos-latest / no-features)` failure list lost all four capture tests (`tee_splice_point_decides_from_the_depth_zero_pipes`, `a_pipe_nested_in_a_group_or_substitution_runs_as_it_does_bare`, `a_whole_stream_filter_sees_every_line_while_its_capture_is_bounded`, `the_spliced_capture_file_is_bounded_while_the_filter_reads_the_whole_stream`); its other 19 failures were all on the earlier list. The set of red jobs on the new run is the baseline set (12 jobs). The two `seq` fixes are therefore confirmed on macOS by that run, which also settles the macOS `<( )` question that the root-cause section left unread. Local evidence before the push: the four tests pass under bash `sh` and under the `ubuntu:24.04` dash; the pre-fix tests fail under that dash with CI's own panic lines (`command_summary.rs:3196`, `tests.rs:8082`). Windows: not run, see the unverified field. Measured 2026-10-23, `scripts/with-slot.sh cargo test --lib -- <the four names>`: 4 passed under the local `sh` (bash). 4 passed again with the `sh` of `ubuntu:24.04` (dash copied out of the image, first on `PATH`). Red control: the pre-fix tests at `5018dd327` under the same dash shim fail the two `<( )` tests at the same lines and with the same text as CI (`command_summary.rs:3196` `left: None right: Some(30)`; `tests.rs:8082` `sh: 1: Syntax error: "(" unexpected`). Not run on macOS: the two `seq` tests are unverified there.
 
 ## Workarounds
 None needed for users, as far as read: the failing tests fail at the test's own command line. Whether production `run_command` on a dash host splices correctly was not run here.
 
 ## Resume
-After the fix commit is pushed, read the CI run on its head: `Test (ubuntu-latest / no-features)` and `Test (ubuntu-latest / local-embed)` must be green, and the two `seq` tests must no longer appear in the `Test (macos-latest / no-features)` failure list. Only then mark this bug fixed and archive it with the fix SHA labelled `experiments` and its patch-id.
+N/A: fixed and verified on `experiments`.
 
 ## References
 CI runs 39915517190 (head) and 39574468685 (baseline `b1fde55c0`). Design: `docs/superpowers/specs/2026-10-21-il3-run-to-completion-pipe-design.md`. Audit log note for the P-8 window: A-41 in `docs/trackers/prompt-hamsa-audit-log.md`.
