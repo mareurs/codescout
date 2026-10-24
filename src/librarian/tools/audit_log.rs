@@ -366,7 +366,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // error or a directory-shaped shard name shortened filtered_total
         // with nothing saying the number was short.
         shard_warnings.push(format!(
-            "{} shard file(s) could not be read (permissions, a race, or a broken symlink) and are not counted in filtered_total",
+            "{} shard file(s) could not be read (permissions, a race, a broken symlink, or a link out of the repository) and are not counted in filtered_total",
             shards.unreadable_files
         ));
     }
