@@ -118,36 +118,33 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
 /// **A `link` names the row whose FILE it wrote.** A plain link writes only a catalog edge on
 /// its source (so: the source, through the worktree overlay like every other write). A
 /// `supersedes` link writes the DESTINATION's frontmatter (`status: superseded`,
-/// `link.rs`), and that is the file that changed, so that is the one named. It is named as the
-/// caller passed it, NOT through the overlay, because `link::call` passes `dst_id` to
-/// `write_field_to_frontmatter` unresolved: from a worktree session it writes the MAIN
-/// checkout's file (a bug of its own, filed), and the result must name what was written.
+/// `link.rs`), and that is the file that changed, so that is the one named. Both ends go
+/// through the worktree overlay: `link::call` resolves the destination with
+/// `resolve_write_target` before writing it, so from a worktree session the file written (and
+/// named) is the destination's shadow.
 ///
 /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
 struct WriteTarget {
+    /// The id the caller passed; `name_the_target` resolves it through the worktree overlay
+    /// (`peek_write_target`) before naming it.
     id: String,
-    /// Resolve `id` through the worktree overlay (`peek_write_target`) before naming it.
-    through_overlay: bool,
 }
 
 fn write_target_id(action: &str, args: &Value) -> Option<WriteTarget> {
-    let (key, through_overlay) = match action {
-        "append_entry" | "update_entry" | "augment" => ("id", true),
-        "link" if args.get("rel").and_then(Value::as_str) == Some("supersedes") => {
-            ("dst_id", false)
-        }
-        "link" => ("src_id", true),
+    let key = match action {
+        "append_entry" | "update_entry" | "augment" => "id",
+        "link" if args.get("rel").and_then(Value::as_str) == Some("supersedes") => "dst_id",
+        "link" => "src_id",
         _ => return None,
     };
-    args.get(key).and_then(Value::as_str).map(|id| WriteTarget {
-        id: id.to_string(),
-        through_overlay,
-    })
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(|id| WriteTarget { id: id.to_string() })
 }
 
 /// Put the path of the artifact a write LANDED ON on its result, so the guide router can read
-/// it. `target` is the id the caller passed; unless it says otherwise (`through_overlay`) the
-/// path named is the one [`super::worktree::peek_write_target`] says the write reached, which
+/// it. `target` is the id the caller passed; the path named is the one
+/// [`super::worktree::peek_write_target`] says the write reached, which
 /// in a worktree session is the overlay shadow, not the main-checkout file the caller's id
 /// points at (naming the latter would send an agent to read a file the write never touched).
 ///
@@ -164,13 +161,8 @@ fn name_the_target(ctx: &ToolContext, target: Option<&WriteTarget>, mut out: Val
     let Some(target) = target else { return out };
     let landed = {
         let cat = ctx.catalog.lock();
-        let landed_id = if target.through_overlay {
-            let Ok(landed_id) = super::worktree::peek_write_target(&cat, ctx, &target.id) else {
-                return out;
-            };
-            landed_id
-        } else {
-            target.id.clone()
+        let Ok(landed_id) = super::worktree::peek_write_target(&cat, ctx, &target.id) else {
+            return out;
         };
         match crate::librarian::catalog::artifact::get(&cat, &landed_id) {
             Ok(Some(row)) => row.abs_path,
@@ -665,28 +657,26 @@ mod tests {
             assert!(write_target_id("update", &args).is_none(), "{args}");
         }
         // And the actions that ARE named still are, so the control above is not vacuous.
-        let named = |action: &str, args: Value| {
-            write_target_id(action, &args).map(|t| (t.id, t.through_overlay))
-        };
+        let named = |action: &str, args: Value| write_target_id(action, &args).map(|t| t.id);
         assert_eq!(
             named("append_entry", json!({"id": id})),
-            Some((id.to_string(), true))
+            Some(id.to_string())
         );
         // A link names the row whose FILE it wrote: the source for a plain edge, the
-        // destination (as passed, not through the overlay) for `supersedes`.
+        // destination for `supersedes`.
         assert_eq!(
             named(
                 "link",
                 json!({"src_id": id, "dst_id": "d", "rel": "implements"})
             ),
-            Some((id.to_string(), true))
+            Some(id.to_string())
         );
         assert_eq!(
             named(
                 "link",
                 json!({"src_id": id, "dst_id": "d", "rel": "supersedes"})
             ),
-            Some(("d".to_string(), false))
+            Some("d".to_string())
         );
     }
 
@@ -695,11 +685,11 @@ mod tests {
     /// is named (through the overlay, like every write). A `supersedes` link writes the
     /// DESTINATION's frontmatter, so the destination is named, and the file on disk is checked to
     /// be the one that changed, so the assertion is about the write and not about a key choice.
-    /// Out of a worktree session both resolve to the artifacts themselves; in one, `supersedes`
-    /// names the MAIN checkout's destination because `link::call` hands `dst_id` to
-    /// `write_field_to_frontmatter` unresolved (a bug of its own, filed): the result names what
-    /// was written, not what should have been. A mutant keying every link on `src_id` survived
-    /// 2,448 tests before this existed, because every supersedes test called `link::call` directly.
+    /// Out of a worktree session both resolve to the artifacts themselves; in one, both rels name
+    /// the overlay shadow of the row they wrote (`link::call` resolves the destination of a
+    /// `supersedes` through the overlay before writing it). A mutant keying every link on `src_id`
+    /// survived 2,448 tests before this existed, because every supersedes test called `link::call`
+    /// directly.
     #[tokio::test]
     async fn a_link_names_the_row_whose_file_it_wrote_for_each_rel_in_and_out_of_a_worktree() {
         use crate::librarian::catalog::artifact::{upsert, TestArtifactRowBuilder};
@@ -713,6 +703,10 @@ mod tests {
                 std::fs::create_dir_all(repo.join("docs/specs")).unwrap();
                 let dst_path = repo.join("docs/specs/other.md");
                 std::fs::write(&dst_path, "---\nstatus: draft\n---\nbody\n").unwrap();
+                // In a real worktree the shadow path holds git's checkout copy of the main file.
+                let shadow_dst_path = wt.join("docs/specs/other.md");
+                std::fs::create_dir_all(shadow_dst_path.parent().unwrap()).unwrap();
+                std::fs::write(&shadow_dst_path, "---\nstatus: draft\n---\nbody\n").unwrap();
                 let src_path = repo.join("docs/trackers/t.md");
 
                 let mut builder = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap());
@@ -742,14 +736,6 @@ mod tests {
                         .unwrap();
                     }
                 }
-                if worktree && rel == "supersedes" {
-                    // The destination already has an overlay shadow, so a name resolved through
-                    // the overlay would be the SHADOW's path while `link::call` writes the main
-                    // file: this is what makes "named as passed" observable.
-                    let mut cat = ctx.catalog.lock();
-                    crate::librarian::tools::worktree::resolve_write_target(&mut cat, &ctx, &dst)
-                        .unwrap();
-                }
                 let out = Artifact
                     .call(
                         &ctx,
@@ -765,7 +751,8 @@ mod tests {
                     .to_string();
                 let fwd = |p: &std::path::Path| crate::util::fs::to_forward_slash(p);
                 let want = match (rel, worktree) {
-                    ("supersedes", _) => fwd(&dst_path),
+                    ("supersedes", true) => fwd(&shadow_dst_path),
+                    ("supersedes", false) => fwd(&dst_path),
                     ("implements", true) => fwd(&wt.join("docs/trackers/t.md")),
                     _ => fwd(&src_path),
                 };
@@ -774,11 +761,24 @@ mod tests {
                     "link {rel} (worktree={worktree}) must name the file it wrote, got {out}"
                 );
                 if rel == "supersedes" {
-                    let written = std::fs::read_to_string(&dst_path).unwrap();
+                    // The file named is the file that changed, and only that one.
+                    let changed = if worktree {
+                        &shadow_dst_path
+                    } else {
+                        &dst_path
+                    };
+                    let written = std::fs::read_to_string(changed).unwrap();
                     assert!(
                         written.contains("superseded"),
                         "premise: the supersedes link rewrote the destination file, got {written:?}"
                     );
+                    if worktree {
+                        let main = std::fs::read_to_string(&dst_path).unwrap();
+                        assert!(
+                            !main.contains("superseded"),
+                            "the main checkout's file must not be written, got {main:?}"
+                        );
+                    }
                 }
             }
         }

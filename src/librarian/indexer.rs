@@ -1606,7 +1606,9 @@ const BLANK_CHARS: &str = "\t\n\u{b}\u{c}\r \u{85}\u{a0}\u{1680}\u{2000}\u{2001}
 /// created for that artifact and stores none of its vectors, because the store target
 /// selects only artifacts without rows and could not otherwise select it again.
 ///
-/// `root_prefix` is the optional path LIKE pattern, already suffixed with `%`.
+/// `scope_root` is the optional project root (a path, not a pattern): the run selects rows at or
+/// under it by exact comparison ([`crate::librarian::util::path_at_or_under_sql`]), so a sibling
+/// whose path merely resembles it (`/x/app2`, `/x/my_app` against `/x/myXapp`) is never reached.
 /// `None` explicitly walks the whole catalog. A backed-up dimension change requires
 /// that catalog-wide scope because `artifact_vec_v2` is shared across projects.
 ///
@@ -1621,7 +1623,7 @@ pub async fn backfill_chunk_vectors(
     catalog: &parking_lot::Mutex<Catalog>,
     svc: &crate::librarian::embedding::EmbeddingService,
     batch: usize,
-    root_prefix: Option<&str>,
+    scope_root: Option<&str>,
     target: BackfillTarget<'_>,
     roots: &[std::path::PathBuf],
 ) -> Result<BackfillReport> {
@@ -1630,7 +1632,7 @@ pub async fn backfill_chunk_vectors(
         catalog,
         svc,
         batch,
-        root_prefix,
+        scope_root,
         migrate_opt_in(raw.as_deref()),
         target,
         roots,
@@ -1641,7 +1643,7 @@ async fn backfill_chunk_vectors_with(
     catalog: &parking_lot::Mutex<Catalog>,
     svc: &crate::librarian::embedding::EmbeddingService,
     batch: usize,
-    root_prefix: Option<&str>,
+    scope_root: Option<&str>,
     allow_dim_migration: bool,
     target: BackfillTarget<'_>,
     roots: &[std::path::PathBuf],
@@ -1654,10 +1656,17 @@ async fn backfill_chunk_vectors_with(
 
     // Scope-keyed; see the doc comment. A shared key would let an interrupted scoped run
     // advance the cursor a later catalog-wide run resumes from.
-    let cursor_key = match root_prefix {
+    let cursor_key = match scope_root {
         Some(p) => format!("{BACKFILL_CURSOR}:{p}"),
         None => BACKFILL_CURSOR.to_string(),
     };
+    // The scope's two bound values for `path_at_or_under_sql`, in the forward-slash form the
+    // catalog stores paths in.
+    let scope_bounds = scope_root.map(|r| {
+        crate::librarian::util::root_and_prefix(
+            crate::util::fs::RepoPath::from(std::path::Path::new(r)).as_str(),
+        )
+    });
 
     // Remote embedders learn their dimensions from their first response.
     // Probe outside the catalog lock and before any catalog write; the probe
@@ -1679,7 +1688,7 @@ async fn backfill_chunk_vectors_with(
         if matches!(target, BackfillTarget::SqliteVec) {
             // Ahead of `ensure_artifact_vec_v2_dim`, and whatever the opt-in: that refusal
             // would tell a scoped run to set the opt-in and retry, and the retry would land here.
-            if root_prefix.is_some()
+            if scope_root.is_some()
                 && vec0_table_dim(&cat.conn, "artifact_vec_v2")?
                     .is_some_and(|dim| dim != expected_dim)
             {
@@ -1735,17 +1744,23 @@ async fn backfill_chunk_vectors_with(
                  ){gap_arm}) \
                  AND (a.updated_at > ?1 OR (a.updated_at = ?1 AND a.id > ?2)){scope} \
                  ORDER BY a.updated_at, a.id LIMIT ?3",
-                scope = if root_prefix.is_some() {
-                    " AND a.abs_path LIKE ?4"
+                scope = if scope_root.is_some() {
+                    format!(
+                        " AND {}",
+                        crate::librarian::util::path_at_or_under_sql("a.abs_path", "?4", "?5")
+                    )
                 } else {
-                    ""
+                    String::new()
                 }
             );
             let mut stmt = cat.conn.prepare(&sql)?;
             let row = |r: &rusqlite::Row<'_>| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?));
-            let rows = match root_prefix {
-                Some(p) => stmt
-                    .query_map(rusqlite::params![cur_updated, cur_id, flush as i64, p], row)?
+            let rows = match &scope_bounds {
+                Some((root, prefix)) => stmt
+                    .query_map(
+                        rusqlite::params![cur_updated, cur_id, flush as i64, root, prefix],
+                        row,
+                    )?
                     .collect::<rusqlite::Result<Vec<_>>>()?,
                 None => stmt
                     .query_map(rusqlite::params![cur_updated, cur_id, flush as i64], row)?
@@ -3827,7 +3842,7 @@ kind = "memory"
                 "no opt-in means no vector destruction"
             );
         }
-        let prefix = format!("{}%", project.join("a").display());
+        let prefix = project.join("a").display().to_string();
         let scoped_error = backfill_chunk_vectors_with(
             &catalog,
             &svc,
@@ -3989,7 +4004,7 @@ kind = "memory"
         )
         .unwrap();
         // `open_in_memory` creates `artifact_vec_v2` at FLOAT[768]; this embedder returns 384.
-        let prefix = format!("{}%", root.path().display());
+        let prefix = root.path().display().to_string();
         let error = backfill_chunk_vectors_with(
             &catalog,
             &backfill_svc_at_dim(384),
@@ -4148,7 +4163,7 @@ kind = "memory"
             )
             .expect("projA artifact must be catalogued, or the fixture proves nothing");
         let a_dir = std::path::Path::new(&a_path).parent().unwrap();
-        let prefix = format!("{}%", a_dir.to_string_lossy());
+        let prefix = a_dir.to_string_lossy().into_owned();
 
         let scoped = backfill_chunk_vectors(
             &m,
@@ -4195,6 +4210,72 @@ kind = "memory"
             wide.artifacts, 1,
             "the catalog-wide run picks up the root the scoped one skipped"
         );
+    }
+
+    /// The scope is a PATH root, compared exactly. As `a.abs_path LIKE '<root>%'` it had no `/`
+    /// boundary (`/x/app` also selected `/x/app2/..`), read `_` and `%` in the path as wildcards
+    /// (`my_app` selected `myXapp`) and folded ASCII case (`MY_APP`), so a scoped run embedded a
+    /// sibling project's artifacts and filed their vectors under the scoped project.
+    /// docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
+    #[tokio::test]
+    async fn a_scoped_backfill_does_not_reach_a_sibling_whose_path_merely_matches_the_root() {
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+        let tmp = tempfile::TempDir::new().unwrap();
+        for dir in ["my_app", "my_app2", "myXapp", "MY_APP"] {
+            std::fs::create_dir_all(tmp.path().join(dir)).unwrap();
+            std::fs::write(tmp.path().join(dir).join("a.md"), "# A\n\nalpha body\n").unwrap();
+        }
+        index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
+        m.lock()
+            .conn
+            .execute("DELETE FROM artifact_chunk", [])
+            .unwrap();
+        // Derive the root from what the catalog stored (the indexer may canonicalize), so a scope
+        // that matched nothing could not make this pass for the wrong reason.
+        let stored: String = m
+            .lock()
+            .conn
+            .query_row(
+                "SELECT abs_path FROM artifact WHERE abs_path GLOB '*/my_app/a.md'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("the my_app artifact must be catalogued");
+        let root = std::path::Path::new(&stored).parent().unwrap();
+        let scope = root.to_string_lossy().into_owned();
+
+        let scoped = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            Some(&scope),
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            scoped.artifacts, 1,
+            "only the artifact under the root itself; more means a sibling's path matched it"
+        );
+        let embedded_paths: Vec<String> = {
+            let cat = m.lock();
+            let mut stmt = cat
+                .conn
+                .prepare(
+                    "SELECT a.abs_path FROM artifact a \
+                     WHERE EXISTS (SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id)",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(embedded_paths, vec![stored], "and it is the right one");
     }
 
     /// A file that is present but not UTF-8 is `unreadable_encoding`, never `missing_file`.
@@ -4383,7 +4464,7 @@ kind = "memory"
         let store =
             crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default();
         let project_id = tmp.path().to_string_lossy().into_owned();
-        let prefix = format!("{project_id}%");
+        let prefix = project_id.clone();
         let qdrant = backfill_chunk_vectors(
             &m,
             &backfill_svc(),
@@ -4461,7 +4542,7 @@ kind = "memory"
             &m,
             &backfill_svc(),
             100,
-            Some(&format!("{project_id}%")),
+            Some(project_id.as_str()),
             BackfillTarget::Store {
                 store: &store,
                 project_id: &project_id,
@@ -4521,7 +4602,7 @@ kind = "memory"
             &m,
             &backfill_svc_at_dim(384),
             100,
-            Some(&format!("{project_id}%")),
+            Some(project_id.as_str()),
             false,
             BackfillTarget::Store {
                 store: &store,

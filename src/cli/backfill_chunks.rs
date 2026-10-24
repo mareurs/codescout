@@ -61,7 +61,7 @@ pub async fn run(args: BackfillChunksArgs) -> Result<()> {
     // query had no path predicate. The flag read as though it narrowed the run and did not.
     // Refuse rather than silently widening: an unscoped run here is a host-wide write, and
     // "no active project" is not a reason to make it one.
-    let root_prefix: Option<String> = if args.all {
+    let scope_root: Option<String> = if args.all {
         None
     } else {
         let p = ctx.current_project.as_ref().context(
@@ -69,7 +69,7 @@ pub async fn run(args: BackfillChunksArgs) -> Result<()> {
              --project <path>, or pass --all to walk EVERY artifact in the catalog \
              deliberately — one catalog serves every project on this host.",
         )?;
-        Some(format!("{}%", p.abs_path.to_string_lossy()))
+        Some(p.abs_path.to_string_lossy().into_owned())
     };
 
     let backend = backfill_backend(
@@ -100,19 +100,19 @@ pub async fn run(args: BackfillChunksArgs) -> Result<()> {
         &ctx.catalog,
         &svc,
         args.batch,
-        root_prefix.as_deref(),
+        scope_root.as_deref(),
         target,
         &roots,
     )
     .await?;
 
-    crate::cli::format::print(&report_json(&report, root_prefix.as_deref()), &output)?;
+    crate::cli::format::print(&report_json(&report, scope_root.as_deref()), &output)?;
     ensure_every_chunk_embedded(&report)
 }
 /// What the run printed: every count, and the scope the counts describe.
 fn report_json(
     report: &crate::librarian::indexer::BackfillReport,
-    root_prefix: Option<&str>,
+    scope_root: Option<&str>,
 ) -> serde_json::Value {
     json!({
         "artifacts": report.artifacts,
@@ -127,9 +127,9 @@ fn report_json(
         // The report names the population it walked. A count whose scope is not stated
         // is the defect this run was fixed for: 10 and 2807 were both correct answers to
         // different questions, and nothing in the output said which was being answered.
-        "scope": match root_prefix {
-            Some(p) => json!({"kind": "project", "abs_path_like": p}),
-            None => json!({"kind": "catalog-wide", "abs_path_like": null}),
+        "scope": match scope_root {
+            Some(p) => json!({"kind": "project", "abs_path_root": p}),
+            None => json!({"kind": "catalog-wide", "abs_path_root": null}),
         },
     })
 }
@@ -303,7 +303,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let printed = report_json(&report, Some("/work/p%"));
+        let printed = report_json(&report, Some("/work/p"));
         assert_eq!(printed["embedded"], 4);
         assert_eq!(printed["embed_failed"], 2);
         assert_eq!(
@@ -313,7 +313,7 @@ mod tests {
                 "chunk-b: embed failed: HTTP 400"
             ])
         );
-        assert_eq!(printed["scope"]["abs_path_like"], "/work/p%");
+        assert_eq!(printed["scope"]["abs_path_root"], "/work/p");
     }
 
     /// A run that left chunks without vectors must exit non-zero, naming the count and the
