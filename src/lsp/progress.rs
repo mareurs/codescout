@@ -4,7 +4,7 @@
 //! `request_until_answered` re-asks a not-answered request for a fixed budget (5 s cold). On a repo
 //! with a lot of files rust-analyzer answers `documentSymbol` with `null` for much longer than that
 //! while it scans (8 to 54 s measured, see
-//! docs/issues/2026-10-23-documentsymbol-null-window-outlasts-the-5s-cold-budget-because-rust-analyzer-scans-the-nested-worktrees.md).
+//! docs/issues/archive/2026-10-23-documentsymbol-null-window-outlasts-the-5s-cold-budget-because-rust-analyzer-scans-the-nested-worktrees.md).
 //! The server announces that work, so a `null` is worth re-asking while it is working.
 //!
 //! The rule is deliberately NOT keyed on a phase name. Measured on a cold rust-analyzer:

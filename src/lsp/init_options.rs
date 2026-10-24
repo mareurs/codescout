@@ -9,7 +9,7 @@
 //! multiplies that scan. On this repo, 275,752 files in nested worktrees against 14,909 in the main
 //! tree kept `textDocument/documentSymbol` answering `null` for 33 to 54 s (three replicates), so
 //! `references` and `symbols` failed after the 5 s cold-start budget
-//! (docs/issues/2026-10-23-documentsymbol-null-window-outlasts-the-5s-cold-budget-because-rust-analyzer-scans-the-nested-worktrees.md).
+//! (docs/issues/archive/2026-10-23-documentsymbol-null-window-outlasts-the-5s-cold-budget-because-rust-analyzer-scans-the-nested-worktrees.md).
 //! With the worktrees excluded the first symbols came after about 7 to 8 s.
 
 use std::path::{Path, PathBuf};

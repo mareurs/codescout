@@ -1,17 +1,18 @@
 ---
-id: e1726ae9982ccd02
+id: 88f38bdfcecead01
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a cold rust-analyzer answers documentSymbol with null for 53 s on this repo, so references fails after the 5 s cold-start budget; the nested linked worktrees are what make the window long'
 owners:
 - marius
 tags:
 - cluster/lazy-warmup-bills-the-first-caller
-closed: ''
+closed: 2026-10-24
 opened: 2026-10-23
 related:
 - docs/issues/archive/2026-08-27-references-symbol-not-found-while-lsp-warms.md
 severity: medium
+unverified: 'STANDING no run on real rust-analyzer has shown a window above 5 s failing before the fix and passing after it: the live test does not discriminate because the window varies from 4.0 s to 15.3 s between runs, and the evidence for the progress wait is a fake server with a fixed 7 s null window. The progress stream reaching a client through the mux is read from the code, not exercised end to end. The 40 s ceiling is a choice, not a measurement; a window above it still ends in the null error.'
 ---
 
 # BUG: a cold rust-analyzer answers documentSymbol with null for 53 s on this repo, so references fails after the 5 s cold-start budget; the nested linked worktrees are what make the window long
@@ -92,7 +93,7 @@ Probe run 3 (`files.excludeDirs` = `.claude/worktrees`, `.worktrees`):
 
 ## Fix
 
-Not applied. The replicates show that excluding the worktrees alone does not clear the 5 s budget (about 6.5 s unbroken `null` in two of three runs), so the first option needs the second or a longer budget beside it. Options, none chosen:
+Applied 2026-10-24 in three commits (below; the three steps are described in this section). The replicates showed that excluding the worktrees alone does not clear the 5 s budget (about 6.5 s unbroken `null` in two of three runs), so the first option needs the second or a longer budget beside it. Options, none chosen:
 
 - Pass `files.excludeDirs` for linked worktrees that sit inside the project root as `initializationOptions` (codescout already lists them in its "Reads are resolving against" warning).
 - Raise or replace the 5 s cold-start budget, for example by waiting on rust-analyzer's `Roots Scanned` progress instead of a fixed time.
@@ -124,7 +125,9 @@ Not established: the progress stream reaching a client through the mux is read f
 
 ## Tests added
 
-None.
+In `src/lsp/progress.rs`: the tracker (begin, end and the 1 s debounce, a report for a token never seen to begin, string versus number tokens, non-progress messages ignored) and `keep_waiting` (inside the budget, past it, an empty array, the 40 s ceiling). In `src/lsp/client.rs`: `a_null_answer_is_re_asked_past_the_budget_while_the_server_reports_progress` (a fake server null for 7 s while announcing progress succeeds past the 5 s budget; it failed first, with the old 5000 ms error) and `a_null_answer_still_ends_at_the_budget_when_the_server_reports_no_progress` (the same 7 s of null with no progress still ends at 5 s); `initialize_excludes_nested_worktrees_for_rust_analyzer` and `initialize_sends_no_options_to_another_server` (the `initialize` params on the wire: exclusions and the progress capability for rust-analyzer, neither for another server). In `src/lsp/mux/process.rs`: `the_mux_handshake_excludes_nested_worktrees_for_rust_analyzer` (the same for the mux handshake). In `src/lsp/init_options.rs`: eight unit tests of the decision. Dropping the options at either `initialize` site makes the matching wire test fail with `left: Null` (checked by mutation). Manual and not in the gate: `live_cold_document_symbols_smoke_test_on_this_repo`, which does not discriminate (see Fix).
+
+`./scripts/gate.sh` exited 0 on a clean detached worktree of `1b208ad79`: lean 5278 passed, default 7937 passed, Python 1274 passed, 0 failed. `scripts/build-windows.sh clippy --all-targets -- -D warnings` exits 0.
 
 ## Workarounds
 
@@ -132,7 +135,15 @@ Wait and retry: `references` worked 104 s after rust-analyzer started. Or exclud
 
 ## Resume
 
-Choose between the three fix options (the probe runs are replicated; see Root cause). The probe takes `PROBE_INIT_OPTS='{"files":{"excludeDirs":[".claude/worktrees",".worktrees"]}}'` to test an exclusion list. Build any fix test-first against `LspClient::request_until_answered` in `src/lsp/client.rs`.
+Closed, with the standing caveat in `unverified`. To reopen: a run of codescout's own client on real rust-analyzer in which a window above 5 s still ends in the null error (the 40 s ceiling is the first suspect), or a client joining a running mux that never sees its progress.
+
+
+## Fix provenance
+
+- **SHA:** `1b208ad79e522da6de8d970e0edd7e48e3340b33` (`experiments`)
+- **patch-id:** `1421dd4bbc60e6b6cb6183ef82c958fc1443c48c`
+
+The fix is three commits on `experiments`; the two earlier ones are `86e7b1fbdaed0cf16c2c3832d9486697c92ca516` (the hint, patch-id `777cb7943742cda70150278777f68c03c21f6a51`) and `a9e198d07a5ada42fe24d0259e3dccbf1ba21a1e` (the exclusion of nested worktrees, patch-id `3cf0f9a0384ce5399541e841f5eb81d190ba844c`).
 
 ## References
 
