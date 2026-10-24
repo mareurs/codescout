@@ -49,7 +49,12 @@ None by the filing session.
 
 ## Fix
 
-Not implemented. Candidate: make the recorder and the write paths refuse to create a project root that is gone (the refused-pin recorder already does this for the default root: `CodeScoutServer::refuse_pin`).
+PARTLY fixed; status stays `open`. Only the usage-recorder path is fixed: `open_db` (`src/usage/db.rs`) creates just the `.codescout` leaf with `create_dir`, tolerating AlreadyExists for a directory, so a vanished project root is no longer recreated by the recorder.
+
+- Fix SHA for that part (branch `integration/fixes-20261024`, not yet on `experiments`): `640ef2e79bf54e446ad73d81cca2b8a37499bd36`
+- patch-id: `71ea06b50d6abac6b501a39a4be911f6dcb4ec1d`
+
+These paths STILL create parents and can recreate a deleted root: `util::fs::write_utf8`'s `create_dir_all` (the `create_file` path the issue names); `MemoryStore::from_dir` and `open`; `WriteTransaction::prepare`; the write-lock file (`open_lock_file`); and `sqlite_vec_ext::open_conn`'s `create_dir_all`, which now runs on every memory call because the sqlite memory store is built per call, so that window is wider than before. Closing them needs a root-aware directory-creation helper threaded through the write paths: an owner design choice. A call-level probe (pin a resident project, delete its directory, `create_file` a nested path) passed BEFORE any fix, because the second pin check at the call already refuses a vanished root; the remaining window is microseconds to milliseconds between that check and the write's `create_dir_all`, and it was not hit deterministically.
 
 ## Tests added
 

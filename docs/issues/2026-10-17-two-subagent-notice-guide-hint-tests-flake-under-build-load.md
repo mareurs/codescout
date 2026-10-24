@@ -1,16 +1,17 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'two guide-hint tests fail intermittently under build load: a_subagent_moving_the_default_is_reported_to_the_parent_via_the_stamped_principal and a_subagent_switching_projects_by_id_is_reported_to_the_parent'
 tags:
 - cluster/gate-keyed-on-unobservable-event
 - flaky-test
 - guide-hints
+closed: 2026-10-24
 opened: 2026-10-17
-closed:
 owner: marius
-severity: low
 related: []
+severity: low
+unverified: A natural failure was never reproduced; the mechanism was reproduced by forcing a 6 s sleep between the two activations. Nothing pins the upper side of the production 5 s constant or the `<` versus `<=` boundary.
 ---
 
 # BUG: two subagent-notice tests flake when the machine is loaded
@@ -67,13 +68,14 @@ from the failing runs, which is the first thing to capture on the next occurrenc
 
 ## Fix
 
-Not started. If the window is the cause: give the decision an injectable clock or window (the pure
-function already takes `window` as a parameter, so a test can pass a generous one), rather than
-reading `Instant` through the real server path.
+Fixed in `src/agent/mod.rs`, `src/server.rs` (test seam) and the two tests (a test flaw; production behaviour unchanged). `Agent::note_activation` compares real elapsed time between two activations with the 5 s `CONCURRENT_ACTIVATION_WINDOW`, so two real activations with a slow build in between fell outside the window. A `#[cfg(test)]`-only `activation_window_override` field and `set_activation_window_for_test()` let the two tests use a 24 h window. The sibling `agent::tests::note_activation_tells_a_parent_from_its_subagent` is deliberately left without the override so a zero window is still caught.
+
+- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `982a9403e0f286532182db199716e8b18f880397`
+- patch-id: `b9806d894021619d934135c41e637e868d691738`
 
 ## Tests added
 
-None.
+No new test; the two named tests now set the override. With a forced 6 s sleep between the two activations both failed before the fix and pass after. Window expiry is still covered by the pure `concurrent_switch_warning` tests (they pin 60 s against a 5 s window; neither the `<` boundary nor the production constant is pinned). Gate on the merged tree: exit 0.
 
 ## Workarounds
 

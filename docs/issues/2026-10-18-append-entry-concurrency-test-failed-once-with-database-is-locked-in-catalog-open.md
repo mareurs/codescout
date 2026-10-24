@@ -1,15 +1,17 @@
 ---
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: append_entry_serializes_across_independent_connections_to_same_file failed once with "applying schema: database is locked" inside Catalog::open, in a full cargo test --lib run'
 tags:
 - cluster/unclassified
 - flaky-test
+closed: 2026-10-24
 opened: 2026-10-18
 owner: marius
 related:
 - docs/issues/2026-10-17-two-subagent-notice-guide-hint-tests-flake-under-build-load.md
 severity: low
+unverified: 'That the original once-only sighting was the 5 s busy timeout expiring was never measured; only an injected fsync delay reproduced the signature. The remaining exposure is real: a commit slower than 5 s can still fail the other append, now inside the operation under test, and two real servers opening a shared catalog would hit it too (filed in docs/issues/2026-10-24-catalog-open-takes-the-write-lock-and-fsyncs-trigger-ddl-on-every-open.md).'
 ---
 
 # BUG: append_entry_serializes_across_independent_connections_to_same_file failed once with "applying schema: database is locked" inside Catalog::open, in a full cargo test --lib run
@@ -63,11 +65,14 @@ The log excerpt above, from `lib.log` of the 2026-10-18 final verification run. 
 
 ## Fix
 
-None yet.
+Mitigated, not root-caused. The test flaw is fixed: both tests opened their `Catalog` connections inside the racing threads, so `Catalog::open` (setup) raced with itself. Both connections are now opened first and a `Barrier(2)` releases the two appends together, so only the appends race (`src/librarian/catalog/augmentation.rs`). The product weakness behind the "database is locked" signature is NOT fixed: `Catalog::open` takes the write lock and runs fsync'd trigger DDL on every open (see `docs/issues/2026-10-24-catalog-open-takes-the-write-lock-and-fsyncs-trigger-ddl-on-every-open.md`). Raising `busy_timeout` would not be a fix.
+
+- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `982a9403e0f286532182db199716e8b18f880397`
+- patch-id: `b9806d894021619d934135c41e637e868d691738`
 
 ## Tests added
 
-N/A: open, unreproduced.
+No new test: `append_entry_serializes_across_independent_connections_to_same_file` and `allocate_entry_id_serializes_across_independent_connections` were restructured. With a 3 s fsync delay injected by `strace`, both failed 0 of 4 before the change with the exact "applying schema ... Error code 5" signature and pass 4 of 4 after. They still assert no duplicate ids and no lost update. Under CPU load alone the old tests also passed 360 of 360. Gate on the merged tree: exit 0.
 
 ## Workarounds
 

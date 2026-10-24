@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: a `| head -N` pipe cuts its own unfiltered capture, and the response reports the partial stream as the whole
 owners:
 - marius
@@ -8,7 +8,8 @@ tags:
 - cluster/capped-result-presented-as-complete
 opened: 2026-10-21
 severity: medium
-unverified: 'the fix is on feat/il3-run-to-completion-20261021 and has not passed the full gate or reached experiments; no SHA or patch-id is recorded yet; dash (as /bin/sh) was not available to test the drain group.'
+unverified: dash (as /bin/sh) was not available to test the drain group itself; commit 2acc553ad made the capture tests portable to dash and BSD seq but they were not run under dash here. A live check of `seq 1 300000 | head -3` on a freshly built server was not done.
+closed: 2026-10-24
 ---
 
 ## Summary
@@ -60,7 +61,13 @@ Plan: wrap the filter in a group that drains what the filter leaves unread, up t
 
 In a chain (`seq 1 1000 | grep 7 | head -2`) the handle used to be an intermediate stream (271 lines against the producer's 1000, measured 2026-10-21 on the old server); the tee is now spliced at the FIRST pipe, so the handle is the producer's own stream.
 
-Fix SHA / patch-id: not yet recorded (branch `feat/il3-run-to-completion-20261021`, not committed to `experiments`).
+Fix commits, all on `experiments` (verified 2026-10-24 with `git branch --contains`; each patch-id from `git show <sha> | git patch-id --stable`):
+
+- `24c963d3f1d5b64d4c27da5b5876154d75c0f3b0`, "a head pipe no longer cuts its own capture" (the draining group, `splice_tee` in `src/tools/command_summary.rs`, called from `inject_tee_in`): patch-id `b9519bca16155f8276f66d89fd80642d6649956c`
+- `8f696c5ee0589bd91c6a28bb38be0033ef55f9a0`, "bound the drain at the capture store limit so an endless producer still ends": patch-id `353226d79a186805ca90f5e3ea418b6dcf89cdc8`
+- `026d510b4d4fa4389a13be7a34e58d851cec84bf`, "bound the capture file and its read, decode it lossily, say what a captured timeout is (R26, R27, R29)": patch-id `0ef5a0256d2b548aac20fff698a4a2281de4a49e`
+
+Re-checked 2026-10-24 on the merged integration tree (`integration/fixes-20261024`, which contains all three commits): the full gate exited 0. Its default-feature library lane ran all 7932 library tests (7918 passed, 0 failed, 14 ignored), which include `a_head_pipe_still_captures_the_whole_stream`, `an_endless_producer_into_head_ends_at_once_with_a_bounded_capture` and `a_head_pipe_over_the_store_limit_reports_a_lower_bound_and_the_truncated_flag`. A separate run of the whole `tools::run_command::tests::` module on the pre-merge `fix/c-20261024` tree (also containing the three commits) passed 389 tests.
 
 Cost: a drained finite producer now runs to completion, so `seq 1 N | head -3` takes as long as the producer; that is the price of a complete capture and is the design in `docs/superpowers/specs/2026-10-21-il3-run-to-completion-pipe-design.md`. A FAST endless producer ends when the 4 MiB drain closes the pipe. A SLOW one (fewer than 4 MiB before `timeout_secs`) runs to `timeout_secs`, where the response is flagged `capture_incomplete`: the filter run once over the partial capture when `filter_is_replayable` allows it (`src/tools/command_summary.rs`), else the capture's handle with `filter_not_run` (measured by hand 2026-10-21: `while :; do echo x; sleep 0.2; done | head -1` -> rc=124 at the timeout; the old layout ended at once). The spec accepts this cost.
 
@@ -78,7 +85,7 @@ Before the fix: treat `unfiltered_output_lines` of a `| head` command as a lower
 
 ## Resume
 
-Run the gate on `feat/il3-run-to-completion-20261021`, record the SHA and patch-id (`git show <sha> | git patch-id --stable`), then flip `status` to `fixed` and archive.
+Done: on `experiments`, gate green. Archive into `docs/issues/archive/` with `doc(action="move")`. Not done: `dash` as `/bin/sh` was not tested for the drain group (the later commit `2acc553ad` made the capture TESTS portable to dash and BSD `seq`, which is not the same as running the drain group under dash).
 
 ## References
 

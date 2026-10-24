@@ -1,7 +1,7 @@
 ---
 id: d0310f7b0f499c83
 kind: bug
-status: open
+status: fixed
 title: 'BUG: tracker hygiene''s retirement recipe drops entry definitions required by citation resolution'
 owners:
 - marius
@@ -9,11 +9,12 @@ tags:
 - cluster/unclassified
 - tracker-archiving
 - documentation
-closed: null
+closed: 2026-10-24
 opened: 2026-10-08
 owner: marius
 related: []
 severity: medium
+unverified: The issue's own Resume verification (a throwaway retirement fixture run through `link_scan`) was not run. A skill text cannot be unit-tested here; the check is that the instruction exists and that cached copies at version 1.20.19 carry it (older cached versions 1.20.14 to 1.20.18 do not), and which version each profile's `installed_plugins.json` selects was not checked.
 ---
 
 # BUG: tracker hygiene's retirement recipe drops entry definitions required by citation resolution
@@ -59,24 +60,10 @@ Never reduce an entry to a bare row to "compact" it.
 
 ## Fix
 
-Not implemented; the fix site is in another repository, so this record stays `open`. `src/librarian/tools/link_scan/resolve.rs` needs no change. Verified 2026-10-16 at checkout f5f1c6f7: in `resolve` (resolve.rs:320-451) the `EntryToken` arm and the qualified `CrossRepoToken` arm both ask `index.definers(token)` for the defining artifact. `DefinitionIndex::build` fills that from `## PREFIX-N` headings in the indexed body, and nothing reads git history. A digest that drops the headings leaves zero definers, so a token of a known prefix resolves to `Outcome::Dangling` (resolve.rs, `0 =>` branch). The defect is only the skill text.
+Fixed in the sibling repo, not in this one. `claude-plugins` commit `e0532f08` ("fix(tracker-hygiene): D10 compaction keeps every entry's heading so link_scan citations still resolve") changes `codescout-companion/skills/tracker-hygiene/SKILL.md` step 4, which now reads "Never reduce an F-N / W-N entry to a bare row: every entry keeps ..." the `## <ID> — <title>` heading and is verified with `link_scan`. Confirmed in this session: the commit is on `claude-plugins` branches `main`, `effort-routing-r1` and `fix/codescout-issues-20261016`, and the text is at `SKILL.md:244` on `main`.
 
-**Where.** `/home/marius/work/claude/claude-plugins/codescout-companion/skills/tracker-hygiene/SKILL.md`, D10 step 4 (line 244 of that file at 2026-10-16; the same text also sits in the serving copy under `~/.codex/plugins/cache/sdd-misc-plugins/codescout-companion/` and in the `claude-plugins-effort-steering-*` checkouts). The file's other uses of the word "heading" (lines 193, 392-404) concern D11 and the ledger template, not compaction, so nothing in the skill preserves entry headings.
-
-**Proposed replacement for step 4** (the owner applies it; this session did not edit the plugin repo because its tree is dirty on branch `effort-routing-r1`):
-
-```text
-4. **Compact.** Never reduce an F-N / W-N entry to a bare row: every entry keeps
-   its `## <ID> — <title>` heading in the archived file, because `link_scan` binds
-   PREFIX-N to that heading and to nothing else, and git history is not consulted.
-   Prose beneath a heading may be shortened. Add the outcomes digest (the Index /
-   Wins Index tables with updated statuses, one paragraph per promoted/rehomed
-   entry naming its destination, and unfired Promote-when criteria) as an
-   ADDITIONAL reading surface at the top. Verify with `link_scan`: no new dangling
-   citation for the stem's tokens.
-```
-
-After the plugin edit, bump the plugin version and sync the serving copies.
+- Fix commit (cross-repo, branch `main` of `claude-plugins`): `claude-plugins:e0532f0877fcf7e8c12bf69636e3ef927ed52130`
+- patch-id: `e21f4bb868f412e6a880d41db750bae556ad864c`
 
 ## Tests added
 None: documentation conflict logged during exploration. Existing resolver test inspected; no new failure was executed.

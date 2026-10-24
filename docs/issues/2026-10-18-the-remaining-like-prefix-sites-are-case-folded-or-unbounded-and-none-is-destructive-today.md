@@ -1,12 +1,16 @@
 ---
-status: open
-opened: 2026-10-18
-severity: low
-owner: marius
-related: [docs/issues/2026-10-18-doctor-prune-missing-matches-rows-with-like-and-deletes-the-rows-of-live-sibling-repositories.md, docs/issues/2026-10-18-merge-worktree-abandon-matches-rows-with-like-and-deletes-the-rows-of-a-case-only-sibling-worktree.md]
+kind: bug
+status: fixed
 tags:
 - cluster/unclassified
-kind: bug
+closed: 2026-10-24
+opened: 2026-10-18
+owner: marius
+related:
+- docs/issues/2026-10-18-doctor-prune-missing-matches-rows-with-like-and-deletes-the-rows-of-live-sibling-repositories.md
+- docs/issues/2026-10-18-merge-worktree-abandon-matches-rows-with-like-and-deletes-the-rows-of-a-case-only-sibling-worktree.md
+severity: low
+unverified: '`plan_rehome`, `rehome_commits` and the `descendant_path_like` users (`covering_conn`, `shadow_main_pairs`) were not examined and not changed, as this issue itself said. KNOWN GAP in the `delete_orphan_repos` whole-volume guard (`bounds_no_territory`): the verbatim UNC prefix is matched case-sensitively, so a scope spelled `//?/unc/server/share` is NOT recognised as a whole share and is treated as an ordinary directory root. That misclassification fails OPEN (the guard does not skip it). Both current callers pass the same list as scope and active roots, so nothing extra is deleted today, but a future caller with different lists could. The opposite misclassification (a POSIX path starting with `//` read as a UNC root) fails closed. The commit message of 37cfe5a40 says every misclassification fails closed; that is wrong for the lowercase-UNC case. The Windows-shaped roots are tested as strings on Linux only.'
 ---
 
 # BUG: the remaining `LIKE` path-prefix call sites fold ASCII case or have no `/` boundary; none is destructive today, and none was changed
@@ -63,12 +67,16 @@ N/A.
 
 ## Fix
 
-Not done, by scope. Route each site through `path_at_or_under_sql` and `root_and_prefix` (for the backfill, also pass the root and the
-`/`-terminated prefix instead of `"<root>%"`).
+Fixed at all four sites. They now use the exact `path_at_or_under_sql` / `root_and_prefix` helpers (the root itself plus `root/...`, byte-exact, with a `/` boundary): `list_stale`, `delete_orphan_repos`, `backfill_chunk_vectors` / `backfill_chunk_vectors_with` (the parameter is now `scope_root`, a plain path), and `resolve_cite_ref` (byte-exact suffix match `substr(abs_path, -length(?)) = '/' || raw`). `delete_orphan_repos` ignores a scope that is a whole filesystem, volume or share (`bounds_no_territory`: `/`, a drive, `//?/C:`, `//server`, `//server/share`, `//?/UNC/server/share`). Behaviour changes, all in CHANGELOG.md: a row equal to a scope root is now in scope; a case or wildcard variant of an active root is no longer kept (deliberate, pinned by a test); a cite that matched only by case now fails to resolve; the `backfill-chunks` JSON key `scope.abs_path_like` is renamed `scope.abs_path_root`.
+
+- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `37cfe5a40144c661ca585dfc29d38484d6ef7a20`
+- patch-id: `1f019d71b303f7f8ae0988f31890bd6bb2e9a128`
+
+An independent Opus review found no way for either caller of `delete_orphan_repos` to delete more than before.
 
 ## Tests added
 
-N/A: nothing was changed (justification: the sites are not destructive today and were outside the round's list).
+Each fails on the old code: `augmentation::tests::list_stale_scopes_to_the_project_path_exactly`, `artifact::tests::delete_orphan_repos_treats_roots_as_paths_not_like_patterns`, `artifact::tests::delete_orphan_repos_refuses_a_scope_that_is_a_whole_filesystem_or_volume`, `artifact::tests::a_root_with_no_component_below_its_prefix_is_not_a_bounded_scope`, `augmentation::tests::resolve_cite_ref_does_not_fold_case_in_a_rel_path`, `indexer::tests::a_scoped_backfill_does_not_reach_a_sibling_whose_path_merely_matches_the_root`. Gate on the merged tree: exit 0.
 
 ## Workarounds
 

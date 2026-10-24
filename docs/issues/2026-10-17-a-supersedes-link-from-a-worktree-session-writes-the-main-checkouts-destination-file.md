@@ -1,18 +1,19 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'a supersedes link written from a worktree session rewrites the MAIN checkout''s destination file: link::call resolves src_id through the overlay and passes dst_id unresolved'
 tags:
 - cluster/guard-narrower-than-its-name
 - librarian
 - worktree-overlay
+closed: 2026-10-24
 opened: 2026-10-17
-closed:
 owner: marius
-severity: medium
 related:
 - docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
 - docs/adrs/2026-08-31-write-responses-name-the-path-they-wrote.md
+severity: medium
+unverified: No real `merge_worktree` run of a shadow produced by this path, and a destination already forked and then superseded was not tested. When the destination is a main file that is untracked or was added after the worktree branched, the link now fails with 'artifact file not found on disk' AFTER the shadow rows are forked (before this change it 'succeeded' by writing the main file); that is filed as docs/issues/2026-10-24-a-worktree-supersedes-of-a-main-file-the-worktree-lacks-fails-after-forking-shadow-rows.md.
 ---
 
 # BUG: `doc(link, rel="supersedes")` from a linked-worktree session writes the main checkout's file
@@ -77,15 +78,20 @@ The reproduction above. `update::call` resolves its own id through the overlay
 
 ## Fix
 
-Not started. Resolve `dst_id` through `resolve_write_target` before `write_field_to_frontmatter`
-and before the `artifact::upsert` of the destination row, and let `name_the_target` name it through
-the overlay (today it deliberately names it AS PASSED, with a comment pointing here; that branch
-and its test case must change with the fix).
+Fixed in `src/librarian/tools/link.rs` and `src/librarian/tools/artifact.rs`. For `rel == "supersedes"` the destination now goes through `resolve_write_target` as well. The frontmatter write, the `previous_status` read and the row upsert use the shadow id; the link edge, the `superseded_by` event payload and the response's `superseded.id` keep the caller's `dst_id`, which `merge_worktree` folds back onto the main twin (three-way merge: an unchanged main status takes the superseded status, a moved one is a reported conflict). A plain link is unchanged. `write_target_id` keys a supersedes link on `dst_id`; the `through_overlay` field is removed because every arm was true. The 2026-08-31 ADR carries a dated amendment.
+
+- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `f2f1bafb40d0a566afae4ca295992fed908ba2a1`
+- patch-id: `9e4e6d94c89c718bb147253cbb62f7ad64657331`
+
+An independent Opus review confirmed the status survives `merge_worktree` and that nothing reads `through_overlay`.
 
 ## Tests added
 
-None for the bug itself. The current behaviour is pinned as the premise of the test named under
-Reproduction, which reds when the fix lands and says what to change.
+- `link::tests::supersedes_from_a_worktree_session_writes_the_shadow_and_not_the_main_file`: the main file is byte-identical, the shadow file reads `superseded`, the shadow row is `superseded`, the main row is unchanged. Red before the fix (the main file read `status: superseded`).
+- `artifact::tests::a_link_names_the_row_whose_file_it_wrote_for_each_rel_in_and_out_of_a_worktree`: a worktree `supersedes` now names the shadow path and leaves the main file unwritten.
+- `an_update_that_changes_status_names_no_path_in_either_spelling`: updated for the dropped field.
+
+Gate on the merged tree: exit 0.
 
 ## Workarounds
 

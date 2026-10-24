@@ -1,14 +1,14 @@
 ---
-status: open
-opened: 2026-10-18
-closed:
-severity: low
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/unclassified
-kind: bug
-unverified: 'Cause not established: seen once, under load, in the default lane of a gate run, and it passed in the lean lane of the same run and in an isolated rerun. The suspected load cause is reasoned, not reproduced.'
+closed: 2026-10-24
+opened: 2026-10-18
+owner: marius
+related: []
+severity: low
+unverified: The failure was NOT reproduced by CPU load alone (96 of 96 passed under 192 burners); only an injected process stall reproduced it. That the 2026-10-18 gate failure was a stall of that kind is the mechanism the evidence supports, not something measured.
 ---
 
 # BUG: `run_command_heartbeat_emits_progress_text` fails under load: a 5 s sleep under a 6 s timeout leaves one heartbeat no margin
@@ -56,11 +56,16 @@ None run.
 
 ## Fix
 
-N/A, not started.
+Fixed in `src/tools/run_command/tests.rs` (a test flaw; no production change). The old shape ran `sleep 5` under a 6 s timeout and raced the command's exit against the first 3 s heartbeat tick, so a stall past the command's end made the call return first. The command now loops until a marker file exists; the test writes the marker only after it has seen TWO heartbeats, and asserts the rate and text: N1 >= 3 and N2 - N1 >= 3 parsed from `"{N}s elapsed"`. The 20 s wait and `timeout_secs: 120` are upper bounds for a dead heartbeat, not the pass condition.
+
+- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `982a9403e0f286532182db199716e8b18f880397`
+- patch-id: `b9806d894021619d934135c41e637e868d691738`
+
+An independent Opus review found the first version no longer checked the heartbeat rate; the rate and text assertions are the fix for that.
 
 ## Tests added
 
-N/A: the defect is in a test.
+`run_command_heartbeat_emits_progress_text` rewritten. Mutation checks against it, each reverted: interval 3 s to 30 s fails, 3 s to 1 ms fails, 3 s to 3600 s fails. With a SIGSTOP stall injected (stop at 1.5 s for 5.5 s) it passes 6 of 6 where the old test passed 0 of 6. Gate on the merged tree: exit 0.
 
 ## Workarounds
 

@@ -1,14 +1,16 @@
 ---
-status: open
-opened: 2026-10-18
-closed:
-severity: medium
-owner: marius
-related: [docs/issues/archive/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md, docs/issues/2026-10-17-the-librarian-applies-no-read-deny-list-to-a-catalogued-outward-link.md]
+kind: bug
+status: fixed
 tags:
 - cluster/unclassified
-kind: bug
-unverified: 'Read, not run: no test drives librarian(action="reindex") against a store that holds vectors for a row whose file vanished. The CLI path (indexer::index_repo) does delete them and has a test.'
+closed: 2026-10-24
+opened: 2026-10-18
+owner: marius
+related:
+- docs/issues/archive/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md
+- docs/issues/2026-10-17-the-librarian-applies-no-read-deny-list-to-a-catalogued-outward-link.md
+severity: medium
+unverified: 'A real Qdrant `delete` and its transient-error behaviour are exercised by no test (the in-memory double matches Qdrant''s exact artifact-id selection by reading). A failed delete is reported but never retried: the vectors stay orphaned in the external store until removed by hand. `delete_orphan_repos` (the `orphan_removed` sweep) was not read for external-store vectors.'
 ---
 
 # BUG: `librarian(reindex)` drops the catalog row of a vanished file but never deletes its vectors from an external store
@@ -59,12 +61,22 @@ N/A (read, not run).
 
 ## Fix
 
-Not applied: out of the read-door fix's scope. Delete `report.removed_ids` from `ctx.artifact_store` in the tool,
-as `index_repo` does, and add a tool-level test with an in-memory store.
+Fixed in `src/librarian/tools/reindex.rs`. The MCP reindex tool now deletes external-store vectors for every id in `report.removed_ids`, chained with `escaping_kept_ids` (`reclaimed_escaping_ids` is a subset of `removed_ids`). The delete is by exact artifact id: ids are fixed-length sha256 hex and a Qdrant point id is a UUIDv5 of the per-artifact chunk id, so an alias and its target never share a point. A failed delete no longer aborts the call (the catalog rows are already committed as deleted, so nothing would retry): failures are collected and reported as `vector_delete_error_count`, `vector_delete_errors` (sample of 20) and `vector_delete_note`, shaped like the `embed_*` fields. The CLI path (`indexer::index_repo`) is unchanged.
+
+- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `dca0e573e0061225695d42176823f3852131c2f3`
+- patch-id: `ce8308e6eb2c26ec0ea35eb9b9530bc5cf915f44`
+
+An independent Opus review found no over-deletion; its one SHOULD-FIX (a failed delete aborting the reindex) is in the commit.
 
 ## Tests added
 
-N/A: filed, not fixed.
+In `src/librarian/tools/reindex.rs` (in-memory store, tempdirs, no Qdrant, no `~/.codescout`):
+
+- `a_vanished_file_has_its_vectors_dropped_from_the_external_store` (survivor and a name-prefix sibling keep their vectors)
+- `a_failed_vector_delete_is_reported_and_does_not_abort_the_reindex` (a store whose `delete` fails for chosen ids; two roots; red with the `?` put back)
+- `dropping_a_symlink_alias_row_leaves_its_targets_vectors` (guards over-deletion; not red-before-fix)
+
+Gate on the merged tree: exit 0.
 
 ## Workarounds
 

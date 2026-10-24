@@ -1,16 +1,18 @@
 ---
 id: '270b230c44ed8029'
 kind: bug
-status: open
+status: fixed
 title: The skill ledger writes to a deleted worktree and re-stamps every first-seen as now
 owners:
 - marius
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
 topic: hook state resolution and worktree residue
+closed: 2026-10-24
 opened: 2026-09-11
 owner: marius
 severity: low
+unverified: Recorded on the strength of reading the commit stat and message and grepping the cited lines on `main`; the `claude-plugins` tests were not run here and the original deleted-worktree scenario was not reproduced. Only the commit's existence and its patch-id were confirmed by command in this session.
 ---
 
 ## Summary
@@ -160,31 +162,10 @@ against a path string.
 
 ## Fix
 
-Not attempted in this repo — the code is in the sibling `claude-plugins` repo
-(`buddy/scripts/skill_ledger.py`, `buddy/scripts/statusline.py`; neither file exists in
-codescout, `git ls-files | grep -E "skill_ledger|statusline"` is empty). Re-verified
-2026-10-16 against `/home/marius/work/claude/claude-plugins` (branch `effort-routing-r1`,
-checkout dirty with unrelated work, so not touched): the defect lines are unchanged —
-`skill_ledger.py:43` `def load_ledger`, `:58` `path.parent.mkdir(parents=True, exist_ok=True)`,
-`:181` `cwd = event.get("cwd")`, `:187` `ledger_path(Path(cwd), sid)`; the last commit touching
-either file is `b4f68ce` (2026-06-16), so no fix has landed.
+Fixed in the sibling repo, not in this one. `claude-plugins` commit `c37421f` ("fix(buddy): skill ledger no longer resurrects a deleted worktree or restamps first-seen as now", 2026-10-16) covers the three proposed changes: `buddy_paths.event_project_dir` is the single resolver (`skill_ledger.py` and `statusline.py` both use it), the writer refuses a missing project root (`if not project_root.is_dir()`), and `read_ledger` returns `None` for an absent ledger so a from-zero rebuild takes `first_ts` from the transcript line timestamps. It adds `buddy/tests/test_skill_ledger.py`. It is on `claude-plugins` branches `main`, `effort-routing-r1` and `fix/codescout-issues-20261016`.
 
-Proposed fix (awaiting the owner's go-ahead for a `claude-plugins` change):
-
-1. **Writer refuses a missing root.** Before `path.parent.mkdir(parents=True, ...)`, require
-   `project_root` itself to exist and be a directory; otherwise return without writing. Only
-   `.buddy/<sid>/` may be created beneath an existing root. This ends the resurrection of a
-   deleted worktree, since a `mkdir -p` against a deleted tree is never the intended write.
-2. **One resolver at both sites.** Add one helper (for example in `buddy_paths.py`) that
-   resolves the project root as `workspace.current_dir or cwd` from the event payload; have
-   `skill_ledger.py:181-187` and `statusline.py:268-269` both call it, so writer and reader
-   cannot address different directories.
-3. **`load_ledger` distinguishes absent from empty.** Return a sentinel (or raise a
-   dedicated `LedgerAbsent`) for a missing file; the caller that would stamp `first_ts = now`
-   for every skill seen in the transcript must, on absence, either skip stamping or derive
-   `first_ts` from the transcript's own timestamps, never from the write instant.
-
-Left undecided here: whether (3) skips or back-fills from transcript timestamps.
+- Fix commit (cross-repo, branch `main` of `claude-plugins`): `claude-plugins:c37421ff85580f6b4e6c87584ef3b7d55858cda8`
+- patch-id: `db7fc01808359127f3700feb28a40191dc0e950a`
 
 ## Tests added
 
