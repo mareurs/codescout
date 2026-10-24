@@ -22,39 +22,75 @@ fn main() {
     emit_prompt_surfaces();
 }
 
+/// Paths whose changes mark the build dirty: sources compiled into the executable.
+/// A conservative input scope, not byte-equivalence of binaries.
+const DIRTY_SCOPE: &[&str] = &[
+    "src",
+    "crates",
+    "scripts",
+    "build.rs",
+    "Cargo.toml",
+    "Cargo.lock",
+    "docs/PROGRESSIVE_DISCOVERABILITY.md",
+    "docs/trackers/operator-rules.md",
+];
+
+fn git_output(repo: &std::path::Path, args: &[&str]) -> Option<Vec<u8>> {
+    std::process::Command::new("git")
+        // A metadata read must not refresh the watched index and retrigger Cargo.
+        .arg("--no-optional-locks")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        // Cargo can inherit these from a caller operating in another repository.
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| o.stdout)
+}
+
 fn bake_git_sha() {
-    let sha = std::process::Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
+    let repo = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set by cargo"),
+    );
+    let sha = git_output(&repo, &["rev-parse", "--short", "HEAD"])
+        .and_then(|s| String::from_utf8(s).ok())
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let sha_full = std::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
+    let sha_full = git_output(&repo, &["rev-parse", "HEAD"])
+        .and_then(|s| String::from_utf8(s).ok())
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let dirty = std::process::Command::new("git")
-        .args(["status", "--porcelain"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| if o.stdout.is_empty() { "0" } else { "1" })
+    let mut status_args = vec!["status", "--porcelain", "--untracked-files=all", "--"];
+    status_args.extend(DIRTY_SCOPE.iter().copied());
+    let dirty = git_output(&repo, &status_args)
+        .map(|o| if o.is_empty() { "0" } else { "1" })
         .unwrap_or("unknown");
 
     println!("cargo:rustc-env=CODESCOUT_GIT_SHA={sha}");
     println!("cargo:rustc-env=CODESCOUT_GIT_SHA_FULL={sha_full}");
     println!("cargo:rustc-env=CODESCOUT_GIT_DIRTY={dirty}");
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    println!("cargo:rerun-if-changed=.git/index");
-    println!("cargo:rerun-if-changed=.git/refs/heads/");
+    for path in DIRTY_SCOPE {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    // Resolve administrative paths for both ordinary and linked worktrees.
+    for name in ["HEAD", "index", "refs", "packed-refs"] {
+        if let Some(path) = git_output(&repo, &["rev-parse", "--git-path", name])
+            .and_then(|s| String::from_utf8(s).ok())
+        {
+            let path = repo.join(path.trim());
+            // Missing administrative files make Cargo rerun on every invocation.
+            // Loose refs detect packing, after which packed-refs is watched too.
+            if path.exists() {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
 }
 
 fn emit_prompt_surfaces() {
