@@ -1377,7 +1377,9 @@ impl LspClient {
                     self.not_answered_budget().as_millis()
                 ),
                 "null means the server has not answered, not that the file has no symbols \
-                 — rust-analyzer sends it while it reloads its workspace. Retry shortly.",
+                 — rust-analyzer sends it while it reloads its workspace. A repo with many \
+                 nested linked worktrees (for example under `.claude/worktrees`) can keep it \
+                 answering null for about a minute after start-up. Retry shortly.",
             )
             .into());
         };
