@@ -14,7 +14,8 @@ Answers, without needing transcripts:
 
 WHAT THE PREDICATES LITERALLY COUNT (read before quoting a number):
 
-  * "error"      = `outcome = 'error'`. codescout's RecoverableErrors ARE counted here;
+  * "error"      = `outcome = 'error'` or `outcome = 'recoverable_error'` (exactly these two;
+                   unknown outcomes are not errors). RecoverableErrors ARE counted here;
                    they are NOT visible as `is_error` in transcripts, by design.
   * "signature"  = `err_family` when non-NULL, else `tool_name + ':' + first 60 chars of
                    error_msg`. The fallback is a PROXY for "same error" and can split one
@@ -53,6 +54,8 @@ import sqlite3
 import sys
 from collections import defaultdict
 from pathlib import Path
+
+ERROR_OUTCOMES = ("error", "recoverable_error")
 
 DEFAULT_DB = Path(".codescout/usage.db")
 
@@ -96,7 +99,7 @@ def signature(row) -> tuple[str, bool]:
 def coverage_by_tool(rows):
     agg = defaultdict(lambda: {"errs": 0, "null": 0})
     for r in rows:
-        if r["outcome"] != "error":
+        if r["outcome"] not in ERROR_OUTCOMES:
             continue
         a = agg[r["tool_name"]]
         a["errs"] += 1
@@ -133,7 +136,7 @@ def immediate_repeat(rows):
     fam = defaultdict(lambda: {"errs": 0, "repeats": 0, "proxy": 0})
     for _skey, seq in per.items():
         for i, r in enumerate(seq):
-            if r["outcome"] != "error":
+            if r["outcome"] not in ERROR_OUTCOMES:
                 continue
             sig, proxy = signature(r)
             key = r["err_family"] or "<unclassified>"
@@ -143,7 +146,7 @@ def immediate_repeat(rows):
                 f["proxy"] += 1
             if i + 1 < len(seq):
                 nxt = seq[i + 1]
-                if nxt["outcome"] == "error" and signature(nxt)[0] == sig:
+                if nxt["outcome"] in ERROR_OUTCOMES and signature(nxt)[0] == sig:
                     f["repeats"] += 1
     out = []
     for k, f in fam.items():
@@ -186,7 +189,7 @@ def calls_to_recovery(rows, cap: int = 25):
     fam = defaultdict(lambda: {"dists": [], "unrecovered": 0})
     for _skey, seq in per.items():
         for i, r in enumerate(seq):
-            if r["outcome"] != "error":
+            if r["outcome"] not in ERROR_OUTCOMES:
                 continue
             key = r["err_family"] or "<unclassified>"
             dist = None
@@ -231,7 +234,7 @@ def error_runs(rows):
     for skey, seq in per.items():
         cur = []
         for r in seq:
-            if r["outcome"] == "error":
+            if r["outcome"] in ERROR_OUTCOMES:
                 cur.append(r)
             else:
                 if len(cur) >= 1:
@@ -261,7 +264,7 @@ def error_runs(rows):
 def null_detail(rows):
     agg = defaultdict(lambda: {"n": 0, "tool": "", "msg": ""})
     for r in rows:
-        if r["outcome"] != "error" or r["err_family"] is not None:
+        if r["outcome"] not in ERROR_OUTCOMES or r["err_family"] is not None:
             continue
         k = (r["tool_name"], (r["error_msg"] or "")[:60])
         a = agg[k]
@@ -328,7 +331,7 @@ def compare_split(db: Path, cut: str, clean_only: bool):
         return {
             r["tool_name"]: (r["n"], r["e"])
             for r in conn.execute(
-                f"SELECT tool_name, COUNT(*) n, SUM(outcome='error') e FROM tool_calls "
+                f"SELECT tool_name, COUNT(*) n, SUM(outcome IN ('error', 'recoverable_error')) e FROM tool_calls "
                 f"WHERE called_at {op} ? AND {key} GROUP BY tool_name",
                 (cut,),
             )
@@ -483,7 +486,7 @@ def main() -> int:
         return 1
 
     rows = load_rows(args.db, args.days, args.session_key)
-    errs = [r for r in rows if r["outcome"] == "error"]
+    errs = [r for r in rows if r["outcome"] in ERROR_OUTCOMES]
     if not rows:
         print("ERROR: empty corpus for that window", file=sys.stderr)
         return 1

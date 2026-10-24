@@ -1,0 +1,427 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-24T06:27:51.770041+00:00",
+  "status": "verified-local-handoff",
+  "registration": {
+    "frozen_utc": "2026-10-24T06:16:07.339078+00:00",
+    "purpose": "Single real issue feasibility; not comparative efficacy",
+    "base_commit": "32d0c713de272738ae7ccba9e1e4fccb004600fe",
+    "image_id": "sha256:f889a5f92f5be30c8d6d9ddc1c28669ed22dbdeda6da121447d2f3d14e11fa73",
+    "artifact_sha256": {
+      "/tmp/reliable-agent-real-task-20261024/manifest.json": "02cbef92b18aa8e13d04e24a44c0b7e56a88bbf9844ec715d7b5584f115c8767",
+      "/tmp/reliable-agent-real-task-20261024/task.txt": "a04a2c483add2d93fc9d87e8e16df9a03eb749b8f704b0769f74cc6367ceb89c",
+      "/tmp/reliable-agent-real-task-20261024/agent.Dockerfile": "080c9e08cbb0758991034966c63ea375351a67f8d8a5838c65818857d68cf3d4",
+      "/tmp/reliable-agent-real-task-20261024/calibration.json": "546f950465a2095d6c7c7f7054f0c414a1ff3360510b7bd92373e7239243d014",
+      "/tmp/reliable-agent-real-task-20261024/controls.json": "c158b276ddcd74221b2fc31cf6fed0788211496f2567a9f7b169af55676053d7",
+      "/tmp/reliable-agent-real-task-20261024/image-context/verify_stop.py": "522c3f7f45141e4ba94f46753f14c2d1707c7e3a3ad1388a6d1d3a5d47543129",
+      "/tmp/reliable-agent-real-task-20261024/image-context/test_friction_probe.py": "3d53172b2432d141ca5fe3dc14967e5156cabbfc0a9f8219bf9e402001f63306",
+      "/tmp/reliable-agent-real-task-20261024/image-context/verify.json": "98c953c3f2214e16812f91b6d94bc02041b90cd6d5b27bb5dc4c1ba7635cf91d",
+      "/tmp/codescout-real-task-20261024/.codescout/resident-private/real-task/driver.py": "7e8ecf371f1269dce98eb5fa141ce7da6586a6ce0335ec595f86b4994398f614"
+    },
+    "admission": {
+      "prior_client_usd": "2.9529524",
+      "ceiling_usd": "10.00",
+      "reserve_usd": "3.00",
+      "attempt_cap_usd": "1.25",
+      "paid_attempts": 1,
+      "automatic_paid_retries": 0
+    },
+    "check_authoring": "Researcher wrote tests and a mechanical positive control before the model call. Native tools in a full frozen repository container; no MCP configured.",
+    "unpriced_costs": "Orchestrator/reviewer tokens and elapsed time recorded separately; rates and provider invoices unavailable."
+  },
+  "controls": {
+    "negative": {
+      "pass": false,
+      "exit_code": 1,
+      "tests_run": 13
+    },
+    "positive": {
+      "pass": true,
+      "exit_code": 0,
+      "tests_run": 13
+    },
+    "permissions": {
+      "uid": 1000,
+      "checks_writable": false,
+      "controller_writable": false,
+      "source_writable": true
+    },
+    "image_id": "sha256:f889a5f92f5be30c8d6d9ddc1c28669ed22dbdeda6da121447d2f3d14e11fa73",
+    "cli_sha256": "4d704a8aecbe038affa3000f498ae17c1b4f753add8facb8764120affc99b658",
+    "created_utc": "2026-10-24T06:16:07.339078+00:00"
+  },
+  "attempt": {
+    "runId": "rae7-real-friction-low-0",
+    "taskId": "codescout__friction-recoverable-70f4cad102afb762",
+    "effort": "low",
+    "rep": 0,
+    "sessionId": "bde96ce9-bb38-4687-99e5-1c9d7c8eac4f",
+    "costUsd": 0.0407358,
+    "wallMs": 22615,
+    "cliExit": 0,
+    "isError": false,
+    "numTurns": 6,
+    "usage": {
+      "main": {
+        "input_total": 53137,
+        "cache_creation": 5729,
+        "cache_read": 47398,
+        "output": 1306,
+        "thinking": 0,
+        "messages": 5,
+        "thinkingFieldMissing": 0
+      },
+      "subagents": {
+        "input_total": 0,
+        "cache_creation": 0,
+        "cache_read": 0,
+        "output": 0,
+        "thinking": 0,
+        "messages": 0,
+        "thinkingFieldMissing": 0
+      },
+      "total": {
+        "input_total": 53137,
+        "cache_creation": 5729,
+        "cache_read": 47398,
+        "output": 1306,
+        "thinking": 0,
+        "messages": 5,
+        "thinkingFieldMissing": 0
+      },
+      "subagentFiles": [],
+      "efforts": [
+        "low"
+      ],
+      "subagentEfforts": [],
+      "apiError": false,
+      "subagentApiErrors": 0,
+      "transcriptPath": "/tmp/reliable-agent-real-task-20261024/rae7-real-friction-low-0/config/projects/-testbed/bde96ce9-bb38-4687-99e5-1c9d7c8eac4f.jsonl",
+      "reason": null
+    },
+    "grade": {
+      "pass": true,
+      "exit_code": 0,
+      "tests_run": 13,
+      "log": "/tmp/reliable-agent-real-task-20261024/rae7-real-friction-low-0-independent-grade.log",
+      "verification": {
+        "status": "passed",
+        "repairs_requested": 0,
+        "check_exit": 0,
+        "events": [
+          {
+            "status": "passed",
+            "check_exit": 0,
+            "failed_check": null,
+            "timed_out": false,
+            "repairs_requested": 0,
+            "mode": "hook"
+          }
+        ]
+      }
+    }
+  },
+  "all_attempts": 32,
+  "all_client_reported_usd": "2.9936882",
+  "acceptance_review_replay": {
+    "candidate_source_sha256": "028a5a5d9d5309d47633b4f06b84dfdca8ba6ef06cf294ece6c604991fc16903",
+    "strengthened_test_sha256": "e821db2b3d38f2d6c38ac1a11d27e671ceeadab446145c76f5fce0a249173817",
+    "original_cases": 13,
+    "original_survivors": 1,
+    "strengthened_cases": 14,
+    "mutants_applied": 16,
+    "strengthened_survivors": 0,
+    "mutants": [
+      {
+        "id": "coverage-hard-only",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 1,
+        "exit_code": 1,
+        "mutant_sha256": "c2da683f413192d14be8556a23f3f3fa96923b5d8f8e00a79ef6b31f30f0ac45"
+      },
+      {
+        "id": "coverage-nonsuccess",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 1,
+        "exit_code": 1,
+        "mutant_sha256": "58f7859f8ccaa009994d3dd411e7c68c53dc58ff40a9b115018f0bf1119ded9b"
+      },
+      {
+        "id": "null-detail-hard-only",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 1,
+        "exit_code": 1,
+        "mutant_sha256": "480483f8ee26e37b2c63d1e58cf794b032907b86a637e6fa57ffb50870c3c9cc"
+      },
+      {
+        "id": "null-detail-nonsuccess",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 1,
+        "exit_code": 1,
+        "mutant_sha256": "27b65de3adc4a730499049e6c71ddaaa8584857c506f9b7dc98df73ae27bec4f"
+      },
+      {
+        "id": "recovery-hard-only",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 1,
+        "exit_code": 1,
+        "mutant_sha256": "1d6a79b28c95be300437e2ea620779797a01e2eeb63df067b71c0bd496bd7611"
+      },
+      {
+        "id": "recovery-nonsuccess",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 1,
+        "exit_code": 1,
+        "mutant_sha256": "0484fe2f04fde37e6d815e6972185b93eddd4592342ed76e445352ac374747df"
+      },
+      {
+        "id": "repeat-next-hard-only",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 1,
+        "exit_code": 1,
+        "mutant_sha256": "ca2905ee463fbc0e2905294b655eccbbeb38214bfb1c709a6e524beafa71a560"
+      },
+      {
+        "id": "repeat-next-nonsuccess",
+        "original_survived": true,
+        "replay_ran": 14,
+        "replay_assertion_failures": 1,
+        "exit_code": 1,
+        "mutant_sha256": "e4b76feadc23800e774c1aa4b127ca7f41e34cd4beaa41ae7bdbdaad5e483649"
+      },
+      {
+        "id": "repeat-origin-hard-only",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 4,
+        "exit_code": 1,
+        "mutant_sha256": "7a90a30deac03f2e26c5c613f14d8f4a1cb885aa070a9697b615e38534d9413d"
+      },
+      {
+        "id": "repeat-origin-nonsuccess",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 2,
+        "exit_code": 1,
+        "mutant_sha256": "72aba3271a2dd3eee93b608e3e8c5f505e218acd1a775ee2af68f79e51b6c8af"
+      },
+      {
+        "id": "runs-hard-only",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 1,
+        "exit_code": 1,
+        "mutant_sha256": "8498ba4e60f0952e4358216cf717c7d7dd8b453208dd3f5a8eded9b21f6fa69f"
+      },
+      {
+        "id": "runs-nonsuccess",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 1,
+        "exit_code": 1,
+        "mutant_sha256": "70c5f11431b3b0798caeaf12c7fe9eaf7228857c8a353c67871979763fc46946"
+      },
+      {
+        "id": "sql-hard-only",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 2,
+        "exit_code": 1,
+        "mutant_sha256": "88ab91dfd281226598e5b13c303d858b60a9c2521ecf9756ac70ce0bb75a846e"
+      },
+      {
+        "id": "sql-nonsuccess",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 2,
+        "exit_code": 1,
+        "mutant_sha256": "9a09e5cedf9ca0b22b41a9564d114c23a76cd3da4380dff25b7d96b732fb4cd2"
+      },
+      {
+        "id": "totals-hard-only",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 2,
+        "exit_code": 1,
+        "mutant_sha256": "4099c0d95498d27b0a5e67d530c54ffc7e196cd589016bb5bd43517374164ec2"
+      },
+      {
+        "id": "totals-nonsuccess",
+        "original_survived": false,
+        "replay_ran": 14,
+        "replay_assertion_failures": 2,
+        "exit_code": 1,
+        "mutant_sha256": "4fb324b71fa328c2d78239c9e7efbb5f74fa0ad29a93bb890f76260d0dd5c09e"
+      }
+    ]
+  },
+  "retained_corpus_calibration": {
+    "snapshot_utc": "2026-10-24T06:19:22.190809+00:00",
+    "snapshot_sha256": "ae49df8dd8050f653d711dddd50c20c29c183a1c2ac26da6facf88af540b1e52",
+    "population": "All rows in this read-only SQLite backup of the retained codescout usage DB; not all-time usage. No date-window extrapolation.",
+    "retained_window": [
+      "2026-09-24 06:19:21.173",
+      "2026-10-24 06:19:20.201"
+    ],
+    "literal_outcome_counts": {
+      "error": 19,
+      "recoverable_error": 3053,
+      "success": 77852
+    },
+    "sql_error_predicate": "outcome IN ('error','recoverable_error')",
+    "sql_error_count": 3072,
+    "reports": {
+      "old": {
+        "calls": 80924,
+        "errors": 19,
+        "unclassified": 12
+      },
+      "candidate": {
+        "calls": 80924,
+        "errors": 3072,
+        "unclassified": 306
+      }
+    }
+  },
+  "timing": {
+    "user_phase_started_utc": "2026-10-24T06:05:46.008Z",
+    "paid_driver_launch_mark_utc": "2026-10-24T06:16:17.528035+00:00",
+    "preparation_elapsed_seconds": 631.520035,
+    "review_dispatched_utc": "2026-10-24T06:18:44.889Z",
+    "review_ended_utc": "2026-10-24T06:23:14.092423Z",
+    "review_elapsed_seconds": 269.203423,
+    "attempt_and_independent_grading_seconds": 22.615,
+    "cli_reported_duration_ms": 18034,
+    "cli_reported_api_duration_ms": 11494,
+    "note": "Wall durations overlap with gate work and must not be added as active labor or compared across models. Review price and reviewer tokens unavailable."
+  },
+  "orchestration_sample": {
+    "sample_utc": "2026-10-24T06:24:41.451Z",
+    "phase_user_timestamp": "2026-10-24T06:05:46.008Z",
+    "model_last_recorded": "gpt-6.1-sol",
+    "token_counter_delta": {
+      "input_tokens": 5105108,
+      "cached_input_tokens": 5018496,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 31418,
+      "reasoning_output_tokens": 15203,
+      "total_tokens": 5136526
+    },
+    "review_dispatch_timestamps": [
+      "2026-10-24T06:18:44.889Z"
+    ],
+    "prices_usd": null,
+    "note": "Input includes cached input; reasoning is part of output. Counters through sample only; final handoff work is later. Provider billing rates are not known."
+  },
+  "review_usage": {
+    "model": "gpt-6-astra",
+    "tokens": null,
+    "price_usd": null
+  },
+  "cost_conclusion": "Complete end-to-end dollar cost unavailable. CLI implementation cost excludes authoring, orchestration, review, infrastructure and human effort.",
+  "scope": "One feasibility trial, no ordinary-low control or causal quality advantage. Original13 and strengthened14 outcomes remain separate.",
+  "accounting": {
+    "attempts": 32,
+    "source_usd_values": [
+      "0.08973279999999999",
+      "0.1724277",
+      "0.34275189999999994",
+      "0.0539336",
+      "0.060514200000000004",
+      "0.0652213",
+      "0.12371280000000001",
+      "0.1257942",
+      "0.3497895000000001",
+      "0.0856245",
+      "0.1029947",
+      "0.035952399999999995",
+      "0.0435157",
+      "0.3484232",
+      "0.059787700000000006",
+      "0.0860549",
+      "0.039519399999999996",
+      "0.0925603",
+      "0.0649159",
+      "0.0166904",
+      "0.043433599999999996",
+      "0.022683099999999998",
+      "0.053157600000000006",
+      "0.0177496",
+      "0.0550717",
+      "0.04772900000000001",
+      "0.1339951",
+      "0.059791699999999996",
+      "0.05660169999999999",
+      "0.0740611",
+      "0.0287611",
+      "0.0407358"
+    ],
+    "literal_decimal_sum_usd": "2.993688200000000037",
+    "reported_usd_7dp": "2.9936882",
+    "ceiling_usd": "10.00",
+    "within_ceiling": true
+  },
+  "projection": {
+    "raw_snapshot": "Temporary raw backup discarded after projection equivalence; raw payload fields are not archived.",
+    "projection_file": "retained-usage-projection.db",
+    "projection_sha256": "f3ead7548aa402ab37cbc71aaf5ac41c028714238fd7730eecfd12de8afa2308",
+    "retained_columns": [
+      "id",
+      "tool_name",
+      "called_at",
+      "outcome",
+      "err_family",
+      "error_msg",
+      "session_id",
+      "cc_session_id",
+      "codescout_sha",
+      "codescout_dirty"
+    ],
+    "rows": 80924,
+    "error_messages_redacted": 0,
+    "all_rows_preserved": true,
+    "sql_error_count": 3072,
+    "projection_outputs_equal_original": "Both complete old/candidate JSON reports, including null detail and calibration, are equal after removing the DB pathname."
+  },
+  "review": {
+    "report": "review/report.txt",
+    "original_mutations": 16,
+    "original_assertion_kills": 15,
+    "original_survivors": 1,
+    "strengthened_assertion_kills": 16,
+    "strengthened_survivors": 0,
+    "production_source_changed_after_review": false,
+    "worktree_bug_id": "32aab602bed4b7f8",
+    "original_bug_id": "70f4cad102afb762"
+  },
+  "post_review_python_light": {
+    "exit_code": 0,
+    "tests_passed": 1287,
+    "subtests_passed": 424,
+    "log_sha256": "768faa0656f171d48f8a2b75dd35fa9bd34285ef32ecdd5b6458c8945802ac2f"
+  },
+  "gate": {
+    "exit_code": 0,
+    "lanes": {
+      "python_light": 0,
+      "fmt": 0,
+      "clippy": 0,
+      "lean": 0,
+      "default": 0
+    },
+    "log_sha256": "9251bede005d2249fcae544f98491cf9c4c1f83d8506008fdde5ae0e5cbdcc3e",
+    "test_only_addition": "Full Python light lane rerun after review fixture; production source unchanged.",
+    "exclusions": [
+      "heavy Python suites",
+      "server-stack",
+      "local ONNX weights"
+    ]
+  }
+}

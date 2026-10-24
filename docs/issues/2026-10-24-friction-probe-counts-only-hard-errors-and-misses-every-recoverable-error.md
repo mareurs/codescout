@@ -1,10 +1,11 @@
 ---
 id: '70f4cad102afb762'
 kind: bug
-status: open
+status: fixed
 title: friction-probe.py counts only outcome='error' and misses every recoverable_error, so it sees 8 of 2,038 errors
 tags:
 - cluster/selector-narrower-than-its-population
+closed: 2026-10-24
 opened: 2026-10-24
 owner: marius
 severity: medium
@@ -49,19 +50,19 @@ N/A — confirmed directly by the two queries above.
 
 ## Fix
 
-Not started. Proposed: one predicate `is_error(row) = row["outcome"] in ("error", "recoverable_error")` used everywhere; keep a `--hard-only` flag for the old view; fix the docstring; add a self-check that warns when the selected error count is below 10% of `outcome != 'success'`.
+Implemented on the isolated research/checked-real-task-20261024 branch: exact ERROR_OUTCOMES membership at every Python report site, the matching SQL IN predicate, and corrected help text. Success/other rows remain in sequences and denominators. No hard-only flag or arbitrary warning threshold was needed for the correction. This branch is not merged or published; the required full repository gate passes, and the post-review Python lane passes with all 14 focused cases included. Delivery evidence is recorded in its real-task report.
 
 ## Tests added
 
-None yet.
+Thirteen frozen SQLite/subprocess tests were written before implementation: unchanged source failed 11; a separate full-population control passed 13; five partial-fix controls failed. The single low-effort candidate passed all 13 independently. Review actually applied 16 site-specific mutations: 15 were assertion-killed and one survived. After preserving and reproducing that survivor (unknown next outcome sharing its predecessor's signature), one additional test failed against the mutant and passed against unchanged candidate source. The strengthened 14-test suite kills the same 16 mutations with no survivors. Original 13-test evidence is preserved separately.
 
 ## Workarounds
 
-Query `usage.db` directly with `outcome != 'success'`. The 2026-10-24 usage sweep did this (`docs/usage-reports/2026-10-24-usage-analysis.md`).
+Query the intended population directly with outcome IN ('error', 'recoverable_error'); outcome != 'success' would also select unknown values. A frozen retained-corpus backup on 2026-10-24 held 80,924 calls, 19 hard errors and 3,053 recoverable errors. The candidate and independent SQL both count 3,072 errors; original source counts 19. These are retained rows in that snapshot, not all-time counts.
 
 ## Resume
 
-Start at `load_rows` and the eleven `outcome` tests listed above; then re-run `--calibrate` and compare with TU-7.
+Implementation and acceptance are ready in /tmp/codescout-real-task-20261024 on research/checked-real-task-20261024. See docs/research/2026-10-24-checked-completion-real-task.md for the real-corpus calibration, exact accounting and verification status. Retain the worktree; merge/publication is outside this trial.
 
 ## References
 
