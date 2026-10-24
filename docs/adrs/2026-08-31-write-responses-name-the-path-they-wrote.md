@@ -175,7 +175,7 @@ change, not a field addition.
      DESTINATION's frontmatter, so the destination is named, as the caller passed it:
      `link::call` hands `dst_id` to `write_field_to_frontmatter` unresolved, so from a worktree
      session it writes the MAIN checkout's file (filed:
-     `docs/issues/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`),
+     `docs/issues/archive/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`),
      and the result names what was written, not what should have been. Pinned per rel kind, in
      and out of a worktree session. **Superseded by Amendment 2026-10-24 below for the
      `supersedes` destination in a worktree session**; the rest of this item holds.
@@ -187,7 +187,7 @@ change, not a field addition.
 ## Amendment 2026-10-24 — a `supersedes` destination goes through the overlay, and is named through it
 
 - **Status:** accepted; corrects item 5 of the 2026-10-17 amendment. **Trigger:**
-  `docs/issues/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`.
+  `docs/issues/archive/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`.
 - **What now holds.** `link::call` resolves a `supersedes` link's destination with
   `resolve_write_target` before writing it, as it already did the source. From a worktree session
   the destination is forked into its overlay shadow and `status: superseded` is written to the

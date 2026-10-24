@@ -243,7 +243,7 @@ All notable changes to codescout are documented here.
   vectors under the scoped one. **A script that reads `scope.abs_path_like` gets `null` and must
   read `scope.abs_path_root`.** The cursor that resumes an interrupted scoped run is keyed by the
   scope string, which no longer ends in `%`, so such a run restarts from the beginning once.
-  See `docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md`.
+  See `docs/issues/archive/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md`.
 
 - **An `append_entry` cite given as a rel_path is matched case-sensitively.** `resolve_cite_ref`
   compared the path suffix with `LIKE`, which folds ASCII case, so a cite of `notes.md` resolved

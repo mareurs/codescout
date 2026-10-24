@@ -63,10 +63,15 @@ N/A (read, not run).
 
 Fixed in `src/librarian/tools/reindex.rs`. The MCP reindex tool now deletes external-store vectors for every id in `report.removed_ids`, chained with `escaping_kept_ids` (`reclaimed_escaping_ids` is a subset of `removed_ids`). The delete is by exact artifact id: ids are fixed-length sha256 hex and a Qdrant point id is a UUIDv5 of the per-artifact chunk id, so an alias and its target never share a point. A failed delete no longer aborts the call (the catalog rows are already committed as deleted, so nothing would retry): failures are collected and reported as `vector_delete_error_count`, `vector_delete_errors` (sample of 20) and `vector_delete_note`, shaped like the `embed_*` fields. The CLI path (`indexer::index_repo`) is unchanged.
 
-- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `dca0e573e0061225695d42176823f3852131c2f3`
+- Fix SHA (on `experiments`; merged 2026-10-24 by fast-forward, tip `e0255583b`): `dca0e573e0061225695d42176823f3852131c2f3`
 - patch-id: `ce8308e6eb2c26ec0ea35eb9b9530bc5cf915f44`
 
 An independent Opus review found no over-deletion; its one SHOULD-FIX (a failed delete aborting the reindex) is in the commit.
+
+## Fix provenance
+
+- **SHA:** `dca0e573e0061225695d42176823f3852131c2f3` (`experiments`)
+- **patch-id:** `ce8308e6eb2c26ec0ea35eb9b9530bc5cf915f44`
 
 ## Tests added
 

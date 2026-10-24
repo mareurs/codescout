@@ -69,10 +69,15 @@ N/A.
 
 Fixed at all four sites. They now use the exact `path_at_or_under_sql` / `root_and_prefix` helpers (the root itself plus `root/...`, byte-exact, with a `/` boundary): `list_stale`, `delete_orphan_repos`, `backfill_chunk_vectors` / `backfill_chunk_vectors_with` (the parameter is now `scope_root`, a plain path), and `resolve_cite_ref` (byte-exact suffix match `substr(abs_path, -length(?)) = '/' || raw`). `delete_orphan_repos` ignores a scope that is a whole filesystem, volume or share (`bounds_no_territory`: `/`, a drive, `//?/C:`, `//server`, `//server/share`, `//?/UNC/server/share`). Behaviour changes, all in CHANGELOG.md: a row equal to a scope root is now in scope; a case or wildcard variant of an active root is no longer kept (deliberate, pinned by a test); a cite that matched only by case now fails to resolve; the `backfill-chunks` JSON key `scope.abs_path_like` is renamed `scope.abs_path_root`.
 
-- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `37cfe5a40144c661ca585dfc29d38484d6ef7a20`
+- Fix SHA (on `experiments`; merged 2026-10-24 by fast-forward, tip `e0255583b`): `37cfe5a40144c661ca585dfc29d38484d6ef7a20`
 - patch-id: `1f019d71b303f7f8ae0988f31890bd6bb2e9a128`
 
 An independent Opus review found no way for either caller of `delete_orphan_repos` to delete more than before.
+
+## Fix provenance
+
+- **SHA:** `37cfe5a40144c661ca585dfc29d38484d6ef7a20` (`experiments`)
+- **patch-id:** `1f019d71b303f7f8ae0988f31890bd6bb2e9a128`
 
 ## Tests added
 

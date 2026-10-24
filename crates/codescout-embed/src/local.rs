@@ -143,7 +143,7 @@ fn read_required(dir: &Path, rel: &str) -> Result<Vec<u8>> {
 /// here: `pull_from_hf`, `fastembed-5.13.0/src/common.rs:170`.)
 ///
 /// Takes both inputs as arguments so a test never has to touch the process environment.
-/// docs/issues/2026-10-19-the-first-memory-write-creates-a-fastembed-cache-directory-in-the-servers-cwd.md
+/// docs/issues/archive/2026-10-19-the-first-memory-write-creates-a-fastembed-cache-directory-in-the-servers-cwd.md
 fn model_cache_dir(configured: Option<std::ffi::OsString>, user_cache: Option<PathBuf>) -> PathBuf {
     if let Some(dir) = configured.filter(|d| !d.is_empty()) {
         return PathBuf::from(dir);

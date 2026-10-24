@@ -1047,7 +1047,7 @@ mod tests {
     /// every vanished file stayed behind: answered by KNN, unresolvable at hydration. sqlite-vec
     /// hides it (the `artifact_chunk` cascade takes them), which is why the in-memory store, with
     /// no foreign keys, is the right fixture.
-    /// `docs/issues/2026-10-18-librarian-reindex-drops-a-vanished-rows-catalog-entry-but-never-its-external-store-vectors.md`
+    /// `docs/issues/archive/2026-10-18-librarian-reindex-drops-a-vanished-rows-catalog-entry-but-never-its-external-store-vectors.md`
     ///
     /// Asserts the SURVIVORS keep their vectors too: a sweep that deleted every id, or selected
     /// rows by path prefix, would pass a vanished-file-only assertion.

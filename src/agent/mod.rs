@@ -2626,7 +2626,7 @@ impl Agent {
     /// directory, built per call. The Qdrant backend (one collection, keyed by project id) and a
     /// test double installed in the default cell are the default store, unchanged.
     ///
-    /// docs/issues/2026-10-19-a-pinned-projects-memory-vectors-go-into-the-default-projects-embeddings-database.md
+    /// docs/issues/archive/2026-10-19-a-pinned-projects-memory-vectors-go-into-the-default-projects-embeddings-database.md
     pub async fn semantic_memory_store_for(
         &self,
         workspace_override: Option<&Path>,
@@ -3942,7 +3942,7 @@ mod tests {
     /// both roots are temp dirs, and the directory rule is the env-free `default_sqlite_dir`,
     /// so an exported `CODESCOUT_SQLITE_DIR` cannot redirect the stores or make this skip.
     ///
-    /// docs/issues/2026-10-19-a-pinned-projects-memory-vectors-go-into-the-default-projects-embeddings-database.md
+    /// docs/issues/archive/2026-10-19-a-pinned-projects-memory-vectors-go-into-the-default-projects-embeddings-database.md
     #[tokio::test]
     async fn a_pinned_projects_memory_vectors_go_into_its_own_embeddings_dir() {
         use crate::retrieval::code_store::VectorBackend;

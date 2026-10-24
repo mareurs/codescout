@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-17-doc-update-writes-through-a-catalogued-symlink-
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'Other LIKE call sites are NOT fixed here and are listed accurately in docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md (list_stale, delete_orphan_repos, resolve_cite_ref, backfill_chunk_vectors_with); merge_worktree was fixed in its own issue.'
+unverified: 'Other LIKE call sites are NOT fixed here and are listed accurately in docs/issues/archive/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md (list_stale, delete_orphan_repos, resolve_cite_ref, backfill_chunk_vectors_with); merge_worktree was fixed in its own issue.'
 ---
 
 # BUG: `librarian(doctor, fix=prune_missing)` matches rows with `LIKE` and no `ESCAPE`, so pruning a dead root deletes the rows of live repositories whose path differs only by case or by a `_`/`%` position

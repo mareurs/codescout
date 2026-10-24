@@ -1,5 +1,5 @@
 ---
-id: d0310f7b0f499c83
+id: 5e781045832c2eca
 kind: bug
 status: fixed
 title: 'BUG: tracker hygiene''s retirement recipe drops entry definitions required by citation resolution'
@@ -10,6 +10,7 @@ tags:
 - tracker-archiving
 - documentation
 closed: 2026-10-24
+no_fix_commit: 'Fixed in the sibling repository claude-plugins, not in this one: commit e0532f0877fcf7e8c12bf69636e3ef927ed52130 (patch-id e21f4bb868f412e6a880d41db750bae556ad864c), on its branches main, effort-routing-r1 and fix/codescout-issues-20261016. No commit in this repository.'
 opened: 2026-10-08
 owner: marius
 related: []

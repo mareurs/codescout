@@ -58,10 +58,15 @@ None run.
 
 Fixed in `src/tools/run_command/tests.rs` (a test flaw; no production change). The old shape ran `sleep 5` under a 6 s timeout and raced the command's exit against the first 3 s heartbeat tick, so a stall past the command's end made the call return first. The command now loops until a marker file exists; the test writes the marker only after it has seen TWO heartbeats, and asserts the rate and text: N1 >= 3 and N2 - N1 >= 3 parsed from `"{N}s elapsed"`. The 20 s wait and `timeout_secs: 120` are upper bounds for a dead heartbeat, not the pass condition.
 
-- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `982a9403e0f286532182db199716e8b18f880397`
+- Fix SHA (on `experiments`; merged 2026-10-24 by fast-forward, tip `e0255583b`): `982a9403e0f286532182db199716e8b18f880397`
 - patch-id: `b9806d894021619d934135c41e637e868d691738`
 
 An independent Opus review found the first version no longer checked the heartbeat rate; the rate and text assertions are the fix for that.
+
+## Fix provenance
+
+- **SHA:** `982a9403e0f286532182db199716e8b18f880397` (`experiments`)
+- **patch-id:** `b9806d894021619d934135c41e637e868d691738`
 
 ## Tests added
 

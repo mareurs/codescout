@@ -1094,7 +1094,7 @@ mod tests {
     /// case folds) and so DELETED a sibling workspace's rows, and an active root of
     /// `/ws/my_app/live` also kept `/ws/my_app/LIVE`'s. Byte-exact comparison: a row is in scope
     /// only under the scope root itself, and kept only under an active root itself.
-    /// docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
+    /// docs/issues/archive/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
     #[test]
     fn delete_orphan_repos_treats_roots_as_paths_not_like_patterns() {
         let cat = Catalog::open_in_memory().unwrap();

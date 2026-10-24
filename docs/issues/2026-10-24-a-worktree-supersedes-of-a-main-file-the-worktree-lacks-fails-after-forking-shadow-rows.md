@@ -11,7 +11,7 @@ tags:
 - worktree-overlay
 opened: 2026-10-24
 related:
-- docs/issues/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md
+- docs/issues/archive/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md
 severity: low
 ---
 
@@ -74,4 +74,4 @@ Start at `src/librarian/tools/link.rs` `call` (the `resolve_write_target` of `ds
 ## References
 
 - `src/librarian/tools/link.rs`, `src/librarian/tools/worktree.rs`, `src/librarian/tools/update.rs` (`write_field_to_frontmatter`)
-- `docs/issues/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`
+- `docs/issues/archive/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`

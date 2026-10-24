@@ -177,7 +177,7 @@ mod tests {
     /// row the write recorded, because a test that checked only "main is unchanged" would pass
     /// for a link that wrote nowhere. Both files exist: in a real worktree the shadow path holds
     /// git's checkout copy of the main file.
-    /// docs/issues/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md
+    /// docs/issues/archive/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md
     #[tokio::test]
     async fn supersedes_from_a_worktree_session_writes_the_shadow_and_not_the_main_file() {
         use crate::librarian::current_project::CurrentProject;

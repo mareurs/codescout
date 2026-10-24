@@ -6611,7 +6611,7 @@ fn inject_tee_in_wraps_the_filter_in_a_draining_group() {
 /// `| head -N` closed the pipe after N lines, and the capture was cut to whatever had reached
 /// `tee` by then (1860 lines of a 300000-line stream), yet the response reported that partial
 /// stream as if it were the whole. With the drain the producer runs to completion.
-/// docs/issues/2026-10-21-head-capture-looks-complete-but-is-partial.md
+/// docs/issues/archive/2026-10-21-head-capture-looks-complete-but-is-partial.md
 #[cfg(unix)]
 #[tokio::test]
 async fn a_head_pipe_still_captures_the_whole_stream() {

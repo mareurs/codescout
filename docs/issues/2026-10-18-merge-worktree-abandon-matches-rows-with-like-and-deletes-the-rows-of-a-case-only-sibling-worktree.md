@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-18-doctor-prune-missing-matches-rows-with-like-and
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'The merge (non-abandon) path selects the sibling rows too, but I could not make that harmful: with the LIKE predicate restored as a mutation, a real (non-dry) merge of feat_1 left the FEAT_1 row untouched, because reseat_one strips the worktree prefix case-sensitively and skips it. The test for that path is a regression pin, not a reproduced defect. The unchanged LIKE sites that remain are in docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md.'
+unverified: 'The merge (non-abandon) path selects the sibling rows too, but I could not make that harmful: with the LIKE predicate restored as a mutation, a real (non-dry) merge of feat_1 left the FEAT_1 row untouched, because reseat_one strips the worktree prefix case-sensitively and skips it. The test for that path is a regression pin, not a reproduced defect. The unchanged LIKE sites that remain are in docs/issues/archive/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md.'
 ---
 
 # BUG: `librarian(merge_worktree, abandon=true)` selects a worktree's rows with `LIKE`, so abandoning `.worktrees/feat_1` deletes the rows of a case-only sibling worktree with their cascade

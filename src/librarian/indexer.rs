@@ -4216,7 +4216,7 @@ kind = "memory"
     /// boundary (`/x/app` also selected `/x/app2/..`), read `_` and `%` in the path as wildcards
     /// (`my_app` selected `myXapp`) and folded ASCII case (`MY_APP`), so a scoped run embedded a
     /// sibling project's artifacts and filed their vectors under the scoped project.
-    /// docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
+    /// docs/issues/archive/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
     #[tokio::test]
     async fn a_scoped_backfill_does_not_reach_a_sibling_whose_path_merely_matches_the_root() {
         let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());

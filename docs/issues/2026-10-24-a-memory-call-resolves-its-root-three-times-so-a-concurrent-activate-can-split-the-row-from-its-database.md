@@ -5,7 +5,7 @@ closed:
 severity: low
 owner: marius
 related:
-- docs/issues/2026-10-19-a-pinned-projects-memory-vectors-go-into-the-default-projects-embeddings-database.md
+- docs/issues/archive/2026-10-19-a-pinned-projects-memory-vectors-go-into-the-default-projects-embeddings-database.md
 tags:
 - cluster/unclassified
 kind: bug

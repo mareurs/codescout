@@ -6,10 +6,10 @@ owners:
 - marius
 tags:
 - cluster/capped-result-presented-as-complete
+closed: 2026-10-24
 opened: 2026-10-21
 severity: medium
-unverified: dash (as /bin/sh) was not available to test the drain group itself; commit 2acc553ad made the capture tests portable to dash and BSD seq but they were not run under dash here. A live check of `seq 1 300000 | head -3` on a freshly built server was not done.
-closed: 2026-10-24
+unverified: 'dash (as /bin/sh) was not available to test the drain group itself; commit 2acc553ad made the capture tests portable to dash and BSD seq but they were not run under dash here. LIVE CHECK 2026-10-24 on a rebuilt server (git_sha e0255583b), all through run_command: `seq 1 300000 | head -3` gave unfiltered_output_lines 300000 and producer_exit_code 0; `seq 1 1000000 | head -3` gave unfiltered_output_lines 624421, unfiltered_truncated true and producer_exit_code 141 (a lower bound, flagged).'
 ---
 
 ## Summary
@@ -74,6 +74,13 @@ Cost: a drained finite producer now runs to completion, so `seq 1 N | head -3` t
 Capture file bound (R26, 2026-10-22): the producer's stream reaching a whole-stream filter (`grep`, `sort`, `tail`) was written to the capture file in full (`git log --all -p` is 267,840,758 B, on a tmpfs `/tmp` that is RAM) and then read whole into server memory. The splice now runs the tee as `( trap '' XFSZ; ulimit -f N 2>/dev/null; exec tee '{cap}' 2>/dev/null )` with `N = ceil((4 MiB + 64 KiB) / 512)` = 8320: the filter still reads the whole stream, and the file stops at 4,259,840 B under POSIX `sh` (8,519,680 B under a bash outside POSIX mode, which counts 1024-byte units; measured 2026-10-22). `read_capture` also reads at most 4 MiB + 1 MiB of it, decodes it lossily (a byte that is not UTF-8 used to drop the whole handle), and marks the handle truncated when the file went on past what was read or reached the file bound.
 
 Count semantics: `unfiltered_output_lines` is the line count of the capture read. For a stream that fit the capture file it is the stream's total. Whenever `unfiltered_truncated` is set it is a LOWER BOUND of the stream, for every filter: the drain stopped an early-exit filter's producer (a stream over 4 MiB into `head`), or the file bound stopped the capture of a whole-stream filter's. `seq 1 1000000 | head -3` and `seq 1 1000000 | grep zzz` both report a number between 500000 and 1000000 (624421 measured through `grep`, the lines that fit 4,259,840 B), where `seq 1 620000 | grep zzz` (4,228,895 B, under the file bound) reports exactly 620000.
+
+## Fix provenance
+
+- **SHA:** `24c963d3f1d5b64d4c27da5b5876154d75c0f3b0` (`experiments`)
+- **patch-id:** `b9519bca16155f8276f66d89fd80642d6649956c`
+
+The same fix also spans `8f696c5ee0589bd91c6a28bb38be0033ef55f9a0` (patch-id `353226d79a186805ca90f5e3ea418b6dcf89cdc8`) and `026d510b4d4fa4389a13be7a34e58d851cec84bf` (patch-id `0ef5a0256d2b548aac20fff698a4a2281de4a49e`), both on `experiments`; see `## Fix`.
 
 ## Tests added
 

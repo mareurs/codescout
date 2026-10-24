@@ -55,10 +55,15 @@ None.
 
 `append_preferences_section` now takes the call's `workspace_override`, reads the project id with `with_project_at(workspace_override, ..)` and the store from `Agent::semantic_memory_store_for(workspace_override)`; `onboarding` passes `ctx.workspace_override.as_deref()`. The store read is split out as `append_preferences_from_store`.
 
-- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `640ef2e79bf54e446ad73d81cca2b8a37499bd36`
+- Fix SHA (on `experiments`; merged 2026-10-24 by fast-forward, tip `e0255583b`): `640ef2e79bf54e446ad73d81cca2b8a37499bd36`
 - patch-id: `71ea06b50d6abac6b501a39a4be911f6dcb4ec1d`
 
 That commit also carries the fix of the pinned-memory issue this one was found from (`2026-10-19-a-pinned-projects-memory-vectors-...`); one commit fixes both.
+
+## Fix provenance
+
+- **SHA:** `640ef2e79bf54e446ad73d81cca2b8a37499bd36` (`experiments`)
+- **patch-id:** `71ea06b50d6abac6b501a39a4be911f6dcb4ec1d`
 
 ## Tests added
 

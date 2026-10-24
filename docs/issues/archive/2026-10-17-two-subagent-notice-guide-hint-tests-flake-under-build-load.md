@@ -70,8 +70,13 @@ from the failing runs, which is the first thing to capture on the next occurrenc
 
 Fixed in `src/agent/mod.rs`, `src/server.rs` (test seam) and the two tests (a test flaw; production behaviour unchanged). `Agent::note_activation` compares real elapsed time between two activations with the 5 s `CONCURRENT_ACTIVATION_WINDOW`, so two real activations with a slow build in between fell outside the window. A `#[cfg(test)]`-only `activation_window_override` field and `set_activation_window_for_test()` let the two tests use a 24 h window. The sibling `agent::tests::note_activation_tells_a_parent_from_its_subagent` is deliberately left without the override so a zero window is still caught.
 
-- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `982a9403e0f286532182db199716e8b18f880397`
+- Fix SHA (on `experiments`; merged 2026-10-24 by fast-forward, tip `e0255583b`): `982a9403e0f286532182db199716e8b18f880397`
 - patch-id: `b9806d894021619d934135c41e637e868d691738`
+
+## Fix provenance
+
+- **SHA:** `982a9403e0f286532182db199716e8b18f880397` (`experiments`)
+- **patch-id:** `b9806d894021619d934135c41e637e868d691738`
 
 ## Tests added
 

@@ -198,7 +198,7 @@ reviewed state.
 - **A `link` names the row whose file it wrote**: the source for a plain edge, the destination (as the
   caller passed it) for `supersedes`. From a worktree session `link::call` writes the MAIN
   checkout's destination file; that is filed separately
-  (`docs/issues/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`).
+  (`docs/issues/archive/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`).
 - Naming re-takes the catalog lock after the write; a `merge_worktree` or abandon in that window makes
   the result name the main row's path or none (cosmetic, routing unchanged).
 

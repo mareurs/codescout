@@ -60,10 +60,15 @@ N/A.
 
 Fixed. `read_shards` and `gitattributes_declares_shard_union` (`src/librarian/catalog/audit/shard.rs`) read through `read_door::for_project(repo_root)`. A refused shard counts into the existing `unreadable_files` counter, so it is reported and its rows never reach `rows`, `hosts` or `files_read`. `.gitattributes` is read with `text_for_write`, which refuses ANY leaf link, because git itself ignores a symlinked `.gitattributes`; an in-repository link therefore no longer counts as a union-merge opt-in. The two content-read entries left the `ALLOWED` list in `src/librarian/read_door.rs`, so the source gate `no_librarian_production_read_bypasses_the_read_door` now enforces these reads (the issue said three; only two content-read entries existed).
 
-- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `3ea841fc241163e7dc7aa606d0bd7143c29f4161`
+- Fix SHA (on `experiments`; merged 2026-10-24 by fast-forward, tip `e0255583b`): `3ea841fc241163e7dc7aa606d0bd7143c29f4161`
 - patch-id: `0d7448249aa8f6de5f3970ce515f5abfda903feb`
 
 An independent Opus review found no blocker; its two SHOULD-FIX items (a symlinked in-repo `.gitattributes` still counted as an opt-in; the refusal fixtures depended on whether an ancestor of TMPDIR is a git repository) are in the commit.
+
+## Fix provenance
+
+- **SHA:** `3ea841fc241163e7dc7aa606d0bd7143c29f4161` (`experiments`)
+- **patch-id:** `0d7448249aa8f6de5f3970ce515f5abfda903feb`
 
 ## Tests added
 

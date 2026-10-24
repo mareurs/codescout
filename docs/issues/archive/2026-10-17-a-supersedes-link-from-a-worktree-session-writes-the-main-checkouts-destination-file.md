@@ -80,10 +80,15 @@ The reproduction above. `update::call` resolves its own id through the overlay
 
 Fixed in `src/librarian/tools/link.rs` and `src/librarian/tools/artifact.rs`. For `rel == "supersedes"` the destination now goes through `resolve_write_target` as well. The frontmatter write, the `previous_status` read and the row upsert use the shadow id; the link edge, the `superseded_by` event payload and the response's `superseded.id` keep the caller's `dst_id`, which `merge_worktree` folds back onto the main twin (three-way merge: an unchanged main status takes the superseded status, a moved one is a reported conflict). A plain link is unchanged. `write_target_id` keys a supersedes link on `dst_id`; the `through_overlay` field is removed because every arm was true. The 2026-08-31 ADR carries a dated amendment.
 
-- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `f2f1bafb40d0a566afae4ca295992fed908ba2a1`
+- Fix SHA (on `experiments`; merged 2026-10-24 by fast-forward, tip `e0255583b`): `f2f1bafb40d0a566afae4ca295992fed908ba2a1`
 - patch-id: `9e4e6d94c89c718bb147253cbb62f7ad64657331`
 
 An independent Opus review confirmed the status survives `merge_worktree` and that nothing reads `through_overlay`.
+
+## Fix provenance
+
+- **SHA:** `f2f1bafb40d0a566afae4ca295992fed908ba2a1` (`experiments`)
+- **patch-id:** `9e4e6d94c89c718bb147253cbb62f7ad64657331`
 
 ## Tests added
 

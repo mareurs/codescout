@@ -1,5 +1,5 @@
 ---
-id: '270b230c44ed8029'
+id: fc6a842d5e3dd66b
 kind: bug
 status: fixed
 title: The skill ledger writes to a deleted worktree and re-stamps every first-seen as now
@@ -9,6 +9,7 @@ tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
 topic: hook state resolution and worktree residue
 closed: 2026-10-24
+no_fix_commit: 'Fixed in the sibling repository claude-plugins, not in this one: commit c37421ff85580f6b4e6c87584ef3b7d55858cda8 (patch-id db7fc01808359127f3700feb28a40191dc0e950a), on its branches main, effort-routing-r1 and fix/codescout-issues-20261016. No commit in this repository.'
 opened: 2026-09-11
 owner: marius
 severity: low

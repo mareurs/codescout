@@ -9,7 +9,7 @@ closed: 2026-10-24
 opened: 2026-10-18
 owner: marius
 related:
-- docs/issues/2026-10-17-two-subagent-notice-guide-hint-tests-flake-under-build-load.md
+- docs/issues/archive/2026-10-17-two-subagent-notice-guide-hint-tests-flake-under-build-load.md
 severity: low
 unverified: 'That the original once-only sighting was the 5 s busy timeout expiring was never measured; only an injected fsync delay reproduced the signature. The remaining exposure is real: a commit slower than 5 s can still fail the other append, now inside the operation under test, and two real servers opening a shared catalog would hit it too (filed in docs/issues/2026-10-24-catalog-open-takes-the-write-lock-and-fsyncs-trigger-ddl-on-every-open.md).'
 ---
@@ -67,7 +67,7 @@ The log excerpt above, from `lib.log` of the 2026-10-18 final verification run. 
 
 Mitigated, not root-caused. The test flaw is fixed: both tests opened their `Catalog` connections inside the racing threads, so `Catalog::open` (setup) raced with itself. Both connections are now opened first and a `Barrier(2)` releases the two appends together, so only the appends race (`src/librarian/catalog/augmentation.rs`). The product weakness behind the "database is locked" signature is NOT fixed: `Catalog::open` takes the write lock and runs fsync'd trigger DDL on every open (see `docs/issues/2026-10-24-catalog-open-takes-the-write-lock-and-fsyncs-trigger-ddl-on-every-open.md`). Raising `busy_timeout` would not be a fix.
 
-- Fix SHA (branch `integration/fixes-20261024`, not yet on `experiments`): `982a9403e0f286532182db199716e8b18f880397`
+- Fix SHA (on `experiments`; merged 2026-10-24 by fast-forward, tip `e0255583b`): `982a9403e0f286532182db199716e8b18f880397`
 - patch-id: `b9806d894021619d934135c41e637e868d691738`
 
 ## Tests added
@@ -85,4 +85,4 @@ Re-run the test alone; it passes.
 ## References
 
 - `src/librarian/catalog/augmentation.rs` (the test, around line 5096)
-- `docs/issues/2026-10-17-two-subagent-notice-guide-hint-tests-flake-under-build-load.md`
+- `docs/issues/archive/2026-10-17-two-subagent-notice-guide-hint-tests-flake-under-build-load.md`

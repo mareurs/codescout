@@ -6444,7 +6444,7 @@ mod tests {
     /// `LIKE` ignores ASCII case, and an `ESCAPE` clause cures only the wildcard half: a cite of
     /// `notes.md` matched the row of `Notes.md` and, with both present, was reported ambiguous
     /// instead of resolving to the file it names. The suffix comparison is byte-exact.
-    /// docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
+    /// docs/issues/archive/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
     #[test]
     fn resolve_cite_ref_does_not_fold_case_in_a_rel_path() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -6483,7 +6483,7 @@ mod tests {
     /// `list_stale`'s project filter is a path prefix. `LIKE` made `_`/`%` in the project's path
     /// wildcards (no `ESCAPE` was given) and folded case, so a project at `/x/my_app` also listed
     /// the stale augmentations of `/x/myXapp` and `/x/MY_APP`.
-    /// docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
+    /// docs/issues/archive/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
     #[test]
     fn list_stale_scopes_to_the_project_path_exactly() {
         let cat = Catalog::open_in_memory().unwrap();
