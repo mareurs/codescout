@@ -75,9 +75,11 @@ there rather than patching R117 alone.
 
 **Decision 2026-10-16 (the operator, after the options below were put to them): leave this open, spec-deferred.** No code and no test changed. The options, for whoever writes the later judge spec: (A) leave open, taken; (B) apply the 12-row and 20,000-char caps over text-bearing rows only, which stops the cap being wasted and restores narration but still shows no tool evidence, and changes what R117 means; (C) have `_session_part` delegate to `scripts/measure/packet.py` `build_packet`, the packet rule the operator labels use, which fixes the bug but is the new prompt and new gate that spec defers. `tests/test_measure_judge.py` (about L254-283) pins the current 12-newest-rows behaviour. Audit mode has not run on the corpus, so no recorded judge result depends on `_session_part`.
 
+**Partial fix 2026-10-24, option B (the operator said "as you choose" after the options were put to them again; working tree, uncommitted):** `scripts/measure/judge.py` `_session_part` now skips text-less rows, so the 12-turn and 20,000-char caps run over text-bearing rows only. This stops the cap being spent on rows with nothing to show and restores the assistant's narration. It does NOT show tool calls or tool results, and it changes what R117's "turns" means, as option B above says. The bug therefore stays `open`: the full fix is still option C (packet rule), deferred by the spec. When that spec lands, replace this change with `build_packet`.
+
 ## Tests added
 
-None yet.
+`tests/test_measure_judge.py::BoundedContextTests::test_text_less_rows_do_not_spend_the_turn_cap` (2026-10-24): 14 prompt rows, each followed by a text-less `tool_use` and a text-less `tool_result`. It expects the 12 newest TEXT-BEARING rows. It failed before the change (the context lost `p02`, and kept text-less rows) and passes after. `tests/test_measure_judge.py` as a whole: 60 passed.
 
 ## References
 

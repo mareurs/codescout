@@ -282,6 +282,25 @@ class BoundedContextTests(unittest.TestCase):
                                      "decision_ts": "2026-09-26T10:01:00Z"}, db, [], "audit")
             # 5 x 4000 is EXACTLY 20,000, which is "up to 20,000": all five are kept.
             self.assertEqual([c["uuid"] for c in inp["context"]], ["e5", "e4", "e3", "e2", "e1"])
+    def test_text_less_rows_do_not_spend_the_turn_cap(self):
+        # Every other row is a text-less tool_use/tool_result entry (the `turns` table keeps one row
+        # per transcript entry, text or not). They carry nothing to show, so they must not use up
+        # slots of the 12-turn cap: the context is the 12 newest rows that HAVE text.
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = []
+            for i in range(14):
+                rows.append(_turn(f"p{i:02d}", f"2026-09-26T10:{i:02d}:00Z", kind="prompt",
+                                  text=f"t{i}"))
+                rows.append(_turn(f"u{i:02d}", f"2026-09-26T10:{i:02d}:01Z", kind="tool_use", text=""))
+                rows.append(_turn(f"r{i:02d}", f"2026-09-26T10:{i:02d}:02Z", kind="tool_result",
+                                  text=""))
+            rows.append(_turn("d", "2026-09-26T11:00:00Z", text="decision"))
+            db = _events_db(tmp, rows)
+            inp = judge.build_input({"id": "i", "sid": SID, "decision_uuid": "d",
+                                     "decision_ts": "2026-09-26T11:00:00Z"}, db, [], "audit")
+            self.assertEqual([c["uuid"] for c in inp["context"]],
+                             [f"p{i:02d}" for i in range(13, 1, -1)])  # 12 text rows, newest first
+            self.assertTrue(all(c["text"] for c in inp["context"]))
 
     def test_origin_candidates_are_previous_top_level_assistant_text_only(self):
         with tempfile.TemporaryDirectory() as tmp:

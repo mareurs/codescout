@@ -434,7 +434,8 @@ def render_lesson_index(entries):
 
 def _session_part(events_db, item, mode):
     """R117: the same session's preceding TOP-LEVEL turns (rowid = transcript order), newest
-    first, up to 12 turns and 20,000 chars, dropping the oldest first; in correction mode also up
+    first, up to 12 text-bearing turns and 20,000 chars, dropping the oldest first (a text-less row
+    is skipped and uses no slot); in correction mode also up
     to 5 preceding top-level `assistant_text` turns as origin candidates. R116: every included
     turn must be STRICTLY before the decision (join.utc), else LeakageError -- a guard on what was
     selected by order, never a filter that would hide the violation."""
@@ -461,9 +462,10 @@ def _session_part(events_db, item, mode):
     context = []
     used = 0
     for uuid, ts, role, kind, text in reversed(preceding):
+        if not text:  # a text-less row (tool_use / tool_result) shows nothing and must not use a slot
+            continue
         if len(context) >= CONTEXT_MAX_TURNS:
             break
-        text = text or ""
         if used + len(text) > CONTEXT_MAX_CHARS:
             if not context:  # the newest turn alone is over budget: keep its newest part
                 marker = "[… the earlier part of this turn is not shown]\n"
