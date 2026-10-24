@@ -1,3 +1,8 @@
+// Most helpers here serve tests that are `#[cfg(unix)]` (they run `sh`, `seq`, `perl`, a
+// pty). Without that gate they have no reader on Windows, so the Windows clippy lane
+// would flag each one as dead code.
+#![cfg_attr(not(unix), allow(dead_code))]
+
 use super::inner::classify_slow_command;
 use super::*;
 use crate::agent::Agent;
