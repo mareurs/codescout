@@ -801,6 +801,7 @@ fn a_notice_alone_adds_no_empty_corrections_block_to_an_error_body() {
 /// the file it failed on. `project.toml` can be a link to ANY readable file, and the toml
 /// parser's `Display` prints the offending source line, so a link to a secret file returned
 /// that line in `_workspace_notice`, past the read deny-list. Only message, line and column.
+#[cfg_attr(not(unix), allow(dead_code))]
 const SECRET: &str = "SECRETMARKER-7f3a91c2";
 
 #[cfg(unix)]

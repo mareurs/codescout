@@ -106,11 +106,13 @@ pub struct LspManager {
     /// Two callers loop `get_or_start` per file, so without this every file paid the whole
     /// wait; within `MUX_WEDGED_MEMORY` later attempts make one connect attempt and fail fast
     /// (a mux that has come up since still connects). Cleared on a successful connect.
+    #[cfg(unix)]
     mux_wedged_at: StdMutex<HashMap<LspKey, tokio::time::Instant>>,
     /// Test seam: run synchronously when a wait on a peer's mux ends because its holder died,
     /// before the next round claims the lock. The window it opens (a third process taking the
     /// lock) has no yield point in the natural flow, so a test cannot land in it otherwise.
     #[cfg(test)]
+    #[cfg_attr(not(unix), allow(dead_code))]
     after_early_stop: StdMutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Test seam: the program (and leading arguments) the mux spawn runs instead of
     /// `resolve_mux_binary()`, so a test can stand a script in for the mux (the test binary cannot
@@ -118,6 +120,7 @@ pub struct LspManager {
     /// fails with ETXTBSY ("Text file busy") while another thread's fork holds a copy of the
     /// write descriptor.
     #[cfg(test)]
+    #[cfg_attr(not(unix), allow(dead_code))]
     mux_binary_for_test: StdMutex<Option<(PathBuf, Vec<String>)>>,
     /// Project root for test-only DB writes. Set by new_for_test_with_root.
     #[cfg(test)]
@@ -759,6 +762,7 @@ impl LspManager {
             project_root: None,
             startup_failures: StdMutex::new(HashMap::new()),
             cold_start_until: StdMutex::new(HashMap::new()),
+            #[cfg(unix)]
             mux_wedged_at: StdMutex::new(HashMap::new()),
             #[cfg(test)]
             after_early_stop: StdMutex::new(None),
@@ -3169,6 +3173,7 @@ mod tests {
     /// The constants the docs and the issue files quote, pinned by literals: the tests above
     /// measure against the constants themselves, so changing one would otherwise move the
     /// behaviour and the expectation together (review F4: 5 s to 2 s, 500 ms to 150 ms survived).
+    #[cfg(unix)]
     #[test]
     fn the_mux_connect_constants_have_the_values_the_docs_quote() {
         assert_eq!(

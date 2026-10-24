@@ -30,12 +30,14 @@ use crate::tools::RecoverableError;
 // cap-class: NOT_A_CAP — ring-buffer capacity for server stderr used to detect fatal init conditions; diagnostic state, never part of a tool result
 const MAX_STDERR_LINES: usize = 200;
 
+#[cfg(unix)]
 /// Longest [`LspClient::connect`] waits for a mux to send its init message after accepting the
 /// connection. A mux writes it as soon as it accepts, so a socket still silent after this long is
 /// accepting but not serving; the caller of [`LspClient::connect_with_init_timeout`] may pick a
 /// shorter bound.
 // cap-class: NOT_A_CAP — bound on a wait for a peer's first message; expiry surfaces as a connect error, never as a shorter answer
 pub(crate) const MUX_INIT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+#[cfg(unix)]
 /// The error of a mux that accepted a connection and sent no init message within `after`. A type
 /// of its own so a caller (and a test) can read the bound that was applied instead of parsing it
 /// out of the message.
@@ -45,6 +47,7 @@ pub(crate) struct MuxInitTimeout {
     pub(crate) after: std::time::Duration,
 }
 
+#[cfg(unix)]
 impl std::fmt::Display for MuxInitTimeout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -55,6 +58,7 @@ impl std::fmt::Display for MuxInitTimeout {
     }
 }
 
+#[cfg(unix)]
 impl std::error::Error for MuxInitTimeout {}
 
 use super::call_hierarchy::supports_call_hierarchy;

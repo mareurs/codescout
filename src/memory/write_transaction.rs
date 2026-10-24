@@ -158,6 +158,7 @@ fn private_dir(path: &Path) -> Result<()> {
             path.display()
         ),
         Err(e) if e.kind() == ErrorKind::NotFound => {
+            #[cfg_attr(not(unix), allow(unused_mut))]
             let mut builder = std::fs::DirBuilder::new();
             #[cfg(unix)]
             {

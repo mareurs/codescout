@@ -747,6 +747,7 @@ async fn an_unpinned_write_with_no_project_keeps_its_protocol_error() {
 
 /// A server built with `debug = true`, which stores every call's input and output in the usage
 /// row, so a leak into the telemetry is visible to a test. Mirrors `make_server`.
+#[cfg_attr(not(unix), allow(dead_code))]
 async fn make_debug_server() -> (tempfile::TempDir, CodeScoutServer) {
     let dir = tempdir().unwrap();
     let codescout_dir = dir.path().join(".codescout");
