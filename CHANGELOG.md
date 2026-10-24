@@ -235,6 +235,22 @@ All notable changes to codescout are documented here.
 
 ### Changed
 
+- **`codescout backfill-chunks` reports its scope as `scope.abs_path_root`, not
+  `scope.abs_path_like`, and the value is a plain path.** The scoped run now selects rows at or
+  under the project root by exact comparison instead of `abs_path LIKE '<root>%'`, which had no
+  `/` boundary (`/x/app` also selected `/x/app2/...`), read `_` and `%` in the path as wildcards
+  and folded ASCII case, so a scoped run could embed a sibling project's artifacts and file their
+  vectors under the scoped one. **A script that reads `scope.abs_path_like` gets `null` and must
+  read `scope.abs_path_root`.** The cursor that resumes an interrupted scoped run is keyed by the
+  scope string, which no longer ends in `%`, so such a run restarts from the beginning once.
+  See `docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md`.
+
+- **An `append_entry` cite given as a rel_path is matched case-sensitively.** `resolve_cite_ref`
+  compared the path suffix with `LIKE`, which folds ASCII case, so a cite of `notes.md` resolved
+  to the row of `Notes.md` (and reported two case-variant files as ambiguous). It now resolves
+  only to the file whose path ends in exactly that spelling; a cite that matched by case alone
+  fails with `did not resolve`. A 16-hex id or a `<slug>:<local>` cite is unaffected.
+
 - **Writes are now refused when git worktrees exist and no project was chosen this
   session.** `guard_worktree_write` gated on `is_project_explicitly_activated`, which the
   `current_dir()` startup fallback sets in essentially every session — so the guard never

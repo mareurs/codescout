@@ -2504,13 +2504,16 @@ fn resolve_cite_ref(conn: &rusqlite::Connection, raw: &str) -> Result<String> {
             "append_entry: cite `{raw}` — no such entry (slug or local id not found)"
         )));
     }
-    // 3. rel_path suffix match — must resolve to exactly one artifact.
-    let escaped = crate::librarian::util::escape_like_pattern(raw);
-    let like = format!("%/{escaped}");
-    let mut stmt = conn
-        .prepare("SELECT id FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2 ESCAPE '\\'")?;
+    // 3. rel_path suffix match — must resolve to exactly one artifact. Byte-exact, not `LIKE`:
+    // `LIKE` folds ASCII case, so `notes.md` also named the row of `Notes.md` (and made a
+    // pair of them ambiguous). `substr` with a negative start takes the last N CHARACTERS and
+    // `length` counts characters, so the two agree for a non-ASCII path.
+    let suffix = format!("/{raw}");
+    let mut stmt = conn.prepare(
+        "SELECT id FROM artifact WHERE abs_path = ?1 OR substr(abs_path, -length(?2)) = ?2",
+    )?;
     let ids: Vec<String> = stmt
-        .query_map(rusqlite::params![raw, like], |r| r.get::<_, String>(0))?
+        .query_map(rusqlite::params![raw, suffix], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     match ids.len() {
         1 => Ok(ids.into_iter().next().unwrap()),
@@ -2952,9 +2955,21 @@ pub fn list_stale(
     if let Some(prefix) = abs_path_prefix {
         let prefix_s = crate::util::fs::RepoPath::from(prefix);
         if !prefix_s.as_str().is_empty() {
-            sql.push_str(&format!(" AND a.abs_path LIKE ?{idx}"));
-            params.push(Box::new(format!("{prefix_s}/%")));
-            idx += 1;
+            // Byte-exact "at or under this root", not `LIKE`: the project path's `_`/`%` were
+            // wildcards here (no `ESCAPE`) and ASCII case folded, so a sibling project's stale
+            // augmentations were listed under this one.
+            let (root, root_prefix) = crate::librarian::util::root_and_prefix(prefix_s.as_str());
+            sql.push_str(&format!(
+                " AND {}",
+                crate::librarian::util::path_at_or_under_sql(
+                    "a.abs_path",
+                    &format!("?{idx}"),
+                    &format!("?{}", idx + 1)
+                )
+            ));
+            params.push(Box::new(root));
+            params.push(Box::new(root_prefix));
+            idx += 2;
         }
     }
 
@@ -6408,5 +6423,80 @@ mod tests {
 
         let resolved = resolve_cite_ref(&cat.conn, "foo_bar.md").unwrap();
         assert_eq!(resolved, "underscore");
+    }
+
+    /// `LIKE` ignores ASCII case, and an `ESCAPE` clause cures only the wildcard half: a cite of
+    /// `notes.md` matched the row of `Notes.md` and, with both present, was reported ambiguous
+    /// instead of resolving to the file it names. The suffix comparison is byte-exact.
+    /// docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
+    #[test]
+    fn resolve_cite_ref_does_not_fold_case_in_a_rel_path() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("upper")
+                .with_abs_path("/x/Notes.md")
+                .build(),
+        )
+        .unwrap();
+
+        let err = resolve_cite_ref(&cat.conn, "notes.md").unwrap_err();
+        assert!(
+            err.to_string().contains("did not resolve"),
+            "a case-only sibling is not the file named, got: {err}"
+        );
+
+        art_upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("lower")
+                .with_abs_path("/x/notes.md")
+                .build(),
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_cite_ref(&cat.conn, "notes.md").unwrap(),
+            "lower",
+            "the exact-case row resolves; the case-only sibling is not a second match"
+        );
+        // The suffix still anchors at a `/`: `otes.md` is not a path component of either row.
+        assert!(resolve_cite_ref(&cat.conn, "otes.md").is_err());
+        // And a whole-path cite still resolves by equality.
+        assert_eq!(resolve_cite_ref(&cat.conn, "/x/Notes.md").unwrap(), "upper");
+    }
+
+    /// `list_stale`'s project filter is a path prefix. `LIKE` made `_`/`%` in the project's path
+    /// wildcards (no `ESCAPE` was given) and folded case, so a project at `/x/my_app` also listed
+    /// the stale augmentations of `/x/myXapp` and `/x/MY_APP`.
+    /// docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
+    #[test]
+    fn list_stale_scopes_to_the_project_path_exactly() {
+        let cat = Catalog::open_in_memory().unwrap();
+        for (id, path) in [
+            ("mine", "/x/my_app/docs/a.md"),
+            ("wild", "/x/myXapp/docs/a.md"),
+            ("case", "/x/MY_APP/docs/a.md"),
+            ("longer", "/x/my_app2/docs/a.md"),
+        ] {
+            art_upsert(
+                &cat,
+                &TestArtifactRowBuilder::new(id)
+                    .with_abs_path(path)
+                    .with_kind("tracker")
+                    .build(),
+            )
+            .unwrap();
+            upsert(&cat, &aug(id)).unwrap();
+        }
+
+        let listed = list_stale(
+            &cat,
+            "2999-01-01T00:00:00.000Z",
+            50,
+            Some(std::path::Path::new("/x/my_app")),
+        )
+        .unwrap();
+
+        let ids: Vec<&str> = listed.iter().map(|e| e.artifact_id.as_str()).collect();
+        assert_eq!(ids, vec!["mine"], "only rows under the project path");
     }
 }

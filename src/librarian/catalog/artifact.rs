@@ -493,6 +493,39 @@ pub fn delete(cat: &Catalog, id: &str) -> Result<bool> {
         > 0)
 }
 
+/// Whether `root` (as [`crate::librarian::util::root_and_prefix`] returns it: forward-slash form,
+/// no trailing `/`) names a whole filesystem, volume or share, with no path component below its
+/// anchor, so that "under it" selects every row of that volume and bounds no territory.
+///
+/// Covered spellings: `` (the POSIX root `/`), a drive (`C:`), a verbatim drive (`//?/C:`), a UNC
+/// server or share (`//server`, `//server/share`) and a verbatim UNC share
+/// (`//?/UNC/server/share`). A directory below any of them (`C:/proj`, `//server/share/dir`) is
+/// bounded. String-level on purpose, so it holds on a host where those spellings are not
+/// absolute paths.
+fn bounds_no_territory(root: &str) -> bool {
+    fn is_drive(s: &str) -> bool {
+        let b = s.as_bytes();
+        b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+    }
+    if root.is_empty() || is_drive(root) {
+        return true;
+    }
+    if let Some(rest) = root.strip_prefix("//?/UNC/") {
+        // `server` and `share` are the anchor.
+        return rest.split('/').filter(|c| !c.is_empty()).count() <= 2;
+    }
+    if root == "//?" {
+        return true;
+    }
+    if let Some(rest) = root.strip_prefix("//?/") {
+        return rest.is_empty() || is_drive(rest) || rest == "UNC";
+    }
+    if let Some(rest) = root.strip_prefix("//") {
+        return rest.split('/').filter(|c| !c.is_empty()).count() <= 2;
+    }
+    false
+}
+
 /// Delete rows whose `abs_path` is under one of `scope_roots` but **not** under
 /// any path in `active_roots`. Returns the number removed.
 ///
@@ -501,7 +534,17 @@ pub fn delete(cat: &Catalog, id: &str) -> Result<bool> {
 /// single machine-global catalog against the cross-workspace wipe (`3ea49090`):
 /// callers pass the active workspace's own roots as `scope_roots`, so the sweep
 /// can only prune within that workspace's territory. Empty `active_roots` or
-/// empty `scope_roots` is a no-op (returns 0) — never a `DELETE FROM artifact`.
+/// empty `scope_roots` is a no-op (returns 0) — never a `DELETE FROM artifact`. A scope that is
+/// a whole filesystem, volume or share (`/`, `C:/`, `//server/share`) bounds nothing and is
+/// ignored, so a call whose scope roots are all of that kind also returns 0.
+///
+/// Roots are compared as paths, byte-exact (`path_at_or_under_sql`), not as `LIKE` patterns.
+/// Three consequences are deliberate, and `delete_orphan_repos_treats_roots_as_paths_not_like_patterns`
+/// pins them: a row whose `abs_path` equals a scope root exactly is in scope; a case or wildcard
+/// variant of an active root (`/ws/my_app/LIVE` against `/ws/my_app/live`) is no longer kept as
+/// "under" it, so it is deleted when it is under the scope; and on a case-insensitive
+/// filesystem that means a row for a live directory the catalog spelled differently from the
+/// active root is deleted too.
 pub fn delete_orphan_repos(
     cat: &Catalog,
     active_roots: &[&std::path::Path],
@@ -516,32 +559,53 @@ pub fn delete_orphan_repos(
     }
     // Forward-slash normalize to match the form abs_paths are stored in
     // (artifact::upsert writes forward-slash via RepoPath). Without this, on
-    // Windows a LIKE pattern would use backslash and match NOTHING.
-    let scope_likes: Vec<String> = scope_roots
-        .iter()
-        .map(|p| format!("{}/%", crate::util::fs::RepoPath::from_path(p)))
-        .collect();
-    let active_likes: Vec<String> = active_roots
-        .iter()
-        .map(|p| format!("{}/%", crate::util::fs::RepoPath::from_path(p)))
-        .collect();
+    // Windows the roots would use backslash and match NOTHING.
+    //
+    // Each root binds as TWO parameters (the root, and the root plus one `/`) for
+    // `path_at_or_under_sql`: a byte-exact comparison, not `LIKE`. `LIKE` made `_` and `%` in a
+    // root wildcards and folded ASCII case, so a scope of `/ws/my_app` also selected, and this
+    // DELETE removed, the rows of `/ws/myXapp` and `/ws/MY_APP`.
+    let mut params: Vec<String> = Vec::new();
+    let mut clause = |roots: &[&std::path::Path], skip_filesystem_root: bool| -> Vec<String> {
+        let mut out = Vec::new();
+        for p in roots {
+            let (root, prefix) = crate::librarian::util::root_and_prefix(
+                crate::util::fs::RepoPath::from_path(p).as_str(),
+            );
+            // A whole filesystem or volume (`/` is `("", "/")`, `C:/` is `("C:", "C:/")`, a UNC
+            // share likewise: see `bounds_no_territory`) has every row of that volume under it. As
+            // a SCOPE that is the unbounded wipe this function exists to refuse, so it bounds
+            // nothing and is dropped. This is stricter than the `LIKE '<root>/%'` it replaced:
+            // that pattern read `/` as `//%`, which still matched rows spelled `//...` (UNC and
+            // `//?/` paths), and read `C:/` as `C://%`, which matched nothing.
+            if skip_filesystem_root && bounds_no_territory(&root) {
+                continue;
+            }
+            params.push(root);
+            params.push(prefix);
+            let n = params.len();
+            out.push(crate::librarian::util::path_at_or_under_sql(
+                "abs_path",
+                &format!("?{}", n - 1),
+                &format!("?{n}"),
+            ));
+        }
+        out
+    };
 
     // Delete rows that are UNDER some scope root but NOT under any active root.
     // The scope clause is the blast-radius guard: a row outside every scope root
     // is never matched, even when it is also outside every active root.
-    let in_scope: Vec<String> = (1..=scope_likes.len())
-        .map(|i| format!("abs_path LIKE ?{i}"))
-        .collect();
-    let under_active: Vec<String> = (scope_likes.len() + 1
-        ..=scope_likes.len() + active_likes.len())
-        .map(|i| format!("abs_path LIKE ?{i}"))
-        .collect();
+    let in_scope = clause(scope_roots, true);
+    if in_scope.is_empty() {
+        return Ok(0);
+    }
+    let under_active = clause(active_roots, false);
     let sql = format!(
         "DELETE FROM artifact WHERE ({}) AND NOT ({})",
         in_scope.join(" OR "),
         under_active.join(" OR "),
     );
-    let params: Vec<String> = scope_likes.into_iter().chain(active_likes).collect();
     let param_refs: Vec<&dyn rusqlite::ToSql> =
         params.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
     let n = cat
@@ -1023,6 +1087,127 @@ mod tests {
         let n = delete_orphan_repos(&cat, &[alive], &[]).unwrap();
         assert_eq!(n, 0, "empty scope is a no-op");
         assert!(get(&cat, "a1").unwrap().is_some());
+    }
+
+    /// Both lists are PATH roots, not patterns. Written as `LIKE '<root>/%'` a scope of
+    /// `/ws/my_app` also selected the rows of `/ws/myXapp` and `/ws/MY_APP` (`_` is a wildcard,
+    /// case folds) and so DELETED a sibling workspace's rows, and an active root of
+    /// `/ws/my_app/live` also kept `/ws/my_app/LIVE`'s. Byte-exact comparison: a row is in scope
+    /// only under the scope root itself, and kept only under an active root itself.
+    /// docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md
+    #[test]
+    fn delete_orphan_repos_treats_roots_as_paths_not_like_patterns() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let rows = [
+            ("live", "/ws/my_app/live/a.md", true),
+            ("dead", "/ws/my_app/dead/a.md", false),
+            // Case-only variant of the ACTIVE root: not under it, so it is an orphan.
+            ("live-case", "/ws/my_app/LIVE/a.md", false),
+            // Siblings of the SCOPE root: another workspace's rows, never touched.
+            ("wild", "/ws/myXapp/dead/a.md", true),
+            ("scope-case", "/ws/MY_APP/dead/a.md", true),
+            ("scope-longer", "/ws/my_app2/dead/a.md", true),
+        ];
+        for (id, path, _) in rows {
+            let mut r = sample(id);
+            r.abs_path = std::path::PathBuf::from(path);
+            upsert(&cat, &r).unwrap();
+        }
+
+        let removed = delete_orphan_repos(
+            &cat,
+            &[std::path::Path::new("/ws/my_app/live")],
+            &[std::path::Path::new("/ws/my_app")],
+        )
+        .unwrap();
+
+        for (id, path, kept) in rows {
+            assert_eq!(
+                get(&cat, id).unwrap().is_some(),
+                kept,
+                "{path}: expected kept={kept}"
+            );
+        }
+        assert_eq!(removed, 2, "exactly `dead` and `live-case`");
+    }
+
+    /// A scope that is the root of a whole filesystem or volume bounds nothing: every row under
+    /// it would be in scope, which is the unbounded wipe the function refuses (`3ea49090`). The
+    /// guard is on the SHAPE of the root, so each spelling a root takes is checked as a string
+    /// (a Windows drive root is a plain relative-looking path on Unix, and this must run there).
+    #[test]
+    fn delete_orphan_repos_refuses_a_scope_that_is_a_whole_filesystem_or_volume() {
+        for scope in [
+            "/",
+            "C:/",
+            "C:\\",
+            "//?/C:/",
+            "//server/share",
+            "//?/UNC/server/share/",
+        ] {
+            let cat = Catalog::open_in_memory().unwrap();
+            let rows = [
+                "/other/x.md",
+                "C:/other/x.md",
+                "//?/C:/other/x.md",
+                "//server/share/other/x.md",
+                "//?/UNC/server/share/other/x.md",
+            ];
+            for (i, path) in rows.iter().enumerate() {
+                let mut r = sample(&format!("r{i}"));
+                r.abs_path = std::path::PathBuf::from(path);
+                upsert(&cat, &r).unwrap();
+            }
+            let removed = delete_orphan_repos(
+                &cat,
+                &[std::path::Path::new("/ws/a")],
+                &[std::path::Path::new(scope)],
+            )
+            .unwrap();
+            assert_eq!(
+                removed, 0,
+                "scope {scope:?} bounds nothing and must delete nothing"
+            );
+            for (i, path) in rows.iter().enumerate() {
+                assert!(
+                    get(&cat, &format!("r{i}")).unwrap().is_some(),
+                    "scope {scope:?}: row {path} was deleted"
+                );
+            }
+        }
+    }
+
+    /// The guard's predicate on its own, so a spelling that is a root and one that merely looks
+    /// like one cannot be confused: `C:/proj` and `//server/share/dir` are bounded territories.
+    #[test]
+    fn a_root_with_no_component_below_its_prefix_is_not_a_bounded_scope() {
+        for root in [
+            "",
+            "C:",
+            "c:",
+            "//?/C:",
+            "//server/share",
+            "//server",
+            "//?/UNC/server/share",
+        ] {
+            assert!(
+                bounds_no_territory(root),
+                "{root:?} is a whole volume or share"
+            );
+        }
+        for root in [
+            "/ws",
+            "/ws/my_app",
+            "C:/proj",
+            "//?/C:/proj",
+            "//server/share/dir",
+            "//?/UNC/server/share/dir",
+        ] {
+            assert!(
+                !bounds_no_territory(root),
+                "{root:?} is a bounded directory"
+            );
+        }
     }
 
     #[test]
