@@ -187,6 +187,6 @@ The existing gate exits before testing in this Codex session because CLAUDE_CODE
 
 Two existing documentation conflicts are tracked in:
 - [Taxonomy destination conflict](../../issues/2026-10-08-taxonomy-archive-cadence-conflicts-with-ratified-policy.md)
-- [Retirement compaction conflict](../../issues/2026-10-08-tracker-hygiene-compaction-drops-citable-entry-headings.md)
+- [Retirement compaction conflict](../../issues/archive/2026-10-08-tracker-hygiene-compaction-drops-citable-entry-headings.md)
 
 [Work-stream reconnaissance log](../../trackers/tracker-archiving-session-log.md).

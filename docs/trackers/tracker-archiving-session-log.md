@@ -71,7 +71,7 @@ Every entry declares Status and Valid; preserve defining headings during archiva
 
 **Rests on:** the two live instruction surfaces read during this scout; no new archive operation was executed.
 
-**Fix idea / Pointer:** [Dedicated issue](../issues/2026-10-08-tracker-hygiene-compaction-drops-citable-entry-headings.md).
+**Fix idea / Pointer:** [Dedicated issue](../issues/archive/2026-10-08-tracker-hygiene-compaction-drops-citable-entry-headings.md).
 
 ## Design brief — 2026-10-09
 
