@@ -369,6 +369,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // because F-5 swallowed a failure silently, and the remedy — keep going, report
     // what broke — is identical here.
     let mut embed_errors: Vec<String> = Vec::new();
+    // External-store vector deletes that FAILED, one `<artifact id>: <error>` entry each. By the
+    // time a delete runs, `index_repo_sync` has already committed the row's removal, so a bare
+    // `?` here would strand the vectors of every id after the failing one (no row remains to
+    // trigger a retry), discard the counts, and skip every later target and the embed phase.
+    // Collected and reported instead, the same shape and for the same reason as `embed_errors`.
+    let mut vector_delete_errors: Vec<String> = Vec::new();
 
     let want_embeddings = ctx.embedding.is_some();
 
@@ -401,17 +407,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
         all_unknown_ids.extend(report.unknown_ids);
         total_reclaimed_escaping += report.reclaimed_escaping;
-        // The vectors of every escaping row, reclaimed or kept, leave the store with it: they were
-        // computed from bytes the read door now refuses (decision D4 for a kept row). On sqlite
-        // the chunk delete already took them through `artifact_vec_v2_cascade_delete`; an
-        // external store has no foreign keys, so it is told here.
+        // The vectors of every row the walk dropped, and of every KEPT escaping row, leave the
+        // store with it. `removed_ids` is every deleted row (a vanished file, a skipped duplicate,
+        // a reclaimed escaping row: `reclaimed_escaping_ids` is a subset of it). A kept escaping
+        // row still has its catalog row, so it is not in `removed_ids`, and its vectors were
+        // computed from bytes the read door now refuses (decision D4). On sqlite the chunk delete
+        // already took them through `artifact_vec_v2_cascade_delete`; an external store has no
+        // foreign keys, so it is told here. `indexer::index_repo` (the CLI) does the same for
+        // `removed_ids` only; it never tells the store about `escaping_kept_ids`.
         if let Some(store) = ctx.artifact_store.as_ref() {
             for id in report
-                .reclaimed_escaping_ids
+                .removed_ids
                 .iter()
                 .chain(report.escaping_kept_ids.iter())
             {
-                store.delete(id).await?;
+                if let Err(e) = store.delete(id).await {
+                    vector_delete_errors.push(format!("{id}: {e}"));
+                }
             }
         }
         reclaimed_escaping_ids.extend(report.reclaimed_escaping_ids);
@@ -737,6 +749,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // Capped at the same 20 as `unknown_sample`, and for the same reason: one
         // entry per queued artifact could be thousands. The COUNT is exact.
         "embed_errors": embed_errors.iter().take(20).collect::<Vec<_>>(),
+        "vector_delete_error_count": vector_delete_errors.len(),
+        // Capped at 20 like `embed_errors`; the COUNT is exact.
+        "vector_delete_errors": vector_delete_errors.iter().take(20).collect::<Vec<_>>(),
+        "vector_delete_note": if vector_delete_errors.is_empty() {
+            Value::Null
+        } else {
+            json!(format!(
+                "{} external-store vector delete(s) FAILED. The catalog row of each is already \
+                 gone and nothing will retry, so those vectors are ORPHANED in the external \
+                 store (answered by KNN, unresolvable at hydration) until removed by hand. \
+                 The ids are in `vector_delete_errors`.",
+                vector_delete_errors.len()
+            ))
+        },
         // Name the ambiguous case out loud rather than leaving the caller to
         // infer it from a bare `unchanged: N`.
         // A partial embed is the case worth naming first: the catalog IS refreshed
@@ -1012,6 +1038,350 @@ mod tests {
              collection while reporting success."
         );
     }
+    /// `librarian(reindex)` must drop the external-store vectors of a row whose file vanished.
+    ///
+    /// `index_repo_sync` drops the catalog row and reports its id in `IndexReport.removed_ids`;
+    /// only an async caller can tell the vector store, because its `delete` is async. The CLI
+    /// path (`indexer::index_repo`) does. This tool read `reclaimed_escaping_ids` and
+    /// `escaping_kept_ids` but never `removed_ids`, so on a Qdrant-backed install the points of
+    /// every vanished file stayed behind: answered by KNN, unresolvable at hydration. sqlite-vec
+    /// hides it (the `artifact_chunk` cascade takes them), which is why the in-memory store, with
+    /// no foreign keys, is the right fixture.
+    /// `docs/issues/2026-10-18-librarian-reindex-drops-a-vanished-rows-catalog-entry-but-never-its-external-store-vectors.md`
+    ///
+    /// Asserts the SURVIVORS keep their vectors too: a sweep that deleted every id, or selected
+    /// rows by path prefix, would pass a vanished-file-only assertion.
+    #[tokio::test]
+    async fn a_vanished_file_has_its_vectors_dropped_from_the_external_store() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+
+        struct OkEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for OkEmbedder {
+            fn dimensions(&self) -> usize {
+                4
+            }
+            async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0, 0.0]).collect())
+            }
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let proj = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        std::fs::create_dir_all(proj.join("docs/specs")).unwrap();
+        std::fs::write(proj.join("docs/specs/keep.md"), "# Keep\nbody\n").unwrap();
+        std::fs::write(proj.join("docs/specs/gone.md"), "# Gone\nbody\n").unwrap();
+        // Shares a path prefix with `gone.md`: it catches a fix that selects the rows to delete by
+        // path prefix. (An id prefix cannot collide: ids are fixed-length sha256 hex.)
+        std::fs::write(proj.join("docs/specs/gone-not.md"), "# Gone not\nbody\n").unwrap();
+
+        let rules =
+            load_rules("[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n").unwrap();
+        let store = std::sync::Arc::new(InMemoryArtifactStore::default());
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_rules(rules)
+            .with_current_project(std::sync::Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: proj.clone(),
+                    git_root: proj.clone(),
+                    main_root: None,
+                    umbrella: None,
+                },
+            ))
+            .with_embedding(std::sync::Arc::new(
+                crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(OkEmbedder)),
+            ))
+            .with_artifact_store(store.clone())
+            .build();
+
+        let id_of = |name: &str| {
+            crate::librarian::ids::artifact_id_from_abs(&proj.join("docs/specs").join(name))
+        };
+        let (keep, gone, gone_not) = (id_of("keep.md"), id_of("gone.md"), id_of("gone-not.md"));
+
+        call(&ctx, json!({"scope": "project"})).await.unwrap();
+        assert!(
+            store.chunks_under(&gone) > 0
+                && store.chunks_under(&keep) > 0
+                && store.chunks_under(&gone_not) > 0,
+            "precondition: all three files have vectors in the store, or the assertions below \
+             are vacuous"
+        );
+
+        std::fs::remove_file(proj.join("docs/specs/gone.md")).unwrap();
+        let v = call(&ctx, json!({"scope": "project"})).await.unwrap();
+
+        assert_eq!(
+            v["removed"].as_u64().unwrap(),
+            1,
+            "test setup: exactly the vanished file's row is dropped"
+        );
+        assert_eq!(
+            store.chunks_under(&gone),
+            0,
+            "vectors survived their artifact -- returned by KNN, unresolvable at hydration"
+        );
+        assert!(
+            store.chunks_under(&keep) > 0,
+            "a surviving file lost its vectors"
+        );
+        assert!(
+            store.chunks_under(&gone_not) > 0,
+            "a file sharing the vanished file's name prefix lost its vectors"
+        );
+    }
+    /// An external store whose `delete` FAILS for chosen artifact ids and otherwise behaves as
+    /// the in-memory store. A real Qdrant outage is transient and per call, which a store that
+    /// always fails cannot model: the point is that ids AFTER the failing one are still told.
+    struct FlakyDeleteStore {
+        inner: Arc<crate::librarian::artifact_store::test_support::InMemoryArtifactStore>,
+        failing: std::collections::HashSet<String>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::librarian::artifact_store::ArtifactVectorStore for FlakyDeleteStore {
+        async fn upsert(
+            &self,
+            project_id: &str,
+            chunk_id: &str,
+            artifact_id: &str,
+            vector: &[f32],
+        ) -> Result<()> {
+            self.inner
+                .upsert(project_id, chunk_id, artifact_id, vector)
+                .await
+        }
+
+        async fn delete(&self, artifact_id: &str) -> Result<()> {
+            if self.failing.contains(artifact_id) {
+                anyhow::bail!("qdrant unavailable");
+            }
+            self.inner.delete(artifact_id).await
+        }
+
+        async fn refile(&self, old_artifact_id: &str, new_artifact_id: &str) -> Result<u64> {
+            self.inner.refile(old_artifact_id, new_artifact_id).await
+        }
+
+        async fn knn(
+            &self,
+            project_id: Option<&str>,
+            query: &[f32],
+            k: usize,
+        ) -> Result<Vec<(String, f32)>> {
+            self.inner.knn(project_id, query, k).await
+        }
+    }
+
+    /// A context with no current project (so `call` reindexes every root) that embeds into
+    /// `store`. Rule: every `docs/specs/*.md` is a spec.
+    fn external_store_ctx(
+        roots: &[(&str, &std::path::Path)],
+        store: Arc<dyn crate::librarian::artifact_store::ArtifactVectorStore>,
+    ) -> ToolContext {
+        struct UnitEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for UnitEmbedder {
+            fn dimensions(&self) -> usize {
+                4
+            }
+            async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0, 0.0]).collect())
+            }
+        }
+        let rules =
+            load_rules("[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n").unwrap();
+        let mut b = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap());
+        for (name, path) in roots {
+            b = b.with_root(Root {
+                name: (*name).into(),
+                path: path.to_path_buf(),
+            });
+        }
+        b.with_rules(rules)
+            .with_embedding(Arc::new(
+                crate::librarian::embedding::EmbeddingService::new(Arc::new(UnitEmbedder)),
+            ))
+            .with_artifact_store(store)
+            .build()
+    }
+
+    /// A failed external-store delete must not abort the reindex.
+    ///
+    /// By the time the store is told, `index_repo_sync` has already COMMITTED the row's removal,
+    /// so nothing remains to trigger a retry. A bare `?` on the delete therefore stranded the
+    /// vectors of every id after the failing one, lost the counts, and skipped every later
+    /// target and the embed phase, with the caller seeing only an error. The failures are
+    /// collected and reported, the way `embed_errors` are
+    /// (`docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md`).
+    ///
+    /// Two targets, and the failing ids are the first and third of three vanished files in the
+    /// first target: the id between them, and the vanished file of the SECOND target, must still
+    /// be deleted. The failing ids' vectors must still be there, or the injection did nothing.
+    #[tokio::test]
+    async fn a_failed_vector_delete_is_reported_and_does_not_abort_the_reindex() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+
+        let tmp = TempDir::new().unwrap();
+        let base = std::fs::canonicalize(tmp.path()).unwrap();
+        let (one, two) = (base.join("one"), base.join("two"));
+        for (root, files) in [
+            (&one, &["gone1.md", "gone2.md", "gone3.md", "keep.md"][..]),
+            (&two, &["gone.md", "keep.md"][..]),
+        ] {
+            std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+            for f in files {
+                std::fs::write(root.join("docs/specs").join(f), format!("# {f}\nbody\n")).unwrap();
+            }
+        }
+        let id_of = |root: &std::path::Path, name: &str| {
+            crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs").join(name))
+        };
+        let (fail1, ok2, fail3) = (
+            id_of(&one, "gone1.md"),
+            id_of(&one, "gone2.md"),
+            id_of(&one, "gone3.md"),
+        );
+        let (two_gone, one_keep, two_keep) = (
+            id_of(&two, "gone.md"),
+            id_of(&one, "keep.md"),
+            id_of(&two, "keep.md"),
+        );
+
+        let inner = Arc::new(InMemoryArtifactStore::default());
+        let store = Arc::new(FlakyDeleteStore {
+            inner: inner.clone(),
+            failing: [fail1.clone(), fail3.clone()].into_iter().collect(),
+        });
+        let ctx = external_store_ctx(&[("one", &one), ("two", &two)], store);
+
+        let first = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            first["vector_delete_error_count"].as_u64().unwrap(),
+            0,
+            "a run that deletes nothing reports no failures"
+        );
+        assert!(
+            first["vector_delete_note"].is_null(),
+            "no failures, no note: {}",
+            first["vector_delete_note"]
+        );
+        for id in [&fail1, &ok2, &fail3, &two_gone, &one_keep, &two_keep] {
+            assert!(
+                inner.chunks_under(id) > 0,
+                "precondition: every file has vectors in the store, or the assertions below are \
+                 vacuous"
+            );
+        }
+
+        for (root, name) in [
+            (&one, "gone1.md"),
+            (&one, "gone2.md"),
+            (&one, "gone3.md"),
+            (&two, "gone.md"),
+        ] {
+            std::fs::remove_file(root.join("docs/specs").join(name)).unwrap();
+        }
+        let v = call(&ctx, json!({})).await.expect(
+            "a failed vector delete must not fail the whole reindex: the catalog rows are \
+             already gone and the counts must reach the caller",
+        );
+
+        assert_eq!(
+            v["removed"].as_u64().unwrap(),
+            4,
+            "the rows of BOTH targets are dropped; the second target is the one an abort skips"
+        );
+        assert_eq!(v["vector_delete_error_count"].as_u64().unwrap(), 2);
+        let mut reported: Vec<String> = v["vector_delete_errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| {
+                let e = e.as_str().unwrap();
+                assert!(
+                    e.ends_with(": qdrant unavailable"),
+                    "an entry names its cause: {e}"
+                );
+                e.split(": ").next().unwrap().to_string()
+            })
+            .collect();
+        reported.sort();
+        let mut expected = vec![fail1.clone(), fail3.clone()];
+        expected.sort();
+        assert_eq!(reported, expected, "exactly the failing ids are reported");
+        let note = v["vector_delete_note"].as_str().unwrap();
+        assert!(
+            note.contains("ORPHANED") && note.contains("nothing will retry"),
+            "the note names the consequence: {note}"
+        );
+
+        assert_eq!(
+            inner.chunks_under(&ok2),
+            0,
+            "an id AFTER a failed delete was never told: the loop stopped at the first error"
+        );
+        assert_eq!(
+            inner.chunks_under(&two_gone),
+            0,
+            "the second target's vanished file kept its vectors"
+        );
+        assert!(
+            inner.chunks_under(&fail1) > 0 && inner.chunks_under(&fail3) > 0,
+            "test setup: the injected failures must leave their vectors behind"
+        );
+        assert!(
+            inner.chunks_under(&one_keep) > 0 && inner.chunks_under(&two_keep) > 0,
+            "a surviving file lost its vectors"
+        );
+    }
+
+    /// A row dropped as an in-root symlink ALIAS (keyed `sha256(link path)`) takes only its OWN
+    /// vectors: the file it points at keeps its.
+    ///
+    /// Built the way the real state arises: `alias.md` is indexed as a regular file, then replaced
+    /// by a link back to `real.md`, whose row the walk now drops as a duplicate name.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dropping_a_symlink_alias_row_leaves_its_targets_vectors() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+
+        let tmp = TempDir::new().unwrap();
+        let proj = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        std::fs::create_dir_all(proj.join("docs/specs")).unwrap();
+        std::fs::write(proj.join("docs/specs/real.md"), "# Real\nbody\n").unwrap();
+        std::fs::write(proj.join("docs/specs/alias.md"), "# Alias\nother body\n").unwrap();
+
+        let store = Arc::new(InMemoryArtifactStore::default());
+        let ctx = external_store_ctx(&[("proj", &proj)], store.clone());
+        let real = crate::librarian::ids::artifact_id_from_abs(&proj.join("docs/specs/real.md"));
+        let alias = crate::librarian::ids::artifact_id_from_abs(&proj.join("docs/specs/alias.md"));
+
+        call(&ctx, json!({})).await.unwrap();
+        let real_chunks = store.chunks_under(&real);
+        assert!(
+            real_chunks > 0 && store.chunks_under(&alias) > 0,
+            "precondition: both files have vectors, or the assertions below are vacuous"
+        );
+
+        std::fs::remove_file(proj.join("docs/specs/alias.md")).unwrap();
+        std::os::unix::fs::symlink("real.md", proj.join("docs/specs/alias.md")).unwrap();
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            v["removed"].as_u64().unwrap(),
+            1,
+            "test setup: the alias row, and only it, is dropped as a duplicate name"
+        );
+        assert_eq!(v["vector_delete_error_count"].as_u64().unwrap(), 0);
+        assert_eq!(store.chunks_under(&alias), 0, "the alias kept its vectors");
+        assert_eq!(
+            store.chunks_under(&real),
+            real_chunks,
+            "dropping the alias took its target's vectors"
+        );
+    }
+
     /// A long re-embed must tell its CALLER it is alive.
     ///
     /// Before the librarian `ToolContext` carried a progress reporter this was not a
