@@ -5137,12 +5137,21 @@ mod tests {
             upsert(&cat, &a).unwrap();
         }
 
-        let path1 = path.clone();
-        let path2 = path.clone();
+        // Both connections are opened HERE, one after the other, and only the appends race. Opening
+        // is setup, not the property under test: `Catalog::open` runs schema and trigger DDL, with
+        // fsync'd commits, under the write lock, so two opens racing inside the 5 s busy_timeout
+        // fail with "applying schema: database is locked" once the host's commits are slow
+        // (docs/issues/2026-10-18-append-entry-concurrency-test-failed-once-with-database-is-locked-in-catalog-open.md).
+        // The barrier releases both appends together, which maximises the chance they overlap
+        // (it cannot force an interleaving).
+        let mut cat1 = Catalog::open(&path).unwrap();
+        let mut cat2 = Catalog::open(&path).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let b1 = barrier.clone();
         let h1 = std::thread::spawn(move || {
-            let mut cat = Catalog::open(&path1).unwrap();
+            b1.wait();
             append_entry(
-                &mut cat,
+                &mut cat1,
                 "art1",
                 "failures",
                 "F",
@@ -5153,9 +5162,9 @@ mod tests {
             .unwrap()
         });
         let h2 = std::thread::spawn(move || {
-            let mut cat = Catalog::open(&path2).unwrap();
+            barrier.wait();
             append_entry(
-                &mut cat,
+                &mut cat2,
                 "art1",
                 "failures",
                 "F",
@@ -5475,14 +5484,21 @@ mod tests {
             art_upsert(&cat, &art).unwrap();
         }
 
-        let (p1, p2) = (db.clone(), db.clone());
+        // Both connections are opened HERE, before the race: `Catalog::open` is setup and fails with
+        // "applying schema: database is locked" when two opens collide on a slow host (see
+        // `append_entry_serializes_across_independent_connections_to_same_file`). Only the
+        // allocations race, released together by the barrier.
+        let mut cat1 = Catalog::open(&db).unwrap();
+        let mut cat2 = Catalog::open(&db).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let b1 = barrier.clone();
         let h1 = std::thread::spawn(move || {
-            let mut cat = Catalog::open(&p1).unwrap();
-            allocate_entry_id(&mut cat, "art1", "R", None).unwrap().id
+            b1.wait();
+            allocate_entry_id(&mut cat1, "art1", "R", None).unwrap().id
         });
         let h2 = std::thread::spawn(move || {
-            let mut cat = Catalog::open(&p2).unwrap();
-            allocate_entry_id(&mut cat, "art1", "R", None).unwrap().id
+            barrier.wait();
+            allocate_entry_id(&mut cat2, "art1", "R", None).unwrap().id
         });
 
         let mut ids = vec![h1.join().unwrap(), h2.join().unwrap()];

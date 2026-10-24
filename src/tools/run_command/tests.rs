@@ -1087,8 +1087,6 @@ async fn execute_shell_command_timeout_is_enforced() {
 
 #[cfg(unix)]
 use crate::tools::progress::test_support::CountingSink;
-#[cfg(unix)]
-use std::sync::atomic::Ordering;
 
 #[cfg(unix)]
 async fn project_ctx_with_progress(
@@ -1122,15 +1120,88 @@ async fn project_ctx_with_progress(
 #[cfg(unix)]
 #[tokio::test]
 async fn run_command_heartbeat_emits_progress_text() {
-    // The heartbeat task fires report_text("Xs elapsed") every 3s.
-    // We use a 5s sleep with a 6s timeout so at least one heartbeat fires.
-    let (_dir, ctx, sink) = project_ctx_with_progress().await;
-    let _ = RunCommand
-        .call(json!({"command": "sleep 5", "timeout_secs": 6}), &ctx)
-        .await;
+    // The heartbeat task fires report_text("Ns elapsed") every 3s, N being whole seconds since it
+    // started. The test keeps the TEXTS, waits for two of them, and checks both what they say and
+    // how far apart they are, so a wrong interval or wrong text fails here too, not only a silent
+    // heartbeat.
+    //
+    // The command is held open until the test has SEEN two heartbeats, so the assertion cannot
+    // depend on how long the host takes. A fixed `sleep 5` under a 6s timeout raced the command's
+    // exit against the first tick: when the process stalled past the command's end, the call
+    // returned first and dropped the heartbeat task before its tick ever ran (measured: a
+    // 5.5s SIGSTOP/SIGCONT stall failed 6 of 6 runs of that shape). `timeout_secs` and the 20s
+    // wait below are only upper bounds for a heartbeat that is dead or too slow, not the pass
+    // condition.
+    //
+    // Why the bounds hold under load: a tokio sleep never returns early and `elapsed` is
+    // floored, so the first tick reports N1 >= 3 and, the second sleep starting after the first
+    // report, floor(t + 3) >= floor(t) + 3 gives N2 - N1 >= 3.
+    struct TextSink(std::sync::Mutex<Vec<String>>);
+    #[async_trait::async_trait]
+    impl crate::tools::progress::ProgressSink for TextSink {
+        async fn emit_progress(
+            &self,
+            _step: f64,
+            _total: Option<f64>,
+            _token: &rmcp::model::NumberOrString,
+        ) {
+        }
+        async fn emit_text(&self, text: &str) {
+            self.0.lock().unwrap().push(text.to_string());
+        }
+    }
+
+    let (dir, mut ctx, _counting) = project_ctx_with_progress().await;
+    let sink = std::sync::Arc::new(TextSink(std::sync::Mutex::new(Vec::new())));
+    ctx.progress = Some(crate::tools::progress::ProgressReporter::with_sink(
+        sink.clone(),
+        rmcp::model::NumberOrString::Number(1),
+    ));
+    let release = dir.path().join("release-heartbeat-test");
+    let command = format!(
+        "while [ ! -e '{}' ]; do sleep 0.05; done",
+        release.display()
+    );
+    let call = RunCommand.call(json!({"command": command, "timeout_secs": 120}), &ctx);
+    let observe_then_release = async {
+        let seen_two = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            while sink.0.lock().unwrap().len() < 2 {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .is_ok();
+        // Release unconditionally so the command ends and the call returns either way.
+        std::fs::write(&release, "").unwrap();
+        seen_two
+    };
+    let (result, seen_two) = tokio::join!(call, observe_then_release);
+    let result = result.unwrap();
     assert!(
-        sink.text_calls.load(Ordering::Relaxed) >= 1,
-        "expected at least 1 report_text() from run_command heartbeat"
+        result["exit_code"] == 0,
+        "the held-open command must finish normally once released: {result}"
+    );
+    let texts = sink.0.lock().unwrap().clone();
+    assert!(
+        seen_two,
+        "expected at least 2 report_text() heartbeats from run_command within 20s, got {texts:?}"
+    );
+    let secs: Vec<u64> = texts
+        .iter()
+        .take(2)
+        .map(|t| {
+            t.strip_suffix("s elapsed")
+                .and_then(|n| n.parse().ok())
+                .unwrap_or_else(|| panic!("heartbeat text is not \"<N>s elapsed\": {t:?}"))
+        })
+        .collect();
+    assert!(
+        secs[0] >= 3,
+        "the first heartbeat must come after the 3s interval, not early: {texts:?}"
+    );
+    assert!(
+        secs[1] - secs[0] >= 3,
+        "consecutive heartbeats must be at least 3s apart: {texts:?}"
     );
 }
 

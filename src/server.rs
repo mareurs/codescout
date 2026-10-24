@@ -13527,6 +13527,14 @@ mod guide_hint_tests {
         let activate = |dir: &tempfile::TempDir| json!({"action": "activate", "path": dir.path(), "read_only": false});
 
         let (home, server) = make_server().await;
+        // The "rapid switch" verdict is decided by wall-clock time between two activations. Install
+        // a window no loaded host can outlast, so a slow second activation cannot turn the notice
+        // this test asserts into silence. The pure `concurrent_switch_warning` tests pin only that
+        // a switch well inside a window warns and one far outside it does not; neither the `<`
+        // boundary nor the production 5 s constant is pinned by them.
+        server
+            .agent
+            .set_activation_window_for_test(std::time::Duration::from_secs(24 * 3600));
         let (f1, f2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
 
         // 1. The parent (unstamped) activates a foreign root, as the documented
@@ -13676,6 +13684,11 @@ mod guide_hint_tests {
     #[tokio::test]
     async fn a_subagent_switching_projects_by_id_is_reported_to_the_parent() {
         let (home, server) = make_server_with_subproject().await;
+        // See the first subagent-notice test: pin the window so wall-clock delay between the two
+        // activations cannot decide the verdict.
+        server
+            .agent
+            .set_activation_window_for_test(std::time::Duration::from_secs(24 * 3600));
         let activate = |path: &str| json!({"action": "activate", "path": path, "read_only": false});
 
         // The parent activates home explicitly, as an ordinary session does; it moves
