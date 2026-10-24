@@ -426,7 +426,13 @@ pub(crate) fn unexported_count(conn: &Connection, repo_root: &Path) -> Result<i6
 /// A missing or unreadable `.gitattributes` is treated as "not opted in", not
 /// as an error — most repos simply have not adopted `.codescout/audit/` yet.
 pub(crate) fn gitattributes_declares_shard_union(repo_root: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(repo_root.join(".gitattributes")) else {
+    // Through the read door: a `.gitattributes` that resolves outside the repository is refused.
+    // `text_for_write` also refuses ANY leaf link, an in-repo one too: git never honours a
+    // symlinked `.gitattributes` (`merge: unspecified`, "Too many levels of symbolic links"), so
+    // such a file is not an opt-in and the shards would be merged as plain text. Both refusals
+    // read as not opted in.
+    let door = crate::librarian::read_door::for_project(repo_root);
+    let Ok(text) = door.text_for_write(&repo_root.join(".gitattributes")) else {
         return false;
     };
     text.lines().any(|line| {
@@ -739,7 +745,8 @@ pub(crate) struct ShardRead {
     pub files_skipped_by_window: usize,
     /// Shard files that parsed as a shard name, survived the window, but
     /// could not be read (permissions, race with a concurrent writer, a
-    /// symlink to nowhere). Counted separately from `malformed` — malformed
+    /// symlink to nowhere, or the read door's refusal: a file that resolves
+    /// outside the repository). Counted separately from `malformed` — malformed
     /// is a bad *line* inside a file we did read; this is a whole file we
     /// never got to look at, and conflating them would hide which one it is.
     pub unreadable_files: usize,
@@ -782,6 +789,10 @@ pub(crate) fn read_shards(
         return Ok(out); // never exported, or a fresh clone: an empty read.
     };
     let mut seen: std::collections::HashSet<(String, i64)> = Default::default();
+    // A shard is repository content: a repository can commit its name as a link to any file the
+    // user can read, so it is read through the read door, which refuses a file that resolves
+    // outside the repository.
+    let door = crate::librarian::read_door::for_project(repo_root);
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().to_string();
         let Some((file_host, month)) = host::parse_shard_file_name(&name) else {
@@ -794,10 +805,11 @@ pub(crate) fn read_shards(
             out.files_skipped_by_window += 1;
             continue;
         }
-        let Ok(body) = std::fs::read_to_string(e.path()) else {
+        let Ok(body) = door.text(&e.path()) else {
             // A file whose NAME parsed as a valid shard but whose CONTENTS we
             // could not read (permissions, a race with a concurrent writer, a
-            // dangling symlink) must not vanish silently — that would under-count
+            // dangling symlink, a link out of the repository: the door refuses
+            // it) must not vanish silently — that would under-count
             // `files_read` against what the directory listing promised with no
             // signal anywhere that a file was dropped.
             out.unreadable_files += 1;
@@ -2315,6 +2327,112 @@ mod tests {
             "not conflated with a bad LINE inside a file we did read"
         );
         assert_eq!(r.rows.len(), 0);
+    }
+    // Issue 2026-10-18: a shard is repository content, so a repository can commit its name as a
+    // link to any file the user can read. The reader must not follow a link out of the
+    // repository: the target's rows must not be merged in, and the file must be REPORTED as not
+    // read. The links are made inside tempdirs, never under the real `.codescout/`.
+    #[cfg(unix)]
+    #[test]
+    fn a_shard_that_is_a_link_out_of_the_repository_is_refused_and_counted() {
+        let repo = tempfile::tempdir().unwrap();
+        // A repository root of its own: without one the door's root is the nearest `.git` above
+        // TMPDIR, and an ancestor repository would make the sibling `outside` dir count as inside.
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("foreign-log.jsonl");
+        std::fs::write(&target, foreign_line(1, 1_788_220_800_000, "leaked")).unwrap();
+        let dir = super::super::host::audit_dir(repo.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::os::unix::fs::symlink(&target, dir.join("otherbox-99ffee-202609.jsonl")).unwrap();
+
+        let r = read_shards(repo.path(), &Default::default(), "me-000000").unwrap();
+        assert!(
+            r.rows.is_empty(),
+            "a row of a file outside the repository was merged in: {r:?}"
+        );
+        assert_eq!(r.files_read, 0, "never counted as read: {r:?}");
+        assert_eq!(r.unreadable_files, 1, "the refusal is REPORTED: {r:?}");
+        assert!(r.hosts.is_empty(), "no coverage from the outside file");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_shard_directory_that_is_a_link_out_of_the_repository_is_refused_and_counted() {
+        let repo = tempfile::tempdir().unwrap();
+        // A repository root of its own (see the sibling test): an ancestor repository of TMPDIR
+        // must not widen the door's root.
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(
+            outside.path().join("otherbox-99ffee-202609.jsonl"),
+            foreign_line(1, 1_788_220_800_000, "leaked"),
+        )
+        .unwrap();
+        let dir = super::super::host::audit_dir(repo.path());
+        std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &dir).unwrap();
+
+        let r = read_shards(repo.path(), &Default::default(), "me-000000").unwrap();
+        assert!(r.rows.is_empty(), "rows from outside the repo: {r:?}");
+        assert_eq!(r.files_read, 0, "{r:?}");
+        assert_eq!(r.unreadable_files, 1, "the refusal is REPORTED: {r:?}");
+    }
+
+    /// The control: the door's leaf rule reads a link that resolves INSIDE the repository, because
+    /// its bytes are the repository's own.
+    #[cfg(unix)]
+    #[test]
+    fn a_shard_that_is_a_link_inside_the_repository_is_still_read() {
+        let repo = tempfile::tempdir().unwrap();
+        // A repository root of its own: an ancestor repository of TMPDIR must not move the root.
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let dir = super::super::host::audit_dir(repo.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        let real = repo.path().join("kept-elsewhere.jsonl");
+        std::fs::write(&real, foreign_line(1, 1_788_220_800_000, "inside")).unwrap();
+        std::os::unix::fs::symlink(&real, dir.join("otherbox-99ffee-202609.jsonl")).unwrap();
+
+        let r = read_shards(repo.path(), &Default::default(), "me-000000").unwrap();
+        assert_eq!(r.rows.len(), 1, "{r:?}");
+        assert_eq!(r.unreadable_files, 0, "{r:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_gitattributes_that_is_a_link_out_of_the_repository_is_not_an_opt_in() {
+        let repo = tempfile::tempdir().unwrap();
+        // A repository root of its own: an ancestor repository of TMPDIR must not widen the root.
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("attrs");
+        std::fs::write(&target, ".codescout/audit/*.jsonl merge=union\n").unwrap();
+        std::os::unix::fs::symlink(&target, repo.path().join(".gitattributes")).unwrap();
+        assert!(
+            !gitattributes_declares_shard_union(repo.path()),
+            "a declaration read through a link out of the repository must not count"
+        );
+    }
+    /// git never honours a symlinked `.gitattributes` (`merge: unspecified`), so a link to an
+    /// IN-repository file that holds the union line is not an opt-in either, although the read
+    /// door's leaf rule would admit its bytes.
+    #[cfg(unix)]
+    #[test]
+    fn a_gitattributes_that_is_a_link_inside_the_repository_is_not_an_opt_in() {
+        let repo = tempfile::tempdir().unwrap();
+        // A repository root of its own: an ancestor repository of TMPDIR must not move the root.
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let real = repo.path().join("attrs-real");
+        std::fs::write(&real, ".codescout/audit/*.jsonl merge=union\n").unwrap();
+        std::os::unix::fs::symlink(&real, repo.path().join(".gitattributes")).unwrap();
+        assert!(
+            !gitattributes_declares_shard_union(repo.path()),
+            "git ignores a symlinked .gitattributes, so it must not count as an opt-in"
+        );
+        // Control: the same bytes as a plain file are an opt-in.
+        std::fs::remove_file(repo.path().join(".gitattributes")).unwrap();
+        std::fs::copy(&real, repo.path().join(".gitattributes")).unwrap();
+        assert!(gitattributes_declares_shard_union(repo.path()));
     }
 
     #[test]

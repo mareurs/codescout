@@ -923,27 +923,17 @@ mod tests {
         ("catalog/audit/host.rs", "/etc/hostname", 1, "the host name"),
         (
             "catalog/audit/shard.rs",
-            "std::fs::read_to_string(repo_root.join(\".gitattributes\"))",
-            1,
-            "audit shard I/O is out of this fix's scope (filed separately)",
-        ),
-        (
-            "catalog/audit/shard.rs",
             "std::fs::OpenOptions::new()",
             1,
-            "audit shard I/O is out of this fix's scope (filed separately)",
+            "the export's append-mode open of a shard (write side; `.read(true)` is only for the \
+             Windows lock, no content is read); writing through a committed link is tracked in \
+             docs/issues/2026-10-17-doc-update-writes-through-a-catalogued-symlink-and-rewrites-a-file-outside-the-root.md",
         ),
         (
             "catalog/audit/shard.rs",
             "std::fs::File::open(&dir)",
             1,
             "audit shard I/O is out of this fix's scope: an fsync of a directory, no content",
-        ),
-        (
-            "catalog/audit/shard.rs",
-            "std::fs::read_to_string(e.path())",
-            1,
-            "audit shard I/O is out of this fix's scope (filed separately)",
         ),
     ];
 
