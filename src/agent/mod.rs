@@ -110,6 +110,12 @@ pub struct Agent {
     #[cfg(test)]
     pub(crate) code_search_override:
         Arc<std::sync::Mutex<Option<Arc<dyn crate::retrieval::search::CodeChunkSearch>>>>,
+    /// Test-only replacement for [`Agent::CONCURRENT_ACTIVATION_WINDOW`]. The guard decides on
+    /// wall-clock time between two activations, which a test cannot control; a test that needs
+    /// the "rapid" verdict installs a window no loaded host can outlast instead of racing the
+    /// real 5 s. Test-gated so the production struct is unchanged.
+    #[cfg(test)]
+    pub(crate) activation_window_override: Arc<std::sync::Mutex<Option<std::time::Duration>>>,
 }
 
 pub struct AgentInner {
@@ -1037,6 +1043,8 @@ impl Agent {
             test_seen_client_embedder: Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(test)]
             code_search_override: Arc::new(std::sync::Mutex::new(None)),
+            #[cfg(test)]
+            activation_window_override: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -1537,8 +1545,14 @@ impl Agent {
             .last_activation
             .as_ref()
             .map(|(p, at, s)| (p.as_path(), at.elapsed(), s.as_deref()));
-        let warning =
-            Self::concurrent_switch_warning(prev, root, caller, Self::CONCURRENT_ACTIVATION_WINDOW);
+        let window = Self::CONCURRENT_ACTIVATION_WINDOW;
+        #[cfg(test)]
+        let window = self
+            .activation_window_override
+            .lock()
+            .unwrap()
+            .unwrap_or(window);
+        let warning = Self::concurrent_switch_warning(prev, root, caller, window);
         // What the default was BEFORE this activation: the previous record's root,
         // else the home project the server started on. Re-activating the root that is
         // already the default moves nothing, so it is not a displacement.
@@ -2792,6 +2806,15 @@ impl Agent {
         search: Arc<dyn crate::retrieval::search::CodeChunkSearch>,
     ) {
         *self.code_search_override.lock().unwrap() = Some(search);
+    }
+
+    /// Replace the concurrent-activation window for this agent (see
+    /// `activation_window_override`). A test of "a switch INSIDE the window" passes
+    /// a window far beyond any scheduling delay, so the verdict no longer depends on how
+    /// long the host takes between two activations.
+    #[cfg(test)]
+    pub fn set_activation_window_for_test(&self, window: std::time::Duration) {
+        *self.activation_window_override.lock().unwrap() = Some(window);
     }
 }
 
