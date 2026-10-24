@@ -177,11 +177,29 @@ change, not a field addition.
      session it writes the MAIN checkout's file (filed:
      `docs/issues/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`),
      and the result names what was written, not what should have been. Pinned per rel kind, in
-     and out of a worktree session.
+     and out of a worktree session. **Superseded by Amendment 2026-10-24 below for the
+     `supersedes` destination in a worktree session**; the rest of this item holds.
   6. The row is looked up AFTER the write, which takes the catalog lock a second time. A
      `merge_worktree` or abandon landing in that window makes the result name the main row's
      path or none. Cosmetic: the answer is advisory and routing does not depend on which it
      names.
+
+## Amendment 2026-10-24 — a `supersedes` destination goes through the overlay, and is named through it
+
+- **Status:** accepted; corrects item 5 of the 2026-10-17 amendment. **Trigger:**
+  `docs/issues/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`.
+- **What now holds.** `link::call` resolves a `supersedes` link's destination with
+  `resolve_write_target` before writing it, as it already did the source. From a worktree session
+  the destination is forked into its overlay shadow and `status: superseded` is written to the
+  SHADOW copy at the worktree path; the main checkout's file is untouched until `merge_worktree`.
+  So the result now names the shadow path (`name_the_target` resolves `dst_id` through
+  `peek_write_target` like every other write; the `through_overlay` flag it needed while the
+  destination was named "as passed" is gone). Outside a worktree session nothing changes: the
+  destination's own path is named. A plain link is unchanged (source, through the overlay). The
+  link edge, the `superseded_by` event payload and `superseded.id` in the result still carry the
+  `dst_id` the caller passed. Pinned by
+  `link::tests::supersedes_from_a_worktree_session_writes_the_shadow_and_not_the_main_file` and,
+  for the naming, `a_link_names_the_row_whose_file_it_wrote_for_each_rel_in_and_out_of_a_worktree`.
 
 ## Sites (initial)
 

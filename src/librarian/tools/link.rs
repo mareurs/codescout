@@ -28,13 +28,14 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a = parse_args(args)?;
     let now = chrono::Utc::now().timestamp_millis();
+    let superseding = a.rel == "supersedes";
 
     // The catalog lock is SCOPED here rather than held across the body, because
     // `write_field_to_frontmatter` below acquires it itself and `parking_lot::Mutex` is
     // not reentrant — holding it across that call deadlocks rather than failing. Same
     // shape as `event_create::call`, which takes the lock in narrow blocks for exactly
     // this reason.
-    let (src_id, dst) = {
+    let (src_id, dst_write_id, dst) = {
         let mut cat = ctx.catalog.lock();
         let src_id = super::worktree::resolve_write_target(&mut cat, ctx, &a.src_id)?;
 
@@ -44,13 +45,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 src_id
             )));
         }
-        let dst = artifact::get(&cat, &a.dst_id)?.ok_or_else(|| {
+        // A `supersedes` link WRITES the destination's frontmatter, so the destination goes
+        // through the same overlay gate as the source: from a worktree session the write lands
+        // on its shadow and never on the main checkout's file. A plain link writes only an
+        // edge, whose destination stays the id the caller passed.
+        let dst_write_id = if superseding {
+            super::worktree::resolve_write_target(&mut cat, ctx, &a.dst_id)?
+        } else {
+            a.dst_id.clone()
+        };
+        let dst = artifact::get(&cat, &dst_write_id)?.ok_or_else(|| {
             LibrarianRecoverableError::new(format!("dst artifact `{}` not found", a.dst_id))
         })?;
-        (src_id, dst)
+        (src_id, dst_write_id, dst)
     };
 
-    let superseding = a.rel == "supersedes";
     let previous_status = dst.status.clone();
 
     // FILE BEFORE CATALOG, and the order is load-bearing. This project declares the file
@@ -61,7 +70,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if superseding {
         crate::librarian::tools::update::write_field_to_frontmatter(
             ctx,
-            &a.dst_id,
+            &dst_write_id,
             "status",
             &json!("superseded"),
         )?;
@@ -157,6 +166,90 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string()
+    }
+
+    /// The worktree overlay's promise is that a session in a linked worktree never writes the
+    /// shared main checkout. A `supersedes` link writes its DESTINATION's frontmatter, so the
+    /// destination goes through the same gate as the source: the write lands on the overlay
+    /// shadow at the worktree path, and the main checkout's file is untouched.
+    ///
+    /// Asserts both halves on disk (main file unchanged, shadow file changed) and the catalog
+    /// row the write recorded, because a test that checked only "main is unchanged" would pass
+    /// for a link that wrote nowhere. Both files exist: in a real worktree the shadow path holds
+    /// git's checkout copy of the main file.
+    /// docs/issues/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md
+    #[tokio::test]
+    async fn supersedes_from_a_worktree_session_writes_the_shadow_and_not_the_main_file() {
+        use crate::librarian::current_project::CurrentProject;
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let wt = repo.join(".worktrees/feat");
+        let draft = "---\nstatus: draft\n---\nbody\n";
+        for root in [&repo, &wt] {
+            std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+            std::fs::write(root.join("docs/specs/other.md"), draft).unwrap();
+        }
+        let main_dst_path = repo.join("docs/specs/other.md");
+        let shadow_dst_path = wt.join("docs/specs/other.md");
+        let src_path = repo.join("docs/trackers/t.md");
+
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: wt.clone(),
+                git_root: wt.clone(),
+                main_root: Some(repo.clone()),
+                umbrella: None,
+            }))
+            .build();
+        let src = crate::librarian::ids::artifact_id_from_abs(&src_path);
+        let dst = crate::librarian::ids::artifact_id_from_abs(&main_dst_path);
+        {
+            let cat = ctx.catalog.lock();
+            for (id, path, kind) in [(&src, &src_path, "tracker"), (&dst, &main_dst_path, "spec")] {
+                artifact::upsert(
+                    &cat,
+                    &TestArtifactRowBuilder::new(id)
+                        .with_abs_path(path.to_str().unwrap())
+                        .with_kind(kind)
+                        .build(),
+                )
+                .unwrap();
+            }
+        }
+        let main_status_before = artifact::get(&ctx.catalog.lock(), &dst)
+            .unwrap()
+            .unwrap()
+            .status;
+
+        call(
+            &ctx,
+            json!({"src_id": src, "dst_id": dst, "rel": "supersedes"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&main_dst_path).unwrap(),
+            draft,
+            "a worktree session must not write the main checkout's destination file"
+        );
+        let shadow = std::fs::read_to_string(&shadow_dst_path).unwrap();
+        assert!(
+            shadow.contains("status: superseded"),
+            "the destination's shadow file must carry the transition, got:\n{shadow}"
+        );
+        let cat = ctx.catalog.lock();
+        let shadow_id = crate::librarian::ids::artifact_id_from_abs(&shadow_dst_path);
+        let shadow_row = artifact::get(&cat, &shadow_id)
+            .unwrap()
+            .expect("the destination was forked into a shadow row");
+        assert_eq!(shadow_row.status, "superseded");
+        assert_eq!(
+            artifact::get(&cat, &dst).unwrap().unwrap().status,
+            main_status_before,
+            "the main row is merge_worktree's to move, not the link's"
+        );
     }
 
     /// Asserts the **file**, not the catalog row.
