@@ -1,16 +1,16 @@
 ---
-id: '99b56275f0439c09'
+id: 19f657b84d232f18
 kind: bug
-status: open
+status: fixed
 title: the Windows lib-test build fails because a mux test reads constants that exist only on Unix
 owners:
 - marius
 tags:
 - cluster/repro-env-diverges-from-gate-env
-closed: null
+closed: 2026-10-24
 opened: 2026-10-23
 severity: medium
-unverified: The cfg of three of the four constants was not read, and no Windows build was run here.
+unverified: 'STANDING no Windows runner here: the lib tests compile and lint for x86_64-pc-windows-gnu (verified 2026-10-24) but were not run on Windows. Earlier caveat, settled: the cfg of all four constants was read; each is #[cfg(unix)].'
 ---
 
 # BUG: the Windows lib-test build fails because a mux test reads constants that exist only on Unix
@@ -50,16 +50,27 @@ Read 2026-10-23: `src/lsp/manager.rs:603` declares `MUX_INIT_READ_MIN` under `#[
 1. **Hypothesis:** the capture work caused it. **Test:** the baseline run for `b1fde55c0` predates the capture and shows 4 `E0425` errors in the same job. **Verdict:** rejected.
 
 ## Fix
-Not started. One candidate: mark the test `#[cfg(unix)]`, like the constants. The owner of the mux code decides.
+
+Fixed 2026-10-24 in `40f33bad6` (experiments). Read at the source: all four constants are `#[cfg(unix)]` (`MUX_SPAWNED_CONNECT_WINDOW`, `MUX_CONNECT_RETRY_INTERVAL`, `MUX_CONNECT_ROUNDS`, `MUX_INIT_READ_MIN`), and so is `MUX_INIT_READ_TIMEOUT` after the same commit. The test `the_mux_connect_constants_have_the_values_the_docs_quote` in `src/lsp/manager.rs` is now `#[cfg(unix)]` like the constants it reads.
+
+With that fix the Windows lib-test build gets past the four `E0425` errors, and 52 dead-code errors that they had hidden appear. They are fixed in the same commit with `cfg_attr(not(unix), allow(dead_code))` (a module-level one in `src/tools/run_command/tests.rs`); the commit message says so. The sibling bug `docs/issues/archive/2026-10-24-the-windows-clippy-lane-fails-on-dead-code-and-an-unused-mut-that-exist-only-on-windows.md` covers the lib-side errors.
 
 ## Tests added
-N/A until the fix exists.
+
+No new test: the failure was a compile error, and the regression check is the build itself. `scripts/build-windows.sh clippy --all-targets -- -D warnings` (it builds the lib tests for `x86_64-pc-windows-gnu`) fails before `40f33bad6` and finishes with exit 0 after it. `./scripts/gate.sh` on a clean detached worktree of `40f33bad6` exited 0 (lean 5253 passed, default 7895 passed, Python 1274 passed). No test was run on Windows.
 
 ## Workarounds
 None. Windows CI cannot gate lib tests until it is fixed.
 
 ## Resume
-Open `src/lsp/manager.rs` around lines 584-603 and 3168-3178. Check the `cfg` on all four constants, then gate the test the same way. Verify with a Windows lib-test build or the CI job `Test (windows-latest / no-features)`.
+
+Closed. Nothing to resume. The CI job `Test (windows-latest / no-features)` is the first place these tests will actually run on Windows.
+
+
+## Fix provenance
+
+- **SHA:** `40f33bad6b52764f7dd1a70d9bfb48517c33f28b` (`experiments`)
+- **patch-id:** `442c8136824ec7eb4fb27b69bb544aa9ef52765b`
 
 ## References
 CI runs 39915517190 and 39574468685. Related capture-test bug: `docs/issues/archive/2026-10-23-capture-feature-tests-assume-a-bash-sh-and-gnu-seq-and-fail-on-ubuntu-and-macos-ci.md`. Mux issues that quote these constants: `docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md`.
