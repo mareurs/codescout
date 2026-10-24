@@ -106,6 +106,15 @@ Not applied. The replicates show that excluding the worktrees alone does not cle
 
 Recommended order, confidence medium: (1) the hint change now (no protocol change, safe); (2) `excludeDirs` at both sites with a live-server test per mode; (3) the progress wait only if (2) leaves failures. This needs a plan and live rust-analyzer tests, so it is not started in the session that filed the bug.
 
+
+**Step 2 applied 2026-10-24 (see the commit that cites this file): partial, measured.** New `src/lsp/init_options.rs` sends rust-analyzer `initializationOptions` `files.excludeDirs` at BOTH `initialize` sites (`LspClient::start`, and the mux handshake in `src/lsp/mux/process.rs`). Other servers get none. Wire tests record the `initialize` params a fake server receives, for both sites; with the options dropped at either site the matching test fails with `left: Null`.
+
+The first version excluded each registered nested worktree (`list_git_worktrees`; 43 of 50 once the mutation-probe slots it skips are removed). Measured with the probe on a cold rust-analyzer, same file, no other load from this session: the null window was still **31.3 s** (0.893 s to 32.198 s), no better than the default (33.6 to 54.1 s). Cause, from the directory contents and not re-measured per directory: `.claude/worktrees` and `.worktrees` hold trees that are not registered, and the skipped `mutation-slot-N` trees, and those are most of the files.
+
+The rule was changed: a registered worktree whose parent directory is named `worktrees` or `.worktrees` is excluded as that parent, whole; any other parent (`crates`, `vendor`) never is. For this repo that is `['.claude/worktrees', '.worktrees']`. Measured with that list: **15.3 s** (0.689 s to 16.0 s) and **7.6 s** (0.769 s to 8.343 s), n = 2. That is a cut of 2x to 7x against the default, and **both runs are still above the 5 s cold-start budget**. The spread between the two runs is large and its cause is not found.
+
+So this bug stays open: `references` and `symbols` can still fail on a cold start in a repo like this one. What remains is step 3 of the assessment above (wait on rust-analyzer's `Roots Scanned` progress instead of a fixed 5 s), or a longer cold budget, which costs latency for a symbol that truly has no references. Not started.
+
 ## Tests added
 
 None.

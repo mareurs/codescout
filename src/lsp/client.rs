@@ -677,7 +677,12 @@ impl LspClient {
         };
 
         // Perform the LSP initialize handshake
-        client.initialize().await?;
+        client
+            .initialize(crate::lsp::init_options::for_workspace(
+                &config.command,
+                &config.workspace_root,
+            ))
+            .await?;
 
         Ok(client)
     }
@@ -981,7 +986,7 @@ impl LspClient {
     /// Retries on -32800 (RequestCancelled) because JVM-based servers like
     /// kotlin-lsp may return this during early JVM bootstrap before they're
     /// ready to handle the initialize request.
-    async fn initialize(&self) -> Result<()> {
+    async fn initialize(&self, initialization_options: Option<Value>) -> Result<()> {
         let root_uri = path_to_uri(&self.workspace_root)?;
 
         let params = lsp_types::InitializeParams {
@@ -1007,6 +1012,7 @@ impl LspClient {
                 }),
                 ..Default::default()
             },
+            initialization_options,
             workspace_folders: Some(vec![lsp_types::WorkspaceFolder {
                 uri: root_uri,
                 name: self
@@ -2035,6 +2041,53 @@ struct Point {
 
         client.shutdown().await.unwrap();
         assert!(!client.is_alive());
+    }
+    /// The `initialize` params a fake server received when `LspClient::start` ran it as
+    /// `command_name` in a repository with one linked worktree nested inside it (`.worktrees/wt`).
+    #[cfg(unix)]
+    async fn initialize_params_seen_by_a_fake_server(command_name: &str) -> serde_json::Value {
+        let server = crate::lsp::init_options::test_support::fake_server(command_name);
+        let client = LspClient::start(LspServerConfig {
+            command: server.command.to_string_lossy().into_owned(),
+            args: server.args.clone(),
+            workspace_root: server.workspace.clone(),
+            init_timeout: Some(std::time::Duration::from_secs(10)),
+            mux: false,
+            env: vec![],
+            idle_timeout_secs: None,
+        })
+        .await
+        .expect("the fake server should start");
+        client.shutdown().await.unwrap();
+        server
+            .recorded_params()
+            .expect("the fake server recorded the initialize params")
+    }
+
+    /// rust-analyzer scans every directory under the root, so a linked worktree nested in the
+    /// project multiplies the scan and keeps `documentSymbol` answering null for tens of seconds.
+    /// `initialize` must tell it to leave those directories alone.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn initialize_excludes_nested_worktrees_for_rust_analyzer() {
+        let params = initialize_params_seen_by_a_fake_server("rust-analyzer").await;
+        assert_eq!(
+            params["initializationOptions"],
+            serde_json::json!({"files": {"excludeDirs": [".worktrees"]}}),
+            "initialize params were: {params}"
+        );
+    }
+
+    /// `files.excludeDirs` is a rust-analyzer setting. Any other server must get no
+    /// `initializationOptions` at all (not `null`), as before.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn initialize_sends_no_options_to_another_server() {
+        let params = initialize_params_seen_by_a_fake_server("some-other-server").await;
+        assert!(
+            params.get("initializationOptions").is_none(),
+            "initialize params were: {params}"
+        );
     }
 
     #[tokio::test]

@@ -3,6 +3,7 @@
 
 pub mod client;
 pub mod client_ops;
+pub(crate) mod init_options;
 pub mod manager;
 pub mod manager_provider;
 pub mod mock;

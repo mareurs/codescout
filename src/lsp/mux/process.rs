@@ -162,7 +162,7 @@ pub async fn run(
     }
 
     // 3. LSP initialize handshake
-    let init_request = json!({
+    let mut init_request = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "method": "initialize",
@@ -192,6 +192,11 @@ pub async fn run(
             "rootUri": url::Url::from_file_path(workspace_root).map(|u| u.to_string()).unwrap_or_default()
         }
     });
+    // The same options `LspClient::start` sends for a server it spawns itself, so a workspace
+    // behaves alike with and without the mux. Omitted, not `null`, when there are none.
+    if let Some(options) = crate::lsp::init_options::for_workspace(server_command, workspace_root) {
+        init_request["params"]["initializationOptions"] = options;
+    }
 
     {
         let mut w = server_writer.lock().await;
@@ -1245,6 +1250,46 @@ mod tests {
             cache.len(),
             1,
             "identical re-registration must not grow the replay cache"
+        );
+    }
+
+    /// The mux sends its OWN `initialize`, a JSON literal and not `LspClient::initialize`, so the
+    /// nested-worktree exclusion has to be in that literal too. Without it a workspace would scan
+    /// its worktrees through the mux and not without it. The fake server records what it received.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_mux_handshake_excludes_nested_worktrees_for_rust_analyzer() {
+        let server = crate::lsp::init_options::test_support::fake_server("rust-analyzer");
+        let socket = server._dir.path().join("mux.sock");
+        let lock = server._dir.path().join("mux.lock");
+        let (workspace, command, args) = (
+            server.workspace.clone(),
+            server.command.to_string_lossy().into_owned(),
+            server.args.clone(),
+        );
+        let mux =
+            tokio::spawn(
+                async move { run(&socket, &lock, &workspace, 60, &command, &args, &[]).await },
+            );
+
+        // The handshake is the first thing the mux does after spawning the server.
+        let params = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            loop {
+                if let Some(params) = server.recorded_params() {
+                    return params;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("the mux sent no initialize to the fake server within 20 s");
+        // Dropping the future drops the child (`kill_on_drop`).
+        mux.abort();
+
+        assert_eq!(
+            params["initializationOptions"],
+            json!({"files": {"excludeDirs": [".worktrees"]}}),
+            "the mux's initialize params were: {params}"
         );
     }
 
