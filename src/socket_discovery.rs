@@ -170,7 +170,7 @@ mod tests {
 /// The runtime directory holds the peer, mux and index-lock sockets, so it must be a directory
 /// only this user can write to. Every case here passes the inputs as parameters
 /// ([`runtime_dir_from`]), never through the process environment.
-/// (`docs/issues/2026-10-17-per-user-runtime-dir-trusts-a-predictable-name-in-a-shared-temp-directory-without-owner-mode-or-symlink-checks.md`)
+/// (`docs/issues/archive/2026-10-17-per-user-runtime-dir-trusts-a-predictable-name-in-a-shared-temp-directory-without-owner-mode-or-symlink-checks.md`)
 #[cfg(all(test, unix))]
 mod runtime_dir_trust {
     use super::*;

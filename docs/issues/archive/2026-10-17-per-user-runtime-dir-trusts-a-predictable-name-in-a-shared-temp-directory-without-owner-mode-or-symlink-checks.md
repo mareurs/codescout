@@ -1,13 +1,14 @@
 ---
-status: open
-opened: 2026-10-17
-closed:
-severity: medium
-owner: marius
-related: [docs/issues/2026-10-17-attribution-helper-runs-python-from-a-predictable-shared-temp-directory.md]
+kind: bug
+status: fixed
 tags:
 - cluster/unclassified
-kind: bug
+closed: 2026-10-24
+opened: 2026-10-17
+owner: marius
+related:
+- docs/issues/2026-10-17-attribution-helper-runs-python-from-a-predictable-shared-temp-directory.md
+severity: medium
 ---
 
 # BUG: `per_user_runtime_dir` trusts `$TMPDIR/codescout-<uid>` and `$XDG_RUNTIME_DIR` without checking owner, mode or symlink, and the peer, mux and index-lock sockets live in it
@@ -78,7 +79,9 @@ None needed.
 
 ## Fix
 
-Applied 2026-10-24 in the working tree, NOT committed (no fix SHA or patch-id yet).
+Fixed 2026-10-24. Fix SHA (experiments): `8d1bd4917e2bd22947bebfaa5bc5a05f1c0239eb`. Patch-id (`git show <sha> | git patch-id --stable`): `6f2bd8b2b5fece6d05896f2db884f9f4e3a15708`.
+
+Verified on the committed bytes in a clean detached worktree of `ccf9e54ef` (no peer work): `./scripts/gate.sh` exited 0 with the lean lane at 5248 passed and the default lane at 7890 passed, 0 failed, and the Python lane at 1274 passed. The gate on the shared tree had been red only because of a peer's uncommitted `src/tools/grep.rs`.
 
 The operator chose to refuse with an error. In detail:
 
@@ -112,11 +115,13 @@ Use a per-user `TMPDIR` (for example under `$XDG_RUNTIME_DIR`), which also avoid
 
 ## Resume
 
-The code and tests are done in the working tree and uncommitted. To close this bug:
+Closed. Nothing to resume. The behaviour change (a non-private `XDG_RUNTIME_DIR` is refused with an error) is in the commit message of the fix SHA above.
 
-1. Get a green `./scripts/gate.sh` once the peer's `src/tools/grep.rs` work is committed or parked.
-2. Run `scripts/build-windows.sh clippy --all-targets -- -D warnings`. The only error from this change (an unused `DirRefusal` import) is fixed. The remaining errors are in code this change does not touch (see the Windows lib-test bug).
-3. Commit with the sequence in `docs/conventions/shared-checkout-commit-sequence.md`, then set `status: fixed` and cite the fix by SHA and patch-id as `docs/RELEASE.md` requires.
+
+## Fix provenance
+
+- **SHA:** `8d1bd4917e2bd22947bebfaa5bc5a05f1c0239eb` (`experiments`)
+- **patch-id:** `6f2bd8b2b5fece6d05896f2db884f9f4e3a15708`
 
 ## References
 
