@@ -1,13 +1,15 @@
 ---
-status: open
-opened: 2026-10-24
-closed:
-severity: low
-owner: marius
-related: [docs/issues/2026-10-23-the-windows-lib-test-build-fails-because-a-mux-test-reads-constants-that-exist-only-on-unix.md]
+kind: bug
+status: fixed
 tags:
 - cluster/unclassified
-kind: bug
+closed: 2026-10-24
+opened: 2026-10-24
+owner: marius
+related:
+- docs/issues/archive/2026-10-23-the-windows-lib-test-build-fails-because-a-mux-test-reads-constants-that-exist-only-on-unix.md
+severity: low
+unverified: 'STANDING no Windows runner here: the lib and its tests compile and lint for x86_64-pc-windows-gnu (verified 2026-10-24) but were not run on Windows. The allow(dead_code) attributes on non-Unix builds hide real dead code in the files they cover.'
 ---
 
 # BUG: the Windows clippy lane fails on dead code and an unused `mut` that exist only on Windows
@@ -59,11 +61,19 @@ None.
 
 ## Fix
 
-Not applied. For each item either gate the definition with `#[cfg(unix)]` or add the Windows reader. For the `mut`, gate the binding on `cfg(unix)` or use `#[cfg_attr(not(unix), allow(unused_mut))]`.
+Fixed 2026-10-24 in `40f33bad6` (experiments).
+
+- `src/lsp/client.rs`: `#[cfg(unix)]` on `MUX_INIT_READ_TIMEOUT`, `MuxInitTimeout` and its `Display` and `Error` impls. Their only reader, `LspClient::connect`, is `#[cfg(unix)]`.
+- `src/lsp/manager.rs`: `#[cfg(unix)]` on the field `mux_wedged_at` and its initializer. Its readers are in the unix-only `get_or_start_via_mux_waiting`.
+- `src/memory/write_transaction.rs`: `#[cfg_attr(not(unix), allow(unused_mut))]` on the `DirBuilder`, which only the Unix branch mutates.
+
+The cause named in Root cause held for all four lib errors: a definition compiled on Windows whose only readers are Unix-only. The root-cause note that this was not checked against a baseline stays true; the fix does not depend on it.
+
+Beyond the four lib errors, 52 dead-code errors appeared once the lib tests compiled (see the sibling bug about the `E0425` lib-test build). They were fixed in the same commit with `cfg_attr(not(unix), allow(dead_code))`: a module-level attribute in `src/tools/run_command/tests.rs` for 49 helpers, and one each on two test-seam fields in `src/lsp/manager.rs`, on `make_debug_server` and on `SECRET`. This hides real dead code on Windows in those files.
 
 ## Tests added
 
-N/A: filed, not fixed.
+No new test: the failure was a lint error, and the regression check is the lane itself. `scripts/build-windows.sh clippy --all-targets -- -D warnings` failed with 4 lib errors before `40f33bad6` and finishes with exit 0 after it. `./scripts/gate.sh` on a clean detached worktree of `40f33bad6` exited 0 (lean 5253 passed, default 7895 passed, Python 1274 passed). No test was run on Windows.
 
 ## Workarounds
 
@@ -71,9 +81,15 @@ None known. The errors do not affect Unix builds.
 
 ## Resume
 
-Read each item's use sites (`references`), decide gate-versus-reader per item, and check with `scripts/build-windows.sh clippy --all-targets -- -D warnings` together with the sibling bug's fix.
+Closed. Nothing to resume.
+
+
+## Fix provenance
+
+- **SHA:** `40f33bad6b52764f7dd1a70d9bfb48517c33f28b` (`experiments`)
+- **patch-id:** `442c8136824ec7eb4fb27b69bb544aa9ef52765b`
 
 ## References
 
-- `docs/issues/2026-10-23-the-windows-lib-test-build-fails-because-a-mux-test-reads-constants-that-exist-only-on-unix.md`
+- `docs/issues/archive/2026-10-23-the-windows-lib-test-build-fails-because-a-mux-test-reads-constants-that-exist-only-on-unix.md`
 - `src/lsp/client.rs:38`, `src/lsp/manager.rs:109`, `src/memory/write_transaction.rs:161`
