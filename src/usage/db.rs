@@ -4,8 +4,17 @@ use std::path::Path;
 
 pub fn open_db(project_root: &Path) -> Result<Connection> {
     let path = project_root.join(".codescout").join("usage.db");
+    // Create `.codescout/` ONLY, never the root above it: `create_dir_all` over a root that was
+    // deleted under a running call re-created the project (and a pinned one with it). A missing
+    // root is `NotFound` here, and the caller's recording is best-effort. `create_dir` is also
+    // atomic against the delete, where an `is_dir` check before `create_dir_all` is not.
+    // docs/issues/2026-10-19-a-pinned-directory-deleted-during-a-call-is-recreated-by-the-write-or-the-usage-recorder.md
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        match std::fs::create_dir(parent) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && parent.is_dir() => {}
+            Err(e) => return Err(e.into()),
+        }
     }
     let conn = Connection::open(&path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -1333,6 +1342,29 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let conn = open_db(dir.path()).unwrap();
         (dir, conn)
+    }
+
+    /// `open_db` creates `<root>/.codescout/`, never `<root>` itself: a project root that was
+    /// deleted under a running call must stay deleted, because `create_dir_all` over the
+    /// missing parent chain re-created it (and a pinned project with it).
+    /// docs/issues/2026-10-19-a-pinned-directory-deleted-during-a-call-is-recreated-by-the-write-or-the-usage-recorder.md
+    #[test]
+    fn open_db_does_not_recreate_a_deleted_project_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("gone");
+        assert!(open_db(&root).is_err(), "no root, so no database");
+        assert!(
+            !root.exists(),
+            "open_db re-created the missing project root"
+        );
+    }
+
+    /// The counterpart: an existing root without a `.codescout/` still gets one.
+    #[test]
+    fn open_db_still_creates_the_codescout_dir_under_an_existing_root() {
+        let dir = tempfile::tempdir().unwrap();
+        open_db(dir.path()).unwrap();
+        assert!(dir.path().join(".codescout").join("usage.db").exists());
     }
 
     #[test]

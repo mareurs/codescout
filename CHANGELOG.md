@@ -387,6 +387,30 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **A pinned (`workspace=`) memory call wrote into the session default project's state.**
+  Its vectors went to the default project's `.codescout/embeddings/<name>.memories.db` (one
+  store built once from the default root and never rebuilt, so also after an `activate`), and
+  were embedded with the default project's model. Under the sqlite-vec backend the store is
+  now resolved per call from that call's own root, and the memory embedder follows the
+  resolved root's embedding config (url, model, dimension pin, key), shared between projects
+  with an identical config. The Qdrant backend keeps its single collection and, with it, the
+  default embedder for every root (a second model would be rejected on dimension or mix
+  embedding spaces in that collection). `onboarding`'s `## User Preferences` section reads the
+  same per-call store. Also: the usage recorder (`open_db`) no longer re-creates a project
+  root that was deleted under a running call. Other `create_dir_all` sites still can:
+  `write_utf8` (`create_file`, `src/util/fs.rs`), `MemoryStore::from_dir`/`open`,
+  `WriteTransaction::prepare`, the write-lock file, and `sqlite_vec_ext::open_conn` — which,
+  because the sqlite memory store is now built per call, runs on every memory call and so
+  widens that window.
+- **Local ONNX model cache moved out of the working directory.** fastembed's default cache is
+  the relative `.fastembed_cache`, so the first model load created that directory beside
+  wherever the server was started. Weights now go to `<user cache dir>/codescout/fastembed`
+  (`$XDG_CACHE_HOME` or `~/.cache` on Linux, `~/Library/Caches` on macOS, `%LOCALAPPDATA%` on
+  Windows; the temp dir when there is none). `FASTEMBED_CACHE_DIR` still replaces that default
+  when set and non-empty, and `HF_HOME`, when set, replaces both (fastembed prefers it), so
+  **users with `HF_HOME` set are unaffected**. **Upgrade note:** otherwise, weights already in a
+  `.fastembed_cache` are not found; the model downloads once into the new location, or set
+  `FASTEMBED_CACHE_DIR` to the old directory to keep using it.
 - **The dimension-migration backup was a `fs::copy` of a WAL-mode catalog, so it silently
   omitted everything committed since the last checkpoint.** `catalog.db` is opened
   `journal_mode = WAL`; the main `.db` file holds only checkpointed pages, and the rest lives

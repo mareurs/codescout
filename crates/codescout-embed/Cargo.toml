@@ -13,7 +13,8 @@ description = "Shared embedding primitives for codescout + librarian-mcp"
 # Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
 remote-embed = ["dep:reqwest", "dep:rustls"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
-# First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
+# First use downloads the chosen model (~20-300MB) to `<user cache dir>/codescout/fastembed`
+# (`FASTEMBED_CACHE_DIR` overrides; `HF_HOME`, when set, replaces both — fastembed prefers it).
 # Two ONNX backends — mutually exclusive, pick one:
 #   local-embed         — static prebuilt ONNX Runtime (linux/macos/windows-msvc).
 #   local-embed-dynamic — runtime-loaded onnxruntime.dll via the C ABI; required on
@@ -22,12 +23,14 @@ remote-embed = ["dep:reqwest", "dep:rustls"]
 #                         Drops the image-models tree (codescout embeds text only).
 local-embed = [
     "dep:fastembed",
+    "dep:dirs",
     "fastembed/ort-download-binaries-native-tls",
     "fastembed/hf-hub-native-tls",
     "fastembed/image-models",
 ]
 local-embed-dynamic = [
     "dep:fastembed",
+    "dep:dirs",
     "fastembed/ort-load-dynamic",
     "fastembed/hf-hub-native-tls",
 ]
@@ -49,6 +52,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring"], opti
 # off so the ONNX backend (download-binaries vs load-dynamic) is selected by the
 # local-embed / local-embed-dynamic features above.
 fastembed = { version = "5", optional = true, default-features = false }
+# Per-user cache directory for the downloaded model weights (local-embed only).
+dirs = { version = "5", optional = true }
 
 [dev-dependencies]
 # Serialize tests that mutate the process-global EMBED_API_KEY env var

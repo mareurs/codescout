@@ -462,10 +462,9 @@ jobs:
 
       # from_dir_matches_the_hub_path_for_the_same_model also builds an embedder
       # via the hub path (LocalEmbedder::new), which pulls AllMiniLM-L6-v2-Q into
-      # fastembed's own cache — FASTEMBED_CACHE_DIR if set, else `.fastembed_cache`
-      # relative to CWD (Cargo runs codescout-embed's own test binary from that
-      # package's directory, not the workspace root — see the .gitignore fix in
-      # this same PR). Left unset, that's a second, uncached ~22MB download per
+      # fastembed's own cache — FASTEMBED_CACHE_DIR if set, else (since the model
+      # cache moved out of the working directory) `<user cache dir>/codescout/fastembed`;
+      # before that it was `.fastembed_cache` relative to CWD. Left unset, that's a second, uncached ~22MB download per
       # job on three OSes, and an HF hiccup fails the lane on `.expect("hub model
       # must load")`. Point it at a subdirectory of the same cached tree above so
       # the one cache step covers both the from_dir weights and this download.

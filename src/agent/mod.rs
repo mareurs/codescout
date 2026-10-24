@@ -88,6 +88,18 @@ pub struct Agent {
     /// retrieval stack.
     pub(crate) memory_embedder:
         Arc<tokio::sync::OnceCell<Arc<dyn crate::retrieval::embedder::DenseEmbedder>>>,
+    /// Memory embedders by the config that identifies them (url, model, dimension pin, key),
+    /// for [`Agent::memory_embedder_for`]. Holds one entry per distinct embedding config the
+    /// session's memory calls resolved to, normally one.
+    #[allow(clippy::type_complexity)]
+    pub(crate) memory_embedders_by_config: Arc<
+        std::sync::Mutex<
+            HashMap<
+                (Option<String>, String, Option<usize>, Option<String>),
+                Arc<dyn crate::retrieval::embedder::DenseEmbedder>,
+            >,
+        >,
+    >,
     /// Test-only capture of the `RetrievalClient.embedder` seen by the single
     /// `RetrievalClient::from_env()` call inside `memory_embedder()`, taken at
     /// the exact point that `Arc` is about to be moved into `CodeDenseAdapter`.
@@ -1039,6 +1051,7 @@ impl Agent {
             )),
             semantic_memory: Arc::new(tokio::sync::OnceCell::new()),
             memory_embedder: Arc::new(tokio::sync::OnceCell::new()),
+            memory_embedders_by_config: Arc::new(std::sync::Mutex::new(HashMap::new())),
             #[cfg(test)]
             test_seen_client_embedder: Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(test)]
@@ -2602,6 +2615,77 @@ impl Agent {
 // Semantic memory store (Qdrant)
 // ---------------------------------------------------------------------------
 impl Agent {
+    /// The semantic memory store a call should use, honouring its `workspace=` pin.
+    ///
+    /// [`Agent::semantic_memory_store`] is one cell built once from the SESSION DEFAULT
+    /// project's root, so under the sqlite-vec backend (whose directory is
+    /// `<root>/.codescout/embeddings`) a memory write pinned at project B put B's vectors into
+    /// the default project A's `<id>.memories.db`, and after an `activate` every write kept
+    /// going to the project the cell was first built for. Under sqlite-vec this resolves the
+    /// root of THIS call (its pin, else the current default) and returns a store over that
+    /// directory, built per call. The Qdrant backend (one collection, keyed by project id) and a
+    /// test double installed in the default cell are the default store, unchanged.
+    ///
+    /// docs/issues/2026-10-19-a-pinned-projects-memory-vectors-go-into-the-default-projects-embeddings-database.md
+    pub async fn semantic_memory_store_for(
+        &self,
+        workspace_override: Option<&Path>,
+    ) -> anyhow::Result<Arc<dyn SemanticMemoryStore>> {
+        self.semantic_memory_store_for_backend(
+            crate::retrieval::code_store::VectorBackend::resolve(),
+            workspace_override,
+            |root| {
+                Ok(
+                    crate::retrieval::config::RetrievalConfig::from_env_and_project(root)?
+                        .sqlite_dir,
+                )
+            },
+        )
+        .await
+    }
+
+    /// [`Agent::semantic_memory_store_for`] with the backend and the root-to-directory resolver
+    /// passed in, so a test selects the sqlite-vec arm and the directory rule without setting
+    /// `CODESCOUT_VECTOR_BACKEND` or `CODESCOUT_SQLITE_DIR`.
+    pub(crate) async fn semantic_memory_store_for_backend(
+        &self,
+        backend: crate::retrieval::code_store::VectorBackend,
+        workspace_override: Option<&Path>,
+        sqlite_dir_for: impl Fn(Option<&Path>) -> anyhow::Result<PathBuf>,
+    ) -> anyhow::Result<Arc<dyn SemanticMemoryStore>> {
+        use crate::memory::sqlite_semantic_store::SqliteVecSemanticMemoryStore;
+        use crate::retrieval::code_store::VectorBackend;
+        if !matches!(backend, VectorBackend::SqliteVec) {
+            return self.semantic_memory_store().await;
+        }
+        // A test double installed in the default cell stands for every root (the seam would
+        // otherwise be bypassed under the lean build, where the backend resolves to sqlite-vec).
+        // In production the cell holds a sqlite-vec store whenever this arm is reached, so the
+        // check is test-only: `SemanticMemoryStore::as_any` is.
+        #[cfg(test)]
+        if let Some(installed) = self.semantic_memory.get() {
+            if installed
+                .as_any()
+                .downcast_ref::<SqliteVecSemanticMemoryStore>()
+                .is_none()
+            {
+                return Ok(installed.clone());
+            }
+        }
+        // The root is resolved on EVERY call, from this call's pin or else the CURRENT default,
+        // and the store is built fresh over its directory. Neither the default cell nor a cache
+        // keyed by root can be used here: the cell is built once and survives an `activate`, and
+        // a cached store keeps its sqlite files open, so a worktree removed and recreated at the
+        // same path would keep writing into a deleted inode. `at` only allocates; a connection is
+        // opened on first use of the store, which is this call's own use.
+        let root = match workspace_override {
+            Some(pin) => Some(self.require_project_root_for(Some(pin)).await?),
+            None => self.project_root().await,
+        };
+        let dir = sqlite_dir_for(root.as_deref())?;
+        Ok(Arc::new(SqliteVecSemanticMemoryStore::at(dir)) as Arc<dyn SemanticMemoryStore>)
+    }
+
     /// Lazily construct (or return cached) the semantic memory store.
     ///
     /// Backend is selected by `CODESCOUT_VECTOR_BACKEND`: Qdrant (server stack,
@@ -2718,7 +2802,14 @@ impl Agent {
         self.semantic_memory.set(store)
     }
 
-    /// Lazily construct (or return cached) the dense embedder for memory ops.
+    /// Lazily construct (or return cached) the DEFAULT dense embedder for memory ops: one cell,
+    /// built once from the default project's config.
+    ///
+    /// Production reaches this only through [`Agent::memory_embedder_for`]'s non-sqlite-vec arm
+    /// (the Qdrant backend, whose one shared collection needs one embedding space). The
+    /// sqlite-vec path builds per resolved config instead, so a pinned project is not embedded
+    /// with the default project's model. Tests also use the cell as the seam that installs a
+    /// double (`set_memory_embedder_for_test`).
     ///
     /// First call performs `RetrievalClient::from_env()` (one network probe)
     /// and wraps the resulting `client.embedder` (`Arc<dyn CodeEmbedder>`) in
@@ -2745,6 +2836,102 @@ impl Agent {
             })
             .await
             .cloned()
+    }
+
+    /// The dense embedder a memory call should use, following the embedding config of the root
+    /// THAT CALL resolves to (its `workspace=` pin, else the current default project).
+    ///
+    /// [`Agent::memory_embedder`] is one cell built once from the default project's config, so
+    /// vectors for a pinned project B were embedded with A's model — and, now that they land in
+    /// B's own database ([`Agent::semantic_memory_store_for`]), would mix embedding spaces or
+    /// clash on dimension there. Built here from the resolved config exactly as
+    /// `RetrievalClient::from_env` builds its embedder (`build_embedder`), and cached by what
+    /// identifies an embedder: url, model, dimension pin and key. Projects that share a config
+    /// share one embedder. A test double installed in the `memory_embedder` cell wins. Under
+    /// the Qdrant backend this is the default embedder; see [`Agent::memory_embedder_for_with`].
+    pub async fn memory_embedder_for(
+        &self,
+        workspace_override: Option<&Path>,
+    ) -> anyhow::Result<Arc<dyn crate::retrieval::embedder::DenseEmbedder>> {
+        #[cfg(test)]
+        if let Some(installed) = self.memory_embedder.get() {
+            return Ok(installed.clone());
+        }
+        self.memory_embedder_for_with(
+            crate::retrieval::code_store::VectorBackend::resolve(),
+            workspace_override,
+            crate::retrieval::config::RetrievalConfig::from_env_and_project,
+        )
+        .await
+    }
+
+    /// [`Agent::memory_embedder_for`] with the backend and the root-to-config resolver passed
+    /// in, so a test selects the arm and supplies per-root configs without the process
+    /// environment (which on a developer machine pins the embedder for EVERY root).
+    ///
+    /// Only the sqlite-vec backend follows the root. Under Qdrant the memory store is the one
+    /// default-cell collection, sized from the first root's model dimension, so a vector
+    /// embedded for another root's model would be rejected (other dimension) or mix embedding
+    /// spaces in that collection (same dimension): the default embedder is the only consistent
+    /// answer there, exactly as [`Agent::semantic_memory_store_for`] answers with the default
+    /// store.
+    pub(crate) async fn memory_embedder_for_with(
+        &self,
+        backend: crate::retrieval::code_store::VectorBackend,
+        workspace_override: Option<&Path>,
+        resolve: impl Fn(Option<&Path>) -> anyhow::Result<crate::retrieval::config::RetrievalConfig>,
+    ) -> anyhow::Result<Arc<dyn crate::retrieval::embedder::DenseEmbedder>> {
+        if !matches!(
+            backend,
+            crate::retrieval::code_store::VectorBackend::SqliteVec
+        ) {
+            return self.memory_embedder().await;
+        }
+        let root = match workspace_override {
+            Some(pin) => Some(self.require_project_root_for(Some(pin)).await?),
+            None => self.project_root().await,
+        };
+        let config = resolve(root.as_deref())?;
+        self.memory_embedder_for_config(&config).await
+    }
+
+    /// The cached-by-config half of [`Agent::memory_embedder_for`], split out so a test can hand
+    /// it configs directly instead of routing them through the process environment.
+    pub(crate) async fn memory_embedder_for_config(
+        &self,
+        config: &crate::retrieval::config::RetrievalConfig,
+    ) -> anyhow::Result<Arc<dyn crate::retrieval::embedder::DenseEmbedder>> {
+        let key = (
+            config.embedder_url.clone(),
+            config.model.clone(),
+            config.model_dim,
+            config.api_key.clone(),
+        );
+        let cached = self
+            .memory_embedders_by_config
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&key)
+            .cloned();
+        if let Some(found) = cached {
+            return Ok(found);
+        }
+        let lite = matches!(
+            crate::retrieval::code_store::VectorBackend::resolve(),
+            crate::retrieval::code_store::VectorBackend::SqliteVec
+        );
+        let embedder =
+            crate::retrieval::client::RetrievalClient::build_embedder(config, lite).await?;
+        let built = Arc::new(crate::retrieval::embedder::CodeDenseAdapter(embedder))
+            as Arc<dyn crate::retrieval::embedder::DenseEmbedder>;
+        // Two callers can build concurrently; the first insert wins and both use it.
+        Ok(self
+            .memory_embedders_by_config
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(key)
+            .or_insert(built)
+            .clone())
     }
 
     /// Test seam: pre-populate the embedder cell so tool calls bypass
@@ -3747,6 +3934,287 @@ mod tests {
             .unwrap();
         // Default config uses directory name
         assert!(!name.is_empty());
+    }
+
+    /// A memory write pinned at project B must put B's vectors under B's own
+    /// `.codescout/embeddings`, not under the session default A's. The sqlite-vec arm is selected
+    /// by argument, so the test neither sets `CODESCOUT_VECTOR_BACKEND` nor touches the real home;
+    /// both roots are temp dirs, and the directory rule is the env-free `default_sqlite_dir`,
+    /// so an exported `CODESCOUT_SQLITE_DIR` cannot redirect the stores or make this skip.
+    ///
+    /// docs/issues/2026-10-19-a-pinned-projects-memory-vectors-go-into-the-default-projects-embeddings-database.md
+    #[tokio::test]
+    async fn a_pinned_projects_memory_vectors_go_into_its_own_embeddings_dir() {
+        use crate::retrieval::code_store::VectorBackend;
+
+        let (_d, default_root) = temp_project("default-proj");
+        let (_p, pinned_root) = temp_project("pinned-proj");
+        let agent = Agent::new(Some(default_root.clone())).await.unwrap();
+        agent.ensure_resident(pinned_root.clone()).await.unwrap();
+
+        let store = agent
+            .semantic_memory_store_for_backend(
+                VectorBackend::SqliteVec,
+                Some(&pinned_root),
+                default_sqlite_dir,
+            )
+            .await
+            .unwrap();
+        upsert_probe(store.as_ref(), "pinned-proj").await;
+
+        assert_eq!(
+            memory_dbs(&pinned_root).len(),
+            1,
+            "the pinned project's memory vectors must land under ITS embeddings dir"
+        );
+        assert!(
+            memory_dbs(&default_root).is_empty(),
+            "the session default project must not receive the pinned project's vectors: {:?}",
+            memory_dbs(&default_root)
+        );
+    }
+
+    /// A temp project root (canonical) whose `project.toml` names it `name`.
+    fn temp_project(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(
+            dir.path().join(".codescout").join("project.toml"),
+            format!("[project]\nname = \"{name}\"\n"),
+        )
+        .unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        (dir, root)
+    }
+
+    /// The `*.memories.db` files under `<root>/.codescout/embeddings`.
+    fn memory_dbs(root: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(root.join(".codescout").join("embeddings"))
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| n.ends_with(".memories.db"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    async fn upsert_probe(store: &dyn SemanticMemoryStore, project_id: &str) {
+        use crate::retrieval::memory_payload::SemanticMemory;
+        store
+            .upsert(
+                &SemanticMemory {
+                    project_id: project_id.into(),
+                    bucket: "note".into(),
+                    title: "t".into(),
+                    content: "content".into(),
+                    anchors: Vec::new(),
+                    created_at: "2026-10-24T00:00:00Z".into(),
+                    updated_at: "2026-10-24T00:00:00Z".into(),
+                },
+                &[1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            )
+            .await
+            .unwrap();
+    }
+
+    #[cfg(feature = "remote-embed")]
+    #[tokio::test]
+    async fn memory_embedder_follows_the_resolved_roots_embedding_config() {
+        // The resolver reads each root's own `[embeddings]` through the pure project loader
+        // (an EMPTY global layer, no `CODESCOUT_EMBED_*` overlay) and fixes everything else the
+        // key does not read, so no process environment decides the verdict. The environment of a
+        // developer machine pins one embedder for every root, which is exactly what made the
+        // earlier env-reading version of this test return early and still report `ok`.
+        let resolver =
+            |root: Option<&Path>| -> anyhow::Result<crate::retrieval::config::RetrievalConfig> {
+                let project = crate::config::project::ProjectConfig::load_with_global_base(
+                    root.expect("a project root"),
+                    toml::Value::Table(toml::map::Map::new()),
+                )?;
+                let mut config =
+                    crate::retrieval::config::RetrievalConfig::from_env_and_project(None)?;
+                config.embedder_url = project.embeddings.url.clone();
+                config.model = project.embeddings.model_or_default();
+                config.model_dim = None;
+                config.api_key = None;
+                Ok(config)
+            };
+        let with_model = |name: &str, model: &str| {
+            let (dir, root) = temp_project(name);
+            std::fs::write(
+                root.join(".codescout").join("project.toml"),
+                format!(
+                    "[project]\nname = \"{name}\"\n[embeddings]\nurl = \"http://unused.invalid/v1\"\nmodel = \"{model}\"\n"
+                ),
+            )
+            .unwrap();
+            (dir, root)
+        };
+        let (_da, a) = with_model("proj-a", "model-a");
+        let (_db, b) = with_model("proj-b", "model-b");
+        let (_dc, c) = with_model("proj-c", "model-a");
+        let agent = Agent::new(Some(a.clone())).await.unwrap();
+        agent.ensure_resident(b.clone()).await.unwrap();
+        agent.ensure_resident(c.clone()).await.unwrap();
+
+        use crate::retrieval::code_store::VectorBackend::SqliteVec;
+        let for_a = agent
+            .memory_embedder_for_with(SqliteVec, None, resolver)
+            .await
+            .unwrap();
+        let for_b = agent
+            .memory_embedder_for_with(SqliteVec, Some(&b), resolver)
+            .await
+            .unwrap();
+        let for_c = agent
+            .memory_embedder_for_with(SqliteVec, Some(&c), resolver)
+            .await
+            .unwrap();
+        assert!(
+            !Arc::ptr_eq(&for_a, &for_b),
+            "a pinned project with another model must not be embedded with the default's"
+        );
+        assert!(
+            Arc::ptr_eq(&for_a, &for_c),
+            "projects with an identical embedding config share one embedder"
+        );
+    }
+
+    /// Under Qdrant the store is one default-cell collection sized from the first root's model,
+    /// so the embedder must be the default one whatever root the call names: the resolver is
+    /// never consulted. (No test seam in `memory_embedder_for_with`: the double is installed in
+    /// the default cell, which IS the default embedder.)
+    #[tokio::test]
+    async fn the_qdrant_backend_embeds_with_the_default_embedder_for_every_root() {
+        use crate::retrieval::code_store::VectorBackend;
+        use crate::retrieval::embedder::DenseEmbedder;
+
+        struct Stub;
+        #[async_trait::async_trait]
+        impl DenseEmbedder for Stub {
+            async fn embed(&self, _t: &str) -> anyhow::Result<Vec<f32>> {
+                Ok(vec![1.0])
+            }
+            async fn embed_document(&self, _t: &str) -> anyhow::Result<Vec<f32>> {
+                Ok(vec![1.0])
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+        let (_da, a) = temp_project("proj-a");
+        let (_db, b) = temp_project("proj-b");
+        let agent = Agent::new(Some(a.clone())).await.unwrap();
+        agent.ensure_resident(b.clone()).await.unwrap();
+        let default: Arc<dyn DenseEmbedder> = Arc::new(Stub);
+        agent
+            .set_memory_embedder_for_test(default.clone())
+            .map_err(|_| ())
+            .expect("install the default embedder");
+
+        let got = agent
+            .memory_embedder_for_with(VectorBackend::Qdrant, Some(&b), |_| {
+                panic!("the Qdrant backend must not resolve a per-root embedding config")
+            })
+            .await
+            .unwrap();
+        assert!(
+            Arc::ptr_eq(&got, &default),
+            "a pinned root must get the default embedder under Qdrant"
+        );
+    }
+
+    /// The directory rule with no environment: `CODESCOUT_SQLITE_DIR` is not consulted.
+    fn default_sqlite_dir(root: Option<&Path>) -> anyhow::Result<PathBuf> {
+        crate::retrieval::config::resolve_sqlite_dir(None, root)
+    }
+
+    #[cfg(feature = "remote-embed")]
+    #[tokio::test]
+    async fn memory_embedders_are_cached_by_embedding_config() {
+        let (_d, root) = temp_project("proj-cfg");
+        let agent = Agent::new(Some(root.clone())).await.unwrap();
+        let config_with = |model: &str| {
+            let mut c =
+                crate::retrieval::config::RetrievalConfig::from_env_and_project(Some(&root))
+                    .unwrap();
+            c.embedder_url = Some("http://unused.invalid/v1".into());
+            c.model = model.into();
+            c
+        };
+        let a = agent
+            .memory_embedder_for_config(&config_with("model-a"))
+            .await
+            .unwrap();
+        let b = agent
+            .memory_embedder_for_config(&config_with("model-b"))
+            .await
+            .unwrap();
+        let a_again = agent
+            .memory_embedder_for_config(&config_with("model-a"))
+            .await
+            .unwrap();
+        assert!(
+            !Arc::ptr_eq(&a, &b),
+            "another model must get its own embedder"
+        );
+        assert!(
+            Arc::ptr_eq(&a, &a_again),
+            "an identical config shares one embedder"
+        );
+    }
+
+    /// The default project changes under a running session (`activate`): the store cell
+    /// is built once from the root at first use and never reset, so the next memory write
+    /// — pinned at the new default or not — wrote into the PREVIOUS project's directory.
+    /// Both calls here go through one `Agent`, as one session does.
+    #[tokio::test]
+    async fn memory_vectors_follow_the_default_project_across_an_activate() {
+        use crate::retrieval::code_store::VectorBackend;
+
+        let (_da, a) = temp_project("proj-a");
+        let (_db, b) = temp_project("proj-b");
+        let agent = Agent::new(Some(a.clone())).await.unwrap();
+
+        let first = agent
+            .semantic_memory_store_for_backend(VectorBackend::SqliteVec, None, default_sqlite_dir)
+            .await
+            .unwrap();
+        upsert_probe(first.as_ref(), "proj-a").await;
+        assert_eq!(
+            memory_dbs(&a).len(),
+            1,
+            "precondition: A's write lands under A"
+        );
+
+        agent.activate(b.clone(), None).await.unwrap();
+
+        for (label, pin) in [
+            ("unpinned", None),
+            ("pinned at the new default", Some(b.as_path())),
+        ] {
+            let store = agent
+                .semantic_memory_store_for_backend(
+                    VectorBackend::SqliteVec,
+                    pin,
+                    default_sqlite_dir,
+                )
+                .await
+                .unwrap();
+            upsert_probe(store.as_ref(), "proj-b").await;
+            assert_eq!(
+                memory_dbs(&b).len(),
+                1,
+                "{label}: after activating B, B's vectors must land under B"
+            );
+            assert_eq!(
+                memory_dbs(&a).len(),
+                1,
+                "{label}: after activating B, A must receive nothing more: {:?}",
+                memory_dbs(&a)
+            );
+        }
     }
 
     #[cfg(feature = "server-stack")]

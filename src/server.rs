@@ -824,8 +824,9 @@ impl CodeScoutServer {
     ///
     /// The row is written against the session's DEFAULT project, never the pinned one (nothing
     /// may be created at the pinned path), and is best-effort in three ways:
-    /// - it is skipped when the default project's root is gone, because opening the usage
-    ///   database creates the directory, and telemetry must not bring a deleted project back;
+    /// - it is skipped when the default project's root is gone: `open_db` no longer re-creates
+    ///   a missing root (it creates only `.codescout/`), but a refusal row for a project that is
+    ///   gone has nowhere to live, and the skip keeps this path from attempting the open at all;
     /// - it runs on the blocking pool under a short budget, because the database waits out
     ///   SQLite's 5 s busy timeout when another process holds it, and the caller must not;
     /// - what it stores is the refusal's message, which is already capped and escaped.

@@ -190,7 +190,9 @@ cargo install --path . --no-default-features --features local-embed,http,librari
 ```
 
 The first time you build a semantic search index, the local backend model downloads
-automatically to `~/.cache/huggingface/hub/`. Subsequent uses are fully offline.
+automatically to `<user cache dir>/codescout/fastembed` (`$XDG_CACHE_HOME` or `~/.cache` on
+Linux, `~/Library/Caches` on macOS, `%LOCALAPPDATA%` on Windows). `FASTEMBED_CACHE_DIR`
+overrides it; if `HF_HOME` is set it replaces both. Subsequent uses are fully offline.
 
 In this mode `semantic_search` falls back to pure dense vector scoring — no
 SPLADE sparse leg, no cross-encoder rerank. The retrieval-stack configuration
