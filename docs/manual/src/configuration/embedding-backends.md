@@ -223,7 +223,7 @@ a native system library that cannot be bundled through crates.io.
 > **Looking for free local embeddings without building from source?** Use [Ollama](#ollama-default)
 > instead — it is the recommended path for most users.
 
-**Model cache:** `~/.cache/huggingface/hub/` — downloaded on first use, then fully offline
+**Model cache:** `<user cache dir>/codescout/fastembed` — downloaded on first use, then fully offline. `<user cache dir>` is `$XDG_CACHE_HOME` or `~/.cache` on Linux, `~/Library/Caches` on macOS, `%LOCALAPPDATA%` on Windows. `FASTEMBED_CACHE_DIR` overrides it; if `HF_HOME` is set it replaces both.
 
 ### Build
 

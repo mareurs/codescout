@@ -218,17 +218,16 @@ fn topic_not_found_error(topic: &str, available: Vec<String>) -> RecoverableErro
 
 /// The chunk budget for memory content, from the RESOLVED model — never
 /// `p.config.embeddings.model_or_default()`, which is the raw project.toml-only
-/// copy that can diverge from what the shared embedder (`ctx.agent.memory_embedder`)
+/// copy that can diverge from what the shared embedder (`ctx.agent.memory_embedder_for`)
 /// was actually built from whenever an env var overrides project.toml. Shared by
 /// [`cross_embed_memory`] and [`create_semantic_anchors`], which segment the SAME
 /// point id and must therefore agree with each other, not just with the config.
 ///
-/// Does not reuse the CACHED `memory_embedder`'s own model — that would need
-/// `memory_embedder()` to expose the config it resolved on first construction,
-/// which it does not (the cell only stores the type-erased `Arc<dyn
-/// DenseEmbedder>`). Re-resolving here can disagree with an already-cached
-/// embedder if config changes between the two, which is a narrower, separate
-/// risk from the one this fixes (env vs project.toml) and is not addressed here.
+/// Does not reuse the embedder's own model — `Agent::memory_embedder_for` caches the
+/// type-erased `Arc<dyn DenseEmbedder>` by config key and does not expose the config it
+/// resolved. Re-resolving here reads the same root's config through the same function, so the
+/// two agree unless the config changes between them, which is a narrower, separate risk from
+/// the one this fixes (env vs project.toml) and is not addressed here.
 fn resolved_chunk_budget(root: &std::path::Path) -> anyhow::Result<usize> {
     let model = crate::retrieval::config::RetrievalConfig::from_env_and_project(Some(root))?.model;
     Ok(crate::embed::chunk_size_for_model(&model))
@@ -263,7 +262,10 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
     // per-model arms. Memory content has no such benchmarked size; its only real
     // constraint is the ceiling, which is what this returns.
     let budget_chars = resolved_chunk_budget(&root)?;
-    let embedder = ctx.agent.memory_embedder().await?;
+    let embedder = ctx
+        .agent
+        .memory_embedder_for(ctx.workspace_override.as_deref())
+        .await?;
     let dense =
         crate::embed::document::embed_document_pooled(embedder.as_ref(), content, budget_chars)
             .await?;
@@ -278,7 +280,10 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
         created_at: now.clone(),
         updated_at: now,
     };
-    let store = ctx.agent.semantic_memory_store().await?;
+    let store = ctx
+        .agent
+        .semantic_memory_store_for(ctx.workspace_override.as_deref())
+        .await?;
     store.upsert(&memory, &dense).await?;
     Ok(())
 }
@@ -319,7 +324,10 @@ async fn create_semantic_anchors(
     // anchor pass overwrite a correctly-pooled vector with a truncated or missing one
     // — the second write silently undoing the first.
     let budget_chars = resolved_chunk_budget(&root)?;
-    let embedder = ctx.agent.memory_embedder().await?;
+    let embedder = ctx
+        .agent
+        .memory_embedder_for(ctx.workspace_override.as_deref())
+        .await?;
     let dense =
         crate::embed::document::embed_document_pooled(embedder.as_ref(), content, budget_chars)
             .await?;
@@ -389,7 +397,10 @@ async fn create_semantic_anchors(
         updated_at: now,
     };
 
-    let store = ctx.agent.semantic_memory_store().await?;
+    let store = ctx
+        .agent
+        .semantic_memory_store_for(ctx.workspace_override.as_deref())
+        .await?;
     store.upsert(&memory, &dense).await?;
     Ok(())
 }
@@ -1154,7 +1165,11 @@ impl Tool for Memory {
                             "structured",
                             topic,
                         );
-                        if let Ok(store) = ctx.agent.semantic_memory_store().await {
+                        if let Ok(store) = ctx
+                            .agent
+                            .semantic_memory_store_for(ctx.workspace_override.as_deref())
+                            .await
+                        {
                             let _ = store.delete(&project_id, id).await;
                         }
                     }
@@ -1180,7 +1195,11 @@ impl Tool for Memory {
                     })
                     .await?;
 
-                let dense = ctx.agent.memory_embedder().await.map_err(|e| {
+                let dense = ctx
+                    .agent
+                    .memory_embedder_for(ctx.workspace_override.as_deref())
+                    .await
+                    .map_err(|e| {
                     super::RecoverableError::with_hint(
                         format!("embedder unavailable: {e}"),
                         "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
@@ -1197,7 +1216,10 @@ impl Tool for Memory {
                     created_at: now.clone(),
                     updated_at: now,
                 };
-                let store = ctx.agent.semantic_memory_store().await?;
+                let store = ctx
+                    .agent
+                    .semantic_memory_store_for(ctx.workspace_override.as_deref())
+                    .await?;
                 store.upsert(&memory, &dense).await?;
 
                 Ok(json!("ok"))
@@ -1218,14 +1240,21 @@ impl Tool for Memory {
                 // lives in the same space as the memories collection's stored
                 // vectors. Tests can swap the embedder via
                 // `Agent::set_memory_embedder_for_test`.
-                let query_vec = ctx.agent.memory_embedder().await.map_err(|e| {
+                let query_vec = ctx
+                    .agent
+                    .memory_embedder_for(ctx.workspace_override.as_deref())
+                    .await
+                    .map_err(|e| {
                     super::RecoverableError::with_hint(
                         format!("embedder unavailable: {e}"),
                         "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
                     )
                 })?.embed(query).await?;
 
-                let store = ctx.agent.semantic_memory_store().await?;
+                let store = ctx
+                    .agent
+                    .semantic_memory_store_for(ctx.workspace_override.as_deref())
+                    .await?;
                 // Overfetch limit+1 to detect that more memories match than the
                 // page shows (silent-cap family — see
                 // docs/issues/archive/2026-07-10-silent-cap-missing-overflow-signals-audit.md).
@@ -1297,7 +1326,10 @@ impl Tool for Memory {
                     })
                     .await?;
 
-                let store = ctx.agent.semantic_memory_store().await?;
+                let store = ctx
+                    .agent
+                    .semantic_memory_store_for(ctx.workspace_override.as_deref())
+                    .await?;
                 store.delete(&project_id, id).await?;
 
                 Ok(json!("ok"))

@@ -1226,8 +1226,12 @@ async fn perform_full_onboarding(
         Some(&gathered.projects),
         &libraries,
     );
-    crate::prompts::builders::append_preferences_section(&ctx.agent, &mut system_prompt_draft)
-        .await;
+    crate::prompts::builders::append_preferences_section(
+        &ctx.agent,
+        ctx.workspace_override.as_deref(),
+        &mut system_prompt_draft,
+    )
+    .await;
 
     let discovered_projects: Vec<serde_json::Value> = gathered
         .projects

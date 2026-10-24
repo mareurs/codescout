@@ -216,7 +216,8 @@ remote-embed = ["codescout-embed/remote-embed", "dep:reqwest", "dep:rustls"]
 # --features server-stack` compiles those call sites against configured-out types.
 server-stack = ["dep:qdrant-client", "remote-embed"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
-# First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
+# First use downloads the chosen model (~20-300MB) to <user cache dir>/codescout/fastembed
+# (FASTEMBED_CACHE_DIR overrides; HF_HOME, when set, replaces both).
 local-embed = ["codescout-embed/local-embed"]
 # Same, but via runtime-loaded onnxruntime.dll (windows-gnu / custom ONNX). The
 # caller supplies the DLL at runtime (ORT_DYLIB_PATH); see codescout-embed.

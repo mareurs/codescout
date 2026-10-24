@@ -38,7 +38,10 @@ exact text matches. This guide covers how to configure the embedding backend.
 codescout works out of the box with a bundled embedding model. No setup needed.
 
 On first `index(action: build)`, it downloads **all-MiniLM-L6-v2** (~22 MB, quantized)
-to `~/.cache/huggingface/hub/` and runs it locally via ONNX. This is a one-time download.
+to `<user cache dir>/codescout/fastembed` and runs it locally via ONNX. `<user cache dir>` is
+`$XDG_CACHE_HOME` or `~/.cache` on Linux, `~/Library/Caches` on macOS and `%LOCALAPPDATA%` on
+Windows. Set `FASTEMBED_CACHE_DIR` to put it elsewhere; if `HF_HOME` is set it replaces both.
+This is a one-time download.
 
 ```toml
 # .codescout/project.toml (default — no changes needed)
@@ -288,7 +291,8 @@ curl http://127.0.0.1:43300/v1/embeddings \
 The bundled model downloads from HuggingFace. If your proxy blocks this:
 
 1. Download the model on an unrestricted machine
-2. Copy to `~/.cache/huggingface/hub/models--nomic-ai--nomic-embed-text-v1.5/`
+2. Copy to `<cache dir>/models--nomic-ai--nomic-embed-text-v1.5/`, where `<cache dir>` is
+   `HF_HOME` if set, else `FASTEMBED_CACHE_DIR` if set, else `<user cache dir>/codescout/fastembed`
 3. Or use an external server instead (set `url`)
 
 ## Migration from Prefix Syntax

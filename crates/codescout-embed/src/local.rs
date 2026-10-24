@@ -4,8 +4,10 @@
 //! - [`LocalEmbedder::new`] / [`LocalEmbedder::new_blocking`]: model strings
 //!   use fastembed's `EmbeddingModel` variant names directly, e.g.
 //!   `local:JinaEmbeddingsV2BaseCode` or `local:BGESmallENV15Q`. Models are
-//!   downloaded on first use to `~/.cache/huggingface/hub/` — requires
-//!   network on that first use.
+//!   downloaded on first use to `<user cache dir>/codescout/fastembed`
+//!   (`FASTEMBED_CACHE_DIR` overrides it; `HF_HOME`, when set, replaces BOTH — fastembed's
+//!   `pull_from_hf` prefers it over the directory it is given) —
+//!   requires network on that first use.
 //! - [`LocalEmbedder::from_dir`]: loads AllMiniLM-L6-v2-Q weights already
 //!   present on disk — no hf-hub, no network, works offline. See
 //!   [`MODEL_FILE`] for the expected on-disk layout and its model-identity
@@ -130,6 +132,28 @@ fn read_required(dir: &Path, rel: &str) -> Result<Vec<u8>> {
     std::fs::read(&p).map_err(|e| anyhow::anyhow!("cannot read {} ({e})", p.display()))
 }
 
+/// Where fastembed downloads and finds model weights.
+///
+/// fastembed's own default is the RELATIVE path `.fastembed_cache`, so the first model load
+/// of a server session created that directory in the process's working directory — beside
+/// whatever the server happened to be started in, and unrelated to the project a pinned call
+/// names. An explicit `FASTEMBED_CACHE_DIR` (`configured`) still wins, as it did; otherwise
+/// the per-user cache directory (`user_cache`), falling back to the temp dir as
+/// `heartbeat_dir` does. (fastembed itself still lets `HF_HOME` replace whatever is returned
+/// here: `pull_from_hf`, `fastembed-5.13.0/src/common.rs:170`.)
+///
+/// Takes both inputs as arguments so a test never has to touch the process environment.
+/// docs/issues/2026-10-19-the-first-memory-write-creates-a-fastembed-cache-directory-in-the-servers-cwd.md
+fn model_cache_dir(configured: Option<std::ffi::OsString>, user_cache: Option<PathBuf>) -> PathBuf {
+    if let Some(dir) = configured.filter(|d| !d.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    user_cache
+        .unwrap_or_else(std::env::temp_dir)
+        .join("codescout")
+        .join("fastembed")
+}
+
 pub struct LocalEmbedder {
     model: Arc<Mutex<fastembed::TextEmbedding>>,
     dims: usize,
@@ -150,7 +174,9 @@ impl LocalEmbedder {
 
     fn new_blocking(model_name: &str) -> Result<Self> {
         let embedding_model = parse_model(model_name)?;
-        let mut opts = fastembed::InitOptions::new(embedding_model);
+        let mut opts = fastembed::InitOptions::new(embedding_model).with_cache_dir(
+            model_cache_dir(std::env::var_os("FASTEMBED_CACHE_DIR"), dirs::cache_dir()),
+        );
         opts.show_download_progress = false;
         let mut model = fastembed::TextEmbedding::try_new(opts)?;
         // Derive actual dims by embedding a probe string.
@@ -279,6 +305,45 @@ mod tests {
     use super::*;
 
     use crate::Embedder;
+
+    /// The default cache directory must not be relative to the process's working directory:
+    /// fastembed's own default (`.fastembed_cache`) put a model cache next to wherever the
+    /// server was started. Only the path is computed — nothing is created, and the process
+    /// environment is never touched.
+    #[test]
+    fn model_cache_dir_defaults_to_the_user_cache_not_the_working_directory() {
+        let user = std::env::temp_dir().join("user-cache");
+        let got = model_cache_dir(None, Some(user.clone()));
+        assert!(
+            got.is_absolute(),
+            "cache dir must not be cwd-relative: {got:?}"
+        );
+        assert_eq!(got, user.join("codescout").join("fastembed"));
+        // An empty FASTEMBED_CACHE_DIR is "unset", not the empty path (which is the cwd).
+        assert_eq!(model_cache_dir(Some("".into()), Some(user.clone())), got);
+    }
+
+    #[test]
+    fn model_cache_dir_honours_an_explicit_override() {
+        let got = model_cache_dir(
+            Some("/srv/weights".into()),
+            Some(PathBuf::from("/home/u/.cache")),
+        );
+        assert_eq!(got, PathBuf::from("/srv/weights"));
+    }
+
+    #[test]
+    fn model_cache_dir_without_a_user_cache_falls_back_to_the_temp_dir() {
+        let got = model_cache_dir(None, None);
+        assert!(
+            got.is_absolute(),
+            "fallback must not be cwd-relative: {got:?}"
+        );
+        assert_eq!(
+            got,
+            std::env::temp_dir().join("codescout").join("fastembed")
+        );
+    }
 
     #[test]
     fn parse_model_unknown_name_returns_error() {

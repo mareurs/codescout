@@ -1138,7 +1138,11 @@ impl crate::tools::Tool for IndexVerify {
         //
         // Degrades rather than propagates: the code index is this tool's primary
         // subject, and a memory-store outage must not turn its report into an error.
-        let memories = match ctx.agent.semantic_memory_store().await {
+        let memories = match ctx
+            .agent
+            .semantic_memory_store_for(ctx.workspace_override.as_deref())
+            .await
+        {
             Ok(store) => {
                 // SHARED topics only — `cross_embed_memory` runs under `if !private`,
                 // so private memories have no point BY DESIGN and would otherwise

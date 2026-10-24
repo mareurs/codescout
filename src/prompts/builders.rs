@@ -431,25 +431,44 @@ pub(crate) fn build_system_prompt_draft(
 /// async (Qdrant) and the draft builder must stay sync to keep its 16+ test
 /// call sites simple. Best-effort: any failure (store unavailable, empty,
 /// network error) leaves `draft` untouched.
-pub(crate) async fn append_preferences_section(agent: &crate::agent::Agent, draft: &mut String) {
-    let project_id = {
-        let inner = agent.inner.read().await;
-        match inner.active_project() {
-            Some(p) => p.config.project.name.clone(),
-            None => return,
-        }
+///
+/// `workspace_override` is the calling tool's `workspace=` pin: the project id and the store
+/// both follow it. Both used to be the session default's — and the store a cell built once
+/// for whichever project first filled it, so after an `activate` the preferences were read from
+/// the PREVIOUS project's directory.
+pub(crate) async fn append_preferences_section(
+    agent: &crate::agent::Agent,
+    workspace_override: Option<&Path>,
+    draft: &mut String,
+) {
+    let project_id = match agent
+        .with_project_at(workspace_override, |p| Ok(p.config.project.name.clone()))
+        .await
+    {
+        Ok(id) => id,
+        Err(_) => return,
     };
-    let store = match agent.semantic_memory_store().await {
+    let store = match agent.semantic_memory_store_for(workspace_override).await {
         Ok(s) => s,
         Err(_) => return,
     };
+    append_preferences_from_store(store.as_ref(), &project_id, draft).await;
+}
+
+/// The store-reading half of [`append_preferences_section`], split out so a test can hand it a
+/// store and a project id without an `Agent`.
+async fn append_preferences_from_store(
+    store: &dyn crate::memory::semantic_store::SemanticMemoryStore,
+    project_id: &str,
+    draft: &mut String,
+) {
     let filter = crate::memory::semantic_store::MemoryFilter {
         bucket: Some("preferences".into()),
         order_by: crate::memory::semantic_store::MemoryOrder::UpdatedAtDesc,
         limit: Some(10),
         ..Default::default()
     };
-    let hits = match store.list(&project_id, filter).await {
+    let hits = match store.list(project_id, filter).await {
         Ok(h) => h,
         Err(_) => return,
     };
@@ -1146,5 +1165,56 @@ mod workspace_toml_read_tests {
         );
         assert!(got.contains("## Workspace Projects"), "{got}");
         assert!(!got.contains("Cross-project dependencies"), "{got}");
+    }
+}
+/// `append_preferences_section` reads the preferences of the project it is given, from the store
+/// it is given. The wiring to the call's pin (`semantic_memory_store_for`) is covered by the
+/// `Agent` store tests; this pins the rendering and the project scoping of the store read.
+#[cfg(test)]
+mod preferences_tests {
+    use super::append_preferences_from_store;
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::SemanticMemoryStore;
+    use crate::retrieval::memory_payload::SemanticMemory;
+
+    fn preference(project: &str, title: &str) -> SemanticMemory {
+        SemanticMemory {
+            project_id: project.into(),
+            bucket: "preferences".into(),
+            title: title.into(),
+            content: format!("content of {title}"),
+            anchors: Vec::new(),
+            created_at: "2026-10-24T00:00:00Z".into(),
+            updated_at: "2026-10-24T00:00:00Z".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_section_lists_only_the_given_projects_preferences() {
+        let store = InMemorySemanticMemoryStore::new();
+        store
+            .upsert(&preference("proj-a", "tabs"), &[1.0])
+            .await
+            .unwrap();
+        store
+            .upsert(&preference("proj-b", "spaces"), &[1.0])
+            .await
+            .unwrap();
+
+        let mut for_b = String::new();
+        append_preferences_from_store(&store, "proj-b", &mut for_b).await;
+        assert!(for_b.contains("## User Preferences"), "{for_b}");
+        assert!(for_b.contains("**spaces:**"), "{for_b}");
+        assert!(
+            !for_b.contains("tabs"),
+            "another project's preference leaked: {for_b}"
+        );
+
+        let mut for_none = String::new();
+        append_preferences_from_store(&store, "proj-c", &mut for_none).await;
+        assert!(
+            for_none.is_empty(),
+            "no preferences, no section: {for_none}"
+        );
     }
 }
