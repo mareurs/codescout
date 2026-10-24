@@ -6,6 +6,7 @@ pub mod librarian_response;
 pub mod librarian_sync;
 pub mod markdown_fence;
 pub mod path_security;
+pub mod private_dir;
 pub mod redact;
 pub mod shrink_guard;
 pub mod text;

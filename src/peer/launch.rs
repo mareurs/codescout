@@ -43,8 +43,8 @@ pub(crate) fn build_peer_serve_args(
 pub async fn ensure_peer_serve(target: &Path, read_only: bool) -> Result<PeerClient> {
     use fs4::fs_std::FileExt;
 
-    let socket_path = crate::socket_discovery::peer_socket_path_for_workspace(target);
-    let lock_path = crate::socket_discovery::peer_lock_path_for_workspace(target);
+    let socket_path = crate::socket_discovery::peer_socket_path_for_workspace(target)?;
+    let lock_path = crate::socket_discovery::peer_lock_path_for_workspace(target)?;
 
     let need_spawn = {
         let mut opts = std::fs::OpenOptions::new();

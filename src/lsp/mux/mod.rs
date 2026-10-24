@@ -41,18 +41,22 @@ pub use crate::socket_discovery::workspace_hash;
 /// Note this covers unit tests only. `tests/*.rs` link the lib built without
 /// `cfg(test)` and so still use the real directory; measured at ~1 file per full
 /// `cargo test`, versus 17 from the lib.
-fn mux_dir() -> PathBuf {
+fn mux_dir() -> Result<PathBuf, crate::socket_discovery::RuntimeDirError> {
     #[cfg(test)]
     {
         static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-        DIR.get_or_init(|| {
-            let base = per_user_mux_dir();
-            sweep_dead_test_mux_dirs(&base);
-            let d = base.join(format!("{TEST_MUX_PREFIX}{}", std::process::id()));
-            let _ = std::fs::create_dir_all(&d);
-            d
-        })
-        .clone()
+        if let Some(dir) = DIR.get() {
+            return Ok(dir.clone());
+        }
+        let base = per_user_mux_dir()?;
+        Ok(DIR
+            .get_or_init(|| {
+                sweep_dead_test_mux_dirs(&base);
+                let d = base.join(format!("{TEST_MUX_PREFIX}{}", std::process::id()));
+                let _ = std::fs::create_dir_all(&d);
+                d
+            })
+            .clone())
     }
     #[cfg(not(test))]
     {
@@ -114,20 +118,26 @@ fn pid_is_alive(pid: u32) -> bool {
 #[cfg(all(test, not(unix)))]
 fn sweep_dead_test_mux_dirs(_base: &Path) {}
 
-pub fn socket_path_for_workspace(language: &str, workspace_root: &Path) -> PathBuf {
-    mux_dir().join(format!(
+pub fn socket_path_for_workspace(
+    language: &str,
+    workspace_root: &Path,
+) -> Result<PathBuf, crate::socket_discovery::RuntimeDirError> {
+    Ok(mux_dir()?.join(format!(
         "codescout-{}-mux-{}.sock",
         language,
         workspace_hash(workspace_root)
-    ))
+    )))
 }
 
-pub fn lock_path_for_workspace(language: &str, workspace_root: &Path) -> PathBuf {
-    mux_dir().join(format!(
+pub fn lock_path_for_workspace(
+    language: &str,
+    workspace_root: &Path,
+) -> Result<PathBuf, crate::socket_discovery::RuntimeDirError> {
+    Ok(mux_dir()?.join(format!(
         "codescout-{}-mux-{}.lock",
         language,
         workspace_hash(workspace_root)
-    ))
+    )))
 }
 /// Where the mux records that it killed an LSP for memory, for the manager to find.
 ///
@@ -150,18 +160,18 @@ mod tests {
 
     #[test]
     fn socket_path_deterministic_for_same_workspace() {
-        let p1 = socket_path_for_workspace("kotlin", Path::new("/home/user/project"));
-        let p2 = socket_path_for_workspace("kotlin", Path::new("/home/user/project"));
+        let p1 = socket_path_for_workspace("kotlin", Path::new("/home/user/project")).unwrap();
+        let p2 = socket_path_for_workspace("kotlin", Path::new("/home/user/project")).unwrap();
         assert_eq!(p1, p2);
 
-        let p3 = socket_path_for_workspace("kotlin", Path::new("/home/user/other"));
+        let p3 = socket_path_for_workspace("kotlin", Path::new("/home/user/other")).unwrap();
         assert_ne!(p1, p3);
     }
 
     #[test]
     fn different_languages_get_different_paths() {
-        let p1 = socket_path_for_workspace("kotlin", Path::new("/project"));
-        let p2 = socket_path_for_workspace("java", Path::new("/project"));
+        let p1 = socket_path_for_workspace("kotlin", Path::new("/project")).unwrap();
+        let p2 = socket_path_for_workspace("java", Path::new("/project")).unwrap();
         assert_ne!(p1, p2);
     }
 
@@ -176,8 +186,8 @@ mod tests {
     #[test]
     fn socket_and_lock_share_a_parent_inside_the_per_user_dir() {
         let ws = Path::new("/some/workspace");
-        let sock = socket_path_for_workspace("rust", ws);
-        let lock = lock_path_for_workspace("rust", ws);
+        let sock = socket_path_for_workspace("rust", ws).unwrap();
+        let lock = lock_path_for_workspace("rust", ws).unwrap();
         assert_eq!(
             sock.parent(),
             lock.parent(),
@@ -188,7 +198,7 @@ mod tests {
         // child of it. Fails if the seam is ever re-sited to bare temp_dir().
         let parent = sock.parent().expect("socket path has a parent");
         assert!(
-            parent.starts_with(per_user_mux_dir()),
+            parent.starts_with(per_user_mux_dir().unwrap()),
             "mux dir must stay inside the per-user runtime dir, got {}",
             parent.display()
         );
@@ -200,12 +210,13 @@ mod tests {
     #[test]
     fn test_builds_redirect_the_mux_dir_away_from_the_shared_one() {
         let parent = socket_path_for_workspace("rust", Path::new("/w"))
+            .unwrap()
             .parent()
             .unwrap()
             .to_path_buf();
         assert_ne!(
             parent,
-            per_user_mux_dir(),
+            per_user_mux_dir().unwrap(),
             "test builds must not write mux files into the shared per-user dir"
         );
     }

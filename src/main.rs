@@ -573,9 +573,10 @@ async fn main() -> Result<()> {
             read_only,
             idle_timeout,
         } => {
-            let socket = socket.unwrap_or_else(|| {
-                codescout::socket_discovery::peer_socket_path_for_workspace(&workspace)
-            });
+            let socket = match socket {
+                Some(socket) => socket,
+                None => codescout::socket_discovery::peer_socket_path_for_workspace(&workspace)?,
+            };
             codescout::peer::server::run(&socket, &workspace, read_only, idle_timeout).await?;
         }
     }

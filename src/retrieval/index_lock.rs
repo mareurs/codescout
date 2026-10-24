@@ -134,8 +134,11 @@ fn pid_path(lock_path: &Path) -> PathBuf {
 /// symlink (which `set_len(0)` below would then truncate) or simply hold the flock
 /// to wedge every index run. `per_user_runtime_dir()` handles both platforms —
 /// `0o700` dir on Unix, already-per-user `temp_dir()` on Windows.
-pub fn lock_path(project_id: &str) -> PathBuf {
-    lock_path_in(&crate::socket_discovery::per_user_runtime_dir(), project_id)
+pub fn lock_path(project_id: &str) -> Result<PathBuf, crate::socket_discovery::RuntimeDirError> {
+    Ok(lock_path_in(
+        &crate::socket_discovery::per_user_runtime_dir()?,
+        project_id,
+    ))
 }
 
 /// Acquire the exclusive index lock for `project_id` under `dir`, or fail
@@ -200,7 +203,12 @@ pub fn peek_in(dir: &Path, project_id: &str) -> Option<Option<u32>> {
 /// Non-blocking check: is `project_id`'s index lock currently held by someone else?
 /// See [`peek_in`] for the exact semantics.
 pub fn peek(project_id: &str) -> Option<Option<u32>> {
-    peek_in(&crate::socket_discovery::per_user_runtime_dir(), project_id)
+    match crate::socket_discovery::per_user_runtime_dir() {
+        Ok(dir) => peek_in(&dir, project_id),
+        // The lock directory cannot be trusted, so nothing can be said about the lock. `None`
+        // is the documented "check failed" answer; the `acquire` that follows reports why.
+        Err(_) => None,
+    }
 }
 
 /// Acquire the exclusive index lock for `project_id`, or fail immediately.
@@ -219,7 +227,10 @@ pub fn peek(project_id: &str) -> Option<Option<u32>> {
 /// had already exited. See
 /// docs/issues/archive/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
 pub fn acquire(project_id: &str) -> Result<IndexLock> {
-    acquire_in(&crate::socket_discovery::per_user_runtime_dir(), project_id)
+    acquire_in(
+        &crate::socket_discovery::per_user_runtime_dir()?,
+        project_id,
+    )
 }
 
 #[cfg(test)]
@@ -397,7 +408,7 @@ mod tests {
         let dir = scratch();
         // Distinctive enough that no real project or other test collides with it.
         let project_id = "index-lock-seam-guard-must-never-reach-the-runtime-dir";
-        let real = lock_path(project_id);
+        let real = lock_path(project_id).unwrap();
         assert!(
             !real.exists(),
             "precondition: {} must not pre-exist",
@@ -419,8 +430,8 @@ mod tests {
 
     #[test]
     fn lock_path_is_deterministic_and_filename_safe() {
-        let a = lock_path("some/project:with weird*chars");
-        let b = lock_path("some/project:with weird*chars");
+        let a = lock_path("some/project:with weird*chars").unwrap();
+        let b = lock_path("some/project:with weird*chars").unwrap();
         assert_eq!(a, b, "lock_path must be deterministic");
 
         let name = a.file_name().unwrap().to_str().unwrap();
@@ -430,8 +441,8 @@ mod tests {
             "filename must be safe regardless of project_id, got: {name}"
         );
         assert_ne!(
-            lock_path("project-one"),
-            lock_path("project-two"),
+            lock_path("project-one").unwrap(),
+            lock_path("project-two").unwrap(),
             "distinct project ids must map to distinct lock files"
         );
     }
@@ -459,7 +470,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn lock_path_is_not_sited_in_bare_temp_dir() {
-        let p = lock_path("some-project-for-siting-check");
+        let p = lock_path("some-project-for-siting-check").unwrap();
         assert_ne!(
             p.parent(),
             Some(std::env::temp_dir().as_path()),
@@ -475,10 +486,14 @@ mod tests {
     /// here, on every platform.
     #[test]
     fn lock_path_is_sited_in_the_per_user_runtime_dir() {
-        let p = lock_path("some-project-for-siting-check");
+        let p = lock_path("some-project-for-siting-check").unwrap();
         assert_eq!(
             p.parent(),
-            Some(crate::socket_discovery::per_user_runtime_dir().as_path()),
+            Some(
+                crate::socket_discovery::per_user_runtime_dir()
+                    .unwrap()
+                    .as_path()
+            ),
             "lock must sit in per_user_runtime_dir(), got parent {:?}",
             p.parent()
         );

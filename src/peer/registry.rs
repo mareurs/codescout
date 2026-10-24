@@ -33,7 +33,7 @@ pub struct PeerEntry {
 }
 
 impl PeerEntry {
-    pub fn socket_path(&self) -> PathBuf {
+    pub fn socket_path(&self) -> Result<PathBuf, crate::socket_discovery::RuntimeDirError> {
         peer_socket_path_for_workspace(&self.target)
     }
 }
@@ -93,7 +93,7 @@ mod tests {
         let backend = reg.get("backend").unwrap();
         assert_eq!(backend.default_access, Access::ReadOnly);
         assert!(backend.description.contains("payments"));
-        let sock = backend.socket_path();
+        let sock = backend.socket_path().unwrap();
         assert!(sock.to_str().unwrap().contains("codescout-peer-"));
         assert_eq!(
             reg.get("frontend").unwrap().default_access,

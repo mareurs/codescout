@@ -78,16 +78,33 @@ None needed.
 
 ## Fix
 
-Not applied. The shape that fixed the sibling: create 0700 without `recursive`, then verify on every use that the
-entry is a real directory (`symlink_metadata`), owned by `geteuid`, with no group/other write bit, falling back to a
-fresh private directory (or refusing). `src/tools/run_command/attribution.rs::verify_private_dir` is that check;
-it is private to that module today. Also refuse a non-absolute `temp_dir()`. Unlike the attribution engine this
-directory is used for long-lived sockets, so a silent fallback to a different directory would split peers that must
-find each other: refusing with a clear error is the likelier right answer here.
+Applied 2026-10-24 in the working tree, NOT committed (no fix SHA or patch-id yet).
+
+The operator chose to refuse with an error. In detail:
+
+- `verify_private_dir`, `create_private_dir`, `effective_uid`, `Uid` and `DirRefusal` moved verbatim from `src/tools/run_command/attribution.rs` into the new `src/util/private_dir.rs`. `attribution.rs` imports them.
+- `per_user_runtime_dir()` now returns `Result<PathBuf, RuntimeDirError>`. `RuntimeDirError` has three variants: `NotAbsolute`, `Refused { dir, why }` and `Create { dir, source }`. Its text names the path and tells the user to set `XDG_RUNTIME_DIR` or `TMPDIR`.
+- The pure core is `runtime_dir_from(xdg, temp, name_uid, verify_uid)`. It ignores a relative or missing `XDG_RUNTIME_DIR`. It verifies an absolute existing one and refuses it unless private. It requires an absolute `temp_dir()`. It creates `codescout-<uid>` without `recursive`, then verifies it.
+- The signature change reaches every caller. `peer_socket_path_for_workspace`, `peer_lock_path_for_workspace`, `lsp::mux::{socket,lock}_path_for_workspace`, `index_lock::{lock_path, acquire}`, `PeerEntry::socket_path`, `peer::launch::ensure_peer_serve`, `peer::server::run`, `main` (`PeerServe`) and `LspManager::get_or_start_via_mux_waiting` propagate the error with `?`. `index_lock::peek` returns `None` and `LspManager::count_mem_kill_marker` returns early on a refused directory.
+
+Behaviour change: an `XDG_RUNTIME_DIR` that is not private (for example `/tmp`, mode 1777) was accepted before. It is now refused with an error.
 
 ## Tests added
 
-N/A: filed, not fixed.
+Eight tests in `socket_discovery::runtime_dir_trust` (`src/socket_discovery.rs`), run through the `runtime_dir_from` seam so none touches the real runtime directory:
+
+- `a_missing_directory_is_created_private_and_reused`
+- `a_symlink_at_the_name_is_refused`
+- `a_group_or_world_writable_directory_is_refused`
+- `a_directory_owned_by_another_uid_is_refused`
+- `an_empty_or_relative_temp_dir_is_refused_and_creates_nothing`
+- `a_world_writable_xdg_directory_is_refused`
+- `a_private_xdg_directory_is_used`
+- `the_refusal_names_the_path_and_the_way_out`
+
+They were written first and failed against a stub before the implementation (RED), then passed (GREEN). The foreign-owner case uses a uid seam, so it needs no second account.
+
+Verified 2026-10-24: 129 targeted tests pass (`socket_discovery`, `index_lock`, `lsp::mux`, `peer::`, `private_dir`, `attribution`) and `cargo check --workspace --all-targets` is clean. The full gate was NOT green on the final bytes: one test, `server::tests::every_declared_alias_is_absent_from_the_schema`, fails on a peer's uncommitted `src/tools/grep.rs`, and `fmt-mine` refuses that file. Neither failure touches this change.
 
 ## Workarounds
 
@@ -95,9 +112,11 @@ Use a per-user `TMPDIR` (for example under `$XDG_RUNTIME_DIR`), which also avoid
 
 ## Resume
 
-Lift `verify_private_dir` (and its `DirRefusal`) out of `src/tools/run_command/attribution.rs` into a shared
-`src/util/` helper, call it from `per_user_runtime_dir`, decide refuse-versus-fallback for the socket case, and
-test with the same seams (a symlink, each write bit, a uid seam).
+The code and tests are done in the working tree and uncommitted. To close this bug:
+
+1. Get a green `./scripts/gate.sh` once the peer's `src/tools/grep.rs` work is committed or parked.
+2. Run `scripts/build-windows.sh clippy --all-targets -- -D warnings`. The only error from this change (an unused `DirRefusal` import) is fixed. The remaining errors are in code this change does not touch (see the Windows lib-test bug).
+3. Commit with the sequence in `docs/conventions/shared-checkout-commit-sequence.md`, then set `status: fixed` and cite the fix by SHA and patch-id as `docs/RELEASE.md` requires.
 
 ## References
 

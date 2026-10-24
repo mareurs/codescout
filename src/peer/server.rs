@@ -122,7 +122,7 @@ pub async fn run(
     read_only: bool,
     idle_timeout_secs: u64,
 ) -> Result<()> {
-    let lock_path = crate::socket_discovery::peer_lock_path_for_workspace(workspace);
+    let lock_path = crate::socket_discovery::peer_lock_path_for_workspace(workspace)?;
     run_with_lock(
         socket_path,
         &lock_path,

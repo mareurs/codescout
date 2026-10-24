@@ -789,7 +789,11 @@ impl LspManager {
         language: &str,
         workspace_root: &std::path::Path,
     ) {
-        let lock_path = crate::lsp::mux::lock_path_for_workspace(language, workspace_root);
+        // A refused runtime dir means no marker can have been written there by this user.
+        let Ok(lock_path) = crate::lsp::mux::lock_path_for_workspace(language, workspace_root)
+        else {
+            return;
+        };
         let marker = crate::lsp::mux::memkill_path_for_lock(&lock_path);
         let Ok(meta) = std::fs::metadata(&marker) else {
             return;
@@ -1148,8 +1152,8 @@ impl LspManager {
     ) -> Result<Arc<LspClient>> {
         use anyhow::Context;
 
-        let socket_path = crate::lsp::mux::socket_path_for_workspace(language, workspace_root);
-        let lock_path = crate::lsp::mux::lock_path_for_workspace(language, workspace_root);
+        let socket_path = crate::lsp::mux::socket_path_for_workspace(language, workspace_root)?;
+        let lock_path = crate::lsp::mux::lock_path_for_workspace(language, workspace_root)?;
 
         // Liveness is the flock AND socket reachability, not the flock alone
         // (defect #1, issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision).
@@ -2270,7 +2274,7 @@ mod tests {
         let mgr = LspManager::new();
         let key = LspKey::new("kotlin", ws);
         let marker = crate::lsp::mux::memkill_path_for_lock(
-            &crate::lsp::mux::lock_path_for_workspace("kotlin", ws),
+            &crate::lsp::mux::lock_path_for_workspace("kotlin", ws).unwrap(),
         );
         let count = || mgr.startup_failures.lock().unwrap().get(&key).map(|e| e.0);
 
@@ -2817,8 +2821,8 @@ mod tests {
     async fn get_or_start_via_mux_surfaces_wedged_error_when_flock_held_socket_absent() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
-        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
         // The wedged state: lock file present + held, NO reachable socket.
         std::fs::write(&lock_path, b"").unwrap();
         let _ = std::fs::remove_file(&sock_path);
@@ -3275,8 +3279,8 @@ mod tests {
     async fn a_mux_this_call_spawned_is_connected_to_although_it_answers_its_init_late() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
-        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
         let _ = std::fs::remove_file(&sock_path);
         let _ = std::fs::remove_file(&lock_path);
         let fake_mux = dir.path().join("fake-mux.py");
@@ -3386,8 +3390,8 @@ except Exception:
     async fn a_peer_mux_that_accepts_but_never_sends_init_is_wedged_and_remembered() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
-        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
         let _ = std::fs::remove_file(&sock_path);
         let _owner = super::claim_mux_lock(&lock_path)
             .unwrap()
@@ -3458,8 +3462,8 @@ except Exception:
     async fn a_silent_socket_whose_holder_died_is_not_remembered_as_a_wedged_mux() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
-        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
         let _ = std::fs::remove_file(&sock_path);
         let owner = super::claim_mux_lock(&lock_path)
             .unwrap()
@@ -3562,8 +3566,8 @@ except Exception:
         for _ in 0..TRIALS {
             let dir = tempfile::tempdir().unwrap();
             let ws = dir.path().to_path_buf();
-            let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", &ws);
-            let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", &ws);
+            let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", &ws).unwrap();
+            let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", &ws).unwrap();
             let _ = std::fs::remove_file(&sock_path);
             let owner = super::claim_mux_lock(&lock_path).unwrap().unwrap();
             let clients: Vec<_> = (0..2)
@@ -3646,8 +3650,8 @@ except Exception:
     ) -> LockHandOffs {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use tokio::io::AsyncWriteExt;
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
-        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
         let _ = std::fs::remove_file(&sock_path);
         let first = super::claim_mux_lock(&lock_path)
             .unwrap()
@@ -3965,7 +3969,7 @@ except Exception:
     async fn rounds_that_run_out_with_the_lock_free_do_not_blame_a_holder() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
         let LockHandOffs { mgr, held, gaps } =
             manager_whose_lock_changes_hands_after_the_first_holder_dies(
                 ws,
@@ -4013,7 +4017,7 @@ except Exception:
     async fn rounds_that_run_out_with_the_last_holder_alive_still_name_it() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
         let LockHandOffs { mgr, held, gaps } =
             manager_whose_lock_changes_hands_after_the_first_holder_dies(
                 ws,
@@ -4181,8 +4185,8 @@ except Exception:
     async fn a_peer_mux_that_never_binds_is_reported_wedged_after_the_wait() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
-        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
         let _ = std::fs::remove_file(&sock_path);
         let _owner = super::claim_mux_lock(&lock_path)
             .unwrap()
@@ -4225,8 +4229,8 @@ except Exception:
     async fn a_peer_mux_that_never_binds_costs_one_wait_not_one_per_file() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
-        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
         let _ = std::fs::remove_file(&sock_path);
         let _owner = super::claim_mux_lock(&lock_path)
             .unwrap()
@@ -4269,8 +4273,8 @@ except Exception:
     async fn the_production_peer_wait_is_thirty_seconds() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
-        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
         let _ = std::fs::remove_file(&sock_path);
         let _owner = super::claim_mux_lock(&lock_path)
             .unwrap()
@@ -4307,8 +4311,8 @@ except Exception:
     async fn an_early_stop_because_the_holder_died_is_not_remembered_as_a_wedged_mux() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
-        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
         let _ = std::fs::remove_file(&sock_path);
         let owner = super::claim_mux_lock(&lock_path)
             .unwrap()
@@ -4348,8 +4352,8 @@ except Exception:
     async fn the_wedge_memory_lasts_sixty_seconds_and_not_longer() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
-        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
         let _ = std::fs::remove_file(&sock_path);
         let _owner = super::claim_mux_lock(&lock_path)
             .unwrap()
@@ -4402,8 +4406,8 @@ except Exception:
         use tokio::io::AsyncWriteExt;
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
-        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
         let _ = std::fs::remove_file(&sock_path);
         let _owner = super::claim_mux_lock(&lock_path)
             .unwrap()
@@ -4501,8 +4505,8 @@ except Exception:
 
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
-        let socket_path = crate::lsp::mux::socket_path_for_workspace("kotlin", ws);
-        let lock_path = crate::lsp::mux::lock_path_for_workspace("kotlin", ws);
+        let socket_path = crate::lsp::mux::socket_path_for_workspace("kotlin", ws).unwrap();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("kotlin", ws).unwrap();
 
         let mut mux_child = std::process::Command::new(&codescout_bin)
             .arg("mux")
