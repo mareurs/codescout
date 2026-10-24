@@ -7,6 +7,7 @@ pub(crate) mod init_options;
 pub mod manager;
 pub mod manager_provider;
 pub mod mock;
+pub(crate) mod progress;
 pub mod servers;
 pub mod symbols;
 pub use mock::{MockLspClient, MockLspProvider};

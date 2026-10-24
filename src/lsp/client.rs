@@ -62,6 +62,7 @@ impl std::fmt::Display for MuxInitTimeout {
 impl std::error::Error for MuxInitTimeout {}
 
 use super::call_hierarchy::supports_call_hierarchy;
+use super::progress::{keep_waiting, ProgressTracker};
 
 /// Convert an LSP URI to a filesystem path.
 ///
@@ -432,6 +433,10 @@ pub struct LspClient {
     /// construction — otherwise a slow kotlin-lsp init (5+ min Gradle import)
     /// consumes the whole budget before the first user request.
     pub(crate) init_completed_at: std::sync::OnceLock<std::time::Instant>,
+    /// The server's announced start-up work (`$/progress`), read off its notifications. It
+    /// decides how long a `null` answer is re-asked in the cold-start window; see
+    /// [`ProgressTracker`].
+    progress: Arc<ProgressTracker>,
 }
 
 impl LspClient {
@@ -449,6 +454,7 @@ impl LspClient {
         msg: Value,
         pending: &PendingRequests,
         writer: &Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>,
+        progress: &ProgressTracker,
         request_label: &str,
         notification_label: &str,
     ) {
@@ -490,6 +496,7 @@ impl LspClient {
             }
         } else if let Some(method) = msg.get("method").and_then(|v| v.as_str()) {
             tracing::debug!("{}: {}", notification_label, method);
+            progress.observe(&msg, std::time::Instant::now());
         }
     }
 
@@ -500,6 +507,7 @@ impl LspClient {
         mut reader: BufReader<R>,
         pending: PendingRequests,
         writer: Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>,
+        progress: Arc<ProgressTracker>,
         request_label: &'static str,
         notif_label: &'static str,
     ) -> anyhow::Error
@@ -509,8 +517,15 @@ impl LspClient {
         loop {
             match transport::read_message(&mut reader).await {
                 Ok(msg) => {
-                    Self::dispatch_lsp_message(msg, &pending, &writer, request_label, notif_label)
-                        .await;
+                    Self::dispatch_lsp_message(
+                        msg,
+                        &pending,
+                        &writer,
+                        &progress,
+                        request_label,
+                        notif_label,
+                    )
+                    .await;
                 }
                 Err(e) => return e,
             }
@@ -625,11 +640,14 @@ impl LspClient {
         let pending_clone = pending.clone();
         let alive_clone = alive.clone();
         let writer_clone = writer.clone();
+        let progress = Arc::new(ProgressTracker::default());
+        let progress_clone = progress.clone();
         let reader_handle = tokio::spawn(async move {
             let read_err = Self::run_dispatch_loop(
                 BufReader::new(stdout),
                 pending_clone.clone(),
                 writer_clone,
+                progress_clone,
                 "LSP server request",
                 "LSP notification",
             )
@@ -674,14 +692,15 @@ impl LspClient {
             stderr_lines,
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
+            progress,
         };
 
         // Perform the LSP initialize handshake
         client
-            .initialize(crate::lsp::init_options::for_workspace(
-                &config.command,
-                &config.workspace_root,
-            ))
+            .initialize(
+                crate::lsp::init_options::for_workspace(&config.command, &config.workspace_root),
+                crate::lsp::init_options::wants_progress(&config.command),
+            )
             .await?;
 
         Ok(client)
@@ -754,11 +773,14 @@ impl LspClient {
         let pending_clone = pending.clone();
         let alive_clone = alive.clone();
         let writer_clone = writer.clone();
+        let progress = Arc::new(ProgressTracker::default());
+        let progress_clone = progress.clone();
         let reader_handle = tokio::spawn(async move {
             let _read_err = Self::run_dispatch_loop(
                 buf_reader,
                 pending_clone.clone(),
                 writer_clone,
+                progress_clone,
                 "mux forwarded server request",
                 "LSP notification from mux",
             )
@@ -784,6 +806,7 @@ impl LspClient {
             stderr_lines: Arc::new(StdMutex::new(Vec::new())),
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
+            progress,
         })
     }
 
@@ -986,12 +1009,20 @@ impl LspClient {
     /// Retries on -32800 (RequestCancelled) because JVM-based servers like
     /// kotlin-lsp may return this during early JVM bootstrap before they're
     /// ready to handle the initialize request.
-    async fn initialize(&self, initialization_options: Option<Value>) -> Result<()> {
+    async fn initialize(
+        &self,
+        initialization_options: Option<Value>,
+        advertise_progress: bool,
+    ) -> Result<()> {
         let root_uri = path_to_uri(&self.workspace_root)?;
 
         let params = lsp_types::InitializeParams {
             process_id: Some(std::process::id()),
             capabilities: lsp_types::ClientCapabilities {
+                window: advertise_progress.then(|| lsp_types::WindowClientCapabilities {
+                    work_done_progress: Some(true),
+                    ..Default::default()
+                }),
                 text_document: Some(lsp_types::TextDocumentClientCapabilities {
                     document_symbol: Some(lsp_types::DocumentSymbolClientCapabilities {
                         hierarchical_document_symbol_support: Some(true),
@@ -1304,8 +1335,10 @@ impl LspClient {
     }
 
     /// Send `method` and re-ask while the answer is `not_answered` — a SUCCESS that
-    /// carries nothing — every 200 ms within `not_answered_budget`. Returns the answer,
-    /// or `None` if every attempt in the budget was not-answered.
+    /// carries nothing — every 200 ms within `not_answered_budget`, and past it for a `null`
+    /// answer while the server reports start-up progress (see `progress::keep_waiting`).
+    /// Returns `Ok(answer)`, or `Err(waited)` if every attempt was not-answered, with how long
+    /// that took, so the caller's error states the time it really waited.
     ///
     /// rust-analyzer answers this way while it loads its workspace, and `request`'s
     /// retry cannot see it because it retries only -32800 / -32801 ERRORS. Measured
@@ -1319,17 +1352,21 @@ impl LspClient {
         method: &str,
         params: Value,
         not_answered: fn(&Value) -> bool,
-    ) -> Result<Option<Value>> {
+    ) -> Result<std::result::Result<Value, std::time::Duration>> {
         const RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
         let budget = self.not_answered_budget();
         let first_asked = std::time::Instant::now();
         loop {
             let result = self.request(method, params.clone()).await?;
             if !not_answered(&result) {
-                return Ok(Some(result));
+                return Ok(Ok(result));
             }
-            if first_asked.elapsed() >= budget {
-                return Ok(None);
+            // Past the budget a null answer is still worth asking while the server reports
+            // work (see `progress`): only in the cold-start window, and never for `[]`.
+            let busy = self.in_cold_start_window() && self.progress.busy(std::time::Instant::now());
+            let waited = first_asked.elapsed();
+            if !keep_waiting(waited, budget, result.is_null(), busy) {
+                return Ok(Err(waited));
             }
             tokio::time::sleep(RETRY_INTERVAL).await;
         }
@@ -1371,27 +1408,30 @@ impl LspClient {
         // `request_until_answered`. It used to become `Ok(vec![])` here: `references`
         // said "symbol not found" and path-scoped `symbols` said "0 matches" for symbols
         // that exist. An empty ARRAY is an answer and is returned as one.
-        let Some(result) = self
+        let result = match self
             .request_until_answered(
                 "textDocument/documentSymbol",
                 serde_json::to_value(params)?,
                 Value::is_null,
             )
             .await?
-        else {
-            return Err(RecoverableError::with_hint(
-                format!(
-                    "the language server answered textDocument/documentSymbol with null for {} \
-                     on every attempt for {} ms",
-                    path.display(),
-                    self.not_answered_budget().as_millis()
-                ),
-                "null means the server has not answered, not that the file has no symbols \
-                 — rust-analyzer sends it while it reloads its workspace. A repo with many \
-                 nested linked worktrees (for example under `.claude/worktrees`) can keep it \
-                 answering null for about a minute after start-up. Retry shortly.",
-            )
-            .into());
+        {
+            Ok(result) => result,
+            Err(waited) => {
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "the language server answered textDocument/documentSymbol with null \
+                         for {} on every attempt for {} ms",
+                        path.display(),
+                        waited.as_millis()
+                    ),
+                    "null means the server has not answered, not that the file has no symbols \
+                     — rust-analyzer sends it while it reloads its workspace. A repo with many \
+                     nested linked worktrees (for example under `.claude/worktrees`) can keep \
+                     it answering null for about a minute after start-up. Retry shortly.",
+                )
+                .into());
+            }
         };
 
         // LSP returns either DocumentSymbol[] (hierarchical) or SymbolInformation[] (flat)
@@ -2076,6 +2116,13 @@ struct Point {
             serde_json::json!({"files": {"excludeDirs": [".worktrees"]}}),
             "initialize params were: {params}"
         );
+        // rust-analyzer sends `$/progress` only to a client that advertises it; the cold-start
+        // wait for a null answer reads that progress.
+        assert_eq!(
+            params["capabilities"]["window"]["workDoneProgress"],
+            serde_json::json!(true),
+            "initialize params were: {params}"
+        );
     }
 
     /// `files.excludeDirs` is a rust-analyzer setting. Any other server must get no
@@ -2087,6 +2134,138 @@ struct Point {
         assert!(
             params.get("initializationOptions").is_none(),
             "initialize params were: {params}"
+        );
+        // Another server (kotlin-lsp above all) keeps the capabilities it has always seen: an
+        // advertised progress capability would make it send a stream it never sent before.
+        assert!(
+            params["capabilities"].get("window").is_none(),
+            "initialize params were: {params}"
+        );
+    }
+
+    /// Start the progress fixture (null `documentSymbol` answers for `null_seconds` after
+    /// `initialize`, announced as a progress token unless `announce` is false) and ask for the
+    /// symbols of one file. Real clock: a paused clock jumps over real socket I/O.
+    #[cfg(unix)]
+    async fn document_symbols_from_a_slow_starting_server(
+        null_seconds: u32,
+        announce: bool,
+    ) -> (Result<Vec<crate::lsp::SymbolInfo>>, std::time::Duration) {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("lib.rs");
+        std::fs::write(&file, "fn ready_symbol() {}\n").unwrap();
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/fake_lsp_progress.py");
+        let mut args = vec![
+            fixture.to_string_lossy().into_owned(),
+            null_seconds.to_string(),
+        ];
+        if !announce {
+            args.push("noprogress".into());
+        }
+        let client = LspClient::start(LspServerConfig {
+            command: "python3".into(),
+            args,
+            workspace_root: dir.path().to_path_buf(),
+            init_timeout: Some(std::time::Duration::from_secs(10)),
+            mux: false,
+            env: vec![],
+            idle_timeout_secs: None,
+        })
+        .await
+        .expect("the fake server should start");
+        // Time the call only: `shutdown` is not what these tests are about.
+        let started = std::time::Instant::now();
+        let symbols = client.document_symbols(&file, "rust").await;
+        let elapsed = started.elapsed();
+        client.shutdown().await.unwrap();
+        (symbols, elapsed)
+    }
+
+    /// rust-analyzer answers `documentSymbol` with null for much longer than the 5 s cold budget on
+    /// a big repo, and announces that work as progress. A null answer must be re-asked while a
+    /// progress token is open: here the server is null for 7 s and the budget is 5 s.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_null_answer_is_re_asked_past_the_budget_while_the_server_reports_progress() {
+        let (symbols, _) = document_symbols_from_a_slow_starting_server(7, true).await;
+        let symbols = symbols.expect("the server reported progress for the whole null window");
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "ready_symbol");
+    }
+
+    /// The control: the same 7 s of null with NO progress announced still ends at the 5 s budget,
+    /// with the same error as before. Nothing is waited for that the server did not announce.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_null_answer_still_ends_at_the_budget_when_the_server_reports_no_progress() {
+        let (result, elapsed) = document_symbols_from_a_slow_starting_server(7, false).await;
+        let err = result.expect_err("no progress was announced, so the 5 s budget applies");
+        assert!(
+            err.to_string()
+                .contains("answered textDocument/documentSymbol with null"),
+            "got: {err}"
+        );
+        // The error states the time actually waited: a little over the 5 s budget.
+        assert!(
+            err.to_string().contains("on every attempt for 5"),
+            "got: {err}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(7),
+            "gave up at the 5 s budget, not after the 7 s null window; took {elapsed:?}"
+        );
+    }
+
+    /// LIVE and manual: codescout's own client against a real rust-analyzer on THIS repository,
+    /// asking for the symbols of one file just after the server has started, and printing how long
+    /// the answer took. It passes when the call answers, so it is a smoke test of the whole chain
+    /// (init options, progress capability, progress wait) and NOT a discriminator: the null window
+    /// varies run to run (4.0 s and 6.2 s back to back with the progress wait on and off, because
+    /// the file cache warms), so a short window passes with or without the wait. The deterministic
+    /// evidence for the wait is the fixture test with a fixed 7 s window.
+    ///
+    /// Run: `cargo test --lib live_cold_document_symbols -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore] // needs rust-analyzer and a cold start of this repo; run manually
+    async fn live_cold_document_symbols_smoke_test_on_this_repo() {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let client = LspClient::start(LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: root.clone(),
+            init_timeout: Some(std::time::Duration::from_secs(60)),
+            mux: false,
+            env: vec![],
+            idle_timeout_secs: None,
+        })
+        .await
+        .expect("rust-analyzer should start");
+        // A cold rust-analyzer answers symbols for its first ~0.7 s, BEFORE its first workspace
+        // reload, and then answers null until the scan ends (measured: symbols at 0.07 s, null
+        // from 0.7 s). The failing call in the field came 1.4 s after start. Asking at once would
+        // test nothing, so wait until the null window has begun.
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        let started = std::time::Instant::now();
+        let symbols = client
+            .document_symbols(&root.join("src/lsp/init_options.rs"), "rust")
+            .await;
+        eprintln!(
+            "document_symbols answered after {:?}: {}",
+            started.elapsed(),
+            match &symbols {
+                Ok(s) => format!("{} symbols", s.len()),
+                Err(e) => format!("error: {e}"),
+            }
+        );
+        client.shutdown().await.unwrap();
+        assert!(
+            symbols.is_ok_and(|s| !s.is_empty()),
+            "the call must answer, not report null"
         );
     }
 
@@ -2363,6 +2542,7 @@ struct Point {
             stderr_lines: Arc::new(StdMutex::new(Vec::new())),
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
+            progress: Arc::new(ProgressTracker::default()),
         }
     }
 
@@ -2892,6 +3072,7 @@ struct Point {
             stderr_lines: Arc::new(StdMutex::new(Vec::new())),
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
+            progress: Arc::new(ProgressTracker::default()),
         };
 
         assert!(

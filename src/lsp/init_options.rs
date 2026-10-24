@@ -38,6 +38,15 @@ fn is_worktrees_dir(relative: &Path) -> bool {
         .is_some_and(|name| name == "worktrees" || name == ".worktrees")
 }
 
+/// Whether codescout advertises `window.workDoneProgress` to `server_command`, so that the server
+/// sends `$/progress` for its start-up work (which [`super::progress`] reads to decide how long a
+/// `null` answer is re-asked). rust-analyzer only: another server (kotlin-lsp above all) keeps the
+/// capabilities it has always seen, because an advertised capability makes it send a stream it
+/// never sent before.
+pub(crate) fn wants_progress(server_command: &str) -> bool {
+    is_rust_analyzer(server_command)
+}
+
 /// The `initializationOptions` for `server_command` in `workspace_root`, given the linked
 /// worktrees of the repository (`worktrees`, absolute roots). `None` means "send none".
 ///
@@ -241,6 +250,19 @@ mod tests {
                 None,
                 "{command}: `files.excludeDirs` is a rust-analyzer setting"
             );
+        }
+    }
+
+    #[test]
+    fn only_rust_analyzer_is_sent_the_progress_capability() {
+        assert!(wants_progress("rust-analyzer"));
+        assert!(wants_progress("/home/u/.cargo/bin/rust-analyzer"));
+        for command in [
+            "kotlin-lsp",
+            "pyright-langserver",
+            "my-rust-analyzer-wrapper",
+        ] {
+            assert!(!wants_progress(command), "{command}");
         }
     }
 

@@ -192,6 +192,11 @@ pub async fn run(
             "rootUri": url::Url::from_file_path(workspace_root).map(|u| u.to_string()).unwrap_or_default()
         }
     });
+    // The same progress capability `LspClient::start` advertises (rust-analyzer only): the
+    // server's `$/progress` is broadcast to every client, which reads it for the cold-start wait.
+    if crate::lsp::init_options::wants_progress(server_command) {
+        init_request["params"]["capabilities"]["window"] = json!({"workDoneProgress": true});
+    }
     // The same options `LspClient::start` sends for a server it spawns itself, so a workspace
     // behaves alike with and without the mux. Omitted, not `null`, when there are none.
     if let Some(options) = crate::lsp::init_options::for_workspace(server_command, workspace_root) {
@@ -1289,6 +1294,11 @@ mod tests {
         assert_eq!(
             params["initializationOptions"],
             json!({"files": {"excludeDirs": [".worktrees"]}}),
+            "the mux's initialize params were: {params}"
+        );
+        assert_eq!(
+            params["capabilities"]["window"]["workDoneProgress"],
+            json!(true),
             "the mux's initialize params were: {params}"
         );
     }
