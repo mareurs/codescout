@@ -77,7 +77,7 @@ impl Tool for Grep {
             ("regex", "pattern"),
             // Claude Code's native Grep spells these differently. Dropped silently,
             // `-i` ran the search case-sensitive and a context flag returned bare
-            // lines (2026-10-24 sweep, docs/issues/2026-10-24-grep-silently-drops-…).
+            // lines (2026-10-24 sweep; archived bug 2026-10-24-grep-silently-drops-native-grep-parameters).
             // `-A`/`-B` map to the same key: `context_lines` is symmetric, so the
             // result is a superset of what was asked for, never fewer lines.
             ("-i", "ignore_case"),

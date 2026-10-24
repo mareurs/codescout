@@ -1,13 +1,15 @@
 ---
-id: '6e55396a0bfe1217'
+id: 112809c15b6b2b28
 kind: bug
-status: open
+status: fixed
 title: grep silently drops native-Grep parameters (-i, multiline, -A/-B/-C, output_mode, head_limit) on 21.4% of calls, so a case-insensitive search runs case-sensitive
 tags:
 - cluster/accepted-parameter-silently-dropped
+closed: 2026-10-24
 opened: 2026-10-24
 owner: marius
 severity: high
+unverified: 'No live call through a rebuilt server yet: the regression tests run normalize_params then Grep.call, the two steps call_content runs, but not the MCP boundary itself. Not fixed on purpose: head_limit (0 means unlimited in native Grep, 0 results here), -n, -o (superset output, harmless), and output_mode count/files_with_matches are refused rather than translated.'
 ---
 
 # BUG: grep silently drops native-Grep parameters (`-i`, `multiline`, `-A/-B/-C`, `context`, `output_mode`, `head_limit`), so a case-insensitive search runs case-sensitive
@@ -50,13 +52,23 @@ N/A — the replay above is the direct check.
 
 ## Fix
 
-Not started. Two options, not exclusive:
-1. Repair-and-continue aliases with a `corrections` note: `-i`→`ignore_case`, `-C`/`context`→`context_lines`, `head_limit`→`limit`, `output_mode: files_with_matches`→`mode: files`, `output_mode: content`→`mode: lines`.
-2. For keys with no safe mapping (`multiline`, `-A`/`-B` asymmetry, `output_mode: count`, `-o`), a recoverable refusal that names the key, or at least an `ignored_params` field in the response.
+Implemented in `63734e311` (`experiments`). Patch-id `40e9bc1da150a11818b65646f0f7342116b1346c`.
+
+- `Grep::param_aliases` gained `-i`→`ignore_case` and `-C`, `-A`, `-B`, `context`→`context_lines`. The dispatcher announces each in `corrections`. `-A`/`-B` share the symmetric key, so the result is a superset, never fewer lines.
+- `ignore_case`, `whole_word` and `include_hidden` read through `optional_bool_param`, so the string `"true"` works (31 of the 82 `-i` calls sent it).
+- `refuse_native_keys_that_change_the_result`: `multiline: true` and an `output_mode` other than `content`/`lines` return a `RecoverableError` naming the key and the working spelling, and nothing is searched.
+- The two alias ledgers in `src/server.rs` (`grep` 5→10 pairs, five new `EXPECTED_ALIAS_PAIRS` rows) were updated on purpose.
+
+Not done, deliberately: `head_limit`, `-n` and `-o` stay ignored (see `unverified`).
 
 ## Tests added
 
-None yet.
+Five tests in `src/tools/grep.rs`, each watched red before the change: `grep_dash_i_is_honoured_as_ignore_case`, `grep_string_encoded_ignore_case_is_honoured`, `grep_native_context_spellings_become_context_lines`, `grep_refuses_multiline_instead_of_searching_line_by_line`, `grep_output_mode_content_is_the_default_and_any_other_value_is_refused`. Gate on the final bytes: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0 FMT_STATE=passed`, `PYTHON_LIGHT=0`; lib suite 5,253 passed, 0 failed.
+
+## Fix provenance
+
+- **SHA:** `63734e31105c771285c717b43d27737b437ca593` (`experiments`)
+- **patch-id:** `40e9bc1da150a11818b65646f0f7342116b1346c`
 
 ## Workarounds
 
