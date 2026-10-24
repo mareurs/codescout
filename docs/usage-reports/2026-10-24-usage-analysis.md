@@ -50,6 +50,8 @@ The 09-10 report's decision still stands: the Iron-Law gates are healthy by reco
 
 4,966 of 23,222 recorded `grep` calls (21.4%) carried a key that the schema does not declare. 4,960 returned `success` with no notice. Dropped keys include `-i` (82), `multiline` (11), `-A/-B/-C`/`context` (269), `head_limit` (593) and `output_mode` (4,693).
 
+**Most of those drops are harmless.** 4,561 of the 4,693 `output_mode` values are `content` or `lines`, the default shape. The result-changing drops are `-i` (82, of which 31 sent the string `"true"`), non-zero context keys, `multiline` (11) and the 137 non-default `output_mode` values (`files` 57, `count` 53, `files_with_matches` 27). The 21.4% figure counts every undeclared key, so it overstates the harm.
+
 Verified by replay: the same search returned **43 matches with `ignore_case=true` and 37 without** (what a `-i` call actually gets). The dropped lines are real hits.
 → `docs/issues/2026-10-24-grep-silently-drops-native-grep-parameters-so-a-case-insensitive-search-runs-case-sensitive.md`
 

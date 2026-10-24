@@ -4,7 +4,9 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::format::{insert_below_header, overflow_head};
-use super::{optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext};
+use super::{
+    optional_bool_param, optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext,
+};
 use crate::util::fs::to_forward_slash;
 
 // ── grep ───────────────────────────────────────────────────────
@@ -62,8 +64,8 @@ impl Tool for Grep {
         // canonical name. Declaring it here runs it through the same dispatch-level
         // `normalize_params` as the path aliases, which DOES announce it.
         //
-        // LOAD-BEARING, and NOT `crate::fs::PATH_PARAM_ALIAS_MAP`: the last two
-        // pairs are exactly the two that constant does not carry. The
+        // LOAD-BEARING, and NOT `crate::fs::PATH_PARAM_ALIAS_MAP`: the pairs after
+        // the three path names are exactly the ones that constant does not carry. The
         // `require_str_param_or` fallback in `call()` below stays — direct-`call()`
         // tests bypass `call_content`'s normalization boundary entirely, so it is
         // their only resolver for `query`/`regex`.
@@ -73,6 +75,16 @@ impl Tool for Grep {
             ("file", "path"),
             ("query", "pattern"),
             ("regex", "pattern"),
+            // Claude Code's native Grep spells these differently. Dropped silently,
+            // `-i` ran the search case-sensitive and a context flag returned bare
+            // lines (2026-10-24 sweep, docs/issues/2026-10-24-grep-silently-drops-…).
+            // `-A`/`-B` map to the same key: `context_lines` is symmetric, so the
+            // result is a superset of what was asked for, never fewer lines.
+            ("-i", "ignore_case"),
+            ("-C", "context_lines"),
+            ("-A", "context_lines"),
+            ("-B", "context_lines"),
+            ("context", "context_lines"),
         ]
     }
 
@@ -81,6 +93,7 @@ impl Tool for Grep {
         // above normalizes `query`/`regex` before this runs, but direct-`call()`
         // tests bypass that boundary — see the comment on `param_aliases()`.
         let pattern = super::require_str_param_or(&input, "pattern", &["query", "regex"])?;
+        refuse_native_keys_that_change_the_result(&input)?;
         let raw_path = strip_buffer_ref_quotes(
             input["path"]
                 .as_str()
@@ -124,18 +137,11 @@ impl Tool for Grep {
         } else {
             max
         };
-        let ignore_case = input
-            .get("ignore_case")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let whole_word = input
-            .get("whole_word")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let include_hidden = input
-            .get("include_hidden")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        // `optional_bool_param` also accepts the string "true"/"false": 31 of the 82
+        // `-i` calls in the 2026-10-24 sweep sent a string, which `as_bool` rejects.
+        let ignore_case = optional_bool_param(&input, "ignore_case").unwrap_or(false);
+        let whole_word = optional_bool_param(&input, "whole_word").unwrap_or(false);
+        let include_hidden = optional_bool_param(&input, "include_hidden").unwrap_or(false);
         let files_mode = input.get("mode").and_then(|v| v.as_str()) == Some("files");
         let globs = parse_globs(&input);
         // An absolute glob outside the search root can never match a candidate this walk
@@ -612,6 +618,42 @@ impl Tool for Grep {
 /// argument it claims to be.
 pub(crate) fn path_candidate(file: &str, tally: &str) -> String {
     format!("path={} ({tally})", crate::util::text::json_quote(file))
+}
+
+/// Refuse the two native-Grep keys that `grep` cannot honour AND that change the answer.
+///
+/// An undeclared key used to be dropped without a word. Most of those drops are
+/// harmless (`-n`, `-o` and `head_limit` return a superset or a slightly longer
+/// list; `output_mode: "content"` IS the default shape), so refusing every unknown
+/// key would break the common call. These two are different: the caller asked for a
+/// result `grep` does not produce, and got a confident answer about something else.
+///
+/// - `multiline: true` — `grep` matches one line at a time, so a pattern that spans
+///   lines returned `0 matches` for text that is in the file.
+/// - `output_mode` other than `content`/`lines` — `files_with_matches`, `files` and
+///   `count` ask for a per-file shape and received full lines instead.
+fn refuse_native_keys_that_change_the_result(input: &Value) -> Result<()> {
+    if optional_bool_param(input, "multiline") == Some(true) {
+        return Err(RecoverableError::with_hint(
+            "'multiline' is not supported — grep matches one line at a time, so a pattern \
+             that spans lines would report 0 matches for text that is in the file",
+            "Search for one distinctive line of the block, then read_file the range around \
+             it. Nothing was searched.",
+        )
+        .into());
+    }
+    if let Some(shape) = input.get("output_mode").and_then(|v| v.as_str()) {
+        if !matches!(shape, "content" | "lines") {
+            return Err(RecoverableError::with_hint(
+                format!("'output_mode' is not a parameter of grep — '{shape}' was not applied"),
+                "grep's own spelling is mode=\"files\" (ranked files + per-file counts, no \
+                 line content); the default mode=\"lines\" returns the matching lines. \
+                 Nothing was searched.",
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn format_grep(val: &Value) -> String {
@@ -2374,6 +2416,134 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r["total"].as_u64().unwrap(), 1, "only the .rs file matches");
+    }
+
+    /// The dispatch boundary rewrites aliases before `call()` runs (`call_content`
+    /// → `normalize_params`). A direct `Grep.call` skips it, so these tests run the
+    /// same two steps in the same order.
+    async fn call_as_dispatched(mut input: Value, ctx: &ToolContext) -> Result<Value> {
+        crate::tools::core::param_alias::normalize_params(&mut input, Grep.param_aliases());
+        Grep.call(input, ctx).await
+    }
+
+    #[tokio::test]
+    async fn grep_dash_i_is_honoured_as_ignore_case() {
+        // Claude Code's native Grep spells it `-i`. Before the alias it was dropped
+        // silently and the search ran case-sensitive, so a mixed-case hit vanished
+        // with no sign that the flag was lost (2026-10-24 sweep: 82 calls).
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "Hello WORLD\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = call_as_dispatched(
+            json!({ "pattern": "world", "path": dir.path().to_str().unwrap(), "-i": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["total"].as_u64().unwrap(), 1, "-i must mean ignore_case");
+    }
+
+    #[tokio::test]
+    async fn grep_string_encoded_ignore_case_is_honoured() {
+        // 31 of the 82 `-i` calls sent the string "true", which `as_bool` rejects.
+        // Every other boolean parameter in this crate reads through
+        // `optional_bool_param`, which accepts it.
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "Hello WORLD\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "world", "path": dir.path().to_str().unwrap(), "ignore_case": "true" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(r["total"].as_u64().unwrap(), 1, "\"true\" must mean true");
+    }
+
+    #[tokio::test]
+    async fn grep_native_context_spellings_become_context_lines() {
+        // `-C`, `-A`, `-B` and `context` are the native Grep names for context_lines.
+        // `-A`/`-B` map to the same key: the result is a superset of what was asked
+        // for, never fewer lines.
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "before\nNEEDLE\nafter\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        for key in ["-C", "-A", "-B", "context"] {
+            let r = call_as_dispatched(
+                json!({ "pattern": "NEEDLE", "path": dir.path().to_str().unwrap(), key: 1 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+            let s = r.to_string();
+            assert!(
+                s.contains("before") && s.contains("after"),
+                "{key}: 1 must return the neighbouring lines: {s}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn grep_refuses_multiline_instead_of_searching_line_by_line() {
+        // grep matches one line at a time. `multiline: true` used to be dropped, so
+        // a pattern spanning two lines returned a confident `0 matches`.
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "one\ntwo\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let err = Grep
+            .call(
+                json!({ "pattern": "one\\ntwo", "path": dir.path().to_str().unwrap(), "multiline": true }),
+                &ctx,
+            )
+            .await
+            .expect_err("multiline cannot be honoured, so it must be refused");
+        let rec = err
+            .downcast_ref::<RecoverableError>()
+            .expect("a refusal the caller can act on");
+        assert!(rec.message.contains("multiline"), "names the key: {rec:?}");
+
+        // An explicit false asks for nothing, so it is not refused.
+        Grep.call(
+            json!({ "pattern": "one", "path": dir.path().to_str().unwrap(), "multiline": false }),
+            &ctx,
+        )
+        .await
+        .expect("multiline:false is the behaviour grep already has");
+    }
+
+    #[tokio::test]
+    async fn grep_output_mode_content_is_the_default_and_any_other_value_is_refused() {
+        // 4,396 of 4,693 `output_mode` uses in the sweep were "content" — the default,
+        // so ignoring it is correct and refusing it would break the common call. The
+        // other values ask for a different shape (`files_with_matches`, `count`) that
+        // was silently ignored; they are refused with the spelling that works.
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "NEEDLE\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        for ok in ["content", "lines"] {
+            Grep.call(
+                json!({ "pattern": "NEEDLE", "path": dir.path().to_str().unwrap(), "output_mode": ok }),
+                &ctx,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("output_mode={ok} is the default shape: {e}"));
+        }
+        for bad in ["files_with_matches", "files", "count"] {
+            let err = Grep
+                .call(
+                    json!({ "pattern": "NEEDLE", "path": dir.path().to_str().unwrap(), "output_mode": bad }),
+                    &ctx,
+                )
+                .await
+                .expect_err("a different output shape cannot be silently ignored");
+            let rec = err.downcast_ref::<RecoverableError>().expect("recoverable");
+            let text = format!("{rec:?}");
+            assert!(
+                text.contains("output_mode") && text.contains("mode"),
+                "names the key and the working spelling: {text}"
+            );
+        }
     }
 
     #[tokio::test]
