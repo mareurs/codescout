@@ -301,7 +301,7 @@ the working tree for every session in it.
 **Scope.** This rule covers the author side. The pusher side is separate: re-derive the range and send the
 decided set by SHA. That rule is in `docs/RELEASE.md` § *Concurrent-Work Rules*.
 
-**Status.** The policy now has a mechanism, on the push side. A session that must withhold its work runs
+**Status.** The policy has checks at commit and push time. A session that must withhold its work runs
 `scripts/hold-publish.sh set <reason>`. That writes a ref `refs/holds/<session-id>` in the shared repo.
 `scripts/hold-publish.sh release [sid]` drops it. `scripts/hold-publish.sh list` shows every hold. The pre-existing
 pre-push guard, `scripts/pre-push-foreign-session-guard.sh`, refuses a push that carries any commit whose
@@ -315,14 +315,15 @@ no prefix to push" when nothing there is unpublished, and, when the remote tip i
 (so the prefix cannot be counted), that no prefix can be computed and that `git fetch` comes first. A refusal
 triggered only by a tag or a `refs/wip/*` push has no branch to name, so it prints none of these lines.
 
+The native pre-commit dispatcher, `scripts/pre-commit-run.sh`, also refuses commits from a session with an active hold. It checks only the committing session, including in linked worktrees, and leaves HEAD, the index and the hold unchanged. The refusal names the reason and the release command; release requires the author or operator's decision. Other sessions can still commit. A malformed session id or a hold lookup error refuses the commit rather than treating the hold as absent. The lookup uses `git show-ref --exists`; Git versions without that operation report a lookup error and refuse session commits.
+
 **Limits of the mechanism.**
 
 - A commit with no `Session-Id` trailer is not matched. The guard cannot tell whose it is.
 - A hold covers the whole session, not one commit.
 - Nothing forces a session to set a hold. The hold is only as good as that habit.
 - `release` is a convention. Nothing proves that the caller is the operator when it drops another session's hold.
-- Nothing stops a session from committing a change its operator said to hold. The rule above is still the only
-  protection on the commit side.
+- The commit check enforces an already-recorded hold. It cannot infer withholding that was never recorded. Like the push check, it reads `CLAUDE_CODE_SESSION_ID`; a manual commit without that variable is allowed. Skipping hooks also skips the check.
 - A push from a terminal with no `CLAUDE_CODE_SESSION_ID` publishes held commits silently. That is by design: the
   guard has no pusher to compare against.
 - A squash merge of a held branch by another session launders the trailer: only the pusher's sid survives, in the

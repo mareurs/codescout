@@ -1,7 +1,7 @@
 ---
 id: d9d291b44775e50d
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: a push publishes every local commit, and nothing records that an author was withholding one pending their operator''s say-so'
 tags:
 - cluster/shared-resource-carries-no-owner
@@ -9,16 +9,19 @@ tags:
 - shared-checkout
 - git-workflow
 - authorisation
+closed: 2026-10-21
 last_observed: 2026-09-13
 opened: 2026-09-06
 owner: marius
 severity: high
-verified_open: 2026-09-11 at HEAD 6c31ef0f — trailer census (10 kinds, none answers publishability), zero git-notes refs, remedy unadopted in both candidate surfaces
+unverified: STANDING Enforcement requires an explicit recorded hold, CLAUDE_CODE_SESSION_ID and active hooks. Unrecorded withholding, Codex identity without that variable, manual commits without it, and skipped hooks remain outside this mechanism.
 ---
 
 # BUG: a push publishes every local commit, and nothing records that an author was withholding one pending their operator's say-so
 
 ## Summary
+**Update, 2026-10-21:** Explicit publish holds now have checks at both commit and push time. The operator approved the commit-side extension implemented in `scripts/pre-commit-run.sh`. The remaining limitation is withholding that a session never records, or an operation that bypasses session identity or hooks. The original incident and investigation below explain why that state cannot be inferred from the commit itself.
+
 
 `git push` sends every commit on the branch, not the pusher's own. On a checkout
 shared by several agent sessions, that means **one session's push performs an
@@ -917,6 +920,14 @@ SHA alone would not, observed rather than argued.
    layer down.
 
 ## Fix
+### Commit-side hold check, 2026-10-21
+
+The operator approved enforcing the existing publish hold at commit time. `scripts/pre-commit-run.sh` now checks `refs/holds/<CLAUDE_CODE_SESSION_ID>` before dispatching the other commit checks. It refuses the held session's index, pathspec, `-a`, amend, empty and initial commits, including in linked worktrees, and prints the reason and release command. Other sessions remain free to commit. A refusal does not change HEAD, the index or the hold. The check lives in the existing dispatcher, so the installed shim needs no update.
+
+The ref lookup uses `git show-ref --exists`: missing is exit 2; lookup failure refuses. Measured with a broken loose ref, `show-ref --verify --quiet` instead returned 1 just as for an absent ref and let the first implementation commit. Git versions without `--exists` refuse session commits with a lookup error.
+
+This enforces an explicit hold; it cannot infer an unrecorded operator conversation. The corrupted-ref regression test directly exercises that distinction. Manual commits without `CLAUDE_CODE_SESSION_ID`, bypassed hooks and the existing push-side limits remain outside this check. Validation is recorded under Tests added.
+
 
 **Publish hold, written 2026-10-06 (OB-20): the push side now has a mechanism. The commit side does not, so
 this bug stays `open`.** The work is merged to `experiments` (merge `4766c07f`, and the later
@@ -1048,13 +1059,32 @@ The original proposal follows, unchanged.
 
 ## Tests added
 
-None, and none is possible at this layer: the missing state does not exist in any
-artifact a test could read. That is the finding, not a gap in the work.
+**Initial validation, 2026-10-21:** `tests/test_pre_commit_publish_hold.py` exercises real `git commit` calls through the native dispatcher in isolated repositories. Before the implementation, nine refusal cases committed successfully and three allowed controls passed. After the implementation, all 12 cases pass: index, pathspec, `-a`, amend, empty, initial and linked-worktree commits; release and retry; another session's hold; unheld and manual commits; and a broken hold ref. The refusal assertions check unchanged HEAD, index and hold where applicable.
 
-The checkable half, if the first remedy is adopted, is a hook refusing a commit to
-the shared branch from a session that has declared itself unable to publish — which
-requires the declaration to exist first, and that is the part that does not exist
-today.
+The existing push-side suite passed 412 assertions and the hold recorder suite passed 91 assertions before this change. Four mutations were actually applied in scratch copies and run against the new suite: removing the dispatch produced 9 failed / 3 passed; reading another session's ref produced 10 failed / 2 passed; allowing lookup errors produced 1 failed / 11 passed; refusing missing holds produced 3 failed / 9 passed. Zero of four survived. The shared dispatcher was not mutated. The repository mutation wrapper refused to run without a Claude session id, so these are pytest's observed results from the isolated probe, not a verdict from that wrapper. An independent review found no Critical or Important findings and independently ran the new suite (12 passed). The reviewer applied two additional scratch mutations: refusing manual commits produced 1 failed / 11 passed; suppressing the hold reason produced 5 failed / 7 passed. Neither survived. In total, zero of six applied candidate mutations survived. The full `./scripts/gate.sh --check` completed with exit 0 on 2026-10-21: `PYTHON_LIGHT=0`, `FMT=0`, `CLIPPY=0`, `LEAN=0`, `DEFAULT=0`, `FMT_STATE=passed`. Its Python lane reported 1,285 passed and 424 subtests passed. This gate retains its documented exclusions (heavy Python, server-stack, and local ONNX weight tests). `bash -n scripts/pre-commit-run.sh`, `scripts/install-hooks.sh --check` and `git diff --check` also passed.
+
+### Reverification before commit, 2026-10-26
+
+The operator authorized committing this change on 2026-10-26. A fresh independent review reproduced one previously untested behavior: deleting malformed-session-ID validation left the original 12 cases green and allowed a real commit with an invalid identity. That surviving mutation was observed before extending the tests.
+
+Four parameterized cases now cover a slash, dot, space and newline in the identity. They require the specific refusal and unchanged HEAD and index. Both the parent and independent reviewer ran the final suite: 16 passed.
+
+The reviewer actually reapplied six mutations in scratch copies against the final tests:
+
+| Mutation | Failed | Passed | Survived |
+| --- | ---: | ---: | --- |
+| Remove dispatch | 13 | 3 | no |
+| Look up another session | 10 | 6 | no |
+| Allow lookup errors | 1 | 15 | no |
+| Reject missing holds | 3 | 13 | no |
+| Remove identity validation | 4 | 12 | no |
+| Suppress hold reason | 5 | 11 | no |
+
+All six were killed; no Critical or Important findings remain. Additional scratch probes checked unstaged `-a` and pathspec state preservation, a missing hold object and a synthetic lookup failure. The lookup instrument's initial PATH-only attempt did not intercept Git's hook lookup; the corrected instrument also sets GIT_EXEC_PATH. No production finding is inferred from the invalid first probe.
+
+Fresh parent checks also passed the hold recorder's 91 assertions, the push guard's 412 assertions, hook discrimination, shell syntax and installed-hook configuration. Current review evidence is retained under `.codescout/resident-private/publish-hold-commit-20261026/review`. The production dispatcher was not mutated during review.
+
+The full `./scripts/gate.sh --check` completed with exit 0 on 2026-10-26: `PYTHON_LIGHT=0`, `FMT=0`, `CLIPPY=0`, `LEAN=0`, `DEFAULT=0`, `FMT_STATE=passed`. Its Python step preceded the four added malformed-identity cases, so the complete light Python lane was rerun afterward: 1,369 passed and 445 subtests passed. Heavy Python, server-stack and real local ONNX-weight execution retain the gate's documented exclusions. Validation logs are retained under `.codescout/resident-private/publish-hold-commit-20261026`.
 
 ## Workarounds
 
@@ -1095,9 +1125,7 @@ turns on.
 
 ## Resume
 
-The convention and its push-side mechanism are written (see `## Fix`, 2026-10-06). What is left is
-the operator's agreement and the commit-side gap (the branch has landed on `experiments`):
-nothing stops a session committing a change its operator said to hold.
+The operator approved the commit-side extension on 2026-10-21. The native pre-commit dispatcher now refuses a session with an active publish hold. The existing installed shim reaches it, and `scripts/install-hooks.sh --check` passed. Regression tests cover the commit-side gap; the full gate passed and all six applied candidate mutations were caught (see Tests added). The operator authorized committing the implementation, regression tests and matching documentation on 2026-10-26. Fresh review added malformed-identity coverage and caught all six final applied mutations; see the dated reverification above. The broader defect remains mitigated rather than fully eliminated: a session must record its hold, and operations without session identity or hooks remain outside the mechanism.
 
 **Third, added 2026-09-11: the PUSHER-side half is a SEPARATE question, and it is already
 answered.** Everything above concerns the author's state. The guard names a second failure mode

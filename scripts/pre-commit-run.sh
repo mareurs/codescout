@@ -141,6 +141,42 @@ matches() {
     [ -n "$paths" ] && printf '%s\n' "$paths" | grep -qE "$1"
 }
 
+
+# A hold is shared through refs/holds even in a linked worktree. Check the
+# committing session only; another author's hold must not block this commit.
+# Keep this in the dispatcher so an installed pre-commit shim needs no update.
+refuse_held_commit() {
+    local _sid="${CLAUDE_CODE_SESSION_ID:-}" _ref _rc _body _reason
+    [ -n "$_sid" ] || return 0
+    case "$_sid" in
+        *[!A-Za-z0-9-]*)
+            printf 'pre-commit: cannot check publish hold for invalid session id %s\n' "$_sid" >&2
+            return 1
+            ;;
+    esac
+    _ref="refs/holds/$_sid"
+    # --exists distinguishes absence (2) from lookup failure (1).
+    # --verify --quiet collapses a broken loose ref into the same 1 as absence.
+    if git show-ref --exists "$_ref" 2>/dev/null; then
+        _body="$(git cat-file -p "$_ref" 2>/dev/null)" || _body=""
+        _reason="$(printf '%s\n' "$_body" | sed -n 's/^reason: //p' | sed -n 1p)"
+        {
+            printf 'REFUSING THE COMMIT: PUBLISH HOLD for session %s\n' "$_sid"
+            [ -z "$_reason" ] || printf '  reason: %s\n' "$_reason"
+            printf '  Keep this work uncommitted while publication is withheld.\n'
+            printf '  After operator authorization, release with: scripts/hold-publish.sh release %s\n' "$_sid"
+        } >&2
+        return 1
+    else
+        _rc=$?
+        [ "$_rc" -eq 2 ] && return 0
+        printf 'pre-commit: cannot check publish hold for session %s (git exited %s); refusing the commit\n' "$_sid" "$_rc" >&2
+        return 1
+    fi
+}
+
+refuse_held_commit || exit 1
+
 # always_run — these answer a question about the COMMIT itself, not about any file in it.
 run "refuse a pathspec commit carrying unstaged content" \
     scripts/pre-commit-unreviewed-content.sh
