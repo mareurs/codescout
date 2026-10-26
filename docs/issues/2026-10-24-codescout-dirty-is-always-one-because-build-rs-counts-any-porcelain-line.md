@@ -14,7 +14,7 @@ local_fix_sha: b1a030f8a1a43bf481362b589e50bfe363fadd48
 opened: 2026-10-24
 owner: marius
 severity: low
-unverified: 'The corrected value was not yet observed in usage.db. A binary rebuilt at ff3de90ee on 2026-10-26 still wrote codescout_dirty=1, because the uncommitted scripts/pre-commit-run.sh (inside DIRTY_SCOPE) was dirty; the same git status command without scripts returns nothing. Writer unknown: file-provenance.py returned UNKNOWN and named only codex:01a15cc2-8bfd-7903-8135-eaae49add81e, and the file was last modified 2026-10-21. Re-check after that file is committed or dropped and the binary is rebuilt. DIRTY_SCOPE includes scripts, so peer script edits can keep the flag at 1.'
+unverified: 'CLEARED 2026-10-26. Was: the corrected value had not been observed in usage.db. A binary rebuilt at 750e3a320 wrote codescout_dirty=0 on its first row while three out-of-scope paths (.codescout/audit/ripper-65e654-202610.jsonl, docs/trackers/bug-fix-session-log.md, x/) were dirty, after the peer committed scripts/pre-commit-run.sh in 750e3a320. One row was observed, not a population. Standing limit: DIRTY_SCOPE includes scripts, so an uncommitted peer edit under scripts/ still sets the flag to 1.'
 ---
 
 # BUG: `codescout_dirty` is 1 on 99.7% of rows because build.rs counts any porcelain line, on a checkout that is never clean
