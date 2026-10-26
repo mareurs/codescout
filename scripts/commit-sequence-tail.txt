@@ -27,6 +27,10 @@ on this checkout — the sequence, not the rules, is what nobody had written dow
        not. And -m goes BEFORE --, or git reads it as a pathspec.
   5. Verify the INDEX, not the exit code. `git add` can fail on a contended
        lock, and a retry loop that exhausts looks identical to one that worked.
+       The index is shared in the other direction too: never `git restore
+       --staged` or `git reset` a path you did not stage. A peer's staged path
+       vanishes silently and its commit then lands without it; no hook guards
+       `git restore --staged`.
   6. If a commit captures another session's file: stop. Do not reset or amend.
        On a shared tree the repair destroys work the defect only mislabels.
        Report it instead.

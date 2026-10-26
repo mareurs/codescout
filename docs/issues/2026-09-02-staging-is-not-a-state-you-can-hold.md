@@ -361,9 +361,8 @@ docs and gates recommend. Three items, in their state as of 2026-09-25:
    `21258b4b`. The served commit-sequence tail (step 4) prescribes SEPARATE calls, and
    `scripts/pre-commit-unreviewed-content.sh` refuses a pathspec commit carrying unstaged content. Do not
    re-propose the atomic shape: it trades this file's losing half for the capture half.
-2. **OPEN: put "never unstage a path you did not stage" into the shared guidance.** A dispatch brief
-   carried *"if the shared index holds paths you did not stage, commit by pathspec and leave them alone.
-   Never `git restore --staged`, never `git reset`"*, and no shared page says it yet.
+2. **DONE 2026-10-26: put "never unstage a path you did not stage" into the shared guidance.** The rule is now in `scripts/commit-sequence-tail.txt` under step 5, so every refusing hook prints it. `docs/conventions/shared-checkout-commit-sequence.md` step 5 does not carry it yet (the page had another session's uncommitted edits on 2026-10-26). The wording came from a dispatch brief that carried *"if the shared index holds paths you did not stage, commit by pathspec and leave them alone.
+   Never `git restore --staged`, never `git reset`"*; before 2026-10-26 no shared page said it.
    `scripts/git-safe-reset.sh` guards `git reset` for sessions that choose to use it. Nothing guards
    `git restore --staged`.
 3. **DECIDED at `a27b3988`: the gate reads the INDEX.** That is the opposite direction to the
@@ -423,9 +422,9 @@ identifies content and never ownership — usable only if you remember what your
 
 Item 3 is decided and item 1 superseded (see § Fix). What is left is the LOSING half, which is still live
 (re-verified 2026-09-25): a peer's `git restore --staged` or `git reset` drops your staged path silently, from a
-bare commit and from `commit-mine` alike. Two open moves:
+bare commit and from `commit-mine` alike. Fix item 2 is done (2026-10-26). Two open moves:
 
-- Fix item 2, the shared-guidance sentence.
+- Mirror the sentence into step 5 of `docs/conventions/shared-checkout-commit-sequence.md`, so the terse copy and its source agree.
 - A detector. `post-index-change` fires on the peer's unstage too, so the recorder is positioned to notice a
   session removing a pair that another session staged. Nothing is designed yet.
 

@@ -266,11 +266,12 @@ untrusted project before activating it.
 
 ## Resume
 
-Every read named in this file's list is now bounded on the branch (rows 1 to 12). What remains is
-the writers that skip `check_write` question (including the hard-link `.md` -> `project.toml`
-case, untested) and the swap between a path-type check and the open at the system-prompt and
-`.git` pointer sites. Merge the branch before archiving this file (patch-ids are above; the SHAs
-are positional).
+2026-10-26: every fix commit named in the tables (rows 1 to 12, 19 SHAs) is verified an ancestor of `experiments`, and the helpers exist in `src/util/fs.rs`. The branch `fix/bounded-repo-reads-2026-10-20` no longer exists locally, so nothing is left to merge. Two questions remain open and neither is verified as a defect:
+
+- Writers that skip `check_write`, including the hard-link `.md` -> `project.toml` case (untested).
+- The swap between a path-type check and the open at the system-prompt and `.git` pointer sites.
+
+File each as its own bug once reproduced, then close this file with `unverified: TRACKED <id>`.
 
 ## References
 

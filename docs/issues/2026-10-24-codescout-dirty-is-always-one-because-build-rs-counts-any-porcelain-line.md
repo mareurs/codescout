@@ -1,13 +1,20 @@
 ---
 id: '5f247e864d241b0f'
 kind: bug
-status: open
+status: fixed
 title: codescout_dirty is 1 on 99.7% of usage rows because build.rs counts any porcelain line on a checkout that is never clean
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
+closed: 2026-10-26
+fix_patch_id: aaa23a1918e7fdba94551a6a69618070d7dba1db
+fix_sha_experiments: 5ae04c24c74f4572f21d6e441ab87d31d5d8374f
+local_fix_branch: research/checked-real-task-20261024
+local_fix_patch_id: aaa23a1918e7fdba94551a6a69618070d7dba1db
+local_fix_sha: b1a030f8a1a43bf481362b589e50bfe363fadd48
 opened: 2026-10-24
 owner: marius
 severity: low
+unverified: The running binary predates the fix. codescout_dirty in new usage rows stays 1 until ./scripts/rb.sh and a /mcp restart; the rebuilt value was not observed in usage.db.
 ---
 
 # BUG: `codescout_dirty` is 1 on 99.7% of rows because build.rs counts any porcelain line, on a checkout that is never clean
@@ -46,11 +53,11 @@ N/A.
 
 ## Fix
 
-Not started. Proposed: `git status --porcelain --untracked-files=no -- src crates build.rs Cargo.toml Cargo.lock` (the inputs that change the binary); optionally bake a hash of `git diff HEAD -- <those paths>` so two dirty builds can be told apart.
+Fixed on `experiments` at `5ae04c24c` (patch-id `aaa23a1918e7fdba94551a6a69618070d7dba1db`, cherry-picked from `b1a030f8a` on `research/checked-real-task-20261024`). It uses a conservative source scope that includes scripts and two embedded docs, counts untracked source, anchors Git to the manifest and refreshes metadata on incremental builds in ordinary and linked worktrees. No binary hash or exhaustive dependency fingerprint is claimed.
 
 ## Tests added
 
-None yet.
+`tests/test_build_git_dirty.py` adds 24 methods that exercise the real `build.rs` through warm offline Cargo builds. On 2026-10-26 they passed on `experiments` together with `tests/test_friction_probe.py` (38 passed, 18 subtests). `./scripts/gate.sh` also passed on `experiments` (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`). The mutation counts recorded on the research branch (38 detected) are in `docs/research/2026-10-24-matched-checked-completion.md` on that branch only.
 
 ## Workarounds
 
@@ -58,7 +65,7 @@ Use `codescout_sha` alone and accept that it does not identify the source.
 
 ## Resume
 
-`bake_git_sha` in `build.rs`.
+Closed 2026-10-26. To see the effect in `usage.db`, run `./scripts/rb.sh` and restart with `/mcp`, then check that new rows carry `codescout_dirty=0` on a clean source tree. The research branch and its `/tmp` worktree are no longer needed for this fix.
 
 ## References
 

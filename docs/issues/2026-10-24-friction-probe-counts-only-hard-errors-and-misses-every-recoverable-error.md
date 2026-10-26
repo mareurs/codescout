@@ -5,7 +5,9 @@ status: fixed
 title: friction-probe.py counts only outcome='error' and misses every recoverable_error, so it sees 8 of 2,038 errors
 tags:
 - cluster/selector-narrower-than-its-population
-closed: 2026-10-24
+closed: 2026-10-26
+fix_patch_id: d07da12a54d3ef373052fbacbe633bb8293ab3d4
+fix_sha_experiments: 56fb01cf4c2c65c6b2c7c393874f7677263b5f3c
 opened: 2026-10-24
 owner: marius
 severity: medium
@@ -50,7 +52,7 @@ N/A — confirmed directly by the two queries above.
 
 ## Fix
 
-Implemented on the isolated research/checked-real-task-20261024 branch: exact ERROR_OUTCOMES membership at every Python report site, the matching SQL IN predicate, and corrected help text. Success/other rows remain in sequences and denominators. No hard-only flag or arbitrary warning threshold was needed for the correction. This branch is not merged or published; the required full repository gate passes, and the post-review Python lane passes with all 14 focused cases included. Delivery evidence is recorded in its real-task report.
+Fixed on `experiments` at `56fb01cf4` (patch-id `d07da12a54d3ef373052fbacbe633bb8293ab3d4`, cherry-picked from `6acfec2f4` on `research/checked-real-task-20261024`). `scripts/friction-probe.py` now uses exact `ERROR_OUTCOMES` membership at every Python report site, the matching SQL `IN` predicate, and corrected help text. Success and other rows stay in sequences and denominators. No hard-only flag or warning threshold was needed.
 
 ## Tests added
 
@@ -62,7 +64,7 @@ Query the intended population directly with outcome IN ('error', 'recoverable_er
 
 ## Resume
 
-Implementation and acceptance are ready in /tmp/codescout-real-task-20261024 on research/checked-real-task-20261024. See docs/research/2026-10-24-checked-completion-real-task.md for the real-corpus calibration, exact accounting and verification status. Retain the worktree; merge/publication is outside this trial.
+Closed 2026-10-26. `./scripts/gate.sh` and `tests/test_friction_probe.py` (14 tests) pass on `experiments`. The research report with the corpus calibration is `docs/research/2026-10-24-checked-completion-real-task.md`. The `/tmp/codescout-real-task-20261024` worktree is no longer needed for this fix.
 
 ## References
 
