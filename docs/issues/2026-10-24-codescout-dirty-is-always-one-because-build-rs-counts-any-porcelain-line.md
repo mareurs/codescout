@@ -14,7 +14,7 @@ local_fix_sha: b1a030f8a1a43bf481362b589e50bfe363fadd48
 opened: 2026-10-24
 owner: marius
 severity: low
-unverified: The running binary predates the fix. codescout_dirty in new usage rows stays 1 until ./scripts/rb.sh and a /mcp restart; the rebuilt value was not observed in usage.db.
+unverified: 'The corrected value was not yet observed in usage.db. A binary rebuilt at ff3de90ee on 2026-10-26 still wrote codescout_dirty=1, because the uncommitted scripts/pre-commit-run.sh (inside DIRTY_SCOPE) was dirty; the same git status command without scripts returns nothing. Writer unknown: file-provenance.py returned UNKNOWN and named only codex:01a15cc2-8bfd-7903-8135-eaae49add81e, and the file was last modified 2026-10-21. Re-check after that file is committed or dropped and the binary is rebuilt. DIRTY_SCOPE includes scripts, so peer script edits can keep the flag at 1.'
 ---
 
 # BUG: `codescout_dirty` is 1 on 99.7% of rows because build.rs counts any porcelain line, on a checkout that is never clean
