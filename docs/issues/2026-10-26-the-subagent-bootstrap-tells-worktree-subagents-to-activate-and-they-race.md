@@ -54,10 +54,17 @@ Whether the soft notice ("warns the switcher; tells the harmed party once per mo
 
 ## Fix
 
-Open. **A text-only change to the bootstrap is not enough** (checked 2026-10-26). `claude-plugins:codescout-companion/hooks/worktree-write-guard.mjs` denies `edit_code`, `edit_file` and `create_file` in a worktree while `.cs-worktree-pending` exists in the worktree root, and it never looks at a `workspace=` pin on the call; only `cs-activate-project.mjs` deletes the marker, and only on `activate`. A subagent told to pin would still be blocked from writing. The fix therefore has three parts, all in the companion repo, and each changes behaviour for every session on the machine:
-1. `subagent-guidance.mjs`: for a subagent whose root is a worktree, prescribe pinning every call with `workspace="<root>"` and not `activate`.
-2. `worktree-write-guard.mjs`: allow a write whose `tool_input.workspace` names the worktree (or a path under it), as the server's own `guard_worktree_write` already does.
-3. The parent's brief: give paths valid in the worktree's base commit (cause B above).
+Parts 1 and 2 are written in the `claude-plugins` working tree on 2026-10-27. They are **not committed, not released, and not live**. Part 3 has no code fix. Status stays `open` until the release reaches all three profiles.
+
+**A text-only change to the bootstrap was not enough** (checked 2026-10-26). `claude-plugins:codescout-companion/hooks/worktree-write-guard.mjs` denies `edit_code`, `edit_file` and `create_file` in a worktree while `.cs-worktree-pending` exists in the worktree root. It never looked at a `workspace=` pin on the call. Only `cs-activate-project.mjs` deletes the marker, and only on `activate`. A subagent told to pin would still have been blocked from writing.
+
+1. **Done.** `subagent-guidance.mjs`: a subagent whose cwd is in a linked worktree is told to pin every call with `workspace="<toplevel>"` and not to `activate`. A main checkout still gets the `activate` text. The worktree test compares RESOLVED `--git-dir` and `--git-common-dir`. From a subdirectory of a main checkout git prints the first absolute and the second relative (`../../.git`), so a string compare misclassified that case as a worktree. The existing `tests/test-subagent-guidance.sh` caught this.
+2. **Done, narrower than first written.** `worktree-write-guard.mjs` lets a write through when `tool_input.workspace` is an absolute path that resolves to the worktree root. A pin to the main repo, a sibling worktree, an empty string, a relative path or a prefix-sibling path is still denied. I did not accept "a path under it", because a pin names a project root, not a subdirectory.
+3. **No code fix.** The parent's brief must give paths valid in the worktree's base commit (cause B above). A hook cannot enforce that. The new bootstrap text tells the subagent to check that its paths exist in the worktree.
+
+Tests: 9 new cases in `codescout-companion/hooks/worktree-write-guard.test.sh` (25 total, the 4 self-pin cases failed first). In `tests/test-subagent-guidance.sh` the worktree case was rewritten to the new contract and 4 cases were added (43 total; the main-subdirectory case failed first against my first draft). `tests/run-all.sh` passes in full.
+
+The same string compare is still in `worktree-write-guard.mjs`. From a main-checkout subdirectory it takes the main repo for a worktree. It only matters if a `.cs-worktree-pending` file exists in the main repo's root, so I left it.
 
 ## Tests added
 
@@ -69,7 +76,9 @@ Brief each subagent explicitly to pin `workspace="<abs worktree>"` on every call
 
 ## Resume
 
-Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, groups G3 and G4). Fix belongs mainly in `claude-plugins`; cite it as `claude-plugins:codescout-companion/hooks/subagent-guidance.mjs`.
+Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, groups G3 and G4). Cite the fix as `claude-plugins:codescout-companion/hooks/subagent-guidance.mjs`.
+
+Committed as `claude-plugins:968f7b9` (`main`, 4 files, not pushed). To finish: release a new `codescout-companion` version, then update `installed_plugins.json` in all three profiles. Each profile loads `1.20.20` from its own `cache/` copy, so the source edit changes no behaviour on this machine until then. After that, run a worktree subagent campaign and confirm no `activate` race and no write block.
 
 ## References
 
