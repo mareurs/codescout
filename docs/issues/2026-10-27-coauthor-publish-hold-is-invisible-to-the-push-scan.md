@@ -52,6 +52,10 @@ Not an absent hold, missing attribution or trailer paragraph problem: the valid 
 
 Include both Session-Id and Co-Authored-Session-Id values in the hold scan. Retain the existing foreign-session acknowledgement policy and Git range selection. Delivered alongside Codex hold identity support; full gate and independent mutation review completed: every gate lane exited 0, both observed mutation survivors received discriminating closure tests, and the final Python light lane passed 1407 tests plus 445 subtests. Fix is verified on the isolated feature branch; integration into experiments remains separate.
 
+## Fix provenance
+
+Verified feature-branch commit f7d6c797e733275dce6f7455bb30de797e7dcb09 (feat/codex-publish-holds-20261027), stable patch-id f4cbd8641d2bd78440c5078254b264af8a6ffb5e. Not merged into experiments or installed. The full gate and all review closure checks passed before this commit. Keep the worktree/overlay for the separate integration decision.
+
 ## Tests added
 
 New tests/test_codex_publish_hold.py::test_codex_coauthor_hold_is_respected exercises a qualified Codex contributor's hold through an actual stamped commit and push refusal under wildcard acknowledgement.
@@ -62,4 +66,4 @@ Do not publish a contributor's work until the contributor/operator authorizes it
 
 ## Resume
 
-Record feature-branch fix SHA plus patch-id after commit. Keep the worktree and overlay for integration review; do not archive as an experiments fix before integration. This issue remains distinct from docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md, which originally concerns withholding absent from Git state.
+Fix SHA and patch-id are recorded above. Preserve the isolated worktree/branch and reconcile its librarian overlay only when integration is authorized. The source fix is verified here; no publication, hook installation or real hold mutation was performed.

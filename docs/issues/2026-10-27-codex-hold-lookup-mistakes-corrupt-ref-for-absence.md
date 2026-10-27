@@ -52,6 +52,10 @@ Not missing native identity: the probe resolves a valid Codex root and stamps th
 
 Use show-ref --exists on the new _codex namespace for push lookup and release; separate missing from failed lookup. Push emits an explicit lookup refusal, while release reports inability to inspect and leaves the bytes alone. Preserve the existing documented Claude lookup policy, as required by compatibility scope. Full gate completed with all lane exits 0; both corrupt push/release reproductions passed after the fix. Final light lane reported 1407 passed plus 445 subtests. This is verified on the isolated feature branch; deployment/integration remains separate.
 
+## Fix provenance
+
+Verified feature-branch commit f7d6c797e733275dce6f7455bb30de797e7dcb09 (feat/codex-publish-holds-20261027), stable patch-id f4cbd8641d2bd78440c5078254b264af8a6ffb5e. Not merged into experiments or installed. The full gate and all review closure checks passed before this commit. Keep the worktree/overlay for the separate integration decision.
+
 ## Tests added
 
 The push/release parametrization checks nonzero exit, specific failure cause and preservation of the corrupt ref. Independent review also applies mutations in scratch; final outcomes will be recorded in the implementation plan.
@@ -62,4 +66,4 @@ Treat an unreadable hold store as unresolved. The author/operator must repair it
 
 ## Resume
 
-Record feature-branch fix SHA and patch-id after commit. Preserve the branch/worktree and its overlay for integration review. The legacy Claude error-policy limitation remains in the original subject issue and is deliberately unchanged.
+Fix SHA and patch-id are recorded above. Preserve the isolated worktree/branch and reconcile its librarian overlay only when integration is authorized. The source fix is verified here; no publication, hook installation or real hold mutation was performed.

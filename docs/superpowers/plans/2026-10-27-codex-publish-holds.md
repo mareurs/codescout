@@ -1,7 +1,7 @@
 ---
 id: '002eb5d7b4ca73ea'
 kind: plan
-status: active
+status: done
 title: Codex publish holds implementation plan
 ---
 
@@ -44,7 +44,7 @@ title: Codex publish holds implementation plan
 - [x] Rerun new pytest cases, existing pre-commit pytest and hold/push/trailer shell discriminations; fix regressions.
 - [x] Request an independent strong-model reviewer to APPLY candidate mutations in scratch and report observed survivor counts before adding closure tests.
 - [x] Close observed review gaps with failing tests first, then rerun affected lanes.
-- [ ] Run ./scripts/gate.sh --check, update user convention and existing subject issue with evidence, and commit only owned paths on this isolated branch.
+- [x] Run ./scripts/gate.sh --check, update user convention and existing subject issue with evidence, and commit only owned paths on this isolated branch.
 
 ## Reconnaissance
 
@@ -74,4 +74,4 @@ Direct shell results: hold 91 passed/0 failed, pre-push 412 passed/0 failed, com
 
 Coverage limits printed by the gate: three heavy Python suites are excluded (test_phase1b_step4.py, test_phase1b_step5.py, test_phase1b_training.py); server-stack is not compiled by these lanes; librarian code runs only in DEFAULT; two local ONNX weight tests report ok while skipped without their weights. Existing configured ignored Rust/doc tests remain ignored. No model CLI/API calls, remote publication, hook installation, profile changes or real hold mutations were performed.
 
-Delivery: preserve the isolated feature branch/worktree and its catalog overlay. Integration and librarian merge_worktree reconciliation require a separate explicit decision; no merge, push, global enablement or catalog reconciliation is performed here. Fix provenance will be recorded after the feature commit exists.
+Delivery: preserve the isolated feature branch/worktree and its catalog overlay. Integration and librarian merge_worktree reconciliation require a separate explicit decision; no merge, push, global enablement or catalog reconciliation is performed here. Feature commit: f7d6c797e733275dce6f7455bb30de797e7dcb09; stable patch-id f4cbd8641d2bd78440c5078254b264af8a6ffb5e. Actual native commit attribution was read back as a canonical codex root Session-Id. The isolated branch is feat/codex-publish-holds-20261027. Raw gate, final Python and mutation logs are retained under the Git-ignored .codescout/resident-private/codex-publish-holds-20261027/ directory; original reviewer snapshots and closure scripts remain under /tmp. The implementation commit's dead-artifact-id hook reported a documented skip because no default binary path existed in this worktree; a separate explicit gate-binary audit was then run over all seven changed Markdown paths, with its report retained beside the logs. Its high-severity artifact_missing/artifact_id selection was empty; historical missing-path and unknown-symbol findings remain in the raw report and were not represented as a clean all-reference audit.

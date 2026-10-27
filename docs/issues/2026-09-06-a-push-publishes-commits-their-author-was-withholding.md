@@ -1046,6 +1046,11 @@ The isolated Codex publish-hold branch extends set/release/list, commit refusal,
 Both primary and coauthor trailers now enter the hold scan. The distinct, preexisting coauthor omission is recorded in docs/issues/2026-10-27-coauthor-publish-hold-is-invisible-to-the-push-scan.md. Final verification: the full gate exited 0 with PYTHON_LIGHT=0, FMT=0, CLIPPY=0, LEAN=0 and DEFAULT=0. The final Python light rerun reported 1407 passed plus 445 subtests. Direct shell suites passed 91 hold, 412 push, 21 stamping and 298 index assertions. Independent review applied 10 mutations: 8 were killed and 2 survived the initial suite; both survivors were subsequently reapplied against added regression cases and killed. The new Codex path also refuses corrupt-ref push/release lookups, while the documented legacy Claude error policy remains. Detailed review and exclusions are retained in docs/superpowers/reviews/2026-10-27-codex-publish-holds.md and its implementation plan. This is verified feature-branch evidence; installed hooks and the shared experiments checkout have not been changed by this task.
 
 
+### Codex extension provenance
+
+Feature-branch commit f7d6c797e733275dce6f7455bb30de797e7dcb09; stable patch-id f4cbd8641d2bd78440c5078254b264af8a6ffb5e. This is isolated branch evidence, not an experiments merge or installed-hook update. The worktree and catalog overlay are retained for integration review.
+
+
 ## Fix provenance
 
 - **SHA:** `a3dcff7213b60a3141261c54f58785763c62a36e` (`experiments`)
