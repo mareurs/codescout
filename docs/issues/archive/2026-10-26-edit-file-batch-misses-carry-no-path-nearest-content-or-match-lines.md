@@ -1,10 +1,11 @@
 ---
-id: c04d2f540b83ea9a
+id: 09102de754efd8ae
 kind: bug
-status: open
+status: fixed
 title: the edit_file batch path answers "old_string not found" and "found N times" with no path, nearest content or line numbers
 tags:
 - cluster/hint-composed-without-the-request
+closed: 2026-10-27
 opened: 2026-10-26
 owner: marius
 severity: low
@@ -47,11 +48,22 @@ N/A.
 
 ## Fix
 
-Open. Reuse `not_found_msg` in the batch path with the edit index, and list match lines in the ambiguous case.
+Fixed in `src/tools/edit_file/mod.rs`. The batch loop now answers a miss with `edit[i]: ` plus `not_found_msg` (the file path and the nearest content), and an ambiguous edit with its match lines. A new helper `match_lines_csv` computes the lines for both the single-edit and the batch path, so they cannot disagree. A new helper `batch_lines_note` adds, for `i > 0`, the clause that line numbers count the content after the earlier edits, because the batch edits an in-memory copy. The substrings `old_string not found` and `old_string found ` that `src/usage/db.rs` classifies on are unchanged, so error families do not move.
+
+## Fix provenance
+
+- **SHA:** `6441894a1` (`experiments`)
+- **patch-id:** `0d8c6f8fef392e71aeb455592d0c0ff552f39a1c`
 
 ## Tests added
 
-None. A test would assert a batch miss contains `Nearest content at lines`, and a batch ambiguity contains the line numbers.
+In `src/tools/edit_file/tests.rs`, all seen failing before the fix and passing after:
+
+- `a_batch_miss_names_the_file_and_the_nearest_content`
+- `a_batch_ambiguity_lists_the_match_lines`
+- `a_later_batch_miss_says_its_lines_follow_the_earlier_edits`
+
+Not tested: the batch path still does not apply a whitespace-normalized match the way the single-edit path does. This fix only improves the error text.
 
 ## Workarounds
 
@@ -59,7 +71,7 @@ Send the failing edit alone, to get the single-edit message.
 
 ## Resume
 
-Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, group G2). Fix not started.
+N/A — fixed.
 
 ## References
 

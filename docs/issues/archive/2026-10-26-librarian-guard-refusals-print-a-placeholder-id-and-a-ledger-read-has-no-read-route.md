@@ -1,10 +1,11 @@
 ---
-id: '030b05def6336fe4'
+id: 56dcc467826e17ae
 kind: bug
-status: open
+status: fixed
 title: librarian-guard refusals print a literal id placeholder and the ledger refusal for a read names no read route
 tags:
 - cluster/hint-composed-without-the-request
+closed: 2026-10-27
 opened: 2026-10-26
 owner: marius
 severity: low
@@ -49,11 +50,26 @@ N/A.
 
 ## Fix
 
-Open. Name the id (or a `doc(action="find", …)` by path) where it is known, and give a read route in the ledger arm for a read.
+Fixed in `src/util/librarian_guard.rs`. A new `frontmatter_id` reads the file's own `id:` (`is_librarian_artifact` now calls it, same first-`id:`-line rule). `guard_with_oracle` builds `id_arg` from it, so all three hint arms print `id="<the real id>"`. When the file has no `id:`, which is the case for a ledger or an augmented tracker, the hint adds a step `doc(action="find", rel_path="<path>")` and names the id as `<id from the find above>`. For an absolute path the step uses the file name, because `rel_path` is repo-relative and matched by substring. A refused READ of a ledger now also names `doc(action="get", ...)`; write refusals keep their old shape.
+
+Limit: a stamped file whose `id:` line is stale (well-formed but no longer the catalog id) would be named as is. The guard validates the id's shape and never its value, as `is_librarian_id` documents.
+
+## Fix provenance
+
+- **SHA:** `aac42dba8` (`experiments`)
+- **patch-id:** `934af73a2517fdaa157bee50f2fb368f43e68c8e`
 
 ## Tests added
 
-None. A test would refuse a read of a ledger and assert the text names `doc(action="get"`.
+In `src/util/librarian_guard.rs`:
+
+- `a_ledger_read_refusal_names_the_read_route` (seen failing before the fix)
+- `a_stamped_refusal_names_the_files_own_id_not_a_placeholder` (seen failing)
+- `a_refusal_with_no_id_in_the_file_says_how_to_find_it` (seen failing)
+- `the_find_lookup_for_an_absolute_path_uses_the_file_name` (seen failing)
+- `a_ledger_write_refusal_does_not_grow_a_read_route`, a narrowness pin. It passed before the fix and after it, by design.
+
+Not verified end to end: the new `find` step was not run against a live server, so that `rel_path` with a file name returns the artifact rests on the tool schema text and not on a call.
 
 ## Workarounds
 
@@ -61,7 +77,7 @@ None. A test would refuse a read of a ledger and assert the text names `doc(acti
 
 ## Resume
 
-Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, group G4). Fix not started.
+N/A — fixed. One open check: run the new hint's `doc(action="find", rel_path="<file name>")` once on a rebuilt server and confirm it returns the ledger.
 
 ## References
 

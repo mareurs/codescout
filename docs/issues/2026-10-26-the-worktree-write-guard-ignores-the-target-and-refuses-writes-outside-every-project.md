@@ -58,7 +58,14 @@ Pin `workspace="<abs path>"` on the call.
 
 ## Resume
 
-Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, group G3). Fix not started.
+Not a hint fix, so it was held back from the 2026-10-27 batch. Checked 2026-10-27 (source read, nothing changed):
+
+- `guard_worktree_write(ctx)` has 13 references. Only `create_file` (`src/tools/create_file.rs:62`), `edit_file` (`src/tools/edit_file/mod.rs:538`) and `approve_write` (`src/tools/approve_write.rs:48`) can name a target outside a project. `edit_code` and the librarian adapter write inside a project.
+- The fix needs a target-aware entry point, because the guard has no path today. Each of those three callers would pass its resolved target.
+- "Outside every project root" must be decided with care. A linked worktree path is outside the main root but is exactly what the guard exists for, so the test must count every worktree from `list_git_worktrees` and every workspace member as a project.
+- Still not checked: whether the write-root checks refuse a `/tmp` target regardless. If they do, skipping the guard only changes which error the caller sees.
+
+Next action: decide the "inside a project" predicate, then add a failing test that creates a file in a temp dir outside the root with worktrees present and no activation.
 
 ## References
 
