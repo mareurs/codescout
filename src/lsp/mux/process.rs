@@ -77,13 +77,29 @@ const MUX_LOCK_POLL: std::time::Duration = std::time::Duration::from_millis(10);
 ///
 /// A flock that cannot be taken is retried for [`MUX_LOCK_GRACE`], then the attempt fails, which
 /// `run` reports as `another mux instance holds the lock`.
+///
+/// The file is opened WITHOUT truncation and emptied only once the flock is held. `File::create`
+/// truncates, and the flock is advisory, so a start that lost the lock used to empty the file in
+/// which the live holder wrote its PID for diagnostics
+/// (`docs/issues/2026-10-18-mux-lock-file-truncated-before-its-flock-is-tried.md`).
 pub(crate) async fn acquire_mux_lock(lock_path: &Path) -> Result<std::fs::File> {
-    let lock_file = std::fs::File::create(lock_path)
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(lock_path)
         .with_context(|| format!("failed to create lock file: {}", lock_path.display()))?;
     let deadline = tokio::time::Instant::now() + MUX_LOCK_GRACE;
     loop {
         match lock_file.try_lock_exclusive() {
-            Ok(()) => return Ok(lock_file),
+            Ok(()) => {
+                // The lock is ours, so the old record is stale: empty it, or a shorter PID
+                // written over a longer one leaves the tail of the old one behind.
+                lock_file.set_len(0).with_context(|| {
+                    format!("failed to reset lock file: {}", lock_path.display())
+                })?;
+                return Ok(lock_file);
+            }
             Err(e) if tokio::time::Instant::now() >= deadline => {
                 return Err(e).context("another mux instance holds the lock");
             }
@@ -1402,6 +1418,63 @@ mod tests {
         assert!(
             took >= MUX_LOCK_GRACE && took < MUX_LOCK_GRACE + std::time::Duration::from_secs(3),
             "gave up after {took:?}, the grace is {MUX_LOCK_GRACE:?}"
+        );
+    }
+
+    /// The loser of the lock must leave the holder's record alone. `run` writes its PID into the
+    /// lock file "for diagnostics" so a person can name the live mux, but `acquire_mux_lock` used
+    /// to open with `File::create`, which truncates, BEFORE it tried the flock: a second start that
+    /// then gave up had already emptied the file the holder wrote. The flock is advisory and does
+    /// not stop a truncating open.
+    /// `docs/issues/2026-10-18-mux-lock-file-truncated-before-its-flock-is-tried.md`
+    #[tokio::test]
+    async fn a_mux_start_that_loses_the_lock_leaves_the_holders_pid_line_alone() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join("mux.lock");
+        // The holder takes the flock WITHOUT truncating, as the real one does, and writes its PID.
+        let mut holder = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock)
+            .unwrap();
+        holder.try_lock_exclusive().unwrap();
+        holder.write_all(b"12345\n").unwrap();
+        holder.flush().unwrap();
+
+        let err = acquire_mux_lock(&lock)
+            .await
+            .expect_err("a live holder keeps the lock");
+        assert!(
+            format!("{err:#}").contains("another mux instance holds the lock"),
+            "got: {err:#}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&lock).unwrap(),
+            "12345\n",
+            "the refused start must not have touched the holder's PID line"
+        );
+        drop(holder);
+    }
+
+    /// The other half of the same change: truncation moves to AFTER the flock, it does not go
+    /// away. A winner that wrote its PID over an older, longer record without emptying it first
+    /// would leave the tail of the old one behind, so the file would name two PIDs.
+    #[tokio::test]
+    async fn a_mux_start_that_wins_the_lock_leaves_exactly_its_own_pid() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join("mux.lock");
+        std::fs::write(&lock, "99999999\nstale, longer than the new pid\n").unwrap();
+
+        let won = acquire_mux_lock(&lock)
+            .await
+            .expect("nobody holds the lock");
+        writeln!(&won, "{}", std::process::id()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&lock).unwrap(),
+            format!("{}\n", std::process::id())
         );
     }
 
