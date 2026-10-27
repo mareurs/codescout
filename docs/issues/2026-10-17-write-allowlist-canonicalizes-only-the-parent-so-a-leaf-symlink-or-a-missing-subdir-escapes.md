@@ -398,6 +398,17 @@ Other follow-ups from the review of this branch, none fixed here:
   fixed in `b493599d`. See
   `docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md`.
 
+
+**Update 2026-10-27 — policy decided by delegation, two gaps pinned.** The operator told this session "as you say is best, trust you" and asked it to continue without asking. On that basis the policy in Fix is KEPT: option 1's policy half, with no new refusal. The alternative (a hard denial for any in-root link whose end is outside the roots) stays rejected, because it refuses writes that are harmless for every writer but rename and changes behaviour for projects that keep such links.
+
+Not built: the "replaced symlink X" notice. Checked in the code: it needs about 15 success return points in `create_file`, `edit_file`, `edit_markdown` and `edit_code`, with string and object response shapes mixed. A field on `ToolContext` is not viable (287 construction sites). A hook in `call_tool_inner` would couple the server to tool names and path-param aliases. Revisit when a real occurrence shows in `usage.db`, or when the write tools gain a shared result type. Confidence medium; how often an agent writes through such a link was not measured.
+
+Pinned in `4d70f9594` (patch-id `e34e96c8f03d7632993e22188d975d9c44ebffa5`), both characterization tests that passed on first run:
+- `edit_file_heading_grammar_on_a_leaf_link_replaces_the_link_and_spares_the_victim` (`src/tools/edit_file/tests.rs`): the heading grammar replaces the link and leaves the outside file unchanged.
+- `a_memory_write_onto_a_leaf_link_never_modifies_the_file_it_points_at` (`src/tools/memory/tests.rs`): shared and private stores; the write may succeed or refuse, but never reaches the pointed-at file.
+
+Still unverified: macOS, case-insensitive filesystems, Windows; the `/etc/passwd` probe; and the check-versus-write race, which the second looks narrow and do not close. The test for the memory store does not say whether it refuses or replaces. The issue stays `open`.
+
 ## References
 
 - `docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md`
