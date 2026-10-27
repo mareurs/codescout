@@ -455,7 +455,7 @@ fn atomic_write_with(
     // them back made a link to a setuid file into a regular file that was setuid and owned by
     // the writer. Read BEFORE the create, because an existing target is also what makes the
     // staging file private until it is applied.
-    // docs/issues/2026-10-17-atomic-write-replace-keeps-setuid-and-takes-the-pointed-at-files-mode.md
+    // docs/issues/archive/2026-10-17-atomic-write-replace-keeps-setuid-and-takes-the-pointed-at-files-mode.md
     #[cfg(unix)]
     let existing_mode = std::fs::metadata(path).ok().map(|m| {
         use std::os::unix::fs::PermissionsExt;
@@ -1355,7 +1355,7 @@ mod tests {
     /// onto the replacement, which undid that, and a link to a setuid file yielded a regular file that
     /// was setuid and owned by the writer. A text-editing funnel has no use for either bit, so neither
     /// may reach the replacement; every other bit still does.
-    /// `docs/issues/2026-10-17-atomic-write-replace-keeps-setuid-and-takes-the-pointed-at-files-mode.md`
+    /// `docs/issues/archive/2026-10-17-atomic-write-replace-keeps-setuid-and-takes-the-pointed-at-files-mode.md`
     #[cfg(unix)]
     #[test]
     fn atomic_write_never_carries_setuid_or_setgid_onto_the_replacement() {

@@ -1,13 +1,15 @@
 ---
-status: open
-opened: 2026-10-17
-closed:
-severity: low
-owner: marius
-related: [docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md, docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md]
+kind: bug
+status: fixed
 tags:
 - cluster/unclassified
-kind: bug
+closed: 2026-10-27
+opened: 2026-10-17
+owner: marius
+related:
+- docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md
+- docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md
+severity: low
 ---
 
 # BUG: `atomic_write` re-applies the target's setuid/setgid bits after the write, and a replaced symlink takes the pointed-at file's mode, so a leaf link to a setuid file yields a setuid file owned by the writer
@@ -70,13 +72,23 @@ None needed.
 
 ## Fix
 
-Not applied. Options: mask `0o6000` off the mode on replace (matches what a plain write does); or keep it for an
-existing regular target and drop it for a replaced symlink; or leave as is. Needs a deliberate decision.
+Decided 2026-10-27 by delegation (the operator said "as you say is best, trust you" and asked this session to continue without asking): mask `0o6000` off the mode on replace. This is the first option listed here, and it matches what a plain write does. A text-editing funnel has no use for setuid or setgid, and a Linux shebang script ignores them anyway.
+
+Fixed in `src/util/fs.rs` `atomic_write_with`: `existing_mode` is now `metadata(path).permissions().mode() & !0o6000`. Every other bit is preserved as before, including for a replaced link, which still takes the pointed-at file's other bits. The doc paragraph that said "the final mode is unchanged in every case" now says setuid and setgid are the exception.
+
+Still true and not changed: the sticky bit is kept, and a failing `fchmod` is ignored (the existing documented behaviour). Not run: as root, on other filesystems, or on a `nosuid` mount, where the bits are inert.
+
+## Fix provenance
+
+- **SHA:** `9289dc7cf` (`experiments`)
+- **patch-id:** `9b107877729bd7318e33550f377f4c81b830399d`
 
 ## Tests added
 
-N/A: a decision record, not a fix. If the decision is to strip, `the_final_mode_is_unchanged_for_every_kind_of_target`
-(the `0o4755` row) changes with it.
+In `src/util/fs.rs`:
+
+- `atomic_write_never_carries_setuid_or_setgid_onto_the_replacement`. It covers existing targets `4755`, `2755`, `6755` and `6640`, and a link to a `6755` file (the link becomes a regular `755` file, the pointed-at file keeps its content and mode). Seen failing before the fix (`left: 2541, right: 493`), passing after.
+- `the_final_mode_is_unchanged_for_every_kind_of_target`: its `0o4755` row is removed, because that row pinned the behaviour this fix changes. Its doc comment points to the new test.
 
 ## Workarounds
 
@@ -84,7 +96,7 @@ None needed.
 
 ## Resume
 
-Decide; then change `atomic_write_with` and the final-mode test together.
+N/A — fixed.
 
 ## References
 
