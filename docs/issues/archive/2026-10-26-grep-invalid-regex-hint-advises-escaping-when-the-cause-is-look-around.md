@@ -1,10 +1,11 @@
 ---
-id: c225771a02a41002
+id: 637ac39f6a9e7f73
 kind: bug
-status: open
+status: fixed
 title: grep's invalid-regex hint always says "escape metacharacters", which is wrong advice when the cause is look-around
 tags:
 - cluster/hint-composed-without-the-request
+closed: 2026-10-27
 opened: 2026-10-26
 owner: marius
 severity: low
@@ -46,11 +47,22 @@ N/A.
 
 ## Fix
 
-Open. When the error text names look-around, hint "use two greps, or `(?=…)`-free alternatives; the engine has no look-around".
+Fixed in `src/tools/grep.rs`: a new `invalid_regex_hint(&regex::Error)` helper chooses the hint, and `build_grep_regex` calls it in the `Err(e)` arm. When the compile error text contains "look-around", the hint says the engine has no look-around and suggests two greps or a rewrite. Every other invalid pattern keeps the escape advice.
+
+- SHA: `f2aad964a` on `experiments`.
+- patch-id: `9826ccfcaeccd91c0f62dd3c82d1875076976b82` (`git show f2aad964a | git patch-id --stable`).
+
+## Fix provenance
+
+- **SHA:** `f2aad964a` (`experiments`)
+- **patch-id:** `9826ccfcaeccd91c0f62dd3c82d1875076976b82`
 
 ## Tests added
 
-None. A test would compile `a(?!b)` through the grep tool and assert the hint mentions look-around, not escaping.
+- `invalid_regex_hint_names_look_around_not_escaping` in `src/tools/grep.rs` (compiles `a(?!b)`, asserts the hint names look-around and not escaping).
+- `invalid_regex_hint_keeps_escape_advice_for_other_errors` in `src/tools/grep.rs` (compiles `a(b`, asserts the escape advice stays).
+
+Both test the helper, not the full `grep` tool call. The tests were written after the fix, so no red run is recorded for them. The helper takes the pattern as a runtime parameter because clippy's `invalid_regex` lint denies invalid regex literals.
 
 ## Workarounds
 
@@ -58,7 +70,7 @@ Rewrite the pattern without look-around.
 
 ## Resume
 
-Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, group G5). Severity low.
+N/A — fixed.
 
 ## References
 

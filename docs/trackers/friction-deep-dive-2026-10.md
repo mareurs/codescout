@@ -137,7 +137,7 @@ Nine bug files, all opened 2026-10-26. Each cites the controller's own check; su
 | `c04d2f540b83ea9a` | low | `edit_file` batch misses carry no path, nearest content or lines (G2) |
 | `ecb3508a7f51f803` | low | `guard_worktree_write` ignores the write target (G3) |
 | `30c21b0aa5cb249d` | low | Three recurring error shapes carry no `err_family`; the oversized-section shape is already being fixed by a peer's uncommitted `db.rs` change, two shapes remain (G8) |
-| `c225771a02a41002` | low | The grep invalid-regex hint advises escaping when the cause is look-around (G5) |
+| `637ac39f6a9e7f73` | low | The grep invalid-regex hint advises escaping when the cause is look-around (G5) |
 
 Not filed, because the controller did not verify them or because they are documented design choices: plain-text `edit_file` on a stamped file (G4), memory `sections` exact match (G4), item-level `body` (G5), `invalid_line_range` hint (G5), `unknown_enum_value` catch-all (G5), `doc(find)` items lacking `rel_path` (G6), `TargetDropped` and `SiblingsDropped` wording (G2), Python-constant `ast_extent_fail` (G2), the IL-3 compound-command and `$VAR` design costs (G1).
 
