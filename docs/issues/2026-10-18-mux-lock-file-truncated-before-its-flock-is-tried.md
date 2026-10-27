@@ -1,9 +1,12 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a second mux start truncates the lock file before its flock is tried, erasing the PID line of the live mux that holds it'
 tags:
 - cluster/unclassified
+closed: 2026-10-27
+fix_patch_id: a6eab46886c8122b71f3123e8153234222eb2ffa
+fix_sha: a99be50a5 (experiments)
 opened: 2026-10-18
 owner: marius
 related:
@@ -62,11 +65,14 @@ None beyond the measurement.
 
 ## Fix
 
-Unknown, not implemented. Option: open with `OpenOptions::new().create(true).write(true).truncate(false)` (as `claim_mux_lock` in `src/lsp/manager.rs` does), try the flock, and truncate and write the PID only after it succeeds.
+Fixed on `experiments` in `a99be50a5` (patch-id `a6eab46886c8122b71f3123e8153234222eb2ffa`). `acquire_mux_lock` (`src/lsp/mux/process.rs`) now opens the lock file with `OpenOptions::new().create(true).truncate(false).write(true)`, tries the flock, and calls `set_len(0)` only once the lock is held. A losing start never touches the file. A winner empties it first, so a short PID written over an older longer record leaves no tail. This is the option the bug proposed.
 
 ## Tests added
 
-N/A: open.
+- `a_mux_start_that_loses_the_lock_leaves_the_holders_pid_line_alone`: a holder takes the flock without truncating and writes `12345\n`, a second `acquire_mux_lock` gives up, and the file must still read `12345\n`. RED was `left: ""`, `right: "12345\n"`.
+- `a_mux_start_that_wins_the_lock_leaves_exactly_its_own_pid`: the guard for the other half of the change. A file holding an older, longer record ends up holding exactly the winner's PID. It passed before the fix and must keep passing.
+
+The 22 `lsp::mux::process::tests` and the manager's `a_waiting_clients_lock_probe_never_makes_a_starting_mux_give_up` pass. The full `./scripts/gate.sh` was green (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, `PYTHON_LIGHT=0`), run in an isolated worktree holding `HEAD` plus this patch and the logging fix.
 
 ## Workarounds
 
