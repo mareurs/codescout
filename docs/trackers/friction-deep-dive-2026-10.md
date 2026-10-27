@@ -132,7 +132,7 @@ Nine bug files, all opened 2026-10-26. Each cites the controller's own check; su
 | `2f6b6a8bcc9150c7` | medium | The companion's subagent bootstrap tells worktree subagents to `activate`; they race on the shared slot (G3) |
 | `d29988a6e87331f7` | medium | `grep` and `read_file` refuse a live `@bg_*` handle with a false message (G6) |
 | `c74560d325f6ea3d` | medium | `edit_file` drops an unparseable `edits` string and reports `missing 'old_string'` (G5) |
-| `34ee5cb2d2883cb7` | low | The `read_file` not-found hint does not name the `workspace=` pin (G3) |
+| `fc18b0e65a75bf8b` | low | The `read_file` not-found hint does not name the `workspace=` pin (G3) |
 | `030b05def6336fe4` | low | Librarian-guard refusals print `<id>`, and a ledger read has no read route (G4) |
 | `c04d2f540b83ea9a` | low | `edit_file` batch misses carry no path, nearest content or lines (G2) |
 | `ecb3508a7f51f803` | low | `guard_worktree_write` ignores the write target (G3) |

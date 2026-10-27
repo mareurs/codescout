@@ -1,10 +1,11 @@
 ---
-id: '34ee5cb2d2883cb7'
+id: fc18b0e65a75bf8b
 kind: bug
-status: open
+status: fixed
 title: the read_file "file not found" hint never names the per-call workspace= pin
 tags:
 - cluster/hint-composed-without-the-request
+closed: 2026-10-27
 opened: 2026-10-26
 owner: marius
 severity: low
@@ -48,11 +49,19 @@ N/A — read directly.
 
 ## Fix
 
-Open. Add `or pass workspace="<abs root>" on this call to pin it` to the hint, matching `guard_worktree_write`.
+Fixed. A new `pub(crate) const FILE_NOT_FOUND_HINT` in `src/tools/read_file.rs` carries the hint and adds `or pass workspace="<abs root>" on this call to pin it`. `read_file_text` and the not-found arm in `src/tools/markdown/read_markdown.rs` both use it, so the two sites cannot drift apart again.
+
+Not fixed here: the `cwd_escapes_root` message (9 errors). The issue marks that omission as a subagent finding the controller did not verify, and this fix did not check it.
+
+## Fix provenance
+
+- **SHA:** `24551b6f9` (`experiments`)
+- **patch-id:** `45864e9aecfe4e5e1afb46d3e05daa8d1e631634`
 
 ## Tests added
 
-None. A test would assert the NotFound hint contains `workspace=`.
+- `file_not_found_hint_names_the_workspace_pin` in `src/tools/read_file.rs`. It calls `read_file_text` on a missing path and asserts the hint contains `workspace=`. Seen failing before the fix, passing after.
+- `read_markdown_file_not_found_hint_names_the_workspace_pin` in `src/tools/markdown/tests.rs`. It reads a missing markdown file and asserts the same. It was not run on its own before the fix, but it checks the same hint text.
 
 ## Workarounds
 
@@ -60,7 +69,7 @@ Pin `workspace="<abs path>"` on each call.
 
 ## Resume
 
-Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, group G3). Fix not started.
+N/A — fixed. Open follow-up: check whether the `cwd_escapes_root` message also lacks the pin, and file a bug if it does.
 
 ## References
 
