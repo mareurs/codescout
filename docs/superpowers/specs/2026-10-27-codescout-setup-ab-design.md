@@ -51,6 +51,15 @@ limits and network policy in every arm. Only the configuration differs.
 | `cs` | `bare` plus the codescout MCP server and the `codescout-companion` hooks, configured as in daily use. | codescout's contribution |
 | `full` | `cs` plus superpowers, buddy, the user-level CLAUDE.md and settings: a frozen copy of `~/.claude` with memories, `projects/` and transcripts removed. | the whole setup |
 
+**Retrieval stack (operator ruling 2026-10-27): faithful hybrid.** The `cs` and `full`
+arms run a study-owned copy of the daily retrieval stack on the study network: Qdrant,
+the dense embedder (`codescout-dense-amd`'s image and arguments, CodeRankEmbed Q4_K_M)
+and the sparse embedder (TEI, `prithivida/Splade_PP_en_v1`). The copy follows the stack
+**as measured at freeze**: on 2026-10-27 the reranker URL `:48083` had no listener, so
+there is no reranker. The live `codescout-qdrant` is never reached, because it holds
+the live repository's index, which contains the fixes. Each run starts from a fresh
+copy of its task's template Qdrant volume.
+
 `full − bare` is the bundle effect. `cs − bare` is the part a claim about codescout may
 cite. `full − cs` is the rest of the setup. No claim about codescout may rest on
 `full − bare` alone.
