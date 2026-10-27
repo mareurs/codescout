@@ -496,6 +496,48 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     {
         return Some("read_file_overflow_threshold");
     }
+    // The 2026-10-24 sweep's unclassified head: guard messages added after the taxonomy was
+    // last extended. Placed HERE, before every substring scan, for the reason given above: each
+    // one embeds data (a symbol name, a path, a hint) that a later rule's substring could claim.
+    // The fixed prefix decides, and the tail only separates a sibling that shares the prefix.
+    // Pinned by `the_six_guard_messages_the_2026_10_24_sweep_found_unclassified_have_a_family`.
+    //
+    // One guard, five write tools, three prefixes (`shrink_guard::check`). The repair is the same
+    // for all: re-read, then repeat with `force=true` if the reduction is intended.
+    if msg.starts_with("shrink guard: ")
+        || msg.starts_with("body-shrink guard: ")
+        || msg.starts_with("memory-shrink guard: ")
+    {
+        return Some("shrink_guard_blocked");
+    }
+    // `replace` was handed a declaration for a DIFFERENT symbol. Not `replace_dropped_sibling`,
+    // whose message says the body lost its declaration: there the repair is to send the whole
+    // declaration, here it is to call `rename` first.
+    if msg.starts_with("edit_code replace(")
+        && msg.contains(") was given a complete declaration, but it declares ")
+    {
+        return Some("replace_would_rename");
+    }
+    // `refuse_unanchored_archive` — one refusal, two texts: no anchor at all, or a SHA without
+    // its patch-id. Both owe the same edit (a fix-provenance block) before the archive.
+    if msg.starts_with("doc(action=\"")
+        && (msg.contains(" bug declares no fix anchor, and archiving it")
+            || msg.contains(" bug declares a fix SHA but no patch-id, and "))
+    {
+        return Some("unanchored_archive_refused");
+    }
+    // Tool-scoped: the advisory is `symbols`'s own, and its repair (use `grep`) is meaningless
+    // for any other caller.
+    if tool_name == "symbols" && msg.starts_with("pattern looks like a regex (found ") {
+        return Some("symbols_pattern_is_regex");
+    }
+    // Two more shapes of the family kept last below. They sit up here because the second one's
+    // hint is free text, so a later substring scan could claim it first.
+    if msg.starts_with("end_line provided without start_line")
+        || (msg.starts_with("body_edits[") && msg.contains("]: missing required '"))
+    {
+        return Some("missing_required_param");
+    }
     // infra / tool-class (excluded from the probe's code-class score)
     if msg.contains("index is locked") {
         return Some("lsp_index_locked");
@@ -848,8 +890,12 @@ const ERR_FAMILIES: &[&str] = &[
     "read_markdown_path_is_directory",
     "read_markdown_wrong_ext",
     "replace_dropped_sibling",
+    "replace_would_rename",
+    "shrink_guard_blocked",
     "symbol_not_found",
+    "symbols_pattern_is_regex",
     "target_already_exists",
+    "unanchored_archive_refused",
     "unknown_enum_value",
     "worktree_activate_required",
     "write_scope_denied",
@@ -3680,6 +3726,7 @@ mod tests {
             );
         }
     }
+
     /// `read_markdown` was folded into `read_file` on 2026-09-02, but `read_file` still
     /// emits `read_markdown`'s overflow messages, and the only arm that named them was
     /// scoped to the retired tool. So every live occurrence fell out as `err_family IS NULL`:
@@ -3741,6 +3788,120 @@ mod tests {
             ),
             Some("read_file_overflow_threshold"),
             "the family is scoped to read_file, as the read_markdown arm is to read_markdown"
+        );
+    }
+    /// The six guard messages the 2026-10-24 sweep found in `err_family IS NULL`
+    /// (`docs/issues/2026-10-24-err-family-overflow-branch-keys-on-retired-read-markdown-so-read-file-errors-are-null.md`).
+    /// Each shape below is copied from a live `usage.db` row or, for the two that no row in this
+    /// project carries, from the `format!` that emits it. A symbol name, a path or a hint is data
+    /// the classifier does not control, so every rule also gets a hostile one that would satisfy a
+    /// substring rule further down.
+    #[test]
+    fn the_six_guard_messages_the_2026_10_24_sweep_found_unclassified_have_a_family() {
+        let shrink = "shrink guard: replacing 'backfill_svc' would reduce 732 → 111 bytes (85%) \
+                      and 20 → 3 lines (85%) — over the threshold on bytes and lines — hint: \
+                      Re-read the complete declaration with symbols(include_body=true). If the \
+                      reduction is intentional, repeat edit_code(action=\"replace\", symbol=..., \
+                      path=..., body=..., force=true).";
+        let rename = "edit_code replace('expand_home') was given a complete declaration, but it \
+                      declares `expand_home_with` instead of `expand_home`. `replace` cannot rename \
+                      — applying this would have removed `expand_home` and added a different \
+                      symbol. File restored. — hint: To rename: edit_code(action=\"rename\", \
+                      symbol=..., new_name=...) — then replace the body in a second call if it \
+                      also changed.";
+        let archive_no_anchor = "doc(action=\"move\") refused: this `fixed` bug declares no fix \
+                                 anchor, and archiving it would take it out of \
+                                 `terminal_status_without_fix_anchor`, the only check that asks \
+                                 for one — hint: Add a `## Fix provenance` section.";
+        let archive_no_patch_id =
+            "doc(action=\"update\") refused: this `fixed` bug declares a fix \
+                                   SHA but no patch-id, and a SHA alone orphans on the next \
+                                   rebase — hint: Add the patch-id as its own bullet.";
+        let body_edits_heading = "body_edits[0]: missing required 'heading' field — hint: Each \
+                                  entry must have shape {heading, action, content?, at?}. Editing \
+                                  text BEFORE the first heading? That is the preamble.";
+        let cases = [
+            ("edit_code", shrink, Some("shrink_guard_blocked")),
+            // The same guard raised by the other write tools, each with its own prefix.
+            (
+                "create_file",
+                "shrink guard: overwriting 'a.md' would reduce 900 → 10 bytes (99%) — over the \
+                 threshold on bytes",
+                Some("shrink_guard_blocked"),
+            ),
+            (
+                "doc",
+                "body-shrink guard: write to docs/a.md would reduce 900 → 10 bytes (99%) — over \
+                 the threshold on bytes",
+                Some("shrink_guard_blocked"),
+            ),
+            // Hostile symbol name: satisfies `symbol_not_found` and `lsp_index_locked` below.
+            (
+                "edit_code",
+                "shrink guard: replacing 'symbol not found index is locked' would reduce 732 → \
+                 111 bytes (85%) — over the threshold on bytes",
+                Some("shrink_guard_blocked"),
+            ),
+            ("edit_code", rename, Some("replace_would_rename")),
+            (
+                "edit_code",
+                "edit_code replace('a/symbol not found') was given a complete declaration, but it \
+                 declares `a/index is locked` instead of `a/symbol not found`. `replace` cannot \
+                 rename — File restored.",
+                Some("replace_would_rename"),
+            ),
+            // The neighbouring message keeps its own family.
+            (
+                "edit_code",
+                "edit_code replace('x') dropped the symbol definition — body must be the complete \
+                 declaration. File restored.",
+                Some("replace_dropped_sibling"),
+            ),
+            ("doc", archive_no_anchor, Some("unanchored_archive_refused")),
+            (
+                "doc",
+                archive_no_patch_id,
+                Some("unanchored_archive_refused"),
+            ),
+            (
+                "symbols",
+                "pattern looks like a regex (found regex syntax) — symbols searches symbol names, \
+                 not text — hint: Use grep(pattern=\"...\") for regex text search.",
+                Some("symbols_pattern_is_regex"),
+            ),
+            (
+                "symbols",
+                "pattern looks like a regex (found '|') — symbols searches symbol names, not text",
+                Some("symbols_pattern_is_regex"),
+            ),
+            (
+                "read_file",
+                "end_line provided without start_line — hint: Pass start_line (end_line defaults \
+                 to start_line+49), or pass both for an explicit range.",
+                Some("missing_required_param"),
+            ),
+            ("doc", body_edits_heading, Some("missing_required_param")),
+            (
+                "doc",
+                "body_edits[2]: missing required 'action' field — hint: Allowed actions: \
+                 replace, insert_before, insert_after, remove, edit.",
+                Some("missing_required_param"),
+            ),
+        ];
+        for (tool, msg, want) in cases {
+            assert_eq!(
+                normalize_err_family(tool, msg),
+                want,
+                "tool={tool} msg={msg}"
+            );
+        }
+
+        // Tool scope: the regex advisory is `symbols`'s own, so another tool saying the same
+        // words is not attributed to it.
+        assert_ne!(
+            normalize_err_family("grep", "pattern looks like a regex (found '|') — x"),
+            Some("symbols_pattern_is_regex"),
+            "symbols_pattern_is_regex is scoped to the symbols tool"
         );
     }
 
