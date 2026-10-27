@@ -826,7 +826,7 @@ fn read_edit_target(resolved: &std::path::Path, display_path: &str) -> anyhow::R
 /// parse", so the batch branch was skipped and the single-edit branch reported
 /// `missing 'old_string' parameter`, a parameter the caller never meant to send. The caller then
 /// resent the same edits as a native array, one large payload wasted per mistake.
-/// `docs/issues/2026-10-26-edit-file-drops-an-unparseable-edits-string-and-reports-a-missing-old-string.md`
+/// `docs/issues/archive/2026-10-26-edit-file-drops-an-unparseable-edits-string-and-reports-a-missing-old-string.md`
 fn unreadable_edits(given: &Value) -> super::RecoverableError {
     let kind = |v: &Value| match v {
         Value::Null => "null",

@@ -1,13 +1,17 @@
 ---
-id: d46b5039658ad060
+id: d29988a6e87331f7
 kind: bug
-status: open
+status: fixed
 title: grep and read_file refuse a live @bg_ handle with a false "expired" or "file not found" message
 tags:
 - cluster/doc-contradicted-by-code
+closed: 2026-10-27
+fix_patch_id: b62d05e32628ba8aa2a0b1c908cc156bb18d34fb
+fix_sha: a8373725a (experiments)
 opened: 2026-10-26
 owner: marius
 severity: medium
+unverified: 'CLEARED 2026-10-27. Was: the gate was not re-run after one whitespace-only edit. The final gate on the committed tree exited 0: python 1369, lean 5288, default 7947 passed.'
 ---
 
 # BUG: grep and read_file refuse a live `@bg_*` handle with a false "expired" or "file not found" message
@@ -51,11 +55,13 @@ The `@bg_` handle is looked up in the wrong store by `grep` and `read_file`. Con
 
 ## Fix
 
-Open. Either make `grep` and `read_file` resolve `@bg_*` through the background-job store, or make both refuse with a message that says "use run_command tail/grep on a background handle".
+Fixed in `a8373725a` (experiments), patch-id `b62d05e32628ba8aa2a0b1c908cc156bb18d34fb`.
+
+`OutputBuffer::get_stream_or_job_log` (`src/tools/output_buffer.rs`) reads a `@bg_*` log fresh from disk. `grep` and `read_file` call it. A log over `JOB_LOG_READ_LIMIT` (16 MiB, chosen without measurement) is refused with a route to `run_command("tail -50 @bg_x")`. Checked on the rebuilt binary on 2026-10-27: `grep` and `read_file` on a running job's handle returned its first line.
 
 ## Tests added
 
-None yet. A test would start a background `run_command`, then assert that `grep(path=@bg_x)` and `read_file(path=@bg_x)` return the log or name `run_command`, and that `read_file` never answers `file not found` for an `@bg_` handle.
+Six tests in `src/tools/read_file_job_log_tests.rs`. All six failed before the fix and passed after it.
 
 ## Workarounds
 
@@ -63,7 +69,13 @@ None yet. A test would start a background `run_command`, then assert that `grep(
 
 ## Resume
 
-Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, group G6). Fix not started.
+Fixed. Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, group G6). Archive after the final gate passes.
+
+
+## Fix provenance
+
+- **SHA:** `a8373725a` (`experiments`)
+- **patch-id:** `b62d05e32628ba8aa2a0b1c908cc156bb18d34fb`
 
 ## References
 

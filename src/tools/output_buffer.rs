@@ -1748,7 +1748,7 @@ impl OutputBuffer {
     /// reason). A log over [`JOB_LOG_READ_LIMIT`] is refused with a route to `run_command`:
     /// reading it whole puts it in memory, and cutting it would show a prefix as the whole log.
     ///
-    /// `docs/issues/2026-10-26-grep-and-read-file-refuse-a-live-bg-handle-with-a-false-expired-message.md`
+    /// `docs/issues/archive/2026-10-26-grep-and-read-file-refuse-a-live-bg-handle-with-a-false-expired-message.md`
     pub fn get_stream_or_job_log(&self, id: &str) -> Result<Option<String>, RecoverableError> {
         if !id.starts_with("@bg_") {
             return Ok(self.get_stream(id));

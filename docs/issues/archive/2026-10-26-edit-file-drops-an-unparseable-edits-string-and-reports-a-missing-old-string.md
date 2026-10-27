@@ -1,13 +1,17 @@
 ---
-id: '2c48dccab72c0509'
+id: c74560d325f6ea3d
 kind: bug
-status: open
+status: fixed
 title: edit_file with an unparseable `edits` string is reported as "missing 'old_string' parameter"
 tags:
 - cluster/accepted-parameter-silently-dropped
+closed: 2026-10-27
+fix_patch_id: b62d05e32628ba8aa2a0b1c908cc156bb18d34fb
+fix_sha: a8373725a (experiments)
 opened: 2026-10-26
 owner: marius
 severity: medium
+unverified: 'CLEARED 2026-10-27. Was: the gate was not re-run after one whitespace-only edit. The final gate on the committed tree exited 0: python 1369, lean 5288, default 7947 passed.'
 ---
 
 # BUG: `edit_file` with an `edits` string that is not valid JSON is reported as "missing 'old_string' parameter"
@@ -46,11 +50,13 @@ None on why the string is garbled; the server cannot fix that.
 
 ## Fix
 
-Open. When `edits` is present but not coercible to an array, return an error that names `edits` and the parse error position, instead of falling through.
+Fixed in `a8373725a` (experiments), patch-id `b62d05e32628ba8aa2a0b1c908cc156bb18d34fb`.
+
+`edit_file` (`src/tools/edit_file/mod.rs`) now refuses a non-null `edits` that it cannot read as an array. The error names `edits` and the parse error. `edits: null` still counts as absent. Checked on the rebuilt binary on 2026-10-27: a truncated JSON string gave `edits could not be read as an array of edit objects … EOF while parsing a value at line 1 column 21`.
 
 ## Tests added
 
-None. A test would send `{path, edits: "[{\"new_string\">x"}` and assert the error names `edits` and not `old_string`.
+Three tests in `src/tools/edit_file/tests.rs`. The two refusal tests failed before the fix. The `null` test is a control and passed before and after.
 
 ## Workarounds
 
@@ -58,7 +64,13 @@ Resend `edits` as a native JSON array.
 
 ## Resume
 
-Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, group G5). Fix not started.
+Fixed. Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, group G5). Other callers of `optional_array_param` may share the silent-`None` problem. I did not check them. Archive after the final gate passes.
+
+
+## Fix provenance
+
+- **SHA:** `a8373725a` (`experiments`)
+- **patch-id:** `b62d05e32628ba8aa2a0b1c908cc156bb18d34fb`
 
 ## References
 

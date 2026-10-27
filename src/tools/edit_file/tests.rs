@@ -5540,7 +5540,7 @@ async fn edit_file_writes_a_literal_unicode_escape_as_written_in_every_argument_
 /// that does not parse. The caller then fell through to the single-edit path and was told
 /// `missing 'old_string' parameter`: a message about a parameter it never meant to send. The
 /// field logs show 25 of 41 such errors carrying `edits` as `[{"new_string">…`, the `":` lost.
-/// `docs/issues/2026-10-26-edit-file-drops-an-unparseable-edits-string-and-reports-a-missing-old-string.md`
+/// `docs/issues/archive/2026-10-26-edit-file-drops-an-unparseable-edits-string-and-reports-a-missing-old-string.md`
 #[tokio::test]
 async fn an_unparseable_edits_string_is_refused_by_naming_edits() {
     let (dir, ctx) = project_ctx().await;

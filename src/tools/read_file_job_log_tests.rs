@@ -6,7 +6,7 @@
 //! when the session resets` and `read_file` answered `file not found … (searched <root>/@bg_x)`
 //! for a job that was alive and whose log `run_command("tail @bg_x")` printed. The refusal named
 //! a cause (expiry, a missing file) that was not the cause.
-//! `docs/issues/2026-10-26-grep-and-read-file-refuse-a-live-bg-handle-with-a-false-expired-message.md`
+//! `docs/issues/archive/2026-10-26-grep-and-read-file-refuse-a-live-bg-handle-with-a-false-expired-message.md`
 
 use super::ReadFile;
 use crate::agent::Agent;
