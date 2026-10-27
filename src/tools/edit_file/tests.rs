@@ -417,6 +417,45 @@ async fn edit_file_on_a_leaf_link_to_a_harmless_file_still_replaces_the_link_and
     assert_eq!(std::fs::read_to_string(&leaf).unwrap(), "beta\n");
 }
 
+/// The heading grammar of `edit_file` (the markdown route) reaches the same write classifier and
+/// the same `atomic_write` as the text grammar, so on an in-root link to a harmless file OUTSIDE the
+/// project it must also replace the link and spare the file it pointed at. The issue file lists this
+/// as run by a reviewer and never by the session that fixed the classifier.
+/// `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`
+#[cfg(unix)]
+#[tokio::test]
+async fn edit_file_heading_grammar_on_a_leaf_link_replaces_the_link_and_spares_the_victim() {
+    let (dir, ctx) = project_ctx().await;
+    let outside = tempdir().unwrap();
+    let victim = outside.path().join("elsewhere.md");
+    std::fs::write(&victim, "# T\n\n## S\n\nalpha\n").unwrap();
+    std::os::unix::fs::symlink(&victim, dir.path().join("leaf.md")).unwrap();
+
+    EditFile
+        .call(
+            json!({"path": "leaf.md", "heading": "## S", "action": "edit",
+                   "old_string": "alpha", "new_string": "beta"}),
+            &ctx,
+        )
+        .await
+        .expect("a harmless link is still editable through the heading grammar");
+
+    assert_eq!(
+        std::fs::read_to_string(&victim).unwrap(),
+        "# T\n\n## S\n\nalpha\n",
+        "the file the link pointed at must be untouched"
+    );
+    let leaf = dir.path().join("leaf.md");
+    assert!(
+        !std::fs::symlink_metadata(&leaf)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the link is replaced by the edited copy"
+    );
+    assert!(std::fs::read_to_string(&leaf).unwrap().contains("beta"));
+}
+
 /// The measured probe of the issue, with a fake `$HOME` and a fake key — the only way to put a
 /// readable deny-listed file under a test without mutating this process's environment
 /// (`docs/conventions/test-env-isolation.md`): the test re-executes ITS OWN binary with

@@ -1299,6 +1299,39 @@ async fn read_refuses_a_topic_that_is_a_symlink_to_a_secret() {
     }
 }
 
+/// The memory store writes through `tempfile::NamedTempFile::persist`, not `atomic_write`, and no
+/// write classifier is consulted. The issue file lists a write onto a leaf link as never run. Whatever
+/// the store does with the link, it must not modify the file the link points at.
+/// `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`
+#[cfg(unix)]
+#[tokio::test]
+async fn a_memory_write_onto_a_leaf_link_never_modifies_the_file_it_points_at() {
+    let (dir, ctx) = test_ctx_with_project().await;
+    let victim = dir.path().join("elsewhere/victim.md");
+    std::fs::create_dir_all(victim.parent().unwrap()).unwrap();
+    std::fs::write(&victim, "VICTIM-ORIGINAL").unwrap();
+    for (private, sub) in [(false, "memories"), (true, "private-memories")] {
+        let store_dir = dir.path().join(".codescout").join(sub);
+        std::fs::create_dir_all(&store_dir).unwrap();
+        std::os::unix::fs::symlink(&victim, store_dir.join("arch.md")).unwrap();
+
+        // Ok or a refusal are both acceptable; a write through the link is not.
+        let _ = Memory
+            .call(
+                json!({"action": "write", "topic": "arch", "private": private,
+                       "content": "# Arch\n\nNEW CONTENT long enough to anchor."}),
+                &ctx,
+            )
+            .await;
+
+        assert_eq!(
+            std::fs::read_to_string(&victim).unwrap(),
+            "VICTIM-ORIGINAL",
+            "private={private}: the memory write must not reach the file the link points at"
+        );
+    }
+}
+
 // ── shrink guard (CM-6) ─────────────────────────────────────────────────
 //
 // `write` replaces a topic wholesale. Writing two new sections to a
