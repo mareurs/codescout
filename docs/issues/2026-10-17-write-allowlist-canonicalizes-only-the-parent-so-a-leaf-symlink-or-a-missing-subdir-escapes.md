@@ -22,7 +22,7 @@ Shape 1, a leaf that is itself a symlink, was classified in-root; as of 2026-10-
 (`resolve_leaf_link`) and refuses a link whose END is in the deny list or cannot be established (a loop, an over-long chain, an
 unreadable link, an unresolvable `..`). A link whose end is merely outside the roots stays `Allowed` as the link, because the
 writers replace it (`edit_code` rename, which writes through, is gated by the kept second look in `fs`). That is a policy
-decision pending the user's confirmation; the alternative is under Fix (fixes `0b0ab92f4`, then `520f95fce`, see Fix and Tests
+decision, confirmed by the user on 2026-10-27 (see Fix); the alternative is under Fix (fixes `0b0ab92f4`, then `520f95fce`, see Fix and Tests
 added). The write tools that reach `atomic_write` (`edit_file`,
 `create_file`, `edit_code`) never wrote through a leaf link. `edit_file` on a link to a deny-listed path
 disclosed that file (fixed earlier at the resolvers by `38a492b4`; the classifier now refuses it too). The
@@ -144,7 +144,7 @@ rule no longer exists.
 names a file below a missing directory, i.e. a dangling link, is resolved through the deepest existing ancestor), and stops
 after `MAX_LEAF_LINK_HOPS` (40, the kernel's `MAXSYMLINKS`) links. Only the END of the chain is judged.
 
-**Policy. DECIDED BY THE COORDINATOR, PENDING THE USER'S CONFIRMATION.**
+**Policy. DECIDED BY THE COORDINATOR, CONFIRMED BY THE USER ON 2026-10-27.**
 
 - An end in the deny list: `Denied` ("'<link>' is a symbolic link to '<end>', which is in a protected location"), whatever
   roots are approved, asked BEFORE the roots so no `@ack_*` is ever offered (`a_link_outside_the_roots_to_the_deny_list_...`).
@@ -175,7 +175,7 @@ after `MAX_LEAF_LINK_HOPS` (40, the kernel's `MAXSYMLINKS`) links. Only the END 
 symbolic link to '<end>'; the write would replace the link", offering no approval. It is simpler to state and never lets a
 link into a place the project does not own be replaced silently, but it refuses a write that is harmless for every writer but
 rename (the link is replaced, nothing outside is touched) and it changes the behaviour of every project that keeps a link to a
-shared file inside it. The coordinator chose the policy above; the user has not yet confirmed it.
+shared file inside it. The coordinator chose the policy above. The user confirmed it on 2026-10-27: asked in session c78f48d5 whether to keep the current policy (the recommendation was to keep it), they answered "da". That answer settles the policy only. It does not cover what is still unverified (macOS, Windows, case-insensitive filesystems, the `/etc/passwd` probe, the check-versus-write race), so the issue stays `open`.
 
 `fs::validate_leaf_link_target` (the resolver look added by `38a492b4`) is KEPT, and it is two different things by policy:
 
