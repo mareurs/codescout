@@ -17,6 +17,7 @@ Steps (each writes one JSON under CONTROLS; run them in this order):
 Every container is `sab-ctl-*`; teardown goes through stack.py's exact-name helpers.
 """
 import json
+import os
 import subprocess
 import sys
 import time
@@ -28,7 +29,8 @@ import pilot
 import stack
 
 DATA = Path("/home/marius/work/claude/setup-ab-data")
-CONTROLS = DATA / "controls"
+# SAB_CONTROLS: a fresh evidence dir for a later round (run dirs are never reused).
+CONTROLS = Path(os.environ.get("SAB_CONTROLS", DATA / "controls"))
 HERE = Path(__file__).resolve().parent
 NET = "sab-ctl-net"
 IMAGE = "sab-agent-cs-ruff-15309:f9b0fc9f8"
@@ -39,7 +41,24 @@ FIXTURE_DIR = "/home/agent/zq"
 CANARY = "zq-isolation-canary-7f3a"
 MODEL = "claude-sonnet-5-5"
 PROMPT = "List the files in the repository root.\n"
-RUNS = ("ctl-a", "ctl-b", "ctl-ra", "ctl-r10cs", "ctl-r10full")
+RUNS = ("ctl-a", "ctl-b", "ctl-ra", "ctl-r10cs", "ctl-r10full", "ctl-capcs", "ctl-capfull")
+
+# C2b capture control: a stub endpoint on the internal network and a plainly fake key.
+CAPTURE_IMAGE = "python:3.12-slim"
+CAPTURE_NAME = "sab-capture"
+CAPTURE_PORT = 8080
+FAKE_API_KEY = "sab-fake-api-key-not-a-credential"
+MARKERS = {
+    # A heading only the frozen ~/.claude/CLAUDE.md carries (line 44).
+    "claude_md": "Subagent Dispatch — Model Floor + Review Escalation",
+    # A heading of the legible plugin's output style, `legible:Explanatory STE`.
+    "output_style": "Writing Style: about 80% of ASD-STE100",
+    # codescout's server instructions.
+    "codescout_instructions": "codescout MCP — semantic code intelligence",
+    "iron_laws": "Iron Laws",
+    # The companion's SessionStart hook context.
+    "session_start_context": "PROJECT BOOTSTRAP",
+}
 
 
 def docker(*args, **kwargs):
@@ -253,6 +272,15 @@ def probe(container, workdir, calls, out_name, timeout=900):
 def text_of(call):
     result = call.get("result") or {}
     return "\n".join(c.get("text", "") for c in result.get("content", []))
+def git_state(container, workdir=FIXTURE_DIR):
+    """The tree as an agent's patch extraction would see it, plus /tmp (C3/C7 checks)."""
+    def run(*cmd):
+        return docker("exec", "-w", workdir, container, *cmd, check=False).stdout
+    return {"porcelain": run("git", "status", "--porcelain").strip(),
+            "porcelain_ignored": run("git", "status", "--porcelain", "--ignored").strip(),
+            "log": run("git", "log", "--oneline", "-3").strip(),
+            "tracked_codescout": run("git", "ls-files", ".codescout", ".gitignore").strip(),
+            "tmp": run("ls", "-A", "/tmp").strip()}
 
 
 def step_isolation(manifest):
@@ -306,8 +334,11 @@ def step_isolation(manifest):
                                    out / run)
         name = f"sab-{run}"
         start_arm_container(name, INDEXED_IMAGE, spec, out / run)
+        fresh = git_state(name)
         results[run] = probe(name, FIXTURE_DIR, calls[run], f"isolation-{run}")
         results[run]["qdrant_url"] = url
+        results[run]["git_fresh"] = fresh
+        results[run]["git_after_probe"] = git_state(name)
     a, b = results["ctl-a"], results["ctl-b"]
     checks = {
         "a_semantic_search_finds_marker": "zq_marker_fn" in text_of(a["calls"][0]),
@@ -317,10 +348,16 @@ def step_isolation(manifest):
         "b_recall_does_not_see_a_canary": CANARY not in text_of(b["calls"][1]),
         "b_list_does_not_show_a_topic": "zq-canary-a" not in text_of(b["calls"][2]),
         "a_and_b_qdrant_differ": a["qdrant_url"] != b["qdrant_url"],
+        "fresh_run_container_git_status_empty": all(
+            r["git_fresh"]["porcelain"] == "" for r in (a, b)),
+        "fresh_run_container_has_no_tmp_index_lock": all(
+            "codescout-index-" not in r["git_fresh"]["tmp"] for r in (a, b)),
     }
+    git = {"fresh": a["git_fresh"], "a_after_probe": a["git_after_probe"],
+           "b_after_probe": b["git_after_probe"]}
     save("stack-isolation.json", {"template": TEMPLATE, "indexed_image": INDEXED_IMAGE,
                                   "fixture": FIXTURE_DIR, "canary": CANARY, "checks": checks,
-                                  "pass": all(checks.values()),
+                                  "pass": all(checks.values()), "git": git,
                                   "probes": ["isolation-ctl-a.probe.json",
                                              "isolation-ctl-b.probe.json"],
                                   "index_cost": json.loads((out / "prepare" / "index-cost.json")
@@ -399,6 +436,8 @@ def summarize_stream(raw):
         })
     summary["hook_events"] = [{k: e.get(k) for k in ("subtype", "hook_event", "hook_name",
                                                       "exit_code", "outcome")}
+                              | {"output_bytes": len(e.get("output") or ""),
+                                 "output_head": (e.get("output") or "")[:200]}
                               for e in hooks]
     summary["hook_events_raw_count"] = len(hooks)
     last = events[-1] if events else None
@@ -466,6 +505,133 @@ def step_r10(manifest):
                            "tools": s.get("tools")}
                      for arm, s in report["arms"].items()},
         "streams": [f"r10/{a}.stream.jsonl" for a in arms.ARMS]})
+# --- C2b: capture the first request body at a stub endpoint ---------------------------------
+
+def _main_request(requests):
+    """The agent turn's /v1/messages request: the target model, with tools and a system."""
+    msgs = [r for r in requests if r["method"] == "POST"
+            and r["path"].split("?")[0] == "/v1/messages" and isinstance(r["body"], dict)]
+    main = [r for r in msgs if r["body"].get("model") == MODEL and r["body"].get("tools")]
+    return (main or msgs or [None])[0], msgs
+
+
+def capture_checks(arms_report):
+    """The C2b assertions on the captured agent-turn request of each arm."""
+    got = {a: s["markers_anywhere"] for a, s in arms_report.items()}
+    effort = {a: s["effort_fields"]["output_config"] for a, s in arms_report.items()}
+    return {
+        "full_has_claude_md_marker": got["full"]["claude_md"],
+        "full_has_output_style_text": got["full"]["output_style"],
+        "cs_has_codescout_instructions": got["cs"]["codescout_instructions"]
+        and got["cs"]["iron_laws"],
+        "cs_has_session_start_context": got["cs"]["session_start_context"],
+        "bare_has_none": not any(got["bare"].values()),
+        "output_config_effort_equal_across_arms": effort["bare"] == effort["cs"] == effort["full"],
+    }
+
+
+def capture_findings(arms_report):
+    """Arm differences the capture shows that are not pass/fail gates (reported, not judged)."""
+    return {
+        "thinking_display": {a: s["effort_fields"]["thinking"] for a, s in arms_report.items()},
+        "stdout_shape": {a: s["stdout_shape"] for a, s in arms_report.items()},
+        "messages_requests": {a: s["messages_requests"] for a, s in arms_report.items()},
+        "native_tools": {a: s.get("native_tools") for a, s in arms_report.items()},
+    }
+
+def step_capture(manifest):
+    out = CONTROLS / "capture"
+    out.mkdir(exist_ok=True)
+    reqfile = out / "requests.jsonl"
+    image_id = docker("image", "inspect", "-f", "{{.Id}}", CAPTURE_IMAGE).stdout.strip()
+    docker("run", "-d", "--name", CAPTURE_NAME, "--network", NET, "--user", "1000:1000",
+           "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+           "-v", f"{HERE / 'capture_stub.py'}:/opt/capture_stub.py:ro",
+           "-v", f"{out}:/capture", CAPTURE_IMAGE, "python3", "/opt/capture_stub.py",
+           str(CAPTURE_PORT))
+    stack.wait_ready({CAPTURE_NAME: ["python3", "-c", "import socket; socket.create_connection("
+                                     f"('127.0.0.1', {CAPTURE_PORT}), 2)"]}, timeout=60)
+    report = {"stub": "tools/setup-ab-eval/capture_stub.py", "stub_image": CAPTURE_IMAGE,
+              "stub_image_id": image_id, "network": NET,
+              "base_url": f"http://{CAPTURE_NAME}:{CAPTURE_PORT}",
+              "api_key": f"{FAKE_API_KEY} (plainly fake; no real token anywhere)",
+              "markers": MARKERS, "arms": {}}
+    try:
+        for arm in arms.ARMS:
+            run = f"ctl-cap{arm}" if arm != "bare" else None
+            url = (stack.qdrant_for_run(TEMPLATE, run, network=NET) if run
+                   else "http://sab-qdrant-unused:6334")
+            spec = arms.arm_invocation(arm, MODEL, PROMPT, manifest, study_urls(manifest, url),
+                                       out / arm, session_id=str(uuid.uuid4()))
+            name = f"sab-ctl-cap-{arm}"
+            try:
+                start_arm_container(name, IMAGE, spec, out / arm)
+                # The arm's own argv, unchanged (json output); only the endpoint and fake key
+                # are added, identically for every arm.
+                r = subprocess.run(["docker", "exec", "-w", "/testbed",
+                                    "-e", f"ANTHROPIC_BASE_URL=http://{CAPTURE_NAME}:{CAPTURE_PORT}",
+                                    "-e", f"ANTHROPIC_API_KEY={FAKE_API_KEY}",
+                                    name, *spec.cli_args],
+                                   capture_output=True, text=True, timeout=300)
+                (out / f"{arm}.stdout.json").write_text(r.stdout)
+                (out / f"{arm}.stderr.txt").write_text(r.stderr)
+                rc = r.returncode
+            finally:
+                docker("rm", "-f", name, check=False)
+                if run:
+                    stack.run_down(run)
+            requests = []
+            if reqfile.exists():
+                reqfile.rename(out / f"{arm}.requests.jsonl")
+                requests = [json.loads(l) for l in
+                            (out / f"{arm}.requests.jsonl").read_text().splitlines() if l]
+            main, msgs = _main_request(requests)
+            try:
+                stdout = json.loads(r.stdout)
+                shape = type(stdout).__name__
+            except ValueError:
+                stdout, shape = None, "not-json"
+            summary = {"exit_code": rc, "requests": len(requests),
+                       "paths": [f"{q['method']} {q['path']}" for q in requests],
+                       "messages_requests": len(msgs), "stdout_shape": shape,
+                       "stdout_is_error": stdout.get("is_error") if isinstance(stdout, dict)
+                       else None,
+                       "stdout_result": stdout.get("result") if isinstance(stdout, dict)
+                       else None}
+            if main is None:
+                summary["sent_request"] = False
+                report["arms"][arm] = summary
+                continue
+            body = main["body"]
+            system = json.dumps(body.get("system"), ensure_ascii=False)
+            messages = json.dumps(body.get("messages"), ensure_ascii=False)
+            summary.update({
+                "sent_request": True, "model": body.get("model"),
+                "top_level_keys": sorted(body),
+                "effort_fields": {k: body.get(k) for k in ("thinking", "output_config",
+                                                           "effort", "max_tokens")},
+                "tool_count": len(body.get("tools", [])),
+                "native_tools": sorted(t.get("name") for t in body.get("tools", [])
+                                       if not str(t.get("name", "")).startswith("mcp__")),
+                "mcp_tool_count": len([t for t in body.get("tools", [])
+                                       if str(t.get("name", "")).startswith("mcp__")]),
+                "system_bytes": len(system), "messages_bytes": len(messages),
+                "markers_in_system": {k: m in system for k, m in MARKERS.items()},
+                "markers_in_messages": {k: m in messages for k, m in MARKERS.items()},
+            })
+            summary["markers_anywhere"] = {k: summary["markers_in_system"][k]
+                                           or summary["markers_in_messages"][k]
+                                           for k in MARKERS}
+            (out / f"{arm}.request-body.json").write_text(json.dumps(body, indent=2,
+                                                                     ensure_ascii=False))
+            report["arms"][arm] = summary
+    finally:
+        docker("rm", "-f", CAPTURE_NAME, check=False)
+    sent = all(s.get("sent_request") for s in report["arms"].values())
+    report["checks"] = capture_checks(report["arms"]) if sent else None
+    report["findings"] = capture_findings(report["arms"]) if sent else None
+    report["pass"] = bool(report["checks"]) and all(report["checks"].values())
+    save("capture.json", report)
 
 
 # --- teardown ------------------------------------------------------------------------------
@@ -495,7 +661,8 @@ def step_down(manifest):
 
 STEPS = {"image": step_image, "hooks": step_hooks,
          "hooks-seeded": lambda m: step_hooks(m, seeded=True), "stack": step_stack,
-         "isolation": step_isolation, "ra": step_ra, "r10": step_r10, "down": step_down}
+         "isolation": step_isolation, "ra": step_ra, "r10": step_r10, "capture": step_capture,
+         "down": step_down}
 
 
 def main(argv):

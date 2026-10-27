@@ -1,0 +1,68 @@
+{
+  "task": "setup-ab Stage 0 Task 4, controller rulings C1, C2, C2b, C3+C7 applied and checked live",
+  "date": "2026-10-27",
+  "model_calls": 0,
+  "real_token_in_any_container": false,
+  "code_commit": "0938be89c fix(setup-ab): seed the hooks' codescout entry, sanitize full's user settings, commit index artifacts into the base",
+  "raw_evidence": {
+    "round2": "/home/marius/work/claude/setup-ab-data/controls/round2 (stack, isolation + git status, r10 streams, first capture run, verbose and effort A/B probes, teardown)",
+    "capture": "/home/marius/work/claude/setup-ab-data/controls/capture (+ controls/capture.json): per arm <arm>.requests.jsonl, <arm>.request-body.json, <arm>.stdout.json"
+  },
+  "C1_claude_json_seed": {
+    "pass": true,
+    "evidence": "round2/r10-streams.json, round2/r10/<arm>.stream.jsonl",
+    "cs": {"mcp_servers": [{"name": "codescout", "status": "connected"}], "mcp_tools": 18,
+           "session_start_output_bytes": [1656]},
+    "full": {"mcp_servers": [{"name": "codescout", "status": "connected"}], "mcp_tools": 18,
+             "session_start_output_bytes": [3604, 1656, 0],
+             "note": "3604 = superpowers (<EXTREMELY_IMPORTANT> context), 1656 = codescout-companion (PROJECT BOOTSTRAP), 0 = a third SessionStart hook with no output"},
+    "bare": {"mcp_servers": [], "mcp_tools": 0, "hook_events": 0}
+  },
+  "C2_full_user_settings": {
+    "pass": true,
+    "evidence": "round2/r10-streams.json (full init output_style), round2/r10/full/arm-record.json",
+    "full_init_output_style": "legible:Explanatory STE",
+    "bare_cs_output_style": "default",
+    "setting_sources": {"bare": "local", "cs": "local", "full": "user,local"},
+    "dropped_keys": ["env", "statusLine", "effortLevel", "modelSettings", "hooks.UserPromptSubmit",
+                     "extraKnownMarketplaces", "autoMode"],
+    "deviation_effort_keys": {
+      "what": "effortLevel and modelSettings dropped although they hold no host value (the C2 generic rule would keep them)",
+      "why": "Global Constraint: every arm at the CLI default effort, equal across the arms of a task",
+      "evidence": "round2/effort-probe/effort-probe.json: model claude-opus-5-5, output_config.effort bare=medium, full as built=medium, full with the two keys restored=xhigh"
+    }
+  },
+  "C2b_capture": {
+    "pass": true,
+    "evidence": "controls/capture.json, controls/capture/",
+    "endpoint": "sab-capture (python:3.12-slim, tools/setup-ab-eval/capture_stub.py) on the --internal study network; 400 invalid_request_error on /v1/messages",
+    "api_key": "sab-fake-api-key-not-a-credential",
+    "cli_accepted_base_url_and_sent_requests": true,
+    "checks": {
+      "full_has_claude_md_marker": true,
+      "full_has_output_style_text": true,
+      "cs_has_codescout_instructions": true,
+      "cs_has_session_start_context": true,
+      "bare_has_none": true,
+      "output_config_effort_equal_across_arms": true
+    },
+    "where_markers_sit": "every marker is in the request's messages (system-reminder context), none in the system field",
+    "findings": {
+      "full_native_tools": "Glob, Grep, Read only: the kept operator permissions.deny = [Bash, Write, Edit] removes Bash, Write and Edit from full's tool list (bare and cs: Bash, Edit, Glob, Grep, Read, Write)",
+      "full_verbose": "the kept `verbose: true` makes full's `-p --output-format json` stdout a JSON list (not the result object), sets thinking.display=updates (bare/cs: omitted) and doubles the request count; A/B in round2/verbose-probe/verbose-probe.json: minus verbose, all three match bare/cs"
+    }
+  },
+  "C3_C7_prepare": {
+    "pass": true,
+    "evidence": "round2/stack-isolation.json (git), round2/isolation/prepare/index-diff.txt",
+    "fresh_run_container": {"git_status_porcelain": "", "git_status_porcelain_ignored": "",
+                            "log": ["5e2423b sab: codescout index artifacts", "2f51231 fixture"],
+                            "tracked": [".codescout/index-state.json", ".codescout/write.lock", ".gitignore"],
+                            "tmp": ""},
+    "index_diff_has_tmp_lock": false,
+    "isolation_checks_still_pass": true,
+    "finding_after_a_session": "after a codescout MCP session, git status shows untracked, not ignored: .codescout/debug.log, .codescout/diagnostic-*.log, .codescout/usage.db, .codescout/write.lock.holder and (after a memory write) .codescout/memories/; a `git add -A` patch extraction would carry them in cs/full only"
+  },
+  "teardown": {"evidence": "round2/teardown.json", "left_sab_containers": [], "left_sab_volumes": [],
+               "left_sab_networks": []}
+}
