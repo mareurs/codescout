@@ -1026,6 +1026,36 @@ pub fn write_lsp_failure(
     )?;
     Ok(conn.last_insert_rowid())
 }
+/// What `lsp_events` says about how recent starts of one language went: the number of
+/// `outcome='failed'` rows since its latest `success`, and how long ago the newest of them was.
+#[derive(Debug, PartialEq, Eq)]
+pub struct LspStartHistory {
+    pub consecutive_failures: usize,
+    pub last_failure_age_secs: Option<u64>,
+}
+
+/// Read [`LspStartHistory`] for `language`. The in-memory circuit breaker cannot see across
+/// processes, and each activation is a new one, so this is the only place a deterministic start
+/// failure is remembered between activations.
+pub fn lsp_start_history(conn: &Connection, language: &str) -> Result<LspStartHistory> {
+    // `id` is AUTOINCREMENT, so "after the latest success" is "id greater than its id" and needs
+    // no timestamp comparison; `started_at` is only used to age the newest failure.
+    let (count, age): (i64, Option<i64>) = conn.query_row(
+        "SELECT COUNT(*),
+                CAST((julianday('now') - julianday(MAX(started_at))) * 86400 AS INTEGER)
+         FROM lsp_events
+         WHERE language = ?1 AND outcome = 'failed'
+           AND id > COALESCE(
+               (SELECT MAX(id) FROM lsp_events WHERE language = ?1 AND outcome = 'success'), 0)",
+        params![language],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    Ok(LspStartHistory {
+        consecutive_failures: usize::try_from(count).unwrap_or(0),
+        // A clock set back after the write would give a negative age; read it as "just now".
+        last_failure_age_secs: age.map(|a| u64::try_from(a).unwrap_or(0)),
+    })
+}
 
 /// Fill in the first_response_ms for a previously inserted lsp_events row.
 /// Best-effort — if the row was already updated or is missing, this is a no-op.
@@ -2499,6 +2529,92 @@ mod tests {
             .unwrap();
         assert_eq!(outcome, "failed");
         assert_eq!(error.as_deref(), Some("LSP server disconnected"));
+    }
+    /// A deterministic start failure (`jdtls` under a JDK it cannot read) is retried by every
+    /// activation, because the circuit breaker lives in one process. The history must therefore
+    /// count failed starts of ONE language since its latest success, and say how old the newest is.
+    #[test]
+    fn lsp_start_history_counts_failed_starts_since_the_last_success() {
+        let (_dir, conn) = tmp();
+        let empty = lsp_start_history(&conn, "java").unwrap();
+        assert_eq!(
+            empty,
+            LspStartHistory {
+                consecutive_failures: 0,
+                last_failure_age_secs: None
+            }
+        );
+
+        write_lsp_failure(
+            &conn,
+            "java",
+            "new_session",
+            16_000,
+            "LSP server disconnected",
+        )
+        .unwrap();
+        write_lsp_failure(
+            &conn,
+            "java",
+            "new_session",
+            16_000,
+            "LSP server disconnected",
+        )
+        .unwrap();
+        // Another language's failures must not count against `java`.
+        write_lsp_failure(
+            &conn,
+            "kotlin",
+            "new_session",
+            900,
+            "LSP server disconnected",
+        )
+        .unwrap();
+        let two = lsp_start_history(&conn, "java").unwrap();
+        assert_eq!(two.consecutive_failures, 2);
+        assert!(
+            two.last_failure_age_secs.is_some_and(|a| a < 60),
+            "a failure written just now is seconds old, got {:?}",
+            two.last_failure_age_secs
+        );
+
+        // A success ends the run: the count restarts from zero.
+        write_lsp_event(&conn, "java", "new_session", 2_000).unwrap();
+        assert_eq!(
+            lsp_start_history(&conn, "java").unwrap(),
+            LspStartHistory {
+                consecutive_failures: 0,
+                last_failure_age_secs: None
+            }
+        );
+        write_lsp_failure(
+            &conn,
+            "java",
+            "new_session",
+            16_000,
+            "LSP server disconnected",
+        )
+        .unwrap();
+        assert_eq!(
+            lsp_start_history(&conn, "java")
+                .unwrap()
+                .consecutive_failures,
+            1
+        );
+
+        // The age is measured from the NEWEST failure of the run, in seconds.
+        conn.execute(
+            "UPDATE lsp_events SET started_at = datetime('now', '-7 hours') WHERE language = 'java'",
+            [],
+        )
+        .unwrap();
+        let old = lsp_start_history(&conn, "java").unwrap();
+        assert!(
+            old.last_failure_age_secs
+                .is_some_and(|a| (7 * 3600 - 5..=7 * 3600 + 60).contains(&a)),
+            "a failure back-dated 7 h is about 25200 s old, got {:?}",
+            old.last_failure_age_secs
+        );
     }
 
     #[test]

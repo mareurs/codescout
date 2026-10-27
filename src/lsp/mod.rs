@@ -26,26 +26,82 @@ pub use symbols::{SymbolInfo, SymbolKind};
 /// Hardcoded to JVM languages — Kotlin in particular takes 30–60 s to start.
 const PREWARM_LANGUAGES: &[&str] = &["java", "kotlin"];
 
+/// Consecutive failed starts, since a language's last success, after which the pre-warm stops
+/// trying. Two can be bad luck (a lock held by a peer); three in a row is a pattern.
+// cap-class: NOT_A_CAP — a back-off threshold; skipping the pre-warm drops no answer, because a call that needs the server still starts it
+const PREWARM_BACKOFF_AFTER_FAILURES: usize = 3;
+
+/// How long the pre-warm stays off after the newest failed start. Bounds the cost of a
+/// deterministic failure to one attempt per window, while a fixed server is still noticed.
+// cap-class: NOT_A_CAP — a back-off window; it delays an optional warm-up and never shortens a result
+const PREWARM_BACKOFF_WINDOW_SECS: u64 = 6 * 60 * 60;
+
+/// Whether `history` says this language fails every time it starts, recently enough to believe it.
+fn prewarm_backs_off(history: &crate::usage::db::LspStartHistory) -> bool {
+    history.consecutive_failures >= PREWARM_BACKOFF_AFTER_FAILURES
+        && history
+            .last_failure_age_secs
+            .is_some_and(|age| age < PREWARM_BACKOFF_WINDOW_SECS)
+}
+
+/// The failed-start history of `language` in `root`'s `usage.db`, or `None` when it cannot be
+/// read. `None` means "pre-warm as before": the history only ever removes a start, so an
+/// unreadable one must not.
+async fn start_history(
+    root: &std::path::Path,
+    language: &str,
+) -> Option<crate::usage::db::LspStartHistory> {
+    let root = root.to_path_buf();
+    let language = language.to_string();
+    tokio::task::spawn_blocking(move || {
+        let conn = crate::usage::db::open_db(&root).ok()?;
+        crate::usage::db::lsp_start_history(&conn, &language).ok()
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 /// Spawn background `get_or_start` tasks for any JVM languages found in
 /// `project_languages`. Safe to call concurrently: `LspManager`'s starting-map
 /// serialises parallel starters via a watch channel — no double-start risk.
+///
+/// A language whose last starts all failed is skipped (see [`prewarm_backs_off`]). The circuit
+/// breaker cannot do this: it lives in one process and each activation is a new one, so a start
+/// that fails every time was retried on every activation (235 starts of `jdtls`, ~16 s each).
+/// Only the optional warm-up is skipped; a tool call that needs the server still starts it.
+///
+/// Returns the spawned tasks. Production callers drop them; a test awaits them so it can
+/// assert on what the pre-warm did without sleeping.
 pub fn prewarm_lsp_background(
     lsp: std::sync::Arc<dyn LspProvider>,
     root: std::path::PathBuf,
     project_languages: &[String],
-) {
+) -> Vec<tokio::task::JoinHandle<()>> {
+    let mut tasks = Vec::new();
     for lang in project_languages {
         if PREWARM_LANGUAGES.contains(&lang.as_str()) {
             let lsp = lsp.clone();
             let root = root.clone();
             let lang = lang.clone();
-            tokio::spawn(async move {
+            tasks.push(tokio::spawn(async move {
+                if let Some(history) = start_history(&root, &lang).await {
+                    if prewarm_backs_off(&history) {
+                        tracing::info!(
+                            "LSP pre-warm for {lang} skipped: its last {} starts failed, the newest {}s ago",
+                            history.consecutive_failures,
+                            history.last_failure_age_secs.unwrap_or(0)
+                        );
+                        return;
+                    }
+                }
                 if let Err(e) = lsp.get_or_start(&lang, &root, None).await {
                     tracing::debug!("LSP pre-warm for {lang} skipped: {e}");
                 }
-            });
+            }));
         }
     }
+    tasks
 }
 
 /// Budget for a tool call that would otherwise block on an LSP cold start.
@@ -161,6 +217,111 @@ mod budget_tests {
         assert!(
             got.is_some(),
             "second call after warm-up must hit the ready fast path"
+        );
+    }
+}
+
+/// The pre-warm runs once per activation in a fresh process, so the in-memory circuit breaker
+/// (5 failures in 60 s) never reaches its ceiling for a start that fails every time. These pin
+/// that the pre-warm consults the failed-start history in `usage.db` instead.
+#[cfg(test)]
+mod prewarm_tests {
+    use super::*;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// Counts `get_or_start` calls and always fails, like `jdtls` under a JDK it cannot read.
+    struct FailingStart {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl LspProvider for FailingStart {
+        async fn get_or_start(
+            &self,
+            _language: &str,
+            _workspace_root: &Path,
+            _mux_override: Option<bool>,
+        ) -> anyhow::Result<Arc<dyn LspClientOps>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(anyhow::anyhow!("LSP server disconnected"))
+        }
+        async fn notify_file_changed(&self, _path: &Path) {}
+        async fn shutdown_all(&self) {}
+        async fn is_ready(&self, _language: &str, _workspace_root: &Path) -> bool {
+            false
+        }
+    }
+
+    /// Seed `n` failed starts of `language` into a fresh project's `usage.db`, run the pre-warm
+    /// for `language`, and return how many starts it attempted.
+    async fn starts_after(language: &str, seed: impl FnOnce(&rusqlite::Connection)) -> usize {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        {
+            let conn = crate::usage::db::open_db(&root).unwrap();
+            seed(&conn);
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let lsp: Arc<dyn LspProvider> = Arc::new(FailingStart {
+            calls: calls.clone(),
+        });
+        for task in prewarm_lsp_background(lsp, root, &[language.to_string()]) {
+            task.await.unwrap();
+        }
+        calls.load(Ordering::SeqCst)
+    }
+
+    fn fail(conn: &rusqlite::Connection, language: &str, n: usize) {
+        for _ in 0..n {
+            crate::usage::db::write_lsp_failure(
+                conn,
+                language,
+                "new_session",
+                16_000,
+                "LSP server disconnected",
+            )
+            .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_language_whose_recent_starts_all_failed_is_not_pre_warmed() {
+        assert_eq!(starts_after("java", |c| fail(c, "java", 3)).await, 0);
+        // Kotlin is pre-warmed too, and gets the same treatment.
+        assert_eq!(starts_after("kotlin", |c| fail(c, "kotlin", 5)).await, 0);
+    }
+
+    #[tokio::test]
+    async fn the_pre_warm_still_runs_when_the_history_does_not_justify_skipping() {
+        // No history: the first activation must still try.
+        assert_eq!(starts_after("java", |_| {}).await, 1);
+        // Below the threshold: two failures can be bad luck.
+        assert_eq!(starts_after("java", |c| fail(c, "java", 2)).await, 1);
+        // Another language's failures say nothing about this one.
+        assert_eq!(starts_after("java", |c| fail(c, "kotlin", 9)).await, 1);
+        // A success ends the run of failures.
+        assert_eq!(
+            starts_after("java", |c| {
+                fail(c, "java", 4);
+                crate::usage::db::write_lsp_event(c, "java", "new_session", 2_000).unwrap();
+            })
+            .await,
+            1
+        );
+        // Old failures: after the window the pre-warm tries again, so a fixed JDK is noticed.
+        assert_eq!(
+            starts_after("java", |c| {
+                fail(c, "java", 4);
+                c.execute(
+                    "UPDATE lsp_events SET started_at = datetime('now', '-7 hours')",
+                    [],
+                )
+                .unwrap();
+            })
+            .await,
+            1
         );
     }
 }

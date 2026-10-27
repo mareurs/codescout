@@ -467,6 +467,47 @@ pub(super) fn resolve_mux_flag(default: bool, override_: Option<bool>) -> bool {
     override_.unwrap_or(default)
 }
 
+/// The server config `get_or_start` spawns for `language` in `workspace_root`: the built-in one,
+/// with the project's `mux` override applied and its `[lsp.<language>.env]` added. `None` for a
+/// language with no server.
+///
+/// The env is read from the config of `workspace_root` itself, not from the session's active
+/// project: a pinned call starts a server in a foreign workspace, and resolving the session's
+/// config for it is the defect recorded in
+/// `docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md` (finding 5).
+/// An unreadable `project.toml` leaves the built-in environment untouched. A key the built-in
+/// config already sets is kept, and a warning names it: kotlin's `JAVA_TOOL_OPTIONS` carries the
+/// per-workspace `-Duser.home` that isolates its index.
+///
+/// Its own function so the config a start really uses can be tested without spawning a server.
+pub(super) fn server_config_for(
+    language: &str,
+    workspace_root: &Path,
+    mux_override: Option<bool>,
+) -> Option<LspServerConfig> {
+    let mut config = servers::default_config(language, workspace_root)?;
+    config.mux = resolve_mux_flag(config.mux, mux_override);
+    match crate::config::ProjectConfig::load_or_default(workspace_root) {
+        Ok(project) => {
+            for (key, value) in project.lsp_env(language) {
+                if config.env.iter().any(|(built_in, _)| *built_in == key) {
+                    tracing::warn!(
+                        "ignoring [lsp.{language}.env] {key} in {}: the server sets it itself",
+                        workspace_root.display()
+                    );
+                } else {
+                    config.env.push((key, value));
+                }
+            }
+        }
+        Err(e) => tracing::debug!(
+            "no [lsp.{language}.env] read for {}: {e}",
+            workspace_root.display()
+        ),
+    }
+    Some(config)
+}
+
 /// True when the current executable lives in cargo's test-binary directory
 /// (`target/<profile>/deps/`) — i.e. a `cargo test` runner, where spawning a
 /// `codescout mux` child (via `current_exe()`) would re-exec the test binary.
@@ -905,12 +946,10 @@ impl LspManager {
 
         // Resolve the server config early — fail fast for unknown languages
         // before touching the barrier map at all.
-        let mut config = servers::default_config(language, workspace_root).ok_or_else(|| {
-            anyhow::anyhow!("No LSP server configured for language: {}", language)
-        })?;
-
-        // Apply per-project mux override from project config (if any).
-        config.mux = resolve_mux_flag(config.mux, mux_override);
+        let mut config =
+            server_config_for(language, workspace_root, mux_override).ok_or_else(|| {
+                anyhow::anyhow!("No LSP server configured for language: {}", language)
+            })?;
 
         // Mux path: languages that use the multiplexer bypass the normal pool.
         // The fast-path cache check at the top of get_or_start() handles
@@ -4716,6 +4755,78 @@ except Exception:
     fn resolve_mux_flag_none_uses_default() {
         assert!(crate::lsp::manager::resolve_mux_flag(true, None));
         assert!(!crate::lsp::manager::resolve_mux_flag(false, None));
+    }
+
+    /// `jdtls` cannot read JDK 27 class files, so a project must be able to name its JDK:
+    /// `[lsp.java.env] JAVA_HOME = …` has to reach the config a start really spawns. A key the
+    /// server already sets must NOT be replaced — kotlin's `JAVA_TOOL_OPTIONS` carries the
+    /// per-workspace `-Duser.home` that isolates its index — and an unreadable `project.toml`
+    /// must leave the start exactly as it was.
+    #[test]
+    fn a_project_env_override_reaches_the_server_config_and_never_replaces_a_built_in_key() {
+        let write = |body: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+            std::fs::write(dir.path().join(".codescout/project.toml"), body).unwrap();
+            dir
+        };
+        let dir = write(
+            r#"
+[project]
+name = "demo"
+
+[lsp.java.env]
+JAVA_HOME = "/usr/lib/jvm/java-21-openjdk"
+
+[lsp.kotlin.env]
+JAVA_TOOL_OPTIONS = "-Xmx64m"
+EXTRA = "1"
+"#,
+        );
+
+        let java = crate::lsp::manager::server_config_for("java", dir.path(), None).unwrap();
+        assert!(
+            java.env.contains(&(
+                "JAVA_HOME".to_string(),
+                "/usr/lib/jvm/java-21-openjdk".to_string()
+            )),
+            "the project's JAVA_HOME must reach the spawn, got {:?}",
+            java.env
+        );
+
+        let kotlin = crate::lsp::manager::server_config_for("kotlin", dir.path(), None).unwrap();
+        let opts: Vec<_> = kotlin
+            .env
+            .iter()
+            .filter(|(k, _)| k == "JAVA_TOOL_OPTIONS")
+            .collect();
+        assert_eq!(opts.len(), 1, "one JAVA_TOOL_OPTIONS, got {:?}", kotlin.env);
+        assert!(
+            opts[0].1.contains("-Duser.home=") && !opts[0].1.contains("-Xmx64m"),
+            "the built-in value wins over the override, got {:?}",
+            opts[0].1
+        );
+        assert!(
+            kotlin.env.contains(&("EXTRA".to_string(), "1".to_string())),
+            "a key the server does not set is added, got {:?}",
+            kotlin.env
+        );
+
+        // No `project.toml`, and one that does not parse: the built-in environment, untouched.
+        let bare = tempfile::tempdir().unwrap();
+        assert!(
+            crate::lsp::manager::server_config_for("java", bare.path(), None)
+                .unwrap()
+                .env
+                .is_empty()
+        );
+        let broken = write("this is [not toml");
+        assert!(
+            crate::lsp::manager::server_config_for("java", broken.path(), None)
+                .unwrap()
+                .env
+                .is_empty()
+        );
     }
 
     #[test]

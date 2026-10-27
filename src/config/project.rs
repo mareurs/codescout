@@ -613,6 +613,13 @@ pub struct LspLangOverride {
     /// `None` means "use the built-in default from servers::default_config".
     #[serde(default)]
     pub mux: Option<bool>,
+    /// Environment variables for this language's server, added to the built-in ones
+    /// (`[lsp.java.env]`, e.g. `JAVA_HOME = "/usr/lib/jvm/java-21-openjdk"`). A key the server
+    /// already sets is NOT replaced: kotlin's `JAVA_TOOL_OPTIONS` carries the per-workspace
+    /// `-Duser.home` that isolates its index, so the built-in wins and a warning names the key.
+    /// Ordered, so the spawn is deterministic.
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
 }
 
 fn default_fetch_timeout() -> u64 {
@@ -858,6 +865,16 @@ impl ProjectConfig {
         Ok(config)
     }
 
+    /// The `[lsp.<language>.env]` variables, in key order. Empty when the language has no
+    /// override. The caller layers them over the server's built-in environment.
+    pub fn lsp_env(&self, language: &str) -> Vec<(String, String)> {
+        self.lsp
+            .langs
+            .get(language)
+            .map(|o| o.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default()
+    }
+
     /// Inner implementation — accepts an already-resolved global base so tests can
     /// inject it directly without touching environment variables.
     pub(crate) fn load_with_global_base(root: &Path, global_base: toml::Value) -> Result<Self> {
@@ -1030,6 +1047,45 @@ mux = true
     assert_eq!(cfg.lsp.langs.get("rust").and_then(|o| o.mux), Some(false));
     assert_eq!(cfg.lsp.langs.get("python").and_then(|o| o.mux), Some(true));
     assert!(!cfg.lsp.langs.contains_key("go"));
+}
+
+/// `[lsp.<language>.env]` is how a project names the environment its language server runs
+/// in. The motivating case: `jdtls` cannot read the class files of the system JDK 27, and
+/// the project can point it at JDK 21 without touching the machine's default `java`.
+#[test]
+fn lsp_section_parses_a_per_language_env() {
+    let toml = r#"
+[project]
+name = "demo"
+
+[lsp.java]
+mux = false
+
+[lsp.java.env]
+JAVA_HOME = "/usr/lib/jvm/java-21-openjdk"
+ZED = "last"
+ALPHA = "first"
+
+[lsp.rust]
+mux = true
+"#;
+    let cfg: ProjectConfig = toml::from_str(toml).unwrap();
+    // Key order, not file order: the spawn must not depend on how the file was written.
+    assert_eq!(
+        cfg.lsp_env("java"),
+        vec![
+            ("ALPHA".to_string(), "first".to_string()),
+            (
+                "JAVA_HOME".to_string(),
+                "/usr/lib/jvm/java-21-openjdk".to_string()
+            ),
+            ("ZED".to_string(), "last".to_string()),
+        ]
+    );
+    // The existing `mux` key still parses beside `env`, and a language with no `env` is empty.
+    assert_eq!(cfg.lsp.langs.get("java").and_then(|o| o.mux), Some(false));
+    assert!(cfg.lsp_env("rust").is_empty());
+    assert!(cfg.lsp_env("go").is_empty());
 }
 
 #[test]

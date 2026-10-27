@@ -253,6 +253,24 @@ means buffer queries are unavailable too.
 
 ---
 
+## `[lsp.<language>]` — Language Server Settings
+
+Per-language settings for the language server codescout starts. The table is named after the language (`java`, `kotlin`, `rust`, `python`, …). Both keys are optional.
+
+| Key | Type | Effect |
+|---|---|---|
+| `mux` | bool | `true` shares one server across codescout instances. `false` starts a dedicated one. Omit it for the built-in default. |
+| `env` | table of strings | Environment variables added to the server's environment. |
+
+```toml
+[lsp.java.env]
+JAVA_HOME = "/usr/lib/jvm/java-21-openjdk"
+```
+
+Use `env` when the machine's default tool is one the server cannot run under. For example, `jdtls` fails at start-up under JDK 27 with `Unsupported class file major version 71`. Pointing `JAVA_HOME` at JDK 21 fixes that for this project only. Restart the server with `/mcp` after you edit the file.
+
+A variable the server already sets is **not** replaced, and codescout logs a warning that names it. Kotlin's `JAVA_TOOL_OPTIONS` is one: it holds the per-workspace setting that keeps each index separate.
+
 ## Complete Example
 
 A complete `project.toml` for a Rust service that uses local CPU embeddings:
