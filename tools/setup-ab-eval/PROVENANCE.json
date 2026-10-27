@@ -1,0 +1,19 @@
+{
+  "source_repo": "/home/marius/.codex/worktrees/3940/codescout",
+  "source_commit": "19dccd9bc11f7b0c58fdb64c0d35b0c90034cef1",
+  "files": {
+    "pilot.py": "61d5020fbc4de8791431d367106dac1246afe37bd462ca3100ef6a54afe63c38",
+    "baseline.py": "3a1311976af2d9eb8bde99f0219958f2f297919d39c4517ae3a03e3729440db1",
+    "test_pilot.py": "9a0d22a9f35c631583ad0366c2a8b352474f4fa56e90d11c93c9b69bd2984c92",
+    "test_baseline.py": "4679afd5e3ca43dcba3dcb20d01e93bb8a73abb3ca9884eefb65cc52c046d52e",
+    "test_grader_boundary.py": "50c2739e04e7d5dc72c1dbe1d954652353fd14615473c0250cffc9daa909fe74",
+    "evidence.py": "fa4ce2e1aa77fb4bd3ffae5fb643325a1c8c89fe2ad76b9c38577f4139cedda4",
+    "pilot-protocol.md": "57dec0d780ed5307150e19f8adee917dd4555f6ca103f96d79737833ca137801",
+    "agent.Dockerfile": "189455188ab17062926d44dff28b099e59e94ce8342a363f3b063135cd0bb24c"
+  },
+  "added_dependencies": [
+    "evidence.py: imported by pilot.py and baseline.py (nonnegative)",
+    "pilot-protocol.md and agent.Dockerfile: read by pilot.run_pilot (HERE / name); 10 test_baseline tests fail without them",
+    "all copied unmodified; not in the original five-file brief"
+  ]
+}
