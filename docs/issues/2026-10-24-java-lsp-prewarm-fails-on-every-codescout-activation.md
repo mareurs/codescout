@@ -11,7 +11,7 @@ fix_sha: ce424fa47 (experiments)
 opened: 2026-10-24
 owner: marius
 severity: low
-unverified: 'Observed 2026-10-27 on rebuilt binary 38ec0662e: the pre-warm back-off skips java (debug.log, no new lsp_events row). Still open: this project''s project.toml does not set [lsp.java.env], so jdtls still fails to start here, and the env override has only been verified by hand and by unit test, never through a real codescout start. The window expiring and retrying has not been observed. The 3-failure and 6-hour thresholds are untested guesses.'
+unverified: The 3-failure and 6-hour back-off thresholds are untested guesses, and the window expiring and retrying has not been observed (a java success on 2026-10-27 reset the run). The env override was verified through one real start on one machine.
 ---
 
 # BUG: Java LSP pre-warm fails on every activation of the codescout project (235 of 235, ~16.6 s each)
@@ -74,7 +74,12 @@ The numbers 3 and 6 h are guesses, not measurements.
 
 **Observed on a rebuilt binary, 2026-10-27.** After `/mcp` the server reported `codescout_sha=38ec0662e`, and `git merge-base --is-ancestor ce424fa47 38ec0662e` exits 0. `.codescout/debug.log` holds two lines, at 06:53:15Z and 06:53:25Z: `LSP pre-warm for java skipped: its last 340 starts failed, the newest 3071s ago` (and `3081s` for the second). `lsp_events` gained no `java` row: `max(id)` stayed 10450, and 0 rows have `started_at` after 06:50Z. So the back-off engages on a real activation, in the project's own `usage.db`.
 
-Not observed: the window expiring and one retry running; an `[lsp.java.env]` setting reaching a real `jdtls` start; and a `success` row after either.
+Not observed at that point: the window expiring and one retry running; and an `[lsp.java.env]` setting reaching a real `jdtls` start. The second was observed afterwards, below. The first cannot be observed on this project now, as explained below.
+
+
+**End to end, 2026-10-27, on the same rebuilt binary.** With `[lsp.java.env] JAVA_HOME = "/usr/lib/jvm/java-21-openjdk"` added to this project's `.codescout/project.toml` (a local file, not tracked by git), an explicit `symbols` call on `tests/fixtures/java-library/src/main/java/library/models/Book.java` started `jdtls` through codescout. `lsp_events` gained `id 10467, 07:06:53Z, success, handshake_ms 2637`, the first `java` success since 2026-09-30 and the first after 350 failures. The running process (`/proc/527095`) executes `/usr/lib/jvm/java-21-openjdk/bin/java` with `JAVA_HOME=/usr/lib/jvm/java-21-openjdk`. The codescout server's own environment has `JAVA_HOME=/usr/lib/jvm/default`, which is JDK 27, so the value reached the child only through `[lsp.java.env]`. One start, one machine.
+
+A success row ends the run of failures, so `lsp_start_history` now reports 0 for `java` here and the back-off no longer applies. The window expiring and a retry running therefore cannot be observed on this project unless `jdtls` fails again.
 
 ## Tests added
 
@@ -87,11 +92,11 @@ The full `./scripts/gate.sh` was green (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, `PYTH
 
 ## Workarounds
 
-Until the fix runs here: set `[lsp.java.env] JAVA_HOME = "/usr/lib/jvm/java-21-openjdk"` in `.codescout/project.toml` (needs the new build), or set `JAVA_HOME` to JDK 21 in the environment of the process that runs codescout. `JAVA_HOME` alone keeps `jdtls` up by hand. Putting JDK 21 first on the `PATH` without `JAVA_HOME` was not tested.
+Applied here 2026-10-27: `[lsp.java.env] JAVA_HOME = "/usr/lib/jvm/java-21-openjdk"` in `.codescout/project.toml`. For another project or machine with the same problem, set the same table, or set `JAVA_HOME` to JDK 21 in the environment of the process that runs codescout. `JAVA_HOME` alone keeps `jdtls` up. Putting JDK 21 first on the `PATH` without `JAVA_HOME` was not tested.
 
 ## Resume
 
-Done in code. To close the caveat: rebuild, run `/mcp`, activate this project twice, and read `SELECT started_at, outcome FROM lsp_events WHERE language='java' ORDER BY id DESC LIMIT 5`. After 3 failed rows, the next activation should add none. Then set `[lsp.java.env]` and confirm a `success` row appears.
+Verified on a rebuilt binary (see Fix). Nothing is required to close it. To watch for a regression: `SELECT date(started_at), outcome, count(*) FROM lsp_events WHERE language='java' GROUP BY 1,2 ORDER BY 1 DESC LIMIT 5`. If `jdtls` fails again, `debug.log` will say `LSP pre-warm for java skipped` after 3 failed starts. Open question: whether 3 failures and 6 hours are the right numbers.
 
 ## References
 
