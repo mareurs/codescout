@@ -1,7 +1,7 @@
 ---
 id: '191ec294d551ba58'
 kind: bug
-status: open
+status: investigating
 title: Java LSP pre-warm fails on every activation of the codescout project (235 of 235 starts, ~16.6 s each)
 tags:
 - cluster/unclassified
@@ -34,19 +34,36 @@ Linux, jdtls at `~/.local/bin/jdtls`, `/usr/bin/java`.
 
 ## Root cause
 
-Unknown — under investigation. Not established: why jdtls disconnects (missing workspace data dir, JDK version, or the fixture layout), and whether pre-warm should skip a language whose last N starts all failed.
+**Established 2026-10-27: `jdtls` cannot run under the system JDK 27.** `~/.local/bin/jdtls` is a launcher that uses whatever `java` the environment resolves. On 2026-09-30 `pacman -Syu` upgraded `jdk-openjdk 26.0.2.1.u1-1 -> 27.u35-1` (`/var/log/pacman.log:8413`, 13:06:59+0300, which is 10:06:59Z) and repointed `/usr/lib/jvm/default-runtime` to `java-27-openjdk`. The `jdtls` install dates from February and May and did not change.
+
+Run by hand with the same launcher, under JDK 27, the process exits with code 13 and `.metadata/.log` holds `java.lang.IllegalArgumentException: Unsupported class file major version 71` from `org.apache.aries.spifly.dynamic.bundle`. Class-file version 71 is JDK 27, and `jdtls`'s bundled bytecode reader does not know it. The same command under `/usr/lib/jvm/java-21-openjdk` (JAVA_HOME and PATH set) stayed up until my 60-second timeout (exit 124) with 0 occurrences of that error.
+
+**Why it retries on every activation.** `LspManager.startup_failures` is an in-memory map, and the breaker trips at 5 failures within 60 s (`CIRCUIT_BREAKER_MAX_FAILURES`, `CIRCUIT_BREAKER_WINDOW` in `src/lsp/manager.rs`). Each activation is a new process that pre-warms once, so its count reaches 1 and never trips. The failure is never remembered across processes. `grep startup_failures src/` finds no persistence.
+
+**Not established:** the 13 `java` failures between 2026-08-18 and 2026-09-11 (before the JDK upgrade) have no known cause. Nothing here ties them to JDK 27.
 
 ## Evidence
 
 Daily java failures (successes are 0 every day): 10-03 5, 10-05 20, 10-13 21, 10-14 31, 10-16 21, 10-23 23 (full table in the 2026-10-24 sweep).
 
+
+**Correction to the Summary's "0 successes".** That holds for the 2026-10-03..10-24 window only. All-time, `lsp_events` holds 1,961 `java` successes (average handshake 2,198 ms, last at 2026-09-30 09:40:47Z) and 350 failures (average 15,992 ms). The first failure of the current run is 2026-09-30 10:44:46Z, 37 minutes after the JDK 27 upgrade. `started_at` is UTC (`datetime('now')`).
+
+`/usr/lib/jvm` holds `java-21-openjdk` and `java-27-openjdk`. `java -version` resolves to `27.0.1.0.3`.
+
 ## Hypotheses tried
 
-None yet.
+- Missing workspace data dir: ruled out. A fresh `-data` directory gets as far as the version error.
+- JDK version: confirmed. JDK 27 fails, JDK 21 does not, with the identical command and a fresh data directory.
+- Fixture layout: not tested, and not needed to explain the failure.
 
 ## Fix
 
-Not started. Two independent options: fix the jdtls launch; and make pre-warm back off (skip a language after K consecutive failed starts in this project, re-try on explicit use).
+Not started. Three independent options. None is applied.
+
+1. **Machine fix (no code).** Run codescout with JDK 21 on `PATH` or `JAVA_HOME`, or upgrade `jdtls` to a build that reads class-file version 71. This stops the failures here and nothing else.
+2. **Remember a failed start across processes.** Skip the pre-warm for a language whose last K starts in this project all failed, and retry on explicit use. The in-memory breaker cannot do this (see Root cause). The `lsp_events` table already records each failed start, so it is one possible store, and the mem-kill marker file next to the mux lock is another.
+3. **Let the project name the JDK.** `LspLangOverride` carries only `mux`. An `env` override for the language would let `[lsp.java]` set `JAVA_HOME` per project, and `LspServerConfig` already has an `env` field.
 
 ## Tests added
 
@@ -58,7 +75,7 @@ None needed for correctness; the cost is CPU, memory and telemetry noise.
 
 ## Resume
 
-Start at the pre-warm call site (`grep "LSP pre-warm for" src/`), then run jdtls by hand with the arguments `src/lsp/` passes and read its stderr.
+Cause is known. What remains is a choice of fix (the Fix section lists three). Decide before coding: a cross-process failure memory is a design question, so use `buddy:architecture-snow-lion` first. Re-check after any JDK or `jdtls` change with `SELECT date(started_at), outcome, count(*) FROM lsp_events WHERE language='java' GROUP BY 1,2 ORDER BY 1 DESC LIMIT 5`.
 
 ## References
 
