@@ -925,6 +925,7 @@ def scan_provenance(root: Path, environ: dict[str, str]) -> ProvenanceScan:
         *(read_codex_history(path) for path in codex_files),
     ])
     owners, evidence, gaps = {}, {}, list(batch.gaps)
+    streams = {}
     operations = sorted(batch.operations, key=lambda op: op.timestamp or "")
     facts = operation_activations(operations)
     no_facts = {"parent_activated": False, "sub_activated_at": None}
@@ -964,13 +965,14 @@ def scan_provenance(root: Path, environ: dict[str, str]) -> ProvenanceScan:
                     gaps.append(CoverageGap(op.source_id, "native writer identity is unresolved", root, (rel,)))
                     continue
                 owners.setdefault(rel, []).append((who, when))
+                streams.setdefault(rel, {}).setdefault(who, set()).add(op.agent_id)
                 key = (rel, who, when)
                 if texts is None or evidence.get(key, []) is None:
                     evidence[key] = None
                 else:
                     evidence.setdefault(key, []).extend(texts)
         active_by_stream[stream] = activated_tree(op.name, op.input, active)
-    return ProvenanceScan(owners, evidence, gaps)
+    return ProvenanceScan(owners, evidence, gaps, streams)
 
 
 def relevant_gaps(scan: ProvenanceScan, rel: str, root: Path) -> list[CoverageGap]:
@@ -1122,6 +1124,31 @@ def absorbed_writes(rel: str, root: Path, floor: str | None,
         if all(head.count(t) > 0 and work.count(t) <= head.count(t) for t in texts):
             out.add((who, when))
     return out
+
+
+
+def session_grain_note(scan: ProvenanceScan, rel: str, principal: str, indent: str) -> list[str]:
+    """The caveat a path needs when a SUBAGENT lies behind the session that "wrote" it, else nothing.
+
+    Every subagent a session spawns runs under its parent's session id, so `owners` can only say
+    "this session wrote it". That sentence is true of a path the root wrote, and equally true of one
+    a sibling subagent wrote, though a reader who is a different subagent of the same session is
+    being told something quite different. The verdict does not change (`fmt-mine.sh` partitions on
+    its token, and a parent rightly owns what it dispatched): what changes is that the answer stops
+    reading as precise. A path only the root wrote gets no note.
+    The asker's own agent id is not available here for Claude Code, whose native environment carries
+    none (only Codex's `CODEX_THREAD_ID` and an explicit context file do), so the note names the
+    writers and leaves "was that me?" to the reader.
+    docs/issues/2026-09-19-file-provenance-answers-at-session-grain-so-sibling-subagents-are-one-writer.md
+    """
+    agents = scan.streams.get(rel, {}).get(principal, set())
+    if not any(agent is not None for agent in agents):
+        return []
+    names = ["root" if agent is None else f"agent {agent}"
+            for agent in sorted(agents, key=lambda a: (a is not None, a or ""))]
+    return [f"{indent}session-grain: written under this one session id by {', '.join(names)}. "
+            f"Attribution names the SESSION, not the agent, so a sibling subagent's write reads as "
+            f"this session's; which agent wrote which bytes is not recorded."]
 
 
 
@@ -1333,6 +1360,8 @@ def main(argv: list[str]) -> int:
             continue
         if mine:
             print(f"          written by THIS session ({short_principal(me)})")
+            for note in session_grain_note(scan_result, rel, me, " " * 10):
+                print(note)
         for w in peers:
             mark = "  [undated — could not be placed in the window]" if (
                 w in undated and w not in in_window) else ""
@@ -1340,6 +1369,8 @@ def main(argv: list[str]) -> int:
                 named_sids.add(w)
             suffix, extra = owner_contact(w, live, " " * 21)
             print(f"          written by {w}{mark}{suffix}")
+            for note in session_grain_note(scan_result, rel, w, " " * 10):
+                print(note)
             for line in extra:
                 print(line)
 

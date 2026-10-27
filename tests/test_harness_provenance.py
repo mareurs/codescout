@@ -132,6 +132,54 @@ def test_mixed_native_ownership_and_same_id_cross_host(checkout, harness, identi
         assert "not live" not in result.stdout
 
 
+def _block(result, name):
+    """The lines `file-provenance.py` printed for one path: from its verdict line to the next."""
+    tokens = ("MINE", "PEER", "SHARED", "UNKNOWN", "CLEAN")
+    taking, lines = False, []
+    for line in result.stdout.splitlines():
+        parts = line.split(maxsplit=1)
+        if parts and parts[0] in tokens and len(parts) == 2:
+            taking = parts[1] == name
+        if taking:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def test_writes_by_several_agents_of_one_session_say_the_attribution_is_session_grain(checkout):
+    """docs/issues/2026-09-19-file-provenance-answers-at-session-grain-so-sibling-subagents-are-one-writer.md
+
+    Every subagent a session spawns runs under its parent's session id, so a path written by sibling
+    subagents is "written by THIS session" for all of them: true, and coarser than the question. The
+    verdict token must not change (`fmt-mine.sh` partitions on it, and a parent that dispatched the
+    subagents rightly owns their output), but the answer must stop reading as though it were precise
+    whenever a subagent lies behind it, alone or beside others: a sibling who asks about a path ANOTHER
+    subagent wrote gets the same answer. A path only the root wrote says nothing.
+    """
+    root, env = checkout
+    env["CLAUDE_CODE_SESSION_ID"] = "root-1"
+    base = Path(env["FILE_PROVENANCE_ROOTS"])
+    add_writes(root, env, "claude-code", "root-1", ["own.rs", "shared.rs"])
+    for agent, name in (("aaa111", "peer.rs"), ("bbb222", "peer.rs"), ("ccc333", "shared.rs"),
+                        ("ddd444", "unknown.rs")):
+        history(base / "root-1" / "subagents" / f"agent-{agent}.jsonl", [
+            claude_call(inp={"file_path": str(root / name)}, call=f"call-{agent}", sid="root-1", cwd=root),
+            claude_result(call=f"call-{agent}")])
+
+    result = invoke(root, env, "own.rs", "peer.rs", "shared.rs", "unknown.rs")
+
+    assert verdicts(result) == {"own.rs": "MINE", "peer.rs": "MINE", "shared.rs": "MINE",
+                                "unknown.rs": "MINE"}, result.stdout
+    own, siblings, mixed, single = (_block(result, n)
+                                    for n in ("own.rs", "peer.rs", "shared.rs", "unknown.rs"))
+    assert "session-grain" not in own, f"a path only the root wrote needs no caveat:\n{own}"
+    assert "session-grain" in siblings, f"two sibling subagents wrote this path:\n{siblings}"
+    assert "aaa111" in siblings and "bbb222" in siblings, siblings
+    assert "session-grain" in mixed, f"the root and a subagent both wrote this path:\n{mixed}"
+    assert "root" in mixed and "ccc333" in mixed, mixed
+    assert "session-grain" in single and "ddd444" in single, (
+        f"one subagent alone reads as this session's to a sibling too:\n{single}")
+
+
 def test_known_own_plus_gap_unknown_and_shared_plus_gap_retained(checkout):
     root, env = checkout
     add_writes(root, env, "claude-code", "me", ["own.rs", "shared.rs"])

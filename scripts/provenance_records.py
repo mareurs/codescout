@@ -1,5 +1,5 @@
 """Native history decoders emit these records; ownership policy stays host-neutral."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 
@@ -39,6 +39,11 @@ class ProvenanceScan:
     owners: dict[str, list[tuple[str, str | None]]]
     evidence: dict[tuple[str, str, str | None], list[str] | None]
     gaps: list[CoverageGap]
+    # path -> principal -> the agent ids (None = the root session itself) that wrote it. `owners`
+    # names the SESSION only, because every subagent runs under its parent's session id; this is
+    # what lets a reader see that more than one writer lies behind one session's name. Defaulted so
+    # every consumer that builds or unpacks a scan without it is unaffected.
+    streams: dict[str, dict[str, set[str | None]]] = field(default_factory=dict)
 
 
 def result_refused(block: dict) -> bool:
