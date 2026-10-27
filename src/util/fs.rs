@@ -401,7 +401,9 @@ fn create_staging_file(
 /// content of a private file is not readable by other users during the write; a new file keeps
 /// the `0666 & !umask` default.
 ///
-/// **The final mode is unchanged in every case where `fchmod` succeeds.** A failing `fchmod`
+/// **The final mode is unchanged in every case where `fchmod` succeeds, except that setuid and
+/// setgid are never carried over.** A write clears them anyway, and keeping them made a replaced
+/// link to a setuid file into a setuid file owned by the writer. A failing `fchmod`
 /// is ignored, as it always was, and for an existing target that now leaves the file at
 /// `0600 & !umask` instead of `0666 & !umask` — it fails closed, a `0644`/`0755` file narrows
 /// to `0600`, and the write still succeeds. Plausible hosts: an sshfs mount whose sftp-server
@@ -448,12 +450,16 @@ fn atomic_write_with(
     write: &mut dyn FnMut(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     // The mode to preserve, if the target already exists (`metadata` follows a symlink target,
-    // so a replaced link takes the mode of what it pointed at). Read BEFORE the create, because
-    // an existing target is also what makes the staging file private until it is applied.
+    // so a replaced link takes the mode of what it pointed at), WITHOUT setuid and setgid: a
+    // plain in-place write clears them (the kernel does, for a non-root writer), and copying
+    // them back made a link to a setuid file into a regular file that was setuid and owned by
+    // the writer. Read BEFORE the create, because an existing target is also what makes the
+    // staging file private until it is applied.
+    // docs/issues/2026-10-17-atomic-write-replace-keeps-setuid-and-takes-the-pointed-at-files-mode.md
     #[cfg(unix)]
     let existing_mode = std::fs::metadata(path).ok().map(|m| {
         use std::os::unix::fs::PermissionsExt;
-        m.permissions().mode()
+        m.permissions().mode() & !0o6000
     });
     #[cfg(not(unix))]
     let existing_mode: Option<u32> = None;
@@ -1292,7 +1298,8 @@ mod tests {
     }
 
     /// The hardening above must not move the FINAL mode in any case. Each row is the mode
-    /// `atomic_write` gave before it: an existing target keeps its own (setuid included), a new
+    /// `atomic_write` gave before it: an existing target keeps its own (setuid and setgid excluded,
+    /// which `atomic_write_never_carries_setuid_or_setgid_onto_the_replacement` pins), a new
     /// file gets the umask default, and a symlink target gets the mode of what it points at
     /// (`metadata` follows the link; `symlink_metadata` would give 0777) while a dangling one
     /// gets the default.
@@ -1307,7 +1314,7 @@ mod tests {
             std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap()
         };
 
-        for existing in [0o600, 0o640, 0o755, 0o4755] {
+        for existing in [0o600, 0o640, 0o755] {
             let t = dir.path().join(format!("existing-{existing:o}"));
             std::fs::write(&t, "old").unwrap();
             chmod(&t, existing);
@@ -1341,6 +1348,57 @@ mod tests {
         std::os::unix::fs::symlink(dir.path().join("nowhere"), &dangling).unwrap();
         atomic_write(&dangling, "new").unwrap();
         assert_eq!(mode_of(&dangling), default);
+    }
+
+    /// The kernel clears setuid/setgid when a non-root user writes to a file, so a plain in-place
+    /// write over a `6755` file leaves `755`. `atomic_write` used to copy the target's whole mode back
+    /// onto the replacement, which undid that, and a link to a setuid file yielded a regular file that
+    /// was setuid and owned by the writer. A text-editing funnel has no use for either bit, so neither
+    /// may reach the replacement; every other bit still does.
+    /// `docs/issues/2026-10-17-atomic-write-replace-keeps-setuid-and-takes-the-pointed-at-files-mode.md`
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_never_carries_setuid_or_setgid_onto_the_replacement() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let mode_of = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        let chmod = |p: &Path, m: u32| {
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap()
+        };
+
+        for (existing, expected) in [
+            (0o4755, 0o755),
+            (0o2755, 0o755),
+            (0o6755, 0o755),
+            (0o6640, 0o640),
+        ] {
+            let t = dir.path().join(format!("existing-{existing:o}"));
+            std::fs::write(&t, "old").unwrap();
+            chmod(&t, existing);
+            atomic_write(&t, "new").unwrap();
+            assert_eq!(mode_of(&t), expected, "existing target {existing:o}");
+            assert_eq!(std::fs::read_to_string(&t).unwrap(), "new");
+        }
+
+        // A link to a setuid file: the link becomes a regular file WITHOUT the bit, and the file it
+        // pointed at keeps its content and its mode.
+        let pointed_at = dir.path().join("pointed-at");
+        std::fs::write(&pointed_at, "old").unwrap();
+        chmod(&pointed_at, 0o6755);
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&pointed_at, &link).unwrap();
+        atomic_write(&link, "new").unwrap();
+        assert_eq!(mode_of(&link), 0o755, "the replacement must not be setuid");
+        assert!(!std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_to_string(&pointed_at).unwrap(), "old");
+        assert_eq!(
+            mode_of(&pointed_at),
+            0o6755,
+            "the pointed-at file is untouched"
+        );
     }
 
     /// The real staging names must stay on the target's filesystem, or the closing `rename`
