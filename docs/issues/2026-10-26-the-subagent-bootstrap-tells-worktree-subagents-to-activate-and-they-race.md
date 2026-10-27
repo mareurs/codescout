@@ -54,7 +54,10 @@ Whether the soft notice ("warns the switcher; tells the harmed party once per mo
 
 ## Fix
 
-Open. In the companion repo, change the bootstrap for a subagent whose root differs from the parent's to "pin every call with workspace=<root>" and not "activate". Separately, the parent should brief paths valid in the worktree's base commit.
+Open. **A text-only change to the bootstrap is not enough** (checked 2026-10-26). `claude-plugins:codescout-companion/hooks/worktree-write-guard.mjs` denies `edit_code`, `edit_file` and `create_file` in a worktree while `.cs-worktree-pending` exists in the worktree root, and it never looks at a `workspace=` pin on the call; only `cs-activate-project.mjs` deletes the marker, and only on `activate`. A subagent told to pin would still be blocked from writing. The fix therefore has three parts, all in the companion repo, and each changes behaviour for every session on the machine:
+1. `subagent-guidance.mjs`: for a subagent whose root is a worktree, prescribe pinning every call with `workspace="<root>"` and not `activate`.
+2. `worktree-write-guard.mjs`: allow a write whose `tool_input.workspace` names the worktree (or a path under it), as the server's own `guard_worktree_write` already does.
+3. The parent's brief: give paths valid in the worktree's base commit (cause B above).
 
 ## Tests added
 

@@ -556,6 +556,13 @@ impl Tool for EditFile {
 
         // Batch mode — edits array takes precedence over single old_string.
         let edits = super::optional_array_param(&input, "edits");
+        // `None` also means "sent, but not readable as an array". Falling through then reported
+        // `missing 'old_string'`, a parameter the caller never sent. `null` is absent.
+        if edits.is_none() {
+            if let Some(given) = input.get("edits").filter(|v| !v.is_null()) {
+                return Err(unreadable_edits(given).into());
+            }
+        }
         let has_old_string = input["old_string"].as_str().is_some();
 
         if edits.is_some() && has_old_string {
@@ -811,6 +818,37 @@ fn read_edit_target(resolved: &std::path::Path, display_path: &str) -> anyhow::R
         crate::util::librarian_guard::Access::FrontmatterWrite,
     )?;
     Ok(content)
+}
+
+/// The refusal for an `edits` value that was sent but cannot be read as an array.
+///
+/// `optional_array_param` answers `None` both for "absent" and for "a string that does not
+/// parse", so the batch branch was skipped and the single-edit branch reported
+/// `missing 'old_string' parameter`, a parameter the caller never meant to send. The caller then
+/// resent the same edits as a native array, one large payload wasted per mistake.
+/// `docs/issues/2026-10-26-edit-file-drops-an-unparseable-edits-string-and-reports-a-missing-old-string.md`
+fn unreadable_edits(given: &Value) -> super::RecoverableError {
+    let kind = |v: &Value| match v {
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+        Value::Array(_) => "an array",
+        Value::Object(_) => "an object",
+    };
+    let why = match given.as_str() {
+        Some(s) => match serde_json::from_str::<Value>(s) {
+            Err(e) => format!("it is a string that is not valid JSON ({e})"),
+            Ok(inner) => format!("it is a string holding {}, not an array", kind(&inner)),
+        },
+        None => format!("it is {}, not an array", kind(given)),
+    };
+    super::RecoverableError::with_hint(
+        format!("edits could not be read as an array of edit objects: {why}"),
+        "Send `edits` as a JSON array of {old_string, new_string} objects. A client that \
+         stringifies arrays must send valid JSON. For one edit, drop `edits` and pass \
+         old_string/new_string.",
+    )
 }
 
 async fn perform_edit(

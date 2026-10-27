@@ -134,7 +134,11 @@ impl Tool for ReadFile {
         }
 
         // Buffer refs bypass the filesystem entirely.
-        if path.starts_with("@file_") || path.starts_with("@cmd_") || path.starts_with("@tool_") {
+        if path.starts_with("@file_")
+            || path.starts_with("@cmd_")
+            || path.starts_with("@tool_")
+            || path.starts_with("@bg_")
+        {
             // `read_from_buffer` attaches `buffer_truncated` itself, to every return shape,
             // before it measures the response: attached here, after sizing, it pushed a
             // response at the limit over it.
@@ -269,6 +273,7 @@ fn strip_buffer_ref_quotes(path: &str) -> &str {
             if inner.starts_with("@file_")
                 || inner.starts_with("@cmd_")
                 || inner.starts_with("@tool_")
+                || inner.starts_with("@bg_")
                 || inner.starts_with("@ack_")
             {
                 return inner;
@@ -304,12 +309,15 @@ fn file_accepts_value_nav(source: &str, nav: &str) -> bool {
 /// or the extracted value's under `json_path`, whose `next` repeats that `json_path`. Each page is
 /// sized as the response it returns, so `call_content` never re-wraps it in a `@tool_*` envelope.
 fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Value> {
-    let raw = ctx.output_buffer.get_stream(path).ok_or_else(|| {
-        RecoverableError::with_hint(
-            format!("buffer reference not found: '{}'", path),
-            crate::tools::output_buffer::ref_gone_hint(path),
-        )
-    })?;
+    let raw = ctx
+        .output_buffer
+        .get_stream_or_job_log(path)?
+        .ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("buffer reference not found: '{}'", path),
+                crate::tools::output_buffer::ref_gone_hint(path),
+            )
+        })?;
 
     // A handle whose buffer holds only a prefix says so at EVERY read (the same contract as
     // run_command's `buffer_truncated`). It is part of every response below, so it is attached
@@ -5711,6 +5719,10 @@ mod buffer_edge_tests;
 #[cfg(test)]
 #[path = "read_file_one_handle_tests.rs"]
 mod one_handle_tests;
+
+#[cfg(test)]
+#[path = "read_file_job_log_tests.rs"]
+mod job_log_tests;
 
 #[cfg(test)]
 #[path = "read_file_route_path_tests.rs"]

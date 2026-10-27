@@ -5536,6 +5536,81 @@ async fn edit_file_writes_a_literal_unicode_escape_as_written_in_every_argument_
     );
 }
 
+/// `optional_array_param` coerces a JSON-array STRING to an array and answers `None` for a string
+/// that does not parse. The caller then fell through to the single-edit path and was told
+/// `missing 'old_string' parameter`: a message about a parameter it never meant to send. The
+/// field logs show 25 of 41 such errors carrying `edits` as `[{"new_string">…`, the `":` lost.
+/// `docs/issues/2026-10-26-edit-file-drops-an-unparseable-edits-string-and-reports-a-missing-old-string.md`
+#[tokio::test]
+async fn an_unparseable_edits_string_is_refused_by_naming_edits() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("e.txt");
+    std::fs::write(&path, "keep\n").unwrap();
+
+    let err = EditFile
+        .call(
+            json!({"path": path.to_str().unwrap(), "edits": r#"[{"new_string">x"#}),
+            &ctx,
+        )
+        .await
+        .expect_err("a batch that cannot be parsed must not run as a single edit");
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("edits") && !msg.contains("missing 'old_string'"),
+        "the refusal must name `edits`, not a parameter the caller never sent, got: {msg}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "keep\n");
+}
+
+#[tokio::test]
+async fn an_edits_value_that_is_neither_an_array_nor_a_json_array_string_is_refused_by_naming_edits(
+) {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("e.txt");
+    std::fs::write(&path, "keep\n").unwrap();
+
+    for bad in [json!(5), json!({"old_string": "keep"}), json!("{\"a\": 1}")] {
+        let err = EditFile
+            .call(
+                json!({"path": path.to_str().unwrap(), "edits": bad.clone()}),
+                &ctx,
+            )
+            .await
+            .expect_err("a non-array `edits` must be refused");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("edits") && !msg.contains("missing 'old_string'"),
+            "edits={bad}: the refusal must name `edits`, got: {msg}"
+        );
+    }
+}
+
+/// The control for the two above: a `null` `edits` is an absent one, so the single-edit form
+/// beside it still runs. A fix that refused every non-array `edits` would break callers that
+/// send `edits: null` next to `old_string`.
+#[tokio::test]
+async fn a_null_edits_beside_an_old_string_still_runs_the_single_edit() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("e.txt");
+    std::fs::write(&path, "alpha\n").unwrap();
+
+    EditFile
+        .call(
+            json!({
+                "path": path.to_str().unwrap(),
+                "edits": null,
+                "old_string": "alpha",
+                "new_string": "beta"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("a null `edits` is absent");
+
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "beta\n");
+}
+
 #[tokio::test]
 async fn edit_file_escape_repair_decodes_a_newline_but_leaves_a_unicode_escape() {
     // The one place codescout decodes `new_string` at all: an edit that introduces a parse

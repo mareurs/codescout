@@ -212,6 +212,13 @@ pub(crate) const MAX_POOL_BYTES: usize = 128 * 1024 * 1024;
 pub(crate) const MIN_POOL_BYTES: usize = 1024 * 1024;
 const _: () = assert!(MIN_POOL_BYTES / 2 > crate::tools::INLINE_MAX_RESPONSE_LEN);
 
+/// The largest background-job log `read_file` and `grep` read whole into memory: 16 MiB.
+/// Chosen, not measured. A log over it is refused with a route to `run_command` (`tail`, `grep`
+/// on the handle read the file on disk and need no copy in memory), never returned cut, so no
+/// reader mistakes a prefix for the whole log.
+// cap-class: NOT_A_CAP — a read above it is refused whole and names run_command; nothing is returned truncated
+pub(crate) const JOB_LOG_READ_LIMIT: u64 = 16 * 1024 * 1024;
+
 /// The hint of a "buffer reference not found" refusal: every way a handle can go. A route
 /// follows it at each site, chosen by the handle's kind ([`ref_gone_hint`]).
 pub(crate) const REF_GONE: &str = "Buffer refs expire when the session resets. The pool also \
@@ -1731,6 +1738,46 @@ impl OutputBuffer {
     pub fn get_background_log(&self, id: &str) -> Option<PathBuf> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.background_jobs.get(id).map(|j| j.log_path.clone())
+    }
+    /// The text of `id` for a reader that addresses it by line (`read_file`, `grep`), or
+    /// `Ok(None)` when the handle is not held.
+    ///
+    /// A pool handle is its stored stream. A `@bg_*` handle is not in the pool: its text is the
+    /// job's log, read FRESH from disk on every call, because a snapshot would show a job that is
+    /// still writing as it was at the first read (`resolve_refs` reads the live log for the same
+    /// reason). A log over [`JOB_LOG_READ_LIMIT`] is refused with a route to `run_command`:
+    /// reading it whole puts it in memory, and cutting it would show a prefix as the whole log.
+    ///
+    /// `docs/issues/2026-10-26-grep-and-read-file-refuse-a-live-bg-handle-with-a-false-expired-message.md`
+    pub fn get_stream_or_job_log(&self, id: &str) -> Result<Option<String>, RecoverableError> {
+        if !id.starts_with("@bg_") {
+            return Ok(self.get_stream(id));
+        }
+        let Some(log) = self.get_background_log(id) else {
+            return Ok(None);
+        };
+        let through_the_shell = format!(
+            "The shell reads the log on disk and needs no copy in memory: \
+             run_command(\"tail -50 {id}\") or run_command(\"grep PATTERN {id}\")."
+        );
+        let unavailable = |e: std::io::Error| {
+            RecoverableError::with_hint(
+                format!("background job log unavailable: {}: {e}", log.display()),
+                "Check if the process is still running; its log file no longer exists.",
+            )
+        };
+        let len = std::fs::metadata(&log).map_err(unavailable)?.len();
+        if len > JOB_LOG_READ_LIMIT {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "background job log {id} is {len} bytes, over the {JOB_LOG_READ_LIMIT}-byte \
+                     limit for reading a whole log"
+                ),
+                through_the_shell,
+            ));
+        }
+        let bytes = std::fs::read(&log).map_err(unavailable)?;
+        Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
     }
 
     /// Resolve `@cmd_<8hex>` (and `@cmd_<8hex>.err`) references in a command string.

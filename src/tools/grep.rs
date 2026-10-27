@@ -1028,12 +1028,15 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let raw = ctx.output_buffer.get_stream(raw_path).ok_or_else(|| {
-        RecoverableError::with_hint(
-            format!("buffer reference not found: '{raw_path}'"),
-            crate::tools::output_buffer::ref_gone_hint(raw_path),
-        )
-    })?;
+    let raw = ctx
+        .output_buffer
+        .get_stream_or_job_log(raw_path)?
+        .ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("buffer reference not found: '{raw_path}'"),
+                crate::tools::output_buffer::ref_gone_hint(raw_path),
+            )
+        })?;
 
     // ONE derivation, shared with `read_file`. These two drifted by exactly this
     // `.replace()` once already; never re-inline it. See the function's doc comment for
@@ -1233,6 +1236,7 @@ fn strip_buffer_ref_quotes(path: &str) -> &str {
             if inner.starts_with("@file_")
                 || inner.starts_with("@cmd_")
                 || inner.starts_with("@tool_")
+                || inner.starts_with("@bg_")
                 || inner.starts_with("@ack_")
             {
                 return inner;
