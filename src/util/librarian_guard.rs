@@ -188,14 +188,43 @@ fn guard_with_oracle(
     // that `body_edits` performs section-scoped. Naming only the first would send
     // every prose edit to the wrong tool, and a guard whose hint cannot be followed
     // is what trains callers to route around it.
+    // The id the hint tells the caller to type. The file's own frontmatter carries it when it
+    // is stamped; a ledger or an augmented tracker may carry none, and then the hint must say
+    // how to FIND it by the path the refused call named, because a literal `<id>` reads as the
+    // value to type. `find`'s `rel_path` is repo-relative and matched by substring, so an
+    // absolute path would never match it: the file name does, and is distinctive.
+    // docs/issues/archive/2026-10-26-librarian-guard-refusals-print-a-placeholder-id-and-a-ledger-read-has-no-read-route.md
+    let (id_arg, find_step) = match frontmatter_id(text) {
+        Some(id) => (format!("id=\"{id}\""), String::new()),
+        None => {
+            let key = if path.starts_with('/') {
+                path.rsplit('/').next().unwrap_or(path)
+            } else {
+                path
+            };
+            (
+                "id=\"<id from the find above>\"".to_string(),
+                format!("• Find the id:  doc(action=\"find\", rel_path=\"{key}\")\n"),
+            )
+        }
+    };
     let hint = if ledger && !augmented && !stamped {
-        "This file is a ledger — it owns a PREFIX-N id namespace.\n\
-             • Add an entry:  doc(action=\"append_entry\", id=\"<id>\", id_prefix=\"<PREFIX>\")\n\
+        // A READ is refused by this arm too, and the write routes below do not show the body.
+        // The ledger is not augmented, so `get` is a true read route for it.
+        let read_step = if access == Access::Read {
+            format!("• Read it:  doc(action=\"get\", {id_arg})\n")
+        } else {
+            String::new()
+        };
+        format!(
+            "This file is a ledger — it owns a PREFIX-N id namespace.\n\
+             {find_step}{read_step}\
+             • Add an entry:  doc(action=\"append_entry\", {id_arg}, id_prefix=\"<PREFIX>\")\n\
              \x20 then write the section yourself with the id it returns.\n\
              • Edit anything else (prose, a heading, a typo):\n\
-             \x20 doc(action=\"update\", id=\"<id>\", patch={body_edits: [{heading: \"## X\", \
-             action: \"edit\", old_string: \"...\", new_string: \"...\"}]})"
-            .to_string()
+             \x20 doc(action=\"update\", {id_arg}, patch={{body_edits: [{{heading: \"## X\", \
+             action: \"edit\", old_string: \"...\", new_string: \"...\"}}]}})"
+        )
     } else if stamped_only {
         // Reached only by a FrontmatterWrite, since every other access returned Ok
         // above. So the hint can name the one route that does reach the catalog,
@@ -212,22 +241,26 @@ fn guard_with_oracle(
         // is structurally scoped to one section, so only it is passed `BodyWrite` and
         // only it reaches here successfully.
         // docs/issues/archive/2026-09-03-librarian-guard-refuses-text-grammar-while-promising-it-works.md
-        "Frontmatter on this file is catalog-indexed, so edit it through the catalog:\n\
-             • doc(action=\"update\", id=\"<id>\", patch={status: \"...\", tags: [...]})\n\
+        format!(
+            "Frontmatter on this file is catalog-indexed, so edit it through the catalog:\n\
+             {find_step}\
+             • doc(action=\"update\", {id_arg}, patch={{status: \"...\", tags: [...]}})\n\
              Reads and BODY edits are allowed directly, but only via a call that can prove \
              it stays in the body: read_file always works; for edit_file, only the markdown \
              heading grammar (`heading` + `action`) does — its plain text grammar \
              (`old_string`/`new_string`, `insert`, or a non-heading `edits[]` item) cannot \
              bound its own extent and is refused here even with no `frontmatter` param. Use \
-             doc(action=\"update\", patch={body_edits: [...]}) for that shape instead."
-            .to_string()
+             doc(action=\"update\", patch={{body_edits: [...]}}) for that shape instead."
+        )
     } else {
-        "Use artifact tools instead:\n\
-             • Read:   doc(action=\"get\", id=\"<id>\")\n\
+        format!(
+            "Use artifact tools instead:\n\
+             {find_step}\
+             • Read:   doc(action=\"get\", {id_arg})\n\
              • Find:   doc(action=\"find\", semantic=\"<topic>\")\n\
-             • Edit:   doc(action=\"update\", id=\"<id>\", patch={...})\n\
+             • Edit:   doc(action=\"update\", {id_arg}, patch={{...}})\n\
              Full guide: resources/read doc://librarian-guide"
-            .to_string()
+        )
     };
     // The trailing clause is a claim about SCOPE, and for `stamped_only` the blanket form is
     // now false: reads and body edits both returned `Ok` above, so "do not read or edit it
@@ -251,18 +284,24 @@ fn guard_with_oracle(
 /// Returns `true` when the file begins with YAML frontmatter that contains
 /// an `id:` field matching the 16-char lowercase hex format used by librarian.
 pub fn is_librarian_artifact(text: &str) -> bool {
-    let Some(rest) = text.strip_prefix("---\n") else {
-        return false;
-    };
+    frontmatter_id(text).is_some()
+}
+
+/// The librarian id the file's frontmatter carries, unquoted, or `None` when it carries none
+/// (a ledger or an augmented tracker routinely has no `id:`). Hand-parsed for the reason
+/// [`declared_entry_prefixes`] gives. The first `id:` line decides, as it always has.
+fn frontmatter_id(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix("---\n")?;
     for line in rest.lines() {
         if line == "---" {
             break;
         }
         if let Some(val) = line.strip_prefix("id:") {
-            return is_librarian_id(val.trim());
+            let val = val.trim();
+            return is_librarian_id(val).then(|| strip_matching_quotes(val));
         }
     }
-    false
+    None
 }
 
 /// The id namespaces a file's frontmatter declares via `entry_prefix`, or empty
@@ -1172,6 +1211,135 @@ mod tests {
         assert!(
             hint.contains("body_edits"),
             "the prose route must be named: {hint}"
+        );
+    }
+
+    /// The refusal of a READ of a ledger used to offer only "add an entry" and "edit anything
+    /// else", so an agent that wanted to read the file got instructions for writing it. The
+    /// ledger is not augmented, so `doc(action="get")` is the route that shows its body.
+    /// `docs/issues/archive/2026-10-26-librarian-guard-refusals-print-a-placeholder-id-and-a-ledger-read-has-no-read-route.md`
+    #[test]
+    fn a_ledger_read_refusal_names_the_read_route() {
+        let text = "---\nkind: template\nentry_prefix: F\n---\n\n## Prose\n";
+        let err = guard_with_oracle(
+            "docs/templates/session-log.md",
+            text,
+            None,
+            None,
+            Access::Read,
+        )
+        .expect_err("a ledger refuses every access");
+        let hint = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap()
+            .hint()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            hint.contains("doc(action=\"get\""),
+            "a refused read must be told how to read: {hint}"
+        );
+    }
+
+    /// A write refusal does not need the read route; it stays as narrow as it was.
+    #[test]
+    fn a_ledger_write_refusal_does_not_grow_a_read_route() {
+        let text = "---\nkind: template\nentry_prefix: F\n---\n\n## Prose\n";
+        let err = guard_with_oracle(
+            "docs/templates/session-log.md",
+            text,
+            None,
+            None,
+            Access::FrontmatterWrite,
+        )
+        .expect_err("a ledger refuses every access");
+        let hint = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap()
+            .hint()
+            .unwrap_or_default()
+            .to_string();
+        assert!(!hint.contains("doc(action=\"get\""), "got: {hint}");
+    }
+
+    /// The hint printed the literal `id="<id>"` although the file's own frontmatter carries the
+    /// id. When the guard can read it, it must name it.
+    #[test]
+    fn a_stamped_refusal_names_the_files_own_id_not_a_placeholder() {
+        let text = "---\nid: 'abc513d3ee0f0b50'\nkind: bug\n---\n\n## Summary\n";
+        let err = guard_with_oracle(
+            "docs/issues/b.md",
+            text,
+            None,
+            None,
+            Access::FrontmatterWrite,
+        )
+        .expect_err("a frontmatter write on a stamped file is refused");
+        let hint = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap()
+            .hint()
+            .unwrap_or_default()
+            .to_string();
+        assert!(hint.contains("id=\"abc513d3ee0f0b50\""), "got: {hint}");
+        assert!(
+            !hint.contains("<id>"),
+            "no placeholder when the id is known: {hint}"
+        );
+    }
+
+    /// A ledger or an augmented tracker may carry no `id:`. The guard cannot name an id it does
+    /// not have, so it must say how to find it, by the path the refused call named, and must not
+    /// leave the bare `<id>` placeholder as if it were the value to type.
+    #[test]
+    fn a_refusal_with_no_id_in_the_file_says_how_to_find_it() {
+        let text = "---\nkind: template\nentry_prefix: F\n---\n\n## Prose\n";
+        let err = guard_with_oracle(
+            "docs/templates/session-log.md",
+            text,
+            None,
+            None,
+            Access::FrontmatterWrite,
+        )
+        .expect_err("a ledger refuses every access");
+        let hint = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap()
+            .hint()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            hint.contains("doc(action=\"find\", rel_path=\"docs/templates/session-log.md\")"),
+            "must name the lookup by the path the call used: {hint}"
+        );
+        assert!(
+            !hint.contains("id=\"<id>\""),
+            "the bare placeholder reads as a value to type: {hint}"
+        );
+    }
+
+    /// `find`'s `rel_path` is repo-relative and matched by substring, so an ABSOLUTE path the
+    /// caller typed would never match it. The lookup must use the file name then.
+    #[test]
+    fn the_find_lookup_for_an_absolute_path_uses_the_file_name() {
+        let text = "---\nkind: template\nentry_prefix: F\n---\n";
+        let err = guard_with_oracle(
+            "/repo/docs/templates/session-log.md",
+            text,
+            None,
+            None,
+            Access::Read,
+        )
+        .expect_err("a ledger refuses every access");
+        let hint = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap()
+            .hint()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            hint.contains("rel_path=\"session-log.md\""),
+            "an absolute path cannot match a repo-relative rel_path: {hint}"
         );
     }
 
