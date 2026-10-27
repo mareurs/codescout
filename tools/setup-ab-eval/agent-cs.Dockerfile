@@ -14,7 +14,10 @@
 # result as the run image.
 #
 # Provenance (ruling R3): adapted from claude-plugins
-# effort-steering/spikes/s5/images/codescout.Dockerfile at 223b56abecae (last changed 40b0586):
+# effort-steering/spikes/s5/images/codescout.Dockerfile at 223b56abecae (last changed 40b0586),
+# source sha256 f8046b6a5f06ea51c4e51e4318fa49f5125b52734883f1b4718142e812cb65cd
+# (`git show 223b56abecae:effort-steering/spikes/s5/images/codescout.Dockerfile | sha256sum`;
+# recorded under "adapted" in PROVENANCE.json):
 #   kept     node copied from the official node image (pinned binary, no extra apt repo);
 #            mold, because codescout's .cargo/config.toml links with -fuse-ld=mold;
 #            RUSTUP_TOOLCHAIN set so rustup ignores rust-toolchain.toml's windows-gnu target;
@@ -47,8 +50,10 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 RUN rustup component add rust-analyzer
 # glibc shim (found by the first build here): ort's prebuilt onnxruntime static library, pulled
-# in by the default `local-embed` feature, references __isoc23_strtol/strtoll/strtoull, which
-# exist only from glibc 2.38; bookworm has 2.36, so the link fails. These forward to the C99
+# in by the default `local-embed` feature, references three glibc 2.38 symbols,
+# __isoc23_strtol/strtoll/strtoull (the link errors named exactly these); bookworm has 2.36, so
+# the link fails. The shim defines four functions: those three plus __isoc23_strtoul, the
+# remaining member of the family, unreferenced today. Each forwards to the C99
 # functions (C23 only adds the 0b prefix), keeping the daily feature set (R11) on a glibc that
 # the task image can run (R3). The study configures only HTTP embedders, so ort never runs.
 COPY <<'EOF' /opt/isoc23-shim.c

@@ -15,5 +15,15 @@
     "evidence.py: imported by pilot.py and baseline.py (nonnegative)",
     "pilot-protocol.md and agent.Dockerfile: read by pilot.run_pilot (HERE / name); 10 test_baseline tests fail without them",
     "all copied unmodified; not in the original five-file brief"
-  ]
+  ],
+  "adapted": {
+    "agent-cs.Dockerfile": {
+      "status": "adapted (not a verbatim copy; test_provenance checks only `files`)",
+      "source_repo": "/home/marius/work/claude/claude-plugins",
+      "source_commit": "223b56abecae8d8d086f0b3c3a77f3bf57b5f88e",
+      "source_path": "effort-steering/spikes/s5/images/codescout.Dockerfile",
+      "source_sha256": "f8046b6a5f06ea51c4e51e4318fa49f5125b52734883f1b4718142e812cb65cd",
+      "changes": "see the Provenance block in agent-cs.Dockerfile's header (kept / changed / dropped)"
+    }
+  }
 }

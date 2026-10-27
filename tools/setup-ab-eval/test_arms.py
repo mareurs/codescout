@@ -1,7 +1,9 @@
 """Tests for arms.py: the three arms differ only in CLI flags and mounts."""
 import ast
 import json
+import subprocess
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -66,7 +68,9 @@ class ArmsTest(unittest.TestCase):
         self.user_settings = {
             "outputStyle": "legible:Explanatory STE",
             "enabledPlugins": {"superpowers@superpowers-marketplace": True},
-            "permissions": {"allow": ["Read(/home/marius/.claude/plugins/**)", "Bash(ls:*)"]},
+            "permissions": {"allow": ["Read(/home/marius/.claude/plugins/**)", "Bash(ls:*)",
+                                      "Bash(git clone https://github.com/apache/x.git)",
+                                      "WebFetch(domain:127.0.0.1)"]},
             "env": {"ANTHROPIC_BASE_URL": "http://localhost:8082",
                     "CODESCOUT_QDRANT_URL": "http://127.0.0.1:6334", "TMPDIR": "/tmp"},
             "hooks": {"UserPromptSubmit": [{"hooks": [
@@ -80,6 +84,9 @@ class ArmsTest(unittest.TestCase):
             "modelSettings": {"claude-sonnet-5-5": {"effortLevel": "medium"}},
             "theme": "dark",
             "verbose": True,
+            "autoMemoryEnabled": False,
+            "fileCheckpointingEnabled": False,
+            "lanService": {"endpoint": "http://192.168.1.20:3000"},
             "skillOverrides": {"vet-ad-offer": "user-invocable-only"},
         }
         (profile / "settings.json").write_text(json.dumps(self.user_settings) + "\n")
@@ -256,7 +263,8 @@ class ArmsTest(unittest.TestCase):
         self.assertEqual(record["arm"], "full")
         self.assertEqual(sorted(record["settings_dropped"]),
                          ["autoMode", "effortLevel", "env", "extraKnownMarketplaces",
-                          "hooks.UserPromptSubmit", "modelSettings", "statusLine", "verbose"])
+                          "hooks.UserPromptSubmit", "lanService", "modelSettings", "statusLine",
+                          "verbose"])
         self.assertTrue(all(record["settings_dropped"].values()))
         # The same function the record came from is importable for the manifest.
         kept, dropped = arms.sanitize_user_settings(self.user_settings)
@@ -285,6 +293,58 @@ class ArmsTest(unittest.TestCase):
             self.assertEqual(record["setting_sources"], source[arm])
             if arm != "full":
                 self.assertEqual(record["settings_dropped"], {})
+    def test_only_study_hosts_pass_the_allowlist(self):
+        # Minor 2: every URL host must start with sab-; a denylist would miss each of these.
+        bad = ["http://192.168.1.20:8080", "http://172.17.0.1:6334", "http://[::1]:6334",
+               "http://qdrant:6334", "localhost:8082"]
+        for n, value in enumerate(bad):
+            leftover = dict(self.manifest, mcp_env=dict(self.manifest["mcp_env"],
+                                                        CODESCOUT_EXTRA_URL=value))
+            with self.assertRaises(ValueError, msg=value):
+                arms.arm_invocation("cs", MODEL, PROMPT, leftover, self.urls,
+                                    self.root / "runs" / f"left{n}", session_id=SESSION)
+            with self.assertRaises(ValueError, msg=value):
+                arms.arm_invocation("cs", MODEL, PROMPT, self.manifest,
+                                    dict(self.urls, CODESCOUT_QDRANT_URL=value),
+                                    self.root / "runs" / f"study{n}", session_id=SESSION)
+            # A settings key with such a URL is dropped from full's settings...
+            kept, dropped = arms.sanitize_user_settings({"svc": {"url": value}, "theme": "x"})
+            self.assertEqual(kept, {"theme": "x"}, value)
+            self.assertIn("svc", dropped)
+            # ...and a key kept by name may not carry one (permissions patterns excepted).
+            with self.assertRaises(ValueError, msg=value):
+                arms.sanitize_user_settings({"outputStyle": f"style at {value}"})
+        self.assertEqual(arms.foreign_hosts("http://sab-dense:8080/v1 http://sab-qdrant-r1:6334"),
+                         [])
+        kept, _ = arms.sanitize_user_settings(
+            {"permissions": {"allow": ["Bash(git clone https://github.com/a/b.git)"]}})
+        self.assertIn("permissions", kept)
+
+    def test_arm_record_lists_kept_settings_with_their_effects(self):
+        # Minor 3: every kept key is listed, and these three name their effect.
+        self.spec("full")
+        record = json.loads((self.root / "runs" / "full" / "arm-record.json").read_text())
+        kept, _ = arms.sanitize_user_settings(self.user_settings)
+        self.assertEqual(sorted(record["settings_kept"]), sorted(kept))
+        for key in ("autoMemoryEnabled", "fileCheckpointingEnabled", "skillOverrides",
+                    "outputStyle", "enabledPlugins", "permissions"):
+            effect = record["settings_kept"][key]
+            self.assertTrue(effect and not effect.startswith("unknown"), key)
+        self.assertIn("# Memory", record["settings_kept"]["autoMemoryEnabled"])
+        self.assertTrue(all(isinstance(v, str) and v for v in record["settings_kept"].values()))
+
+    def test_the_arm_tool_set_is_the_daily_codescout_set(self):
+        # I1: daily use advertises 21 codescout tools; references, symbol_at and call_graph are
+        # gated on has_lsp (src/tools/core/types.rs Availability::RequiresLsp).
+        self.assertEqual(len(arms.CODESCOUT_TOOLS), 21)
+        for tool in arms.LSP_GATED_TOOLS:
+            self.assertIn(tool, arms.CODESCOUT_TOOLS)
+        self.assertEqual(set(arms.LSP_GATED_TOOLS), {"references", "symbol_at", "call_graph"})
+        expected = arms.expected_mcp_tools("cs")
+        self.assertIn("mcp__codescout__references", expected)
+        self.assertIn("mcp__codescout__symbol_at", expected)
+        self.assertEqual(expected, arms.expected_mcp_tools("full"))
+        self.assertEqual(arms.expected_mcp_tools("bare"), [])
 
     def test_mcp_env_urls_are_rewritten_to_study_services(self):
         cs = self.spec("cs")
@@ -342,17 +402,65 @@ class ArmsTest(unittest.TestCase):
             argvs[arm] = rest
         self.assertEqual(argvs["bare"], argvs["cs"])
         self.assertEqual(argvs["cs"], argvs["full"])
-class FakeDocker:
-    """Records docker argv; `exec ... index` exits with `index_rc`."""
+# The project.toml codescout's own onboarding() wrote in the ruff task container (measured
+# 2026-10-27, controls/round4/onboarding-probe/project.toml), embeddings as the hardware
+# recommendation gave them: the shape prepare_index then edits.
+ONBOARDED_TOML = """[embeddings]
+model = "local:AllMiniLML6V2Q"
 
-    def __init__(self, index_rc=0):
-        self.calls, self.index_rc = [], index_rc
+[ignored_paths]
+force_include = []
+
+[libraries]
+auto_fetch_sources = false
+auto_index = false
+fetch_timeout_secs = 300
+
+[libraries.version_overrides]
+
+[lsp]
+
+[memory]
+protected = ["gotchas"]
+semantic_anchor_min_similarity = 0.10000000149011612
+semantic_anchor_top_n = 10
+staleness_drift_threshold = 0.30000001192092896
+
+[project]
+encoding = "utf-8"
+languages = [
+    "bash",
+    "markdown",
+    "python",
+    "rust",
+]
+name = "testbed"
+system_prompt_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+tool_timeout_secs = 60
+"""
+
+
+class FakeDocker:
+    """Records docker argv. `exec ... index` exits with `index_rc`; the in-container MCP probe
+    answers its onboarding() call (with an error when `onboarding_error`)."""
+
+    def __init__(self, index_rc=0, onboarding_error=False):
+        self.calls, self.index_rc, self.onboarding_error = [], index_rc, onboarding_error
 
     def __call__(self, *args, **kwargs):
         args = [str(a) for a in args]
         self.calls.append(args)
         rc = self.index_rc if (args[0] == "exec" and "index" in args) else 0
         out = "A /home/agent/.codescout\n" if args[0] == "diff" else "log line\n"
+        if args[0] == "exec" and any(a.endswith("mcp_probe.py") for a in args):
+            result = ({"content": [{"type": "text", "text": "onboarding failed"}],
+                       "isError": True} if self.onboarding_error else
+                      {"content": [{"type": "text", "text": "{\"languages\": [\"rust\"]}"}]})
+            out = json.dumps({"tools": ["onboarding"], "calls": [
+                {"tool": "onboarding", "arguments": {}, "result": result, "error": None,
+                 "probe_error": None}]})
+        if args[0] == "exec" and args[-1].endswith("/.codescout/project.toml") and "cat" in args:
+            out = ONBOARDED_TOML
         return type("P", (), {"returncode": rc, "stdout": out})()
 
 
@@ -361,6 +469,7 @@ class PrepareIndexTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.data = Path(self.tmp.name)
         self.env = {"CODESCOUT_QDRANT_URL": "http://sab-qdrant:6334",
+                    "CODESCOUT_EMBEDDER_URL": "http://sab-dense:8080",
                     "CODESCOUT_QUERY_PREFIX": "Represent this query: "}
         self.ticks = iter([100.0, 142.5])
 
@@ -371,6 +480,10 @@ class PrepareIndexTest(unittest.TestCase):
         return arms.prepare_index("sab-agent-cs-x:1", "sab-run-x:1", "sab-net", self.env,
                                   self.data, docker=docker, clock=lambda: next(self.ticks))
 
+    @staticmethod
+    def at(docker, pred):
+        return next(i for i, c in enumerate(docker.calls) if pred(c))
+
     def test_prepare_index_times_the_index_and_commits_the_result(self):
         docker = FakeDocker()
         self.run_prepare(docker)
@@ -380,9 +493,9 @@ class PrepareIndexTest(unittest.TestCase):
         self.assertEqual(run[run.index("--network") + 1], "sab-net")
         for flag in arms.RESOURCES:
             self.assertIn(flag, run)
-        exec_ = next(c for c in docker.calls if c[0] == "exec")
-        self.assertEqual(exec_[-4:], [arms.CODESCOUT_BIN, "index", "-p", "/testbed"])
-        self.assertIn("CODESCOUT_QUERY_PREFIX=Represent this query: ", exec_)
+        index = next(c for c in docker.calls if c[0] == "exec" and "index" in c)
+        self.assertEqual(index[-4:], [arms.CODESCOUT_BIN, "index", "-p", "/testbed"])
+        self.assertIn("CODESCOUT_QUERY_PREFIX=Represent this query: ", index)
         commit = next(c for c in docker.calls if c[0] == "commit")
         self.assertEqual(commit[-2:], [name, "sab-run-x:1"])
         self.assertEqual(docker.calls[-1], ["rm", "-f", name])
@@ -391,6 +504,77 @@ class PrepareIndexTest(unittest.TestCase):
         self.assertEqual(cost["exit_code"], 0)
         self.assertEqual(cost["image"], "sab-agent-cs-x:1")
         self.assertIn("/home/agent/.codescout", (self.data / "index-diff.txt").read_text())
+
+    def test_prepare_onboards_through_codescout_before_indexing(self):
+        # Round-4 ruling I1: the project config (languages -> has_lsp -> references, symbol_at,
+        # call_graph) comes from codescout's own onboarding(), run before the index so the
+        # index chunks with the configured model.
+        docker = FakeDocker()
+        self.run_prepare(docker)
+        self.assertEqual(json.loads((self.data / "prepare-calls.json").read_text()),
+                         [["onboarding", {}]])
+        mcp = json.loads((self.data / "prepare-mcp.json").read_text())["mcpServers"]["codescout"]
+        self.assertEqual([mcp["command"], *mcp["args"]], [arms.CODESCOUT_BIN, *arms.CODESCOUT_ARGS])
+        self.assertEqual(mcp["env"], self.env)
+        probe = self.at(docker, lambda c: c[0] == "exec" and
+                        any(a.endswith("mcp_probe.py") for a in c))
+        self.assertEqual(docker.calls[probe][docker.calls[probe].index("-w") + 1], "/testbed")
+        embed = self.at(docker, lambda c: c[0] == "exec" and
+                        any(a.endswith("set_embeddings.py") for a in c))
+        cleanup = self.at(docker, lambda c: c[0] == "exec" and c[-1] == arms.PREPARE_CLEANUP)
+        index = self.at(docker, lambda c: c[0] == "exec" and "index" in c)
+        git = self.at(docker, lambda c: c[0] == "exec" and "git add -f" in c[-1])
+        self.assertTrue(probe < embed < cleanup < index < git)
+        record = json.loads((self.data / "prepare.json").read_text())
+        self.assertTrue(record["onboarding"]["ok"])
+
+    def test_a_failed_onboarding_is_refused_and_nothing_is_committed(self):
+        docker = FakeDocker(onboarding_error=True)
+        with self.assertRaises(RuntimeError):
+            self.run_prepare(docker)
+        self.assertFalse([c for c in docker.calls if c[0] == "commit"])
+        self.assertFalse([c for c in docker.calls if c[0] == "exec" and "index" in c])
+        self.assertEqual(docker.calls[-1][:2], ["rm", "-f"])
+
+    def test_prepare_sets_the_daily_embeddings_in_the_committed_config(self):
+        docker = FakeDocker()
+        self.run_prepare(docker)
+        embed = next(c for c in docker.calls if c[0] == "exec" and
+                     any(a.endswith("set_embeddings.py") for a in c))
+        self.assertEqual(embed[-3:], ["/testbed/.codescout/project.toml",
+                                      arms.DAILY_EMBED_MODEL, "http://sab-dense:8080/v1"])
+        # The script the container runs, applied here to the TOML codescout's onboarding wrote.
+        scope = {"__name__": "set_embeddings"}
+        exec(arms.SET_EMBEDDINGS_PY, scope)
+        rewritten = tomllib.loads(scope["rewrite"](ONBOARDED_TOML, arms.DAILY_EMBED_MODEL,
+                                                   "http://sab-dense:8080/v1"))
+        original = tomllib.loads(ONBOARDED_TOML)
+        self.assertEqual(rewritten["embeddings"], {"model": "CodeRankEmbed",
+                                                   "url": "http://sab-dense:8080/v1"})
+        self.assertEqual({k: v for k, v in rewritten.items() if k != "embeddings"},
+                         {k: v for k, v in original.items() if k != "embeddings"})
+        record = json.loads((self.data / "prepare.json").read_text())
+        self.assertEqual(record["embeddings"]["set"], {"model": "CodeRankEmbed",
+                                                       "url": "http://sab-dense:8080/v1"})
+        self.assertEqual(record["embeddings"]["onboarding_wrote"],
+                         {"model": "local:AllMiniLML6V2Q"})
+        self.assertIn("daily_effective", record["embeddings"])
+
+    def test_prepare_cleanup_removes_memories_and_runtime_files_but_keeps_config(self):
+        root = self.data / "proj"
+        cs = root / ".codescout"
+        for rel in ("project.toml", "workspace.toml", "index-state.json", "write.lock",
+                    "write.lock.holder", "usage.db", "debug.log", "diagnostic-1a2b.log",
+                    "memories/onboarding.md", "memories/.history/onboarding.md/x.md.bak",
+                    "private-memories/p.md", "projects/ruff/memories/onboarding.md",
+                    "projects/ruff/memories/language-patterns.md"):
+            (cs / rel).parent.mkdir(parents=True, exist_ok=True)
+            (cs / rel).write_text("x")
+        subprocess.run(["sh", "-c", arms.PREPARE_CLEANUP], cwd=root, check=True)
+        left = sorted(str(p.relative_to(cs)) for p in cs.rglob("*") if p.is_file())
+        self.assertEqual(left, ["index-state.json", "project.toml", "workspace.toml",
+                                "write.lock"])
+
     def test_prepare_commits_index_artifacts_but_not_tmp_lock(self):
         docker = FakeDocker()
         self.run_prepare(docker)
@@ -409,6 +593,7 @@ class PrepareIndexTest(unittest.TestCase):
         lock = [c for c in execs if any("/tmp/codescout-" in a for a in c)]
         self.assertEqual(len(lock), 1)
         self.assertIn("rm -f", lock[0][-1])
+        self.assertIn("/tmp/sab-prepare", lock[0][-1])
         commit_at = kinds.index("commit")
         git_at = docker.calls.index(git[0])
         lock_at = docker.calls.index(lock[0])
@@ -426,9 +611,12 @@ class PrepareIndexTest(unittest.TestCase):
         self.assertEqual(json.loads((self.data / "index-cost.json").read_text())["exit_code"], 1)
 
     def test_prepare_index_refuses_a_host_url(self):
-        with self.assertRaises(ValueError):
-            arms.prepare_index("i", "o", "sab-net", {"CODESCOUT_QDRANT_URL": "http://127.0.0.1:6334"},
-                               self.data, docker=FakeDocker())
+        # Minor 2: an allowlist (host must start with sab-), not a denylist of host names.
+        for bad in ("http://127.0.0.1:6334", "http://192.168.1.20:6334", "http://172.17.0.1:6334",
+                    "http://[::1]:6334", "http://qdrant:6334"):
+            with self.assertRaises(ValueError, msg=bad):
+                arms.prepare_index("i", "o", "sab-net", dict(self.env, CODESCOUT_QDRANT_URL=bad),
+                                   self.data, docker=FakeDocker())
 
 
 if __name__ == "__main__":

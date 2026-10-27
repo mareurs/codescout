@@ -18,9 +18,11 @@ Every container is `sab-ctl-*`; teardown goes through stack.py's exact-name help
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+import tomllib
 import uuid
 from pathlib import Path
 
@@ -41,7 +43,8 @@ FIXTURE_DIR = "/home/agent/zq"
 CANARY = "zq-isolation-canary-7f3a"
 MODEL = "claude-sonnet-5-5"
 PROMPT = "List the files in the repository root.\n"
-RUNS = ("ctl-a", "ctl-b", "ctl-ra", "ctl-r10cs", "ctl-r10full", "ctl-capcs", "ctl-capfull")
+RUNS = ("ctl-a", "ctl-b", "ctl-ra", "ctl-r10cs", "ctl-r10full", "ctl-capcs", "ctl-capfull",
+        "ctl-r10indexedcs", "ctl-r10indexedfull")
 
 # C2b capture control: a stub endpoint on the internal network and a plainly fake key.
 CAPTURE_IMAGE = "python:3.12-slim"
@@ -280,6 +283,7 @@ def git_state(container, workdir=FIXTURE_DIR):
             "porcelain_ignored": run("git", "status", "--porcelain", "--ignored").strip(),
             "log": run("git", "log", "--oneline", "-3").strip(),
             "tracked_codescout": run("git", "ls-files", ".codescout", ".gitignore").strip(),
+            "project_toml": run("cat", ".codescout/project.toml"),
             "tmp": run("ls", "-A", "/tmp").strip()}
 
 
@@ -352,6 +356,15 @@ def step_isolation(manifest):
             r["git_fresh"]["porcelain"] == "" for r in (a, b)),
         "fresh_run_container_has_no_tmp_index_lock": all(
             "codescout-index-" not in r["git_fresh"]["tmp"] for r in (a, b)),
+        "fresh_run_container_tracks_project_toml": all(
+            ".codescout/project.toml" in r["git_fresh"]["tracked_codescout"].split() for r in (a, b)),
+        "committed_config_has_daily_model_and_languages": all(
+            (tomllib.loads(r["git_fresh"]["project_toml"]).get("embeddings", {}).get("model")
+             == arms.DAILY_EMBED_MODEL)
+            and bool(tomllib.loads(r["git_fresh"]["project_toml"])["project"]["languages"])
+            for r in (a, b)),
+        "daily_tool_set_in_both_runs": all(
+            sorted(r["tools"]) == sorted(arms.CODESCOUT_TOOLS) for r in (a, b)),
     }
     git = {"fresh": a["git_fresh"], "a_after_probe": a["git_after_probe"],
            "b_after_probe": b["git_after_probe"]}
@@ -446,13 +459,16 @@ def summarize_stream(raw):
     return summary
 
 
-def step_r10(manifest):
-    out = CONTROLS / "r10"
+def step_r10(manifest, image=IMAGE, workdir="/testbed", label="r10"):
+    """`claude -p` stream per arm with no token. `image`/`workdir`/`label` let the same check
+    run on a prepared run image (round 4: the fixture image prepare_index onboarded+indexed)."""
+    out = CONTROLS / label
     out.mkdir(exist_ok=True)
-    report = {"network": NET, "token": "none (no CLAUDE_CODE_OAUTH_TOKEN, no ANTHROPIC_API_KEY, "
+    report = {"network": NET, "image": image, "workdir": workdir,
+              "token": "none (no CLAUDE_CODE_OAUTH_TOKEN, no ANTHROPIC_API_KEY, "
               "empty CLAUDE_CONFIG_DIR)", "proxy": "none", "arms": {}}
     for arm in arms.ARMS:
-        run = f"ctl-r10{arm}" if arm != "bare" else None
+        run = f"ctl-{label.replace('-', '')}{arm}" if arm != "bare" else None
         url = (stack.qdrant_for_run(TEMPLATE, run, network=NET) if run
                else "http://sab-qdrant-unused:6334")
         spec = arms.arm_invocation(arm, MODEL, PROMPT, manifest, study_urls(manifest, url),
@@ -462,9 +478,9 @@ def step_r10(manifest):
         args[i:i + 2] = ["--output-format", "stream-json", "--verbose", "--include-hook-events"]
         sep = args.index("--")
         args[sep:sep] = ["--debug-file", f"{arms.CONFIG_DIR}/r10-debug.log"]
-        name = f"sab-ctl-r10-{arm}"
+        name = f"sab-ctl-{label}-{arm}"
         try:
-            start_arm_container(name, IMAGE, spec, out / arm)
+            start_arm_container(name, image, spec, out / arm)
             env = docker("exec", name, "env", check=False).stdout
             leaked = [l.split("=")[0] for l in env.splitlines()
                       if l.split("=")[0] in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY",
@@ -474,7 +490,7 @@ def step_r10(manifest):
                 raise RuntimeError(f"credential/proxy env present in {name}: {leaked}")
             started = time.monotonic()
             try:
-                r = subprocess.run(["docker", "exec", "-w", "/testbed", name, *args],
+                r = subprocess.run(["docker", "exec", "-w", workdir, name, *args],
                                    capture_output=True, text=True, timeout=240)
                 stdout, stderr, rc = r.stdout, r.stderr, r.returncode
             except subprocess.TimeoutExpired as e:
@@ -484,10 +500,17 @@ def step_r10(manifest):
             (out / f"{arm}.stream.jsonl").write_text(stdout)
             (out / f"{arm}.stderr.txt").write_text(stderr)
             summary = summarize_stream(stdout)
+            debug_log = out / arm / "config" / "r10-debug.log"
+            labels = sorted(set(re.findall(r"segment budget for '([^']+)'",
+                                           debug_log.read_text(errors="replace")
+                                           if debug_log.exists() else "")))
             summary.update({"exit_code": rc, "seconds": round(time.monotonic() - started, 1),
                             "args": args, "mounts": spec.mounts,
-                            "stream": f"r10/{arm}.stream.jsonl",
-                            "debug_log": str(out / arm / "config" / "r10-debug.log")})
+                            "stream": f"{label}/{arm}.stream.jsonl",
+                            "debug_log": str(debug_log),
+                            "embedding_model_labels_in_debug_log": labels,
+                            "expected_mcp_tools_present": sorted(arms.expected_mcp_tools(arm))
+                            == sorted(summary.get("mcp_tools") or [])})
             report["arms"][arm] = summary
         finally:
             docker("rm", "-f", name, check=False)
@@ -496,15 +519,16 @@ def step_r10(manifest):
     cs = report["arms"]["cs"]
     report["tools_flag_hides_mcp_tools"] = (
         None if not cs.get("init_emitted") else not cs.get("mcp_tools"))
-    save("r10-streams.json", report)
-    save("tools-flag.json", {
-        "question": "does --tools Bash,Read,Write,Edit,Glob,Grep hide MCP tools?",
-        "answer": report["tools_flag_hides_mcp_tools"],
-        "evidence": {arm: {"init_emitted": s.get("init_emitted"),
-                           "mcp_tools": s.get("mcp_tools"), "mcp_servers": s.get("mcp_servers"),
-                           "tools": s.get("tools")}
-                     for arm, s in report["arms"].items()},
-        "streams": [f"r10/{a}.stream.jsonl" for a in arms.ARMS]})
+    save(f"{label}-streams.json", report)
+    if label == "r10":
+        save("tools-flag.json", {
+            "question": "does --tools Bash,Read,Write,Edit,Glob,Grep hide MCP tools?",
+            "answer": report["tools_flag_hides_mcp_tools"],
+            "evidence": {arm: {"init_emitted": s.get("init_emitted"),
+                               "mcp_tools": s.get("mcp_tools"),
+                               "mcp_servers": s.get("mcp_servers"), "tools": s.get("tools")}
+                         for arm, s in report["arms"].items()},
+            "streams": [f"r10/{a}.stream.jsonl" for a in arms.ARMS]})
 # --- C2b: capture the first request body at a stub endpoint ---------------------------------
 
 def _main_request(requests):
@@ -661,7 +685,9 @@ def step_down(manifest):
 
 STEPS = {"image": step_image, "hooks": step_hooks,
          "hooks-seeded": lambda m: step_hooks(m, seeded=True), "stack": step_stack,
-         "isolation": step_isolation, "ra": step_ra, "r10": step_r10, "capture": step_capture,
+         "isolation": step_isolation, "ra": step_ra, "r10": step_r10,
+         "r10-indexed": lambda m: step_r10(m, INDEXED_IMAGE, FIXTURE_DIR, "r10-indexed"),
+         "capture": step_capture,
          "down": step_down}
 
 
