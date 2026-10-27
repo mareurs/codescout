@@ -222,7 +222,7 @@ pub trait ArtifactVectorStore: Send + Sync {
     /// nothing retired, and an in-memory test store has nothing to report. Only the Qdrant
     /// backend overrides it, because its scheme is addressed by a name prefix that can
     /// leave an old collection outside the namespace with no code path left to reach it
-    /// (`docs/issues/2026-09-06-the-legacy-artifacts-qdrant-collection-is-orphaned-not-cleaned-up.md`).
+    /// (`docs/issues/archive/2026-09-06-the-legacy-artifacts-qdrant-collection-is-orphaned-not-cleaned-up.md`).
     ///
     /// Same lock rule as every method here: never call it while holding the catalog lock.
     async fn retired_collections(&self) -> Result<Vec<RetiredCollection>> {

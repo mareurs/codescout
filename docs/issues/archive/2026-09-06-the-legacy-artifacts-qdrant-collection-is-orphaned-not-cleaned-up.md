@@ -1,9 +1,10 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/shared-resource-carries-no-owner
-closed: null
+closed: 2026-10-27
+no_fix_commit: The fix was a one-off operator deletion of the host-local Qdrant collection `artifacts` (curl -X DELETE), approved by the operator on 2026-10-27; no code changed. The detector shipped earlier on 2026-10-16 is unchanged.
 opened: 2026-09-06
 owner: marius
 related:
@@ -155,7 +156,18 @@ None needed. The collection costs disk and nothing else; no query reads it.
 
 ## Resume
 
-Identify the writer (see *What would close this bug*). Do not run the `DELETE` before that. Confirm the new doctor row against the live daemon (count matches `curl`).
+N/A — resolved. See Resolution.
+
+## Resolution 2026-10-27
+
+The operator approved the deletion ("approve it"). The approval was given on a summary that called the collection orphaned and did not mention the `DO NOT DELETE` section above, so the state was re-checked before the command ran.
+
+- **Point count: 5394**, read twice about a minute apart on 2026-10-27 (12:02:58 and 12:04:01) with `POST /collections/artifacts/points/count {"exact":true}`. It is exactly the figure recorded on 2026-09-24, so the collection did not grow in about 33 days. `6f032dbd` is dated 2026-09-03, and the oldest `codescout start` process running on 2026-10-27 (`ps -eo lstart`, pid 412806) started on 2026-10-03, a month later; each binary's own build date was not checked. That is close to the issue's criterion 2 (flat across a period in which every process restarted on a post-`6f032dbd` build), not a proof of it.
+- **The writer was never identified.** The count stopped growing; nothing explains why it ever grew. If it starts growing again, `doctor` will not show it (the collection no longer exists) and a new collection named `artifacts` would reappear in `GET /collections`.
+- **Safety net:** a snapshot was taken before the delete, `artifacts-968029894703799-2026-10-27-10-03-12.snapshot` (45,170,176 bytes, sha256 `720da13d7d2e52ad4710d38c8fdc6eba150aed0151a5b4e4e92906706094d244`). After the delete, the snapshots API no longer lists it. Whether the file survived on disk is NOT verified: the Qdrant process (pid 3909) runs under another user and its directory is not readable from this session.
+- **Command:** `curl -X DELETE http://127.0.0.1:6333/collections/artifacts`, answer `{"result":true}`. Afterwards `GET /collections/artifacts` answers `Not found`, and the live collection `artifact_chunks_codescout_dc6a871595179329` still counts 52008 points.
+- **Lost verification:** the issue asked for the new `doctor` row to be confirmed once against a live daemon while the collection existed (its row must show `qdrant:artifacts` with a count matching `curl`). That was not done before the delete and cannot be done now. After the delete, `doctor` lists `retired_vector_collection_present: 0`, which shows the check runs but not that it would have counted 5394. The daemon calls of `scan_retired_vector_collections` stay unexercised by any test and by any live run.
+- The 993 points that carried a `project_id` were not migrated (option 3 of the issue). The per-project collections are rebuilt from each project's catalog by a reindex, so those vectors are derived data.
 
 ## References
 

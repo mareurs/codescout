@@ -241,7 +241,7 @@ impl Check {
     /// 2026-09-24 measurement in the bug file found it still GROWING with no writer in this
     /// tree — so the one action that would silence the row may destroy live data from a
     /// binary or checkout this repo cannot see. There is deliberately no `fix=` for it.
-    /// (`docs/issues/2026-09-06-the-legacy-artifacts-qdrant-collection-is-orphaned-not-cleaned-up.md`)
+    /// (`docs/issues/archive/2026-09-06-the-legacy-artifacts-qdrant-collection-is-orphaned-not-cleaned-up.md`)
     ///
     /// Adding a variant here silently changes two published numbers (`summary.defects`
     /// and the CLI's exit code), and neither the compiler nor
@@ -748,7 +748,7 @@ fn scan_retired_objects(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
 /// tree. So the row says what exists and tells the reader NOT to delete it until the writer is
 /// identified — the same point at which this check stops being the right instrument, which is
 /// why the destructive half is left out rather than gated.
-/// `docs/issues/2026-09-06-the-legacy-artifacts-qdrant-collection-is-orphaned-not-cleaned-up.md`
+/// `docs/issues/archive/2026-09-06-the-legacy-artifacts-qdrant-collection-is-orphaned-not-cleaned-up.md`
 ///
 /// Backend-grain, so it is a named `EXEMPT` entry in
 /// `every_declared_check_is_scope_gated_or_a_named_exemption` rather than a row-grain check:
