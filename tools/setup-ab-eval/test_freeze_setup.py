@@ -23,12 +23,11 @@ def fake_runner(argv):
 
 
 class Fixture:
-    def __init__(self, tmp: Path, plugins=None):
+    def __init__(self, tmp: Path, plugins=None, settings_env=None, mcp_env=ENV, records_extra=None):
         self.root = tmp
         self.profile = tmp / "profile"
         self.profile.mkdir()
         (self.profile / "CLAUDE.md").write_text("# claude\n")
-        (self.profile / "settings.json").write_text("{}")
         for d in ("projects", "memory", "todos", "sessions"):
             (self.profile / d).mkdir()
             (self.profile / d / "x.jsonl").write_text("{}")
@@ -46,14 +45,18 @@ class Fixture:
             if spec.get("mcp"):
                 (path / ".mcp.json").write_text(json.dumps({"mcpServers": {name: {"command": "x"}}}))
             enabled[key] = True
-            records[key] = [{"installPath": str(path), "version": "1.0"}]
-        (self.profile / "settings.json").write_text(json.dumps({"enabledPlugins": enabled}))
+            records[key] = [{"scope": "user", "installPath": str(path), "version": "1.0"}]
+        records.update(records_extra or {})
+        settings = {"enabledPlugins": enabled}
+        if settings_env is not None:
+            settings["env"] = settings_env
+        (self.profile / "settings.json").write_text(json.dumps(settings))
         (self.profile / "plugins").mkdir(exist_ok=True)
         (self.profile / "plugins/installed_plugins.json").write_text(
             json.dumps({"version": 2, "plugins": records}))
-        self.claude_json = tmp / "claude.json"
+        self.claude_json = self.profile / ".claude.json"
         self.claude_json.write_text(json.dumps({"mcpServers": {"codescout": {
-            "command": str(self.cs_bin), "args": ["start"], "env": ENV}}}))
+            "command": str(self.cs_bin), "args": ["start"], "env": mcp_env}}}))
 
     def freeze(self, probe=lambda url: True):
         return freeze_setup.freeze(self.profile, self.claude_json, probe, cli_path=self.cli,
@@ -122,6 +125,72 @@ class FreezeTests(unittest.TestCase):
             "command": str(fx.cs_bin), "env": {}}}}))
         with self.assertRaises(ValueError):
             fx.freeze()
+
+
+    def test_env_inherited_from_settings_json(self):
+        fx = Fixture(self.tmp, settings_env=dict(ENV, CODESCOUT_EMBEDDER_PROTOCOL="llama-server"),
+                     mcp_env={})
+        m = fx.freeze()
+        self.assertEqual(m["mcp_env"]["CODESCOUT_EMBEDDER_PROTOCOL"], "llama-server")
+        self.assertEqual(m["mcp_env_source"]["CODESCOUT_EMBEDDER_URL"], "settings")
+
+    def test_mcp_env_overrides_settings_env(self):
+        fx = Fixture(self.tmp, settings_env=dict(ENV, CODESCOUT_EMBEDDER_PROTOCOL="llama-server"),
+                     mcp_env={"CODESCOUT_EMBEDDER_PROTOCOL": "openai"})
+        m = fx.freeze()
+        self.assertEqual(m["mcp_env"]["CODESCOUT_EMBEDDER_PROTOCOL"], "openai")
+        self.assertEqual(m["mcp_env_source"]["CODESCOUT_EMBEDDER_PROTOCOL"], "claude_json")
+        self.assertEqual(m["mcp_env_source"]["CODESCOUT_QDRANT_URL"], "settings")
+
+    def test_non_codescout_settings_env_keys_never_recorded(self):
+        fx = Fixture(self.tmp, settings_env=dict(ENV, CLAUDE_CODE_OAUTH_TOKEN="sk-secret",
+                                                 LIBRARIAN_ENABLED="1", TMPDIR="/x"))
+        m = fx.freeze()
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", m["mcp_env"])
+        self.assertNotIn("TMPDIR", m["mcp_env"])
+        self.assertEqual(m["mcp_env"]["LIBRARIAN_ENABLED"], "1")
+        self.assertNotIn("sk-secret", (self.tmp / "setup-manifest.json").read_text())
+
+    def test_mismatched_profile_and_claude_json_raises(self):
+        fx = Fixture(self.tmp)
+        other = self.tmp / "other.json"
+        other.write_text(fx.claude_json.read_text())
+        with self.assertRaises(ValueError):
+            freeze_setup.freeze(fx.profile, other, lambda u: True, cli_path=fx.cli,
+                                runner=fake_runner, out_path=self.tmp / "m.json")
+
+    def test_claude_json_defaults_to_profile_dot_claude_json(self):
+        fx = Fixture(self.tmp)
+        m = freeze_setup.freeze(fx.profile, None, lambda u: True, cli_path=fx.cli,
+                                runner=fake_runner, out_path=self.tmp / "m.json")
+        self.assertEqual(m["mcp_env"], ENV)
+
+    def test_user_scope_record_wins_over_later_project_record(self):
+        fx = Fixture(self.tmp)
+        key = "codescout-companion@mk"
+        recs = json.loads((fx.profile / "plugins/installed_plugins.json").read_text())
+        proj = self.tmp / "elsewhere"
+        proj.mkdir()
+        recs["plugins"][key].append({"scope": "project", "projectPath": "/p",
+                                     "installPath": str(proj), "version": "9.9"})
+        (fx.profile / "plugins/installed_plugins.json").write_text(json.dumps(recs))
+        m = fx.freeze()
+        self.assertEqual(m["plugins_cs"]["version"], "1.0")
+
+    def test_missing_user_scope_record_raises(self):
+        fx = Fixture(self.tmp)
+        key = "codescout-companion@mk"
+        recs = json.loads((fx.profile / "plugins/installed_plugins.json").read_text())
+        recs["plugins"][key][0]["scope"] = "project"
+        (fx.profile / "plugins/installed_plugins.json").write_text(json.dumps(recs))
+        with self.assertRaises(ValueError):
+            fx.freeze()
+
+    def test_missing_companion_raises(self):
+        fx = Fixture(self.tmp, {"other@mk": {}})
+        with self.assertRaises(ValueError) as cm:
+            fx.freeze()
+        self.assertIn("codescout-companion", str(cm.exception))
 
 
     def test_cli_has_no_default_profile(self):

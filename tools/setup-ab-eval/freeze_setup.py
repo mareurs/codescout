@@ -27,6 +27,9 @@ CONFIG_FILE_NAMES = ("CLAUDE.md", "settings.json")
 QDRANT_HTTP_URL = "http://127.0.0.1:6333"
 QDRANT_HEALTH_PATH = "/healthz"
 
+# Only these settings.json env keys are ever recorded (never tokens or unrelated vars).
+ENV_KEY_PREFIXES = ("CODESCOUT_", "LIBRARIAN_")
+
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -76,10 +79,12 @@ def _enabled_plugins(profile: Path) -> list:
     for key, on in settings.get("enabledPlugins", {}).items():
         if not on:
             continue
-        recs = records.get(key)
-        if not recs:
-            raise ValueError(f"plugin {key} is enabled but has no install record")
-        rec = recs[-1]
+        # Duplicate records are per-scope (user/project/local); the user-scope one is the setup.
+        recs = [r for r in records.get(key, []) if r.get("scope") == "user"]
+        if len(recs) != 1:
+            raise ValueError(f"plugin {key}: expected exactly one user-scope install record, "
+                             f"found {len(recs)}")
+        rec = recs[0]
         install = Path(rec["installPath"]).resolve()
         if not install.is_relative_to(root):
             raise ValueError(f"plugin {key} installPath {install} is outside profile {root}")
@@ -88,18 +93,30 @@ def _enabled_plugins(profile: Path) -> list:
     return out
 
 
-def freeze(profile_dir: Path, claude_json: Path, probe: Callable[[str], bool], *,
+def freeze(profile_dir: Path, claude_json: Optional[Path], probe: Callable[[str], bool], *,
            cli_path: Path, runner: Callable = default_runner,
            out_path: Optional[Path] = None) -> dict:
     profile = Path(profile_dir)
-    cs = json.loads(Path(claude_json).read_text())["mcpServers"]["codescout"]
-    env = cs.get("env", {})
+    claude_json = Path(claude_json) if claude_json else profile / ".claude.json"
+    if claude_json.resolve().parent != profile.resolve():
+        raise ValueError(f"claude_json {claude_json} does not belong to profile {profile}")
+    cs = json.loads(claude_json.read_text())["mcpServers"]["codescout"]
     cs_bin = Path(cs["command"])
+
+    # Effective env: the profile's settings.json env (CODESCOUT_*/LIBRARIAN_* only, so no
+    # token ever lands in the manifest), overlaid by the MCP entry's own env.
+    settings_env = json.loads((profile / "settings.json").read_text()).get("env", {})
+    env, env_source = {}, {}
+    for k, v in settings_env.items():
+        if k.startswith(ENV_KEY_PREFIXES):
+            env[k], env_source[k] = v, "settings"
+    for k, v in cs.get("env", {}).items():
+        env[k], env_source[k] = v, "claude_json"
 
     for key in ("CODESCOUT_EMBEDDER_URL", "CODESCOUT_SPARSE_EMBEDDER_URL", "CODESCOUT_RERANKER_URL"):
         # An unconfigured service is a config error, not a measured "absent".
         if not env.get(key):
-            raise ValueError(f"{key} missing from codescout env in {claude_json}")
+            raise ValueError(f"{key} missing from effective codescout env of {profile}")
 
     retrieval = {
         "qdrant": probe(QDRANT_HTTP_URL + QDRANT_HEALTH_PATH),
@@ -119,6 +136,8 @@ def freeze(profile_dir: Path, claude_json: Path, probe: Callable[[str], bool], *
             full.append(entry)
     cs_plugin = next(({"install_path": p["install_path"], "version": p["version"]}
                       for p in plugins if p["name"] == "codescout-companion"), None)
+    if cs_plugin is None:
+        raise ValueError(f"codescout-companion is not enabled in {profile}; the cs arm needs it")
 
     manifest = {
         "profile_dir": str(profile),
@@ -129,6 +148,7 @@ def freeze(profile_dir: Path, claude_json: Path, probe: Callable[[str], bool], *
         "codescout": {"binary_sha256": sha256_file(cs_bin),
                       "version_json": json.loads(runner([str(cs_bin), "version"]))},
         "mcp_env": env,
+        "mcp_env_source": env_source,
         "retrieval": retrieval,
         "plugins_cs": cs_plugin,
         "plugins_full": full,
@@ -144,7 +164,7 @@ def freeze(profile_dir: Path, claude_json: Path, probe: Callable[[str], bool], *
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--profile", required=True, type=Path, help="profile dir; no default")
-    ap.add_argument("--claude-json", required=True, type=Path)
+    ap.add_argument("--claude-json", type=Path, default=None, help="default: <profile>/.claude.json")
     ap.add_argument("--cli", required=True, type=Path, help="Claude Code CLI binary")
     ap.add_argument("--out", type=Path, default=Path("setup-manifest.json"))
     a = ap.parse_args(argv)
