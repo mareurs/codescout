@@ -1,13 +1,15 @@
 ---
 id: '3d7e38fd20fac6b8'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: file provenance answers at session grain, so N parallel subagents are one writer and fmt-mine.sh cannot refuse any of them'
 owners:
 - marius
 tags:
 - cluster/attribute-derived-at-container-granularity
 topic: authorship attribution under subagent fan-out
+closed: 2026-10-27
+unverified: The fix says the attribution is session-grain; it does not restore the refusal, so fmt-mine.sh still formats a sibling subagent's file. The note also prints when the asker is the parent that dispatched the subagent, where MINE is correct. The asker's own agent id is not available natively for Claude Code, so the note names the writers and cannot say which one is the reader.
 ---
 
 ## Summary
@@ -94,22 +96,19 @@ A five-agent round in session `48d1f0c8-9f60-43bb-a15e-17ec7995813a`. One agent 
 
 ## Fix
 
-Not fixed. Candidate directions, neither costed:
+Mitigated by direction 2, in `3b1b97232` (patch-id `cb2e3b19502ef4b42c6a361fb7658e7608c60a5e`). Direction 1 is not available natively; see Resume.
 
-1. **Give provenance an agent column.** Requires a per-agent identifier the writer can stamp;
-   whether the harness exposes one is unverified and is the first thing to check.
-2. **Make the session-grain answer say so.** Cheaper and strictly honest: when a session has
-   multiple concurrent writers, have `fmt-mine.sh` and `wip_authors` report *"session-grain
-   attribution; N writers active under this sessionId"* rather than *"likely yours"*. This does not
-   restore the refusal, but it stops the instrument asserting a precision it does not have —
-   which is the half that actually misleads.
+`ProvenanceScan` gained a `streams` field: path, then principal, then the set of agent ids that wrote it (`None` is the root session). `scan_provenance` fills it. `session_grain_note` in `scripts/file-provenance.py` prints a `session-grain:` line under `written by THIS session` and under each peer `written by` line when any agent id is not `None`. The note names the writers and says that attribution names the SESSION, not the agent. A path only the root wrote gets no note.
 
-Direction 2 is the one that matches `CLAUDE.md` § *Observer Blindness* position 3: a check that
-runs when nobody is worried, rather than a rule someone must remember.
+The verdict tokens (`MINE`, `PEER`, `SHARED`, `UNKNOWN`, `CLEAN`) are unchanged, because `fmt-mine.sh` partitions on them.
+
+Not done: the refusal. A sibling subagent that formats another subagent's file still gets `MINE`. A refusal needs a verdict policy for subagents and the asker's own agent id. That is a decision for Marius.
 
 ## Tests added
 
-None.
+`tests/test_harness_provenance.py::test_writes_by_several_agents_of_one_session_say_the_attribution_is_session_grain`. RED was watched: the output showed only `written by THIS session (claude-code:root-1)` for two sibling subagents. It covers root only (no note), two sibling subagents, the root plus a subagent, and a single subagent. All verdicts stay `MINE`.
+
+Green: `tests/test_harness_provenance.py` 20 passed; the Python light lane 1370 passed; `tests/file-provenance.sh` 245/0; `tests/fmt-mine.sh` 56/0; `tests/attribute-red.sh` 45/0; `./scripts/gate.sh` green in an isolated worktree (patch-id matched the committed diff).
 
 ## Workarounds
 
@@ -119,9 +118,9 @@ this campaign did, and which is why the sweep was harmless rather than a collisi
 
 ## Resume
 
-Open. Locus: `scripts/file-provenance.py` (attribution), `scripts/fmt-mine.sh` (consumer),
-`scripts/attribute-red.py` (consumer). Check first whether the harness exposes a per-agent id at
-all; if it does not, direction 2 is the whole available fix.
+Mitigated, not fixed. Checked 2026-10-27: Claude Code subagent transcripts do carry an agent id (`<session>/subagents/agent-<id>.jsonl`, read as `op.agent_id`), but `_native_context` in `scripts/session_context.py` gives the asker `agent_id=None` for Claude Code. Only Codex (`CODEX_THREAD_ID`) or an explicit context file supplies one. So direction 1, and any refusal, needs either a harness-supplied agent id or a policy that treats every subagent-written path as `SHARED`. Open decision: which policy.
+
+Locus: `scripts/file-provenance.py` (`scan_provenance`, `session_grain_note`), `scripts/provenance_records.py`, `scripts/fmt-mine.sh` (consumer), `scripts/attribute-red.py` (consumer; its `wip_authors` line was not changed and was not checked against the new note).
 
 ## References
 
