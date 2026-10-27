@@ -51,6 +51,10 @@ class FakeDocker:
             out = "false\n" if argv[-1] in self.exited else "true\n"
         elif argv[0] == "exec":
             rc = 1 if argv[1] in self.unready else 0
+        elif argv[:2] == ["rm", "-f"]:
+            self.containers = [c for c in self.containers if c not in argv[2:]]
+        elif argv[:2] == ["volume", "rm"]:
+            self.volumes -= set(argv[2:])
         if kwargs.get("check", True) and rc:
             raise RuntimeError(f"docker failed (exit {rc})")
         return SimpleNamespace(returncode=rc, stdout=out)
@@ -190,6 +194,35 @@ class StackUpTest(unittest.TestCase):
             stack.stack_up(NETWORK, ALL_ON, docker=failing_copy)
         self.assertIn(["volume", "rm", "sab-model-cache"], d.calls)
         self.assertIsNone(d.run_named("sab-sparse"))
+    def test_every_docker_run_is_named_in_the_study_namespace(self):
+        d, _ = self.up()
+        d.volumes.add("sab-tpl-t")
+        clock = FakeClock()
+        stack.qdrant_for_run("sab-tpl-t", "a1", network=NETWORK, docker=d, clock=clock,
+                             sleep=clock.sleep)
+        runs = d.runs()
+        self.assertEqual(len(runs), 6)  # cache copy, 3 services, run copy, run qdrant
+        for argv in runs:
+            self.assertIn("--name", argv, argv)
+            self.assertTrue(argv[argv.index("--name") + 1].startswith("sab-"), argv)
+
+    def test_a_timed_out_cache_copy_removes_the_helper_before_the_volume(self):
+        d = FakeDocker()
+        real = d.__call__
+
+        def hanging_copy(*args, **kwargs):
+            if args[0] == "run" and "--rm" in args:
+                d.calls.append([str(a) for a in args])
+                d.containers.append(args[args.index("--name") + 1])  # it keeps running
+                raise subprocess.TimeoutExpired(["docker", *args], 1800)
+            return real(*args, **kwargs)
+        with self.assertRaises(subprocess.TimeoutExpired):
+            stack.stack_up(NETWORK, ALL_ON, docker=hanging_copy)
+        rm_helper = d.calls.index(["rm", "-f", "sab-copy-sab-model-cache"])
+        rm_volume = d.calls.index(["volume", "rm", "sab-model-cache"])
+        self.assertLess(rm_helper, rm_volume)
+        self.assertNotIn("sab-model-cache", d.volumes)
+        self.assertEqual(d.containers, [])
 
     def test_qdrant_starts_on_a_fresh_study_volume(self):
         d, _ = self.up()
@@ -238,9 +271,9 @@ class QdrantForRunTest(unittest.TestCase):
                                     sleep=clock.sleep)
 
     def test_each_run_gets_its_own_qdrant_volume_copied_from_template(self):
-        d = FakeDocker(volumes={"sab-qtemplate"})
-        url_a = self.start(d, "sab-qtemplate", "a1")
-        url_b = self.start(d, "sab-qtemplate", "b2")
+        d = FakeDocker(volumes={"sab-tpl-t"})
+        url_a = self.start(d, "sab-tpl-t", "a1")
+        url_b = self.start(d, "sab-tpl-t", "b2")
         self.assertEqual(url_a, "http://sab-qdrant-a1:6334")
         self.assertEqual(url_b, "http://sab-qdrant-b2:6334")
         for run in ("a1", "b2"):
@@ -248,7 +281,7 @@ class QdrantForRunTest(unittest.TestCase):
             self.assertIn(["volume", "create", vol], d.calls)
             copy = [c for c in d.runs() if f"{vol}:/d" in c]
             self.assertEqual(len(copy), 1)
-            self.assertIn("sab-qtemplate:/s:ro", copy[0])
+            self.assertIn("sab-tpl-t:/s:ro", copy[0])
             self.assertIn("--rm", copy[0])
             self.assertEqual(copy[0][-3:], ["-a", "/s/.", "/d/"])
             q = d.run_named(f"sab-qdrant-{run}")
@@ -259,27 +292,54 @@ class QdrantForRunTest(unittest.TestCase):
         self.assertIsNone(d.run_named("sab-qdrant"))
 
     def test_a_run_never_reuses_an_existing_volume(self):
-        d = FakeDocker(volumes={"sab-qtemplate", "sab-qv-a1"})
+        d = FakeDocker(volumes={"sab-tpl-t", "sab-qv-a1"})
         with self.assertRaisesRegex(RuntimeError, "sab-qv-a1"):
-            self.start(d, "sab-qtemplate", "a1")
+            self.start(d, "sab-tpl-t", "a1")
         self.assertEqual(d.runs(), [])
 
     def test_a_live_volume_is_never_a_template(self):
         d = FakeDocker(volumes={"codescout-retrieval_qdrant_storage"})
-        with self.assertRaisesRegex(ValueError, "sab-"):
+        with self.assertRaisesRegex(ValueError, "sab-tpl-"):
             self.start(d, "codescout-retrieval_qdrant_storage", "a1")
         self.assertEqual(d.calls, [])
 
+    def test_template_must_use_tpl_prefix(self):
+        for bad in ("sab-qv-index", "sab-qv-a1", "sab-qtemplate", "sab-model-cache", "sab-tpl",
+                    "sab-tpl-", "codescout-retrieval_qdrant_storage"):
+            d = FakeDocker(volumes={bad})
+            with self.assertRaisesRegex(ValueError, "sab-tpl-", msg=bad):
+                self.start(d, bad, "a1")
+            self.assertEqual(d.calls, [], bad)
+        self.assertTrue(self.start(FakeDocker(volumes={"sab-tpl-x"}), "sab-tpl-x", "a1"))
+
+    def test_a_timed_out_copy_removes_the_helper_before_the_volume(self):
+        d = FakeDocker(volumes={"sab-tpl-t"})
+        real = d.__call__
+
+        def hanging_copy(*args, **kwargs):
+            if args[0] == "run" and "--rm" in args:
+                d.calls.append([str(a) for a in args])
+                d.containers.append(args[args.index("--name") + 1])  # it keeps running
+                raise subprocess.TimeoutExpired(["docker", *args], 1800)
+            return real(*args, **kwargs)
+        with self.assertRaises(subprocess.TimeoutExpired):
+            stack.qdrant_for_run("sab-tpl-t", "a1", network=NETWORK, docker=hanging_copy)
+        rm_helper = d.calls.index(["rm", "-f", "sab-copy-sab-qv-a1"])
+        rm_volume = d.calls.index(["volume", "rm", "sab-qv-a1"])
+        self.assertLess(rm_helper, rm_volume)
+        self.assertNotIn("sab-qv-a1", d.volumes)
+        self.assertIsNone(d.run_named("sab-qdrant-a1"))
+
     def test_a_missing_template_is_refused(self):
         d = FakeDocker()
-        with self.assertRaisesRegex(RuntimeError, "sab-qtemplate"):
-            self.start(d, "sab-qtemplate", "a1")
+        with self.assertRaisesRegex(RuntimeError, "sab-tpl-t"):
+            self.start(d, "sab-tpl-t", "a1")
         self.assertEqual(d.runs(), [])
 
     def test_a_run_name_that_is_not_a_plain_token_is_refused(self):
         for bad in ("", "../x", "a b", "A:1", "-x"):
             with self.assertRaises(ValueError, msg=bad):
-                self.start(FakeDocker(volumes={"sab-qtemplate"}), "sab-qtemplate", bad)
+                self.start(FakeDocker(volumes={"sab-tpl-t"}), "sab-tpl-t", bad)
 
 
 class StackDownTest(unittest.TestCase):
@@ -292,7 +352,7 @@ class StackDownTest(unittest.TestCase):
 
     def test_stack_down_removes_per_run_volumes_only(self):
         d = FakeDocker(containers=["sab-qdrant-a1"],
-                       volumes={"sab-qv-a1", "sab-qv-index", "sab-qtemplate", "sab-model-cache",
+                       volumes={"sab-qv-a1", "sab-qv-index", "sab-tpl-t", "sab-model-cache",
                                 "codescout-retrieval_qdrant_storage", "x-sab-qv-1"})
         stack.stack_down(docker=d)
         removed = [n for c in d.calls if c[:2] == ["volume", "rm"] for n in c[2:]]
@@ -311,6 +371,58 @@ class StackDownTest(unittest.TestCase):
         for bad in ("", "s", "sa", "codescout-", "rae-"):
             with self.assertRaises(ValueError, msg=bad):
                 stack.stack_down(bad, docker=FakeDocker(containers=["codescout-qdrant"]))
+    def test_stack_down_keeps_templates(self):
+        d = FakeDocker(volumes={"sab-tpl-t", "sab-tpl-u", "sab-qv-a1", "sab-model-cache"})
+        stack.stack_down(docker=d)
+        self.assertEqual(d.volumes, {"sab-tpl-t", "sab-tpl-u", "sab-model-cache"})
+
+    def test_stack_down_rejects_narrower_prefix(self):
+        for bad in ("sab-qdrant", "sab-qdrant-a1", "sab-qv-a1", "sab-q", "sab-tpl-", "sab-copy-"):
+            d = FakeDocker(containers=["sab-qdrant", "sab-qdrant-a1"], volumes={"sab-qv-a1"})
+            with self.assertRaises(ValueError, msg=bad):
+                stack.stack_down(bad, docker=d)
+            self.assertEqual(d.calls, [], bad)
+
+    def test_stack_down_removes_a_leftover_copy_helper(self):
+        d = FakeDocker(containers=["sab-copy-sab-qv-a1"], volumes={"sab-qv-a1"})
+        stack.stack_down(docker=d)
+        self.assertEqual((d.containers, d.volumes), ([], set()))
+class ExactTeardownTest(unittest.TestCase):
+    def test_run_down_a1_leaves_a10(self):
+        d = FakeDocker(containers=["sab-qdrant-a1", "sab-qdrant-a10", "sab-copy-sab-qv-a1",
+                                   "sab-copy-sab-qv-a10", "sab-qdrant"],
+                       volumes={"sab-qv-a1", "sab-qv-a10", "sab-qv-index", "sab-tpl-t"})
+        stack.run_down("a1", docker=d)
+        self.assertEqual(d.containers, ["sab-qdrant-a10", "sab-copy-sab-qv-a10", "sab-qdrant"])
+        self.assertEqual(d.volumes, {"sab-qv-a10", "sab-qv-index", "sab-tpl-t"})
+
+    def test_run_down_of_an_absent_run_issues_no_rm(self):
+        d = FakeDocker(containers=["sab-qdrant-a10"], volumes={"sab-qv-a10"})
+        stack.run_down("a1", docker=d)
+        self.assertFalse(any(c[0] == "rm" or c[:2] == ["volume", "rm"] for c in d.calls))
+
+    def test_run_down_refuses_a_run_name_that_is_not_a_plain_token(self):
+        for bad in ("", "a1 a10", "-x", "A1"):
+            with self.assertRaises(ValueError, msg=bad):
+                stack.run_down(bad, docker=FakeDocker())
+
+    def test_index_down_retires_only_the_index_builder(self):
+        d = FakeDocker(containers=["sab-qdrant", "sab-qdrant-a1", "sab-dense"],
+                       volumes={"sab-qv-index", "sab-qv-a1"})
+        stack.index_down(docker=d)
+        self.assertEqual(d.containers, ["sab-qdrant-a1", "sab-dense"])
+        # The index volume stays: it is what the caller copies into a template.
+        self.assertEqual(d.volumes, {"sab-qv-index", "sab-qv-a1"})
+
+    def test_remove_template_removes_exactly_that_template(self):
+        d = FakeDocker(volumes={"sab-tpl-t", "sab-tpl-t2", "sab-qv-a1"})
+        stack.remove_template("sab-tpl-t", docker=d)
+        self.assertEqual(d.volumes, {"sab-tpl-t2", "sab-qv-a1"})
+        for bad in ("sab-qv-a1", "sab-model-cache", "codescout-x", "sab-tpl-"):
+            with self.assertRaises(ValueError, msg=bad):
+                stack.remove_template(bad, docker=d)
+
+
 
 
 if __name__ == "__main__":
