@@ -843,6 +843,17 @@ fn format_search_context_mode(out: &mut String, matches: &[Value]) {
     }
 }
 
+/// Hint for a regex that failed to compile. The `regex` crate has no
+/// look-around, and its error text says so; escaping would not help then.
+fn invalid_regex_hint(err: &regex::Error) -> &'static str {
+    if err.to_string().contains("look-around") {
+        "the regex engine has no look-around (?!…) (?<!…) (?=…) (?<=…) — \
+         use two greps, or rewrite the pattern without it"
+    } else {
+        "patterns are full regex syntax — escape metacharacters like \\( \\. \\[ for literals"
+    }
+}
+
 /// Build a search regex. Resolves the body (raw regex, or escaped literal when
 /// the pattern isn't valid regex and didn't intend to be), then applies
 /// whole-word wrapping and case-insensitivity. Returns (regex, is_literal_fallback).
@@ -864,7 +875,7 @@ fn build_grep_regex(
             if super::is_regex_like(pattern) {
                 return Err(RecoverableError::with_hint(
                     format!("invalid regex: {e}"),
-                    "patterns are full regex syntax — escape metacharacters like \\( \\. \\[ for literals",
+                    invalid_regex_hint(&e),
                 )
                 .into());
             }
@@ -2370,6 +2381,25 @@ mod tests {
             "a clamped line must SAY it was clamped, got: {}",
             &payload[..payload.len().min(400)]
         );
+    }
+
+    /// The compile error for `pattern`. Taking the pattern as a parameter keeps
+    /// clippy's `invalid_regex` lint, which reads literals, from rejecting the
+    /// deliberately invalid patterns below.
+    fn compile_error(pattern: &str) -> regex::Error {
+        regex::Regex::new(pattern).unwrap_err()
+    }
+
+    #[test]
+    fn invalid_regex_hint_names_look_around_not_escaping() {
+        let hint = invalid_regex_hint(&compile_error("a(?!b)"));
+        assert!(hint.contains("look-around"), "got: {hint}");
+        assert!(!hint.contains("escape"), "got: {hint}");
+    }
+
+    #[test]
+    fn invalid_regex_hint_keeps_escape_advice_for_other_errors() {
+        assert!(invalid_regex_hint(&compile_error("a(b")).contains("escape"));
     }
 
     #[test]
