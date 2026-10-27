@@ -8,6 +8,8 @@ tags:
 closed: 2026-10-27
 fix_patch_id: ccc4e87cb187b9404f075ca2ba6de4cfe7ec2a69
 fix_sha: 03c125594 (experiments)
+follow_up_fix_patch_id: 9fa67bb3eddc08fa1ff915e2d0f0d909c7422d0b
+follow_up_fix_sha: 3ba135be5 (experiments)
 opened: 2026-10-24
 owner: marius
 severity: low
@@ -49,17 +51,36 @@ N/A.
 
 ## Fix
 
-Fixed on `experiments` in `03c125594` (patch-id `ccc4e87cb187b9404f075ca2ba6de4cfe7ec2a69`). `normalize_err_family` now returns `read_file_overflow_threshold` for a `read_file` message that starts with `section "` or `combined headings span ` and contains ` lines — exceeds inline threshold`. The rule sits before the substring scans, because the section title inside the message is data: a title such as `index is locked` would otherwise match `lsp_index_locked`. The family is added to `ERR_FAMILIES`, which changes the persisted fingerprint, so the backfill re-classifies history when each DB is next opened.
+Two commits on `experiments`.
 
-Not done, and still open (file each as its own bug when reproduced):
+- `03c125594` (patch-id `ccc4e87cb187b9404f075ca2ba6de4cfe7ec2a69`). `normalize_err_family` returns `read_file_overflow_threshold` for a `read_file` message that starts with `section "` or `combined headings span ` and contains ` lines — exceeds inline threshold`. The rule sits before the substring scans, because the section title inside the message is data: a title such as `index is locked` would otherwise match `lsp_index_locked`.
+- `3ba135be5` (patch-id `9fa67bb3eddc08fa1ff915e2d0f0d909c7422d0b`). Four new families and two folded messages, each on a fixed prefix before the substring scans:
+  - `shrink_guard_blocked`: `shrink guard: `, `body-shrink guard: ` and `memory-shrink guard: `. The source has five emitters (`edit_code`, `create_file`, `edit_markdown`, `doc(update)`, `memory`). Only `edit_code` rows exist in the data read here.
+  - `replace_would_rename`: `edit_code replace('…') was given a complete declaration, but it declares …`. The neighbouring `replace_dropped_sibling` keeps its own text.
+  - `unanchored_archive_refused`: both texts of `refuse_unanchored_archive` (no fix anchor, and a SHA without its patch-id), from `doc(move)` and `doc(update)`.
+  - `symbols_pattern_is_regex`: tool-scoped to `symbols`.
+  - `missing_required_param` now also takes `end_line provided without start_line` and `body_edits[N]: missing required '…'`.
 
-- `doc(get)` overflow. No `doc(get)` row in this project's `usage.db` shows it, so it is unverified.
-- The six newer guard messages listed under Root cause. They have no family yet.
-- The backfill was not run against a copy of a real `usage.db`. Only the unit tests cover the re-classification.
+Both commits add families to `ERR_FAMILIES`, which changes the persisted fingerprint, so each `usage.db` re-runs the backfill on its next open. The backfill only fills NULL rows.
+
+**Backfill verified on a real copy.** I copied this project's live `usage.db` with `sqlite3 .backup` and ran the real `open_db` path on it.
+
+- After resetting the 74 overflow rows and rewinding `user_version`, exactly 74 rows changed, all from NULL to `read_file_overflow_threshold`.
+- With the four new families, 117 more rows changed, all from NULL to the intended family. None left an existing family. The row count held at 73,632. NULL rows fell from 217 to 100.
+- The live DB's `user_version` was `90010721`, which is not the fingerprint of the code at the time. It re-runs the backfill on its next open.
+
+**Corrections to this bug's own text.**
+
+- `doc(get)` does not share the section reader. `grep` for `exceeds inline threshold` finds one emitter, `src/tools/markdown/read_markdown.rs`, and only `ReadFile` calls it. No `doc(get)` family is needed.
+- The 49 `symbols` regex errors were not reproduced. A `find` under `/home/marius/work` listed 35 `usage.db` files. The query ran with stderr suppressed, so I did not verify that every file opened. It found 4 rows, in 2 DBs (3 and 1). The shape is `pattern looks like a regex (found regex syntax) — symbols searches symbol names, not text`.
+
+**Still open.** 100 NULL rows remain in this project's DB. They are other messages: the `doc` leaf/ops filter-shape errors, `edit_file` `edits[]` mixing shapes, the `/tmp` rooted-artifact refusal, `both start_line and end_line are required` on `read_file`, and a few one-offs. None is in this bug's list. File a new bug if the ranking needs them.
 
 ## Tests added
 
-`a_read_file_overflow_is_classified_and_stays_tool_scoped` in `src/usage/db.rs`. It covers both live shapes, a hostile title (`index is locked`), the `read_markdown` arm keeping its own family, a non-overflow `read_file` error, and a `run_command` tool-scope check. RED was watched (`left: None`), and a naive `contains` placement failed the hostile-title case. 55 `usage::db::tests::` tests pass, and the full `./scripts/gate.sh` was green (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`).
+- `a_read_file_overflow_is_classified_and_stays_tool_scoped` in `src/usage/db.rs`. It covers both live shapes, a hostile title (`index is locked`), the `read_markdown` arm keeping its own family, a non-overflow `read_file` error, and a `run_command` tool-scope check. RED was watched (`left: None`), and a naive `contains` placement failed the hostile-title case.
+- `the_six_guard_messages_the_2026_10_24_sweep_found_unclassified_have_a_family` in `src/usage/db.rs`. Shapes are copied from live rows, or from the emitting `format!` where no row exists here. Every rule has a hostile symbol name or hint, and `symbols_pattern_is_regex` has a tool-scope `assert_ne`. RED was watched (`left: None`).
+- 56 `usage::db::tests::` tests pass, including `err_families_lists_exactly_what_the_classifier_can_emit`. The full `./scripts/gate.sh` was green for both commits (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, `PYTHON_LIGHT=0`).
 
 ## Workarounds
 
