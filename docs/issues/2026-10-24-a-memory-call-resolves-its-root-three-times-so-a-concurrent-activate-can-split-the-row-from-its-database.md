@@ -54,6 +54,11 @@ None.
 
 Not implemented. Candidate: resolve the root (or `None`) once at the top of each memory action and pass `Some(&root)` as the override to `memory_embedder_for` and `semantic_memory_store_for`, deciding explicitly what a call with no project should do.
 
+
+**Checked 2026-10-27 before any code: the candidate is not decision-free.** `Memory/call` and its helpers resolve the pin at about 30 sites (`grep -n workspace_override src/tools/memory/mod.rs`). Resolving once and passing `Some(&root)` would route every one of them through `Agent::with_project_at(Some(root))`, which runs `ensure_resident(root)` and then looks up `inner.workspaces` by the canonical root before taking the workspace's focused project. `None` takes `inner.default_workspace()`. The two are the same workspace only when `root` is the WORKSPACE root. A `p.root` read from the focused sub-project (for example `crates/codescout-embed` in this workspace) would instead be treated as a new pinned workspace (inferred from reading `with_project_at`; not run). So the fix needs two things this file does not yet have: an accessor for the default workspace's root, and a decision on what a call with no active project does (today `with_project_at(None)` errors with `No active project`, while `semantic_memory_store_for_backend` takes `self.project_root().await`, an `Option`, and hands `None` to the directory resolver; what directory that gives was not checked). A race test also needs a hook between the resolutions. The code states the per-call resolution is deliberate (`semantic_memory_store_for_backend` resolves the root "on EVERY call, from this call's pin or else the CURRENT default" so a store never outlives an `activate`), so a fix changes a documented choice.
+
+Not started. Classified as a design item, not a mechanical fix.
+
 ## Tests added
 
 N/A: not fixed; this file records a finding.
