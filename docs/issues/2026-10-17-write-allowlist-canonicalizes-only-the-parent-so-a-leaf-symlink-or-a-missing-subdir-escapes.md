@@ -409,6 +409,26 @@ Pinned in `4d70f9594` (patch-id `e34e96c8f03d7632993e22188d975d9c44ebffa5`), bot
 
 Still unverified: macOS, case-insensitive filesystems, Windows; the `/etc/passwd` probe; and the check-versus-write race, which the second looks narrow and do not close. The test for the memory store does not say whether it refuses or replaces. The issue stays `open`.
 
+## Live probe on the rebuilt server, 2026-10-27
+
+Server PID 4055182, binary built 13:16 after commit `018abc731`, from a working tree that also held peers' uncommitted test edits. Linux only. Each link was made inside the project in a scratch directory and removed afterwards. The user authorised a canary file inside `~/.ssh`. `~/.ssh` was manifested first (28 file hashes) and matched after the cleanup.
+
+| # | Link target | Tool | Result |
+|---|---|---|---|
+| 1 | canary file outside every root, owned by the user | `create_file` overwrite | The link became a regular file. The canary kept its SHA-256. |
+| 2 | `/etc/passwd` (not on the deny list) | `create_file`, then again with `force` | The shrink guard fired first with the size of `/etc/passwd` (2799 bytes, 49 lines), so it compares against the pointed-at file. With `force` the link was replaced and the `/etc/passwd` hash did not change. A non-root user could not write that file anyway, so probe 1 is the one that discriminates. |
+| 3 | `/etc/shadow` | `create_file`, `edit_file` | Both `write denied`, naming the target. `approve_write` cannot grant it. |
+| 4 | dangling link into `~/.ssh` | `create_file` | `write denied`. Nothing was created in `~/.ssh`. |
+| 5 | canary file outside every root, owned by the user | `edit_file` | `old_string` matched through the link, the link was replaced, the canary was unchanged. |
+| 6 | readable canary inside `~/.ssh` | `read_file` on the link; `read_file` on the absolute path; `edit_file` with the marker as `old_string`; `create_file` overwrite with `force` | All four refused, none disclosed the marker, the canary hash did not change. |
+| 7 | same canary | `run_command` `cat`, on the link and on the absolute path | The marker was returned both times. Filed as `510f27fe15220816`: the shell does not consult the read deny list. It is not a defect of this record's policy. |
+
+A `grep` for the marker over the link returned 0 matches. That is not a pass: ripgrep does not follow symlinks.
+
+What this settles: on Linux, `create_file` and `edit_file` replace an in-project link whose end is outside every root and not deny-listed, and never touch the end (probes 1, 2 and 5). A link whose end is on the deny list is refused by name, even when it dangles (probes 3, 4 and 6). The `/etc/passwd` probe is now run for `create_file`.
+
+Not run: `edit_code` `rename` (the one writer that writes through a link), `doc(update)` and `doc(create)` on links, macOS, Windows, case-insensitive filesystems, and the check-versus-write race. The issue stays `open` for those.
+
 ## References
 
 - `docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md`
