@@ -309,10 +309,10 @@ the working tree for every session in it.
 decided set by SHA. That rule is in `docs/RELEASE.md` § *Concurrent-Work Rules*.
 
 **Status.** The policy has checks at commit and push time. A session that must withhold its work runs
-`scripts/hold-publish.sh set <reason>`. That writes a ref `refs/holds/<session-id>` in the shared repo.
+`scripts/hold-publish.sh set <reason>`. The shared context resolver accepts native `CLAUDE_CODE_SESSION_ID`, native `CODEX_SESSION_ID`, or `CODESCOUT_CONTEXT_FILE`; simultaneous native roots or an explicit/native mismatch refuse hold mutation, commit and push. Codex child thread IDs keep their root principal; `CODEX_THREAD_ID` alone is not a root identity. Claude keeps `refs/holds/<sid>` and bare `Session-Id: <sid>`. Codex uses `refs/holds/_codex/<sid>` and canonical `Session-Id: codex:<sid>`; `_codex` cannot collide with a valid legacy ID. No existing refs or history are migrated. Bare explicit release tokens always mean Claude; `codex:<sid>` selects Codex and `claude-code:<sid>` explicitly aliases a legacy Claude hold. Implicit release selects the caller's own harness. Codex liveness stays `?` and never borrows a same-UUID Claude registry row.
 `scripts/hold-publish.sh release [sid]` drops it. `scripts/hold-publish.sh list` shows every hold. The pre-existing
 pre-push guard, `scripts/pre-push-foreign-session-guard.sh`, refuses a push that carries any commit whose
-`Session-Id` trailer has a hold. It refuses before it reads `CODESCOUT_PUSH_ACK`, so `CODESCOUT_PUSH_ACK=all` does
+`Session-Id` or `Co-Authored-Session-Id` trailer has a hold. It refuses before it reads `CODESCOUT_PUSH_ACK`, so `CODESCOUT_PUSH_ACK=all` does
 not clear a hold. It checks every pushed ref except a deletion, so a tag or a `refs/wip/*` push is covered too, and it
 refuses when it cannot list a push range while any hold exists. It names the reason, the age (in seconds, minutes, hours or days; from 24 hours up it counts days, so 49 hours prints
 `2d`) and the release
@@ -326,12 +326,12 @@ The native pre-commit dispatcher, `scripts/pre-commit-run.sh`, also refuses comm
 
 **Limits of the mechanism.**
 
-- A commit with no `Session-Id` trailer is not matched. The guard cannot tell whose it is.
+- A commit with neither `Session-Id` nor `Co-Authored-Session-Id` is not matched. The guard cannot tell whose it is.
 - A hold covers the whole session, not one commit.
 - Nothing forces a session to set a hold. The hold is only as good as that habit.
 - `release` is a convention. Nothing proves that the caller is the operator when it drops another session's hold.
-- The commit check enforces an already-recorded hold. It cannot infer withholding that was never recorded. Like the push check, it reads `CLAUDE_CODE_SESSION_ID`; a manual commit without that variable is allowed. Skipping hooks also skips the check.
-- A push from a terminal with no `CLAUDE_CODE_SESSION_ID` publishes held commits silently. That is by design: the
+- The commit check enforces an already-recorded hold. It cannot infer withholding that was never recorded. Like the push check, it uses the resolved root identity; a manual commit without one is allowed. Skipping hooks also skips the check.
+- A push from a terminal with no resolved root identity publishes held commits silently. That is by design: the
   guard has no pusher to compare against.
 - A squash merge of a held branch by another session launders the trailer: only the pusher's sid survives, in the
   body. A cherry-pick keeps the trailer and is refused.
@@ -339,7 +339,7 @@ The native pre-commit dispatcher, `scripts/pre-commit-run.sh`, also refuses comm
   shim runs the toplevel's script). A worktree or branch that predates the merge does not enforce it.
 - A trailer outside the message's final paragraph is invisible to the guard. This was already true.
 - A commit already on any remote-tracking ref counts as published: a new branch is scanned with `--not --remotes`.
-- The one-line warning for an unreadable hold store covers hard git failures only (an exit other than 0 or 1). A store failure that git itself reports as "no such ref" (a permission-denied `refs/holds` directory, a broken loose ref) is not detected and fails open.
+- The legacy Claude push lookup retains its error policy: the warning covers hard Git failures only (an exit other than 0 or 1), while a corrupt loose ref reported as missing can fail open. Codex push and release lookups use `git show-ref --exists`, distinguish missing from failed lookup, and refuse on failure; release preserves unreadable ref bytes.
 - The hold lookup and the trailer value are matched case-sensitively. A hand-written trailer whose session id is in a
   different case from the hold's is not matched. (The ack comparison is the exception: it ignores case.)
 

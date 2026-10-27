@@ -146,15 +146,12 @@ matches() {
 # committing session only; another author's hold must not block this commit.
 # Keep this in the dispatcher so an installed pre-commit shim needs no update.
 refuse_held_commit() {
-    local _sid="${CLAUDE_CODE_SESSION_ID:-}" _ref _rc _body _reason
+    local _sid _ref _rc _body _reason _dir
+    _dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    . "$_dir/publish-identity.sh" || return 1
+    _sid="$(publish_identity)" || return 1
     [ -n "$_sid" ] || return 0
-    case "$_sid" in
-        *[!A-Za-z0-9-]*)
-            printf 'pre-commit: cannot check publish hold for invalid session id %s\n' "$_sid" >&2
-            return 1
-            ;;
-    esac
-    _ref="refs/holds/$_sid"
+    _ref="$(publish_hold_ref "$_sid")" || return 1
     # --exists distinguishes absence (2) from lookup failure (1).
     # --verify --quiet collapses a broken loose ref into the same 1 as absence.
     if git show-ref --exists "$_ref" 2>/dev/null; then

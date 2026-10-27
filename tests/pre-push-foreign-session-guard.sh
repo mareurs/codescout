@@ -42,6 +42,9 @@
 
 set -uo pipefail
 
+# Each case declares its own harness; never inherit an enclosing Codex/explicit context.
+unset CODEX_SESSION_ID CODEX_THREAD_ID CODESCOUT_CONTEXT_FILE
+
 GUARD="$(cd "$(dirname "$0")/../scripts" && pwd)/pre-push-foreign-session-guard.sh"
 ZERO="0000000000000000000000000000000000000000"
 
@@ -160,6 +163,7 @@ commit "$ALICE" "alice on top"; TIP=$(sha)
 GUARD_REAL="$GUARD"
 LONE_DIR="$(mktemp -d "$SUITE_TMP/lone-XXXXXX")"
 cp "$GUARD_REAL" "$LONE_DIR/pre-push-foreign-session-guard.sh"
+cp "$(dirname "$GUARD_REAL")"/publish-identity.{sh,py} "$(dirname "$GUARD_REAL")/session_context.py" "$LONE_DIR/"
 GUARD="$LONE_DIR/pre-push-foreign-session-guard.sh"
 run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
 LONE_OUT="$OUT"; LONE_EC="$EC"
@@ -2018,6 +2022,7 @@ mkhold "$BOB" "lone guard"
 G7_REAL="$GUARD"
 G7_DIR="$(mktemp -d "$SUITE_TMP/prepush-guard-lone-hold-XXXXXX")"
 cp "$G7_REAL" "$G7_DIR/pre-push-foreign-session-guard.sh"
+cp "$(dirname "$G7_REAL")"/publish-identity.{sh,py} "$(dirname "$G7_REAL")/session_context.py" "$G7_DIR/"
 GUARD="$G7_DIR/pre-push-foreign-session-guard.sh"
 run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
 GUARD="$G7_REAL"
@@ -2097,6 +2102,7 @@ for m in "# BEGIN PUBLISH HOLD" "# END PUBLISH HOLD" \
 done
 [ "$NC_COUNT_OK" -eq 1 ] && ok "every PUBLISH HOLD marker appears exactly once, on its own line"
 NC_DIR="$(mktemp -d "$SUITE_TMP/nc-XXXXXX")"
+cp "$(dirname "$GUARD")"/publish-identity.{sh,py} "$(dirname "$GUARD")/session_context.py" "$NC_DIR/"
 sed '/^# BEGIN PUBLISH HOLD/,/^# END PUBLISH HOLD/d' "$GUARD" > "$NC_DIR/pre-push-foreign-session-guard.sh"
 chmod +x "$NC_DIR/pre-push-foreign-session-guard.sh"
 eq    "the stripped copy is a different file" \
