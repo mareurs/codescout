@@ -76,6 +76,9 @@ Both commits add families to `ERR_FAMILIES`, which changes the persisted fingerp
 
 **Still open.** 100 NULL rows remain in this project's DB. They are other messages: the `doc` leaf/ops filter-shape errors, `edit_file` `edits[]` mixing shapes, the `/tmp` rooted-artifact refusal, `both start_line and end_line are required` on `read_file`, and a few one-offs. None is in this bug's list. File a new bug if the ranking needs them.
 
+
+**Confirmed on the live DB, 2026-10-27, after a rebuild (`codescout_sha=38ec0662e`).** `PRAGMA user_version` is `2061252835`, the fingerprint of the family list with all four new families, so `open_db` ran the backfill on the real `.codescout/usage.db`. It holds 74 `read_file_overflow_threshold`, 47 `replace_would_rename`, 23 `shrink_guard_blocked` and 35 `unanchored_archive_refused` rows, and 100 NULL rows. 100 is the count the replay on the copy predicted. `symbols_pattern_is_regex` has 0 rows here, which is expected: no `symbols` regex error exists in this project's DB.
+
 ## Tests added
 
 - `a_read_file_overflow_is_classified_and_stays_tool_scoped` in `src/usage/db.rs`. It covers both live shapes, a hostile title (`index is locked`), the `read_markdown` arm keeping its own family, a non-overflow `read_file` error, and a `run_command` tool-scope check. RED was watched (`left: None`), and a naive `contains` placement failed the hostile-title case.

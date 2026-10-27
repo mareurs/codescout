@@ -11,7 +11,7 @@ fix_sha: ce424fa47 (experiments)
 opened: 2026-10-24
 owner: marius
 severity: low
-unverified: No rebuilt binary has been observed skipping a real pre-warm, and no real activation has been run end to end. This project's project.toml does not set [lsp.java.env], so jdtls still fails here. The 3-failure and 6-hour thresholds are untested guesses.
+unverified: 'Observed 2026-10-27 on rebuilt binary 38ec0662e: the pre-warm back-off skips java (debug.log, no new lsp_events row). Still open: this project''s project.toml does not set [lsp.java.env], so jdtls still fails to start here, and the env override has only been verified by hand and by unit test, never through a real codescout start. The window expiring and retrying has not been observed. The 3-failure and 6-hour thresholds are untested guesses.'
 ---
 
 # BUG: Java LSP pre-warm fails on every activation of the codescout project (235 of 235, ~16.6 s each)
@@ -70,6 +70,11 @@ Fixed on `experiments` in `ce424fa47` (patch-id `f1c9570384ec1dbc4850ed5d44e5cd4
 3. **Machine fix. Not applied.** This project's `.codescout/project.toml` has no `[lsp.java.env]`, and the system `java` is still JDK 27. Until the operator sets `JAVA_HOME` there (or upgrades `jdtls`), `jdtls` still fails here. The back-off stops the retries and does not make it start.
 
 The numbers 3 and 6 h are guesses, not measurements.
+
+
+**Observed on a rebuilt binary, 2026-10-27.** After `/mcp` the server reported `codescout_sha=38ec0662e`, and `git merge-base --is-ancestor ce424fa47 38ec0662e` exits 0. `.codescout/debug.log` holds two lines, at 06:53:15Z and 06:53:25Z: `LSP pre-warm for java skipped: its last 340 starts failed, the newest 3071s ago` (and `3081s` for the second). `lsp_events` gained no `java` row: `max(id)` stayed 10450, and 0 rows have `started_at` after 06:50Z. So the back-off engages on a real activation, in the project's own `usage.db`.
+
+Not observed: the window expiring and one retry running; an `[lsp.java.env]` setting reaching a real `jdtls` start; and a `success` row after either.
 
 ## Tests added
 
