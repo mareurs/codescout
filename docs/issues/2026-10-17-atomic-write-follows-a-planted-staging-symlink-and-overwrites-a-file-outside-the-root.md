@@ -114,8 +114,8 @@ real-closure staging tests, fchmod and mode-read-race documentation). patch-ids 
   write is lost (old: `0755`); a target deleted during the write keeps `0600` (old: `0644`). Also documented there.
   Before, a `0600` target's new content sat in a `0644` staging file for the length of the write. Red first:
   `the_staging_file_of_a_private_target_is_private_while_it_is_written` saw mode `0o044` in group/other.
-  (Commit `417c4d3e`.) A leaf link to a setuid file yields a setuid regular file: see
-  `2026-10-17-atomic-write-replace-keeps-setuid-and-takes-the-pointed-at-files-mode.md`.
+  (Commit `417c4d3e`.) **Superseded 2026-10-27:** `atomic_write` no longer carries setuid or setgid over (`9289dc7cf`), so "unchanged in every case ... incl. setuid" above and a setuid result for a link to a setuid file both describe the state before that fix; see
+  `archive/2026-10-17-atomic-write-replace-keeps-setuid-and-takes-the-pointed-at-files-mode.md`.
 - Not changed: no fsync (the code never had one), the rename-over-target semantics.
 
 **A target that is itself a symlink is replaced, not written through** (decision, pinned by test): the
