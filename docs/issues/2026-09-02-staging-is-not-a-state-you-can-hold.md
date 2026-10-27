@@ -361,7 +361,7 @@ docs and gates recommend. Three items, in their state as of 2026-09-25:
    `21258b4b`. The served commit-sequence tail (step 4) prescribes SEPARATE calls, and
    `scripts/pre-commit-unreviewed-content.sh` refuses a pathspec commit carrying unstaged content. Do not
    re-propose the atomic shape: it trades this file's losing half for the capture half.
-2. **DONE 2026-10-26: put "never unstage a path you did not stage" into the shared guidance.** The rule is now in `scripts/commit-sequence-tail.txt` under step 5, so every refusing hook prints it. `docs/conventions/shared-checkout-commit-sequence.md` step 5 does not carry it yet (the page had another session's uncommitted edits on 2026-10-26). The wording came from a dispatch brief that carried *"if the shared index holds paths you did not stage, commit by pathspec and leave them alone.
+2. **DONE 2026-10-26: put "never unstage a path you did not stage" into the shared guidance.** The rule is now in `scripts/commit-sequence-tail.txt` under step 5, so every refusing hook prints it. `docs/conventions/shared-checkout-commit-sequence.md` step 5 carries it too, as of 2026-10-27, with the 2026-09-02 measurement it was paid for. The wording came from a dispatch brief that carried *"if the shared index holds paths you did not stage, commit by pathspec and leave them alone.
    Never `git restore --staged`, never `git reset`"*; before 2026-10-26 no shared page said it.
    `scripts/git-safe-reset.sh` guards `git reset` for sessions that choose to use it. Nothing guards
    `git restore --staged`.

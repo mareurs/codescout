@@ -166,6 +166,13 @@ mechanism claim in the record this technique then corrected.
 (Technique from sessionId `9403d62d-116b-46ea-ac9b-004acff2b1cb`, 2026-09-17, resolving the
 `7b5f3d5b` capture above.)
 
+
+**Never unstage a path you did not stage.** The index is shared in the other direction too: `git restore --staged <path>` or `git reset` on a path a peer staged removes it from the peer's commit silently, and the peer's commit then lands without it. If `git diff --cached --name-only` lists paths that are not yours, leave them where they are and commit by pathspec. A pathspec commit already ignores every path it does not name, so unstaging them buys nothing.
+
+*Measured 2026-09-02:* `codescout-26`'s implementer subagent ran `git add` for its own file and found four paths staged instead of one. It ran `git restore --staged` on the three that were not its own, and then committed by pathspec. It read the hazard correctly and then repaired it, where reporting was the whole job. Staged paths of another session vanished within about 60 seconds, and that left a ledger edit on disk that contradicted the corpus and red-gated seven sessions (`8941001da3c21636`).
+
+**No hook guards `git restore --staged`.** `scripts/git-safe-reset.sh` (`40273a16`) covers `git reset` only, for sessions that choose to use it. So this rule is carried by the text alone, and the terse copy prints it at the moment of need: step 5 of `scripts/commit-sequence-tail.txt`, which every refusing hook emits. A detector for a peer's unstage has no design yet; see `8941001da3c21636` § *Resume*.
+
 ### 6. If a commit captures another session's file, stop
 
 Do not `reset`, do not `amend`, do not `stash`. On a shared tree **the repair destroys work
