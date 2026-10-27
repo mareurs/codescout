@@ -203,6 +203,31 @@ fn sync_append(path: &Path, msg: &str) {
     }
 }
 
+/// The directory the log files go in: `<project>/.codescout` when `args` name an existing
+/// directory with `--project`, else `<cwd>/.codescout`.
+///
+/// Logging starts before the CLI is parsed, so it cannot ask clap. A server started with
+/// `--project /x` from another directory wrote its logs under that other directory. A path
+/// that is not a directory means "the cwd": creating `.codescout` under a typo is how a log
+/// directory appears where no project exists.
+pub(crate) fn log_dir_for(args: &[String], cwd: &Path) -> PathBuf {
+    let named = args.iter().enumerate().find_map(|(i, arg)| {
+        if let Some(value) = arg.strip_prefix("--project=") {
+            Some(value.to_string())
+        } else if arg == "--project" {
+            args.get(i + 1).cloned()
+        } else {
+            None
+        }
+    });
+    named
+        // `join` with an absolute path yields that path, so one expression covers both forms.
+        .map(|path| cwd.join(path))
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| cwd.to_path_buf())
+        .join(".codescout")
+}
+
 /// Initialise tracing.
 ///
 /// - `debug`: enables both DEBUG-level file logging to `.codescout/debug.log`
@@ -221,9 +246,10 @@ pub fn init(debug: bool) -> LoggingGuards {
         .with_ansi(false)
         .with_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")));
 
-    let log_dir = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".codescout");
+    let log_dir = log_dir_for(
+        &std::env::args().collect::<Vec<_>>(),
+        &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    );
 
     // Store for the panic hook — even when debug is off, crash.log is useful.
     CODESCOUT_DIR.set(log_dir.clone()).ok();
@@ -540,6 +566,71 @@ mod tests {
         assert_eq!(
             numbered(Path::new("diagnostic-abcd.log"), 3),
             PathBuf::from("diagnostic-abcd.log.3")
+        );
+    }
+
+    /// A server started with `--project /x` from some other directory must log under the project,
+    /// not under wherever it happened to be started: `init` used `current_dir()` unconditionally,
+    /// so tool output (a refused pin's message included) landed in a directory that is not the
+    /// project. A `--project` that names nothing must not make the log directory appear there.
+    /// `docs/issues/2026-10-19-debug-writes-its-log-under-the-servers-cwd-not-the-project.md`
+    #[test]
+    fn the_log_dir_follows_an_existing_project_argument_and_falls_back_to_the_cwd() {
+        let cwd = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let p = project.path().to_str().unwrap();
+
+        // Both spellings clap accepts.
+        assert_eq!(
+            log_dir_for(
+                &args(&["codescout", "start", "--debug", "--project", p]),
+                cwd.path()
+            ),
+            project.path().join(".codescout")
+        );
+        assert_eq!(
+            log_dir_for(
+                &args(&["codescout", "start", &format!("--project={p}")]),
+                cwd.path()
+            ),
+            project.path().join(".codescout")
+        );
+        // A relative path is relative to the cwd, as clap would resolve it.
+        std::fs::create_dir(cwd.path().join("sub")).unwrap();
+        assert_eq!(
+            log_dir_for(
+                &args(&["codescout", "start", "--project", "sub"]),
+                cwd.path()
+            ),
+            cwd.path().join("sub").join(".codescout")
+        );
+        // No argument, a dangling flag, and a path that is not a directory all mean "the cwd".
+        let fallback = cwd.path().join(".codescout");
+        assert_eq!(
+            log_dir_for(&args(&["codescout", "start", "--debug"]), cwd.path()),
+            fallback
+        );
+        assert_eq!(
+            log_dir_for(&args(&["codescout", "start", "--project"]), cwd.path()),
+            fallback
+        );
+        assert_eq!(
+            log_dir_for(
+                &args(&["codescout", "start", "--project", "/no/such/dir"]),
+                cwd.path()
+            ),
+            fallback,
+            "a typo must not create a .codescout directory where nothing exists"
+        );
+        let file = cwd.path().join("a-file");
+        std::fs::write(&file, "x").unwrap();
+        assert_eq!(
+            log_dir_for(
+                &args(&["codescout", "start", "--project", file.to_str().unwrap()]),
+                cwd.path()
+            ),
+            fallback
         );
     }
 }
