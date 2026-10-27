@@ -279,6 +279,32 @@ fn not_found_msg(content: &str, old_string: &str, path: &str) -> String {
     }
 }
 
+/// The 1-based line of every exact occurrence of `old_string` in `content`, joined with `, `.
+/// Shared by the single-edit and batch ambiguity messages so both answer "which lines" alike.
+fn match_lines_csv(content: &str, old_string: &str) -> String {
+    content
+        .match_indices(old_string)
+        // NOT `.lines().count() + 1`: `lines()` counts a partial trailing line, so a
+        // match starting mid-line reported N+1. Counting newlines is correct at every
+        // offset. Same expression as the markdown grammar's gate in
+        // `src/tools/markdown/edit_markdown.rs::plan_scoped_edit`, so the two halves of
+        // this tool give one answer to "which line" rather than two.
+        .map(|(byte_offset, _)| (content[..byte_offset].matches('\n').count() + 1).to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// For edit `i` of a batch, the clause saying which content its line numbers count. The batch
+/// applies edits to an in-memory copy, so for `i > 0` the numbers follow the earlier edits and
+/// not the file on disk; edit 0 sees the file as it is, and needs no clause.
+fn batch_lines_note(i: usize) -> String {
+    if i == 0 {
+        String::new()
+    } else {
+        format!(" Line numbers count the content after the {i} earlier edit(s) of this batch.")
+    }
+}
+
 async fn commit_edit(
     ctx: &ToolContext,
     resolved: &std::path::Path,
@@ -657,15 +683,26 @@ impl Tool for EditFile {
                 let match_count = content.matches(old_s).count();
                 if match_count == 0 {
                     return Err(super::RecoverableError::with_hint(
-                        format!("edit[{i}]: old_string not found"),
-                        "Batch aborted — no changes written.",
+                        format!("edit[{i}]: {}", not_found_msg(&content, old_s, path)),
+                        format!(
+                            "Batch aborted — no changes written. Copy the actual bytes shown \
+                             (or from read_file) and retry.{}",
+                            batch_lines_note(i)
+                        ),
                     )
                     .into());
                 }
                 if match_count > 1 && !replace_all_edit {
                     return Err(super::RecoverableError::with_hint(
-                        format!("edit[{i}]: old_string found {match_count} times"),
-                        "Add more context or set replace_all: true. Batch aborted.",
+                        format!(
+                            "edit[{i}]: old_string found {match_count} times (lines {})",
+                            match_lines_csv(&content, old_s)
+                        ),
+                        format!(
+                            "Add more context or set replace_all: true. Batch aborted — no \
+                             changes written.{}",
+                            batch_lines_note(i)
+                        ),
                     )
                     .into());
                 }
@@ -1060,20 +1097,7 @@ async fn perform_edit(
     }
 
     if match_count > 1 && !replace_all {
-        let line_numbers: Vec<usize> = content
-            .match_indices(old_string)
-            // NOT `.lines().count() + 1`: `lines()` counts a partial trailing line, so a
-            // match starting mid-line reported N+1. Counting newlines is correct at every
-            // offset. Same expression as the markdown grammar's gate in
-            // `src/tools/markdown/edit_markdown.rs::plan_scoped_edit`, so the two halves of
-            // this tool give one answer to "which line" rather than two.
-            .map(|(byte_offset, _)| content[..byte_offset].matches('\n').count() + 1)
-            .collect();
-        let lines_str = line_numbers
-            .iter()
-            .map(|n| n.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let lines_str = match_lines_csv(&content, old_string);
         return Err(super::RecoverableError::with_hint(
             format!(
                 "old_string found {match_count} times (lines {lines_str}). Include more surrounding context or use replace_all: true."

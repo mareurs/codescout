@@ -5563,6 +5563,90 @@ async fn an_unparseable_edits_string_is_refused_by_naming_edits() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "keep\n");
 }
 
+/// A batch miss used to say only `edit[i]: old_string not found` and `Batch aborted`, so the
+/// caller resent the whole batch with changed text. The single-edit path already names the
+/// file and the nearest content; the batch path must say the same, keyed by edit index.
+/// `docs/issues/archive/2026-10-26-edit-file-batch-misses-carry-no-path-nearest-content-or-match-lines.md`
+#[tokio::test]
+async fn a_batch_miss_names_the_file_and_the_nearest_content() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("m.txt");
+    std::fs::write(&path, "fn a() {\n    let x = 1;\n}\n").unwrap();
+
+    // Exact `matches` fails: the indentation of the middle line differs.
+    let err = EditFile
+        .call(
+            json!({"path": path.to_str().unwrap(),
+                   "edits": [{"old_string": "fn a() {\nlet x = 1;\n}", "new_string": "z"}]}),
+            &ctx,
+        )
+        .await
+        .expect_err("an indentation difference is a miss in batch mode");
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("edit[0]: old_string not found in"),
+        "got: {msg}"
+    );
+    assert!(msg.contains("m.txt"), "must name the file, got: {msg}");
+    assert!(
+        msg.contains("Nearest content at lines"),
+        "must show the nearest content, got: {msg}"
+    );
+}
+
+/// An ambiguous batch edit must list the lines it matched, as the single-edit path does.
+#[tokio::test]
+async fn a_batch_ambiguity_lists_the_match_lines() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("d.txt");
+    std::fs::write(&path, "dup\nx\ndup\n").unwrap();
+
+    let err = EditFile
+        .call(
+            json!({"path": path.to_str().unwrap(),
+                   "edits": [{"old_string": "dup", "new_string": "y"}]}),
+            &ctx,
+        )
+        .await
+        .expect_err("two matches without replace_all is ambiguous");
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("edit[0]: old_string found 2 times (lines 1, 3)"),
+        "got: {msg}"
+    );
+}
+
+/// The batch applies edits to an in-memory copy, so for edit `i > 0` the line numbers count the
+/// content after the earlier edits, not the file on disk. The message has to say so.
+#[tokio::test]
+async fn a_later_batch_miss_says_its_lines_follow_the_earlier_edits() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("l.txt");
+    std::fs::write(&path, "one\ntwo\nthree\n").unwrap();
+
+    let err = EditFile
+        .call(
+            json!({"path": path.to_str().unwrap(),
+                   "edits": [{"old_string": "one", "new_string": "1\n1b"},
+                             {"old_string": "tree", "new_string": "3"}]}),
+            &ctx,
+        )
+        .await
+        .expect_err("edit 1 has no match");
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("edit[1]: old_string not found in"),
+        "got: {msg}"
+    );
+    assert!(
+        msg.contains("after the 1 earlier edit"),
+        "edit[1] must say its line numbers follow edit 0, got: {msg}"
+    );
+}
+
 #[tokio::test]
 async fn an_edits_value_that_is_neither_an_array_nor_a_json_array_string_is_refused_by_naming_edits(
 ) {
