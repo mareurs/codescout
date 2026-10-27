@@ -1,10 +1,13 @@
 ---
 id: ca68c33bb07c7005
 kind: bug
-status: open
+status: fixed
 title: err_family maps the markdown overflow error only for the retired read_markdown, so 146 read_file rows (and six new guard messages) land in NULL
 tags:
 - cluster/config-propagation-is-additive
+closed: 2026-10-27
+fix_patch_id: ccc4e87cb187b9404f075ca2ba6de4cfe7ec2a69
+fix_sha: 03c125594 (experiments)
 opened: 2026-10-24
 owner: marius
 severity: low
@@ -46,11 +49,17 @@ N/A.
 
 ## Fix
 
-Not started. Proposed: map the overflow messages for `read_file` (and `doc(get)`, which shares the section reader); add families for the six new guard messages above; bump the fingerprint so the backfill re-classifies history.
+Fixed on `experiments` in `03c125594` (patch-id `ccc4e87cb187b9404f075ca2ba6de4cfe7ec2a69`). `normalize_err_family` now returns `read_file_overflow_threshold` for a `read_file` message that starts with `section "` or `combined headings span ` and contains ` lines — exceeds inline threshold`. The rule sits before the substring scans, because the section title inside the message is data: a title such as `index is locked` would otherwise match `lsp_index_locked`. The family is added to `ERR_FAMILIES`, which changes the persisted fingerprint, so the backfill re-classifies history when each DB is next opened.
+
+Not done, and still open (file each as its own bug when reproduced):
+
+- `doc(get)` overflow. No `doc(get)` row in this project's `usage.db` shows it, so it is unverified.
+- The six newer guard messages listed under Root cause. They have no family yet.
+- The backfill was not run against a copy of a real `usage.db`. Only the unit tests cover the re-classification.
 
 ## Tests added
 
-None yet.
+`a_read_file_overflow_is_classified_and_stays_tool_scoped` in `src/usage/db.rs`. It covers both live shapes, a hostile title (`index is locked`), the `read_markdown` arm keeping its own family, a non-overflow `read_file` error, and a `run_command` tool-scope check. RED was watched (`left: None`), and a naive `contains` placement failed the hostile-title case. 55 `usage::db::tests::` tests pass, and the full `./scripts/gate.sh` was green (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`).
 
 ## Workarounds
 
