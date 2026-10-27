@@ -63,6 +63,14 @@
     "isolation_checks_still_pass": true,
     "finding_after_a_session": "after a codescout MCP session, git status shows untracked, not ignored: .codescout/debug.log, .codescout/diagnostic-*.log, .codescout/usage.db, .codescout/write.lock.holder and (after a memory write) .codescout/memories/; a `git add -A` patch extraction would carry them in cs/full only"
   },
+  "round3_verbose_dropped": {
+    "ruling": "R2-F1: full also drops `verbose` (harness behaviour, not capability)",
+    "pass": true,
+    "evidence": "/home/marius/work/claude/setup-ab-data/controls/round3/round3-check.json",
+    "full_stdout": "one JSON object (total_cost_usd 0, is_error true)",
+    "requests": 2,
+    "thinking_display": "omitted"
+  },
   "teardown": {"evidence": "round2/teardown.json", "left_sab_containers": [], "left_sab_volumes": [],
                "left_sab_networks": []}
 }

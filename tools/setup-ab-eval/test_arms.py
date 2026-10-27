@@ -79,6 +79,7 @@ class ArmsTest(unittest.TestCase):
             "effortLevel": "medium",
             "modelSettings": {"claude-sonnet-5-5": {"effortLevel": "medium"}},
             "theme": "dark",
+            "verbose": True,
             "skillOverrides": {"vet-ad-offer": "user-invocable-only"},
         }
         (profile / "settings.json").write_text(json.dumps(self.user_settings) + "\n")
@@ -245,7 +246,7 @@ class ArmsTest(unittest.TestCase):
         # The host-path hook is dropped; a hook without one survives.
         self.assertEqual(settings["hooks"], {"Stop": self.user_settings["hooks"]["Stop"]})
         for key in ("env", "statusLine", "extraKnownMarketplaces", "autoMode",
-                    "effortLevel", "modelSettings"):
+                    "effortLevel", "modelSettings", "verbose"):
             self.assertNotIn(key, settings, key)
         rest = {k: v for k, v in settings.items() if k not in arms.USER_SETTINGS_KEPT_BY_NAME}
         for marker in ("/home/", "127.0.0.1", "localhost"):
@@ -255,7 +256,7 @@ class ArmsTest(unittest.TestCase):
         self.assertEqual(record["arm"], "full")
         self.assertEqual(sorted(record["settings_dropped"]),
                          ["autoMode", "effortLevel", "env", "extraKnownMarketplaces",
-                          "hooks.UserPromptSubmit", "modelSettings", "statusLine"])
+                          "hooks.UserPromptSubmit", "modelSettings", "statusLine", "verbose"])
         self.assertTrue(all(record["settings_dropped"].values()))
         # The same function the record came from is importable for the manifest.
         kept, dropped = arms.sanitize_user_settings(self.user_settings)
@@ -264,10 +265,15 @@ class ArmsTest(unittest.TestCase):
         # env, statusLine and the effort keys go by name, even with no host value in them.
         kept, dropped = arms.sanitize_user_settings(
             {"env": {"FOO": "1"}, "statusLine": {"type": "command", "command": "true"},
-             "effortLevel": "medium", "modelSettings": {}, "theme": "dark"})
+             "effortLevel": "medium", "modelSettings": {}, "verbose": True, "theme": "dark"})
         self.assertEqual(kept, {"theme": "dark"})
         self.assertEqual(dropped, {k: arms.USER_SETTINGS_DROPPED[k] for k in
-                                   ("env", "statusLine", "effortLevel", "modelSettings")})
+                                   ("env", "statusLine", "effortLevel", "modelSettings",
+                                    "verbose")})
+        # Round-3 ruling: harness-behaviour keys (effort, verbose) are pinned as dropped.
+        for key in ("effortLevel", "modelSettings", "verbose"):
+            self.assertIn(key, arms.USER_SETTINGS_DROPPED)
+            self.assertTrue(arms.USER_SETTINGS_DROPPED[key])
 
     def test_only_full_uses_user_setting_source(self):
         values = {arm: self.spec(arm).cli_args for arm in arms.ARMS}

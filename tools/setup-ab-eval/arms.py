@@ -92,6 +92,9 @@ USER_SETTINGS_DROPPED = {
                    "carrying one would fail the per-task effort-equality gate",
     "modelSettings": "per-model effortLevel settings; every arm runs at the CLI default effort, "
                      "and full alone carrying one would fail the per-task effort-equality gate",
+    # Round-3 ruling (R2-F1, measured: controls/round2/verbose-probe/verbose-probe.json).
+    "verbose": "changes output shape, thinking display and request count (cost); harness "
+               "behaviour, not capability",
 }
 
 
