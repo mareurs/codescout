@@ -4118,6 +4118,32 @@ fn diagnose_causes_produce_pairwise_distinguishable_messages() {
     }
 }
 
+/// The markdown route's not-found hint must name the per-call `workspace=` pin,
+/// the same remedy `read_file` gives; it shares `FILE_NOT_FOUND_HINT` with it.
+#[tokio::test]
+async fn read_markdown_file_not_found_hint_names_the_workspace_pin() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+
+    let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    let mut ctx = test_ctx().await;
+    ctx.agent = agent;
+
+    let err = super::read(json!({ "path": "definitely-absent-doc.md" }), &ctx)
+        .await
+        .expect_err("the file does not exist under this root");
+    let hint = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .and_then(|e| e.hint())
+        .expect("a missing markdown file is a RecoverableError with a hint");
+    assert!(
+        hint.contains("workspace="),
+        "the hint must name the per-call workspace= pin, got: {hint}"
+    );
+}
+
 /// Sibling of `read_file`'s `file_not_found_names_the_root_it_searched`. Same
 /// clobber, same silent form, but `resolve_markdown_source` carries its own
 /// not-found arm — fixing one site does not cover the other, so both are pinned.

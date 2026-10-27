@@ -79,10 +79,7 @@ async fn resolve_markdown_source(
                     path,
                     resolved.display()
                 ),
-                "Check the path with tree, or use tree with `glob` to locate the file. \
-                 If the root above is not the project you meant, a subagent sharing \
-                 this session's process may have changed the active project — call \
-                 workspace(action='status') to check.",
+                crate::tools::read_file::FILE_NOT_FOUND_HINT,
             )
             .into(),
             _ => anyhow::anyhow!("failed to read {}: {}", resolved.display(), e),

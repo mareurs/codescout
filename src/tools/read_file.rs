@@ -1090,6 +1090,16 @@ async fn compute_source_tag(resolved: &std::path::Path, ctx: &ToolContext) -> St
     }
 }
 
+/// Hint for a read whose file is missing under the root it was resolved against.
+/// Shared with `read_markdown`, whose not-found arm must say the same thing.
+/// The remedy is the per-call `workspace=` pin that `get_guide("workspace-state")`
+/// prescribes; `workspace(action='status')` only diagnoses.
+pub(crate) const FILE_NOT_FOUND_HINT: &str = "Check the path with tree, or use tree with \
+     `glob` to locate the file. If the root above is not the project you meant, a subagent \
+     sharing this session's process may have changed the active project — call \
+     workspace(action='status') to check, or pass workspace=\"<abs root>\" on this call \
+     to pin it.";
+
 /// Read file contents with user-friendly error messages.
 fn read_file_text(path: &str, resolved: &std::path::PathBuf) -> Result<String> {
     std::fs::read_to_string(resolved).map_err(|e| match e.kind() {
@@ -1099,10 +1109,7 @@ fn read_file_text(path: &str, resolved: &std::path::PathBuf) -> Result<String> {
                 path,
                 resolved.display()
             ),
-            "Check the path with tree, or use tree with `glob` to locate the file. If \
-             the root above is not the project you meant, a subagent sharing this \
-             session's process may have changed the active project — call \
-             workspace(action='status') to check.",
+            FILE_NOT_FOUND_HINT,
         )
         .into(),
         std::io::ErrorKind::InvalidData => RecoverableError::with_hint(
@@ -2354,6 +2361,23 @@ mod tests {
         assert!(
             !body.contains("BETA-CONTENT"),
             "pinned read must NOT leak the default workspace B (BETA), got: {result}"
+        );
+    }
+
+    /// `get_guide("workspace-state")` prescribes a per-call `workspace=` pin for a
+    /// caller whose active project moved under it. The not-found hint named only
+    /// a diagnostic (`workspace(action='status')`) and never that remedy.
+    #[test]
+    fn file_not_found_hint_names_the_workspace_pin() {
+        let missing = std::path::PathBuf::from("/nonexistent-root/absent.txt");
+        let err = read_file_text("absent.txt", &missing).unwrap_err();
+        let hint = err
+            .downcast_ref::<RecoverableError>()
+            .and_then(|e| e.hint())
+            .expect("a missing file is a RecoverableError with a hint");
+        assert!(
+            hint.contains("workspace="),
+            "the hint must name the per-call workspace= pin, got: {hint}"
         );
     }
 
