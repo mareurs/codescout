@@ -972,7 +972,7 @@ fn too_broad_write_denial(raw: &str, dir: &Path, why: &TooBroad) -> String {
     // entry: `config::protected_files` refuses a write that changes a project's security table
     // (`a_changed_added_or_removed_security_table_is_refused`). Naming the route keeps the denial
     // from being a dead end.
-    // docs/issues/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md
+    // docs/issues/archive/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md
     format!(
         "{denial} To allow this one file, the operator can list its absolute path in \
          `security.extra_write_roots` in `.codescout/project.toml`; the agent cannot add that entry."
@@ -5978,7 +5978,7 @@ mod tests {
     }
 
     /// `approve_write("/home")` used to be accepted (`F8a` in
-    /// `docs/issues/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`):
+    /// `docs/issues/archive/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`):
     /// only `/` and `$HOME` itself were refused, so a directory CONTAINING the home passed, and a
     /// session root over it admitted `~/.bashrc` and every other non-denied file in the home.
     #[test]
@@ -9466,7 +9466,7 @@ EOF"#;
     /// contains it is refused as too broad), so the one route to it is the OPERATOR's own config: an
     /// absolute path in `security.extra_write_roots`. That route must admit exactly the file named,
     /// existing or not yet created (`~/.vimrc` on a fresh machine), and nothing next to it.
-    /// `docs/issues/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`
+    /// `docs/issues/archive/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`
     #[cfg(unix)]
     #[test]
     fn an_extra_write_root_naming_one_file_in_the_home_admits_that_file_alone() {

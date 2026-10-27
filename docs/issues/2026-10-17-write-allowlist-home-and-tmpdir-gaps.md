@@ -4,7 +4,7 @@ opened: 2026-10-17
 closed: 2026-10-17
 severity: high
 owner: marius
-related: [docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md, docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md, docs/issues/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md, docs/issues/2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admits-every-path.md]
+related: [docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md, docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md, docs/issues/archive/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md, docs/issues/2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admits-every-path.md]
 tags:
 - cluster/unclassified
 kind: bug
@@ -308,5 +308,5 @@ Nothing open here except the documented symlinked-`$TMPDIR` residual and the Win
 
 - `docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md`
 - `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`
-- `docs/issues/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`
+- `docs/issues/archive/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`
 - `docs/issues/2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admits-every-path.md`

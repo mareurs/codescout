@@ -4,7 +4,7 @@ opened: 2026-10-17
 closed: 2026-10-17
 severity: high
 owner: marius
-related: [docs/issues/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md, docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md, docs/issues/2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admits-every-path.md]
+related: [docs/issues/archive/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md, docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md, docs/issues/2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admits-every-path.md]
 tags:
 - cluster/unclassified
 kind: bug
@@ -176,6 +176,6 @@ Nothing open. The related issue stays open for a different question (file-scoped
 
 ## References
 
-- `docs/issues/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`
+- `docs/issues/archive/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`
 - `docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md`
 - `docs/issues/2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admits-every-path.md`

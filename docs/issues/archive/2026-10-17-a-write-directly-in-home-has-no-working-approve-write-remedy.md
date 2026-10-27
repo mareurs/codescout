@@ -1,13 +1,15 @@
 ---
-status: open
-opened: 2026-10-17
-closed:
-severity: low
-owner: marius
-related: [docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md, docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md]
+kind: bug
+status: fixed
 tags:
 - cluster/unclassified
-kind: bug
+closed: 2026-10-27
+opened: 2026-10-17
+owner: marius
+related:
+- docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md
+- docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md
+severity: low
 ---
 
 # BUG: a write to a file directly in `$HOME` (or `/`) has no working `approve_write` remedy, and `approve_write` accepted a directory that contains the home
@@ -137,6 +139,21 @@ subdirectory that does not contain the home. Still open as a design question, no
 file-scoped approval for a file directly in a home should exist. `validate_approve_path` must not be
 widened to allow it.
 
+## Fix provenance
+
+- **SHA:** `de43b4553` (`experiments`)
+- **patch-id:** `b7f59042aa844d595b2e739a1f87b4cd19d05adb`
+
+## Resolution 2026-10-27
+
+The open design question (should a file-scoped `approve_write` exist for a file directly in a home?) is decided: **no**. The operator asked for `~/.bashrc`, `~/.vimrc` and folders in `$HOME`. The route for the files is the operator's own config, not an approval the agent can grant to itself: those files run in later shells, so consent for them must come from the operator. `validate_approve_path` stays as it is.
+
+- **Files:** list the file's absolute path in `security.extra_write_roots` in `.codescout/project.toml`. Verified on the classifier with a fake home: the entry admits exactly that file, whether it exists or not, and the deny list still wins (an entry naming `~/.ssh/id_rsa` or `~/.ssh` does not unlock them). Only the operator can add the entry, because `config::protected_files` refuses a write that changes the security table.
+- **Denial text:** the too-broad denial now ends with that route, so it is no longer a dead end.
+- **Folders:** a file in a NEW folder directly in the home needs no entry. The folder is a subdirectory of the home, so `approve_write` accepts it even though it does not exist yet. Pinned by a test. An empty folder is not a write; `run_command` makes it.
+- **Known, documented, not changed:** a root is a path prefix, so a path below a listed entry is admitted too. For an existing file that write fails; for a listed name that does not exist yet, a directory of that name could be created. The cost is that one dotfile.
+- **Not verified end to end:** the classifier tests do not run the real server, and the entry's absolute path must be written out (a leading `~` is not expanded). The operator must add the entries to each project that needs them; the global config cannot set this key.
+
 ## Tests added
 
 `src/util/path_security.rs`: `validate_approve_path_rejects_every_ancestor_of_the_home_directory`
@@ -186,15 +203,19 @@ does not contain it.` and `create_file("/probe-review-x")` returned `approve_wri
 — specify a subdirectory`. m4c was predicted to survive the first
 symlink test and got its own test before being run, so it was not observed surviving.
 
+Added 2026-10-27 in `src/util/path_security.rs`:
+
+- `the_too_broad_denial_names_the_operators_route` (seen failing before the fix)
+- `an_extra_write_root_naming_one_file_in_the_home_admits_that_file_alone` (its first draft also asserted that a path below a listed file is refused; that failed and showed the prefix behaviour, now pinned as known)
+- `a_file_entry_in_the_home_never_unlocks_the_deny_list` and `a_file_in_a_new_folder_directly_in_the_home_can_be_approved` (characterization tests, passed on first run)
+
 ## Workarounds
 
 Write into a subdirectory (with `$TMPDIR` a directory that is not `$HOME` or an ancestor of it).
 
 ## Resume
 
-Decide whether a file-scoped approval is wanted for the broad-directory case; nothing else is open.
-The issue was set back to `open` for that question after the review follow-up, not because the
-refusals regressed.
+N/A — resolved. See Resolution 2026-10-27.
 
 ## References
 
