@@ -1,10 +1,15 @@
 ---
 id: '30c21b0aa5cb249d'
 kind: bug
-status: open
+status: fixed
 title: 'three large error shapes carry no err_family: oversized-section refusals, fixed-bug-no-anchor refusals and the edit_code shrink guard'
 tags:
 - cluster/selector-narrower-than-its-population
+closed: 2026-10-27
+first_fix_patch_id: ccc4e87cb187b9404f075ca2ba6de4cfe7ec2a69
+first_fix_sha: 03c125594 (experiments)
+fix_patch_id: 9fa67bb3eddc08fa1ff915e2d0f0d909c7422d0b
+fix_sha: 3ba135be5 (experiments)
 opened: 2026-10-26
 owner: marius
 severity: low
@@ -50,11 +55,18 @@ N/A.
 
 ## Fix
 
-Open. Add the three families to `ERR_FAMILIES`; adding a family re-classifies history on next open (fingerprint-versioned).
+Fixed on `experiments` by two commits that also close `docs/issues/2026-10-24-err-family-overflow-branch-keys-on-retired-read-markdown-so-read-file-errors-are-null.md`.
+
+- Oversized-section refusals: `03c125594` (patch-id `ccc4e87cb187b9404f075ca2ba6de4cfe7ec2a69`), family `read_file_overflow_threshold`.
+- Fixed-bug-no-anchor refusals and the `edit_code` shrink guard: `3ba135be5` (patch-id `9fa67bb3eddc08fa1ff915e2d0f0d909c7422d0b`), families `unanchored_archive_refused` and `shrink_guard_blocked`. The shrink family also covers the `body-shrink guard:` and `memory-shrink guard:` prefixes, which the source emits from four more tools.
+
+History is re-classified by the fingerprint-versioned backfill. On the live `usage.db` after a rebuild (`codescout_sha=38ec0662e`, `user_version=2061252835`) the families hold 74, 35 and 23 rows. The bug counted 48, 32 and 23 on 2026-10-26, so the populations match and the first two grew.
+
+Not decided here, and not part of the fix: whether the oversized-section refusal is friction or the designed progressive-disclosure step. It still costs a second call.
 
 ## Tests added
 
-None. A test would feed each message to `normalize_err_family` and expect its family.
+`a_read_file_overflow_is_classified_and_stays_tool_scoped` and `the_six_guard_messages_the_2026_10_24_sweep_found_unclassified_have_a_family` in `src/usage/db.rs`. Each feeds the real message shapes to `normalize_err_family` and expects its family, as this section proposed, and each carries hostile symbol names or titles that a substring rule would claim. RED was watched for both. The full `./scripts/gate.sh` was green for each commit.
 
 ## Workarounds
 
