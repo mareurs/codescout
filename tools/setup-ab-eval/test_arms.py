@@ -62,7 +62,26 @@ class ArmsTest(unittest.TestCase):
         profile = root / "profile"
         profile.mkdir()
         (profile / "CLAUDE.md").write_text("# frozen user CLAUDE.md\n")
-        (profile / "settings.json").write_text('{"outputStyle": "x"}\n')
+        # The shapes of the operator's real keys (measured in ~/.claude/settings.json).
+        self.user_settings = {
+            "outputStyle": "legible:Explanatory STE",
+            "enabledPlugins": {"superpowers@superpowers-marketplace": True},
+            "permissions": {"allow": ["Read(/home/marius/.claude/plugins/**)", "Bash(ls:*)"]},
+            "env": {"ANTHROPIC_BASE_URL": "http://localhost:8082",
+                    "CODESCOUT_QDRANT_URL": "http://127.0.0.1:6334", "TMPDIR": "/tmp"},
+            "hooks": {"UserPromptSubmit": [{"hooks": [
+                {"type": "command", "command": "node /home/marius/work/x/user-prompt.mjs"}]}],
+                "Stop": [{"hooks": [{"type": "command", "command": "true"}]}]},
+            "statusLine": {"type": "command", "command": "bash /home/marius/statusline.sh"},
+            "extraKnownMarketplaces": {"m": {"source": {"source": "directory",
+                                                        "path": "/home/marius/work/m"}}},
+            "autoMode": {"environment": ["dev Langfuse at `http://localhost:3000`"]},
+            "effortLevel": "medium",
+            "modelSettings": {"claude-sonnet-5-5": {"effortLevel": "medium"}},
+            "theme": "dark",
+            "skillOverrides": {"vet-ad-offer": "user-invocable-only"},
+        }
+        (profile / "settings.json").write_text(json.dumps(self.user_settings) + "\n")
         cli = root / "claude-cli"
         cli.write_text("binary")
         self.manifest = {
@@ -172,8 +191,11 @@ class ArmsTest(unittest.TestCase):
 
     def test_full_is_superset_of_cs(self):
         cs, full = self.spec("cs"), self.spec("full")
-        self.assertTrue(set(pairs(cs.cli_args)) <= set(pairs(full.cli_args)))
-        added = [p for p in pairs(full.cli_args) if p not in pairs(cs.cli_args)]
+        # C2 ruling: full alone loads the user setting source; every other pair is kept.
+        swap = {("--setting-sources", "local"): ("--setting-sources", "user,local")}
+        self.assertTrue({swap.get(p, p) for p in pairs(cs.cli_args)} <= set(pairs(full.cli_args)))
+        added = [p for p in pairs(full.cli_args) if swap.get(p, p) not in
+                 [swap.get(q, q) for q in pairs(cs.cli_args)]]
         # One --plugin-dir per plugins_full entry; the companion is already in cs, not twice.
         self.assertEqual(added, [("--plugin-dir", "/opt/plugins/superpowers"),
                                  ("--plugin-dir", "/opt/plugins/buddy")])
@@ -189,11 +211,74 @@ class ArmsTest(unittest.TestCase):
                          host_of(cs, "/opt/plugins/codescout-companion"))
         self.assertEqual(Path(host_of(full, "/opt/sab/mcp.json")).read_bytes(),
                          Path(host_of(cs, "/opt/sab/mcp.json")).read_bytes())
-        config = Path(next(m[0] for m in full.mounts if m[1] == arms.CONFIG_DIR))
-        for src in self.manifest["full_config_files"]:
-            self.assertEqual((config / Path(src).name).read_bytes(), Path(src).read_bytes())
-        cs_config = Path(next(m[0] for m in cs.mounts if m[1] == arms.CONFIG_DIR))
-        self.assertEqual(list(cs_config.iterdir()), [])
+        config = Path(host_of(full, arms.CONFIG_DIR))
+        claude_md = self.manifest["full_config_files"][0]
+        self.assertEqual((config / "CLAUDE.md").read_bytes(), Path(claude_md).read_bytes())
+        self.assertEqual(sorted(p.name for p in config.iterdir()),
+                         [".claude.json", "CLAUDE.md", "settings.json"])
+        cs_config = Path(host_of(cs, arms.CONFIG_DIR))
+        self.assertEqual(sorted(p.name for p in cs_config.iterdir()), [".claude.json"])
+
+    def test_cs_and_full_seed_claude_json_with_the_same_server(self):
+        # C1 ruling: the companion's detect.mjs finds codescout only in the config dir's
+        # .claude.json (or the repo), never through --mcp-config.
+        for arm in ("cs", "full"):
+            spec = self.spec(arm)
+            mcp = json.loads(Path(host_of(spec, "/opt/sab/mcp.json")).read_text())
+            seeded = json.loads((Path(host_of(spec, arms.CONFIG_DIR)) / ".claude.json")
+                                .read_text())
+            self.assertEqual(seeded, {"mcpServers": mcp["mcpServers"]}, arm)
+            self.assertEqual(list(seeded["mcpServers"]), ["codescout"])
+        bare = self.spec("bare")
+        self.assertEqual(list(Path(host_of(bare, arms.CONFIG_DIR)).iterdir()), [])
+
+    def test_full_settings_drop_env_hooks_statusline_and_host_values(self):
+        full = self.spec("full")
+        settings = json.loads((Path(host_of(full, arms.CONFIG_DIR)) / "settings.json")
+                              .read_text())
+        # Kept by name, whatever their values hold (C2 ruling).
+        for key in ("outputStyle", "enabledPlugins", "permissions"):
+            self.assertEqual(settings[key], self.user_settings[key], key)
+        # Kept because no host path or URL is in the value.
+        self.assertEqual(settings["theme"], "dark")
+        self.assertEqual(settings["skillOverrides"], self.user_settings["skillOverrides"])
+        # The host-path hook is dropped; a hook without one survives.
+        self.assertEqual(settings["hooks"], {"Stop": self.user_settings["hooks"]["Stop"]})
+        for key in ("env", "statusLine", "extraKnownMarketplaces", "autoMode",
+                    "effortLevel", "modelSettings"):
+            self.assertNotIn(key, settings, key)
+        rest = {k: v for k, v in settings.items() if k not in arms.USER_SETTINGS_KEPT_BY_NAME}
+        for marker in ("/home/", "127.0.0.1", "localhost"):
+            self.assertNotIn(marker, json.dumps(rest))
+        # Every dropped key is recorded with a reason in the run's arm record.
+        record = json.loads((self.root / "runs" / "full" / "arm-record.json").read_text())
+        self.assertEqual(record["arm"], "full")
+        self.assertEqual(sorted(record["settings_dropped"]),
+                         ["autoMode", "effortLevel", "env", "extraKnownMarketplaces",
+                          "hooks.UserPromptSubmit", "modelSettings", "statusLine"])
+        self.assertTrue(all(record["settings_dropped"].values()))
+        # The same function the record came from is importable for the manifest.
+        kept, dropped = arms.sanitize_user_settings(self.user_settings)
+        self.assertEqual(kept, settings)
+        self.assertEqual(dropped, record["settings_dropped"])
+        # env, statusLine and the effort keys go by name, even with no host value in them.
+        kept, dropped = arms.sanitize_user_settings(
+            {"env": {"FOO": "1"}, "statusLine": {"type": "command", "command": "true"},
+             "effortLevel": "medium", "modelSettings": {}, "theme": "dark"})
+        self.assertEqual(kept, {"theme": "dark"})
+        self.assertEqual(dropped, {k: arms.USER_SETTINGS_DROPPED[k] for k in
+                                   ("env", "statusLine", "effortLevel", "modelSettings")})
+
+    def test_only_full_uses_user_setting_source(self):
+        values = {arm: self.spec(arm).cli_args for arm in arms.ARMS}
+        source = {arm: a[a.index("--setting-sources") + 1] for arm, a in values.items()}
+        self.assertEqual(source, {"bare": "local", "cs": "local", "full": "user,local"})
+        for arm, args in values.items():
+            self.assertEqual(args.count("--setting-sources"), 1, arm)
+            record = json.loads((self.root / "runs" / arm / "arm-record.json").read_text())
+            self.assertEqual(record["setting_sources"], source[arm])
+            if arm != "full":
+                self.assertEqual(record["settings_dropped"], {})
 
     def test_mcp_env_urls_are_rewritten_to_study_services(self):
         cs = self.spec("cs")
@@ -300,6 +385,31 @@ class PrepareIndexTest(unittest.TestCase):
         self.assertEqual(cost["exit_code"], 0)
         self.assertEqual(cost["image"], "sab-agent-cs-x:1")
         self.assertIn("/home/agent/.codescout", (self.data / "index-diff.txt").read_text())
+    def test_prepare_commits_index_artifacts_but_not_tmp_lock(self):
+        docker = FakeDocker()
+        self.run_prepare(docker)
+        kinds = [c[0] for c in docker.calls]
+        execs = [c for c in docker.calls if c[0] == "exec"]
+        index_at = next(i for i, c in enumerate(docker.calls) if c[0] == "exec" and "index" in c)
+        git = [c for c in execs if any("git add -f" in a for a in c)]
+        self.assertEqual(len(git), 1)
+        script = git[0][-1]
+        # The index's artifacts go into the base commit, so an agent's patch excludes them.
+        self.assertIn(".codescout", script)
+        self.assertIn(".gitignore", script)
+        self.assertIn("commit", script)
+        self.assertNotIn("/tmp", script)
+        self.assertEqual(git[0][git[0].index("-w") + 1], "/testbed")
+        lock = [c for c in execs if any("/tmp/codescout-" in a for a in c)]
+        self.assertEqual(len(lock), 1)
+        self.assertIn("rm -f", lock[0][-1])
+        commit_at = kinds.index("commit")
+        git_at = docker.calls.index(git[0])
+        lock_at = docker.calls.index(lock[0])
+        diff_at = kinds.index("diff")
+        # index, then the git commit, then the lock removal, then the recorded diff, then the
+        # image commit: the image never carries the /tmp lock, and the diff shows what it carries.
+        self.assertTrue(index_at < git_at < lock_at < diff_at < commit_at)
 
     def test_a_failed_index_is_not_committed_and_the_container_is_removed(self):
         docker = FakeDocker(index_rc=1)
