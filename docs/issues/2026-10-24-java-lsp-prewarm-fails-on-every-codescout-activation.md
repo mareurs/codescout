@@ -1,13 +1,17 @@
 ---
 id: '191ec294d551ba58'
 kind: bug
-status: investigating
+status: fixed
 title: Java LSP pre-warm fails on every activation of the codescout project (235 of 235 starts, ~16.6 s each)
 tags:
 - cluster/unclassified
+closed: 2026-10-27
+fix_patch_id: f1c9570384ec1dbc4850ed5d44e5cd495ed38bb3
+fix_sha: ce424fa47 (experiments)
 opened: 2026-10-24
 owner: marius
 severity: low
+unverified: No rebuilt binary has been observed skipping a real pre-warm, and no real activation has been run end to end. This project's project.toml does not set [lsp.java.env], so jdtls still fails here. The 3-failure and 6-hour thresholds are untested guesses.
 ---
 
 # BUG: Java LSP pre-warm fails on every activation of the codescout project (235 of 235, ~16.6 s each)
@@ -59,23 +63,30 @@ Daily java failures (successes are 0 every day): 10-03 5, 10-05 20, 10-13 21, 10
 
 ## Fix
 
-Not started. Three independent options. None is applied.
+Fixed on `experiments` in `ce424fa47` (patch-id `f1c9570384ec1dbc4850ed5d44e5cd495ed38bb3`). Two of the three options below were built. The third is a machine change that stays with the operator.
 
-1. **Machine fix (no code).** Run codescout with JDK 21 on `PATH` or `JAVA_HOME`, or upgrade `jdtls` to a build that reads class-file version 71. This stops the failures here and nothing else.
-2. **Remember a failed start across processes.** Skip the pre-warm for a language whose last K starts in this project all failed, and retry on explicit use. The in-memory breaker cannot do this (see Root cause). The `lsp_events` table already records each failed start, so it is one possible store, and the mem-kill marker file next to the mux lock is another.
-3. **Let the project name the JDK.** `LspLangOverride` carries only `mux`. An `env` override for the language would let `[lsp.java]` set `JAVA_HOME` per project, and `LspServerConfig` already has an `env` field.
+1. **Remember a failed start across processes. Built.** `usage::db::lsp_start_history` counts a language's `outcome='failed'` rows since its latest success and ages the newest. `prewarm_lsp_background` skips a language after `PREWARM_BACKOFF_AFTER_FAILURES` (3) consecutive failed starts whose newest is under `PREWARM_BACKOFF_WINDOW_SECS` (6 h) old, so a deterministic failure costs one attempt per window. Only the optional warm-up is skipped: a tool call that needs the server still starts it. An unreadable history means "pre-warm as before". The history is read from the activated project's `usage.db`, and `LspManager::record_lsp_failure` writes to the manager's own `project_root`. The two are the same store only while the manager's root is the project being pre-warmed. If they differ, the back-off does not engage and the old behaviour remains.
+2. **Let the project name the JDK. Built.** `[lsp.<language>.env]` in `project.toml` adds environment variables to that language's server. `server_config_for` in `src/lsp/manager.rs` reads them from the config of the workspace root being started, not from the session's active project. A key the server already sets is kept and a warning names it, because kotlin's `JAVA_TOOL_OPTIONS` carries the per-workspace `-Duser.home`. Documented in `docs/manual/src/configuration/project-toml.md`. Verified by hand that `JAVA_HOME=/usr/lib/jvm/java-21-openjdk` alone keeps `jdtls` up.
+3. **Machine fix. Not applied.** This project's `.codescout/project.toml` has no `[lsp.java.env]`, and the system `java` is still JDK 27. Until the operator sets `JAVA_HOME` there (or upgrades `jdtls`), `jdtls` still fails here. The back-off stops the retries and does not make it start.
+
+The numbers 3 and 6 h are guesses, not measurements.
 
 ## Tests added
 
-None yet.
+- `lsp_start_history_counts_failed_starts_since_the_last_success` (`src/usage/db.rs`). Counts one language only, restarts at a success, and ages the newest failure. RED was `left: 0, right: 2`.
+- `prewarm_tests::a_language_whose_recent_starts_all_failed_is_not_pre_warmed` and `the_pre_warm_still_runs_when_the_history_does_not_justify_skipping` (`src/lsp/mod.rs`). They drive `prewarm_lsp_background` with a provider that counts starts and always fails. They cover the threshold, another language's failures, a success in between, and a failure older than the window. RED was `left: 1, right: 0`.
+- `lsp_section_parses_a_per_language_env` (`src/config/project.rs`). Key order, and `mux` still parses beside `env`.
+- `a_project_env_override_reaches_the_server_config_and_never_replaces_a_built_in_key` (`src/lsp/manager.rs`). It checks the real `server_config_for`, the kotlin built-in key kept, and a missing or unparseable `project.toml`. RED was `got []`.
+
+The full `./scripts/gate.sh` was green (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, `PYTHON_LIGHT=0`). It ran in an isolated worktree holding `HEAD` plus this patch, because a peer's uncommitted edit to `src/tools/grep.rs` fails the format check in the shared tree. The staged diff and the gated patch have the same patch-id.
 
 ## Workarounds
 
-None needed for correctness; the cost is CPU, memory and telemetry noise.
+Until the fix runs here: set `[lsp.java.env] JAVA_HOME = "/usr/lib/jvm/java-21-openjdk"` in `.codescout/project.toml` (needs the new build), or set `JAVA_HOME` to JDK 21 in the environment of the process that runs codescout. `JAVA_HOME` alone keeps `jdtls` up by hand. Putting JDK 21 first on the `PATH` without `JAVA_HOME` was not tested.
 
 ## Resume
 
-Cause is known. What remains is a choice of fix (the Fix section lists three). Decide before coding: a cross-process failure memory is a design question, so use `buddy:architecture-snow-lion` first. Re-check after any JDK or `jdtls` change with `SELECT date(started_at), outcome, count(*) FROM lsp_events WHERE language='java' GROUP BY 1,2 ORDER BY 1 DESC LIMIT 5`.
+Done in code. To close the caveat: rebuild, run `/mcp`, activate this project twice, and read `SELECT started_at, outcome FROM lsp_events WHERE language='java' ORDER BY id DESC LIMIT 5`. After 3 failed rows, the next activation should add none. Then set `[lsp.java.env]` and confirm a `success` row appears.
 
 ## References
 
