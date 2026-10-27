@@ -122,6 +122,25 @@ land — it cannot unlock credential paths. Each entry must be an absolute path:
 an empty or relative entry is refused when the project config loads (a leading `~`
 is not expanded).
 
+**A single file directly in your home, such as `~/.bashrc` or `~/.vimrc`.** `approve_write`
+cannot make such a file writable: every directory that contains it is refused as too broad,
+because a root over your home would admit every file in it. List the file's absolute path
+instead, which admits that file and nothing next to it:
+
+```toml
+[security]
+extra_write_roots = [
+    "/home/user/.bashrc",
+    "/home/user/.vimrc",
+]
+```
+
+The file does not need to exist yet. Only you can add the entry: the agent cannot change a
+project's security table. A listed path is a prefix, so a path below it is admitted too; for an
+existing file such a write fails, and for a name that does not exist yet it would let a directory
+of that name be created. A file in a NEW folder directly in your home (`~/projects/new/a.txt`)
+needs no entry: approve that folder when the write offers it.
+
 ### Disabling Writes Entirely
 
 For read-only sessions:

@@ -946,7 +946,7 @@ fn too_broad(dir: &Path, homes: &[PathBuf]) -> Option<TooBroad> {
 /// any approval (every directory that contains it is refused too), so "write into a subdirectory"
 /// is not an option for it; only a file inside a subdirectory can be approved.
 fn too_broad_write_denial(raw: &str, dir: &Path, why: &TooBroad) -> String {
-    match why {
+    let denial = match why {
         TooBroad::FilesystemRoot => format!(
             "write denied: '{raw}' is directly in the filesystem root, outside the project root. \
              approve_write refuses a filesystem root as too broad, so no approval can make this \
@@ -967,7 +967,16 @@ fn too_broad_write_denial(raw: &str, dir: &Path, why: &TooBroad) -> String {
             home.display(),
             dir.display()
         ),
-    }
+    };
+    // The one way forward for THIS file is the operator's own config. An agent cannot add that
+    // entry: `config::protected_files` refuses a write that changes a project's security table
+    // (`a_changed_added_or_removed_security_table_is_refused`). Naming the route keeps the denial
+    // from being a dead end.
+    // docs/issues/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md
+    format!(
+        "{denial} To allow this one file, the operator can list its absolute path in \
+         `security.extra_write_roots` in `.codescout/project.toml`; the agent cannot add that entry."
+    )
 }
 
 /// The denial for a write to `raw` whose directory `dir` `approve_write` would refuse as too broad
@@ -9450,6 +9459,136 @@ EOF"#;
         assert_denied_as_protected(
             &t.classify(&ssh_link, &[t.home.join(".ssh")]),
             "a link inside the deny list",
+        );
+    }
+
+    /// A file directly in the home cannot be made writable by `approve_write` (every directory that
+    /// contains it is refused as too broad), so the one route to it is the OPERATOR's own config: an
+    /// absolute path in `security.extra_write_roots`. That route must admit exactly the file named,
+    /// existing or not yet created (`~/.vimrc` on a fresh machine), and nothing next to it.
+    /// `docs/issues/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`
+    #[cfg(unix)]
+    #[test]
+    fn an_extra_write_root_naming_one_file_in_the_home_admits_that_file_alone() {
+        let t = LeafTree::new();
+        let bashrc = t.home.join(".bashrc");
+        let vimrc = t.home.join(".vimrc"); // not created: a first write must work too
+        std::fs::write(&bashrc, "# rc\n").unwrap();
+        let config = PathSecurityConfig {
+            extra_write_roots: vec![bashrc.clone(), vimrc.clone()],
+            ..Default::default()
+        };
+        let classify = |p: &Path| {
+            classify_write_path_in(p.to_str().unwrap(), &t.project, &config, &[], &t.env())
+        };
+
+        for named in [&bashrc, &vimrc] {
+            let decision = classify(named);
+            assert!(
+                matches!(&decision, WritePathDecision::Allowed(p) if p == named),
+                "{named:?} is listed, so it must be allowed, got: {decision:?}"
+            );
+        }
+        // Neighbours: another file in the home, and a name that merely starts the same. None is
+        // listed, so none may be admitted.
+        for other in [
+            t.home.join("notes.txt"),
+            t.home.join(".bash_profile"),
+            t.home.join(".bashrc2"),
+        ] {
+            let decision = classify(&other);
+            assert!(
+                matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+                "{other:?} is not listed and must stay outside the roots, got: {decision:?}"
+            );
+        }
+        // KNOWN, pinned so the documentation stays true: a root is a path PREFIX, so a path BELOW a
+        // listed entry is admitted too. For an existing file the write itself then fails (ENOTDIR);
+        // for a listed name that does not exist yet, a directory of that name could be created. That
+        // costs the operator that one dotfile and reaches nothing else.
+        let below = bashrc.join("x");
+        let decision = classify(&below);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == below),
+            "a path below a listed entry is admitted by prefix, got: {decision:?}"
+        );
+    }
+
+    /// The deny list asks first and `extra_write_roots` cannot unlock it, so listing a file in the
+    /// home never reaches `~/.ssh`, whether the entry names a key or the directory itself.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_entry_in_the_home_never_unlocks_the_deny_list() {
+        let t = LeafTree::new();
+        let config = PathSecurityConfig {
+            extra_write_roots: vec![
+                t.home.join(".bashrc"),
+                t.home.join(".ssh/id_rsa"),
+                t.home.join(".ssh"),
+            ],
+            ..Default::default()
+        };
+        for target in [t.home.join(".ssh/id_rsa"), t.home.join(".ssh/config")] {
+            let decision = classify_write_path_in(
+                target.to_str().unwrap(),
+                &t.project,
+                &config,
+                &[],
+                &t.env(),
+            );
+            assert_denied_as_protected(&decision, "an extra root that names the deny list");
+        }
+    }
+
+    /// The denial for a file directly in the home (or in `/`, or above a home) says no APPROVAL can
+    /// make the write possible. That is true, and it left the caller with no way forward. The
+    /// operator's route exists, so the text must name it.
+    #[test]
+    fn the_too_broad_denial_names_the_operators_route() {
+        let home = PathBuf::from("/h/u");
+        for (raw, dir) in [
+            ("/h/u/.bashrc", PathBuf::from("/h/u")),
+            ("/h/x", PathBuf::from("/h")),
+            ("/x", PathBuf::from("/")),
+        ] {
+            let msg = too_broad_directory_denial_in(raw, &dir, std::slice::from_ref(&home))
+                .unwrap_or_else(|| panic!("{raw}: expected a denial"));
+            assert!(
+                msg.contains("extra_write_roots") && msg.contains("project.toml"),
+                "{raw}: the denial must name the operator's config route, got: {msg}"
+            );
+        }
+    }
+
+    /// A NEW folder directly in the home is the other thing an operator wants to create. It needs no
+    /// config: the file's directory is a subdirectory of the home, which `approve_write` accepts even
+    /// though the directory does not exist yet. So the write is offered an approval, not refused.
+    /// (An empty folder with no file in it is not a write; `run_command` makes it.)
+    #[cfg(unix)]
+    #[test]
+    fn a_file_in_a_new_folder_directly_in_the_home_can_be_approved() {
+        let t = LeafTree::new();
+        let target = t.home.join("projects/new/a.txt");
+        let decision = t.classify(&target, &[]);
+        let WritePathDecision::OutsideRoot { resolved } = &decision else {
+            panic!("a file in a new home subfolder must be offered an approval, got: {decision:?}");
+        };
+        let dir = resolved.parent().unwrap();
+        assert!(!dir.exists(), "the folder does not exist yet");
+        let approved = validate_approve_path_in(
+            dir.to_str().unwrap(),
+            &t.project,
+            std::slice::from_ref(&t.home),
+        );
+        assert!(
+            approved.is_ok(),
+            "the new folder must be approvable, got: {approved:?}"
+        );
+        // And once approved it admits the file, so the second call writes it.
+        let after = t.classify(&target, &[approved.unwrap()]);
+        assert!(
+            matches!(&after, WritePathDecision::Allowed(p) if *p == target),
+            "an approved new folder must admit its file, got: {after:?}"
         );
     }
 
