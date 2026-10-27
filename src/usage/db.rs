@@ -484,6 +484,18 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     if msg.starts_with("json_path '[*]' needs an array, found ") {
         return Some("json_path_shape_mismatch");
     }
+    // `read_file` serves what `read_markdown` used to and still emits its overflow messages,
+    // but the arm below that names them is scoped to the retired tool, so every live row fell
+    // out unclassified. Placed HERE for the same reason as the rule above: the section title
+    // inside `section "…" spans N lines` is data, and one such as `index is locked` would
+    // satisfy a substring rule further down. The fixed prefix and the fixed tail decide.
+    // Pinned by `a_read_file_overflow_is_classified_and_stays_tool_scoped`.
+    if tool_name == "read_file"
+        && (msg.starts_with("section \"") || msg.starts_with("combined headings span "))
+        && msg.contains(" lines — exceeds inline threshold")
+    {
+        return Some("read_file_overflow_threshold");
+    }
     // infra / tool-class (excluded from the probe's code-class score)
     if msg.contains("index is locked") {
         return Some("lsp_index_locked");
@@ -828,6 +840,7 @@ const ERR_FAMILIES: &[&str] = &[
     "mux_startup_fail",
     "params_schema_violation",
     "path_not_found",
+    "read_file_overflow_threshold",
     "read_markdown_file_not_found",
     "read_markdown_invalid_line_range",
     "read_markdown_overflow_threshold",
@@ -3666,6 +3679,69 @@ mod tests {
                 "tool={tool} msg={msg}"
             );
         }
+    }
+    /// `read_markdown` was folded into `read_file` on 2026-09-02, but `read_file` still
+    /// emits `read_markdown`'s overflow messages, and the only arm that named them was
+    /// scoped to the retired tool. So every live occurrence fell out as `err_family IS NULL`:
+    /// 74 rows in this project's `usage.db`, all from `read_file`. The family is tool-scoped
+    /// for the same reason the `read_markdown` arm is: an unrelated tool whose message
+    /// happens to contain these words must not be attributed to `read_file`.
+    /// `docs/issues/2026-10-24-err-family-overflow-branch-keys-on-retired-read-markdown-so-read-file-errors-are-null.md`
+    #[test]
+    fn a_read_file_overflow_is_classified_and_stays_tool_scoped() {
+        let cases = [
+            // The two live shapes, copied from `usage.db` (hint tail included).
+            (
+                "read_file",
+                "section \"# Albert — pregătirea laptopului\" spans 212 lines — exceeds inline \
+                 threshold — hint: use \"@file_19e5b4c4\" — request one heading at a time",
+                Some("read_file_overflow_threshold"),
+            ),
+            (
+                "read_file",
+                "combined headings span 100 lines — exceeds inline threshold — hint: use \
+                 \"@file_19e5b4c4\" — request one heading at a time",
+                Some("read_file_overflow_threshold"),
+            ),
+            // A section title is DATA the classifier does not control. This one satisfies the
+            // earlier `lsp_index_locked` rule's substring, so only a prefix rule placed before
+            // the substring scans classifies it correctly.
+            (
+                "read_file",
+                "section \"index is locked\" spans 212 lines — exceeds inline threshold — hint: \
+                 use \"@file_19e5b4c4\"",
+                Some("read_file_overflow_threshold"),
+            ),
+            // The historical arm must keep its own family, so old rows are not re-labelled.
+            (
+                "read_markdown",
+                "combined headings span 142 lines — exceeds inline threshold",
+                Some("read_markdown_overflow_threshold"),
+            ),
+            // A `read_file` error that is not an overflow must not be swept in.
+            (
+                "read_file",
+                "path segment 'summary' not found — hint: Available keys: content",
+                Some("json_path_key_miss"),
+            ),
+        ];
+        for (tool, msg, want) in cases {
+            assert_eq!(
+                normalize_err_family(tool, msg),
+                want,
+                "tool={tool} msg={msg}"
+            );
+        }
+
+        // Tool scope: the same words from another tool are not `read_file`'s family.
+        assert_ne!(
+            normalize_err_family(
+                "run_command",
+                "combined headings span 100 lines — exceeds inline threshold"
+            ),
+            Some("read_file_overflow_threshold"),
+            "the family is scoped to read_file, as the read_markdown arm is to read_markdown"
+        );
     }
 
     /// The coupling that silently freezes the corpus: `backfill_legacy_rows` skips
