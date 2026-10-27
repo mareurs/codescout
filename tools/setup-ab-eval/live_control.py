@@ -284,6 +284,8 @@ def git_state(container, workdir=FIXTURE_DIR):
             "log": run("git", "log", "--oneline", "-3").strip(),
             "tracked_codescout": run("git", "ls-files", ".codescout", ".gitignore").strip(),
             "project_toml": run("cat", ".codescout/project.toml"),
+            "head": run("git", "rev-parse", "HEAD").strip(),
+            "index_state": run("cat", ".codescout/index-state.json"),
             "tmp": run("ls", "-A", "/tmp").strip()}
 
 
@@ -365,6 +367,9 @@ def step_isolation(manifest):
             for r in (a, b)),
         "daily_tool_set_in_both_runs": all(
             sorted(r["tools"]) == sorted(arms.CODESCOUT_TOOLS) for r in (a, b)),
+        "fresh_run_container_index_at_head": all(
+            json.loads(r["git_fresh"]["index_state"]).get("last_indexed_commit")
+            == r["git_fresh"]["head"] for r in (a, b)),
     }
     git = {"fresh": a["git_fresh"], "a_after_probe": a["git_after_probe"],
            "b_after_probe": b["git_after_probe"]}

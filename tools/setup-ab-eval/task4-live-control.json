@@ -1,4 +1,16 @@
 {
+  "superseded_by": "task4-rulings-control.json",
+  "superseded_fields": {
+    "results.1b_companion_hooks_run.but": "C1 (round 2): cs/full seed config/.claude.json; SessionStart now 1656 B in cs and full",
+    "results.4_r10_streams.per_arm.cs.mcp_tools / full.mcp_tools": "18 -> 21 (round 4, I1: onboarding() writes project.toml, has_lsp adds references, symbol_at, call_graph)",
+    "results.4_r10_streams.per_arm.cs.hook_output_bytes": "0 -> 1656 (C1)",
+    "results.4_r10_streams.per_arm.full.output_style": "default -> legible:Explanatory STE (C2: --setting-sources user,local + sanitized settings)",
+    "results.2_isolation.facts (index wall time, fixture tree)": "prepare now runs onboarding() and commits .codescout config + index artifacts into the base (C3/C7, I1); re-measured in round 2 and round 4",
+    "concerns.concern_hooks_do_not_detect_codescout": "resolved by C1",
+    "concerns.concern_full_settings_not_applied": "resolved by C2 / C2b (capture) and round 3 (verbose)",
+    "concerns.concern_index_writes_into_the_tree": "resolved by C3/C7",
+    "image.codescout.link_shim": "comment fixed in round 4: three referenced symbols, four shim functions"
+  },
   "task": "setup-ab Stage 0 Task 4 live control (and Task 3 Step 5, moved here by ruling R2)",
   "date": "2026-10-27",
   "model_calls": 0,
@@ -15,14 +27,26 @@
     "node_source": "node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe",
     "codescout": {
       "sha": "f9b0fc9f867a0b6f5b6bb0d0b436fb303e1c5248",
-      "version_json": {"version": "0.15.0", "git_sha": "f9b0fc9", "git_sha_full": "f9b0fc9f867a0b6f5b6bb0d0b436fb303e1c5248", "git_dirty": false},
+      "version_json": {
+        "version": "0.15.0",
+        "git_sha": "f9b0fc9",
+        "git_sha_full": "f9b0fc9f867a0b6f5b6bb0d0b436fb303e1c5248",
+        "git_dirty": false
+      },
       "build": "cargo build --release --locked --features server-stack (default features on: remote-embed, http, librarian, local-embed)",
       "link_shim": "__isoc23_strtol/strtoll/strtoul/strtoull forwarded to the C99 functions (ort's prebuilt onnxruntime needs glibc 2.38)",
       "binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
       "daily_binary_sha256": "1e4ac1f5b3bcaf962a479e5fcb4167388f7988b53222359a64810d7699318c4c (host build, glibc 2.44; same SHA, different toolchain environment)"
     },
-    "rust_analyzer": {"version": "rust-analyzer 1.97.1 (8bab26f 2026-07-14)", "sha256": "ee29a71ff067766ef636e36bc61d7caf529691486e3682ae3e3e3f0d3f739d6e", "libs": "/opt/sab/lib (toolchain librustc_driver + libLLVM)"},
-    "node": {"version": "v26.12.1", "sha256": "08f12d42fb304468e8ee86247fe686aae5b225836ea65e9d6566c11ae6ba2e8e"},
+    "rust_analyzer": {
+      "version": "rust-analyzer 1.97.1 (8bab26f 2026-07-14)",
+      "sha256": "ee29a71ff067766ef636e36bc61d7caf529691486e3682ae3e3e3f0d3f739d6e",
+      "libs": "/opt/sab/lib (toolchain librustc_driver + libLLVM)"
+    },
+    "node": {
+      "version": "v26.12.1",
+      "sha256": "08f12d42fb304468e8ee86247fe686aae5b225836ea65e9d6566c11ae6ba2e8e"
+    },
     "python3": "3.11.2 (the base image's own)"
   },
   "results": {
@@ -33,13 +57,22 @@
     },
     "1b_companion_hooks_run": {
       "pass": true,
-      "evidence": ["hooks.json", "hooks-seeded.json"],
+      "evidence": [
+        "hooks.json",
+        "hooks-seeded.json"
+      ],
       "facts": "all 20 distinct hook commands of codescout-companion 1.20.21 exit 0 with no module/permission error in a cs container (companion mounted read-only)",
       "but": "as built, every hook detects HAS_CODESCOUT=false and exits early (output 0 bytes); see concern_hooks_do_not_detect_codescout"
     },
     "2_isolation": {
       "pass": true,
-      "evidence": ["stack-isolation.json", "isolation-ctl-a.probe.json", "isolation-ctl-b.probe.json", "isolation/prepare/index-cost.json", "isolation/prepare/index-diff.txt"],
+      "evidence": [
+        "stack-isolation.json",
+        "isolation-ctl-a.probe.json",
+        "isolation-ctl-b.probe.json",
+        "isolation/prepare/index-cost.json",
+        "isolation/prepare/index-diff.txt"
+      ],
       "checks": {
         "a_semantic_search_finds_marker": true,
         "a_recall_finds_its_canary": true,
@@ -53,19 +86,70 @@
     },
     "3_stack": {
       "pass": true,
-      "evidence": ["stack.json", "sab-sparse.log", "sab-dense.log"],
-      "vram_bytes": {"total": 17163091968, "before": 4586844160, "after_stack_up": 5190094848, "after_indexing": 5210312704},
+      "evidence": [
+        "stack.json",
+        "sab-sparse.log",
+        "sab-dense.log"
+      ],
+      "vram_bytes": {
+        "total": 17163091968,
+        "before": 4586844160,
+        "after_stack_up": 5190094848,
+        "after_indexing": 5210312704
+      },
       "facts": "sab-dense fits next to the live codescout-dense-amd (+0.56 GiB); sab-sparse (TEI cpu-1.8, HF_HUB_OFFLINE=1, /data mounted ro from sab-model-cache) started and served /embed_sparse; per-run Qdrant opened cp -a copies of the stopped template (runs ctl-a, ctl-b, ctl-ra, ctl-r10cs, ctl-r10full)"
     },
     "4_r10_streams": {
-      "evidence": ["r10-streams.json", "tools-flag.json", "r10/<arm>.stream.jsonl", "r10/<arm>/config/r10-debug.log"],
-      "init_emitted_before_auth_failure": {"bare": true, "cs": true, "full": true},
+      "evidence": [
+        "r10-streams.json",
+        "tools-flag.json",
+        "r10/<arm>.stream.jsonl",
+        "r10/<arm>/config/r10-debug.log"
+      ],
+      "init_emitted_before_auth_failure": {
+        "bare": true,
+        "cs": true,
+        "full": true
+      },
       "auth_failure": "'Not logged in' result; debug log: 'Could not resolve authentication method' before any request; telemetry getaddrinfo EAI_AGAIN api.anthropic.com",
       "tools_flag_hides_mcp_tools": false,
       "per_arm": {
-        "bare": {"tools": 6, "mcp_tools": 0, "mcp_servers": [], "plugins": "3 CLI builtins", "skills": 18, "hook_events": 0},
-        "cs": {"tools": 24, "mcp_tools": 18, "mcp_servers": [{"name": "codescout", "status": "connected"}], "plugins": "codescout-companion 1.20.21 + 3 builtins", "skills": 25, "hook_events": 4, "hook_output_bytes": 0},
-        "full": {"tools": 24, "mcp_tools": 18, "mcp_servers": [{"name": "codescout", "status": "connected"}], "plugins": "companion, superpowers, buddy, legible, document-skills, frontend-design, claude-md-management + 3 builtins", "skills": 77, "hook_events": 10, "output_style": "default"}
+        "bare": {
+          "tools": 6,
+          "mcp_tools": 0,
+          "mcp_servers": [],
+          "plugins": "3 CLI builtins",
+          "skills": 18,
+          "hook_events": 0
+        },
+        "cs": {
+          "tools": 24,
+          "mcp_tools": 18,
+          "mcp_servers": [
+            {
+              "name": "codescout",
+              "status": "connected"
+            }
+          ],
+          "plugins": "codescout-companion 1.20.21 + 3 builtins",
+          "skills": 25,
+          "hook_events": 4,
+          "hook_output_bytes": 0
+        },
+        "full": {
+          "tools": 24,
+          "mcp_tools": 18,
+          "mcp_servers": [
+            {
+              "name": "codescout",
+              "status": "connected"
+            }
+          ],
+          "plugins": "companion, superpowers, buddy, legible, document-skills, frontend-design, claude-md-management + 3 builtins",
+          "skills": 77,
+          "hook_events": 10,
+          "output_style": "default"
+        }
       }
     },
     "ra_memory_under_cap": {
@@ -77,7 +161,11 @@
   "concerns": {
     "concern_hooks_do_not_detect_codescout": {
       "status": "NEEDS_CONTEXT",
-      "evidence": ["hookfix.json", "r10-hookfix/*.stream.jsonl", "hooks-seeded.json"],
+      "evidence": [
+        "hookfix.json",
+        "r10-hookfix/*.stream.jsonl",
+        "hooks-seeded.json"
+      ],
       "facts": "companion detect.mjs finds codescout only via <cwd>/.claude/codescout-companion.json, <cwd>/.mcp.json, or mcpServers in $CLAUDE_CONFIG_DIR/.claude.json|settings.json; --mcp-config is invisible to it, so the cs arm's hooks all no-op. Seeding the run's config/.claude.json with the same mcpServers entry: SessionStart output 0 -> 1656 bytes, still exactly one MCP server (strict-mcp-config), pre-tool-guard denies native Read as in daily use"
     },
     "concern_full_settings_not_applied": {
@@ -88,5 +176,14 @@
       "facts": "codescout index adds .codescout/ and a .gitignore under the project root (index-diff.txt); committed into the run image, so every arm's extracted patch would carry it unless prepare commits it into the base"
     }
   },
-  "teardown": {"evidence": "teardown.json", "left_sab_containers": [], "left_sab_volumes": [], "left_sab_networks": [], "kept": ["image sab-agent-cs-ruff-15309:f9b0fc9f8", "pulled base images rust:1.97.1-bookworm, node:26-bookworm-slim"]}
+  "teardown": {
+    "evidence": "teardown.json",
+    "left_sab_containers": [],
+    "left_sab_volumes": [],
+    "left_sab_networks": [],
+    "kept": [
+      "image sab-agent-cs-ruff-15309:f9b0fc9f8",
+      "pulled base images rust:1.97.1-bookworm, node:26-bookworm-slim"
+    ]
+  }
 }

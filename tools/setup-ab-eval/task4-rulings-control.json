@@ -11,21 +11,58 @@
   "C1_claude_json_seed": {
     "pass": true,
     "evidence": "round2/r10-streams.json, round2/r10/<arm>.stream.jsonl",
-    "cs": {"mcp_servers": [{"name": "codescout", "status": "connected"}], "mcp_tools": 18,
-           "session_start_output_bytes": [1656]},
-    "full": {"mcp_servers": [{"name": "codescout", "status": "connected"}], "mcp_tools": 18,
-             "session_start_output_bytes": [3604, 1656, 0],
-             "note": "3604 = superpowers (<EXTREMELY_IMPORTANT> context), 1656 = codescout-companion (PROJECT BOOTSTRAP), 0 = a third SessionStart hook with no output"},
-    "bare": {"mcp_servers": [], "mcp_tools": 0, "hook_events": 0}
+    "cs": {
+      "mcp_servers": [
+        {
+          "name": "codescout",
+          "status": "connected"
+        }
+      ],
+      "mcp_tools": 18,
+      "session_start_output_bytes": [
+        1656
+      ]
+    },
+    "full": {
+      "mcp_servers": [
+        {
+          "name": "codescout",
+          "status": "connected"
+        }
+      ],
+      "mcp_tools": 18,
+      "session_start_output_bytes": [
+        3604,
+        1656,
+        0
+      ],
+      "note": "3604 = superpowers (<EXTREMELY_IMPORTANT> context), 1656 = codescout-companion (PROJECT BOOTSTRAP), 0 = a third SessionStart hook with no output"
+    },
+    "bare": {
+      "mcp_servers": [],
+      "mcp_tools": 0,
+      "hook_events": 0
+    }
   },
   "C2_full_user_settings": {
     "pass": true,
     "evidence": "round2/r10-streams.json (full init output_style), round2/r10/full/arm-record.json",
     "full_init_output_style": "legible:Explanatory STE",
     "bare_cs_output_style": "default",
-    "setting_sources": {"bare": "local", "cs": "local", "full": "user,local"},
-    "dropped_keys": ["env", "statusLine", "effortLevel", "modelSettings", "hooks.UserPromptSubmit",
-                     "extraKnownMarketplaces", "autoMode"],
+    "setting_sources": {
+      "bare": "local",
+      "cs": "local",
+      "full": "user,local"
+    },
+    "dropped_keys": [
+      "env",
+      "statusLine",
+      "effortLevel",
+      "modelSettings",
+      "hooks.UserPromptSubmit",
+      "extraKnownMarketplaces",
+      "autoMode"
+    ],
     "deviation_effort_keys": {
       "what": "effortLevel and modelSettings dropped although they hold no host value (the C2 generic rule would keep them)",
       "why": "Global Constraint: every arm at the CLI default effort, equal across the arms of a task",
@@ -55,10 +92,20 @@
   "C3_C7_prepare": {
     "pass": true,
     "evidence": "round2/stack-isolation.json (git), round2/isolation/prepare/index-diff.txt",
-    "fresh_run_container": {"git_status_porcelain": "", "git_status_porcelain_ignored": "",
-                            "log": ["5e2423b sab: codescout index artifacts", "2f51231 fixture"],
-                            "tracked": [".codescout/index-state.json", ".codescout/write.lock", ".gitignore"],
-                            "tmp": ""},
+    "fresh_run_container": {
+      "git_status_porcelain": "",
+      "git_status_porcelain_ignored": "",
+      "log": [
+        "5e2423b sab: codescout index artifacts",
+        "2f51231 fixture"
+      ],
+      "tracked": [
+        ".codescout/index-state.json",
+        ".codescout/write.lock",
+        ".gitignore"
+      ],
+      "tmp": ""
+    },
     "index_diff_has_tmp_lock": false,
     "isolation_checks_still_pass": true,
     "finding_after_a_session": "after a codescout MCP session, git status shows untracked, not ignored: .codescout/debug.log, .codescout/diagnostic-*.log, .codescout/usage.db, .codescout/write.lock.holder and (after a memory write) .codescout/memories/; a `git add -A` patch extraction would carry them in cs/full only"
@@ -71,6 +118,41 @@
     "requests": 2,
     "thinking_display": "omitted"
   },
-  "teardown": {"evidence": "round2/teardown.json", "left_sab_containers": [], "left_sab_volumes": [],
-               "left_sab_networks": []}
+  "teardown": {
+    "evidence": "round2/teardown.json",
+    "left_sab_containers": [],
+    "left_sab_volumes": [],
+    "left_sab_networks": []
+  },
+  "round4": {
+    "I1_daily_tool_set": {
+      "pass": true,
+      "cause": "references, symbol_at and call_graph are Availability::RequiresLsp; has_lsp reads [project] languages from .codescout/project.toml (src/server.rs:1131-1143); codescout index writes no project.toml; the only production writer is onboarding()'s perform_full_onboarding (src/tools/onboarding.rs:1090)",
+      "path_used": "codescout's own onboarding() over MCP in the prepare container (mcp_probe.py), no LLM",
+      "measurement": "controls/round4/onboarding-probe/onboarding-probe.json: 18 -> 21 tools on ruff /testbed after onboarding()",
+      "live": "controls/round4c/r10-indexed-streams.json: cs and full init list 21 codescout tools incl. mcp__codescout__references and mcp__codescout__symbol_at, server connected; bare none",
+      "expected_set": "arms.CODESCOUT_TOOLS (21), matching a live daily session's list"
+    },
+    "I1_embeddings": {
+      "daily_effective": "model CodeRankEmbed ([embeddings].model of the daily codescout project.toml under ~/.claude, whose env sets no model var; kat/sdd env CODESCOUT_EMBED_MODEL=CodeRankEmbed); url from env CODESCOUT_EMBEDDER_URL (env wins, merge_embed_config)",
+      "onboarding_wrote": "local:AllMiniLML6V2Q (hardware recommendation; the agent container has no /dev/dri or /dev/kfd)",
+      "study_set": {
+        "model": "CodeRankEmbed",
+        "url": "http://sab-dense:8080/v1"
+      },
+      "log_label_before": "652-char segment budget for 'local:AllMiniLML6V2Q' (round 1)",
+      "log_label_after": "5222-char segment budget for 'CodeRankEmbed' (round4c r10-indexed debug logs, cs and full)",
+      "index_state": "indexed_with_model CodeRankEmbed"
+    },
+    "I1_nudge": {
+      "companion_not_yet_onboarded": "flipped by .codescout/project.toml alone (detect.mjs:169); round 2: present, round4c: absent; no project memories kept",
+      "codescout_memories_line": "'Memories: None yet - run onboarding' (src/prompts/mod.rs:162) needs project memories; onboarding()'s programmatic memories are removed at prepare (spec: no project memories), so this line stays: an arm condition"
+    },
+    "I1_prepare_findings": {
+      "onboarding_tmp_prompt": "onboarding() writes .codescout/tmp/onboarding-prompt.md (32 KB of codescout instructions; round4 committed it into the base, visible to every arm incl. bare); PREPARE_CLEANUP now removes .codescout/tmp",
+      "index_behind_head": "committing index-state.json left last_indexed_commit one commit behind HEAD (round4b), so the companion spawned a background codescout index in every run; now the config is committed before the index and index-state.json/write.lock are excluded via .git/info/exclude (round4c: index at HEAD, tree clean, no 'Refreshing in background')"
+    },
+    "minor3_autoMemoryEnabled_ab": "controls/round4c/automem-probe/automem-probe.json: system chars cs 5591 (# Memory), full 3573 (none), full minus autoMemoryEnabled 5629 (# Memory back)",
+    "teardown": "controls/round4c/teardown.json: 0 sab- containers, volumes, networks"
+  }
 }

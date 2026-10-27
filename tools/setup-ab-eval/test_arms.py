@@ -524,7 +524,7 @@ class PrepareIndexTest(unittest.TestCase):
         cleanup = self.at(docker, lambda c: c[0] == "exec" and c[-1] == arms.PREPARE_CLEANUP)
         index = self.at(docker, lambda c: c[0] == "exec" and "index" in c)
         git = self.at(docker, lambda c: c[0] == "exec" and "git add -f" in c[-1])
-        self.assertTrue(probe < embed < cleanup < index < git)
+        self.assertTrue(probe < embed < cleanup < git < index)
         record = json.loads((self.data / "prepare.json").read_text())
         self.assertTrue(record["onboarding"]["ok"])
 
@@ -567,7 +567,7 @@ class PrepareIndexTest(unittest.TestCase):
                     "write.lock.holder", "usage.db", "debug.log", "diagnostic-1a2b.log",
                     "memories/onboarding.md", "memories/.history/onboarding.md/x.md.bak",
                     "private-memories/p.md", "projects/ruff/memories/onboarding.md",
-                    "projects/ruff/memories/language-patterns.md"):
+                    "projects/ruff/memories/language-patterns.md", "tmp/onboarding-prompt.md"):
             (cs / rel).parent.mkdir(parents=True, exist_ok=True)
             (cs / rel).write_text("x")
         subprocess.run(["sh", "-c", arms.PREPARE_CLEANUP], cwd=root, check=True)
@@ -576,6 +576,10 @@ class PrepareIndexTest(unittest.TestCase):
                                 "write.lock"])
 
     def test_prepare_commits_index_artifacts_but_not_tmp_lock(self):
+        # Round-4 order: the config (project.toml, .gitignore) is committed BEFORE the index, so
+        # the index records that commit as last_indexed_commit == HEAD; the index state itself
+        # stays untracked but excluded (.git/info/exclude), so an agent's `git add -A` patch
+        # carries none of it and the companion never sees the index behind HEAD.
         docker = FakeDocker()
         self.run_prepare(docker)
         kinds = [c[0] for c in docker.calls]
@@ -584,23 +588,61 @@ class PrepareIndexTest(unittest.TestCase):
         git = [c for c in execs if any("git add -f" in a for a in c)]
         self.assertEqual(len(git), 1)
         script = git[0][-1]
-        # The index's artifacts go into the base commit, so an agent's patch excludes them.
         self.assertIn(".codescout", script)
         self.assertIn(".gitignore", script)
         self.assertIn("commit", script)
         self.assertNotIn("/tmp", script)
         self.assertEqual(git[0][git[0].index("-w") + 1], "/testbed")
+        state = [c for c in execs if c[-1] == arms.INDEX_STATE_EXCLUDE]
+        self.assertEqual(len(state), 1)
+        self.assertEqual(state[0][state[0].index("-w") + 1], "/testbed")
         lock = [c for c in execs if any("/tmp/codescout-" in a for a in c)]
         self.assertEqual(len(lock), 1)
         self.assertIn("rm -f", lock[0][-1])
         self.assertIn("/tmp/sab-prepare", lock[0][-1])
         commit_at = kinds.index("commit")
         git_at = docker.calls.index(git[0])
+        state_at = docker.calls.index(state[0])
         lock_at = docker.calls.index(lock[0])
         diff_at = kinds.index("diff")
-        # index, then the git commit, then the lock removal, then the recorded diff, then the
-        # image commit: the image never carries the /tmp lock, and the diff shows what it carries.
-        self.assertTrue(index_at < git_at < lock_at < diff_at < commit_at)
+        # config commit, index, index-state exclusion (+ HEAD and clean-tree checks), lock
+        # removal, recorded diff, image commit.
+        self.assertTrue(git_at < index_at < state_at < lock_at < diff_at < commit_at)
+
+    def test_index_state_exclude_leaves_a_clean_tree_at_head(self):
+        repo = self.data / "repo"
+        cs = repo / ".codescout"
+        cs.mkdir(parents=True)
+        git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        (cs / "project.toml").write_text("[project]\nname = \"r\"\n")
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-qm", "config"], check=True)
+        head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True,
+                              check=True).stdout.strip()
+        (cs / "write.lock").write_text("")
+        (cs / "index-state.json").write_text(json.dumps({"last_indexed_commit": head}, indent=2))
+        r = subprocess.run(["sh", "-c", arms.INDEX_STATE_EXCLUDE], cwd=repo, capture_output=True,
+                           text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        status = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True)
+        self.assertEqual(status.stdout, "")
+        self.assertTrue((cs / "index-state.json").exists())
+        # Idempotent: a second run adds no duplicate lines.
+        subprocess.run(["sh", "-c", arms.INDEX_STATE_EXCLUDE], cwd=repo, check=True)
+        lines = (repo / ".git" / "info" / "exclude").read_text().splitlines()
+        self.assertEqual(lines.count("/.codescout/index-state.json"), 1)
+        # An index behind HEAD is refused.
+        (cs / "index-state.json").write_text(json.dumps({"last_indexed_commit": "0" * 40}))
+        r = subprocess.run(["sh", "-c", arms.INDEX_STATE_EXCLUDE], cwd=repo, capture_output=True,
+                           text=True)
+        self.assertNotEqual(r.returncode, 0)
+        # So is a dirty tree.
+        (cs / "index-state.json").write_text(json.dumps({"last_indexed_commit": head}))
+        (repo / "stray.txt").write_text("x")
+        r = subprocess.run(["sh", "-c", arms.INDEX_STATE_EXCLUDE], cwd=repo, capture_output=True,
+                           text=True)
+        self.assertNotEqual(r.returncode, 0)
 
     def test_a_failed_index_is_not_committed_and_the_container_is_removed(self):
         docker = FakeDocker(index_rc=1)

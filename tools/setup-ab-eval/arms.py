@@ -74,11 +74,31 @@ HOST_PATH_MARKERS = ("/home/",)
 # and `WebFetch(domain:127.0.0.1)`, which grant nothing the internal network can reach.
 URL_ALLOWLIST_EXEMPT_SETTINGS = ("permissions",)
 
-# prepare_index, run in the project dir: commit what the index wrote into the tree (C3).
+# prepare_index, run in the project dir BEFORE the index: commit the project config that
+# onboarding() wrote (project.toml, workspace.toml, write.lock, .gitignore) into the base (C3),
+# so the index then records this commit as last_indexed_commit == HEAD.
 INDEX_ARTIFACTS_COMMIT = (
     "set -e; for p in .codescout .gitignore; do if [ -e \"$p\" ]; then git add -f -- \"$p\"; "
     "fi; done; git diff --cached --quiet || git -c user.name=sab-prepare "
-    "-c user.email=sab-prepare@example.invalid commit -q -m 'sab: codescout index artifacts'")
+    "-c user.email=sab-prepare@example.invalid commit -q -m 'sab: codescout project config'")
+# prepare_index, run in the project dir AFTER the index (round-4 live finding). A tracked
+# index-state.json cannot name the commit that contains it, so committing it left the index one
+# commit behind HEAD, and the companion's SessionStart hook then spawned a background
+# `codescout index` in every run (session-start.mjs:259-283). The index state stays in the
+# image, untracked and excluded through .git/info/exclude (an agent's `git add -A` patch skips
+# it). The script refuses an index not at HEAD and a tree that is not clean.
+INDEX_STATE_EXCLUDE = (
+    "set -e; "
+    "[ \"$(git rev-parse --show-toplevel)\" = \"$(pwd -P)\" ] "
+    "|| { echo 'project dir is not the repo root'; exit 2; }; "
+    "ex=\"$(git rev-parse --git-path info/exclude)\"; mkdir -p \"$(dirname \"$ex\")\"; "
+    "for p in /.codescout/index-state.json /.codescout/write.lock; do "
+    "grep -qxF \"$p\" \"$ex\" 2>/dev/null || echo \"$p\" >> \"$ex\"; done; "
+    "head=\"$(git rev-parse HEAD)\"; "
+    "grep -q \"\\\"last_indexed_commit\\\": *\\\"$head\\\"\" .codescout/index-state.json "
+    "|| { echo \"index-state.json is not at HEAD $head\"; exit 4; }; "
+    "s=\"$(git status --porcelain)\"; "
+    "[ -z \"$s\" ] || { echo 'tree not clean after prepare:'; echo \"$s\"; exit 3; }")
 # prepare_index: the index's lock under /tmp/codescout-<uid>/ never enters the image (C7), nor
 # do the prepare step's own files or the codescout home state its MCP session created. Runs
 # only through `docker exec` in the prepare container (it names $HOME).
@@ -177,12 +197,14 @@ if __name__ == "__main__":
 
 # Run in the project dir after onboarding() and after the index: keep the project config
 # (project.toml, workspace.toml) and the index state; remove the memories onboarding() writes
-# (the study carries no project memories, spec section 3 gate 3 / section 9.1) and the MCP
-# session's runtime files (usage db, logs, lock holder).
+# (the study carries no project memories, spec section 3 gate 3 / section 9.1), its per-call
+# subagent hand-off prompt in .codescout/tmp/ (32 KB of codescout instructions that every arm,
+# bare included, would otherwise find in the tree; round-4 live finding) and the MCP session's
+# runtime files (usage db, logs, lock holder).
 PREPARE_CLEANUP = (
     "set -e; cd .codescout 2>/dev/null || exit 0; "
     "find . -type d \\( -name memories -o -name private-memories \\) -prune -exec rm -rf {} +; "
-    "rm -f usage.db usage.db-shm usage.db-wal write.lock.holder; "
+    "rm -rf tmp; rm -f usage.db usage.db-shm usage.db-wal write.lock.holder; "
     "find . -maxdepth 1 -name '*.log' -delete; "
     "find . -mindepth 1 -type d -empty -delete; true")
 
@@ -489,8 +511,11 @@ def prepare_index(image, out_image, network, env, data_dir, *, project="/testbed
         docker("exec", name, "python3", f"{PREPARE_TMP}/set_embeddings.py", config,
                embeddings["model"], embeddings["url"])
         (data_dir / "project.toml").write_text(docker("exec", name, "cat", config).stdout)
-        # 3. No project memories, no session state.
+        # 3. No project memories, no session state; then C3: the project config into the base
+        # commit, so the index (step 4) records that commit and an agent's extracted patch
+        # (git add -A; git diff --cached <base>) excludes the config.
         docker("exec", "-w", project, name, "sh", "-c", PREPARE_CLEANUP)
+        docker("exec", "-w", project, name, "sh", "-c", INDEX_ARTIFACTS_COMMIT)
         # 4. The index, timed.
         exports = [a for k, v in sorted(env.items()) for a in ("-e", f"{k}={v}")]
         started = clock()
@@ -506,9 +531,9 @@ def prepare_index(image, out_image, network, env, data_dir, *, project="/testbed
             raise RuntimeError(f"codescout index failed (exit {result.returncode}); see "
                                f"{data_dir / 'index.log'}")
         docker("exec", "-w", project, name, "sh", "-c", PREPARE_CLEANUP)
-        # 5. C3: config and index artifacts into the base commit, so an agent's extracted patch
-        # (git add -A; git diff --cached <base>) excludes them. C7: no /tmp lock in the image.
-        docker("exec", "-w", project, name, "sh", "-c", INDEX_ARTIFACTS_COMMIT)
+        # 5. The index state stays untracked and excluded, at HEAD, in a clean tree (refused
+        # otherwise). C7: no /tmp lock in the image.
+        docker("exec", "-w", project, name, "sh", "-c", INDEX_STATE_EXCLUDE)
         docker("exec", name, "sh", "-c", TMP_LOCK_REMOVAL)
         (data_dir / "index-diff.txt").write_text(docker("diff", name).stdout)
         docker("commit", "--change", 'CMD ["bash"]', name, out_image)
