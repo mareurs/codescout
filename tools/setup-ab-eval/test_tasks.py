@@ -371,6 +371,25 @@ class History(unittest.TestCase):
         self.assertFalse(r["ok"])
 
 
+class BrokenLinks(unittest.TestCase):
+    """Live finding (ruff fuzz/corpus): a dangling symlink made the scan ScanIncomplete."""
+
+    def test_dangling_links_become_a_scanned_listing(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "export"
+            (root / "d").mkdir(parents=True)
+            (root / "d" / "real.txt").write_text("fine\n")
+            os.symlink("real.txt", root / "d" / "ok_link")
+            os.symlink("../missing/zz_secret_target", root / "d" / "dangling")
+            with self.assertRaises(leak_scan.ScanIncomplete):
+                leak_scan.scan([root], None, ["zz_secret_target"], allow_unbaselined=True)
+            listing = Path(td) / "links.txt"
+            found = tasks.unlink_broken_links(root, listing)
+            self.assertEqual(found, [("d/dangling", "../missing/zz_secret_target")])
+            self.assertTrue((root / "d" / "ok_link").is_symlink())
+            report = leak_scan.scan([root, listing], None, ["zz_secret_target"], allow_unbaselined=True)
+            self.assertEqual([(h.path, h.needle) for h in report.hits], [(listing, "zz_secret_target")])
+
 class ControlOrder(unittest.TestCase):
     """Task 5 carried minor: the planted shingle must not contain another kept name needle."""
 

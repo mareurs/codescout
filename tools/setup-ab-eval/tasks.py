@@ -265,9 +265,11 @@ def _pinned_tag(image, name):
     return tag, image_id
 
 
-def _docker_build(context, dockerfile_text, tag, log, *, build_args=(), extra=(), timeout=7200):
+def _docker_build(context, dockerfile_text, tag, log, *, build_args=(), extra=(), timeout=7200,
+                  offline=True):
     (Path(context) / "Dockerfile").write_text(dockerfile_text)
-    argv = ["docker", "build", "--network", "none", "-t", tag, "-f", str(Path(context) / "Dockerfile")]
+    argv = ["docker", "build", *(["--network", "none"] if offline else []), "-t", tag,
+            "-f", str(Path(context) / "Dockerfile")]
     for a in build_args:
         argv += ["--build-arg", a]
     r = pilot.command([*argv, *extra, str(context)], timeout=timeout, check=False)
@@ -519,7 +521,7 @@ def assemble_foreign(record, out, task_image):
     base_tree = out / "baseline-tree"
     export_tree(task_image, ["testbed"], base_tree, excludes=["testbed/target", "testbed/.git"])
     raw = leak_scan.needles_for(record)
-    needles = leak_scan.baseline_needles(raw, base_tree / "testbed")
+    needles = leak_scan.baseline_needles(raw, lambda: tree_files(base_tree / "testbed"))
     prompt = out / "prompt.txt"
     prompt.write_text(PROMPT_PREFIX + record["problem_statement"].replace("\r\n", "\n"))
     gold = out / "gold.patch"
@@ -537,12 +539,15 @@ def assemble_foreign(record, out, task_image):
 # --- the public builders -----------------------------------------------------------------------
 
 def build_agent_image(task_image, tag, log):
-    """agent-cs.Dockerfile FROM the task image (Task 4), offline: the codescout stage is cached."""
+    """agent-cs.Dockerfile FROM the task image, built exactly as Task 4 built it (default build
+    network): BuildKit keys a RUN's cache on its network mode, so `--network none` would miss the
+    cached codescout builder stage and re-run its apt-get. The task image under it was built
+    offline; this layer adds only /opt/sab (and python3 if the base lacks it)."""
     ctx = Path(log).parent / "agent-ctx"
     ctx.mkdir(parents=True, exist_ok=True)
     return _docker_build(ctx, (HERE / "agent-cs.Dockerfile").read_text(),
                          tag, log, build_args=[f"BASE={task_image}"],
-                         extra=["--build-context", f"codescout_src={CODESCOUT_SRC}"])
+                         extra=["--build-context", f"codescout_src={CODESCOUT_SRC}"], offline=False)
 
 
 def grader_for(record, image, gdir):
@@ -595,6 +600,14 @@ def build_foreign(record, out):
     return TaskBundle(tid, image, prompt, needles, foreign_grader(record, image, out / "grades"), "", rec)
 
 
+def stack_down_exact():
+    """Retire the index-building stack by exact name: sab-qdrant, sab-dense, sab-sparse and
+    sab-qv-index. Not stack.stack_down(), whose `sab-` sweep would also remove a concurrent
+    grade or template-dump container (found live: Step 5 runs controls beside a prepare)."""
+    return stack._remove_exact(pilot.docker, containers=["sab-qdrant", "sab-dense", "sab-sparse"],
+                               volumes=[stack.INDEX_VOLUME])
+
+
 def prepare_task(bundle, manifest, out, network=NET):
     """Onboard and index the agent image on the study stack (arms.prepare_index), keep the index
     as template `sab-tpl-<id>`, and return the bundle on the run image with its grader rebound."""
@@ -611,7 +624,7 @@ def prepare_task(bundle, manifest, out, network=NET):
         pilot.docker("volume", "create", template)
         stack.copy_volume(stack.INDEX_VOLUME, template)
     finally:
-        stack.stack_down()
+        stack_down_exact()
     record = dict(bundle.record, run_image=run_image, template=template)
     return bundle._replace(image=run_image, template=template, record=record,
                            grade=grader_for(record, run_image, Path(record["out"]) / "grades"))
@@ -722,6 +735,27 @@ def config_roots(manifest):
     return list(dict.fromkeys(roots))
 
 
+def unlink_broken_links(root, listing):
+    """Replace the dangling symlinks under `root` (an export copy) by one listing file.
+
+    leak_scan reads a dangling link as unreadable and refuses the scan (ScanIncomplete), though
+    an agent can read nothing through it either: what it can see is the link's path and its
+    target string. Those go, one `path -> target` line each, into `listing`, which the caller
+    scans; the links themselves are removed from the copy. Returns [(path, target)].
+    """
+    root = Path(root)
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in dirnames + filenames:
+            p = Path(dirpath) / name
+            if p.is_symlink() and not p.exists():
+                found.append((p.relative_to(root).as_posix(), os.readlink(p)))
+    for rel, _ in found:
+        (root / rel).unlink()
+    if found:
+        Path(listing).write_text("".join(f"{rel} -> {target}\n" for rel, target in found))
+    return found
+
 def leak_control(bundle, manifest, data):
     """Scan everything an arm can reach of the run image, the template dump, the git object
     stream and the config copy, with the positive control planted alongside."""
@@ -748,6 +782,10 @@ def leak_control(bundle, manifest, data):
     dump = data / "qdrant-dump.jsonl"
     points = dump_template(bundle, dump)
     roots, empty = [], []
+    links = data / "broken-symlinks.txt"
+    broken = unlink_broken_links(export, links)
+    if broken:
+        roots.append(links)
     for p in present:
         d = export / p
         (roots if any(f.is_file() or f.is_symlink() for f in d.rglob("*")) else empty).append(d)
@@ -761,6 +799,7 @@ def leak_control(bundle, manifest, data):
         "per_root": [list(x) for x in report.per_root], "needle_counts": report.needle_counts,
         "dropped_by_baseline": report.dropped,
         "empty_roots_not_scanned": [str(e) for e in empty],
+        "broken_symlinks": {"count": len(broken), "scanned_as": str(links) if broken else None},
         "excluded": SCAN_EXCLUDED, "not_scanned": NOT_SCANNED,
         "qdrant_points": points, "git_object_stream_bytes": objects.stat().st_size,
         "history": history,
@@ -807,7 +846,7 @@ def bundle_for(task_id, root):
         else:
             record = json.loads(Path(rec["record_path"]).read_text())
             needles = leak_scan.baseline_needles(leak_scan.needles_for(record),
-                                                 Path(rec["out"]) / "baseline-tree" / "testbed")
+                                                 lambda: tree_files(Path(rec["out"]) / "baseline-tree" / "testbed"))
             prompt = Path(rec["out"]) / "prompt.txt"
         return TaskBundle(task_id, image, prompt, needles, grader_for(rec, image, Path(rec["out"]) / "grades"),
                           rec.get("template", ""), rec)
