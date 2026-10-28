@@ -498,12 +498,44 @@ def foreign_grader(record, image, gdir):
     return grade
 
 
+_TAR_UNREADABLE = re.compile(r"^tar: (.+?): (?:Warning: )?(Cannot (?:open|opendir|read|stat)\b.*)$")
+
+
+def parse_tar_stderr(err):
+    """(unreadable, unknown) from the stderr of the export tar.
+
+    unreadable: [{"path": "/<member>", "reason": ...}] for each `Cannot open|opendir|read|stat`
+    line (a stat failure is a file inside a directory the user cannot traverse). unknown: every
+    other non-empty line, which the caller treats as a failed export (review N1: nothing tar
+    reports may be skipped silently)."""
+    unreadable, unknown = [], []
+    for line in err.splitlines():
+        if not line.strip():
+            continue
+        m = _TAR_UNREADABLE.match(line)
+        if m:
+            unreadable.append({"path": "/" + m.group(1).lstrip("/"), "reason": m.group(2)})
+        else:
+            unknown.append(line)
+    return unreadable, unknown
+
+
+def unreadable_not_allowed(entries):
+    """The unreadable entries that are not the exec-only files of Ruling A. Accepts the dict
+    form and the round-1 string form (`opt/sab/bin/codescout: Warning: Cannot open: ...`)."""
+    paths = [e["path"] if isinstance(e, dict) else "/" + str(e).split(": ", 1)[0].lstrip("/")
+             for e in entries or []]
+    return [p for p in paths if p not in arms.EXEC_ONLY_FILES]
+
+
 def export_tree(image, paths, dest, *, excludes=(), unreadable=None):
     """tar `paths` (relative to /) out of a container of `image`, as the image user, into dest.
 
-    The export is the agent user's view: a file that user cannot read (the exec-only codescout
-    binary, Ruling A) is not exported and is appended to `unreadable` (a list) as `path: reason`;
-    tar's `--ignore-failed-read` keeps that from failing the export. Any other tar failure raises.
+    The export is the agent user's view. A file that user cannot read is not exported and is
+    appended to `unreadable` (a list of {path, reason}); tar's `--ignore-failed-read` keeps that
+    from failing the export. Fail closed (review N1): any tar stderr line that is not such an
+    unreadable report raises, and so does an unreadable file outside arms.EXEC_ONLY_FILES (a
+    mode-000 file the agent owns is unreadable to tar yet one chmod away for the agent).
     """
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -525,9 +557,13 @@ def export_tree(image, paths, dest, *, excludes=(), unreadable=None):
     if producer.returncode or untar.returncode:
         raise RuntimeError(f"export of {present} from {image} failed: {err[-2000:]} "
                            f"{untar.stderr.decode(errors='replace')[-2000:]}")
+    found, unknown = parse_tar_stderr(err)
     if unreadable is not None:
-        unreadable += [m.group(1) + ": " + m.group(2)
-                       for m in re.finditer(r"^tar: (.+?): (?:Warning: )?(Cannot (?:open|opendir|read).*)$", err, re.M)]
+        unreadable += found
+    bad = unreadable_not_allowed(found)
+    if unknown or bad:
+        raise RuntimeError(f"export of {present} from {image} is incomplete: unreadable outside "
+                           f"the exec-only allowlist {bad}; unexplained tar output {unknown[:5]}")
     return present
 
 
@@ -866,6 +902,8 @@ def prescan_task(bundle, manifest, data, image=None):
     try:
         report = leak_scan.positive_control(roots, control_order(bundle.needles), None)
         out = {"id": bundle.id, "image": image, "control": "pass", "unreadable_to_agent": unreadable,
+               "reasons": ([f"unreadable to the agent-user export but not exec-only: {bad}"]
+                           if (bad := unreadable_not_allowed(unreadable)) else []),
                "hits": [{"path": str(h.path), "needle": h.needle, "offset": h.offset} for h in report.hits],
                "per_root": [list(x) for x in report.per_root], "needle_counts": report.needle_counts}
     except leak_scan.ControlFailed as e:
@@ -899,7 +937,9 @@ def base_fails(kind, base):
 
 
 def arm_image_name(run_image):
-    return run_image.replace("sab-run-", "sab-arm-", 1)
+    if not run_image.startswith("sab-run-"):
+        raise ValueError(f"{run_image!r} is not a run image name (sab-run-<id>:<tag>)")
+    return "sab-arm-" + run_image[len("sab-run-"):]
 
 
 def ensure_arm(bundle):
@@ -933,7 +973,7 @@ def control_task(bundle, manifest, data):
               "run_image": bundle.record["run_image"],
               "image_id": pilot.docker("image", "inspect", bundle.image, "--format", "{{.Id}}").stdout.strip(),
               "template": bundle.template, "prompt_sha256": hashlib.sha256(bundle.prompt_path.read_bytes()).hexdigest(),
-              "binary_postdates_fix": kind == "private"}
+              "binary_postdates_fix": binary_postdates_fix(kind)}
     try:
         result["leak"] = leak_control(bundle, manifest, data)
     except leak_scan.ControlFailed as e:
@@ -960,7 +1000,6 @@ EXEC_CHECK_SH = (
     "|| echo strings=$(cat /tmp/e); else echo strings=absent; fi; "
     "python3 -c \"open('$b','rb').read()\" 2>/tmp/e && echo open=READABLE "
     "|| echo open=$(tail -n 1 /tmp/e); "
-    "cat /proc/self/exe >/dev/null 2>&1; "
     "mv $b /tmp/moved 2>/dev/null && echo mv=MOVED || echo mv=denied; rm -f /tmp/e /tmp/copy")
 
 
@@ -1046,14 +1085,30 @@ def exec_only_check(bundle, manifest, data, network="sab-perm-net"):
     (data / "exec-only.json").write_text(json.dumps(out, indent=2) + "\n")
     return out
 
-def verify_controls(r):
+def binary_postdates_fix(kind):
+    """The one definition (review round 2): every private task's fix is compiled into the frozen
+    codescout binary (exec-only since Ruling A, so not readable) and the cs/full tools behave as
+    fixed; Task 9 stratifies on it. None when the kind is unknown."""
+    return None if kind is None else kind == "private"
+
+
+def expected_root_subject(kind, task_id):
+    return f"task {task_id}" if kind == "private" else FOREIGN_ROOT_SUBJECT
+
+
+def verify_controls(r, task_id=None):
     """[] when one task's controls.json shows every Step-5 control passed, else the reasons.
 
-    Recomputed from the stored evidence, not read from its own `pass`: leak hits 0, the planted
-    control passed with at least one planted needle, R12 history ok with exactly one branch ref,
-    a non-empty Qdrant dump, base fails by an observed failure (base_fails) and gold passes, and
-    the scanned image is the task's arm image or the run image it derives from."""
+    Recomputed from the stored evidence, never from its own `pass` or `history.ok`: the id is
+    the task's; leak hits 0; the planted control passed with at least one planted needle; every
+    file the agent-user export could not read is an exec-only file of Ruling A; R12: a plain
+    repository, exactly one branch ref, a single chain, the expected subjects (`task <id>` or
+    `Benchmark base source`, then at most the prepare config commit) and no unreachable object;
+    a non-empty Qdrant dump; base fails by an observed failure (base_fails) and gold passes."""
     why = []
+    rid = r.get("id")
+    if task_id is not None and rid != task_id:
+        why.append(f"controls.json is for {rid!r}, not {task_id!r}")
     leak, grader = r.get("leak") or {}, r.get("grader") or {}
     if leak.get("control") != "pass":
         why.append(f"planted control: {leak.get('control')} {leak.get('error', '')}".strip())
@@ -1064,11 +1119,20 @@ def verify_controls(r):
         why.append("no needle was planted")
     if leak.get("hits") != []:
         why.append(f"leak hits: {len(leak.get('hits') or [])}" if "hits" in leak else "no leak scan")
+    bad = unreadable_not_allowed(leak.get("unreadable_to_agent"))
+    if bad:
+        why.append(f"unreadable to the agent-user export but not exec-only: {bad}")
     hist = leak.get("history") or {}
     refs = hist.get("refs") or []
-    if not (hist.get("ok") and len(refs) == 1 and refs[0].startswith("refs/heads/")
-            and not hist.get("unreachable_objects")):
-        why.append("R12 history not ok")
+    subjects = hist.get("subjects") or []
+    root = expected_root_subject(r.get("kind"), rid)
+    if not (hist.get("plain_repo") is True and hist.get("single_chain") is True
+            and len(refs) == 1 and refs[0].startswith("refs/heads/")
+            and hist.get("unreachable_objects") == []
+            and 1 <= len(subjects) <= 2 and subjects[0] == root
+            and all(s == CONFIG_SUBJECT for s in subjects[1:])):
+        why.append("R12 history not ok (plain repo, one branch ref, single chain, subjects, "
+                   "no unreachable object)")
     if not sum((leak.get("qdrant_points") or {}).values()):
         why.append("empty Qdrant template dump")
     if not base_fails(r.get("kind"), grader.get("base") or {}):
@@ -1078,9 +1142,39 @@ def verify_controls(r):
     return why
 
 
-def verify(ids, root):
-    """{id: reasons} for every id; Task 10 gates on all reason lists being empty."""
-    out = {}
+def _inspect_image(image):
+    """(image id, exec-only base label) of a local image, or (None, None) when it is gone."""
+    r = pilot.docker("image", "inspect", image, "--format", "{{.Id}} {{json .Config.Labels}}",
+                     check=False)
+    if r.returncode:
+        return None, None
+    image_id, _, labels = r.stdout.strip().partition(" ")
+    return image_id, (json.loads(labels or "null") or {}).get(arms.EXEC_ONLY_LABEL)
+
+
+def bundle_run_image(bundle_json, inspect=_inspect_image):
+    """The ONLY image a runner may start an arm from: bundle.json's `arm_image`, after checking
+    that it is the exec-only layer over the run image currently recorded (review round 2 carry for
+    Tasks 8/10: starting from `run_image` would bypass Ruling A). Raises otherwise."""
+    rec = json.loads(Path(bundle_json).read_text())
+    arm, run = rec.get("arm_image"), rec.get("run_image")
+    if not arm or not run:
+        raise RuntimeError(f"{bundle_json}: no arm_image/run_image recorded; run `tasks.py arm`")
+    run_id, _ = inspect(run)
+    arm_id, label = inspect(arm)
+    if run_id is None or arm_id is None:
+        raise RuntimeError(f"{bundle_json}: {run if run_id is None else arm} is not a local image")
+    if label != run_id:
+        raise RuntimeError(f"{arm} is not the exec-only layer of the current {run} "
+                           f"(label {label}, run image {run_id})")
+    return arm
+
+
+def verify(ids, root, *, selected=(), inspect=_inspect_image):
+    """{id: reasons} for every id (and every `selected` id, which must all be among `ids`);
+    Task 10 gates on all reason lists being empty."""
+    out = {s: ["selected but not verified: list every selected id (or none)"]
+           for s in selected if s not in ids}
     for task_id in ids:
         path = Path(root) / task_id / "controls" / "controls.json"
         bundle_json = Path(root) / task_id / "bundle.json"
@@ -1088,12 +1182,19 @@ def verify(ids, root):
             out[task_id] = ["no controls.json (the task was not controlled on its prepared image)"]
             continue
         r = json.loads(path.read_text())
-        why = verify_controls(r)
+        why = verify_controls(r, task_id)
         rec = json.loads(bundle_json.read_text()) if bundle_json.exists() else {}
-        if not rec.get("arm_image"):
-            why.append("no exec-only arm image recorded (run `tasks.py arm`)")
-        elif r.get("image") not in (rec.get("arm_image"), rec.get("run_image")):
+        try:
+            bundle_run_image(bundle_json, inspect)
+        except (OSError, RuntimeError) as e:
+            why.append(f"arm image: {e}")
+        if r.get("image") not in (rec.get("arm_image"), rec.get("run_image")):
             why.append(f"controls ran on {r.get('image')}, not on {rec.get('arm_image')} or its run image")
+        else:
+            current, _ = inspect(r["image"])
+            if current != r.get("image_id"):
+                why.append(f"stale evidence: controls ran on image id {r.get('image_id')}, "
+                           f"{r['image']} is now {current}")
         out[task_id] = why
     return out
 
@@ -1134,19 +1235,19 @@ def save_bundle(b, root):
 
 
 def _row(root, task_id):
-    """One task's Step-5 state: the full control (verified from its evidence), else the pre-index
-    scan of the agent image (prescan.json, no .codescout/ and no Qdrant dump yet), else nothing.
-
-    `binary_postdates_fix` is true for every private task: the frozen codescout binary (exec-only
-    since Ruling A, so unreadable) still contains the task's fix and the cs/full tools behave as
-    fixed; Task 9 stratifies on it."""
-    note = {"binary_postdates_fix": task_id.startswith("cs-")}
+    """One task's Step-5 state: the full control (verified from its evidence; `tasks.py verify`
+    adds the image checks), else the pre-index scan of the agent image (prescan.json, no
+    .codescout/ and no Qdrant dump yet), else nothing. `binary_postdates_fix` comes from the
+    task's recorded kind through binary_postdates_fix()."""
+    bundle_json = root / task_id / "bundle.json"
+    kind = json.loads(bundle_json.read_text()).get("kind") if bundle_json.exists() else None
     full = root / task_id / "controls" / "controls.json"
     pre = root / task_id / "prescan" / "prescan.json"
     if full.exists():
         r = json.loads(full.read_text())
+        kind = r.get("kind", kind)
         leak, grader = r.get("leak", {}), r.get("grader", {})
-        why = verify_controls(r)
+        why = verify_controls(r, task_id)
         return {"id": task_id, "status": "complete", "pass": not why, "reasons": why,
                 "image": r.get("image"),
                 "hits": len(leak.get("hits") or []) if "hits" in leak else None,
@@ -1154,11 +1255,13 @@ def _row(root, task_id):
                 "qdrant_points": leak.get("qdrant_points"),
                 "base_fails": base_fails(r.get("kind"), grader.get("base") or {}),
                 "gold_passes": (grader.get("gold") or {}).get("pass") is True,
-                "detail": str(full), **note}
+                "detail": str(full), "binary_postdates_fix": binary_postdates_fix(kind)}
+    note = {"binary_postdates_fix": binary_postdates_fix(kind)}
     if pre.exists():
         r = json.loads(pre.read_text())
         return {"id": task_id, "status": "pre-index scan only", "pass": None,
                 "hits": len(r.get("hits", [])), "control": r.get("control"),
+                "unreadable_not_allowlisted": unreadable_not_allowed(r.get("unreadable_to_agent")),
                 "hit_paths": sorted({h["path"] for h in r.get("hits", [])}), "detail": str(pre), **note}
     return {"id": task_id, "status": "not run", "pass": None, **note}
 
@@ -1191,7 +1294,8 @@ def main(argv=None):
         print(json.dumps(write_table(ids)["tasks"], indent=2))
         return
     if args.action == "verify":
-        reasons = verify(ids, root)
+        reasons = verify(ids, root, selected=json.loads(
+            (DATA / "selection" / "selection.json").read_text())["selected"])
         print(json.dumps(reasons, indent=2))
         if any(reasons.values()):
             raise SystemExit(1)

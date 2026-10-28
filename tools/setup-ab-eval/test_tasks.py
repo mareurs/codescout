@@ -16,6 +16,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
+import arms
 import leak_scan
 import select_tasks
 import tasks
@@ -414,14 +415,19 @@ class BrokenLinks(unittest.TestCase):
             report = leak_scan.scan([root, listing], None, ["zz_secret_target"], allow_unbaselined=True)
             self.assertEqual([(h.path, h.needle) for h in report.hits], [(listing, "zz_secret_target")])
 
-def complete_controls(kind="private", **over):
+def complete_controls(kind="private", task_id="a", **over):
     """A synthetic controls.json that every Step-5 check accepts."""
     base = ({"pass": False, "graft": "ok", "build": "ok", "infra": None,
              "f2p": {"passed": [], "failed": ["t"], "notRun": []}} if kind == "private"
             else {"pass": False, "failure_kind": "test_failure", "failed": ["t"]})
-    r = {"id": "a", "kind": kind, "image": "sab-arm-a:1", "pass": True,
+    root = tasks.expected_root_subject(kind, task_id)
+    r = {"id": task_id, "kind": kind, "image": "sab-arm-a:1", "image_id": "sha256:arm", "pass": True,
          "leak": {"hits": [], "control": "pass", "planted": 2, "qdrant_points": {"code_chunks": 9},
-                  "history": {"ok": True, "refs": ["refs/heads/main"], "unreachable_objects": []}},
+                  "unreadable_to_agent": [{"path": "/opt/sab/bin/codescout",
+                                           "reason": "Cannot open: Permission denied"}],
+                  "history": {"ok": True, "plain_repo": True, "single_chain": True,
+                              "subjects": [root, tasks.CONFIG_SUBJECT],
+                              "refs": ["refs/heads/main"], "unreachable_objects": []}},
          "grader": {"base": base, "gold": {"pass": True}}}
     for path, value in over.items():
         node = r
@@ -438,6 +444,7 @@ class Table(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / "cs-a" / "prescan").mkdir(parents=True)
+            (root / "cs-a" / "bundle.json").write_text(json.dumps({"kind": "private"}))
             (root / "cs-a" / "prescan" / "prescan.json").write_text(json.dumps(
                 {"control": "pass", "hits": [{"path": "/x/opt/sab/bin/codescout", "needle": "n", "offset": 1}]}))
             row = tasks._row(root, "cs-a")
@@ -450,33 +457,136 @@ class Table(unittest.TestCase):
                  "grader": {"base_fails": True, "gold_passes": True}}))
             row = tasks._row(root, "cs-a")
             self.assertEqual((row["status"], row["pass"]), ("complete", False))
-            (root / "cs-a" / "controls" / "controls.json").write_text(json.dumps(complete_controls()))
+            (root / "cs-a" / "controls" / "controls.json").write_text(
+                json.dumps(complete_controls(task_id="cs-a")))
             row = tasks._row(root, "cs-a")
             self.assertEqual((row["status"], row["pass"], row["hits"], row["reasons"]), ("complete", True, 0, []))
-            self.assertEqual(tasks._row(root, "b")["status"], "not run")
-            self.assertFalse(tasks._row(root, "b")["binary_postdates_fix"])
+            self.assertIsNone(tasks._row(root, "b")["binary_postdates_fix"])  # kind unknown
+
+    def test_binary_postdates_fix_has_one_definition_by_kind(self):
+        self.assertTrue(tasks.binary_postdates_fix("private"))
+        self.assertFalse(tasks.binary_postdates_fix("foreign"))
+        self.assertIsNone(tasks.binary_postdates_fix(None))
+
+
+class FakeImages:
+    """inspect(image) -> (id, exec-only label) over a dict; a missing image is (None, None)."""
+
+    def __init__(self, images):
+        self.images = images
+
+    def __call__(self, image):
+        return self.images.get(image, (None, None))
+
+
+GOOD_IMAGES = {"sab-arm-a:1": ("sha256:arm", "sha256:run"), "sab-run-a:1": ("sha256:run", None)}
+GOOD_BUNDLE = {"kind": "private", "arm_image": "sab-arm-a:1", "run_image": "sab-run-a:1"}
 
 
 class Verify(unittest.TestCase):
-    """Task 7 review I3: the gate Task 10 runs (`tasks.py verify`)."""
+    """The gate Task 10 runs (`tasks.py verify`): review I3 and round-2 gaps."""
+
+    def tree(self, td, controls=None, bundle=GOOD_BUNDLE, task_id="a"):
+        root = Path(td)
+        (root / task_id / "controls").mkdir(parents=True, exist_ok=True)
+        if controls is not None:
+            (root / task_id / "controls" / "controls.json").write_text(json.dumps(controls))
+        if bundle is not None:
+            (root / task_id / "bundle.json").write_text(json.dumps(bundle))
+        return root
 
     def test_complete_controls_pass_for_both_kinds(self):
-        self.assertEqual(tasks.verify_controls(complete_controls("private")), [])
-        self.assertEqual(tasks.verify_controls(complete_controls("foreign")), [])
+        self.assertEqual(tasks.verify_controls(complete_controls("private"), "a"), [])
+        self.assertEqual(tasks.verify_controls(complete_controls("foreign"), "a"), [])
 
     def test_each_missing_control_is_named(self):
         cases = {
             "leak.hits": [{"path": "x", "needle": "n", "offset": 0}],
             "leak.control": "FAILED",
             "leak.planted": 0,
-            "leak.history": {"ok": True, "refs": ["refs/heads/main", "refs/tags/t"], "unreachable_objects": []},
+            "leak.unreadable_to_agent": [{"path": "/testbed/src/fix.rs", "reason": "Cannot open: Permission denied"}],
+            "leak.history.refs": ["refs/heads/main", "refs/tags/t"],
+            "leak.history.plain_repo": False,
+            "leak.history.single_chain": False,
+            "leak.history.subjects": ["task a", "a later commit"],
+            "leak.history.unreachable_objects": ["abc"],
             "leak.qdrant_points": {},
             "grader.gold": {"pass": False},
             "grader.base": {"pass": False, "graft": "failed", "f2p": {"failed": []}},
         }
         for path, value in cases.items():
-            why = tasks.verify_controls(complete_controls(**{path: value}))
+            why = tasks.verify_controls(complete_controls(**{path: value}), "a")
             self.assertEqual(len(why), 1, (path, why))
+        # The stored `history.ok` is not trusted.
+        self.assertEqual(len(tasks.verify_controls(
+            complete_controls(**{"leak.history.subjects": ["Benchmark base source"]}), "a")), 1)
+        # Evidence for another task (its subjects name that task too) is refused.
+        why = tasks.verify_controls(complete_controls(task_id="cs-other"), "a")
+        self.assertEqual(why, ["controls.json is for 'cs-other', not 'a'"])
+
+    def test_only_the_exec_only_binary_may_be_unreadable(self):
+        allowed = complete_controls()
+        self.assertEqual(tasks.verify_controls(allowed, "a"), [])
+        # The round-1 string form is read too.
+        old = complete_controls(**{"leak.unreadable_to_agent": [
+            "opt/sab/bin/codescout: Warning: Cannot open: Permission denied",
+            "home/agent/secret: Cannot stat: Permission denied"]})
+        why = tasks.verify_controls(old, "a")
+        self.assertEqual(len(why), 1)
+        self.assertIn("/home/agent/secret", why[0])
+
+    def test_tar_stderr_records_stat_failures_and_rejects_unknown_lines(self):
+        err = ("tar: opt/sab/bin/codescout: Warning: Cannot open: Permission denied\n"
+               "tar: testbed/locked/fix.rs: Cannot stat: Permission denied\n"
+               "tar: Exiting with failure status due to previous errors\n")
+        found, unknown = tasks.parse_tar_stderr(err)
+        self.assertEqual([f["path"] for f in found], ["/opt/sab/bin/codescout", "/testbed/locked/fix.rs"])
+        self.assertEqual(unknown, ["tar: Exiting with failure status due to previous errors"])
+        self.assertEqual(tasks.unreadable_not_allowed(found), ["/testbed/locked/fix.rs"])
+        self.assertEqual(tasks.parse_tar_stderr("tar: opt/sab/bin/codescout: Warning: Cannot open: "
+                                                "Permission denied\n"), (found[:1], []))
+
+    def test_verify_checks_ids_images_and_the_selection(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self.tree(td, complete_controls())
+            ok = FakeImages(GOOD_IMAGES)
+            self.assertEqual(tasks.verify(["a"], root, selected=["a"], inspect=ok), {"a": []})
+            # Stale evidence: the arm image was rebuilt after the control ran.
+            stale = FakeImages(dict(GOOD_IMAGES, **{"sab-arm-a:1": ("sha256:new", "sha256:run")}))
+            self.assertIn("stale evidence", tasks.verify(["a"], root, inspect=stale)["a"][0])
+            # The arm layer no longer derives from the current run image.
+            moved = FakeImages(dict(GOOD_IMAGES, **{"sab-run-a:1": ("sha256:run2", None)}))
+            self.assertTrue(any("exec-only layer" in w for w in tasks.verify(["a"], root, inspect=moved)["a"]))
+            # A selected id that is not listed fails the gate.
+            out = tasks.verify(["a"], root, selected=["a", "b"], inspect=ok)
+            self.assertEqual(out["a"], [])
+            self.assertIn("selected but not verified", out["b"][0])
+            # No controls.json, no arm image.
+            self.tree(td, None, task_id="c")
+            self.assertIn("no controls.json", tasks.verify(["c"], root, inspect=ok)["c"][0])
+            self.tree(td, complete_controls(task_id="d"), bundle={"run_image": "sab-run-a:1"}, task_id="d")
+            self.assertTrue(any("arm image" in w for w in tasks.verify(["d"], root, inspect=ok)["d"]))
+
+    def test_the_cli_exits_non_zero_unless_every_selected_task_is_verified(self):
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            root = self.tree(data / "tasks", complete_controls())
+            (data / "selection").mkdir()
+            (data / "selection" / "selection.json").write_text(json.dumps({"selected": ["a", "b"]}))
+            manifest = data / "m.json"
+            manifest.write_text("{}")
+            ok = FakeImages(GOOD_IMAGES)
+            real = tasks.verify
+            with unittest.mock.patch.object(tasks, "DATA", data), \
+                    unittest.mock.patch.object(tasks, "verify", lambda ids, r, **kw: real(ids, r, inspect=ok, **kw)), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as cm:
+                    tasks.main(["verify", str(manifest), "a"])  # one task cannot pass the gate
+                self.assertEqual(cm.exception.code, 1)
+                (root / "b" / "controls").mkdir(parents=True)
+                (root / "b" / "controls" / "controls.json").write_text(json.dumps(complete_controls(task_id="b")))
+                (root / "b" / "bundle.json").write_text(json.dumps(GOOD_BUNDLE))
+                tasks.main(["verify", str(manifest)])  # every selected id complete: exit 0
 
     def test_base_fails_needs_an_observed_failure(self):
         f = tasks.base_fails
@@ -491,28 +601,63 @@ class Verify(unittest.TestCase):
         self.assertFalse(f("foreign", {"pass": False, "error": "unexplained grader exit"}))
         self.assertFalse(f("foreign", {"pass": False, "failure_kind": None}))
 
-    def test_verify_reads_every_id_and_requires_the_arm_image(self):
+
+class ArmImage(unittest.TestCase):
+    """Round-2 carry for Tasks 8/10: a runner can obtain only the exec-only arm image."""
+
+    def test_arm_image_name_needs_a_run_image(self):
+        self.assertEqual(tasks.arm_image_name("sab-run-x:1"), "sab-arm-x:1")
+        for bad in ("sab-agent-cs-x:1", "x-sab-run-y:1", "sab-arm-x:1"):
+            with self.assertRaises(ValueError):
+                tasks.arm_image_name(bad)
+
+    def test_bundle_run_image_returns_only_a_verified_arm_image(self):
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            for i in ("a", "b", "c"):
-                (root / i / "controls").mkdir(parents=True)
-            (root / "a" / "controls" / "controls.json").write_text(json.dumps(complete_controls()))
-            (root / "a" / "bundle.json").write_text(json.dumps({"arm_image": "sab-arm-a:1",
-                                                                "run_image": "sab-run-a:1"}))
-            (root / "b" / "controls" / "controls.json").write_text(json.dumps(complete_controls()))
-            (root / "b" / "bundle.json").write_text(json.dumps({"run_image": "sab-run-a:1"}))
-            out = tasks.verify(["a", "b", "c"], root)
-            self.assertEqual(out["a"], [])
-            self.assertEqual(len(out["b"]), 1)
-            self.assertIn("no controls.json", out["c"][0])
-            # The CLI exits non-zero unless every id is complete.
-            with self.assertRaises(SystemExit) as cm, contextlib.redirect_stdout(io.StringIO()):
-                with unittest.mock.patch.object(tasks, "DATA", root.parent), \
-                        unittest.mock.patch.object(tasks, "verify", lambda ids, r: out):
-                    manifest = root / "m.json"
-                    manifest.write_text("{}")
-                    tasks.main(["verify", str(manifest), "a", "b", "c"])
-            self.assertEqual(cm.exception.code, 1)
+            path = Path(td) / "bundle.json"
+            path.write_text(json.dumps(GOOD_BUNDLE))
+            self.assertEqual(tasks.bundle_run_image(path, FakeImages(GOOD_IMAGES)), "sab-arm-a:1")
+            with self.assertRaises(RuntimeError):  # the arm layer is not over the current run image
+                tasks.bundle_run_image(path, FakeImages(dict(GOOD_IMAGES, **{"sab-run-a:1": ("sha256:x", None)})))
+            with self.assertRaises(RuntimeError):  # the arm image is gone
+                tasks.bundle_run_image(path, FakeImages({"sab-run-a:1": ("sha256:run", None)}))
+            path.write_text(json.dumps({"run_image": "sab-run-a:1"}))
+            with self.assertRaises(RuntimeError):  # never falls back to the run image
+                tasks.bundle_run_image(path, FakeImages(GOOD_IMAGES))
+
+
+
+@unittest.skipUnless(have_docker_image(tasks.PRIVATE_BASE_IMAGE),
+                     f"needs docker and the {tasks.PRIVATE_BASE_IMAGE} image")
+class ExportFailsClosed(unittest.TestCase):
+    """Review N1, live: a mode-000 file the agent owns is unreadable to tar but one chmod away for
+    the agent, so the export must fail; the exec-only binary alone is allowed."""
+
+    def test_only_the_exec_only_binary_may_be_unreadable_in_a_real_export(self):
+        tag = f"sab-test-export-{os.getpid()}"
+        base, arm = f"{tag}-base:1", f"{tag}-arm:1"
+        self.addCleanup(subprocess.run, ["docker", "image", "rm", "-f", base, arm, f"{tag}-bad:1"],
+                        capture_output=True)
+        with tempfile.TemporaryDirectory() as td:
+            ctx = Path(td) / "base"
+            ctx.mkdir()
+            (ctx / "Dockerfile").write_text(
+                f"FROM {tasks.PRIVATE_BASE_IMAGE}\nUSER root\nRUN mkdir -p /opt/sab/bin /testbed "
+                "&& cp /bin/true /opt/sab/bin/codescout && echo ok > /testbed/a.txt "
+                "&& chown -R 1000:1000 /testbed\nUSER 1000:1000\n")
+            subprocess.run(["docker", "build", "--network", "none", "-t", base, str(ctx)],
+                           check=True, capture_output=True, timeout=600)
+            arms.exec_only_image(base, arm, Path(td) / "layer")
+            got = []
+            present = tasks.export_tree(arm, ["testbed", "opt/sab"], Path(td) / "ok", unreadable=got)
+            self.assertEqual(present, ["testbed", "opt/sab"])
+            self.assertEqual([g["path"] for g in got], ["/opt/sab/bin/codescout"])
+            bad = Path(td) / "bad"
+            bad.mkdir()
+            (bad / "Dockerfile").write_text(f"FROM {arm}\nRUN echo fix > /testbed/fix.rs && chmod 000 /testbed/fix.rs\n")
+            subprocess.run(["docker", "build", "--network", "none", "-t", f"{tag}-bad:1", str(bad)],
+                           check=True, capture_output=True, timeout=600)
+            with self.assertRaisesRegex(RuntimeError, "/testbed/fix.rs"):
+                tasks.export_tree(f"{tag}-bad:1", ["testbed", "opt/sab"], Path(td) / "bad-out")
 
 class ControlOrder(unittest.TestCase):
     """Task 5 carried minor: the planted shingle must not contain another kept name needle."""
