@@ -4,8 +4,10 @@ Every row is built by run.make_row, the runner's own row constructor, so the sch
 exercise is the journal's. The synthetic studies are built from the spec's wording (section 6
 table), not from the implementation: each one names the condition it is meant to meet.
 """
+import itertools
 import math
 import random
+import sys
 import unittest
 from unittest import mock
 
@@ -15,7 +17,7 @@ import run
 S = "claude-sonnet-5-5"
 O = "claude-opus-5-5"
 TASKS = [f"org__repo-{i:02d}" for i in range(12)]
-REG = 12
+REGISTERED = {t: "foreign" for t in TASKS}
 SEED = 7
 
 
@@ -59,18 +61,25 @@ def study(ratios, spread=1.0, n=12, cs_fail=(), bare_pass=(True, True), model=S,
 
 
 def decide(rows, **kw):
-    kw.setdefault("registered_tasks", REG)
+    kw.setdefault("registered_tasks", REGISTERED)
     kw.setdefault("seed", SEED)
+    kw.setdefault("instrument_failures", ())
     return analyze.decide(rows, kw.pop("model", S), **kw)
 
 
-# Spec section 6 wording -> data:
-# promising: non-inferiority holds AND the 90% interval's upper bound < 1.0. All pass; cs costs
-#   0.55-0.65 of bare; bare reps 2% apart (the floor), so the difference is outside it.
+def without(rows, task, arm, rep=None):
+    return [r for r in rows if not (r["taskId"] == task and r["arm"] == arm
+                                    and (rep is None or r["rep"] == rep))]
+
+
+# Spec section 6 wording -> data (F = the bare floor; the ruling's step 4 compares to F):
+# promising: non-inferiority holds AND the 90% interval's upper bound < 1.0 (and < 1/F). All
+#   pass; cs costs 0.55-0.65 of bare; bare reps 2% apart (F = 1.02).
 PROMISING = dict(ratios=(0.55, 0.65), spread=1.02)
 # no demonstrated advantage: non-inferiority holds AND the interval contains 1.0. Ratios swing
-#   0.6 / 1.5 (geometric mean 0.95, outside a 1% floor), so the interval straddles 1.0.
+#   0.6 / 1.5, so the interval straddles 1.0.
 NO_ADVANTAGE = dict(ratios=(0.6, 1.5), spread=1.01)
+VARIED = dict(ratios=tuple(0.5 + 0.09 * i for i in range(12)), spread=1.01)
 
 
 class DecisionRuleTest(unittest.TestCase):
@@ -82,16 +91,18 @@ class DecisionRuleTest(unittest.TestCase):
         self.assertEqual(d.n_valid_tasks, 12)
         self.assertEqual(d.pass_counts, {"cs": 12, "bare": 12})
         self.assertLess(d.ci90[1], 1.0)
+        self.assertLess(d.ci90[1], 1 / d.floor)
         self.assertAlmostEqual(d.cost_ratio_gmean, math.sqrt(0.55 * 0.65), places=12)
         self.assertAlmostEqual(d.floor, 1.02, places=12)
         self.assertEqual(d.effect, "codescout")
+        self.assertIn("the upper bound of the cost ratio's 90% interval is below 1.0", d.reasons)
 
     def test_no_demonstrated_advantage(self):
         d = decide(study(**NO_ADVANTAGE))
         self.assertEqual(d.outcome, "no demonstrated advantage")
         self.assertLessEqual(d.ci90[0], 1.0)
         self.assertGreaterEqual(d.ci90[1], 1.0)
-        self.assertGreater(abs(math.log(d.cost_ratio_gmean)), math.log(d.floor))
+        self.assertIn("the interval contains 1.0", d.reasons)
 
     def test_worse_by_pass_rate(self):
         # cs passes 10, bare 12: 10 < 12 - 1, so non-inferiority fails, whatever the cost says.
@@ -101,11 +112,12 @@ class DecisionRuleTest(unittest.TestCase):
         self.assertEqual(d.outcome, "worse")
 
     def test_worse_by_cost(self):
-        # The lower bound of the cost interval is above 1.0 (cs costs 1.4-1.6x bare).
+        # The lower bound of the cost interval is above 1.0 and above F (cs costs 1.4-1.6x bare).
         d = decide(study(ratios=(1.4, 1.6), spread=1.02))
-        self.assertGreater(d.ci90[0], 1.0)
+        self.assertGreater(d.ci90[0], d.floor)
         self.assertEqual(d.pass_counts, {"cs": 12, "bare": 12})
         self.assertEqual(d.outcome, "worse")
+        self.assertIn("the lower bound of the cost interval is above 1.0", d.reasons)
 
     def test_inconclusive_when_fewer_valid_tasks_than_registered(self):
         d = decide(study(n=11, **PROMISING))
@@ -114,21 +126,20 @@ class DecisionRuleTest(unittest.TestCase):
         self.assertEqual(d.outcome, "inconclusive")
 
     def test_inconclusive_when_difference_inside_floor(self):
-        # bare reps differ 2x on every task (floor 2.0); cs costs 0.8x bare: 0.8 is inside
-        # [1/2, 2]. The interval is exactly 0.8 (constant ratio), so without the floor this
-        # would be promising.
+        # bare reps differ 2x on every task (F = 2.0); cs costs 0.8x bare: the interval is
+        # exactly 0.8, below 1.0 but not below 1/F = 0.5, so without the floor it would be
+        # promising.
         d = decide(study(ratios=(0.8,), spread=2.0))
         self.assertAlmostEqual(d.floor, 2.0, places=12)
         self.assertLess(d.ci90[1], 1.0)
         self.assertEqual(d.outcome, "inconclusive")
+        self.assertTrue(any("inside the variance floor" in r for r in d.reasons))
 
     def test_invalid_arm_rows_never_enter_the_statistic(self):
         rows = study(**PROMISING)
-        # One task's cs run failed the arm-integrity check: charged, never scored. Its row keeps
-        # its cost and a failing grade would be meaningless; the task loses its cs measurement.
+        # One task's cs run failed the arm-integrity check: charged, never scored.
         task = TASKS[4]
-        bad = [r for r in rows if r["taskId"] == task and r["arm"] == "cs"][0]
-        rows_with_invalid = [r for r in rows if r is not bad] + [
+        rows_with_invalid = without(rows, task, "cs") + [
             row(task, "cs", 0, 500.0, None, outcome="invalid-arm")]
         without_task = [r for r in rows if r["taskId"] != task]
         d1 = decide(rows_with_invalid)
@@ -138,9 +149,8 @@ class DecisionRuleTest(unittest.TestCase):
         self.assertEqual(d1.outcome, "inconclusive")  # 11 valid tasks < 12 registered
         self.assertIn(task, d1.excluded)
         # An invalid-arm row on a bare rep is the same: the task has one scored bare rep only.
-        bare_bad = [r for r in rows if not (r["taskId"] == task and r["arm"] == "bare"
-                                            and r["rep"] == 1)]
-        bare_bad.append(row(task, "bare", 1, 0.0001, None, outcome="invalid-arm"))
+        bare_bad = without(rows, task, "bare", 1) + [
+            row(task, "bare", 1, 0.0001, None, outcome="invalid-arm")]
         self.assertEqual(decide(bare_bad)[:6], d2[:6])
 
     def test_full_vs_bare_is_labelled_setup_not_codescout(self):
@@ -170,7 +180,7 @@ class DecisionRuleTest(unittest.TestCase):
         self.assertAlmostEqual(d.ci90[1], 0.8, places=9)
         # Seeded: the same seed gives the same Decision; another seed may differ (twelve
         # distinct per-task ratios, so the percentiles are not pinned to a few discrete values).
-        varied = study(ratios=tuple(0.5 + 0.09 * i for i in range(12)), spread=1.01)
+        varied = study(**VARIED)
         self.assertEqual(decide(varied, seed=1), decide(varied, seed=1))
         cis = {decide(varied, seed=s).ci90 for s in range(1, 6)}
         self.assertGreater(len(cis), 1)
@@ -195,13 +205,23 @@ class DecisionRuleTest(unittest.TestCase):
         self.assertAlmostEqual(lo, 2, places=9)
         self.assertAlmostEqual(hi, 20, places=9)
         # decide's interval is exactly that, over the 10,000 bootstrap means
-        rows = study(ratios=tuple(0.5 + 0.09 * i for i in range(12)), spread=1.01)
+        rows = study(**VARIED)
         units, _ = analyze.task_units(rows, S, "cs")
         log_ratios = [math.log(u.treat_cost / (sum(u.bare_costs) / 2)) for u in units]
         means = analyze.bootstrap_log_means(log_ratios, SEED)
         self.assertEqual(len(means), 10_000)
         self.assertEqual(means, sorted(means))
         self.assertEqual(decide(rows).ci90, (math.exp(means[499]), math.exp(means[9500])))
+
+    def test_golden_interval_for_a_fixed_seed(self):
+        # Freezes the RNG consumption: random.Random(7), 10,000 x 12 randrange(12) draws, tasks
+        # in id order. Measured on CPython 3.14.8. Python guarantees the same random() stream
+        # for a seed, NOT randrange's algorithm across versions, so a different Python may move
+        # these digits legitimately; the study records its Python version at the freeze.
+        d = decide(study(**VARIED), seed=SEED)
+        self.assertEqual(sys.version_info[:2], (3, 14), "golden values measured on 3.14")
+        self.assertAlmostEqual(d.ci90[0], GOLDEN_CI[0], places=12)
+        self.assertAlmostEqual(d.ci90[1], GOLDEN_CI[1], places=12)
 
     # -- resamples, exclusions, malformed rows --
 
@@ -237,14 +257,14 @@ class DecisionRuleTest(unittest.TestCase):
     def test_neutral_and_infra_outcomes_never_enter_the_statistic(self):
         base = study(**PROMISING)
         task = TASKS[2]
-        without = decide([r for r in base if r["taskId"] != task])
+        reference = decide([r for r in base if r["taskId"] != task])
         for outcome in ("plan-limit", "infra-oom", "infra-other", "unknown-spend"):
             with self.subTest(outcome=outcome):
-                rows = [r for r in base if not (r["taskId"] == task and r["arm"] == "cs")]
-                rows.append(row(task, "cs", 0, None if outcome == "unknown-spend" else 3.0,
-                                None, outcome=outcome))
+                rows = without(base, task, "cs") + [
+                    row(task, "cs", 0, None if outcome == "unknown-spend" else 3.0, None,
+                        outcome=outcome)]
                 d = decide(rows)
-                self.assertEqual(d[:6], without[:6])
+                self.assertEqual(d[:6], reference[:6])
                 self.assertIn(task, d.excluded)
         # A run whose latest journal row is still `pending` is not scored either.
         rows = base + [row(TASKS[0], "full", 0, None, None, outcome="pending")]
@@ -252,8 +272,7 @@ class DecisionRuleTest(unittest.TestCase):
 
     def test_latest_row_of_a_run_wins(self):
         base = study(**PROMISING)
-        task = TASKS[1]
-        cs = [r for r in base if r["taskId"] == task and r["arm"] == "cs"][0]
+        cs = [r for r in base if r["taskId"] == TASKS[1] and r["arm"] == "cs"][0]
         pending_first = [dict(cs, outcome="pending", costUsd=None, grade=None)] + base
         self.assertEqual(decide(pending_first), decide(base))
 
@@ -311,8 +330,14 @@ class DecisionRuleTest(unittest.TestCase):
 
     def test_arguments_are_checked(self):
         rows = study(**PROMISING)
-        for kw in ({"registered_tasks": 0}, {"registered_tasks": True}, {"seed": "7"},
-                   {"seed": False}, {"comparison": ("cs", "full")}):
+        for kw in ({"registered_tasks": 0}, {"registered_tasks": True},
+                   {"registered_tasks": 12}, {"registered_tasks": set(TASKS)},
+                   {"registered_tasks": {}},
+                   {"registered_tasks": dict(REGISTERED, **{TASKS[0]: "public"})},
+                   {"registered_tasks": dict(REGISTERED, **{run.DEVELOPMENT_TASKS[0]: "foreign"})},
+                   {"seed": "7"}, {"seed": False}, {"comparison": ("cs", "full")},
+                   {"instrument_failures": None}, {"instrument_failures": "leak gate"},
+                   {"instrument_failures": ("",)}):
             with self.subTest(kw), self.assertRaises(ValueError):
                 decide(rows, **kw)
 
@@ -329,16 +354,172 @@ class DecisionRuleTest(unittest.TestCase):
         self.assertIsNone(d.ci90)
         self.assertIsNone(d.floor)
 
+    def test_excluded_defaults_to_an_empty_mapping(self):
+        d = analyze.Decision("inconclusive", {}, None, None, None, 0)
+        self.assertEqual(dict(d.excluded), {})
+        self.assertEqual(decide(study(**PROMISING)).excluded, {})
+
+
+class FixRound1Test(unittest.TestCase):
+    """Review round 1: I1 (registered set), I2 (re-runs), I5 (required instrument gates), and
+    the pooled contamination note."""
+
+    def test_unregistered_task_raises_instead_of_filling_the_count(self):
+        # Reviewer's scenario: 11 registered tasks + one block of `zz__unregistered-99` gave
+        # promising with n_valid 12. Now the extra block is a protocol breach and raises.
+        registered = {t: "foreign" for t in TASKS[:11]}
+        rows = study(n=11, **PROMISING) + block("zz__unregistered-99", (1.0, 1.0), 0.6)
+        with self.assertRaisesRegex(analyze.MalformedRow, "zz__unregistered-99"):
+            decide(rows, registered_tasks=registered)
+        # Even a non-scored row of an unregistered main task raises; another model's too.
+        rows = study(n=11, **PROMISING) + [row("zz__unregistered-99", "cs", 0, 1.0, None,
+                                               model=O, outcome="invalid-arm")]
+        with self.assertRaises(analyze.MalformedRow):
+            decide(rows, registered_tasks=registered)
+        # The count comes from the registered mapping, never from the rows.
+        d = decide(study(n=11, **PROMISING), registered_tasks=REGISTERED)
+        self.assertEqual((d.n_valid_tasks, d.outcome), (11, "inconclusive"))
+
+    def test_bare_rerun_after_invalid_arm_raises(self):
+        # Reviewer's scenario: bare rep 1 invalid-arm, then a new scored bare rep 2.
+        rows = study(**PROMISING)
+        task = TASKS[3]
+        rows = without(rows, task, "bare", 1) + [
+            row(task, "bare", 1, 1.0, None, outcome="invalid-arm"),
+            row(task, "bare", 2, 1.0, True)]
+        with self.assertRaisesRegex(analyze.MalformedRow, "re-run"):
+            decide(rows)
+
+    def test_cs_rerun_after_invalid_arm_raises(self):
+        rows = study(**PROMISING)
+        task = TASKS[3]
+        rows = without(rows, task, "cs") + [
+            row(task, "cs", 0, 1.0, None, outcome="invalid-arm"),
+            row(task, "cs", 1, 0.5, True)]
+        with self.assertRaisesRegex(analyze.MalformedRow, "re-run"):
+            decide(rows)
+        rows = study(full_ratios=(0.6,), **PROMISING) + [row(TASKS[0], "full", 1, 1.0, True)]
+        with self.assertRaisesRegex(analyze.MalformedRow, "re-run"):
+            decide(rows)
+
+    def test_second_final_row_for_a_run_raises(self):
+        # The same runId written again after its final row: a re-run in place.
+        rows = study(**PROMISING)
+        task = TASKS[3]
+        rows = without(rows, task, "cs") + [
+            row(task, "cs", 0, 1.0, None, outcome="invalid-arm"),
+            row(task, "cs", 0, 0.5, True)]
+        with self.assertRaisesRegex(analyze.MalformedRow, "re-run"):
+            decide(rows)
+        with self.assertRaises(analyze.MalformedRow):
+            analyze.secondary(rows)
+
+    def test_instrument_failures_is_required(self):
+        rows = study(**PROMISING)
+        with self.assertRaises(TypeError):
+            analyze.decide(rows, S, registered_tasks=REGISTERED, seed=SEED)
+        with self.assertRaises(TypeError):
+            analyze.strata(rows, S, REGISTERED, seed=SEED)
+        self.assertEqual(analyze.decide(rows, S, registered_tasks=REGISTERED, seed=SEED,
+                                        instrument_failures=()).outcome, "promising")
+
+    def test_decide_notes_contamination_whenever_private_tasks_are_pooled(self):
+        private = [f"cs-p{i:02d}" for i in range(6)]
+        registered = {**{t: "foreign" for t in TASKS[:6]}, **{t: "private" for t in private}}
+        rows = study(n=6, **PROMISING) + study(n=6, tasks=private, **PROMISING)
+        d = decide(rows, registered_tasks=registered)
+        self.assertEqual(d.stratum, "pooled")
+        self.assertIn("contaminated", " ".join(d.notes))
+        foreign_only = decide(study(**PROMISING))
+        self.assertEqual((foreign_only.stratum, foreign_only.notes), ("foreign", ()))
+
+
+class RulingOrderTest(unittest.TestCase):
+    """The coordinator's binding order for spec section 6 (fix round 1, I3 + I4)."""
+
+    def test_reviewer_example_directional_interval_inside_floor(self):
+        out, reasons = analyze.rule(12, 12, 12, 12, 0.7, (0.55, 0.9), 1.2)
+        self.assertEqual(out, "inconclusive")  # 0.9 is not below 1/1.2 = 0.833
+        self.assertIn("the upper bound of the cost ratio's 90% interval is below 1.0", reasons)
+        self.assertTrue(any("inside the variance floor" in r for r in reasons))
+
+    def test_reviewer_example_worse_by_cost_not_claimed_inside_floor(self):
+        out, reasons = analyze.rule(12, 12, 12, 12, 1.5, (1.3, 1.7), 2.0)
+        self.assertEqual(out, "inconclusive")  # low 1.3 <= F 2.0
+        self.assertIn("the lower bound of the cost interval is above 1.0", reasons)
+        self.assertFalse(any("above the floor" in r for r in reasons))
+
+    def test_whole_interval_beyond_floor_is_worse(self):
+        out, reasons = analyze.rule(12, 12, 12, 12, 2.5, (2.1, 2.9), 2.0)
+        self.assertEqual(out, "worse")
+        self.assertTrue(any("above the floor" in r for r in reasons))
+
+    def test_too_few_tasks_lists_every_condition_that_held(self):
+        out, reasons = analyze.rule(11, 12, 5, 11, 1.8, (1.5, 2.1), 1.1)
+        self.assertEqual(out, "inconclusive")
+        joined = " | ".join(reasons)
+        self.assertIn("fewer than the registered number of valid tasks (11 < 12)", joined)
+        self.assertIn("non-inferiority fails", joined)
+        self.assertIn("the lower bound of the cost interval is above 1.0", joined)
+        self.assertIn("above the floor", joined)
+
+    def test_non_inferiority_failure_is_not_masked_by_the_floor(self):
+        out, reasons = analyze.rule(12, 12, 9, 12, 0.9, (0.8, 0.95), 2.0)
+        self.assertEqual(out, "worse")
+        self.assertTrue(any("inside the variance floor" in r for r in reasons))
+
+    def test_ties_claim_less(self):
+        rule = analyze.rule
+        self.assertEqual(rule(12, 12, 12, 12, 0.45, (0.4, 0.5), 2.0)[0], "inconclusive")
+        self.assertEqual(rule(12, 12, 12, 12, 0.45, (0.4, 0.4999), 2.0)[0], "promising")
+        self.assertEqual(rule(12, 12, 12, 12, 2.5, (2.0, 3.0), 2.0)[0], "inconclusive")
+        self.assertEqual(rule(12, 12, 12, 12, 2.5, (2.0001, 3.0), 2.0)[0], "worse")
+        self.assertEqual(rule(12, 12, 12, 12, 0.8, (0.7, 1.0), 1.0)[0],
+                         "no demonstrated advantage")
+        self.assertEqual(rule(12, 12, 12, 12, 1.2, (1.0, 1.3), 1.0)[0],
+                         "no demonstrated advantage")
+        # bare mean pass 0.5 counts, so 11 vs 12 holds and 10 vs 12 fails
+        self.assertEqual(rule(12, 12, 11, 12, 0.5, (0.4, 0.6), 1.0)[0], "promising")
+        self.assertEqual(rule(12, 12, 10, 12, 0.5, (0.4, 0.6), 1.0)[0], "worse")
+
+    def test_instrument_first(self):
+        out, reasons = analyze.rule(11, 12, 5, 12, 0.5, (0.4, 0.6), 1.0, ("leak",))
+        self.assertEqual(out, "invalid instrument")
+        self.assertTrue(any("fewer than" in r for r in reasons))
+
+    def test_cost_branch_is_exhaustive_exclusive_and_reaches_every_outcome(self):
+        grid = [0.3, 0.5, 0.7, 0.9, 0.99, 1.0, 1.01, 1.1, 1.4, 2.0, 2.5, 4.0]
+        seen = set()
+        for floor in (1.0, 1.05, 1.25, 2.0):
+            for low, high in itertools.combinations_with_replacement(grid, 2):
+                worse = low > floor
+                promising = high < 1 / floor
+                contains = low <= 1.0 <= high
+                self.assertLessEqual(worse + promising + contains, 1, (low, high, floor))
+                out = analyze.cost_branch((low, high), floor)
+                expect = ("worse" if worse else "promising" if promising
+                          else "no demonstrated advantage" if contains else "inconclusive")
+                self.assertEqual(out, expect)
+                if floor == 1.0:
+                    self.assertNotEqual(out, "inconclusive")
+                seen.add(out)
+        self.assertEqual(seen, {"worse", "promising", "no demonstrated advantage",
+                                "inconclusive"})
+        # every label is reachable through rule()
+        self.assertEqual({analyze.rule(*a)[0] for a in (
+            (12, 12, 12, 12, 0.5, (0.4, 0.6), 1.0),
+            (12, 12, 12, 12, 1.0, (0.8, 1.2), 1.0),
+            (12, 12, 12, 12, 2.0, (1.5, 2.5), 1.0),
+            (11, 12, 12, 12, 0.5, (0.4, 0.6), 1.0),
+            (12, 12, 12, 12, 0.5, (0.4, 0.6), 1.0, ("x",)))}, set(analyze.LABELS))
+
 
 class AmbiguityDecisionsTest(unittest.TestCase):
     """Each ambiguity is resolved toward the reading that makes `promising` harder."""
 
     def test_single_bare_rep_excludes_the_task(self):
-        rows = study(**PROMISING)
         task = TASKS[6]
-        rows = [r for r in rows if not (r["taskId"] == task and r["arm"] == "bare"
-                                        and r["rep"] == 1)]
-        d = decide(rows)
+        d = decide(without(study(**PROMISING), task, "bare", 1))
         self.assertEqual(d.n_valid_tasks, 11)
         self.assertIn("bare", d.excluded[task])
         self.assertEqual(d.outcome, "inconclusive")
@@ -351,77 +532,58 @@ class AmbiguityDecisionsTest(unittest.TestCase):
         d = decide(study(bare_pass=(False, False), **PROMISING))
         self.assertEqual(d.pass_counts["bare"], 0)
 
-    def test_interval_touching_one_contains_one(self):
-        out, _ = analyze.rule(12, 12, 12, 12, 0.8, (0.7, 1.0), 1.01)
-        self.assertEqual(out, "no demonstrated advantage")
-        out, _ = analyze.rule(12, 12, 12, 12, 1.2, (1.0, 1.3), 1.01)
-        self.assertEqual(out, "no demonstrated advantage")
-        out, _ = analyze.rule(12, 12, 12, 12, 0.8, (0.7, 0.999999), 1.01)
-        self.assertEqual(out, "promising")
-
-    def test_difference_on_the_floor_is_inside(self):
-        out, _ = analyze.rule(12, 12, 12, 12, 0.5, (0.4, 0.6), 2.0)
-        self.assertEqual(out, "inconclusive")
-        out, _ = analyze.rule(12, 12, 12, 12, 2.0, (1.5, 2.5), 2.0)
-        self.assertEqual(out, "inconclusive")
-        out, _ = analyze.rule(12, 12, 12, 12, 0.49, (0.4, 0.6), 2.0)
-        self.assertEqual(out, "promising")
-
-    def test_precedence(self):
-        # fewer valid tasks beats worse; worse by pass rate beats the floor; the floor beats
-        # worse by cost and promising.
-        self.assertEqual(analyze.rule(11, 12, 5, 12, 2.0, (1.5, 2.5), 1.0)[0], "inconclusive")
-        self.assertEqual(analyze.rule(12, 12, 5, 12, 0.9, (0.8, 0.95), 2.0)[0], "worse")
-        self.assertEqual(analyze.rule(12, 12, 12, 12, 1.5, (1.2, 1.8), 2.0)[0], "inconclusive")
-        self.assertEqual(analyze.rule(12, 12, 12, 12, 1.5, (1.2, 1.8), 1.1)[0], "worse")
-        self.assertEqual(analyze.rule(12, 12, 12, 12, 0.9, (0.8, 1.1), 1.05)[0],
-                         "no demonstrated advantage")
-        self.assertEqual(analyze.rule(12, 12, 12, 12, 0.9, (0.8, 0.95), 1.05,
-                                      instrument_failures=("x",))[0], "invalid instrument")
-
-    def test_more_valid_tasks_than_registered_is_not_inconclusive(self):
-        self.assertEqual(decide(study(**PROMISING), registered_tasks=10).outcome, "promising")
-
 
 class StrataTest(unittest.TestCase):
     def setUp(self):
         self.foreign = TASKS[:6]
         self.private = [f"cs-p{i:02d}" for i in range(6)]
-        self.kinds = {**{t: "foreign" for t in self.foreign},
-                      **{t: "private" for t in self.private}}
+        self.registered = {**{t: "foreign" for t in self.foreign},
+                           **{t: "private" for t in self.private}}
         self.rows = (study(n=6, tasks=self.foreign, ratios=(0.4, 0.45), spread=1.01)
                      + study(n=6, tasks=self.private, ratios=(1.4, 1.6), spread=1.01))
 
+    def strata(self, registered=None, rows=None):
+        return analyze.strata(self.rows if rows is None else rows, S,
+                              registered or self.registered, seed=SEED, instrument_failures=())
+
     def test_foreign_private_and_pooled_are_separate(self):
-        out = analyze.strata(self.rows, S, self.kinds, {"foreign": 6, "private": 6}, seed=SEED)
+        out = self.strata()
         self.assertEqual(set(out), {"foreign", "private", "pooled"})
         self.assertEqual(out["foreign"].outcome, "promising")
         self.assertEqual(out["private"].outcome, "worse")
         self.assertEqual(out["foreign"].n_valid_tasks, 6)
         self.assertEqual(out["private"].n_valid_tasks, 6)
         self.assertEqual(out["pooled"].n_valid_tasks, 12)
-        self.assertEqual(out["foreign"].stratum, "foreign")
+        self.assertEqual([out[k].stratum for k in ("foreign", "private", "pooled")],
+                         ["foreign", "private", "pooled"])
         self.assertIn("contaminated", " ".join(out["private"].notes))
         self.assertIn("contaminated", " ".join(out["pooled"].notes))
         self.assertEqual(out["foreign"].notes, ())
-        # the filter is the same function: decide(task_filter=...) gives the same answer
-        same = analyze.decide(self.rows, S, registered_tasks=6, seed=SEED,
-                              task_filter=set(self.foreign))
-        self.assertEqual(same[:6], out["foreign"][:6])
+        # the same function: decide over the foreign part gives the same answer
+        same = decide([r for r in self.rows if r["taskId"] in self.foreign],
+                      registered_tasks={t: "foreign" for t in self.foreign})
+        self.assertEqual(same, out["foreign"])
 
     def test_registered_count_is_per_stratum(self):
-        out = analyze.strata(self.rows, S, self.kinds, {"foreign": 7, "private": 6}, seed=SEED)
-        self.assertEqual(out["foreign"].outcome, "inconclusive")
+        registered = dict(self.registered, **{"org__repo-11": "foreign"})
+        out = self.strata(registered)
+        self.assertEqual(out["foreign"].outcome, "inconclusive")  # 6 valid < 7 registered
+        self.assertEqual(out["private"].outcome, "worse")
         self.assertEqual(out["pooled"].n_valid_tasks, 12)
 
-    def test_a_task_without_a_kind_raises(self):
-        kinds = dict(self.kinds)
-        del kinds[self.private[0]]
+    def test_a_stratum_without_registered_tasks_is_none(self):
+        foreign_rows = [r for r in self.rows if r["taskId"] in self.foreign]
+        out = self.strata({t: "foreign" for t in self.foreign}, foreign_rows)
+        self.assertIsNone(out["private"])
+        self.assertEqual(out["pooled"].stratum, "foreign")
+
+    def test_an_unregistered_or_badly_kinded_task_raises(self):
+        registered = dict(self.registered)
+        del registered[self.private[0]]
+        with self.assertRaises(analyze.MalformedRow):
+            self.strata(registered)
         with self.assertRaises(ValueError):
-            analyze.strata(self.rows, S, kinds, {"foreign": 6, "private": 6}, seed=SEED)
-        with self.assertRaises(ValueError):
-            analyze.strata(self.rows, S, dict(self.kinds, **{self.foreign[0]: "public"}),
-                           {"foreign": 6, "private": 6}, seed=SEED)
+            self.strata(dict(self.registered, **{self.foreign[0]: "public"}))
 
 
 class SecondaryTest(unittest.TestCase):
@@ -513,6 +675,9 @@ class SecondaryTest(unittest.TestCase):
             with self.subTest(c):
                 self.assertFalse(analyze.compiles_all_targets(c))
 
+
+# Measured 2026-10-28 on CPython 3.14.8: decide(study(**VARIED), seed=7).ci90.
+GOLDEN_CI = (0.8026677052434217, 1.1010586634143393)
 
 if __name__ == "__main__":
     unittest.main()

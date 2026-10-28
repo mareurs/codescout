@@ -1,16 +1,28 @@
 """Pre-registered analysis for the setup A/B study: spec section 6's decision rule.
 
-    decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, seed, task_filter=None,
-           instrument_failures=(), stratum="pooled") -> Decision
-    strata(rows, model, kinds, registered, *, seed, comparison=("cs", "bare"),
-           instrument_failures=()) -> {"foreign": Decision, "private": Decision, "pooled": Decision}
+    decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, seed,
+           instrument_failures) -> Decision
+    strata(rows, model, registered_tasks, *, seed, instrument_failures,
+           comparison=("cs", "bare")) -> {"foreign": Decision|None, "private": Decision|None,
+                                          "pooled": Decision}
     secondary(rows, gold_files=None, task_filter=None) -> {model: {arm: {...}}}   never gated
     rule(n_valid, registered, treat_passes, bare_passes, gmean, ci90, floor,
-         instrument_failures=()) -> (outcome, reasons)                           the bare table
+         instrument_failures=()) -> (outcome, reasons)                          the bare table
+    cost_branch(ci90, floor) -> outcome of step 4
     compiles_all_targets(command) -> bool
 
 Pure computation over Task 8 journal rows (run.py ROW_FIELDS). No docker, network or token.
-`registered_tasks` and `seed` are keyword-only (the brief lists them after a defaulted argument).
+`registered_tasks`, `seed` and `instrument_failures` are keyword-only and REQUIRED.
+
+REGISTERED TASKS (fix round 1, I1). `registered_tasks` is the frozen task list as a mapping
+{task id: "foreign" | "private"} (the bundle record's `kind`); the registered COUNT is its len.
+Any main-stage row whose task is not in it raises MalformedRow: an unregistered task can never
+fill the count. A development task may not be registered. The kinds decide the stratum
+("foreign", "private", or "pooled" when both occur) and its note (Task 7 Ruling A).
+
+INSTRUMENT (fix round 1, I5). `instrument_failures` is required: the study-level failures of
+the leakage gates, controls and arm-integrity checks. An explicit () means "the gates were run
+and passed"; any entry gives "invalid instrument".
 
 SPEC SECTION 6, VERBATIM (per model, using the cs - bare comparison):
   promising                  pass-rate non-inferiority holds AND the upper bound of the cost
@@ -28,50 +40,55 @@ Section 5: non-inferiority = "the cs arm passes at least as many tasks as bare m
 interval over tasks"; floor = "bare runs twice on every task. The floor is the spread between
 those two runs, on each metric."
 
-WHAT ENTERS THE STATISTIC. The latest journal row of each runId (run.latest_rows: a pending row
-followed by its final row counts once). Of those, only rows with outcome exactly `scored` (stage
-"main"); never `dev-scored`, `invalid-arm` (charged, never scored), `plan-limit`, `infra-oom`,
-`infra-other`, `unknown-spend` or `pending`. A task whose (task, model) run.task_validity marks
-invalid (an effective-effort mismatch or unknown effort across ANY of its graded arms) is
-excluded. The unit is the task: a valid task has exactly two scored `bare` reps and one scored
-treatment run; per task, the treatment passes when its run passes, `bare` passes when the mean of
-its two reps' pass is >= 0.5, and the cost ratio is treatment cost / mean of the two bare costs.
+ORDER (coordinator ruling, fix round 1, I3 + I4; binding; the rows of the table overlap):
+  1. any instrument failure                             -> invalid instrument
+  2. fewer valid tasks than registered                  -> inconclusive
+  3. non-inferiority fails                              -> worse (the floor never masks it)
+  4. cost, F = floor >= 1 (cost_branch):
+       low > F                                          -> worse
+       high < 1/F                                       -> promising
+       low <= 1.0 <= high                               -> no demonstrated advantage
+       otherwise (1/F <= high < 1.0 or 1.0 < low <= F)  -> inconclusive (cost difference inside
+                                                           the variance floor)
+  Ties go to the side that claims less: low == F is not worse, high == 1/F is not promising, an
+  interval touching 1.0 contains it. The three bounded cases exclude each other (low > F >= 1
+  means 1.0 is outside and high > 1/F; high < 1/F <= 1 means 1.0 is outside), and the rest is
+  inconclusive, so step 4 is exhaustive; with F == 1 the inconclusive branch is empty.
+  `reasons` lists EVERY section 6 condition that holds (not only the deciding one).
 
-FAIL CLOSED. Every row is checked (check_row) before anything is counted: exact ROW_FIELDS, a
-known outcome, model and arm, an int rep, runId == run.run_id(task, model, arm, rep), stage ==
-run.stage_of(task) (a development task is never `scored`), and for a graded row a dict grade
-with a bool `pass` and a finite cost > 0. More scored reps than the plan (bare x2, treatment x1)
-raise. A bad row raises MalformedRow (a ValueError); it is never dropped.
+WHAT ENTERS THE STATISTIC. Rows are checked (check_row) and the journal is checked (every runId
+has at most one final row and nothing after it: a second final row is a re-run). Then the latest
+row of each runId, of stage "main", outcome exactly `scored`; never `dev-scored`, `invalid-arm`
+(charged, never scored), `plan-limit`, `infra-oom`, `infra-other`, `unknown-spend` or `pending`.
+A task that run.task_validity marks invalid for the model (an effective-effort mismatch or
+unknown effort across ANY of its graded arms) is excluded. A valid task has two scored `bare`
+reps and one scored treatment run. Per task, the treatment passes when its run passes, `bare`
+passes when the mean of its two reps' pass is >= 0.5, and the cost ratio is treatment cost /
+mean of the two bare costs.
 
-DECISIONS (each ambiguity resolved toward the reading that makes "promising" harder; the report
-task-9-report.md cites the spec text each one resolves):
-  D1 floor     per valid task the bare spread is max(b0, b1) / min(b0, b1) (cost); the floor F is
-               their geometric mean over the valid tasks (the cost statistic's own averaging). It
-               is not divided by sqrt(n). "Inside the floor" means 1/F <= gmean <= F, ties inside
-               (with a 1e-12 tolerance on the log scale).
-  D2 one bare  a task with fewer than two scored bare reps has no floor and is not a valid task
-               (it lowers n_valid_tasks toward "inconclusive"); likewise a task with no scored
-               treatment run.
-  D3 ties      "below 1.0" and "above 1.0" are strict; an interval that touches 1.0 contains it.
-               A bare mean pass of exactly 0.5 is a pass (the brief's ">= 0.5").
+FAIL CLOSED. check_row raises MalformedRow (a ValueError) for: not exactly ROW_FIELDS; an
+unknown outcome, model or arm; a rep that is not an int or, on a main row, is outside the Stage 3
+plan run.STAGE3_REPS (bare 0-1, cs 0, full 0: any other rep is a re-run, spec sections 4 and 7);
+runId != run.run_id(task, model, arm, rep); stage != run.stage_of(task); and for a graded row a
+grade without a bool `pass` or a cost that is not finite and > 0. Nothing is dropped silently.
+
+DECISIONS (resolved toward a harder "promising"; the report cites the spec text of each):
+  D1 floor     per valid task the bare spread is max(b0, b1) / min(b0, b1) (cost); F is their
+               geometric mean over the valid tasks, not divided by sqrt(n). THE OPERATOR MUST
+               CONFIRM THIS DEFINITION OF F AT THE STAGE 2 FREEZE.
+  D2 one bare  a task with fewer than two scored bare reps, or no scored treatment run, is not a
+               valid task (it lowers n_valid_tasks toward "inconclusive").
+  D3 ties      see ORDER; a bare mean pass of exactly 0.5 is a pass (the brief's ">= 0.5").
   D4 interval  percentile bootstrap, 10,000 resamples of n whole tasks with replacement from
-               random.Random(seed), tasks in sorted task-id order (row order does not matter);
-               bounds are the order statistics floor(0.05 (B-1)) and ceil(0.95 (B-1)) of the
-               sorted log means, rounded outward.
-  D5 order     invalid instrument > inconclusive (fewer valid tasks) > worse (non-inferiority
-               fails) > inconclusive (inside the floor) > worse (cost lower bound > 1.0) >
-               promising > no demonstrated advantage. More valid tasks than registered is fine.
-  D6 label     `outcome` is always one of the five spec labels; `effect` is "codescout" for
-               cs - bare and "the setup" for full - bare, and `claim` = "<effect>: <outcome>".
-               Other comparisons raise: full - cs has a single cs run, so no floor.
-  D7 instrument  the gates are not in the rows; the caller passes their study-level failures as
-               `instrument_failures` (any non-empty -> "invalid instrument").
-  D8 strata    task kinds ("foreign" / "private") come from the caller (the bundle record's
-               `kind`); rows do not carry them. Each stratum has its own registered count; the
-               private and pooled Decisions carry a note that the private stratum is functionally
-               contaminated for cs/full (Task 7 Ruling A: binary_postdates_fix).
+               random.Random(seed), tasks in sorted task-id order; bounds are the order
+               statistics floor(0.05 (B-1)) and ceil(0.95 (B-1)) of the sorted log means.
+  D5 order     replaced by the coordinator's ORDER above.
+  D6 label     `outcome` is one of the five spec labels; `effect` is "codescout" for cs - bare
+               and "the setup" for full - bare, `claim` = "<effect>: <outcome>". Other
+               comparisons raise: full - cs has a single cs run, so no floor.
+  D8 strata    see REGISTERED TASKS; strata() splits the mapping by kind and filters the rows.
   D9 secondary over the statistic's population: scored, main, effort-valid rows (task_filter
-               optional). See secondary() and compiles_all_targets() for the exact definitions.
+               optional). See secondary() and compiles_all_targets().
 
 Stdlib only.
 """
@@ -80,6 +97,7 @@ import random
 import re
 import shlex
 import statistics
+from types import MappingProxyType
 from typing import NamedTuple
 
 import run
@@ -89,13 +107,13 @@ LABELS = ("promising", "no demonstrated advantage", "worse", "inconclusive", "in
 EFFECTS = {("cs", "bare"): "codescout", ("full", "bare"): "the setup"}
 ARMS = run.arms.ARMS
 KINDS = ("foreign", "private")
+PLANNED_REPS = {arm: range(n) for arm, n in run.STAGE3_REPS}
 SECONDARY_MEDIANS = ("inputTokens", "outputTokens", "numTurns", "wallMs")
-_TIE = 1e-12
 PRIVATE_NOTE = ("the private stratum is functionally contaminated for cs/full: the frozen "
                 "codescout binary post-dates every private fix (Task 7 Ruling A, "
                 "binary_postdates_fix); a claim must not rest on it")
-POOLED_NOTE = ("pooled includes the private stratum, which is functionally contaminated for "
-               "cs/full (Task 7 Ruling A); cite the foreign stratum for a claim")
+POOLED_NOTE = ("pooled includes private tasks, which are functionally contaminated for cs/full "
+               "(Task 7 Ruling A); cite the foreign stratum for a claim")
 
 
 class MalformedRow(ValueError):
@@ -111,9 +129,9 @@ class Decision(NamedTuple):
     n_valid_tasks: int
     effect: str = "codescout"     # "codescout" (cs - bare) or "the setup" (full - bare)
     claim: str = ""               # "<effect>: <outcome>"
-    reasons: tuple = ()
-    excluded: dict = None         # {task id: why it is not a valid task}
-    stratum: str = "pooled"
+    reasons: tuple = ()           # every section 6 condition that holds
+    excluded: dict = MappingProxyType({})   # {task id: why it is not a valid task}
+    stratum: str = "pooled"       # "foreign", "private" or "pooled", from the registered kinds
     notes: tuple = ()
 
 
@@ -132,7 +150,7 @@ def _finite_number(v):
 
 
 def check_row(row):
-    """Raise MalformedRow unless `row` is a well-formed journal row (see the module docstring)."""
+    """Raise MalformedRow unless `row` is a well-formed journal row (see FAIL CLOSED)."""
     if not isinstance(row, dict):
         raise MalformedRow(f"not a row: {row!r}")
     missing = [f for f in run.ROW_FIELDS if f not in row]
@@ -156,6 +174,10 @@ def check_row(row):
     if row["stage"] != run.stage_of(row["taskId"]):
         raise MalformedRow(f"{rid}: stage {row['stage']!r} but the task is "
                            f"{run.stage_of(row['taskId'])!r}")
+    if row["stage"] == "main" and row["rep"] not in PLANNED_REPS[row["arm"]]:
+        raise MalformedRow(f"{rid}: rep {row['rep']} of {row['arm']} is outside the Stage 3 plan "
+                           f"({list(PLANNED_REPS[row['arm']])}): a re-run, and spec sections 4 "
+                           f"and 7 forbid one")
     if row["outcome"] == "scored" and row["stage"] == "dev":
         raise MalformedRow(f"{rid}: a development task is never `scored`")
     if row["outcome"] == "dev-scored" and row["stage"] != "dev":
@@ -172,15 +194,47 @@ def check_row(row):
 
 
 def _latest(rows):
-    """Check every row, then {runId: latest row} (run.latest_rows)."""
+    """Check every row and the journal, then {runId: latest row} (run.latest_rows).
+
+    A runId's rows are `pending` rows followed by at most one final row; a row after a final row
+    is a re-run of that spec (spec sections 4 and 7: never re-run) and raises."""
+    final = {}
     for r in rows:
         check_row(r)
+        rid = r["runId"]
+        if rid in final:
+            raise MalformedRow(f"{rid}: a {r['outcome']!r} row after its final "
+                               f"{final[rid]!r} row: a re-run, and spec sections 4 and 7 forbid "
+                               f"one")
+        if r["outcome"] != run.PENDING:
+            final[rid] = r["outcome"]
     return run.latest_rows(rows)
 
 
-def _population(rows, task_filter=None):
-    """(scored main rows of effort-valid tasks, {(task, model): why excluded}, latest rows)."""
-    latest = _latest(rows)
+def check_registered(registered_tasks):
+    """The frozen task list: a non-empty mapping {main task id: "foreign" | "private"}."""
+    if not isinstance(registered_tasks, dict) or not registered_tasks:
+        raise ValueError(f"registered_tasks must be a non-empty mapping {{task id: kind}}, got "
+                         f"{registered_tasks!r}")
+    for task, kind in registered_tasks.items():
+        if not isinstance(task, str) or not task:
+            raise ValueError(f"registered task id {task!r} is not a string")
+        if run.stage_of(task) != "main":
+            raise ValueError(f"{task}: a development task is never registered")
+        if kind not in KINDS:
+            raise ValueError(f"{task}: kind {kind!r} is not one of {KINDS}")
+    return registered_tasks
+
+
+def _check_registered_rows(latest, registered_tasks):
+    for r in latest.values():
+        if r["stage"] == "main" and r["taskId"] not in registered_tasks:
+            raise MalformedRow(f"{r['runId']}: task {r['taskId']!r} is not registered; an "
+                               f"unregistered task never enters the statistic")
+
+
+def _population(latest, task_filter=None):
+    """(main rows of effort-valid tasks, {(task, model): why excluded})."""
     validity = run.task_validity(list(latest.values()))
     kept, invalid = [], {}
     for r in latest.values():
@@ -199,7 +253,7 @@ def _population(rows, task_filter=None):
 
 def task_units(rows, model, treatment, task_filter=None):
     """([TaskUnit] in task-id order, {task: why it is not valid}) for one model and treatment."""
-    kept, invalid = _population(rows, task_filter)
+    kept, invalid = _population(_latest(rows), task_filter)
     excluded = {t: why for (t, m), why in invalid.items() if m == model}
     by_task = {}
     for r in kept:
@@ -210,13 +264,10 @@ def task_units(rows, model, treatment, task_filter=None):
         scored = [r for r in by_task[task] if r["outcome"] == "scored"]
         bare = sorted((r for r in scored if r["arm"] == "bare"), key=lambda r: r["rep"])
         treat = [r for r in scored if r["arm"] == treatment]
-        if len(bare) > 2:
-            raise MalformedRow(f"{task}|{model}: {len(bare)} scored bare reps; the plan has 2")
-        if len(treat) > 1:
-            raise MalformedRow(f"{task}|{model}: {len(treat)} scored {treatment} runs; the plan "
-                               f"has 1")
+        if len(bare) > 2 or len(treat) > 1:  # unreachable after check_row; kept as a guard
+            raise MalformedRow(f"{task}|{model}: more scored runs than the plan")
         if len(bare) < 2:
-            excluded[task] = (f"{len(bare)} scored bare rep(s); the floor needs 2 (D2)")
+            excluded[task] = f"{len(bare)} scored bare rep(s); the floor needs 2 (D2)"
             continue
         if not treat:
             excluded[task] = f"no scored {treatment} run"
@@ -255,26 +306,58 @@ def bootstrap_ci(log_ratios, seed, resamples=RESAMPLES):
     return interval90(bootstrap_log_means(log_ratios, seed, resamples))
 
 
+def cost_branch(ci90, floor):
+    """Step 4 of ORDER: the cost outcome of a 90% interval against the floor F >= 1."""
+    low, high = ci90
+    if low > floor:
+        return "worse"
+    if high < 1.0 / floor:
+        return "promising"
+    if low <= 1.0 <= high:
+        return "no demonstrated advantage"
+    return "inconclusive"
+
+
 def rule(n_valid, registered, treat_passes, bare_passes, gmean, ci90, floor,
          instrument_failures=()):
-    """(outcome, reasons): spec section 6's table in the order D5."""
+    """(outcome, reasons): spec section 6 in the coordinator's ORDER; `reasons` lists every
+    section 6 condition that holds. ci90 and floor may be None only when n_valid is 0."""
+    held = [f"invalid instrument: {f}" for f in instrument_failures]
+    few = n_valid < registered
+    if few:
+        held.append(f"fewer than the registered number of valid tasks ({n_valid} < "
+                    f"{registered})")
+    noninferior = treat_passes >= bare_passes - 1
+    held.append(f"non-inferiority {'holds' if noninferior else 'fails'} ({treat_passes} vs "
+                f"{bare_passes} - 1)")
+    branch = None
+    if n_valid:
+        low, high = ci90
+        held.append(f"cost ratio geometric mean {gmean:.4g}, 90% interval [{low:.4g}, "
+                    f"{high:.4g}], floor F {floor:.4g}")
+        if high < 1.0:
+            held.append("the upper bound of the cost ratio's 90% interval is below 1.0")
+        if low <= 1.0 <= high:
+            held.append("the interval contains 1.0")
+        if low > 1.0:
+            held.append("the lower bound of the cost interval is above 1.0")
+        branch = cost_branch(ci90, floor)
+        if low > floor:
+            held.append(f"the lower bound is above the floor F ({floor:.4g})")
+        if high < 1.0 / floor:
+            held.append(f"the upper bound is below 1/F ({1 / floor:.4g})")
+        if not (low > floor or high < 1.0 / floor):
+            held.append(f"the cost difference is inside the variance floor [{1 / floor:.4g}, "
+                        f"{floor:.4g}]")
     if instrument_failures:
-        return "invalid instrument", tuple(f"instrument: {f}" for f in instrument_failures)
-    if n_valid < registered:
-        return "inconclusive", (f"{n_valid} valid tasks < {registered} registered",)
-    if treat_passes < bare_passes - 1:
-        return "worse", (f"non-inferiority fails: {treat_passes} < {bare_passes} - 1",)
-    if abs(math.log(gmean)) <= math.log(floor) + _TIE:
-        return "inconclusive", (f"cost ratio {gmean:.4g} is inside the variance floor "
-                                f"[{1 / floor:.4g}, {floor:.4g}]",)
-    low, high = ci90
-    if low > 1.0:
-        return "worse", (f"cost interval lower bound {low:.4g} > 1.0",)
-    if high < 1.0:
-        return "promising", (f"non-inferiority holds ({treat_passes} >= {bare_passes} - 1) and "
-                             f"cost interval upper bound {high:.4g} < 1.0",)
-    return "no demonstrated advantage", (f"non-inferiority holds and the cost interval "
-                                         f"[{low:.4g}, {high:.4g}] contains 1.0",)
+        outcome = "invalid instrument"
+    elif few:
+        outcome = "inconclusive"
+    elif not noninferior:
+        outcome = "worse"
+    else:
+        outcome = branch
+    return outcome, tuple(held)
 
 
 def _check_int(value, name, minimum):
@@ -282,18 +365,36 @@ def _check_int(value, name, minimum):
         raise ValueError(f"{name} must be an int >= {minimum}, got {value!r}")
 
 
-def decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, seed, task_filter=None,
-           instrument_failures=(), stratum="pooled"):
+def _check_instrument(instrument_failures):
+    if (not isinstance(instrument_failures, (tuple, list))
+            or not all(isinstance(f, str) and f for f in instrument_failures)):
+        raise ValueError(f"instrument_failures must be a tuple of non-empty strings (() = every "
+                         f"gate ran and passed), got {instrument_failures!r}")
+
+
+def _stratum(registered_tasks):
+    kinds = set(registered_tasks.values())
+    if kinds == {"foreign"}:
+        return "foreign", ()
+    if kinds == {"private"}:
+        return "private", (PRIVATE_NOTE,)
+    return "pooled", (POOLED_NOTE,)
+
+
+def decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, seed,
+           instrument_failures):
     """Spec section 6 for one model and one comparison (see the module docstring)."""
     comparison = tuple(comparison)
     if comparison not in EFFECTS:
         raise ValueError(f"comparison {comparison!r} is not one of {sorted(EFFECTS)}")
     if model not in run.MODELS:
         raise ValueError(f"model {model!r} is not one of {run.MODELS}")
-    _check_int(registered_tasks, "registered_tasks", 1)
+    check_registered(registered_tasks)
     _check_int(seed, "seed", 0)
+    _check_instrument(instrument_failures)
+    _check_registered_rows(_latest(rows), registered_tasks)
     treatment = comparison[0]
-    units, excluded = task_units(rows, model, treatment, task_filter)
+    units, excluded = task_units(rows, model, treatment)
     n = len(units)
     counts = {treatment: sum(u.treat_pass for u in units),
               "bare": sum(sum(u.bare_passes) / 2 >= 0.5 for u in units)}
@@ -304,39 +405,29 @@ def decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, seed, ta
         floor = math.exp(math.fsum(abs(math.log(u.bare_costs[0] / u.bare_costs[1]))
                                    for u in units) / n)
         ci = bootstrap_ci(logs, seed)
-    if n == 0 and not instrument_failures:
-        outcome, reasons = "inconclusive", (f"0 valid tasks < {registered_tasks} registered",)
-    else:
-        outcome, reasons = rule(n, registered_tasks, counts[treatment], counts["bare"], gmean,
-                                ci, floor, instrument_failures)
+    outcome, reasons = rule(n, len(registered_tasks), counts[treatment], counts["bare"], gmean,
+                            ci, floor, tuple(instrument_failures))
     effect = EFFECTS[comparison]
+    stratum, notes = _stratum(registered_tasks)
     return Decision(outcome, counts, gmean, ci, floor, n, effect, f"{effect}: {outcome}",
-                    reasons, dict(sorted(excluded.items())), stratum, ())
+                    reasons, dict(sorted(excluded.items())), stratum, notes)
 
 
-def strata(rows, model, kinds, registered, *, seed, comparison=("cs", "bare"),
-           instrument_failures=()):
-    """Foreign-only, private-only and pooled Decisions from decide(task_filter=...) (D8).
-
-    kinds: {task id: "foreign" | "private"} for every main task in `rows` (any model);
-    registered: {"foreign": int, "private": int}; pooled registers their sum."""
-    for task, kind in kinds.items():
-        if kind not in KINDS:
-            raise ValueError(f"{task}: kind {kind!r} is not one of {KINDS}")
-    for r in rows:
-        check_row(r)
-        if r["stage"] == "main" and r["taskId"] not in kinds:
-            raise ValueError(f"{r['taskId']}: no kind given; every main task needs one")
-    if set(registered) != set(KINDS):
-        raise ValueError(f"registered must give exactly {KINDS}, got {sorted(registered)}")
-    by_kind = {k: {t for t, v in kinds.items() if v == k} for k in KINDS}
+def strata(rows, model, registered_tasks, *, seed, instrument_failures,
+           comparison=("cs", "bare")):
+    """Foreign-only, private-only and pooled Decisions (spec section 2: "reported separately and
+    also pooled"; Task 7 Ruling A). Each stratum is decide() over its part of the registered
+    mapping and the rows of those tasks; a stratum with no registered task is None. Every row
+    is checked against the WHOLE mapping first, so an unregistered task raises here too."""
+    check_registered(registered_tasks)
+    _check_registered_rows(_latest(rows), registered_tasks)
     common = dict(comparison=comparison, seed=seed, instrument_failures=instrument_failures)
-    out = {k: decide(rows, model, registered_tasks=registered[k], task_filter=by_kind[k],
-                     stratum=k, **common) for k in KINDS}
-    out["private"] = out["private"]._replace(notes=(PRIVATE_NOTE,))
-    out["pooled"] = decide(rows, model, registered_tasks=registered["foreign"]
-                           + registered["private"], task_filter=set(kinds), stratum="pooled",
-                           **common)._replace(notes=(POOLED_NOTE,))
+    out = {}
+    for kind in KINDS:
+        part = {t: k for t, k in registered_tasks.items() if k == kind}
+        out[kind] = (decide([r for r in rows if r["taskId"] in part], model,
+                            registered_tasks=part, **common) if part else None)
+    out["pooled"] = decide(rows, model, registered_tasks=registered_tasks, **common)
     return out
 
 
@@ -366,12 +457,14 @@ def compiles_all_targets(command):
     wrappers time/nice/env/command/exec/nohup and `timeout [-opts] DURATION` are skipped; the next
     word must be `cargo` (or a path ending in /cargo). Arguments after a bare `--` belong to the
     test harness and are ignored. The subcommand is the first argument not starting with `-` or
-    `+` (so `cargo --color always test` is misread: a known limit). The segment counts when:
+    `+`. The segment counts when:
       - any cargo subcommand carries `--all-targets` or `--tests` (also `--flag=...`), or
       - the subcommand is exactly `test` (or cargo's built-in alias `t`) - a whole word, so
         `cargo test-foo` and `cargo testx` do not count - and no target selector (`--lib`,
         `--bin`, `--bins`, `--test`, `--example(s)`, `--bench(es)`, `--doc`) narrows it.
-    `cargo nextest run` without those flags does not count (outside the brief's list)."""
+    Known misses (deferred, secondary only): `bash -c 'cargo test'`, `env -u X cargo test`
+    (the -u value is read as the command), `cargo --color always test` (the subcommand is read
+    as `always`), and `cargo nextest run` without --tests/--all-targets."""
     for segment in _SEPARATORS.split(command or ""):
         toks = _tokens(segment)
         i = 0
@@ -461,7 +554,7 @@ def secondary(rows, gold_files=None, task_filter=None):
 
     Limit: bashCommands holds native Bash calls only; a shell run through codescout's
     run_command (cs, and full whose settings deny Bash) is not in all_targets_share."""
-    kept, _ = _population(rows, task_filter)
+    kept, _ = _population(_latest(rows), task_filter)
     groups = {m: {a: [] for a in ARMS} for m in run.MODELS}
     for r in kept:
         if r["outcome"] == "scored":
