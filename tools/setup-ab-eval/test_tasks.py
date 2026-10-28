@@ -546,6 +546,32 @@ class Verify(unittest.TestCase):
         self.assertEqual(tasks.parse_tar_stderr("tar: opt/sab/bin/codescout: Warning: Cannot open: "
                                                 "Permission denied\n"), (found[:1], []))
 
+    def test_an_allowlisted_path_with_another_reason_is_not_accepted(self):
+        for err in ("tar: opt/sab/bin/codescout: Warning: Cannot open: No such file or directory\n",
+                    "tar: opt/sab/bin/codescout: Cannot stat: No such file or directory\n",
+                    "tar: opt/sab/bin/codescout: file changed as we read it\n"):
+            with self.subTest(err=err):
+                found, unknown = tasks.parse_tar_stderr(err)
+                self.assertEqual((found, unknown), ([], [err.strip()]))
+        found, unknown = tasks.parse_tar_stderr(
+            "tar: opt/sab/bin/codescout: Warning: Cannot open: Permission denied\n")
+        self.assertEqual(([f["path"] for f in found], unknown), (["/opt/sab/bin/codescout"], []))
+
+    def test_controls_must_have_run_on_the_arm_image_not_the_bare_run_image(self):
+        self.assertEqual(tasks.verify_controls(complete_controls(), "a", arm_image="sab-arm-a:1"), [])
+        why = tasks.verify_controls(complete_controls(image="sab-run-a:1"), "a",
+                                    arm_image="sab-arm-a:1")
+        self.assertEqual(len(why), 1)
+        self.assertIn("sab-arm-a:1", why[0])
+        with tempfile.TemporaryDirectory() as td:
+            ok = FakeImages(GOOD_IMAGES)
+            root = self.tree(td, complete_controls(image="sab-run-a:1", image_id="sha256:run"))
+            why = tasks.verify(["a"], root, inspect=ok)["a"]
+            self.assertTrue(any("sab-arm-a:1" in w for w in why), why)
+        with tempfile.TemporaryDirectory() as td:
+            root = self.tree(td, complete_controls())
+            self.assertEqual(tasks.verify(["a"], root, inspect=FakeImages(GOOD_IMAGES)), {"a": []})
+
     def test_verify_checks_ids_images_and_the_selection(self):
         with tempfile.TemporaryDirectory() as td:
             root = self.tree(td, complete_controls())

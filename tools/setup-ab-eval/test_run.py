@@ -582,7 +582,11 @@ class NoRetryTest(RunnerCase):
         plan = [spec()]
         pending = run.make_row(plan[0], "s-1", outcome=run.PENDING)
         (self.data / "rows.jsonl").write_text(json.dumps(pending) + "\n")
-        cli = self.batch(plan, BUDGET)
+        # the killed batch's journal: start and call, no stop (the operator acknowledges it)
+        run._event(self.data, "start", budget=BUDGET._asdict())
+        run._event(self.data, "call", runId=run.run_id(plan[0]))
+        self.ack_last_stop(plan, BUDGET)
+        cli = self.batch(plan, BUDGET, go=False)
         self.assertEqual(cli.calls, [])
         self.assertEqual(self.latest()[run.run_id(plan[0])]["outcome"], "unknown-spend")
 
@@ -607,8 +611,11 @@ class PendingTest(RunnerCase):
         pending = run.make_row(plan[0], "s-1", outcome=run.PENDING)
         (self.data / "rows.jsonl").write_text(json.dumps(pending) + "\n")
         budget = run.Budget(3.5, 0.0, 1.25, 1.0)
+        run._event(self.data, "start", budget=budget._asdict())
+        run._event(self.data, "call", runId=run.run_id(plan[0]))
+        self.ack_last_stop(plan, budget)
         # Charged at per_call: 1.25 + 1.0 + 1.25 = 3.5 <= 3.5 admits rep 1 and nothing more.
-        cli = self.batch(plan, budget)
+        cli = self.batch(plan, budget, go=False)
         rows = self.latest()
         self.assertEqual(rows[run.run_id(plan[0])]["outcome"], "unknown-spend")
         self.assertIsNone(rows[run.run_id(plan[0])]["costUsd"])
@@ -1013,9 +1020,10 @@ class LatchTest(RunnerCase):
 
     def test_a_batch_that_never_wrote_its_stop_is_latched(self):
         run._event(self.data, "start", budget=BUDGET._asdict())  # then SIGKILL: no stop event
-        with self.assertRaisesRegex(run.Refused, "unterminated-1"):
+        with self.assertRaisesRegex(run.Refused, "unterminated-1-[0-9a-f]{8}"):
             self.batch([spec()], BUDGET)
-        self.go([spec()], BUDGET, acks=["unterminated-1"])
+        latched = run.last_stop(run.read_events(self.data))
+        self.go([spec()], BUDGET, acks=[latched[0]])
         self.batch([spec()], BUDGET, go=False)
         self.assertEqual(self.latest()[run.run_id(spec())]["outcome"], "scored")
 
@@ -1094,6 +1102,16 @@ class GraderSignalTest(RunnerCase):
                     self.assertIn(outcome, ("infra-other", "infra-oom"))
 
 
+class FailingKillWorld(World):
+    """A daemon whose `docker kill` always fails (exit 1)."""
+
+    def __call__(self, *args, **kw):
+        res = super().__call__(*args, **kw)
+        if args and str(args[0]) == "kill":
+            return SimpleNamespace(returncode=1, stdout="")
+        return res
+
+
 class KillTest(RunnerCase):
     """M1: a timed-out or OOM-hit agent container is killed before usage is read."""
 
@@ -1114,6 +1132,21 @@ class KillTest(RunnerCase):
         record = json.loads((self.data / "runs" / run.run_id(spec()) / "run-record.json")
                             .read_text())
         self.assertEqual(record["killed"], "timeout")
+        self.assertEqual(record["killedRc"], 0)  # the `docker kill` return code is recorded
+
+    def test_the_kill_return_code_is_recorded_even_when_the_kill_fails(self):
+        self.world = FailingKillWorld()
+        self.batch([spec()], BUDGET, cli=FakeCLI(self.world, self.data,
+                                                 lambda a, n: {"timeout": True}))
+        record = json.loads((self.data / "runs" / run.run_id(spec()) / "run-record.json")
+                            .read_text())
+        self.assertEqual((record["killed"], record["killedRc"]), ("timeout", 1))
+
+    def test_a_run_that_is_not_killed_records_no_kill_rc(self):
+        self.batch([spec()], BUDGET)
+        record = json.loads((self.data / "runs" / run.run_id(spec()) / "run-record.json")
+                            .read_text())
+        self.assertEqual((record["killed"], record["killedRc"]), (None, None))
 
     def test_an_oom_container_is_killed_before_usage_is_read(self):
         name = run.AGENT_PREFIX + run._key(run.run_id(spec()))
@@ -1142,6 +1175,121 @@ class StageTest(RunnerCase):
         # Effort equality still applies to development rows (Stage 1 runs the gate live).
         self.assertIn(f"astral-sh__ruff-15309|{MODEL}",
                       json.loads((self.data / "task-validity.json").read_text()))
+
+
+# --- task 10a: pre-go hardening ----------------------------------------------------------------
+
+class JournalTrustTest(RunnerCase):
+    """batch.jsonl is the one point of trust for the latch and the per-call charge: rows.jsonl
+    without a matching batch.jsonl is refused before any side effect."""
+
+    def seed_row(self, sp=None, outcome="scored", cost=0.4):
+        run._append(self.data / run.ROWS, run.make_row(sp or spec(), "s", outcome=outcome,
+                                                        costUsd=cost))
+
+    def refused(self, pattern):
+        cli = FakeCLI(self.world, self.data)
+        before = sorted(p.name for p in self.data.iterdir())
+        with self.assertRaisesRegex(run.Refused, pattern):
+            self.batch([spec(rep=1)], BUDGET, cli=cli)
+        self.assertEqual(cli.calls, [])
+        self.assertEqual(self.world.calls, [])
+        after = sorted(p.name for p in self.data.iterdir())
+        self.assertEqual(after, sorted(set(before) | {"GO.json"}))
+
+    def test_rows_without_a_batch_journal_are_refused(self):
+        self.seed_row()
+        self.refused("batch.jsonl")
+
+    def test_rows_with_a_journal_that_has_no_start_are_refused(self):
+        self.seed_row()
+        run._event(self.data, "call", runId=run.run_id(spec()))
+        self.refused("start")
+
+    def test_a_graded_row_without_a_call_event_is_refused(self):
+        run._event(self.data, "start", plan_sha256="x", budget=BUDGET._asdict())
+        run._event(self.data, "stop", reason=run.PLAN_COMPLETE, spent=0)
+        self.seed_row()
+        self.refused(run.run_id(spec()))
+
+    def test_a_row_with_a_call_event_is_accepted(self):
+        self.batch([spec()], BUDGET)
+        self.batch([spec(), spec(rep=1)], BUDGET)
+        self.assertEqual(self.latest()[run.run_id(spec(rep=1))]["outcome"], "scored")
+
+    def test_a_pending_row_needs_no_call_event(self):
+        run._event(self.data, "start", plan_sha256="x", budget=BUDGET._asdict())
+        run._event(self.data, "stop", reason=run.PLAN_COMPLETE, spent=0)
+        self.seed_row(outcome=run.PENDING, cost=None)
+        self.batch([spec(rep=1)], BUDGET)  # recovered as unknown-spend, then runs
+
+    def test_an_old_format_journal_line_is_refused_not_a_keyerror(self):
+        (self.data / "batch.jsonl").write_text(json.dumps({"event": "start", "budget": {}}) + "\n")
+        with self.assertRaisesRegex(run.Refused, "seq"):
+            run.read_events(self.data)
+        self.go([spec()], BUDGET)
+        with self.assertRaisesRegex(run.Refused, "seq"):
+            self.batch([spec()], BUDGET, go=False)
+
+    def test_an_old_format_stop_without_a_stop_id_is_refused(self):
+        (self.data / "batch.jsonl").write_text(
+            json.dumps({"event": "stop", "seq": 1, "reason": "error"}) + "\n")
+        with self.assertRaisesRegex(run.Refused, "stopId"):
+            run.read_events(self.data)
+
+
+class StopIdTest(RunnerCase):
+    def test_stop_ids_are_unique_even_at_the_same_seq(self):
+        other = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, other, ignore_errors=True)
+        a = run._event(self.data, "stop", reason="error")
+        b = run._event(other, "stop", reason="error")
+        self.assertEqual(a["seq"], b["seq"])
+        for e in (a, b):
+            self.assertRegex(e["stopId"], r"^stop-1-[0-9a-f]{8}$")
+        self.assertNotEqual(a["stopId"], b["stopId"])
+        self.assertEqual(run.read_events(self.data)[0]["stopId"], a["stopId"])  # stored, stable
+
+    def test_a_truncated_journal_cannot_reuse_a_stale_acknowledged_id(self):
+        plan = [spec()]
+        cli = FakeCLI(self.world, self.data, lambda a, n: {"raise": RuntimeError("boom")})
+        with self.assertRaises(RuntimeError):
+            self.batch(plan, BUDGET, cli=cli)
+        stale = run.last_stop(run.read_events(self.data))[0]
+        # the operator restored an older journal; the next stop lands on the same seq
+        (self.data / "batch.jsonl").unlink()
+        (self.data / run.ROWS).unlink()
+        shutil.rmtree(self.data / "runs", ignore_errors=True)
+        self.world = World()
+        self.go(plan, BUDGET, acks=[stale])
+        with self.assertRaises(RuntimeError):
+            self.batch(plan, BUDGET, cli=FakeCLI(self.world, self.data,
+                                                 lambda a, n: {"raise": RuntimeError("boom")}),
+                       go=False)
+        fresh = run.last_stop(run.read_events(self.data))[0]
+        self.assertNotEqual(stale, fresh)
+        with self.assertRaisesRegex(run.Refused, fresh):
+            self.batch(plan, BUDGET, go=False)  # GO.json still lists only the stale id
+
+    def test_the_unterminated_id_is_deterministic_and_names_its_start_event(self):
+        run._event(self.data, "start", budget=BUDGET._asdict())
+        first = run.last_stop(run.read_events(self.data))[0]
+        self.assertRegex(first, r"^unterminated-1-[0-9a-f]{8}$")
+        self.assertEqual(first, run.last_stop(run.read_events(self.data))[0])
+        other = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, other, ignore_errors=True)
+        e = run._event(other, "start", budget=dict(BUDGET._asdict(), cap_usd=99.0))
+        self.assertNotEqual(first, run.last_stop([e])[0])
+
+
+class RequiredArgsTest(unittest.TestCase):
+    def test_spent_usd_requires_the_events(self):
+        with self.assertRaises(TypeError):
+            run.spent_usd([], BUDGET)
+
+    def test_development_tasks_equal_the_selection_rules_excluded_ids(self):
+        rule = json.loads((run.HERE / "selection-rule.json").read_text())
+        self.assertEqual(sorted(run.DEVELOPMENT_TASKS), sorted(rule["exclude_ids"]))
 
 
 if __name__ == "__main__":

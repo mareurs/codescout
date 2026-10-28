@@ -312,11 +312,14 @@ def last_stop(events):
     """(stop id, reason) of the latest batch that did not end in PLAN_COMPLETE, else None.
 
     A batch whose `start` has no later `stop` (the runner was killed) is latched as
-    `unterminated-<start seq>`."""
+    `unterminated-<start seq>-<hash of the start event>` (deterministic: the same journal always
+    names the same id, a restored or truncated journal names another)."""
     starts = [e for e in events if e.get("event") == "start"]
     stops = [e for e in events if e.get("event") == "stop"]
     if starts and (not stops or starts[-1]["seq"] > stops[-1]["seq"]):
-        return f"unterminated-{starts[-1]['seq']}", "the batch never wrote its stop (killed)"
+        digest = hashlib.sha256(json.dumps(starts[-1], sort_keys=True).encode()).hexdigest()[:8]
+        return (f"unterminated-{starts[-1]['seq']}-{digest}",
+                "the batch never wrote its stop (killed)")
     if stops and stops[-1].get("reason") != PLAN_COMPLETE:
         return stops[-1]["stopId"], stops[-1].get("reason")
     return None
@@ -356,11 +359,13 @@ def _append(path, obj):
 
 def _event(data, event, **fields):
     """Append one batch.jsonl event with its sequence number (1-based line number, stable: the
-    file is append-only); a `stop` also gets `stopId` = `stop-<seq>`. Returns the event."""
+    file is append-only); a `stop` also gets `stopId` = `stop-<seq>-<uuid8>`, stored in the event
+    (the uuid keeps a truncated or restored journal from reusing a stale acknowledged id).
+    Returns the event."""
     seq = len(read_events(data)) + 1
     rec = {"event": event, "seq": seq, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), **fields}
     if event == "stop":
-        rec["stopId"] = f"stop-{seq}"
+        rec["stopId"] = f"stop-{seq}-{uuid.uuid4().hex[:8]}"
     _append(Path(data) / EVENTS, rec)
     return rec
 
@@ -369,7 +374,43 @@ def read_events(data):
     path = Path(data) / EVENTS
     if not path.exists():
         return []
-    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    events = []
+    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        e = json.loads(line)
+        if not isinstance(e, dict) or isinstance(e.get("seq"), bool) or not isinstance(
+                e.get("seq"), int):
+            raise Refused(f"{path}:{n}: journal line has no integer `seq` (old format?); the "
+                          f"latch cannot be read; inspect it before any spend")
+        if e.get("event") == "stop" and not isinstance(e.get("stopId"), str):
+            raise Refused(f"{path}:{n}: stop event has no `stopId` (old format?); inspect it "
+                          f"before any spend")
+        events.append(e)
+    return events
+
+
+def check_journal(data):
+    """batch.jsonl is the one point of trust for the latch and the per-call charge. Refuse (before
+    any side effect) when rows.jsonl has rows but batch.jsonl does not exist or has no `start`
+    event, or when a non-pending row's runId has no `call` event (every row this code writes has
+    one: a deleted or truncated journal would clear the latch and under-count the spend)."""
+    rows = read_rows(data)
+    if not rows:
+        return
+    events = read_events(data)
+    if not (Path(data) / EVENTS).exists():
+        raise Refused(f"{Path(data) / ROWS} has {len(rows)} row(s) but {Path(data) / EVENTS} does "
+                      f"not exist; the journal was deleted or never written; inspect before any "
+                      f"spend")
+    if not any(e.get("event") == "start" for e in events):
+        raise Refused(f"{Path(data) / ROWS} has rows but {EVENTS} has no `start` event; the "
+                      f"journal was truncated; inspect before any spend")
+    called = {e.get("runId") for e in events if e.get("event") == "call"}
+    for row in rows:
+        if row["outcome"] != PENDING and row["runId"] not in called:
+            raise Refused(f"row {row['runId']} ({row['outcome']}) has no `call` event in "
+                          f"{EVENTS}; the journal does not cover it; inspect before any spend")
 
 
 def stage_of(task_id):
@@ -437,7 +478,7 @@ def call_per_call(events, budget):
     return per_run, max(starts + [budget.per_call_usd])
 
 
-def spent_usd(rows, budget, events=()):
+def spent_usd(rows, budget, events):
     """budget.spent_usd + the latest row's cost per runId; an unknown cost (pending,
     unknown-spend, no result) is charged at its own call's per_call (call_per_call)."""
     per_run, fallback = call_per_call(events, budget)
@@ -971,9 +1012,9 @@ def _run_one(ctx, spec):
         started = ctx.clock()
         stdout, stderr, rc = ctx.exec_cli(name, argv, ctx.timeout)
         wall = round((ctx.clock() - started) * 1000)
-        killed = None
+        killed = killed_rc = None
         if rc is None:  # M1: the docker exec client timed out; the CLI inside may still spend
-            docker("kill", name, check=False)
+            killed_rc = docker("kill", name, check=False).returncode
             killed = "timeout"
         stdout = (stdout or "").replace(ctx.token, "[REDACTED]")
         stderr = (stderr or "").replace(ctx.token, "[REDACTED]")
@@ -982,9 +1023,10 @@ def _run_one(ctx, spec):
         oom = docker("inspect", "-f", "{{.State.OOMKilled}}", name,
                      check=False).stdout.strip() == "true"
         if oom and killed is None:  # M1: nothing of an OOM-hit container keeps running
-            docker("kill", name, check=False)
+            killed_rc = docker("kill", name, check=False).returncode
             killed = "oom"
         record["killed"] = killed
+        record["killedRc"] = killed_rc
         lines, dups, shape_errors = dedupe_tool_uses(stdout.splitlines())
         (run_dir / "stream.dedup.jsonl").write_text("".join(l + "\n" for l in lines))
         records = _records(lines)
@@ -1138,6 +1180,7 @@ def run_batch(plan, budget, data, dry_run, *, docker=None, exec_cli=None, load_t
         _dry_run(plan, budget, data)
         return None
     go = check_go(data, plan, budget)  # before any side effect
+    check_journal(data)  # rows without the journal that covers them are refused
     acknowledged = check_latch(data, go)  # I3: a stop holds until the operator acknowledges it
     docker = docker or pilot.docker
     exec_cli = exec_cli or docker_exec_cli

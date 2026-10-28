@@ -443,6 +443,41 @@ class RulingOrderTest(unittest.TestCase):
         self.assertIn("the upper bound of the cost ratio's 90% interval is below 1.0", reasons)
         self.assertTrue(any("inside the variance floor" in r for r in reasons))
 
+    def test_the_floor_reason_is_only_for_an_interval_that_misses_1_inside_the_floor(self):
+        # the reviewer's example: the interval contains 1.0, so it is NOT "inside the floor"
+        out, reasons = analyze.rule(12, 12, 12, 12, 0.7, (0.3, 1.5), 1.2)
+        self.assertEqual(out, "no demonstrated advantage")
+        self.assertIn("the interval contains 1.0", reasons)
+        self.assertFalse(any("variance floor" in r for r in reasons), reasons)
+        # the residual cases (1/F <= high < 1.0, 1.0 < low <= F) still carry it
+        for ci in ((0.9, 0.95), (1.05, 1.1)):
+            with self.subTest(ci=ci):
+                out, reasons = analyze.rule(12, 12, 12, 12, 1.0, ci, 1.2)
+                self.assertEqual(out, "inconclusive")
+                self.assertTrue(any("inside the variance floor" in r for r in reasons), reasons)
+        # beyond the floor is not inside it either
+        for ci in ((1.3, 1.7), (0.3, 0.5)):
+            with self.subTest(ci=ci):
+                _, reasons = analyze.rule(12, 12, 12, 12, 1.0, ci, 1.2)
+                self.assertFalse(any("variance floor" in r for r in reasons), reasons)
+
+    def test_rule_and_cost_branch_validate_floor_and_registered_count(self):
+        ci = (0.4, 0.6)
+        for floor in (0.99, 0.0, -1.0, float("nan"), float("inf"), True, "2", None):
+            with self.subTest(floor=floor):
+                with self.assertRaises(ValueError):
+                    analyze.rule(12, 12, 12, 12, 0.5, ci, floor)
+                with self.assertRaises(ValueError):
+                    analyze.cost_branch(ci, floor)
+        for registered in (0, -1, 1.5, True, None):
+            with self.subTest(registered=registered):
+                with self.assertRaises(ValueError):
+                    analyze.rule(12, registered, 12, 12, 0.5, ci, 1.0)
+        # the boundary values are accepted; no cost interval and floor when no task is valid
+        self.assertEqual(analyze.rule(12, 1, 12, 12, 0.5, ci, 1.0)[0], "promising")
+        self.assertEqual(analyze.cost_branch(ci, 1.0), "promising")
+        self.assertEqual(analyze.rule(0, 12, 0, 0, None, None, None)[0], "inconclusive")
+
     def test_reviewer_example_worse_by_cost_not_claimed_inside_floor(self):
         out, reasons = analyze.rule(12, 12, 12, 12, 1.5, (1.3, 1.7), 2.0)
         self.assertEqual(out, "inconclusive")  # low 1.3 <= F 2.0

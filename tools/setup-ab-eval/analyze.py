@@ -306,8 +306,16 @@ def bootstrap_ci(log_ratios, seed, resamples=RESAMPLES):
     return interval90(bootstrap_log_means(log_ratios, seed, resamples))
 
 
+def _check_floor(floor):
+    if (isinstance(floor, bool) or not isinstance(floor, (int, float))
+            or not math.isfinite(floor) or floor < 1.0):
+        raise ValueError(f"floor must be a finite number >= 1, got {floor!r}")
+
+
 def cost_branch(ci90, floor):
-    """Step 4 of ORDER: the cost outcome of a 90% interval against the floor F >= 1."""
+    """Step 4 of ORDER: the cost outcome of a 90% interval against the floor F >= 1 (a floor that
+    is not finite or is below 1 raises ValueError)."""
+    _check_floor(floor)
     low, high = ci90
     if low > floor:
         return "worse"
@@ -321,7 +329,12 @@ def cost_branch(ci90, floor):
 def rule(n_valid, registered, treat_passes, bare_passes, gmean, ci90, floor,
          instrument_failures=()):
     """(outcome, reasons): spec section 6 in the coordinator's ORDER; `reasons` lists every
-    section 6 condition that holds. ci90 and floor may be None only when n_valid is 0."""
+    section 6 condition that holds. ci90 and floor may be None only when n_valid is 0. A
+    registered count below 1, or (with n_valid > 0) a floor that is not finite or is below 1,
+    raises ValueError."""
+    _check_int(registered, "registered", 1)
+    if n_valid:
+        _check_floor(floor)
     held = [f"invalid instrument: {f}" for f in instrument_failures]
     few = n_valid < registered
     if few:
@@ -346,7 +359,7 @@ def rule(n_valid, registered, treat_passes, bare_passes, gmean, ci90, floor,
             held.append(f"the lower bound is above the floor F ({floor:.4g})")
         if high < 1.0 / floor:
             held.append(f"the upper bound is below 1/F ({1 / floor:.4g})")
-        if not (low > floor or high < 1.0 / floor):
+        if branch == "inconclusive":  # the interval misses 1.0 and is not beyond the floor
             held.append(f"the cost difference is inside the variance floor [{1 / floor:.4g}, "
                         f"{floor:.4g}]")
     if instrument_failures:

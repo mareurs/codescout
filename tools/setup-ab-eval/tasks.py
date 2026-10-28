@@ -507,14 +507,17 @@ def parse_tar_stderr(err):
     unreadable: [{"path": "/<member>", "reason": ...}] for each `Cannot open|opendir|read|stat`
     line (a stat failure is a file inside a directory the user cannot traverse). unknown: every
     other non-empty line, which the caller treats as a failed export (review N1: nothing tar
-    reports may be skipped silently)."""
+    reports may be skipped silently). An allowlisted exec-only file (arms.EXEC_ONLY_FILES) is
+    unreadable only for `Permission denied`; any other reason for it (`No such file`, ...) is
+    unknown."""
     unreadable, unknown = [], []
     for line in err.splitlines():
         if not line.strip():
             continue
         m = _TAR_UNREADABLE.match(line)
-        if m:
-            unreadable.append({"path": "/" + m.group(1).lstrip("/"), "reason": m.group(2)})
+        path = "/" + m.group(1).lstrip("/") if m else None
+        if m and not (path in arms.EXEC_ONLY_FILES and not m.group(2).endswith("Permission denied")):
+            unreadable.append({"path": path, "reason": m.group(2)})
         else:
             unknown.append(line)
     return unreadable, unknown
@@ -1096,7 +1099,7 @@ def expected_root_subject(kind, task_id):
     return f"task {task_id}" if kind == "private" else FOREIGN_ROOT_SUBJECT
 
 
-def verify_controls(r, task_id=None):
+def verify_controls(r, task_id=None, arm_image=None):
     """[] when one task's controls.json shows every Step-5 control passed, else the reasons.
 
     Recomputed from the stored evidence, never from its own `pass` or `history.ok`: the id is
@@ -1104,9 +1107,13 @@ def verify_controls(r, task_id=None):
     file the agent-user export could not read is an exec-only file of Ruling A; R12: a plain
     repository, exactly one branch ref, a single chain, the expected subjects (`task <id>` or
     `Benchmark base source`, then at most the prepare config commit) and no unreachable object;
-    a non-empty Qdrant dump; base fails by an observed failure (base_fails) and gold passes."""
+    a non-empty Qdrant dump; base fails by an observed failure (base_fails) and gold passes.
+    When `arm_image` is given (bundle.json's current one) the controls must have run on exactly
+    that image: a control run on the bare run image does not show the arm image is clean."""
     why = []
     rid = r.get("id")
+    if arm_image is not None and r.get("image") != arm_image:
+        why.append(f"controls ran on {r.get('image')!r}, not on the arm image {arm_image!r}")
     if task_id is not None and rid != task_id:
         why.append(f"controls.json is for {rid!r}, not {task_id!r}")
     leak, grader = r.get("leak") or {}, r.get("grader") or {}
@@ -1182,15 +1189,13 @@ def verify(ids, root, *, selected=(), inspect=_inspect_image):
             out[task_id] = ["no controls.json (the task was not controlled on its prepared image)"]
             continue
         r = json.loads(path.read_text())
-        why = verify_controls(r, task_id)
         rec = json.loads(bundle_json.read_text()) if bundle_json.exists() else {}
+        why = verify_controls(r, task_id, arm_image=rec.get("arm_image") or "")
         try:
             bundle_run_image(bundle_json, inspect)
         except (OSError, RuntimeError) as e:
             why.append(f"arm image: {e}")
-        if r.get("image") not in (rec.get("arm_image"), rec.get("run_image")):
-            why.append(f"controls ran on {r.get('image')}, not on {rec.get('arm_image')} or its run image")
-        else:
+        if r.get("image") == rec.get("arm_image"):
             current, _ = inspect(r["image"])
             if current != r.get("image_id"):
                 why.append(f"stale evidence: controls ran on image id {r.get('image_id')}, "
