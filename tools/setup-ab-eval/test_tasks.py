@@ -390,6 +390,24 @@ class BrokenLinks(unittest.TestCase):
             report = leak_scan.scan([root, listing], None, ["zz_secret_target"], allow_unbaselined=True)
             self.assertEqual([(h.path, h.needle) for h in report.hits], [(listing, "zz_secret_target")])
 
+class Table(unittest.TestCase):
+
+    def test_a_row_prefers_the_full_control_and_never_reads_pass_from_a_prescan(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "a" / "prescan").mkdir(parents=True)
+            (root / "a" / "prescan" / "prescan.json").write_text(json.dumps(
+                {"control": "pass", "hits": [{"path": "/x/opt/sab/bin/codescout", "needle": "n", "offset": 1}]}))
+            row = tasks._row(root, "a")
+            self.assertEqual((row["status"], row["pass"], row["hits"]), ("pre-index scan only", None, 1))
+            (root / "a" / "controls").mkdir()
+            (root / "a" / "controls" / "controls.json").write_text(json.dumps(
+                {"pass": True, "leak": {"hits": [], "control": "pass", "history": {"ok": True}},
+                 "grader": {"base_fails": True, "gold_passes": True}}))
+            row = tasks._row(root, "a")
+            self.assertEqual((row["status"], row["pass"], row["hits"]), ("complete", True, 0))
+            self.assertEqual(tasks._row(root, "b")["status"], "not run")
+
 class ControlOrder(unittest.TestCase):
     """Task 5 carried minor: the planted shingle must not contain another kept name needle."""
 

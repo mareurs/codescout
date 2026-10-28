@@ -809,6 +809,39 @@ def leak_control(bundle, manifest, data):
     }
 
 
+def prescan_task(bundle, manifest, data):
+    """The leak gate on the AGENT image before the index exists: every root leak_control reads
+    except the index-made ones (.codescout/ state of a run, the Qdrant dump). A hit here (the
+    /opt/sab binaries, the config copy, the git objects) fails the gate whatever the index
+    holds, so the rule can replace the task before its multi-hour index is built. Evidence
+    only for the tasks that go on: their record is control_task on the run image."""
+    image = bundle.record.get("image", bundle.image)
+    image = image.replace("sab-run-", "sab-agent-cs-", 1)
+    data = Path(data)
+    if data.exists():
+        shutil.rmtree(data)
+    data.mkdir(parents=True)
+    export = data / "export"
+    present = export_tree(image, SCAN_PATHS, export, excludes=list(SCAN_EXCLUDED))
+    objects = data / "git-objects.bin"
+    objects.write_bytes(subprocess.run(
+        ["docker", "run", "--rm", "--network", "none", "-w", WORKDIR, "--entrypoint", "git", image,
+         "cat-file", "--batch-all-objects", "--batch"], capture_output=True, check=True, timeout=1800).stdout)
+    links = data / "broken-symlinks.txt"
+    roots = [links] if unlink_broken_links(export, links) else []
+    roots += [export / p for p in present
+              if any(f.is_file() or f.is_symlink() for f in (export / p).rglob("*"))]
+    roots += [objects] + config_roots(manifest)
+    try:
+        report = leak_scan.positive_control(roots, control_order(bundle.needles), None)
+        out = {"id": bundle.id, "image": image, "control": "pass",
+               "hits": [{"path": str(h.path), "needle": h.needle, "offset": h.offset} for h in report.hits],
+               "per_root": [list(x) for x in report.per_root], "needle_counts": report.needle_counts}
+    except leak_scan.ControlFailed as e:
+        out = {"id": bundle.id, "image": image, "control": "FAILED", "error": str(e)}
+    (data / "prescan.json").write_text(json.dumps(out, indent=2) + "\n")
+    return out
+
 def control_task(bundle, manifest, data):
     """Step 5 for one prepared task: leak gate with its control, history, grader controls."""
     data = Path(data)
@@ -869,37 +902,53 @@ def save_bundle(b, root):
                                     template=b.template), indent=2) + "\n")
 
 
+def _row(root, task_id):
+    """One task's Step-5 state: the full control on the run image, else the pre-index scan of
+    the agent image (prescan.json, no .codescout/ and no Qdrant dump yet), else nothing."""
+    full = root / task_id / "controls" / "controls.json"
+    pre = root / task_id / "prescan" / "prescan.json"
+    if full.exists():
+        r = json.loads(full.read_text())
+        leak, grader = r.get("leak", {}), r.get("grader", {})
+        return {"id": task_id, "status": "complete", "pass": r.get("pass"),
+                "hits": len(leak.get("hits") or []) if "hits" in leak else None,
+                "control": leak.get("control"), "history_ok": leak.get("history", {}).get("ok"),
+                "qdrant_points": leak.get("qdrant_points"),
+                "base_fails": grader.get("base_fails"), "gold_passes": grader.get("gold_passes"),
+                "detail": str(full)}
+    if pre.exists():
+        r = json.loads(pre.read_text())
+        return {"id": task_id, "status": "pre-index scan only", "pass": None,
+                "hits": len(r.get("hits", [])), "control": r.get("control"),
+                "hit_paths": sorted({h["path"] for h in r.get("hits", [])}), "detail": str(pre)}
+    return {"id": task_id, "status": "not run", "pass": None}
+
+
+def write_table(ids):
+    root, controls = DATA / "tasks", DATA / "controls"
+    selection = json.loads((DATA / "selection" / "selection.json").read_text())
+    summary = {"model_calls": 0, "token_in_any_container": False,
+               "selected": selection["selected"], "failed_and_replaced": selection.get("failed", []),
+               "tasks": [_row(root, i) for i in ids],
+               "replaced": [_row(root, i) for i in selection.get("failed", [])],
+               "excluded_from_scan": SCAN_EXCLUDED, "not_scanned": NOT_SCANNED,
+               "per_task_evidence": str(root / "<id>" / "controls" / "controls.json")}
+    controls.mkdir(parents=True, exist_ok=True)
+    (controls / "tasks.json").write_text(json.dumps(summary, indent=2) + "\n")
+    return summary
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Step 5 of Task 7: build, prepare and control tasks")
-    ap.add_argument("action", choices=["build", "prepare", "control", "table"])
+    ap.add_argument("action", choices=["build", "prescan", "prepare", "control", "table"])
     ap.add_argument("manifest", type=Path)
     ap.add_argument("ids", nargs="*")
     args = ap.parse_args(argv)
     manifest = json.loads(args.manifest.read_text())
     root = DATA / "tasks"
-    controls = DATA / "controls"
     ids = args.ids or json.loads((DATA / "selection" / "selection.json").read_text())["selected"]
     if args.action == "table":
-        rows = {}
-        for i in ids:
-            p = root / i / "controls" / "controls.json"
-            rows[i] = json.loads(p.read_text()) if p.exists() else {"id": i, "pass": False, "missing": True}
-        summary = {"model_calls": 0, "token_in_any_container": False,
-                   "selection": json.loads((DATA / "selection" / "selection.json").read_text())["selected"],
-                   "tasks": [{"id": i, "pass": r.get("pass"),
-                              "hits": len(r.get("leak", {}).get("hits", []) or []) if r.get("leak") else None,
-                              "control": r.get("leak", {}).get("control"),
-                              "history_ok": r.get("leak", {}).get("history", {}).get("ok"),
-                              "base_fails": r.get("grader", {}).get("base_fails"),
-                              "gold_passes": r.get("grader", {}).get("gold_passes")} for i, r in rows.items()],
-                   "excluded_from_scan": SCAN_EXCLUDED, "not_scanned": NOT_SCANNED, "detail": rows}
-        failed = json.loads((DATA / "selection" / "selection.json").read_text()).get("failed", [])
-        summary["replaced"] = {
-            i: json.loads((root / i / "controls" / "controls.json").read_text())
-            for i in failed if (root / i / "controls" / "controls.json").exists()}
-        controls.mkdir(parents=True, exist_ok=True)
-        (controls / "tasks.json").write_text(json.dumps(summary, indent=2) + "\n")
-        print(json.dumps(summary["tasks"], indent=2))
+        print(json.dumps(write_table(ids)["tasks"], indent=2))
         return
     for task_id in ids:
         (root / task_id).mkdir(parents=True, exist_ok=True)
@@ -908,7 +957,11 @@ def main(argv=None):
             pilot.docker("network", "create", "--internal", NET, check=False)
             b = prepare_task(b, manifest, root / task_id)
             save_bundle(b, root)
-        if args.action == "control":
+        if args.action == "prescan":
+            r = prescan_task(b, manifest, root / task_id / "prescan")
+            print(json.dumps({"id": task_id, "control": r["control"], "hits": len(r.get("hits", []))}),
+                  flush=True)
+        elif args.action == "control":
             r = control_task(b, manifest, root / task_id / "controls")
             print(json.dumps({"id": task_id, "pass": r["pass"]}), flush=True)
         else:
