@@ -9104,6 +9104,34 @@ async fn workspace_onboarding_full_flow() {
     let compact = Onboarding.format_compact(&result).unwrap_or_default();
     assert!(compact.contains("workspace"));
 }
+/// Onboarding a pinned directory must describe THAT directory. It used to read the
+/// project list of the home workspace, so a manifest-less nested repo got the home
+/// workspace's `[[project]]` table written into its own `.codescout/workspace.toml`.
+/// docs/issues/2026-10-28-a-nested-git-repo-cannot-join-a-workspace-as-a-project-and-pinned-onboarding-mixes-in-the-home-workspace.md
+#[tokio::test]
+async fn a_pinned_onboarding_describes_the_pinned_directory_not_the_home_workspace() {
+    let home = tempfile::tempdir().unwrap();
+    setup_workspace_dirs(home.path());
+    let mut ctx = project_ctx_at(home.path()).await;
+
+    let nested = tempfile::tempdir().unwrap();
+    let nested_root = std::fs::canonicalize(nested.path()).unwrap();
+    std::fs::write(nested_root.join("addon.py"), "print('hello')").unwrap();
+    ctx.workspace_override = Some(nested_root.clone());
+
+    let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+
+    let ws_path = crate::config::workspace::workspace_config_path(&nested_root);
+    let written = std::fs::read_to_string(&ws_path).unwrap_or_default();
+    assert!(
+        !written.contains("api") && !written.contains("web"),
+        "the pinned directory got the home workspace's projects: {written}"
+    );
+    assert_ne!(
+        result["workspace_mode"], true,
+        "a one-project directory must not onboard in workspace mode"
+    );
+}
 
 #[test]
 fn parse_timeout_input_correct_key_small() {

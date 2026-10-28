@@ -1165,7 +1165,10 @@ async fn perform_full_onboarding(
     // Gather rich context from well-known project files.
     // Pass the already-discovered project list from the workspace to avoid a
     // redundant discover_projects walk (the agent runs it at activation time).
-    let discovered = ctx.agent.discovered_projects().await;
+    let discovered = ctx
+        .agent
+        .discovered_projects_at(ctx.workspace_override.as_deref())
+        .await;
     let gathered = gather_project_context(&root, discovered);
 
     // Create workspace.toml for multi-project repos

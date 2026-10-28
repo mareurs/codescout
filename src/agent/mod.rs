@@ -2281,10 +2281,35 @@ impl Agent {
     /// Return the list of discovered projects from the active workspace.
     /// Returns an empty vec if no workspace is active.
     pub async fn discovered_projects(&self) -> Vec<crate::workspace::DiscoveredProject> {
+        self.discovered_projects_at(None).await
+    }
+
+    /// Pinned twin of [`Agent::discovered_projects`]: the projects of the workspace named by
+    /// `workspace_override` (resident-on-demand), or of the session default for `None`.
+    /// Empty when that workspace is not resident or no workspace is active.
+    ///
+    /// A caller that works on a pinned root must read the project list from the same
+    /// workspace. Reading the default's list described the home workspace's projects while
+    /// writing into the pinned directory.
+    /// docs/issues/2026-10-28-a-nested-git-repo-cannot-join-a-workspace-as-a-project-and-pinned-onboarding-mixes-in-the-home-workspace.md
+    pub async fn discovered_projects_at(
+        &self,
+        workspace_override: Option<&Path>,
+    ) -> Vec<crate::workspace::DiscoveredProject> {
+        if let Some(root) = workspace_override {
+            if self.ensure_resident(root.to_path_buf()).await.is_err() {
+                return Vec::new();
+            }
+        }
         let inner = self.inner.read().await;
-        inner
-            .default_workspace()
-            .map(|ws| ws.projects.iter().map(|p| p.discovered.clone()).collect())
+        let ws = match workspace_override {
+            Some(root) => {
+                let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+                inner.workspaces.get(&key)
+            }
+            None => inner.default_workspace(),
+        };
+        ws.map(|ws| ws.projects.iter().map(|p| p.discovered.clone()).collect())
             .unwrap_or_default()
     }
 
