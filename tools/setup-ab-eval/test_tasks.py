@@ -4,13 +4,16 @@ The S5-backed tests build a tiny private task from a throwaway git repo through 
 build-task.mjs (invoked with node, never modified); they skip when node or the S5 checkout is
 missing. The grader control needs docker and the s5/codescout image.
 """
+import contextlib
 import hashlib
+import io
 import json
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import leak_scan
@@ -121,6 +124,10 @@ class Selection(unittest.TestCase):
         repo = next(c["repo"] for c in pool if c["id"] == victim)
         new = (set(again) - set(chosen)).pop()
         self.assertEqual(next(c["repo"] for c in pool if c["id"] == new), repo)
+    def test_an_unknown_failed_id_is_refused(self):
+        # Task 7 review minor 2: a typo must not silently keep the task it meant to replace.
+        with self.assertRaises(ValueError):
+            select_tasks.select(population(), RULE, failed=["cs-p99"])
 
     def test_malformed_candidates_are_refused(self):
         with self.assertRaises(ValueError):
@@ -356,6 +363,23 @@ class History(unittest.TestCase):
         r = tasks.history_report(self.run_in_repo, "task fx-p01")
         self.assertFalse(r["ok"])
         self.assertEqual(r["unreachable_objects"], [blob])
+    def test_a_foreign_object_behind_an_extra_ref_fails_the_history_check(self):
+        # Task 7 review I1: a lightweight tag on a blob made the object "reachable" from --all.
+        blob = subprocess.run(["git", "-C", str(self.repo), "hash-object", "-w", "--stdin"],
+                              input=b"the fix from the future\n", capture_output=True,
+                              check=True).stdout.decode().strip()
+        git(self.repo, "tag", "leak", blob)
+        r = tasks.history_report(self.run_in_repo, "task fx-p01")
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["unreachable_objects"], [blob])
+        self.assertFalse(r["one_branch_ref"])
+
+    def test_a_second_ref_alone_fails_the_history_check(self):
+        git(self.repo, "branch", "other")
+        r = tasks.history_report(self.run_in_repo, "task fx-p01")
+        self.assertEqual(r["unreachable_objects"], [])
+        self.assertFalse(r["one_branch_ref"])
+        self.assertFalse(r["ok"])
 
     def test_a_second_root_or_an_unexpected_subject_fails(self):
         git(self.repo, "commit", "--allow-empty", "-qm", "a later commit")
@@ -390,23 +414,105 @@ class BrokenLinks(unittest.TestCase):
             report = leak_scan.scan([root, listing], None, ["zz_secret_target"], allow_unbaselined=True)
             self.assertEqual([(h.path, h.needle) for h in report.hits], [(listing, "zz_secret_target")])
 
+def complete_controls(kind="private", **over):
+    """A synthetic controls.json that every Step-5 check accepts."""
+    base = ({"pass": False, "graft": "ok", "build": "ok", "infra": None,
+             "f2p": {"passed": [], "failed": ["t"], "notRun": []}} if kind == "private"
+            else {"pass": False, "failure_kind": "test_failure", "failed": ["t"]})
+    r = {"id": "a", "kind": kind, "image": "sab-arm-a:1", "pass": True,
+         "leak": {"hits": [], "control": "pass", "planted": 2, "qdrant_points": {"code_chunks": 9},
+                  "history": {"ok": True, "refs": ["refs/heads/main"], "unreachable_objects": []}},
+         "grader": {"base": base, "gold": {"pass": True}}}
+    for path, value in over.items():
+        node = r
+        *head, last = path.split(".")
+        for k in head:
+            node = node[k]
+        node[last] = value
+    return r
+
+
 class Table(unittest.TestCase):
 
     def test_a_row_prefers_the_full_control_and_never_reads_pass_from_a_prescan(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            (root / "a" / "prescan").mkdir(parents=True)
-            (root / "a" / "prescan" / "prescan.json").write_text(json.dumps(
+            (root / "cs-a" / "prescan").mkdir(parents=True)
+            (root / "cs-a" / "prescan" / "prescan.json").write_text(json.dumps(
                 {"control": "pass", "hits": [{"path": "/x/opt/sab/bin/codescout", "needle": "n", "offset": 1}]}))
-            row = tasks._row(root, "a")
+            row = tasks._row(root, "cs-a")
             self.assertEqual((row["status"], row["pass"], row["hits"]), ("pre-index scan only", None, 1))
-            (root / "a" / "controls").mkdir()
-            (root / "a" / "controls" / "controls.json").write_text(json.dumps(
-                {"pass": True, "leak": {"hits": [], "control": "pass", "history": {"ok": True}},
+            self.assertTrue(row["binary_postdates_fix"])
+            (root / "cs-a" / "controls").mkdir()
+            # A stored `pass: true` is not trusted: it is recomputed from the evidence.
+            (root / "cs-a" / "controls" / "controls.json").write_text(json.dumps(
+                {"pass": True, "kind": "private", "leak": {"hits": [], "control": "pass", "history": {"ok": True}},
                  "grader": {"base_fails": True, "gold_passes": True}}))
-            row = tasks._row(root, "a")
-            self.assertEqual((row["status"], row["pass"], row["hits"]), ("complete", True, 0))
+            row = tasks._row(root, "cs-a")
+            self.assertEqual((row["status"], row["pass"]), ("complete", False))
+            (root / "cs-a" / "controls" / "controls.json").write_text(json.dumps(complete_controls()))
+            row = tasks._row(root, "cs-a")
+            self.assertEqual((row["status"], row["pass"], row["hits"], row["reasons"]), ("complete", True, 0, []))
             self.assertEqual(tasks._row(root, "b")["status"], "not run")
+            self.assertFalse(tasks._row(root, "b")["binary_postdates_fix"])
+
+
+class Verify(unittest.TestCase):
+    """Task 7 review I3: the gate Task 10 runs (`tasks.py verify`)."""
+
+    def test_complete_controls_pass_for_both_kinds(self):
+        self.assertEqual(tasks.verify_controls(complete_controls("private")), [])
+        self.assertEqual(tasks.verify_controls(complete_controls("foreign")), [])
+
+    def test_each_missing_control_is_named(self):
+        cases = {
+            "leak.hits": [{"path": "x", "needle": "n", "offset": 0}],
+            "leak.control": "FAILED",
+            "leak.planted": 0,
+            "leak.history": {"ok": True, "refs": ["refs/heads/main", "refs/tags/t"], "unreachable_objects": []},
+            "leak.qdrant_points": {},
+            "grader.gold": {"pass": False},
+            "grader.base": {"pass": False, "graft": "failed", "f2p": {"failed": []}},
+        }
+        for path, value in cases.items():
+            why = tasks.verify_controls(complete_controls(**{path: value}))
+            self.assertEqual(len(why), 1, (path, why))
+
+    def test_base_fails_needs_an_observed_failure(self):
+        f = tasks.base_fails
+        ok = {"pass": False, "graft": "ok", "infra": None}
+        self.assertTrue(f("private", dict(ok, f2p={"failed": ["t"]})))
+        self.assertTrue(f("private", dict(ok, build="failed", build_compile_error=True, f2p={"failed": []})))
+        self.assertFalse(f("private", dict(ok, build="failed", build_compile_error=False, f2p={"failed": []})))
+        self.assertFalse(f("private", dict(ok, graft="failed", f2p={"failed": ["t"]})))
+        self.assertFalse(f("private", dict(ok, infra="incomplete", f2p={"failed": ["t"]})))
+        self.assertFalse(f("private", dict(ok, **{"pass": True}, f2p={"failed": []})))
+        self.assertTrue(f("foreign", {"pass": False, "failure_kind": "build_failure"}))
+        self.assertFalse(f("foreign", {"pass": False, "error": "unexplained grader exit"}))
+        self.assertFalse(f("foreign", {"pass": False, "failure_kind": None}))
+
+    def test_verify_reads_every_id_and_requires_the_arm_image(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for i in ("a", "b", "c"):
+                (root / i / "controls").mkdir(parents=True)
+            (root / "a" / "controls" / "controls.json").write_text(json.dumps(complete_controls()))
+            (root / "a" / "bundle.json").write_text(json.dumps({"arm_image": "sab-arm-a:1",
+                                                                "run_image": "sab-run-a:1"}))
+            (root / "b" / "controls" / "controls.json").write_text(json.dumps(complete_controls()))
+            (root / "b" / "bundle.json").write_text(json.dumps({"run_image": "sab-run-a:1"}))
+            out = tasks.verify(["a", "b", "c"], root)
+            self.assertEqual(out["a"], [])
+            self.assertEqual(len(out["b"]), 1)
+            self.assertIn("no controls.json", out["c"][0])
+            # The CLI exits non-zero unless every id is complete.
+            with self.assertRaises(SystemExit) as cm, contextlib.redirect_stdout(io.StringIO()):
+                with unittest.mock.patch.object(tasks, "DATA", root.parent), \
+                        unittest.mock.patch.object(tasks, "verify", lambda ids, r: out):
+                    manifest = root / "m.json"
+                    manifest.write_text("{}")
+                    tasks.main(["verify", str(manifest), "a", "b", "c"])
+            self.assertEqual(cm.exception.code, 1)
 
 class ControlOrder(unittest.TestCase):
     """Task 5 carried minor: the planted shingle must not contain another kept name needle."""

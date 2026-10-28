@@ -328,6 +328,11 @@ class ArmsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             arms.study_mcp_env({"CODESCOUT_QDRANT_URL": "http://127.0.0.1:6334"},
                                {"CODESCOUT_QDRANT_URL": "http://sab-x@192.168.1.20:6334"})
+    def test_foreign_hosts_treats_a_backslash_as_the_end_of_the_authority(self):
+        # Task 7 review minor 1: `\@sab-x` must not turn 10.0.0.1 into userinfo.
+        self.assertEqual(arms.foreign_hosts("http://10.0.0.1\\@sab-x:6334/"), ["10.0.0.1"])
+        self.assertEqual(arms.foreign_hosts("http://sab-qdrant\\@10.0.0.1:6334/"), [])
+        self.assertEqual(arms.foreign_hosts("http://u\\x@10.0.0.2/"), ["u"])
 
     def test_arm_record_lists_kept_settings_with_their_effects(self):
         # Minor 3: every kept key is listed, and these three name their effect.
@@ -711,6 +716,68 @@ class PrepareIndexTest(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad):
                 arms.prepare_index("i", "o", "sab-net", dict(self.env, CODESCOUT_QDRANT_URL=bad),
                                    self.data, docker=FakeDocker())
+S5_IMAGE = "s5/codescout:latest"
+
+
+def _have_image(image):
+    try:
+        return subprocess.run(["docker", "image", "inspect", image], capture_output=True,
+                              timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+class ExecOnlyTest(unittest.TestCase):
+    """Controller Ruling A: the frozen codescout binary is executable but unreadable by the agent."""
+
+    def test_the_layer_pins_root_ownership_and_mode_0711_on_the_binary(self):
+        text = arms.EXEC_ONLY_DOCKERFILE
+        self.assertEqual(arms.EXEC_ONLY_FILES, (arms.CODESCOUT_BIN,))
+        self.assertEqual(arms.EXEC_ONLY_MODE, "0711")
+        self.assertIn(f"chown root:root {arms.CODESCOUT_BIN}", text)
+        self.assertIn(f"chmod 0711 {arms.CODESCOUT_BIN}", text)
+        self.assertIn(f"chown root:root {arms.SAB_BIN} && chmod 0755 {arms.SAB_BIN}", text)
+        # Built FROM the prepared run image and back to the agent user: nothing else changes.
+        self.assertTrue(text.startswith("ARG BASE\nFROM ${BASE}\n"))
+        self.assertTrue(text.rstrip().endswith("USER ${AGENT_USER}"))
+        self.assertNotIn("COPY", text)
+
+    @unittest.skipUnless(_have_image(S5_IMAGE), f"needs docker and the {S5_IMAGE} image")
+    def test_the_agent_user_can_run_but_not_read_the_binary(self):
+        tag = f"sab-test-execonly-{os.getpid()}"
+        base, out = f"{tag}-base:1", f"{tag}-out:1"
+        with tempfile.TemporaryDirectory() as td:
+            ctx = Path(td) / "base"
+            ctx.mkdir()
+            (ctx / "Dockerfile").write_text(
+                f"FROM {S5_IMAGE}\nUSER root\nRUN mkdir -p /opt/sab/bin "
+                "&& cp /bin/true /opt/sab/bin/codescout && chmod 0755 /opt/sab/bin/codescout\n"
+                "USER 1000:1000\n")
+            self.addCleanup(subprocess.run, ["docker", "image", "rm", "-f", base, out],
+                            capture_output=True)
+            subprocess.run(["docker", "build", "--network", "none", "-t", base, str(ctx)],
+                           check=True, capture_output=True, timeout=600)
+            arms.exec_only_image(base, out, Path(td) / "layer")
+            script = ("id -u; stat -c '%a %U:%G' /opt/sab/bin/codescout; "
+                      "/opt/sab/bin/codescout && echo exec=ok; "
+                      "cat /opt/sab/bin/codescout > /dev/null 2>&1 || echo cat=denied; "
+                      "cp /opt/sab/bin/codescout /tmp/x 2>/dev/null || echo cp=denied; "
+                      "python3 -c \"open('/opt/sab/bin/codescout','rb').read()\" 2>/dev/null "
+                      "|| echo open=denied; "
+                      "mv /opt/sab/bin/codescout /tmp/y 2>/dev/null || echo mv=denied")
+            r = subprocess.run(["docker", "run", "--rm", "--network", "none", out, "sh", "-c", script],
+                               capture_output=True, text=True, timeout=120)
+            lines = r.stdout.split()
+            self.assertEqual(lines[0], "1000", r.stdout + r.stderr)
+            self.assertEqual(lines[1:3], ["711", "root:root"])
+            for want in ("exec=ok", "cat=denied", "cp=denied", "open=denied", "mv=denied"):
+                self.assertIn(want, lines)
+            label = subprocess.run(["docker", "image", "inspect", out, "--format",
+                                    "{{index .Config.Labels \"" + arms.EXEC_ONLY_LABEL + "\"}}"],
+                                   capture_output=True, text=True).stdout.strip()
+            base_id = subprocess.run(["docker", "image", "inspect", base, "--format", "{{.Id}}"],
+                                     capture_output=True, text=True).stdout.strip()
+            self.assertEqual(label, base_id)
 
 
 if __name__ == "__main__":

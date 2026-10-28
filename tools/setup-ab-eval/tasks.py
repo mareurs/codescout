@@ -36,8 +36,16 @@ and the verdict is S5's judgeNames/verdict over its result files (SUMMARY_JS mir
 `summarise`, which is not exported). Foreign: Codex's grade_task flow (the patch, the test paths
 restored from HEAD, the record's test_patch, the test command) parsed by baseline.grade_output.
 
-Step 5 (no model call): `python3 tasks.py live <manifest.json> [ids...]` -> per task
-setup-ab-data/controls/tasks/<id>.json and the table setup-ab-data/controls/tasks.json.
+Step 5 (no model call): `python3 tasks.py <action> <manifest.json> [ids...]`, ids defaulting to
+setup-ab-data/selection/selection.json's `selected`. Actions:
+  build    task image + agent image; bundle.json      prescan  leak gate on the agent image
+  prepare  index + Qdrant template sab-tpl-<id> (skipped when bundle.json already names one),
+           then the arm image                        arm      the exec-only arm image (Ruling A)
+  control  leak gate, R12 history, grader controls on the arm image
+  table    setup-ab-data/controls/tasks.json         verify   exits 1 unless every id is complete
+Per-task evidence: setup-ab-data/tasks/<id>/{build,prepare,prescan,controls}/ (controls.json).
+The arm image (sab-arm-<id>) = the run image (sab-run-<id>) + arms.EXEC_ONLY_DOCKERFILE: the
+codescout binary, which post-dates every private fix, is executable but not readable.
 Stdlib only; docker through pilot.docker / pilot.command.
 """
 import argparse
@@ -372,6 +380,9 @@ def private_grader(a, image, gdir):
         summary = json.loads(_node(SUMMARY_JS % _s5("grade.mjs"), run_dir / "manifest.json", results))
         summary.update({"name": name, "exit_code": r.returncode, "wall_seconds": wall,
                         "oom_killed": oom == "true", "base_commit": base, "results": str(results)})
+        build_out = results / "build.out"
+        summary["build_compile_error"] = (build_out.is_file() and not build_out.is_symlink() and bool(
+            _COMPILE_ERROR.search(build_out.read_bytes()[-(8 << 20):].decode(errors="replace"))))
         if oom == "true":
             summary["infra"], summary["pass"] = "oom", False
         (run_dir / "grade.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -487,8 +498,13 @@ def foreign_grader(record, image, gdir):
     return grade
 
 
-def export_tree(image, paths, dest, *, excludes=()):
-    """tar `paths` (relative to /) out of a container of `image`, as the image user, into dest."""
+def export_tree(image, paths, dest, *, excludes=(), unreadable=None):
+    """tar `paths` (relative to /) out of a container of `image`, as the image user, into dest.
+
+    The export is the agent user's view: a file that user cannot read (the exec-only codescout
+    binary, Ruling A) is not exported and is appended to `unreadable` (a list) as `path: reason`;
+    tar's `--ignore-failed-read` keeps that from failing the export. Any other tar failure raises.
+    """
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     present = pilot.docker("run", "--rm", "--network", "none", "--entrypoint", "sh", image, "-c",
@@ -497,7 +513,7 @@ def export_tree(image, paths, dest, *, excludes=()):
     if not present:
         return []
     cmd = ["docker", "run", "--rm", "--network", "none", "--entrypoint", "tar", image, "-C", "/",
-           "-cf", "-", *[f"--exclude={e}" for e in excludes], *present]
+           "--ignore-failed-read", "-cf", "-", *[f"--exclude={e}" for e in excludes], *present]
     with tempfile.TemporaryFile() as errf:
         with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf) as producer:
             untar = subprocess.run(["tar", "-x", "--no-same-owner", "-C", str(dest)],
@@ -509,6 +525,9 @@ def export_tree(image, paths, dest, *, excludes=()):
     if producer.returncode or untar.returncode:
         raise RuntimeError(f"export of {present} from {image} failed: {err[-2000:]} "
                            f"{untar.stderr.decode(errors='replace')[-2000:]}")
+    if unreadable is not None:
+        unreadable += [m.group(1) + ": " + m.group(2)
+                       for m in re.finditer(r"^tar: (.+?): (?:Warning: )?(Cannot (?:open|opendir|read).*)$", err, re.M)]
     return present
 
 
@@ -655,13 +674,19 @@ def control_order(ns):
 
 
 def history_report(run, root_subject):
-    """R12 history check. `run(*argv) -> stdout bytes` runs git in the workspace."""
+    """R12 history check. `run(*argv) -> stdout bytes` runs git in the workspace.
+
+    ok iff: a plain repository (git-dir == common-dir, no linked worktree); exactly one ref and
+    it is a branch (refs/heads/*); one root and a linear chain equal to HEAD's; the subjects
+    are `root_subject` then at most the prepare config commit; and every object in the store
+    is reachable from HEAD (not from --all: an extra ref, e.g. a tag on a blob, must not make a
+    foreign object count as part of the build chain; Task 7 review I1)."""
     def out(*argv):
         return run(*argv).decode().strip()
     git_dir = out("git", "rev-parse", "--path-format=absolute", "--git-dir")
     common = out("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
     every = set(out("git", "cat-file", "--batch-all-objects", "--batch-check=%(objectname)").split())
-    reachable = {line.split()[0] for line in out("git", "rev-list", "--objects", "--all").splitlines() if line}
+    reachable = {line.split()[0] for line in out("git", "rev-list", "--objects", "HEAD").splitlines() if line}
     chain = [line.split() for line in out("git", "rev-list", "--all", "--parents", "--reverse").splitlines()]
     head_chain = out("git", "rev-list", "--reverse", "HEAD").split()
     subjects = [out("git", "log", "-1", "--format=%s", c[0]) for c in chain]
@@ -671,12 +696,13 @@ def history_report(run, root_subject):
               and [c[0] for c in chain] == head_chain)
     expected = bool(subjects) and subjects[0] == root_subject and all(s == CONFIG_SUBJECT for s in subjects[1:]) \
         and len(subjects) <= 2
+    one_branch = len(refs) == 1 and refs[0].startswith("refs/heads/")
     unreachable = sorted(every - reachable)
     report = {"plain_repo": git_dir == common, "git_dir": git_dir, "commits": len(chain),
-              "subjects": subjects, "refs": refs, "objects": len(every),
-              "unreachable_objects": unreachable, "single_chain": single,
+              "subjects": subjects, "refs": refs, "one_branch_ref": one_branch, "objects": len(every),
+              "unreachable_objects": unreachable, "reachable_from": "HEAD", "single_chain": single,
               "expected_subjects": expected}
-    report["ok"] = report["plain_repo"] and single and expected and not unreachable
+    report["ok"] = report["plain_repo"] and one_branch and single and expected and not unreachable
     return report
 
 
@@ -766,7 +792,9 @@ def leak_control(bundle, manifest, data):
     export = data / "export"
     if export.exists():
         shutil.rmtree(export)
-    present = export_tree(bundle.image, SCAN_PATHS, export, excludes=list(SCAN_EXCLUDED))
+    unreadable = []
+    present = export_tree(bundle.image, SCAN_PATHS, export, excludes=list(SCAN_EXCLUDED),
+                          unreadable=unreadable)
     objects = data / "git-objects.bin"
     r = subprocess.run(["docker", "run", "--rm", "--network", "none", "-w", WORKDIR, "--entrypoint", "git",
                         bundle.image, "cat-file", "--batch-all-objects", "--batch"],
@@ -794,10 +822,12 @@ def leak_control(bundle, manifest, data):
         (roots if any(f.is_file() or f.is_symlink() for f in d.rglob("*")) else empty).append(d)
     roots.append(objects)
     roots += config_roots(manifest)
-    report = leak_scan.positive_control(roots, control_order(bundle.needles), None, qdrant_dump=dump)
+    ordered = control_order(bundle.needles)
+    report = leak_scan.positive_control(roots, ordered, None, qdrant_dump=dump)
     return {
         "hits": [{"path": str(h.path), "needle": h.needle, "offset": h.offset} for h in report.hits],
-        "control": "pass",
+        "control": "pass", "planted": planted_count(ordered),
+        "unreadable_to_agent": unreadable,
         "files_scanned": report.files_scanned, "bytes_scanned": report.bytes_scanned,
         "per_root": [list(x) for x in report.per_root], "needle_counts": report.needle_counts,
         "dropped_by_baseline": report.dropped,
@@ -809,20 +839,21 @@ def leak_control(bundle, manifest, data):
     }
 
 
-def prescan_task(bundle, manifest, data):
+def prescan_task(bundle, manifest, data, image=None):
     """The leak gate on the AGENT image before the index exists: every root leak_control reads
     except the index-made ones (.codescout/ state of a run, the Qdrant dump). A hit here (the
     /opt/sab binaries, the config copy, the git objects) fails the gate whatever the index
     holds, so the rule can replace the task before its multi-hour index is built. Evidence
     only for the tasks that go on: their record is control_task on the run image."""
-    image = bundle.record.get("image", bundle.image)
-    image = image.replace("sab-run-", "sab-agent-cs-", 1)
+    image = image or (bundle.record.get("image", bundle.image).replace("sab-arm-", "sab-agent-cs-", 1)
+                      .replace("sab-run-", "sab-agent-cs-", 1))
     data = Path(data)
     if data.exists():
         shutil.rmtree(data)
     data.mkdir(parents=True)
     export = data / "export"
-    present = export_tree(image, SCAN_PATHS, export, excludes=list(SCAN_EXCLUDED))
+    unreadable = []
+    present = export_tree(image, SCAN_PATHS, export, excludes=list(SCAN_EXCLUDED), unreadable=unreadable)
     objects = data / "git-objects.bin"
     objects.write_bytes(subprocess.run(
         ["docker", "run", "--rm", "--network", "none", "-w", WORKDIR, "--entrypoint", "git", image,
@@ -834,7 +865,7 @@ def prescan_task(bundle, manifest, data):
     roots += [objects] + config_roots(manifest)
     try:
         report = leak_scan.positive_control(roots, control_order(bundle.needles), None)
-        out = {"id": bundle.id, "image": image, "control": "pass",
+        out = {"id": bundle.id, "image": image, "control": "pass", "unreadable_to_agent": unreadable,
                "hits": [{"path": str(h.path), "needle": h.needle, "offset": h.offset} for h in report.hits],
                "per_root": [list(x) for x in report.per_root], "needle_counts": report.needle_counts}
     except leak_scan.ControlFailed as e:
@@ -842,13 +873,67 @@ def prescan_task(bundle, manifest, data):
     (data / "prescan.json").write_text(json.dumps(out, indent=2) + "\n")
     return out
 
+def planted_count(ns):
+    """How many needles positive_control plants: one per needle kind present in the set."""
+    return sum(1 for k in leak_scan.KINDS if any(leak_scan.kind_of(n) == k for n in ns.needles))
+
+
+_COMPILE_ERROR = re.compile(r"^(?:error\[E\d+\]|error: could not compile)", re.M)  # grade.mjs
+
+
+def base_fails(kind, base):
+    """The base control reads "fails" only for a failure the grader observed (review minor 3).
+
+    private: graft ok, no infra, and an f2p name FAILED, or the build failed with a named
+    compile error (hidden tests that use the fix's new API). A graft failure, a build that
+    failed without a compile error, or an incomplete driver is a harness error, not a fail.
+    foreign: baseline.grade_output's failure_kind is test_failure or build_failure, no error."""
+    if base.get("pass") is not False or base.get("infra") or base.get("oom_killed"):
+        return False
+    if kind == "private":
+        if base.get("graft") != "ok":
+            return False
+        return bool((base.get("f2p") or {}).get("failed")) or (
+            base.get("build") == "failed" and bool(base.get("build_compile_error")))
+    return "error" not in base and base.get("failure_kind") in ("test_failure", "build_failure")
+
+
+def arm_image_name(run_image):
+    return run_image.replace("sab-run-", "sab-arm-", 1)
+
+
+def ensure_arm(bundle):
+    """The image every arm runs in: the run image plus the exec-only layer (Ruling A), built once
+    and reused while its label names the current run image. Records it in bundle.json."""
+    rec = dict(bundle.record)
+    run_image = rec.get("run_image")
+    if not run_image:
+        raise RuntimeError(f"{bundle.id}: not prepared (no run image); run `tasks.py prepare` first")
+    arm = arm_image_name(run_image)
+    run_id = pilot.docker("image", "inspect", run_image, "--format", "{{.Id}}").stdout.strip()
+    have = pilot.docker("image", "inspect", arm, "--format",
+                        "{{index .Config.Labels \"" + arms.EXEC_ONLY_LABEL + "\"}}", check=False)
+    if have.returncode or have.stdout.strip() != run_id:
+        arms.exec_only_image(run_image, arm, Path(rec["out"]) / "arm-ctx")
+    rec.update(arm_image=arm, run_image=run_image, template=bundle.template or rec.get("template", ""))
+    bundle_json = Path(rec["out"]).parent / "bundle.json"
+    bundle_json.write_text(json.dumps(dict(rec, image=arm), indent=2) + "\n")
+    return bundle._replace(image=arm, record=rec,
+                           grade=grader_for(rec, arm, Path(rec["out"]) / "grades"))
+
+
 def control_task(bundle, manifest, data):
-    """Step 5 for one prepared task: leak gate with its control, history, grader controls."""
+    """Step 5 for one prepared task, on its arm image (run image + exec-only layer): leak gate
+    with its control (agent-user view), history, grader controls."""
+    bundle = ensure_arm(bundle)
     data = Path(data)
     data.mkdir(parents=True, exist_ok=True)
-    result = {"id": bundle.id, "kind": bundle.record["kind"], "image": bundle.image,
+    kind = bundle.record["kind"]
+    result = {"id": bundle.id, "kind": kind, "image": bundle.image,
+              "run_image": bundle.record["run_image"],
               "image_id": pilot.docker("image", "inspect", bundle.image, "--format", "{{.Id}}").stdout.strip(),
-              "template": bundle.template, "prompt_sha256": hashlib.sha256(bundle.prompt_path.read_bytes()).hexdigest()}
+              "template": bundle.template, "prompt_sha256": hashlib.sha256(bundle.prompt_path.read_bytes()).hexdigest(),
+              "binary_postdates_fix": kind == "private"}
     try:
         result["leak"] = leak_control(bundle, manifest, data)
     except leak_scan.ControlFailed as e:
@@ -857,14 +942,160 @@ def control_task(bundle, manifest, data):
         (Path(bundle.record["out"]) / "assembly.json").read_text())["gold_patch"]).read_text()
     base = bundle.grade("", "control-base")
     gold = bundle.grade(gold_text, "control-gold")
-    result["grader"] = {"base": base, "gold": gold,
-                        "base_fails": base["pass"] is False and "error" not in base and not base.get("infra"),
+    result["grader"] = {"base": base, "gold": gold, "base_fails": base_fails(kind, base),
                         "gold_passes": gold["pass"] is True}
-    leak = result["leak"]
-    result["pass"] = (leak.get("control") == "pass" and leak.get("hits") == [] and leak["history"]["ok"]
-                      and result["grader"]["base_fails"] and result["grader"]["gold_passes"])
+    (data / "controls.json").write_text(json.dumps(result, indent=2) + "\n")
+    result["pass"] = not verify_controls(result)
     (data / "controls.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
+
+
+EXEC_CHECK_SH = (
+    "b=" + arms.CODESCOUT_BIN + "; echo uid=$(id -u); echo mode=$(stat -c '%a %U:%G' $b); "
+    "codescout --version >/dev/null 2>&1 && echo exec=ok || echo exec=FAILED; "
+    "cat $b >/dev/null 2>/tmp/e && echo cat=READABLE || echo cat=$(cat /tmp/e); "
+    "cp $b /tmp/copy 2>/tmp/e && echo cp=READABLE || echo cp=$(cat /tmp/e); "
+    "dd if=$b of=/dev/null count=1 2>/tmp/e && echo dd=READABLE || echo dd=$(tail -n 1 /tmp/e); "
+    "if command -v strings >/dev/null; then strings $b >/dev/null 2>/tmp/e && echo strings=READABLE "
+    "|| echo strings=$(cat /tmp/e); else echo strings=absent; fi; "
+    "python3 -c \"open('$b','rb').read()\" 2>/tmp/e && echo open=READABLE "
+    "|| echo open=$(tail -n 1 /tmp/e); "
+    "cat /proc/self/exe >/dev/null 2>&1; "
+    "mv $b /tmp/moved 2>/dev/null && echo mv=MOVED || echo mv=denied; rm -f /tmp/e /tmp/copy")
+
+
+def exec_only_check(bundle, manifest, data, network="sab-perm-net"):
+    """Ruling A, live, no model call and no token: in a bare-shaped and a cs-shaped run container
+    of the arm image (arms.arm_invocation mounts and env), the agent user can execute codescout
+    but cannot read, copy or open it; in cs the codescout MCP server still starts and lists the
+    daily tool set, and the companion's SessionStart hook still emits its marker."""
+    data = Path(data)
+    if data.exists():
+        shutil.rmtree(data)
+    data.mkdir(parents=True)
+    created = pilot.docker("network", "inspect", network, check=False).returncode != 0
+    if created:
+        pilot.docker("network", "create", "--internal", network)
+    urls = {"CODESCOUT_QDRANT_URL": "http://sab-qdrant-permcheck:6334",
+            "CODESCOUT_EMBEDDER_URL": "http://sab-dense:8080", "CODESCOUT_EMBED_URL": "http://sab-dense:8080/v1",
+            "LIBRARIAN_EMBED_URL": "http://sab-dense:8080/v1", "CODESCOUT_SPARSE_EMBEDDER_URL": "http://sab-sparse:80"}
+    out = {"image": bundle.image, "network": network, "model_calls": 0, "token": None, "arms": {}}
+    try:
+        for arm in ("bare", "cs"):
+            run_dir = data / arm
+            spec = arms.arm_invocation(arm, "claude-sonnet-5-5", "List the files.\n", manifest, urls, run_dir)
+            env_file = run_dir / "control.env"
+            env_file.write_text(arms.env_file_lines(spec))  # non-secret lines only: no token, no proxy
+            name = f"sab-permcheck-{arm}-{bundle.id}"
+            pilot.docker("rm", "-f", name, check=False)
+            pilot.docker(*arms.docker_run_args(name, bundle.image, network, spec, env_file))
+            try:
+                lines = pilot.docker("exec", "-w", WORKDIR, name, "sh", "-c", EXEC_CHECK_SH).stdout
+                facts = dict(line.split("=", 1) for line in lines.splitlines() if "=" in line)
+                rec = {"facts": facts}
+                if arm == "cs":
+                    (run_dir / "calls.json").write_text(json.dumps([["get_guide", {"topic": "error-handling"}]]))
+                    pilot.docker("cp", str(HERE / "mcp_probe.py"), f"{name}:/tmp/mcp_probe.py")
+                    pilot.docker("cp", str(run_dir / "calls.json"), f"{name}:/tmp/calls.json")
+                    probe = pilot.docker("exec", "-w", WORKDIR, "-e", "MCP_PROBE_TIMEOUT=300", name, "python3",
+                                         "/tmp/mcp_probe.py", arms.MCP_CONFIG, "/tmp/calls.json",
+                                         check=False, timeout=600)
+                    (run_dir / "probe.json").write_text(probe.stdout)
+                    p = json.loads(probe.stdout)
+                    call = p["calls"][0]
+                    text = "\n".join(c.get("text", "") for c in (call.get("result") or {}).get("content", []))
+                    rec["mcp"] = {"server": (p.get("initialize") or {}).get("serverInfo"),
+                                  "tools": len(p.get("tools", [])),
+                                  "daily_tool_set": sorted(t.removeprefix("mcp__codescout__") for t in p.get("tools", []))
+                                  == sorted(arms.CODESCOUT_TOOLS),
+                                  "get_guide_ok": bool(text) and not (call.get("result") or {}).get("isError")}
+                    payload = json.dumps({"session_id": "permcheck", "hook_event_name": "SessionStart",
+                                          "source": "startup", "cwd": WORKDIR,
+                                          "transcript_path": "/run/config/x.jsonl"})
+                    hook = subprocess.run(["docker", "exec", "-i", "-w", WORKDIR, "-e",
+                                           f"CLAUDE_PLUGIN_ROOT={arms.PLUGINS_ROOT}/{arms.COMPANION}",
+                                           "-e", f"CLAUDE_PROJECT_DIR={WORKDIR}", name, "node",
+                                           f"{arms.PLUGINS_ROOT}/{arms.COMPANION}/hooks/session-start.mjs"],
+                                          input=payload, capture_output=True, text=True, timeout=120)
+                    (run_dir / "session-start.out").write_text(hook.stdout + "\n--- stderr\n" + hook.stderr)
+                    rec["session_start_marker"] = "PROJECT BOOTSTRAP" in hook.stdout
+                    cc = pilot.docker("exec", "-w", WORKDIR, name, "codescout", "constitution-check",
+                                      "--project", WORKDIR, check=False)
+                    rec["constitution_check_exit"] = cc.returncode
+                out["arms"][arm] = rec
+            finally:
+                pilot.docker("rm", "-f", name, check=False)
+    finally:
+        if created:
+            pilot.docker("network", "rm", network, check=False)
+    denied = all("Permission denied" in out["arms"][a]["facts"].get(k, "")
+                 for a in out["arms"] for k in ("cat", "cp", "dd", "open")
+                 + (() if out["arms"][a]["facts"].get("strings") == "absent" else ("strings",)))
+    cs = out["arms"]["cs"]
+    out["checks"] = {
+        "agent_uid_1000": all(out["arms"][a]["facts"].get("uid") == "1000" for a in out["arms"]),
+        "mode_711_root": all(out["arms"][a]["facts"].get("mode") == "711 root:root" for a in out["arms"]),
+        "exec_ok": all(out["arms"][a]["facts"].get("exec") == "ok" for a in out["arms"]),
+        "read_copy_open_denied": denied,
+        "not_movable": all(out["arms"][a]["facts"].get("mv") == "denied" for a in out["arms"]),
+        "cs_mcp_server_starts_with_daily_tools": cs["mcp"]["daily_tool_set"] and cs["mcp"]["get_guide_ok"],
+        "cs_session_start_marker": cs["session_start_marker"],
+        "cs_constitution_check_exit_0": cs["constitution_check_exit"] == 0,
+    }
+    out["pass"] = all(out["checks"].values())
+    (data / "exec-only.json").write_text(json.dumps(out, indent=2) + "\n")
+    return out
+
+def verify_controls(r):
+    """[] when one task's controls.json shows every Step-5 control passed, else the reasons.
+
+    Recomputed from the stored evidence, not read from its own `pass`: leak hits 0, the planted
+    control passed with at least one planted needle, R12 history ok with exactly one branch ref,
+    a non-empty Qdrant dump, base fails by an observed failure (base_fails) and gold passes, and
+    the scanned image is the task's arm image or the run image it derives from."""
+    why = []
+    leak, grader = r.get("leak") or {}, r.get("grader") or {}
+    if leak.get("control") != "pass":
+        why.append(f"planted control: {leak.get('control')} {leak.get('error', '')}".strip())
+    planted = leak.get("planted")
+    if planted is None:  # controls.json written before the field existed
+        planted = sum(1 for v in (leak.get("needle_counts") or {}).values() if v)
+    if not planted:
+        why.append("no needle was planted")
+    if leak.get("hits") != []:
+        why.append(f"leak hits: {len(leak.get('hits') or [])}" if "hits" in leak else "no leak scan")
+    hist = leak.get("history") or {}
+    refs = hist.get("refs") or []
+    if not (hist.get("ok") and len(refs) == 1 and refs[0].startswith("refs/heads/")
+            and not hist.get("unreachable_objects")):
+        why.append("R12 history not ok")
+    if not sum((leak.get("qdrant_points") or {}).values()):
+        why.append("empty Qdrant template dump")
+    if not base_fails(r.get("kind"), grader.get("base") or {}):
+        why.append("grader: base does not fail by an observed failure")
+    if (grader.get("gold") or {}).get("pass") is not True:
+        why.append("grader: gold does not pass")
+    return why
+
+
+def verify(ids, root):
+    """{id: reasons} for every id; Task 10 gates on all reason lists being empty."""
+    out = {}
+    for task_id in ids:
+        path = Path(root) / task_id / "controls" / "controls.json"
+        bundle_json = Path(root) / task_id / "bundle.json"
+        if not path.exists():
+            out[task_id] = ["no controls.json (the task was not controlled on its prepared image)"]
+            continue
+        r = json.loads(path.read_text())
+        why = verify_controls(r)
+        rec = json.loads(bundle_json.read_text()) if bundle_json.exists() else {}
+        if not rec.get("arm_image"):
+            why.append("no exec-only arm image recorded (run `tasks.py arm`)")
+        elif r.get("image") not in (rec.get("arm_image"), rec.get("run_image")):
+            why.append(f"controls ran on {r.get('image')}, not on {rec.get('arm_image')} or its run image")
+        out[task_id] = why
+    return out
 
 
 # --- CLI -----------------------------------------------------------------------------------------
@@ -875,7 +1106,7 @@ def bundle_for(task_id, root):
     rec_path = Path(root) / task_id / "bundle.json"
     if rec_path.exists():
         rec = json.loads(rec_path.read_text())
-        image = rec.get("run_image") or rec["image"]
+        image = rec.get("arm_image") or rec.get("run_image") or rec["image"]
         if rec["kind"] == "private":
             a = load_private(Path(rec["out"]))
             needles, prompt = a.needles, a.prompt_path
@@ -903,25 +1134,33 @@ def save_bundle(b, root):
 
 
 def _row(root, task_id):
-    """One task's Step-5 state: the full control on the run image, else the pre-index scan of
-    the agent image (prescan.json, no .codescout/ and no Qdrant dump yet), else nothing."""
+    """One task's Step-5 state: the full control (verified from its evidence), else the pre-index
+    scan of the agent image (prescan.json, no .codescout/ and no Qdrant dump yet), else nothing.
+
+    `binary_postdates_fix` is true for every private task: the frozen codescout binary (exec-only
+    since Ruling A, so unreadable) still contains the task's fix and the cs/full tools behave as
+    fixed; Task 9 stratifies on it."""
+    note = {"binary_postdates_fix": task_id.startswith("cs-")}
     full = root / task_id / "controls" / "controls.json"
     pre = root / task_id / "prescan" / "prescan.json"
     if full.exists():
         r = json.loads(full.read_text())
         leak, grader = r.get("leak", {}), r.get("grader", {})
-        return {"id": task_id, "status": "complete", "pass": r.get("pass"),
+        why = verify_controls(r)
+        return {"id": task_id, "status": "complete", "pass": not why, "reasons": why,
+                "image": r.get("image"),
                 "hits": len(leak.get("hits") or []) if "hits" in leak else None,
                 "control": leak.get("control"), "history_ok": leak.get("history", {}).get("ok"),
                 "qdrant_points": leak.get("qdrant_points"),
-                "base_fails": grader.get("base_fails"), "gold_passes": grader.get("gold_passes"),
-                "detail": str(full)}
+                "base_fails": base_fails(r.get("kind"), grader.get("base") or {}),
+                "gold_passes": (grader.get("gold") or {}).get("pass") is True,
+                "detail": str(full), **note}
     if pre.exists():
         r = json.loads(pre.read_text())
         return {"id": task_id, "status": "pre-index scan only", "pass": None,
                 "hits": len(r.get("hits", [])), "control": r.get("control"),
-                "hit_paths": sorted({h["path"] for h in r.get("hits", [])}), "detail": str(pre)}
-    return {"id": task_id, "status": "not run", "pass": None}
+                "hit_paths": sorted({h["path"] for h in r.get("hits", [])}), "detail": str(pre), **note}
+    return {"id": task_id, "status": "not run", "pass": None, **note}
 
 
 def write_table(ids):
@@ -940,7 +1179,8 @@ def write_table(ids):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Step 5 of Task 7: build, prepare and control tasks")
-    ap.add_argument("action", choices=["build", "prescan", "prepare", "control", "table"])
+    ap.add_argument("action", choices=["build", "prescan", "prepare", "arm", "exec-check", "control",
+                                        "table", "verify"])
     ap.add_argument("manifest", type=Path)
     ap.add_argument("ids", nargs="*")
     args = ap.parse_args(argv)
@@ -950,6 +1190,12 @@ def main(argv=None):
     if args.action == "table":
         print(json.dumps(write_table(ids)["tasks"], indent=2))
         return
+    if args.action == "verify":
+        reasons = verify(ids, root)
+        print(json.dumps(reasons, indent=2))
+        if any(reasons.values()):
+            raise SystemExit(1)
+        return
     for task_id in ids:
         (root / task_id).mkdir(parents=True, exist_ok=True)
         b = bundle_for(task_id, root)
@@ -957,6 +1203,13 @@ def main(argv=None):
             pilot.docker("network", "create", "--internal", NET, check=False)
             b = prepare_task(b, manifest, root / task_id)
             save_bundle(b, root)
+            b = ensure_arm(b)
+        if args.action == "arm":
+            b = ensure_arm(b)
+        if args.action == "exec-check":
+            r = exec_only_check(ensure_arm(b), manifest, DATA / "controls" / "exec-only" / task_id)
+            print(json.dumps({"id": task_id, "pass": r["pass"], "checks": r["checks"]}), flush=True)
+            continue
         if args.action == "prescan":
             r = prescan_task(b, manifest, root / task_id / "prescan")
             print(json.dumps({"id": task_id, "control": r["control"], "hits": len(r.get("hits", []))}),

@@ -103,6 +103,9 @@ def select(candidates, rule, *, failed=()):
     next admissible candidate of their source takes their place (the rule's replacement)."""
     projected = {c["id"]: c for c in _projected(candidates)}
     failed = set(failed)
+    unknown = sorted(failed - projected.keys())
+    if unknown:  # fail closed: a typo would otherwise silently keep the task it meant to replace
+        raise ValueError(f"failed ids are not candidates: {unknown}")
     picks = {}
     for name, order in ranked(list(projected.values()), rule).items():
         src = rule["sources"][name]

@@ -67,8 +67,10 @@ DROPPED_ENV_KEYS = ("CODESCOUT_RERANKER_URL",)
 # gateway (172.17.0.1), [::1] and bare service names.
 STUDY_HOST_PREFIX = "sab-"
 # Task 7 (carried Task 4 minor 3): optional userinfo is skipped, so in `http://sab-x@10.0.0.1/`
-# the host is 10.0.0.1, not the `sab-x` user name.
-_SCHEME_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://(?:[^/\s@\"'?#]*@)?(\[[^\]]*\]|[^/\s:\"'?#@]+)")
+# the host is 10.0.0.1, not the `sab-x` user name. A backslash ends the authority as `/` does
+# (Task 7 review minor 1: WHATWG URL parsers treat it so for http), so `http://10.0.0.1\@sab-x/`
+# names 10.0.0.1.
+_SCHEME_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://(?:[^/\\\s@\"'?#]*@)?(\[[^\]]*\]|[^/\\\s:\"'?#@]+)")
 _HOST_PORT = re.compile(r"(?:^|[\s=,(`\"'])(\[[^\]]*\]|[A-Za-z0-9][A-Za-z0-9.-]*):\d{2,5}\b")
 HOST_PATH_MARKERS = ("/home/",)
 # Settings keys whose values are permission PATTERNS, not endpoints: kept by name (C2) and not
@@ -442,6 +444,45 @@ def docker_run_args(name, image, network, spec, env_file):
 def env_file_lines(spec):
     """The non-secret lines of the run's env file (identical across arms)."""
     return "".join(f"{k}={v}\n" for k, v in sorted(spec.env.items()))
+
+
+# Controller Ruling A (Task 7 review): the frozen codescout binary post-dates every private fix
+# and carried verbatim gold-patch strings for 5 private tasks, readable by every arm (bare too).
+# The image every arm runs in therefore gets one derived layer over the prepared run image: the
+# binary owned by root and mode 0711, so the agent user can execute it (the kernel maps an ELF it
+# cannot read; such a process is also not dumpable) but cannot read, copy or open its bytes.
+# /opt/sab/bin stays root-owned 0755: the agent cannot replace the file, and the other tools
+# there (node, rust-analyzer, which hold no task content) stay listable, so the leak scan's
+# agent-user view still reads them. A layer, not an agent-cs.Dockerfile change: the prepared run
+# images and their Qdrant templates (hours of indexing) stay valid.
+EXEC_ONLY_FILES = (CODESCOUT_BIN,)
+EXEC_ONLY_MODE = "0711"
+EXEC_ONLY_DOCKERFILE = (
+    "ARG BASE\nFROM ${BASE}\nARG AGENT_USER=1000:1000\nUSER root\n"
+    f"RUN chown root:root {' '.join(EXEC_ONLY_FILES)} "
+    f"&& chmod {EXEC_ONLY_MODE} {' '.join(EXEC_ONLY_FILES)} "
+    f"&& chown root:root {SAB_BIN} && chmod 0755 {SAB_BIN}\n"
+    "USER ${AGENT_USER}\n")
+EXEC_ONLY_LABEL = "sab.exec_only_base"
+
+
+def exec_only_image(base, out_image, context, *, command=None):
+    """Build `out_image` = `base` + EXEC_ONLY_DOCKERFILE, offline, labelled with base's image id."""
+    command = command or pilot.command
+    base_id = pilot.docker("image", "inspect", base, "--format", "{{.Id}}").stdout.strip()
+    context = Path(context)
+    context.mkdir(parents=True, exist_ok=True)
+    (context / "Dockerfile").write_text(EXEC_ONLY_DOCKERFILE)
+    r = command(["docker", "build", "--network", "none", "--build-arg", f"BASE={base}",
+                 "--label", f"{EXEC_ONLY_LABEL}={base_id}", "-t", out_image,
+                 "-f", str(context / "Dockerfile"), str(context)], timeout=1800, check=False)
+    (context / "build.log").write_text(r.stdout)
+    if r.returncode:
+        raise RuntimeError(f"exec-only layer {out_image} failed (exit {r.returncode}); see "
+                           f"{context / 'build.log'}")
+    return out_image
+
+
 def _toml_table(text, table):
     """One table of a TOML document as a dict, or None (tomllib, Python 3.11+)."""
     try:
