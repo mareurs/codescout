@@ -72,6 +72,9 @@ DATASET = DATA / "selection" / "inputs" / "dataset.json"
 PRIVATE_BASE_IMAGE = "s5/codescout:latest"
 WORKDIR = "/testbed"
 NET = "sab-tasks-net"
+# The index's wall-clock limit. prepare_index's default (2 h) cut off the first codescout-repo
+# index (cs-p08, live): the CPU sparse embedder copied from daily use runs at ~5-7 chunks/s.
+INDEX_TIMEOUT = 12 * 3600
 # build-task.mjs:63, the names S5 removes at every depth.
 DROP_NAMES = ("CLAUDE.md", "AGENTS.md", ".claude", ".codescout", ".buddy")
 FOREIGN_ROOT_SUBJECT = "Benchmark base source"
@@ -619,7 +622,7 @@ def prepare_task(bundle, manifest, out, network=NET):
     try:
         env = arms.study_mcp_env(manifest["mcp_env"], urls)
         arms.prepare_index(bundle.image, run_image, network, env, Path(out) / "prepare",
-                           project=WORKDIR, run=bundle.id)
+                           project=WORKDIR, run=bundle.id, timeout=INDEX_TIMEOUT)
         stack.index_down()
         pilot.docker("volume", "create", template)
         stack.copy_volume(stack.INDEX_VOLUME, template)
@@ -890,6 +893,10 @@ def main(argv=None):
                               "base_fails": r.get("grader", {}).get("base_fails"),
                               "gold_passes": r.get("grader", {}).get("gold_passes")} for i, r in rows.items()],
                    "excluded_from_scan": SCAN_EXCLUDED, "not_scanned": NOT_SCANNED, "detail": rows}
+        failed = json.loads((DATA / "selection" / "selection.json").read_text()).get("failed", [])
+        summary["replaced"] = {
+            i: json.loads((root / i / "controls" / "controls.json").read_text())
+            for i in failed if (root / i / "controls" / "controls.json").exists()}
         controls.mkdir(parents=True, exist_ok=True)
         (controls / "tasks.json").write_text(json.dumps(summary, indent=2) + "\n")
         print(json.dumps(summary["tasks"], indent=2))
