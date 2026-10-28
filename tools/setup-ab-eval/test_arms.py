@@ -1,6 +1,7 @@
 """Tests for arms.py: the three arms differ only in CLI flags and mounts."""
 import ast
 import json
+import os
 import subprocess
 import tempfile
 import tomllib
@@ -319,6 +320,14 @@ class ArmsTest(unittest.TestCase):
         kept, _ = arms.sanitize_user_settings(
             {"permissions": {"allow": ["Bash(git clone https://github.com/a/b.git)"]}})
         self.assertIn("permissions", kept)
+    def test_foreign_hosts_reads_the_host_after_userinfo(self):
+        # Task 4 carried minor 3: `sab-x@` is userinfo, the host is what follows the `@`.
+        self.assertEqual(arms.foreign_hosts("http://sab-x@192.168.1.20/"), ["192.168.1.20"])
+        self.assertEqual(arms.foreign_hosts("http://sab-a:pw@10.0.0.1:6334/x"), ["10.0.0.1"])
+        self.assertEqual(arms.foreign_hosts("http://user:pw@sab-qdrant:6334"), [])
+        with self.assertRaises(ValueError):
+            arms.study_mcp_env({"CODESCOUT_QDRANT_URL": "http://127.0.0.1:6334"},
+                               {"CODESCOUT_QDRANT_URL": "http://sab-x@192.168.1.20:6334"})
 
     def test_arm_record_lists_kept_settings_with_their_effects(self):
         # Minor 3: every kept key is listed, and these three name their effect.
@@ -565,6 +574,7 @@ class PrepareIndexTest(unittest.TestCase):
         cs = root / ".codescout"
         for rel in ("project.toml", "workspace.toml", "index-state.json", "write.lock",
                     "write.lock.holder", "usage.db", "debug.log", "diagnostic-1a2b.log",
+                    "debug.log.1", "debug.log.2.gz",
                     "memories/onboarding.md", "memories/.history/onboarding.md/x.md.bak",
                     "private-memories/p.md", "projects/ruff/memories/onboarding.md",
                     "projects/ruff/memories/language-patterns.md", "tmp/onboarding-prompt.md"):
@@ -574,6 +584,48 @@ class PrepareIndexTest(unittest.TestCase):
         left = sorted(str(p.relative_to(cs)) for p in cs.rglob("*") if p.is_file())
         self.assertEqual(left, ["index-state.json", "project.toml", "workspace.toml",
                                 "write.lock"])
+    def test_config_commit_is_an_allowlist(self):
+        # Task 4 carried minor 2: only the named config files enter the base commit, so a
+        # rotated log (or any other runtime file) can never be committed with them.
+        repo = self.data / "allow"
+        cs = repo / ".codescout"
+        cs.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        (repo / "a.txt").write_text("a\n")
+        subprocess.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@e.invalid",
+                        "commit", "-qm", "base"], check=True)
+        for rel in ("project.toml", "workspace.toml", "write.lock", "debug.log.1", "usage.db",
+                    "embeddings/x.bin"):
+            (cs / rel).parent.mkdir(parents=True, exist_ok=True)
+            (cs / rel).write_text("x")
+        (repo / ".gitignore").write_text("/target\n")
+        subprocess.run(["sh", "-c", arms.INDEX_ARTIFACTS_COMMIT], cwd=repo, check=True)
+        tracked = subprocess.run(["git", "-C", str(repo), "ls-tree", "-r", "--name-only", "HEAD"],
+                                 capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual(sorted(tracked), [".codescout/project.toml", ".codescout/workspace.toml",
+                                           ".codescout/write.lock", ".gitignore", "a.txt"])
+        # Run again with nothing new: nothing to commit is not an error.
+        subprocess.run(["sh", "-c", arms.INDEX_ARTIFACTS_COMMIT], cwd=repo, check=True)
+
+    def test_home_state_removal_removes_only_the_codescout_session_state(self):
+        # Task 4 carried minor 1: the onboarding session's XDG state (measured in round4c's
+        # index-diff.txt) leaves the image; the rest of the home stays.
+        home = self.data / "home"
+        state = [".cache/codescout/heartbeats/19.log", ".config/librarian/workspace.toml",
+                 ".local/state/codescout/servers/19.json", ".local/state/codescout/guide_rearm",
+                 ".local/share/librarian/catalog.db", ".local/share/librarian/catalog.db-wal",
+                 ".codescout/usage.db"]
+        keep = [".bashrc", ".cache/pip/x", ".config/git/config", ".local/share/other/y"]
+        for rel in state + keep:
+            (home / rel).parent.mkdir(parents=True, exist_ok=True)
+            (home / rel).write_text("x")
+        subprocess.run(["sh", "-c", arms.HOME_STATE_REMOVAL], check=True,
+                       env={"HOME": str(home), "PATH": os.environ["PATH"]})
+        left = sorted(p.relative_to(home).as_posix() for p in home.rglob("*") if p.is_file())
+        self.assertEqual(left, sorted(keep))
+        self.assertFalse((home / ".local/state").exists())
+        self.assertIn(arms.HOME_STATE_REMOVAL, arms.TMP_LOCK_REMOVAL)
 
     def test_prepare_commits_index_artifacts_but_not_tmp_lock(self):
         # Round-4 order: the config (project.toml, .gitignore) is committed BEFORE the index, so

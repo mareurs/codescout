@@ -66,7 +66,9 @@ DROPPED_ENV_KEYS = ("CODESCOUT_RERANKER_URL",)
 # containers; anything else raises. A denylist of host names missed LAN IPs, the docker bridge
 # gateway (172.17.0.1), [::1] and bare service names.
 STUDY_HOST_PREFIX = "sab-"
-_SCHEME_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://(\[[^\]]*\]|[^/\s:\"'?#@]+)")
+# Task 7 (carried Task 4 minor 3): optional userinfo is skipped, so in `http://sab-x@10.0.0.1/`
+# the host is 10.0.0.1, not the `sab-x` user name.
+_SCHEME_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://(?:[^/\s@\"'?#]*@)?(\[[^\]]*\]|[^/\s:\"'?#@]+)")
 _HOST_PORT = re.compile(r"(?:^|[\s=,(`\"'])(\[[^\]]*\]|[A-Za-z0-9][A-Za-z0-9.-]*):\d{2,5}\b")
 HOST_PATH_MARKERS = ("/home/",)
 # Settings keys whose values are permission PATTERNS, not endpoints: kept by name (C2) and not
@@ -75,10 +77,15 @@ HOST_PATH_MARKERS = ("/home/",)
 URL_ALLOWLIST_EXEMPT_SETTINGS = ("permissions",)
 
 # prepare_index, run in the project dir BEFORE the index: commit the project config that
-# onboarding() wrote (project.toml, workspace.toml, write.lock, .gitignore) into the base (C3),
-# so the index then records this commit as last_indexed_commit == HEAD.
+# onboarding() wrote into the base (C3), so the index then records this commit as
+# last_indexed_commit == HEAD. An ALLOWLIST (Task 7, carried Task 4 minor 2): only these files
+# are added, so a rotated log or any other runtime file can never enter the base; a leftover
+# one stays untracked and INDEX_STATE_EXCLUDE then refuses the dirty tree.
+CONFIG_COMMIT_ALLOWLIST = (".codescout/project.toml", ".codescout/workspace.toml",
+                           ".codescout/write.lock", ".gitignore")
 INDEX_ARTIFACTS_COMMIT = (
-    "set -e; for p in .codescout .gitignore; do if [ -e \"$p\" ]; then git add -f -- \"$p\"; "
+    "set -e; for p in " + " ".join(CONFIG_COMMIT_ALLOWLIST) + "; do if [ -e \"$p\" ]; then "
+    "git add -f -- \"$p\"; "
     "fi; done; git diff --cached --quiet || git -c user.name=sab-prepare "
     "-c user.email=sab-prepare@example.invalid commit -q -m 'sab: codescout project config'")
 # prepare_index, run in the project dir AFTER the index (round-4 live finding). A tracked
@@ -102,9 +109,19 @@ INDEX_STATE_EXCLUDE = (
 # prepare_index: the index's lock under /tmp/codescout-<uid>/ never enters the image (C7), nor
 # do the prepare step's own files or the codescout home state its MCP session created. Runs
 # only through `docker exec` in the prepare container (it names $HOME).
+# The onboarding MCP session's XDG state under $HOME (Task 7, carried Task 4 minor 1; measured
+# in controls/round4c/isolation/prepare/index-diff.txt): heartbeats, the librarian workspace and
+# catalog, the server rendezvous slot and guide state. The study carries no catalog history
+# (spec section 3, gate 3), and a run's codescout recreates what it needs. Empty parents go too.
+HOME_STATE_PATHS = (".codescout", ".cache/codescout", ".config/librarian",
+                    ".local/state/codescout", ".local/share/librarian")
+HOME_STATE_REMOVAL = (
+    "for p in " + " ".join(HOME_STATE_PATHS) + "; do rm -rf \"$HOME/$p\"; done; "
+    "for d in .cache .config .local/state .local/share .local; do "
+    "rmdir \"$HOME/$d\" 2>/dev/null; done; true")
 TMP_LOCK_REMOVAL = ("rm -f /tmp/codescout-*/codescout-index-*.lock; "
                     "rmdir /tmp/codescout-* 2>/dev/null; rm -rf /tmp/sab-prepare; "
-                    "rm -rf \"$HOME/.codescout\"; true")
+                    + HOME_STATE_REMOVAL)
 
 # The Codex `--setting-sources local` (bare, cs); full alone also loads the user source, so the
 # sanitized user settings.json and the frozen CLAUDE.md in its config dir apply (C2 ruling).
@@ -205,7 +222,7 @@ PREPARE_CLEANUP = (
     "set -e; cd .codescout 2>/dev/null || exit 0; "
     "find . -type d \\( -name memories -o -name private-memories \\) -prune -exec rm -rf {} +; "
     "rm -rf tmp; rm -f usage.db usage.db-shm usage.db-wal write.lock.holder; "
-    "find . -maxdepth 1 -name '*.log' -delete; "
+    "find . -maxdepth 1 -name '*.log*' -delete; "
     "find . -mindepth 1 -type d -empty -delete; true")
 
 # Minor 3: what each KEPT user-settings key does in full, where it is known.
@@ -448,8 +465,10 @@ def prepare_index(image, out_image, network, env, data_dir, *, project="/testbed
          recommendation instead, `local:AllMiniLML6V2Q` in a GPU-less container.
       3. PREPARE_CLEANUP: onboarding()'s memories and the session's runtime files go.
       4. `codescout index -p <project>`, timed (index-cost.json), then PREPARE_CLEANUP again.
-      5. The config and index artifacts are committed into the repo's base (C3); /tmp locks,
-         the prepare files and the container's codescout home state are removed (C7).
+      5. Only the config (CONFIG_COMMIT_ALLOWLIST) was committed into the repo's base, before
+         the index (C3); the index state (index-state.json) stays untracked, excluded through
+         .git/info/exclude, and must name HEAD. /tmp locks, the prepare files and the
+         onboarding session's home state (HOME_STATE_PATHS) are removed (C7).
 
     Writes prepare.json (onboarding outcome, the embeddings comparison), onboarding.json,
     project.onboarded.toml, project.toml, index.log, index-cost.json and index-diff.txt under
