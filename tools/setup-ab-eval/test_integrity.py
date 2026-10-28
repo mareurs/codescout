@@ -153,17 +153,86 @@ class IntegrityTest(unittest.TestCase):
         v = self.check("weird", records("bare_valid.jsonl"))
         self.assertFalse(v.ok)
         self.assertTrue(any("unknown arm" in x for x in v.reasons), v.reasons)
-
-    def test_errored_run_is_invalid(self):
-        v = self.check("cs", records("cs_valid.jsonl"), stdout={"is_error": True})
+    def test_errored_run_with_no_model_work_is_invalid(self):
+        # the real auth failure shape (round4c): is_error, zero api time, zero tokens, zero cost
+        auth = {"is_error": True, "duration_api_ms": 0, "total_cost_usd": 0, "num_turns": 1,
+                "usage": {"input_tokens": 0, "output_tokens": 0}, "result": "Not logged in"}
+        recs = [r for r in records("cs_valid.jsonl") if r.get("type") != "assistant"]
+        v = self.check("cs", recs, stdout=auth)
         self.assertFalse(v.ok)
-        self.assertTrue(any("is_error" in x for x in v.reasons), v.reasons)
+        self.assertTrue(any("before any model work" in x for x in v.reasons), v.reasons)
+
+    def test_errored_run_after_real_work_is_scored_not_invalid(self):
+        # max-turns / budget failure: a model-side failure is a result, not a dropped run
+        failed = {"is_error": True, "subtype": "error_max_turns", "duration_api_ms": 51000,
+                  "total_cost_usd": 0.4, "num_turns": 30,
+                  "usage": {"input_tokens": 900, "output_tokens": 300}}
+        v = self.check("cs", records("cs_valid.jsonl"), stdout=failed)
+        self.assertEqual(v.reasons, [])
+        self.assertTrue(v.ok)
+
+    def test_errored_run_with_zero_api_time_but_tool_calls_is_not_invalid(self):
+        odd = {"is_error": True, "duration_api_ms": 0, "total_cost_usd": 0,
+               "usage": {"input_tokens": 0, "output_tokens": 0}}
+        self.assertTrue(self.check("cs", records("cs_valid.jsonl"), stdout=odd).ok)
+
+    def test_errored_run_with_missing_usage_fields_is_not_assumed_no_work(self):
+        self.assertTrue(self.check("cs", records("cs_valid.jsonl"),
+                                   stdout={"is_error": True}).ok)
+
+    def test_non_companion_hook_output_is_not_evidence_for_full(self):
+        # real full stream: the superpowers hook (non-empty) precedes the companion's
+        recs = records("full_valid.jsonl")
+        companion = [r for r in recs if r.get("subtype") == "hook_response"
+                     and "PROJECT BOOTSTRAP" in r["output"]]
+        others = [r for r in recs if r.get("subtype") == "hook_response" and r["output"]
+                  and r not in companion]
+        self.assertEqual((len(companion), len(others)), (1, 1))  # fixture keeps both
+        for r in companion:
+            r["output"] = r["stdout"] = ""
+        v = self.check("full", recs)
+        self.assertFalse(v.ok)
+        self.assertEqual(v.hook_events, 0)
+        self.assertTrue(any("companion" in x for x in v.reasons), v.reasons)
+
+    def test_cs_with_only_foreign_hook_output_is_invalid(self):
+        recs = records("cs_valid.jsonl")
+        for r in recs:
+            if r.get("subtype") == "hook_response" and r["output"]:
+                r["output"] = r["stdout"] = "<EXTREMELY_IMPORTANT> You have superpowers."
+        self.assertFalse(self.check("cs", recs).ok)
+
+    def test_tool_use_inside_a_user_tool_result_is_not_counted(self):
+        recs = records("bare_valid.jsonl")
+        recs.insert(1, {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_REDACTED1",
+             "content": [{"type": "tool_use", "name": "mcp__codescout__symbols"}]}]}})
+        self.assertEqual(self.check("bare", recs).codescout_calls, 0)
+
+    def test_sidechain_calls_are_counted_in_totals_and_separately(self):
+        recs = records("cs_valid.jsonl")
+        self.assertEqual(self.check("cs", recs).sidechain_calls, 0)  # main-thread fixture
+        side = {"type": "assistant", "parent_tool_use_id": "toolu_PARENT", "message": {
+            "content": [{"type": "tool_use", "id": "toolu_S", "name": "mcp__codescout__grep",
+                         "input": {}},
+                        {"type": "tool_use", "id": "toolu_T", "name": "Read", "input": {}}]}}
+        v = self.check("cs", recs + [side])
+        self.assertEqual((v.codescout_calls, v.native_calls, v.sidechain_calls), (3, 3, 2))
+        self.assertTrue(v.ok)
+
+    def test_fixture_tool_use_records_carry_parent_tool_use_id_null(self):
+        calls = [r for r in records("cs_valid.jsonl") if r.get("type") == "assistant"]
+        self.assertTrue(calls)
+        for r in calls:
+            self.assertIn("parent_tool_use_id", r)
+            self.assertIsNone(r["parent_tool_use_id"])
+
 
     def test_stdout_json_not_a_dict_is_invalid(self):
         v = self.check("bare", records("bare_valid.jsonl"), stdout=None)
         self.assertFalse(v.ok)
 
-    def test_codescout_tool_use_in_user_or_text_blocks_is_not_counted(self):
+    def test_codescout_name_in_a_text_block_is_not_counted(self):
         recs = records("bare_valid.jsonl")
         recs.insert(1, {"type": "assistant", "message": {"content": [
             {"type": "text", "text": "mcp__codescout__symbols"}]}})
@@ -171,7 +240,8 @@ class IntegrityTest(unittest.TestCase):
 
     def test_verdict_is_a_namedtuple(self):
         self.assertEqual(Verdict._fields,
-                         ("ok", "reasons", "codescout_calls", "native_calls", "hook_events"))
+                         ("ok", "reasons", "codescout_calls", "native_calls", "hook_events",
+                          "sidechain_calls"))
 
 
 if __name__ == "__main__":
