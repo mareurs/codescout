@@ -25,5 +25,28 @@
       "source_sha256": "f8046b6a5f06ea51c4e51e4318fa49f5125b52734883f1b4718142e812cb65cd",
       "changes": "see the Provenance block in agent-cs.Dockerfile's header (kept / changed / dropped)"
     }
+  },
+  "vendored": {
+    "source_repo": "/home/marius/work/claude/claude-plugins",
+    "source_commit": "223b56abecae8d8d086f0b3c3a77f3bf57b5f88e",
+    "why": "Task 8 (ruling R7): the runner calls these copies through node, never the live effort-toggle-b worktree (pilot.transcript_usage) or a live checkout, so a peer edit cannot change token accounting, plan-limit detection or the proxy config mid-study. Byte-identical `git show <commit>:<source_path>`; the copies keep the source layout so usage.mjs's `../s4-rows.mjs` import resolves to the copy. The same bytes were also in effort-toggle-b d04595fd7 (sha256 compared 2026-10-28).",
+    "files": {
+      "vendor/claude-plugins/effort-steering/spikes/plan-limit.mjs": {
+        "source_path": "effort-steering/spikes/plan-limit.mjs",
+        "sha256": "e9d0ba90c0a269f29c5dc3baf3897d238124087b40feb1f6c92eae28ffe95c4f"
+      },
+      "vendor/claude-plugins/effort-steering/spikes/s4-rows.mjs": {
+        "source_path": "effort-steering/spikes/s4-rows.mjs",
+        "sha256": "800938d75f5e20b93eabdfba68ed244b99e9f213f1a19f290603c7ba9b9a56a9"
+      },
+      "vendor/claude-plugins/effort-steering/spikes/s5/usage.mjs": {
+        "source_path": "effort-steering/spikes/s5/usage.mjs",
+        "sha256": "4d1e0b76bb61762bbbfe077a7d7d3c4d95a4be45f2c57d9490a8d47c8e2d5534"
+      },
+      "vendor/claude-plugins/effort-steering/spikes/s5/images/tinyproxy.conf.tmpl": {
+        "source_path": "effort-steering/spikes/s5/images/tinyproxy.conf.tmpl",
+        "sha256": "f44e1a4ddeb5efa887c456e661034a602605faa15aea767671f431bf3e7ebd8c"
+      }
+    }
   }
 }

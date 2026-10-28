@@ -1,0 +1,1076 @@
+"""Sequential runner for the setup A/B study: one Claude Code run at a time, never a retry.
+
+    run_batch(plan, budget, data, dry_run)       plan: [RunSpec], budget: Budget, data: a dir
+    make_order(tasks, models, seed)              per task and model: bare x2, cs x1, full x1,
+                                                 the arms of each (task, model) block shuffled
+    stage1_order(seed)                           spec section 7 Stage 1: 2 development tasks x
+                                                 3 arms x 2 models, one run each = 12 specs
+
+SPEND SAFETY. `run_batch(..., dry_run=False)` refuses to start (Refused, before any docker call)
+unless `<data>/GO.json` is a regular file holding `cap_usd` equal to `budget.cap_usd`,
+`plan_sha256` equal to `plan_sha256(plan)` and `authorized_by: "operator"`. The file is the
+operator's (Task 10); nothing in this module writes it. `dry_run=True` touches no docker object,
+no CLI and no token: it writes `<data>/dry-run.json` (the specs and the plan hash) and returns.
+
+JOURNAL. `<data>/rows.jsonl`, append-only, every line fsynced. A run writes a `pending` row
+BEFORE the CLI call and its final row after; the latest row of a runId wins. At batch start every
+runId whose latest row is still `pending` (the runner was killed) gets an `unknown-spend` row. A
+runId that has any row is never run again by any batch: there is no automatic retry after any
+outcome. Row fields are exactly ROW_FIELDS: the Task 8 brief's list plus ruling R6's
+bashCommands, editedFiles, inputTokens and outputTokens. Final outcomes are OUTCOMES.
+
+SPEND. spent = budget.spent_usd (spend outside this journal) + for the latest row of every runId
+its `costUsd`, or `per_call_usd` when the cost is unknown (pending, unknown-spend, a run with no
+result record): conservative. ADMISSION: a call starts only when
+spent + reserve_usd + per_call_usd <= cap_usd (per_call_usd is the call's `--max-budget-usd`, its
+worst case; the reserve is held for the next run, spec section 7). `cap_usd` may not exceed the
+study's $200 (TOTAL_CAP_USD).
+
+OUTCOMES, decided in this order for each run (the first that applies):
+  plan-limit     the vendored plan-limit.mjs (through node) finds a refusal in the result record,
+                 stdout, stderr or the session transcript. Neutral: not scored, not a failure of
+                 the arm. STOPS the batch.
+  infra-oom      the agent container has State.OOMKilled=true (or the grader's container had).
+                 Not scored, not a failure. The batch goes on when the cost is known.
+  infra-other    no result record (timeout, kill, crash), or no usable cost, or the run did no
+                 model work (is_error with zero api time, tokens, cost and calls: a credential or
+                 infrastructure failure), or the grader raised. Not scored. STOPS the batch
+                 (spec section 7 / plan Global Constraints: stop on missing cost, credential
+                 error).
+  invalid-arm    integrity.check is not ok, or a tool_use block is malformed. Charged, not scored.
+  scored         graded by the task's grader on the image the agent ran in.
+  unknown-spend  the CLI was called and the runner did not learn the cost (interruption).
+After a scored row, EFFORT: the scored rows of each (task, model) must share one effectiveEffort
+(a non-empty string). A different or unknown value marks that task+model invalid in
+`<data>/task-validity.json` and STOPS the batch.
+
+CONTAINERS. Every arm starts from bundle.json's `arm_image` through `tasks.bundle_run_image`
+(the exec-only layer, Task 7 Ruling A), never `run_image`, with arms.docker_run_args (cap-drop
+ALL, no-new-privileges); the agent must answer `id -u` with 1000 before the CLI starts. The CLI
+argv is arms.arm_invocation's, with `--output-format json` replaced by `stream-json --verbose
+--include-hook-events` (the input integrity.check reads, as live_control.step_r10 built it) and
+`--max-budget-usd` set to `budget.per_call_usd`; no `--effort` (spec: CLI default effort). The env
+file adds the token, HTTPS_PROXY (the runner's proxy) and NO_PROXY/no_proxy covering 127.0.0.1,
+localhost and every study host of the run (Task 4 carry); it is deleted once the container runs.
+Patches exclude `.codescout/`, `.buddy/` and `.superpowers/` at any depth (Task 4 ruling R2-F3);
+the excluded paths are listed in the run's run-record.json.
+
+OWNERSHIP. The runner creates only `sab-ab-*` objects plus the per-run Qdrant objects stack.py
+names (`sab-qdrant-ab<key>`, `sab-qv-ab<key>`, `sab-copy-sab-qv-ab<key>`). Each name is written
+to `<data>/owned.jsonl` BEFORE it is created, and a name that already exists is refused, never
+adopted. Cleanup removes exactly the ledger's names (stack.run_down / stack._remove_exact, exact
+names, never a prefix sweep and never stack.stack_down), so the background index job's
+`sab-prep-*`, `sab-dense`, `sab-sparse`, `sab-qdrant`, the `sab-tpl-*` templates, `codescout-*`,
+`pbr27-*` and `rae-*` are never touched.
+
+Stdlib only. Never uses pilot's PREFIX/NETWORK/IMAGE/DATA/ORDER constants (ruling R1); token
+accounting and plan-limit detection run the vendored copies under vendor/ (ruling R7,
+PROVENANCE.json "vendored").
+"""
+import argparse
+import hashlib
+import json
+import os
+import random
+import re
+import subprocess
+import time
+import uuid
+from pathlib import Path, PurePosixPath
+from typing import Callable, NamedTuple
+from urllib.parse import urlsplit
+
+import arms
+import integrity
+import pilot
+import stack
+import tasks
+from evidence import nonnegative
+
+HERE = Path(__file__).resolve().parent
+VENDOR = HERE / "vendor/claude-plugins/effort-steering/spikes"
+PLAN_LIMIT_MJS = VENDOR / "plan-limit.mjs"
+USAGE_MJS = VENDOR / "s5/usage.mjs"
+PROXY_TEMPLATE = VENDOR / "s5/images/tinyproxy.conf.tmpl"
+
+MODELS = ("claude-sonnet-5-5", "claude-opus-5-5")
+STAGE3_REPS = (("bare", 2), ("cs", 1), ("full", 1))
+STAGE1_REPS = (("bare", 1), ("cs", 1), ("full", 1))
+# Provisional: spec section 2 lists the development tasks; Task 10 confirms the two (and builds
+# their bundles) before the operator go. ripgrep-2576 is the Codex pilot's task, ruff-15309
+# the development image of ruling R4.
+STAGE1_DEV_TASKS = ("burntsushi__ripgrep-2576", "astral-sh__ruff-15309")
+TOTAL_CAP_USD = 200.0
+STAGE1_CAP_USD = 25.0
+RUN_TIMEOUT_S = 1800
+AGENT_UID = "1000"
+
+OUTCOMES = ("scored", "invalid-arm", "plan-limit", "infra-oom", "infra-other", "unknown-spend")
+PENDING = "pending"  # journal-only state; never a final outcome
+ROW_FIELDS = ("runId", "taskId", "model", "arm", "rep", "sessionId", "costUsd", "wallMs",
+              "numTurns", "usage", "effectiveEffort", "grade", "integrity", "outcome",
+              "bashCommands", "editedFiles", "inputTokens", "outputTokens")
+
+PATCH_EXCLUDED_DIRS = (".codescout", ".buddy", ".superpowers")
+PATCH_PATHSPEC = (".", *(f":(exclude,glob)**/{d}/**" for d in PATCH_EXCLUDED_DIRS))
+
+# Runner-owned names (study namespace `sab-`, runner sub-namespace `sab-ab-`).
+NET = "sab-ab-net"
+PROXY = "sab-ab-proxy"
+PROXY_PORT = 8888
+DENSE = "sab-ab-dense"
+SPARSE = "sab-ab-sparse"
+NETPROBE = "sab-ab-netprobe"
+AGENT_PREFIX = "sab-ab-agent-"
+QDRANT_RUN_PREFIX = "ab"  # stack.qdrant_for_run(run=ab<key>) -> sab-qdrant-ab<key>, sab-qv-ab<key>
+PROXY_IMAGE = "s5/proxy:latest"
+PROBE_IMAGE = "python:3.12-slim"
+ALLOWED_HOST = "api.anthropic.com"
+PROXY_CONF_MOUNT = "/etc/s5-proxy"
+
+GO_FILE = "GO.json"
+ROWS = "rows.jsonl"
+OWNED = "owned.jsonl"
+EVENTS = "batch.jsonl"
+LOCK = "runner.lock"
+VALIDITY = "task-validity.json"
+
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+_SUBNET = re.compile(r"\d{1,3}(\.\d{1,3}){3}/\d{1,2}")
+_HOST = re.compile(r"(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*")
+
+
+class Refused(RuntimeError):
+    """The runner will not start: no operator authorization, a foreign object, a held lock."""
+
+
+class RunSpec(NamedTuple):
+    task_id: str
+    model: str
+    arm: str
+    rep: int
+
+
+class Budget(NamedTuple):
+    cap_usd: float
+    spent_usd: float
+    per_call_usd: float
+    reserve_usd: float
+
+
+class TaskInfo(NamedTuple):
+    image: str                 # the verified arm image (tasks.bundle_run_image)
+    prompt: str
+    template: str              # the task's Qdrant template volume, sab-tpl-<id>
+    grader: Callable           # grader(gdir) -> grade(patch, name) -> dict
+
+
+# --- plan, budget, authorization -----------------------------------------------------------------
+
+def make_order(tasks_, models, seed, reps=STAGE3_REPS):
+    """Per task, then per model (in the given orders), one block of run specs whose arm order is
+    shuffled by one random.Random(seed): deterministic for a seed (spec section 7: arm order per
+    task randomised, to spread prompt-cache effects)."""
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ValueError(f"seed must be an int, got {seed!r}")
+    tasks_, models = list(tasks_), list(models)
+    if not tasks_ or len(set(tasks_)) != len(tasks_) or not models or len(set(models)) != len(models):
+        raise ValueError("tasks and models must be non-empty and without duplicates")
+    for arm, n in reps:
+        if arm not in arms.ARMS or not isinstance(n, int) or n < 1:
+            raise ValueError(f"bad reps entry {(arm, n)!r}")
+    rng = random.Random(seed)
+    order = []
+    for task_id in tasks_:
+        for model in models:
+            block = [RunSpec(task_id, model, arm, rep) for arm, n in reps for rep in range(n)]
+            rng.shuffle(block)
+            order += block
+    return check_plan(order)
+
+
+def stage1_order(seed, dev_tasks=STAGE1_DEV_TASKS):
+    """Stage 1 (spec section 7): two development tasks x 3 arms x 2 models, one run each."""
+    return make_order(dev_tasks, MODELS, seed, STAGE1_REPS)
+
+
+def check_plan(plan):
+    out, seen = [], set()
+    for s in plan:
+        s = RunSpec(*s)
+        if not (isinstance(s.task_id, str) and _ID.fullmatch(s.task_id)):
+            raise ValueError(f"bad task id {s.task_id!r}")
+        if s.model not in MODELS:
+            raise ValueError(f"model {s.model!r} is not one of {MODELS}")
+        if s.arm not in arms.ARMS:
+            raise ValueError(f"arm {s.arm!r} is not one of {arms.ARMS}")
+        if isinstance(s.rep, bool) or not isinstance(s.rep, int) or s.rep < 0:
+            raise ValueError(f"rep must be an int >= 0, got {s.rep!r}")
+        rid = run_id(s)
+        if rid in seen:
+            raise ValueError(f"duplicate run spec {rid}")
+        seen.add(rid)
+        out.append(s)
+    if not out:
+        raise ValueError("empty plan")
+    return out
+
+
+def plan_sha256(plan):
+    """sha256 of the canonical JSON of the ordered spec list: [[task, model, arm, rep], ...]."""
+    canon = json.dumps([list(RunSpec(*s)) for s in plan], separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canon.encode()).hexdigest()
+
+
+def run_id(spec):
+    s = RunSpec(*spec)
+    return f"{s.task_id}.{s.model}.{s.arm}.{s.rep}"
+
+
+def _key(rid):
+    return hashlib.sha256(rid.encode()).hexdigest()[:12]
+
+
+def check_budget(budget):
+    b = Budget(*budget)
+    for field in b._fields:
+        nonnegative(getattr(b, field), field)
+    if b.cap_usd > TOTAL_CAP_USD:
+        raise ValueError(f"cap_usd {b.cap_usd} exceeds the study's ${TOTAL_CAP_USD:.0f} total")
+    if b.per_call_usd <= 0:
+        raise ValueError("per_call_usd must be > 0 (it is the call's --max-budget-usd)")
+    return b
+
+
+def admit(budget, spent):
+    """A call may start only when its worst case and the held reserve still fit under the cap."""
+    return spent + budget.reserve_usd + budget.per_call_usd <= budget.cap_usd
+
+
+def check_go(data, plan, budget):
+    """The operator's authorization, or Refused. Read only; the runner never writes GO.json."""
+    path = Path(data) / GO_FILE
+    if path.is_symlink() or not path.is_file():
+        raise Refused(f"{path} is missing (or not a regular file): spending needs the "
+                      f"operator's go (Task 10); the runner never creates it")
+    try:
+        go = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        raise Refused(f"{path} is unreadable: {e}")
+    if not isinstance(go, dict) or go.get("authorized_by") != "operator":
+        raise Refused(f"{path} is not authorized_by the operator")
+    cap = go.get("cap_usd")
+    if isinstance(cap, bool) or not isinstance(cap, (int, float)) or float(cap) != float(budget.cap_usd):
+        raise Refused(f"{path} authorizes cap_usd {cap!r}, the batch has {budget.cap_usd}")
+    if go.get("plan_sha256") != plan_sha256(plan):
+        raise Refused(f"{path} authorizes plan {go.get('plan_sha256')!r}, the batch's plan is "
+                      f"{plan_sha256(plan)}")
+    return go
+
+
+# --- journal -------------------------------------------------------------------------------------
+
+def _fsync_dir(d):
+    fd = os.open(d, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _append(path, obj):
+    path = Path(path)
+    new = not path.exists()
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(obj, allow_nan=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    if new:
+        _fsync_dir(path.parent)
+
+
+def _event(data, event, **fields):
+    _append(Path(data) / EVENTS, {"event": event, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                                  **fields})
+
+
+def make_row(spec, session, **fields):
+    s = RunSpec(*spec)
+    unknown = set(fields) - set(ROW_FIELDS)
+    if unknown:
+        raise ValueError(f"not row fields: {sorted(unknown)}")
+    row = dict.fromkeys(ROW_FIELDS)
+    row.update(runId=run_id(s), taskId=s.task_id, model=s.model, arm=s.arm, rep=s.rep,
+               sessionId=session)
+    row.update(fields)
+    if row["outcome"] not in OUTCOMES + (PENDING,):
+        raise ValueError(f"bad outcome {row['outcome']!r}")
+    return row
+
+
+def read_rows(data):
+    """Every journal row in order; a torn or foreign line raises (inspect before any spend)."""
+    path = Path(data) / ROWS
+    if not path.exists():
+        return []
+    rows = []
+    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            raise ValueError(f"{path}:{n}: torn or malformed journal line; inspect it before "
+                             f"any further spend")
+        if (not isinstance(row, dict) or set(row) != set(ROW_FIELDS)
+                or row["outcome"] not in OUTCOMES + (PENDING,)):
+            raise ValueError(f"{path}:{n}: not a runner row")
+        rows.append(row)
+    return rows
+
+
+def latest_rows(rows):
+    """{runId: its latest row}, in first-seen order."""
+    out = {}
+    for row in rows:
+        out[row["runId"]] = row
+    return out
+
+
+def spent_usd(rows, budget):
+    total = budget.spent_usd
+    for row in latest_rows(rows).values():
+        total += row["costUsd"] if row["costUsd"] is not None else budget.per_call_usd
+    return total
+
+
+def recover_pending(data):
+    """A pending latest row means the runner died around a CLI call: append unknown-spend."""
+    out = []
+    for row in latest_rows(read_rows(data)).values():
+        if row["outcome"] == PENDING:
+            fixed = dict(row, outcome="unknown-spend", costUsd=None)
+            _append(Path(data) / ROWS, fixed)
+            out.append(fixed)
+    return out
+
+
+def effective_effort(usage):
+    """The one effort the main transcript's counted assistant records carry, else None."""
+    efforts = (usage or {}).get("efforts")
+    if isinstance(efforts, list) and len(efforts) == 1 and isinstance(efforts[0], str) and efforts[0]:
+        return efforts[0]
+    return None
+
+
+def task_validity(rows):
+    """{"<task>|<model>": {valid, efforts, reason}} over the latest SCORED rows. Valid iff every
+    scored row of the task and model has the same non-empty effectiveEffort (an unknown effort
+    cannot be shown equal). Rows of other outcomes are not compared."""
+    groups = {}
+    for row in latest_rows(rows).values():
+        if row["outcome"] == "scored":
+            groups.setdefault((row["taskId"], row["model"]), []).append(row)
+    out = {}
+    for (task_id, model), rs in groups.items():
+        values = [r["effectiveEffort"] for r in rs]
+        ok = all(isinstance(v, str) and v for v in values) and len(set(values)) == 1
+        out[f"{task_id}|{model}"] = {
+            "taskId": task_id, "model": model, "valid": ok,
+            "efforts": {r["runId"]: r["effectiveEffort"] for r in rs},
+            "reason": None if ok else "effective effort differs or is unknown across the arms"}
+    return out
+
+
+# --- node: the vendored S5 readers ---------------------------------------------------------------
+
+_PLAN_LIMIT_JS = ("import {detectPlanLimit} from %s; import {readFileSync} from 'node:fs';"
+                  "console.log(JSON.stringify(detectPlanLimit(JSON.parse(readFileSync(0,'utf8')))));")
+_USAGE_JS = ("import {readRunUsage} from %s; import {readFileSync} from 'node:fs';"
+             "const a=JSON.parse(readFileSync(0,'utf8'));"
+             "console.log(JSON.stringify(readRunUsage(a.config,a.session)));")
+
+
+def _node(script, payload, timeout=120):
+    p = subprocess.run(["node", "--input-type=module", "-e", script], input=json.dumps(payload),
+                       capture_output=True, text=True, timeout=timeout)
+    if p.returncode:
+        raise RuntimeError(f"node failed (exit {p.returncode}): {p.stderr[-2000:]}")
+    return json.loads(p.stdout)
+
+
+def plan_limit(envelope=None, stdout="", stderr="", transcript=""):
+    """The vendored plan-limit.mjs verdict (a hit dict) or None. Never re-implemented here."""
+    return _node(_PLAN_LIMIT_JS % json.dumps(PLAN_LIMIT_MJS.as_uri()),
+                 {"envelope": envelope, "stdout": stdout, "stderr": stderr,
+                  "transcript": transcript})
+
+
+def run_usage(config, session):
+    """The vendored usage.mjs readRunUsage(config, session) (tokens, efforts, transcriptPath)."""
+    return _node(_USAGE_JS % json.dumps(USAGE_MJS.as_uri()),
+                 {"config": str(config), "session": session})
+
+
+# --- stream --------------------------------------------------------------------------------------
+
+def dedupe_tool_uses(lines):
+    """(lines, duplicates, shape_errors). A tool_use block whose id an earlier block had is dropped
+    (Task 6 carry: stream-json may repeat an assistant message); a block without a string id and
+    name and an object input is kept and reported. Unparseable lines are kept verbatim, so
+    integrity.check still reports them."""
+    seen, dups, errors, out = set(), 0, [], []
+    for n, line in enumerate(lines, 1):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            out.append(line)
+            continue
+        msg = rec.get("message") if isinstance(rec, dict) and rec.get("type") == "assistant" else None
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            out.append(line)
+            continue
+        kept = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                tid, name, inp = block.get("id"), block.get("name"), block.get("input")
+                if not (isinstance(tid, str) and tid and isinstance(name, str) and name
+                        and isinstance(inp, dict)):
+                    errors.append(f"line {n}: tool_use without a string id/name or object input")
+                elif tid in seen:
+                    dups += 1
+                    continue
+                else:
+                    seen.add(tid)
+            kept.append(block)
+        out.append(json.dumps(dict(rec, message=dict(msg, content=kept))))
+    return out, dups, errors
+
+
+def _records(lines):
+    out = []
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            out.append(rec)
+    return out
+
+
+def bash_commands(records):
+    """input.command of every Bash tool_use (ruling R6), subagent calls included."""
+    out = []
+    for rec in records:
+        msg = rec.get("message") if rec.get("type") == "assistant" else None
+        for block in (msg.get("content") if isinstance(msg, dict) else None) or []:
+            if (isinstance(block, dict) and block.get("type") == "tool_use"
+                    and block.get("name") == "Bash" and isinstance(block.get("input"), dict)
+                    and isinstance(block["input"].get("command"), str)):
+                out.append(block["input"]["command"])
+    return out
+
+
+def _result_record(records):
+    results = [r for r in records if r.get("type") == "result"]
+    return results[-1] if results else None
+
+
+def _cost(result):
+    if not isinstance(result, dict):
+        return None
+    try:
+        return nonnegative(result.get("total_cost_usd"), "total_cost_usd")
+    except ValueError:
+        return None
+
+
+# --- container inputs ----------------------------------------------------------------------------
+
+def cli_argv(args, per_call_usd):
+    """arms.arm_invocation's argv with stream-json output and the per-call cap; flags are looked
+    up before the `--` separator only, so the prompt can never be mistaken for one."""
+    args = list(args)
+    sep = args.index("--")
+    flags = args[:sep]
+    if "--effort" in flags:
+        raise ValueError("--effort in an arm argv: every arm runs at the CLI default effort")
+    if flags.count("--output-format") != 1 or flags.count("--max-budget-usd") != 1:
+        raise ValueError("expected exactly one --output-format and one --max-budget-usd")
+    i = flags.index("--output-format")
+    if flags[i + 1] != "json":
+        raise ValueError(f"expected arms' --output-format json, got {flags[i + 1]!r}")
+    flags[i:i + 2] = ["--output-format", "stream-json", "--verbose", "--include-hook-events"]
+    j = flags.index("--max-budget-usd")
+    flags[j + 1] = repr(float(nonnegative(per_call_usd, "per_call_usd")))
+    return flags + args[sep:]
+
+
+def url_host(url):
+    return urlsplit(url).hostname
+
+
+def study_urls(key, retrieval_urls):
+    """The codescout env URLs of run <key>: its own Qdrant plus the runner's dense/sparse."""
+    urls = dict(retrieval_urls)
+    urls.update(stack._urls("qdrant", f"sab-qdrant-{QDRANT_RUN_PREFIX}{key}"))
+    return urls
+
+
+def no_proxy(urls):
+    hosts = sorted({url_host(v) for v in urls.values()})
+    bad = [h for h in hosts if not (h and h.startswith(stack.STUDY_PREFIX))]
+    if bad:
+        raise ValueError(f"study URLs name non-study hosts: {bad}")
+    return ",".join(["127.0.0.1", "localhost", *hosts])
+
+
+def _check_token(token):
+    if not isinstance(token, str) or not token or any(c.isspace() for c in token):
+        raise ValueError("invalid token")
+    return token
+
+
+def env_file_text(spec, token, urls):
+    np = no_proxy(urls)
+    return (arms.env_file_lines(spec) + f"CLAUDE_CODE_OAUTH_TOKEN={_check_token(token)}\n"
+            f"HTTPS_PROXY=http://{PROXY}:{PROXY_PORT}\nNO_PROXY={np}\nno_proxy={np}\n")
+
+
+def read_token_file():
+    """The default token reader: SAB_TOKEN_FILE, mode 0600, a regular file (pilot's checks). There
+    is deliberately no default path: Task 10 names the account that pays."""
+    path = os.environ.get("SAB_TOKEN_FILE")
+    if not path:
+        raise Refused("SAB_TOKEN_FILE is not set; the operator names the token file at Task 10")
+    p = Path(path)
+    st = p.lstat()
+    if p.is_symlink() or not p.is_file() or st.st_mode & 0o077:
+        raise Refused(f"{p}: not a regular 0600 file")
+    return _check_token(p.read_text().strip())
+
+
+def is_excluded_path(name):
+    """True for a path under a .codescout/, .buddy/ or .superpowers/ directory at any depth."""
+    return any(part in PATCH_EXCLUDED_DIRS for part in PurePosixPath(name).parts[:-1])
+
+
+def extract_patch(git, base):
+    """(patch, edited, excluded) of the work tree against `base`; `git(*args) -> stdout`.
+
+    pilot.extract_patch's `git add -A; git diff --cached --binary <base>` with PATCH_PATHSPEC, so
+    tool session state never enters a patch (R2-F3); `excluded` lists what was left out."""
+    git("add", "-A")
+    changed = [n for n in git("diff", "--cached", "--name-only", "-z", base).split("\0") if n]
+    edited = [n for n in git("diff", "--cached", "--name-only", "-z", base, "--",
+                             *PATCH_PATHSPEC).split("\0") if n]
+    patch = git("diff", "--cached", "--binary", base, "--", *PATCH_PATHSPEC)
+    kept = set(edited)
+    excluded = [n for n in changed if n not in kept]
+    if any(is_excluded_path(n) for n in edited) or not all(is_excluded_path(n) for n in excluded):
+        raise RuntimeError(f"pathspec and path rule disagree: edited {edited}, excluded {excluded}")
+    return patch, edited, excluded
+
+
+def render_proxy_config(template, subnets, allowlist=(ALLOWED_HOST,)):
+    """Python port of S5 proxy.mjs renderProxyConfig (claude-plugins 223b56abe,
+    effort-steering/spikes/s5/proxy.mjs:92-124), allowlist mode, over the vendored template."""
+    if not subnets or not all(isinstance(s, str) and _SUBNET.fullmatch(s) for s in subnets):
+        raise ValueError(f"proxy subnets must be IPv4 CIDRs, got {subnets!r}")
+    if not allowlist or not all(isinstance(h, str) and _HOST.fullmatch(h) for h in allowlist):
+        raise ValueError(f"proxy allowlist must be plain lower-case host names: {allowlist!r}")
+    filt = "".join(f"^{h.replace('.', chr(92) + '.')}$\n" for h in dict.fromkeys(allowlist))
+    filter_lines = ["FilterDefaultDeny Yes", "FilterType ere", "FilterURLs Off",
+                    "FilterCaseSensitive Off", f'Filter "{PROXY_CONF_MOUNT}/filter"']
+    out, seen = [], {"allow": 0, "filter": 0}
+    for line in template.split("\n"):
+        if line == "@@ALLOW@@":
+            seen["allow"] += 1
+            out += [f"Allow {s}" for s in subnets]
+        elif line == "@@FILTER@@":
+            seen["filter"] += 1
+            out += filter_lines
+        else:
+            out.append(line)
+    if seen != {"allow": 1, "filter": 1}:
+        raise ValueError(f"template must hold one @@ALLOW@@ and one @@FILTER@@ line: {seen}")
+    return "\n".join(out), filt
+
+
+# Fail-closed egress probe (pilot.start_proxy), from a named sab- container on the run network.
+NET_PROBE_PY = f'''import socket
+for host, expected in [("github.com",b"403"),("huggingface.co",b"403"),("{ALLOWED_HOST}",b"200")]:
+    s=socket.create_connection(("{PROXY}",{PROXY_PORT}),10)
+    s.sendall(("CONNECT "+host+":443 HTTP/1.1\\r\\nHost: "+host+":443\\r\\n\\r\\n").encode())
+    assert expected in s.recv(4096), host
+    s.close()
+s=socket.socket();s.settimeout(3)
+assert s.connect_ex(("1.1.1.1",443)) != 0
+'''
+
+
+# --- ownership -----------------------------------------------------------------------------------
+
+class Owned:
+    """The ledger of objects this runner created: claimed before creation, removed by exact name."""
+
+    def __init__(self, data, docker):
+        self.path = Path(data) / OWNED
+        self.docker = docker
+
+    def entries(self):
+        if not self.path.exists():
+            return []
+        return [json.loads(l) for l in self.path.read_text().splitlines() if l.strip()]
+
+    def live(self):
+        """[(kind, name)] claimed and not yet removed, latest claim last."""
+        state = {}
+        for e in self.entries():
+            state[(e["kind"], e["name"])] = e["event"]
+        return [k for k, v in state.items() if v == "claim"]
+
+    def exists(self, kind, name):
+        if kind == "container":
+            return name in self.docker("ps", "-a", "--format", "{{.Names}}").stdout.split()
+        if kind in ("volume", "network"):
+            return self.docker(kind, "inspect", name, check=False).returncode == 0
+        raise ValueError(kind)
+
+    def claim(self, kind, name):
+        if not name.startswith(stack.STUDY_PREFIX):
+            raise ValueError(f"{name}: the runner creates only sab- objects")
+        if self.exists(kind, name):
+            raise Refused(f"{kind} {name} already exists and this runner's ledger does not hold "
+                          f"it as live: never adopted, never removed")
+        _append(self.path, {"event": "claim", "kind": kind, "name": name})
+
+    def removed(self, kind, name):
+        _append(self.path, {"event": "removed", "kind": kind, "name": name})
+
+    def release(self, kind, name):
+        if (kind, name) not in self.live():
+            raise RuntimeError(f"{kind} {name} is not owned by this runner")
+        if kind == "network":
+            if self.exists("network", name):
+                self.docker("network", "rm", name)
+        elif kind == "container":
+            stack._remove_exact(self.docker, containers=[name])
+        else:
+            stack._remove_exact(self.docker, volumes=[name])
+        self.removed(kind, name)
+
+    def cleanup(self):
+        """Remove every live ledger object: containers, then volumes, then networks."""
+        errors = []
+        live = self.live()
+        for kind in ("container", "volume", "network"):
+            for k, name in reversed(live):
+                if k == kind:
+                    try:
+                        self.release(kind, name)
+                    except Exception as e:  # keep going; report every leftover
+                        errors.append(f"{kind} {name}: {e}")
+        if errors:
+            raise RuntimeError("cleanup left objects behind: " + "; ".join(errors))
+
+
+# --- tasks ---------------------------------------------------------------------------------------
+
+def load_task_from_bundle(task_id, tasks_root=None, *, inspect=None, grader_for=None):
+    """A task's TaskInfo from its bundle.json. The image is tasks.bundle_run_image's (the verified
+    exec-only arm image, Task 7 carry); the grader runs on that same image."""
+    root = Path(tasks_root) if tasks_root is not None else tasks.DATA / "tasks"
+    bundle_json = root / task_id / "bundle.json"
+    image = tasks.bundle_run_image(bundle_json, inspect or tasks._inspect_image)
+    rec = json.loads(bundle_json.read_text())
+    if rec.get("kind") == "private":
+        prompt = Path(rec["out"]) / "s5" / "tasks" / task_id / "prompt.txt"
+    elif rec.get("kind") == "foreign":
+        prompt = Path(rec["out"]) / "prompt.txt"
+    else:
+        raise RuntimeError(f"{bundle_json}: unknown kind {rec.get('kind')!r}")
+    template = rec.get("template") or ""
+    if not template.startswith(stack.TEMPLATE_PREFIX):
+        raise RuntimeError(f"{bundle_json}: no Qdrant template recorded")
+    make = grader_for or tasks.grader_for
+    return TaskInfo(image, prompt.read_text(), template, lambda gdir: make(rec, image, gdir))
+
+
+def docker_exec_cli(container, argv, timeout):
+    """(stdout, stderr, exit code or None on timeout) of the CLI in the agent container."""
+    try:
+        p = subprocess.run(["docker", "exec", "-w", tasks.WORKDIR, container, *argv],
+                           capture_output=True, text=True, timeout=timeout)
+        return p.stdout, p.stderr, p.returncode
+    except subprocess.TimeoutExpired as e:
+        text = lambda b: b.decode(errors="replace") if isinstance(b, bytes) else (b or "")
+        return text(e.stdout), text(e.stderr), None
+
+
+def _redact_tree(root, token):
+    """Replace the token in every regular file under `root` (symlinks are never followed)."""
+    if not token:
+        return
+    needle = token.encode()
+    for path in Path(root).rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        raw = path.read_bytes()
+        if needle in raw:
+            path.write_bytes(raw.replace(needle, b"[REDACTED]"))
+
+
+# --- infrastructure ------------------------------------------------------------------------------
+
+def _infra_up(docker, owned, data, manifest, need_retrieval):
+    """The run network (internal), the egress proxy (api.anthropic.com only, probed fail-closed)
+    and, for cs/full, the runner's own dense and sparse embedders. Returns (urls, record)."""
+    owned.claim("network", NET)
+    docker("network", "create", "--internal", "--label", "sab.owner=setup-ab-run", NET)
+    stack._require_internal(docker, NET)
+    subnets = docker("network", "inspect", "-f", "{{range .IPAM.Config}}{{.Subnet}} {{end}}",
+                     NET).stdout.split()
+    conf, filt = render_proxy_config(PROXY_TEMPLATE.read_text(), subnets)
+    pdir = Path(data) / "proxy"
+    pdir.mkdir(exist_ok=True)
+    (pdir / "tinyproxy.conf").write_text(conf)
+    (pdir / "filter").write_text(filt)
+    record = {"network": NET, "subnets": subnets, "proxy": PROXY,
+              "proxy_image_id": docker("image", "inspect", PROXY_IMAGE, "--format",
+                                       "{{.Id}}").stdout.strip()}
+    owned.claim("container", PROXY)
+    docker("run", "-d", "--name", PROXY, "--network", NET, "--read-only", "--cap-drop", "ALL",
+           "--security-opt", "no-new-privileges", "-v", f"{pdir}:{PROXY_CONF_MOUNT}:ro",
+           PROXY_IMAGE)
+    docker("network", "connect", "bridge", PROXY)
+    owned.claim("container", NETPROBE)
+    probe = docker("run", "--rm", "--name", NETPROBE, "--network", NET, "--cap-drop", "ALL",
+                   "--security-opt", "no-new-privileges", PROBE_IMAGE, "python", "-c",
+                   NET_PROBE_PY, check=False, timeout=120)
+    if probe.returncode:
+        raise RuntimeError(f"egress probe failed: {probe.stdout[-2000:]}")
+    urls = {}
+    if need_retrieval:
+        retrieval = manifest["retrieval"]
+        if retrieval.get("reranker"):
+            raise RuntimeError("manifest marks a reranker present; the study has no copy of it")
+        if not retrieval.get("qdrant"):
+            raise RuntimeError("manifest marks no Qdrant; cs/full cannot run as in daily use")
+        services = [s for s in ("dense", "sparse") if retrieval.get(s)]
+        if "sparse" in services and docker("volume", "inspect", stack.MODEL_CACHE,
+                                           check=False).returncode:
+            raise RuntimeError(f"{stack.MODEL_CACHE} is missing; prepare creates it")
+        names = {"dense": DENSE, "sparse": SPARSE}
+        builders = {"dense": stack._dense_args, "sparse": stack._sparse_args}
+        for s in services:
+            args = builders[s]()
+            args[args.index("--name") + 1] = names[s]
+            owned.claim("container", names[s])
+            docker("run", "-d", "--network", NET, *args)
+            urls.update(stack._urls(s, names[s]))
+        stack.wait_ready({names[s]: stack.PROBES[s] for s in services}, docker=docker)
+    record["retrieval_urls"] = urls
+    (Path(data) / "infra.json").write_text(json.dumps(record, indent=2) + "\n")
+    return urls, record
+
+
+# --- one run -------------------------------------------------------------------------------------
+
+def _run_one(ctx, spec):
+    """Run one spec; returns (final row, stop reason or None). Raises after recording
+    unknown-spend (or infra-other with a known cost) when anything fails after the pending row."""
+    rid = run_id(spec)
+    key = _key(rid)
+    qrun = QDRANT_RUN_PREFIX + key
+    name = AGENT_PREFIX + key
+    info = ctx.load_task(spec.task_id)
+    run_dir = ctx.data / "runs" / rid
+    run_dir.mkdir(parents=True)  # exists -> raise: a run dir is never reused
+    session = str(uuid.uuid4())
+    urls = study_urls(key, ctx.retrieval_urls)
+    record = {"runId": rid, "spec": list(spec), "image": info.image, "sessionId": session,
+              "container": name, "qdrant_run": qrun if spec.arm != "bare" else None}
+    rows_path = ctx.data / ROWS
+    state = {"pending": False, "cost": None, "cli": False}
+    docker = ctx.docker
+    patch = edited = excluded = None
+    try:
+        if spec.arm != "bare":
+            volume = stack.RUN_VOLUME_PREFIX + qrun
+            for kind, n in (("volume", volume), ("container", stack.COPY_HELPER_PREFIX + volume),
+                            ("container", f"sab-qdrant-{qrun}")):
+                ctx.owned.claim(kind, n)
+            got = stack.qdrant_for_run(info.template, qrun, network=NET, docker=docker)
+            if got != urls["CODESCOUT_QDRANT_URL"]:
+                raise RuntimeError(f"per-run Qdrant URL {got} != {urls['CODESCOUT_QDRANT_URL']}")
+        arm_spec = arms.arm_invocation(spec.arm, spec.model, info.prompt, ctx.manifest, urls,
+                                       run_dir, session_id=session)
+        argv = cli_argv(arm_spec.cli_args, ctx.budget.per_call_usd)
+        record["argv_flags"] = argv[:argv.index("--")]
+        env_file = run_dir / "private.env"
+        fd = os.open(env_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(env_file_text(arm_spec, ctx.token, urls))
+        ctx.owned.claim("container", name)
+        try:
+            docker(*arms.docker_run_args(name, info.image, NET, arm_spec, env_file))
+        finally:
+            env_file.unlink(missing_ok=True)
+        uid = docker("exec", name, "id", "-u").stdout.strip()
+        if uid != AGENT_UID:
+            raise RuntimeError(f"agent container runs as uid {uid!r}, not {AGENT_UID}; the CLI "
+                               f"is not started")
+        base = docker("exec", "-w", tasks.WORKDIR, name, "git", "rev-parse", "HEAD").stdout.strip()
+        _append(rows_path, make_row(spec, session, outcome=PENDING))
+        state["pending"] = True
+        started = ctx.clock()
+        stdout, stderr, rc = ctx.exec_cli(name, argv, ctx.timeout)
+        state["cli"] = True
+        wall = round((ctx.clock() - started) * 1000)
+        stdout = (stdout or "").replace(ctx.token, "[REDACTED]")
+        stderr = (stderr or "").replace(ctx.token, "[REDACTED]")
+        (run_dir / "stream.jsonl").write_text(stdout)
+        (run_dir / "stderr.txt").write_text(stderr)
+        oom = docker("inspect", "-f", "{{.State.OOMKilled}}", name,
+                     check=False).stdout.strip() == "true"
+        lines, dups, shape_errors = dedupe_tool_uses(stdout.splitlines())
+        (run_dir / "stream.dedup.jsonl").write_text("".join(l + "\n" for l in lines))
+        records = _records(lines)
+        result = _result_record(records)
+        cost = _cost(result)
+        state["cost"] = cost
+        verdict = integrity.check(spec.arm, run_dir / "stream.dedup.jsonl",
+                                  result if result is not None else {})
+        integ = dict(verdict._asdict(), duplicateToolUses=dups, toolUseShapeErrors=shape_errors)
+        if shape_errors:
+            integ["ok"] = False
+            integ["reasons"] = list(verdict.reasons) + [f"malformed tool_use ({e})"
+                                                        for e in shape_errors]
+        pilot.safe_config_files(run_dir / "config")  # no symlink is followed into the host
+        usage = run_usage(run_dir / "config", session)
+        transcript = (Path(usage["transcriptPath"]).read_text(errors="replace")
+                      if usage.get("transcriptPath") else "")
+        hit = plan_limit(envelope=result, stdout=stdout, stderr=stderr, transcript=transcript)
+        calls = list(integrity._tool_uses(records))
+        outcome, stop, why = None, None, None
+        if hit:
+            outcome, stop = "plan-limit", "plan-limit"
+        elif oom:
+            outcome, stop = "infra-oom", ("missing cost" if cost is None else None)
+        elif result is None:
+            outcome, stop = "infra-other", "missing cost"
+            why = "timeout" if rc is None else f"no result record (exit {rc})"
+        elif cost is None:
+            outcome, stop, why = "infra-other", "missing cost", "result has no usable total_cost_usd"
+        elif result.get("is_error") and integrity._did_no_model_work(result, calls):
+            outcome, stop = "infra-other", "no model work"
+            why = "is_error with zero api time, tokens, cost and calls (credential or infra)"
+        elif not integ["ok"]:
+            outcome = "invalid-arm"
+        if outcome in (None, "invalid-arm"):
+            git = lambda *a: docker("exec", "-w", tasks.WORKDIR, name, "git", *a).stdout
+            patch, edited, excluded = extract_patch(git, base)
+            (run_dir / "agent.patch").write_text(patch)
+        fields = dict(costUsd=cost, wallMs=wall,
+                      numTurns=result.get("num_turns") if result else None, usage=usage,
+                      effectiveEffort=effective_effort(usage), integrity=integ,
+                      bashCommands=bash_commands(records), editedFiles=edited,
+                      inputTokens=usage["total"]["input_total"] if usage.get("reason") is None else None,
+                      outputTokens=usage["total"]["output"] if usage.get("reason") is None else None)
+        record.update(exitCode=rc, oomKilled=oom, planLimit=hit, why=why, patchExcluded=excluded)
+    except BaseException as e:
+        if state["pending"]:
+            final = ("infra-other", state["cost"]) if state["cost"] is not None else ("unknown-spend", None)
+            _append(rows_path, make_row(spec, session, outcome=final[0], costUsd=final[1]))
+            record.update(outcome=final[0], error=f"{type(e).__name__}: {e}")
+        else:
+            record.update(outcome=None, error=f"{type(e).__name__}: {e} (before the CLI call)")
+        _write_record(run_dir, record)
+        raise
+    finally:
+        _teardown_run(ctx, name, qrun, spec.arm != "bare")
+        _redact_tree(run_dir, ctx.token)
+    grade = None
+    if outcome is None:
+        try:
+            grade = info.grader(run_dir / "grades")(patch, rid)
+        except Exception as e:
+            outcome, stop, why = "infra-other", "grader error", f"{type(e).__name__}: {e}"
+        else:
+            if grade.get("oom_killed"):
+                outcome = "infra-oom"
+            elif grade.get("infra"):
+                outcome = "infra-other"
+            else:
+                outcome = "scored"
+    row = make_row(spec, session, outcome=outcome, grade=grade if outcome == "scored" else None,
+                   **fields)
+    _append(rows_path, row)
+    record.update(outcome=outcome, stop=stop, why=why, graderResult=grade)
+    _write_record(run_dir, record)
+    return row, stop
+
+
+def _write_record(run_dir, record):
+    (run_dir / "run-record.json").write_text(json.dumps(record, indent=2, default=str) + "\n")
+
+
+def _teardown_run(ctx, name, qrun, has_qdrant):
+    """The run's agent container and Qdrant objects, by exact name, through the ledger."""
+    live = set(ctx.owned.live())
+    if ("container", name) in live:
+        ctx.owned.release("container", name)
+    if has_qdrant:
+        volume = stack.RUN_VOLUME_PREFIX + qrun
+        objs = [("container", f"sab-qdrant-{qrun}"),
+                ("container", stack.COPY_HELPER_PREFIX + volume), ("volume", volume)]
+        if any(o in live for o in objs):
+            stack.run_down(qrun, docker=ctx.docker)
+            for o in objs:
+                if o in live:
+                    ctx.owned.removed(*o)
+
+
+# --- the batch -----------------------------------------------------------------------------------
+
+def _check_cli(manifest):
+    cli = manifest["cli"]
+    got = hashlib.sha256(Path(cli["path"]).read_bytes()).hexdigest()
+    if got != cli["sha256"]:
+        raise Refused(f"CLI {cli['path']} changed after freeze ({got} != {cli['sha256']})")
+
+
+def _dry_run(plan, budget, data):
+    data.mkdir(parents=True, exist_ok=True)
+    out = {"dry_run": True, "count": len(plan), "plan_sha256": plan_sha256(plan),
+           "specs": [list(s) for s in plan],
+           "run_ids": [run_id(s) for s in plan], "budget": budget._asdict(),
+           "worst_case_usd": round(len(plan) * budget.per_call_usd, 6),
+           "first_call_admitted": admit(budget, budget.spent_usd),
+           "go_file": str(data / GO_FILE),
+           "note": "no docker object, CLI call or token was touched"}
+    (data / "dry-run.json").write_text(json.dumps(out, indent=2) + "\n")
+    return out
+
+
+def run_batch(plan, budget, data, dry_run, *, docker=None, exec_cli=None, load_task=None,
+              manifest=None, token_reader=None, clock=time.monotonic, timeout=RUN_TIMEOUT_S):
+    """Run `plan` in order, one spec at a time. Keyword-only additions to the brief's signature
+    are the injection points for tests (fake docker, fake CLI) and the frozen manifest
+    (default `<data>/setup-manifest.json`)."""
+    plan = check_plan(plan)
+    budget = check_budget(budget)
+    data = Path(data)
+    if dry_run:
+        _dry_run(plan, budget, data)
+        return None
+    check_go(data, plan, budget)  # before any side effect
+    docker = docker or pilot.docker
+    exec_cli = exec_cli or docker_exec_cli
+    load_task = load_task or load_task_from_bundle
+    token_reader = token_reader or read_token_file
+    if manifest is None:
+        manifest = json.loads((data / "setup-manifest.json").read_text())
+    _check_cli(manifest)
+    try:
+        lock = os.open(data / LOCK, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        raise Refused(f"{data / LOCK} exists: another batch runs, or one died; check before "
+                      f"removing it")
+    os.write(lock, f"{os.getpid()}\n".encode())
+    os.close(lock)
+    stop = None
+    try:
+        _event(data, "start", plan_sha256=plan_sha256(plan), budget=budget._asdict(),
+               count=len(plan))
+        for row in recover_pending(data):
+            _event(data, "recovered", runId=row["runId"], outcome="unknown-spend")
+        owned = Owned(data, docker)
+        owned.cleanup()  # leftovers of an earlier batch of THIS runner (ledger-live names only)
+        ctx = None
+        try:
+            for spec in plan:
+                rid = run_id(spec)
+                rows = read_rows(data)
+                if rid in latest_rows(rows):
+                    _event(data, "skip", runId=rid, reason="journaled; no automatic retry")
+                    continue
+                spent = spent_usd(rows, budget)
+                if not admit(budget, spent):
+                    stop = "admission"
+                    _event(data, "refused", runId=rid, spent=spent)
+                    break
+                if ctx is None:
+                    token = _check_token(token_reader())
+                    urls, _ = _infra_up(docker, owned, data, manifest,
+                                        any(s.arm != "bare" for s in plan))
+                    ctx = _Ctx(docker, exec_cli, load_task, manifest, token, data, budget, owned,
+                               urls, timeout, clock)
+                row, stop = _run_one(ctx, spec)
+                _event(data, "row", runId=rid, outcome=row["outcome"], costUsd=row["costUsd"])
+                validity = task_validity(read_rows(data))
+                (data / VALIDITY).write_text(json.dumps(validity, indent=2) + "\n")
+                v = validity.get(f"{spec.task_id}|{spec.model}")
+                if stop is None and v is not None and not v["valid"]:
+                    stop = "effort mismatch"
+                if stop:
+                    break
+        except BaseException as e:
+            stop = f"error: {type(e).__name__}: {e}"
+            raise
+        finally:
+            try:
+                owned.cleanup()
+            finally:
+                _event(data, "stop", reason=stop or "plan complete",
+                       spent=spent_usd(read_rows(data), budget))
+    finally:
+        (data / LOCK).unlink(missing_ok=True)
+    return None
+
+
+class _Ctx(NamedTuple):
+    docker: Callable
+    exec_cli: Callable
+    load_task: Callable
+    manifest: dict
+    token: str
+    data: Path
+    budget: Budget
+    owned: Owned
+    retrieval_urls: dict
+    timeout: float
+    clock: Callable
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    sub = p.add_subparsers(dest="action", required=True)
+    d = sub.add_parser("dry-run", help="the Stage 1 order; no docker, no CLI, no token")
+    d.add_argument("--seed", type=int, required=True)
+    d.add_argument("--tasks", nargs="*", default=list(STAGE1_DEV_TASKS))
+    d.add_argument("--data", type=Path, default=tasks.DATA / "stage1-dry-run")
+    d.add_argument("--cap", type=float, default=STAGE1_CAP_USD)
+    d.add_argument("--per-call", type=float, default=float(arms.MAX_BUDGET_USD))
+    d.add_argument("--reserve", type=float, default=None)
+    r = sub.add_parser("run", help="spend: refused without <data>/GO.json")
+    r.add_argument("--plan", type=Path, required=True, help="JSON [[task, model, arm, rep], ...]")
+    r.add_argument("--data", type=Path, required=True)
+    for flag in ("--cap", "--spent", "--per-call", "--reserve"):
+        r.add_argument(flag, type=float, required=True)
+    a = p.parse_args(argv)
+    if a.action == "dry-run":
+        plan = make_order(a.tasks, MODELS, a.seed, STAGE1_REPS)
+        budget = Budget(a.cap, 0.0, a.per_call, a.per_call if a.reserve is None else a.reserve)
+        run_batch(plan, budget, a.data, dry_run=True)
+        print(json.dumps(json.loads((a.data / "dry-run.json").read_text()), indent=2))
+    else:
+        plan = [RunSpec(*s) for s in json.loads(a.plan.read_text())]
+        run_batch(plan, Budget(a.cap, a.spent, a.per_call, a.reserve), a.data, dry_run=False)
+
+
+if __name__ == "__main__":
+    main()

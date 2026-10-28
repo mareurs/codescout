@@ -1,0 +1,32 @@
+# tinyproxy.conf.tmpl — the proxy's configuration, rendered by proxy.mjs (renderProxyConfig).
+#
+# Two placeholders, each replaced by whole lines (or nothing):
+#   @@ALLOW@@   one `Allow <subnet>` line per subnet of the s5-internal network
+#   @@FILTER@@  allowlist mode: the filter lines (default deny + the filter file)
+#               log-all mode:   nothing, so every host passes (pilot discovery only)
+#
+# Facts this file relies on (tinyproxy 1.11, checked by images.test.mjs, not assumed):
+#   * the filter is matched against the host name of the request, before DNS, so a refused host
+#     is never resolved or contacted;
+#   * with FilterDefaultDeny Yes a host that matches no pattern is refused with 403.
+
+Port 8888
+Listen 0.0.0.0
+# Idle seconds before a tunnel is closed. A long model turn can be quiet for minutes.
+Timeout 1800
+MaxClients 256
+DisableViaHeader Yes
+
+# Info logs one line per request, which names the CONNECT host (`proxyLog` returns it).
+LogLevel Info
+
+# Who may use the proxy: the proxy's own container (the readiness probe) and the s5-internal
+# subnet. The proxy is also attached to the default bridge, where other containers can reach it;
+# without an Allow list for them they get 403.
+Allow 127.0.0.1
+@@ALLOW@@
+
+# CONNECT only to 443: an allowed host is not a way to reach another port on it.
+ConnectPort 443
+
+@@FILTER@@
