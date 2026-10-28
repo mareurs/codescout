@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import run
 
@@ -40,6 +41,8 @@ class World:
         self.uid = uid
         self.changed = ["src/lib.rs", ".codescout/usage.db", "crates/x/.buddy/state.json"]
         self.started = []  # (name, image, argv) of every `docker run`
+        self.fail_rm = set()  # container names whose `rm -f` fails
+        self.killed = []
 
     def __call__(self, *args, check=True, timeout=None, data=None):
         a = [str(x) for x in args]
@@ -91,8 +94,14 @@ class World:
                 self.containers[name] = {"mounts": mounts, "oom": False, "env": env,
                                          "image": image}
         elif a[:2] == ["rm", "-f"]:
-            for n in a[2:]:
-                self.containers.pop(n, None)
+            if any(n in self.fail_rm for n in a[2:]):
+                rc = 1
+            else:
+                for n in a[2:]:
+                    self.containers.pop(n, None)
+        elif a[0] == "kill":
+            self.killed.append(a[-1])
+            rc = 0 if a[-1] in self.containers else 1
         elif a[0] == "exec":
             i = 1
             while a[i].startswith("-"):
@@ -265,14 +274,27 @@ class RunnerCase(unittest.TestCase):
         return run.TaskInfo(image=f"sab-arm-{task_id}:t", prompt="Fix the bug.\n",
                             template=f"sab-tpl-{task_id}", grader=self.grader)
 
-    def go(self, plan, cap, **override):
-        body = {"cap_usd": cap, "plan_sha256": run.plan_sha256(plan), "authorized_by": "operator"}
+    def go(self, plan, budget, acks=(), **override):
+        """Play the operator: write GO.json for `plan` and `budget` (a Budget)."""
+        body = {"cap_usd": budget.cap_usd, "per_call_usd": budget.per_call_usd,
+                "reserve_usd": budget.reserve_usd, "plan_sha256": run.plan_sha256(plan),
+                "authorized_by": "operator", "acknowledged_stops": list(acks)}
         body.update(override)
         (self.data / "GO.json").write_text(json.dumps(body) + "\n")
 
+    def ack_last_stop(self, plan, budget):
+        """Play the operator after inspecting a stop: acknowledge the latched stop id."""
+        latched = run.last_stop(run.read_events(self.data))
+        self.go(plan, budget, acks=[latched[0]] if latched else [])
+        return latched
+
+    def spent(self, budget=None):
+        return run.spent_usd(run.read_rows(self.data), budget or BUDGET,
+                             run.read_events(self.data))
+
     def batch(self, plan, budget, cli=None, go=True, **kw):
         if go:
-            self.go(plan, budget.cap_usd)
+            self.go(plan, budget)
         cli = cli or FakeCLI(self.world, self.data)
         kwargs = dict(docker=self.world, exec_cli=cli, load_task=self.load,
                       manifest=self.manifest, token_reader=lambda: TOKEN)
@@ -347,21 +369,21 @@ class GoGuardTest(RunnerCase):
 
     def test_refused_on_cap_mismatch(self):
         plan = [spec()]
-        self.go(plan, 30.0)
+        self.go(plan, BUDGET._replace(cap_usd=30.0))
         self.assertRefused(plan, BUDGET)
 
     def test_refused_on_plan_hash_mismatch(self):
-        self.go([spec(rep=1)], BUDGET.cap_usd)
+        self.go([spec(rep=1)], BUDGET)
         self.assertRefused([spec()], BUDGET)
 
     def test_refused_unless_authorized_by_the_operator(self):
         plan = [spec()]
-        self.go(plan, BUDGET.cap_usd, authorized_by="controller")
+        self.go(plan, BUDGET, authorized_by="controller")
         self.assertRefused(plan, BUDGET)
 
     def test_refused_on_a_symlinked_or_malformed_file(self):
         plan = [spec()]
-        self.go(plan, BUDGET.cap_usd)
+        self.go(plan, BUDGET)
         real = self.tmp / "elsewhere.json"
         (self.data / "GO.json").rename(real)
         (self.data / "GO.json").symlink_to(real)
@@ -376,10 +398,20 @@ class GoGuardTest(RunnerCase):
         self.assertEqual(self.latest()[run.run_id(spec())]["outcome"], "scored")
 
     def test_the_runner_never_writes_the_go_file(self):
-        plan = run.stage1_order(seed=7)
-        run.run_batch(plan, BUDGET, self.data, dry_run=True)
-        self.assertFalse((self.data / "GO.json").exists())
-        self.assertNotIn("GO_FILE).write", Path(run.__file__).read_text())
+        # Behavioral (fix round 1, M4/M7): a full fake batch over all three arms leaves GO.json's
+        # bytes and mtime as the operator wrote them and creates no other GO* file.
+        plan = [spec(arm="bare"), spec(arm="cs"), spec(arm="full")]
+        self.go(plan, BUDGET)
+        go = self.data / "GO.json"
+        before = (go.read_bytes(), go.stat().st_mtime_ns)
+        self.batch(plan, BUDGET, go=False)
+        self.assertEqual({r["outcome"] for r in self.latest().values()}, {"scored"})
+        self.assertEqual((go.read_bytes(), go.stat().st_mtime_ns), before)
+        self.assertEqual(sorted(p.name for p in self.data.rglob("*")
+                                if p.name.upper().startswith("GO")), ["GO.json"])
+        dry = self.tmp / "dry"
+        run.run_batch(run.stage1_order(seed=7), BUDGET, dry, dry_run=True)
+        self.assertEqual([p.name for p in dry.iterdir()], ["dry-run.json"])
 
 
 class PlanLimitTest(RunnerCase):
@@ -437,7 +469,7 @@ class InfraOutcomeTest(RunnerCase):
                 self.assertIsNone(row["grade"])
                 self.assertEqual(len(cli.calls), 1)  # missing cost stops the batch
                 self.assertEqual(self.events()[-1]["reason"], "missing cost")
-                self.assertEqual(run.spent_usd(run.read_rows(self.data), BUDGET), 1.25)
+                self.assertEqual(self.spent(), 1.25)
                 record = json.loads((self.data / "runs" / run.run_id(plan[0]) /
                                      "run-record.json").read_text())
                 self.assertEqual(record["why"], "timeout" if "timeout" in case
@@ -464,7 +496,7 @@ class InvalidArmTest(RunnerCase):
         self.assertEqual(self.grader.calls, [])
         self.assertFalse(row["integrity"]["ok"])
         self.assertIn("cs arm made zero codescout calls", row["integrity"]["reasons"])
-        self.assertEqual(run.spent_usd(run.read_rows(self.data), BUDGET), 0.5)
+        self.assertEqual(self.spent(), 0.5)
 
     def test_duplicate_tool_use_blocks_count_once(self):
         cli = FakeCLI(self.world, self.data, lambda arm, n: {"dup": True})
@@ -539,7 +571,9 @@ class NoRetryTest(RunnerCase):
                 plan = [spec()]
                 self.batch(plan, BUDGET, cli=cli)
                 self.assertEqual(self.latest()[run.run_id(plan[0])]["outcome"], outcome)
-                self.batch(plan, BUDGET, cli=cli)  # the same plan again: nothing re-runs
+                # The same plan again (after the operator acknowledged any stop): nothing re-runs.
+                self.ack_last_stop(plan, BUDGET)
+                self.batch(plan, BUDGET, cli=cli, go=False)
                 self.assertEqual(len(cli.calls), 1)
                 self.assertEqual(len(run.read_rows(self.data)), 2)  # pending + final
                 self.assertIn("skip", [e["event"] for e in self.events()])
@@ -564,7 +598,7 @@ class PendingTest(RunnerCase):
         # The interruption leaves `unknown-spend`, never a silent gap, and it is charged.
         row = self.latest()[run.run_id(spec())]
         self.assertEqual(row["outcome"], "unknown-spend")
-        self.assertEqual(run.spent_usd(run.read_rows(self.data), BUDGET), 1.25)
+        self.assertEqual(self.spent(), 1.25)
         self.assertEqual(self.world.runner_objects(), (set(), set(), set()))
 
     def test_pending_rows_left_by_a_killed_runner_become_unknown_spend_at_start(self):
@@ -580,7 +614,7 @@ class PendingTest(RunnerCase):
         self.assertIsNone(rows[run.run_id(plan[0])]["costUsd"])
         self.assertEqual(len(cli.calls), 1)
         self.assertEqual(cli.calls[0][1][cli.calls[0][1].index("--session-id") + 1] != "s-1", True)
-        self.assertEqual(run.spent_usd(run.read_rows(self.data), budget), 1.25 + 0.5)
+        self.assertEqual(self.spent(budget), 1.25 + 0.5)
 
 
 class CleanupTest(RunnerCase):
@@ -724,7 +758,7 @@ class ContainerTest(RunnerCase):
         cli = cli or FakeCLI(world, self.data)
         self.last_cli = cli
         if go:
-            self.go(plan, budget.cap_usd)
+            self.go(plan, budget)
         kwargs = dict(docker=spy, exec_cli=cli, load_task=self.load, manifest=self.manifest,
                       token_reader=lambda: TOKEN)
         kwargs.update(kw)
@@ -783,8 +817,10 @@ class RowTest(RunnerCase):
         brief = ["runId", "taskId", "model", "arm", "rep", "sessionId", "costUsd", "wallMs",
                  "numTurns", "usage", "effectiveEffort", "grade", "integrity", "outcome"]
         r6 = ["bashCommands", "editedFiles", "inputTokens", "outputTokens"]
+        fix_round_1 = ["stage"]  # M5: development rows are tagged and never `scored`
         for row in rows:
-            self.assertEqual(sorted(row), sorted(brief + r6))
+            self.assertEqual(sorted(row), sorted(brief + r6 + fix_round_1))
+        self.assertEqual(rows[-1]["stage"], "main")
         final = rows[-1]
         self.assertEqual(final["outcome"], "scored")
         self.assertEqual(final["numTurns"], 3)
@@ -863,6 +899,249 @@ class VendoredTest(unittest.TestCase):
                                       capture_output=True, check=True).stdout
                 self.assertEqual(hashlib.sha256(blob).hexdigest(), meta["sha256"], rel)
         self.assertEqual(run.USAGE_MJS, run.HERE / "vendor/claude-plugins/effort-steering/spikes/s5/usage.mjs")
+
+
+# --- fix round 1 ------------------------------------------------------------------------------
+
+class RaisingGrader:
+    def __init__(self, exc):
+        self.exc, self.calls = exc, []
+
+    def __call__(self, gdir):
+        def grade(patch, name):
+            self.calls.append(name)
+            raise self.exc
+        return grade
+
+
+class PerCallChargeTest(RunnerCase):
+    """I1a: an unknown cost is charged at the per_call of the call that spent it."""
+
+    def test_unknown_spend_is_charged_at_the_per_call_of_its_own_call(self):
+        b5 = run.Budget(25.0, 0.0, 5.0, 1.0)
+        cli = FakeCLI(self.world, self.data, lambda arm, n: {"raise": KeyboardInterrupt()})
+        with self.assertRaises(KeyboardInterrupt):
+            self.batch([spec()], b5, cli=cli)
+        self.assertEqual(self.latest()[run.run_id(spec())]["outcome"], "unknown-spend")
+        b1 = run.Budget(25.0, 0.0, 1.25, 1.0)
+        plan = [spec(), spec(rep=1)]
+        self.ack_last_stop(plan, b1)
+        cli2 = FakeCLI(self.world, self.data)
+        self.batch(plan, b1, cli=cli2, go=False)
+        self.assertEqual(len(cli2.calls), 1)
+        self.assertEqual(self.spent(b1), 5.0 + 0.5)  # not 1.25 + 0.5
+
+    def test_charge_lookup_and_fallback(self):
+        ev = []
+        def add(event, **f):
+            ev.append({"event": event, "seq": len(ev) + 1, **f})
+        add("start", budget={"per_call_usd": 5.0})
+        add("call", runId="a")
+        add("stop", reason="error", stopId="stop-3")
+        add("start", budget={"per_call_usd": 2.0})
+        add("call", runId="b")
+        rows = [dict(run.make_row(spec(rep=i), "s", outcome="unknown-spend"), runId=r)
+                for i, r in enumerate(("a", "b", "c"))]
+        budget = run.Budget(25.0, 0.0, 1.25, 1.0)
+        # a at its batch's 5, b at its batch's 2, c (no call event) at the max over starts: 5.
+        self.assertEqual(run.spent_usd(rows, budget, ev), 5.0 + 2.0 + 5.0)
+        self.assertEqual(run.spent_usd(rows, budget, []), 3 * 1.25)
+
+
+class GoBindsPerCallTest(RunnerCase):
+    """I1b: GO.json binds per_call_usd and reserve_usd too."""
+
+    def test_per_call_or_reserve_mismatch_is_refused(self):
+        plan = [spec()]
+        for field, value in (("per_call_usd", 2.0), ("reserve_usd", 0.5), ("per_call_usd", None)):
+            with self.subTest(field=field, value=value):
+                self.go(plan, BUDGET, **{field: value})
+                cli = FakeCLI(self.world, self.data)
+                with self.assertRaisesRegex(run.Refused, field):
+                    self.batch(plan, BUDGET, cli=cli, go=False)
+                self.assertEqual(cli.calls, [])
+                self.assertEqual(self.world.calls, [])
+
+
+class LatchTest(RunnerCase):
+    """I3: every stop other than `plan complete` holds until the operator acknowledges it."""
+
+    def kinds(self):
+        no_work = {"is_error": True, "cost": 0, "duration_api_ms": 0, "text": "Not logged in",
+                   "no_work": True}
+        return {
+            "plan-limit": dict(script=lambda a, n: {"text": "You've hit your limit",
+                                                    "is_error": True}),
+            "missing cost": dict(script=lambda a, n: {"timeout": True}),
+            "no model work": dict(script=lambda a, n: no_work),
+            "effort mismatch": dict(script=lambda a, n: {"effort": "high" if a == "cs"
+                                                         else "medium"}),
+            "grader error": dict(grader=RaisingGrader(RuntimeError("grader broke"))),
+            "grader infra": dict(grader=Grader({"pass": False, "infra": "timeout"})),
+            "admission": dict(budget=run.Budget(2.0, 0.0, 1.25, 1.0)),
+            "error: RuntimeError: boom": dict(script=lambda a, n: {"raise": RuntimeError("boom")},
+                                              raises=RuntimeError),
+        }
+
+    def test_restart_after_each_stop_kind_is_refused_until_acknowledged(self):
+        for reason, k in self.kinds().items():
+            with self.subTest(stop=reason):
+                self.setUp()
+                plan = [spec(arm="bare"), spec(arm="cs"), spec(rep=1)]
+                budget = k.get("budget", BUDGET)
+                if "grader" in k:
+                    self.grader = k["grader"]
+                cli = FakeCLI(self.world, self.data, k.get("script"))
+                if k.get("raises"):
+                    with self.assertRaises(k["raises"]):
+                        self.batch(plan, budget, cli=cli)
+                else:
+                    self.batch(plan, budget, cli=cli)
+                stop = self.events()[-1]
+                self.assertEqual(stop["event"], "stop")
+                self.assertTrue(stop["reason"].startswith(reason), stop["reason"])
+                calls = len(cli.calls)
+                with self.assertRaisesRegex(run.Refused, stop["stopId"]):
+                    self.batch(plan, budget, cli=cli)  # same command, GO without the ack
+                self.assertEqual(len(cli.calls), calls)
+                self.assertEqual(self.events()[-1], stop)  # refused before writing anything
+                self.grader = Grader()
+                self.ack_last_stop(plan, budget)
+                self.batch(plan, budget, cli=FakeCLI(self.world, self.data), go=False)
+                start = [e for e in self.events() if e["event"] == "start"][-1]
+                self.assertEqual(start["acknowledged"], stop["stopId"])
+
+    def test_a_batch_that_never_wrote_its_stop_is_latched(self):
+        run._event(self.data, "start", budget=BUDGET._asdict())  # then SIGKILL: no stop event
+        with self.assertRaisesRegex(run.Refused, "unterminated-1"):
+            self.batch([spec()], BUDGET)
+        self.go([spec()], BUDGET, acks=["unterminated-1"])
+        self.batch([spec()], BUDGET, go=False)
+        self.assertEqual(self.latest()[run.run_id(spec())]["outcome"], "scored")
+
+    def test_a_completed_batch_does_not_latch(self):
+        self.batch([spec()], BUDGET)
+        self.assertEqual(self.events()[-1]["reason"], "plan complete")
+        self.batch([spec(), spec(rep=1)], BUDGET)
+        self.assertEqual(self.events()[-1]["reason"], "plan complete")
+
+
+class TeardownTest(RunnerCase):
+    """I2: the final row and its cost survive a teardown failure or an interrupt in grading."""
+
+    def test_teardown_failure_after_the_cli_keeps_the_row_and_its_cost(self):
+        self.world.fail_rm.add(run.AGENT_PREFIX + run._key(run.run_id(spec())))
+        with self.assertRaises(RuntimeError):
+            self.batch([spec()], BUDGET)
+        row = self.latest()[run.run_id(spec())]
+        self.assertEqual(row["outcome"], "scored")
+        self.assertEqual(row["costUsd"], 0.5)
+        record = json.loads((self.data / "runs" / run.run_id(spec()) / "run-record.json")
+                            .read_text())
+        self.assertTrue(record["teardownErrors"])
+        self.assertTrue(self.events()[-1]["reason"].startswith("error:"))
+
+    def test_an_interrupt_during_grading_still_writes_the_row(self):
+        self.grader = RaisingGrader(KeyboardInterrupt())
+        with self.assertRaises(KeyboardInterrupt):
+            self.batch([spec(), spec(rep=1)], BUDGET)
+        row = self.latest()[run.run_id(spec())]
+        self.assertEqual(row["outcome"], "infra-other")
+        self.assertEqual(row["costUsd"], 0.5)
+        self.assertEqual(len(self.latest()), 1)
+        self.assertEqual(self.world.runner_objects(), (set(), set(), set()))
+
+
+class GraderSignalTest(RunnerCase):
+    """I4: grader infra, anomalies and exceptions are infra and stop the batch."""
+
+    def test_grade_infra_is_infra_other_and_stops(self):
+        self.grader = Grader({"pass": False, "infra": "incomplete", "build": "not_run"})
+        self.batch([spec(), spec(rep=1)], BUDGET)
+        row = self.latest()[run.run_id(spec())]
+        self.assertEqual(row["outcome"], "infra-other")
+        self.assertIsNone(row["grade"])
+        self.assertEqual(len(self.latest()), 1)
+        self.assertEqual(self.events()[-1]["reason"], "grader infra")
+
+    def test_a_grader_exception_stops_with_grader_error(self):
+        self.grader = RaisingGrader(RuntimeError("docker run of the grader failed"))
+        self.batch([spec(), spec(rep=1)], BUDGET)
+        row = self.latest()[run.run_id(spec())]
+        self.assertEqual((row["outcome"], row["costUsd"]), ("infra-other", 0.5))
+        self.assertEqual(len(self.latest()), 1)
+        self.assertEqual(self.events()[-1]["reason"], "grader error")
+
+    def test_grade_outcome_signals(self):
+        ok = {"infra": None, "graft": "ok", "build": "ok", "pass": True,
+              "f2p": {"passed": ["t"], "failed": [], "notRun": []},
+              "p2p": {"passed": [], "failed": [], "notRun": []}}
+        self.assertEqual(run.grade_outcome(ok), ("scored", None, None))
+        self.assertEqual(run.grade_outcome({"pass": False, "failure_kind": "test_failure"}),
+                         ("scored", None, None))
+        cases = {
+            "grader anomaly": [{"pass": False, "error": "missing required tests: ['t']"},
+                               dict(ok, build="failed"),            # checked_pass contradiction
+                               {"pass": None}, "not a dict"],
+            "grader infra": [{"pass": False, "infra": "rm_failed"},
+                             {"pass": False, "oom_killed": True}],
+        }
+        for stop, grades in cases.items():
+            for g in grades:
+                with self.subTest(grade=g):
+                    outcome, got, _ = run.grade_outcome(g)
+                    self.assertEqual(got, stop)
+                    self.assertIn(outcome, ("infra-other", "infra-oom"))
+
+
+class KillTest(RunnerCase):
+    """M1: a timed-out or OOM-hit agent container is killed before usage is read."""
+
+    def run_watching_usage(self, script):
+        seen = []
+        real = run.run_usage
+
+        def watched(config, session):
+            seen.append(list(self.world.killed))
+            return real(config, session)
+        with mock.patch.object(run, "run_usage", watched):
+            self.batch([spec()], BUDGET, cli=FakeCLI(self.world, self.data, script))
+        return seen
+
+    def test_a_timed_out_cli_is_killed_before_usage_is_read(self):
+        name = run.AGENT_PREFIX + run._key(run.run_id(spec()))
+        self.assertEqual(self.run_watching_usage(lambda a, n: {"timeout": True}), [[name]])
+        record = json.loads((self.data / "runs" / run.run_id(spec()) / "run-record.json")
+                            .read_text())
+        self.assertEqual(record["killed"], "timeout")
+
+    def test_an_oom_container_is_killed_before_usage_is_read(self):
+        name = run.AGENT_PREFIX + run._key(run.run_id(spec()))
+        self.assertEqual(self.run_watching_usage(lambda a, n: {"oom": True}), [[name]])
+
+    def test_a_normal_run_is_not_killed(self):
+        self.assertEqual(self.run_watching_usage(None), [[]])
+
+
+class StageTest(RunnerCase):
+    """M5: development-task rows carry stage "dev" and are `dev-scored`, never `scored`."""
+
+    def test_development_rows_are_tagged_and_never_scored(self):
+        dev = spec("astral-sh__ruff-15309")
+        self.batch([dev, spec("t1")], BUDGET)
+        rows = self.latest()
+        self.assertEqual((rows[run.run_id(dev)]["stage"], rows[run.run_id(dev)]["outcome"]),
+                         ("dev", "dev-scored"))
+        self.assertIsNotNone(rows[run.run_id(dev)]["grade"])
+        self.assertEqual((rows[run.run_id(spec("t1"))]["stage"],
+                          rows[run.run_id(spec("t1"))]["outcome"]), ("main", "scored"))
+        with self.assertRaises(ValueError):
+            run.make_row(dev, "s", outcome="scored")
+        self.assertTrue(set(run.STAGE1_DEV_TASKS) <= set(run.DEVELOPMENT_TASKS))
+        self.assertTrue(all(s.task_id in run.DEVELOPMENT_TASKS for s in run.stage1_order(1)))
+        # Effort equality still applies to development rows (Stage 1 runs the gate live).
+        self.assertIn(f"astral-sh__ruff-15309|{MODEL}",
+                      json.loads((self.data / "task-validity.json").read_text()))
 
 
 if __name__ == "__main__":

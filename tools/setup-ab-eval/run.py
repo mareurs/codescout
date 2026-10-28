@@ -7,21 +7,33 @@
                                                  3 arms x 2 models, one run each = 12 specs
 
 SPEND SAFETY. `run_batch(..., dry_run=False)` refuses to start (Refused, before any docker call)
-unless `<data>/GO.json` is a regular file holding `cap_usd` equal to `budget.cap_usd`,
-`plan_sha256` equal to `plan_sha256(plan)` and `authorized_by: "operator"`. The file is the
-operator's (Task 10); nothing in this module writes it. `dry_run=True` touches no docker object,
-no CLI and no token: it writes `<data>/dry-run.json` (the specs and the plan hash) and returns.
+unless `<data>/GO.json` is a regular file holding `cap_usd`, `per_call_usd` and `reserve_usd`
+equal to the batch's Budget, `plan_sha256` equal to `plan_sha256(plan)` and
+`authorized_by: "operator"`. The file is the operator's (Task 10); nothing in this module writes
+it. STOPS LATCH: every batch ends with a `stop` event in `<data>/batch.jsonl` carrying a
+`stopId`; when the latest one is not "plan complete" (or a batch never wrote its stop), the next
+batch is refused until GO.json `acknowledged_stops` lists that id. `dry_run=True` touches no
+docker object, no CLI and no token: it writes `<data>/dry-run.json` (the specs and the plan
+hash) and returns.
 
 JOURNAL. `<data>/rows.jsonl`, append-only, every line fsynced. A run writes a `pending` row
 BEFORE the CLI call and its final row after; the latest row of a runId wins. At batch start every
 runId whose latest row is still `pending` (the runner was killed) gets an `unknown-spend` row. A
 runId that has any row is never run again by any batch: there is no automatic retry after any
 outcome. Row fields are exactly ROW_FIELDS: the Task 8 brief's list plus ruling R6's
-bashCommands, editedFiles, inputTokens and outputTokens. Final outcomes are OUTCOMES.
+bashCommands, editedFiles, inputTokens and outputTokens, plus `stage` ("dev" for the spec's
+seven development tasks, "main" otherwise). Final outcomes are OUTCOMES. ONE DATA DIR PER STUDY:
+the lock, the ledger and the spend total are per data dir (deferred M3).
+
+A spec that failed BEFORE its pending row (bad bundle, uid check, a foreign name) has a
+`runs/<runId>/` dir with run-record.json (`error` ... "before the CLI call") and no row; the next
+batch stops at its `mkdir`. Recovery is by hand: confirm no row and no `call` event for that
+runId, move the dir aside (`runs/<runId>.failed-<date>`), then acknowledge the stop.
 
 SPEND. spent = budget.spent_usd (spend outside this journal) + for the latest row of every runId
-its `costUsd`, or `per_call_usd` when the cost is unknown (pending, unknown-spend, a run with no
-result record): conservative. ADMISSION: a call starts only when
+its `costUsd`, or, when the cost is unknown (pending, unknown-spend, a run with no result
+record), the `per_call_usd` of the batch that made that call (its `call` event's `start` event;
+the largest per_call of any start event when there is none): conservative. ADMISSION: a call starts only when
 spent + reserve_usd + per_call_usd <= cap_usd (per_call_usd is the call's `--max-budget-usd`, its
 worst case; the reserve is held for the next run, spec section 7). `cap_usd` may not exceed the
 study's $200 (TOTAL_CAP_USD).
@@ -29,18 +41,24 @@ study's $200 (TOTAL_CAP_USD).
 OUTCOMES, decided in this order for each run (the first that applies):
   plan-limit     the vendored plan-limit.mjs (through node) finds a refusal in the result record,
                  stdout, stderr or the session transcript. Neutral: not scored, not a failure of
-                 the arm. STOPS the batch.
+                 the arm. STOPS the batch. (Ruling M2: on a stream-json stdout the stdout channel
+                 is inert, as the detector anchors at index 0 with a 600-char cap; only the
+                 envelope and transcript channels detect. With no retry, a false positive, an
+                 answer that starts like a limit message, loses that one paid run: accepted.)
   infra-oom      the agent container has State.OOMKilled=true (or the grader's container had).
-                 Not scored, not a failure. The batch goes on when the cost is known.
+                 Not scored, not a failure. The batch goes on when the cost is known. On OOM
+                 and on a CLI timeout the container is `docker kill`ed at once, before usage
+                 and plan-limit are read, so a runaway CLI cannot keep spending.
   infra-other    no result record (timeout, kill, crash), or no usable cost, or the run did no
                  model work (is_error with zero api time, tokens, cost and calls: a credential or
-                 infrastructure failure), or the grader raised. Not scored. STOPS the batch
-                 (spec section 7 / plan Global Constraints: stop on missing cost, credential
-                 error).
+                 infrastructure failure), or the grader raised or reported infra or an anomaly
+                 (grade_outcome). Not scored. EVERY infra-other STOPS the batch (spec section
+                 7: stop on missing cost, credential error, grader contamination).
   invalid-arm    integrity.check is not ok, or a tool_use block is malformed. Charged, not scored.
-  scored         graded by the task's grader on the image the agent ran in.
+  scored         graded by the task's grader on the image the agent ran in (main tasks).
+  dev-scored     the same for a development task: never a scored outcome.
   unknown-spend  the CLI was called and the runner did not learn the cost (interruption).
-After a scored row, EFFORT: the scored rows of each (task, model) must share one effectiveEffort
+After a graded row, EFFORT: the graded rows of each (task, model) must share one effectiveEffort
 (a non-empty string). A different or unknown value marks that task+model invalid in
 `<data>/task-validity.json` and STOPS the batch.
 
@@ -81,6 +99,7 @@ from typing import Callable, NamedTuple
 from urllib.parse import urlsplit
 
 import arms
+import evidence
 import integrity
 import pilot
 import stack
@@ -100,16 +119,27 @@ STAGE1_REPS = (("bare", 1), ("cs", 1), ("full", 1))
 # their bundles) before the operator go. ripgrep-2576 is the Codex pilot's task, ruff-15309
 # the development image of ruling R4.
 STAGE1_DEV_TASKS = ("burntsushi__ripgrep-2576", "astral-sh__ruff-15309")
+PLAN_COMPLETE = "plan complete"
 TOTAL_CAP_USD = 200.0
 STAGE1_CAP_USD = 25.0
 RUN_TIMEOUT_S = 1800
 AGENT_UID = "1000"
 
-OUTCOMES = ("scored", "invalid-arm", "plan-limit", "infra-oom", "infra-other", "unknown-spend")
+# Fix round 1 (M5): a graded run of a development task is `dev-scored`, never `scored` (spec
+# section 2 and 7: development outcomes are never scored), so an analysis that counts `scored`
+# cannot include one even if it ignores the row's `stage`.
+OUTCOMES = ("scored", "dev-scored", "invalid-arm", "plan-limit", "infra-oom", "infra-other",
+            "unknown-spend")
+GRADED = ("scored", "dev-scored")
 PENDING = "pending"  # journal-only state; never a final outcome
+# The brief's 14 fields, R6's 4, and `stage` (fix round 1, M5).
 ROW_FIELDS = ("runId", "taskId", "model", "arm", "rep", "sessionId", "costUsd", "wallMs",
               "numTurns", "usage", "effectiveEffort", "grade", "integrity", "outcome",
-              "bashCommands", "editedFiles", "inputTokens", "outputTokens")
+              "bashCommands", "editedFiles", "inputTokens", "outputTokens", "stage")
+# Spec section 2: the seven Codex development tasks; plumbing and calibration only, never scored.
+DEVELOPMENT_TASKS = ("burntsushi__ripgrep-2576", "tokio-rs__axum-734", "tokio-rs__axum-1119",
+                     "burntsushi__ripgrep-2209", "tokio-rs__tokio-6551", "astral-sh__ruff-15443",
+                     "astral-sh__ruff-15309")
 
 PATCH_EXCLUDED_DIRS = (".codescout", ".buddy", ".superpowers")
 PATCH_PATHSPEC = (".", *(f":(exclude,glob)**/{d}/**" for d in PATCH_EXCLUDED_DIRS))
@@ -248,7 +278,11 @@ def admit(budget, spent):
 
 
 def check_go(data, plan, budget):
-    """The operator's authorization, or Refused. Read only; the runner never writes GO.json."""
+    """The operator's authorization, or Refused. Read only; the runner never writes GO.json.
+
+    Binds cap_usd, per_call_usd and reserve_usd (fix round 1, I1b: the per-call cap is what an
+    unknown cost is charged at) and the plan hash. `acknowledged_stops`, optional, is the list of
+    stop ids (batch.jsonl) the operator has inspected; see check_latch."""
     path = Path(data) / GO_FILE
     if path.is_symlink() or not path.is_file():
         raise Refused(f"{path} is missing (or not a regular file): spending needs the "
@@ -259,13 +293,44 @@ def check_go(data, plan, budget):
         raise Refused(f"{path} is unreadable: {e}")
     if not isinstance(go, dict) or go.get("authorized_by") != "operator":
         raise Refused(f"{path} is not authorized_by the operator")
-    cap = go.get("cap_usd")
-    if isinstance(cap, bool) or not isinstance(cap, (int, float)) or float(cap) != float(budget.cap_usd):
-        raise Refused(f"{path} authorizes cap_usd {cap!r}, the batch has {budget.cap_usd}")
+    for field in ("cap_usd", "per_call_usd", "reserve_usd"):
+        value = go.get(field)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or float(value) != float(getattr(budget, field))):
+            raise Refused(f"{path} authorizes {field} {value!r}, the batch has "
+                          f"{getattr(budget, field)}")
     if go.get("plan_sha256") != plan_sha256(plan):
         raise Refused(f"{path} authorizes plan {go.get('plan_sha256')!r}, the batch's plan is "
                       f"{plan_sha256(plan)}")
+    acks = go.get("acknowledged_stops", [])
+    if not isinstance(acks, list) or not all(isinstance(a, str) for a in acks):
+        raise Refused(f"{path}: acknowledged_stops must be a list of stop ids")
     return go
+
+
+def last_stop(events):
+    """(stop id, reason) of the latest batch that did not end in PLAN_COMPLETE, else None.
+
+    A batch whose `start` has no later `stop` (the runner was killed) is latched as
+    `unterminated-<start seq>`."""
+    starts = [e for e in events if e.get("event") == "start"]
+    stops = [e for e in events if e.get("event") == "stop"]
+    if starts and (not stops or starts[-1]["seq"] > stops[-1]["seq"]):
+        return f"unterminated-{starts[-1]['seq']}", "the batch never wrote its stop (killed)"
+    if stops and stops[-1].get("reason") != PLAN_COMPLETE:
+        return stops[-1]["stopId"], stops[-1].get("reason")
+    return None
+
+
+def check_latch(data, go):
+    """Fix round 1 (I3): a stop is latched. A new batch is refused until the operator lists the
+    latest stop's id in GO.json `acknowledged_stops`. Every stop reason other than PLAN_COMPLETE
+    latches, admission included (re-running the same budget would only stop again)."""
+    latched = last_stop(read_events(data))
+    if latched and latched[0] not in go.get("acknowledged_stops", []):
+        raise Refused(f"the previous batch stopped ({latched[1]}, stop id {latched[0]}); inspect "
+                      f"it, then list {latched[0]!r} in {GO_FILE} acknowledged_stops")
+    return latched
 
 
 # --- journal -------------------------------------------------------------------------------------
@@ -290,8 +355,25 @@ def _append(path, obj):
 
 
 def _event(data, event, **fields):
-    _append(Path(data) / EVENTS, {"event": event, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                                  **fields})
+    """Append one batch.jsonl event with its sequence number (1-based line number, stable: the
+    file is append-only); a `stop` also gets `stopId` = `stop-<seq>`. Returns the event."""
+    seq = len(read_events(data)) + 1
+    rec = {"event": event, "seq": seq, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), **fields}
+    if event == "stop":
+        rec["stopId"] = f"stop-{seq}"
+    _append(Path(data) / EVENTS, rec)
+    return rec
+
+
+def read_events(data):
+    path = Path(data) / EVENTS
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def stage_of(task_id):
+    return "dev" if task_id in DEVELOPMENT_TASKS else "main"
 
 
 def make_row(spec, session, **fields):
@@ -301,10 +383,12 @@ def make_row(spec, session, **fields):
         raise ValueError(f"not row fields: {sorted(unknown)}")
     row = dict.fromkeys(ROW_FIELDS)
     row.update(runId=run_id(s), taskId=s.task_id, model=s.model, arm=s.arm, rep=s.rep,
-               sessionId=session)
+               sessionId=session, stage=stage_of(s.task_id))
     row.update(fields)
     if row["outcome"] not in OUTCOMES + (PENDING,):
         raise ValueError(f"bad outcome {row['outcome']!r}")
+    if row["outcome"] == "scored" and row["stage"] == "dev":
+        raise ValueError(f"{row['runId']}: a development task is never `scored` (dev-scored)")
     return row
 
 
@@ -337,10 +421,29 @@ def latest_rows(rows):
     return out
 
 
-def spent_usd(rows, budget):
+def call_per_call(events, budget):
+    """{runId: the per_call_usd of the batch that made its CLI call} and the fallback charge.
+
+    Fix round 1 (I1a): an unknown cost is charged at the cap of the call that spent it, read from
+    the `budget` of the `start` event preceding the run's `call` event in batch.jsonl. A run with
+    no `call` event is charged the MAX per_call over every start event (and the current one)."""
+    per_run, current = {}, None
+    for e in events:
+        if e.get("event") == "start":
+            current = float(e["budget"]["per_call_usd"])
+        elif e.get("event") == "call" and current is not None:
+            per_run[e["runId"]] = current
+    starts = [float(e["budget"]["per_call_usd"]) for e in events if e.get("event") == "start"]
+    return per_run, max(starts + [budget.per_call_usd])
+
+
+def spent_usd(rows, budget, events=()):
+    """budget.spent_usd + the latest row's cost per runId; an unknown cost (pending,
+    unknown-spend, no result) is charged at its own call's per_call (call_per_call)."""
+    per_run, fallback = call_per_call(events, budget)
     total = budget.spent_usd
-    for row in latest_rows(rows).values():
-        total += row["costUsd"] if row["costUsd"] is not None else budget.per_call_usd
+    for rid, row in latest_rows(rows).items():
+        total += row["costUsd"] if row["costUsd"] is not None else per_run.get(rid, fallback)
     return total
 
 
@@ -364,12 +467,13 @@ def effective_effort(usage):
 
 
 def task_validity(rows):
-    """{"<task>|<model>": {valid, efforts, reason}} over the latest SCORED rows. Valid iff every
-    scored row of the task and model has the same non-empty effectiveEffort (an unknown effort
-    cannot be shown equal). Rows of other outcomes are not compared."""
+    """{"<task>|<model>": {valid, efforts, reason}} over the latest GRADED rows (scored and
+    dev-scored). Valid iff every graded row of the task and model has the same non-empty
+    effectiveEffort (an unknown effort cannot be shown equal). Rows of other outcomes are not
+    compared."""
     groups = {}
     for row in latest_rows(rows).values():
-        if row["outcome"] == "scored":
+        if row["outcome"] in GRADED:
             groups.setdefault((row["taskId"], row["model"]), []).append(row)
     out = {}
     for (task_id, model), rs in groups.items():
@@ -779,26 +883,63 @@ def _infra_up(docker, owned, data, manifest, need_retrieval):
 
 # --- one run -------------------------------------------------------------------------------------
 
+def grade_outcome(grade):
+    """(outcome, stop, why) of one grader result. Fails closed; fix round 1 (I4).
+
+    Spec section 7 stops on "grader contamination". The signals the graders actually expose:
+      - S5 grade.mjs `infra` (create_failed, oom, inspect_failed, rm_failed, timeout,
+        incomplete) and tasks.private_grader's `oom_killed` / `infra: "oom"`;
+      - tasks.foreign_grader's `error` (baseline.grade_output refused the log: an unexplained
+        grader exit, a missing required test, a duplicate test identity);
+      - evidence.checked_pass on an S5-shaped grade (a `build` key): a pass that build, infra or
+        the test lists contradict;
+      - no boolean `pass`.
+    Each one stops the batch. NOT detectable here: tampering that still yields normal-looking
+    test output (an in-source #[cfg(test)] module the agent edited, which neither grader restores;
+    git attribute or textconv tricks, grade.mjs:345)."""
+    if not isinstance(grade, dict) or type(grade.get("pass")) is not bool:
+        return "infra-other", "grader anomaly", "grade has no boolean pass"
+    if grade.get("oom_killed") or grade.get("infra") == "oom":
+        return "infra-oom", "grader infra", "the grader's container was OOM-killed"
+    if grade.get("infra") is not None:
+        return "infra-other", "grader infra", f"grader infra: {grade['infra']}"
+    if grade.get("error"):
+        return "infra-other", "grader anomaly", f"grader output refused: {grade['error']}"
+    if "build" in grade:
+        try:
+            evidence.checked_pass(grade)
+        except ValueError as e:
+            return "infra-other", "grader anomaly", str(e)
+    return "scored", None, None
+
+
 def _run_one(ctx, spec):
-    """Run one spec; returns (final row, stop reason or None). Raises after recording
-    unknown-spend (or infra-other with a known cost) when anything fails after the pending row."""
+    """Run one spec; returns (final row, stop reason or None).
+
+    The final row is always written before anything that can still fail: an exception after the
+    pending row writes `unknown-spend` (or `infra-other` with the cost when it is known) and is
+    re-raised; teardown and redaction errors are collected and raised only after the row and
+    run-record.json exist (fix round 1, I2); an interrupt during grading still writes the row."""
     rid = run_id(spec)
     key = _key(rid)
     qrun = QDRANT_RUN_PREFIX + key
     name = AGENT_PREFIX + key
+    has_qdrant = spec.arm != "bare"
     info = ctx.load_task(spec.task_id)
     run_dir = ctx.data / "runs" / rid
-    run_dir.mkdir(parents=True)  # exists -> raise: a run dir is never reused
+    run_dir.mkdir(parents=True)  # exists -> raise: a run dir is never reused (see M6 in run.py)
     session = str(uuid.uuid4())
     urls = study_urls(key, ctx.retrieval_urls)
-    record = {"runId": rid, "spec": list(spec), "image": info.image, "sessionId": session,
-              "container": name, "qdrant_run": qrun if spec.arm != "bare" else None}
+    record = {"runId": rid, "spec": list(spec), "stage": stage_of(spec.task_id),
+              "image": info.image, "sessionId": session, "container": name,
+              "qdrant_run": qrun if has_qdrant else None}
     rows_path = ctx.data / ROWS
-    state = {"pending": False, "cost": None, "cli": False}
+    state = {"pending": False, "cost": None}
     docker = ctx.docker
+    errors = []
     patch = edited = excluded = None
     try:
-        if spec.arm != "bare":
+        if has_qdrant:
             volume = stack.RUN_VOLUME_PREFIX + qrun
             for kind, n in (("volume", volume), ("container", stack.COPY_HELPER_PREFIX + volume),
                             ("container", f"sab-qdrant-{qrun}")):
@@ -824,18 +965,26 @@ def _run_one(ctx, spec):
             raise RuntimeError(f"agent container runs as uid {uid!r}, not {AGENT_UID}; the CLI "
                                f"is not started")
         base = docker("exec", "-w", tasks.WORKDIR, name, "git", "rev-parse", "HEAD").stdout.strip()
+        _event(ctx.data, "call", runId=rid)  # ties the call to this batch's per_call (I1)
         _append(rows_path, make_row(spec, session, outcome=PENDING))
         state["pending"] = True
         started = ctx.clock()
         stdout, stderr, rc = ctx.exec_cli(name, argv, ctx.timeout)
-        state["cli"] = True
         wall = round((ctx.clock() - started) * 1000)
+        killed = None
+        if rc is None:  # M1: the docker exec client timed out; the CLI inside may still spend
+            docker("kill", name, check=False)
+            killed = "timeout"
         stdout = (stdout or "").replace(ctx.token, "[REDACTED]")
         stderr = (stderr or "").replace(ctx.token, "[REDACTED]")
         (run_dir / "stream.jsonl").write_text(stdout)
         (run_dir / "stderr.txt").write_text(stderr)
         oom = docker("inspect", "-f", "{{.State.OOMKilled}}", name,
                      check=False).stdout.strip() == "true"
+        if oom and killed is None:  # M1: nothing of an OOM-hit container keeps running
+            docker("kill", name, check=False)
+            killed = "oom"
+        record["killed"] = killed
         lines, dups, shape_errors = dedupe_tool_uses(stdout.splitlines())
         (run_dir / "stream.dedup.jsonl").write_text("".join(l + "\n" for l in lines))
         records = _records(lines)
@@ -883,55 +1032,76 @@ def _run_one(ctx, spec):
         record.update(exitCode=rc, oomKilled=oom, planLimit=hit, why=why, patchExcluded=excluded)
     except BaseException as e:
         if state["pending"]:
-            final = ("infra-other", state["cost"]) if state["cost"] is not None else ("unknown-spend", None)
+            final = (("infra-other", state["cost"]) if state["cost"] is not None
+                     else ("unknown-spend", None))
             _append(rows_path, make_row(spec, session, outcome=final[0], costUsd=final[1]))
             record.update(outcome=final[0], error=f"{type(e).__name__}: {e}")
         else:
             record.update(outcome=None, error=f"{type(e).__name__}: {e} (before the CLI call)")
+        _cleanup_run(ctx, name, qrun, has_qdrant, run_dir, errors)
+        record["teardownErrors"] = errors
         _write_record(run_dir, record)
         raise
-    finally:
-        _teardown_run(ctx, name, qrun, spec.arm != "bare")
-        _redact_tree(run_dir, ctx.token)
-    grade = None
+    _cleanup_run(ctx, name, qrun, has_qdrant, run_dir, errors)
+    grade, interrupted = None, None
     if outcome is None:
         try:
             grade = info.grader(run_dir / "grades")(patch, rid)
-        except Exception as e:
+        except BaseException as e:  # an interrupt too: the row with the known cost comes first
             outcome, stop, why = "infra-other", "grader error", f"{type(e).__name__}: {e}"
+            if not isinstance(e, Exception):
+                interrupted = e
         else:
-            if grade.get("oom_killed"):
-                outcome = "infra-oom"
-            elif grade.get("infra"):
-                outcome = "infra-other"
-            else:
-                outcome = "scored"
-    row = make_row(spec, session, outcome=outcome, grade=grade if outcome == "scored" else None,
+            outcome, stop, why = grade_outcome(grade)
+    if outcome == "infra-other" and stop is None:
+        stop = "infra-other"  # every infra-other stops the batch (I4)
+    if outcome == "scored" and stage_of(spec.task_id) == "dev":
+        outcome = "dev-scored"
+    row = make_row(spec, session, outcome=outcome, grade=grade if outcome in GRADED else None,
                    **fields)
     _append(rows_path, row)
-    record.update(outcome=outcome, stop=stop, why=why, graderResult=grade)
+    record.update(outcome=outcome, stop=stop, why=why, graderResult=grade, teardownErrors=errors)
     _write_record(run_dir, record)
+    if interrupted is not None:
+        raise interrupted
+    if errors:
+        raise RuntimeError(f"{rid}: teardown failed after its row was written: {errors}")
     return row, stop
 
 
 def _write_record(run_dir, record):
     (run_dir / "run-record.json").write_text(json.dumps(record, indent=2, default=str) + "\n")
-
-
-def _teardown_run(ctx, name, qrun, has_qdrant):
-    """The run's agent container and Qdrant objects, by exact name, through the ledger."""
-    live = set(ctx.owned.live())
+def _cleanup_run(ctx, name, qrun, has_qdrant, run_dir, errors):
+    """The run's agent container and Qdrant objects, by exact name through the ledger, then the
+    token redaction of the run dir. Never raises: each failure is appended to `errors`."""
+    try:
+        live = set(ctx.owned.live())
+    except Exception as e:
+        errors.append(f"ledger: {type(e).__name__}: {e}")
+        live = set()
     if ("container", name) in live:
-        ctx.owned.release("container", name)
+        try:
+            ctx.owned.release("container", name)
+        except Exception as e:
+            errors.append(f"container {name}: {type(e).__name__}: {e}")
     if has_qdrant:
         volume = stack.RUN_VOLUME_PREFIX + qrun
         objs = [("container", f"sab-qdrant-{qrun}"),
                 ("container", stack.COPY_HELPER_PREFIX + volume), ("volume", volume)]
         if any(o in live for o in objs):
-            stack.run_down(qrun, docker=ctx.docker)
-            for o in objs:
-                if o in live:
-                    ctx.owned.removed(*o)
+            try:
+                stack.run_down(qrun, docker=ctx.docker)
+                for o in objs:
+                    if o in live:
+                        ctx.owned.removed(*o)
+            except Exception as e:
+                errors.append(f"qdrant run {qrun}: {type(e).__name__}: {e}")
+    try:
+        _redact_tree(run_dir, ctx.token)
+    except Exception as e:
+        errors.append(f"redaction: {type(e).__name__}: {e}")
+
+
 
 
 # --- the batch -----------------------------------------------------------------------------------
@@ -967,7 +1137,8 @@ def run_batch(plan, budget, data, dry_run, *, docker=None, exec_cli=None, load_t
     if dry_run:
         _dry_run(plan, budget, data)
         return None
-    check_go(data, plan, budget)  # before any side effect
+    go = check_go(data, plan, budget)  # before any side effect
+    acknowledged = check_latch(data, go)  # I3: a stop holds until the operator acknowledges it
     docker = docker or pilot.docker
     exec_cli = exec_cli or docker_exec_cli
     load_task = load_task or load_task_from_bundle
@@ -985,7 +1156,7 @@ def run_batch(plan, budget, data, dry_run, *, docker=None, exec_cli=None, load_t
     stop = None
     try:
         _event(data, "start", plan_sha256=plan_sha256(plan), budget=budget._asdict(),
-               count=len(plan))
+               count=len(plan), acknowledged=acknowledged[0] if acknowledged else None)
         for row in recover_pending(data):
             _event(data, "recovered", runId=row["runId"], outcome="unknown-spend")
         owned = Owned(data, docker)
@@ -998,7 +1169,7 @@ def run_batch(plan, budget, data, dry_run, *, docker=None, exec_cli=None, load_t
                 if rid in latest_rows(rows):
                     _event(data, "skip", runId=rid, reason="journaled; no automatic retry")
                     continue
-                spent = spent_usd(rows, budget)
+                spent = spent_usd(rows, budget, read_events(data))
                 if not admit(budget, spent):
                     stop = "admission"
                     _event(data, "refused", runId=rid, spent=spent)
@@ -1025,8 +1196,8 @@ def run_batch(plan, budget, data, dry_run, *, docker=None, exec_cli=None, load_t
             try:
                 owned.cleanup()
             finally:
-                _event(data, "stop", reason=stop or "plan complete",
-                       spent=spent_usd(read_rows(data), budget))
+                _event(data, "stop", reason=stop or PLAN_COMPLETE,
+                       spent=spent_usd(read_rows(data), budget, read_events(data)))
     finally:
         (data / LOCK).unlink(missing_ok=True)
     return None
