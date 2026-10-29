@@ -404,6 +404,36 @@ mod tests {
             .unwrap()
     }
 
+    // A member that is its own git repository (hidden from its parent with
+    // `.git/info/exclude`) must be indexed against ITS history, not the parent's.
+    #[test]
+    fn a_nested_repo_member_records_its_own_head_not_the_parents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let parent = tmp.path();
+        let member = parent.join("remote-fixes/addon");
+        fs::create_dir_all(&member).unwrap();
+
+        let parent_head = commit(parent, "p.txt", "P", "parent");
+        let member_first = commit(&member, "a.py", "A", "member first");
+        write_index_state(&member).unwrap();
+
+        let recorded = read_index_state(&member).unwrap().last_indexed_commit;
+        assert_eq!(recorded, member_first.to_string(), "the member's own HEAD");
+        assert_ne!(recorded, parent_head.to_string(), "not the parent's HEAD");
+
+        // Commits in the member move the member's freshness; the parent is untouched.
+        commit(&member, "b.py", "B", "member second");
+        let gs = git_sync_status(&member).unwrap();
+        assert_eq!(gs["status"], "behind");
+        assert_eq!(gs["behind_commits"], 1);
+
+        // And a commit in the parent does not move the member's freshness.
+        write_index_state(&member).unwrap();
+        commit(parent, "q.txt", "Q", "parent second");
+        let gs = git_sync_status(&member).unwrap();
+        assert_eq!(gs["status"], "up_to_date");
+    }
+
     // Three-query cache-invalidation sandwich (CLAUDE.md testing pattern):
     // baseline fresh → mutate HEAD → assert STALE → reindex → assert fresh.
     #[test]

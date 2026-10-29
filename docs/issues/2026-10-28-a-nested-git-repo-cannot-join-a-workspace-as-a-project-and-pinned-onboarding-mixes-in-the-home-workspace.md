@@ -8,7 +8,7 @@ related: []
 tags:
 - cluster/declared-not-wired
 kind: bug
-unverified: 'Parts A and B are fixed and tested (711b8c3a4, 0d95ee8bf). Not verified: per-member git identity for indexing (Evidence 4 is a subagent read, not re-read); a run on the real Kodi checkout; whether the ignore crate honors .git/info/exclude; the gate on a clean tree (two OP-2 tests were red from a peer edit). The manual page for library scope still disagrees with the code (Evidence 5).'
+unverified: 'Parts A and B are fixed and tested (711b8c3a4, 0d95ee8bf). Not verified: a run on the real Kodi checkout; the `Repository::open` probes for a member without its own .git (Evidence 4); whether the ignore crate honors .git/info/exclude; the gate on a clean tree (two OP-2 tests were red from a peer edit). The manual page for library scope still disagrees with the code (Evidence 5).'
 ---
 
 # BUG: a nested or sibling git repo cannot join a workspace as a project, and onboarding under a workspace pin mixes in the home workspace
@@ -68,8 +68,9 @@ src/librarian/tools/doctor.rs:3229-3243: an absolute `[[project]] root` is flagg
 ### 3. Onboarding under a workspace pin
 Measured 2026-10-28. Contents of the nested repo's `.codescout/workspace.toml` after the call: `[workspace] name = "script.module.thecrew"` followed by `[[project]]` ids kodi, xbmc, addons, libUPnP, packaging (the Kodi workspace). `git status` in the nested repo: ` M .gitignore`, one added line. The directory was removed afterwards.
 
-### 4. Git-aware features (subagent read, not re-read)
-`last_indexed_commit` / `git_sync` use `Repository::discover(root)` of the project root (src/index_state.rs:259-260, 317 as cited), so commits in a nested repo never register against the parent's index. `dirty_files` is an in-memory set and is not git-based.
+### 4. Git-aware features
+
+Read and tested 2026-10-29. `head_commit_full` (src/retrieval/index_state.rs) uses `Repository::discover(root)`, which finds the nearest `.git`, so a member that is its own repo records its own HEAD. The test `a_nested_repo_member_records_its_own_head_not_the_parents` passes: the recorded commit is the member's, a member commit makes `git_sync` report `behind` by 1, and a parent commit leaves the member `up_to_date`. The test was green on first run, so it is a probe of existing behavior, not a reproduction. `index` has no member parameter: it indexes the active project or a pinned workspace (src/tools/semantic/index.rs:206), so a member is indexed by pinning its path and the root is then the member's directory. Not tested: `resolve_head_sha` and `probe_has_git_remote` use `Repository::open`, which returns nothing for a member without its own `.git`, while `discover` returns the parent's HEAD. `dirty_files` is an in-memory set and is not git-based (subagent read, not re-read).
 
 ### 5. Library route
 
@@ -92,7 +93,7 @@ Chosen: `[[project]]` is the contract; no separate `[[member]]` table.
   - Manual: "Declared projects and discovered projects" in docs/manual/src/concepts/multi-project-workspace.md.
 
 Still open, not fixed:
-- Per-member git identity for indexing. `resolve_head_sha` and `probe_has_git_remote` use `Repository::open(root)`; src/index_state.rs:260 uses `discover(root)`. Not verified for a member inside a parent repo.
+- `resolve_head_sha` and `probe_has_git_remote` use `Repository::open(root)`, while `head_commit_full` uses `discover(root)`. Per-member identity is verified for a member with its own `.git` (Evidence 4); the mixed case is not.
 - Onboarding a nested repo still appends to that repo's own `.gitignore` (src/memory/mod.rs:92). Judged acceptable.
 - `semantic_search(scope="lib:<name>")` returns "library scope is not yet supported by the Qdrant retrieval stack" while the manual says it works. Separate issue.
 - Whether the Kodi checkout gitignores `.codescout/`, and whether the `ignore` crate honors `.git/info/exclude` for the walk, are not verified.
@@ -116,7 +117,7 @@ Gate at Part B: format, clippy and Python light pass. Two tests fail, `operator_
 ## Resume
 
 Parts A and B are committed on `experiments` (`711b8c3a4`, `0d95ee8bf`), not pushed. Next:
-1. Probe per-member git identity: index a member that is its own repo inside a parent repo, and read `git_sync` / `last_indexed_commit` for it.
+1. Done 2026-10-29: per-member git identity holds for a member that is its own repo (Evidence 4). Still open: the `Repository::open` probes for a member without its own `.git`.
 2. Run the Kodi case end to end with a `.git/info/exclude`d member.
 3. Re-run the gate once the peer's `OP-2` edit is committed or reverted.
 4. Close or archive only after 1 and 2, with the fix SHAs and their patch-ids.
