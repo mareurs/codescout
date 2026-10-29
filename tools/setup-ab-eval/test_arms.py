@@ -200,8 +200,10 @@ class ArmsTest(unittest.TestCase):
 
     def test_full_is_superset_of_cs(self):
         cs, full = self.spec("cs"), self.spec("full")
-        # C2 ruling: full alone loads the user setting source; every other pair is kept.
-        swap = {("--setting-sources", "local"): ("--setting-sources", "user,local")}
+        # C2 ruling: full alone loads the user setting source; I-8: full alone adds Skill and
+        # Agent to the tool list. Every other pair is kept.
+        swap = {("--setting-sources", "local"): ("--setting-sources", "user,local"),
+                ("--tools", arms.NATIVE_TOOLS): ("--tools", arms.FULL_TOOLS)}
         self.assertTrue({swap.get(p, p) for p in pairs(cs.cli_args)} <= set(pairs(full.cli_args)))
         added = [p for p in pairs(full.cli_args) if swap.get(p, p) not in
                  [swap.get(q, q) for q in pairs(cs.cli_args)]]
@@ -227,6 +229,31 @@ class ArmsTest(unittest.TestCase):
                          [".claude.json", "CLAUDE.md", "settings.json"])
         cs_config = Path(host_of(cs, arms.CONFIG_DIR))
         self.assertEqual(sorted(p.name for p in cs_config.iterdir()), [".claude.json"])
+
+    def test_only_full_gets_skill_and_agent(self):
+        # Final review I-8 (operator decision 2026-10-29): bare and cs keep the Codex list.
+        tools = {}
+        for arm in arms.ARMS:
+            args = self.spec(arm).cli_args
+            tools[arm] = args[args.index("--tools") + 1]
+        self.assertEqual(tools["bare"], "Bash,Read,Write,Edit,Glob,Grep")
+        self.assertEqual(tools["cs"], "Bash,Read,Write,Edit,Glob,Grep")
+        self.assertEqual(tools["full"], "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent")
+
+    def test_a_frozen_manifest_may_not_name_a_live_path(self):
+        # Final review I-7: with frozen_root set, arm_invocation refuses any plugin or config
+        # path outside it, before writing anything.
+        root = self.root / "frozen"
+        root.mkdir()
+        for arm in ("cs", "full"):
+            m = dict(self.manifest, frozen_root=str(root))
+            with self.subTest(arm), self.assertRaisesRegex(ValueError, "outside the frozen"):
+                arms.arm_invocation(arm, MODEL, PROMPT, m, self.urls,
+                                    self.root / "runs" / f"fz-{arm}", session_id=SESSION)
+            self.assertFalse((self.root / "runs" / f"fz-{arm}").exists())
+        # bare reads neither plugins nor config: unaffected.
+        arms.arm_invocation("bare", MODEL, PROMPT, dict(self.manifest, frozen_root=str(root)),
+                            self.urls, self.root / "runs" / "fz-bare", session_id=SESSION)
 
     def test_cs_and_full_seed_claude_json_with_the_same_server(self):
         # C1 ruling: the companion's detect.mjs finds codescout only in the config dir's

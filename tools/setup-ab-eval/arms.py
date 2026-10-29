@@ -6,7 +6,14 @@
   cs    bare + `--mcp-config /opt/sab/mcp.json` (codescout, its env rewritten to the study
         stack) + `--plugin-dir /opt/plugins/codescout-companion`.
   full  cs + one `--plugin-dir` per `plugins_full` entry (the companion is not repeated), with
-        the frozen CLAUDE.md and settings.json copied into the run's config dir.
+        the frozen CLAUDE.md and settings.json copied into the run's config dir, and the
+        `Skill` and `Agent` tools added to `--tools` (final review I-8, operator decision
+        2026-10-29: the setup of daily use invokes skills and starts subagents; bare and cs keep
+        the Codex list).
+
+FROZEN INPUTS (final review I-7). When the manifest carries `frozen_root` (the runner's
+frozen.frozen_manifest()), every plugin dir and config file arm_invocation reads must lie under
+it, or it raises: the runner reads the study's frozen copy, never the live profile.
 
 What is the same in every arm, by construction: the image (the `bare` arm runs in the same
 agent-cs image, so the bytes the agent can read are the same), the CLI binary, the model, the
@@ -53,6 +60,9 @@ CODESCOUT_ARGS = ["start", "--debug"]
 
 # Copied from pilot.run_pilot (pilot.py:233-238).
 NATIVE_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
+# Final review I-8: the full arm also gets the Skill and Agent tools.
+FULL_ONLY_TOOLS = ("Skill", "Agent")
+FULL_TOOLS = ",".join((NATIVE_TOOLS, *FULL_ONLY_TOOLS))
 MAX_BUDGET_USD = "1.25"
 # Copied from pilot.run_pilot's `docker run` (--cpus 4 --memory 8g). Identical in every arm.
 RESOURCES = ("--cpus", "4", "--memory", "8g")
@@ -347,16 +357,31 @@ def sanitize_user_settings(settings):
     return kept, dropped
 
 
-def _bare_args(model, session_id, task_prompt, extra, setting_sources=None):
+def _bare_args(model, session_id, task_prompt, extra, setting_sources=None, tools=NATIVE_TOOLS):
     # pilot.py:233-238 minus `--effort <effort>`; `extra` goes in front of the prompt separator.
-    # Only full changes the setting sources (C2 ruling); bare keeps the Codex `local`.
+    # Only full changes the setting sources (C2 ruling) and the tool list (I-8); bare keeps the
+    # Codex `local` and native tools.
     return [CLI, "-p", "--model", model, "--session-id", session_id,
             "--setting-sources", setting_sources or SETTING_SOURCES, "--settings", SETTINGS,
             "--strict-mcp-config", "--dangerously-skip-permissions",
-            "--tools", NATIVE_TOOLS,
+            "--tools", tools,
             "--output-format", "json", "--max-budget-usd", MAX_BUDGET_USD,
             *extra, "--", task_prompt]
 
+
+def _check_frozen_paths(arm, manifest):
+    """I-7: with `frozen_root` set, every plugin dir and config file the arm reads lies under it."""
+    root = manifest.get("frozen_root")
+    if root is None:
+        return
+    root = Path(root).resolve()
+    paths = [manifest["plugins_cs"]["install_path"]]
+    if arm == "full":
+        paths += [p["install_path"] for p in manifest["plugins_full"]]
+        paths += list(manifest["full_config_files"])
+    outside = [p for p in paths if not Path(p).resolve().is_relative_to(root)]
+    if outside:
+        raise ValueError(f"{arm} arm would read {outside} outside the frozen inputs {root}")
 
 def arm_invocation(arm, model, task_prompt, manifest, urls, run_dir, *, session_id=None):
     """Write the run's config files under `run_dir` and return the arm's CLI args and mounts.
@@ -372,6 +397,8 @@ def arm_invocation(arm, model, task_prompt, manifest, urls, run_dir, *, session_
     session_id = session_id or str(uuid.uuid4())
     # Validate before writing anything, so a refused env leaves no half-made run dir.
     mcp_env = study_mcp_env(manifest["mcp_env"], urls) if arm != "bare" else None
+    if arm != "bare":
+        _check_frozen_paths(arm, manifest)
     run_dir = Path(run_dir)
     config = run_dir / "config"
     config.mkdir(parents=True, exist_ok=False)
@@ -412,18 +439,20 @@ def arm_invocation(arm, model, task_prompt, manifest, urls, run_dir, *, session_
             else:
                 shutil.copyfile(src, config / Path(src).name)
     sources = FULL_SETTING_SOURCES if arm == "full" else SETTING_SOURCES
+    tools = FULL_TOOLS if arm == "full" else NATIVE_TOOLS
     kept_effects = {}
     if arm == "full":
         kept_settings = json.loads((config / "settings.json").read_text())
         kept_effects = {k: KEPT_SETTING_EFFECTS.get(k, KEPT_SETTING_DEFAULT_EFFECT)
                         for k in kept_settings}
     (run_dir / "arm-record.json").write_text(json.dumps({
-        "arm": arm, "setting_sources": sources,
+        "arm": arm, "setting_sources": sources, "tools": tools,
+        "frozen_root": manifest.get("frozen_root"),
         "config_files": sorted(p.name for p in config.iterdir()),
         "expected_mcp_tools": expected_mcp_tools(arm),
         "settings_kept": kept_effects,
         "settings_dropped": dropped}, indent=2) + "\n")
-    return ArmSpec(cli_args=_bare_args(model, session_id, task_prompt, extra, sources),
+    return ArmSpec(cli_args=_bare_args(model, session_id, task_prompt, extra, sources, tools),
                    mounts=mounts, env=dict(CONTAINER_ENV))
 
 

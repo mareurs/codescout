@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import frozen
 import run
 
 TOKEN = "fake-token-not-real-0123456789"
@@ -272,6 +273,10 @@ class RunnerCase(unittest.TestCase):
         self.grader = Grader()
         self.registration = self.tmp / "registration.json"
         self.registered = set()
+        # Final review I-7: the arms read a frozen copy; the registration carries its hashes.
+        (self.tmp / "companion" / "hooks.json").write_text("{}\n")
+        self.frozen_root = self.tmp / "frozen"
+        self.frozen_trees = frozen.freeze_inputs(self.manifest, self.frozen_root)["trees"]
 
     def load(self, task_id):
         return run.TaskInfo(image=f"sab-arm-{task_id}:t", prompt="Fix the bug.\n",
@@ -296,8 +301,10 @@ class RunnerCase(unittest.TestCase):
         if hashes <= self.registered:
             return
         self.registered |= hashes
-        body = {"stage": "test", "plans": {f"p{i}": {"plan_sha256": h}
-                                           for i, h in enumerate(sorted(self.registered))}}
+        body = {"stage": "test",
+                "frozen": {"root": str(self.frozen_root), "trees": self.frozen_trees},
+                "plans": {f"p{i}": {"plan_sha256": h}
+                           for i, h in enumerate(sorted(self.registered))}}
         reg = dict(body, registration_sha256=run.registration_digest(body))
         self.registration.write_text(json.dumps(reg) + "\n")
 
@@ -951,6 +958,50 @@ class CapHitTest(RunnerCase):
         self.assertTrue(run.cap_hit({"subtype": "error_max_budget_usd", "is_error": True}))
         self.assertTrue(run.cap_hit({"subtype": "error_during_execution",
                                      "terminal_reason": "budget_exhausted"}))
+class FrozenInputsTest(RunnerCase):
+    """Final review I-7: the arms read only the frozen copy, and a changed copy stops a batch."""
+
+    def mounts(self):
+        out = []
+        for name, image, argv in self.world.started:
+            if name.startswith(run.AGENT_PREFIX):
+                out += [argv[i + 1].split(":")[:2] for i, a in enumerate(argv) if a == "-v"]
+        return out
+
+    def test_the_arms_mount_only_the_frozen_copies(self):
+        self.batch([spec(arm="cs"), spec(arm="full")], BUDGET)
+        plugin_hosts = [h for h, t in self.mounts() if t.startswith("/opt/plugins/")]
+        self.assertEqual(len(plugin_hosts), 3)  # cs: companion; full: companion + superpowers
+        root = self.frozen_root.resolve()
+        self.assertTrue(all(Path(h).is_relative_to(root) for h in plugin_hosts), plugin_hosts)
+        self.assertFalse([h for h, _ in self.mounts() if h.startswith(str(self.tmp / "companion"))])
+        record = json.loads((self.data / "runs" / run.run_id(spec(arm="full")) /
+                             "arm-record.json").read_text())
+        self.assertEqual(record["frozen_root"], str(root))
+        self.assertEqual(record["tools"], "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent")
+
+    def test_a_changed_frozen_input_refuses_the_batch_before_any_docker_call(self):
+        (self.frozen_root / "plugins" / "superpowers" / "late-edit.md").write_text("x")
+        cli = FakeCLI(self.world, self.data)
+        with self.assertRaisesRegex(run.Refused, "changed after the freeze"):
+            self.batch([spec()], BUDGET, cli=cli)
+        self.assertEqual((cli.calls, self.world.calls), ([], []))
+        self.assertFalse((self.data / "batch.jsonl").exists())
+
+    def test_a_registration_without_frozen_inputs_refuses(self):
+        self.frozen_trees = {}
+        cli = FakeCLI(self.world, self.data)
+        with self.assertRaisesRegex(run.Refused, "frozen"):
+            self.batch([spec()], BUDGET, cli=cli)
+        self.assertEqual(self.world.calls, [])
+
+    def test_a_manifest_plugin_the_registration_did_not_freeze_refuses(self):
+        (self.tmp / "legible").mkdir()
+        self.manifest["plugins_full"].append({"name": "legible",
+                                              "install_path": str(self.tmp / "legible")})
+        with self.assertRaisesRegex(run.Refused, "freezes"):
+            self.batch([spec()], BUDGET)
+        self.assertEqual(self.world.calls, [])
 
 
 class Stage1RowsTest(RunnerCase):

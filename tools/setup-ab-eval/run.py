@@ -78,7 +78,10 @@ After a graded row, EFFORT: the graded rows of each (task, model) must share one
 
 CONTAINERS. Every arm starts from bundle.json's `arm_image` through `tasks.bundle_run_image`
 (the exec-only layer, Task 7 Ruling A), never `run_image`, with arms.docker_run_args (cap-drop
-ALL, no-new-privileges); the agent must answer `id -u` with 1000 before the CLI starts. The CLI
+ALL, no-new-privileges); the agent must answer `id -u` with 1000 before the CLI starts. The
+plugin dirs and the full arm's config come from the registration's frozen copy (final review
+I-7, frozen.py): run_batch re-hashes every frozen tree before the lock and refuses on any
+difference, and hands arms a manifest that names only the frozen paths. The CLI
 argv is arms.arm_invocation's, with `--output-format json` replaced by `stream-json --verbose
 --include-hook-events` (the input integrity.check reads, as live_control.step_r10 built it) and
 `--max-budget-usd` set to `budget.per_call_usd`; no `--effort` (spec: CLI default effort). The env
@@ -114,6 +117,7 @@ from urllib.parse import urlsplit
 
 import arms
 import evidence
+import frozen
 import integrity
 import pilot
 import stack
@@ -1239,6 +1243,22 @@ def _check_cli(manifest):
     got = hashlib.sha256(Path(cli["path"]).read_bytes()).hexdigest()
     if got != cli["sha256"]:
         raise Refused(f"CLI {cli['path']} changed after freeze ({got} != {cli['sha256']})")
+def _frozen_inputs(reg, manifest):
+    """Final review I-7: the registration's frozen arm inputs (`frozen.root`, `frozen.trees`)
+    must hash as frozen, or Refused; returns the manifest that names only the frozen copies."""
+    fz = reg.get("frozen")
+    if not isinstance(fz, dict) or not isinstance(fz.get("root"), str) or not fz["root"]:
+        raise Refused("the registration records no frozen arm inputs (frozen.root, "
+                      "frozen.trees); see frozen.py")
+    try:
+        frozen.check_trees(fz["root"], fz.get("trees"))
+        names = set(frozen.entry_names(manifest))
+        if names != set(fz["trees"]):
+            raise frozen.Mismatch(f"the registration freezes {sorted(fz['trees'])}, the "
+                                  f"manifest's arms read {sorted(names)}")
+        return frozen.frozen_manifest(manifest, fz["root"])
+    except frozen.Mismatch as e:
+        raise Refused(str(e))
 
 
 def plan_reps(plan):
@@ -1294,6 +1314,7 @@ def run_batch(plan, budget, data, dry_run, *, registration=None, docker=None, ex
     if manifest is None:
         manifest = json.loads((data / "setup-manifest.json").read_text())
     _check_cli(manifest)
+    manifest = _frozen_inputs(reg, manifest)  # I-7: re-hashed at every batch start
     try:
         lock = os.open(data / LOCK, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
