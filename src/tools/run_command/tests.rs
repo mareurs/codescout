@@ -7483,6 +7483,32 @@ async fn a_chain_keeps_the_last_stages_exit_status() {
         .unwrap();
     assert_eq!(result["exit_code"], 1, "{result}");
 }
+/// A command that a signal kills has no exit code, and `exit_code: -1` alone does not say so: the
+/// model read a self-inflicted `pkill -f` as an unexplained failure. The response names the signal.
+/// An ordinary non-zero exit carries no such key, so its presence never means "failed".
+#[cfg(unix)]
+#[tokio::test]
+async fn a_signal_killed_command_names_the_signal_beside_the_minus_one() {
+    let (_dir, ctx) = project_ctx().await;
+    // `kill -KILL`, not `kill -9`: the dangerous-command list refuses the latter without an ack.
+    let killed = RunCommand
+        .call(json!({ "command": "echo before; kill -KILL $$" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(killed["exit_code"], -1, "{killed}");
+    assert_eq!(killed["terminated_by_signal"], 9, "{killed}");
+    assert!(
+        killed["stdout"].as_str().unwrap().contains("before"),
+        "{killed}"
+    );
+
+    let exited = RunCommand
+        .call(json!({ "command": "exit 3" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(exited["exit_code"], 3, "{exited}");
+    assert!(exited.get("terminated_by_signal").is_none(), "{exited}");
+}
 
 #[cfg(unix)]
 #[tokio::test]

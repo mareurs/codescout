@@ -1035,6 +1035,25 @@ pub(crate) struct LateKeys {
     /// `producer_exit_code` key. `None` when none was recorded: no capture, a producer that is not a
     /// plain command, a status file that could not be made or read.
     pub producer_exit_code: Option<i32>,
+    /// The signal that ended the command ([`terminating_signal`]): the `terminated_by_signal` key.
+    /// A signal death has no exit code, so `exit_code` reads `-1` and says nothing else. `None`
+    /// for every normal exit, so the key's presence is never a sign of an ordinary failure.
+    pub terminated_by_signal: Option<i32>,
+}
+
+/// The signal that ended a process, or `None` when it exited on its own (any code) or the platform
+/// has no signals. `ExitStatus::code` is `None` exactly when this is `Some`.
+pub(crate) fn terminating_signal(status: &std::process::ExitStatus) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = status;
+        None
+    }
 }
 
 /// What `"stdout":""` adds to a response that had no `stdout` key. The tee block inserts it when a
@@ -1685,6 +1704,9 @@ pub(crate) async fn handle_successful_output_with(
     // `attachments` parameter: it is not part of the capture's own keys, which that function builds.
     if let Some(code) = late_keys.producer_exit_code {
         late.insert("producer_exit_code".into(), json!(code));
+    }
+    if let Some(signal) = late_keys.terminated_by_signal {
+        late.insert("terminated_by_signal".into(), json!(signal));
     }
 
     // --- Step 6: Decide whether to buffer + summarize ---

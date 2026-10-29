@@ -126,7 +126,11 @@ pub(crate) async fn run_command_interactive(
                 if !tail.is_empty() {
                     accumulated_output.push_str(&tail);
                 }
-                return Ok(interactive_response(code, &accumulated_output, round, None));
+                let mut response = interactive_response(code, &accumulated_output, round, None);
+                if let Some(signal) = super::output::terminating_signal(&status) {
+                    response["terminated_by_signal"] = json!(signal);
+                }
+                return Ok(response);
             }
             Ok(None) => {} // still running
             Err(e) => {

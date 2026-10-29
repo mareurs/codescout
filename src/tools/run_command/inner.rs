@@ -890,6 +890,7 @@ pub(crate) async fn run_command_inner(
                     ),
                     stdout_prefix: notes.stdout_prefix.clone(),
                     producer_exit_code,
+                    terminated_by_signal: super::output::terminating_signal(&output.status),
                 },
             )
             .await?;
