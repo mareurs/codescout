@@ -1,8 +1,8 @@
 """Pre-registered analysis for the setup A/B study: spec section 6's decision rule.
 
-    decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, seed,
+    decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, registered_min, seed,
            instrument_failures) -> Decision
-    strata(rows, model, registered_tasks, *, seed, instrument_failures,
+    strata(rows, model, registered_tasks, *, registered_min, seed, instrument_failures,
            comparison=("cs", "bare")) -> {"foreign": Decision|None, "private": Decision|None,
                                           "pooled": Decision}
     secondary(rows, gold_files=None, task_filter=None) -> {model: {arm: {...}}}   never gated
@@ -12,13 +12,22 @@
     compiles_all_targets(command) -> bool
 
 Pure computation over Task 8 journal rows (run.py ROW_FIELDS). No docker, network or token.
-`registered_tasks`, `seed` and `instrument_failures` are keyword-only and REQUIRED.
+`registered_tasks`, `registered_min`, `seed` and `instrument_failures` are keyword-only and
+REQUIRED.
 
 REGISTERED TASKS (fix round 1, I1). `registered_tasks` is the frozen task list as a mapping
-{task id: "foreign" | "private"} (the bundle record's `kind`); the registered COUNT is its len.
-Any main-stage row whose task is not in it raises MalformedRow: an unregistered task can never
-fill the count. A development task may not be registered. The kinds decide the stratum
-("foreign", "private", or "pooled" when both occur) and its note (Task 7 Ruling A).
+{task id: "foreign" | "private"} (the bundle record's `kind`). Any main-stage row whose task is
+not in it raises MalformedRow: an unregistered task can never fill the count. A development task
+may not be registered. The kinds decide the stratum ("foreign", "private", or "pooled" when both
+occur) and its note (Task 7 Ruling A).
+
+REGISTERED MINIMUM (final review I-2, operator decision 2026-10-29). `registered_min` is "the
+registered number of valid tasks" of spec section 6, a frozen number separate from the task
+set: REGISTERED_MIN = 10 valid tasks of the 12 registered, per model. Fewer valid tasks than
+`registered_min` gives "inconclusive"; 1 <= registered_min <= len(registered_tasks). A stratum
+is held to the same share of its own tasks, rounded up: stratum_min(registered_min, k, n) =
+ceil(registered_min * k / n) for a stratum of k of the n registered tasks (10 of 12 -> 5 of 6).
+Pilot-only data (6 of the 12 tasks) therefore reads "inconclusive" in every stratum.
 
 INSTRUMENT (fix round 1, I5). `instrument_failures` is required: the study-level failures of
 the leakage gates, controls and arm-integrity checks. An explicit () means "the gates were run
@@ -73,9 +82,14 @@ runId != run.run_id(task, model, arm, rep); stage != run.stage_of(task); and for
 grade without a bool `pass` or a cost that is not finite and > 0. Nothing is dropped silently.
 
 DECISIONS (resolved toward a harder "promising"; the report cites the spec text of each):
-  D1 floor     per valid task the bare spread is max(b0, b1) / min(b0, b1) (cost); F is their
-               geometric mean over the valid tasks, not divided by sqrt(n). THE OPERATOR MUST
-               CONFIRM THIS DEFINITION OF F AT THE STAGE 2 FREEZE.
+  D1 floor     F = GM over the valid tasks i of max(bare0_i, bare1_i) / min(bare0_i, bare1_i)
+                 = exp(mean_i |ln(bare0_i / bare1_i)|),
+               the costs of the two bare reps of task i; not divided by sqrt(n). Operator
+               decision 2026-10-29: "the LARGER of the two bare costs' geometric-mean readings"
+               (the cautious one). The other reading, GM_i(bare0) / GM_i(bare1) taken larger over
+               smaller = exp(|mean_i ln(bare0_i / bare1_i)|), is never larger (triangle
+               inequality) and is 1.0 when the per-task spreads cancel; it is NOT used.
+               test_analyze pins this formula with spreads that differ and change direction.
   D2 one bare  a task with fewer than two scored bare reps, or no scored treatment run, is not a
                valid task (it lowers n_valid_tasks toward "inconclusive").
   D3 ties      see ORDER; a bare mean pass of exactly 0.5 is a pass (the brief's ">= 0.5").
@@ -103,6 +117,9 @@ from typing import NamedTuple
 import run
 
 RESAMPLES = 10_000
+# Final review I-2, operator decision 2026-10-29: at least 10 of the 12 registered tasks must be
+# valid per model, or the verdict is "inconclusive". Frozen before any scored run.
+REGISTERED_MIN = 10
 LABELS = ("promising", "no demonstrated advantage", "worse", "inconclusive", "invalid instrument")
 EFFECTS = {("cs", "bare"): "codescout", ("full", "bare"): "the setup"}
 ARMS = run.arms.ARMS
@@ -394,7 +411,31 @@ def _stratum(registered_tasks):
     return "pooled", (POOLED_NOTE,)
 
 
-def decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, seed,
+def floor_f(units):
+    """D1: F = GM over tasks of max(bare0, bare1) / min(bare0, bare1) = exp(mean |ln(b0 / b1)|)."""
+    return math.exp(math.fsum(abs(math.log(u.bare_costs[0] / u.bare_costs[1])) for u in units)
+                    / len(units))
+
+
+def stratum_min(registered_min, k, n):
+    """The minimum for a stratum of k of the n registered tasks: the same share, rounded up
+    (ceil(registered_min * k / n), exact integer arithmetic)."""
+    _check_int(n, "n", 1)
+    _check_int(k, "k", 1)
+    _check_int(registered_min, "registered_min", 1)
+    if k > n or registered_min > n:
+        raise ValueError(f"stratum of {k} of {n} tasks with a minimum of {registered_min}")
+    return -(-registered_min * k // n)
+
+
+def _check_registered_min(registered_min, registered_tasks):
+    _check_int(registered_min, "registered_min", 1)
+    if registered_min > len(registered_tasks):
+        raise ValueError(f"registered_min {registered_min} exceeds the {len(registered_tasks)} "
+                         f"registered tasks")
+
+
+def decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, registered_min, seed,
            instrument_failures):
     """Spec section 6 for one model and one comparison (see the module docstring)."""
     comparison = tuple(comparison)
@@ -403,6 +444,7 @@ def decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, seed,
     if model not in run.MODELS:
         raise ValueError(f"model {model!r} is not one of {run.MODELS}")
     check_registered(registered_tasks)
+    _check_registered_min(registered_min, registered_tasks)
     _check_int(seed, "seed", 0)
     _check_instrument(instrument_failures)
     _check_registered_rows(_latest(rows), registered_tasks)
@@ -415,10 +457,9 @@ def decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, seed,
     if n:
         logs = [math.log(u.treat_cost / (sum(u.bare_costs) / 2)) for u in units]
         gmean = math.exp(math.fsum(logs) / n)
-        floor = math.exp(math.fsum(abs(math.log(u.bare_costs[0] / u.bare_costs[1]))
-                                   for u in units) / n)
+        floor = floor_f(units)
         ci = bootstrap_ci(logs, seed)
-    outcome, reasons = rule(n, len(registered_tasks), counts[treatment], counts["bare"], gmean,
+    outcome, reasons = rule(n, registered_min, counts[treatment], counts["bare"], gmean,
                             ci, floor, tuple(instrument_failures))
     effect = EFFECTS[comparison]
     stratum, notes = _stratum(registered_tasks)
@@ -426,21 +467,28 @@ def decide(rows, model, comparison=("cs", "bare"), *, registered_tasks, seed,
                     reasons, dict(sorted(excluded.items())), stratum, notes)
 
 
-def strata(rows, model, registered_tasks, *, seed, instrument_failures,
+def strata(rows, model, registered_tasks, *, registered_min, seed, instrument_failures,
            comparison=("cs", "bare")):
     """Foreign-only, private-only and pooled Decisions (spec section 2: "reported separately and
     also pooled"; Task 7 Ruling A). Each stratum is decide() over its part of the registered
-    mapping and the rows of those tasks; a stratum with no registered task is None. Every row
-    is checked against the WHOLE mapping first, so an unregistered task raises here too."""
+    mapping and the rows of those tasks, with stratum_min() of `registered_min`; a stratum with
+    no registered task is None. Every row is checked against the WHOLE mapping first, so an
+    unregistered task raises here too. Final review I-3 ruling: there is no pooled headline; a
+    headline claim needs the foreign and private strata to agree (analyze_study.headline)."""
     check_registered(registered_tasks)
+    _check_registered_min(registered_min, registered_tasks)
     _check_registered_rows(_latest(rows), registered_tasks)
     common = dict(comparison=comparison, seed=seed, instrument_failures=instrument_failures)
     out = {}
+    n = len(registered_tasks)
     for kind in KINDS:
         part = {t: k for t, k in registered_tasks.items() if k == kind}
         out[kind] = (decide([r for r in rows if r["taskId"] in part], model,
-                            registered_tasks=part, **common) if part else None)
-    out["pooled"] = decide(rows, model, registered_tasks=registered_tasks, **common)
+                            registered_tasks=part,
+                            registered_min=stratum_min(registered_min, len(part), n), **common)
+                     if part else None)
+    out["pooled"] = decide(rows, model, registered_tasks=registered_tasks,
+                           registered_min=registered_min, **common)
     return out
 
 

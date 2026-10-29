@@ -62,6 +62,10 @@ def study(ratios, spread=1.0, n=12, cs_fail=(), bare_pass=(True, True), model=S,
 
 def decide(rows, **kw):
     kw.setdefault("registered_tasks", REGISTERED)
+    # Every registered task required unless a test says otherwise (the pre-I-2 strict rule); the
+    # frozen 10-of-12 minimum has its own tests (RegisteredMinTest).
+    kw.setdefault("registered_min", len(kw["registered_tasks"])
+                  if isinstance(kw["registered_tasks"], dict) else 1)
     kw.setdefault("seed", SEED)
     kw.setdefault("instrument_failures", ())
     return analyze.decide(rows, kw.pop("model", S), **kw)
@@ -417,11 +421,11 @@ class FixRound1Test(unittest.TestCase):
     def test_instrument_failures_is_required(self):
         rows = study(**PROMISING)
         with self.assertRaises(TypeError):
-            analyze.decide(rows, S, registered_tasks=REGISTERED, seed=SEED)
+            analyze.decide(rows, S, registered_tasks=REGISTERED, registered_min=12, seed=SEED)
         with self.assertRaises(TypeError):
-            analyze.strata(rows, S, REGISTERED, seed=SEED)
-        self.assertEqual(analyze.decide(rows, S, registered_tasks=REGISTERED, seed=SEED,
-                                        instrument_failures=()).outcome, "promising")
+            analyze.strata(rows, S, REGISTERED, registered_min=12, seed=SEED)
+        self.assertEqual(analyze.decide(rows, S, registered_tasks=REGISTERED, registered_min=12,
+                                        seed=SEED, instrument_failures=()).outcome, "promising")
 
     def test_decide_notes_contamination_whenever_private_tasks_are_pooled(self):
         private = [f"cs-p{i:02d}" for i in range(6)]
@@ -578,8 +582,9 @@ class StrataTest(unittest.TestCase):
                      + study(n=6, tasks=self.private, ratios=(1.4, 1.6), spread=1.01))
 
     def strata(self, registered=None, rows=None):
-        return analyze.strata(self.rows if rows is None else rows, S,
-                              registered or self.registered, seed=SEED, instrument_failures=())
+        registered = registered or self.registered
+        return analyze.strata(self.rows if rows is None else rows, S, registered,
+                              registered_min=len(registered), seed=SEED, instrument_failures=())
 
     def test_foreign_private_and_pooled_are_separate(self):
         out = self.strata()
@@ -709,6 +714,125 @@ class SecondaryTest(unittest.TestCase):
         for c in no:
             with self.subTest(c):
                 self.assertFalse(analyze.compiles_all_targets(c))
+class FloorFormulaTest(unittest.TestCase):
+    """Final review I-1: F is pinned to GM over tasks of max(bare0, bare1) / min(bare0, bare1)
+    (operator decision 2026-10-29, "the larger reading"). The bare spreads differ per task and
+    change direction, so the other candidate formulas give other numbers."""
+
+    SPREADS = (2.0, 0.5, 1.5, 1 / 3, 1.1, 0.8, 3.0, 0.9, 1.25, 0.4, 1.05, 0.7)
+
+    @staticmethod
+    def gm(xs):
+        return math.exp(math.fsum(math.log(x) for x in xs) / len(xs))
+
+    def bare_costs(self, spreads):
+        b0 = [1.0 + 0.25 * i for i in range(len(spreads))]
+        return b0, [b * s for b, s in zip(b0, spreads)]
+
+    def rows(self, spreads):
+        b0, b1 = self.bare_costs(spreads)
+        rows = []
+        for task, x, y in zip(TASKS, b0, b1):
+            rows += block(task, (x, y), 0.6 * (x + y) / 2)
+        return rows
+
+    def test_floor_is_the_geometric_mean_of_per_task_max_over_min(self):
+        b0, b1 = self.bare_costs(self.SPREADS)
+        d = decide(self.rows(self.SPREADS))
+        per_task = [max(x, y) / min(x, y) for x, y in zip(b0, b1)]
+        self.assertAlmostEqual(d.floor, self.gm(per_task), places=12)
+        # Algebraically the same: GM of the per-task max over GM of the per-task min.
+        self.assertAlmostEqual(d.floor, self.gm([max(x, y) for x, y in zip(b0, b1)])
+                               / self.gm([min(x, y) for x, y in zip(b0, b1)]), places=12)
+        # Not the rep-0 / rep-1 reading (larger over smaller), not an arithmetic mean.
+        rep_reading = max(self.gm(b0) / self.gm(b1), self.gm(b1) / self.gm(b0))
+        self.assertGreater(d.floor - rep_reading, 0.3)
+        self.assertGreater(math.fsum(per_task) / len(per_task) - d.floor, 0.05)
+
+    def test_spreads_that_cancel_still_give_the_larger_floor(self):
+        # 2x up, then 2x down, alternating: the rep-0 / rep-1 reading is exactly 1.0; F is 2.0.
+        spreads = (2.0, 0.5) * 6
+        b0, b1 = self.bare_costs(spreads)
+        self.assertAlmostEqual(self.gm(b0) / self.gm(b1), 1.0, places=12)
+        self.assertAlmostEqual(decide(self.rows(spreads)).floor, 2.0, places=12)
+
+
+class RegisteredMinTest(unittest.TestCase):
+    """Final review I-2, operator decision 2026-10-29: at least 10 of the 12 registered tasks
+    valid per model; fewer is inconclusive; the registered task set stays 12."""
+
+    def invalidate(self, rows, *tasks):
+        for t in tasks:
+            rows = without(rows, t, "cs") + [row(t, "cs", 0, 1.0, None, outcome="invalid-arm")]
+        return rows
+
+    def split(self):
+        foreign, private = TASKS[:6], [f"cs-p{i:02d}" for i in range(6)]
+        return foreign, private, {**{t: "foreign" for t in foreign},
+                                  **{t: "private" for t in private}}
+
+    def test_the_frozen_minimum_is_ten(self):
+        self.assertEqual(analyze.REGISTERED_MIN, 10)
+        self.assertEqual(len(REGISTERED), 12)
+
+    def test_ten_valid_of_twelve_decides(self):
+        rows = self.invalidate(study(**PROMISING), TASKS[3], TASKS[8])
+        d = decide(rows, registered_min=analyze.REGISTERED_MIN)
+        self.assertEqual((d.n_valid_tasks, d.outcome), (10, "promising"))
+        self.assertEqual(sorted(d.excluded), [TASKS[3], TASKS[8]])
+        self.assertFalse(any("fewer than" in r for r in d.reasons))
+        # The same data under the old all-12 rule is inconclusive: the minimum is what decides.
+        self.assertEqual(decide(rows, registered_min=12).outcome, "inconclusive")
+
+    def test_nine_valid_of_twelve_is_inconclusive(self):
+        rows = self.invalidate(study(**PROMISING), TASKS[1], TASKS[3], TASKS[8])
+        d = decide(rows, registered_min=analyze.REGISTERED_MIN)
+        self.assertEqual((d.n_valid_tasks, d.outcome), (9, "inconclusive"))
+        self.assertIn("fewer than the registered number of valid tasks (9 < 10)", d.reasons)
+
+    def test_pilot_only_data_is_inconclusive_in_every_stratum(self):
+        foreign, private, registered = self.split()
+        rows = (study(n=3, tasks=foreign, **PROMISING)
+                + study(n=3, tasks=private, **PROMISING))
+        out = analyze.strata(rows, S, registered, registered_min=analyze.REGISTERED_MIN,
+                             seed=SEED, instrument_failures=())
+        for kind, n, need in (("foreign", 3, 5), ("private", 3, 5), ("pooled", 6, 10)):
+            with self.subTest(kind):
+                self.assertEqual(out[kind].outcome, "inconclusive")
+                self.assertIn(f"fewer than the registered number of valid tasks ({n} < {need})",
+                              out[kind].reasons)
+        d = decide(rows, registered_tasks=registered, registered_min=analyze.REGISTERED_MIN)
+        self.assertEqual(d.outcome, "inconclusive")
+
+    def test_a_stratum_needs_the_same_share_rounded_up(self):
+        self.assertEqual(analyze.stratum_min(10, 6, 12), 5)
+        self.assertEqual(analyze.stratum_min(10, 7, 12), 6)    # 5.83 -> 6
+        self.assertEqual(analyze.stratum_min(10, 5, 12), 5)    # 4.17 -> 5
+        self.assertEqual(analyze.stratum_min(12, 6, 12), 6)
+        self.assertEqual(analyze.stratum_min(1, 1, 12), 1)
+        for bad in ((13, 6, 12), (10, 13, 12), (0, 6, 12), (10, 0, 12)):
+            with self.subTest(bad), self.assertRaises(ValueError):
+                analyze.stratum_min(*bad)
+        foreign, private, registered = self.split()
+        rows = (self.invalidate(study(n=6, tasks=foreign, **PROMISING), foreign[0])
+                + self.invalidate(study(n=6, tasks=private, **PROMISING), private[0], private[1]))
+        out = analyze.strata(rows, S, registered, registered_min=10, seed=SEED,
+                             instrument_failures=())
+        self.assertEqual((out["foreign"].n_valid_tasks, out["foreign"].outcome),
+                         (5, "promising"))                              # 5 of 6 >= 5
+        self.assertEqual((out["private"].n_valid_tasks, out["private"].outcome),
+                         (4, "inconclusive"))                           # 4 of 6 < 5
+        self.assertEqual((out["pooled"].n_valid_tasks, out["pooled"].outcome),
+                         (9, "inconclusive"))                           # 9 of 12 < 10
+
+    def test_registered_min_is_required_and_validated(self):
+        rows = study(**PROMISING)
+        with self.assertRaises(TypeError):
+            analyze.decide(rows, S, registered_tasks=REGISTERED, seed=SEED,
+                           instrument_failures=())
+        for bad in (0, 13, True, 10.0, None):
+            with self.subTest(bad), self.assertRaises(ValueError):
+                decide(rows, registered_min=bad)
 
 
 # Measured 2026-10-28 on CPython 3.14.8: decide(study(**VARIED), seed=7).ci90.
