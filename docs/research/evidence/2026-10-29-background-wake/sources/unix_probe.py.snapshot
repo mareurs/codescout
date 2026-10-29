@@ -1,0 +1,108 @@
+import base64
+import json
+import os
+import socket
+import struct
+import time
+from pathlib import Path
+
+
+class UnixWebSocket:
+    def __init__(self, path):
+        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.socket.settimeout(10)
+        self.socket.connect(path)
+        key = base64.b64encode(os.urandom(16)).decode()
+        self.socket.sendall((
+            'GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n'
+            'Connection: Upgrade\r\nSec-WebSocket-Key: ' + key +
+            '\r\nSec-WebSocket-Version: 13\r\n\r\n'
+        ).encode())
+        self.buffer = bytearray()
+        while b'\r\n\r\n' not in self.buffer:
+            self.buffer.extend(self.socket.recv(4096))
+        header, _, remaining = self.buffer.partition(b'\r\n\r\n')
+        if not header.startswith(b'HTTP/1.1 101 '):
+            raise RuntimeError(header.split(b'\r\n')[0])
+        self.buffer = bytearray(remaining)
+
+    def exact(self, length):
+        while len(self.buffer) < length:
+            data = self.socket.recv(max(4096, length - len(self.buffer)))
+            if not data:
+                raise EOFError('websocket closed')
+            self.buffer.extend(data)
+        result = bytes(self.buffer[:length])
+        del self.buffer[:length]
+        return result
+
+    def frame(self, payload, opcode=1):
+        mask = os.urandom(4)
+        header = bytes([0x80 | opcode])
+        length = len(payload)
+        if length < 126:
+            header += bytes([0x80 | length])
+        elif length < 65536:
+            header += bytes([0x80 | 126]) + struct.pack('!H', length)
+        else:
+            header += bytes([0x80 | 127]) + struct.pack('!Q', length)
+        masked = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
+        self.socket.sendall(header + mask + masked)
+
+    def send(self, value):
+        self.frame(json.dumps(value).encode())
+
+    def receive(self, timeout=10):
+        self.socket.settimeout(timeout)
+        fragments = bytearray()
+        while True:
+            first, second = self.exact(2)
+            opcode = first & 15
+            length = second & 127
+            if length == 126:
+                length = struct.unpack('!H', self.exact(2))[0]
+            elif length == 127:
+                length = struct.unpack('!Q', self.exact(8))[0]
+            mask = self.exact(4) if second & 128 else None
+            payload = self.exact(length)
+            if mask:
+                payload = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
+            if opcode == 9:
+                self.frame(payload, 10)
+                continue
+            if opcode == 10:
+                continue
+            if opcode == 8:
+                raise EOFError('websocket close frame')
+            fragments.extend(payload)
+            if first & 128:
+                return json.loads(fragments)
+
+    def close(self):
+        self.socket.close()
+
+
+if __name__ == '__main__':
+    connection = UnixWebSocket('/home/marius/.codex/app-server-control/app-server-control.sock')
+    try:
+        connection.send({'id': 1, 'method': 'initialize', 'params': {
+            'clientInfo': {'name': 'bg_wake_readonly_probe', 'version': '0.1'}}})
+        reply = connection.receive()
+        print('INITIALIZE', reply)
+        connection.send({'method': 'initialized'})
+        connection.send({'id': 2, 'method': 'thread/read', 'params': {
+            'threadId': os.environ['CODEX_THREAD_ID'], 'includeTurns': False}})
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            reply = connection.receive()
+            if reply.get('id') != 2:
+                continue
+            if 'error' in reply:
+                print('THREAD_READ_ERROR', reply['error'])
+            else:
+                thread = reply.get('result', {}).get('thread', {})
+                print('CURRENT_THREAD', thread.get('id') == os.environ['CODEX_THREAD_ID'],
+                      'STATUS', thread.get('status'))
+            break
+    finally:
+        connection.close()

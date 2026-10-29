@@ -1,0 +1,28 @@
+{
+  "version": "1.0.2",
+  "sessionPrototypeMethods": [
+    "constructor",
+    "rpc",
+    "workspacePath",
+    "send",
+    "sendAndWait",
+    "on",
+    "_dispatchEvent",
+    "_handleBroadcastEvent",
+    "_executeToolAndRespond",
+    "_executePermissionAndRespond",
+    "registerTools",
+    "getToolHandler",
+    "registerPermissionHandler",
+    "registerUserInputHandler",
+    "registerHooks",
+    "_handleUserInputRequest",
+    "_handleHooksInvoke",
+    "getMessages",
+    "destroy",
+    "abort",
+    "setModel"
+  ],
+  "clientStopSource": "async stop(){let e=[];for(let t of this.sessions.values()){let s=t.sessionId,i=null;for(let c=1;c<=3;c++)try{await t.destroy(),i=null;break}catch(l){if(i=l instanceof Error?l:new Error(String(l)),c<3){let m=100*Math.pow(2,c-1);await new Promise(S=>setTimeout(S,m))}}i&&e.push(new Error(`Failed to destroy session ${s} after 3 attempts: ${i.message}`))}if(this.sessions.clear(),this.connection){try{this.connection.dispose()}catch(t){e.push(new Error(`Failed to dispose connection: ${t instanceof Error?t.message:String(t)}`))}this.connection=null,this._rpc=null}if(this.modelsCache=null,this.socket){try{this.socket.end()}catch(t){e.push(new Error(`Failed to close socket: ${t instanceof Error?t.message:String(t)}`))}this.socket=null}if(this.cliProcess&&!this.isExternalServer){try{this.cliProcess.kill()}catch(t){e.push(new Error(`Failed to kill CLI process: ${t instanceof Error?t.message:String(t)}`))}this.cliProcess=null}return this.state=\"disconnected\",this.actualPort=null,this.stderrBuffer=\"\",this.processExitPromise=null,e}",
+  "clientForceStopSource": "async forceStop(){if(this.forceStopping=!0,this.sessions.clear(),this.connection){try{this.connection.dispose()}catch{}this.connection=null,this._rpc=null}if(this.modelsCache=null,this.socket){try{this.socket.destroy()}catch{}this.socket=null}if(this.cliProcess&&!this.isExternalServer){try{this.cliProcess.kill(\"SIGKILL\")}catch{}this.cliProcess=null}this.state=\"disconnected\",this.actualPort=null,this.stderrBuffer=\"\",this.processExitPromise=null}"
+}

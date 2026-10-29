@@ -1,0 +1,169 @@
+{
+  "measured_date": "2026-10-29",
+  "versions": {
+    "codex_cli": "0.165.0",
+    "codex_daemon": "0.160.0",
+    "copilot_cli_and_bundled_sdk": "1.0.2",
+    "companion": "1.20.23"
+  },
+  "scope": "Historical measurements, not a shipped adapter. Copilot backend synthetic; Codex backend real. Source snapshots are final harness revisions; earlier result-label differences reflect harness iteration.",
+  "files": [
+    {
+      "path": "codex-results.json",
+      "bytes": 3205,
+      "sha256": "e7370db15f6f3bee7171dde30c3cf38b245e914188e01b85f1dc14d4adb8abc5",
+      "source": "/tmp/wake-measurements-20261029/codex-results.json",
+      "source_sha256": "e7370db15f6f3bee7171dde30c3cf38b245e914188e01b85f1dc14d4adb8abc5",
+      "copy": "exact"
+    },
+    {
+      "path": "codex-supplement-results.json",
+      "bytes": 1312,
+      "sha256": "d2b5410620946c3c4a36ad032227a012bb44ddf27c3465c30ec5f9ee49a29421",
+      "source": "/tmp/wake-measurements-20261029/codex-supplement-results.json",
+      "source_sha256": "d2b5410620946c3c4a36ad032227a012bb44ddf27c3465c30ec5f9ee49a29421",
+      "copy": "exact"
+    },
+    {
+      "path": "copilot-stdio-results.json",
+      "bytes": 1303,
+      "sha256": "30e9b21bdf0a2acb00fefe06ccbfd4cd612e1c31f189c1f37a32905ef896d02b",
+      "source": "/tmp/wake-measurements-20261029/copilot-sdk-results.json",
+      "source_sha256": "30e9b21bdf0a2acb00fefe06ccbfd4cd612e1c31f189c1f37a32905ef896d02b",
+      "copy": "exact"
+    },
+    {
+      "path": "copilot-destroy-results.json",
+      "bytes": 1674,
+      "sha256": "5d550d9df4f2b7b2f51fe778fa222b0b8f5f35c524cbffa783506a77ec33e52e",
+      "source": "/tmp/wake-measurements-20261029/copilot-tcp/copilot-sdk-results.json",
+      "source_sha256": "5d550d9df4f2b7b2f51fe778fa222b0b8f5f35c524cbffa783506a77ec33e52e",
+      "copy": "exact"
+    },
+    {
+      "path": "copilot-client-stop-results.json",
+      "bytes": 1752,
+      "sha256": "6e6a7e3729339bc66fc8250609a1c0a10acc02e5e2f7924265d17838b1719cfc",
+      "source": "/tmp/wake-measurements-20261029/copilot-tcp-detach-only/copilot-sdk-results.json",
+      "source_sha256": "6e6a7e3729339bc66fc8250609a1c0a10acc02e5e2f7924265d17838b1719cfc",
+      "copy": "exact"
+    },
+    {
+      "path": "copilot-force-detach-results.json",
+      "bytes": 2124,
+      "sha256": "b3b2f0a1a3a883e13efc31433085690bb67da0249efcbf2d3874ad65c15baf97",
+      "source": "/tmp/wake-measurements-20261029/copilot-tcp-force-detach/copilot-sdk-results.json",
+      "source_sha256": "b3b2f0a1a3a883e13efc31433085690bb67da0249efcbf2d3874ad65c15baf97",
+      "copy": "exact"
+    },
+    {
+      "path": "copilot-force-detach-provider-requests.json",
+      "bytes": 1471,
+      "sha256": "0e7736ae7eb81a5def8c0f0d40e7163237a3a6f2f1da542db8f40f0cf5166675",
+      "source": "/tmp/wake-measurements-20261029/copilot-tcp-force-detach/copilot-provider-requests.json",
+      "source_sha256": "0e7736ae7eb81a5def8c0f0d40e7163237a3a6f2f1da542db8f40f0cf5166675",
+      "copy": "exact"
+    },
+    {
+      "path": "copilot-force-detach-owner-events.jsonl",
+      "bytes": 5937,
+      "sha256": "415188424cb5fc25e077be569550b1f75fb7f022216d1f869e642dc900ae0ec0",
+      "source": "/tmp/wake-measurements-20261029/copilot-tcp-force-detach/copilot-sdk-resumed-events.jsonl",
+      "source_sha256": "415188424cb5fc25e077be569550b1f75fb7f022216d1f869e642dc900ae0ec0",
+      "copy": "exact"
+    },
+    {
+      "path": "current-session-model-receipt.json",
+      "bytes": 1210,
+      "sha256": "f4f1fe60fda340ab7c658fb3b0069e0db5d2f5c7a89624b7fc8530881ff34216",
+      "source": "/tmp/wake-measurements-20261029/current-session-model-receipt.json",
+      "source_sha256": "f4f1fe60fda340ab7c658fb3b0069e0db5d2f5c7a89624b7fc8530881ff34216",
+      "copy": "exact"
+    },
+    {
+      "path": "current-session-wake.jsonl",
+      "bytes": 769,
+      "sha256": "4c6ab702bcc79158f8d197863e5cc049ddc2b37a66380332ef2f2fe9498bd836",
+      "source": "/tmp/wake-measurements-20261029/current-session-wake.jsonl",
+      "source_sha256": "4c6ab702bcc79158f8d197863e5cc049ddc2b37a66380332ef2f2fe9498bd836",
+      "copy": "exact"
+    },
+    {
+      "path": "codescout-terminal-results.json",
+      "bytes": 1664,
+      "sha256": "0524664d6e65de8c126184ed753d7977937a8a21cdb6394b5aa7e0950d23576c",
+      "source": "/tmp/wake-measurements-20261029/codescout-terminal-results.json",
+      "source_sha256": "0524664d6e65de8c126184ed753d7977937a8a21cdb6394b5aa7e0950d23576c",
+      "copy": "exact"
+    },
+    {
+      "path": "sources/unix_probe.py.snapshot",
+      "bytes": 4071,
+      "sha256": "9b5fd7c8d28b05e5b0dd1a4e25025986e87b6cd6ecd369659e8eb854fb5093f5",
+      "source": "/tmp/wake-measurements-20261029/unix_probe.py",
+      "source_sha256": "9b5fd7c8d28b05e5b0dd1a4e25025986e87b6cd6ecd369659e8eb854fb5093f5",
+      "copy": "exact"
+    },
+    {
+      "path": "sources/codex_matrix.py.snapshot",
+      "bytes": 8094,
+      "sha256": "e964e215a00130f7c2486b86fdb0250dba1e31d94f7e52584bb4dcb59e00ce67",
+      "source": "/tmp/wake-measurements-20261029/codex_matrix.py",
+      "source_sha256": "e964e215a00130f7c2486b86fdb0250dba1e31d94f7e52584bb4dcb59e00ce67",
+      "copy": "exact"
+    },
+    {
+      "path": "sources/codex_supplement.py.snapshot",
+      "bytes": 5168,
+      "sha256": "70b9f347c2dc890ff1c2b0642b22c08714a47320215f6b220ac6df4c4ff34321",
+      "source": "/tmp/wake-measurements-20261029/codex_supplement.py",
+      "source_sha256": "70b9f347c2dc890ff1c2b0642b22c08714a47320215f6b220ac6df4c4ff34321",
+      "copy": "exact"
+    },
+    {
+      "path": "sources/copilot_sdk_matrix.mjs.snapshot",
+      "bytes": 8949,
+      "sha256": "78bb971ea4652739263a4240e51f4825aa64b085f2b6be5cff9e4ed2cd4cf317",
+      "source": "/tmp/wake-measurements-20261029/copilot_sdk_matrix.mjs",
+      "source_sha256": "78bb971ea4652739263a4240e51f4825aa64b085f2b6be5cff9e4ed2cd4cf317",
+      "copy": "exact"
+    },
+    {
+      "path": "sources/current_session_wake.py.snapshot",
+      "bytes": 5656,
+      "sha256": "1e7ff1353b7e6b1ccda68a3182ce74638096a10e204bb079a6fe872cbd8f77bb",
+      "source": "/tmp/wake-measurements-20261029/current_session_wake.py",
+      "source_sha256": "1e7ff1353b7e6b1ccda68a3182ce74638096a10e204bb079a6fe872cbd8f77bb",
+      "copy": "exact"
+    },
+    {
+      "path": "codex-existing-daemon-selected.jsonl",
+      "bytes": 48995,
+      "sha256": "675c91c37f851707798957e6151a8a72473fdf9a84d720f729c7b44babf8ac7a",
+      "source": "/tmp/wake-measurements-20261029/codex-existing-daemon.jsonl",
+      "source_sha256": "fe0742a7b53639d175fb98b8dea9bb1d1759a3e965f1fda81c2edb31f7ffa6ef",
+      "copy": "selected original lines, byte-preserved",
+      "source_records": 224,
+      "retained_records": 94,
+      "predicate": "message.method in ['initialize', 'initialized', 'item/completed', 'thread/inject_items', 'thread/read', 'thread/resume', 'thread/start', 'thread/status/changed', 'turn/completed', 'turn/start', 'turn/started', 'turn/steer'] or message.method absent; account, quota, token-usage, hook and MCP startup notifications omitted"
+    },
+    {
+      "path": "codex-supplement-selected.jsonl",
+      "bytes": 22879,
+      "sha256": "b0fb8c7c1642c206ac079d1aa0c07d819bb9079132bb1212bec1a0c5b7be28f0",
+      "source": "/tmp/wake-measurements-20261029/codex-supplement.jsonl",
+      "source_sha256": "e66af33c8ba5855c9a1e3508f0e51aea3455229795b3a53dd2f7f3feca86dcd2",
+      "copy": "selected original lines, byte-preserved",
+      "source_records": 121,
+      "retained_records": 45,
+      "predicate": "message.method in ['initialize', 'initialized', 'item/completed', 'thread/inject_items', 'thread/read', 'thread/resume', 'thread/start', 'thread/status/changed', 'turn/completed', 'turn/start', 'turn/started', 'turn/steer'] or message.method absent; account, quota, token-usage, hook and MCP startup notifications omitted"
+    },
+    {
+      "path": "copilot-sdk-lifecycle-observation.json",
+      "bytes": 2066,
+      "sha256": "c891bf947a64fb4a93bda5fbb911a36d900cec5c53297b2e3b063514d34f1d64",
+      "copy": "runtime reflection of the installed SDK prototype, captured during documentation",
+      "source": "/home/marius/.copilot/pkg/linux-x64/1.0.2/copilot-sdk/index.js"
+    }
+  ]
+}

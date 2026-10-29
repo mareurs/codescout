@@ -1,0 +1,95 @@
+[
+  {
+    "case": "sdk_start",
+    "connected": true
+  },
+  {
+    "case": "create_session",
+    "sessionId": "a9a1986f-6e50-46be-b6d3-6c7a178f5f9b",
+    "synthetic_backend": true
+  },
+  {
+    "case": "idle_send_0",
+    "sameSession": "a9a1986f-6e50-46be-b6d3-6c7a178f5f9b",
+    "marker_observed": true,
+    "text": "PROBE_IDLE_0",
+    "provider_requests": 1,
+    "elapsed_ms": 1351
+  },
+  {
+    "case": "idle_send_1",
+    "sameSession": "a9a1986f-6e50-46be-b6d3-6c7a178f5f9b",
+    "marker_observed": true,
+    "text": "PROBE_IDLE_1",
+    "provider_requests": 1,
+    "elapsed_ms": 286
+  },
+  {
+    "case": "idle_send_2",
+    "sameSession": "a9a1986f-6e50-46be-b6d3-6c7a178f5f9b",
+    "marker_observed": true,
+    "text": "PROBE_IDLE_2",
+    "provider_requests": 1,
+    "elapsed_ms": 241
+  },
+  {
+    "case": "enqueue_during_active",
+    "messageId": "a1629473-d7d1-4d67-806c-665f2c6f954d",
+    "provider_requests": 2,
+    "second_marker_observed": true
+  },
+  {
+    "case": "duplicate_send_0",
+    "marker_observed": true,
+    "provider_requests": 1
+  },
+  {
+    "case": "duplicate_send_1",
+    "marker_observed": true,
+    "provider_requests": 1
+  },
+  {
+    "case": "resume_session",
+    "same_session": true,
+    "marker_observed": true
+  },
+  {
+    "case": "second_client_connected",
+    "port": 37217
+  },
+  {
+    "case": "second_client_send",
+    "same_session": true,
+    "marker_observed": true,
+    "original_client_observed": true
+  },
+  {
+    "case": "secondary_cleanup_method",
+    "method": "external client.forceStop only"
+  },
+  {
+    "case": "owner_after_force_detach",
+    "messageId": "d43bb3f2-bd13-4b30-8b31-81ed8c5a7b07",
+    "marker_observed": true,
+    "answers": [
+      "PROBE_OWNER_AFTER_DETACH"
+    ],
+    "provider_requests": 1,
+    "new_event_types": [
+      "session.idle",
+      "pending_messages.modified",
+      "pending_messages.modified",
+      "user.message",
+      "assistant.turn_start",
+      "session.usage_info",
+      "assistant.usage",
+      "assistant.message",
+      "assistant.turn_end",
+      "session.idle"
+    ]
+  },
+  {
+    "case": "permission_requests",
+    "count": 0
+  }
+]

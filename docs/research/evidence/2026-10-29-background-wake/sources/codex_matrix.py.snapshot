@@ -1,0 +1,164 @@
+import json
+import os
+import time
+import tempfile
+from pathlib import Path
+from unix_probe import UnixWebSocket
+
+ROOT = Path('/tmp/wake-measurements-20261029')
+LOG = (ROOT / 'codex-existing-daemon.jsonl').open('w')
+RESULTS = []
+SOCKET = '/home/marius/.codex/app-server-control/app-server-control.sock'
+
+class Rpc:
+    def __init__(self, label):
+        self.label = label
+        self.connection = UnixWebSocket(SOCKET)
+        self.next_id = 1
+        self.messages = []
+        self.request('initialize', {'clientInfo': {'name': 'bg_wake_matrix', 'version': '0.1'}})
+        self.send_notification('initialized', {})
+
+    def log(self, direction, message):
+        LOG.write(json.dumps({'time': time.time(), 'client': self.label,
+                              'direction': direction, 'message': message}) + '\n')
+        LOG.flush()
+
+    def receive(self, timeout=60):
+        message = self.connection.receive(timeout)
+        self.log('received', message)
+        self.messages.append(message)
+        if 'id' in message and 'method' in message:
+            # No tool is authorized by this probe.
+            self.connection.send({'id': message['id'], 'error': {'code': -32601, 'message': 'Probe refuses tools'}})
+        return message
+
+    def request(self, method, params):
+        identifier = self.next_id
+        self.next_id += 1
+        request = {'id': identifier, 'method': method, 'params': params}
+        self.log('sent', request)
+        self.connection.send(request)
+        deadline = time.monotonic() + 65
+        while time.monotonic() < deadline:
+            message = self.receive(max(.1, deadline - time.monotonic()))
+            if message.get('id') == identifier and 'method' not in message:
+                return message
+        raise TimeoutError(method)
+
+    def send_notification(self, method, params):
+        self.connection.send({'method': method, 'params': params})
+
+    def complete(self, turn_id):
+        def found():
+            return next((m for m in self.messages if m.get('method') == 'turn/completed'
+                         and m.get('params', {}).get('turn', {}).get('id') == turn_id), None)
+        deadline = time.monotonic() + 65
+        while not found() and time.monotonic() < deadline:
+            self.receive(max(.1, deadline - time.monotonic()))
+        message = found()
+        if not message:
+            raise TimeoutError('turn did not complete')
+        texts = [m['params']['item'].get('text', '') for m in self.messages
+                 if m.get('method') == 'item/completed'
+                 and m.get('params', {}).get('turnId') == turn_id
+                 and m.get('params', {}).get('item', {}).get('type') == 'agentMessage']
+        return message['params']['turn']['status'], '\n'.join(texts)
+
+    def close(self):
+        self.connection.close()
+
+def record(case, **data):
+    result = {'case': case, **data}
+    RESULTS.append(result)
+    print(json.dumps(result), flush=True)
+    (ROOT / 'codex-results.json').write_text(json.dumps(RESULTS, indent=2))
+
+def tool_turn(client, thread, marker, case):
+    started = time.monotonic()
+    response = client.request('turn/start', {'threadId': thread, 'input': [],
+        'toolOutput': {'name': 'background_probe', 'output': 'A background job completed. Reply exactly ' + marker}})
+    if 'error' in response:
+        record(case, error=response['error'])
+        return None
+    turn = response['result']['turn']['id']
+    status, text = client.complete(turn)
+    record(case, thread=thread, turn=turn, status=status, marker_observed=marker in text,
+           text=text, elapsed_seconds=round(time.monotonic() - started, 3))
+    return turn
+
+client = None
+other = None
+try:
+    client = Rpc('A')
+    with tempfile.TemporaryDirectory(prefix='codex-matrix-work-') as work:
+        response = client.request('thread/start', {'cwd': work, 'ephemeral': False,
+            'approvalPolicy': 'never', 'sandbox': 'read-only', 'model': 'gpt-6.1-sol',
+            'baseInstructions': 'Transport measurement. Never use tools. Reply with the latest requested marker only.',
+            'developerInstructions': 'Never invoke tools or read or modify files.'})
+        if 'error' in response:
+            raise RuntimeError(response['error'])
+        thread = response['result']['thread']['id']
+        record('isolated_thread_on_existing_daemon', thread=thread)
+        for index in range(3):
+            tool_turn(client, thread, 'IDLE_WAKE_' + str(index), 'idle_tool_output_' + str(index))
+        state = client.request('thread/read', {'threadId': thread})
+        record('idle_after_completion', status=state.get('result', {}).get('thread', {}).get('status'))
+        response = client.request('turn/start', {'threadId': thread,
+            'input': [{'type': 'text', 'text': 'Reply exactly PRIMARY_TURN.'}]})
+        primary = response['result']['turn']['id']
+        state = client.request('thread/read', {'threadId': thread})
+        before = state.get('result', {}).get('thread', {}).get('status')
+        queued = client.request('turn/start', {'threadId': thread, 'input': [],
+            'toolOutput': {'name': 'background_probe', 'output': 'Reply exactly ACTIVE_DELIVERY.'}})
+        if 'result' in queued:
+            returned = queued['result']['turn']['id']
+            status, text = client.complete(returned)
+            record('tool_output_during_active_turn', status_before=before, primary_turn=primary,
+                   returned_turn=returned, same_turn=primary == returned, status=status,
+                   marker_observed='ACTIVE_DELIVERY' in text, text=text)
+        else:
+            record('tool_output_during_active_turn', error=queued['error'])
+            client.complete(primary)
+        response = client.request('turn/start', {'threadId': thread,
+            'input': [{'type': 'text', 'text': 'INVALID_MIX'}],
+            'toolOutput': {'name': 'background_probe', 'output': 'INVALID_MIX'}})
+        record('reject_mixed_input', rejected='error' in response, error=response.get('error'))
+        response = client.request('turn/start', {'threadId': 'invalid-probe-thread', 'input': [],
+            'toolOutput': {'name': 'background_probe', 'output': 'INVALID_THREAD'}})
+        record('reject_invalid_thread', rejected='error' in response, error=response.get('error'))
+        first = tool_turn(client, thread, 'DUPLICATE_EVENT', 'duplicate_delivery_first')
+        second = tool_turn(client, thread, 'DUPLICATE_EVENT', 'duplicate_delivery_second')
+        record('duplicate_delivery_turn_ids', distinct_turns=bool(first and second and first != second))
+        other = Rpc('B')
+        response = other.request('thread/resume', {'threadId': thread})
+        record('second_client_resume', same_thread=response.get('result', {}).get('thread', {}).get('id') == thread,
+               error=response.get('error'))
+        before = len(client.messages)
+        turn = tool_turn(other, thread, 'SECOND_CLIENT_WAKE', 'second_client_tool_output')
+        seen = False
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                message = client.receive(max(.05, deadline-time.monotonic()))
+                if message.get('method') == 'turn/completed' and message.get('params', {}).get('turn', {}).get('id') == turn:
+                    seen = True
+            except TimeoutError:
+                break
+        record('first_client_observes_second_client_turn', observed_completed=seen)
+        client.close()
+        client = None
+        other.close()
+        other = Rpc('C-reconnected')
+        response = other.request('thread/resume', {'threadId': thread})
+        record('reconnect_resume', same_thread=response.get('result', {}).get('thread', {}).get('id') == thread,
+               error=response.get('error'))
+        tool_turn(other, thread, 'RECONNECTED_WAKE', 'reconnected_tool_output')
+except Exception as error:
+    record('probe_exception', type=type(error).__name__, message=str(error))
+finally:
+    if client:
+        client.close()
+    if other:
+        other.close()
+    LOG.close()

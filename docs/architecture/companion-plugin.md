@@ -12,6 +12,10 @@ hook inventory lives here. Source of truth is the plugin's own `hooks/hooks.json
 - `SubagentStart` hook (`hooks/subagent-guidance.mjs`) — same for all subagents
 - `PreToolUse` hook on `Grep|Glob|Read|Bash|Edit|Write` (`hooks/pre-tool-guard.mjs`) — **hard-denies (`permissionDecision: deny`) native Read/Grep/Glob/Edit/Write on source files and native Bash**, redirecting to codescout MCP tools
 
+## Background-job continuation across harnesses
+
+The Claude-style completion hook and an external host adapter are different mechanisms. The [2026-10-29 Codex/Copilot measurements](../research/2026-10-29-background-wake-codex-copilot.md) establish real Codex continuation through the existing daemon and synthetic-provider Copilot SDK continuation, including deduplication and client-cleanup limits. They do not represent an installed companion feature.
+
 ## Full hook inventory (per `hooks/hooks.json`)
 
 Re-derived from the installed `hooks/hooks.json` on 2026-08-18 at companion **1.16.9**, because

@@ -1,0 +1,121 @@
+[
+  {
+    "case": "isolated_thread_on_existing_daemon",
+    "thread": "01a1894e-26c8-7ac2-ba4d-e188c7f24cac"
+  },
+  {
+    "case": "idle_tool_output_0",
+    "thread": "01a1894e-26c8-7ac2-ba4d-e188c7f24cac",
+    "turn": "01a1894e-2c4e-7031-93f4-cf3ae93d44d0",
+    "status": "completed",
+    "marker_observed": true,
+    "text": "IDLE_WAKE_0",
+    "elapsed_seconds": 4.407
+  },
+  {
+    "case": "idle_tool_output_1",
+    "thread": "01a1894e-26c8-7ac2-ba4d-e188c7f24cac",
+    "turn": "01a1894e-3d4b-7a61-af75-aabe42e67362",
+    "status": "completed",
+    "marker_observed": true,
+    "text": "IDLE_WAKE_1",
+    "elapsed_seconds": 2.938
+  },
+  {
+    "case": "idle_tool_output_2",
+    "thread": "01a1894e-26c8-7ac2-ba4d-e188c7f24cac",
+    "turn": "01a1894e-48c4-7400-abfc-e1fcef11fe3d",
+    "status": "completed",
+    "marker_observed": true,
+    "text": "IDLE_WAKE_2",
+    "elapsed_seconds": 2.113
+  },
+  {
+    "case": "idle_after_completion",
+    "status": {
+      "type": "idle"
+    }
+  },
+  {
+    "case": "tool_output_during_active_turn",
+    "status_before": {
+      "type": "idle"
+    },
+    "primary_turn": "01a1894e-5111-7783-a67f-cee293884453",
+    "returned_turn": "01a1894e-5111-7783-a67f-cee293884453",
+    "same_turn": true,
+    "status": "completed",
+    "marker_observed": true,
+    "text": "PRIMARY_TURN\nACTIVE_DELIVERY"
+  },
+  {
+    "case": "reject_mixed_input",
+    "rejected": true,
+    "error": {
+      "code": -32600,
+      "message": "`toolOutput` cannot be combined with nonempty `input`"
+    }
+  },
+  {
+    "case": "reject_invalid_thread",
+    "rejected": true,
+    "error": {
+      "code": -32600,
+      "message": "invalid thread id: invalid character: expected an optional prefix of `urn:uuid:` followed by [0-9a-fA-F-], found `i` at 1"
+    }
+  },
+  {
+    "case": "duplicate_delivery_first",
+    "thread": "01a1894e-26c8-7ac2-ba4d-e188c7f24cac",
+    "turn": "01a1894e-6277-7f30-8b78-12c55e46b5e2",
+    "status": "completed",
+    "marker_observed": true,
+    "text": "DUPLICATE_EVENT",
+    "elapsed_seconds": 2.693
+  },
+  {
+    "case": "duplicate_delivery_second",
+    "thread": "01a1894e-26c8-7ac2-ba4d-e188c7f24cac",
+    "turn": "01a1894e-6cfb-70d2-b1d3-d6a16f5d93a7",
+    "status": "completed",
+    "marker_observed": true,
+    "text": "DUPLICATE_EVENT",
+    "elapsed_seconds": 2.296
+  },
+  {
+    "case": "duplicate_delivery_turn_ids",
+    "distinct_turns": true
+  },
+  {
+    "case": "second_client_resume",
+    "same_thread": true,
+    "error": null
+  },
+  {
+    "case": "second_client_tool_output",
+    "thread": "01a1894e-26c8-7ac2-ba4d-e188c7f24cac",
+    "turn": "01a1894e-765a-7993-9a97-9d0cf717fce8",
+    "status": "completed",
+    "marker_observed": true,
+    "text": "SECOND_CLIENT_WAKE",
+    "elapsed_seconds": 2.441
+  },
+  {
+    "case": "first_client_observes_second_client_turn",
+    "observed_completed": true
+  },
+  {
+    "case": "reconnect_resume",
+    "same_thread": true,
+    "error": null
+  },
+  {
+    "case": "reconnected_tool_output",
+    "thread": "01a1894e-26c8-7ac2-ba4d-e188c7f24cac",
+    "turn": "01a1894e-87fd-7ca0-b538-fb014f4e6093",
+    "status": "completed",
+    "marker_observed": true,
+    "text": "RECONNECTED_WAKE",
+    "elapsed_seconds": 3.381
+  }
+]

@@ -1,0 +1,7 @@
+{"time": 1793305783.865474, "phase": "watcher_started", "pid": 4053773, "thread_id": "01a1892f-e3b5-7ec2-b2b9-7f280eef776a", "handle": "@bg_0000000a", "record": "/tmp/codescout-bg/2445809-3a90f18e-bg_0000000a.json"}
+{"time": 1793305783.8680866, "phase": "connected"}
+{"time": 1793305783.873821, "phase": "thread_status", "observed_status": "active", "job_state": "running"}
+{"time": 1793305803.9818158, "phase": "thread_status", "observed_status": "idle", "job_state": "running"}
+{"time": 1793305811.0182087, "phase": "job_finished_and_thread_stably_idle", "exit_code": 0, "job_state": "exited"}
+{"time": 1793305811.0187426, "phase": "turn_start_submitted"}
+{"time": 1793305811.048161, "phase": "turn_start_accepted", "turn_id": "01a1895b-184f-7320-a60e-e1b33dbea92d"}

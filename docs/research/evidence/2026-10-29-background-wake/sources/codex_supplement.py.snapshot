@@ -1,0 +1,84 @@
+import json, os, time, uuid
+from pathlib import Path
+from unix_probe import UnixWebSocket
+
+root=Path('/tmp/wake-measurements-20261029')
+thread=next(x['thread'] for x in json.loads((root/'codex-results.json').read_text())
+            if x['case']=='isolated_thread_on_existing_daemon')
+assert thread != os.environ['CODEX_THREAD_ID']
+connection=UnixWebSocket('/home/marius/.codex/app-server-control/app-server-control.sock')
+log=(root/'codex-supplement.jsonl').open('w')
+messages=[]
+results=[]
+identifier=0
+def record(case,**data):
+    result={'case':case,**data};results.append(result);print(json.dumps(result),flush=True)
+    (root/'codex-supplement-results.json').write_text(json.dumps(results,indent=2))
+def receive(timeout=60):
+    message=connection.receive(timeout);messages.append(message)
+    log.write(json.dumps({'time':time.time(),'direction':'received','message':message})+'\n');log.flush()
+    return message
+def request(method,params):
+    global identifier
+    identifier+=1;current=identifier
+    message={'id':current,'method':method,'params':params}
+    log.write(json.dumps({'time':time.time(),'direction':'sent','message':message})+'\n');log.flush()
+    connection.send(message)
+    while True:
+        answer=receive()
+        if answer.get('id')==current:return answer
+def wait(method,turn):
+    def found():return next((m for m in messages if m.get('method')==method
+        and (m.get('params',{}).get('turn',{}).get('id')==turn)),None)
+    deadline=time.monotonic()+60
+    while not found() and time.monotonic()<deadline:receive(max(.1,deadline-time.monotonic()))
+    if not found():raise TimeoutError(method)
+    return found()
+try:
+    request('initialize',{'clientInfo':{'name':'bg_wake_supplement','version':'0.1'},'capabilities':{'experimentalApi':True}})
+    connection.send({'method':'initialized'})
+    request('thread/resume',{'threadId':thread,'cwd':str(root)})
+    reply=request('thread/inject_items',{'threadId':thread,'items':[{'type':'message','role':'assistant',
+        'content':[{'type':'output_text','text':'CONTEXT_ONLY_PROBE'}]}]})
+    since=len(messages);deadline=time.monotonic()+2
+    while time.monotonic()<deadline:
+        try:receive(max(.05,deadline-time.monotonic()))
+        except TimeoutError:break
+    starts=[m for m in messages[since:] if m.get('method')=='turn/started']
+    state=request('thread/read',{'threadId':thread})
+    record('inject_context_only',accepted='result' in reply,error=reply.get('error'),
+           observation_seconds=2,turn_started_events=len(starts),status=state.get('result',{}).get('thread',{}).get('status'))
+    reply=request('turn/steer',{'threadId':thread,'expectedTurnId':str(uuid.uuid4()),
+        'input':[{'type':'text','text':'IDLE_STEER_NEGATIVE_CONTROL'}]})
+    record('steer_idle',rejected='error' in reply,error=reply.get('error'))
+    reply=request('turn/start',{'threadId':str(uuid.uuid4()),'input':[],
+        'toolOutput':{'name':'background_probe','output':'UNKNOWN_THREAD_CONTROL'}})
+    record('well_formed_unknown_thread',rejected='error' in reply,error=reply.get('error'))
+    reply=request('turn/start',{'threadId':thread,'input':[],
+        'toolOutput':{'name':'','output':'EMPTY_NAME_CONTROL'}})
+    record('empty_tool_name',rejected='error' in reply,error=reply.get('error'))
+    reply=request('turn/start',{'threadId':thread,'input':[{'type':'text','text':'Reply exactly CONFIRMED_ACTIVE_PRIMARY.'}]})
+    primary=reply['result']['turn']['id'];wait('turn/started',primary)
+    state=request('thread/read',{'threadId':thread})
+    reply=request('turn/start',{'threadId':thread,'input':[],
+        'toolOutput':{'name':'background_probe','output':'Reply exactly CONFIRMED_ACTIVE_DELIVERY.'}})
+    returned=reply.get('result',{}).get('turn',{}).get('id')
+    complete=wait('turn/completed',returned)
+    text='\n'.join(m['params']['item'].get('text','') for m in messages
+        if m.get('method')=='item/completed' and m.get('params',{}).get('turnId')==returned
+        and m.get('params',{}).get('item',{}).get('type')=='agentMessage')
+    record('confirmed_active_delivery',status_before=state.get('result',{}).get('thread',{}).get('status'),
+           same_turn=returned==primary,status=complete['params']['turn']['status'],
+           marker_observed='CONFIRMED_ACTIVE_DELIVERY' in text,text=text)
+    message_id=str(uuid.uuid4());turns=[]
+    for index in range(2):
+        reply=request('turn/start',{'threadId':thread,'clientUserMessageId':message_id,'input':[],
+            'toolOutput':{'name':'background_probe','output':'Reply exactly IDEMPOTENCY_PROBE.'}})
+        if 'error' in reply:
+            record('client_message_id_'+str(index),error=reply['error']);continue
+        turn=reply['result']['turn']['id'];turns.append(turn)
+        completed=wait('turn/completed',turn)
+        record('client_message_id_'+str(index),turn=turn,status=completed['params']['turn']['status'])
+    record('tool_output_client_message_id_dedup',two_responses=len(turns)==2,same_turn=len(turns)==2 and turns[0]==turns[1])
+except Exception as error:record('probe_exception',type=type(error).__name__,message=str(error))
+finally:connection.close();log.close()

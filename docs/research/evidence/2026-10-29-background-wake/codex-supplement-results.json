@@ -1,0 +1,62 @@
+[
+  {
+    "case": "inject_context_only",
+    "accepted": true,
+    "error": null,
+    "observation_seconds": 2,
+    "turn_started_events": 0,
+    "status": {
+      "type": "idle"
+    }
+  },
+  {
+    "case": "steer_idle",
+    "rejected": true,
+    "error": {
+      "code": -32600,
+      "message": "no active turn to steer"
+    }
+  },
+  {
+    "case": "well_formed_unknown_thread",
+    "rejected": true,
+    "error": {
+      "code": -32600,
+      "message": "thread not found: 5f1c247d-e1c4-49e9-a5d2-b05667e98242"
+    }
+  },
+  {
+    "case": "empty_tool_name",
+    "rejected": true,
+    "error": {
+      "code": -32600,
+      "message": "`toolOutput.name` must not be empty"
+    }
+  },
+  {
+    "case": "confirmed_active_delivery",
+    "status_before": {
+      "type": "active",
+      "activeFlags": []
+    },
+    "same_turn": true,
+    "status": "completed",
+    "marker_observed": true,
+    "text": "CONFIRMED_ACTIVE_PRIMARY.\nCONFIRMED_ACTIVE_DELIVERY."
+  },
+  {
+    "case": "client_message_id_0",
+    "turn": "01a18953-8ca5-7023-a8ec-0ceb97c7ce25",
+    "status": "completed"
+  },
+  {
+    "case": "client_message_id_1",
+    "turn": "01a18953-93c5-7793-8d1b-e3dacaf69480",
+    "status": "completed"
+  },
+  {
+    "case": "tool_output_client_message_id_dedup",
+    "two_responses": true,
+    "same_turn": false
+  }
+]

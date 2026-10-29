@@ -39,6 +39,7 @@ further down, holds its blind spots. Read it before you quote a number.
 | Which running servers execute a deleted binary? | `scripts/stale-servers.sh` |
 | What did a past session cost or do? | the `claude-traces` and `analyze-usage` skills |
 | Is retrieval quality holding? | `scripts/run-tc-benchmark.py` |
+| Can a background-job result wake Codex or Copilot after idle? | [Dated live-host and synthetic-provider measurements](research/2026-10-29-background-wake-codex-copilot.md), with historical source snapshots and their limits |
 
 A gate change has its own order of work: `docs/conventions/changing-an-enforcement-gate.md`.
 

@@ -1,0 +1,113 @@
+import json
+import os
+import sys
+import time
+from pathlib import Path
+from unix_probe import UnixWebSocket
+
+root=Path('/tmp/wake-measurements-20261029')
+config=json.loads(Path(sys.argv[1]).read_text())
+log=(root/'current-session-wake.jsonl').open('a')
+status_path=root/'current-session-wake-status.json'
+state={}
+def record(phase,**details):
+    entry={'time':time.time(),'phase':phase,**details}
+    log.write(json.dumps(entry)+'\n');log.flush()
+    state.update(entry);status_path.write_text(json.dumps(state,indent=2))
+    summary_path=root/'summary.json'
+    if summary_path.exists():
+        summary=json.loads(summary_path.read_text())
+        summary['actual_current_session_probe']=dict(state)
+        summary_path.write_text(json.dumps(summary,indent=2))
+
+connection=None
+identifier=0
+events=[]
+def receive(timeout=15):
+    message=connection.receive(timeout)
+    if 'method' in message:
+        events.append(message)
+        if message['method'] in ['turn/started','turn/completed']:
+            turn=message.get('params',{}).get('turn',{})
+            record(message['method'],turn_id=turn.get('id'),turn_status=turn.get('status'))
+        elif message['method']=='item/completed':
+            item=message.get('params',{}).get('item',{})
+            if item.get('type')=='agentMessage':record('agent_message',text=item.get('text',''))
+    return message
+def request(method,params):
+    global identifier
+    identifier+=1;current=identifier
+    connection.send({'id':current,'method':method,'params':params})
+    deadline=time.monotonic()+20
+    while time.monotonic()<deadline:
+        message=receive(max(.1,deadline-time.monotonic()))
+        if message.get('id')==current:return message
+    raise TimeoutError(method)
+
+try:
+    record('watcher_started',pid=os.getpid(),thread_id=config['thread_id'],handle=config['handle'],record=config['record'])
+    connection=UnixWebSocket(config['socket'])
+    initialized=request('initialize',{'clientInfo':{'name':'bg_current_session_probe','version':'0.1'}})
+    if 'error' in initialized:raise RuntimeError(initialized['error'])
+    connection.send({'method':'initialized'})
+    record('connected')
+    stable_idle=None
+    last_status=None
+    deadline=time.monotonic()+300
+    while time.monotonic()<deadline:
+        job=json.loads(Path(config['record']).read_text())
+        if job.get('schema')!=1 or job.get('server_pid')!=config['server_pid']:
+            raise RuntimeError('Job record schema/server mismatch')
+        os.kill(config['server_pid'],0)
+        reply=request('thread/read',{'threadId':config['thread_id'],'includeTurns':False})
+        if 'error' in reply:raise RuntimeError(reply['error'])
+        thread=reply.get('result',{}).get('thread',{})
+        if thread.get('id')!=config['thread_id']:raise RuntimeError('Wrong thread returned')
+        status=thread.get('status',{}).get('type')
+        if status!=last_status:
+            record('thread_status',observed_status=status,job_state=job.get('state'))
+            last_status=status
+        finished=job.get('state') in ['exited','failed']
+        if finished and status=='idle':
+            if stable_idle is None:stable_idle=time.monotonic()
+            if time.monotonic()-stable_idle>=3:
+                record('job_finished_and_thread_stably_idle',exit_code=job.get('exit_code'),job_state=job.get('state'))
+                break
+        else:stable_idle=None
+        time.sleep(1)
+    else:raise TimeoutError('Thread did not become idle after background completion')
+    claim=root/'current-session-wake.claim'
+    with claim.open('x') as file:file.write(str(os.getpid()))
+    output=(
+        'Actual-session background wake measurement, authorized by the user. '
+        'A separate temporary watcher observed the real codescout job '+config['handle']+
+        ' finish with state '+str(job.get('state'))+' and exit_code '+str(job.get('exit_code'))+
+        ', then observed this exact conversation idle continuously for at least three seconds. '
+        'It is submitting this tool output to the already-running Codex daemon, without user input. '
+        'To complete the measurement, read the job once with codescout run_command("tail -50 '+config['handle']+
+        '") and report whether automatic continuation in the existing conversation succeeded. '
+        'The probe evidence is in /tmp/wake-measurements-20261029/current-session-wake.jsonl. '
+        'The raw job record is '+config['record']+'. '
+        'Do not modify repository code or installed configuration. '
+        'This is a manually launched measurement adapter, not the installed companion hook.'
+    )
+    record('turn_start_submitted')
+    reply=request('turn/start',{'threadId':config['thread_id'],'input':[],
+        'toolOutput':{'name':'codescout_background_measurement','output':output}})
+    if 'error' in reply:
+        record('turn_start_rejected',error=reply['error'])
+    else:
+        turn=reply['result']['turn']['id'];record('turn_start_accepted',turn_id=turn)
+        deadline=time.monotonic()+180
+        while time.monotonic()<deadline:
+            completed=next((m for m in events if m.get('method')=='turn/completed'
+                and m.get('params',{}).get('turn',{}).get('id')==turn),None)
+            if completed:
+                record('probe_finished',turn_id=turn,status=completed['params']['turn']['status'])
+                break
+            receive(max(.1,deadline-time.monotonic()))
+        else:record('completion_not_observed',turn_id=turn)
+except Exception as error:record('probe_error',error_type=type(error).__name__,message=str(error))
+finally:
+    if connection:connection.close()
+    log.close()

@@ -1,0 +1,72 @@
+[
+  {
+    "time": 1793305476982,
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "marker": "PROBE_IDLE_0",
+    "stream": null
+  },
+  {
+    "time": 1793305477577,
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "marker": "PROBE_IDLE_1",
+    "stream": null
+  },
+  {
+    "time": 1793305478118,
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "marker": "PROBE_IDLE_2",
+    "stream": null
+  },
+  {
+    "time": 1793305478413,
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "marker": "PROBE_ACTIVE_FIRST",
+    "stream": null
+  },
+  {
+    "time": 1793305478678,
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "marker": "PROBE_ACTIVE_SECOND",
+    "stream": null
+  },
+  {
+    "time": 1793305478923,
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "marker": "PROBE_DUPLICATE",
+    "stream": null
+  },
+  {
+    "time": 1793305479170,
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "marker": "PROBE_DUPLICATE",
+    "stream": null
+  },
+  {
+    "time": 1793305479632,
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "marker": "PROBE_RESUMED",
+    "stream": null
+  },
+  {
+    "time": 1793305480007,
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "marker": "PROBE_SECOND_CLIENT",
+    "stream": null
+  },
+  {
+    "time": 1793305480256,
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "marker": "PROBE_OWNER_AFTER_DETACH",
+    "stream": null
+  }
+]

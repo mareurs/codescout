@@ -1,0 +1,123 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { CopilotClient } from '/home/marius/.copilot/pkg/linux-x64/1.0.2/copilot-sdk/index.js';
+
+const tcp=process.env.COPILOT_MATRIX_TCP==='1';
+const detachOnly=process.env.COPILOT_MATRIX_DETACH_ONLY==='1';
+const forceDetach=process.env.COPILOT_MATRIX_FORCE_DETACH==='1';
+const root='/tmp/wake-measurements-20261029'+(tcp?(forceDetach?'/copilot-tcp-force-detach':detachOnly?'/copilot-tcp-detach-only':'/copilot-tcp'):'');
+fs.mkdirSync(root,{recursive:true});
+const work=fs.mkdtempSync(path.join(os.tmpdir(),'copilot-sdk-matrix-'));
+const results=[];
+const requests=[];
+let permissionRequests=0;
+let client;
+const record=(name,data)=>{
+  const result={case:name,...data};results.push(result);console.log(JSON.stringify(result));
+  fs.writeFileSync(path.join(root,'copilot-sdk-results.json'),JSON.stringify(results,null,2));
+};
+const server=http.createServer(async(req,res)=>{
+  let body='';for await(const chunk of req)body+=chunk;
+  let parsed={};try{parsed=JSON.parse(body||'{}');}catch{}
+  const markers=body.match(/PROBE_[A-Z0-9_]+/g)||[];
+  const marker=markers.at(-1)||'PROBE_FALLBACK';
+  requests.push({time:Date.now(),method:req.method,path:req.url,marker,stream:parsed.stream??null});
+  fs.writeFileSync(path.join(root,'copilot-provider-requests.json'),JSON.stringify(requests,null,2));
+  if(req.method==='GET'){
+    res.writeHead(200,{'content-type':'application/json'});
+    res.end(JSON.stringify({object:'list',data:[{id:'gpt-4.1',object:'model',owned_by:'probe'}]}));return;
+  }
+  await new Promise(resolve=>setTimeout(resolve,200));
+  if(req.url.includes('chat/completions')){
+    if(!parsed.stream){
+      res.writeHead(200,{'content-type':'application/json'});
+      res.end(JSON.stringify({id:'chatcmpl-probe-'+requests.length,object:'chat.completion',created:Math.floor(Date.now()/1000),model:'gpt-4.1',
+        choices:[{index:0,message:{role:'assistant',content:marker},finish_reason:'stop'}],
+        usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15}}));return;
+    }
+    res.writeHead(200,{'content-type':'text/event-stream'});
+    const base={id:'chatcmpl-probe-'+requests.length,object:'chat.completion.chunk',created:Math.floor(Date.now()/1000),model:'gpt-4.1'};
+    res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{role:'assistant',content:marker},finish_reason:null}]})+'\n\n');
+    res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15}})+'\n\n');
+    res.end('data: [DONE]\n\n');return;
+  }
+  res.writeHead(404,{'content-type':'application/json'});res.end(JSON.stringify({error:{message:'Probe endpoint unsupported: '+req.url}}));
+});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const provider={type:'openai',wireApi:'completions',baseUrl:`http://127.0.0.1:${server.address().port}/v1`};
+const config={model:'gpt-4.1',provider,workingDirectory:work,
+  onPermissionRequest:()=>{permissionRequests++;return {kind:'denied-by-rules'};},
+  systemMessage:{mode:'replace',content:'Transport measurement with a deterministic synthetic backend. Never use tools. Reply only with the latest requested marker.'}};
+const deadline=setTimeout(()=>{record('overall_timeout',{});process.exit(2);},90000);
+try{
+  client=new CopilotClient({cliPath:'/home/marius/.local/bin/copilot',
+    cliArgs:['--config-dir',work,'--disable-builtin-mcps','--log-dir',path.join(work,'logs')],
+    cwd:work,env:{...process.env,COPILOT_PLUGIN_DIR_ONLY:'true'},autoRestart:false,useStdio:!tcp});
+  await client.start();record('sdk_start',{connected:true});
+  const session=await client.createSession(config);record('create_session',{sessionId:session.sessionId,synthetic_backend:true});
+  const events=[];session.on(event=>{events.push(event);fs.appendFileSync(path.join(root,'copilot-sdk-events.jsonl'),JSON.stringify({time:Date.now(),event})+'\n');});
+  for(let index=0;index<3;index++){
+    if(index)await new Promise(resolve=>setTimeout(resolve,300));
+    const marker='PROBE_IDLE_'+index;const start=Date.now();const before=requests.length;
+    const reply=await session.sendAndWait({prompt:'Reply exactly '+marker},15000);
+    const text=reply?.data?.content||'';
+    record('idle_send_'+index,{sameSession:session.sessionId,marker_observed:text.includes(marker),text,
+      provider_requests:requests.length-before,elapsed_ms:Date.now()-start});
+  }
+  const before=requests.length;
+  const first=session.sendAndWait({prompt:'Reply exactly PROBE_ACTIVE_FIRST'},15000);
+  await new Promise(resolve=>setTimeout(resolve,30));
+  const secondId=await session.send({prompt:'Reply exactly PROBE_ACTIVE_SECOND',mode:'enqueue'});
+  await first;
+  const end=Date.now()+10000;
+  while(Date.now()<end && !events.some(e=>e.type==='assistant.message'&&e.data?.content?.includes('PROBE_ACTIVE_SECOND')))
+    await new Promise(resolve=>setTimeout(resolve,50));
+  record('enqueue_during_active',{messageId:secondId,provider_requests:requests.length-before,
+    second_marker_observed:events.some(e=>e.type==='assistant.message'&&e.data?.content?.includes('PROBE_ACTIVE_SECOND'))});
+  for(let index=0;index<2;index++){
+    const before=requests.length;const reply=await session.sendAndWait({prompt:'Reply exactly PROBE_DUPLICATE'},15000);
+    record('duplicate_send_'+index,{marker_observed:reply?.data?.content?.includes('PROBE_DUPLICATE')||false,provider_requests:requests.length-before});
+  }
+  const sessionId=session.sessionId;
+  if(session.disconnect)await session.disconnect();else await session.destroy();
+  const resumed=await client.resumeSession(sessionId,config);
+  const reply=await resumed.sendAndWait({prompt:'Reply exactly PROBE_RESUMED'},15000);
+  record('resume_session',{same_session:resumed.sessionId===sessionId,marker_observed:reply?.data?.content?.includes('PROBE_RESUMED')||false});
+  if(tcp){
+    const observerEvents=[];
+    resumed.on(event=>{observerEvents.push(event);fs.appendFileSync(path.join(root,'copilot-sdk-resumed-events.jsonl'),JSON.stringify({time:Date.now(),event})+'\n');});
+    const secondClient=new CopilotClient({cliUrl:'127.0.0.1:'+client.actualPort,autoRestart:false});
+    try{
+      await secondClient.start();record('second_client_connected',{port:client.actualPort});
+      const secondSession=await secondClient.resumeSession(sessionId,config);
+      const answer=await secondSession.sendAndWait({prompt:'Reply exactly PROBE_SECOND_CLIENT'},15000);
+      record('second_client_send',{same_session:secondSession.sessionId===sessionId,
+        marker_observed:answer?.data?.content?.includes('PROBE_SECOND_CLIENT')||false,
+        original_client_observed:observerEvents.some(e=>e.type==='assistant.message'&&e.data?.content?.includes('PROBE_SECOND_CLIENT'))});
+      record('secondary_cleanup_method',{method:forceDetach?'external client.forceStop only':detachOnly?'client.stop only':(secondSession.disconnect?'session.disconnect':'session.destroy')});
+      if(!detachOnly&&!forceDetach){if(secondSession.disconnect)await secondSession.disconnect();else await secondSession.destroy();}
+    }finally{if(forceDetach)await secondClient.forceStop();else await secondClient.stop();}
+    try{
+      const eventStart=observerEvents.length;const requestStart=requests.length;
+      const messageId=await resumed.send({prompt:'Reply exactly PROBE_OWNER_AFTER_DETACH'});
+      const until=Date.now()+10000;
+      while(Date.now()<until&&!observerEvents.slice(eventStart).some(e=>e.type==='assistant.message'&&e.data?.content?.includes('PROBE_OWNER_AFTER_DETACH')))
+        await new Promise(resolve=>setTimeout(resolve,50));
+      const answers=observerEvents.slice(eventStart).filter(e=>e.type==='assistant.message').map(e=>e.data?.content);
+      record(forceDetach?'owner_after_force_detach':detachOnly?'owner_after_client_stop':'owner_after_secondary_session_destroy',{
+        messageId,marker_observed:answers.some(text=>text?.includes('PROBE_OWNER_AFTER_DETACH')),answers,
+        provider_requests:requests.length-requestStart,new_event_types:observerEvents.slice(eventStart).map(e=>e.type)});
+    }catch(error){record(forceDetach?'owner_after_force_detach':detachOnly?'owner_after_client_stop':'owner_after_secondary_session_destroy',{error:error.message});}
+  }
+  record('permission_requests',{count:permissionRequests});
+  if(resumed.disconnect)await resumed.disconnect();else await resumed.destroy();
+}catch(error){record('probe_exception',{name:error.name,message:error.message});}
+finally{
+  clearTimeout(deadline);
+  if(client)try{await client.stop();}catch(error){record('stop_error',{message:error.message});}
+  await new Promise(resolve=>server.close(resolve));
+  if(fs.existsSync(path.join(work,'logs')))fs.cpSync(path.join(work,'logs'),path.join(root,'copilot-runtime-logs'),{recursive:true});
+  fs.rmSync(work,{recursive:true,force:true});
+}

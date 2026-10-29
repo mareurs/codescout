@@ -1,0 +1,23 @@
+{
+  "confirmed_at_utc": "2026-10-29T20:31:06.009240+00:00",
+  "current_thread_matches_target": true,
+  "automatic_turn_id": "01a1895b-184f-7320-a60e-e1b33dbea92d",
+  "job_handle": "@bg_0000000a",
+  "job_record": {
+    "schema": 1,
+    "handle": "@bg_0000000a",
+    "command": "python3 -c 'import time; print(\"BG_CURRENT_SESSION_PROBE_STARTED\", flush=True); time.sleep(30); print(\"BG_CURRENT_SESSION_PROBE_COMPLETED\", flush=True)'",
+    "server_pid": 2445809,
+    "job_pid": 4052284,
+    "state": "exited",
+    "exit_code": 0,
+    "error": null,
+    "started_at": "2026-10-29T20:29:37.698389596+00:00",
+    "finished_at": "2026-10-29T20:30:07.777873964+00:00"
+  },
+  "job_read_observed_completion_marker": true,
+  "model_continuation_in_existing_conversation_verified": true,
+  "scope": "Manually launched temporary watcher through existing Codex daemon; installed companion unchanged.",
+  "watcher_cleanup": "Stopped own watcher after independent model receipt confirmation.",
+  "observer_limit": "Watcher was not subscribed to the thread event stream; completion was verified by the automatically resumed model reading the real job, rather than by waiting for turn/completed on that watcher connection."
+}

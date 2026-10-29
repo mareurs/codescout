@@ -1,0 +1,35 @@
+{
+  "nonzero": {
+    "spawn": {
+      "output_id": "@bg_00000008",
+      "record": "/tmp/codescout-bg/2445809-3a90f18e-bg_00000008.json",
+      "hint": "Started; outcome not yet observed. Read output with run_command(\"tail -50 @bg_00000008\") — that response carries this job's state.",
+      "_guide_hint": "First call this session for topic 'progressive-disclosure'. Full guide auto-injected as a separate content block below; do not re-call get_guide(\"progressive-disclosure\")."
+    },
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\n  \"exit_code\": 0,\n  \"stdout\": \"BG_EXIT7_PROBE\\n\",\n  \"jobs\": [\n    {\n      \"handle\": \"@bg_00000008\",\n      \"state\": \"exited 7\",\n      \"command\": \"python3 -c 'import sys; print(\\\"BG_EXIT7_PROBE\\\", flush=True); sys.exit(7)'\"\n    }\n  ]\n}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "signal": {
+    "spawn": {
+      "output_id": "@bg_00000009",
+      "record": "/tmp/codescout-bg/2445809-3a90f18e-bg_00000009.json",
+      "hint": "Started; outcome not yet observed. Read output with run_command(\"tail -50 @bg_00000009\") — that response carries this job's state."
+    },
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\n  \"exit_code\": 0,\n  \"stdout\": \"BG_SIGNAL_PROBE\\n\",\n  \"jobs\": [\n    {\n      \"handle\": \"@bg_00000009\",\n      \"state\": \"terminated by signal\",\n      \"command\": \"python3 -c 'import os, signal; print(\\\"BG_SIGNAL_PROBE\\\", flush=True); os.kill(os.getpid(), signal.SIGTERM)'\"\n    }\n  ]\n}"
+        }
+      ],
+      "isError": false
+    }
+  }
+}
