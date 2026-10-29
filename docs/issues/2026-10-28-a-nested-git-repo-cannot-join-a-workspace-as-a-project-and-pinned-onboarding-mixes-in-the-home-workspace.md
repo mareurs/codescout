@@ -90,7 +90,7 @@ Measured 2026-10-29 with a binary built from `e34ff991f`, driving `codescout sta
 ### 7. Index build on a member
 
 Measured 2026-10-29 on the same replica, binary built from `e34ff991f`, the embedder at `http://127.0.0.1:48081` (CodeRankEmbed). The script `kodi-index.py` listed the projects, then ran `workspace(activate, path=<member>, read_only=false)`, `index(action="build")`, `index(action="status")` and `semantic_search`.
-- The activation named the member by its directory (`project_id: "script.module.thecrew"`), not by its declared id `thecrew-module`. `languages` was `[]` in the activation response, while `project_hints.primary_language` was `python`.
+- The activation named the member by its directory (`project_id: "script.module.thecrew"`), not by its declared id `thecrew-module`, also when the call passed the declared id as `path`. `semantic_search(project_id="thecrew-module")` then returned no results while the directory name found the file. Filed as docs/issues/2026-10-29-semantic-search-project-id-takes-the-directory-name-not-the-declared-member-id.md. `languages` was `[]` in the activation response, while `project_hints.primary_language` was `python`.
 - The status showed `file_count: 1`, `chunk_count: 1`, `chunks_without_vectors: 0`, `integrity: "ok"`, `indexed_with_model` equal to `configured_model`. Only the member's own file was indexed.
 - `git_sync` showed `up_to_date` with `head_commit: "0bd447eb"`. `git rev-parse --short=8 HEAD` gave `0bd447eb` in the member and `84719a99` in the parent, so the index records the member's own HEAD.
 - `semantic_search` returned `addon.py` lines 1-2 (`def main(): return 1`).
