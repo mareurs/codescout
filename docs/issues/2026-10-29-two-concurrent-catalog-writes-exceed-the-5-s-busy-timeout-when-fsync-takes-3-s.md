@@ -48,7 +48,7 @@ Not established. What was read: both tests open their two connections on the mai
 ## Evidence
 
 - Panic sites above, from `@bg_00000015` of this session (script `scratchpad/inject.sh`).
-- Contradiction to resolve: `docs/issues/2026-10-18-append-entry-concurrency-test-failed-once-with-database-is-locked-in-catalog-open.md` records both reworked tests as passing 4 of 4 under the same 3 s injection. At HEAD they fail 8 of 8. The cause of the difference is not known: the tree, the command or the host may differ.
+- Contradiction to resolve: `docs/issues/2026-10-18-append-entry-concurrency-test-failed-once-with-database-is-locked-in-catalog-open.md` records both reworked tests as passing 4 of 4 under the same 3 s injection. At HEAD they fail 8 of 8. Bisect (2026-10-29, same script and injection, `append_entry_serializes_across_independent_connections_to_same_file`): `982a9403e` passed 4 of 4 (159-160 s) and `allocate_entry_id_serializes_across_independent_connections` 4 of 4 (141-142 s); `e34ff991f` passed 1 of 1 (160 s); `d7d29171f` failed 1 of 1 (123 s, `database is locked` at `augmentation.rs:5177`); HEAD `e312bdc20` failed 8 of 8. So the outcome flips at `d7d29171f` (`audit::install_in_txn` skips the trigger reinstall when the stored definitions match). The 2026-10-18 record is consistent with its own tree. The runs at the two boundary commits are single runs. Why the flip happens is not measured. A passing run is 35 s slower than a failing one, which fits the old opens spending their time in trigger DDL fsyncs, but nothing here shows that this is what protected the appends.
 
 ## Hypotheses tried
 
@@ -68,7 +68,7 @@ None needed for the normal test run: without injection the tests pass.
 
 ## Resume
 
-1. Find why the 2026-10-18 record shows 4 of 4 passes: run the tree at that record's commit under the same injection.
+1. Explain the flip at `d7d29171f`: count the fsyncs and the lock hold of each statement in one `append_entry` (`strace -T`) on `e34ff991f` and on `d7d29171f`. Repeat the two boundary runs to get more than one run each.
 2. Count fsyncs and lock hold time of one `append_entry` (`strace -T`).
 3. Decide whether 5 s is a design limit for a catalog on slow storage, and what to do for two real servers.
 
