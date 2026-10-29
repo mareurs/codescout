@@ -193,18 +193,33 @@ class MainTest(unittest.TestCase):
         self.assertEqual(self.verified, [(list(MAPPING), list(MAPPING))])
         self.assertEqual(out["models"][S]["cs - bare"]["headline"], "codescout: promising")
 
+    def write_reg(self, body, sign=True):
+        path = self.tmp / "reg.json"
+        reg = dict(body, registration_sha256=run.registration_digest(body)) if sign else body
+        path.write_text(json.dumps(reg))
+        return path
+
     def test_a_registration_must_match_the_bundles(self):
         reg = {"registered_tasks": MAPPING, "registered_min": 10, "bootstrap_seed": 7}
-        path = self.tmp / "reg.json"
-        path.write_text(json.dumps(reg))
-        self.assertEqual(self.run_main("--registration", str(path))["seed"], 7)
-        path.write_text(json.dumps(dict(reg, registered_tasks=dict(MAPPING, **{FOREIGN[0]:
-                                                                              "private"}))))
-        with self.assertRaises(SystemExit):
+        self.assertEqual(self.run_main("--registration", str(self.write_reg(reg)))["seed"], 7)
+        path = self.write_reg(dict(reg, registered_tasks=dict(MAPPING, **{FOREIGN[0]: "private"})))
+        with self.assertRaisesRegex(SystemExit, "kinds"):
             self.run_main("--registration", str(path))
-        path.write_text(json.dumps(dict(reg, registered_min=12)))
-        with self.assertRaises(SystemExit):
+        path = self.write_reg(dict(reg, registered_min=12))
+        with self.assertRaisesRegex(SystemExit, "registered_min"):
             self.run_main("--registration", str(path))
+
+    def test_an_edited_registration_is_refused(self):
+        # Fix round 2 (N-3): the bootstrap seed is read from the registration, so an edit after
+        # the data is seen must not pass.
+        reg = {"registered_tasks": MAPPING, "registered_min": 10, "bootstrap_seed": 7}
+        path = self.write_reg(reg)
+        signed = json.loads(path.read_text())
+        path.write_text(json.dumps(dict(signed, bootstrap_seed=8)))
+        with self.assertRaisesRegex(SystemExit, "does not match its content"):
+            self.run_main("--registration", str(path))
+        with self.assertRaisesRegex(SystemExit, "does not match its content"):
+            self.run_main("--registration", str(self.write_reg(reg, sign=False)))
 
 
 if __name__ == "__main__":

@@ -170,6 +170,10 @@ def main(argv=None, *, verify=tasks.verify):
     a = ap.parse_args(argv)
     if a.registration is not None:
         reg = json.loads(a.registration.read_text())
+        body = {k: v for k, v in reg.items() if k != "registration_sha256"}
+        if reg.get("registration_sha256") != run.registration_digest(body):
+            raise SystemExit(f"registration {a.registration}: registration_sha256 does not match "
+                             f"its content (edited after the freeze?)")  # fix round 2, N-3
         ids, seed = list(reg["registered_tasks"]), reg["bootstrap_seed"]
         if reg.get("registered_min") != analyze.REGISTERED_MIN:
             raise SystemExit(f"registration registered_min {reg.get('registered_min')} != "

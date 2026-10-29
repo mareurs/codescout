@@ -275,7 +275,7 @@ class RunnerCase(unittest.TestCase):
         self.world = World()
         self.grader = Grader()
         self.registration = self.tmp / "registration.json"
-        self.registered = set()
+        self.registered = {}
         # Final review I-7: the arms read a frozen copy; the registration carries its hashes.
         (self.tmp / "companion" / "hooks.json").write_text("{}\n")
         self.frozen_root = self.tmp / "frozen"
@@ -288,7 +288,7 @@ class RunnerCase(unittest.TestCase):
     def go(self, plan, budget, acks=(), **override):
         """Play the operator: write GO.json for `plan` and `budget` (a Budget), bound to the
         registration (which is made to register `plan` first)."""
-        self.register(plan)
+        self.register(plan, budget=budget)
         body = {"cap_usd": budget.cap_usd, "per_call_usd": budget.per_call_usd,
                 "reserve_usd": budget.reserve_usd, "spent_usd": budget.spent_usd,
                 "plan_sha256": run.plan_sha256(plan),
@@ -297,17 +297,19 @@ class RunnerCase(unittest.TestCase):
         body.update(override)
         (self.data / "GO.json").write_text(json.dumps(body) + "\n")
 
-    def register(self, *plans):
-        """Play the freeze: a registration that registers every plan given so far. Rewritten
-        (a new registration_sha256) only when a plan is new."""
-        hashes = {run.plan_sha256(p) for p in plans}
-        if hashes <= self.registered:
+    def register(self, *plans, budget=None):
+        """Play the freeze: a registration that registers every plan given so far, each with
+        `budget` (default BUDGET; N-2: run_batch compares it). Rewritten (a new
+        registration_sha256) only when a plan is new."""
+        new = {run.plan_sha256(p) for p in plans} - set(self.registered)
+        if not new:
             return
-        self.registered |= hashes
+        b = (budget or BUDGET)._asdict()
+        self.registered.update({h: b for h in new})
         body = {"stage": "test",
                 "frozen": {"root": str(self.frozen_root), "trees": self.frozen_trees},
-                "plans": {f"p{i}": {"plan_sha256": h}
-                           for i, h in enumerate(sorted(self.registered))}}
+                "plans": {f"p{i}": {"plan_sha256": h, "budget": self.registered[h]}
+                          for i, h in enumerate(sorted(self.registered))}}
         reg = dict(body, registration_sha256=run.registration_digest(body))
         self.registration.write_text(json.dumps(reg) + "\n")
 
@@ -328,7 +330,7 @@ class RunnerCase(unittest.TestCase):
         if go:
             self.go(plan, budget)
         else:
-            self.register(plan)
+            self.register(plan, budget=budget)
         cli = cli or FakeCLI(self.world, self.data)
         kwargs = dict(docker=self.world, exec_cli=cli, load_task=self.load,
                       manifest=self.manifest, token_reader=lambda: TOKEN,
@@ -411,6 +413,32 @@ class GoGuardTest(RunnerCase):
         self.register([spec(rep=1)], [spec()])  # both registered: GO.json alone decides
         self.go([spec(rep=1)], BUDGET)
         self.assertRefused([spec()], BUDGET, "authorizes plan")
+    def test_refused_when_the_batch_budget_differs_from_the_registered_one(self):
+        # Fix round 2 (N-2): GO.json and the batch agree, the registration says otherwise.
+        plan = [spec()]
+        for field, value in (("per_call_usd", 5.0), ("cap_usd", 30.0), ("reserve_usd", 2.0)):
+            with self.subTest(field):
+                self.setUp()
+                self.register(plan, budget=BUDGET._replace(**{field: value}))
+                self.go(plan, BUDGET)
+                self.assertRefused(plan, BUDGET, f"registration's {field}")
+        # spent_usd is GO.json's to bind (I-5), not the registration's.
+        self.setUp()
+        self.register(plan, budget=BUDGET._replace(spent_usd=3.0))
+        self.go(plan, BUDGET)
+        self.assertEqual(len(self.batch(plan, BUDGET, go=False).calls), 1)
+
+    def test_registered_budget_reads_both_registration_forms(self):
+        p = [spec()]
+        stage1 = {"plan_sha256": run.plan_sha256(p), "budget": {"cap_usd": 25}}
+        parts = {"plans": {"pilot": {"plan_sha256": run.plan_sha256(p), "budget": {"cap_usd": 200}},
+                           "extension": {"plan_sha256": "x", "budget": {"cap_usd": 1}}}}
+        self.assertEqual(run.registered_budget(stage1, p), {"cap_usd": 25})
+        self.assertEqual(run.registered_budget(parts, p), {"cap_usd": 200})
+        self.assertIsNone(run.registered_budget({"plans": {}}, p))
+        with self.assertRaisesRegex(run.Refused, "no budget"):
+            run.check_registered_budget({"plans": {}}, p, BUDGET)
+
     def test_refused_on_spent_mismatch(self):
         # Final review I-5: GO.json binds spent_usd (the spend outside this journal).
         plan = [spec()]
@@ -860,7 +888,7 @@ class ContainerTest(RunnerCase):
         if go:
             self.go(plan, budget)
         else:
-            self.register(plan)
+            self.register(plan, budget=budget)
         kwargs = dict(docker=spy, exec_cli=cli, load_task=self.load, manifest=self.manifest,
                       token_reader=lambda: TOKEN, registration=self.registration)
         kwargs.update(kw)

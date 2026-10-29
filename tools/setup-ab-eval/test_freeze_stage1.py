@@ -158,6 +158,7 @@ class FreezeTest(unittest.TestCase):
         # The runner's registration reader accepts the freeze's digest form and plan hash.
         path = self.env.tool / "stage1-registration.json"
         self.assertEqual(run.load_registration(path, plan), reg)
+        run.check_registered_budget(reg, plan, budget)  # N-2: Stage 1's top-level budget form
 
     def test_changing_one_file_changes_the_registration_hash_through_files_alone(self):
         fixed = lambda tool_dir: "f" * 40   # the same head both times: only `files` can differ

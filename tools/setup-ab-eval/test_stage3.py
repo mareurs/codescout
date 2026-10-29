@@ -90,6 +90,11 @@ class Stage3Test(unittest.TestCase):
             self.assertEqual(part["budget"], {"cap_usd": 200.0, "spent_usd": 0.0,
                                               "per_call_usd": 5.0, "reserve_usd": 5.0})
             self.assertEqual(part["tasks"], p["split"][name])
+            # N-2: the runner accepts exactly the registered part's budget.
+            run.check_registered_budget(p, order, stage3.stage3_budget())
+            with self.assertRaises(run.Refused):
+                run.check_registered_budget(p, order, stage3.stage3_budget()._replace(
+                    per_call_usd=2.0))
         self.assertNotEqual(p["plans"]["pilot"]["plan_sha256"],
                             p["plans"]["extension"]["plan_sha256"])
         # A registration carrying these pieces registers both plans for the runner.

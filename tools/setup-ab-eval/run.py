@@ -384,6 +384,30 @@ def load_registration(path, plan):
         raise Refused(f"registration {path} does not register the batch's plan "
                       f"{plan_sha256(plan)}")
     return reg
+def registered_budget(reg, plan):
+    """The budget a registration records for `plan`: Stage 1's top-level `budget` when its
+    `plan_sha256` is the plan's, else the `budget` of the `plans.<part>` whose hash it is."""
+    h = plan_sha256(plan)
+    if reg.get("plan_sha256") == h:
+        return reg.get("budget")
+    for part in (reg.get("plans") or {}).values():
+        if isinstance(part, dict) and part.get("plan_sha256") == h:
+            return part.get("budget")
+    return None
+
+
+def check_registered_budget(reg, plan, budget):
+    """Fix round 2 (N-2): the batch runs under the cap, per-call cap and reserve its registered
+    part records, or Refused (the per-call cap is outcome-affecting, I-6)."""
+    want = registered_budget(reg, plan)
+    if not isinstance(want, dict):
+        raise Refused("the registration records no budget for the batch's plan")
+    for field in ("cap_usd", "per_call_usd", "reserve_usd"):
+        value = want.get(field)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or float(value) != float(getattr(budget, field))):
+            raise Refused(f"the registration's {field} for this plan is {value!r}, the batch "
+                          f"has {getattr(budget, field)}")
 
 
 def last_stop(events):
@@ -1304,6 +1328,7 @@ def run_batch(plan, budget, data, dry_run, *, registration=None, docker=None, ex
     if registration is None:
         raise Refused("a batch that spends runs under a registration: pass --registration")
     reg = load_registration(registration, plan)  # before any side effect
+    check_registered_budget(reg, plan, budget)  # N-2
     go = check_go(data, plan, budget, reg["registration_sha256"])
     check_journal(data)  # rows without the journal that covers them are refused
     acknowledged = check_latch(data, go)  # I3: a stop holds until the operator acknowledges it
