@@ -106,7 +106,7 @@ None needed for the tests after the rework. For a real pair of servers: not know
 
 ## Resume
 
-1. Decide whether to close: the open path no longer writes or locks on an up-to-date catalog. The remaining injected-fsync failure is in `append_entry`, which is real write contention and may deserve its own bug file or a longer `busy_timeout` for appends.
+1. Decide whether to close: the open path no longer writes or locks on an up-to-date catalog. The remaining injected-fsync failure is in `append_entry` and `allocate_entry_id`: 8 of 8 runs failed at HEAD `e312bdc20` on 2026-10-29, none inside `Catalog::open`. It is filed as `docs/issues/2026-10-29-two-concurrent-catalog-writes-exceed-the-5-s-busy-timeout-when-fsync-takes-3-s.md`.
 2. Optionally re-run both strace reproductions with the pre-rework test bodies for a true before/after.
 3. Keep `migrations_current` in step with `apply_migrations_in_txn` when adding a migration.
 
