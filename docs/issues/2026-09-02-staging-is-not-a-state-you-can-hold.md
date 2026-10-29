@@ -422,9 +422,8 @@ identifies content and never ownership — usable only if you remember what your
 
 Item 3 is decided and item 1 superseded (see § Fix). What is left is the LOSING half, which is still live
 (re-verified 2026-09-25): a peer's `git restore --staged` or `git reset` drops your staged path silently, from a
-bare commit and from `commit-mine` alike. Fix item 2 is done (2026-10-26). Two open moves:
+bare commit and from `commit-mine` alike. Fix item 2 is done (2026-10-26), including the mirror into step 5 of `docs/conventions/shared-checkout-commit-sequence.md` (done 2026-10-27, verified 2026-10-29: step 5 carries the "Never unstage a path you did not stage" rule and the 2026-09-02 measurement). One open move:
 
-- Mirror the sentence into step 5 of `docs/conventions/shared-checkout-commit-sequence.md`, so the terse copy and its source agree.
 - A detector. `post-index-change` fires on the peer's unstage too, so the recorder is positioned to notice a
   session removing a pair that another session staged. Nothing is designed yet.
 

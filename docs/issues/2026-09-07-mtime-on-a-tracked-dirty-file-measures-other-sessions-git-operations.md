@@ -205,6 +205,9 @@ population: how many `status: open` bug files carry `last_observed:` at all
 is a check that cannot fire. If the count is low, the finding stays a triage rule and this file
 stays open as a pointer rather than a task.
 
+
+**Count run 2026-10-29** (`grep -l '^last_observed:' docs/issues/*.md`, then filtered on `^status: open`; 27 files in `docs/issues/*.md` carry `status: open`): **6 files declare `last_observed:`, and 0 of them are `status: open`.** Their statuses are 5 zombie and 1 mitigated. The field is a zombie-record convention, not something open bugs carry. A doctor check over `last_observed:` on open bugs would have an empty population and could not fire today. Recommendation: do not build it; keep the finding as a triage rule and leave this file open as a pointer. Re-count if open bugs start declaring the field. (Counted over `docs/issues/*.md` only, not `docs/issues/archive/`.)
+
 ## References
 
 - `docs/trackers/issue-clusters/IC-17-shared-resource-carries-no-owner.md` — the class; its remedy

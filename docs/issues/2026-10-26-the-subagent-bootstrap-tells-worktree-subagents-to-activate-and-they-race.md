@@ -54,7 +54,7 @@ Whether the soft notice ("warns the switcher; tells the harmed party once per mo
 
 ## Fix
 
-Parts 1 and 2 are written in the `claude-plugins` working tree on 2026-10-27. They are **not committed, not released, and not live**. Part 3 has no code fix. Status stays `open` until the release reaches all three profiles.
+Parts 1 and 2 are committed in `claude-plugins` as `968f7b9` (an ancestor of `origin/main`) and shipped in codescout-companion 1.20.21 (`1db0234`). Verified 2026-10-29: all four profiles' `installed_plugins.json` record 1.20.21 with an `installPath` under their own cache, and a read-only review ran the three test suites green (25, 43, `run-all.sh` exit 0). Part 3 has no code fix. Status stays `open` for two reasons. First, a subagent dispatched 2026-10-29 was still told to `activate` by its bootstrap; whether that profile loaded an older hook or its cwd was not a linked worktree was not checked. Second, a pin that differs only by symlink is accepted by the write guard, and no test covers it.
 
 **A text-only change to the bootstrap was not enough** (checked 2026-10-26). `claude-plugins:codescout-companion/hooks/worktree-write-guard.mjs` denies `edit_code`, `edit_file` and `create_file` in a worktree while `.cs-worktree-pending` exists in the worktree root. It never looked at a `workspace=` pin on the call. Only `cs-activate-project.mjs` deletes the marker, and only on `activate`. A subagent told to pin would still have been blocked from writing.
 
