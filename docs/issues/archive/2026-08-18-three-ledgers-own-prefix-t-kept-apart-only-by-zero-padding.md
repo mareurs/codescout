@@ -14,7 +14,7 @@ tags:
 - cluster/addressing-without-an-escape-hatch
 topic: tracker-entry-identity
 closed: 2026-08-18
-unverified: 'TRACKED 03b55d94e6d03c4e — Item (4) of the Fix is still open and handed off: renaming `researcher`''s prefix in docs/trackers/langfuse-tracing-roadmap.md. Downgraded from urgent — unpadded T-1/T-2 now have no codescout definer, since tool-usage-patterns spells those T-001/T-002 — so a backfill there cannot create ambiguity. Recorded 2026-08-28 (tracker-hygiene-log:HY-22): the caveat was stated in prose only, so no query could reach it while status reads `fixed`.'
+unverified: 'STANDING 2026-10-29 — item (4) of the Fix, renaming `researcher`''s prefix in docs/trackers/langfuse-tracing-roadmap.md, will not be done: the operator closed its tracker 03b55d94e6d03c4e as wontfix. Unpadded T-1/T-2 have no codescout definer (tool-usage-patterns spells them T-001/T-002), so the unrenamed researcher entries T-7..T-12 cannot create ambiguity today. Reopen if codescout gains a definer of unpadded T-N.'
 ---
 
 # BUG: three ledgers own prefix `T`, kept apart only by zero-padding

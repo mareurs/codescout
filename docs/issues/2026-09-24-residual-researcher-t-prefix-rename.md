@@ -1,11 +1,11 @@
 ---
 id: '03b55d94e6d03c4e'
 kind: bug
-status: open
+status: wontfix
 title: 'RESIDUAL: Rename the T- entry prefix in researcher:docs/trackers/langfuse-tracing-roadmap.md (still T-7..T-12 on 2026-09-24)'
 tags:
 - cluster/addressing-without-an-escape-hatch
-closed: null
+closed: 2026-10-29
 opened: 2026-09-24
 owner: marius
 related:
@@ -27,7 +27,7 @@ Remaining work split out of `docs/issues/archive/2026-08-18-three-ledgers-own-pr
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+Decided 2026-10-29 by the operator: do not rename. Reason: the parent record downgraded this from urgent, because unpadded `T-1`/`T-2` have no codescout definer (tool-usage-patterns spells them `T-001`/`T-002`), so a backfill there cannot create ambiguity; and `researcher:docs/trackers/langfuse-tracing-roadmap.md` is `status: draft`. Re-checked 2026-10-29: `T-7` to `T-12` are still in that file, so the prefix still collides in name only. Reopen if codescout gains a definer of unpadded `T-N`, or the researcher roadmap leaves `draft`. The parent's caveat was changed to `STANDING` in the same step, so `doctor` does not report it again. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
 
 ## References
 
