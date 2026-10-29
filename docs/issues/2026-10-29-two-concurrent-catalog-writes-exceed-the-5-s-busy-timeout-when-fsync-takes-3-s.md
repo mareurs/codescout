@@ -43,7 +43,7 @@ Linux, strace 7.2, SQLite through rusqlite, `busy_timeout = 5000` ms, WAL journa
 
 ## Root cause
 
-Not established. What was read: both tests open their two connections on the main thread first, then release the two writers with a `Barrier(2)`. So the failing statement is a write inside the operation. A plausible mechanism is that one writer holds the write lock across several 3 s fsyncs, and the second writer waits longer than 5 s. Nothing here measured the lock hold time or the number of fsyncs per append, so this is a hypothesis.
+Not established. What was read: both tests open their two connections on the main thread first, then release the two writers with a `Barrier(2)`. So the failing statement is a write inside the operation. Measured 2026-10-29 (fsync targets per thread, `strace -f -y`, no injection; then one mutation run under injection). Both tests drop their only connection at the end of the setup block, and SQLite deletes the WAL file when the last connection closes. The first write after that recreates the WAL. That write costs three fsyncs inside its transaction: `fsync(wal)`, `fsync(<directory>)`, `fsync(wal)`. A write into an existing WAL costs one. At `e34ff991f` the two opens ran trigger DDL on the main thread, so they recreated the WAL before the race; each append then cost one fsync (3 s injected, under the 5 s `busy_timeout`). At `d7d29171f` and later the opens write nothing, so the first append recreates the WAL: 3 fsyncs, 9 s injected, and the second append's 5 s `busy_timeout` expires. Mutation check: at `a3290718c` one added line after the two opens (`art_upsert(&cat1, &sample_art("warm"))`, which writes and so creates the WAL) made the injected test pass (rc=0, 149 s), where the unmutated test fails 8 of 8 on the same tree. That mutation run is a single run. Not measured: the lock hold of a fresh-WAL write on a real host without injection, and whether two real servers ever hit a fresh-WAL write while another waits.
 
 ## Evidence
 
@@ -68,7 +68,7 @@ None needed for the normal test run: without injection the tests pass.
 
 ## Resume
 
-1. Explain the flip at `d7d29171f`: the append threads made 9 fsyncs instead of 6 in one run each. Find which statements of `append_entry` commit, with the lock hold of each (`strace -T`, or SQLite's own trace), on `e34ff991f` and on `d7d29171f`. Repeat the two boundary runs under injection to get more than one run each.
+1. Decide what the test should do: the flip is explained (fresh-WAL write inside the race), so either warm the WAL in setup, as the mutation did, or state that a first write after the last connection closed is slow by design. Repeat the mutation run for more than one run. The product question stays open: a first writer after an idle period holds the write lock for three fsyncs.
 2. Count fsyncs and lock hold time of one `append_entry` (`strace -T`).
 3. Decide whether 5 s is a design limit for a catalog on slow storage, and what to do for two real servers.
 
