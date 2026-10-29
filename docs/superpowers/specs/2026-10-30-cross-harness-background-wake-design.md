@@ -1,7 +1,7 @@
 # Background-job continuation across harnesses and operating systems
 
 Date: 2026-10-30
-Status: draft for operator review; approach selected, detailed design not yet approved.
+Status: approved by the operator on 2026-10-30; implementation plan follows.
 
 ## Intent and agreed scope
 
@@ -9,7 +9,7 @@ The operator selected a shared continuation engine with small harness adapters. 
 
 Success means that a terminal codescout background job can cause its originating, still-live conversation to continue, with an accurate job identity and delivery status. A duplicate observer must not ordinarily cause another continuation. An ambiguous network failure must remain visible instead of being reported as successful or silently retried.
 
-The implementation choices explicitly labelled below are the author's proposals, not additional operator requirements. No product implementation is authorized by this document's draft status.
+The implementation choices explicitly labelled below are the author's proposals, not additional operator requirements. The operator approved this design on 2026-10-30. Implementation follows the separately reviewed task plan.
 
 ## Evidence and current boundaries
 
