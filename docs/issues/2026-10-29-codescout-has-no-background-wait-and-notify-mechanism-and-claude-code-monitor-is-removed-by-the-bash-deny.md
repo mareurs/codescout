@@ -1,0 +1,124 @@
+---
+id: '45d8ce48dc6eb6fd'
+kind: bug
+status: open
+title: 'BUG: codescout has no monitor mechanism for long background commands, and Claude Code''s Monitor is unavailable when Bash is denied'
+tags:
+- cluster/unclassified
+opened: 2026-10-29
+owner: marius
+severity: medium
+---
+
+# BUG: codescout has no monitor mechanism for long background commands, and Claude Code's Monitor is unavailable when Bash is denied
+
+## Summary
+This is a missing capability, filed as an issue on the operator's request. The operator's iron rule says to "activate a Monitor" for long tasks. On this machine Claude Code's `Monitor` tool does not exist, so the rule cannot be followed. Codescout's `run_command` with `run_in_background` returns a `@bg_*` handle, but nothing tells the model when the job ends. The outcome appears only in the response of a later call that names the handle. The operator wants codescout to provide a better monitor itself.
+
+## Class fit
+This is a missing feature, not a defect in an existing surface, so no class trait applies. The closest bug-shaped trait is a rule that names a tool the environment cannot supply. Filed `cluster/unclassified` as the sanctioned escape hatch: looked, nothing fits.
+
+## Symptom (Effect)
+No `Monitor` tool appears in the session tool list. The session has `ScheduleWakeup`, `TaskStop`, and `run_command(run_in_background=true)`. The last returns an `@bg_*` handle. Nothing re-invokes the session when the job ends. Correction 2026-10-29: an earlier version of this issue said the harness re-invokes the session on completion. The code does not support that. `spawn_background_command` (`src/tools/run_command/inner.rs`) hands the child to a supervisor task that only calls `OutputBuffer::set_job_state`, and no notification goes to the client. The companion plugin had no hook that wakes a session.
+
+## Reproduction
+Measured 2026-10-29 by a forked agent, with `claude` 2.1.312 and tiny `-p "hi"` calls in a temporary config dir, same auth and base URL:
+
+| permissions.deny | Bash | Edit | Write | Monitor |
+|---|---|---|---|---|
+| none | yes | yes | yes | yes |
+| `["Bash"]` | no | yes | yes | no |
+| `["Write","Edit"]` | yes | no | no | yes |
+
+All three profiles (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat`) set `permissions.deny = ["Bash","Write","Edit"]`. The `--debug-file` log says `Adding 3 deny rule(s) to destination 'userSettings'`. The stream-json init tool list has no `Bash`, `Edit`, `Write` or `Monitor`.
+
+## Environment
+Linux, Claude Code 2.1.312, requests routed through llm-proxy at `localhost:8082`. Branch `experiments`.
+
+## Root cause
+Claude Code applies the Bash permission rules to `Monitor`. The tools reference (https://code.claude.com/docs/en/tools-reference.md) says `Monitor` follows the Bash rules. The permissions page (https://code.claude.com/docs/en/permissions.md) says a bare `Bash` deny removes the tool from the model's context. Measured by the A/B test above: the bare `Bash` deny alone removes `Monitor`.
+
+Ruled out, with evidence: llm-proxy (`STRIP_TOOLS` in `/proc/9498/environ` and `/home/marius/agents/llm-proxy/.env:19` has no `Monitor`; stripping is by exact name, `src/passthrough.rs:79-83`; `~/.buddy/proxy-overrides` is empty), the version (above the documented 2.1.310 floor), and feature-flag fetching (debug log shows `mcp runtime arm: v2 (source: growthbook)`).
+
+Not explained: `CronCreate` appears in the model's tool list although `STRIP_TOOLS` names it. Inferred, not measured: the proxy edits the API request after Claude Code builds the list. Also not explained: `ToolSearch` is unavailable in this session.
+
+## Evidence
+Open upstream issues report the same symptom for other causes: https://github.com/anthropics/claude-code/issues/104194 (open, no cause known) and https://github.com/anthropics/claude-code/issues/86171 (a telemetry-off flag). Neither explains this machine, because the A/B test removes `Monitor` with the deny rule alone. The researcher found no replacement for `Monitor` in Anthropic's docs.
+
+## Probe: what else each deny value removes (2026-10-29)
+Measured with `claude` 2.1.312, five tiny `-p "hi"` calls in fresh config dirs, same auth and base URL. The script read the stream-json init event. Only `env` was copied from the `~/.claude-kat` profile, and `CLAUDE_CODE_ENABLE_TODO_TOOLS` was dropped.
+
+| permissions.deny | Removed from the init tool list | Added |
+|---|---|---|
+| none | nothing | nothing |
+| `["Bash"]` | `Bash`, `Monitor` | `Glob`, `Grep` |
+| `["Edit"]` | `Edit` | nothing |
+| `["Write"]` | `Write` | nothing |
+| `["Bash","Write","Edit"]` | `Bash`, `Monitor`, `Write`, `Edit` | `Glob`, `Grep` |
+
+Findings:
+- `Bash` and `Monitor` are the only tools the deny set removes beyond `Edit` and `Write` themselves.
+- A bare `Edit` deny does not remove `Write` or `NotebookEdit`. A bare `Write` deny does not remove `Edit` or `NotebookEdit`. `NotebookEdit` stays in every case, so it is a write path that the deny set does not close.
+- Without `Bash`, Claude Code adds the dedicated `Glob` and `Grep` tools. The tools reference says they are absent by default on Linux.
+- The agent list (5), the skill list (19) and the slash-command count (52) are the same in all five cases. The deny set hides no agent and no skill at list level.
+- `LSP`, `PowerShell` and the `Task*` tools are absent in the `none` case too, so the deny set does not cause their absence.
+- `ToolSearch` is present in every case. The Reproduction section says it is unavailable in this session, so that statement is stale.
+
+Behavioral probe, same day, `--model haiku`, `--permission-mode bypassPermissions` in a temporary working directory, one run per case. Bypass mode skips prompts but still applies deny rules.
+
+| Case | deny | Result |
+|---|---|---|
+| `NotebookEdit` writes `n.ipynb` | `["Bash","Write","Edit"]` | The cell source changed to `PROBE_WRITTEN`. The first call failed with "File has not been read yet"; the model then used `Read` and retried. |
+| Skill with `` !`cmd` `` injection | none | The harness expanded all three forms (`A: !`cmd``, a bare `` !`cmd` `` line, and a fenced `` ```! `` block). The model made no tool call. |
+| Same skill | `["Bash"]` | The invocation returned an empty result with no tool call. No error text reached the result. |
+| Subagent (`general-purpose`) runs `echo` and writes `sub.txt` | none | The subagent used `Bash` and `Write`. `sub.txt` exists. |
+| Same subagent task | `["Bash","Write","Edit"]` | The subagent had neither tool. It called only `ToolSearch`. `sub.txt` does not exist. |
+
+Findings:
+- `NotebookEdit` is a working write path under the full deny set. The deny set does not stop file writes.
+- A skill that uses shell injection does nothing while `Bash` is denied. Such skills are unusable on this machine.
+- The deny set applies to subagents. The built-in `statusline-setup` agent lists `Edit` as a tool, so it is probably unusable too. I did not test that agent.
+
+Not valid, kept as a warning: the first skill probe used `RESULT=!`echo ...$((6*7))``. The harness did not expand that form, and the model could compute `42` without a shell. Use output the model cannot guess, such as `$RANDOM` and `$$`.
+
+Not measured: `/tasks`, the `!` prompt prefix, command hooks, and the `statusline-setup` agent.
+
+## Hypotheses tried
+1. llm-proxy strips `Monitor`. Refuted: see Root cause.
+2. Version or feature-flag gate. Refuted: see Root cause.
+3. Bare `Bash` deny removes `Monitor`. Confirmed by the A/B test.
+
+## Fix
+
+Implemented 2026-10-29 on `experiments` (codescout) and `main` (claude-plugins). Nothing is pushed or released yet. Design: `docs/superpowers/specs/2026-10-29-background-job-wake-design.md`. Plan: `docs/superpowers/plans/2026-10-29-background-job-wake.md`.
+
+In short: the background supervisor writes a JSON completion record (`$TMPDIR/codescout-bg/<server_pid>-<token>-<handle>.json`) and the spawn response carries its path as `record`. A companion-plugin `PostToolUse` hook on `mcp__codescout__run_command`, with `asyncRewake: true`, waits on that record and exits 2, which wakes an idle session. A heartbeat wake-up covers long jobs, and a read of a still-running job re-arms the watcher.
+
+Commits, codescout: `09cbba443`, `dc8092c79` (record module and its fix), `5392b1d17`, `bdd533f5d` (supervisor writes records). Commits, claude-plugins: `32d8a06`, `2615b82` (hook), `872b634`, `2317650`, `fb79f46` (re-arm), `5ed4847` (registration). Review gaps in an earlier design draft are recorded as F-201 in `docs/trackers/bug-fix-session-log.md`.
+
+## Tests added
+
+- `src/tools/job_record.rs`: 12 unit tests (record shape and redaction, atomic and concurrent writes, a refused untrusted directory, a symlink at the temp name, sweep and delivered-removal rules).
+- `src/tools/run_command/tests.rs` and `src/tools/output_buffer.rs`: a running record at spawn, an exited record with the code, an evicted live job still finalising its record, an acked background spawn carrying a record, a failed first write giving `record_error`, delivered and undelivered eviction, the once-per-buffer sweep, `pid_alive`.
+- `codescout-companion/hooks/wake-on-job-end.test.sh` in claude-plugins: 44 assertions (arm on the spawn response shape, acked replay, guards, vanished record, two racing watchers, heartbeat, dead server with a live and a dead job, re-arm, no loop, `.watch` ownership).
+- End-to-end, 2026-10-29, `haiku`, throwaway config with `Bash`, `Write` and `Edit` denied, the real companion plugin and a debug build of this branch: a short job, a 70 s job with three heartbeat re-arms and a final wake-up, an acked `rm -rf` background command, and a subagent's job (no arm, as designed). All passed.
+
+## Workarounds
+
+Until the fix ships: start the job with `run_command(run_in_background=true)`, then use `ScheduleWakeup` at 1200 s or more as a fallback, and read the job with `run_command("tail -50 @bg_…")` when it fires. No completion notice exists today.
+
+## Resume
+
+Not done yet, and the operator's to approve: a release build and install of the codescout binary (`./scripts/rb.sh`, then `/mcp`), the companion version bump and its install into the four profiles, and updating the operator rule "activate a Monitor" in the CLAUDE.md files. Still unmeasured: a wait of several hours and a server that restarts. Gate, run 2026-10-29 on the committed tree: Python, rustfmt and clippy green. The two cargo test lanes were red with 30 library failures, none in `job_record`, `output_buffer` or `run_command`. 27 are an artifact of the run: a long `TMPDIR` (set because `/tmp` hit a disk quota) breaks unix socket paths (`path must be shorter than SUN_LEN`) for the `lsp`, `peer` and `util::fs` socket tests and one `memory` size test; all 246 of them pass with a short `TMPDIR`. The other 3 are not from this work: two OP-2 rule tests (`operator_rules::route`, `server::every_triggered_rule_names_a_tool_that_can_deliver_it`, tied to the uncommitted `src/operator_rules/profiles.rs`) and `prompts::reader_docs_contain_no_retired_call_forms` (the gitignored `.codescout/resident-private` tree). They were not re-run on a clean tree. The gate must be re-run once the machine's `/tmp` quota and those peer files are settled.
+
+Known limit, not measured: if an old server outlives `/mcp` long enough to finalise its record, the hook's wake text says `tail -50 @bg_N`, and that call goes to the new server, where `@bg_N` may be a different job. Still unmeasured: a wait of several hours.
+
+## Related research
+Cross-harness wake paths (Claude Code inbox socket, Codex `codex queue`, channels, hooks, Pi gaps), measured 2026-10-29: codescout memory `research/cross-harness-session-messaging`. The peer session's design for this bug is `docs/superpowers/specs/2026-10-29-background-job-wake-design.md`.
+
+## References
+- https://code.claude.com/docs/en/tools-reference.md
+- https://code.claude.com/docs/en/permissions.md
+- https://github.com/anthropics/claude-code/issues/104194
+- https://github.com/anthropics/claude-code/issues/86171
+- Operator rule: "Long Tasks — Activate a Monitor, Do Not Poll" in the user CLAUDE.md files.
