@@ -9,7 +9,7 @@ related:
 tags:
 - cluster/declared-not-wired
 kind: bug
-unverified: 'The fix is tested through Agent and project_id() only. Gate on b358e9aab, 2026-10-29: lean 5356 passed and 2 failed, default 8020 passed and 2 failed; both failures are OP-2 routing tests (operator_rules::route::tests::a_rule_with_several_selectors_routes_on_any_one_of_them and server::tests::every_triggered_rule_names_a_tool_that_can_deliver_it) while a peer holds uncommitted edits to docs/trackers/operator-rules.md and src/operator_rules/profiles.rs; not re-run on a clean tree. Not run: the end-to-end search by declared id against a binary built with the fix; a member whose own project.toml names a project differently from its id; which other tools key a store by config.project.name for a member (memory, status) and whether any depends on the old name.'
+unverified: 'The fix is tested through Agent and project_id() only. Gate on b358e9aab, 2026-10-29: lean 5356 passed and 2 failed, default 8020 passed and 2 failed; both failures are OP-2 routing tests (operator_rules::route::tests::a_rule_with_several_selectors_routes_on_any_one_of_them and server::tests::every_triggered_rule_names_a_tool_that_can_deliver_it) while a peer holds uncommitted edits to docs/trackers/operator-rules.md and src/operator_rules/profiles.rs; not re-run on a clean tree. Not run: a member whose own project.toml names a project differently from its id; which other tools key a store by config.project.name for a member (memory, status) and whether any depends on the old name.'
 ---
 
 # BUG: semantic_search(project_id=<declared member id>) returns no results because an index is keyed by the member's directory name
@@ -38,7 +38,12 @@ Linux, codescout over stdio, remote-http embedding backend, `sqlite-vec` store (
 Read 2026-10-29. `semantic_search` takes an explicit `project_id` verbatim as the store key (src/tools/semantic/semantic_search.rs:646-647). `index` keys a project by `ActiveProject::project_id()`, which returns `config.project.name` (src/agent/mod.rs:478-480). For a member activated by path or by declared id, that name comes from the directory, not from the `[[project]]` id. The two names meet nowhere. Not yet read: where the `[project] name` of a member's `project.toml` is first written, and whether a declared id could set it.
 
 ## Evidence
-Run output: scratchpad `kodi-id.out`, 2026-10-29. `git_sync` in the status shows the member's own HEAD `28e79441`. The sequence in Reproduction is the evidence; the two `semantic_search` calls differ only in `project_id`.
+Before the fix, run output in scratchpad `kodi-id.out`, 2026-10-29. `git_sync` in the status shows the member's own HEAD `28e79441`. The sequence in Reproduction is the evidence; the two `semantic_search` calls differ only in `project_id`.
+
+After the fix, 2026-10-29, the same script `kodi-id.py` on a fresh replica (`kodi-replica4`), run against the release binary the user rebuilt (`workspace(status)` showed `git_sha: a398925ea`, which contains `b358e9aab`; `git_dirty: true` from peers' uncommitted files). Output in `kodi-id-fixed.out`:
+- Activation by `thecrew-module` named the project `thecrew-module`; the index status showed `project_id: "thecrew-module"`, `file_count: 1`.
+- `semantic_search(project_id="thecrew-module")` returned `addon.py`, total 1. With no `project_id` it returned the same hit.
+- `semantic_search(project_id="script.module.thecrew")` returned total 0. The directory name is no longer a key for a declared member. That is a behavior change of the fix, and a user who indexed a member under its directory name must rebuild.
 
 ## Hypotheses tried
 1. **Hypothesis:** activating by the declared id keys the index by that id. **Test:** step 2 and 3 above. **Verdict:** rejected. The status shows the directory name.
@@ -63,7 +68,7 @@ Both go through `Agent` and the member's `project_id()`. Neither runs `semantic_
 ## Resume
 1. Done 2026-10-29: red test, then the fix (see Fix and Tests added).
 2. Done 2026-10-29: an auto-discovered member is keyed by its directory name, equal to its id, so it is not affected.
-3. Open: re-run the replica script `kodi-id.py` against a binary built with the fix, and expect `semantic_search(project_id="thecrew-module")` to find `addon.py`.
+3. Done 2026-10-29: the replica script on the rebuilt binary (see Evidence, after the fix).
 4. Open: the hint on an empty result that names the project id searched and the ids that hold chunks (docs/adrs/2026-08-27-negative-results-name-their-scope.md).
 5. Gate run 2026-10-29 on b358e9aab: only the two OP-2 failures, not mine (see the `unverified:` line). Close or archive after 3 and a clean-tree gate, with the fix SHA and its patch-id.
 
