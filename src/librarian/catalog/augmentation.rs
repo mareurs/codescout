@@ -5161,6 +5161,16 @@ mod tests {
         // (it cannot force an interleaving).
         let mut cat1 = Catalog::open(&path).unwrap();
         let mut cat2 = Catalog::open(&path).unwrap();
+        // The WAL file is deleted when the setup block's connection closes, and the first write
+        // after that recreates it with three fsyncs under the write lock (wal, directory, wal).
+        // Traces also show a directory fsync on each connection's own first write. Nothing above
+        // writes now that an up-to-date open takes no write lock, so write once on each connection
+        // here: this test measures the contention of two appends, not those cold starts. With 3 s
+        // injected per fsync, warming only cat1 left the second test failing 2 of 2 and warming
+        // both passed 2 of 2 (see
+        // docs/issues/2026-10-29-two-concurrent-catalog-writes-exceed-the-5-s-busy-timeout-when-fsync-takes-3-s.md).
+        art_upsert(&cat1, &sample_art("warm")).unwrap();
+        art_upsert(&cat2, &sample_art("warm2")).unwrap();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let b1 = barrier.clone();
         let h1 = std::thread::spawn(move || {
@@ -5505,6 +5515,10 @@ mod tests {
         // allocations race, released together by the barrier.
         let mut cat1 = Catalog::open(&db).unwrap();
         let mut cat2 = Catalog::open(&db).unwrap();
+        // Write once on each connection before the race; see
+        // `append_entry_serializes_across_independent_connections_to_same_file`.
+        art_upsert(&cat1, &sample_art("warm")).unwrap();
+        art_upsert(&cat2, &sample_art("warm2")).unwrap();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let b1 = barrier.clone();
         let h1 = std::thread::spawn(move || {
