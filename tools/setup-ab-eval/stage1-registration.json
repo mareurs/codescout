@@ -1,0 +1,221 @@
+{
+  "stage": 1,
+  "head": "0f8c05dca9199455f5ce1b047ccf7984c5204159",
+  "files": {
+    "PROVENANCE.json": "17eff19c2502b39886fb680a867fccebf8483ae18488929450935715bbb53340",
+    "agent-cs.Dockerfile": "a5891963c784217eb53f601f0aaaeb60c28dfb52babeb6513fb0f5cb886b74da",
+    "agent.Dockerfile": "189455188ab17062926d44dff28b099e59e94ce8342a363f3b063135cd0bb24c",
+    "analyze.py": "eefab516aa406a7abb62a09bf018dea3734a611ede7d1d9773cea444226d7fb0",
+    "arms.py": "9f2ac2234e402c88edd6a0f85825b5dd935448012fbb768077e3350a427cd6c0",
+    "baseline.py": "3a1311976af2d9eb8bde99f0219958f2f297919d39c4517ae3a03e3729440db1",
+    "capture_stub.py": "57b7b37927ca920868c63b12947f9b2894623729c9f985ef10adb7e02c231a75",
+    "evidence.py": "fa4ce2e1aa77fb4bd3ffae5fb643325a1c8c89fe2ad76b9c38577f4139cedda4",
+    "fixtures/bare_valid.jsonl": "cd0366947eca59b12868a2beea658511564d8219db2c465238a661344ad6d2fa",
+    "fixtures/cs_valid.jsonl": "728be9973c41fb7a62479d2cd393bfec804518781a4fbbd93116ff68f450e3a5",
+    "fixtures/full_valid.jsonl": "6653a325cb893e29ea1ce56a37f45af7e92b2b5375846a78b8dd38d0307e6d26",
+    "freeze_setup.py": "def4faaa169a195db4722175e14af6c9ad4f3734110a20413371e98ad5d1a8c1",
+    "freeze_stage1.py": "efa59d87c22d8341b14c665456d0ff3a24b0b31930b0f12ae611b0ddc291644c",
+    "integrity.py": "6415b2616c297098ef5a6db683667609f4e3617f8d3bdc184963d3a618ebb40a",
+    "leak_scan.py": "896e23869fab19668c8d7a61b92cdbd84afb7fb0bb248c2c8564bca2a0716f14",
+    "live_control.py": "459115f89658a486c399ee13cdf31bd886c099dda3ef90dff68eae48c805a5b4",
+    "mcp_probe.py": "5265138b67c7510c9a02c9cc6f7036b4785d15579dc1821ffab71c37c161ed07",
+    "pilot-protocol.md": "57dec0d780ed5307150e19f8adee917dd4555f6ca103f96d79737833ca137801",
+    "pilot.py": "61d5020fbc4de8791431d367106dac1246afe37bd462ca3100ef6a54afe63c38",
+    "run.py": "bd0eb7ccd44cbce884e7875a8640ac6168a0439097fb594bfea67026cf42e034",
+    "select_tasks.py": "f0379cede595b871d962cd8945329b1c66102882f51b9f804700cb9ccedd4439",
+    "selection-rule.json": "6f0205bc6036495c0e0153a5a873754e31306f1b4df33cc146435f0d6fcd52c3",
+    "stack.py": "b6450629229fe81c5add15def405424b7cf49a4bd16d5839f31091efd18921b7",
+    "task4-live-control.json": "52821f57d48e134823615d031a8c42daf90207497e3200dc0115c05984390e71",
+    "task4-rulings-control.json": "a5e8af417ce7d5df46a939ed749de69871b10781e6e0a2b593c912fe8b53ae29",
+    "tasks.py": "ef5366307e7f7addff5e37fc8a009d9afd92ea3cf63481e990c932f75734d88e",
+    "test_analyze.py": "413d85c13951cf12dbf88a540aeb83cf74e47f9af257ab8b5e6e7f2ff5f049f0",
+    "test_arms.py": "6684b5457726b11a802ca79a7888d52c92faf133f32ceb6bf21042af164e17fc",
+    "test_baseline.py": "4679afd5e3ca43dcba3dcb20d01e93bb8a73abb3ca9884eefb65cc52c046d52e",
+    "test_freeze_setup.py": "30b5c3da74e3d83ecb643b9b69618285cd361c531997eaaa483eeac65344054e",
+    "test_freeze_stage1.py": "3b379cf09d499b65746662886f4c52ab70e8969b6ae20af17dd9d33c6e504610",
+    "test_grader_boundary.py": "50c2739e04e7d5dc72c1dbe1d954652353fd14615473c0250cffc9daa909fe74",
+    "test_integrity.py": "b8a9b6e7e14a90572d0360a0c368e440d0855012bcaf06ef48c5ef5d41705888",
+    "test_leak_scan.py": "a21ec0334d336f117f26c50e3149021b60cb393192f998b592f3db24488512bd",
+    "test_pilot.py": "9a0d22a9f35c631583ad0366c2a8b352474f4fa56e90d11c93c9b69bd2984c92",
+    "test_provenance.py": "a0faa189973f34cb10a27a5c3a7fdacaa4327d5c9db988a9d845d56d38eaa7c1",
+    "test_run.py": "9960c5bfb3d30c0fb497155ff24cfe4a2c2b80d8334c71c4ba572bc8fcb25ef1",
+    "test_stack.py": "938c8da8c1743cf016bed6183e8ffc4a449ca3627721d985edcf11a5a2c86101",
+    "test_tasks.py": "8bd2e33e476ceb5c36c2c11a059234a8572ca993342a6ff3ab008431f78fceae",
+    "vendor/claude-plugins/effort-steering/spikes/plan-limit.mjs": "e9d0ba90c0a269f29c5dc3baf3897d238124087b40feb1f6c92eae28ffe95c4f",
+    "vendor/claude-plugins/effort-steering/spikes/s4-rows.mjs": "800938d75f5e20b93eabdfba68ed244b99e9f213f1a19f290603c7ba9b9a56a9",
+    "vendor/claude-plugins/effort-steering/spikes/s5/images/tinyproxy.conf.tmpl": "f44e1a4ddeb5efa887c456e661034a602605faa15aea767671f431bf3e7ebd8c",
+    "vendor/claude-plugins/effort-steering/spikes/s5/usage.mjs": "4d1e0b76bb61762bbbfe077a7d7d3c4d95a4be45f2c57d9490a8d47c8e2d5534"
+  },
+  "manifest_path": "/home/marius/work/claude/setup-ab-data/study/setup-manifest.json",
+  "manifest_sha256": "b6ad964e3c56a4e9df6f32de3eacd2eae362e6db4eadf9fd6eee2a532fb1d2a6",
+  "selection_rule_sha256": "6f0205bc6036495c0e0153a5a873754e31306f1b4df33cc146435f0d6fcd52c3",
+  "selection_sha256": "caad4c46ab5daf141a817fa804160c2aaed8ac8360fc550d69caf17e6077c540",
+  "selected": [
+    "cs-p08",
+    "tokio-rs__axum-691",
+    "cs-p04",
+    "uutils__coreutils-6575",
+    "cs-p07",
+    "nushell__nushell-13831",
+    "cs-p15",
+    "astral-sh__ruff-15626",
+    "cs-p19",
+    "sharkdp__bat-1892",
+    "cs-p01",
+    "tokio-rs__tokio-6603"
+  ],
+  "tasks": [
+    {
+      "task_id": "burntsushi__ripgrep-2576",
+      "kind": "foreign",
+      "run_image": {
+        "tag": "sab-run-burntsushi__ripgrep-2576:f9b0fc9f8",
+        "id": "sha256:efb800acf15ce4c65c18c6636e5ec9f82cba1801f260e2bf2667621eb1976d8a"
+      },
+      "arm_image": {
+        "tag": "sab-arm-burntsushi__ripgrep-2576:f9b0fc9f8",
+        "id": "sha256:6fd7b47faffdf65a3f0ba2d25ef2f8c5c77e93dcbab818eca9b3829f56c68064"
+      },
+      "template": "sab-tpl-burntsushi__ripgrep-2576"
+    },
+    {
+      "task_id": "astral-sh__ruff-15309",
+      "kind": "foreign",
+      "run_image": {
+        "tag": "sab-run-astral-sh__ruff-15309:f9b0fc9f8",
+        "id": "sha256:75ad229d61953cf5c1ff286c839687be78fbaf36d1012ea99fc7fd5a01937e3b"
+      },
+      "arm_image": {
+        "tag": "sab-arm-astral-sh__ruff-15309:f9b0fc9f8",
+        "id": "sha256:51276a44b2bf024f25da94bd0767503390230486f718f121e7ff0fcaddfffded"
+      },
+      "template": "sab-tpl-astral-sh__ruff-15309"
+    }
+  ],
+  "seed": 20261029,
+  "models": [
+    "claude-sonnet-5-5",
+    "claude-opus-5-5"
+  ],
+  "reps": [
+    [
+      "bare",
+      1
+    ],
+    [
+      "cs",
+      1
+    ],
+    [
+      "full",
+      1
+    ]
+  ],
+  "order": [
+    [
+      "burntsushi__ripgrep-2576",
+      "claude-sonnet-5-5",
+      "bare",
+      0
+    ],
+    [
+      "burntsushi__ripgrep-2576",
+      "claude-sonnet-5-5",
+      "cs",
+      0
+    ],
+    [
+      "burntsushi__ripgrep-2576",
+      "claude-sonnet-5-5",
+      "full",
+      0
+    ],
+    [
+      "burntsushi__ripgrep-2576",
+      "claude-opus-5-5",
+      "full",
+      0
+    ],
+    [
+      "burntsushi__ripgrep-2576",
+      "claude-opus-5-5",
+      "cs",
+      0
+    ],
+    [
+      "burntsushi__ripgrep-2576",
+      "claude-opus-5-5",
+      "bare",
+      0
+    ],
+    [
+      "astral-sh__ruff-15309",
+      "claude-sonnet-5-5",
+      "bare",
+      0
+    ],
+    [
+      "astral-sh__ruff-15309",
+      "claude-sonnet-5-5",
+      "full",
+      0
+    ],
+    [
+      "astral-sh__ruff-15309",
+      "claude-sonnet-5-5",
+      "cs",
+      0
+    ],
+    [
+      "astral-sh__ruff-15309",
+      "claude-opus-5-5",
+      "full",
+      0
+    ],
+    [
+      "astral-sh__ruff-15309",
+      "claude-opus-5-5",
+      "cs",
+      0
+    ],
+    [
+      "astral-sh__ruff-15309",
+      "claude-opus-5-5",
+      "bare",
+      0
+    ]
+  ],
+  "plan_sha256": "80ab16e6fe6b838908e74ef2f7f33faed6364c65a9d079186593ad98acad6768",
+  "budget": {
+    "cap_usd": 25.0,
+    "per_call_usd": 2.0,
+    "reserve_usd": 2.0
+  },
+  "reserve_rule": "run.py dry-run: --reserve defaults to --per-call (one call's worst case)",
+  "claude_cli_version": "2.1.309 (Claude Code)",
+  "codescout": {
+    "host_binary": {
+      "source": "setup-manifest.json (the operator's daily binary; NOT the one in the arm image)",
+      "sha256": "1e4ac1f5b3bcaf962a479e5fcb4167388f7988b53222359a64810d7699318c4c",
+      "version_json": {
+        "version": "0.15.0",
+        "git_sha": "f9b0fc9f8",
+        "git_sha_full": "f9b0fc9f867a0b6f5b6bb0d0b436fb303e1c5248",
+        "git_dirty": false
+      }
+    },
+    "arm_image_binary": {
+      "source": "tools/setup-ab-eval/task4-live-control.json",
+      "source_sha256": "52821f57d48e134823615d031a8c42daf90207497e3200dc0115c05984390e71",
+      "sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "version_json": {
+        "version": "0.15.0",
+        "git_sha": "f9b0fc9",
+        "git_sha_full": "f9b0fc9f867a0b6f5b6bb0d0b436fb303e1c5248",
+        "git_dirty": false
+      }
+    }
+  },
+  "python_version": "3.14.8",
+  "registration_sha256": "31bcd38b07d4f3ace67eb334fcd619ff19b7754e17790326e492273e535abfa3"
+}
