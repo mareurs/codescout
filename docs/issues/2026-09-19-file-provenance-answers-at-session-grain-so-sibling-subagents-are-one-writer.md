@@ -118,7 +118,7 @@ this campaign did, and which is why the sweep was harmless rather than a collisi
 
 ## Resume
 
-Mitigated, not fixed. Checked 2026-10-27: Claude Code subagent transcripts do carry an agent id (`<session>/subagents/agent-<id>.jsonl`, read as `op.agent_id`), but `_native_context` in `scripts/session_context.py` gives the asker `agent_id=None` for Claude Code. Only Codex (`CODEX_THREAD_ID`) or an explicit context file supplies one. So direction 1, and any refusal, needs either a harness-supplied agent id or a policy that treats every subagent-written path as `SHARED`. Open decision: which policy.
+Mitigated, not fixed. Checked 2026-10-27: Claude Code subagent transcripts do carry an agent id (`<session>/subagents/agent-<id>.jsonl`, read as `op.agent_id`), but `_native_context` in `scripts/session_context.py` gives the asker `agent_id=None` for Claude Code. Only Codex (`CODEX_THREAD_ID`) or an explicit context file supplies one. So direction 1, and any refusal, needs either a harness-supplied agent id or a policy that treats every subagent-written path as `SHARED`. DECIDED BY THE USER ON 2026-10-29: option A, keep the `session-grain:` note and build no refusal for now. Revisit option B (report `SHARED` for any subagent-written path) if a third incident occurs, and measure first how often it would withhold a legitimate `MINE` from the root session.
 
 Locus: `scripts/file-provenance.py` (`scan_provenance`, `session_grain_note`), `scripts/provenance_records.py`, `scripts/fmt-mine.sh` (consumer), `scripts/attribute-red.py` (consumer; its `wip_authors` line was not changed and was not checked against the new note).
 
