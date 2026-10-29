@@ -191,6 +191,10 @@ fn update_diff_expr(cols: &[String]) -> String {
 /// connection's point of view (busy_timeout makes a concurrent writer block
 /// on BEGIN IMMEDIATE rather than observe a half-updated trigger set).
 pub(crate) fn install(conn: &Connection) -> Result<()> {
+    // Read first: an up-to-date catalog needs no write transaction at all.
+    if triggers_current(conn) {
+        return Ok(());
+    }
     conn.execute_batch("BEGIN IMMEDIATE")?;
     match install_in_txn(conn) {
         Ok(()) => {
@@ -220,80 +224,14 @@ fn install_in_txn(conn: &Connection) -> Result<()> {
          CREATE INDEX IF NOT EXISTS idx_audit_at ON catalog_audit(at_ms);",
     )?;
     for t in AUDITED_TABLES {
-        let cols = table_columns(conn, t.name)?;
-        let (name, image, diff) = (t.name, old_image_expr(&cols), update_diff_expr(&cols));
-        // An UPDATE that writes the values a row already holds still fires
-        // AFTER UPDATE, and the diff then folds to a literal '{}'. Measured
-        // 2026-09-01 before this guard existed: 27,505 of 27,914 rows (98.5%)
-        // in a 1.74-hour window were exactly that, from reindex rewriting the
-        // commits table. They carry nothing, and they dilute `seq`, whose gaps
-        // this design names as its tamper signal.
-        // Empty is unreachable (`table_columns` bails on a column-less table),
-        // but an empty predicate would emit `WHEN BEGIN` — so fall back to no
-        // WHEN at all, failing toward recording MORE rather than a broken open.
-        let changed = changed_predicate(&cols);
-        let when = if changed.is_empty() {
-            String::new()
-        } else {
-            format!("WHEN {changed} ")
-        };
-        // (trigger name, CREATE TRIGGER text WITHOUT the trailing `;`). SQLite
-        // stores a trigger's `sql` in sqlite_master verbatim from `CREATE` up
-        // to, not including, the terminating `;`, so this text is directly
-        // comparable with the stored one.
-        let triggers = [
-            (
-                format!("audit_{name}_insert"),
-                format!(
-                    "CREATE TRIGGER audit_{name}_insert AFTER INSERT ON \"{name}\" BEGIN
-               INSERT INTO catalog_audit(at_ms, tbl, op, row_id)
-               VALUES({NOW_MS}, '{name}', 'insert', {rid_new});
-             END",
-                    rid_new = t.row_id_new,
-                ),
-            ),
-            (
-                format!("audit_{name}_update"),
-                format!(
-                    "CREATE TRIGGER audit_{name}_update AFTER UPDATE ON \"{name}\" {when}BEGIN
-               INSERT INTO catalog_audit(at_ms, tbl, op, row_id, payload)
-               VALUES({NOW_MS}, '{name}', 'update', {rid_new}, {diff});
-             END",
-                    rid_new = t.row_id_new,
-                ),
-            ),
-            (
-                format!("audit_{name}_delete"),
-                format!(
-                    "CREATE TRIGGER audit_{name}_delete AFTER DELETE ON \"{name}\" BEGIN
-               INSERT INTO catalog_audit(at_ms, tbl, op, row_id, payload)
-               VALUES({NOW_MS}, '{name}', 'delete', {rid_old}, {image});
-             END",
-                    rid_old = t.row_id_old,
-                ),
-            ),
-        ];
         // An open of an up-to-date catalog must write nothing: every DDL
         // statement is an fsync'd commit under the single write lock, which a
         // second opener queues behind (docs/issues/2026-10-24-catalog-open-…).
         // Skip only when ALL three stored definitions equal the generated
         // ones, so a changed definition, a column add or a missing trigger
         // still converges through the drop+create below.
-        let mut up_to_date = true;
-        for (trigger, sql) in &triggers {
-            let stored: Option<String> = conn
-                .query_row(
-                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1",
-                    [trigger],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            if stored.as_deref() != Some(sql.as_str()) {
-                up_to_date = false;
-                break;
-            }
-        }
-        if up_to_date {
+        let triggers = generated_triggers(conn, t)?;
+        if table_triggers_current(conn, &triggers)? {
             continue;
         }
         for (trigger, sql) in &triggers {
@@ -301,6 +239,104 @@ fn install_in_txn(conn: &Connection) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The three audit triggers for `t` as (trigger name, CREATE TRIGGER text
+/// WITHOUT the trailing `;`). SQLite stores a trigger's `sql` in sqlite_master
+/// verbatim from `CREATE` up to, not including, the terminating `;`, so this
+/// text is directly comparable with the stored one. Read-only.
+fn generated_triggers(conn: &Connection, t: &AuditedTable) -> Result<[(String, String); 3]> {
+    let cols = table_columns(conn, t.name)?;
+    let (name, image, diff) = (t.name, old_image_expr(&cols), update_diff_expr(&cols));
+    // An UPDATE that writes the values a row already holds still fires
+    // AFTER UPDATE, and the diff then folds to a literal '{}'. Measured
+    // 2026-09-01 before this guard existed: 27,505 of 27,914 rows (98.5%)
+    // in a 1.74-hour window were exactly that, from reindex rewriting the
+    // commits table. They carry nothing, and they dilute `seq`, whose gaps
+    // this design names as its tamper signal.
+    // Empty is unreachable (`table_columns` bails on a column-less table),
+    // but an empty predicate would emit `WHEN BEGIN` — so fall back to no
+    // WHEN at all, failing toward recording MORE rather than a broken open.
+    let changed = changed_predicate(&cols);
+    let when = if changed.is_empty() {
+        String::new()
+    } else {
+        format!("WHEN {changed} ")
+    };
+    Ok([
+        (
+            format!("audit_{name}_insert"),
+            format!(
+                "CREATE TRIGGER audit_{name}_insert AFTER INSERT ON \"{name}\" BEGIN
+               INSERT INTO catalog_audit(at_ms, tbl, op, row_id)
+               VALUES({NOW_MS}, '{name}', 'insert', {rid_new});
+             END",
+                rid_new = t.row_id_new,
+            ),
+        ),
+        (
+            format!("audit_{name}_update"),
+            format!(
+                "CREATE TRIGGER audit_{name}_update AFTER UPDATE ON \"{name}\" {when}BEGIN
+               INSERT INTO catalog_audit(at_ms, tbl, op, row_id, payload)
+               VALUES({NOW_MS}, '{name}', 'update', {rid_new}, {diff});
+             END",
+                rid_new = t.row_id_new,
+            ),
+        ),
+        (
+            format!("audit_{name}_delete"),
+            format!(
+                "CREATE TRIGGER audit_{name}_delete AFTER DELETE ON \"{name}\" BEGIN
+               INSERT INTO catalog_audit(at_ms, tbl, op, row_id, payload)
+               VALUES({NOW_MS}, '{name}', 'delete', {rid_old}, {image});
+             END",
+                rid_old = t.row_id_old,
+            ),
+        ),
+    ])
+}
+
+/// True when every trigger in `triggers` is stored with exactly that SQL.
+/// Read-only.
+fn table_triggers_current(conn: &Connection, triggers: &[(String, String); 3]) -> Result<bool> {
+    for (trigger, sql) in triggers {
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1",
+                [trigger],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if stored.as_deref() != Some(sql.as_str()) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Read-only: true when `catalog_audit` exists and every audited table already
+/// carries exactly the generated triggers. `install` uses this to return
+/// before `BEGIN IMMEDIATE`, so opening an up-to-date catalog takes no write
+/// lock. A table or column that is not there yet reads as "not current"
+/// (`table_columns` failing is treated the same way, leaving the error to the
+/// locked path).
+fn triggers_current(conn: &Connection) -> bool {
+    let has_audit: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='catalog_audit')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if !has_audit {
+        return false;
+    }
+    AUDITED_TABLES.iter().all(|t| {
+        generated_triggers(conn, t)
+            .and_then(|trg| table_triggers_current(conn, &trg))
+            .unwrap_or(false)
+    })
 }
 
 /// "codescout:<session-id>" for an identified connection, "codescout:anonymous"

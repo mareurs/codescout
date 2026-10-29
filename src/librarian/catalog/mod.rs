@@ -125,6 +125,99 @@ fn parse_create_table_columns(schema_sql: &str, table: &str) -> Vec<String> {
 fn init_sqlite_vec() {
     crate::sqlite_vec_ext::register();
 }
+/// Apply `SCHEMA_SQL` and the baseline stamps. The script is all
+/// `CREATE ... IF NOT EXISTS`, which on an existing object compiles to a read
+/// and takes no write lock; the stamps live in Rust for that reason.
+fn apply_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
+    stamp_baseline_versions(conn).context("applying schema")
+}
+
+const BASELINE_VERSIONS: [i64; 4] = [1, 2, 3, 6];
+/// Stamps `apply_migrations_in_txn` writes (v7 and v8 are column-only).
+const MIGRATION_VERSIONS: [i64; 7] = [4, 5, 9, 10, 11, 12, 13];
+
+/// Baseline `schema_version` stamps that `schema.sql` used to insert with
+/// `INSERT OR IGNORE`. Read first, write only for a missing one.
+fn stamp_baseline_versions(conn: &Connection) -> Result<()> {
+    for version in BASELINE_VERSIONS {
+        if !schema_version_present(conn, version)? {
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_version (version) VALUES (?1)",
+                [version],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn schema_version_present(conn: &Connection, version: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM schema_version WHERE version = ?1)",
+        [version],
+        |r| r.get(0),
+    )?)
+}
+
+/// Read-only: true when `apply_migrations_in_txn` and the v6 `add_columns` /
+/// `backfill` steps would all do nothing, so `run_migrations` can skip its
+/// write transaction. Checks the stamps, every column those blocks add, the
+/// tables they create, and that no legacy v6 column is left to backfill.
+/// Any miss returns false and the full migration path runs as before.
+fn migrations_current(conn: &Connection) -> Result<bool> {
+    for v in MIGRATION_VERSIONS {
+        if !schema_version_present(conn, v)? {
+            return Ok(false);
+        }
+    }
+    const WANTED: &[(&str, &str)] = &[
+        ("artifact_augmentation", "render_template"),
+        ("artifact_augmentation", "params_schema"),
+        ("artifact_augmentation", "append_mode"),
+        ("artifact_augmentation", "history_cap"),
+        ("artifact_augmentation", "entry_collection"),
+        ("artifact_augmentation", "refreshed_at_commit"),
+        ("artifact", "slug"),
+        ("artifact", "missing_since"),
+        ("artifact", "embedded_sha256"),
+        ("artifact", "abs_path"),
+        ("artifact_chunk", "entry_part"),
+        ("artifact_chunk", "entry_parts"),
+        ("commits", "git_root"),
+    ];
+    for (table, column) in WANTED {
+        if !column_exists(conn, table, column)? {
+            return Ok(false);
+        }
+    }
+    // Legacy v6 columns still present: backfill / drop work remains.
+    for (table, column) in [
+        ("artifact", "repo"),
+        ("artifact", "rel_path"),
+        ("commits", "repo"),
+    ] {
+        if column_exists(conn, table, column)? {
+            return Ok(false);
+        }
+    }
+    for table in [
+        "entry_cite",
+        "entry_reservation",
+        "catalog_meta",
+        "artifact_chunk",
+        "artifact_vec_v2",
+    ] {
+        let present: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+            [table],
+            |r| r.get(0),
+        )?;
+        if !present {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
 
 /// Idempotent post-baseline migrations. SCHEMA_SQL covers v1-v3 (CREATE TABLE
 /// IF NOT EXISTS is naturally idempotent); v4+ uses ALTER TABLE which isn't,
@@ -140,6 +233,13 @@ fn run_migrations(conn: &Connection, ws: Option<&WorkspaceConfig>) -> Result<()>
     // Running the whole sequence in one write transaction makes the
     // check-then-ALTER atomic; combined with the connection's `busy_timeout`,
     // the second writer blocks on BEGIN IMMEDIATE, then re-checks and no-ops.
+    //
+    // Read first: `BEGIN IMMEDIATE` takes the write lock even when every block
+    // would no-op, so a second opener of an up-to-date catalog queued behind the
+    // first. When every stamp, column and table is already present, skip it.
+    if migrations_current(conn)? {
+        return widen_events_kind_check(conn);
+    }
     conn.execute_batch("BEGIN IMMEDIATE")?;
     match apply_migrations_in_txn(conn, ws) {
         Ok(()) => {
@@ -658,7 +758,7 @@ impl Catalog {
         conn.execute_batch(
             "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;",
         )?;
-        conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
+        apply_schema(&conn)?;
         run_migrations(&conn, None).context("running migrations")?;
         audit::install(&conn).context("installing audit triggers")?;
         audit::install_session(&conn, &audit::resolve_actor())
@@ -670,7 +770,7 @@ impl Catalog {
         init_sqlite_vec();
         let conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
+        apply_schema(&conn)?;
         run_migrations(&conn, None).context("running migrations")?;
         audit::install(&conn).context("installing audit triggers")?;
         audit::install_session(&conn, &audit::resolve_actor())
@@ -695,7 +795,7 @@ impl Catalog {
         conn.execute_batch(
             "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;",
         )?;
-        conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
+        apply_schema(&conn)?;
         run_migrations(&conn, Some(ws)).context("running migrations")?;
         if needs_v6 {
             migrate_v6::drop_legacy_and_stamp(&conn).context("dropping legacy columns")?;
@@ -1490,6 +1590,95 @@ mod tests {
                     ],
                     "parse_create_table_columns must return every artifact column schema.sql declares, in order"
             );
+    }
+
+    /// Opening an already-initialised catalog must not need the write lock.
+    ///
+    /// Deterministic form of "two concurrent opens": a third connection holds
+    /// `BEGIN IMMEDIATE` (the single write lock) for the whole race and only
+    /// releases it after both openers have returned. Anything in `open` that
+    /// writes, or even takes the write lock, queues behind it for the full
+    /// `busy_timeout` (5 s) and then fails with "database is locked"; an open
+    /// that only reads succeeds. Pass/fail does not depend on scheduling or
+    /// on how long a commit takes.
+    /// docs/issues/2026-10-24-catalog-open-takes-the-write-lock-and-fsyncs-trigger-ddl-on-every-open.md
+    #[test]
+    fn open_of_an_initialised_catalog_takes_no_write_lock() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.sqlite");
+        drop(Catalog::open(&path).unwrap());
+
+        // Holder: take and keep the write lock.
+        let holder = Connection::open(&path).unwrap();
+        holder
+            .execute_batch("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE")
+            .unwrap();
+
+        let barrier = Arc::new(Barrier::new(2));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let (path, barrier) = (path.clone(), Arc::clone(&barrier));
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    Catalog::open(&path).map(drop)
+                })
+            })
+            .collect();
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        holder.execute_batch("ROLLBACK").unwrap();
+
+        for r in results {
+            r.expect("opening an up-to-date catalog must not need the write lock");
+        }
+    }
+
+    /// `schema.sql` no longer stamps the baseline versions; the Rust side must
+    /// still restore a missing one (an older catalog) on open.
+    #[test]
+    fn open_restores_a_missing_baseline_stamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.sqlite");
+        drop(Catalog::open(&path).unwrap());
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute("DELETE FROM schema_version WHERE version IN (1, 6, 12)", [])
+                .unwrap();
+        }
+        let cat = Catalog::open(&path).unwrap();
+        for v in [1i64, 6, 12] {
+            assert!(
+                schema_version_present(&cat.conn, v).unwrap(),
+                "stamp {v} must be restored by a reopen"
+            );
+        }
+    }
+    /// `migrations_current` only knows the stamps in `BASELINE_VERSIONS` and
+    /// `MIGRATION_VERSIONS`. A migration added later that stamps a new version
+    /// but is not added to those lists would be skipped as "already current" on
+    /// an older catalog. A fresh open runs every migration, so every stamp it
+    /// leaves behind must be a listed one: add the new version to the list (and
+    /// its columns/tables to `migrations_current`) when this fails.
+    #[test]
+    fn every_stamped_version_is_known_to_the_up_to_date_check() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut stmt = cat
+            .conn
+            .prepare("SELECT version FROM schema_version ORDER BY version")
+            .unwrap();
+        let stamped: Vec<i64> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        for v in stamped {
+            assert!(
+                BASELINE_VERSIONS.contains(&v) || MIGRATION_VERSIONS.contains(&v),
+                "schema_version {v} is stamped but unknown to migrations_current; \
+                 an older catalog would skip that migration"
+            );
+        }
     }
 
     #[test]

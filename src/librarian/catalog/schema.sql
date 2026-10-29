@@ -69,7 +69,9 @@ CREATE INDEX IF NOT EXISTS idx_link_dst ON artifact_link(dst_id, rel);
 CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER PRIMARY KEY
 );
-INSERT OR IGNORE INTO schema_version (version) VALUES (1);
+-- The baseline stamps (1, 2, 3, 6) are NOT inserted here: an INSERT, even an
+-- ignored one, takes the write lock, and this script runs on every open.
+-- `stamp_baseline_versions` (mod.rs) reads first and writes only if one is missing.
 
 -- v2: TimeMachine event log + narrative graph
 CREATE TABLE IF NOT EXISTS events (
@@ -129,7 +131,6 @@ CREATE INDEX IF NOT EXISTS idx_event_edges_src ON event_edges(src_event_id, rel)
 CREATE INDEX IF NOT EXISTS idx_event_edges_dst_artifact ON event_edges(dst_artifact_id);
 CREATE INDEX IF NOT EXISTS idx_event_edges_dst_event ON event_edges(dst_event_id);
 
-INSERT OR IGNORE INTO schema_version (version) VALUES (2);
 
 -- v3: artifact augmentation (prompt + params for AI-maintained artifacts)
 CREATE TABLE IF NOT EXISTS artifact_augmentation (
@@ -144,10 +145,7 @@ CREATE TABLE IF NOT EXISTS artifact_augmentation (
 );
 CREATE INDEX IF NOT EXISTS idx_augmentation_artifact ON artifact_augmentation(artifact_id);
 
-INSERT OR IGNORE INTO schema_version (version) VALUES (3);
 
--- v6: legacy repo/rel_path columns dropped; abs_path replaces them.
-INSERT OR IGNORE INTO schema_version (version) VALUES (6);
 
 -- Worktree overlay: durable registration of linked git worktrees that have
 -- written to the catalog. Survives `git worktree remove`; the merge flow

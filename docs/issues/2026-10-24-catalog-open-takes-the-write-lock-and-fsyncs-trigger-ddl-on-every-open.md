@@ -76,21 +76,29 @@ The injection runs in Reproduction. Code read as listed above. The two original 
 
 ## Fix
 
-Option 1 is implemented (status stays `open`: the lock is still taken by `schema.sql` and `run_migrations`, and the real failure was not re-tested).
+Options 1 and the lock-avoiding read-first guards are implemented (status stays `open`: the injected-fsync reproduction still ends in "database is locked", now from the test's own appends, see below).
 
-`audit::install_in_txn` (`src/librarian/catalog/audit/mod.rs`) now builds the three `CREATE TRIGGER` texts per audited table (without the trailing `;`, which is how SQLite stores them in `sqlite_master.sql`) and compares each with the stored `sql`. Only when all three are byte-equal does it skip the table; any difference or a missing trigger takes the old drop+create path, so a changed definition, a column add or a lost trigger still converges. An open of an up-to-date catalog therefore runs no trigger DDL.
+Three changes make `Catalog::open` of an up-to-date catalog take no write lock:
 
-Not done: the four `INSERT OR IGNORE INTO schema_version` statements in `schema.sql` still run on every open and still take the write lock (no rows written, so no fsync of a data change, but the lock is taken). `run_migrations` still starts `BEGIN IMMEDIATE`. Options 2 and 3 unchanged.
+1. `audit::install_in_txn` (`src/librarian/catalog/audit/mod.rs`, commit d7d29171f) compares the generated `CREATE TRIGGER` text (no trailing `;`, as SQLite stores it in `sqlite_master.sql`) with the stored `sql` and skips the drop+create when all three triggers of a table match. This round the generation moved into `generated_triggers`, and `install` now calls the read-only `triggers_current` BEFORE `BEGIN IMMEDIATE` and returns early, so the write transaction is not even started. The in-transaction re-check is kept for the racing-opener case.
+2. `run_migrations` (`src/librarian/catalog/mod.rs`) calls the read-only `migrations_current` first and, when true, skips `BEGIN IMMEDIATE` and only runs `widen_events_kind_check` (itself a read when the CHECK is already wide). `migrations_current` requires: stamps 4, 5, 9, 10, 11, 12, 13; every column the v4-v12 / v6 `add_columns` blocks add; no legacy `repo` / `rel_path` column left; and tables `entry_cite`, `entry_reservation`, `catalog_meta`, `artifact_chunk`, `artifact_vec_v2`. Any miss runs the old path unchanged. Trade-off: the list mirrors `apply_migrations_in_txn` by hand, so a new migration must be added to `migrations_current` (or its stamp to `MIGRATION_VERSIONS`), otherwise an up-to-date-looking catalog would skip it. The test `every_stamped_version_is_known_to_the_up_to_date_check` is the tripwire: a fresh open runs every migration, so a new stamp missing from `BASELINE_VERSIONS` / `MIGRATION_VERSIONS` fails it (checked 2026-10-29 by removing 13 from the list: it failed with "schema_version 13 is stamped but unknown"). It cannot see a new column or table that carries no new stamp.
+3. The four `INSERT OR IGNORE INTO schema_version` (v1, v2, v3, v6) are removed from `schema.sql` (an INSERT takes the write lock even when it ignores the row; `execute_batch` runs the whole script on every open). `apply_schema` now runs `SCHEMA_SQL` (all `CREATE ... IF NOT EXISTS`, which on an existing object is a read) and then `stamp_baseline_versions`, which reads each stamp and inserts only a missing one. Used by `open`, `open_in_memory` and `open_with_workspace`.
 
 Verified (2026-10-29):
-- Test-first: `install_on_up_to_date_triggers_runs_no_ddl` failed on the old code (`PRAGMA schema_version` 64 -> 106 across a second `install`), then passed after the change.
-- `scripts/with-slot.sh cargo test --lib librarian::`: 2466 passed, 0 failed, 2 ignored.
+- `scripts/with-slot.sh cargo test --lib librarian::`: 2468 passed, 0 failed, 2 ignored (was 2466; +2 new tests).
+- `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`: clean. `rustfmt --edition 2021 --check` on both changed `.rs` files: clean.
+- Each of the three guards is load-bearing for the new test: with `triggers_current`, `migrations_current` or the stamp read-check disabled one at a time, `open_of_an_initialised_catalog_takes_no_write_lock` failed after 5 s with "database is locked" in `installing audit triggers`, `running migrations` and `applying schema` respectively.
+- strace fsync injection (3 s on every fsync/fdatasync) against the fixed lib test binary, `append_entry_serializes_across_independent_connections_to_same_file`: still FAILED (132 s), but the panic is `database is locked` raised at `augmentation.rs:5190` from `append_entry` inside the worker thread, not from `Catalog::open`; the opens at lines 5163-5164 happen on the main thread before the race and succeeded. So the original signature (`applying schema` / `Catalog::open`) did not appear, but this run does not show the failure gone: two real appends, each with several 3 s fsyncs, exceed the 5 s `busy_timeout` by themselves. That is inherent write contention, a different cost from the open.
 
-Not verified: that this removes the real "database is locked" failure under injected fsync latency (the strace reproduction was not re-run), and the lock hold time of `schema.sql` / `run_migrations` on a real open.
+Not verified: the second reproduction test (`allocate_entry_id_serializes_across_independent_connections`) was not re-run under injection; the injected run above used the post-rework test, so it is not a before/after of the same test body; no measurement of real lock hold times.
 
 ## Tests added
 
-In `src/librarian/catalog/audit/mod.rs` tests: `install_on_up_to_date_triggers_runs_no_ddl` (schema cookie unchanged by a second `install`) and `install_converges_a_changed_or_missing_trigger` (a stale body and a dropped trigger are restored to the generated definitions). No test covers two concurrent `Catalog::open` calls on an initialised file.
+- `src/librarian/catalog/mod.rs`: `open_of_an_initialised_catalog_takes_no_write_lock`. A third connection holds `BEGIN IMMEDIATE` for the whole race; two threads released by a barrier call `Catalog::open` on the already-initialised file; both must return `Ok`. Deterministic: a lock held throughout means any write or write-lock attempt in `open` waits out the 5 s `busy_timeout` and fails, so pass/fail does not depend on timing. The barrier is only there to make the two opens concurrent. Mutation-checked for each of the three guards (see Fix).
+- `src/librarian/catalog/mod.rs`: `open_restores_a_missing_baseline_stamp` (stamps 1, 6, 12 deleted, reopen restores them, so removing the inserts from `schema.sql` did not lose the stamps for older catalogs).
+- `src/librarian/catalog/audit/mod.rs` (commit d7d29171f): `install_on_up_to_date_triggers_runs_no_ddl` and `install_converges_a_changed_or_missing_trigger`.
+
+A DDL-free open is not asserted by `PRAGMA data_version`; the held-write-lock test was chosen because it was verified to fail on each guard removed.
 
 ## Workarounds
 
@@ -98,9 +106,9 @@ None needed for the tests after the rework. For a real pair of servers: not know
 
 ## Resume
 
-1. Measure the write-lock hold time of one `Catalog::open` on an existing file, uncontended and under host load (for example by timing `BEGIN IMMEDIATE` to `COMMIT` in `audit::install`).
-2. Decide between option 1 and leaving the behaviour documented.
-3. If option 1: add a test with the strace-style latency or an injected slow commit that fails on the current code.
+1. Decide whether to close: the open path no longer writes or locks on an up-to-date catalog. The remaining injected-fsync failure is in `append_entry`, which is real write contention and may deserve its own bug file or a longer `busy_timeout` for appends.
+2. Optionally re-run both strace reproductions with the pre-rework test bodies for a true before/after.
+3. Keep `migrations_current` in step with `apply_migrations_in_txn` when adding a migration.
 
 ## References
 
