@@ -69,9 +69,10 @@ MAX_BUDGET_USD = "1.25"
 RESOURCES = ("--cpus", "4", "--memory", "8g")
 # Fix round 2, operator decision 2026-10-30: every ARM container (docker_run_args) gets 16 GB,
 # the same in every arm (rust-analyzer on the codescout repo peaked at 7.3-8.5 GB of 8 GB in an
-# idle session). No --memory-swap flag, as before: Docker's default then allows swap equal to
-# the memory limit when the host has swap (measured in controls/final-fix/ra-cs-p08-16g/).
-AGENT_RESOURCES = ("--cpus", "4", "--memory", "16g")
+# idle session). Round 3 ruling: --memory-swap equal to --memory, so the container has NO swap
+# and a memory-heavy run fails fast as an OOM kill instead of swapping toward the timeout.
+AGENT_MEMORY = "16g"
+AGENT_RESOURCES = ("--cpus", "4", "--memory", AGENT_MEMORY, "--memory-swap", AGENT_MEMORY)
 # The non-secret part of pilot's private.env; the token and proxy are the runner's (Task 8).
 CONTAINER_ENV = {"CLAUDE_CONFIG_DIR": CONFIG_DIR, "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8192",
                  "DISABLE_AUTOUPDATER": "1"}

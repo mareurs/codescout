@@ -432,7 +432,9 @@ class ArmsTest(unittest.TestCase):
                                         Path("/x/private.env"))
             self.assertIn("--cpus", argv)
             self.assertEqual(argv[argv.index("--memory") + 1], "16g")  # fix round 2 ruling
-            self.assertNotIn("--memory-swap", argv)
+            # Round 3 ruling: no swap, i.e. --memory-swap equal to --memory.
+            self.assertEqual(argv[argv.index("--memory-swap") + 1],
+                             argv[argv.index("--memory") + 1])
             # Drop every mount; what is left (resources, network, env, image) must be equal.
             rest, i = [], 0
             while i < len(argv):

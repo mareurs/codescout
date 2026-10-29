@@ -143,7 +143,7 @@ class World:
     def _image(a):
         i = a.index("--name") + 2
         while i < len(a):
-            if a[i] in ("--network", "--cpus", "--memory", "--env-file", "--cap-drop",
+            if a[i] in ("--network", "--cpus", "--memory", "--memory-swap", "--env-file", "--cap-drop",
                         "--security-opt", "-v", "--entrypoint", "--device", "--group-add",
                         "-e", "--user", "--name"):
                 i += 2

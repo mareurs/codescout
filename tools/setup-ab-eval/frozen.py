@@ -26,8 +26,9 @@ LAYOUT of `dest` (default FROZEN = <data>/study/frozen):
     plugins/<name>/         a copy of each plugin tree (the companion from plugins_cs, the rest
                             from plugins_full), symlinks kept as symlinks, WITHOUT the files
                             SECRET_FILE_GLOBS names (`.env*`, key files, credential files; fix
-                            round 2, N-1; listed by path in frozen.json); an absolute symlink or
-                            one that leaves its tree refuses the freeze.
+                            round 2, N-1) and the EXCLUDED_PLUGIN_PATHS of that plugin (round 3:
+                            buddy's `.codescout/`), all listed by path in frozen.json; an absolute
+                            symlink or one that leaves its tree refuses the freeze.
     frozen.json             {"trees": {rel: sha256}, "sources": {rel: host path}, "settings":
                             {"copied_keys", "not_copied_keys", "permission_keys",
                             "not_copied_permission_keys"}, "excluded_files": [rel], "secret_scan":
@@ -57,7 +58,7 @@ import re
 import shutil
 import stat
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import arms
 import tasks
@@ -81,6 +82,11 @@ PERMISSION_KEYS = ("deny", "defaultMode")
 # Fix round 2 (N-1): files never copied into a frozen plugin tree (fnmatch on the base name).
 SECRET_FILE_GLOBS = (".env*", "*.pem", "*.key", "id_*", "*.p12", "credentials*", ".netrc",
                      ".npmrc", ".pgpass")
+# Round 3 ruling: per-plugin paths (relative to the plugin root) never copied. buddy's
+# `.codescout/` is a codescout session's state inside the plugin cache (debug and diagnostic
+# logs, usage.db, an embeddings db, project memories, an onboarding prompt), not plugin content;
+# the spec keeps global codescout and buddy memories out of every arm.
+EXCLUDED_PLUGIN_PATHS = {"buddy": (".codescout",)}
 SECRET_PATTERNS = {
     "anthropic-key": re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"),
     "github-token": re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"),
@@ -173,14 +179,23 @@ def scan_tree(root):
     return files_scanned, sorted(hits)
 
 
-def _excluded_paths(root):
+def _skipped(plugin, rel):
+    """True for a plugin-tree path the freeze does not copy: a SECRET_FILE_GLOBS name anywhere,
+    or a path EXCLUDED_PLUGIN_PATHS lists for that plugin."""
+    return (excluded_name(PurePosixPath(rel).name)
+            or rel in EXCLUDED_PLUGIN_PATHS.get(plugin, ()))
+
+
+def _excluded_paths(root, plugin=None):
     root = Path(root)
     out = []
     for d, dirs, files in os.walk(root, followlinks=False):
         for name in sorted(dirs + files):
-            if excluded_name(name):
-                out.append((Path(d) / name).relative_to(root).as_posix())
-        dirs[:] = [x for x in dirs if not excluded_name(x)]
+            rel = (Path(d) / name).relative_to(root).as_posix()
+            if _skipped(plugin, rel):
+                out.append(rel)
+        dirs[:] = [x for x in dirs
+                   if not _skipped(plugin, (Path(d) / x).relative_to(root).as_posix())]
     return sorted(out)
 
 
@@ -195,7 +210,7 @@ def _file_line(rel, path):
     return f"f {rel} {x} {h.hexdigest()}"
 
 
-def _lines(root, skip_secret_files=False):
+def _lines(root, skip_secret_files=False, plugin=None):
     root = Path(root)
     st = os.lstat(root)
     if stat.S_ISREG(st.st_mode):
@@ -205,8 +220,9 @@ def _lines(root, skip_secret_files=False):
     out = []
     for d, dirs, files in os.walk(root, followlinks=False):
         if skip_secret_files:
-            dirs[:] = [x for x in dirs if not excluded_name(x)]
-            files = [x for x in files if not excluded_name(x)]
+            rel_of = lambda x: (Path(d) / x).relative_to(root).as_posix()
+            dirs[:] = [x for x in dirs if not _skipped(plugin, rel_of(x))]
+            files = [x for x in files if not _skipped(plugin, rel_of(x))]
         dirs.sort()
         for name in sorted(dirs + files):
             p = Path(d) / name
@@ -223,10 +239,11 @@ def _lines(root, skip_secret_files=False):
     return sorted(out, key=lambda line: line.split(" ", 2)[1])
 
 
-def tree_sha256(path, skip_secret_files=False):
+def tree_sha256(path, skip_secret_files=False, plugin=None):
     """The TREE HASH of a file or a directory (see the module docstring); with
-    `skip_secret_files`, as if the SECRET_FILE_GLOBS files were absent (the source of a copy)."""
-    return hashlib.sha256("\n".join(_lines(path, skip_secret_files)).encode()).hexdigest()
+    `skip_secret_files`, as if the paths the freeze does not copy were absent (the source of a
+    copy): SECRET_FILE_GLOBS names, and EXCLUDED_PLUGIN_PATHS of `plugin`."""
+    return hashlib.sha256("\n".join(_lines(path, skip_secret_files, plugin)).encode()).hexdigest()
 
 
 # --- what is frozen ------------------------------------------------------------------------------
@@ -294,8 +311,14 @@ def _check_links(tree):
                     raise Mismatch(f"{p} -> {target}: a symlink that leaves its plugin tree")
 
 
-def _ignore_secret_files(directory, names):
-    return [n for n in names if excluded_name(n)]
+def _ignore_for(src, plugin):
+    """A copytree `ignore` that drops what _skipped() names for `plugin`."""
+    src = Path(src)
+
+    def ignore(directory, names):
+        base = Path(directory).relative_to(src)
+        return [n for n in names if _skipped(plugin, (base / n).as_posix())]
+    return ignore
 
 
 def freeze_inputs(manifest, dest=FROZEN):
@@ -325,12 +348,12 @@ def freeze_inputs(manifest, dest=FROZEN):
                 raise Mismatch(f"plugin {name}: {src} is not a directory")
             _check_links(src)
             shutil.copytree(src, tmp / PLUGINS_DIR / name, symlinks=True,
-                            ignore=_ignore_secret_files)
+                            ignore=_ignore_for(src, name))
             record["sources"][f"{PLUGINS_DIR}/{name}"] = str(src)
             record["excluded_files"] += [f"{PLUGINS_DIR}/{name}/{p}"
-                                         for p in _excluded_paths(src)]
+                                         for p in _excluded_paths(src, name)]
             if (tree_sha256(tmp / PLUGINS_DIR / name)
-                    != tree_sha256(src, skip_secret_files=True)):
+                    != tree_sha256(src, skip_secret_files=True, plugin=name)):
                 raise Mismatch(f"plugin {name}: the copy does not hash like its source")
         files, hits = scan_tree(tmp)
         if hits:

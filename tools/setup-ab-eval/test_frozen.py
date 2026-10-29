@@ -230,6 +230,28 @@ class RealShapesTest(unittest.TestCase):
             self.assertNotIn(value, everything)
         self.assertEqual(rec["trees"]["plugins/buddy"],
                          frozen.tree_sha256(self.fx.plugins["buddy"], skip_secret_files=True))
+    def test_buddy_codescout_state_is_not_copied_and_is_recorded(self):
+        # Round 3 ruling: plugins/buddy/.codescout/ (a codescout session's state) is excluded;
+        # the same name elsewhere (the companion's, a nested one) is not.
+        buddy, companion = self.fx.plugins["buddy"], self.fx.plugins["codescout-companion"]
+        for root in (buddy / ".codescout", buddy / "hooks" / ".codescout",
+                     companion / ".codescout"):
+            (root / "memories").mkdir(parents=True)
+            (root / "memories" / "notes.md").write_text("state\n")
+        (buddy / ".codescout" / "debug.log").write_text("log\n")
+        rec = frozen.freeze_inputs(self.fx.manifest, self.fx.dest)
+        self.assertFalse((self.fx.dest / "plugins" / "buddy" / ".codescout").exists())
+        self.assertTrue((self.fx.dest / "plugins" / "buddy" / "hooks" / ".codescout").is_dir())
+        self.assertTrue((self.fx.dest / "plugins" / "codescout-companion" / ".codescout").is_dir())
+        self.assertIn("plugins/buddy/.codescout", rec["excluded_files"])
+        self.assertNotIn("plugins/buddy/.codescout/debug.log", rec["excluded_files"])  # pruned
+        self.assertFalse([p for p in rec["excluded_files"] if "companion" in p
+                          or p.startswith("plugins/buddy/hooks")])
+        self.assertEqual(rec["trees"]["plugins/buddy"],
+                         frozen.tree_sha256(buddy, skip_secret_files=True, plugin="buddy"))
+        self.assertNotEqual(rec["trees"]["plugins/buddy"],
+                            frozen.tree_sha256(buddy, skip_secret_files=True))
+        frozen.check_trees(self.fx.dest, rec["trees"])
 
     def test_a_secret_in_a_copied_plugin_file_refuses_without_echoing_it(self):
         value = "Zq8" + "x" * 5 + "fake-service-token"
