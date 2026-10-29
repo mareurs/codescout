@@ -1,5 +1,5 @@
 ---
-id: 3df245c295e3833d
+id: '3df245c295e3833d'
 kind: bug
 status: mitigated
 title: 'BUG: a worktree activation serves that commit''s memories and auto-detects sub-projects, so memory set and topology silently diverge from the main checkout'
@@ -12,7 +12,7 @@ tags:
 - sub-projects
 - silent-divergence
 - gitignore
-unverified: TRACKED b259645d3d2c9214 — only the topology half is closed (1869adcb); the memory half is unfixed and is a decision rather than an implementation — a worktree activation still serves that commit's memories, so the memory set silently diverges from the main checkout. See section 'Still open — the semantic question'.
+unverified: 'RESOLVED 2026-10-29 — the memory half is implemented in commit 841a8fcb7, tracked in b259645d3d2c9214 (now fixed, with its own caveats): a linked worktree reads the main checkout''s memories read-only and writes only its own. Not run on a rebuilt server. Was: only the topology half is closed (1869adcb); the memory half is unfixed and is a decision rather than an implementation — a worktree activation still serves that commit''s memories, so the memory set silently diverges from the main checkout. See section ''Still open — the semantic question''.'
 ---
 
 ## Summary
