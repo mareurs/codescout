@@ -31,7 +31,7 @@ In 2026-10-03..10-24, `memory_target_not_found` fired **98 times across 12 proje
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+Not started. Re-checked against HEAD `b15dd5279` on 2026-10-29: `memory(action="list")` pinned to the linked worktree `.worktrees/setup-ab-eval` returned 26 topics, while the main checkout lists 31. The five topics only the main checkout has (`bug-triage-2026-10-27`, `research/cross-harness-session-messaging`, `research/effort-steering/behavior-transfer-20261029`, `research/effort-steering/compile-mechanism-20261029`, `research/setup-ab-eval`) are not in that worktree's committed set. The divergence is still live, so the caveat was not overtaken. Not established: whether those five are uncommitted in the main checkout (likely, since git status lists some of them as untracked), or how the worktree resolves its memory root. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
 
 ## References
 
