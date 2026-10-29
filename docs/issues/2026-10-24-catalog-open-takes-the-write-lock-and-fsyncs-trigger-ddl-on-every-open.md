@@ -76,15 +76,21 @@ The injection runs in Reproduction. Code read as listed above. The two original 
 
 ## Fix
 
-Not started. Options:
+Option 1 is implemented (status stays `open`: the lock is still taken by `schema.sql` and `run_migrations`, and the real failure was not re-tested).
 
-1. **Skip the reinstall when the stored trigger SQL already equals the generated SQL.** An open of an up-to-date catalog would then write nothing and fsync nothing. This changes the contract in the `install` doc comment (drop and recreate "so a definition change or column add always converges"): the comparison must be exact enough that a changed definition still converges. It would also leave the `INSERT OR IGNORE` statements, which write no rows but still take the write lock; they could be guarded by a read first.
-2. **Raising `busy_timeout` is not a fix.** It only moves the point at which a stalled holder produces the failure.
-3. Whether a failed open should be retried by the caller is a separate question; what a server does after `Catalog::open` fails was not read.
+`audit::install_in_txn` (`src/librarian/catalog/audit/mod.rs`) now builds the three `CREATE TRIGGER` texts per audited table (without the trailing `;`, which is how SQLite stores them in `sqlite_master.sql`) and compares each with the stored `sql`. Only when all three are byte-equal does it skip the table; any difference or a missing trigger takes the old drop+create path, so a changed definition, a column add or a lost trigger still converges. An open of an up-to-date catalog therefore runs no trigger DDL.
+
+Not done: the four `INSERT OR IGNORE INTO schema_version` statements in `schema.sql` still run on every open and still take the write lock (no rows written, so no fsync of a data change, but the lock is taken). `run_migrations` still starts `BEGIN IMMEDIATE`. Options 2 and 3 unchanged.
+
+Verified (2026-10-29):
+- Test-first: `install_on_up_to_date_triggers_runs_no_ddl` failed on the old code (`PRAGMA schema_version` 64 -> 106 across a second `install`), then passed after the change.
+- `scripts/with-slot.sh cargo test --lib librarian::`: 2466 passed, 0 failed, 2 ignored.
+
+Not verified: that this removes the real "database is locked" failure under injected fsync latency (the strace reproduction was not re-run), and the lock hold time of `schema.sql` / `run_migrations` on a real open.
 
 ## Tests added
 
-N/A: open, not fixed. The two flaky tests were reworked so they no longer depend on this (opens happen before the race), which also means no test now covers two concurrent `Catalog::open` calls on an initialised file.
+In `src/librarian/catalog/audit/mod.rs` tests: `install_on_up_to_date_triggers_runs_no_ddl` (schema cookie unchanged by a second `install`) and `install_converges_a_changed_or_missing_trigger` (a stale body and a dropped trigger are restored to the generated definitions). No test covers two concurrent `Catalog::open` calls on an initialised file.
 
 ## Workarounds
 

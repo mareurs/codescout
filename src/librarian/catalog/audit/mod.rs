@@ -22,7 +22,7 @@
 //! See docs/issues/archive/2026-09-01-audit-trigger-can-abort-writer-on-null-key-or-blob.md.
 
 use anyhow::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 pub(crate) mod host;
 pub(crate) mod shard;
@@ -174,6 +174,10 @@ fn update_diff_expr(cols: &[String]) -> String {
 /// (memory catalog-sql-hazards), and the same open that ran the migration
 /// reinstalls them here — no cross-open self-heal window. Drop+create (not
 /// IF NOT EXISTS) so a definition change or column add always converges.
+/// A table whose three stored trigger definitions already equal the generated
+/// ones is skipped, so an open of an up-to-date catalog runs no DDL (and so no
+/// fsync'd commit under the write lock). Any difference, or a missing trigger,
+/// takes the drop+create path.
 ///
 /// The whole body runs in one `BEGIN IMMEDIATE` / `COMMIT` transaction, same
 /// pattern as `run_migrations` (bug 33e4ae68). Without it, each `DROP TRIGGER`
@@ -233,25 +237,68 @@ fn install_in_txn(conn: &Connection) -> Result<()> {
         } else {
             format!("WHEN {changed} ")
         };
-        conn.execute_batch(&format!(
-            "DROP TRIGGER IF EXISTS audit_{name}_insert;
-             CREATE TRIGGER audit_{name}_insert AFTER INSERT ON \"{name}\" BEGIN
+        // (trigger name, CREATE TRIGGER text WITHOUT the trailing `;`). SQLite
+        // stores a trigger's `sql` in sqlite_master verbatim from `CREATE` up
+        // to, not including, the terminating `;`, so this text is directly
+        // comparable with the stored one.
+        let triggers = [
+            (
+                format!("audit_{name}_insert"),
+                format!(
+                    "CREATE TRIGGER audit_{name}_insert AFTER INSERT ON \"{name}\" BEGIN
                INSERT INTO catalog_audit(at_ms, tbl, op, row_id)
                VALUES({NOW_MS}, '{name}', 'insert', {rid_new});
-             END;
-             DROP TRIGGER IF EXISTS audit_{name}_update;
-             CREATE TRIGGER audit_{name}_update AFTER UPDATE ON \"{name}\" {when}BEGIN
+             END",
+                    rid_new = t.row_id_new,
+                ),
+            ),
+            (
+                format!("audit_{name}_update"),
+                format!(
+                    "CREATE TRIGGER audit_{name}_update AFTER UPDATE ON \"{name}\" {when}BEGIN
                INSERT INTO catalog_audit(at_ms, tbl, op, row_id, payload)
                VALUES({NOW_MS}, '{name}', 'update', {rid_new}, {diff});
-             END;
-             DROP TRIGGER IF EXISTS audit_{name}_delete;
-             CREATE TRIGGER audit_{name}_delete AFTER DELETE ON \"{name}\" BEGIN
+             END",
+                    rid_new = t.row_id_new,
+                ),
+            ),
+            (
+                format!("audit_{name}_delete"),
+                format!(
+                    "CREATE TRIGGER audit_{name}_delete AFTER DELETE ON \"{name}\" BEGIN
                INSERT INTO catalog_audit(at_ms, tbl, op, row_id, payload)
                VALUES({NOW_MS}, '{name}', 'delete', {rid_old}, {image});
-             END;",
-            rid_new = t.row_id_new,
-            rid_old = t.row_id_old,
-        ))?;
+             END",
+                    rid_old = t.row_id_old,
+                ),
+            ),
+        ];
+        // An open of an up-to-date catalog must write nothing: every DDL
+        // statement is an fsync'd commit under the single write lock, which a
+        // second opener queues behind (docs/issues/2026-10-24-catalog-open-…).
+        // Skip only when ALL three stored definitions equal the generated
+        // ones, so a changed definition, a column add or a missing trigger
+        // still converges through the drop+create below.
+        let mut up_to_date = true;
+        for (trigger, sql) in &triggers {
+            let stored: Option<String> = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1",
+                    [trigger],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if stored.as_deref() != Some(sql.as_str()) {
+                up_to_date = false;
+                break;
+            }
+        }
+        if up_to_date {
+            continue;
+        }
+        for (trigger, sql) in &triggers {
+            conn.execute_batch(&format!("DROP TRIGGER IF EXISTS {trigger}; {sql};"))?;
+        }
     }
     Ok(())
 }
@@ -675,6 +722,61 @@ mod tests {
                 t.name
             );
         }
+    }
+    /// SQLite bumps the schema cookie on every DDL statement, so an unchanged
+    /// cookie proves no `DROP/CREATE TRIGGER` ran (and so no write-lock commit
+    /// of DDL happened for a second opener to queue behind).
+    fn schema_cookie(cat: &Catalog) -> i64 {
+        cat.conn
+            .query_row("PRAGMA schema_version", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn trigger_sql(cat: &Catalog) -> Vec<(String, String)> {
+        let mut stmt = cat
+            .conn
+            .prepare("SELECT name, sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'audit_%' ORDER BY name")
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn install_on_up_to_date_triggers_runs_no_ddl() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let before = schema_cookie(&cat);
+        super::install(&cat.conn).unwrap();
+        assert_eq!(
+            schema_cookie(&cat),
+            before,
+            "re-installing identical triggers must not issue any DDL"
+        );
+    }
+
+    #[test]
+    fn install_converges_a_changed_or_missing_trigger() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let expected = trigger_sql(&cat);
+        assert!(!expected.is_empty());
+        // Stale definition (body differs) and a missing trigger.
+        cat.conn
+            .execute_batch(
+                "DROP TRIGGER audit_artifact_insert;
+                 CREATE TRIGGER audit_artifact_insert AFTER INSERT ON \"artifact\" BEGIN
+                   SELECT 1;
+                 END;
+                 DROP TRIGGER audit_events_delete;",
+            )
+            .unwrap();
+        assert_ne!(trigger_sql(&cat), expected);
+        super::install(&cat.conn).unwrap();
+        assert_eq!(
+            trigger_sql(&cat),
+            expected,
+            "install must restore every trigger to the generated definition"
+        );
     }
 
     // Deliberate break (CLAUDE.md Testing Discipline): the rows come from the
