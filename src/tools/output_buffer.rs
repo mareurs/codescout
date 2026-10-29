@@ -2267,6 +2267,14 @@ mod tests {
         assert_eq!(entry.stderr, "");
         assert_eq!(entry.exit_code, 0);
     }
+    #[cfg(unix)]
+    #[test]
+    fn pid_alive_tells_this_process_from_a_pid_nothing_can_hold() {
+        assert!(pid_alive(std::process::id()), "this process is alive");
+        // Above the kernel's pid_max (at most 2^22), so no process can hold it.
+        assert!(!pid_alive(i32::MAX as u32), "no process holds i32::MAX");
+    }
+
     /// A record directory under a tempdir subdirectory: `write_record` creates it owner-only,
     /// and refuses a pre-existing directory that others can reach (the tempdir itself is 0755).
     fn record_buffer(tmp: &tempfile::TempDir) -> OutputBuffer {
