@@ -1013,14 +1013,11 @@ async fn write_onboarding_memories(
 
     if gathered.projects.len() > 1 {
         for project in &gathered.projects {
-            let mem_dir = if project.relative_root == std::path::Path::new(".") {
-                root.join(".codescout").join("memories")
-            } else {
-                root.join(".codescout")
-                    .join("projects")
-                    .join(&project.id)
-                    .join("memories")
-            };
+            let mem_dir = crate::workspace::member_memory_dir(
+                root,
+                &project.id,
+                Some(project.relative_root.as_path()),
+            );
             if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir) {
                 let proj_summary = format!(
                     "Languages: {}\nRoot: {}\nManifest: {}",
@@ -1067,14 +1064,11 @@ async fn gather_per_project_protected(
         .unwrap_or_default();
     let mut map = serde_json::Map::new();
     for project in &gathered.projects {
-        let mem_dir = if project.relative_root == std::path::Path::new(".") {
-            root.join(".codescout").join("memories")
-        } else {
-            root.join(".codescout")
-                .join("projects")
-                .join(&project.id)
-                .join("memories")
-        };
+        let mem_dir = crate::workspace::member_memory_dir(
+            root,
+            &project.id,
+            Some(project.relative_root.as_path()),
+        );
         let project_root = root.join(&project.relative_root);
         // Read-only: `gather_protected_memory_state` only calls `read` and
         // `exists`. `from_dir`'s `create_dir_all` made this loop materialise

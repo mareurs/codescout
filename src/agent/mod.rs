@@ -2,6 +2,8 @@
 
 pub(crate) mod build_check;
 #[cfg(test)]
+mod declared_member_tests;
+#[cfg(test)]
 mod existing_root_tests;
 mod write_guard;
 #[allow(unused_imports)]
@@ -779,6 +781,35 @@ fn read_discover_settings(root: &std::path::Path) -> Option<(usize, Vec<String>)
     let ws = crate::config::workspace::load_workspace_config(root)?;
     Some((ws.workspace.discovery_max_depth, ws.exclude_projects))
 }
+/// The `[[project]]` entries declared in `root`'s `workspace.toml`, with the same read-through
+/// to the main checkout that [`load_discover_settings`] gives a linked worktree.
+fn load_declared_projects(root: &std::path::Path) -> Vec<crate::config::workspace::ProjectEntry> {
+    if let Some(ws) = crate::config::workspace::load_workspace_config(root) {
+        return ws.projects;
+    }
+    crate::util::path_security::worktree_main_root(root)
+        .and_then(|main| crate::config::workspace::load_workspace_config(&main))
+        .map(|ws| ws.projects)
+        .unwrap_or_default()
+}
+
+/// The member list of the workspace at `root`: the manifest walk, plus the `[[project]]`
+/// entries the user declared. The single place both loaders (`Agent::new` and
+/// `Agent::load_project_resources`) get their members from, so they cannot disagree.
+///
+/// Walked on a blocking thread — `ignore::WalkBuilder`, manifest reads and the declared-root
+/// checks do synchronous fs I/O that must not stall the Tokio runtime.
+async fn resolve_projects(root: &std::path::Path) -> Result<Vec<DiscoveredProject>> {
+    let (depth, exclude) = load_discover_settings(root);
+    let declared = load_declared_projects(root);
+    let root = root.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let found = discover_projects(&root, depth, &exclude);
+        crate::workspace::merge_declared_projects(&root, found, &declared, &exclude)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("discover_projects task failed: {e}"))
+}
 
 /// The most bytes `.codescout/system-prompt.md` may hold before it is not served. The file goes
 /// into the `initialize` instructions, i.e. into the model's context; generated prompts are a few
@@ -963,20 +994,9 @@ impl Agent {
                 session_write_roots: Arc::new(std::sync::Mutex::new(Vec::new())),
             };
 
-            // Discover sub-projects; root project is always included.
-            // Respect depth and exclude settings from workspace.toml if it exists.
-            // Walked on a blocking thread — `ignore::WalkBuilder` + manifest
-            // reads do synchronous fs I/O that must not stall the Tokio runtime.
-            let (discover_depth, discover_exclude) = load_discover_settings(&root);
-            let discovered = {
-                let root = root.clone();
-                let exclude = discover_exclude.clone();
-                tokio::task::spawn_blocking(move || {
-                    discover_projects(&root, discover_depth, &exclude)
-                })
-                .await
-                .map_err(|e| anyhow::anyhow!("discover_projects task failed: {e}"))?
-            };
+            // Discover sub-projects; root project is always included. Depth, exclude
+            // and declared `[[project]]` members come from workspace.toml if it exists.
+            let discovered = resolve_projects(&root).await?;
             let mut projects: Vec<Project> = Vec::new();
 
             // Find if the root project was discovered (relative_root == ".")
@@ -1105,14 +1125,7 @@ impl Agent {
         let registry_path = root.join(".codescout").join("libraries.json");
         let library_registry = LibraryRegistry::load(&registry_path).unwrap_or_default();
         let head_sha = resolve_head_sha(root);
-        let (discover_depth, discover_exclude) = load_discover_settings(root);
-        let discovered = {
-            let root = root.to_path_buf();
-            let exclude = discover_exclude.clone();
-            tokio::task::spawn_blocking(move || discover_projects(&root, discover_depth, &exclude))
-                .await
-                .map_err(|e| anyhow::anyhow!("discover_projects task failed: {e}"))?
-        };
+        let discovered = resolve_projects(root).await?;
         let fresh_file_lock = write_guard::open_lock_file(root)
             .with_context(|| format!("failed to open write.lock for {}", root.display()))?;
         Ok(ProjectResources {

@@ -228,6 +228,108 @@ pub fn discover_projects(
 
     found
 }
+/// Add the `[[project]]` entries a user declared in `workspace.toml` to the manifest-walk
+/// result, so a directory with no build manifest (or one the walk cannot see) can be a member.
+///
+/// The walk stays the authority: a declared entry never renames or replaces a discovered
+/// project. Onboarding writes every discovered project back into `workspace.toml` as a
+/// `[[project]]` snapshot, so an entry that names a discovered root is the expected case and
+/// changes nothing.
+///
+/// A declared entry is skipped, never repaired, unless its root is a relative path to an
+/// existing directory that stays inside the workspace and is not named by `exclude`, and its
+/// id is unused and names no path. A mis-rooted file once declared eight roots that did not
+/// exist, and each became a memory directory
+/// (`docs/issues/archive/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md`).
+/// Each skip is logged, because a member that silently fails to appear is the defect this
+/// function exists to end.
+pub fn merge_declared_projects(
+    workspace_root: &Path,
+    mut discovered: Vec<DiscoveredProject>,
+    declared: &[crate::config::workspace::ProjectEntry],
+    exclude: &[String],
+) -> Vec<DiscoveredProject> {
+    let canonical_root =
+        std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
+
+    for entry in declared {
+        let skip = |why: &str| {
+            tracing::warn!(
+                id = %entry.id,
+                root = %entry.root,
+                "workspace.toml [[project]] entry is not a member: {why}"
+            );
+        };
+
+        let Some(relative_root) = declared_relative_root(&entry.root) else {
+            skip("its root is not a relative path below the workspace root");
+            continue;
+        };
+        if relative_root.components().any(|c| {
+            exclude
+                .iter()
+                .any(|ex| c.as_os_str().to_string_lossy() == *ex)
+        }) {
+            skip("its root is named by exclude_projects");
+            continue;
+        }
+        // The canonical path decides, so a link that leaves the workspace is refused.
+        let inside = std::fs::canonicalize(workspace_root.join(&relative_root))
+            .map(|abs| abs.is_dir() && abs != canonical_root && abs.starts_with(&canonical_root))
+            .unwrap_or(false);
+        if !inside {
+            skip("its root is not an existing directory inside the workspace");
+            continue;
+        }
+        if discovered.iter().any(|p| p.relative_root == relative_root) {
+            // The expected case for an onboarding snapshot: the walk already found it.
+            continue;
+        }
+        let id_is_usable = !entry.id.is_empty()
+            && !entry.id.contains(['/', '\\'])
+            && entry.id != "."
+            && entry.id != ".."
+            && entry.id != ROOT_PROJECT_ID
+            && !discovered.iter().any(|p| p.id == entry.id);
+        if !id_is_usable {
+            skip("its id is empty, names a path, is reserved or is already used");
+            continue;
+        }
+
+        let languages = if entry.languages.is_empty() {
+            scan_languages_by_dominance(&workspace_root.join(&relative_root))
+        } else {
+            entry.languages.clone()
+        };
+        discovered.push(DiscoveredProject {
+            id: entry.id.clone(),
+            relative_root,
+            languages,
+            manifest: None,
+        });
+    }
+    discovered
+}
+
+/// A declared root as a clean relative path, or `None` when it cannot name a directory below
+/// the workspace root: empty, `.`, absolute, a drive path, or containing `..`.
+///
+/// Both separators are accepted because the file is written with forward slashes but hand
+/// edited on every platform.
+fn declared_relative_root(raw: &str) -> Option<PathBuf> {
+    let unified = raw.replace('\\', "/");
+    if unified.starts_with('/') {
+        return None;
+    }
+    let mut clean = PathBuf::new();
+    for part in unified.split('/').filter(|s| !s.is_empty() && *s != ".") {
+        if part == ".." || part.contains(':') {
+            return None;
+        }
+        clean.push(part);
+    }
+    (!clean.as_os_str().is_empty()).then_some(clean)
+}
 
 /// Source languages in `dir`, ordered by file-count dominance (most files
 /// first). Bounded — `discover_projects` runs on every `Agent::new` / activate,
@@ -321,6 +423,39 @@ fn lexically_normalize(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+/// Where a workspace member's memory lives.
+///
+/// - The root project (`relative_root` is `.`): `<workspace>/.codescout/memories`.
+/// - A member that is its own git repository: `<member>/.codescout/memories`. It owns its
+///   history, so its memory must not be written into the parent checkout. A `.git` FILE counts
+///   too: a submodule or a linked worktree has one. This is also where a by-path activation of
+///   that member already reads.
+/// - Any other member, or an id no project owns (`relative_root` is `None`; the caller must
+///   have validated it, see `Workspace::memory_dir_for_project`):
+///   `<workspace>/.codescout/projects/<id>/memories`.
+///
+/// docs/issues/2026-10-28-a-nested-git-repo-cannot-join-a-workspace-as-a-project-and-pinned-onboarding-mixes-in-the-home-workspace.md
+pub fn member_memory_dir(
+    workspace_root: &Path,
+    project_id: &str,
+    relative_root: Option<&Path>,
+) -> PathBuf {
+    if relative_root == Some(Path::new(".")) {
+        return workspace_root.join(".codescout").join("memories");
+    }
+    if let Some(rel) = relative_root {
+        let member_root = workspace_root.join(rel);
+        if member_root.join(".git").exists() {
+            return member_root.join(".codescout").join("memories");
+        }
+    }
+    workspace_root
+        .join(".codescout")
+        .join("projects")
+        .join(project_id)
+        .join("memories")
 }
 
 /// Resolve which project a file path belongs to using longest-prefix match.
@@ -512,11 +647,14 @@ impl Workspace {
             .collect()
     }
 
-    /// Memory directory for a project. Root project -> workspace-level, sub-projects -> per-project.
+    /// Memory directory for a project. Root project -> workspace-level; a member that is its
+    /// own git repository -> that member's own `.codescout/memories`; any other member ->
+    /// per-project under the workspace. The layout rule lives in [`member_memory_dir`], which
+    /// onboarding also calls, so the two cannot disagree.
     ///
     /// PRECONDITION: `project_id` must name a real project — check `has_project`
     /// first. This function cannot enforce it. A lookup miss and a known non-root
-    /// project both take the `else` branch, so an unknown id resolves to a
+    /// project both take the workspace-layout branch, so an unknown id resolves to a
     /// plausible-looking `projects/<id>/memories` path that no project owns, and
     /// `MemoryStore::from_dir` then creates it on read as well as on write.
     ///
@@ -527,21 +665,12 @@ impl Workspace {
     /// `resolve_memory_dir`; see
     /// `docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md`.
     pub fn memory_dir_for_project(&self, project_id: &str) -> PathBuf {
-        let is_root = self
+        let relative_root = self
             .projects
             .iter()
             .find(|p| p.discovered.id == project_id)
-            .map(|p| p.discovered.relative_root == std::path::Path::new("."))
-            .unwrap_or(false);
-        if is_root {
-            self.root.join(".codescout").join("memories")
-        } else {
-            self.root
-                .join(".codescout")
-                .join("projects")
-                .join(project_id)
-                .join("memories")
-        }
+            .map(|p| p.discovered.relative_root.as_path());
+        member_memory_dir(&self.root, project_id, relative_root)
     }
 }
 
@@ -949,6 +1078,201 @@ mod tests {
         assert_eq!(ids.len(), 2);
         assert_ne!(ids[0], ids[1], "IDs must be unique: got {:?}", ids);
     }
+    fn declared(
+        id: &str,
+        root: &str,
+        languages: &[&str],
+    ) -> crate::config::workspace::ProjectEntry {
+        crate::config::workspace::ProjectEntry {
+            id: id.to_string(),
+            root: root.to_string(),
+            languages: languages.iter().map(|s| s.to_string()).collect(),
+            depends_on: vec![],
+        }
+    }
+
+    #[test]
+    fn a_declared_manifestless_root_becomes_a_member() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("addon")).unwrap();
+        fs::write(dir.path().join("addon/addon.py"), "print('x')").unwrap();
+
+        let merged = merge_declared_projects(
+            dir.path(),
+            vec![],
+            &[declared("thecrew", "addon", &["python"])],
+            &[],
+        );
+
+        assert_eq!(merged.len(), 1, "got {merged:?}");
+        assert_eq!(merged[0].id, "thecrew");
+        assert_eq!(merged[0].relative_root, PathBuf::from("addon"));
+        assert_eq!(merged[0].languages, vec!["python".to_string()]);
+        assert_eq!(merged[0].manifest, None);
+    }
+
+    #[test]
+    fn a_declared_member_without_languages_gets_them_from_its_files() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("addon")).unwrap();
+        fs::write(dir.path().join("addon/addon.py"), "print('x')").unwrap();
+
+        let merged = merge_declared_projects(
+            dir.path(),
+            vec![],
+            &[declared("thecrew", "addon", &[])],
+            &[],
+        );
+
+        assert_eq!(merged[0].languages, vec!["python".to_string()]);
+    }
+
+    #[test]
+    fn a_discovered_project_is_never_renamed_by_a_declared_entry_for_its_root() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("svc")).unwrap();
+        let found = vec![make_project("svc", "svc")];
+
+        let merged = merge_declared_projects(
+            dir.path(),
+            found,
+            &[declared("other", "svc", &["rust"])],
+            &[],
+        );
+
+        let ids: Vec<&str> = merged.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["svc"]);
+    }
+
+    #[test]
+    fn a_declared_root_that_cannot_be_a_member_is_skipped() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a_file"), "x").unwrap();
+        let outside = tempdir().unwrap();
+        let absolute = outside.path().to_string_lossy().into_owned();
+
+        for (label, root) in [
+            ("absolute", absolute.as_str()),
+            ("parent escape", "../elsewhere"),
+            ("embedded parent", "a/../../elsewhere"),
+            ("missing", "no-such-dir"),
+            ("a file", "a_file"),
+            ("empty", ""),
+            ("the workspace root", "."),
+        ] {
+            let merged = merge_declared_projects(
+                dir.path(),
+                vec![],
+                &[declared("x", root, &["python"])],
+                &[],
+            );
+            assert!(
+                merged.is_empty(),
+                "{label} root {root:?} became a member: {merged:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_declared_root_that_is_a_link_out_of_the_workspace_is_skipped() {
+        let dir = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("linked")).unwrap();
+
+        let merged = merge_declared_projects(
+            dir.path(),
+            vec![],
+            &[declared("linked", "linked", &["python"])],
+            &[],
+        );
+
+        assert!(
+            merged.is_empty(),
+            "a link out of the workspace became a member: {merged:?}"
+        );
+    }
+
+    #[test]
+    fn a_declared_id_that_is_taken_or_names_a_path_is_skipped() {
+        let dir = tempdir().unwrap();
+        for d in ["one", "two", "three", "four"] {
+            fs::create_dir_all(dir.path().join(d)).unwrap();
+        }
+        let found = vec![make_project("taken", "one")];
+
+        let merged = merge_declared_projects(
+            dir.path(),
+            found,
+            &[
+                declared("taken", "two", &[]),
+                declared("a/b", "three", &[]),
+                declared("..", "four", &[]),
+                declared("", "four", &[]),
+            ],
+            &[],
+        );
+
+        let ids: Vec<&str> = merged.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["taken"], "got {merged:?}");
+    }
+
+    #[test]
+    fn a_root_declared_twice_is_one_member_and_the_first_id_wins() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("addon")).unwrap();
+
+        let merged = merge_declared_projects(
+            dir.path(),
+            vec![],
+            &[
+                declared("first", "addon", &[]),
+                declared("second", "./addon/", &[]),
+            ],
+            &[],
+        );
+
+        let ids: Vec<&str> = merged.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["first"]);
+    }
+
+    #[test]
+    fn exclude_projects_applies_to_declared_roots_too() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("tests/fixtures/a")).unwrap();
+
+        let merged = merge_declared_projects(
+            dir.path(),
+            vec![],
+            &[declared("a", "tests/fixtures/a", &["rust"])],
+            &["fixtures".to_string()],
+        );
+
+        assert!(
+            merged.is_empty(),
+            "an excluded root became a member: {merged:?}"
+        );
+    }
+    #[test]
+    fn a_declared_id_may_not_be_the_id_of_the_synthesized_root_project() {
+        // When no manifest sits at the workspace root, the loader inserts a root project whose
+        // id is `ROOT_PROJECT_ID`. A declared member with that id would make two projects
+        // answer to one id.
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("addon")).unwrap();
+
+        let merged = merge_declared_projects(
+            dir.path(),
+            vec![],
+            &[declared(ROOT_PROJECT_ID, "addon", &[])],
+            &[],
+        );
+
+        assert!(
+            merged.is_empty(),
+            "a member took the root project's id: {merged:?}"
+        );
+    }
 
     #[test]
     fn resolve_project_from_path_uses_longest_prefix() {
@@ -1036,6 +1360,53 @@ mod tests {
         assert_eq!(
             ws.memory_dir_for_project(ROOT_PROJECT_ID),
             dir.path().join(".codescout").join("memories")
+        );
+    }
+    /// A member that is its own git repository keeps its memory in its own `.codescout/`, not in
+    /// the parent checkout. Its memory would otherwise be written into a repository that does not
+    /// own it. A `.git` FILE counts too: a submodule or a linked worktree has one.
+    #[test]
+    fn a_member_with_its_own_git_repo_keeps_its_memory_in_its_own_directory() {
+        let dir = tempdir().unwrap();
+        let nested = dir.path().join("remote-fixes").join("addon");
+        fs::create_dir_all(nested.join(".git")).unwrap();
+        let plain = dir.path().join("plain");
+        fs::create_dir_all(&plain).unwrap();
+        let linked = dir.path().join("linked");
+        fs::create_dir_all(&linked).unwrap();
+        fs::write(linked.join(".git"), "gitdir: ../elsewhere\n").unwrap();
+        let ws = Workspace::new(
+            dir.path().to_path_buf(),
+            vec![
+                Project::new_dormant(make_project(ROOT_PROJECT_ID, ".")),
+                Project::new_dormant(make_project("addon", "remote-fixes/addon")),
+                Project::new_dormant(make_project("plain", "plain")),
+                Project::new_dormant(make_project("linked", "linked")),
+            ],
+        );
+
+        assert_eq!(
+            ws.memory_dir_for_project("addon"),
+            nested.join(".codescout").join("memories")
+        );
+        assert_eq!(
+            ws.memory_dir_for_project("linked"),
+            linked.join(".codescout").join("memories"),
+            "a `.git` file marks a repository too"
+        );
+        assert_eq!(
+            ws.memory_dir_for_project("plain"),
+            dir.path()
+                .join(".codescout")
+                .join("projects")
+                .join("plain")
+                .join("memories"),
+            "a member without its own repository keeps the workspace layout"
+        );
+        assert_eq!(
+            ws.memory_dir_for_project(ROOT_PROJECT_ID),
+            dir.path().join(".codescout").join("memories"),
+            "the root project is unchanged even when it is a repository"
         );
     }
 

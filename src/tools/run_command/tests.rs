@@ -9132,6 +9132,34 @@ async fn a_pinned_onboarding_describes_the_pinned_directory_not_the_home_workspa
         "a one-project directory must not onboard in workspace mode"
     );
 }
+/// Onboarding writes a member's memory where `Workspace::memory_dir_for_project` says it
+/// lives. A member that is its own git repository keeps its memory in its own `.codescout/`;
+/// onboarding used to build the workspace layout itself and wrote it into the parent.
+/// docs/issues/2026-10-28-a-nested-git-repo-cannot-join-a-workspace-as-a-project-and-pinned-onboarding-mixes-in-the-home-workspace.md
+#[tokio::test]
+async fn onboarding_writes_a_nested_repo_members_memory_into_the_member() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let (api_dir, _web_dir) = setup_workspace_dirs(root);
+    std::fs::create_dir_all(api_dir.join(".git")).unwrap();
+    let ctx = project_ctx_at(root).await;
+
+    Onboarding.call(json!({}), &ctx).await.unwrap();
+
+    assert!(
+        api_dir.join(".codescout/memories/onboarding.md").exists(),
+        "the nested repo's own memory was not written"
+    );
+    assert!(
+        !root.join(".codescout/projects/api").exists(),
+        "the nested repo's memory landed in the parent checkout"
+    );
+    assert!(
+        root.join(".codescout/projects/web/memories/onboarding.md")
+            .exists(),
+        "a member without its own repository keeps the workspace layout"
+    );
+}
 
 #[test]
 fn parse_timeout_input_correct_key_small() {
