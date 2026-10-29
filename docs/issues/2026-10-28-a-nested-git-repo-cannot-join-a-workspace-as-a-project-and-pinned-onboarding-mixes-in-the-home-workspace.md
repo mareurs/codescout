@@ -8,7 +8,7 @@ related: []
 tags:
 - cluster/declared-not-wired
 kind: bug
-unverified: 'Parts A and B are fixed and tested (711b8c3a4, 0d95ee8bf). Not verified: a run on the real Kodi checkout; the `Repository::open` probes for a member without its own .git (Evidence 4); whether the ignore crate honors .git/info/exclude; the gate on a clean tree (two OP-2 tests were red from a peer edit). The manual page for library scope still disagrees with the code (Evidence 5).'
+unverified: 'Parts A and B are fixed and tested (711b8c3a4, 0d95ee8bf). Replica run 2026-10-29 passed (Evidence 6). Not verified: the live Kodi checkout; indexing a member end to end; the `Repository::open` probes for a member without its own .git (Evidence 4); whether the ignore crate honors .git/info/exclude; the gate on a clean tree (two OP-2 tests were red from a peer edit). The manual page for library scope still disagrees with the code (Evidence 5).'
 ---
 
 # BUG: a nested or sibling git repo cannot join a workspace as a project, and onboarding under a workspace pin mixes in the home workspace
@@ -76,6 +76,15 @@ Read and tested 2026-10-29. `head_commit_full` (src/retrieval/index_state.rs) us
 
 Read 2026-10-29. src/tools/semantic/semantic_search.rs:633-639 returns `"library scope is not yet supported by the Qdrant retrieval stack"` for `scope="lib:<name>"`. The error names tracker row L-12 in docs/trackers/2026-05-07-legacy-retrieval-removal.md, so the code gap is already tracked there. The manual page docs/manual/src/tools/library-navigation.md lines 112-126 still says `semantic_search` with `scope: "lib:<name>"` works. The manual drift is the open part and is not filed as its own bug. The `.gitignore` edit comes from src/memory/mod.rs:92 and `ensure_gitignored` at :111 (read).
 
+
+### 6. End-to-end replica run
+Measured 2026-10-29 with a binary built from `e34ff991f`, driving `codescout start --project <parent>` over stdio. Replica: a parent repo with a `CMakeLists.txt`, two nested repos with no manifest hidden by `.git/info/exclude`, and three `[[project]]` entries in the parent's workspace.toml. This is a scratchpad replica, not the live Kodi checkout.
+- `workspace(list_projects)` listed `kodi`, `thecrew-module` and `thecrew-video`. The hidden repos are members.
+- `onboarding(workspace=<member>)` returned a single-project onboarding (`[python] · config created`), not the parent's prompt.
+- The member's `.codescout/` held `project.toml`, `memories/onboarding.md`, `memories/language-patterns.md` and no `workspace.toml`.
+- `git status` in the member showed `.codescout/` and `.gitignore` untracked; the member had no `.gitignore` before. The parent showed `.codescout/` and `.gitignore` untracked. Which step created the parent's `.gitignore` was not checked.
+- Not run: `index(action="build")` on a member (needs the embedding backend), and a member without its own `.git`.
+
 ## Hypotheses tried
 1. **Hypothesis:** roots outside the workspace root are rejected. **Test:** first `../kodi-refs/...` roots, then in-tree `remote-fixes/...` roots. **Verdict:** rejected. Both failed the same way.
 2. **Hypothesis:** the server caches the workspace across re-activation. **Test:** `/mcp` reconnect and a full Claude Code restart. **Verdict:** rejected.
@@ -118,7 +127,7 @@ Gate at Part B: format, clippy and Python light pass. Two tests fail, `operator_
 
 Parts A and B are committed on `experiments` (`711b8c3a4`, `0d95ee8bf`), not pushed. Next:
 1. Done 2026-10-29: per-member git identity holds for a member that is its own repo (Evidence 4). Still open: the `Repository::open` probes for a member without its own `.git`.
-2. Run the Kodi case end to end with a `.git/info/exclude`d member.
+2. Done 2026-10-29 on a scratchpad replica (Evidence 6). Still open: the live Kodi checkout and `index(action="build")` on a member.
 3. Re-run the gate once the peer's `OP-2` edit is committed or reverted.
 4. Close or archive only after 1 and 2, with the fix SHAs and their patch-ids.
 
