@@ -129,8 +129,10 @@ null without any visible error. The hidden-information eval had the reverse defe
 
 Every run is checked, independently of the outcome metrics:
 
-- `cs` and `full`: the init event lists the codescout tools, at least one codescout tool
-  call occurs, and at least one companion hook fired.
+- `cs` and `full`: the init event lists the codescout tools, and at least one companion
+  hook fired. A `cs` or `full` run with zero codescout tool calls is not `invalid-arm`: it
+  is scored and reported as a result (`zero_codescout_runs`), per the operator's ruling of
+  2026-10-30.
 - `bare`: no MCP tool is listed and none is called.
 - `full`: the init event lists the superpowers and buddy skills.
 
