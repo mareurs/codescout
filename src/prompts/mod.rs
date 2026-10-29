@@ -2615,6 +2615,8 @@ mod tests {
             // is why this is one root rather than three: it has ZERO tracked files, so a
             // per-root non-vacuity assertion naming it would fail on every clone and in CI.
             // Folded in here, it is scanned when present and costs nothing when absent.
+            // The one exception is `resident-private/`, local experiment evidence that is
+            // skipped by `collect_reader_docs`: see `the_reader_docs_gate_skips_local_evidence_and_nothing_else`.
             ".codescout",
         ];
         const FILES: &[&str] = &[
@@ -2642,24 +2644,10 @@ mod tests {
             "docs/templates/session-log.md",
         ];
 
-        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-            let Ok(entries) = std::fs::read_dir(dir) else {
-                return;
-            };
-            for e in entries.flatten() {
-                let p = e.path();
-                if p.is_dir() {
-                    walk(&p, out);
-                } else if p.extension().is_some_and(|x| x == "md") {
-                    out.push(p);
-                }
-            }
-        }
-
         let mut paths: Vec<std::path::PathBuf> = Vec::new();
         for r in ROOTS {
             let before = paths.len();
-            walk(&root.join(r), &mut paths);
+            collect_reader_docs(&root.join(r), &mut paths);
             // PER-ROOT non-vacuity, and it is deliberately not a total.
             //
             // A single `paths.len() > N` floor decays: measured 2026-09-03, renaming ONE of the
@@ -2710,6 +2698,68 @@ mod tests {
              hatch, and it is deliberate: this gate is about invocation claims, not vocabulary.",
             bad.len(),
             bad.join("\n")
+        );
+    }
+    /// Every `.md` file under `dir`, for the reader-docs gate. Skips any directory named
+    /// `resident-private`: see the test below.
+    fn collect_reader_docs(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if p.file_name().is_some_and(|n| n == "resident-private") {
+                    continue;
+                }
+                collect_reader_docs(&p, out);
+            } else if p.extension().is_some_and(|x| x == "md") {
+                out.push(p);
+            }
+        }
+    }
+
+    /// `.codescout/resident-private/` holds local, gitignored evidence from experiment runs, and
+    /// it includes whole copies of repo doc trees. The reader-docs gate must not read it: those
+    /// copies carry retired call forms by design, and on one machine they produced 86,467 hits
+    /// that no reader of this repo ever sees. Only the directory NAME is skipped, at any depth,
+    /// so a doc directory that merely starts with the same letters is still scanned.
+    #[test]
+    fn the_reader_docs_gate_skips_local_evidence_and_nothing_else() {
+        let tmp = tempfile::tempdir().unwrap();
+        let write = |rel: &str| {
+            let p = tmp.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, "x").unwrap();
+        };
+        write("memories/kept.md");
+        write("memories/sub/kept-too.md");
+        write("memories/notes.txt");
+        write("resident-private/run/copied.md");
+        write("memories/resident-private/nested.md");
+        write("resident-private-notes/kept-by-name.md");
+
+        let mut found = Vec::new();
+        collect_reader_docs(tmp.path(), &mut found);
+        let mut rel: Vec<String> = found
+            .iter()
+            .map(|p| {
+                p.strip_prefix(tmp.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        rel.sort();
+        assert_eq!(
+            rel,
+            [
+                "memories/kept.md",
+                "memories/sub/kept-too.md",
+                "resident-private-notes/kept-by-name.md",
+            ],
+            "the gate must skip `resident-private` at any depth, ignore non-markdown files, and \
+             keep every other directory"
         );
     }
 
