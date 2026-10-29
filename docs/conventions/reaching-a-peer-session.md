@@ -48,6 +48,12 @@ in one call. Then address by profile:
 | any other profile | `"uds:/run/user/<uid>/cc-socks/<PID>.sock"` |
 | replying to a message you received | copy its `from=` attribute verbatim |
 
+Since `claude-plugins:a4df207` (companion 1.20.24) the skill covers Codex as well. Its Step 1 merges
+the Claude Code and the Codex rows into one table with a harness column, and the Claude-specific walk
+and addressing live in the skill's `references/claude-code.md`. Two things change this table: a Codex
+thread is addressed by its uuid, never by name, and a message whose `from=` is not a `uds:` address
+cannot be answered by address, so do not copy it verbatim.
+
 `No agent named 'X' is reachable` is true of the **name** and false of the session — a
 cross-profile peer refuses by name and delivers by socket path. Never read it as "no such
 session".
