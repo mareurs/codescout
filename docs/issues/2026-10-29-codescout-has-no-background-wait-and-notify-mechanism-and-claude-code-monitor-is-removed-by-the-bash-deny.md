@@ -1,7 +1,7 @@
 ---
 id: '45d8ce48dc6eb6fd'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: codescout has no monitor mechanism for long background commands, and Claude Code''s Monitor is unavailable when Bash is denied'
 tags:
 - cluster/unclassified
@@ -90,7 +90,7 @@ Not measured: `/tasks`, the `!` prompt prefix, command hooks, and the `statuslin
 
 ## Fix
 
-Implemented 2026-10-29 on `experiments` (codescout) and `main` (claude-plugins). Nothing is pushed or released yet. Design: `docs/superpowers/specs/2026-10-29-background-job-wake-design.md`. Plan: `docs/superpowers/plans/2026-10-29-background-job-wake.md`.
+Implemented 2026-10-29 on `experiments` (codescout) and `main` (claude-plugins). Pushed to `origin/experiments` (codescout, through `e312bdc20`) by another session on the operator's say-so. Released 2026-10-29: the server rebuilt, and the companion bumped to 1.20.22 and installed in all four profiles. Design: `docs/superpowers/specs/2026-10-29-background-job-wake-design.md`. Plan: `docs/superpowers/plans/2026-10-29-background-job-wake.md`.
 
 In short: the background supervisor writes a JSON completion record (`$TMPDIR/codescout-bg/<server_pid>-<token>-<handle>.json`) and the spawn response carries its path as `record`. A companion-plugin `PostToolUse` hook on `mcp__codescout__run_command`, with `asyncRewake: true`, waits on that record and exits 2, which wakes an idle session. A heartbeat wake-up covers long jobs, and a read of a still-running job re-arms the watcher.
 
@@ -109,7 +109,7 @@ Until the fix ships: start the job with `run_command(run_in_background=true)`, t
 
 ## Resume
 
-Not done yet, and the operator's to approve: a release build and install of the codescout binary (`./scripts/rb.sh`, then `/mcp`), the companion version bump and its install into the four profiles, and updating the operator rule "activate a Monitor" in the CLAUDE.md files. Still unmeasured: a wait of several hours and a server that restarts. Gate, run 2026-10-29 on the committed tree: Python, rustfmt and clippy green. The two cargo test lanes were red with 30 library failures, none in `job_record`, `output_buffer` or `run_command`. 27 are an artifact of the run: a long `TMPDIR` (set because `/tmp` hit a disk quota) breaks unix socket paths (`path must be shorter than SUN_LEN`) for the `lsp`, `peer` and `util::fs` socket tests and one `memory` size test; all 246 of them pass with a short `TMPDIR`. The other 3 are not from this work: two OP-2 rule tests (`operator_rules::route`, `server::every_triggered_rule_names_a_tool_that_can_deliver_it`, tied to the uncommitted `src/operator_rules/profiles.rs`) and `prompts::reader_docs_contain_no_retired_call_forms` (the gitignored `.codescout/resident-private` tree). They were not re-run on a clean tree. The gate must be re-run once the machine's `/tmp` quota and those peer files are settled.
+Closed 2026-10-29 as fixed, on the operator's word. Verified live after the release: the rebuilt server wrote a record for `@bg_00000001`, and a 20 s job `@bg_00000002` woke the idle session in the `~/.claude-stef` profile. The other three profiles have 1.20.22 installed with the hook registered; their wake was not exercised. Still open for the operator: updating the operator rule "activate a Monitor" in the CLAUDE.md files, and a clean gate re-run (below). Still unmeasured: a wait of several hours and a server that restarts. Gate, run 2026-10-29 on the committed tree: Python, rustfmt and clippy green. The two cargo test lanes were red with 30 library failures, none in `job_record`, `output_buffer` or `run_command`. 27 are an artifact of the run: a long `TMPDIR` (set because `/tmp` hit a disk quota) breaks unix socket paths (`path must be shorter than SUN_LEN`) for the `lsp`, `peer` and `util::fs` socket tests and one `memory` size test; all 246 of them pass with a short `TMPDIR`. The other 3 are not from this work: two OP-2 rule tests (`operator_rules::route`, `server::every_triggered_rule_names_a_tool_that_can_deliver_it`, tied to the uncommitted `src/operator_rules/profiles.rs`) and `prompts::reader_docs_contain_no_retired_call_forms` (the gitignored `.codescout/resident-private` tree). They were not re-run on a clean tree. The gate must be re-run once the machine's `/tmp` quota and those peer files are settled.
 
 Known limit, not measured: if an old server outlives `/mcp` long enough to finalise its record, the hook's wake text says `tail -50 @bg_N`, and that call goes to the new server, where `@bg_N` may be a different job. Still unmeasured: a wait of several hours.
 
