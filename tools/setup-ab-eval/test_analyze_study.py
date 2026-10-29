@@ -153,6 +153,26 @@ class InstrumentTest(unittest.TestCase):
         self.assertEqual(out["instrument"]["arms"], {})
         self.assertEqual(self.outcomes(out, S, "cs - bare")["foreign"], "promising")
         self.assertEqual(out["secondary"][S]["cs"]["zero_codescout_runs"], 12)
+    def test_a_run_with_construction_and_stream_reasons_counts_as_construction(self):
+        # Pre-freeze M-5: one construction reason is enough, whatever else the run shows.
+        built = dict(ta.integ(), ok=False, reasons=[
+            f"{integrity.CONSTRUCTION}cs arm has no companion hook output ('PROJECT BOOTSTRAP')"])
+        mixed = dict(ta.integ(), ok=False, reasons=[
+            "malformed tool_use (line 3)",
+            f"{integrity.CONSTRUCTION}cs arm init tool list lacks mcp__codescout__references"])
+        rows = rows_for(0.5, 0.55)
+        for t, integ in ((FOREIGN[0], built), (FOREIGN[1], built), (PRIVATE[0], mixed)):
+            rows = replace(rows, t, S, "cs", outcome="invalid-arm", integrity=integ)
+        out = report(rows)
+        self.assertIn("3 of 12 tasks have a construction failure",
+                      out["instrument"]["arms"][f"{S} cs"][0])
+        # A task counts once however many of its runs failed (bare has 2 reps).
+        rows = rows_for(0.5, 0.55)
+        bare_built = dict(built, reasons=[r.replace("cs arm", "bare arm")
+                                          for r in built["reasons"]])
+        for t in (FOREIGN[0], FOREIGN[1]):
+            rows = replace(rows, t, S, "bare", outcome="invalid-arm", integrity=bare_built)
+        self.assertEqual(report(rows)["instrument"]["arms"], {})  # 2 tasks, 4 runs: tolerated
 
     def test_the_registered_rules_are_printed_and_an_admission_stop_is_disclosed(self):
         out = report(rows_for(0.5, 0.55))
@@ -177,6 +197,26 @@ class InstrumentTest(unittest.TestCase):
         out = report(rows_for(0.5, 0.55))
         self.assertEqual(out["secondary"][S]["cs"]["n_runs"], 12)
         self.assertEqual(out["cap_hits"][S]["bare"]["runs"], 24)
+    def test_outcomes_and_memory_are_reported_per_model_and_arm(self):
+        # Pre-freeze M-7: arm-dependent missingness is visible in the frozen output.
+        rows = rows_for(0.5, 0.55)
+        rows = [dict(r, memoryPeakBytes=4_000_000_000 + 1000 * i) if r["arm"] == "cs" else r
+                for i, r in enumerate(rows)]
+        rows = replace(rows, PRIVATE[0], S, "cs", outcome="infra-oom", oomKills=1,
+                       memoryPeakBytes=17_179_869_184)
+        rows = replace(rows, PRIVATE[1], S, "full", outcome="invalid-arm")
+        rows = replace(rows, PRIVATE[2], S, "cs", outcome="infra-other", costUsd=None,
+                       oomKills=None, memoryPeakBytes=None)
+        out = report(rows)["outcomes_per_arm"]
+        cs = out[S]["cs"]
+        self.assertEqual((cs["runs"], cs["scored"], cs["infra-oom"], cs["infra-other"],
+                          cs["invalid-arm"], cs["oom_kills"]), (12, 10, 1, 1, 0, 1))
+        self.assertEqual(cs["memory_peak_max_bytes"], 17_179_869_184)
+        self.assertEqual(out[S]["full"]["invalid-arm"], 1)
+        self.assertEqual(out[S]["bare"], {**out[S]["bare"], "runs": 24, "scored": 24,
+                                          "infra-oom": 0, "memory_peak_max_bytes": None})
+        self.assertEqual(out[O]["cs"]["infra-oom"], 0)
+        self.assertNotIn("dev-scored", cs)
 
 
 class PrescanTest(unittest.TestCase):

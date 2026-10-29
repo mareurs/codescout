@@ -32,7 +32,10 @@ What it fixes:
   NOTES             the registered rules printed with every report (analyze.STRATUM_MIN_RULE,
                     TOLERANCE_NOTE, ARM_INTEGRITY_RULE, ADMISSION_RULE); an `admission` stop in
                     batch.jsonl adds a DISCLOSE note: the rows are analysed as is.
-Secondary metrics (analyze.secondary, analyze.cap_hits) are printed for every model and arm.
+Secondary metrics (analyze.secondary, analyze.cap_hits) are printed for every model and arm, and
+`outcomes_per_arm` (pre-freeze M-7): per model x arm the count of each final outcome (so an
+infra-oom or invalid-arm pattern only cs/full show is visible), the oom_kill sum and the max and
+median memory peak.
 
 Reads rows.jsonl through run.read_rows (Stage 1's dev rows are read and ignored by the
 population). Prints one JSON document. Calls no model; `tasks.py verify` runs `docker image
@@ -40,6 +43,7 @@ inspect` only.
 """
 import argparse
 import json
+import statistics
 import sys
 from pathlib import Path
 
@@ -141,6 +145,29 @@ def _decision(d):
     return None if d is None else dict(d._asdict(), excluded=dict(d.excluded))
 
 
+def outcome_counts(rows, mapping):
+    """Pre-freeze M-7, reported, never gated: per model x arm, over the latest FINAL row of
+    every main run of a registered task, the count of each outcome (infra-oom, invalid-arm and
+    infra-other show arm-dependent missingness), the summed cgroup oom_kill count, and the max
+    and median memoryPeakBytes of the runs that recorded one."""
+    latest = analyze._latest(rows)
+    out = {}
+    for m in run.MODELS:
+        out[m] = {}
+        for a in analyze.ARMS:
+            rs = [r for r in latest.values() if r["model"] == m and r["arm"] == a
+                  and r["stage"] == "main" and r["taskId"] in mapping
+                  and r["outcome"] != run.PENDING]
+            peaks = sorted(r["memoryPeakBytes"] for r in rs if r["memoryPeakBytes"] is not None)
+            out[m][a] = {"runs": len(rs),
+                         **{o: sum(r["outcome"] == o for r in rs) for o in run.OUTCOMES
+                            if o != "dev-scored"},
+                         "oom_kills": sum(r["oomKills"] or 0 for r in rs),
+                         "memory_peak_max_bytes": peaks[-1] if peaks else None,
+                         "memory_peak_median_bytes": (statistics.median(peaks) if peaks
+                                                      else None)}
+    return out
+
 def admission_stops(events):
     """The batch.jsonl `stop` events whose reason is `admission` (the $200 cap held a run)."""
     return [{"stopId": e.get("stopId"), "seq": e.get("seq"), "spent": e.get("spent")}
@@ -182,6 +209,7 @@ def report(rows, mapping, *, registered_min, seed, verify_reasons, prescan, gold
                 "pooled_not_a_headline": _decision(s["pooled"])}
     out["secondary"] = analyze.secondary(rows, gold_files)
     out["cap_hits"] = analyze.cap_hits(rows)
+    out["outcomes_per_arm"] = outcome_counts(rows, mapping)
     return out
 
 

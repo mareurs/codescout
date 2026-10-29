@@ -1195,6 +1195,11 @@ def _run_one(ctx, spec):
             outcome, stop = "plan-limit", "plan-limit"
         elif oom:
             outcome, stop = "infra-oom", ("missing cost" if cost is None else None)
+        elif killed is None and mem["oom_kill"] is None:
+            # Pre-freeze M-1: an unreadable OOM count fails CLOSED (a child OOM on a daemon that
+            # does not set State.OOMKilled would otherwise be scored as a normal attempt).
+            outcome, stop = "infra-other", "oom reading unknown"
+            why = "cgroup memory.events oom_kill unreadable after the CLI returned"
         elif result is None:
             outcome, stop = "infra-other", "missing cost"
             why = "timeout" if rc is None else f"no result record (exit {rc})"

@@ -45,6 +45,7 @@ class World:
         self.fail_rm = set()  # container names whose `rm -f` fails
         self.killed = []
         self.peak = 3_600_000_000
+        self.cgroup_readable = True
 
     def __call__(self, *args, check=True, timeout=None, data=None):
         a = [str(x) for x in args]
@@ -116,10 +117,15 @@ class World:
             elif cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 out = "base0\n"
             elif cmd == ["cat", "/sys/fs/cgroup/memory.events"]:
-                out = (f"low 0\nhigh 0\nmax 0\noom 0\n"
-                       f"oom_kill {self.containers[name].get('oom_kill', 0)}\n")
+                # The real cgroup v2 shape (kernel 7.2.8, ra-cs-p08-16g-noswap): 7 lines,
+                # oom_group_kill AFTER oom_kill (a prefix parser would read its 0).
+                rc = 0 if self.cgroup_readable else 1
+                out = (f"low 0\nhigh 0\nmax 0\noom {self.containers[name].get('oom_kill', 0)}\n"
+                       f"oom_kill {self.containers[name].get('oom_kill', 0)}\n"
+                       f"oom_group_kill 0\nsock_throttled 0\n") if self.cgroup_readable else ""
             elif cmd == ["cat", "/sys/fs/cgroup/memory.peak"]:
-                out = f"{self.peak}\n"
+                rc = 0 if self.cgroup_readable else 1
+                out = f"{self.peak}\n" if self.cgroup_readable else ""
             elif cmd[:3] == ["git", "diff", "--cached"]:
                 names = self.changed
                 if "--" in cmd:
@@ -614,12 +620,28 @@ class InfraOutcomeTest(RunnerCase):
         self.assertEqual((row["oomKills"], row["memoryPeakBytes"]), (None, None))
 
     def test_read_cgroup_memory_parses_and_fails_soft(self):
+        # Pre-freeze M-4: the REAL 7-line kernel shape, oom_group_kill after oom_kill, with every
+        # counter different, so a prefix or wrong-line parser reads the wrong number.
+        events = ("low 0\nhigh 4\nmax 2\noom 1\noom_kill 3\noom_group_kill 0\n"
+                  "sock_throttled 0\n")
         ok = lambda *a, **k: SimpleNamespace(returncode=0, stdout=(
-            "low 0\nhigh 0\nmax 2\noom 1\noom_kill 3\n" if a[-1].endswith("events")
-            else "8470413312\n"))
+            events if a[-1].endswith("events") else "8470413312\n"))
         self.assertEqual(run.read_cgroup_memory(ok, "c"), {"oom_kill": 3, "peak": 8470413312})
         gone = lambda *a, **k: SimpleNamespace(returncode=1, stdout="")
         self.assertEqual(run.read_cgroup_memory(gone, "c"), {"oom_kill": None, "peak": None})
+
+    def test_an_unreadable_oom_reading_fails_closed(self):
+        # Pre-freeze M-1: no oom_kill count -> infra-other with a stop, never a scored run.
+        self.world.cgroup_readable = False
+        cli = FakeCLI(self.world, self.data)
+        self.batch([spec(arm="cs"), spec(arm="bare")], BUDGET, cli=cli)
+        row = self.latest()[run.run_id(spec(arm="cs"))]
+        self.assertEqual((row["outcome"], row["oomKills"], row["costUsd"]),
+                         ("infra-other", None, 0.5))
+        self.assertIsNone(row["grade"])
+        self.assertEqual(self.grader.calls, [])
+        self.assertEqual(len(cli.calls), 1)
+        self.assertEqual(self.events()[-1]["reason"], "oom reading unknown")
 
     def test_timeout_or_kill_without_a_result_record_is_never_scored(self):
         for case in ({"timeout": True}, {"no_result": True}):

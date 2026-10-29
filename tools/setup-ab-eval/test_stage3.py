@@ -126,7 +126,7 @@ class Stage3Test(unittest.TestCase):
                                        ("full", 0, 0.6)):
                     rows.append(run.make_row((t, model, arm, rep), "s", outcome="scored",
                                              costUsd=cost, grade={"pass": True},
-                                             effectiveEffort="medium", capHit=False,
+                                             effectiveEffort="medium", capHit=False, oomKills=0,
                                              integrity={"codescout_calls": 0, "native_calls": 0},
                                              bashCommands=[], editedFiles=[]))
         for model in run.MODELS:

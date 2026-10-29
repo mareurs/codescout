@@ -262,6 +262,16 @@ class RealShapesTest(unittest.TestCase):
         self.assertNotIn(value, str(e.exception))
         self.assertFalse(self.fx.dest.exists())
         self.assertEqual(list(self.fx.dest.parent.glob("frozen.partial-*")), [])
+    def test_a_credential_only_visible_decoded_in_a_plugin_json_refuses(self):
+        # Pre-freeze M-3: the login body sits escaped inside a JSON string value; only the
+        # decoded branch of scan_tree sees it.
+        raw = json.dumps({"example": FAKE_ALLOW[2]})
+        self.assertEqual(frozen.scan_text(raw), [])
+        (self.fx.plugins["superpowers"] / "cfg.json").write_text(raw)
+        with self.assertRaises(frozen.Mismatch) as e:
+            frozen.freeze_inputs(self.fx.manifest, self.fx.dest)
+        self.assertIn("plugins/superpowers/cfg.json (json-password)", str(e.exception))
+        self.assertNotIn("Fake-Passw0rd-9x", str(e.exception))
 
     def test_every_pattern_and_its_placeholders(self):
         hit = {"anthropic-key": "sk-ant-" + "a1" * 12,

@@ -33,7 +33,7 @@ def row(task, arm, rep, cost, passed, model=S, outcome="scored", effort="medium"
                   usage={"efforts": [effort]}, effectiveEffort=effort,
                   grade={"pass": passed} if graded else None, integrity=integ(),
                   bashCommands=[], editedFiles=[], inputTokens=1000, outputTokens=100,
-                  capHit=False if graded else None)
+                  capHit=False if graded else None, oomKills=0 if graded else None)
     fields.update(kw)
     return run.make_row((task, model, arm, rep), "session-" + task, **fields)
 
@@ -866,6 +866,10 @@ class CapHitAnalysisTest(unittest.TestCase):
             with self.subTest(bad), self.assertRaises(analyze.MalformedRow):
                 analyze.check_row(dict(good, oomKills=bad))
         analyze.check_row(dict(good, oomKills=0, memoryPeakBytes=7_309_049_856))
+        # Pre-freeze M-1: a graded main row without the oom_kill count is refused.
+        with self.assertRaisesRegex(analyze.MalformedRow, "oom_kill count"):
+            analyze.check_row(dict(good, oomKills=None))
+        analyze.check_row(row(TASKS[0], "cs", 0, None, None, outcome="infra-other"))  # not graded
         dev = row("burntsushi__ripgrep-2576", "cs", 0, 1.0, True, outcome="dev-scored")
         analyze.check_row(dict(dev, capHit=None))  # Stage 1 rows predate the field
 

@@ -91,10 +91,16 @@ class IntegrityTest(unittest.TestCase):
             self.assertEqual((v.ok, v.reasons, v.codescout_calls), (True, [], 0), arm)
 
     def test_full_with_a_denied_tool_is_a_construction_failure(self):
-        recs = self.init_edit("full_valid.jsonl", lambda r: r.update(tools=r["tools"] + ["Bash"]))
-        v = self.check("full", recs)
-        self.assertEqual(v.reasons, [f"{integrity.CONSTRUCTION}full arm init lists a denied "
-                                     f"tool: Bash (the frozen permissions.deny did not apply)"])
+        # Pre-freeze M-5: every tool of the frozen permissions.deny, one at a time.
+        self.assertEqual(integrity.FULL_DENIED_TOOLS, ("Bash", "Edit", "NotebookEdit", "Write"))
+        for tool in ("Bash", "Edit", "NotebookEdit", "Write"):
+            with self.subTest(tool):
+                recs = self.init_edit("full_valid.jsonl",
+                                      lambda r, t=tool: r.update(tools=r["tools"] + [t]))
+                v = self.check("full", recs)
+                self.assertEqual(v.reasons, [
+                    f"{integrity.CONSTRUCTION}full arm init lists a denied tool: {tool} (the "
+                    f"frozen permissions.deny did not apply)"])
 
     def test_every_init_and_hook_reason_is_marked_construction(self):
         recs = [r for r in records("full_valid.jsonl")

@@ -126,12 +126,14 @@ STRATUM_MIN_RULE = ("a stratum of k of the n registered tasks needs ceil(REGISTE
                     "valid tasks per model: 5 of 6")
 TOLERANCE_NOTE = ("a headline needs both strata to decide, so the real tolerance is 1 invalid "
                   "task per stratum")
-ARM_INTEGRITY_RULE = ("an instrument failure at the study level is any contamination reason, or "
-                      "more construction failures (missing tool list or marker tool, missing "
-                      "companion hook evidence, a denied tool present, missing Skill/Task or "
-                      "superpowers/buddy skills for full) per model and arm than registered "
-                      "tasks minus REGISTERED_MIN; zero codescout calls in a cs/full run is a "
-                      "result (a secondary metric), not an instrument failure")
+ARM_INTEGRITY_RULE = ("an instrument failure at the study level is any run with a contamination "
+                      "reason, or, per model and arm, more TASKS with at least one invalid-arm "
+                      "run carrying a construction reason (missing init record or marker tool, "
+                      "missing companion hook evidence, a denied tool present, missing Skill/Task "
+                      "or superpowers/buddy skills for full, MCP tools in bare) than registered "
+                      "tasks minus REGISTERED_MIN; a task counts once however many of its runs "
+                      "failed; zero codescout calls in a cs/full run is a result (a secondary "
+                      "metric), not an instrument failure")
 ADMISSION_RULE = ("an admission stop (the $200 cap) in the extension: the rows are analysed as "
                   "is, and the stop is disclosed; the cap is not raised")
 LABELS = ("promising", "no demonstrated advantage", "worse", "inconclusive", "invalid instrument")
@@ -226,6 +228,9 @@ def check_row(row):
     for key in ("oomKills", "memoryPeakBytes"):
         if row[key] is not None and not (type(row[key]) is int and row[key] >= 0):
             raise MalformedRow(f"{rid}: {key} must be an int >= 0 or None, got {row[key]!r}")
+    if row["stage"] == "main" and row["outcome"] in run.GRADED and type(row["oomKills"]) is not int:
+        raise MalformedRow(f"{rid}: a graded main row needs the cgroup oom_kill count (an "
+                           f"unreadable reading is infra-other, pre-freeze M-1)")
     if row["stage"] == "main" and row["outcome"] in run.GRADED and row["capHit"] is None:
         raise MalformedRow(f"{rid}: a graded main row has a result record, so capHit is a bool")
     return row
