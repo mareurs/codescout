@@ -111,6 +111,12 @@ def registration_pieces(selected, tasks_root=None, *, split_seed, pilot_seed, ex
     if parts["pilot"]["plan_sha256"] == parts["extension"]["plan_sha256"]:
         raise ValueError("the two plans are identical")
     return {"registered_tasks": mapping, "registered_min": analyze.REGISTERED_MIN,
+            "stratum_min": {k: analyze.stratum_min(analyze.REGISTERED_MIN, counts[k],
+                                                   len(mapping)) for k in KINDS},
+            "rules": {"stratum_min": analyze.STRATUM_MIN_RULE,
+                      "tolerance": analyze.TOLERANCE_NOTE,
+                      "arm_integrity": analyze.ARM_INTEGRITY_RULE,
+                      "admission": analyze.ADMISSION_RULE},
             "split": {"rule": SPLIT_RULE, "seed": split_seed, "pilot": pilot_ids,
                       "extension": ext_ids},
             "plans": parts}

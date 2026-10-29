@@ -169,7 +169,7 @@ DEFAULT = {"effort": "medium", "cost": 0.5, "text": "Fixed the bug.", "is_error"
            "codescout_call": True, "oom": False, "timeout": False, "no_result": False,
            "dup": False, "bad_tool_use": False, "raise": None, "duration_api_ms": 1200,
            "no_work": False, "subtype": "success", "terminal_reason": "completed",
-           "oom_kill": 0}
+           "oom_kill": 0, "no_hook": False}
 
 
 class FakeCLI:
@@ -216,8 +216,11 @@ class FakeCLI:
         recs.insert(0, {"type": "system", "subtype": "init", "tools": tools,
                         "skills": (["superpowers:brainstorming", "buddy:check"] if arm == "full"
                                    else [])})
-        if arm == "full":  # final review I-8: the real init lists Agent as Task
-            recs[0]["tools"] = tools + ["Skill", "Task"]
+        if arm == "full":  # final review I-8: the real init lists Agent as Task; R2-F2 deny
+            recs[0]["tools"] = ([t for t in tools if t not in ("Bash", "Edit", "Write")]
+                               + ["Skill", "Task"])
+        if sc["no_hook"]:  # a construction failure: the companion did not run
+            recs = [r for r in recs if r.get("subtype") != "hook_response"]
         blocks = [{"type": "tool_use", "id": "toolu_1", "name": "Bash",
                    "input": {"command": "cargo test --offline"}}]
         if sc["no_work"]:
@@ -648,7 +651,7 @@ class InfraOutcomeTest(RunnerCase):
 
 class InvalidArmTest(RunnerCase):
     def test_invalid_arm_is_charged_and_not_scored(self):
-        cli = FakeCLI(self.world, self.data, lambda arm, n: {"codescout_call": False})
+        cli = FakeCLI(self.world, self.data, lambda arm, n: {"no_hook": True})
         plan = [spec(arm="cs")]
         self.batch(plan, BUDGET, cli=cli)
         row = self.latest()[run.run_id(plan[0])]
@@ -657,8 +660,16 @@ class InvalidArmTest(RunnerCase):
         self.assertIsNone(row["grade"])
         self.assertEqual(self.grader.calls, [])
         self.assertFalse(row["integrity"]["ok"])
-        self.assertIn("cs arm made zero codescout calls", row["integrity"]["reasons"])
+        self.assertTrue(row["integrity"]["reasons"][0].startswith(
+            "construction: cs arm has no companion hook output"))
         self.assertEqual(self.spent(), 0.5)
+
+    def test_zero_codescout_calls_is_scored(self):
+        # Fix round 2 ruling: a result, not an invalid arm.
+        cli = FakeCLI(self.world, self.data, lambda arm, n: {"codescout_call": False})
+        self.batch([spec(arm="cs")], BUDGET, cli=cli)
+        row = self.latest()[run.run_id(spec(arm="cs"))]
+        self.assertEqual((row["outcome"], row["integrity"]["codescout_calls"]), ("scored", 0))
 
     def test_duplicate_tool_use_blocks_count_once(self):
         cli = FakeCLI(self.world, self.data, lambda arm, n: {"dup": True})

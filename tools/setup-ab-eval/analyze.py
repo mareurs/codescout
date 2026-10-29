@@ -120,6 +120,20 @@ RESAMPLES = 10_000
 # Final review I-2, operator decision 2026-10-29: at least 10 of the 12 registered tasks must be
 # valid per model, or the verdict is "inconclusive". Frozen before any scored run.
 REGISTERED_MIN = 10
+# Fix round 2 rulings (operator, 2026-10-30), recorded in the Stage 2 registration and printed
+# by analyze_study.
+STRATUM_MIN_RULE = ("a stratum of k of the n registered tasks needs ceil(REGISTERED_MIN * k / n) "
+                    "valid tasks per model: 5 of 6")
+TOLERANCE_NOTE = ("a headline needs both strata to decide, so the real tolerance is 1 invalid "
+                  "task per stratum")
+ARM_INTEGRITY_RULE = ("an instrument failure at the study level is any contamination reason, or "
+                      "more construction failures (missing tool list or marker tool, missing "
+                      "companion hook evidence, a denied tool present, missing Skill/Task or "
+                      "superpowers/buddy skills for full) per model and arm than registered "
+                      "tasks minus REGISTERED_MIN; zero codescout calls in a cs/full run is a "
+                      "result (a secondary metric), not an instrument failure")
+ADMISSION_RULE = ("an admission stop (the $200 cap) in the extension: the rows are analysed as "
+                  "is, and the stop is disclosed; the cap is not raised")
 LABELS = ("promising", "no demonstrated advantage", "worse", "inconclusive", "invalid instrument")
 EFFECTS = {("cs", "bare"): "codescout", ("full", "bare"): "the setup"}
 ARMS = run.arms.ARMS
@@ -600,6 +614,8 @@ def _summary(rs, gold_files):
             outside += len(set(edited) - set(gold_files[r["taskId"]]))
     n = len(rs)
     out["cap_hits"] = sum(r["capHit"] is True for r in rs)
+    # Fix round 2 ruling: zero codescout calls is a result, reported here (cs/full meaningful).
+    out["zero_codescout_runs"] = sum(r["integrity"]["codescout_calls"] == 0 for r in rs)
     out["all_targets_share"] = all_targets / n if n else None
     total_calls = cs_calls + native_calls
     out["codescout_share"] = cs_calls / total_calls if total_calls else None

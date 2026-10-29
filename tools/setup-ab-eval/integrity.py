@@ -49,14 +49,18 @@ Rules (every failed rule adds a reason; `ok` is True iff `reasons` is empty):
              codescout_calls / native_calls are whole-run totals including subagent calls;
              sidechain_calls counts tool_use blocks whose parent_tool_use_id is non-null.
   bare       no `mcp__*` tool in the init tool list.
-  cs, full   init tool list contains BOTH `mcp__codescout__references` and
-             `mcp__codescout__symbol_at` (daily-tool-set markers); at least one `mcp__codescout__*`
-             tool_use; at least one hook_response whose output contains COMPANION_MARKER.
+  cs, full   CONSTRUCTION: init tool list contains BOTH `mcp__codescout__references` and
+             `mcp__codescout__symbol_at` (daily-tool-set markers); at least one hook_response
+             whose output contains COMPANION_MARKER. Fix round 2 ruling (operator,
+             2026-10-30): zero `mcp__codescout__*` calls is a RESULT, reported as a secondary
+             metric, never a validity reason (spec section 4's "a codescout call occurs" is
+             superseded).
   full       a `superpowers:*` and a `buddy:*` skill are visible in the init skill list (spec
              section 4: "the init event lists the superpowers and buddy skills"); the init tool
              list holds `Skill` and the subagent tool (final review I-8: `--tools ...,Skill,Agent`;
              CLI 2.1.309 lists `Agent` as `Task` in init, measured in
-             setup-ab-data/controls/final-fix/i8-full-init/, so either name counts).
+             setup-ab-data/controls/final-fix/i8-full-init/, so either name counts), and no tool
+             of the frozen permissions.deny (Bash, Edit, NotebookEdit, Write). All CONSTRUCTION.
   bare, cs   CONTAMINATION (ledger T6 deferred; reasons start with CONTAMINATION): no full-only
              skill (`superpowers:*`, `buddy:*`) and no full-only tool (Skill, Agent/Task) in
              init; bare also has no companion hook output. A contamination reason is a
@@ -77,7 +81,14 @@ NATIVE_TOOLS = frozenset({"Read", "Grep", "Glob", "Bash", "Edit", "Write", "Mult
 FULL_SKILL_PREFIXES = ("superpowers:", "buddy:")
 FULL_SKILL_TOOL = "Skill"
 FULL_SUBAGENT_TOOLS = ("Agent", "Task")
+# The frozen permissions.deny (fix round 2: the only rule list the full arm keeps).
+FULL_DENIED_TOOLS = ("Bash", "Edit", "NotebookEdit", "Write")
 CONTAMINATION = "contamination: "
+# Fix round 2 ruling: a reason that shows the ARM WAS BUILT WRONG (init missing, a marker tool,
+# the companion hook, a full skill or tool missing, a denied tool present) starts with this;
+# analyze_study counts these, and contamination, at the study level. Other reasons (a
+# transcript or stream defect, no model work) only make the run invalid.
+CONSTRUCTION = "construction: "
 
 
 class Verdict(NamedTuple):
@@ -166,7 +177,7 @@ def check(arm, transcript, stdout_json):
 
     inits = [r for r in records if r.get("type") == "system" and r.get("subtype") == "init"]
     if records and not inits:
-        reasons.append("no system/init record in transcript")
+        reasons.append(f"{CONSTRUCTION}no system/init record in transcript")
     tools, skills = [], []
     for init in inits:
         tools += [t for t in init.get("tools") or [] if isinstance(t, str)]
@@ -175,26 +186,30 @@ def check(arm, transcript, stdout_json):
     if inits and arm == "bare":
         mcp = sorted(t for t in tools if t.startswith("mcp__"))
         if mcp:
-            reasons.append(f"bare arm has MCP tools in init: {', '.join(mcp)}")
+            reasons.append(f"{CONSTRUCTION}bare arm has MCP tools in init: {', '.join(mcp)}")
     if arm in ("cs", "full"):
         if inits:
             for marker in MARKER_TOOLS:
                 if marker not in tools:
-                    reasons.append(f"{arm} arm init tool list lacks {marker}")
-        if records and codescout_calls == 0:
-            reasons.append(f"{arm} arm made zero codescout calls")
+                    reasons.append(f"{CONSTRUCTION}{arm} arm init tool list lacks {marker}")
+        # Fix round 2 ruling: zero codescout calls is a RESULT (a secondary metric), never a
+        # validity reason; Verdict.codescout_calls still counts them.
         if records and hook_events == 0:
-            reasons.append(f"{arm} arm has no companion hook output "
+            reasons.append(f"{CONSTRUCTION}{arm} arm has no companion hook output "
                            f"({COMPANION_MARKER!r}); the companion did not run")
     if arm == "full" and inits:
         for prefix in FULL_SKILL_PREFIXES:
             if not any(s.startswith(prefix) for s in skills):
-                reasons.append(f"full arm has no {prefix}* skills visible in init")
+                reasons.append(f"{CONSTRUCTION}full arm has no {prefix}* skills visible in init")
         if FULL_SKILL_TOOL not in tools:
-            reasons.append(f"full arm init tool list lacks {FULL_SKILL_TOOL}")
+            reasons.append(f"{CONSTRUCTION}full arm init tool list lacks {FULL_SKILL_TOOL}")
         if not any(t in tools for t in FULL_SUBAGENT_TOOLS):
-            reasons.append(f"full arm init tool list lacks the subagent tool "
+            reasons.append(f"{CONSTRUCTION}full arm init tool list lacks the subagent tool "
                            f"({' / '.join(FULL_SUBAGENT_TOOLS)})")
+        denied = sorted(t for t in tools if t in FULL_DENIED_TOOLS)
+        if denied:
+            reasons.append(f"{CONSTRUCTION}full arm init lists a denied tool: "
+                           f"{', '.join(denied)} (the frozen permissions.deny did not apply)")
     if arm in ("bare", "cs"):
         reasons += _contamination(arm, records, inits, tools, skills)
 

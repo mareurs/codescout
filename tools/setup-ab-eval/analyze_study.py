@@ -19,14 +19,19 @@ What it fixes:
                     (a) any run whose integrity reasons carry a CONTAMINATION reason
                     (integrity.CONTAMINATION: a poorer arm showed a richer arm's skills, tools
                     or companion output: the arm was built wrong, not one unlucky run);
-                    (b) more registered tasks with an `invalid-arm` run of that arm than the
-                    registered minimum tolerates (len(registered) - registered_min = 2). One or
-                    two invalid-arm tasks only lower n_valid (the rule's "fewer valid tasks").
+                    (b) more registered tasks with an `invalid-arm` run carrying a CONSTRUCTION
+                    reason (integrity.CONSTRUCTION: the arm was built wrong) than the registered
+                    minimum tolerates (len(registered) - registered_min = 2). Fix round 2 ruling:
+                    a run invalid for another reason only lowers n_valid; zero codescout calls is
+                    a result, never invalid (analyze.ARM_INTEGRITY_RULE).
   HEADLINE          ruling (I-3): no pooled headline. For each model and comparison the foreign
                     and private strata are decided separately; the headline is their common
                     outcome when the two agree, else "no headline: the strata disagree". The
                     pooled Decision is printed as a secondary line, never as the headline.
   SEED              the bootstrap seed (the registration's `bootstrap_seed`).
+  NOTES             the registered rules printed with every report (analyze.STRATUM_MIN_RULE,
+                    TOLERANCE_NOTE, ARM_INTEGRITY_RULE, ADMISSION_RULE); an `admission` stop in
+                    batch.jsonl adds a DISCLOSE note: the rows are analysed as is.
 Secondary metrics (analyze.secondary, analyze.cap_hits) are printed for every model and arm.
 
 Reads rows.jsonl through run.read_rows (Stage 1's dev rows are read and ignored by the
@@ -84,28 +89,32 @@ def study_failures(verify_reasons, prescan):
 
 
 def arm_failures(rows, mapping, registered_min):
-    """{(model, arm): [failure]}: arm integrity at the study level (see INSTRUMENT)."""
+    """{(model, arm): [failure]}: arm integrity at the study level (see INSTRUMENT). Fix round 2
+    ruling: only CONSTRUCTION failures (integrity.CONSTRUCTION reasons: the arm was built wrong)
+    count toward the threshold, and any contamination reason is a failure at once; a run that is
+    invalid for another reason (a stream defect) only lowers n_valid, and zero codescout calls is
+    a result (never invalid)."""
     latest = analyze._latest(rows)
     analyze._check_registered_rows(latest, mapping)
     tolerance = len(mapping) - registered_min
     out = {(m, a): [] for m in run.MODELS for a in analyze.ARMS}
-    invalid = {(m, a): set() for m in run.MODELS for a in analyze.ARMS}
+    built_wrong = {(m, a): set() for m in run.MODELS for a in analyze.ARMS}
     for r in latest.values():
         if r["stage"] != "main" or r["taskId"] not in mapping:
             continue
         key = (r["model"], r["arm"])
-        reasons = (r["integrity"] or {}).get("reasons") or []
+        reasons = [w for w in (r["integrity"] or {}).get("reasons") or [] if isinstance(w, str)]
         for why in reasons:
-            if isinstance(why, str) and why.startswith(integrity.CONTAMINATION):
+            if why.startswith(integrity.CONTAMINATION):
                 out[key].append(f"arm-integrity: {r['runId']}: {why}")
-        if r["outcome"] == "invalid-arm":
-            invalid[key].add(r["taskId"])
-    for key, ts in invalid.items():
+        if r["outcome"] == "invalid-arm" and any(w.startswith(integrity.CONSTRUCTION)
+                                                 for w in reasons):
+            built_wrong[key].add(r["taskId"])
+    for key, ts in built_wrong.items():
         if len(ts) > tolerance:
             out[key].append(f"arm-integrity: {key[0]} {key[1]}: {len(ts)} of {len(mapping)} "
-                            f"tasks have an invalid-arm run, more than the {tolerance} the "
-                            f"registered minimum ({registered_min}) tolerates: "
-                            f"{sorted(ts)}")
+                            f"tasks have a construction failure, more than the {tolerance} the "
+                            f"registered minimum ({registered_min}) tolerates: {sorted(ts)}")
     return out
 
 
@@ -132,9 +141,28 @@ def _decision(d):
     return None if d is None else dict(d._asdict(), excluded=dict(d.excluded))
 
 
-def report(rows, mapping, *, registered_min, seed, verify_reasons, prescan, gold_files=None):
+def admission_stops(events):
+    """The batch.jsonl `stop` events whose reason is `admission` (the $200 cap held a run)."""
+    return [{"stopId": e.get("stopId"), "seq": e.get("seq"), "spent": e.get("spent")}
+            for e in events if e.get("event") == "stop" and e.get("reason") == "admission"]
+
+
+def report(rows, mapping, *, registered_min, seed, verify_reasons, prescan, gold_files=None,
+           events=()):
     analyze.check_registered(mapping)
+    stops = admission_stops(events)
+    notes = [analyze.STRATUM_MIN_RULE, analyze.TOLERANCE_NOTE, analyze.ARM_INTEGRITY_RULE,
+             analyze.ADMISSION_RULE]
+    if stops:
+        notes.append(f"DISCLOSE: {len(stops)} admission stop(s) "
+                     f"({', '.join(str(s['stopId']) for s in stops)}): the rows are analysed as "
+                     f"is (registered rule); runs after the stop were never made")
     out = {"registered_tasks": mapping, "registered_min": registered_min, "seed": seed,
+           "stratum_min": {k: analyze.stratum_min(registered_min,
+                                                  sum(v == k for v in mapping.values()),
+                                                  len(mapping))
+                           for k in analyze.KINDS if k in mapping.values()},
+           "notes": notes, "admission_stops": stops,
            "instrument": {"study": study_failures(verify_reasons, prescan),
                           "arms": {f"{m} {a}": f for (m, a), f in
                                    arm_failures(rows, mapping, registered_min).items() if f}},
@@ -189,7 +217,7 @@ def main(argv=None, *, verify=tasks.verify):
                                               selected=list(mapping)).items() if v}
     out = report(run.read_rows(a.data), mapping, registered_min=analyze.REGISTERED_MIN,
                  seed=seed, verify_reasons=verify_reasons,
-                 prescan=prescan_reasons(mapping, a.tasks_root))
+                 prescan=prescan_reasons(mapping, a.tasks_root), events=run.read_events(a.data))
     json.dump(out, sys.stdout, indent=2, default=list)
     print()
     return 0

@@ -113,22 +113,65 @@ class InstrumentTest(unittest.TestCase):
         self.assertIn(f"{S} cs", out["instrument"]["arms"])
 
     def test_invalid_arm_runs_up_to_the_tolerance_only_lower_n_valid(self):
+        built = dict(ta.integ(), ok=False, reasons=[
+            f"{integrity.CONSTRUCTION}cs arm has no companion hook output ('PROJECT BOOTSTRAP')"])
         rows = rows_for(0.5, 0.55)
         for t in (FOREIGN[0], PRIVATE[0]):
-            rows = replace(rows, t, S, "cs", outcome="invalid-arm")
+            rows = replace(rows, t, S, "cs", outcome="invalid-arm", integrity=built)
         out = report(rows)
         o = self.outcomes(out, S, "cs - bare")
         self.assertEqual(o, {"foreign": "promising", "private": "promising",
                              "pooled_not_a_headline": "promising"})  # 5 of 6, 10 of 12
         self.assertEqual(out["instrument"]["arms"], {})
-        rows = replace(rows, FOREIGN[1], S, "cs", outcome="invalid-arm")
+        rows = replace(rows, FOREIGN[1], S, "cs", outcome="invalid-arm", integrity=built)
         out = report(rows)
         self.assertEqual(set(self.outcomes(out, S, "cs - bare").values()), {"invalid instrument"})
-        self.assertIn("3 of 12 tasks have an invalid-arm run", out["instrument"]["arms"][f"{S} cs"][0])
+        self.assertIn("3 of 12 tasks have a construction failure",
+                      out["instrument"]["arms"][f"{S} cs"][0])
         self.assertEqual(self.outcomes(out, S, "full - bare")["foreign"], "promising")
         # Counted per model: the other model's cs arm is untouched.
         self.assertEqual(list(out["instrument"]["arms"]), [f"{S} cs"])
         self.assertEqual(self.outcomes(out, O, "cs - bare")["foreign"], "promising")
+
+    def test_only_construction_failures_count_toward_the_threshold(self):
+        # Fix round 2 ruling: 3 runs invalid for a stream defect lower n_valid (inconclusive)
+        # but are not an instrument failure.
+        stream = dict(ta.integ(), ok=False, reasons=["malformed tool_use (line 3)"])
+        rows = rows_for(0.5, 0.55)
+        for t in (FOREIGN[0], FOREIGN[1], PRIVATE[0]):
+            rows = replace(rows, t, S, "cs", outcome="invalid-arm", integrity=stream)
+        out = report(rows)
+        self.assertEqual(out["instrument"]["arms"], {})
+        o = self.outcomes(out, S, "cs - bare")
+        self.assertEqual(o, {"foreign": "inconclusive", "private": "promising",
+                             "pooled_not_a_headline": "inconclusive"})  # 4 of 6, 9 of 12
+        # Zero codescout calls on scored runs: a result, reported, never an instrument failure.
+        rows = rows_for(0.5, 0.55)
+        rows = [dict(r, integrity=dict(r["integrity"], codescout_calls=0))
+                if r["arm"] == "cs" and r["model"] == S else r for r in rows]
+        out = report(rows)
+        self.assertEqual(out["instrument"]["arms"], {})
+        self.assertEqual(self.outcomes(out, S, "cs - bare")["foreign"], "promising")
+        self.assertEqual(out["secondary"][S]["cs"]["zero_codescout_runs"], 12)
+
+    def test_the_registered_rules_are_printed_and_an_admission_stop_is_disclosed(self):
+        out = report(rows_for(0.5, 0.55))
+        self.assertIn(analyze.TOLERANCE_NOTE, out["notes"])
+        self.assertIn("a headline needs both strata to decide, so the real tolerance is 1 "
+                      "invalid task per stratum", out["notes"])
+        self.assertIn(analyze.ADMISSION_RULE, out["notes"])
+        self.assertEqual(out["stratum_min"], {"foreign": 5, "private": 5})
+        self.assertEqual(out["admission_stops"], [])
+        events = [{"event": "stop", "seq": 9, "reason": "admission", "stopId": "stop-9-abcd",
+                   "spent": 196.1},
+                  {"event": "stop", "seq": 3, "reason": "plan complete", "stopId": "stop-3-x"}]
+        out = analyze_study.report(rows_for(0.5, 0.55), MAPPING,
+                                   registered_min=analyze.REGISTERED_MIN, seed=7,
+                                   verify_reasons={}, prescan={}, events=events)
+        self.assertEqual([s["stopId"] for s in out["admission_stops"]], ["stop-9-abcd"])
+        self.assertTrue(any(n.startswith("DISCLOSE: 1 admission stop") for n in out["notes"]))
+        # Analysed as is: the decisions are the same as without the stop.
+        self.assertEqual(out["models"][S]["cs - bare"]["headline"], "codescout: promising")
 
     def test_secondary_and_cap_hits_are_reported(self):
         out = report(rows_for(0.5, 0.55))

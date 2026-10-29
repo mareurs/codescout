@@ -78,6 +78,11 @@ class Stage3Test(unittest.TestCase):
     def test_two_plans_of_48_runs_with_their_own_seed_hash_and_budget(self):
         p = self.pieces()
         self.assertEqual(p["registered_min"], 10)
+        self.assertEqual(p["stratum_min"], {"foreign": 5, "private": 5})
+        self.assertEqual(p["rules"]["tolerance"], "a headline needs both strata to decide, so "
+                         "the real tolerance is 1 invalid task per stratum")
+        self.assertEqual(set(p["rules"]), {"stratum_min", "tolerance", "arm_integrity",
+                                           "admission"})
         self.assertEqual(p["registered_tasks"], stage3.registered_mapping(SELECTED, self.root))
         for name, seed in (("pilot", 2), ("extension", 3)):
             part = p["plans"][name]

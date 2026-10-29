@@ -41,12 +41,6 @@ class IntegrityTest(unittest.TestCase):
         self.assertFalse(v.ok)
         self.assertTrue(any("mcp__codescout__references" in x for x in v.reasons), v.reasons)
 
-    def test_cs_with_tools_but_zero_calls_is_invalid(self):
-        recs = [r for r in records("cs_valid.jsonl") if r.get("type") != "assistant"]
-        v = self.check("cs", recs)
-        self.assertFalse(v.ok)
-        self.assertEqual(v.codescout_calls, 0)
-        self.assertTrue(any("zero codescout calls" in x for x in v.reasons), v.reasons)
 
     def test_cs_without_hook_evidence_is_invalid(self):
         recs = [r for r in records("cs_valid.jsonl")
@@ -86,7 +80,37 @@ class IntegrityTest(unittest.TestCase):
         recs = self.init_edit("full_valid.jsonl", lambda r: r.update(
             skills=[s for s in r["skills"] if not s.startswith("buddy:")]))
         v = self.check("full", recs)
-        self.assertEqual(v.reasons, ["full arm has no buddy:* skills visible in init"])
+        self.assertEqual(v.reasons, [f"{integrity.CONSTRUCTION}full arm has no buddy:* skills "
+                                     f"visible in init"])
+    def test_zero_codescout_calls_is_a_result_not_an_invalid_arm(self):
+        # Fix round 2 ruling (operator, 2026-10-30): a cs/full run that never calls codescout is
+        # scored; the count is a secondary metric.
+        for arm, name in (("cs", "cs_valid.jsonl"), ("full", "full_valid.jsonl")):
+            recs = [r for r in records(name) if r.get("type") != "assistant"]
+            v = self.check(arm, recs)
+            self.assertEqual((v.ok, v.reasons, v.codescout_calls), (True, [], 0), arm)
+
+    def test_full_with_a_denied_tool_is_a_construction_failure(self):
+        recs = self.init_edit("full_valid.jsonl", lambda r: r.update(tools=r["tools"] + ["Bash"]))
+        v = self.check("full", recs)
+        self.assertEqual(v.reasons, [f"{integrity.CONSTRUCTION}full arm init lists a denied "
+                                     f"tool: Bash (the frozen permissions.deny did not apply)"])
+
+    def test_every_init_and_hook_reason_is_marked_construction(self):
+        recs = [r for r in records("full_valid.jsonl")
+                if not str(r.get("subtype", "")).startswith("hook")]
+        for r in recs:
+            if r.get("subtype") == "init":
+                r["tools"], r["skills"] = ["Bash"], []
+        v = self.check("full", recs)
+        self.assertEqual(len(v.reasons), 8, v.reasons)
+        self.assertTrue(all(x.startswith(integrity.CONSTRUCTION) for x in v.reasons), v.reasons)
+        v = self.check("cs", [r for r in records("cs_valid.jsonl") if r.get("subtype") != "init"])
+        self.assertEqual(v.reasons, [f"{integrity.CONSTRUCTION}no system/init record in "
+                                     f"transcript"])
+        v = self.check("cs", records("cs_valid.jsonl"), raw_extra="not json\n")
+        self.assertFalse(v.ok)
+        self.assertFalse(any(x.startswith(integrity.CONSTRUCTION) for x in v.reasons))
 
     def test_full_without_skill_or_the_subagent_tool_is_invalid(self):
         for drop, why in (("Skill", "lacks Skill"), ("Task", "lacks the subagent tool")):
@@ -147,8 +171,10 @@ class IntegrityTest(unittest.TestCase):
                           if r.get("type") == "result")
             v = integrity.check(arm, d / "stream.dedup.jsonl", result)
             if arm == "full":
-                self.assertEqual(v.reasons, ["full arm init tool list lacks Skill",
-                                             "full arm init tool list lacks the subagent tool "
+                self.assertEqual(v.reasons, [f"{integrity.CONSTRUCTION}full arm init tool list "
+                                             f"lacks Skill",
+                                             f"{integrity.CONSTRUCTION}full arm init tool list "
+                                             "lacks the subagent tool "
                                              "(Agent / Task)"], d.name)
             else:
                 self.assertEqual(v.reasons, [], d.name)
