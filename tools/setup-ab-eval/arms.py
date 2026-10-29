@@ -244,8 +244,10 @@ KEPT_SETTING_EFFECTS = {
     "enabledPlugins": "read only by the marketplace lookup (`Looking up plugin ...`, not found, "
                       "skipped); the plugins load through --plugin-dir (round-1 debug log)",
     "permissions": "deny [Bash, Write, Edit] removes those native tools from full's request "
-                   "(round-2 capture: Glob, Grep, Read remain); the other permission keys have "
-                   "no measured effect under --dangerously-skip-permissions",
+                   "(round-2 capture: Glob, Grep, Read remain); fix round 2 (N-1): only `deny` "
+                   "and `defaultMode` are frozen, `allow`/`ask` are not copied (inert under "
+                   "--dangerously-skip-permissions; init re-measured: controls/final-fix/"
+                   "n1-full-init)",
     "autoMemoryEnabled": "false: CLI 2.1.309 schema 'When false, Claude will not read from or "
                          "write to the auto-memory directory'; removes the '# Memory' section "
                          "from full's system text (5591 -> 3573 chars against cs; round-4 A/B "

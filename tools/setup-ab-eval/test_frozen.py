@@ -85,8 +85,10 @@ class FrozenTest(unittest.TestCase):
         self.assertNotIn("env", frozen.SETTINGS_KEYS)
 
     def test_a_credential_in_a_copied_key_refuses_the_freeze(self):
-        with self.assertRaisesRegex(frozen.Mismatch, "credential"):
-            frozen.frozen_settings({"permissions": {"allow": [f"Bash(echo {TOKENISH})"]}})
+        for settings in ({"outputStyle": TOKENISH},
+                         {"permissions": {"deny": [f"Bash(echo {TOKENISH})"]}}):
+            with self.subTest(settings), self.assertRaisesRegex(frozen.Mismatch, "anthropic-key"):
+                frozen.frozen_settings(settings)
 
     def test_every_change_changes_the_tree_hash(self):
         self.freeze()
@@ -166,6 +168,99 @@ class FrozenTest(unittest.TestCase):
         m["plugins_full"][1]["install_path"] = str(self.fx.plugins["buddy"])
         with self.assertRaisesRegex(frozen.Mismatch, "two install paths"):
             frozen.plugin_sources(m)
+FAKE_GOOGLE = "AIza" + "FakeKeyNotReal0123456789abcdefghijk"   # the 39-char shape, fake
+FAKE_ALLOW = ["Bash(git status:*)",
+              "Bash(PGPASSWORD=fake-pg-pw-9 psql:*)",                     # the real N-1 shapes
+              'Bash({"email":"someone@example.invalid","password":"Fake-Passw0rd-9x"})']
+
+
+class RealShapesTest(unittest.TestCase):
+    """Fix round 2 (N-1): the credential SHAPES found in the real frozen inputs (fake values)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="sab-frozen-n1-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.fx = Fixture(self.tmp)
+        settings = Path(self.fx.manifest["full_config_files"][1])
+        s = json.loads(settings.read_text())
+        s["permissions"] = {"allow": FAKE_ALLOW, "deny": ["Bash", "Edit", "Write"], "ask": [],
+                            "defaultMode": "default", "additionalDirectories": ["/home/u/x"]}
+        settings.write_text(json.dumps(s))
+        buddy = self.fx.plugins["buddy"]
+        (buddy / "tests" / "eval").mkdir(parents=True)
+        (buddy / "tests" / "eval" / ".env").write_text(f"GEMINI_API_KEY={FAKE_GOOGLE}\n")
+        for name in (".env.local", "server.pem", "deploy.key", "id_ed25519", "cert.p12",
+                     "credentials.json", ".netrc", ".npmrc", ".pgpass"):
+            (buddy / name).write_text("fake\n")
+        (buddy / "hooks" / "judge.env").write_text("BUDDY_JUDGE_API_KEY=\nMODEL=x\n")
+        (buddy / "docs.md").write_text("export ANTHROPIC_API_KEY=your_api_key_here\n"
+                                       "API_KEY=abc123\n")
+
+    def test_the_decoded_scan_finds_what_the_dumped_scan_missed(self):
+        self.assertEqual(frozen.scan_strings({"permissions": {"allow": FAKE_ALLOW}}),
+                         ["json-password", "name-equals-secret"])
+        # The round-1 scanner's view: json.dumps escapes the inner quotes.
+        dumped = json.dumps({"allow": FAKE_ALLOW})
+        self.assertNotIn('"password":"', dumped)
+        self.assertEqual(frozen.scan_text(f"GEMINI_API_KEY={FAKE_GOOGLE}"),
+                         ["google-api-key", "name-equals-secret"])
+    def test_a_json_login_body_inside_a_copied_string_refuses(self):
+        # The quotes are inside a string value: only a scan of the DECODED string sees them.
+        with self.assertRaisesRegex(frozen.Mismatch, "json-password"):
+            frozen.frozen_settings({"permissions": {"deny": [FAKE_ALLOW[2]]}})
+
+    def test_the_freeze_drops_the_allow_list_and_the_secret_files(self):
+        rec = frozen.freeze_inputs(self.fx.manifest, self.fx.dest)
+        perms = json.loads((self.fx.dest / "config" / "settings.json").read_text())["permissions"]
+        self.assertEqual(perms, {"deny": ["Bash", "Edit", "Write"], "defaultMode": "default"})
+        self.assertEqual(rec["settings"]["not_copied_permission_keys"],
+                         ["additionalDirectories", "allow", "ask"])
+        self.assertEqual(rec["excluded_files"], sorted(
+            f"plugins/buddy/{n}" for n in (".env.local", "server.pem", "deploy.key",
+                                           "id_ed25519", "cert.p12", "credentials.json",
+                                           ".netrc", ".npmrc", ".pgpass", "tests/eval/.env")))
+        buddy = self.fx.dest / "plugins" / "buddy"
+        self.assertFalse((buddy / "tests" / "eval" / ".env").exists())
+        self.assertTrue((buddy / "hooks" / "judge.env").exists())  # empty value: not a secret
+        self.assertEqual(frozen.scan_tree(self.fx.dest)[1], [])
+        self.assertEqual(rec["secret_scan"]["hits"], 0)
+        everything = "".join(p.read_text(errors="replace") for p in self.fx.dest.rglob("*")
+                             if p.is_file())
+        for value in (FAKE_GOOGLE, "fake-pg-pw-9", "Fake-Passw0rd-9x", "someone@example"):
+            self.assertNotIn(value, everything)
+        self.assertEqual(rec["trees"]["plugins/buddy"],
+                         frozen.tree_sha256(self.fx.plugins["buddy"], skip_secret_files=True))
+
+    def test_a_secret_in_a_copied_plugin_file_refuses_without_echoing_it(self):
+        value = "Zq8" + "x" * 5 + "fake-service-token"
+        (self.fx.plugins["superpowers"] / "setup.sh").write_text(f"SERVICE_TOKEN={value}\n")
+        with self.assertRaises(frozen.Mismatch) as e:
+            frozen.freeze_inputs(self.fx.manifest, self.fx.dest)
+        self.assertIn("plugins/superpowers/setup.sh (name-equals-secret)", str(e.exception))
+        self.assertNotIn(value, str(e.exception))
+        self.assertFalse(self.fx.dest.exists())
+        self.assertEqual(list(self.fx.dest.parent.glob("frozen.partial-*")), [])
+
+    def test_every_pattern_and_its_placeholders(self):
+        hit = {"anthropic-key": "sk-ant-" + "a1" * 12,
+               "github-token": "ghp_" + "A1b2" * 9,
+               "slack-token": "xoxb-" + "1234-" * 5,
+               "aws-access-key": "AKIA" + "ABCDEFGH23456789",
+               "google-api-key": FAKE_GOOGLE,
+               "bearer-header": "Authorization: Bearer " + "abcDEF123" * 3,
+               "pem-private-key": "-----BEGIN OPENSSH PRIVATE KEY-----",
+               "name-equals-secret": "PGPASSWORD=s3cr3t-pw",
+               "json-password": '{"password": "hunter2x"}'}
+        self.assertEqual(set(hit), set(frozen.SECRET_PATTERNS))
+        for name, text in hit.items():
+            with self.subTest(name):
+                self.assertIn(name, frozen.scan_text(text))
+        for text in ("sk-ant-...", "ghp_xxx", "xoxb-...", "AIzaShort", "Bearer $TOKEN",
+                     "API_KEY=$API_KEY", "GITHUB_TOKEN=<token>", "MY_SECRET=", "KEY=\nvalue",
+                     "ANTHROPIC_API_KEY=your_api_key_here", "API_KEY=abc123",
+                     '{"password": "..."}', '{"pass": "fail"}', "PGPASSWORD=${PW}"):
+            with self.subTest(text):
+                self.assertEqual(frozen.scan_text(text), [])
 
 
 if __name__ == "__main__":
