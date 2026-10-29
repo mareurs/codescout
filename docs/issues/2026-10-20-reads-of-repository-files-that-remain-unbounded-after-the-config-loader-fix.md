@@ -1,14 +1,16 @@
 ---
-status: investigating
-opened: 2026-10-20
-closed:
-severity: low
-owner: marius
-related: ["docs/issues/2026-10-19-the-config-loaders-read-a-linked-special-file-without-a-bound.md", "docs/issues/2026-10-20-the-write-lock-holder-record-is-written-through-a-link.md"]
+kind: bug
+status: fixed
 tags:
 - cluster/unclassified
-kind: bug
-unverified: "Fixes are on branch fix/bounded-repo-reads-2026-10-20 only; not merged to experiments. A link to /dev/zero was never driven (it fills memory): reachability by a link to a device is reasoned from std path semantics and the type check on the opened descriptor, FIFO reachability is proven by red tests. /dev/null stands for a device in controls. The hard-link .md -> project.toml question is untested. The stream_regular length bound for a file that lies about its length has no test of its own. Several commits group more than one concern per file (util/fs.rs, server.rs, doctor.rs)."
+closed: 2026-10-29
+opened: 2026-10-20
+owner: marius
+related:
+- docs/issues/2026-10-19-the-config-loaders-read-a-linked-special-file-without-a-bound.md
+- docs/issues/2026-10-20-the-write-lock-holder-record-is-written-through-a-link.md
+severity: low
+unverified: 'Two questions were never reproduced and are not fixed: (1) writers that skip `check_write`, including the hard-link `.md` -> `project.toml` case, are untested; (2) the swap between a path-type check and the open at the system-prompt and `.git` pointer sites was not exercised. File each as its own bug if one is reproduced. All fix commits named in the file were re-verified as ancestors of `experiments` on 2026-10-29; the fixes were not re-run.'
 ---
 
 # BUG: reads of repository files that the config-loader fix did not touch still use a plain read, so a linked FIFO or device can hold them or an oversized file can fill memory
@@ -272,6 +274,8 @@ untrusted project before activating it.
 - The swap between a path-type check and the open at the system-prompt and `.git` pointer sites.
 
 File each as its own bug once reproduced, then close this file with `unverified: TRACKED <id>`.
+
+2026-10-29: marked `fixed` on the operator's decision, with the two questions kept in the `unverified:` field. A re-check the same day found all 33 commit ids in this file (the fix commits, their base commits and review rounds) to be ancestors of `experiments`. The fix tests were not re-run.
 
 ## References
 
