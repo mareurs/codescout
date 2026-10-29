@@ -8,7 +8,7 @@ related: []
 tags:
 - cluster/declared-not-wired
 kind: bug
-unverified: 'Parts A and B are fixed and tested (711b8c3a4, 0d95ee8bf). Replica run 2026-10-29 passed (Evidence 6). Not verified: the live Kodi checkout; indexing a member end to end; the `Repository::open` probes for a member without its own .git (Evidence 4); whether the ignore crate honors .git/info/exclude; the gate on a clean tree (two OP-2 tests were red from a peer edit). The manual page for library scope still disagrees with the code (Evidence 5).'
+unverified: 'Parts A and B are fixed and tested (711b8c3a4, 0d95ee8bf). Replica run 2026-10-29 passed (Evidence 6). Not verified: the live Kodi checkout; indexing a member end to end; whether the ignore crate honors .git/info/exclude; the gate on a clean tree (two OP-2 tests were red from a peer edit). The manual page for library scope still disagrees with the code (Evidence 5).'
 ---
 
 # BUG: a nested or sibling git repo cannot join a workspace as a project, and onboarding under a workspace pin mixes in the home workspace
@@ -72,6 +72,8 @@ Measured 2026-10-28. Contents of the nested repo's `.codescout/workspace.toml` a
 
 Read and tested 2026-10-29. `head_commit_full` (src/retrieval/index_state.rs) uses `Repository::discover(root)`, which finds the nearest `.git`, so a member that is its own repo records its own HEAD. The test `a_nested_repo_member_records_its_own_head_not_the_parents` passes: the recorded commit is the member's, a member commit makes `git_sync` report `behind` by 1, and a parent commit leaves the member `up_to_date`. The test was green on first run, so it is a probe of existing behavior, not a reproduction. `index` has no member parameter: it indexes the active project or a pinned workspace (src/tools/semantic/index.rs:206), so a member is indexed by pinning its path and the root is then the member's directory. Not tested: `resolve_head_sha` and `probe_has_git_remote` use `Repository::open`, which returns nothing for a member without its own `.git`, while `discover` returns the parent's HEAD. `dirty_files` is an in-memory set and is not git-based (subagent read, not re-read).
 
+Tested 2026-10-29 for a member without its own `.git` (probe `a_member_without_its_own_git_dir_has_no_head_and_no_remote`, green on first run): `resolve_head_sha(member)` returns `None` and `probe_has_git_remote(member)` returns `false`, while both answer for the parent. Impact read by grep, not by a failing test: `has_git_remote` feeds `Availability::RequiresGitRemote`, which no tool declares (src/tools/core/types.rs:1220, 1278), and `head_sha` feeds only the nullable provenance column of a usage record (src/usage/mod.rs:155-232). So the gap is real but has no user-visible effect today. No fix made.
+
 ### 5. Library route
 
 Read 2026-10-29. src/tools/semantic/semantic_search.rs:633-639 returns `"library scope is not yet supported by the Qdrant retrieval stack"` for `scope="lib:<name>"`. The error names tracker row L-12 in docs/trackers/2026-05-07-legacy-retrieval-removal.md, so the code gap is already tracked there. The manual page docs/manual/src/tools/library-navigation.md lines 112-126 still says `semantic_search` with `scope: "lib:<name>"` works. The manual drift is the open part and is not filed as its own bug. The `.gitignore` edit comes from src/memory/mod.rs:92 and `ensure_gitignored` at :111 (read).
@@ -83,7 +85,7 @@ Measured 2026-10-29 with a binary built from `e34ff991f`, driving `codescout sta
 - `onboarding(workspace=<member>)` returned a single-project onboarding (`[python] · config created`), not the parent's prompt.
 - The member's `.codescout/` held `project.toml`, `memories/onboarding.md`, `memories/language-patterns.md` and no `workspace.toml`.
 - `git status` in the member showed `.codescout/` and `.gitignore` untracked; the member had no `.gitignore` before. The parent showed `.codescout/` and `.gitignore` untracked. Which step created the parent's `.gitignore` was not checked.
-- Not run: `index(action="build")` on a member (needs the embedding backend), and a member without its own `.git`.
+- Not run: `index(action="build")` on a member (needs the embedding backend).
 
 ## Hypotheses tried
 1. **Hypothesis:** roots outside the workspace root are rejected. **Test:** first `../kodi-refs/...` roots, then in-tree `remote-fixes/...` roots. **Verdict:** rejected. Both failed the same way.
@@ -102,7 +104,7 @@ Chosen: `[[project]]` is the contract; no separate `[[member]]` table.
   - Manual: "Declared projects and discovered projects" in docs/manual/src/concepts/multi-project-workspace.md.
 
 Still open, not fixed:
-- `resolve_head_sha` and `probe_has_git_remote` use `Repository::open(root)`, while `head_commit_full` uses `discover(root)`. Per-member identity is verified for a member with its own `.git` (Evidence 4); the mixed case is not.
+- `resolve_head_sha` and `probe_has_git_remote` use `Repository::open(root)`, while `head_commit_full` uses `discover(root)`. A member without its own `.git` gets no HEAD and no remote (Evidence 4); no tool or user-visible feature depends on either today, so no fix was made.
 - Onboarding a nested repo still appends to that repo's own `.gitignore` (src/memory/mod.rs:92). Judged acceptable.
 - `semantic_search(scope="lib:<name>")` returns "library scope is not yet supported by the Qdrant retrieval stack" while the manual says it works. Separate issue.
 - Whether the Kodi checkout gitignores `.codescout/`, and whether the `ignore` crate honors `.git/info/exclude` for the walk, are not verified.
@@ -125,8 +127,8 @@ Gate at Part B: format, clippy and Python light pass. Two tests fail, `operator_
 
 ## Resume
 
-Parts A and B are committed on `experiments` (`711b8c3a4`, `0d95ee8bf`), not pushed. Next:
-1. Done 2026-10-29: per-member git identity holds for a member that is its own repo (Evidence 4). Still open: the `Repository::open` probes for a member without its own `.git`.
+Parts A and B are committed on `experiments` (`711b8c3a4`, `0d95ee8bf`) and are on `origin/experiments` (pushed by another session on the user's instruction, verified 2026-10-29 with `git branch -r --contains`). Next:
+1. Done 2026-10-29: per-member git identity holds for a member that is its own repo, and the member without its own `.git` is probed (Evidence 4).
 2. Done 2026-10-29 on a scratchpad replica (Evidence 6). Still open: the live Kodi checkout and `index(action="build")` on a member.
 3. Re-run the gate once the peer's `OP-2` edit is committed or reverted.
 4. Close or archive only after 1 and 2, with the fix SHAs and their patch-ids.

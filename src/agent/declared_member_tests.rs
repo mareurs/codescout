@@ -63,3 +63,25 @@ async fn an_ensure_resident_workspace_lists_a_declared_manifestless_member() {
         "the declared member is missing: {ids:?}"
     );
 }
+
+/// Probe: a member directory inside the parent's repository, with no `.git` of its own.
+/// `Repository::open` does not search upward, so both helpers see no repository there.
+#[test]
+fn a_member_without_its_own_git_dir_has_no_head_and_no_remote() {
+    let (_host, root) = workspace_declaring_a_manifestless_member();
+    let repo = git2::Repository::init(&root).unwrap();
+    repo.remote("origin", "https://example.invalid/parent.git")
+        .unwrap();
+    let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    let tree = repo
+        .find_tree(repo.index().unwrap().write_tree().unwrap())
+        .unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+        .unwrap();
+    let member = root.join("remote-fixes/addon");
+
+    assert!(resolve_head_sha(&root).is_some(), "the parent has a HEAD");
+    assert_eq!(resolve_head_sha(&member), None);
+    assert!(probe_has_git_remote(&root));
+    assert!(!probe_has_git_remote(&member));
+}
