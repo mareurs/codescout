@@ -4193,6 +4193,52 @@ mod tests {
 
     // ── Dangerous command detection ──────────────────────────────────────
 
+    /// The shell is outside the read deny list on purpose: an operator decision of 2026-10-29,
+    /// recorded in
+    /// `docs/issues/2026-10-27-run-command-reads-files-on-the-read-deny-list-because-only-the-file-tools-check-it.md`.
+    /// `run_command` takes a command string, and variable expansion, `bash -c`, `eval` and command
+    /// substitution defeat any parser of it. The manual says so under "Read Policy"
+    /// (`docs/manual/src/concepts/security.md`). If a shell gate starts consulting the deny list,
+    /// this test fails: change that manual section in the same commit.
+    #[test]
+    fn the_shell_gates_do_not_consult_the_read_deny_list() {
+        let home = tempdir().unwrap();
+        let project = tempdir().unwrap();
+        let config = PathSecurityConfig::default();
+        let homes = [home.path().to_path_buf()];
+        let mut checked = 0;
+        for entry in crate::platform::denied_read_prefixes() {
+            let Some(rest) = entry.strip_prefix("~/") else {
+                continue;
+            };
+            let target = home.path().join(rest).join("canary");
+            let target = target.to_string_lossy().into_owned();
+            // Control: the file-tool check refuses this path because it is protected. Without
+            // this, a path that merely does not exist would make the test pass for nothing.
+            let refusal = validate_read_path_in(&target, Some(project.path()), &config, &homes)
+                .expect_err(&format!("{entry}: the file-tool check must refuse it"))
+                .to_string();
+            assert!(
+                refusal.contains("protected"),
+                "{entry}: the refusal is not the deny list's: {refusal}"
+            );
+            let command = format!("cat {target}");
+            assert!(
+                is_dangerous_command(&command, &config).is_none(),
+                "{entry}: is_dangerous_command now consults the deny list"
+            );
+            assert!(
+                check_source_file_access(&command, project.path()).is_none(),
+                "{entry}: check_source_file_access now consults the deny list"
+            );
+            checked += 1;
+        }
+        assert!(
+            checked > 10,
+            "the deny list shrank or changed shape: {checked} entries checked"
+        );
+    }
+
     #[test]
     fn dangerous_command_detected() {
         let config = PathSecurityConfig::default();

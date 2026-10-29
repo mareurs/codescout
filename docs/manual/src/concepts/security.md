@@ -64,6 +64,22 @@ On Linux, `/etc/shadow` and `/etc/gshadow` are also blocked. On macOS,
 accidentally leaking credentials even if pointed at a project that tries to read
 them.
 
+**The deny list binds the file tools, not the shell.** `read_file`, `edit_file` and
+`create_file` check it (probed on Linux, with a canary file), and they also refuse a
+symbolic link that points into it. The other tools that take a path are documented
+to check it as well, but were not probed. `run_command` takes a command string
+instead, and it does **not** check the deny list: `cat ~/.ssh/<file>` through
+`run_command` returns the file's contents, and the output reaches the model's context
+and the session transcript. This is deliberate (operator decision, 2026-10-29). The
+server cannot read a command string reliably: variable expansion, `bash -c`, `eval`
+and command substitution all defeat a parser, so a check on the string would give a
+false sense of safety. A test pins this behaviour
+(`the_shell_gates_do_not_consult_the_read_deny_list`). To keep a session away from a
+path through the shell, deny the path in the harness's own permissions, or set
+`shell_command_mode = "disabled"`. The full list is `denied_read_prefixes()` in
+`src/platform/unix.rs`; the entries above are only the main ones. Only Linux was
+tested.
+
 ### The Deny List Is Not Configurable
 
 The built-in deny list cannot be extended or shrunk via `project.toml` — there
@@ -207,7 +223,8 @@ intervention.
 
 ## Summary
 
-- **Reads**: anywhere except the built-in credential deny list
+- **Reads**: anywhere except the built-in credential deny list. The file tools enforce
+  it; `run_command` does not (see [Built-in Read Deny List](#built-in-read-deny-list))
 - **Writes**: project root only, by default — hard boundary, not a warning
 - **Shell**: on by default; `shell_command_mode = "disabled"` hides `run_command` from the
   tool list and refuses any call that still arrives; cwd sandboxed to project

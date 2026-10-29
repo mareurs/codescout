@@ -11,8 +11,10 @@ and shell command safety checks are enforced.
 
 This is the profile used when no `profile` key is present.
 
-- **Read deny-list active** — system paths (`.ssh/`, `/etc/passwd`, etc.) are
-  blocked regardless of the calling tool.
+- **Read deny-list active** — credential paths (`~/.ssh/`, `~/.aws/`, `/etc/shadow`,
+  etc.) are blocked for the file tools (`read_file`, `edit_file` and `create_file` were
+  probed). `run_command` is not bound by the deny list: see
+  [Built-in Read Deny List](security.md#built-in-read-deny-list).
 - **Writes restricted** to the project root and the system temp directory.
   Additional directories can be added via `extra_write_roots`.
 - **Dangerous shell commands** (e.g. `rm -rf`, `dd`, `mkfs`) require

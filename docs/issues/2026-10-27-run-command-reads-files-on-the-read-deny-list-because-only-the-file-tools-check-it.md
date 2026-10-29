@@ -1,7 +1,7 @@
 ---
 id: '510f27fe15220816'
 kind: bug
-status: open
+status: wontfix
 title: 'BUG: run_command reads files on the read deny list (~/.ssh and the rest), because only the file tools consult it and the shell gates do not'
 owners:
 - marius
@@ -9,12 +9,13 @@ tags:
 - cluster/unclassified
 - security
 - run_command
+closed: 2026-10-29
 opened: 2026-10-27
 related:
 - docs/issues/archive/2026-09-28-run-command-returns-an-environment-dump-verbatim-so-a-credential-reaches-model-context.md
 - docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md
 severity: medium
-unverified: 'Whether the shell is MEANT to be outside the read deny list is not established: no document found that says so, and the search was a regex over four docs directories, not a read of them. Only Linux was tested.'
+unverified: Only Linux was tested. That no earlier document called the shell exempt rests on a regex over four docs directories, not a full read; the manual lines that mention the deny list were read on 2026-10-29 and two were corrected (security.md, security-profiles.md). Of the file tools, only read_file, edit_file and create_file were probed against a canary; grep, tree and the symbol tools are documented to check the deny list and were not probed. The pinning test covers is_dangerous_command and check_source_file_access, not a full run_command call.
 ---
 
 # BUG: `run_command` reads files on the read deny list (`~/.ssh` and the rest), because only the file tools consult it and the shell gates do not
@@ -77,14 +78,14 @@ None. This record states a gap, not a malfunction.
 
 ## Fix
 
-Not fixed. The choices, none costed:
+Decided 2026-10-29 by the operator: declare the shell exempt from the read deny list. No code change. The manual now says so (`docs/manual/src/concepts/security.md`, "Built-in Read Deny List", and its Summary bullet; `docs/manual/src/concepts/security-profiles.md` no longer says the deny list applies "regardless of the calling tool", and no longer names `/etc/passwd`, which is not in the list). The test `the_shell_gates_do_not_consult_the_read_deny_list` in `src/util/path_security.rs` pins it; a mutant that made `is_dangerous_command` refuse `.ssh` made it fail. The choices considered, none costed:
 - Make the shell gates ask the deny list for every path-like word, as the file tools do. Variable expansion, `bash -c`, `eval` and command substitution defeat a parser, so this narrows the gap and does not close it.
 - Redact private-key blocks by shape in the output, as the archived record does for tokens.
 - Declare the shell outside the deny list, and say so in the guide and the prompt surfaces, so the file tools' refusals are not read as a boundary.
 
 ## Tests added
 
-N/A: the bug is open and nothing was changed.
+`util::path_security::tests::the_shell_gates_do_not_consult_the_read_deny_list`. For every `~/` entry of `denied_read_prefixes()` it checks that the file-tool check refuses a canary path under a temp home (control), and that `is_dangerous_command` and `check_source_file_access` do not refuse `cat <that path>`. Mutation-checked once: a line in `is_dangerous_command` returning `Some` for `.ssh` made the test fail; the line was reverted.
 
 ## Workarounds
 
@@ -92,7 +93,7 @@ None inside codescout. A user who does not want a session to read a path can den
 
 ## Resume
 
-Decision for Marius: is the shell meant to be exempt from the read deny list? If yes, the fix is a sentence in the guide, a test that pins the exemption, and no code. If no, pick a choice under Fix. A reproduction needs a canary inside the denied directory, never a real key.
+Decided 2026-10-29: the shell is exempt (see Fix). The original question, for the record: is the shell meant to be exempt from the read deny list? If yes, the fix is a sentence in the guide, a test that pins the exemption, and no code. If no, pick a choice under Fix. A reproduction needs a canary inside the denied directory, never a real key.
 
 ## References
 
