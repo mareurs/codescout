@@ -207,6 +207,10 @@ def check_row(row):
         if not _finite_number(row["costUsd"]) or row["costUsd"] <= 0:
             raise MalformedRow(f"{rid}: a graded row needs a finite cost > 0, got "
                                f"{row['costUsd']!r}")
+    if row["capHit"] is not None and type(row["capHit"]) is not bool:
+        raise MalformedRow(f"{rid}: capHit must be a bool or None, got {row['capHit']!r}")
+    if row["stage"] == "main" and row["outcome"] in run.GRADED and row["capHit"] is None:
+        raise MalformedRow(f"{rid}: a graded main row has a result record, so capHit is a bool")
     return row
 
 
@@ -592,6 +596,7 @@ def _summary(rs, gold_files):
                 raise ValueError(f"{r['taskId']}: no gold files given")
             outside += len(set(edited) - set(gold_files[r["taskId"]]))
     n = len(rs)
+    out["cap_hits"] = sum(r["capHit"] is True for r in rs)
     out["all_targets_share"] = all_targets / n if n else None
     total_calls = cs_calls + native_calls
     out["codescout_share"] = cs_calls / total_calls if total_calls else None
@@ -605,7 +610,10 @@ def secondary(rows, gold_files=None, task_filter=None):
     over the statistic's population (D9): latest rows, outcome `scored`, effort-valid tasks.
 
     summary: n_runs; medians of inputTokens, outputTokens, numTurns, wallMs (None values are
-    skipped and counted under `missing`; an empty group gives None); all_targets_share = share
+    skipped and counted under `missing`; an empty group gives None); cap_hits = runs whose
+    result record says `--max-budget-usd` ended them (capHit, final review I-6: such a run is
+    scored, most likely as a fail, with its cost censored near the per-call cap; see also
+    cap_hits()); all_targets_share = share
     of runs with at least one Bash command for which compiles_all_targets() is true;
     codescout_share = sum(codescout_calls) / sum(codescout_calls + native_calls) from the rows'
     integrity blocks (None when both are 0); edits_outside_gold = {total, per_run_mean} of the
@@ -622,3 +630,16 @@ def secondary(rows, gold_files=None, task_filter=None):
             groups[r["model"]][r["arm"]].append(r)
     return {m: {a: _summary(rs, gold_files) for a, rs in arms_.items()}
             for m, arms_ in groups.items()}
+def cap_hits(rows):
+    """Final review I-6, reported, never gated: {model: {arm: {"runs", "cap_hit", "unknown"}}}
+    over the latest FINAL row of every main run (any outcome: a cap hit can also be invalid-arm);
+    `unknown` counts rows with capHit None (no result record)."""
+    out = {m: {a: {"runs": 0, "cap_hit": 0, "unknown": 0} for a in ARMS} for m in run.MODELS}
+    for r in _latest(rows).values():
+        if r["stage"] != "main" or r["outcome"] == run.PENDING:
+            continue
+        g = out[r["model"]][r["arm"]]
+        g["runs"] += 1
+        g["cap_hit"] += r["capHit"] is True
+        g["unknown"] += r["capHit"] is None
+    return out

@@ -6,15 +6,27 @@
     stage1_order(seed)                           spec section 7 Stage 1: 2 development tasks x
                                                  3 arms x 2 models, one run each = 12 specs
 
-SPEND SAFETY. `run_batch(..., dry_run=False)` refuses to start (Refused, before any docker call)
-unless `<data>/GO.json` is a regular file holding `cap_usd`, `per_call_usd` and `reserve_usd`
-equal to the batch's Budget, `plan_sha256` equal to `plan_sha256(plan)` and
+SPEND SAFETY. `run_batch(..., dry_run=False, registration=<file>)` refuses to start (Refused,
+before any docker call) unless the registration file is a regular JSON file whose
+`registration_sha256` is the digest of the rest of it and which registers the plan's hash
+(load_registration), and `<data>/GO.json` is a regular file holding `cap_usd`, `per_call_usd`,
+`reserve_usd` and `spent_usd` equal to the batch's Budget, `plan_sha256` equal to
+`plan_sha256(plan)`, `registration_sha256` equal to the registration's, and
 `authorized_by: "operator"`. The file is the operator's (Task 10); nothing in this module writes
 it. STOPS LATCH: every batch ends with a `stop` event in `<data>/batch.jsonl` carrying a
 `stopId`; when the latest one is not "plan complete" (or a batch never wrote its stop), the next
 batch is refused until GO.json `acknowledged_stops` lists that id. `dry_run=True` touches no
-docker object, no CLI and no token: it writes `<data>/dry-run.json` (the specs and the plan
-hash) and returns.
+docker object, no CLI and no token: it writes `<data>/dry-run.json` (the specs, the plan hash
+and which reps table the plan follows) and returns.
+
+RUNBOOK (final review I-5 ruling, 2026-10-29). Stage 3 (pilot, then the extension) runs in ONE
+data dir, setup-ab-data/study, the one Stage 1 ran in: its journal already holds Stage 1's
+spend, and spent_usd() adds every journal row, so `--spent 0` (spend OUTSIDE this journal: none)
+and GO.json `spent_usd: 0`. Budget: `--cap 200 --per-call 5 --reserve 5` (STAGE3_*). A non-zero
+`--spent` in the same dir double-counts; a fresh data dir with `--spent 0` would forget the
+earlier spend, which is why GO.json binds `spent_usd`. Before the extension, move the pilot's
+GO.json aside (`GO.pilot.json`; the `start` event keeps its budget and plan hash) and write the
+extension's.
 
 JOURNAL. `<data>/rows.jsonl`, append-only, every line fsynced. A run writes a `pending` row
 BEFORE the CLI call and its final row after; the latest row of a runId wins. At batch start every
@@ -22,7 +34,9 @@ runId whose latest row is still `pending` (the runner was killed) gets an `unkno
 runId that has any row is never run again by any batch: there is no automatic retry after any
 outcome. Row fields are exactly ROW_FIELDS: the Task 8 brief's list plus ruling R6's
 bashCommands, editedFiles, inputTokens and outputTokens, plus `stage` ("dev" for the spec's
-seven development tasks, "main" otherwise). Final outcomes are OUTCOMES. ONE DATA DIR PER STUDY:
+seven development tasks, "main" otherwise) and `capHit` (final review I-6: the result record
+says `--max-budget-usd` ended the run; None when there is no result record, and for Stage 1's
+rows, written before the field). Final outcomes are OUTCOMES. ONE DATA DIR PER STUDY:
 the lock, the ledger and the spend total are per data dir (deferred M3).
 
 A spec that failed BEFORE its pending row (bad bundle, uid check, a foreign name) has a
@@ -122,6 +136,12 @@ STAGE1_DEV_TASKS = ("burntsushi__ripgrep-2576", "astral-sh__ruff-15309")
 PLAN_COMPLETE = "plan complete"
 TOTAL_CAP_USD = 200.0
 STAGE1_CAP_USD = 25.0
+# Final review I-5/I-6 rulings (2026-10-29): Stage 3 (pilot and extension) runs in ONE data dir,
+# setup-ab-data/study, whose journal already holds Stage 1's spend; the cap is the study's whole
+# $200, the per-call cap $5.00 and the reserve one call's worst case.
+STAGE3_CAP_USD = TOTAL_CAP_USD
+STAGE3_PER_CALL_USD = 5.00
+STAGE3_RESERVE_USD = STAGE3_PER_CALL_USD
 RUN_TIMEOUT_S = 1800
 AGENT_UID = "1000"
 
@@ -132,10 +152,19 @@ OUTCOMES = ("scored", "dev-scored", "invalid-arm", "plan-limit", "infra-oom", "i
             "unknown-spend")
 GRADED = ("scored", "dev-scored")
 PENDING = "pending"  # journal-only state; never a final outcome
-# The brief's 14 fields, R6's 4, and `stage` (fix round 1, M5).
+# The brief's 14 fields, R6's 4, `stage` (fix round 1, M5) and `capHit` (final review I-6).
 ROW_FIELDS = ("runId", "taskId", "model", "arm", "rep", "sessionId", "costUsd", "wallMs",
               "numTurns", "usage", "effectiveEffort", "grade", "integrity", "outcome",
-              "bashCommands", "editedFiles", "inputTokens", "outputTokens", "stage")
+              "bashCommands", "editedFiles", "inputTokens", "outputTokens", "stage", "capHit")
+# Stage 1's rows (development tasks only) were written before `capHit` existed; read_rows gives
+# such a row capHit None (unknown), and only for stage "dev".
+STAGE1_ROW_FIELDS = tuple(f for f in ROW_FIELDS if f != "capHit")
+# Final review I-6: the CLI's result record when `--max-budget-usd` stopped the run (CLI
+# 2.1.309: a `budget_exhausted` stop becomes {"type": "result", "subtype":
+# "error_max_budget_usd", "is_error": true, ...}; read from the CLI bundle, as no Stage 1 run
+# hit the cap: all 12 results are subtype "success", terminal_reason "completed").
+CAP_HIT_SUBTYPE = "error_max_budget_usd"
+CAP_HIT_TERMINAL_REASON = "budget_exhausted"
 # Spec section 2: the seven Codex development tasks; plumbing and calibration only, never scored.
 DEVELOPMENT_TASKS = ("burntsushi__ripgrep-2576", "tokio-rs__axum-734", "tokio-rs__axum-1119",
                      "burntsushi__ripgrep-2209", "tokio-rs__tokio-6551", "astral-sh__ruff-15443",
@@ -277,12 +306,14 @@ def admit(budget, spent):
     return spent + budget.reserve_usd + budget.per_call_usd <= budget.cap_usd
 
 
-def check_go(data, plan, budget):
+def check_go(data, plan, budget, registration_sha256):
     """The operator's authorization, or Refused. Read only; the runner never writes GO.json.
 
     Binds cap_usd, per_call_usd and reserve_usd (fix round 1, I1b: the per-call cap is what an
-    unknown cost is charged at) and the plan hash. `acknowledged_stops`, optional, is the list of
-    stop ids (batch.jsonl) the operator has inspected; see check_latch."""
+    unknown cost is charged at), spent_usd (final review I-5: the spend outside this data dir's
+    journal, 0 in the one study data dir), the plan hash and `registration_sha256` (final review
+    I-5 / T10b M6: the registration the batch runs under). `acknowledged_stops`, optional, is the
+    list of stop ids (batch.jsonl) the operator has inspected; see check_latch."""
     path = Path(data) / GO_FILE
     if path.is_symlink() or not path.is_file():
         raise Refused(f"{path} is missing (or not a regular file): spending needs the "
@@ -293,7 +324,7 @@ def check_go(data, plan, budget):
         raise Refused(f"{path} is unreadable: {e}")
     if not isinstance(go, dict) or go.get("authorized_by") != "operator":
         raise Refused(f"{path} is not authorized_by the operator")
-    for field in ("cap_usd", "per_call_usd", "reserve_usd"):
+    for field in ("cap_usd", "per_call_usd", "reserve_usd", "spent_usd"):
         value = go.get(field)
         if (isinstance(value, bool) or not isinstance(value, (int, float))
                 or float(value) != float(getattr(budget, field))):
@@ -302,10 +333,53 @@ def check_go(data, plan, budget):
     if go.get("plan_sha256") != plan_sha256(plan):
         raise Refused(f"{path} authorizes plan {go.get('plan_sha256')!r}, the batch's plan is "
                       f"{plan_sha256(plan)}")
+    if not registration_sha256 or go.get("registration_sha256") != registration_sha256:
+        raise Refused(f"{path} authorizes registration {go.get('registration_sha256')!r}, the "
+                      f"batch runs under {registration_sha256!r}")
     acks = go.get("acknowledged_stops", [])
     if not isinstance(acks, list) or not all(isinstance(a, str) for a in acks):
         raise Refused(f"{path}: acknowledged_stops must be a list of stop ids")
     return go
+
+
+def registration_digest(body):
+    """sha256 of the canonical JSON of a registration body (freeze_stage1._digest's form)."""
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"),
+                                     ensure_ascii=True).encode()).hexdigest()
+
+
+def registered_plan_hashes(reg):
+    """Every plan hash a registration registers: a top-level `plan_sha256` (Stage 1's form) and
+    `plans.<part>.plan_sha256` (the Stage 3 parts, stage3.registration_pieces)."""
+    out = set()
+    if isinstance(reg.get("plan_sha256"), str):
+        out.add(reg["plan_sha256"])
+    for part in (reg.get("plans") or {}).values():
+        if isinstance(part, dict) and isinstance(part.get("plan_sha256"), str):
+            out.add(part["plan_sha256"])
+    return out
+
+
+def load_registration(path, plan):
+    """The registration a batch runs under, or Refused: a regular JSON file whose
+    `registration_sha256` is the digest of the rest of it and which registers `plan`."""
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise Refused(f"registration {path} is missing (or not a regular file)")
+    try:
+        reg = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        raise Refused(f"registration {path} is unreadable: {e}")
+    if not isinstance(reg, dict):
+        raise Refused(f"registration {path} is not a JSON object")
+    body = {k: v for k, v in reg.items() if k != "registration_sha256"}
+    if reg.get("registration_sha256") != registration_digest(body):
+        raise Refused(f"registration {path}: registration_sha256 does not match its content "
+                      f"(edited after the freeze?)")
+    if plan_sha256(plan) not in registered_plan_hashes(reg):
+        raise Refused(f"registration {path} does not register the batch's plan "
+                      f"{plan_sha256(plan)}")
+    return reg
 
 
 def last_stop(events):
@@ -434,7 +508,8 @@ def make_row(spec, session, **fields):
 
 
 def read_rows(data):
-    """Every journal row in order; a torn or foreign line raises (inspect before any spend)."""
+    """Every journal row in order; a torn or foreign line raises (inspect before any spend).
+    A Stage 1 row (stage "dev", written before `capHit` existed) gets capHit None."""
     path = Path(data) / ROWS
     if not path.exists():
         return []
@@ -447,6 +522,9 @@ def read_rows(data):
         except ValueError:
             raise ValueError(f"{path}:{n}: torn or malformed journal line; inspect it before "
                              f"any further spend")
+        if (isinstance(row, dict) and set(row) == set(STAGE1_ROW_FIELDS)
+                and row.get("stage") == "dev"):
+            row = dict(row, capHit=None)
         if (not isinstance(row, dict) or set(row) != set(ROW_FIELDS)
                 or row["outcome"] not in OUTCOMES + (PENDING,)):
             raise ValueError(f"{path}:{n}: not a runner row")
@@ -630,6 +708,14 @@ def _cost(result):
         return nonnegative(result.get("total_cost_usd"), "total_cost_usd")
     except ValueError:
         return None
+def cap_hit(result):
+    """Final review I-6: True when the result record says `--max-budget-usd` ended the run
+    (subtype error_max_budget_usd, or terminal_reason budget_exhausted), False for any other
+    result record, None when there is none (unknown)."""
+    if not isinstance(result, dict):
+        return None
+    return (result.get("subtype") == CAP_HIT_SUBTYPE
+            or result.get("terminal_reason") == CAP_HIT_TERMINAL_REASON)
 
 
 # --- container inputs ----------------------------------------------------------------------------
@@ -1065,7 +1151,7 @@ def _run_one(ctx, spec):
             git = lambda *a: docker("exec", "-w", tasks.WORKDIR, name, "git", *a).stdout
             patch, edited, excluded = extract_patch(git, base)
             (run_dir / "agent.patch").write_text(patch)
-        fields = dict(costUsd=cost, wallMs=wall,
+        fields = dict(costUsd=cost, wallMs=wall, capHit=cap_hit(result),
                       numTurns=result.get("num_turns") if result else None, usage=usage,
                       effectiveEffort=effective_effort(usage), integrity=integ,
                       bashCommands=bash_commands(records), editedFiles=edited,
@@ -1155,9 +1241,23 @@ def _check_cli(manifest):
         raise Refused(f"CLI {cli['path']} changed after freeze ({got} != {cli['sha256']})")
 
 
+def plan_reps(plan):
+    """"stage3" or "stage1" when every (task, model) block of `plan` holds exactly the runs of
+    STAGE3_REPS or STAGE1_REPS, else None."""
+    blocks = {}
+    for s in check_plan(plan):
+        blocks.setdefault((s.task_id, s.model), []).append((s.arm, s.rep))
+    for name, reps in (("stage3", STAGE3_REPS), ("stage1", STAGE1_REPS)):
+        want = sorted((arm, r) for arm, n in reps for r in range(n))
+        if all(sorted(b) == want for b in blocks.values()):
+            return name
+    return None
+
+
 def _dry_run(plan, budget, data):
     data.mkdir(parents=True, exist_ok=True)
     out = {"dry_run": True, "count": len(plan), "plan_sha256": plan_sha256(plan),
+           "reps": plan_reps(plan),
            "specs": [list(s) for s in plan],
            "run_ids": [run_id(s) for s in plan], "budget": budget._asdict(),
            "worst_case_usd": round(len(plan) * budget.per_call_usd, 6),
@@ -1168,18 +1268,23 @@ def _dry_run(plan, budget, data):
     return out
 
 
-def run_batch(plan, budget, data, dry_run, *, docker=None, exec_cli=None, load_task=None,
-              manifest=None, token_reader=None, clock=time.monotonic, timeout=RUN_TIMEOUT_S):
+def run_batch(plan, budget, data, dry_run, *, registration=None, docker=None, exec_cli=None,
+              load_task=None, manifest=None, token_reader=None, clock=time.monotonic,
+              timeout=RUN_TIMEOUT_S):
     """Run `plan` in order, one spec at a time. Keyword-only additions to the brief's signature
-    are the injection points for tests (fake docker, fake CLI) and the frozen manifest
-    (default `<data>/setup-manifest.json`)."""
+    are the registration the batch runs under (required to spend: load_registration, and GO.json
+    must name its registration_sha256), the injection points for tests (fake docker, fake CLI)
+    and the frozen manifest (default `<data>/setup-manifest.json`)."""
     plan = check_plan(plan)
     budget = check_budget(budget)
     data = Path(data)
     if dry_run:
         _dry_run(plan, budget, data)
         return None
-    go = check_go(data, plan, budget)  # before any side effect
+    if registration is None:
+        raise Refused("a batch that spends runs under a registration: pass --registration")
+    reg = load_registration(registration, plan)  # before any side effect
+    go = check_go(data, plan, budget, reg["registration_sha256"])
     check_journal(data)  # rows without the journal that covers them are refused
     acknowledged = check_latch(data, go)  # I3: a stop holds until the operator acknowledges it
     docker = docker or pilot.docker
@@ -1199,7 +1304,8 @@ def run_batch(plan, budget, data, dry_run, *, docker=None, exec_cli=None, load_t
     stop = None
     try:
         _event(data, "start", plan_sha256=plan_sha256(plan), budget=budget._asdict(),
-               count=len(plan), acknowledged=acknowledged[0] if acknowledged else None)
+               count=len(plan), acknowledged=acknowledged[0] if acknowledged else None,
+               registration_sha256=reg["registration_sha256"])
         for row in recover_pending(data):
             _event(data, "recovered", runId=row["runId"], outcome="unknown-spend")
         owned = Owned(data, docker)
@@ -1260,30 +1366,56 @@ class _Ctx(NamedTuple):
     clock: Callable
 
 
+def load_plan(path):
+    """A plan file: JSON [[task, model, arm, rep], ...] (stage3.py writes them)."""
+    return check_plan([RunSpec(*s) for s in json.loads(Path(path).read_text())])
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="action", required=True)
-    d = sub.add_parser("dry-run", help="the Stage 1 order; no docker, no CLI, no token")
-    d.add_argument("--seed", type=int, required=True)
+    d = sub.add_parser("dry-run", help="a plan's specs, hash and worst case; no docker, no CLI, "
+                                       "no token")
+    d.add_argument("--plan", type=Path, default=None,
+                   help="a plan file (JSON [[task, model, arm, rep], ...]); else --tasks/--seed")
+    d.add_argument("--stage3", action="store_true",
+                   help="Stage 3: STAGE3_REPS for --tasks, and the Stage 3 budget defaults "
+                        f"(cap {STAGE3_CAP_USD}, per-call {STAGE3_PER_CALL_USD}, reserve "
+                        f"{STAGE3_RESERVE_USD})")
+    d.add_argument("--seed", type=int, default=None)
     d.add_argument("--tasks", nargs="*", default=list(STAGE1_DEV_TASKS))
     d.add_argument("--data", type=Path, default=tasks.DATA / "stage1-dry-run")
-    d.add_argument("--cap", type=float, default=STAGE1_CAP_USD)
-    d.add_argument("--per-call", type=float, default=float(arms.MAX_BUDGET_USD))
+    d.add_argument("--cap", type=float, default=None)
+    d.add_argument("--spent", type=float, default=0.0)
+    d.add_argument("--per-call", type=float, default=None)
     d.add_argument("--reserve", type=float, default=None)
-    r = sub.add_parser("run", help="spend: refused without <data>/GO.json")
+    r = sub.add_parser("run", help="spend: refused without <data>/GO.json and its registration")
     r.add_argument("--plan", type=Path, required=True, help="JSON [[task, model, arm, rep], ...]")
     r.add_argument("--data", type=Path, required=True)
+    r.add_argument("--registration", type=Path, required=True,
+                   help="the frozen registration; GO.json names its registration_sha256")
     for flag in ("--cap", "--spent", "--per-call", "--reserve"):
         r.add_argument(flag, type=float, required=True)
     a = p.parse_args(argv)
     if a.action == "dry-run":
-        plan = make_order(a.tasks, MODELS, a.seed, STAGE1_REPS)
-        budget = Budget(a.cap, 0.0, a.per_call, a.per_call if a.reserve is None else a.reserve)
+        if a.plan is not None:
+            plan = load_plan(a.plan)
+        elif a.seed is None:
+            p.error("dry-run needs --plan or --seed")
+        else:
+            plan = make_order(a.tasks, MODELS, a.seed, STAGE3_REPS if a.stage3 else STAGE1_REPS)
+        if a.stage3:
+            cap = STAGE3_CAP_USD if a.cap is None else a.cap
+            per_call = STAGE3_PER_CALL_USD if a.per_call is None else a.per_call
+        else:
+            cap = STAGE1_CAP_USD if a.cap is None else a.cap
+            per_call = float(arms.MAX_BUDGET_USD) if a.per_call is None else a.per_call
+        budget = Budget(cap, a.spent, per_call, per_call if a.reserve is None else a.reserve)
         run_batch(plan, budget, a.data, dry_run=True)
         print(json.dumps(json.loads((a.data / "dry-run.json").read_text()), indent=2))
     else:
-        plan = [RunSpec(*s) for s in json.loads(a.plan.read_text())]
-        run_batch(plan, Budget(a.cap, a.spent, a.per_call, a.reserve), a.data, dry_run=False)
+        run_batch(load_plan(a.plan), Budget(a.cap, a.spent, a.per_call, a.reserve), a.data,
+                  dry_run=False, registration=a.registration)
 
 
 if __name__ == "__main__":

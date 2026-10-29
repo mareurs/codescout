@@ -32,7 +32,8 @@ def row(task, arm, rep, cost, passed, model=S, outcome="scored", effort="medium"
     fields = dict(outcome=outcome, costUsd=cost, wallMs=60000, numTurns=20,
                   usage={"efforts": [effort]}, effectiveEffort=effort,
                   grade={"pass": passed} if graded else None, integrity=integ(),
-                  bashCommands=[], editedFiles=[], inputTokens=1000, outputTokens=100)
+                  bashCommands=[], editedFiles=[], inputTokens=1000, outputTokens=100,
+                  capHit=False if graded else None)
     fields.update(kw)
     return run.make_row((task, model, arm, rep), "session-" + task, **fields)
 
@@ -833,6 +834,36 @@ class RegisteredMinTest(unittest.TestCase):
         for bad in (0, 13, True, 10.0, None):
             with self.subTest(bad), self.assertRaises(ValueError):
                 decide(rows, registered_min=bad)
+class CapHitAnalysisTest(unittest.TestCase):
+    """Final review I-6: cap hits are reported per arm, never gated."""
+
+    def test_cap_hits_per_model_and_arm(self):
+        rows = study(**PROMISING)
+        rows = without(rows, TASKS[0], "cs") + [row(TASKS[0], "cs", 0, 5.0, False,
+                                                     capHit=True)]
+        rows += [row(TASKS[1], "full", 0, 5.0, None, outcome="invalid-arm", capHit=True),
+                 row(TASKS[2], "full", 0, None, None, outcome="infra-other")]
+        out = analyze.cap_hits(rows)
+        self.assertEqual(out[S]["cs"], {"runs": 12, "cap_hit": 1, "unknown": 0})
+        self.assertEqual(out[S]["full"], {"runs": 2, "cap_hit": 1, "unknown": 1})
+        self.assertEqual(out[S]["bare"], {"runs": 24, "cap_hit": 0, "unknown": 0})
+        self.assertEqual(out[O]["cs"]["runs"], 0)
+        sec = analyze.secondary(rows)
+        self.assertEqual(sec[S]["cs"]["cap_hits"], 1)
+        self.assertEqual(sec[S]["full"]["cap_hits"], 0)  # the invalid-arm run is not scored
+        # Never gated: the decision is the same with or without the cap-hit flag.
+        flagless = [dict(r, capHit=False) if r["capHit"] else r for r in rows]
+        self.assertEqual(decide(rows).outcome, decide(flagless).outcome)
+
+    def test_cap_hit_field_is_checked(self):
+        good = row(TASKS[0], "cs", 0, 1.0, True)
+        with self.assertRaises(analyze.MalformedRow):
+            analyze.check_row(dict(good, capHit="yes"))
+        with self.assertRaises(analyze.MalformedRow):
+            analyze.check_row(dict(good, capHit=None))  # a graded main row has a result record
+        analyze.check_row(dict(good, capHit=True))
+        dev = row("burntsushi__ripgrep-2576", "cs", 0, 1.0, True, outcome="dev-scored")
+        analyze.check_row(dict(dev, capHit=None))  # Stage 1 rows predate the field
 
 
 # Measured 2026-10-28 on CPython 3.14.8: decide(study(**VARIED), seed=7).ci90.

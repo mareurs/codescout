@@ -148,10 +148,16 @@ class FreezeTest(unittest.TestCase):
         go = Path(self._tmp.name) / "go-data"
         go.mkdir()
         (go / run.GO_FILE).write_text(json.dumps({"authorized_by": "operator",
-                                                  "plan_sha256": reg["plan_sha256"], **reg["budget"]}))
+                                                  "plan_sha256": reg["plan_sha256"], **reg["budget"],
+                                                  "spent_usd": 0.0,
+                                                  "registration_sha256": reg["registration_sha256"]}))
         budget = run.Budget(reg["budget"]["cap_usd"], 0.0, reg["budget"]["per_call_usd"],
                             reg["budget"]["reserve_usd"])
-        run.check_go(go, plan, run.check_budget(budget))  # raises Refused when any binding differs
+        # raises Refused when any binding differs
+        run.check_go(go, plan, run.check_budget(budget), reg["registration_sha256"])
+        # The runner's registration reader accepts the freeze's digest form and plan hash.
+        path = self.env.tool / "stage1-registration.json"
+        self.assertEqual(run.load_registration(path, plan), reg)
 
     def test_changing_one_file_changes_the_registration_hash_through_files_alone(self):
         fixed = lambda tool_dir: "f" * 40   # the same head both times: only `files` can differ

@@ -161,7 +161,7 @@ def arm_of(argv):
 DEFAULT = {"effort": "medium", "cost": 0.5, "text": "Fixed the bug.", "is_error": False,
            "codescout_call": True, "oom": False, "timeout": False, "no_result": False,
            "dup": False, "bad_tool_use": False, "raise": None, "duration_api_ms": 1200,
-           "no_work": False}
+           "no_work": False, "subtype": "success", "terminal_reason": "completed"}
 
 
 class FakeCLI:
@@ -222,7 +222,8 @@ class FakeCLI:
                          "message": {"content": [{"type": "tool_use", "name": "Read",
                                                   "input": {}}]}})
         if not (sc["timeout"] or sc["no_result"]):
-            recs.append({"type": "result", "subtype": "success", "is_error": sc["is_error"],
+            recs.append({"type": "result", "subtype": sc["subtype"], "is_error": sc["is_error"],
+                         "terminal_reason": sc["terminal_reason"],
                          "num_turns": 3, "duration_api_ms": sc["duration_api_ms"],
                          "total_cost_usd": sc["cost"],
                          "usage": ({"input_tokens": 0, "output_tokens": 0} if sc["no_work"]
@@ -269,18 +270,39 @@ class RunnerCase(unittest.TestCase):
         }
         self.world = World()
         self.grader = Grader()
+        self.registration = self.tmp / "registration.json"
+        self.registered = set()
 
     def load(self, task_id):
         return run.TaskInfo(image=f"sab-arm-{task_id}:t", prompt="Fix the bug.\n",
                             template=f"sab-tpl-{task_id}", grader=self.grader)
 
     def go(self, plan, budget, acks=(), **override):
-        """Play the operator: write GO.json for `plan` and `budget` (a Budget)."""
+        """Play the operator: write GO.json for `plan` and `budget` (a Budget), bound to the
+        registration (which is made to register `plan` first)."""
+        self.register(plan)
         body = {"cap_usd": budget.cap_usd, "per_call_usd": budget.per_call_usd,
-                "reserve_usd": budget.reserve_usd, "plan_sha256": run.plan_sha256(plan),
+                "reserve_usd": budget.reserve_usd, "spent_usd": budget.spent_usd,
+                "plan_sha256": run.plan_sha256(plan),
+                "registration_sha256": self.registration_sha256(),
                 "authorized_by": "operator", "acknowledged_stops": list(acks)}
         body.update(override)
         (self.data / "GO.json").write_text(json.dumps(body) + "\n")
+
+    def register(self, *plans):
+        """Play the freeze: a registration that registers every plan given so far. Rewritten
+        (a new registration_sha256) only when a plan is new."""
+        hashes = {run.plan_sha256(p) for p in plans}
+        if hashes <= self.registered:
+            return
+        self.registered |= hashes
+        body = {"stage": "test", "plans": {f"p{i}": {"plan_sha256": h}
+                                           for i, h in enumerate(sorted(self.registered))}}
+        reg = dict(body, registration_sha256=run.registration_digest(body))
+        self.registration.write_text(json.dumps(reg) + "\n")
+
+    def registration_sha256(self):
+        return json.loads(self.registration.read_text())["registration_sha256"]
 
     def ack_last_stop(self, plan, budget):
         """Play the operator after inspecting a stop: acknowledge the latched stop id."""
@@ -295,9 +317,12 @@ class RunnerCase(unittest.TestCase):
     def batch(self, plan, budget, cli=None, go=True, **kw):
         if go:
             self.go(plan, budget)
+        else:
+            self.register(plan)
         cli = cli or FakeCLI(self.world, self.data)
         kwargs = dict(docker=self.world, exec_cli=cli, load_task=self.load,
-                      manifest=self.manifest, token_reader=lambda: TOKEN)
+                      manifest=self.manifest, token_reader=lambda: TOKEN,
+                      registration=self.registration)
         kwargs.update(kw)
         run.run_batch(plan, budget, self.data, dry_run=False, **kwargs)
         return cli
@@ -356,9 +381,9 @@ class AdmissionTest(RunnerCase):
 
 
 class GoGuardTest(RunnerCase):
-    def assertRefused(self, plan, budget):
+    def assertRefused(self, plan, budget, pattern=""):
         cli = FakeCLI(self.world, self.data)
-        with self.assertRaises(run.Refused):
+        with self.assertRaisesRegex(run.Refused, pattern):
             self.batch(plan, budget, cli=cli, go=False)
         self.assertEqual(cli.calls, [])
         self.assertEqual(self.world.calls, [])
@@ -373,8 +398,66 @@ class GoGuardTest(RunnerCase):
         self.assertRefused(plan, BUDGET)
 
     def test_refused_on_plan_hash_mismatch(self):
+        self.register([spec(rep=1)], [spec()])  # both registered: GO.json alone decides
         self.go([spec(rep=1)], BUDGET)
-        self.assertRefused([spec()], BUDGET)
+        self.assertRefused([spec()], BUDGET, "authorizes plan")
+    def test_refused_on_spent_mismatch(self):
+        # Final review I-5: GO.json binds spent_usd (the spend outside this journal).
+        plan = [spec()]
+        self.go(plan, BUDGET._replace(spent_usd=10.0))
+        self.assertRefused(plan, BUDGET, "spent_usd")
+        self.go(plan, BUDGET, spent_usd=None)
+        self.assertRefused(plan, BUDGET, "spent_usd")
+
+    def test_refused_on_registration_mismatch(self):
+        # Final review I-5 / T10b M6: GO.json names the registration the batch runs under.
+        plan = [spec()]
+        self.go(plan, BUDGET, registration_sha256="0" * 64)
+        self.assertRefused(plan, BUDGET, "authorizes registration")
+        self.go(plan, BUDGET, registration_sha256=None)
+        self.assertRefused(plan, BUDGET, "authorizes registration")
+
+    def test_refused_without_a_registration_or_with_a_tampered_one(self):
+        plan = [spec()]
+        self.go(plan, BUDGET)
+        cli = FakeCLI(self.world, self.data)
+        with self.assertRaisesRegex(run.Refused, "registration"):
+            self.batch(plan, BUDGET, cli=cli, go=False, registration=None)
+        with self.assertRaisesRegex(run.Refused, "missing"):
+            self.batch(plan, BUDGET, cli=cli, go=False, registration=self.tmp / "nope.json")
+        # An edit after the freeze breaks the registration's own digest.
+        reg = json.loads(self.registration.read_text())
+        reg["stage"] = "edited"
+        self.registration.write_text(json.dumps(reg))
+        with self.assertRaisesRegex(run.Refused, "does not match its content"):
+            self.batch(plan, BUDGET, cli=cli, go=False)
+        self.assertEqual(cli.calls, [])
+        self.assertEqual(self.world.calls, [])
+
+    def test_refused_when_the_registration_does_not_register_the_plan(self):
+        self.register([spec(rep=1)])
+        body = json.loads(self.registration.read_text())
+        plan = [spec()]
+        go = {"cap_usd": BUDGET.cap_usd, "per_call_usd": BUDGET.per_call_usd,
+              "reserve_usd": BUDGET.reserve_usd, "spent_usd": BUDGET.spent_usd,
+              "plan_sha256": run.plan_sha256(plan), "authorized_by": "operator",
+              "registration_sha256": body["registration_sha256"]}
+        (self.data / "GO.json").write_text(json.dumps(go))
+        cli = FakeCLI(self.world, self.data)
+        with self.assertRaisesRegex(run.Refused, "does not register"):
+            run.run_batch(plan, BUDGET, self.data, dry_run=False, registration=self.registration,
+                          docker=self.world, exec_cli=cli, load_task=self.load,
+                          manifest=self.manifest, token_reader=lambda: TOKEN)
+        self.assertEqual(self.world.calls, [])
+        # Stage 1's form (a top-level plan_sha256) and the Stage 3 parts both register.
+        self.assertEqual(run.registered_plan_hashes(
+            {"plan_sha256": "a", "plans": {"pilot": {"plan_sha256": "b"},
+                                           "extension": {"plan_sha256": "c"}}}), {"a", "b", "c"})
+
+    def test_the_start_event_records_the_registration(self):
+        self.batch([spec()], BUDGET)
+        start = [e for e in self.events() if e["event"] == "start"][-1]
+        self.assertEqual(start["registration_sha256"], self.registration_sha256())
 
     def test_refused_unless_authorized_by_the_operator(self):
         plan = [spec()]
@@ -766,8 +849,10 @@ class ContainerTest(RunnerCase):
         self.last_cli = cli
         if go:
             self.go(plan, budget)
+        else:
+            self.register(plan)
         kwargs = dict(docker=spy, exec_cli=cli, load_task=self.load, manifest=self.manifest,
-                      token_reader=lambda: TOKEN)
+                      token_reader=lambda: TOKEN, registration=self.registration)
         kwargs.update(kw)
         run.run_batch(plan, budget, self.data, dry_run=False, **kwargs)
         return cli
@@ -825,8 +910,9 @@ class RowTest(RunnerCase):
                  "numTurns", "usage", "effectiveEffort", "grade", "integrity", "outcome"]
         r6 = ["bashCommands", "editedFiles", "inputTokens", "outputTokens"]
         fix_round_1 = ["stage"]  # M5: development rows are tagged and never `scored`
+        final_review = ["capHit"]  # I-6: the result record says --max-budget-usd ended the run
         for row in rows:
-            self.assertEqual(sorted(row), sorted(brief + r6 + fix_round_1))
+            self.assertEqual(sorted(row), sorted(brief + r6 + fix_round_1 + final_review))
         self.assertEqual(rows[-1]["stage"], "main")
         final = rows[-1]
         self.assertEqual(final["outcome"], "scored")
@@ -837,6 +923,126 @@ class RowTest(RunnerCase):
         self.assertEqual(final["grade"], {"pass": True, "oom_killed": False})
         self.assertTrue(final["integrity"]["ok"])
         self.assertIn(final["outcome"], run.OUTCOMES)
+class CapHitTest(RunnerCase):
+    """Final review I-6: a run ended by --max-budget-usd is recorded per row (capHit)."""
+
+    def test_a_run_ended_by_the_per_call_cap_is_scored_and_marked(self):
+        hit = {"subtype": "error_max_budget_usd", "terminal_reason": "budget_exhausted",
+               "is_error": True, "cost": 1.27}
+        cli = FakeCLI(self.world, self.data, lambda arm, n: hit if n == 0 else {})
+        plan = [spec(rep=0), spec(rep=1)]
+        self.batch(plan, BUDGET, cli=cli)
+        rows = self.latest()
+        capped, normal = rows[run.run_id(plan[0])], rows[run.run_id(plan[1])]
+        self.assertEqual(capped["outcome"], "scored")  # it did model work: scored, never dropped
+        self.assertIs(capped["capHit"], True)
+        self.assertEqual(capped["costUsd"], 1.27)
+        self.assertIs(normal["capHit"], False)
+
+    def test_no_result_record_is_unknown(self):
+        cli = FakeCLI(self.world, self.data, lambda arm, n: {"timeout": True})
+        self.batch([spec()], BUDGET, cli=cli)
+        self.assertIsNone(self.latest()[run.run_id(spec())]["capHit"])
+
+    def test_cap_hit_reads_the_result_record(self):
+        self.assertIsNone(run.cap_hit(None))
+        self.assertFalse(run.cap_hit({"subtype": "success", "terminal_reason": "completed"}))
+        self.assertFalse(run.cap_hit({"subtype": "error_max_turns", "is_error": True}))
+        self.assertTrue(run.cap_hit({"subtype": "error_max_budget_usd", "is_error": True}))
+        self.assertTrue(run.cap_hit({"subtype": "error_during_execution",
+                                     "terminal_reason": "budget_exhausted"}))
+
+
+class Stage1RowsTest(RunnerCase):
+    """Stage 1's rows were written before `capHit`; they stay readable in the one data dir."""
+
+    def legacy(self, task):
+        row = run.make_row((task, MODEL, "bare", 0), "s", outcome="dev-scored"
+                           if run.stage_of(task) == "dev" else "scored",
+                           costUsd=0.1, grade={"pass": True})
+        return {k: v for k, v in row.items() if k != "capHit"}
+
+    def test_a_stage1_row_without_cap_hit_reads_as_unknown(self):
+        (self.data / "rows.jsonl").write_text(json.dumps(self.legacy("burntsushi__ripgrep-2576"))
+                                              + "\n")
+        rows = run.read_rows(self.data)
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]["capHit"])
+        self.assertEqual(sorted(rows[0]), sorted(run.ROW_FIELDS))
+
+    def test_a_main_row_without_cap_hit_is_refused(self):
+        (self.data / "rows.jsonl").write_text(json.dumps(self.legacy("t1")) + "\n")
+        with self.assertRaisesRegex(ValueError, "not a runner row"):
+            run.read_rows(self.data)
+
+    def test_the_real_stage1_journal_still_reads(self):
+        study = run.tasks.DATA / "study"
+        if not (study / "rows.jsonl").is_file():
+            self.skipTest("no Stage 1 journal on this machine")
+        import analyze
+        rows = run.read_rows(study)  # read only
+        self.assertTrue(rows)
+        self.assertTrue(all(r["stage"] == "dev" and r["capHit"] is None for r in rows))
+        for r in rows:
+            analyze.check_row(r)
+
+
+class Stage3DryRunTest(unittest.TestCase):
+    """Final review I-4: `dry-run --plan` and the Stage 3 reps and budget, at $0."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="sab-dry-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def main(self, *argv):
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):
+            run.main(list(argv))
+        return json.loads((self.tmp / "d" / "dry-run.json").read_text())
+
+    def test_dry_run_accepts_a_plan_file_with_the_stage3_reps(self):
+        plan = run.make_order(["org__a-1", "org__a-2"], run.MODELS, 5)
+        path = self.tmp / "plan.json"
+        path.write_text(json.dumps([list(s) for s in plan]))
+        out = self.main("dry-run", "--plan", str(path), "--stage3", "--data", str(self.tmp / "d"))
+        self.assertEqual(out["count"], 16)
+        self.assertEqual(out["reps"], "stage3")
+        self.assertEqual(out["plan_sha256"], run.plan_sha256(plan))
+        self.assertEqual(out["specs"], [list(s) for s in plan])
+        self.assertEqual(out["budget"], {"cap_usd": 200.0, "spent_usd": 0.0,
+                                         "per_call_usd": 5.0, "reserve_usd": 5.0})
+        self.assertEqual(out["worst_case_usd"], 80.0)
+
+    def test_dry_run_builds_a_stage3_order_from_tasks(self):
+        out = self.main("dry-run", "--stage3", "--seed", "3", "--tasks", "org__a-1",
+                        "--data", str(self.tmp / "d"))
+        self.assertEqual((out["count"], out["reps"]), (8, "stage3"))
+        self.assertEqual(out["plan_sha256"],
+                         run.plan_sha256(run.make_order(["org__a-1"], run.MODELS, 3)))
+
+    def test_the_stage1_default_is_unchanged(self):
+        out = self.main("dry-run", "--seed", "7", "--data", str(self.tmp / "d"))
+        self.assertEqual((out["count"], out["reps"]), (12, "stage1"))
+        self.assertEqual(out["plan_sha256"], run.plan_sha256(run.stage1_order(7)))
+        self.assertEqual((out["budget"]["cap_usd"], out["budget"]["per_call_usd"]), (25.0, 1.25))
+
+    def test_dry_run_needs_a_plan_or_a_seed(self):
+        import contextlib
+        import io
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            run.main(["dry-run", "--data", str(self.tmp / "d")])
+
+    def test_plan_reps(self):
+        self.assertEqual(run.plan_reps(run.make_order(["a"], run.MODELS, 1)), "stage3")
+        self.assertEqual(run.plan_reps(run.stage1_order(1)), "stage1")
+        self.assertIsNone(run.plan_reps(run.make_order(["a"], run.MODELS, 1)[:-1]))
+
+    def test_stage3_budget_constants(self):
+        self.assertEqual((run.STAGE3_CAP_USD, run.STAGE3_PER_CALL_USD, run.STAGE3_RESERVE_USD),
+                         (200.0, 5.0, 5.0))
+        run.check_budget(run.Budget(run.STAGE3_CAP_USD, 0.0, run.STAGE3_PER_CALL_USD,
+                                    run.STAGE3_RESERVE_USD))
 
 
 class OrderTest(unittest.TestCase):
