@@ -10,7 +10,7 @@ related:
 - docs/issues/2026-10-19-the-config-loaders-read-a-linked-special-file-without-a-bound.md
 - docs/issues/2026-10-20-the-write-lock-holder-record-is-written-through-a-link.md
 severity: low
-unverified: 'Two questions were never reproduced and are not fixed: (1) writers that skip `check_write`, including the hard-link `.md` -> `project.toml` case, are untested; (2) the swap between a path-type check and the open at the system-prompt and `.git` pointer sites was not exercised. File each as its own bug if one is reproduced. All fix commits named in the file were re-verified as ancestors of `experiments` on 2026-10-29; the fixes were not re-run.'
+unverified: 'Two questions were never reproduced and are not fixed: (1) writers that skip `check_write`, including the hard-link `.md` -> `project.toml` case, are untested; (2) the swap between a path-type check and the open at the system-prompt and `.git` pointer sites was not exercised. Carried over from the earlier caveat, not re-checked on 2026-10-29: a link to /dev/zero was never driven (it fills memory), so reachability by a link to a device is reasoned from std path semantics and the type check on the opened descriptor, while FIFO reachability is proven by red tests; the `stream_regular` length bound for a file that lies about its length was recorded as having no test of its own. File each question as its own bug if one is reproduced. All fix commits named in the file were re-verified as ancestors of `experiments` on 2026-10-29 (the earlier text said they were not merged); the fixes were not re-run.'
 ---
 
 # BUG: reads of repository files that the config-loader fix did not touch still use a plain read, so a linked FIFO or device can hold them or an oversized file can fill memory
