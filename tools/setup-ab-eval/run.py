@@ -59,7 +59,9 @@ OUTCOMES, decided in this order for each run (the first that applies):
                  is inert, as the detector anchors at index 0 with a 600-char cap; only the
                  envelope and transcript channels detect. With no retry, a false positive, an
                  answer that starts like a limit message, loses that one paid run: accepted.)
-  infra-oom      the agent container has State.OOMKilled=true (or the grader's container had).
+  infra-oom      the agent container has State.OOMKilled=true, or its cgroup memory.events
+                 counts an oom_kill (fix round 2, N-5: a killed rust-analyzer or rustc is not
+                 PID 1), or the grader's container was OOM-killed.
                  Not scored, not a failure. The batch goes on when the cost is known. On OOM
                  and on a CLI timeout the container is `docker kill`ed at once, before usage
                  and plan-limit are read, so a runaway CLI cannot keep spending.
@@ -156,13 +158,17 @@ OUTCOMES = ("scored", "dev-scored", "invalid-arm", "plan-limit", "infra-oom", "i
             "unknown-spend")
 GRADED = ("scored", "dev-scored")
 PENDING = "pending"  # journal-only state; never a final outcome
-# The brief's 14 fields, R6's 4, `stage` (fix round 1, M5) and `capHit` (final review I-6).
+# The brief's 14 fields, R6's 4, `stage` (fix round 1, M5), `capHit` (final review I-6) and
+# `oomKills`/`memoryPeakBytes` (fix round 2, N-5: the agent container cgroup's memory.events
+# oom_kill count and memory.peak, read before the container is removed).
 ROW_FIELDS = ("runId", "taskId", "model", "arm", "rep", "sessionId", "costUsd", "wallMs",
               "numTurns", "usage", "effectiveEffort", "grade", "integrity", "outcome",
-              "bashCommands", "editedFiles", "inputTokens", "outputTokens", "stage", "capHit")
-# Stage 1's rows (development tasks only) were written before `capHit` existed; read_rows gives
-# such a row capHit None (unknown), and only for stage "dev".
-STAGE1_ROW_FIELDS = tuple(f for f in ROW_FIELDS if f != "capHit")
+              "bashCommands", "editedFiles", "inputTokens", "outputTokens", "stage", "capHit",
+              "oomKills", "memoryPeakBytes")
+LATER_ROW_FIELDS = ("capHit", "oomKills", "memoryPeakBytes")
+# Stage 1's rows (development tasks only) were written before LATER_ROW_FIELDS existed;
+# read_rows gives such a row None (unknown) for each, and only for stage "dev".
+STAGE1_ROW_FIELDS = tuple(f for f in ROW_FIELDS if f not in LATER_ROW_FIELDS)
 # Final review I-6: the CLI's result record when `--max-budget-usd` stopped the run (CLI
 # 2.1.309: a `budget_exhausted` stop becomes {"type": "result", "subtype":
 # "error_max_budget_usd", "is_error": true, ...}; read from the CLI bundle, as no Stage 1 run
@@ -552,7 +558,7 @@ def read_rows(data):
                              f"any further spend")
         if (isinstance(row, dict) and set(row) == set(STAGE1_ROW_FIELDS)
                 and row.get("stage") == "dev"):
-            row = dict(row, capHit=None)
+            row = dict(row, **dict.fromkeys(LATER_ROW_FIELDS))
         if (not isinstance(row, dict) or set(row) != set(ROW_FIELDS)
                 or row["outcome"] not in OUTCOMES + (PENDING,)):
             raise ValueError(f"{path}:{n}: not a runner row")
@@ -1038,6 +1044,22 @@ def _infra_up(docker, owned, data, manifest, need_retrieval):
 
 # --- one run -------------------------------------------------------------------------------------
 
+def read_cgroup_memory(docker, name):
+    """{"oom_kill": int, "peak": int} of a running container's cgroup v2 memory (memory.events
+    `oom_kill`, memory.peak in bytes); None for a value that cannot be read."""
+    def read(path):
+        r = docker("exec", name, "cat", path, check=False)
+        return r.stdout if r.returncode == 0 else None
+
+    events, peak = read("/sys/fs/cgroup/memory.events"), read("/sys/fs/cgroup/memory.peak")
+    oom_kill = None
+    for line in (events or "").splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == "oom_kill" and parts[1].isdigit():
+            oom_kill = int(parts[1])
+    peak = peak.strip() if peak else ""
+    return {"oom_kill": oom_kill, "peak": int(peak) if peak.isdigit() else None}
+
 def grade_outcome(grade):
     """(outcome, stop, why) of one grader result. Fails closed; fix round 1 (I4).
 
@@ -1134,8 +1156,16 @@ def _run_one(ctx, spec):
         stderr = (stderr or "").replace(ctx.token, "[REDACTED]")
         (run_dir / "stream.jsonl").write_text(stdout)
         (run_dir / "stderr.txt").write_text(stderr)
-        oom = docker("inspect", "-f", "{{.State.OOMKilled}}", name,
-                     check=False).stdout.strip() == "true"
+        # N-5: the cgroup's own count, read while the container still exists (after a timeout
+        # kill it is gone: unknown). A kernel OOM kill of a non-init process (rust-analyzer, a
+        # rustc) need not set State.OOMKilled.
+        mem = read_cgroup_memory(docker, name) if killed is None else {"oom_kill": None,
+                                                                       "peak": None}
+        record["cgroupMemory"] = mem
+        oom_flag = docker("inspect", "-f", "{{.State.OOMKilled}}", name,
+                          check=False).stdout.strip() == "true"
+        record["stateOomKilled"] = oom_flag
+        oom = oom_flag or bool(mem["oom_kill"])
         if oom and killed is None:  # M1: nothing of an OOM-hit container keeps running
             killed_rc = docker("kill", name, check=False).returncode
             killed = "oom"
@@ -1180,6 +1210,7 @@ def _run_one(ctx, spec):
             patch, edited, excluded = extract_patch(git, base)
             (run_dir / "agent.patch").write_text(patch)
         fields = dict(costUsd=cost, wallMs=wall, capHit=cap_hit(result),
+                      oomKills=mem["oom_kill"], memoryPeakBytes=mem["peak"],
                       numTurns=result.get("num_turns") if result else None, usage=usage,
                       effectiveEffort=effective_effort(usage), integrity=integ,
                       bashCommands=bash_commands(records), editedFiles=edited,

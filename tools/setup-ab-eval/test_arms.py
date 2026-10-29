@@ -431,7 +431,8 @@ class ArmsTest(unittest.TestCase):
             argv = arms.docker_run_args(f"sab-{arm}", "img", "sab-net", self.spec(arm),
                                         Path("/x/private.env"))
             self.assertIn("--cpus", argv)
-            self.assertIn("--memory", argv)
+            self.assertEqual(argv[argv.index("--memory") + 1], "16g")  # fix round 2 ruling
+            self.assertNotIn("--memory-swap", argv)
             # Drop every mount; what is left (resources, network, env, image) must be equal.
             rest, i = [], 0
             while i < len(argv):

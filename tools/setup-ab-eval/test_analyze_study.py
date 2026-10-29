@@ -168,7 +168,7 @@ class MainTest(unittest.TestCase):
         self.data.mkdir()
         dev = run.make_row(("burntsushi__ripgrep-2576", S, "bare", 0), "s",
                            outcome="dev-scored", costUsd=0.1, grade={"pass": True})
-        legacy = {k: v for k, v in dev.items() if k != "capHit"}  # a Stage 1 row
+        legacy = {k: v for k, v in dev.items() if k not in run.LATER_ROW_FIELDS}  # Stage 1
         (self.data / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in
                                                       [legacy] + rows_for(0.5, 0.55)))
         (self.tmp / "selection.json").write_text(json.dumps({"selected": list(MAPPING)}))

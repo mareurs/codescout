@@ -209,6 +209,9 @@ def check_row(row):
                                f"{row['costUsd']!r}")
     if row["capHit"] is not None and type(row["capHit"]) is not bool:
         raise MalformedRow(f"{rid}: capHit must be a bool or None, got {row['capHit']!r}")
+    for key in ("oomKills", "memoryPeakBytes"):
+        if row[key] is not None and not (type(row[key]) is int and row[key] >= 0):
+            raise MalformedRow(f"{rid}: {key} must be an int >= 0 or None, got {row[key]!r}")
     if row["stage"] == "main" and row["outcome"] in run.GRADED and row["capHit"] is None:
         raise MalformedRow(f"{rid}: a graded main row has a result record, so capHit is a bool")
     return row

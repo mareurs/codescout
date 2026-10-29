@@ -17,7 +17,7 @@ it, or it raises: the runner reads the study's frozen copy, never the live profi
 
 What is the same in every arm, by construction: the image (the `bare` arm runs in the same
 agent-cs image, so the bytes the agent can read are the same), the CLI binary, the model, the
-prompt bytes, the container env (`ArmSpec.env`), the resource flags (`RESOURCES`) and the
+prompt bytes, the container env (`ArmSpec.env`), the resource flags (`AGENT_RESOURCES`) and the
 network. The codescout env lives in the mounted mcp.json, never in the container env.
 
 URL rewrite (controller ruling): an `mcp_env` key is rewritten only when the study stack
@@ -64,8 +64,14 @@ NATIVE_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
 FULL_ONLY_TOOLS = ("Skill", "Agent")
 FULL_TOOLS = ",".join((NATIVE_TOOLS, *FULL_ONLY_TOOLS))
 MAX_BUDGET_USD = "1.25"
-# Copied from pilot.run_pilot's `docker run` (--cpus 4 --memory 8g). Identical in every arm.
+# Copied from pilot.run_pilot's `docker run` (--cpus 4 --memory 8g): the prepare step and the
+# graders (tasks.private_grader / foreign_grader) keep it, as the Step-5 controls ran with it.
 RESOURCES = ("--cpus", "4", "--memory", "8g")
+# Fix round 2, operator decision 2026-10-30: every ARM container (docker_run_args) gets 16 GB,
+# the same in every arm (rust-analyzer on the codescout repo peaked at 7.3-8.5 GB of 8 GB in an
+# idle session). No --memory-swap flag, as before: Docker's default then allows swap equal to
+# the memory limit when the host has swap (measured in controls/final-fix/ra-cs-p08-16g/).
+AGENT_RESOURCES = ("--cpus", "4", "--memory", "16g")
 # The non-secret part of pilot's private.env; the token and proxy are the runner's (Task 8).
 CONTAINER_ENV = {"CLAUDE_CONFIG_DIR": CONFIG_DIR, "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8192",
                  "DISABLE_AUTOUPDATER": "1"}
@@ -464,7 +470,7 @@ def docker_run_args(name, image, network, spec, env_file):
     The env goes through `env_file` (the runner adds its secret lines to the same file), and the
     container idles so the CLI can be `docker exec`-ed, as in pilot.run_pilot.
     """
-    argv = ["run", "-d", "--name", name, "--network", network, *RESOURCES,
+    argv = ["run", "-d", "--name", name, "--network", network, *AGENT_RESOURCES,
             "--env-file", str(env_file),
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
     for host, target, mode in spec.mounts:

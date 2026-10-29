@@ -862,6 +862,10 @@ class CapHitAnalysisTest(unittest.TestCase):
         with self.assertRaises(analyze.MalformedRow):
             analyze.check_row(dict(good, capHit=None))  # a graded main row has a result record
         analyze.check_row(dict(good, capHit=True))
+        for bad in (-1, 1.5, "3", True):
+            with self.subTest(bad), self.assertRaises(analyze.MalformedRow):
+                analyze.check_row(dict(good, oomKills=bad))
+        analyze.check_row(dict(good, oomKills=0, memoryPeakBytes=7_309_049_856))
         dev = row("burntsushi__ripgrep-2576", "cs", 0, 1.0, True, outcome="dev-scored")
         analyze.check_row(dict(dev, capHit=None))  # Stage 1 rows predate the field
 

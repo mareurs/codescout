@@ -44,6 +44,7 @@ class World:
         self.started = []  # (name, image, argv) of every `docker run`
         self.fail_rm = set()  # container names whose `rm -f` fails
         self.killed = []
+        self.peak = 3_600_000_000
 
     def __call__(self, *args, check=True, timeout=None, data=None):
         a = [str(x) for x in args]
@@ -114,6 +115,11 @@ class World:
                 out = self.uid + "\n"
             elif cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 out = "base0\n"
+            elif cmd == ["cat", "/sys/fs/cgroup/memory.events"]:
+                out = (f"low 0\nhigh 0\nmax 0\noom 0\n"
+                       f"oom_kill {self.containers[name].get('oom_kill', 0)}\n")
+            elif cmd == ["cat", "/sys/fs/cgroup/memory.peak"]:
+                out = f"{self.peak}\n"
             elif cmd[:3] == ["git", "diff", "--cached"]:
                 names = self.changed
                 if "--" in cmd:
@@ -162,7 +168,8 @@ def arm_of(argv):
 DEFAULT = {"effort": "medium", "cost": 0.5, "text": "Fixed the bug.", "is_error": False,
            "codescout_call": True, "oom": False, "timeout": False, "no_result": False,
            "dup": False, "bad_tool_use": False, "raise": None, "duration_api_ms": 1200,
-           "no_work": False, "subtype": "success", "terminal_reason": "completed"}
+           "no_work": False, "subtype": "success", "terminal_reason": "completed",
+           "oom_kill": 0}
 
 
 class FakeCLI:
@@ -196,6 +203,8 @@ class FakeCLI:
         (tdir / f"{session}.jsonl").write_text(json.dumps(rec) + "\n")
         if sc["oom"]:
             self.world.containers[container]["oom"] = True
+        if sc["oom_kill"]:  # N-5: a child was OOM-killed, the container was not
+            self.world.containers[container]["oom_kill"] = sc["oom_kill"]
         tools = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
         recs = []
         if arm != "bare":
@@ -576,6 +585,38 @@ class InfraOutcomeTest(RunnerCase):
         # Not a failure: nothing graded for it, and the batch went on (its cost is known).
         self.assertEqual(len(self.grader.calls), 1)
         self.assertEqual(rows[run.run_id(plan[1])]["outcome"], "scored")
+    def test_a_child_oom_kill_seen_only_in_the_cgroup_is_infra_oom(self):
+        # Fix round 2 (N-5): State.OOMKilled stays false when the kernel kills a non-init
+        # process (rust-analyzer); memory.events oom_kill still counts it.
+        cli = FakeCLI(self.world, self.data, lambda arm, n: {"oom_kill": 1} if n == 0 else {})
+        plan = [spec(arm="cs"), spec(arm="bare")]
+        self.batch(plan, BUDGET, cli=cli)
+        rows = self.latest()
+        hit = rows[run.run_id(plan[0])]
+        self.assertEqual(hit["outcome"], "infra-oom")
+        self.assertEqual((hit["oomKills"], hit["memoryPeakBytes"]), (1, 3_600_000_000))
+        self.assertIsNone(hit["grade"])
+        record = json.loads((self.data / "runs" / run.run_id(plan[0]) /
+                             "run-record.json").read_text())
+        self.assertEqual((record["killed"], record["stateOomKilled"]), ("oom", False))
+        self.assertTrue(any(n.startswith(run.AGENT_PREFIX) for n in self.world.killed))
+        normal = rows[run.run_id(plan[1])]
+        self.assertEqual((normal["outcome"], normal["oomKills"], normal["memoryPeakBytes"]),
+                         ("scored", 0, 3_600_000_000))
+
+    def test_the_cgroup_reading_is_unknown_after_a_timeout_kill(self):
+        cli = FakeCLI(self.world, self.data, lambda arm, n: {"timeout": True})
+        self.batch([spec()], BUDGET, cli=cli)
+        row = self.latest()[run.run_id(spec())]
+        self.assertEqual((row["oomKills"], row["memoryPeakBytes"]), (None, None))
+
+    def test_read_cgroup_memory_parses_and_fails_soft(self):
+        ok = lambda *a, **k: SimpleNamespace(returncode=0, stdout=(
+            "low 0\nhigh 0\nmax 2\noom 1\noom_kill 3\n" if a[-1].endswith("events")
+            else "8470413312\n"))
+        self.assertEqual(run.read_cgroup_memory(ok, "c"), {"oom_kill": 3, "peak": 8470413312})
+        gone = lambda *a, **k: SimpleNamespace(returncode=1, stdout="")
+        self.assertEqual(run.read_cgroup_memory(gone, "c"), {"oom_kill": None, "peak": None})
 
     def test_timeout_or_kill_without_a_result_record_is_never_scored(self):
         for case in ({"timeout": True}, {"no_result": True}):
@@ -949,8 +990,10 @@ class RowTest(RunnerCase):
         r6 = ["bashCommands", "editedFiles", "inputTokens", "outputTokens"]
         fix_round_1 = ["stage"]  # M5: development rows are tagged and never `scored`
         final_review = ["capHit"]  # I-6: the result record says --max-budget-usd ended the run
+        round_2 = ["oomKills", "memoryPeakBytes"]  # N-5: the agent cgroup, per run
         for row in rows:
-            self.assertEqual(sorted(row), sorted(brief + r6 + fix_round_1 + final_review))
+            self.assertEqual(sorted(row), sorted(brief + r6 + fix_round_1 + final_review
+                                                 + round_2))
         self.assertEqual(rows[-1]["stage"], "main")
         final = rows[-1]
         self.assertEqual(final["outcome"], "scored")
@@ -1042,7 +1085,7 @@ class Stage1RowsTest(RunnerCase):
         row = run.make_row((task, MODEL, "bare", 0), "s", outcome="dev-scored"
                            if run.stage_of(task) == "dev" else "scored",
                            costUsd=0.1, grade={"pass": True})
-        return {k: v for k, v in row.items() if k != "capHit"}
+        return {k: v for k, v in row.items() if k not in run.LATER_ROW_FIELDS}
 
     def test_a_stage1_row_without_cap_hit_reads_as_unknown(self):
         (self.data / "rows.jsonl").write_text(json.dumps(self.legacy("burntsushi__ripgrep-2576"))
@@ -1050,6 +1093,8 @@ class Stage1RowsTest(RunnerCase):
         rows = run.read_rows(self.data)
         self.assertEqual(len(rows), 1)
         self.assertIsNone(rows[0]["capHit"])
+        self.assertIsNone(rows[0]["oomKills"])
+        self.assertIsNone(rows[0]["memoryPeakBytes"])
         self.assertEqual(sorted(rows[0]), sorted(run.ROW_FIELDS))
 
     def test_a_main_row_without_cap_hit_is_refused(self):
