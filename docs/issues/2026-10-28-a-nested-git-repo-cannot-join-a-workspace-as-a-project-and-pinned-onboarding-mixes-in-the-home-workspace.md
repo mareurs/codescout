@@ -8,7 +8,7 @@ related: []
 tags:
 - cluster/declared-not-wired
 kind: bug
-unverified: 'Parts A and B are fixed and tested (711b8c3a4, 0d95ee8bf). Replica run 2026-10-29 passed (Evidence 6). Not verified: the live Kodi checkout; indexing a member end to end; whether the ignore crate honors .git/info/exclude; the gate on a clean tree (two OP-2 tests were red from a peer edit). The manual page for library scope still disagrees with the code (Evidence 5).'
+unverified: 'Parts A and B are fixed and tested (711b8c3a4, 0d95ee8bf). Replica run 2026-10-29 passed (Evidence 6). Not verified: the live Kodi checkout; whether the ignore crate honors .git/info/exclude; the gate on a clean tree (two OP-2 tests were red from a peer edit). The manual page for library scope still disagrees with the code (Evidence 5).'
 ---
 
 # BUG: a nested or sibling git repo cannot join a workspace as a project, and onboarding under a workspace pin mixes in the home workspace
@@ -85,7 +85,18 @@ Measured 2026-10-29 with a binary built from `e34ff991f`, driving `codescout sta
 - `onboarding(workspace=<member>)` returned a single-project onboarding (`[python] · config created`), not the parent's prompt.
 - The member's `.codescout/` held `project.toml`, `memories/onboarding.md`, `memories/language-patterns.md` and no `workspace.toml`.
 - `git status` in the member showed `.codescout/` and `.gitignore` untracked; the member had no `.gitignore` before. The parent showed `.codescout/` and `.gitignore` untracked. Which step created the parent's `.gitignore` was not checked.
-- Not run: `index(action="build")` on a member (needs the embedding backend).
+- `index(action="build")` on a member is Evidence 7.
+
+### 7. Index build on a member
+
+Measured 2026-10-29 on the same replica, binary built from `e34ff991f`, the embedder at `http://127.0.0.1:48081` (CodeRankEmbed). The script `kodi-index.py` listed the projects, then ran `workspace(activate, path=<member>, read_only=false)`, `index(action="build")`, `index(action="status")` and `semantic_search`.
+- The activation named the member by its directory (`project_id: "script.module.thecrew"`), not by its declared id `thecrew-module`. `languages` was `[]` in the activation response, while `project_hints.primary_language` was `python`.
+- The status showed `file_count: 1`, `chunk_count: 1`, `chunks_without_vectors: 0`, `integrity: "ok"`, `indexed_with_model` equal to `configured_model`. Only the member's own file was indexed.
+- `git_sync` showed `up_to_date` with `head_commit: "0bd447eb"`. `git rev-parse --short=8 HEAD` gave `0bd447eb` in the member and `84719a99` in the parent, so the index records the member's own HEAD.
+- `semantic_search` returned `addon.py` lines 1-2 (`def main(): return 1`).
+- The server log showed `backend="sqlite-vec"`, not Qdrant, so the run did not write to the shared Qdrant `code_chunks`. I did not check where the sqlite file lives.
+- A first run was killed by an `/mcp` reconnect before I read its output. The second run produced this evidence.
+- The log also showed `WARN … [[project]] entry is not a member: its root is not a relative path below the workspace root id=kodi root=.`, for the replica's `kodi` entry with `root = "."`. The `kodi` project still listed, through discovery. I did not check whether the warning is noise for a generated file.
 
 ## Hypotheses tried
 1. **Hypothesis:** roots outside the workspace root are rejected. **Test:** first `../kodi-refs/...` roots, then in-tree `remote-fixes/...` roots. **Verdict:** rejected. Both failed the same way.
@@ -129,7 +140,7 @@ Gate at Part B: format, clippy and Python light pass. Two tests fail, `operator_
 
 Parts A and B are committed on `experiments` (`711b8c3a4`, `0d95ee8bf`) and are on `origin/experiments` (pushed by another session on the user's instruction, verified 2026-10-29 with `git branch -r --contains`). Next:
 1. Done 2026-10-29: per-member git identity holds for a member that is its own repo, and the member without its own `.git` is probed (Evidence 4).
-2. Done 2026-10-29 on a scratchpad replica (Evidence 6). Still open: the live Kodi checkout and `index(action="build")` on a member.
+2. Done 2026-10-29 on a scratchpad replica (Evidence 6 and 7, including an index build and a search on a member). Still open: the live Kodi checkout.
 3. Re-run the gate once the peer's `OP-2` edit is committed or reverted.
 4. Close or archive only after 1 and 2, with the fix SHAs and their patch-ids.
 
