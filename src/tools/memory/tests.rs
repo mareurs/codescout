@@ -3246,6 +3246,163 @@ async fn a_sub_project_resolves_two_distinct_directories() {
     assert_eq!(dirs.primary, ws_layout_dir(&root));
     assert_eq!(dirs.secondary, Some(local_layout_dir(&root)));
 }
+/// Make `dir` look like a linked git worktree of `main`: the `.git` FILE a `git worktree add`
+/// leaves, whose pointer has a `worktrees` component. Detection is filesystem-only.
+fn make_linked_worktree_of(dir: &std::path::Path, main: &std::path::Path) {
+    std::fs::write(
+        dir.join(".git"),
+        format!("gitdir: {}/.git/worktrees/wt\n", main.display()),
+    )
+    .unwrap();
+}
+
+/// A linked worktree reads the main checkout's memories under its own, and writes only its own.
+///
+/// The worktree was checked out at one commit, so its `.codescout/memories/` is a snapshot of the
+/// main checkout's, or empty when the main checkout never committed them (98
+/// `memory_target_not_found` events in 12 projects, 2026-10-03..10-24). Reads now fall through to
+/// the main checkout. A write must never reach the main checkout: that is another session's tree.
+///
+/// docs/issues/2026-09-24-residual-worktree-memory-resolution-choice.md
+#[tokio::test]
+async fn a_linked_worktree_reads_the_main_checkouts_memories_and_writes_only_its_own() {
+    let (dir, ctx) = test_ctx_with_project().await;
+    let main = tempdir().unwrap();
+    let main_memories = main.path().join(".codescout").join("memories");
+    let wt_memories = dir.path().join(".codescout").join("memories");
+    seed(&main_memories, "only-in-main", "# M");
+    seed(&main_memories, "in-both", "# M-both");
+    seed(&wt_memories, "in-both", "# W-both");
+    make_linked_worktree_of(dir.path(), main.path());
+
+    let list = Memory
+        .call(json!({ "action": "list" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        list["topics"],
+        json!(["in-both", "only-in-main"]),
+        "the union lists a topic held by both layers once: {list:?}"
+    );
+
+    let inherited = Memory
+        .call(json!({ "action": "read", "topic": "only-in-main" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(inherited["content"], json!("# M"), "got: {inherited:?}");
+    assert_eq!(
+        inherited["resolved_from"],
+        json!(crate::util::fs::to_forward_slash(&main_memories)),
+        "a topic from the main checkout must say where it came from: {inherited:?}"
+    );
+    assert_eq!(
+        inherited["write_target"],
+        json!(crate::util::fs::to_forward_slash(&wt_memories)),
+        "{inherited:?}"
+    );
+
+    let shadowed = Memory
+        .call(json!({ "action": "read", "topic": "in-both" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        shadowed["content"],
+        json!("# W-both"),
+        "the worktree's own copy must win over the main checkout's: {shadowed:?}"
+    );
+    assert!(shadowed.get("resolved_from").is_none(), "{shadowed:?}");
+
+    Memory
+        .call(
+            json!({ "action": "write", "topic": "only-in-main", "content": "# forked" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(wt_memories.join("only-in-main.md")).unwrap(),
+        "# forked",
+        "the write must land in the worktree"
+    );
+    assert_eq!(
+        std::fs::read_to_string(main_memories.join("only-in-main.md")).unwrap(),
+        "# M",
+        "a worktree write must never touch the main checkout"
+    );
+    let forked = Memory
+        .call(json!({ "action": "read", "topic": "only-in-main" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(forked["content"], json!("# forked"), "{forked:?}");
+    assert!(forked.get("resolved_from").is_none(), "{forked:?}");
+}
+
+/// Only a LINKED worktree inherits. A plain checkout (`.git` is a directory), a submodule (its
+/// `.git` file points into `.git/modules/`) and a directory with no `.git` read their own store
+/// and nothing else, byte for byte as before.
+#[tokio::test]
+async fn only_a_linked_worktree_inherits_memories() {
+    let main = tempdir().unwrap();
+    seed(
+        &main.path().join(".codescout").join("memories"),
+        "only-in-main",
+        "# M",
+    );
+
+    for (label, setup) in [
+        ("no .git at all", None),
+        ("a plain checkout", Some(false)),
+        ("a submodule", Some(true)),
+    ] {
+        let (dir, ctx) = test_ctx_with_project().await;
+        match setup {
+            None => {}
+            Some(false) => std::fs::create_dir(dir.path().join(".git")).unwrap(),
+            Some(true) => std::fs::write(
+                dir.path().join(".git"),
+                format!("gitdir: {}/.git/modules/sub\n", main.path().display()),
+            )
+            .unwrap(),
+        }
+        let dirs = resolve_memory_dirs(&json!({}), &ctx).await.unwrap();
+        assert!(
+            dirs.inherited.is_empty(),
+            "{label}: inherited nothing expected, got {:?}",
+            dirs.inherited
+        );
+        let list = Memory
+            .call(json!({ "action": "list" }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(list["topics"], json!([]), "{label}: {list:?}");
+    }
+}
+
+/// Reading through to the main checkout must not create anything there. `from_dir` would
+/// `create_dir_all`, which in the main checkout is litter in a tree the session does not own.
+#[tokio::test]
+async fn a_worktree_read_does_not_create_the_main_checkouts_memory_directory() {
+    let (dir, ctx) = test_ctx_with_project().await;
+    let main = tempdir().unwrap();
+    make_linked_worktree_of(dir.path(), main.path());
+    let main_memories = main.path().join(".codescout").join("memories");
+    assert!(!main_memories.exists(), "precondition");
+
+    Memory
+        .call(json!({ "action": "list" }), &ctx)
+        .await
+        .unwrap();
+    let missing = Memory
+        .call(json!({ "action": "read", "topic": "nothing-here" }), &ctx)
+        .await;
+    assert!(missing.is_err(), "a missing topic is still an error");
+
+    assert!(
+        !main.path().join(".codescout").exists(),
+        "a read created {} in the main checkout",
+        main_memories.display()
+    );
+}
 
 /// The provenance fields must be RENDERED, not merely carried.
 ///

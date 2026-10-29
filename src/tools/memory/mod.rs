@@ -443,12 +443,18 @@ pub(crate) struct MemoryReadDirs {
     pub(crate) primary: std::path::PathBuf,
     /// The other layout's directory for the same project, when it differs.
     pub(crate) secondary: Option<std::path::PathBuf>,
+    /// Read-only: the main checkout's twins of the directories above, when this workspace is a
+    /// linked git worktree (see [`inherited_memory_dirs`]). Empty everywhere else. A topic found
+    /// here is reported as `resolved_from`, and a later write forks it into `primary`.
+    pub(crate) inherited: Vec<std::path::PathBuf>,
 }
 
 impl MemoryReadDirs {
     /// Every directory a read consults, write target first.
     pub(crate) fn all(&self) -> impl Iterator<Item = &std::path::PathBuf> {
-        std::iter::once(&self.primary).chain(self.secondary.iter())
+        std::iter::once(&self.primary)
+            .chain(self.secondary.iter())
+            .chain(self.inherited.iter())
     }
 
     /// Union of topics across both layouts, deduped and sorted.
@@ -481,6 +487,46 @@ impl MemoryReadDirs {
         }
         Ok(None)
     }
+}
+
+/// The main checkout's twins of `dirs`, when `checkout_root` is a linked git worktree.
+///
+/// `.codescout/memories/` is git-tracked in some projects and not in others. A worktree
+/// is checked out at one commit, so it serves that commit's memories (a snapshot), or none
+/// at all when the main checkout never committed them. Each directory under
+/// `checkout_root` maps to the same relative path under the main root, and the result is
+/// read-only: `MemoryReadDirs` sends every write to `primary`, so a worktree never writes
+/// into another checkout. That matches `member_memory_dir`, which keeps a member's memory out of
+/// the parent checkout, and gives the librarian's "overlay onto main, fork on first write".
+///
+/// A submodule is not a linked worktree: `is_linked_worktree` needs a `worktrees` component in
+/// the `.git` pointer, which a submodule's `modules/` path lacks. The main root comes from that
+/// pointer file, as it does for every other caller of `worktree_main_root`.
+///
+/// docs/issues/2026-09-24-residual-worktree-memory-resolution-choice.md
+fn inherited_memory_dirs(
+    checkout_root: &std::path::Path,
+    dirs: &[&std::path::PathBuf],
+) -> Vec<std::path::PathBuf> {
+    use crate::util::path_security::{is_linked_worktree, worktree_main_root};
+    if !is_linked_worktree(checkout_root) {
+        return Vec::new();
+    }
+    let Some(main) = worktree_main_root(checkout_root) else {
+        return Vec::new();
+    };
+    let mut twins: Vec<std::path::PathBuf> = Vec::new();
+    for dir in dirs {
+        let Ok(relative) = dir.strip_prefix(checkout_root) else {
+            continue;
+        };
+        let twin = main.join(relative);
+        if dirs.iter().any(|own| **own == twin) || twins.contains(&twin) {
+            continue;
+        }
+        twins.push(twin);
+    }
+    twins
 }
 
 /// Resolve the directories a `memory` tool call reads from.
@@ -598,7 +644,14 @@ async fn resolve_memory_dirs(input: &Value, ctx: &ToolContext) -> anyhow::Result
             .ok()
             .map(|root| root.join(".codescout").join("memories"))
             .filter(|dir| dir != &primary);
-        Ok(MemoryReadDirs { primary, secondary })
+        let own: Vec<&std::path::PathBuf> =
+            std::iter::once(&primary).chain(secondary.iter()).collect();
+        let inherited = inherited_memory_dirs(&ws.root, &own);
+        Ok(MemoryReadDirs {
+            primary,
+            secondary,
+            inherited,
+        })
     } else {
         // No workspace — fall back to the active project's memory dir. That store
         // is already `MemoryStore::open(p.root)`, i.e. the project-local layout,
@@ -613,9 +666,12 @@ async fn resolve_memory_dirs(input: &Value, ctx: &ToolContext) -> anyhow::Result
                 "Call workspace(action='activate') first.",
             )
         })?;
+        let primary = p.memory.dir().to_path_buf();
+        let inherited = inherited_memory_dirs(&p.root, &[&primary]);
         Ok(MemoryReadDirs {
-            primary: p.memory.dir().to_path_buf(),
+            primary,
             secondary: None,
+            inherited,
         })
     }
 }

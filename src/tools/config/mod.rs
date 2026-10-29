@@ -1167,17 +1167,21 @@ async fn build_activation_response(
     //     them back into present/absent, which is what made the old hint assert
     //     "ran with defaults" about a walk that had in fact inherited main's.
     //
-    // Reporting the divergence is deliberately all this does. Whether a worktree
-    // SHOULD share main's memories and topology is a separate, still-open
-    // semantic question; saying so out loud does not foreclose either answer.
+    // The memory half is now answered by `MemoryReadDirs::inherited` (src/tools/memory/mod.rs): a
+    // linked worktree reads the main checkout's memories under its own and writes only its own,
+    // so the list above is the union and the notice says so. The topology half is answered by
+    // the read-through above. What stays true is that the two checkouts can still differ, which
+    // is why this block exists at all.
+    // docs/issues/2026-09-24-residual-worktree-memory-resolution-choice.md
     // docs/issues/archive/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
     if crate::util::path_security::is_linked_worktree(&project_root_path) {
         let mut notice = json!({
             "main_root": crate::util::path_security::worktree_main_root(&project_root_path)
                 .map(|p| to_forward_slash(&p)),
             "memories_are_this_checkouts": format!(
-                "{} memory topics come from THIS worktree's commit. A memory written \
-                 on the main checkout after it was created does not exist here.",
+                "{} memory topics are visible here. Those held by THIS worktree come from its own \
+                 commit; any topic only the main checkout holds is read through, read-only. A write \
+                 forks the topic into THIS worktree and never touches the main checkout.",
                 memories.len()
             ),
         });
@@ -1268,14 +1272,14 @@ fn format_activate_project(result: &Value) -> String {
     if let Some(wt) = result["worktree"].as_object() {
         parts.push(match wt.get("topology").and_then(|v| v.as_str()) {
             Some("inferred") => {
-                "linked worktree · memories + topology are this checkout's (topology inferred)"
+                "linked worktree · memories are this checkout's plus main's (read-only) · topology inferred"
                     .to_string()
             }
             Some("inherited") => {
-                "linked worktree · memories are this checkout's · topology inherited from main"
+                "linked worktree · memories are this checkout's plus main's (read-only) · topology inherited from main"
                     .to_string()
             }
-            _ => "linked worktree · memories are this checkout's".to_string(),
+            _ => "linked worktree · memories are this checkout's plus main's (read-only)".to_string(),
         });
     }
 
