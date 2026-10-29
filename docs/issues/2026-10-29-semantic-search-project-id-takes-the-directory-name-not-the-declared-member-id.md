@@ -9,7 +9,7 @@ related:
 tags:
 - cluster/declared-not-wired
 kind: bug
-unverified: 'The fix is tested through Agent and project_id() only. Not run: the end-to-end search by declared id against a binary built with the fix; the gate on the fix commit; a member whose own project.toml names a project differently from its id; which other tools key a store by config.project.name for a member (memory, status) and whether any depends on the old name.'
+unverified: 'The fix is tested through Agent and project_id() only. Gate on b358e9aab, 2026-10-29: lean 5356 passed and 2 failed, default 8020 passed and 2 failed; both failures are OP-2 routing tests (operator_rules::route::tests::a_rule_with_several_selectors_routes_on_any_one_of_them and server::tests::every_triggered_rule_names_a_tool_that_can_deliver_it) while a peer holds uncommitted edits to docs/trackers/operator-rules.md and src/operator_rules/profiles.rs; not re-run on a clean tree. Not run: the end-to-end search by declared id against a binary built with the fix; a member whose own project.toml names a project differently from its id; which other tools key a store by config.project.name for a member (memory, status) and whether any depends on the old name.'
 ---
 
 # BUG: semantic_search(project_id=<declared member id>) returns no results because an index is keyed by the member's directory name
@@ -65,7 +65,7 @@ Both go through `Agent` and the member's `project_id()`. Neither runs `semantic_
 2. Done 2026-10-29: an auto-discovered member is keyed by its directory name, equal to its id, so it is not affected.
 3. Open: re-run the replica script `kodi-id.py` against a binary built with the fix, and expect `semantic_search(project_id="thecrew-module")` to find `addon.py`.
 4. Open: the hint on an empty result that names the project id searched and the ids that hold chunks (docs/adrs/2026-08-27-negative-results-name-their-scope.md).
-5. Open: the gate result for the fix commit. Close or archive after 3 and the gate, with the fix SHA and its patch-id.
+5. Gate run 2026-10-29 on b358e9aab: only the two OP-2 failures, not mine (see the `unverified:` line). Close or archive after 3 and a clean-tree gate, with the fix SHA and its patch-id.
 
 ## References
 - docs/issues/2026-10-28-a-nested-git-repo-cannot-join-a-workspace-as-a-project-and-pinned-onboarding-mixes-in-the-home-workspace.md (Evidence 7)
