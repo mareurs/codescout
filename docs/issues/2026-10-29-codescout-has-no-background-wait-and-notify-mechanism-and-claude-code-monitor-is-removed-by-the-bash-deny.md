@@ -115,6 +115,24 @@ Counterexample, 2026-10-29, profile `~/.claude-stef`: a session that started bef
 
 Known limit, not measured: if an old server outlives `/mcp` long enough to finalise its record, the hook's wake text says `tail -50 @bg_N`, and that call goes to the new server, where `@bg_N` may be a different job. Still unmeasured: a wait of several hours.
 
+## Follow-up 2026-10-29: a process that `run_command` did not start has no wake, and the guide gives no pattern for it
+
+Found by the operator in a session on `ie-pal-engine` (pasted, not read from the transcript). The agent waited on an evaluation run with its own loop: `while pgrep -f "..."`. The loop matched its own command line, so it never ended. The agent then ran `pkill -f "while pgrep -f"`. That killed its own shell, and the call returned `exit_code: -1`. The analysis in the same command never ran.
+
+**Verified 2026-10-29, claude-plugins session:**
+
+- `pgrep -f` matches the shell that carries the pattern. A `bash -c` command that searched for a marker string counted 2 processes: the outer shell and its subshell. No other process carried the marker.
+- `codescout-companion/hooks/wake-on-job-end.mjs` arms only on a `run_command` spawn response: `output_id` starts with `@bg_`, a `record` path exists, and there is no `exit_code` (`spawnOf`, line 36). Any other call exits 0.
+- The hook skips subagents (`input.agent_id`, line 247) and exits when `CLAUDE_PROJECT_DIR` is unset (line 244).
+- The hook checks liveness with `kill(pid, 0)`, so it does not have the self-match fault.
+- The `progressive-disclosure` guide, section "Background jobs", says "Do not poll with sleeps or repeated status calls". It names no pattern for a process that `run_command` did not start. No guide, spec or issue in this repo mentions the `pgrep -f` or `pkill -f` self-match.
+
+**Not established:** how the evaluation run in that session started, and whether the hook was installed and armed there. The paste does not show either. The loop may have ended for this reason alone, or other causes may have added to it.
+
+**Suggested change, untested:** add to the "Background jobs" section a rule for a process that `run_command` did not start. Wait on its pid, for example `tail --pid=<pid> -f /dev/null` started with `run_in_background`, so the wait has a handle and a record. Warn that `pgrep -f` and `pkill -f` match the agent's own shell; a pattern such as `[w]hile pgrep` avoids that. A change to this guide changes the prompt surface: read `src/prompts/README.md` for the `ONBOARDING_VERSION` rule first.
+
+**Status:** this issue stays `fixed`. The fix covers `run_in_background` jobs. This follow-up is an open gap in the guide, not a regression of that fix.
+
 ## Related research
 Cross-harness wake paths (Claude Code inbox socket, Codex `codex queue`, channels, hooks, Pi gaps), measured 2026-10-29: codescout memory `research/cross-harness-session-messaging`. The peer session's design for this bug is `docs/superpowers/specs/2026-10-29-background-job-wake-design.md`.
 
