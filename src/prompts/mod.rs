@@ -2042,6 +2042,11 @@ mod tests {
             "terminated by signal",
             "has ended, do not read",
             "stays `running` for good",
+            "did not start",
+            "tail --pid=<pid> -f /dev/null",
+            "pgrep -f",
+            "pkill -f",
+            "[e]val_run",
         ] {
             assert!(
                 body.contains(needle),

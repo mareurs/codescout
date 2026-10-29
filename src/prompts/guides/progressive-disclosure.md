@@ -140,6 +140,17 @@ and read the job when it fires, or read the `record` JSON: `state` is `running`,
 stays `running` for good, because only its server could finalise it. The job itself may still run:
 the wake gives its pid. Check that pid, not the handle.
 
+**A process that `run_command` did not start has no record and no wake.** An example is an
+evaluation that you or another tool started earlier. Do not wait on it with a `while pgrep -f …`
+loop. `pgrep -f` and `pkill -f` match the whole command line, and that includes the shell that
+carries the pattern. So the loop finds itself and never ends, and `pkill -f` kills your own shell,
+which returns `exit_code: -1`. Wait on the pid instead:
+`run_command("tail --pid=<pid> -f /dev/null", run_in_background=true)`. It ends when that process
+ends, and as a `@bg_N` job it gets a record and a wake. Its exit code is `0` whatever the waited
+process did, so read that process's own output or result file after the wake. To find the pid by
+name, write one character of the pattern as a bracket class, for example `pgrep -f "[e]val_run"`.
+The class does not match its own text in the command line.
+
 ## Path-relative annotation
 
 Paths in tool responses are project-relative. The response to each
