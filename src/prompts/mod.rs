@@ -2027,6 +2027,28 @@ mod tests {
              foreground pipe ending in a terminal filter"
         );
     }
+    /// The guide must carry the background-job recipe: the handle and record a spawn returns, the
+    /// wake the companion hook sends, and the warning not to read a handle whose server has ended.
+    /// The strings are the ones `wake-on-job-end.mjs` emits (`wakeMessage`) and the spawn response
+    /// carries (`output_id`, `record`).
+    #[test]
+    fn progressive_disclosure_guide_states_the_background_job_recipe() {
+        let body = crate::prompts::topic_body("progressive-disclosure").expect("guide body");
+        for needle in [
+            "## Background jobs",
+            "@bg_N",
+            "`record`",
+            "wakes the idle session",
+            "terminated by signal",
+            "has ended, do not read",
+            "stays `running` for good",
+        ] {
+            assert!(
+                body.contains(needle),
+                "the progressive-disclosure guide must keep the background-job recipe: missing {needle:?}"
+            );
+        }
+    }
 
     /// `PULL_ONLY_GUIDE_TOPICS` membership and reason-quality checks that used to
     /// live inside the deleted `every_guide_topic_is_triggered_or_declared_pull_only`

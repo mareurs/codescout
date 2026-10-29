@@ -111,6 +111,35 @@ finds nothing, because those kinds carry no stderr.
 
 
 
+## Background jobs: start, end the turn, read after the wake
+
+`run_command(..., run_in_background=true)` returns at once with `output_id` (`@bg_N`), a `record`
+path and a `hint`. The job's outcome is not in that response. Do not poll with sleeps or repeated
+status calls.
+
+1. **Start the job.** Note the `output_id`.
+2. **Do other work, or end the turn.** With the codescout-companion plugin (1.20.22 or later) a hook
+   watches the job's `record` and wakes the idle session when the job ends. The wake text reads
+   `codescout background job @bg_N ended: exited 0 after 20s. Read it with run_command("tail -50 @bg_N").`
+   `exited` carries the exit code; `terminated by signal` means the job was killed; `failed` means
+   it could not be started or tracked. After 30 minutes a still-running job wakes you once with
+   `is still running`. Reading it again keeps the wait going.
+3. **After the wake, read the job:** `run_command("tail -50 @bg_N")`. That response carries the
+   job's state and its output. The exit code in the wake is the last command's. For `cargo test | tail`
+   that is `tail`'s `0`, even when cargo failed, so start the job without the pipe and search its
+   buffer with `grep`.
+
+**No wake arrives** when the plugin or its hook is absent, when another harness runs the session,
+or when a subagent started the job. The record file is still written. Use your harness's timer
+and read the job when it fires, or read the `record` JSON: `state` is `running`, `exited` or
+`failed`, and `exit_code` is `null` for a signal death. The file is
+`$TMPDIR/codescout-bg/<server pid>-<token>-<handle>.json`.
+
+**If the wake says the server has ended, do not read `@bg_N`.** Handle numbers restart at
+`@bg_00000001` in every server, so the handle may now name a different job. The old job's record
+stays `running` for good, because only its server could finalise it. The job itself may still run:
+the wake gives its pid. Check that pid, not the handle.
+
 ## Path-relative annotation
 
 Paths in tool responses are project-relative. The response to each
