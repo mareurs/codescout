@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 197
+entry_high_water_F: 201
 entry_high_water_W: 151
 ---
 
@@ -66,6 +66,7 @@ entry_high_water_W: 151
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-197 | 2026-10-15 | med | stale-doc | fixed-verified | **The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it** — the live collection is per project (`artifact_chunks_<base>_<hash>`, 48,223 points here), so my "the Qdrant index looks stale" was wrong. Corrected in `934946e9`. |
+| F-201 | 2026-10-29 | high | plan-drift | open | **The background-wake spec arms on an input flag that `@ack_*` replays never carry** — plus `set_job_state` no-ops after eviction and the re-arm rule cannot locate a record from a handle. |
 | F-196 | 2026-10-15 | med | plan-drift | fixed-verified | **The artifact backend is resolved per process, and the plan treated it as a property of the project** — env outranks `project.toml`, no project in the catalog sets one, and `--all` spans projects, so a per-project selector would have been wrong for it. Fixed in `8c02ad77` and `934946e9`. |
 | F-195 | 2026-10-14 | med | plan-drift | fixed-verified | **"An empty workspace.toml is a reasonable default" was false for classification** — built-in rules cover none of specs, plans, ADRs, audits, handoffs, runbooks, ROADMAP or manual; the only copy of those nine rules is test-only `import_codescout`. |
 | F-194 | 2026-10-14 | med | api-contract | fixed-verified | **Remote embedder dimensions are unknown until the first response** — three observed RED regressions now pass; probe ordering/counts and the full gate are verified. |
@@ -17585,6 +17586,22 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 **Fix:** the doc names the per-project collection and `artifact_collection_name`, and says the shared collection is superseded (`934946e9`).
 
 **Valid:** dated 2026-10-15
+
+## F-201 — The background-wake spec arms on an input flag that `@ack_*` replays never carry
+
+**Valid:** dated 2026-10-29
+
+**Observed:** Recon before review of `docs/superpowers/specs/2026-10-29-background-job-wake-design.md` (the design for `docs/issues/2026-10-29-codescout-has-no-background-wait-and-notify-mechanism-and-claude-code-monitor-is-removed-by-the-bash-deny.md`). Three seams in the spec do not match the code.
+
+1. **The hook's arm guard misses two real spawn paths.** The spec arms on `tool_input.run_in_background == true`. (a) A dangerous background command goes through `@ack_*`: the first call returns `pending_ack` (no `@bg_*`), and the replay call's input is `{"command": "@ack_…"}` with no `run_in_background` key — yet it spawns in the background (`ack_re_dispatch_honours_run_in_background`, `src/tools/run_command/tests.rs`). No watcher would arm: a silent loss. (b) `parse_bool_param` (`src/tools/core/params.rs`) accepts the string `"true"`, so a Node hook testing `=== true` would miss it.
+2. **`set_job_state` silently no-ops once the handle is evicted** (`src/tools/output_buffer.rs`). `store_background` drops the oldest live handle when all retained jobs run. A record write placed inside `set_job_state` would never reach `exited` for such a job, and its watcher would wait to the heartbeat.
+3. **The re-arm rule names no way to find the record from a handle.** The file name needs the server pid, which the hook does not know at read time. Handles restart at `@bg_00000001` in every server (`store_background` counter), so a glob on the handle collides.
+
+Also seen, not a gap: background children run in their own process group (`process_group(0)` in `src/platform/unix.rs`) and nothing kills them on server exit (grep for a `Drop`/`killpg` path found none for background jobs). Inferred, not measured: a job survives its server's death.
+
+**Cost if missed:** (1) is a silent loss of the wake-up on every acked background command — the case goal 3 forbids. (2) and (3) would surface only in the builder's integration run, after both repos changed.
+
+**Resolution:** fold into the spec before planning — arm on the spawn response shape (`output_id` starts `@bg_` and no `exit_code`), write the record from the supervisor directly, keep a per-session handle→record map written at arm time.
 
 ## Template for new entries
 
