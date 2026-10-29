@@ -9,7 +9,7 @@ related:
 tags:
 - cluster/declared-not-wired
 kind: bug
-unverified: 'No regression test and no fix. Not checked: whether an auto-discovered member (not declared) shows the same mismatch; which other tools take a project_id and look it up in a store; whether the id mismatch also splits a member index between a parent run and a member run.'
+unverified: 'The fix is tested through Agent and project_id() only. Not run: the end-to-end search by declared id against a binary built with the fix; the gate on the fix commit; a member whose own project.toml names a project differently from its id; which other tools key a store by config.project.name for a member (memory, status) and whether any depends on the old name.'
 ---
 
 # BUG: semantic_search(project_id=<declared member id>) returns no results because an index is keyed by the member's directory name
@@ -44,21 +44,28 @@ Run output: scratchpad `kodi-id.out`, 2026-10-29. `git_sync` in the status shows
 1. **Hypothesis:** activating by the declared id keys the index by that id. **Test:** step 2 and 3 above. **Verdict:** rejected. The status shows the directory name.
 
 ## Fix
-None yet. Options, not chosen:
-- Write the declared id into the member's `project.toml` `[project] name` when onboarding or activating a declared member. The risk is a rename of an existing index.
-- Resolve a `project_id` argument through the workspace's project list to the store key before the lookup.
-- Make the empty result name the project id it searched and the ids that hold chunks, as the negative-results ADR requires (docs/adrs/2026-08-27-negative-results-name-their-scope.md).
+Chosen 2026-10-29: a non-root member is keyed by its workspace id.
+- `activate_within_workspace` sets `config.project.name` to the member's workspace id when the member's root is not `.` (src/agent/mod.rs).
+- `ActiveProject` gains `member_id: Option<String>`. `reload_config_from_disk` reapplies it, so a reload of the member's `project.toml` cannot put the directory name back.
+- Auto-discovery sets an id to the directory name exactly (src/workspace.rs, `rel_path.file_name()`), so a discovered member keeps its key. Only a declared id that differs from the directory changes. Checked on a replica: an auto-discovered member `pytool` (manifest name `pytool-dist`) was keyed `pytool`, and a search by `pytool` found its files.
+- Edge, not checked: a member whose own `project.toml` names a project differently from its id now takes the id as the key, and an index built under the old name needs a rebuild.
+- Not done: a hint on the empty result that names the project id searched and the ids that hold chunks.
 
 ## Tests added
-None yet. A red test should call the tool path with a declared id and expect either the file or a hint that names the indexed id.
+Both in src/agent/declared_member_tests.rs.
+- `a_declared_member_is_keyed_by_its_declared_id_not_its_directory_name`: red first, `left: "addon"`, `right: "thecrew-module"`. Green after the fix.
+- `a_reload_keeps_a_declared_member_keyed_by_its_declared_id`: green with the fix. With the reapply in `reload_config_from_disk` replaced by a no-op, it failed with `left: "addon"`, so it pins the reapply.
+Both go through `Agent` and the member's `project_id()`. Neither runs `semantic_search` against a real store, so the end-to-end search by declared id is not re-run after the fix.
 
 ## Workarounds
 - Search with the directory name as `project_id`, or omit `project_id` while the member is the active project.
 
 ## Resume
-1. Write the red test first (build a replica index in a test, search by declared id).
-2. Check an auto-discovered member for the same mismatch.
-3. Pick a fix from the options above and ask the user, because it changes what names a store holds.
+1. Done 2026-10-29: red test, then the fix (see Fix and Tests added).
+2. Done 2026-10-29: an auto-discovered member is keyed by its directory name, equal to its id, so it is not affected.
+3. Open: re-run the replica script `kodi-id.py` against a binary built with the fix, and expect `semantic_search(project_id="thecrew-module")` to find `addon.py`.
+4. Open: the hint on an empty result that names the project id searched and the ids that hold chunks (docs/adrs/2026-08-27-negative-results-name-their-scope.md).
+5. Open: the gate result for the fix commit. Close or archive after 3 and the gate, with the fix SHA and its patch-id.
 
 ## References
 - docs/issues/2026-10-28-a-nested-git-repo-cannot-join-a-workspace-as-a-project-and-pinned-onboarding-mixes-in-the-home-workspace.md (Evidence 7)

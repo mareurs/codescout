@@ -85,3 +85,46 @@ fn a_member_without_its_own_git_dir_has_no_head_and_no_remote() {
     assert!(probe_has_git_remote(&root));
     assert!(!probe_has_git_remote(&member));
 }
+/// A declared member is keyed in the index and the search store by its declared id, the id
+/// `workspace(list_projects)` shows. It was keyed by the directory name, so
+/// `semantic_search(project_id=<declared id>)` found nothing.
+/// docs/issues/2026-10-29-semantic-search-project-id-takes-the-directory-name-not-the-declared-member-id.md
+#[tokio::test]
+async fn a_declared_member_is_keyed_by_its_declared_id_not_its_directory_name() {
+    let (_host, root) = workspace_declaring_a_manifestless_member();
+    let agent = Agent::new(Some(root)).await.unwrap();
+
+    agent
+        .activate_within_workspace("thecrew-module", None)
+        .await
+        .unwrap();
+
+    let key = agent
+        .with_project(|p| Ok(p.project_id().to_string()))
+        .await
+        .unwrap();
+    assert_eq!(key, "thecrew-module");
+}
+/// A reload of the member's `project.toml` re-reads the name from disk. It must not put the
+/// directory name back in place of the declared id.
+#[tokio::test]
+async fn a_reload_keeps_a_declared_member_keyed_by_its_declared_id() {
+    let (_host, root) = workspace_declaring_a_manifestless_member();
+    let agent = Agent::new(Some(root.clone())).await.unwrap();
+    agent
+        .activate_within_workspace("thecrew-module", None)
+        .await
+        .unwrap();
+    let member = root.join("remote-fixes/addon");
+    std::fs::create_dir_all(member.join(".codescout")).unwrap();
+    let toml = member.join(".codescout/project.toml");
+    std::fs::write(&toml, "[project]\nname = \"addon\"\n").unwrap();
+
+    agent.reload_config_if_project_toml(&toml).await;
+
+    let key = agent
+        .with_project(|p| Ok(p.project_id().to_string()))
+        .await
+        .unwrap();
+    assert_eq!(key, "thecrew-module");
+}

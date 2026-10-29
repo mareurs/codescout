@@ -322,6 +322,7 @@ impl AgentInner {
             write_lock,
             file_lock,
             session_write_roots: Arc::new(std::sync::Mutex::new(Vec::new())),
+            member_id: None,
         };
 
         let mut projects: Vec<Project> = Vec::new();
@@ -469,6 +470,15 @@ pub struct ActiveProject {
     /// Session-scoped directories approved for writing outside the project root.
     /// Managed by the `approve_write` tool; cleared on re-activation.
     pub(crate) session_write_roots: Arc<std::sync::Mutex<Vec<PathBuf>>>,
+    /// The workspace id of a non-root member, or `None` for a root project.
+    ///
+    /// `config.project.name` is the store key (index, search, memory). It defaults to the
+    /// directory name, which is not the id `workspace(list_projects)` shows when a
+    /// `[[project]]` entry declares a different one. A member therefore carries its id here,
+    /// and `reload_config_from_disk` reapplies it, so a reload cannot put the directory name
+    /// back.
+    /// docs/issues/2026-10-29-semantic-search-project-id-takes-the-directory-name-not-the-declared-member-id.md
+    pub(crate) member_id: Option<String>,
 }
 
 impl ActiveProject {
@@ -513,6 +523,9 @@ impl ActiveProject {
         match crate::config::project::ProjectConfig::load_or_default(&self.root) {
             Ok(fresh) => {
                 self.config = fresh;
+                if let Some(id) = &self.member_id {
+                    self.config.project.name = id.clone();
+                }
                 self.config_load_error = None;
             }
             Err(e) => {
@@ -992,6 +1005,7 @@ impl Agent {
                 file_lock: open_lock_file(&root)
                     .with_context(|| format!("failed to open write.lock for {}", root.display()))?,
                 session_write_roots: Arc::new(std::sync::Mutex::new(Vec::new())),
+                member_id: None,
             };
 
             // Discover sub-projects; root project is always included. Depth, exclude
@@ -1814,7 +1828,14 @@ impl Agent {
         }
 
         // Load config, memory, library registry for the sub-project
-        let config = ProjectConfig::load_or_default(&abs_root)?;
+        let mut config = ProjectConfig::load_or_default(&abs_root)?;
+        // A non-root member is keyed by its workspace id, the one `list_projects` shows. The
+        // loader names it after its directory, which differs when a `[[project]]` entry
+        // declares another id, and then a search by that id finds nothing.
+        let member_id = (relative_root.as_path() != Path::new(".")).then(|| project_id.to_string());
+        if let Some(id) = &member_id {
+            config.project.name = id.clone();
+        }
         // Resolve through the workspace, NOT `MemoryStore::open(&abs_root)`. Every
         // branch of the live `memory` tool — write included — routes through
         // `Workspace::memory_dir_for_project`, which places a non-root project's
@@ -1856,6 +1877,7 @@ impl Agent {
             write_lock: Arc::new(tokio::sync::Mutex::new(())),
             file_lock,
             session_write_roots: Arc::new(std::sync::Mutex::new(Vec::new())),
+            member_id: member_id.clone(),
         };
 
         // Promote in-place
@@ -3088,6 +3110,7 @@ mod tests {
             write_lock: Arc::new(tokio::sync::Mutex::new(())),
             file_lock,
             session_write_roots: Arc::new(std::sync::Mutex::new(Vec::new())),
+            member_id: None,
         }
     }
 
