@@ -1,10 +1,11 @@
 ---
 id: '4012ad02db866d4d'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: two concurrent catalog writes (append_entry, allocate_entry_id) fail with "database is locked" when every fsync takes 3 s'
 tags:
 - cluster/unclassified
+unverified: 'Not established: that the cold-start lock hold never fails on a real disk or a real server pair. The failure was reproduced only with 3 s of injected fsync latency. The operator accepted the product behaviour on 2026-10-29; no product code changed. A longer busy_timeout was not tried.'
 ---
 
 ## Summary
@@ -70,7 +71,8 @@ None needed for the normal test run: without injection the tests pass.
 
 ## Resume
 
-1. Decide what the test should do: the flip is explained (fresh-WAL write inside the race), so either warm the WAL in setup, as the mutation did, or state that a first write after the last connection closed is slow by design. Repeat the mutation run for more than one run. The product question stays open: a first writer after an idle period holds the write lock for three fsyncs.
+0. Decided 2026-10-29 by the operator: accept the product behaviour. The tests were fixed (commit `4f908aeb8`); no product change, no keeper connection (it did not help), no longer `busy_timeout`. Reopen if a real `database is locked` appears at a first write outside injection.
+1. (Done, see 0) Decide what the test should do: the flip is explained (fresh-WAL write inside the race), so either warm the WAL in setup, as the mutation did, or state that a first write after the last connection closed is slow by design. Repeat the mutation run for more than one run. The product question stays open: a first writer after an idle period holds the write lock for three fsyncs.
 2. Count fsyncs and lock hold time of one `append_entry` (`strace -T`).
 3. Decide whether 5 s is a design limit for a catalog on slow storage, and what to do for two real servers.
 
