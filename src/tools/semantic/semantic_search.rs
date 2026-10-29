@@ -828,6 +828,50 @@ impl Tool for SemanticSearch {
                 crate::tools::RecoverableError::with_hint(format!("stack search failed: {e}"), hint)
             })?;
         let mut out = search_response(&hits, limit);
+        if hits.is_empty() {
+            // Fail-soft: a failed lookup leaves the empty page as it was, never an error.
+            let collection = client.config.collection("code_chunks");
+            if let Ok(searched_has_chunks) =
+                client.project_has_chunks(&collection, &project_id).await
+            {
+                let mut holding: Vec<String> = Vec::new();
+                if !searched_has_chunks {
+                    let mut candidates: Vec<String> = ctx
+                        .agent
+                        .discovered_projects_at(ctx.workspace_override.as_deref())
+                        .await
+                        .into_iter()
+                        .map(|p| p.id)
+                        .collect();
+                    if let Ok(active) = ctx
+                        .agent
+                        .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                            Ok(p.config.project.name.clone())
+                        })
+                        .await
+                    {
+                        candidates.push(active);
+                    }
+                    candidates.sort();
+                    candidates.dedup();
+                    for id in candidates {
+                        if id != project_id
+                            && client
+                                .project_has_chunks(&collection, &id)
+                                .await
+                                .unwrap_or(false)
+                        {
+                            holding.push(id);
+                        }
+                    }
+                }
+                if let Some(hint) =
+                    empty_result_scope_hint(&project_id, searched_has_chunks, &holding)
+                {
+                    out["hint"] = serde_json::json!(hint);
+                }
+            }
+        }
         // Both return paths stamp it, not just this one: the worktree branch above
         // returns its own response and would otherwise be the single search shape
         // that never reports an incomplete index.
@@ -927,6 +971,37 @@ fn index_skip_note(root: Option<&std::path::Path>) -> Option<String> {
          incomplete index — an absent match here does not mean the code lacks it. \
          `index(action=\"status\")` lists them; `index(action=\"build\")` retries.",
         st.last_sync_skipped_count
+    ))
+}
+
+/// The note for a search that came back empty because the `project_id` it searched holds no
+/// chunks, or `None` when the project does hold chunks (then the empty page is a real "no
+/// match" and needs no scope note).
+///
+/// A store key is the project's workspace id, and a search by any other name returns an empty
+/// page that reads like "nothing matches". The note names the id that was searched and the
+/// projects of this workspace that do hold chunks, so a mistyped or outdated id is visible.
+/// docs/issues/2026-10-29-semantic-search-project-id-takes-the-directory-name-not-the-declared-member-id.md
+pub(crate) fn empty_result_scope_hint(
+    searched: &str,
+    searched_has_chunks: bool,
+    holding_chunks: &[String],
+) -> Option<String> {
+    if searched_has_chunks {
+        return None;
+    }
+    if holding_chunks.is_empty() {
+        return Some(format!(
+            "No chunks are indexed under project id `{searched}`, and no project of this \
+             workspace holds any, so nothing could match. Run index(action=\"build\")."
+        ));
+    }
+    let named: Vec<String> = holding_chunks.iter().map(|id| format!("`{id}`")).collect();
+    Some(format!(
+        "No chunks are indexed under project id `{searched}`, so nothing could match. \
+         Projects of this workspace that hold chunks: {}. Pass one of them as project_id, \
+         or run index(action=\"build\") for `{searched}`.",
+        named.join(", ")
     ))
 }
 
@@ -2199,5 +2274,40 @@ mod worktree_search_tests {
             truncated.contains("SUSPECT-MARKER-MUST-SURVIVE"),
             "state field must survive truncation from the tail: {truncated}"
         );
+    }
+}
+
+#[cfg(test)]
+mod empty_result_scope_hint_tests {
+    use super::empty_result_scope_hint;
+
+    fn ids(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_project_without_chunks_is_named_with_the_projects_that_hold_chunks() {
+        let hint = empty_result_scope_hint("thecrew-module", false, &ids(&["kodi", "pytool"]))
+            .expect("an id with no chunks must be named");
+
+        assert!(hint.contains("`thecrew-module`"), "{hint}");
+        assert!(
+            hint.contains("`kodi`") && hint.contains("`pytool`"),
+            "{hint}"
+        );
+        assert!(hint.contains("project_id"), "{hint}");
+    }
+
+    #[test]
+    fn a_project_without_chunks_in_a_workspace_without_any_says_to_build() {
+        let hint = empty_result_scope_hint("kodi", false, &[]).expect("must be named");
+
+        assert!(hint.contains("`kodi`"), "{hint}");
+        assert!(hint.contains("index(action=\"build\")"), "{hint}");
+    }
+
+    #[test]
+    fn a_project_with_chunks_gets_no_note_because_the_empty_page_is_a_real_miss() {
+        assert_eq!(empty_result_scope_hint("kodi", true, &ids(&["kodi"])), None);
     }
 }
