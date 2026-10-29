@@ -235,12 +235,19 @@ fn resolved_chunk_budget(root: &std::path::Path) -> anyhow::Result<usize> {
 
 /// Best-effort cross-embed a markdown memory into the semantic store.
 /// Called on `write` so that structured memories are also discoverable via `recall`.
-async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> anyhow::Result<()> {
-    let (project_id, root) = ctx
+async fn cross_embed_memory(
+    ctx: &ToolContext,
+    input: &Value,
+    topic: &str,
+    content: &str,
+) -> anyhow::Result<()> {
+    // The key follows the call's `project_id`, not the focus: the file went to the named
+    // project's directory, so its point must carry that project's key.
+    // docs/issues/2026-10-29-memory-write-with-a-project-id-cross-embeds-under-the-focused-project-not-the-named-one.md
+    let project_id = semantic_project_key(input, ctx).await?;
+    let root = ctx
         .agent
-        .with_project_at(ctx.workspace_override.as_deref(), |p| {
-            Ok((p.config.project.name.clone(), p.root.clone()))
-        })
+        .with_project_at(ctx.workspace_override.as_deref(), |p| Ok(p.root.clone()))
         .await?;
 
     // `embed_document`, not `embed`: this is a document being stored. `embed` is
@@ -288,6 +295,25 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
     Ok(())
 }
 
+/// The key the semantic store files this call's memories under: the call's `project_id`
+/// when it names one, else the focused project's name (the unchanged default).
+async fn semantic_project_key(input: &Value, ctx: &ToolContext) -> anyhow::Result<String> {
+    match input.get("project_id").and_then(Value::as_str) {
+        Some(id) => {
+            ctx.agent
+                .semantic_key_for_project(ctx.workspace_override.as_deref(), id)
+                .await
+        }
+        None => {
+            ctx.agent
+                .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                    Ok(p.config.project.name.clone())
+                })
+                .await
+        }
+    }
+}
+
 /// Create semantic anchors for a markdown memory by embedding it, asking the
 /// retrieval stack for similar code chunks, and re-upserting the memory with
 /// `anchors` populated. Excludes files already covered by path anchors.
@@ -299,15 +325,18 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
 /// Best-effort: failures are returned to the caller (which logs and ignores).
 async fn create_semantic_anchors(
     ctx: &ToolContext,
+    input: &Value,
     topic: &str,
     content: &str,
     path_anchor_files: &HashSet<String>,
 ) -> anyhow::Result<()> {
-    let (project_id, min_sim, top_n, root) = ctx
+    // The SAME key `cross_embed_memory` used: this call re-upserts that point's id, and a
+    // different key would leave two points for one memory.
+    let project_id = semantic_project_key(input, ctx).await?;
+    let (min_sim, top_n, root) = ctx
         .agent
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
             Ok((
-                p.config.project.name.clone(),
                 p.config.memory.semantic_anchor_min_similarity,
                 p.config.memory.semantic_anchor_top_n,
                 p.root.clone(),
@@ -1056,7 +1085,7 @@ impl Tool for Memory {
 
                 // Cross-embed into semantic store (best-effort, non-fatal)
                 if !private {
-                    if let Err(e) = cross_embed_memory(ctx, topic, content).await {
+                    if let Err(e) = cross_embed_memory(ctx, &input, topic, content).await {
                         tracing::warn!("cross-embed memory failed (non-fatal): {e}");
                         warnings.push(format!("cross-embed failed: {e}"));
                     }
@@ -1084,7 +1113,7 @@ impl Tool for Memory {
                         }
                     };
                     if let Err(e) =
-                        create_semantic_anchors(ctx, topic, content, &path_files).await
+                        create_semantic_anchors(ctx, &input, topic, content, &path_files).await
                     {
                         tracing::warn!("semantic anchor creation failed (non-fatal): {e}");
                         warnings.push(format!("semantic anchor creation failed: {e}"));
@@ -1208,13 +1237,7 @@ impl Tool for Memory {
                 // The point id is derived from (project_id, "structured", topic),
                 // so we can delete without looking it up first.
                 if !private {
-                    let project_id = ctx
-                        .agent
-                        .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                            Ok(p.config.project.name.clone())
-                        })
-                        .await
-                        .ok();
+                    let project_id = semantic_project_key(&input, ctx).await.ok();
                     if let Some(project_id) = project_id {
                         let id = crate::retrieval::memory_payload::point_id_for(
                             &project_id,
@@ -1244,12 +1267,7 @@ impl Tool for Memory {
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| "unstructured".to_string());
 
-                let project_id = ctx
-                    .agent
-                    .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                        Ok(p.config.project.name.clone())
-                    })
-                    .await?;
+                let project_id = semantic_project_key(&input, ctx).await?;
 
                 let dense = ctx
                     .agent
@@ -1285,12 +1303,7 @@ impl Tool for Memory {
                 let limit = super::optional_u64_param(&input, "limit").unwrap_or(5) as usize;
                 let bucket_filter = input["bucket"].as_str();
 
-                let project_id = ctx
-                    .agent
-                    .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                        Ok(p.config.project.name.clone())
-                    })
-                    .await?;
+                let project_id = semantic_project_key(&input, ctx).await?;
 
                 // Embed via the shared dense-embedder seam so the query vector
                 // lives in the same space as the memories collection's stored

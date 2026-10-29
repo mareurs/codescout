@@ -1226,6 +1226,57 @@ impl Agent {
         f(project)
     }
 
+    /// The key the semantic memory store files `project_id`'s memories under, resolved in the
+    /// workspace named by `workspace_override` (resident-on-demand), or the default one.
+    ///
+    /// An activated project answers with its `config.project.name`, which is the key the
+    /// no-`project_id` path has always used for the focused project. A dormant one has no
+    /// config yet and answers with its id, which is the name activation gives a non-root
+    /// member (see [`ActiveProject::member_id`]), so the two answers agree.
+    ///
+    /// Refuses an id the workspace does not hold, by name and with the valid ids: filing a
+    /// memory under a key no project owns is how a typo earns a point nothing can recall.
+    pub async fn semantic_key_for_project(
+        &self,
+        workspace_override: Option<&Path>,
+        project_id: &str,
+    ) -> Result<String> {
+        if let Some(root) = workspace_override {
+            self.ensure_resident(root.to_path_buf()).await?;
+        }
+        let inner = self.inner.read().await;
+        let ws = match workspace_override {
+            Some(root) => {
+                let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+                inner.workspaces.get(&key).ok_or_else(|| {
+                    anyhow::anyhow!("pinned workspace not resident: {}", key.display())
+                })?
+            }
+            None => inner.default_workspace().ok_or_else(|| {
+                crate::tools::RecoverableError::with_hint(
+                    "No active project. Use activate_project first.",
+                    "Call activate_project(\"/path/to/project\") to set the active project.",
+                )
+            })?,
+        };
+        let project = ws
+            .projects
+            .iter()
+            .find(|p| p.discovered.id == project_id)
+            .ok_or_else(|| {
+                let mut ids = ws.project_ids();
+                ids.sort();
+                crate::tools::RecoverableError::with_hint(
+                    format!("No project '{project_id}'."),
+                    format!("Valid project ids: {}.", ids.join(", ")),
+                )
+            })?;
+        Ok(match &project.state {
+            crate::workspace::ProjectState::Activated(active) => active.config.project.name.clone(),
+            crate::workspace::ProjectState::Dormant => project_id.to_string(),
+        })
+    }
+
     /// Pinned twin of `project_root`: focused root of the workspace named by
     /// `workspace_override` (resident-on-demand), or the default if `None`.
     pub async fn project_root_for(&self, workspace_override: Option<&Path>) -> Option<PathBuf> {

@@ -909,9 +909,14 @@ async fn cross_embed_memory_stores_under_pinned_project_not_session_default() {
 
     // Cross-embed a memory UNDER THE PIN.
     ctx.workspace_override = Some(pinned_dir.path().to_path_buf());
-    super::cross_embed_memory(&ctx, "pinned-note", "belongs to the pinned project")
-        .await
-        .unwrap();
+    super::cross_embed_memory(
+        &ctx,
+        &json!({}),
+        "pinned-note",
+        "belongs to the pinned project",
+    )
+    .await
+    .unwrap();
 
     // It must land under the pinned project_id, not the session default.
     assert_eq!(
@@ -2529,6 +2534,17 @@ async fn memory_write_routes_to_project_dir() {
 /// `mcp-server` is actually discovered. The hint assertions below are the first
 /// thing in the suite that can tell the difference.
 async fn multi_project_ctx() -> (tempfile::TempDir, ToolContext) {
+    let (dir, ctx, _store) = multi_project_ctx_with_store().await;
+    (dir, ctx)
+}
+
+/// [`multi_project_ctx`] plus a handle on the in-memory semantic store, so a test can
+/// assert WHICH project key a memory landed under, not merely that a write succeeded.
+async fn multi_project_ctx_with_store() -> (
+    tempfile::TempDir,
+    ToolContext,
+    std::sync::Arc<crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore>,
+) {
     use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
     use crate::memory::semantic_store::SemanticMemoryStore;
     use crate::retrieval::embedder::DenseEmbedder;
@@ -2563,16 +2579,162 @@ async fn multi_project_ctx() -> (tempfile::TempDir, ToolContext) {
         .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
         .map_err(|_| ())
         .expect("set embedder");
+    let store = Arc::new(InMemorySemanticMemoryStore::new());
     ctx.agent
-        .set_semantic_memory_store_for_test(
-            Arc::new(InMemorySemanticMemoryStore::new()) as Arc<dyn SemanticMemoryStore>
-        )
+        .set_semantic_memory_store_for_test(store.clone() as Arc<dyn SemanticMemoryStore>)
         .map_err(|_| ())
         .expect("set store");
     ctx.agent.set_code_search_for_test(
         Arc::new(NoCodeSearch) as Arc<dyn crate::retrieval::search::CodeChunkSearch>
     );
-    (dir, ctx)
+    (dir, ctx, store)
+}
+
+/// Points the store holds for `project_id`, whatever their bucket.
+async fn points_under(
+    store: &crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore,
+    project_id: &str,
+) -> usize {
+    use crate::memory::semantic_store::{MemoryFilter, SemanticMemoryStore};
+    store
+        .list(project_id, MemoryFilter::default())
+        .await
+        .unwrap()
+        .len()
+}
+
+/// The `memory` tool takes `project_id` to scope a call to a workspace project. The file
+/// write honors it; the cross-embed read the FOCUSED project's name instead, so a member's
+/// memory was filed under another project's key.
+/// docs/issues/2026-10-29-memory-write-with-a-project-id-cross-embeds-under-the-focused-project-not-the-named-one.md
+#[tokio::test]
+async fn a_write_with_a_project_id_cross_embeds_under_the_named_project() {
+    let (_dir, ctx, store) = multi_project_ctx_with_store().await;
+    let focused = ctx
+        .agent
+        .with_project(|p| Ok(p.config.project.name.clone()))
+        .await
+        .unwrap();
+    assert_ne!(focused, "mcp-server", "test setup: the focus is the root");
+
+    Memory
+        .call(
+            json!({
+                "action": "write",
+                "topic": "conventions",
+                "content": "Use camelCase",
+                "project_id": "mcp-server"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        points_under(&store, "mcp-server").await,
+        1,
+        "the point must carry the named project's key"
+    );
+    assert_eq!(
+        points_under(&store, &focused).await,
+        0,
+        "the point must NOT carry the focused project's key"
+    );
+}
+
+#[tokio::test]
+async fn a_delete_with_a_project_id_removes_the_named_projects_point() {
+    let (_dir, ctx, store) = multi_project_ctx_with_store().await;
+    let args = |action: &str| {
+        json!({
+            "action": action,
+            "topic": "conventions",
+            "content": "Use camelCase",
+            "project_id": "mcp-server"
+        })
+    };
+    Memory.call(args("write"), &ctx).await.unwrap();
+    assert_eq!(
+        points_under(&store, "mcp-server").await,
+        1,
+        "precondition: the write filed a point under the named project"
+    );
+
+    Memory.call(args("delete"), &ctx).await.unwrap();
+
+    assert_eq!(
+        points_under(&store, "mcp-server").await,
+        0,
+        "the delete must remove the point the write filed"
+    );
+}
+
+#[tokio::test]
+async fn remember_with_a_project_id_files_under_the_named_project() {
+    let (_dir, ctx, store) = multi_project_ctx_with_store().await;
+
+    Memory
+        .call(
+            json!({
+                "action": "remember",
+                "content": "The member builds with tsc",
+                "project_id": "mcp-server"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(points_under(&store, "mcp-server").await, 1);
+}
+
+#[tokio::test]
+async fn recall_with_a_project_id_reads_the_named_projects_points() {
+    let (_dir, ctx, _store) = multi_project_ctx_with_store().await;
+    Memory
+        .call(
+            json!({
+                "action": "remember",
+                "content": "The member builds with tsc",
+                "project_id": "mcp-server"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let hits = Memory
+        .call(
+            json!({
+                "action": "recall",
+                "query": "how does the member build",
+                "project_id": "mcp-server"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        hits.to_string().contains("The member builds with tsc"),
+        "recall scoped to the member must find the member's memory: {hits}"
+    );
+
+    // The focused project (the root) holds no such memory: recall without a
+    // `project_id` reads the focused project's key, and the memory was filed under the
+    // member's. Without this half the test passes on the old code, where `remember` and
+    // `recall` both ignored `project_id` and so agreed with each other.
+    let unscoped = Memory
+        .call(
+            json!({ "action": "recall", "query": "how does the member build" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        !unscoped.to_string().contains("The member builds with tsc"),
+        "a recall without project_id must not return the member's memory: {unscoped}"
+    );
 }
 
 #[tokio::test]
