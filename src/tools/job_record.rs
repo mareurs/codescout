@@ -138,10 +138,19 @@ fn read_record(path: &Path) -> Option<JobRecord> {
 pub fn write_record(path: &Path, record: &JobRecord) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     create_private_dir(dir)?;
-    let tmp = sidecar(path, &format!(".tmp-{}", std::process::id()));
+    // Unique per write: two threads of this server write the same record (spawn writes
+    // the running one, the supervisor the finished one), and `create_new` below fails
+    // on a name that already exists.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = sidecar(path, &format!(".tmp-{}-{seq}", std::process::id()));
     let json = serde_json::to_vec_pretty(record).map_err(std::io::Error::other)?;
     let result = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
+        // O_EXCL: never follow a symlink planted at the temp name.
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
         f.write_all(&json)?;
         f.sync_all()?;
         std::fs::rename(&tmp, path)
@@ -154,11 +163,27 @@ pub fn write_record(path: &Path, record: &JobRecord) -> std::io::Result<()> {
 
 #[cfg(unix)]
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
-        .create(dir)
+        .create(dir)?;
+    // `create` succeeds on a directory that already exists, whatever its owner or mode.
+    // The name is fixed and predictable in a shared temp dir, so another user may have
+    // made it first: refuse anything we do not own or that others can touch.
+    let meta = std::fs::symlink_metadata(dir)?;
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    let euid = unsafe { libc::geteuid() };
+    if !meta.is_dir() || meta.uid() != euid || meta.mode() & 0o077 != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "record directory {} is not an owner-only directory owned by this user",
+                dir.display()
+            ),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(not(unix))]
@@ -273,7 +298,7 @@ mod tests {
 
     #[test]
     fn write_record_round_trips_and_leaves_no_temp_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = private_tempdir();
         let path = record_path(dir.path(), "00000000", "@bg_00000001");
         let rec = JobRecord::running("@bg_00000001", "true", Some(1));
         write_record(&path, &rec).unwrap();
@@ -300,6 +325,18 @@ mod tests {
         );
     }
 
+    /// A temp dir the record-directory check accepts: `tempdir()` follows the umask (0755
+    /// here), and `write_record` refuses a directory other users can reach.
+    fn private_tempdir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        dir
+    }
+
     fn sidecar(path: &Path, ext: &str) -> PathBuf {
         let mut s = path.as_os_str().to_owned();
         s.push(ext);
@@ -321,7 +358,7 @@ mod tests {
 
     #[test]
     fn remove_if_delivered_keeps_undelivered_and_running_records() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = private_tempdir();
         // running + .delivered -> kept
         let running = seed(
             dir.path(),
@@ -358,7 +395,7 @@ mod tests {
 
     #[test]
     fn sweep_keeps_young_records_and_live_running_ones() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = private_tempdir();
         let exited = seed(
             dir.path(),
             "00000001",
@@ -397,5 +434,92 @@ mod tests {
         assert!(!exited.exists() && !sidecar(&exited, ".watch").exists());
         assert!(live.exists());
         assert!(!dead.exists() && !sidecar(&dead, ".watch").exists());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn write_record_refuses_a_pre_existing_directory_others_can_reach() {
+        use std::os::unix::fs::PermissionsExt;
+        for mode in [0o755, 0o777] {
+            let base = tempfile::tempdir().unwrap();
+            let dir = base.path().join("codescout-bg");
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+            let path = record_path(&dir, "00000000", "@bg_00000001");
+            let err = write_record(&path, &JobRecord::running("@bg_00000001", "true", None))
+                .expect_err("a directory open to others must be refused");
+            assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied, "{err}");
+            assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "mode {mode:o}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_record_does_not_follow_a_symlink_at_the_temp_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, "precious").unwrap();
+        let sub = dir.path().join("bg");
+        let path = record_path(&sub, "00000000", "@bg_00000001");
+        let rec = JobRecord::running("@bg_00000001", "true", None);
+        write_record(&path, &rec).unwrap(); // creates `sub` 0700
+                                            // Plant a symlink at every temp name the next writes could pick.
+                                            // (The counter is process-wide, so plant far past anything the suite reaches.)
+        for seq in 0..5000 {
+            let tmp = sidecar(&path, &format!(".tmp-{}-{seq}", std::process::id()));
+            let _ = std::os::unix::fs::symlink(&victim, tmp);
+        }
+        assert!(
+            write_record(&path, &rec).is_err(),
+            "O_EXCL must hit the planted name"
+        );
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "precious");
+    }
+
+    #[test]
+    fn concurrent_writers_of_one_record_both_succeed_and_leave_no_temp_file() {
+        let dir = private_tempdir();
+        let path = record_path(dir.path(), "00000000", "@bg_00000001");
+        std::thread::scope(|s| {
+            for _ in 0..8 {
+                s.spawn(|| {
+                    for _ in 0..50 {
+                        let rec = JobRecord::running("@bg_00000001", "true", None);
+                        write_record(&path, &rec).unwrap();
+                    }
+                });
+            }
+        });
+        let back: JobRecord =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(back.handle, "@bg_00000001");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn sweep_skips_what_it_cannot_judge_and_a_missing_directory_is_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let garbage = dir.path().join("x.json");
+        std::fs::write(&garbage, "not json {").unwrap();
+        let json_dir = dir.path().join("dir.json");
+        std::fs::create_dir(&json_dir).unwrap();
+        assert_eq!(sweep_stale(dir.path(), Duration::ZERO, |_| false), 0);
+        assert!(garbage.exists() && json_dir.exists());
+        assert_eq!(
+            sweep_stale(&dir.path().join("absent"), Duration::ZERO, |_| false),
+            0
+        );
+    }
+
+    #[test]
+    fn remove_if_delivered_is_false_for_a_missing_or_malformed_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("none.json");
+        std::fs::write(sidecar(&missing, ".delivered"), b"").unwrap();
+        assert!(!remove_if_delivered(&missing));
+        let bad = dir.path().join("bad.json");
+        std::fs::write(&bad, "garbage").unwrap();
+        std::fs::write(sidecar(&bad, ".delivered"), b"").unwrap();
+        assert!(!remove_if_delivered(&bad));
+        assert!(bad.exists() && sidecar(&bad, ".delivered").exists());
     }
 }
