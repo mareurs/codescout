@@ -94,6 +94,8 @@ async fn spawn_background_command(
     work_dir: &Path,
     ctx: &ToolContext,
 ) -> anyhow::Result<Value> {
+    use crate::tools::job_record::{record_path, write_record, JobRecord};
+
     let log_tmp = tempfile::Builder::new()
         .prefix("codescout-bg-")
         .suffix(".log")
@@ -110,6 +112,7 @@ async fn spawn_background_command(
         .stdout(std::process::Stdio::from(log_file))
         .stderr(std::process::Stdio::from(log_stderr))
         .spawn()?;
+    let job_pid = child.id();
 
     let ref_id = ctx.output_buffer.store_background(BackgroundJob {
         log_path,
@@ -117,11 +120,23 @@ async fn spawn_background_command(
         state: JobState::Running,
     });
 
+    // The completion record. Written BEFORE the supervisor is spawned, so the
+    // supervisor's `finished` write can never be overtaken by this `running` write:
+    // ordering by construction, not by a lock.
+    let record_file = record_path(
+        ctx.output_buffer.record_dir(),
+        ctx.output_buffer.record_token(),
+        &ref_id,
+    );
+    let mut record = JobRecord::running(&ref_id, resolved_command, job_pid);
+    let first_write = write_record(&record_file, &record);
+
     // The supervisor outlives this call deliberately: it is not tied to the tool
     // future, so cancelling the call does not discard the outcome. It holds an
     // `Arc<OutputBuffer>` clone, which is what makes the write-after-return legal.
     let buffer = ctx.output_buffer.clone();
     let supervised_id = ref_id.clone();
+    let supervised_record = record_file.clone();
     tokio::spawn(async move {
         let state = match child.wait().await {
             Ok(status) => JobState::Exited {
@@ -131,6 +146,17 @@ async fn spawn_background_command(
                 error: e.to_string(),
             },
         };
+        // The record is written here, before `set_job_state` and never through it:
+        // `set_job_state` silently does nothing once the handle has been evicted,
+        // and an evicted live job is exactly the one whose waiter has no other channel.
+        record.finish(&state);
+        if let Err(e) = write_record(&supervised_record, &record) {
+            tracing::warn!(
+                "failed to write final record {}: {}",
+                supervised_record.display(),
+                e
+            );
+        }
         buffer.set_job_state(&supervised_id, state);
     });
 
@@ -138,14 +164,30 @@ async fn spawn_background_command(
     // report. `format_run_command`'s three-state match reads that absence as
     // "running", which is correct here precisely because this response is
     // emitted at spawn time rather than five seconds later.
-    Ok(serde_json::json!({
-        "output_id": ref_id,
-        "hint": format!(
-            "Started; outcome not yet observed. Read output with run_command(\"tail -50 {}\") \
-             — that response carries this job's state.",
-            ref_id
-        )
-    }))
+    let mut hint = format!(
+        "Started; outcome not yet observed. Read output with run_command(\"tail -50 {}\") \
+         — that response carries this job's state.",
+        ref_id
+    );
+    let mut response = serde_json::json!({ "output_id": ref_id });
+    match first_write {
+        Ok(()) => {
+            response["record"] = serde_json::json!(record_file.display().to_string());
+        }
+        Err(e) => {
+            tracing::warn!(
+                "failed to write job record {}: {}",
+                record_file.display(),
+                e
+            );
+            response["record_error"] = serde_json::json!(e.to_string());
+            hint.push_str(
+                " No completion record could be written, so no wake-up will come for this job.",
+            );
+        }
+    }
+    response["hint"] = serde_json::json!(hint);
+    Ok(response)
 }
 
 /// SF-4: is `path` safe to interpolate into a shell command?

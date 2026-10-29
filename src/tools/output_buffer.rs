@@ -87,6 +87,19 @@ fn now_ms() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
+/// Whether a process with `pid` exists. Signal 0 delivers nothing and only checks.
+#[cfg(unix)]
+fn pid_alive(pid: u32) -> bool {
+    // SAFETY: `kill` with signal 0 performs only the existence/permission check.
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
+/// Without a way to ask, assume the server is alive: a record kept too long is
+/// harmless, a record swept from under a live server is not.
+#[cfg(not(unix))]
+fn pid_alive(_pid: u32) -> bool {
+    true
+}
 
 /// How a `@file_*` store finds the entry it may reuse ([`OutputBuffer::store_file_inner`]).
 enum FileStore {
@@ -467,6 +480,13 @@ pub struct OutputBuffer {
     /// show text that can never be kept is not copied.
     #[cfg(test)]
     retained_copies: std::sync::atomic::AtomicUsize,
+    /// Where this buffer's background jobs write their completion records.
+    record_dir: PathBuf,
+    /// Random 8-hex token in every record file name, so two runs that reuse one pid
+    /// cannot collide.
+    record_token: String,
+    /// Runs the stale-record sweep once, on the first `store_background`.
+    record_sweep: std::sync::Once,
 }
 
 struct BufferInner {
@@ -542,7 +562,25 @@ impl OutputBuffer {
             read_done_hook: Mutex::new(None),
             #[cfg(test)]
             retained_copies: std::sync::atomic::AtomicUsize::new(0),
+            record_dir: crate::tools::job_record::default_record_dir(),
+            record_token: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(),
+            record_sweep: std::sync::Once::new(),
         }
+    }
+    /// Write this buffer's job records under `dir` instead of the default directory.
+    pub fn with_record_dir(mut self, dir: PathBuf) -> Self {
+        self.record_dir = dir;
+        self
+    }
+
+    /// The directory this buffer's background jobs write completion records into.
+    pub fn record_dir(&self) -> &Path {
+        &self.record_dir
+    }
+
+    /// The random token that is part of every record file name this buffer writes.
+    pub fn record_token(&self) -> &str {
+        &self.record_token
     }
 
     /// The most bytes one entry may hold: half the pool's limit. A `@cmd_*`, `@tool_*` or
@@ -1628,6 +1666,15 @@ impl OutputBuffer {
     ///
     /// docs/issues/archive/2026-09-15-background-log-eviction-deletes-a-running-jobs-log.md
     pub fn store_background(&self, job: BackgroundJob) -> String {
+        // Housekeeping, once per buffer: the first spawn is the first moment the record
+        // directory matters. Done before taking the pool lock, because it touches the disk.
+        self.record_sweep.call_once(|| {
+            crate::tools::job_record::sweep_stale(
+                &self.record_dir,
+                crate::tools::job_record::RECORD_MAX_AGE,
+                pid_alive,
+            );
+        });
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.counter = inner.counter.wrapping_add(1);
         let id = format!("@bg_{:08x}", inner.counter as u32);
@@ -1652,6 +1699,15 @@ impl OutputBuffer {
             match terminated {
                 Some(victim) => {
                     inner.background_order.retain(|oid| oid != &victim);
+                    // Terminated-victim branch ONLY: a live job's record is its only
+                    // channel to a waiter once the handle is gone.
+                    crate::tools::job_record::remove_if_delivered(
+                        &crate::tools::job_record::record_path(
+                            &self.record_dir,
+                            &self.record_token,
+                            &victim,
+                        ),
+                    );
                     if let Some(job) = inner.background_jobs.remove(&victim) {
                         if let Err(e) = std::fs::remove_file(&job.log_path) {
                             tracing::debug!(
@@ -2210,6 +2266,122 @@ mod tests {
         assert_eq!(entry.stdout, "hello\n");
         assert_eq!(entry.stderr, "");
         assert_eq!(entry.exit_code, 0);
+    }
+    /// A record directory under a tempdir subdirectory: `write_record` creates it owner-only,
+    /// and refuses a pre-existing directory that others can reach (the tempdir itself is 0755).
+    fn record_buffer(tmp: &tempfile::TempDir) -> OutputBuffer {
+        OutputBuffer::new(20).with_record_dir(tmp.path().join("bg"))
+    }
+
+    fn exited_job(dir: &Path) -> BackgroundJob {
+        BackgroundJob {
+            log_path: dir.join("never-written.log"),
+            command: "true".to_string(),
+            state: JobState::Exited { code: Some(0) },
+        }
+    }
+
+    fn running_job(dir: &Path) -> BackgroundJob {
+        BackgroundJob {
+            log_path: dir.join("never-written.log"),
+            command: "sleep 1".to_string(),
+            state: JobState::Running,
+        }
+    }
+
+    /// Write the finished record the supervisor would have written for `handle`.
+    fn write_exited_record(buf: &OutputBuffer, handle: &str) -> PathBuf {
+        let path =
+            crate::tools::job_record::record_path(buf.record_dir(), buf.record_token(), handle);
+        let mut rec = crate::tools::job_record::JobRecord::running(handle, "true", None);
+        rec.finish(&JobState::Exited { code: Some(0) });
+        crate::tools::job_record::write_record(&path, &rec).unwrap();
+        path
+    }
+
+    fn delivered_marker(record: &Path) -> PathBuf {
+        let mut s = record.as_os_str().to_owned();
+        s.push(".delivered");
+        PathBuf::from(s)
+    }
+
+    #[test]
+    fn evicting_a_terminated_job_removes_its_record_only_when_delivered() {
+        let tmp = tempfile::tempdir().unwrap();
+        let buf = record_buffer(&tmp);
+        let first = buf.store_background(exited_job(tmp.path()));
+        let second = buf.store_background(exited_job(tmp.path()));
+        let delivered = write_exited_record(&buf, &first);
+        let undelivered = write_exited_record(&buf, &second);
+        std::fs::write(delivered_marker(&delivered), b"").unwrap();
+        // 18 live fillers bring the table to max_pending (20); two more stores evict the two
+        // terminated jobs, oldest first.
+        for _ in 0..18 {
+            buf.store_background(running_job(tmp.path()));
+        }
+        assert!(delivered.exists() && undelivered.exists());
+        buf.store_background(running_job(tmp.path()));
+        buf.store_background(running_job(tmp.path()));
+        assert!(
+            buf.job_states_in(&first).is_empty() && buf.job_states_in(&second).is_empty(),
+            "both terminated handles must have been evicted"
+        );
+        assert!(
+            !delivered.exists() && !delivered_marker(&delivered).exists(),
+            "an evicted job whose outcome was delivered loses its record"
+        );
+        assert!(
+            undelivered.exists(),
+            "an evicted job whose outcome was NOT delivered keeps its record"
+        );
+    }
+
+    #[test]
+    fn evicting_a_live_job_never_removes_its_record() {
+        let tmp = tempfile::tempdir().unwrap();
+        let buf = record_buffer(&tmp);
+        let live = buf.store_background(running_job(tmp.path()));
+        let path =
+            crate::tools::job_record::record_path(buf.record_dir(), buf.record_token(), &live);
+        let rec = crate::tools::job_record::JobRecord::running(&live, "sleep 1", None);
+        crate::tools::job_record::write_record(&path, &rec).unwrap();
+        std::fs::write(delivered_marker(&path), b"").unwrap();
+        for _ in 0..20 {
+            buf.store_background(running_job(tmp.path()));
+        }
+        assert!(
+            buf.job_states_in(&live).is_empty(),
+            "the live handle was evicted"
+        );
+        assert!(
+            path.exists(),
+            "a live job's record must survive its handle's eviction"
+        );
+    }
+
+    #[test]
+    fn the_first_background_store_sweeps_stale_records_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let buf = record_buffer(&tmp);
+        let old = write_exited_record(&buf, "@bg_00000aaa");
+        let age = |p: &Path| {
+            let f = std::fs::OpenOptions::new().write(true).open(p).unwrap();
+            f.set_modified(
+                SystemTime::now()
+                    - crate::tools::job_record::RECORD_MAX_AGE
+                    - std::time::Duration::from_secs(60),
+            )
+            .unwrap();
+        };
+        age(&old);
+        assert!(old.exists());
+        buf.store_background(running_job(tmp.path()));
+        assert!(!old.exists(), "the first store must sweep a stale record");
+        // A stale record that appears later is not swept: the sweep runs once per buffer.
+        let later = write_exited_record(&buf, "@bg_00000bbb");
+        age(&later);
+        buf.store_background(running_job(tmp.path()));
+        assert!(later.exists(), "the sweep must not run on a second store");
     }
 
     #[test]

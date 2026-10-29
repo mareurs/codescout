@@ -13703,3 +13703,145 @@ async fn the_line_marker_is_inside_the_inline_gate_at_the_exact_edge() {
         "{over:.300}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Background completion records (F-201).
+// A context whose buffer writes records under a tempdir SUBDIRECTORY: `write_record`
+// creates that directory owner-only and refuses a pre-existing one others can reach.
+// ---------------------------------------------------------------------------
+
+async fn record_ctx() -> (tempfile::TempDir, tempfile::TempDir, ToolContext) {
+    let (project, mut ctx) = project_ctx().await;
+    let rec = tempdir().unwrap();
+    ctx.output_buffer = Arc::new(
+        crate::tools::output_buffer::OutputBuffer::new(20).with_record_dir(rec.path().join("bg")),
+    );
+    (project, rec, ctx)
+}
+
+fn read_job_record(path: &str) -> crate::tools::job_record::JobRecord {
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// Poll the record at `path` (<= 5 s, 50 ms steps) until its state is not Running.
+async fn finished_record(path: &str) -> crate::tools::job_record::JobRecord {
+    for _ in 0..100 {
+        let rec = read_job_record(path);
+        if rec.state != crate::tools::job_record::RecordState::Running {
+            return rec;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("record {path} still Running after 5 s");
+}
+
+#[tokio::test]
+async fn a_background_spawn_writes_a_running_record_and_returns_its_path() {
+    let (_p, rec_dir, ctx) = record_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "sleep 5", "run_in_background": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let path = result["record"].as_str().expect("record path in response");
+    assert!(
+        std::path::Path::new(path).starts_with(rec_dir.path()),
+        "record {path} must live under the buffer's record dir"
+    );
+    let rec = read_job_record(path);
+    assert_eq!(rec.state, crate::tools::job_record::RecordState::Running);
+    assert_eq!(rec.handle, result["output_id"].as_str().unwrap());
+    assert!(rec.job_pid.is_some());
+    assert_eq!(rec.server_pid, std::process::id());
+    assert!(result.get("exit_code").is_none());
+    assert!(result.get("record_error").is_none());
+}
+
+#[tokio::test]
+async fn the_record_reaches_exited_with_the_code_when_the_job_ends() {
+    let (_p, _r, ctx) = record_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "exit 3", "run_in_background": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let rec = finished_record(result["record"].as_str().unwrap()).await;
+    assert_eq!(rec.state, crate::tools::job_record::RecordState::Exited);
+    assert_eq!(rec.exit_code, Some(3));
+    assert!(rec.finished_at.is_some());
+}
+
+#[tokio::test]
+async fn an_evicted_live_job_still_finalises_its_record() {
+    let (_p, rec_dir, ctx) = record_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "sleep 1", "run_in_background": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let real = result["output_id"].as_str().unwrap().to_string();
+    let path = result["record"].as_str().unwrap().to_string();
+    // max_pending is 20: twenty more running jobs evict the real job's handle while it runs.
+    store_jobs(&ctx, rec_dir.path(), 20, "x", 1);
+    assert!(
+        ctx.output_buffer.job_states_in(&real).is_empty(),
+        "the real job's handle must have been evicted"
+    );
+    assert_eq!(
+        read_job_record(&path).state,
+        crate::tools::job_record::RecordState::Running
+    );
+    let rec = finished_record(&path).await;
+    assert_eq!(rec.state, crate::tools::job_record::RecordState::Exited);
+    assert_eq!(rec.exit_code, Some(0));
+}
+
+#[tokio::test]
+async fn an_acked_background_spawn_carries_a_record() {
+    let (_p, _r, ctx) = record_ctx().await;
+    let handle = ctx
+        .output_buffer
+        .store_dangerous("sleep 1".to_string(), None, 30, true);
+    let result = RunCommand
+        .call(json!({ "command": handle }), &ctx)
+        .await
+        .unwrap();
+    assert!(result["output_id"].as_str().unwrap().starts_with("@bg_"));
+    assert!(result.get("exit_code").is_none());
+    let path = result["record"].as_str().expect("record path in response");
+    assert!(std::path::Path::new(path).is_file(), "{path} must exist");
+}
+
+#[tokio::test]
+async fn a_record_write_failure_is_reported_not_fatal() {
+    let (project, mut ctx) = project_ctx().await;
+    let blocker = project.path().join("a-regular-file");
+    std::fs::write(&blocker, b"x").unwrap();
+    ctx.output_buffer = Arc::new(
+        crate::tools::output_buffer::OutputBuffer::new(20).with_record_dir(blocker.join("bg")),
+    );
+    let result = RunCommand
+        .call(
+            json!({ "command": "true", "run_in_background": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(result["output_id"].as_str().unwrap().starts_with("@bg_"));
+    assert!(result["record"].is_null(), "no record on a failed write");
+    assert!(result["record_error"].is_string());
+    assert!(
+        result["hint"]
+            .as_str()
+            .unwrap()
+            .contains("no wake-up will come"),
+        "hint: {}",
+        result["hint"]
+    );
+}
