@@ -9,7 +9,7 @@ related:
 tags:
 - cluster/declared-not-wired
 kind: bug
-unverified: 'Read from the code on 2026-10-29, not run. Not checked: the effect at recall time (which key recall filters by); whether the focused project or the named member holds the point after a write with project_id; the memory store collection is shared, so a runtime test needs an isolated store.'
+unverified: 'Fixed in 4c32d4341 and tested through the in-memory store seam only; not run against Qdrant or a live server. Gate 2026-10-30 on the combined tree: clippy clean; lean 5368 passed and 2 failed, default 8032 passed and 2 failed; both failures are the OP-2 routing tests (operator_rules::route::tests::a_rule_with_several_selectors_routes_on_any_one_of_them and server::tests::every_triggered_rule_names_a_tool_that_can_deliver_it) while a peer holds uncommitted edits to docs/trackers/operator-rules.md and src/operator_rules/profiles.rs; not re-run on a clean tree. The format step refused (ownership: peer 76494b3d is a live writer of the same files); the narrow rustfmt on the three files was run on the operator''s word that this session is the sole writer. The committed part was re-run alone in a throwaway worktree: tools::memory 103 passed, 0 failed. Not checked: a member that is dormant when a memory is filed (its key is its id; activation later sets the same name, not observed); the root project named by its workspace id while a member is focused; forget (unchanged, the Qdrant delete ignores its project_id argument).'
 ---
 
 # BUG: memory(write, project_id=<member>) puts the file in the member but cross-embeds it under the focused project's key
@@ -24,7 +24,7 @@ The `memory` tool takes a `project_id` that scopes it to a workspace project. Th
 Expected, from the code only: after `memory(action="write", project_id="thecrew-module", topic=..., content=...)` called with another project focused, the markdown lands in the member's memory directory and the cross-embedded point carries the focused project's id as its `project_id` payload and in its point id.
 
 ## Reproduction
-Not run. To run it: a workspace with a declared member, the parent focused, an isolated memory store, then a write with `project_id=<member id>` and a read of the stored point's payload.
+Run 2026-10-30 on the in-memory store seam (no shared collection touched). In a gradle workspace with an `mcp-server` member and the root focused, `memory(write, project_id="mcp-server")` left 0 points under `mcp-server`. The new tests failed on `left: 0, right: 1` before the fix.
 
 ## Environment
 Binary `a398925ea`, read from the source tree.
@@ -43,18 +43,31 @@ The line references above. No runtime run.
 None yet.
 
 ## Fix
-None yet. Direction: pass the resolved project id (the one `resolve_memory_dirs` used) to both helpers, and use it for the delete arm's point id.
+Done 2026-10-30 in 4c32d4341.
+- `Agent::semantic_key_for_project` (src/agent/mod.rs) gives the key for a named project: an activated project answers with `config.project.name`, a dormant one with its id, an unknown id is refused by name with the valid ids.
+- `semantic_project_key` (src/tools/memory/mod.rs) returns that key when the call carries `project_id`, else the focused project's name, as before.
+- `cross_embed_memory` and `create_semantic_anchors` take the call's `input` and use the helper. The anchor pass re-upserts the cross-embed's point id, so both must use one key.
+- The delete arm, `remember` and `recall` use the helper too.
+- Wider than the filed bug: `remember` and `recall` also ignored `project_id`. With only the write changed, a member's memory would have become unreadable from the parent, because `recall` read the focused key. The write fix needed the read side.
+- `forget` is unchanged. The Qdrant `delete` ignores its `project_id` argument (src/memory/semantic_store.rs), so no key reaches it.
+- Behavior change: a memory written with `project_id=<member>` while the parent is focused is no longer found by a `recall` with no `project_id`. It is found by `recall(project_id=<member>)`.
 
 ## Tests added
-None yet. A red test needs a store seam: the helpers should take the project id as a parameter so a test can assert which id they use.
+Red first, in src/tools/memory/tests.rs, on the new fixture `multi_project_ctx_with_store` (it keeps a handle on the in-memory store):
+- `a_write_with_a_project_id_cross_embeds_under_the_named_project`
+- `a_delete_with_a_project_id_removes_the_named_projects_point`
+- `remember_with_a_project_id_files_under_the_named_project`
+- `recall_with_a_project_id_reads_the_named_projects_points` also asserts that a recall without `project_id` does not return the member's memory. Without that half it passed on the old code, because `remember` and `recall` both ignored `project_id` and agreed.
+
+Mutation probe: restoring the old focused-name lookup in the delete arm turned the delete test red (`left: 1, right: 0`). The write, remember and recall tests were red on the unfixed code. No probe was run on the `recall` arm alone.
 
 ## Workarounds
 - Focus the member (`workspace(action="activate", path=<member id>)`) before writing, so the focused project and the named project agree.
 
 ## Resume
-1. Confirm at runtime on an isolated store (the shared `memories` collection must not be written by a probe).
-2. Write the red test on a helper that takes the project id.
-3. Check the recall path for the key it filters by.
+1. Run the gate on a clean tree, so the two OP-2 failures can be shown to come from the peer's uncommitted files.
+2. Run one write, recall and delete with `project_id=<member>` on a live server with an isolated store (`CODESCOUT_QDRANT_COLLECTION_PREFIX`), not only the in-memory seam.
+3. Then move the issue to `docs/issues/archive/` with `doc(action="move", ...)`, the fix SHA 4c32d4341 and its `git patch-id --stable`.
 
 ## References
 - docs/issues/2026-10-29-semantic-search-project-id-takes-the-directory-name-not-the-declared-member-id.md (the same id-versus-key theme; its fix made a member's `config.project.name` equal its workspace id, which hides this mismatch only when the member is focused)
