@@ -52,8 +52,18 @@ Rules (every failed rule adds a reason; `ok` is True iff `reasons` is empty):
   cs, full   init tool list contains BOTH `mcp__codescout__references` and
              `mcp__codescout__symbol_at` (daily-tool-set markers); at least one `mcp__codescout__*`
              tool_use; at least one hook_response whose output contains COMPANION_MARKER.
-  full       a `superpowers:*` skill is visible in the init skill list.
-"""
+  full       a `superpowers:*` and a `buddy:*` skill are visible in the init skill list (spec
+             section 4: "the init event lists the superpowers and buddy skills"); the init tool
+             list holds `Skill` and the subagent tool (final review I-8: `--tools ...,Skill,Agent`;
+             CLI 2.1.309 lists `Agent` as `Task` in init, measured in
+             setup-ab-data/controls/final-fix/i8-full-init/, so either name counts).
+  bare, cs   CONTAMINATION (ledger T6 deferred; reasons start with CONTAMINATION): no full-only
+             skill (`superpowers:*`, `buddy:*`) and no full-only tool (Skill, Agent/Task) in
+             init; bare also has no companion hook output. A contamination reason is a
+             construction failure of the arm, so analyze_study counts it at the study level.
+
+The full fixture's init `tools` list is the real one of the I-8 capture (Skill, Task added to
+the round4c list); its other records are unchanged."""
 import json
 from pathlib import Path
 from typing import NamedTuple
@@ -64,6 +74,10 @@ COMPANION_MARKER = "PROJECT BOOTSTRAP"
 MARKER_TOOLS = ("mcp__codescout__references", "mcp__codescout__symbol_at")
 NATIVE_TOOLS = frozenset({"Read", "Grep", "Glob", "Bash", "Edit", "Write", "MultiEdit",
                           "NotebookEdit"})
+FULL_SKILL_PREFIXES = ("superpowers:", "buddy:")
+FULL_SKILL_TOOL = "Skill"
+FULL_SUBAGENT_TOOLS = ("Agent", "Task")
+CONTAMINATION = "contamination: "
 
 
 class Verdict(NamedTuple):
@@ -172,8 +186,33 @@ def check(arm, transcript, stdout_json):
         if records and hook_events == 0:
             reasons.append(f"{arm} arm has no companion hook output "
                            f"({COMPANION_MARKER!r}); the companion did not run")
-    if arm == "full" and inits and not any(s.startswith("superpowers:") for s in skills):
-        reasons.append("full arm has no superpowers skills visible in init")
+    if arm == "full" and inits:
+        for prefix in FULL_SKILL_PREFIXES:
+            if not any(s.startswith(prefix) for s in skills):
+                reasons.append(f"full arm has no {prefix}* skills visible in init")
+        if FULL_SKILL_TOOL not in tools:
+            reasons.append(f"full arm init tool list lacks {FULL_SKILL_TOOL}")
+        if not any(t in tools for t in FULL_SUBAGENT_TOOLS):
+            reasons.append(f"full arm init tool list lacks the subagent tool "
+                           f"({' / '.join(FULL_SUBAGENT_TOOLS)})")
+    if arm in ("bare", "cs"):
+        reasons += _contamination(arm, records, inits, tools, skills)
 
     return Verdict(not reasons, reasons, codescout_calls, native_calls, hook_events,
                    sidechain_calls)
+
+
+def _contamination(arm, records, inits, tools, skills):
+    """Ledger T6 deferred checks: what only a richer arm may carry, seen in a poorer one."""
+    out = []
+    if arm == "bare" and any(_is_evidence(r) for r in records):
+        out.append(f"{CONTAMINATION}bare arm has companion hook output ({COMPANION_MARKER!r})")
+    if inits:
+        leaked = sorted(s for s in skills if s.startswith(FULL_SKILL_PREFIXES))
+        if leaked:
+            out.append(f"{CONTAMINATION}{arm} arm has full-only skills in init: "
+                       f"{', '.join(leaked[:5])}{' ...' if len(leaked) > 5 else ''}")
+        extra = sorted(t for t in tools if t in (FULL_SKILL_TOOL, *FULL_SUBAGENT_TOOLS))
+        if extra:
+            out.append(f"{CONTAMINATION}{arm} arm has full-only tools in init: {', '.join(extra)}")
+    return out

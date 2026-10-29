@@ -205,7 +205,10 @@ class FakeCLI:
                          "hook_name": "SessionStart:startup", "exit_code": 0,
                          "output": "PROJECT BOOTSTRAP: As your FIRST codescout action ..."})
         recs.insert(0, {"type": "system", "subtype": "init", "tools": tools,
-                        "skills": ["superpowers:brainstorming"] if arm == "full" else []})
+                        "skills": (["superpowers:brainstorming", "buddy:check"] if arm == "full"
+                                   else [])})
+        if arm == "full":  # final review I-8: the real init lists Agent as Task
+            recs[0]["tools"] = tools + ["Skill", "Task"]
         blocks = [{"type": "tool_use", "id": "toolu_1", "name": "Bash",
                    "input": {"command": "cargo test --offline"}}]
         if sc["no_work"]:

@@ -73,6 +73,87 @@ class IntegrityTest(unittest.TestCase):
         v = self.check("full", recs)
         self.assertFalse(v.ok)
         self.assertTrue(any("superpowers" in x for x in v.reasons), v.reasons)
+    # -- final review I-8 and the ledger's deferred checks (T6; spec section 4 buddy skills) --
+
+    def init_edit(self, name, edit):
+        recs = records(name)
+        for r in recs:
+            if r.get("subtype") == "init":
+                edit(r)
+        return recs
+
+    def test_full_without_buddy_skills_is_invalid(self):
+        recs = self.init_edit("full_valid.jsonl", lambda r: r.update(
+            skills=[s for s in r["skills"] if not s.startswith("buddy:")]))
+        v = self.check("full", recs)
+        self.assertEqual(v.reasons, ["full arm has no buddy:* skills visible in init"])
+
+    def test_full_without_skill_or_the_subagent_tool_is_invalid(self):
+        for drop, why in (("Skill", "lacks Skill"), ("Task", "lacks the subagent tool")):
+            with self.subTest(drop):
+                recs = self.init_edit("full_valid.jsonl", lambda r, d=drop: r.update(
+                    tools=[t for t in r["tools"] if t != d]))
+                v = self.check("full", recs)
+                self.assertFalse(v.ok)
+                self.assertEqual(len(v.reasons), 1, v.reasons)
+                self.assertIn(why, v.reasons[0])
+        # The CLI may list the subagent tool as Agent: either name counts.
+        recs = self.init_edit("full_valid.jsonl", lambda r: r.update(
+            tools=["Agent" if t == "Task" else t for t in r["tools"]]))
+        self.assertTrue(self.check("full", recs).ok)
+
+    def test_the_full_fixture_init_is_the_i8_capture(self):
+        init = next(r for r in records("full_valid.jsonl") if r.get("subtype") == "init")
+        native = sorted(t for t in init["tools"] if not t.startswith("mcp__"))
+        self.assertEqual(native, ["Glob", "Grep", "Read", "Skill", "Task"])
+
+    def test_bare_with_companion_output_is_contaminated(self):
+        companion = next(r for r in records("cs_valid.jsonl") if integrity._is_evidence(r))
+        recs = records("bare_valid.jsonl") + [companion]
+        v = self.check("bare", recs)
+        self.assertFalse(v.ok)
+        self.assertTrue(v.reasons[0].startswith(integrity.CONTAMINATION), v.reasons)
+        self.assertIn("companion hook output", v.reasons[0])
+
+    def test_full_only_skills_or_tools_in_bare_or_cs_are_contamination(self):
+        for arm, name in (("bare", "bare_valid.jsonl"), ("cs", "cs_valid.jsonl")):
+            for edit, word in (
+                    (lambda r: r.update(skills=r["skills"] + ["superpowers:brainstorming"]),
+                     "superpowers:brainstorming"),
+                    (lambda r: r.update(skills=r["skills"] + ["buddy:check"]), "buddy:check"),
+                    (lambda r: r.update(tools=r["tools"] + ["Skill"]), "Skill"),
+                    (lambda r: r.update(tools=r["tools"] + ["Task"]), "Task"),
+                    (lambda r: r.update(tools=r["tools"] + ["Agent"]), "Agent")):
+                with self.subTest(arm=arm, word=word):
+                    v = self.check(arm, self.init_edit(name, edit))
+                    self.assertEqual(len(v.reasons), 1, v.reasons)
+                    self.assertTrue(v.reasons[0].startswith(integrity.CONTAMINATION))
+                    self.assertIn(word, v.reasons[0])
+        # The plain fixtures carry none of it.
+        self.assertTrue(self.check("bare", records("bare_valid.jsonl")).ok)
+        self.assertTrue(self.check("cs", records("cs_valid.jsonl")).ok)
+
+    def test_the_real_stage1_streams(self):
+        # Read only. bare and cs pass the new checks too; full fails exactly on the tools I-8
+        # adds (Stage 1 ran before them).
+        runs = Path("/home/marius/work/claude/setup-ab-data/study/runs")
+        if not runs.is_dir():
+            self.skipTest("no Stage 1 runs on this machine")
+        seen = 0
+        for d in sorted(runs.iterdir()):
+            arm = d.name.split(".")[-2]
+            result = next(r for r in (json.loads(l) for l in (d / "stream.dedup.jsonl")
+                                      .read_text().splitlines() if l.strip())
+                          if r.get("type") == "result")
+            v = integrity.check(arm, d / "stream.dedup.jsonl", result)
+            if arm == "full":
+                self.assertEqual(v.reasons, ["full arm init tool list lacks Skill",
+                                             "full arm init tool list lacks the subagent tool "
+                                             "(Agent / Task)"], d.name)
+            else:
+                self.assertEqual(v.reasons, [], d.name)
+            seen += 1
+        self.assertEqual(seen, 12)
 
     def test_valid_cs_counts_calls(self):
         v = self.check("cs", records("cs_valid.jsonl"))
