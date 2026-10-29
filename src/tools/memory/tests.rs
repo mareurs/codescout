@@ -3565,6 +3565,73 @@ async fn a_worktree_read_does_not_create_the_main_checkouts_memory_directory() {
         main_memories.display()
     );
 }
+/// A worktree can delete only what it holds. A topic only the main checkout holds is refused by
+/// name, because answering `"ok"` while the topic stays listed is a lie, and removing it would
+/// write into another checkout. A topic both layers hold loses the worktree's copy, and the answer
+/// says the main checkout's copy now shows through.
+///
+/// docs/issues/2026-09-24-residual-worktree-memory-resolution-choice.md
+#[tokio::test]
+async fn a_worktree_delete_refuses_a_main_only_topic_and_warns_when_a_copy_shows_through() {
+    let (dir, ctx) = test_ctx_with_project().await;
+    let main = tempdir().unwrap();
+    let main_memories = main.path().join(".codescout").join("memories");
+    let wt_memories = dir.path().join(".codescout").join("memories");
+    seed(&main_memories, "only-in-main", "# M");
+    seed(&main_memories, "in-both", "# M-both");
+    seed(&wt_memories, "in-both", "# W-both");
+    seed(&wt_memories, "only-here", "# own");
+    make_linked_worktree_of(dir.path(), main.path());
+
+    let refused = Memory
+        .call(json!({ "action": "delete", "topic": "only-in-main" }), &ctx)
+        .await
+        .expect_err("deleting a topic only the main checkout holds must be refused");
+    let message = format!("{refused:#}");
+    assert!(
+        message.contains(&main_memories.display().to_string()),
+        "the refusal must name where the topic lives: {message}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(main_memories.join("only-in-main.md")).unwrap(),
+        "# M",
+        "a refused delete must leave the main checkout untouched"
+    );
+
+    let shadowed = Memory
+        .call(json!({ "action": "delete", "topic": "in-both" }), &ctx)
+        .await
+        .unwrap();
+    assert!(
+        !wt_memories.join("in-both.md").exists(),
+        "the worktree's own copy is deleted"
+    );
+    assert_eq!(
+        std::fs::read_to_string(main_memories.join("in-both.md")).unwrap(),
+        "# M-both",
+        "the main checkout's copy is not touched"
+    );
+    let warnings = shadowed["warnings"].to_string();
+    assert!(
+        warnings.contains(&main_memories.display().to_string()),
+        "the answer must say a copy still shows through: {shadowed:?}"
+    );
+    let after = Memory
+        .call(json!({ "action": "read", "topic": "in-both" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(after["content"], json!("# M-both"), "{after:?}");
+
+    let plain = Memory
+        .call(json!({ "action": "delete", "topic": "only-here" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        plain,
+        json!("ok"),
+        "a delete with nothing behind it stays plain"
+    );
+}
 
 /// The provenance fields must be RENDERED, not merely carried.
 ///

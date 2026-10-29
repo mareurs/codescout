@@ -516,6 +516,32 @@ impl MemoryReadDirs {
         }
         Ok(None)
     }
+
+    /// The first inherited directory (a linked worktree's read-only view of the main checkout)
+    /// that holds `topic`, if any. Read-only: it never creates the directory it looks into.
+    pub(crate) fn inherited_holder(
+        &self,
+        topic: &str,
+    ) -> anyhow::Result<Option<std::path::PathBuf>> {
+        for dir in &self.inherited {
+            if crate::memory::MemoryStore::from_dir_readonly(dir.clone())
+                .read(topic)?
+                .is_some()
+            {
+                return Ok(Some(dir.clone()));
+            }
+        }
+        Ok(None)
+    }
+
+    /// True when the write target itself holds `topic`.
+    pub(crate) fn primary_holds(&self, topic: &str) -> anyhow::Result<bool> {
+        Ok(
+            crate::memory::MemoryStore::from_dir_readonly(self.primary.clone())
+                .read(topic)?
+                .is_some(),
+        )
+    }
 }
 
 /// The main checkout's twins of `dirs`, when `checkout_root` is a linked git worktree.
@@ -1218,6 +1244,9 @@ impl Tool for Memory {
                 let private = parse_bool_param(&input["private"]);
 
                 // Delete markdown file — route to per-project dir when `project` param given.
+                // A linked worktree's read-only view of the main checkout, when a copy of the
+                // topic still shows through after the worktree's own copy is gone.
+                let mut shows_through: Option<std::path::PathBuf> = None;
                 if private {
                     ctx.agent
                         .with_project_at(ctx.workspace_override.as_deref(), |p| {
@@ -1226,11 +1255,28 @@ impl Tool for Memory {
                         })
                         .await?;
                 } else {
-                    let memories_dir = resolve_memory_dir(&input, ctx).await?;
+                    let dirs = resolve_memory_dirs(&input, ctx).await?;
+                    let holder = dirs.inherited_holder(topic)?;
+                    if let Some(main_dir) = holder.as_ref() {
+                        if !dirs.primary_holds(topic)? {
+                            // Answering "ok" here would be false: the topic stays listed. Removing
+                            // it would write into another checkout.
+                            return Err(super::RecoverableError::with_hint(
+                                format!(
+                                    "topic '{topic}' is held by the main checkout ({}), not by this worktree",
+                                    main_dir.display()
+                                ),
+                                "A worktree never writes into the main checkout. Delete the topic \
+                                 there, or memory(action=\"write\") a replacement here to shadow it.",
+                            )
+                            .into());
+                        }
+                    }
                     crate::memory::guarded::guarded_delete(
-                        &crate::memory::MemoryStore::from_dir(memories_dir)?,
+                        &crate::memory::MemoryStore::from_dir(dirs.primary)?,
                         topic,
                     )?;
+                    shows_through = holder;
                 }
 
                 // Remove cross-embedded entry (best-effort, non-fatal).
@@ -1254,6 +1300,16 @@ impl Tool for Memory {
                     }
                 }
 
+                if let Some(main_dir) = shows_through {
+                    return Ok(json!({
+                        "status": "ok",
+                        "warnings": [format!(
+                            "the main checkout still holds a copy of '{topic}' at {}; reads fall \
+                             through to it until it is deleted there",
+                            main_dir.display()
+                        )],
+                    }));
+                }
                 Ok(json!("ok"))
             }
             "remember" => {
