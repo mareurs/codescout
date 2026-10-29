@@ -53,25 +53,26 @@ def default_run_cli(path) -> str:
                           check=True).stdout
 
 
-def tracked_files(tool_dir) -> list:
-    """Sorted tracked files of tool_dir (relative to it), without the registration itself."""
+def tracked_files(tool_dir, exclude=REGISTRATION) -> list:
+    """Sorted tracked files of tool_dir (relative to it), without the registration `exclude`
+    (this freeze's own output; freeze_stage2 passes its stage3-registration.json)."""
     out = _git(tool_dir, "ls-files", "-z", "--", ".").split("\0")
-    return sorted(f for f in out if f and f != REGISTRATION)
+    return sorted(f for f in out if f and f != exclude)
 
 
-def check_clean(tool_dir, files):
+def check_clean(tool_dir, files, exclude=REGISTRATION):
     """Refused when the directory differs from HEAD in any way that could change what runs: a
     tracked file modified (staged or not, even under --skip-worktree), or an untracked file (the
-    directory is sys.path[0], so an untracked json.py shadows the stdlib). The registration, which
-    this very script rewrites, is not part of what it freezes."""
+    directory is sys.path[0], so an untracked json.py shadows the stdlib). The registration
+    `exclude`, which the freeze itself rewrites, is not part of what it freezes."""
     prefix = _git(tool_dir, "rev-parse", "--show-prefix").strip()
     changed = [f for f in _git(tool_dir, "diff", "--name-only", "--relative", "HEAD", "-z",
-                               "--", ".").split("\0") if f and f != REGISTRATION]
+                               "--", ".").split("\0") if f and f != exclude]
     if changed:
         raise Refused(f"uncommitted changes in {sorted(changed)}: commit them before the freeze")
     untracked = [e[3:] for e in _git(tool_dir, "status", "--porcelain", "--untracked-files=all",
                                      "-z", "--", ".").split("\0")
-                 if e.startswith("?? ") and e[3:] != prefix + REGISTRATION]
+                 if e.startswith("?? ") and e[3:] != prefix + exclude]
     if untracked:
         raise Refused(f"untracked files in the tool directory {sorted(untracked)}: they would run "
                       f"unfrozen; commit or remove them")
