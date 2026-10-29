@@ -7,6 +7,7 @@ tags:
 - cluster/authorship-unrecoverable-after-the-fact
 - commit-hooks
 - shared-checkout
+opened: 2026-10-29
 ---
 
 ## Summary

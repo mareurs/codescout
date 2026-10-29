@@ -5,6 +5,8 @@ status: mitigated
 title: 'BUG: two concurrent catalog writes (append_entry, allocate_entry_id) fail with "database is locked" when every fsync takes 3 s'
 tags:
 - cluster/unclassified
+closed: 2026-10-29
+opened: 2026-10-29
 unverified: 'Not established: that the cold-start lock hold never fails on a real disk or a real server pair. The failure was reproduced only with 3 s of injected fsync latency. The operator accepted the product behaviour on 2026-10-29; no product code changed. A longer busy_timeout was not tried.'
 ---
 

@@ -32,6 +32,7 @@ use crate::util::redact::redact_credentials;
 pub const RECORD_SCHEMA: u32 = 1;
 
 /// How long a finished record may sit before `sweep_stale` removes it.
+/// cap-class: NOT_A_CAP — retention age for stale job records, not a bound on returned output.
 pub const RECORD_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Where records live. Test builds get a different directory so that the many existing

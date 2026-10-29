@@ -5,6 +5,7 @@ status: fixed
 title: 'BUG: codescout has no monitor mechanism for long background commands, and Claude Code''s Monitor is unavailable when Bash is denied'
 tags:
 - cluster/unclassified
+closed: 2026-10-29
 opened: 2026-10-29
 owner: marius
 severity: medium
