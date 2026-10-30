@@ -1,17 +1,18 @@
 ---
 id: '17a9af180d2cf288'
 kind: bug
-status: taken
+status: fixed
 title: workspace and index status scroll every chunk of the project to count chunks and files (22-33 s per call)
 owners:
 - marius
 tags:
 - cluster/unclassified
-claimed_by: f6c27cf1-225c-4791-9084-17cffa386faf
+closed: 2026-10-30
 opened: 2026-10-30
 related:
 - docs/issues/2026-10-30-code-chunks-collection-has-no-payload-index-so-every-project-filter-scans-every-point.md
 severity: high
+unverified: 'Measured with a debug build of this code over stdio MCP, not with a release server; the old release server, given the same indexes, answered in 754 ms, so most of the gain comes from the payload index, not from the facet. The first status call in a fresh server took 14.7 s (45.2 s before the index); that cold cost is not explained. The live-Qdrant tests are #[ignore].'
 ---
 
 # BUG: workspace and index status scroll every chunk of the project to count chunks and files (22-33 s per call)
@@ -63,11 +64,31 @@ None.
 
 ## Fix
 
-Plan: count chunks with an exact `count` request (indexed: milliseconds) and count distinct files with a `facet` on `file_path` filtered by `project_id` (needs the payload index; facet `exact=true`). Keep the trait signature `(chunk_count, file_count)`. Fall back to the scroll only if the facet call fails.
+Implemented on `experiments`:
+
+- `b565ba72e` (patch-id `1270454f901b285eadfbf7c049749af705aef035`): `QdrantWrap::project_index_stats` (`src/retrieval/qdrant.rs`) tries `project_index_stats_by_facet` (exact `count`, then `facet` on `file_path` with `limit` = chunk count, so it cannot cut the file list) and falls back to `project_index_stats_by_scroll` (the old enumeration) when the facet is refused.
+- `addb7e34d` (patch-id `8a3a02ae7f3473d004fd8fa482c96c6bfafb6cc5`): the facet path reads the payload schema first and goes straight to the scroll when `file_path` is not indexed. Without it the exact count was a wasted full scan: status measured 34.8 / 37.8 s steady state against 32.1 s for the old code.
+
+The gain needs the payload index from `docs/issues/2026-10-30-code-chunks-collection-has-no-payload-index-so-every-project-filter-scans-every-point.md`.
+
+Measured 2026-10-30, `workspace(action="status")` on codescout (100,897 chunks, 2,986 files), driver `status_timer.py` over stdio MCP, three calls in one server; the first call in a fresh server is listed separately:
+
+| build | code_chunks indexes | first call | steady state |
+|---|---|---|---|
+| old release server (MCP, this session) | none | — | 32,108 ms |
+| new debug, before `addb7e34d` | none | 52.6 s | 37.8 / 34.8 s |
+| new debug, `addb7e34d` | none | 45.2 s | 30.7 / 30.9 s |
+| new debug, `addb7e34d` | project_id + file_path | 14.7 s | **885 / 900 ms** |
+| old release server (MCP, this session) | project_id + file_path | — | 754 ms |
+
+Every call returned the same `files: 2986, chunks: 100897`.
 
 ## Tests added
 
-None yet.
+- `qdrant_project_index_stats_facet_agrees_with_the_scroll` (`src/retrieval/qdrant.rs`, `#[ignore]`, live Qdrant): facet path == scroll path == public entry point for a project with chunks, one sharing files with another project, and an absent one.
+- `qdrant_project_index_stats_falls_back_to_the_scroll_without_an_index` (`#[ignore]`): on an unindexed collection the facet path is refused and the public entry point still answers `(3, 2)`.
+
+No test pins the time; the table in § Fix is the timing evidence.
 
 ## Workarounds
 
@@ -75,7 +96,7 @@ Use `workspace(action="activate")`, which reports index presence through the che
 
 ## Resume
 
-Implement count + facet in `QdrantWrap::project_index_stats`; re-time `workspace(action="status")` after the payload index exists.
+N/A — fixed 2026-10-30. Archive once a gate run is green. Open question for a later session: why the first status call of a fresh server costs ~14 s more than the next ones.
 
 ## References
 

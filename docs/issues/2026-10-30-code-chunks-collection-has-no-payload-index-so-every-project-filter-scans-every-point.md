@@ -1,16 +1,16 @@
 ---
 id: c72d1df9c825b2ed
 kind: bug
-status: taken
+status: fixed
 title: The code_chunks Qdrant collection has no payload index, so every project_id filter scans all 737k points
 owners:
 - marius
 tags:
 - cluster/unclassified
-claimed_by: f6c27cf1-225c-4791-9084-17cffa386faf
+closed: 2026-10-30
 opened: 2026-10-30
 severity: high
-unverified: The saving after the index exists is estimated from an indexed control collection (artifact_chunks_codescout_*, 52k points), not measured on code_chunks itself.
+unverified: 'The live-Qdrant regression tests are #[ignore] and no gate lane compiles server-stack, so only a manual --include-ignored run exercises them. The gate run of 2026-10-30 was red on two OP-2 tests caused by a peer''s uncommitted ledger edit (docs/trackers/operator-rules.md), so it is not evidence for this change. The live code_chunks indexes were created by REST with the same parameters, not by ensure_collection itself; the upgrade code path is proven only on a test collection.'
 ---
 
 # BUG: The code_chunks Qdrant collection has no payload index, so every project_id filter scans all 737k points
@@ -75,11 +75,31 @@ Callers that pay the scan (read 2026-10-30 by the retrieval explorer of this ses
 
 ## Fix
 
-Plan: an idempotent "ensure payload indexes" step for `code_chunks`, run after the existence check (so existing deployments get it), once per process. Fields: `project_id` keyword with `is_tenant(true)`; `file_path` keyword. Creating an index that already exists is a no-op on the server side, but the step skips the call when `payload_schema` already lists the field.
+Implemented on `experiments`:
+
+- `b565ba72e` (patch-id `1270454f901b285eadfbf7c049749af705aef035`): `CODE_PAYLOAD_INDEXES` (`project_id` keyword with `is_tenant`, `file_path` keyword) and the pure `missing_code_payload_indexes`; `QdrantWrap::ensure_collection` (`src/retrieval/qdrant.rs`) now calls `ensure_code_payload_indexes` on new AND existing collections, `wait(false)`, and logs a refusal as a warning instead of failing the sync.
+- `addb7e34d` (patch-id `8a3a02ae7f3473d004fd8fa482c96c6bfafb6cc5`): the status follow-up, see `docs/issues/2026-10-30-workspace-and-index-status-scroll-every-chunk-of-the-project-to-count-them.md`.
+
+A live deployment gets the indexes at its next `index(action="build")` (the only production caller of `ensure_collection` is `sync_project`). On this host they were created on 2026-10-30 15:05 by REST with the same parameters (`PUT /collections/code_chunks/index`, `wait=false`); both reached 737,514 points and the collection was green after 12 s.
+
+Measured after, same requests as § Symptom (2026-10-30, three runs each):
+
+```
+exact filtered count      5.69 s / 2.66-2.77 s  ->  0.015-0.017 s
+scroll page (1000 points) 0.58 s                ->  0.006-0.007 s
+facet file_path           refused               ->  0.039-0.046 s (2,986 files, same as the scroll)
+filtered dense query      ~0.57 s per leg*      ->  0.002 s (first call 0.244 s)
+```
+
+*the before figure is one leg of a hybrid query measured by a subagent; the after figure is a dense-only query, so the shapes differ.
 
 ## Tests added
 
-None yet.
+- `missing_code_payload_indexes_names_only_the_fields_the_schema_lacks` (`src/retrieval/qdrant.rs`, `tests`): pure, runs in a `server-stack` lib build.
+- `qdrant_ensure_collection_adds_payload_indexes_to_a_collection_that_predates_them` (`#[ignore]`, live Qdrant): the upgrade path. Mutation check 2026-10-30: restoring the early return made it fail with `payload indexes ["project_id", "file_path"] never appeared`.
+- `qdrant_project_index_stats_facet_agrees_with_the_scroll` and `qdrant_project_index_stats_falls_back_to_the_scroll_without_an_index` (`#[ignore]`, live Qdrant).
+
+Run with `scripts/with-slot.sh cargo test --lib --features server-stack retrieval::qdrant::tests -- --include-ignored`: 12 passed on 2026-10-30.
 
 ## Workarounds
 
@@ -87,7 +107,7 @@ None for callers.
 
 ## Resume
 
-Implement the ensure-indexes step in `src/retrieval/qdrant.rs` next to `ensure_collection`; then re-time the count and hybrid query above.
+N/A — fixed 2026-10-30. Archive once a gate run is green (the 2026-10-30 run was red on a peer's uncommitted `OP-2` ledger edit, unrelated to this change).
 
 ## References
 
