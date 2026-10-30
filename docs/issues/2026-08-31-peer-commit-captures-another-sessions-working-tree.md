@@ -1824,3 +1824,5 @@ budget the check was designed around. Do not close this on that finding.
 **Still open, and not closeable by documentation:** the same-file axis itself. It needs
 per-hunk provenance the working tree does not carry — `issue-clusters:IC-10`. The mechanism
 is also still firing: instance 14 was 2026-09-14.
+
+**Re-verified 2026-10-31 (group G worktree pass, `experiments` @ `0f8705532`); status unchanged.** The 2026-09-25 split still describes the file: same-file, intra-path capture needs per-hunk provenance (`issue-clusters:IC-10`) and is an owner decision. No guard changed here; a wrong change to the commit and staging guards can corrupt a peer's work. Only the refusal text for the unattributed-hunk route changed, under `53ed87262cfbdcbf` (`1b53f5f1d`).

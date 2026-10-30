@@ -1,7 +1,7 @@
 ---
 id: '53ed87262cfbdcbf'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: staging a split hunk with update-index costs two refusals and a wrong repair before the recipe is named'
 tags:
 - cluster/authorship-unrecoverable-after-the-fact
@@ -56,7 +56,7 @@ Linux, shared checkout on branch `experiments`, other live sessions holding the 
 - Plain `git commit` of the staged blob: refused by the bare-commit guard.
 
 ## Fix
-Not started. Options, cheapest first:
+FIXED 2026-10-31, SHA 1b53f5f1d (branch worktree-agent-af5b0bb8bc0852bc2; gate exit 0). Options 1 and 2 were done; option 3 (stage-hunks.sh) was not, and stays an owner decision. Changes: scripts/commit-sequence-tail.txt (note under step 4), scripts/pre-commit-foreign-index.sh (the (unrecorded) block names update-index/add -p and the page section), docs/conventions/shared-checkout-commit-sequence.md (decision recorded). Original options, for the record:
 1. Add one line to `scripts/commit-sequence-tail.txt`, which every refusing hook prints: a hunk staged by `update-index` or `add -p` is unattributed; stage a split with a real `git add` from a scratch work tree (see the page, § *A hunk the recorder can attribute*).
 2. Let the bare-commit refusal for an `(unrecorded)` row name that section, not only `commit-mine.sh`.
 3. Add a script (for example `scripts/stage-hunks.sh`) that does the scratch-work-tree add. Needs a decision: the recipe is a short shell snippet, and a script is one more surface to maintain.
@@ -64,7 +64,7 @@ Not started. Options, cheapest first:
 `tests/hook_config.rs` has `every_refusing_hook_emits_the_shared_tail`, and a test pins the tail's separate-calls wording. Any change to the tail needs those to pass.
 
 ## Tests added
-N/A — not started. A change to the tail needs the emitting-hooks test to pass with the new line.
+tests/commit-mine.sh case F13 (bare commit after update-index --cacheinfo is refused, and the refusal names update-index, § A hunk the recorder can attribute, and the scratch work tree). Seen red before the fix (3 assertions), 63/0 after.
 
 ## Workarounds
 The scratch-work-tree recipe in the page, § *A hunk the recorder can attribute*. Verified working 2026-10-29 (`07fece587`).
