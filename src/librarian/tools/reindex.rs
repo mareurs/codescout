@@ -34,6 +34,69 @@ struct Args {
     scope: Option<super::scope::Scope>,
 }
 
+/// How many embedded vectors wait before they are written in one store request.
+///
+/// A durable single-point write costs a sync (24.7 ms per point on this host's Qdrant) that a
+/// batch of 64 pays once (0.66 ms per point), measured 2026-10-30. 64 vectors of 768 floats are
+/// ~200 KB, and a larger batch buys little: the per-request cost is already under a millisecond
+/// per point.
+const UPSERT_BATCH: usize = 64;
+
+/// Write the buffered `(item, vector)` pairs to `store` and fold the outcome into the counters,
+/// leaving `unwritten` empty.
+///
+/// Counts exactly as the one-at-a-time loop did: an item that lands is `total_embedded` and one
+/// more `landed` for its artifact (the stamp is written only for an artifact with every chunk
+/// landed), and one that does not is an `upsert failed` entry that leaves its artifact
+/// unstamped, so the next run retries it. A batch that fails says only that SOME item did not
+/// land, so it is retried item by item: a single bad vector is then the only one reported,
+/// never the 63 that were fine.
+async fn flush_vectors<'q>(
+    store: &dyn crate::librarian::artifact_store::ArtifactVectorStore,
+    project_id: &str,
+    unwritten: &mut Vec<(&'q indexer::EmbedQueueItem, Vec<f32>)>,
+    landed: &mut std::collections::HashMap<&'q str, usize>,
+    total_embedded: &mut usize,
+    embed_errors: &mut Vec<String>,
+) {
+    use crate::librarian::artifact_store::ChunkVector;
+    if unwritten.is_empty() {
+        return;
+    }
+    let batch: Vec<ChunkVector<'_>> = unwritten
+        .iter()
+        .map(|(item, vector)| ChunkVector {
+            chunk_id: &item.chunk_id,
+            artifact_id: &item.artifact_id,
+            vector,
+        })
+        .collect();
+    let outcomes: Vec<Result<()>> = match store.upsert_many(project_id, &batch).await {
+        Ok(()) => batch.iter().map(|_| Ok(())).collect(),
+        Err(_) => {
+            let mut singly = Vec::with_capacity(batch.len());
+            for b in &batch {
+                singly.push(
+                    store
+                        .upsert(project_id, b.chunk_id, b.artifact_id, b.vector)
+                        .await,
+                );
+            }
+            singly
+        }
+    };
+    for ((item, _), outcome) in unwritten.iter().zip(outcomes) {
+        match outcome {
+            Ok(()) => {
+                *total_embedded += 1;
+                *landed.entry(item.artifact_id.as_str()).or_insert(0) += 1;
+            }
+            Err(e) => embed_errors.push(format!("{}: upsert failed: {e}", item.chunk_id)),
+        }
+    }
+    unwritten.clear();
+}
+
 /// Re-attach augmentation shape from committed sidecars, for artifacts that declare one
 /// and currently have no augmentation row.
 ///
@@ -523,20 +586,26 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             let mut last_published_ms = started_ms;
             publish_progress(ctx, &progress_row(0, started_ms));
 
+            // Embedded vectors wait here and land in ONE store request per `UPSERT_BATCH`; the
+            // embedding itself stays one request at a time (the local server does not scale with
+            // concurrency: 17-20 ms per text sequentially, 29-32 ms at 8 and 16 workers).
+            let mut unwritten: Vec<(&indexer::EmbedQueueItem, Vec<f32>)> = Vec::new();
             for item in &embed_queue {
                 match svc.embed_artifact(item.title.as_deref(), &item.text).await {
-                    Ok(vec) => match store
-                        .upsert(&project_id, &item.chunk_id, &item.artifact_id, &vec)
-                        .await
-                    {
-                        Ok(()) => {
-                            total_embedded += 1;
-                            *landed.entry(item.artifact_id.as_str()).or_insert(0) += 1;
+                    Ok(vec) => {
+                        unwritten.push((item, vec));
+                        if unwritten.len() >= UPSERT_BATCH {
+                            flush_vectors(
+                                store.as_ref(),
+                                &project_id,
+                                &mut unwritten,
+                                &mut landed,
+                                &mut total_embedded,
+                                &mut embed_errors,
+                            )
+                            .await;
                         }
-                        Err(e) => {
-                            embed_errors.push(format!("{}: upsert failed: {e}", item.chunk_id))
-                        }
-                    },
+                    }
                     Err(e) => embed_errors.push(format!("{}: embed failed: {e}", item.chunk_id)),
                 }
 
@@ -560,6 +629,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     publish_progress(ctx, &progress_row(embed_done, now));
                 }
             }
+
+            // The last, partial batch.
+            flush_vectors(
+                store.as_ref(),
+                &project_id,
+                &mut unwritten,
+                &mut landed,
+                &mut total_embedded,
+                &mut embed_errors,
+            )
+            .await;
 
             // The loop is over, so the row's claim — "a reindex is embedding right
             // now" — has stopped being true. Cleared here rather than at the end of
@@ -1333,6 +1413,200 @@ mod tests {
         assert!(
             inner.chunks_under(&one_keep) > 0 && inner.chunks_under(&two_keep) > 0,
             "a surviving file lost its vectors"
+        );
+    }
+
+    /// A store that records HOW it was written to: single `upsert` calls, `upsert_many` calls and
+    /// their sizes, and every chunk that landed. With `bad_artifact` set it refuses any request
+    /// that contains that artifact, whole, as Qdrant refuses a request holding one bad point.
+    struct RecordingStore {
+        inner: Arc<crate::librarian::artifact_store::test_support::InMemoryArtifactStore>,
+        single_calls: std::sync::atomic::AtomicUsize,
+        batch_sizes: parking_lot::Mutex<Vec<usize>>,
+        landed: parking_lot::Mutex<Vec<(String, String)>>,
+        bad_artifact: Option<String>,
+    }
+
+    impl RecordingStore {
+        fn new(bad_artifact: Option<String>) -> Arc<Self> {
+            Arc::new(Self {
+                inner: Arc::new(Default::default()),
+                single_calls: Default::default(),
+                batch_sizes: Default::default(),
+                landed: Default::default(),
+                bad_artifact,
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::librarian::artifact_store::ArtifactVectorStore for RecordingStore {
+        async fn upsert(
+            &self,
+            project_id: &str,
+            chunk_id: &str,
+            artifact_id: &str,
+            vector: &[f32],
+        ) -> Result<()> {
+            self.single_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.bad_artifact.as_deref() == Some(artifact_id) {
+                anyhow::bail!("point refused");
+            }
+            self.landed
+                .lock()
+                .push((chunk_id.to_string(), artifact_id.to_string()));
+            self.inner
+                .upsert(project_id, chunk_id, artifact_id, vector)
+                .await
+        }
+
+        async fn upsert_many(
+            &self,
+            project_id: &str,
+            items: &[crate::librarian::artifact_store::ChunkVector<'_>],
+        ) -> Result<()> {
+            self.batch_sizes.lock().push(items.len());
+            if items
+                .iter()
+                .any(|i| self.bad_artifact.as_deref() == Some(i.artifact_id))
+            {
+                anyhow::bail!("request refused: it holds a bad point");
+            }
+            for i in items {
+                self.landed
+                    .lock()
+                    .push((i.chunk_id.to_string(), i.artifact_id.to_string()));
+                self.inner
+                    .upsert(project_id, i.chunk_id, i.artifact_id, i.vector)
+                    .await?;
+            }
+            Ok(())
+        }
+
+        async fn delete(&self, artifact_id: &str) -> Result<()> {
+            self.inner.delete(artifact_id).await
+        }
+
+        async fn refile(&self, old_artifact_id: &str, new_artifact_id: &str) -> Result<u64> {
+            self.inner.refile(old_artifact_id, new_artifact_id).await
+        }
+
+        async fn knn(
+            &self,
+            project_id: Option<&str>,
+            query: &[f32],
+            k: usize,
+        ) -> Result<Vec<(String, f32)>> {
+            self.inner.knn(project_id, query, k).await
+        }
+    }
+
+    fn write_specs(root: &std::path::Path, names: &[String]) {
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        for n in names {
+            std::fs::write(
+                root.join("docs/specs").join(n),
+                format!("# {n}\nbody of {n}\n"),
+            )
+            .unwrap();
+        }
+    }
+
+    /// A reindex that embeds more chunks than one batch holds must write them in batches, not
+    /// one request per chunk: each single durable write costs a sync (24.7 ms per point against
+    /// 0.66 ms in a batch of 64, measured on this host's Qdrant), which was over half of the
+    /// ~34 ms the logged reindexes spent per chunk. The last, partial batch must still be
+    /// written, and every chunk must land exactly once.
+    #[tokio::test]
+    async fn a_reindex_writes_vectors_in_batches_not_one_request_per_chunk() {
+        let tmp = TempDir::new().unwrap();
+        let proj = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        let names: Vec<String> = (0..70).map(|i| format!("spec-{i:02}.md")).collect();
+        write_specs(&proj, &names);
+
+        let store = RecordingStore::new(None);
+        let ctx = external_store_ctx(&[("proj", &proj)], store.clone());
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        let embedded = v["embedded"].as_u64().unwrap() as usize;
+        assert!(
+            embedded >= 65,
+            "fixture must exceed one batch, got {embedded}"
+        );
+        assert_eq!(v["embed_error_count"].as_u64().unwrap(), 0);
+        let sizes = store.batch_sizes.lock().clone();
+        assert_eq!(
+            sizes.iter().sum::<usize>(),
+            embedded,
+            "every chunk is in a batch"
+        );
+        assert_eq!(sizes[0], 64, "a full batch is written when it fills");
+        assert_eq!(
+            *sizes.last().unwrap(),
+            embedded % 64,
+            "and the remainder is flushed"
+        );
+        assert_eq!(
+            store.single_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "no per-chunk request when every batch lands"
+        );
+        let mut ids: Vec<String> = store.landed.lock().iter().map(|(c, _)| c.clone()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), embedded, "each chunk landed exactly once");
+    }
+
+    /// A batch the store refuses says only that SOME point did not land. The run must then retry
+    /// the chunks one by one, so exactly the bad one is reported and its artifact left unstamped,
+    /// while the good ones still land. Reporting the whole batch would turn one bad vector into
+    /// dozens of false failures and re-embed all of them on the next run.
+    #[tokio::test]
+    async fn a_refused_batch_is_retried_singly_and_only_the_bad_chunk_is_reported() {
+        let tmp = TempDir::new().unwrap();
+        let proj = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        let names: Vec<String> = ["a.md", "b.md", "bad.md", "c.md", "d.md"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        write_specs(&proj, &names);
+        let bad_id = crate::librarian::ids::artifact_id_from_abs(&proj.join("docs/specs/bad.md"));
+
+        let store = RecordingStore::new(Some(bad_id.clone()));
+        let ctx = external_store_ctx(&[("proj", &proj)], store.clone());
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            v["embed_error_count"].as_u64().unwrap(),
+            1,
+            "only the bad chunk: {v}"
+        );
+        assert!(
+            v["embed_errors"][0]
+                .as_str()
+                .unwrap()
+                .contains("upsert failed"),
+            "{v}"
+        );
+        assert_eq!(
+            v["embedded"].as_u64().unwrap(),
+            4,
+            "the other four still landed"
+        );
+        assert_eq!(
+            store.batch_sizes.lock().clone(),
+            vec![5],
+            "one refused batch of five"
+        );
+        assert_eq!(
+            store.single_calls.load(std::sync::atomic::Ordering::SeqCst),
+            5,
+            "then each chunk was asked singly"
+        );
+        assert!(
+            store.landed.lock().iter().all(|(_, a)| a != &bad_id),
+            "the bad artifact's vector must not be in the store"
         );
     }
 

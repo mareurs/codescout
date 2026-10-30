@@ -56,6 +56,7 @@ See Symptom. Code spot-checked 2026-10-30 at `src/librarian/indexer.rs:218-236`.
 ## Hypotheses tried
 
 1. **Hypothesis:** batching embeds would help. **Test:** 32 single requests vs one batch of 32. **Verdict:** rejected — 667 ms vs 866 ms.
+2. **Measured 2026-10-30, after the batched-write fix** (`docs/issues/2026-10-30-the-mcp-reindex-wrote-each-embedded-chunk-to-qdrant-as-its-own-durable-request.md`): the local embedder serializes requests (17-20 ms per 2 KB text sequentially; 29-32 ms at 8 and 16 workers), so embedding is the floor at roughly 16-18 ms per chunk. A reindex of 2,184 chunks now takes 34.3 s, about 15.7 ms per chunk. Skipping chunks whose embedded text did not change is therefore now the only large lever left: appending one entry to a 499-chunk tracker is still ~8 s of embedding for what should be one chunk.
 
 ## Fix
 

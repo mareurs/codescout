@@ -154,6 +154,14 @@ pub(crate) fn retired_collection_names(prefix: &str) -> Vec<String> {
     }
 }
 
+/// One chunk's vector, borrowed, for [`ArtifactVectorStore::upsert_many`].
+#[derive(Debug, Clone, Copy)]
+pub struct ChunkVector<'a> {
+    pub chunk_id: &'a str,
+    pub artifact_id: &'a str,
+    pub vector: &'a [f32],
+}
+
 /// Backend-agnostic artifact vector store. Implementations:
 /// - [`QdrantArtifactStore`] — default.
 /// - [`SqliteVecArtifactStore`] — the daemon-free escape hatch.
@@ -184,6 +192,23 @@ pub trait ArtifactVectorStore: Send + Sync {
         artifact_id: &str,
         vector: &[f32],
     ) -> Result<()>;
+    /// Upsert several chunks' embeddings of ONE project; the same contract as [`Self::upsert`]
+    /// for each, idempotent on `chunk_id`.
+    ///
+    /// The default loops [`Self::upsert`], so a backend that gains nothing from batching, and
+    /// every test double, need not implement it. A backend whose write costs a round trip and a
+    /// sync per call (Qdrant: 24.7 ms per point as single requests, 0.66 ms as one batch of 64,
+    /// measured 2026-10-30) overrides it.
+    ///
+    /// All-or-nothing is NOT promised: an error means "at least one did not land". A caller that
+    /// must know which one retries the items singly.
+    async fn upsert_many(&self, project_id: &str, items: &[ChunkVector<'_>]) -> Result<()> {
+        for it in items {
+            self.upsert(project_id, it.chunk_id, it.artifact_id, it.vector)
+                .await?;
+        }
+        Ok(())
+    }
 
     /// Delete EVERY chunk vector belonging to `artifact_id`. Idempotent — an
     /// artifact with no vectors is a no-op.
@@ -382,6 +407,27 @@ impl ArtifactVectorStore for QdrantArtifactStore {
                 artifact_id,
                 vector.to_vec(),
             )
+            .await
+    }
+    async fn upsert_many(&self, project_id: &str, items: &[ChunkVector<'_>]) -> Result<()> {
+        let Some(first) = items.first() else {
+            return Ok(());
+        };
+        if items.iter().any(|i| i.vector.is_empty()) {
+            anyhow::bail!("artifact embedding dim is 0 (embedder returned an empty vector)");
+        }
+        let collection = self.collection_for(project_id)?;
+        self.ensure(&collection, first.vector.len() as u64).await?;
+        // One request for the whole batch: a single `wait(true)` upsert costs a WAL fsync, which
+        // as one request per chunk was ~25 ms of every ~43 ms the reindex spent on a chunk.
+        let points = items
+            .iter()
+            .map(|i| {
+                QdrantWrap::artifact_point(project_id, i.chunk_id, i.artifact_id, i.vector.to_vec())
+            })
+            .collect();
+        self.qdrant
+            .artifact_upsert_points(&collection, points)
             .await
     }
 

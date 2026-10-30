@@ -1228,6 +1228,48 @@ mod tests {
     }
 
     /// Full E2E test — requires a running Qdrant instance.
+    /// Run with: cargo test --features server-stack -- --ignored qdrant_artifact_upsert_points
+    ///
+    /// A batch of artifact points must land in ONE call, each under its chunk-derived id, and a
+    /// second batch over the same chunks must overwrite in place rather than add points.
+    #[tokio::test]
+    #[ignore]
+    async fn qdrant_artifact_upsert_points_lands_a_batch_and_is_idempotent_on_chunk_id() {
+        let wrap = QdrantWrap::connect("http://localhost:6334")
+            .await
+            .expect("connect");
+        let coll = "test_artifact_upsert_points_batch";
+        let _ = wrap.client.delete_collection(coll).await;
+        wrap.ensure_artifacts_collection(coll, 2)
+            .await
+            .expect("ensure");
+
+        let batch = |v: f32| {
+            ["c1", "c2", "c3"]
+                .iter()
+                .map(|c| QdrantWrap::artifact_point("p", c, "art", vec![v, 1.0 - v]))
+                .collect::<Vec<_>>()
+        };
+        wrap.artifact_upsert_points(coll, batch(0.25))
+            .await
+            .expect("first batch");
+        assert_eq!(wrap.collection_point_count(coll).await.unwrap(), 3);
+        wrap.artifact_upsert_points(coll, batch(0.75))
+            .await
+            .expect("second batch over the same chunks");
+        assert_eq!(
+            wrap.collection_point_count(coll).await.unwrap(),
+            3,
+            "the same chunk ids overwrite in place; they do not add points"
+        );
+        wrap.artifact_upsert_points(coll, Vec::new())
+            .await
+            .expect("an empty batch is a no-op, not a request");
+
+        let _ = wrap.client.delete_collection(coll).await;
+    }
+
+    /// Full E2E test — requires a running Qdrant instance.
     /// Run with: cargo test --features server-stack -- --ignored qdrant_project_index_stats_falls_back
     ///
     /// On a collection with no `file_path` index the facet is refused, and the public entry
