@@ -1,7 +1,7 @@
 ---
 id: '4410d44c5394afa7'
 kind: bug
-status: open
+status: mitigated
 title: A doc comment announcing unbuilt work outlives the work, and sends the next reader to rebuild it
 tags:
 - cluster/doc-contradicted-by-code
@@ -9,7 +9,8 @@ tags:
 - doctor
 - statement-validity
 - forward-reference
-unverified: 'The INSTANCES in the three files named by the 2026-10-16 sweep are corrected at 4be94370; the CLASS is not, which is why status stays open. The remaining true forward references (agent/mod.rs:811, doctor.rs:72, semantic/index.rs:354, semantic/semantic_search.rs:625) are correct today and will rot the same way. The candidate mechanism (gate that a forward reference names the symbol it waits on and that the symbol does NOT resolve) is deliberately not built: a decision for Marius, see ## Resume.'
+closed: 2026-10-30
+unverified: 'The CLASS is still unguarded, which is why this is mitigated and not fixed. The INSTANCES in the three files named by the 2026-10-16 sweep are corrected at 4be94370. The four true forward references found on 2026-10-30 (agent/mod.rs:1199, doctor.rs:72, semantic/index.rs:348, semantic/semantic_search.rs:625) are correct today and will rot the same way. The proposed gate was decided against on 2026-10-30, see ## Resume. The count of 306 comment lines naming Phase N or Task N was not read; most may be correct.'
 ---
 
 # BUG: a doc comment announcing unbuilt work outlives the work, and sends the next reader to rebuild it
@@ -206,6 +207,8 @@ Tests added: none, deliberately (comment-only; see `## Tests added`).
 Every stale forward reference found in the three listed files is fixed on the worktree branch (local, not pushed). Status stays `open` because the class is still unguarded: the gate (a forward reference must name a symbol, and that symbol must not resolve) is not built, and that is a decision, not a bug fix. The population of stale instances found by reading is now at least 8 (`doctor.rs`'s original "not-yet-shipped", `traversal.rs`, `retrieval/config.rs`, and the five fixed above). The next session to touch `with_project_at` level-2 pinning must re-read `agent/mod.rs:811`.
 
 Marius decides (1) whether to build the gate, and (2) whether the `CODESCOUT_EMBEDDER_MODEL_NAME` shadow warning is built or dropped (agent `cfg` is adding one to `src/retrieval/config.rs` on its branch; confirm it merges before closing that item).
+
+**DECIDED BY THE USER ON 2026-10-30: option B, do not build the gate.** Status is `mitigated`: the instances are fixed and the class stays unguarded on purpose. Measured on 2026-10-30 with this file's own regex, widened to `//` and `//!` lines: 4 true forward references remain (`agent/mod.rs:1199`, `doctor.rs:72`, `semantic/index.rs:348`, `semantic/semantic_search.rs:625`). The proposed gate (a forward reference names a symbol, and the symbol must not resolve) cannot see the `Phase N` / `Task N` vocabulary, where five of the eight stale comments found by reading lived; a search for those tags matches 306 comment lines in 81 files (matching lines only, not read). Reopen if a reader acts on another stale forward reference, or if a mechanism that covers the tag vocabulary is designed. Option C (a ratchet that only lets the tag count fall) was offered and not chosen; it is untested and could push people to delete correct references. Item (2), the `CODESCOUT_EMBEDDER_MODEL_NAME` shadow warning, was not examined and stays open as a separate question.
 
 ## References
 
