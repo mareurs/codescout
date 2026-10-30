@@ -1,6 +1,6 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Agent behavior analysis — why B.'s sessions failed, and what measurably fixed them
 owners: []
 tags:

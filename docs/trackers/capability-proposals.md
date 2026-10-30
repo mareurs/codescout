@@ -140,7 +140,7 @@ compile-or-test failure rather than a silent RO default — an unclassified writ
 
 **Why it is worth building.** This is the concrete, machine-checkable half of a problem the repo
 has already documented from the human side: AB-6 in
-[`bistriceanu/agent-behavior-analysis.md`](bistriceanu/agent-behavior-analysis.md), *"the unearned
+[`archive/agent-behavior-analysis-2026-10-30.md`](archive/agent-behavior-analysis-2026-10-30.md), *"the unearned
 clean slate"* — the agent starts each session fresh while the human carries every prior mistake,
 and the only cure named there is "a damage ledger the next session actually reads". That entry's
 ledger is prose the agent must remember to write. This one is a byproduct of doing the work, which
@@ -163,7 +163,7 @@ credentials, cost, latency, non-determinism, and a network dependency to a tool 
 appeal includes having none of those.
 
 **The evidence this is aimed at is unusually good.** From
-[`bistriceanu/agent-behavior-analysis.md`](bistriceanu/agent-behavior-analysis.md):
+[`archive/agent-behavior-analysis-2026-10-30.md`](archive/agent-behavior-analysis-2026-10-30.md):
 
 - **AB-1, the root defect** — a census of one session, verified against the transcript: ten
   corrections, four from user pushback, six from running something, **zero from unaided

@@ -23,7 +23,7 @@ a laptop that had never built codescout and repaired the three catalog layers a
 clone never carries.
 
 **Process:** [`docs/conventions/cross-machine-catalog-resume.md`](../conventions/cross-machine-catalog-resume.md) — written during that pass; run it, do not re-derive it.
-**Predecessor handoff:** `docs/trackers/bug-ledger-resume-2026-08-28.md`.
+**Predecessor handoff:** `docs/trackers/archive/bug-ledger-resume-2026-08-28-2026-10-30.md`.
 
 ## How to use this queue
 

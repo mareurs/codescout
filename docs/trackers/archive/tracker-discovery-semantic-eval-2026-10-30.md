@@ -1,7 +1,7 @@
 ---
-id: c7cd64b9230d1548
+id: 481948564c60ac35
 kind: tracker
-status: active
+status: archived
 title: Tracker-Discovery Semantic Search Eval — measure semantic vs filter for Phase-0 discovery
 owners: []
 tags:

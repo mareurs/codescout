@@ -1069,7 +1069,7 @@ Reads and navigation are unaffected — only indexing refuses.
 
 **Valid:** dated 2026-09-14
 
-**Rests on:** `docs/trackers/bug-ledger-resume-2026-08-28.md` § *Two decisions waiting on a human*.
+**Rests on:** `docs/trackers/archive/bug-ledger-resume-2026-08-28-2026-10-30.md` § *Two decisions waiting on a human*.
 
 Answered in principle 2026-08-28: a read-only activation means *exploring only, no writing*.
 One implementation was tried and **reverted**, with the blast radius measured — making a

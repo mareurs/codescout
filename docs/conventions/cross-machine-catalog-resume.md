@@ -492,4 +492,4 @@ and the **catalog**. Both bit during the 2026-08-28 pass.
 - `get_guide("librarian")` — augmentation lifecycle, `merge` semantics, `params_path`
 - `docs/conventions/retrofitting-trackers-for-filtering.md` — Tier-A mechanics
 - `docs/issues/archive/2026-07-02-tool-usage-patterns-augmentation-lost.md` — the precedent restore
-- `docs/trackers/bug-ledger-resume-2026-08-28.md` — the handoff this process was derived from
+- `docs/trackers/archive/bug-ledger-resume-2026-08-28-2026-10-30.md` — the handoff this process was derived from

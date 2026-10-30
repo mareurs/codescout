@@ -417,7 +417,7 @@ The codescout defects above are half the material. The other half — why the ag
 behaved the way it did across his sessions (assert-at-hypothesis, wrong-environment
 verification, protective framing, structure-as-rigor, session amnesia), why his venting
 didn't fix it and his 08-10 protocol did, and what to promote into our surfaces — is
-analyzed in **[`agent-behavior-analysis.md`](agent-behavior-analysis.md)** (AB-1…AB-7),
+analyzed in **[`agent-behavior-analysis-2026-10-30.md`](../archive/agent-behavior-analysis-2026-10-30.md)** (AB-1…AB-7),
 from the transcript, the four screenshots, and the agent's own post-mortems. Key
 cross-repo result: his three-month launchd misdiagnosis is an independent confirmation
 of R-86 (recorded as an `external_signal` event on `reconnaissance-patterns`), and the
@@ -504,7 +504,7 @@ Updated 2026-08-16 — three fixes shipped, closing the loop this tracker opened
 1. **B-9 fixed** — `43fac6c8`, regression test added, bug file archived (see B-9 entry above).
 2. **The maintainer's "Conclude Last" iron rule amended** on all three local CC profiles
    (`~/.claude`, `~/.claude-kat`, `~/.claude-sdd` CLAUDE.md) with the clause the eval
-   proved closes its loophole — see `agent-behavior-analysis.md` § Tier 1b.
+   proved closes its loophole — see `docs/trackers/archive/agent-behavior-analysis-2026-10-30.md` § Tier 1b.
 3. **codescout's own `project-activation-bootstrap` guide** now leads Phase 2 with an
    unconditional ALWAYS-VERIFY imperative — `5917e37e`. This is hard-injected once per
    session on first `workspace(activate)`, in its own uncapped content block (confirmed
@@ -527,7 +527,7 @@ Updated 2026-08-16 — three fixes shipped, closing the loop this tracker opened
 
 All three trace to the reporter's own two sentences — measured the best-performing
 verification-guidance artifact in an 11-arm eval built to answer exactly this
-question. Findings + the full ablation are in `agent-behavior-analysis.md`; a
+question. Findings + the full ablation are in `docs/trackers/archive/agent-behavior-analysis-2026-10-30.md`; a
 scrubbed writeup for the reporter is published as a private Claude artifact —
 private until shared, and access-controlled by account rather than by secrecy of
 the link, so recording it here is safe even in this public repo:
