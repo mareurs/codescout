@@ -397,16 +397,13 @@ pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> 
 /// It cannot be done by delete-then-reinsert instead: the `AFTER DELETE` trigger
 /// would destroy the very vectors the whole exercise exists to preserve.
 ///
-/// Not wrapped in a transaction: this is deliberate house style, not an
-/// oversight. Leaf `&Catalog` writers here (`commits::upsert_many`,
-/// `event_edges::insert_many`, `link_scan/diff.rs`'s apply step,
-/// `merge_worktree.rs` — see its rationale at `:217-221`) don't open
-/// `unchecked_transaction()` themselves, so a composite caller can wrap the
-/// whole multi-step operation (e.g. chunking + re-embedding) in one. Two facts
+/// Not wrapped in a transaction HERE: a composite caller owns that, so it can span more than
+/// this one call. `embed_queue_items` (the production caller that chunks and re-embeds)
+/// wraps it in a SAVEPOINT through `in_one_commit`, because bare each statement below is its
+/// own fsynced commit: 4,691 ms against 12 ms for 400 chunks, measured 2026-10-30. Two facts
 /// the next caller needs: `Connection::transaction()` requires `&mut
-/// Connection` and is unreachable through `&Catalog`, so the option here is
-/// `conn.unchecked_transaction()`; and `unchecked_transaction()` must never be
-/// nested — the caller opens at most one across the whole composite operation.
+/// Connection` and is unreachable through `&Catalog`, so the options are
+/// `conn.unchecked_transaction()`, which must never be nested, or a SAVEPOINT, which nests.
 /// A caller that wraps also gets the sentinel ordinals of step 2 rolled back on
 /// error; unwrapped, a failure between steps 2 and 4 leaves them on disk, which
 /// is the same class of exposure the pre-existing delete-then-insert already had.

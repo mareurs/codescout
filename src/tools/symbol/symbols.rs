@@ -712,6 +712,82 @@ fn merge_deduped(
     }
 }
 
+/// How long a language's `workspace/symbol` leg waits once it has been seen to time out.
+///
+/// The tree-sitter pass covers every accepted file whatever the LSP does, so the LSP leg
+/// only ever ADDS matches the tree-sitter pass could not name. A server that blew the full
+/// `PER_LANG_BUDGET` a minute ago is not worth another 8 s: the usage.db shows 214 of 222
+/// project-wide `symbols(name)` calls waiting the whole budget, and all 33 logged
+/// `workspace/symbol` answers on this repo were `[]`.
+const SHORT_LANG_BUDGET: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// How long after a full-budget timeout the short budget applies, before one full-budget
+/// call probes the server again.
+const LANG_TIMEOUT_MEMORY: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Per (language, workspace root) memory of the last time `workspace/symbol` used up the
+/// FULL budget. Pure over an injected `now` so the policy is testable without a clock.
+#[derive(Default)]
+struct LspLegHealth {
+    last_full_timeout: std::collections::HashMap<String, std::time::Instant>,
+}
+
+impl LspLegHealth {
+    /// The budget the next call for `key` should use: short inside the memory window,
+    /// `full` otherwise.
+    fn budget(
+        &self,
+        key: &str,
+        now: std::time::Instant,
+        full: std::time::Duration,
+    ) -> std::time::Duration {
+        match self.last_full_timeout.get(key) {
+            Some(at) if now.saturating_duration_since(*at) < LANG_TIMEOUT_MEMORY => {
+                SHORT_LANG_BUDGET.min(full)
+            }
+            _ => full,
+        }
+    }
+
+    /// A timeout counts only when it used the FULL budget. A short-budget timeout must not
+    /// refresh the window, or a server that needs 3 s would be starved of its full budget
+    /// forever and the LSP leg would never contribute again.
+    fn note_timeout(&mut self, key: &str, used_full_budget: bool, now: std::time::Instant) {
+        if used_full_budget {
+            self.last_full_timeout.insert(key.to_owned(), now);
+        }
+    }
+
+    /// An answer, even an empty one, proves the server is serving: forget the timeout.
+    fn note_answer(&mut self, key: &str) {
+        self.last_full_timeout.remove(key);
+    }
+}
+
+static LSP_LEG_HEALTH: std::sync::LazyLock<std::sync::Mutex<LspLegHealth>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn leg_key(lang: &str, root: &std::path::Path) -> String {
+    format!("{lang}\0{}", root.display())
+}
+
+/// The text a symbol's name must be found in, for a file to be worth parsing.
+///
+/// Every tree-sitter extractor takes a symbol's name from the source text (the one
+/// synthesized name, Kotlin's `Companion`, always comes with the literal `companion`
+/// keyword), so a file whose lowercased text lacks the last segment of the lowercased
+/// pattern cannot hold a match. Only a purely identifier-shaped segment qualifies: a
+/// pattern with spaces or punctuation (`impl Foo for Bar`) can match a name the text
+/// spells differently, so it gets no prefilter and parses every file as before.
+fn name_prefilter_needle(pattern_lower: &str) -> Option<&str> {
+    let last = pattern_lower.rsplit('/').next().unwrap_or("");
+    let identifier_shaped = !last.is_empty()
+        && last
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    identifier_shaped.then_some(last)
+}
+
 /// Project-scope search (branch B of `Symbols::call`): one `workspace/symbol`
 /// request per language (per-language timeout), then a tree-sitter pass over every
 /// accepted file that merges in anything the LSP's own answer omitted. Body is the
@@ -786,19 +862,35 @@ async fn search_project_symbols(
             .agent
             .lsp_mux_override(ctx.workspace_override.as_deref(), lang)
             .await;
+        let key = leg_key(lang, &root);
+        // A server seen to burn the whole budget recently gets a short one: the
+        // tree-sitter pass below covers its files either way.
+        let budget = LSP_LEG_HEALTH
+            .lock()
+            .map(|h| h.budget(&key, std::time::Instant::now(), PER_LANG_BUDGET))
+            .unwrap_or(PER_LANG_BUDGET);
         join_set.spawn(async move {
             // The mapping lives in `lang_outcome` so its three-into-two collapse is
             // testable; what remains HERE is wiring that only a live LSP reaches.
-            let outcome = lang_outcome(
-                tokio::time::timeout(PER_LANG_BUDGET, async {
-                    let client = lsp.get_or_start(lang, &root, mux_override).await?;
-                    client.workspace_symbols(&pattern).await
-                })
-                .await,
-                lang,
-                PER_LANG_BUDGET,
-            );
-            (lang, outcome)
+            let attempt = tokio::time::timeout(budget, async {
+                let client = lsp.get_or_start(lang, &root, mux_override).await?;
+                client.workspace_symbols(&pattern).await
+            })
+            .await;
+            if let Ok(mut health) = LSP_LEG_HEALTH.lock() {
+                match &attempt {
+                    Err(_) => health.note_timeout(
+                        &key,
+                        budget == PER_LANG_BUDGET,
+                        std::time::Instant::now(),
+                    ),
+                    Ok(Ok(_)) => health.note_answer(&key),
+                    // A start failure or LSP error says nothing about how long this
+                    // server takes to answer; leave the memory as it was.
+                    Ok(Err(_)) => {}
+                }
+            }
+            (lang, lang_outcome(attempt, lang, budget))
         });
     }
     while let Some(task_result) = join_set.join_next().await {
@@ -891,20 +983,25 @@ async fn search_project_symbols(
     // It no longer re-walks the tree. `accepted_files` was built above with the same
     // `WalkBuilder` settings and the same `detect_language` test, so a second walk
     // would be a byte-identical population computed twice.
+    // A file whose text lacks the searched name cannot hold a match, so it is not parsed;
+    // the text read for that test is also what the parser and `include_body` consume.
+    let needle = name_prefilter_needle(pattern_lower);
     for path in files_needing_fallback(&accepted_files) {
         let path = path.as_path();
-        if let Ok(symbols) = crate::ast::extract_symbols(path) {
-            let source = if include_body {
-                std::fs::read_to_string(path).ok()
-            } else {
-                None
-            };
+        let Ok(text) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        if needle.is_some_and(|n| !text.to_lowercase().contains(n)) {
+            continue;
+        }
+        if let Ok(symbols) = crate::ast::extract_symbols_from_text(&text, path) {
+            let source = include_body.then_some(text.as_str());
             let mut candidates = Vec::new();
             collect_matching(
                 &symbols,
                 name_ok,
                 include_body,
-                source.as_deref(),
+                source,
                 depth,
                 true,
                 &mut candidates,
@@ -1720,5 +1817,124 @@ mod lang_outcome_tests {
             answered_empty.is_some(),
             "these two produced the same empty symbol list and MUST NOT be the same value"
         );
+    }
+}
+
+/// The adaptive per-language budget and the text prefilter of `search_project_symbols`.
+#[cfg(test)]
+mod project_search_cost_tests {
+    use super::{name_prefilter_needle, LspLegHealth, LANG_TIMEOUT_MEMORY, SHORT_LANG_BUDGET};
+    use std::time::{Duration, Instant};
+
+    const FULL: Duration = Duration::from_secs(8);
+
+    #[test]
+    fn a_language_never_seen_to_time_out_gets_the_full_budget() {
+        let h = LspLegHealth::default();
+        assert_eq!(h.budget("rust", Instant::now(), FULL), FULL);
+    }
+
+    #[test]
+    fn a_full_budget_timeout_shortens_the_next_budget_until_the_memory_expires() {
+        let mut h = LspLegHealth::default();
+        let t0 = Instant::now();
+        h.note_timeout("rust", true, t0);
+        assert_eq!(
+            h.budget("rust", t0 + Duration::from_secs(1), FULL),
+            SHORT_LANG_BUDGET
+        );
+        assert_eq!(
+            h.budget("rust", t0 + LANG_TIMEOUT_MEMORY, FULL),
+            FULL,
+            "after the memory window one full-budget call must probe the server again"
+        );
+        assert_eq!(
+            h.budget("kotlin", t0, FULL),
+            FULL,
+            "another language is unaffected"
+        );
+    }
+
+    /// Without this, a server that needs 3 s would time out at 1.5 s, refresh the window,
+    /// and never be given its full budget again.
+    #[test]
+    fn a_short_budget_timeout_does_not_refresh_the_window() {
+        let mut h = LspLegHealth::default();
+        let t0 = Instant::now();
+        h.note_timeout("rust", true, t0);
+        h.note_timeout("rust", false, t0 + Duration::from_secs(200));
+        assert_eq!(
+            h.budget("rust", t0 + LANG_TIMEOUT_MEMORY, FULL),
+            FULL,
+            "the window still ends 300 s after the FULL-budget timeout"
+        );
+    }
+
+    #[test]
+    fn an_answer_restores_the_full_budget() {
+        let mut h = LspLegHealth::default();
+        let t0 = Instant::now();
+        h.note_timeout("rust", true, t0);
+        h.note_answer("rust");
+        assert_eq!(h.budget("rust", t0, FULL), FULL);
+    }
+
+    #[test]
+    fn the_short_budget_never_exceeds_a_caller_budget_smaller_than_itself() {
+        let mut h = LspLegHealth::default();
+        let t0 = Instant::now();
+        h.note_timeout("rust", true, t0);
+        let tiny = Duration::from_millis(200);
+        assert_eq!(h.budget("rust", t0, tiny), tiny);
+    }
+
+    #[test]
+    fn only_an_identifier_shaped_last_segment_becomes_a_needle() {
+        assert_eq!(
+            name_prefilter_needle("parse_bool_param"),
+            Some("parse_bool_param")
+        );
+        assert_eq!(name_prefilter_needle("container/member"), Some("member"));
+        assert_eq!(
+            name_prefilter_needle(""),
+            None,
+            "an empty pattern matches everything"
+        );
+        assert_eq!(name_prefilter_needle("a/"), None, "an empty last segment");
+        assert_eq!(
+            name_prefilter_needle("impl foo for bar"),
+            None,
+            "a spaced pattern can match a name the text spells differently"
+        );
+        assert_eq!(name_prefilter_needle("op<t>"), None);
+        assert_eq!(
+            name_prefilter_needle("größe"),
+            None,
+            "non-ASCII is left to the parser"
+        );
+    }
+
+    /// The one extractor-synthesized name. If a needle derived from it were absent from the
+    /// text, the prefilter would drop a symbol the unfiltered pass finds.
+    #[test]
+    fn the_synthesized_kotlin_companion_name_still_appears_in_the_lowercased_text() {
+        let src = "class Foo {\n    companion object {\n        fun make() = 1\n    }\n}\n";
+        let path = std::path::Path::new("Foo.kt");
+        let symbols = crate::ast::extract_symbols_from_text(src, path).expect("kotlin parses");
+        let mut names = Vec::new();
+        fn walk(s: &[crate::lsp::SymbolInfo], out: &mut Vec<String>) {
+            for x in s {
+                out.push(x.name.to_lowercase());
+                walk(&x.children, out);
+            }
+        }
+        walk(&symbols, &mut names);
+        assert!(
+            names.iter().any(|n| n == "companion"),
+            "fixture must exercise the synthesized name; got {names:?}"
+        );
+        assert!(src
+            .to_lowercase()
+            .contains(name_prefilter_needle("companion").unwrap()));
     }
 }

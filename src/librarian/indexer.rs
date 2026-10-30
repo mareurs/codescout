@@ -158,6 +158,31 @@ pub fn first_h1(body: &str) -> Option<String> {
     None
 }
 
+/// Run `f` as ONE catalog commit: a SAVEPOINT, released on `Ok` and rolled back on `Err`.
+///
+/// Without it every statement of a multi-row write is its own autocommit transaction, and
+/// under WAL with `synchronous=FULL` each one fsyncs. Measured 2026-10-30 on a file-backed
+/// catalog: `replace_chunks` over a 400-chunk body took 4,691 ms bare and 12 ms in one
+/// commit; a rewrite that shifted every chunk took 8,592 ms against 14 ms.
+///
+/// A SAVEPOINT rather than `unchecked_transaction()` so a composite caller that already
+/// holds a transaction can still call this: `BEGIN` inside a transaction is an error, a
+/// nested SAVEPOINT is not. The rollback also takes `replace_chunks`' sentinel ordinals
+/// (step 2 of its write) back with it when a later step fails.
+fn in_one_commit<T>(conn: &rusqlite::Connection, f: impl FnOnce() -> Result<T>) -> Result<T> {
+    conn.execute_batch("SAVEPOINT one_commit")?;
+    match f() {
+        Ok(v) => {
+            conn.execute_batch("RELEASE one_commit")?;
+            Ok(v)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK TO one_commit; RELEASE one_commit");
+            Err(e)
+        }
+    }
+}
+
 /// Build the embed-queue entries for `doc`: ONE PER CHUNK, keyed by chunk id.
 ///
 /// **`doc` is the WHOLE file, frontmatter and all** — not a pre-stripped body.
@@ -228,7 +253,9 @@ pub(crate) fn embed_queue_items(
             crate::librarian::catalog::chunk::build_single_chunk(id, body, line_offset)
         }
     };
-    let stored = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built)?;
+    let stored = in_one_commit(&cat.conn, || {
+        crate::librarian::catalog::chunk::replace_chunks(cat, id, &built)
+    })?;
     // Built once per artifact, not per chunk: a ledger has hundreds of chunks and
     // one heading table.
     let titles = crate::librarian::entry_token::entry_titles_by_token(body);
@@ -1875,7 +1902,9 @@ async fn backfill_chunk_vectors_with(
             // docs/issues/archive/2026-10-18-on-a-qdrant-host-backfill-never-retries-a-chunk-whose-embed-failed.md
             if any_failed && created_rows && matches!(target, BackfillTarget::Store { .. }) {
                 let cat = catalog.lock();
-                crate::librarian::catalog::chunk::replace_chunks(&cat, &id, &[])?;
+                in_one_commit(&cat.conn, || {
+                    crate::librarian::catalog::chunk::replace_chunks(&cat, &id, &[]).map(drop)
+                })?;
             } else {
                 pending.extend(finished);
             }
@@ -2547,6 +2576,82 @@ kind = "memory"
             "a REUSED chunk must embed with the entry's CURRENT title, not the one \
              it was stored under: {:?}",
             &second[1].text[..second[1].text.len().min(80)]
+        );
+    }
+
+    /// A write that fails part-way must leave the stored chunks exactly as they were.
+    ///
+    /// `replace_chunks` parks the shifted rows on negative ordinals (step 2) before it
+    /// inserts the new ones (step 3). Inserting a section at the top shifts all three
+    /// existing chunks, so the poisoned insert fails AFTER they were parked. With each
+    /// statement its own commit that leaves them on `chunk_ix < 0`; inside one commit the
+    /// failure rolls them back.
+    #[test]
+    fn a_chunk_write_that_fails_part_way_leaves_the_stored_chunks_as_they_were() {
+        use crate::librarian::catalog::chunk::chunks_for;
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+        let before = "## E-1 — a\n\nalpha\n\n## E-2 — b\n\nbeta\n\n## E-3 — c\n\ngamma\n";
+        embed_queue_items(&cat, "a", None, before, ChunkGrain::Chunk).unwrap();
+        let stored = chunks_for(&cat, "a").unwrap();
+        assert!(
+            stored.len() >= 3,
+            "fixture must hold three shiftable chunks, got {}",
+            stored.len()
+        );
+
+        cat.conn
+            .execute_batch(
+                "CREATE TRIGGER poison_chunk BEFORE INSERT ON artifact_chunk
+                 WHEN NEW.content LIKE '%poison%'
+                 BEGIN SELECT RAISE(ABORT, 'forced chunk insert failure'); END;",
+            )
+            .unwrap();
+        let after = format!("## E-0 — new\n\npoison\n\n{before}");
+        let err = embed_queue_items(&cat, "a", None, &after, ChunkGrain::Chunk);
+        assert!(err.is_err(), "the poisoned insert must fail the write");
+
+        let key = |rows: &[crate::librarian::catalog::chunk::ChunkRow]| {
+            rows.iter()
+                .map(|r| (r.chunk_id.clone(), r.chunk_ix, r.content.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            key(&chunks_for(&cat, "a").unwrap()),
+            key(&stored),
+            "a failed write left the chunk rows changed (parked ordinals, deleted rows)"
+        );
+    }
+
+    /// The commit wrapper must nest: a composite caller that already holds a transaction
+    /// owns the outcome, and the chunk write must neither fail nor commit behind its back.
+    #[test]
+    fn a_chunk_write_inside_an_open_transaction_nests_and_follows_its_outcome() {
+        use crate::librarian::catalog::chunk::chunks_for;
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+        let outer = cat.conn.unchecked_transaction().unwrap();
+        embed_queue_items(&cat, "a", None, "## E-1 — a\n\nalpha\n", ChunkGrain::Chunk)
+            .expect("a nested chunk write must not fail on BEGIN-inside-a-transaction");
+        assert!(!chunks_for(&cat, "a").unwrap().is_empty());
+        drop(outer); // rollback
+        assert!(
+            chunks_for(&cat, "a").unwrap().is_empty(),
+            "the outer rollback must undo the nested chunk write"
         );
     }
 

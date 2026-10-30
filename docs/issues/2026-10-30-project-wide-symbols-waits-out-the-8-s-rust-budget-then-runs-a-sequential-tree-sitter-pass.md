@@ -1,15 +1,16 @@
 ---
 id: '95e240ad522e54b8'
 kind: bug
-status: open
+status: fixed
 title: A project-wide symbols(name=...) waits out rust-analyzer's full 8 s budget, then runs a sequential tree-sitter pass (~11 s per call)
 owners:
 - marius
 tags:
 - cluster/unclassified
+closed: 2026-10-30
 opened: 2026-10-30
 severity: high
-unverified: Why rust-analyzer never answers workspace/symbol is not established. The ~3 s tree-sitter share is read from log timestamps of one call, not from a span. The 2-3 s target is an estimate.
+unverified: Why rust-analyzer never answers workspace/symbol is not established. The 5 min memory window and 1.5 s short budget are chosen, not derived. The first call after a server start still pays the full 8 s when the server does not answer.
 ---
 
 # BUG: A project-wide symbols(name=...) waits out rust-analyzer's full 8 s budget, then runs a sequential tree-sitter pass (~11 s per call)
@@ -63,14 +64,23 @@ See Symptom.
 
 ## Fix
 
-Candidates, not chosen:
-- Remember per language that the last `workspace/symbol` timed out; use a short budget (~1.5 s) for some minutes.
-- Run the tree-sitter pass concurrently with the LSP legs via `spawn_blocking`, so wall time is the max, not the sum.
-- Skip files whose text does not contain the last segment of the name (case-insensitive) before parsing.
+Done in `src/tools/symbol/symbols.rs` (2026-10-30):
+- `LspLegHealth`: a language whose `workspace/symbol` used the FULL 8 s budget gets `SHORT_LANG_BUDGET` (1.5 s) for `LANG_TIMEOUT_MEMORY` (5 min), then one full-budget call probes it again. A short-budget timeout does not refresh the window; an answer clears it; an LSP error leaves it as it was.
+- `name_prefilter_needle`: the tree-sitter pass skips a file whose lowercased text lacks the last segment of the lowercased pattern, only when that segment is `[a-z0-9_]+`. It parses from the text it already read (`extract_symbols_from_text`) instead of reading twice.
+- Not done: running the tree-sitter pass concurrently with the LSP legs.
+
+Measured 2026-10-30 (release builds, `symbols(name="parse_bool_param")`, no `path`, over stdio MCP, 4 calls each, same result set in steady state, digest `60079a1889`):
+
+| binary | call 1 | calls 2-4 |
+|---|---|---|
+| before | 10,870 ms | 3,787 / 4,237 / 4,223 ms |
+| after | 2,615 ms | 1,846 / 2,293 / 1,801 ms |
+
+The "before" steady state is about 4 s, not 8 s, because the rust-analyzer in that run answered inside the budget. The fix helps the timeout case most; the prefilter is what lowers the steady state.
 
 ## Tests added
 
-None yet.
+`project_search_cost_tests` in `src/tools/symbol/symbols.rs`: budget policy (full, short, expiry, no refresh on a short timeout, answer clears, cap) and `name_prefilter_needle` shapes, including the synthesized Kotlin `Companion` name. Not mutation-tested; the live LSP join is covered only by the measurement above.
 
 ## Workarounds
 
