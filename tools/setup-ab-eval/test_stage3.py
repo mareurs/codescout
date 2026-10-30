@@ -1,12 +1,15 @@
 """Tests for stage3: the pilot/extension plans and the per-task freeze pieces. No real docker."""
 import contextlib
+import hashlib
 import io
 import json
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import analyze
 import run
@@ -154,12 +157,30 @@ class Stage3Test(unittest.TestCase):
         self.assertEqual(dry["worst_case_usd"], 240.0)
 
 
+class VolumeDocker:
+    """stage3's docker contract for the template hash: volume inspect, image inspect, run."""
+    PROBE_ID = "sha256:" + "0" * 64
+
+    def __init__(self, stdout, volume_exists=True):
+        self.stdout, self.volume_exists, self.calls = stdout, volume_exists, []
+
+    def __call__(self, *args, check=True, timeout=None):
+        a = [str(x) for x in args]
+        self.calls.append(a)
+        if a[:2] == ["volume", "inspect"]:
+            return SimpleNamespace(returncode=0 if self.volume_exists else 1, stdout="")
+        if a[:2] == ["image", "inspect"]:
+            return SimpleNamespace(returncode=0, stdout=self.PROBE_ID + "\n")
+        return SimpleNamespace(returncode=0, stdout=self.stdout)
+
 class FreezePiecesTest(unittest.TestCase):
     def test_arm_binary_sha256_reads_the_first_line_read_only(self):
         fake = FakeDocker(f"{SHA}  /out/bin/codescout\nabc  /out/bin/rust-analyzer\n")
-        with contextlib.redirect_stdout(io.StringIO()) as printed:
+        with contextlib.redirect_stderr(io.StringIO()) as printed, \
+                contextlib.redirect_stdout(io.StringIO()) as stdout:
             self.assertEqual(stage3.arm_binary_sha256("sab-arm-x:t", fake), SHA)
-        self.assertIn(SHA, printed.getvalue())
+        self.assertIn(SHA, printed.getvalue())  # progress on stderr (round 1, M-4)
+        self.assertEqual(stdout.getvalue(), "")
         argv = fake.calls[0]
         self.assertEqual(argv[:2], ["run", "--rm"])
         self.assertTrue(argv[argv.index("--name") + 1].startswith("sab-binhash-"))
@@ -167,32 +188,57 @@ class FreezePiecesTest(unittest.TestCase):
         self.assertEqual(argv[-2:], ["sab-arm-x:t", "/opt/sab/sha256.txt"])
         for bad in ("", "nothex  /out/bin/codescout\n", f"{SHA}  /out/bin/rust-analyzer\n",
                     f"{SHA}  /out/bin/rust-analyzer\n{SHA}  /out/bin/codescout\n"):
-            with self.subTest(bad), self.assertRaises(RuntimeError):
+            with self.subTest(bad), self.assertRaises(RuntimeError), \
+                    contextlib.redirect_stderr(io.StringIO()):
                 stage3.arm_binary_sha256("sab-arm-x:t", FakeDocker(bad))
 
     def test_template_volume_hash_mounts_read_only_without_network(self):
         listing = "aa  ./collection/a\nbb  ./collection/b\n"
-        fake = FakeDocker(listing)
+        fake = VolumeDocker(listing)
         got = stage3.template_volume_sha256("sab-tpl-x", fake)
         self.assertEqual(got["files"], 2)
-        self.assertEqual(len(got["sha256"]), 64)
-        argv = fake.calls[0]
+        self.assertEqual(got["sha256"], hashlib.sha256(listing.encode()).hexdigest())
+        self.assertEqual(got["probe_image_id"], VolumeDocker.PROBE_ID)
+        self.assertEqual(fake.calls[0], ["volume", "inspect", "sab-tpl-x"])  # first, always
+        argv = fake.calls[-1]
         self.assertIn("sab-tpl-x:/tpl:ro", argv)
         self.assertEqual(argv[argv.index("--network") + 1], "none")
         self.assertTrue(argv[argv.index("--name") + 1].startswith("sab-tplhash-"))
-        self.assertNotEqual(stage3.template_volume_sha256("sab-tpl-x", FakeDocker(
+        self.assertEqual(argv[argv.index("--entrypoint") + 2], VolumeDocker.PROBE_ID)  # by id
+        self.assertIn("set -euo pipefail", argv[-1])
+        self.assertNotEqual(stage3.template_volume_sha256("sab-tpl-x", VolumeDocker(
             listing.replace("bb", "cc")))["sha256"], got["sha256"])
         with self.assertRaises(ValueError):
             stage3.template_volume_sha256("codescout-qdrant", fake)
         with self.assertRaises(RuntimeError):
-            stage3.template_volume_sha256("sab-tpl-x", FakeDocker(""))
+            stage3.template_volume_sha256("sab-tpl-x", VolumeDocker(""))
+
+    def test_a_missing_template_volume_is_refused_before_any_run(self):
+        # Round 1 (I-5): `docker run -v` would CREATE the volume; nothing may run then.
+        fake = VolumeDocker("aa  ./a\n", volume_exists=False)
+        with self.assertRaisesRegex(RuntimeError, "never created"):
+            stage3.template_volume_sha256("sab-tpl-gone", fake)
+        self.assertEqual(fake.calls, [["volume", "inspect", "sab-tpl-gone"]])
+
+    def test_the_default_docker_keeps_stderr_out_of_stdout(self):
+        # pilot.docker merges stderr into stdout; the stdout-only helper must not.
+        with mock.patch.object(stage3.subprocess, "run", return_value=SimpleNamespace(
+                returncode=0, stdout="aa  ./a\n", stderr="WARNING: platform mismatch\n")) as r:
+            out = stage3.docker_stdout("run", "--rm", "x")
+        self.assertEqual(out.stdout, "aa  ./a\n")
+        self.assertEqual(r.call_args.kwargs.get("capture_output"), True)
+        self.assertNotIn("stderr", {k for k, v in r.call_args.kwargs.items()
+                                    if v is subprocess.STDOUT})
+        with mock.patch.object(stage3.subprocess, "run", return_value=SimpleNamespace(
+                returncode=1, stdout="", stderr="no such image")):
+            with self.assertRaisesRegex(RuntimeError, "no such image"):
+                stage3.docker_stdout("image", "inspect", "x")
 
     def test_template_dump_hash_is_the_scanned_dump(self):
         tmp = Path(tempfile.mkdtemp(prefix="sab-dump-"))
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         (tmp / "t" / "controls").mkdir(parents=True)
         (tmp / "t" / "controls" / "qdrant-dump.jsonl").write_bytes(b"{}\n")
-        import hashlib
         self.assertEqual(stage3.template_dump_sha256("t", tmp),
                          hashlib.sha256(b"{}\n").hexdigest())
 

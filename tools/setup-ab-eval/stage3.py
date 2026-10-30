@@ -29,11 +29,12 @@ import hashlib
 import json
 import random
 import re
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 
 import analyze
-import pilot
 import run
 import tasks
 
@@ -44,7 +45,8 @@ SPLIT_RULE = ("pilot = for kind in (foreign, private): random.Random(split_seed)
               "metadata only (id, kind), never outcomes; the extension runs unconditionally")
 SHA_LINE = re.compile(r"([0-9a-f]{64})\s+\S*/bin/codescout$")
 TEMPLATE_HASH_IMAGE = run.PROBE_IMAGE  # python:3.12-slim: sha256sum, find, sort, xargs
-TEMPLATE_HASH_SCRIPT = ("cd /tpl && find . -type f -print0 | sort -z | xargs -0 -r sha256sum")
+TEMPLATE_HASH_SCRIPT = ("set -euo pipefail; cd /tpl && find . -type f -print0 | sort -z "
+                        "| xargs -0 -r sha256sum")
 
 
 def sha256_file(path):
@@ -125,7 +127,18 @@ def registration_pieces(selected, tasks_root=None, *, split_seed, pilot_seed, ex
 # --- per-task freeze pieces (read-only docker) ----------------------------------------------------
 
 def _docker(docker):
-    return docker or pilot.docker
+    return docker or docker_stdout
+
+
+def docker_stdout(*args, check=True, timeout=None):
+    """`docker <args>` with stdout and stderr SEPARATE (pilot.docker merges them, so a daemon
+    warning or pull progress would enter a hash); a failure raises with the stderr tail."""
+    p = subprocess.run(["docker", *map(str, args)], capture_output=True, text=True,
+                       timeout=timeout)
+    if check and p.returncode:
+        raise RuntimeError(f"docker {' '.join(map(str, args[:3]))} failed (exit {p.returncode}): "
+                           f"{p.stderr[-2000:]}")
+    return p
 
 
 def arm_binary_sha256(image, docker=None):
@@ -139,7 +152,7 @@ def arm_binary_sha256(image, docker=None):
     if not m:
         raise RuntimeError(f"{image}: /opt/sab/sha256.txt first line is not a codescout sha256: "
                            f"{first!r}")
-    print(f"{image}: {first}", flush=True)
+    print(f"{image}: {first}", file=sys.stderr, flush=True)  # progress: stderr (round 1, M-4)
     return m.group(1)
 
 
@@ -150,19 +163,31 @@ def template_dump_sha256(task_id, tasks_root=None):
 
 
 def template_volume_sha256(template, docker=None, timeout=3600):
-    """{sha256, files} of a template volume's bytes: `sha256sum` of every file in path order, in
-    a --rm sab- container with the volume mounted READ-ONLY and no network. The template is never
-    written; a run copies it (stack.qdrant_for_run)."""
+    """{sha256, files, probe_image_id} of a template volume's bytes: `sha256sum` of every file in
+    path order, in a --rm sab- container with the volume mounted READ-ONLY and no network. The
+    template is never written; a run copies it (stack.qdrant_for_run).
+
+    Task 11 round 1 (I-5): `docker volume inspect` first, and a missing volume refuses BEFORE any
+    `docker run -v` (which would create it empty); the listing is the container's stdout only
+    (stderr is never hashed), under bash `set -euo pipefail` so a find error fails the check;
+    the probe image is run by its id, which is recorded."""
     if not template.startswith("sab-tpl-"):
         raise ValueError(f"{template!r} is not a study template volume")
+    docker = _docker(docker)
+    if docker("volume", "inspect", template, check=False).returncode:
+        raise RuntimeError(f"{template}: no such volume; it is never created here")
+    image_id = docker("image", "inspect", TEMPLATE_HASH_IMAGE, "--format", "{{.Id}}").stdout.strip()
+    if not image_id.startswith("sha256:"):
+        raise RuntimeError(f"{TEMPLATE_HASH_IMAGE}: no local image id ({image_id!r})")
     name = f"sab-tplhash-{uuid.uuid4().hex[:8]}"
-    out = _docker(docker)("run", "--rm", "--name", name, "--network", "none", "-v",
-                          f"{template}:/tpl:ro", "--entrypoint", "sh", TEMPLATE_HASH_IMAGE, "-c",
-                          TEMPLATE_HASH_SCRIPT, timeout=timeout).stdout
+    out = docker("run", "--rm", "--name", name, "--network", "none", "-v",
+                 f"{template}:/tpl:ro", "--entrypoint", "bash", image_id, "-c",
+                 TEMPLATE_HASH_SCRIPT, timeout=timeout).stdout
     lines = [l for l in out.splitlines() if l.strip()]
     if not lines:
-        raise RuntimeError(f"{template}: no file listed; an empty or missing template")
-    return {"sha256": hashlib.sha256(out.encode()).hexdigest(), "files": len(lines)}
+        raise RuntimeError(f"{template}: no file listed; an empty template")
+    return {"sha256": hashlib.sha256(out.encode()).hexdigest(), "files": len(lines),
+            "probe_image_id": image_id}
 
 
 def task_freeze_entry(task_id, tasks_root=None, *, docker=None, inspect=None,

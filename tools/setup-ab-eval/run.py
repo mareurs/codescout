@@ -1350,11 +1350,13 @@ def _dry_run(plan, budget, data):
 
 def run_batch(plan, budget, data, dry_run, *, registration=None, docker=None, exec_cli=None,
               load_task=None, manifest=None, token_reader=None, clock=time.monotonic,
-              timeout=RUN_TIMEOUT_S):
+              timeout=RUN_TIMEOUT_S, inspect=None, tool_dir=None, s5_dir=None):
     """Run `plan` in order, one spec at a time. Keyword-only additions to the brief's signature
     are the registration the batch runs under (required to spend: load_registration, and GO.json
-    must name its registration_sha256), the injection points for tests (fake docker, fake CLI)
-    and the frozen manifest (default `<data>/setup-manifest.json`)."""
+    must name its registration_sha256; a Stage 2 registration is also re-checked against the
+    host by registration.check: tool files, data dir, manifest, images, grader inputs), the
+    injection points for tests (fake docker, fake CLI, inspect, tool_dir, s5_dir) and the frozen
+    manifest (default `<data>/setup-manifest.json`)."""
     plan = check_plan(plan)
     budget = check_budget(budget)
     data = Path(data)
@@ -1365,6 +1367,13 @@ def run_batch(plan, budget, data, dry_run, *, registration=None, docker=None, ex
         raise Refused("a batch that spends runs under a registration: pass --registration")
     reg = load_registration(registration, plan)  # before any side effect
     check_registered_budget(reg, plan, budget)  # N-2
+    if reg.get("stage") == 2:  # Task 11 round 1 (I-1, I-2, I-3): the host is what was frozen
+        import registration as regcheck  # lazy: registration imports freeze_stage1 -> run
+        try:
+            regcheck.check(reg, data=data, tool_dir=tool_dir or HERE,
+                           inspect=inspect or tasks._inspect_image, s5_dir=s5_dir)
+        except regcheck.Mismatch as e:
+            raise Refused(f"the registration no longer matches the host: {e}")
     go = check_go(data, plan, budget, reg["registration_sha256"])
     check_journal(data)  # rows without the journal that covers them are refused
     acknowledged = check_latch(data, go)  # I3: a stop holds until the operator acknowledges it

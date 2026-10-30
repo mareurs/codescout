@@ -53,6 +53,8 @@ import run
 import stage3
 import tasks
 
+HERE = Path(__file__).resolve().parent
+
 COMPARISONS = (("cs", "bare"), ("full", "bare"))
 NO_HEADLINE = "no headline: the strata disagree"
 
@@ -213,7 +215,7 @@ def report(rows, mapping, *, registered_min, seed, verify_reasons, prescan, gold
     return out
 
 
-def main(argv=None, *, verify=tasks.verify):
+def main(argv=None, *, verify=tasks.verify, inspect=tasks._inspect_image, tool_dir=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--data", type=Path, default=tasks.DATA / "study")
     ap.add_argument("--tasks-root", type=Path, default=tasks.DATA / "tasks")
@@ -234,6 +236,13 @@ def main(argv=None, *, verify=tasks.verify):
         if reg.get("registered_min") != analyze.REGISTERED_MIN:
             raise SystemExit(f"registration registered_min {reg.get('registered_min')} != "
                              f"analyze.REGISTERED_MIN {analyze.REGISTERED_MIN}")
+        if reg.get("stage") == 2:  # Task 11 round 1 (I-1): the code and inputs that run
+            import registration as regcheck
+            try:
+                regcheck.check(reg, data=a.data, tool_dir=tool_dir or HERE, inspect=inspect,
+                               graders=False)
+            except regcheck.Mismatch as e:
+                raise SystemExit(f"the registration no longer matches the host: {e}")
     else:
         if a.seed is None:
             ap.error("--seed is required without --registration")
