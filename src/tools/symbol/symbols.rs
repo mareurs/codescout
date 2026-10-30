@@ -719,6 +719,7 @@ fn merge_deduped(
 /// `PER_LANG_BUDGET` a minute ago is not worth another 8 s: the usage.db shows 214 of 222
 /// project-wide `symbols(name)` calls waiting the whole budget, and all 33 logged
 /// `workspace/symbol` answers on this repo were `[]`.
+// cap-class: RESULT_CAP symbols.short_lang_budget — probed
 const SHORT_LANG_BUDGET: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// How long after a full-budget timeout the short budget applies, before one full-budget

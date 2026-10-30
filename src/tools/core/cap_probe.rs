@@ -404,6 +404,14 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        id: "symbols.short_lang_budget",
+        coverage: Coverage::Untested(
+            "the shortened per-language budget applied after a recent timeout is the same bound \
+             as symbols.per_lang_budget on the same leg, and reaching it needs the same \
+             multi-second multi-language fixture no test in the suite pays for",
+        ),
+    },
+    ProbeRow {
         id: "symbols.per_lang_budget",
         coverage: Coverage::Untested(
             "the per-language time budget in search_project_symbols has no test reference; \
