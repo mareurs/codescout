@@ -16,6 +16,7 @@ use crate::util::fs::to_forward_slash;
 /// nothing bounded the walk by time (docs/issues/2026-10-30-grep-has-no-wall-clock-budget-
 /// so-a-search-rooted-above-the-project-ran-for-6-minutes.md). Every other call in the
 /// usage sample finished in under 7 s.
+// cap-class: RESULT_CAP grep.walk_budget — probed
 const DEFAULT_WALK_BUDGET_MS: u64 = 20_000;
 
 /// The walk's clock. `expired` is polled once per walk entry; when it fires the walk
@@ -104,7 +105,7 @@ impl Tool for Grep {
                 "glob": { "type": ["string", "array"], "description": "Restrict to files matching glob(s), e.g. \"*.rs\" or [\"src/**\", \"*.md\"]" },
                 "include_hidden": { "type": "boolean", "default": false, "description": "Also search hidden files/dirs (dotfiles, .github/)" },
                 "mode": { "type": "string", "enum": ["lines", "files"], "default": "lines", "description": "\"files\": ranked files + per-file counts, no line content (tames broad searches)" },
-                "time_budget_ms": { "type": "integer", "default": 20000, "description": "Wall-clock budget for the walk; when spent, the walk stops and the result says so" }
+                "time_budget_ms": { "type": "integer", "description": "Walk wall-clock ms (default 20000)" }
             }
         })
     }

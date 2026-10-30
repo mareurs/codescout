@@ -898,6 +898,19 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/tools/grep.rs --
     ProbeRow {
+        // The cited test drives a zero budget (the deterministic stand-in for a tree too big
+        // to finish) through both modes and asserts the rendered text carries `walk cut`.
+        // Mutation: not run, so `NotYet` rather than a claim.
+        id: "grep.walk_budget",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("walk cut"),
+            mutation: Mutation::NotYet(
+                "the walk_cut emission was not deleted and the row observed red",
+            ),
+            cited_test: "a_spent_walk_budget_cuts_the_walk_and_names_it_in_both_modes",
+        },
+    },
+    ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
         // test seeds a 50,013 B SINGLE line against `MAX_MATCH_BYTES` 2,000. Marker
         // written by production at `src/tools/grep.rs:825`.
