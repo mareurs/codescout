@@ -144,6 +144,9 @@ Parts A and B are committed on `experiments` (`711b8c3a4`, `0d95ee8bf`) and are 
 3. Re-run the gate once the peer's `OP-2` edit is committed or reverted.
 4. Close or archive only after 1 and 2, with the fix SHAs and their patch-ids.
 
+
+**Re-checked 2026-10-30 (branch worktree-agent-a3aee1a8919a0949f, experiments 573825fb7): no further code change made, and none is owed by this file.** Parts A (711b8c3a4) and B (0d95ee8bf) are in the tree and the full gate is green on a clean worktree, which includes their tests (`a_pinned_onboarding_describes_the_pinned_directory_not_the_home_workspace`, `startup_lists_a_declared_manifestless_member`, `onboarding_writes_a_nested_repo_members_memory_into_the_member` and the `merge_declared_projects` unit tests). Everything under "Still open, not fixed" is a judged-acceptable limit, a separate issue (lib scope manual drift) or a no-effect probe gap, not a design change. Left `status: open` on purpose: Resume item 2 (the live Kodi checkout) cannot be done from a worktree, and the gate re-run of item 3 is now done. Whoever owns the Kodi checkout closes it after one live run.
+
 ## References
 - Kodi side notes: `/home/marius/work/personal/media/kodi-notes/`
 - docs/trackers/issue-clusters/IC-3-declared-not-wired.md
