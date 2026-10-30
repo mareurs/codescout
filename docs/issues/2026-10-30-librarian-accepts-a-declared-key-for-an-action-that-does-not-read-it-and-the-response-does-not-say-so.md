@@ -9,7 +9,7 @@ closed: 2026-10-30
 opened: 2026-10-30
 owner: marius
 severity: low
-unverified: Full gate at 9173695c5 stopped at the issue_frontmatter integration test, which blames a peer's bug file (731747939c0bb764, no `opened`), so the integration binaries after it did not run. Lib suites passed in both lanes (5381 lean, 8065 default, 0 failed).
+unverified: 'CLEARED 2026-10-30. Was: the full gate at 9173695c5 stopped at issue_frontmatter on a peer''s bug file, so later integration binaries did not run. Full gate at 573825fb7 is green (FMT, CLIPPY, LEAN 5381 passed, DEFAULT 8071 passed, 0 failed).'
 ---
 
 # BUG: librarian accepts a declared key for an action that does not read it, and the response does not say so
