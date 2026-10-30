@@ -86,8 +86,10 @@ def pilot_split(mapping, seed):
     return ([t for t in mapping if t in picked], [t for t in mapping if t not in picked])
 
 
-def stage3_budget():
-    return run.check_budget(run.Budget(run.STAGE3_CAP_USD, 0.0, run.STAGE3_PER_CALL_USD,
+def stage3_budget(spent_usd=0.0):
+    """The Stage 3 Budget; `spent_usd` is the spend OUTSIDE the study journal (Task 12: the
+    archived pilot attempt 1's carried spend)."""
+    return run.check_budget(run.Budget(run.STAGE3_CAP_USD, spent_usd, run.STAGE3_PER_CALL_USD,
                                        run.STAGE3_RESERVE_USD))
 
 

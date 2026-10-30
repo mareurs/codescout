@@ -37,7 +37,8 @@ import tasks
 REGISTRATION = "stage3-registration.json"
 # Round 2 (m-4): a Stage 3 plan is refused under a registration without these.
 REQUIRED_KEYS = ("files", "run_data", "manifest_sha256", "tasks", "tasks_root",
-                 "grader_inputs", "node_version", "frozen", "registration_sha256")
+                 "grader_inputs", "node_version", "frozen", "registration_sha256",
+                 "aborted_pilot_1", "carried_spend_usd")
 _IMPORT = re.compile(r"""(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)['"](\.{1,2}/[^'"]+)['"]""",
                      re.M)
 
@@ -165,6 +166,13 @@ def check(reg, *, data=None, tool_dir, inspect=tasks._inspect_image, s5_dir=None
         raise Mismatch(f"not a complete Stage 2 registration (stage {reg.get('stage')!r}, "
                        f"missing {missing})")
     why = _files_reasons(reg, tool_dir) if files else []
+    ab = reg["aborted_pilot_1"]  # Task 12: the archived pilot attempt 1 stays as registered
+    archive = Path(ab["archive"])
+    try:
+        if frozen.tree_sha256(archive) != ab["tree_sha256"]:
+            why.append(f"the aborted-pilot archive {archive} changed after the freeze")
+    except (OSError, frozen.Mismatch) as ex:
+        why.append(f"the aborted-pilot archive {archive} is unreadable: {ex}")
     runner = Path(runner_tasks_root if runner_tasks_root is not None
                   else tasks.DATA / "tasks").resolve()
     tasks_root = reg["tasks_root"]

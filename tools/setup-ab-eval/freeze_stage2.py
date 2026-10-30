@@ -46,8 +46,18 @@ foreign + 3 private each, whose plan_sha256 does not hash its order, or that do 
 each; a part budget other than run.STAGE3_*; a self-check failure.
 
     python3 freeze_stage2.py --run-data <study dir> --manifest <setup-manifest.json> \\
-        --bootstrap-seed N [--replace]
+        --bootstrap-seed N --aborted-archive <dir> --carried-spend <usd> [--replace]
     python3 freeze_stage2.py --check --run-data <study dir>     re-verify, write nothing
+
+TASK 12 (re-freeze after pilot attempt 1, operator 2026-10-30): RUN_TIMEOUT_S 3600, 24 GB per
+arm, and the aborted attempt archived: `--aborted-archive` must hold its rows.jsonl and
+batch.jsonl (ABORTED_RUNS pilot runs, the `missing cost` stop ABORTED_STOP_ID), and
+`--carried-spend` must equal those runs' spend as run.spent_usd charges it (Stage 1's rows stay
+in the study journal and are counted there, never carried). The registration records
+`aborted_pilot_1` (archive, file and tree hashes, runs listing, run ids, reason, spend) and
+`carried_spend_usd`, which both parts' GO.json `spent_usd` and `--spent` must equal (run_batch
+refuses otherwise); registration.check re-hashes the archive. A Stage 3 run dir still in the
+study's runs/ refuses the freeze.
 """
 import argparse
 import json
@@ -76,6 +86,10 @@ DRAW_SEED = 20261030
 PILOT_SEED = 20261031
 EXTENSION_SEED = 20261032
 PARTS = ("pilot", "extension")
+# Task 12 (operator 2026-10-30): pilot attempt 1 under registration 6ff9185c0, archived.
+ABORTED_RUNS = 10
+ABORTED_STOP_ID = "stop-48-82024115"
+ABORTED_REASON = f"timeout (RUN_TIMEOUT_S 1800) -> missing cost stop {ABORTED_STOP_ID}"
 RUNS_PER_PART = 6 * len(run.MODELS) * sum(n for _, n in run.STAGE3_REPS)  # 48
 F_FORMULA = ("F = GM over the valid tasks i of max(bare0_i, bare1_i) / min(bare0_i, bare1_i) "
              "= exp(mean_i |ln(bare0_i / bare1_i)|), the two bare reps' costs; operator "
@@ -152,6 +166,64 @@ def stage1_journal(tool_dir, run_data):
                                                     6)}
 
 
+def aborted_record(archive, tool_dir, carried_spend):
+    """Task 12: the archived pilot attempt 1 (operator 2026-10-30), verified and recorded.
+
+    The archive must hold rows.jsonl and batch.jsonl with exactly ABORTED_RUNS runIds that are
+    not Stage 1's, and the `missing cost` stop ABORTED_STOP_ID. Its pilot spend is computed the
+    way run.spent_usd charges (a known cost, else the per_call of the run's own call), over the
+    NON-Stage-1 runs only, and `carried_spend` must equal it: the study journal keeps Stage 1's
+    rows, so Stage 1's spend is counted there once and must not be carried again."""
+    archive = Path(archive).resolve()
+    if not archive.is_dir():
+        raise Refused(f"aborted-pilot archive {archive} is not a directory")
+    try:
+        order = json.loads((Path(tool_dir) / freeze_stage1.REGISTRATION).read_text())["order"]
+        stage1 = {run.run_id(s) for s in order}
+        rows = run.read_rows(archive)
+        events = run.read_events(archive)
+    except (OSError, ValueError, KeyError, run.Refused) as e:
+        raise Refused(f"aborted-pilot archive {archive} unreadable: {e}")
+    if not (archive / run.ROWS).is_file() or not (archive / run.EVENTS).is_file():
+        raise Refused(f"aborted-pilot archive {archive} lacks {run.ROWS} or {run.EVENTS}")
+    latest = {rid: r for rid, r in run.latest_rows(rows).items() if rid not in stage1}
+    if len(latest) != ABORTED_RUNS:
+        raise Refused(f"the archive holds {len(latest)} pilot runs, not {ABORTED_RUNS}")
+    stops = [e for e in events if e.get("event") == "stop"
+             and e.get("stopId") == ABORTED_STOP_ID and e.get("reason") == "missing cost"]
+    if not stops:
+        raise Refused(f"the archive has no `missing cost` stop {ABORTED_STOP_ID}")
+    per_run, fallback = run.call_per_call(events, stage3.stage3_budget())
+    pilot_spend = sum(r["costUsd"] if r["costUsd"] is not None
+                      else per_run.get(rid, fallback) for rid, r in latest.items())
+    if (isinstance(carried_spend, bool) or not isinstance(carried_spend, (int, float))
+            or abs(float(carried_spend) - pilot_spend) > 1e-9):
+        raise Refused(f"--carried-spend {carried_spend!r} is not the archived pilot runs' spend "
+                      f"{pilot_spend!r} (the study journal already counts Stage 1's spend; "
+                      f"carry only the {ABORTED_RUNS} archived runs)")
+    runs_dir = archive / "runs"
+    return {"archive": str(archive),
+            "files": {name: sha256_file(archive / name) for name in (run.ROWS, run.EVENTS)},
+            "tree_sha256": frozen.tree_sha256(archive),
+            "runs_listing": sorted(p.name for p in runs_dir.iterdir()) if runs_dir.is_dir()
+            else [],
+            "run_ids": sorted(latest),
+            "run_count": len(latest),
+            "reason": ABORTED_REASON,
+            "stop_id": ABORTED_STOP_ID,
+            "pilot_spend_usd": pilot_spend,
+            "carried_spend_usd": float(carried_spend)}
+
+
+def _no_stale_run_dirs(run_data, pieces):
+    """A Stage 3 runId whose runs/<runId> dir is still in the study dir would stop its run at
+    mkdir (a run dir is never reused): the aborted pilot's run dirs must be archived too."""
+    rids = {run.run_id(run.RunSpec(*s)) for p in pieces["plans"].values() for s in p["order"]}
+    stale = sorted(p.name for p in (Path(run_data) / "runs").glob("*") if p.name in rids)
+    if stale:
+        raise Refused(f"{len(stale)} Stage 3 run dir(s) still in {run_data}/runs "
+                      f"({stale[:3]} ...): archive them with the aborted pilot")
+
 def _task_entries(selected, root, arm_record, docker, inspect):
     entries = []
     for t in selected:
@@ -187,7 +259,7 @@ def _frozen_record(manifest, root):
             "frozen_json_sha256": sha256_file(root / frozen.RECORD)}
 
 
-def _check_plans(pieces, selected):
+def _check_plans(pieces, selected, carried=0.0):
     parts = pieces["plans"]
     if set(parts) != set(PARTS):
         raise Refused(f"stage3 parts {sorted(parts)} are not {list(PARTS)}")
@@ -207,7 +279,7 @@ def _check_plans(pieces, selected):
                           f"{RUNS_PER_PART} with STAGE3_REPS")
         if run.plan_sha256(order) != part["plan_sha256"]:
             raise Refused(f"{name}: plan_sha256 does not hash its order")
-        want = stage3.stage3_budget()._asdict()
+        want = stage3.stage3_budget(carried)._asdict()
         if part["budget"] != want:
             raise Refused(f"{name}: budget {part['budget']} is not the Stage 3 budget {want}")
 
@@ -280,7 +352,8 @@ def _self_check(reg_path, plan_paths, manifest, root, check_kw):
         for name in PARTS:
             plan = run.load_plan(plan_paths[name])
             loaded = run.load_registration(reg_path, plan)
-            run.check_registered_budget(loaded, plan, stage3.stage3_budget())
+            run.check_registered_budget(loaded, plan, stage3.stage3_budget(
+                loaded["carried_spend_usd"]))
         run._frozen_inputs(loaded, manifest)
         body = {k: v for k, v in loaded.items() if k != "registration_sha256"}
         if loaded["registration_sha256"] != run.registration_digest(body):
@@ -322,6 +395,7 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
                   python_version: Callable = platform.python_version,
                   executable=sys.executable, python_on_path: Callable = None,
                   frozen_root=None, s5_dir=None, node_version: Callable = None,
+                  aborted_archive, carried_spend,
                   pieces_fn: Callable = stage3.registration_pieces) -> dict:
     tool_dir, data = Path(tool_dir), Path(data)
     run_data, manifest_path = Path(run_data).resolve(), Path(manifest_path).resolve()
@@ -344,6 +418,8 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
     if freeze_stage1.REGISTRATION not in files:
         raise Refused(f"{freeze_stage1.REGISTRATION} (Stage 1 evidence) is not tracked")
     journal = stage1_journal(tool_dir, run_data)
+    aborted = aborted_record(aborted_archive, tool_dir, carried_spend)
+    carried = aborted["carried_spend_usd"]
 
     sel_path, selected = _selected(data)
     root = data / "tasks"
@@ -374,7 +450,10 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
                            extension_seed=EXTENSION_SEED)
     except ValueError as e:
         raise Refused(f"stage3 plans: {e}")
-    _check_plans(pieces, selected)
+    for part in pieces["plans"].values():  # the GO.json spent_usd of both parts (check_go)
+        part["budget"] = dict(part["budget"], spent_usd=carried)
+    _check_plans(pieces, selected, carried)
+    _no_stale_run_dirs(run_data, pieces)
     mapping = pieces["registered_tasks"]
     prescan = analyze_study.prescan_reasons(mapping, root)
     if prescan:
@@ -397,6 +476,8 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
         "files": {f: sha256_file(tool_dir / f) for f in files},
         "stage1_registration_sha256": sha256_file(tool_dir / freeze_stage1.REGISTRATION),
         "stage1_journal": journal,
+        "aborted_pilot_1": aborted,
+        "carried_spend_usd": carried,
         "manifest_path": str(copy),
         "manifest_sha256": sha256_file(copy),
         "selection_rule_sha256": sha256_file(tool_dir / "selection-rule.json"),
@@ -478,6 +559,10 @@ def main(argv=None, **check_kw) -> int:
     ap.add_argument("--run-data", type=Path, required=True,
                     help="the one study data dir; run_batch loads <run-data>/setup-manifest.json")
     ap.add_argument("--bootstrap-seed", type=int, help="analyze's bootstrap seed (freeze)")
+    ap.add_argument("--aborted-archive", type=Path,
+                    help="(freeze) the archived pilot attempt 1 (rows.jsonl, batch.jsonl, runs/)")
+    ap.add_argument("--carried-spend", type=float,
+                    help="(freeze) the archived pilot runs' spend, carried as --spent")
     ap.add_argument("--replace", action="store_true",
                     help="replace an existing registration (never implied)")
     ap.add_argument("--check", action="store_true",
@@ -488,11 +573,14 @@ def main(argv=None, **check_kw) -> int:
         if a.check:
             out = check_main(a, **check_kw)
         else:
-            if a.manifest is None or a.bootstrap_seed is None:
-                ap.error("the freeze needs --manifest and --bootstrap-seed")
+            if (a.manifest is None or a.bootstrap_seed is None or a.aborted_archive is None
+                    or a.carried_spend is None):
+                ap.error("the freeze needs --manifest, --bootstrap-seed, --aborted-archive and "
+                         "--carried-spend")
             reg = freeze_stage2(tool_dir=a.tool_dir, data=a.data, manifest_path=a.manifest,
                                 run_data=a.run_data, bootstrap_seed=a.bootstrap_seed,
-                                replace=a.replace)
+                                aborted_archive=a.aborted_archive,
+                                carried_spend=a.carried_spend, replace=a.replace)
             out = {"registration_sha256": reg["registration_sha256"],
                    "plans": {n: {"plan_sha256": reg["plans"][n]["plan_sha256"],
                                  "runs": len(reg["plans"][n]["order"]),

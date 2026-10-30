@@ -1380,6 +1380,11 @@ def run_batch(plan, budget, data, dry_run, *, registration=None, docker=None, ex
                            runner_tasks_root=tasks_root, node_version=node_version)
         except regcheck.Mismatch as e:
             raise Refused(f"the registration no longer matches the host: {e}")
+        # Task 12: --spent (GO.json spent_usd) is the registered carried spend of the archived
+        # pilot attempt 1; the study journal counts Stage 1's rows itself.
+        if float(budget.spent_usd) != float(reg["carried_spend_usd"]):
+            raise Refused(f"--spent {budget.spent_usd} is not the registered carried spend "
+                          f"{reg['carried_spend_usd']}")
     go = check_go(data, plan, budget, reg["registration_sha256"])
     check_journal(data)  # rows without the journal that covers them are refused
     acknowledged = check_latch(data, go)  # I3: a stop holds until the operator acknowledges it

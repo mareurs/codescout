@@ -38,6 +38,7 @@ LIVE_CONTROL = {"image": {"codescout": {
     "version_json": {"version": "0.15.0", "git_sha": "f9b0fc9", "git_sha_full": GIT_FULL}}}}
 PYTHON = str(Path(sys.executable).resolve())
 NODE = "v22.12.0"
+CARRIED = 9 * 1.0 + 5.0  # the fixture's archived pilot: 9 known costs + 1 timeout at $5
 STAGE1_ORDER = run.stage1_order(20261027)
 
 
@@ -150,12 +151,43 @@ class Env:
         self.run_data.mkdir()
         (self.run_data / "setup-manifest.json").write_text(json.dumps(self.manifest_body))
         self.stage1_journal(self.run_data)
+        self.archive = self.tmp / "archive-pilot-1"
+        self.aborted_pilot(self.archive)
         self.frozen = self.tmp / "study" / "frozen"
         frozen.freeze_inputs(self.manifest_body, self.frozen)
         self.inspect = Inspect()
         self.docker = Docker()
         self.verify_calls = []
         self.verify_reasons = {}
+
+    def aborted_pilot(self, d, runs=10, stop_id=freeze_stage2.ABORTED_STOP_ID,
+                      with_stage1=False):
+        """Pilot attempt 1 as archived: `runs` main runs (the last one timed out: no cost,
+        charged the $5 per-call of its batch), then the `missing cost` stop."""
+        d.mkdir()
+        if with_stage1:  # a full copy of the study journal, Stage 1 included
+            self.stage1_journal(d)
+        specs = [run.RunSpec(t, m, "bare", 0) for t in SELECTED for m in run.MODELS][:runs]
+        lines = (d / run.EVENTS).read_text().splitlines() if with_stage1 else []
+        seq = len(lines)
+
+        def event(**e):
+            nonlocal seq
+            seq += 1
+            lines.append(json.dumps(dict(e, seq=seq)))
+        event(event="start", plan_sha256="pilot", budget={"per_call_usd": 5.0})
+        for i, s in enumerate(specs):
+            event(event="call", runId=run.run_id(s))
+            last = i == len(specs) - 1
+            run._append(d / run.ROWS, run.make_row(
+                s, "s", outcome="infra-other" if last else "scored",
+                costUsd=None if last else 1.0, grade=None if last else {"pass": True},
+                capHit=None if last else False, oomKills=None if last else 0))
+            (d / "runs" / run.run_id(s)).mkdir(parents=True)
+            (d / "runs" / run.run_id(s) / "stream.jsonl").write_text("{}\n")
+        event(event="stop", reason="missing cost", stopId=stop_id, spent=0)
+        (d / run.EVENTS).write_text("\n".join(lines) + "\n")
+        return specs
 
     def stage1_journal(self, data, order=STAGE1_ORDER, stop="plan complete"):
         """Stage 1's journal as run_batch wrote it: start, call+rows per run, stop."""
@@ -211,7 +243,8 @@ class Env:
                     verify_fn=self.verify, docker=self.docker,
                     python_version=lambda: "3.14.8", executable=sys.executable,
                     python_on_path=lambda: PYTHON, frozen_root=self.frozen, s5_dir=self.s5,
-                    node_version=lambda: NODE)
+                    node_version=lambda: NODE, aborted_archive=self.archive,
+                    carried_spend=CARRIED)
         args.update(kw)
         with contextlib.redirect_stderr(io.StringIO()):
             return freeze_stage2.freeze_stage2(**args)
@@ -260,11 +293,12 @@ class RecordsTest(Case):
             plan = run.load_plan(freeze_stage2.plan_file(self.env.run_data, part))
             self.assertEqual(run.plan_sha256(plan), on_disk["plans"][part]["plan_sha256"])
             loaded = run.load_registration(path, plan)
-            run.check_registered_budget(loaded, plan, stage3.stage3_budget())
+            run.check_registered_budget(loaded, plan, stage3.stage3_budget(CARRIED))
             go_dir = self.env.tmp / f"go-{part}"
             go_dir.mkdir()
             (go_dir / run.GO_FILE).write_text(json.dumps(reg["go_templates"][part]["GO.json"]))
-            run.check_go(go_dir, plan, stage3.stage3_budget(), loaded["registration_sha256"])
+            run.check_go(go_dir, plan, stage3.stage3_budget(CARRIED),
+                         loaded["registration_sha256"])
         m = run._frozen_inputs(on_disk, manifest)
         self.assertEqual(m["frozen_root"], str(self.env.frozen.resolve()))
         self.env.check(on_disk, deep=True)  # the fresh registration matches the host
@@ -327,7 +361,7 @@ class RecordsTest(Case):
         for part, seed in (("pilot", 20261031), ("extension", 20261032)):
             p = reg["plans"][part]
             self.assertEqual((p["seed"], len(p["order"])), (seed, 48))
-            self.assertEqual(p["budget"], {"cap_usd": 200.0, "spent_usd": 0.0,
+            self.assertEqual(p["budget"], {"cap_usd": 200.0, "spent_usd": CARRIED,
                                            "per_call_usd": 5.0, "reserve_usd": 5.0})
             self.assertEqual(json.loads(freeze_stage2.plan_file(self.env.run_data, part)
                                         .read_text()), p["order"])
@@ -367,14 +401,14 @@ class RecordsTest(Case):
         reg = self.env.freeze()
         go = reg["go_templates"]["pilot"]
         self.assertEqual(go["GO.json"], {
-            "cap_usd": 200.0, "per_call_usd": 5.0, "reserve_usd": 5.0, "spent_usd": 0.0,
+            "cap_usd": 200.0, "per_call_usd": 5.0, "reserve_usd": 5.0, "spent_usd": CARRIED,
             "plan_sha256": reg["plans"]["pilot"]["plan_sha256"],
             "registration_sha256": reg["registration_sha256"], "authorized_by": "operator",
             "acknowledged_stops": []})
         cmd = go["command"].split()
         self.assertEqual(cmd[0], PYTHON)  # the resolved interpreter (round 1, M-5)
         self.assertEqual(cmd[2:4], ["run", "--plan"])
-        for flag, value in (("--cap", "200.0"), ("--spent", "0.0"), ("--per-call", "5.0"),
+        for flag, value in (("--cap", "200.0"), ("--spent", repr(CARRIED)), ("--per-call", "5.0"),
                             ("--reserve", "5.0"), ("--data", str(self.env.run_data.resolve())),
                             ("--registration",
                              str(self.env.tool.resolve() / freeze_stage2.REGISTRATION))):
@@ -547,10 +581,79 @@ class RefusalTest(Case):
             rc = freeze_stage2.main(["--tool-dir", str(self.env.tool), "--data",
                                      str(self.env.data), "--manifest", str(self.env.manifest),
                                      "--run-data", str(self.env.run_data),
-                                     "--bootstrap-seed", "1"])
+                                     "--bootstrap-seed", "1", "--aborted-archive",
+                                     str(self.env.archive), "--carried-spend", str(CARRIED)])
         self.assertEqual(rc, 1)
         self.assertTrue(err.getvalue().startswith("REFUSED: "))
 
+
+class CarriedSpendTest(Case):
+    """Task 12: the archived pilot attempt 1 and its carried spend (operator 2026-10-30)."""
+
+    def test_the_archive_is_recorded(self):
+        reg = self.env.freeze()
+        ab = reg["aborted_pilot_1"]
+        self.assertEqual(ab["archive"], str(self.env.archive.resolve()))
+        self.assertEqual(ab["files"], {
+            "rows.jsonl": freeze_stage1.sha256_file(self.env.archive / "rows.jsonl"),
+            "batch.jsonl": freeze_stage1.sha256_file(self.env.archive / "batch.jsonl")})
+        self.assertEqual(ab["tree_sha256"], frozen.tree_sha256(self.env.archive))
+        self.assertEqual(len(ab["runs_listing"]), 10)
+        self.assertEqual((ab["run_count"], len(ab["run_ids"])), (10, 10))
+        self.assertEqual(ab["reason"],
+                         "timeout (RUN_TIMEOUT_S 1800) -> missing cost stop stop-48-82024115")
+        self.assertEqual((ab["stop_id"], ab["pilot_spend_usd"], ab["carried_spend_usd"]),
+                         ("stop-48-82024115", 14.0, 14.0))
+        self.assertEqual(reg["carried_spend_usd"], CARRIED)
+        for part in freeze_stage2.PARTS:
+            t = reg["go_templates"][part]
+            self.assertEqual(t["GO.json"]["spent_usd"], CARRIED)
+            cmd = t["command"].split()
+            self.assertEqual(float(cmd[cmd.index("--spent") + 1]), CARRIED)
+
+    def test_stage1_is_counted_once_and_the_carried_spend_once(self):
+        reg = self.env.freeze()
+        budget = stage3.stage3_budget(reg["carried_spend_usd"])
+        study = self.env.run_data
+        spent = run.spent_usd(run.read_rows(study), budget, run.read_events(study))
+        stage1 = 12 * 0.39   # the fixture's Stage 1 journal
+        self.assertAlmostEqual(spent, stage1 + CARRIED, places=9)
+        # The archive's pilot runs are what is carried: their spend, charged as run.spent_usd
+        # charges it, is the carried value; Stage 1 is not in it.
+        archived = run.spent_usd(run.read_rows(self.env.archive), stage3.stage3_budget(),
+                                 run.read_events(self.env.archive))
+        self.assertAlmostEqual(archived, CARRIED, places=9)
+        # Admission on the cap: journal spend + --spent + reserve + per-call <= 200.
+        self.assertTrue(run.admit(budget, spent))
+        self.assertFalse(run.admit(budget, 200.0 - 10.0 + 0.01))
+
+    def test_a_carried_spend_that_includes_stage1_refuses(self):
+        self.refused("already counts Stage 1", carried_spend=CARRIED + 12 * 0.39)
+        self.refused("not the archived pilot runs' spend", carried_spend=0.0)
+
+    def test_a_full_journal_copy_as_archive_carries_the_pilot_only(self):
+        full = self.env.tmp / "archive-full"
+        self.env.aborted_pilot(full, with_stage1=True)
+        reg = self.env.freeze(aborted_archive=full)
+        self.assertEqual(reg["aborted_pilot_1"]["pilot_spend_usd"], CARRIED)
+
+    def test_a_missing_or_wrong_archive_refuses(self):
+        self.refused("not a directory", aborted_archive=self.env.tmp / "nowhere")
+        short = self.env.tmp / "archive-9"
+        self.env.aborted_pilot(short, runs=9)
+        self.refused("9 pilot runs", aborted_archive=short)
+        other = self.env.tmp / "archive-stop"
+        self.env.aborted_pilot(other, stop_id="stop-1-deadbeef")
+        self.refused("no `missing cost` stop", aborted_archive=other)
+
+    def test_a_stage3_run_dir_left_in_the_study_refuses(self):
+        pieces = stage3.registration_pieces(SELECTED, self.env.data / "tasks",
+                                            split_seed=freeze_stage2.DRAW_SEED,
+                                            pilot_seed=freeze_stage2.PILOT_SEED,
+                                            extension_seed=freeze_stage2.EXTENSION_SEED)
+        rid = run.run_id(run.RunSpec(*pieces["plans"]["pilot"]["order"][0]))
+        (self.env.run_data / "runs" / rid).mkdir(parents=True)
+        self.refused("run dir")
 
 class WriteOnceTest(Case):
     """Round 1 (I-4): an existing registration is replaced only with --replace, through a temp
@@ -606,13 +709,13 @@ class RecheckTest(Case):
         self.registration = self.reg()
         self.path = self.env.tool / freeze_stage2.REGISTRATION
 
-    def run_batch(self, part="pilot", data=None, registration=None, **kw):
+    def run_batch(self, part="pilot", data=None, registration=None, spent=CARRIED, **kw):
         plan = run.load_plan(freeze_stage2.plan_file(self.env.run_data, part))
         args = dict(inspect=self.env.inspect, tool_dir=self.env.tool, s5_dir=self.env.s5,
                     tasks_root=self.env.data / "tasks", node_version=lambda: NODE)
         args.update(kw)
         with contextlib.redirect_stderr(io.StringIO()):
-            run.run_batch(plan, stage3.stage3_budget(), data or self.env.run_data,
+            run.run_batch(plan, stage3.stage3_budget(spent), data or self.env.run_data,
                           dry_run=False, registration=registration or self.path, **args)
 
     def assertBatchRefused(self, pattern, **kw):
@@ -628,6 +731,16 @@ class RecheckTest(Case):
     def test_a_matching_host_passes_to_the_go_check(self):
         self.assertBatchRefused("GO.json is missing")  # every registration check passed
         self.env.check(self.registration, deep=True)
+    def test_the_batch_spends_with_the_registered_carried_spend_only(self):
+        # Task 12: GO.json spent_usd / --spent must be the carried spend of attempt 1.
+        self.assertBatchRefused("not the registered carried spend", spent=0.0)
+        self.assertBatchRefused("not the registered carried spend", spent=CARRIED + 4.68)
+        self.assertBatchRefused("GO.json is missing", spent=CARRIED)
+
+    def test_a_changed_archive_refuses(self):
+        (self.env.archive / "rows.jsonl").write_text(
+            (self.env.archive / "rows.jsonl").read_text() + "\n")
+        self.assertBatchRefused("aborted-pilot archive .* changed after the freeze")
 
     # -- N-1a: the committed registration --------------------------------------------------
 
