@@ -1,15 +1,16 @@
 ---
 id: e1515917e4215c93
 kind: bug
-status: open
+status: mitigated
 title: The gate's wall time is recorded nowhere, and dev-profile debug info makes 300-582 MB test binaries
 owners:
 - marius
 tags:
 - cluster/instrument-omits-the-dimension-that-grows
 opened: 2026-10-30
+closed: 2026-10-30
 severity: low
-unverified: No gate duration has been measured; the binary sizes come from a subagent and were not re-checked.
+unverified: 'Gate wall time is now printed per lane but only one full run is recorded; the debug-info change was measured, not applied (operator decision).'
 ---
 
 # BUG: The gate's wall time is recorded nowhere, and dev-profile debug info makes 300-582 MB test binaries
@@ -48,7 +49,16 @@ None.
 
 ## Fix
 
-Measure first. Candidates: `debug = "line-tables-only"` or `[profile.dev.package."*"] debug = false`; the lean lane in a second leased slot (check `gate-ordering.md` and `cli_doc`'s `pinned_binary()` first); fewer test binaries or nextest. Long timeout tests on a binary's critical path: `src/lsp/manager.rs:2950-4485`, `src/lsp/client.rs:2699, 3895, 3928`, `src/server.rs:11708`, `tests/rename_symbol.rs:75` (5 s sleep), `src/librarian/tools/update.rs:1103` (5 s busy_timeout by design).
+Done on branch `worktree-agent-ac59e41db7b0d1eb3`, SHA `59d870c9d` (patch-id `902b9b617a5970f593b4138330fdaf5be0d302e6`): `scripts/gate.sh` now prints `GATE SECONDS -> TOTAL=.. PYTHON=.. FMT=.. CLIPPY=.. LEAN=.. DEFAULT=..` after the tree-size lines. Exit-code handling and lane order are unchanged (`;` throughout).
+
+Measured 2026-10-30, cold `cargo test --workspace --no-run` in a fresh target dir, 64 cores, mold, machine shared with other sessions (timings are noisy), the profile switched with `--config` so `Cargo.toml` was not touched:
+
+| `profile.dev.debug` | build | tree | 51 test exes total | largest exe | `target/debug/codescout` |
+|---|---|---|---|---|---|
+| `1` (current) | 192 s | 13 G | 7.96 GB | 584 MB | 459 MB |
+| `"line-tables-only"` | 190 s | 9.3 G | 4.71 GB | 401 MB | 326 MB |
+
+So `line-tables-only` cuts disk by 29-41 % and does not change the cold build time (190 vs 192 s, within noise). The earlier "300-582 MB, 48 binaries" figure is confirmed in order of magnitude (51 exes, 584 MB max). `Cargo.toml` is NOT changed: the benefit is disk only, and it costs variable-level debug info (breakpoints and backtraces keep line numbers, `dbg!`-style inspection in a debugger loses locals); that is the operator's call. `[profile.dev.package."*"] debug = false`, the lean lane in a second slot, nextest and the slow-test list were not measured.
 
 ## Tests added
 
