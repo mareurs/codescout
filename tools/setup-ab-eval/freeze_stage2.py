@@ -61,6 +61,7 @@ study's runs/ refuses the freeze.
 """
 import argparse
 import json
+import math
 import os
 import platform
 import shutil
@@ -90,6 +91,14 @@ PARTS = ("pilot", "extension")
 ABORTED_RUNS = 10
 ABORTED_STOP_ID = "stop-48-82024115"
 ABORTED_REASON = f"timeout (RUN_TIMEOUT_S 1800) -> missing cost stop {ABORTED_STOP_ID}"
+# Task 12 round 1 (m-2): the archive is attempt 1's, i.e. its one Stage 3 batch started under
+# the first Stage 3 registration (6ff9185c0) with the pilot plan.
+ATTEMPT1 = {"registration_sha256":
+            "433451495de3bc852db7c0d94aeddbc36e036734701597f5b3ad38f0565d2043",
+            "plan_sha256": "b47744e63924101bdcbf402cf7976a20e02d499e6e966d7c7407587c29dcbd42"}
+# Task 12 round 1 (m-3): what happens to the archived runIds.
+ABORTED_DISPOSITION = ("the 10 runIds listed here are re-run under this registration; this "
+                       "attempt is archived and never analysed")
 RUNS_PER_PART = 6 * len(run.MODELS) * sum(n for _, n in run.STAGE3_REPS)  # 48
 F_FORMULA = ("F = GM over the valid tasks i of max(bare0_i, bare1_i) / min(bare0_i, bare1_i) "
              "= exp(mean_i |ln(bare0_i / bare1_i)|), the two bare reps' costs; operator "
@@ -97,7 +106,11 @@ F_FORMULA = ("F = GM over the valid tasks i of max(bare0_i, bare1_i) / min(bare0
 HEADLINE_RULE = ("no single pooled headline: the foreign and private strata are decided "
                  "separately and a headline claim needs both to agree (analyze_study.headline)")
 NO_RERUN_RULE = ("no re-runs: a runId with any journal row is never run again; a main row "
-                 "outside STAGE3_REPS is a re-run and is refused by analyze.check_row")
+                 "outside STAGE3_REPS is a re-run and is refused by analyze.check_row; the one "
+                 "registered exception: the 10 runIds of the archived pilot attempt 1 "
+                 "(aborted_pilot_1, operator decision 2026-10-30, no grade read) left the "
+                 "journal and are re-run from scratch under this registration; that attempt is "
+                 "never analysed")
 INSTRUMENT_RULE = ("instrument failures (analyze_study.instrument_failures): every `tasks.py "
                    "verify` reason of a registered task, every private prescan reason, and per "
                    "model and arm ARM_INTEGRITY_RULE")
@@ -110,10 +123,11 @@ NON_INFERIORITY_RULE = ("treatment passes >= bare passes - 1 (bare passes a task
 ZERO_CALLS_RULE = "a result, reported as zero_codescout_runs; never invalid"
 COMPARISON_NOTE = "per model; full - bare is 'the setup', never 'codescout'"
 PILOT_GO_NOTE = ("keep Stage 1's GO.json history: replace GO.json, do not delete rows.jsonl "
-                 "(move Stage 1's GO.json aside as GO.stage1.json first)")
+                 "(Stage 1's GO.json is GO.stage1.json; attempt 1's is archived with it)")
 RUNBOOK_NOTE = ("the extension may run before or after the pilot (unconditional by ruling); never "
                 "edit the tool dir, never pull claude-plugins, keep sab-* images until analysis "
-                "has run; run `freeze_stage2.py --check --run-data <study>` before each part")
+                "has run; run `freeze_stage2.py --check --run-data <study>` before each part; "
+                "pilot attempt 1: " + ABORTED_DISPOSITION)
 
 Refused = freeze_stage1.Refused
 sha256_file = freeze_stage1.sha256_file
@@ -142,7 +156,10 @@ def _selected(data):
 def stage1_journal(tool_dir, run_data):
     """I-2: `run_data` holds exactly Stage 1's development runs (every runId of
     stage1-registration.json's order, nothing else, none pending), its journal covers them, and
-    no stop is latched. Returns {runs, spend_usd}."""
+    no stop is latched, and no runner.lock is there (Task 12 round 1, m-5: run_batch would refuse
+    it). Returns {runs, spend_usd}."""
+    if (Path(run_data) / run.LOCK).exists():
+        raise Refused(f"{Path(run_data) / run.LOCK} exists: a batch runs, or one died; check it")
     try:
         order = json.loads((Path(tool_dir) / freeze_stage1.REGISTRATION).read_text())["order"]
         want = {run.run_id(s) for s in order}
@@ -166,14 +183,17 @@ def stage1_journal(tool_dir, run_data):
                                                     6)}
 
 
-def aborted_record(archive, tool_dir, carried_spend):
+def aborted_record(archive, tool_dir, carried_spend, attempt=None):
     """Task 12: the archived pilot attempt 1 (operator 2026-10-30), verified and recorded.
 
     The archive must hold rows.jsonl and batch.jsonl with exactly ABORTED_RUNS runIds that are
-    not Stage 1's, and the `missing cost` stop ABORTED_STOP_ID. Its pilot spend is computed the
-    way run.spent_usd charges (a known cost, else the per_call of the run's own call), over the
-    NON-Stage-1 runs only, and `carried_spend` must equal it: the study journal keeps Stage 1's
-    rows, so Stage 1's spend is counted there once and must not be carried again."""
+    not Stage 1's, a run dir for exactly each of them (round 1, m-1), the `missing cost` stop
+    ABORTED_STOP_ID, and exactly ONE batch start after Stage 1, naming attempt 1's registration
+    and plan (`attempt`, default ATTEMPT1; round 1, m-2). Its pilot spend is computed the way
+    run.spent_usd charges (a known cost, else the per_call of the run's own call), over the
+    NON-Stage-1 runs only, and `carried_spend` (finite) must equal it: the study journal keeps
+    Stage 1's rows, so Stage 1's spend is counted there once and must not be carried again."""
+    attempt = attempt or ATTEMPT1
     archive = Path(archive).resolve()
     if not archive.is_dir():
         raise Refused(f"aborted-pilot archive {archive} is not a directory")
@@ -189,6 +209,19 @@ def aborted_record(archive, tool_dir, carried_spend):
     latest = {rid: r for rid, r in run.latest_rows(rows).items() if rid not in stage1}
     if len(latest) != ABORTED_RUNS:
         raise Refused(f"the archive holds {len(latest)} pilot runs, not {ABORTED_RUNS}")
+    runs_dir = archive / "runs"
+    listing = (sorted(p.name for p in runs_dir.iterdir() if p.name not in stage1)
+               if runs_dir.is_dir() else [])
+    if listing != sorted(latest):
+        raise Refused(f"the archive's runs/ ({len(listing)} pilot run dirs) does not hold exactly "
+                      f"the {len(latest)} archived runIds: the run evidence must be archived, "
+                      f"not deleted")
+    s1_plan = registration.stage1_plan_sha256(tool_dir)
+    starts = [e for e in events if e.get("event") == "start" and e.get("plan_sha256") != s1_plan]
+    if len(starts) != 1 or any(starts[0].get(k) != v for k, v in attempt.items()):
+        raise Refused(f"the archive's batch starts after Stage 1 "
+                      f"{[{k: s.get(k) for k in attempt} for s in starts]} are not exactly one "
+                      f"start of attempt 1 {attempt}")
     stops = [e for e in events if e.get("event") == "stop"
              and e.get("stopId") == ABORTED_STOP_ID and e.get("reason") == "missing cost"]
     if not stops:
@@ -197,20 +230,23 @@ def aborted_record(archive, tool_dir, carried_spend):
     pilot_spend = sum(r["costUsd"] if r["costUsd"] is not None
                       else per_run.get(rid, fallback) for rid, r in latest.items())
     if (isinstance(carried_spend, bool) or not isinstance(carried_spend, (int, float))
-            or abs(float(carried_spend) - pilot_spend) > 1e-9):
+            or not math.isfinite(carried_spend)):
+        raise Refused(f"--carried-spend {carried_spend!r} is not a finite number")
+    if abs(float(carried_spend) - pilot_spend) > 1e-9:
         raise Refused(f"--carried-spend {carried_spend!r} is not the archived pilot runs' spend "
                       f"{pilot_spend!r} (the study journal already counts Stage 1's spend; "
                       f"carry only the {ABORTED_RUNS} archived runs)")
-    runs_dir = archive / "runs"
     return {"archive": str(archive),
             "files": {name: sha256_file(archive / name) for name in (run.ROWS, run.EVENTS)},
             "tree_sha256": frozen.tree_sha256(archive),
-            "runs_listing": sorted(p.name for p in runs_dir.iterdir()) if runs_dir.is_dir()
-            else [],
+            "runs_listing": listing,
             "run_ids": sorted(latest),
             "run_count": len(latest),
+            "registration_sha256": attempt["registration_sha256"],
+            "plan_sha256": attempt["plan_sha256"],
             "reason": ABORTED_REASON,
             "stop_id": ABORTED_STOP_ID,
+            "disposition": ABORTED_DISPOSITION,
             "pilot_spend_usd": pilot_spend,
             "carried_spend_usd": float(carried_spend)}
 
@@ -314,8 +350,9 @@ def decision_rule(bootstrap_seed):
 def go_templates(reg, tool_dir, python):
     """Per part, the GO.json the operator writes (never this script) and the run command.
     spent_usd: check_go binds GO.json's spent_usd to the batch's Budget.spent_usd, i.e. `--spent`,
-    the spend OUTSIDE this data dir's journal; spent_usd() already adds every rows.jsonl row
-    (Stage 1's dev rows included), so in the one study dir it is 0."""
+    the spend OUTSIDE this data dir's journal: the registered carried_spend_usd (the archived
+    pilot attempt 1). spent_usd() adds every rows.jsonl row (Stage 1's, counted once there), so
+    admission is journal + carried + reserve + per-call <= cap."""
     run_data = reg["run_data"]
     out = {}
     for name in PARTS:
@@ -395,7 +432,7 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
                   python_version: Callable = platform.python_version,
                   executable=sys.executable, python_on_path: Callable = None,
                   frozen_root=None, s5_dir=None, node_version: Callable = None,
-                  aborted_archive, carried_spend,
+                  aborted_archive, carried_spend, attempt1=None,
                   pieces_fn: Callable = stage3.registration_pieces) -> dict:
     tool_dir, data = Path(tool_dir), Path(data)
     run_data, manifest_path = Path(run_data).resolve(), Path(manifest_path).resolve()
@@ -418,7 +455,7 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
     if freeze_stage1.REGISTRATION not in files:
         raise Refused(f"{freeze_stage1.REGISTRATION} (Stage 1 evidence) is not tracked")
     journal = stage1_journal(tool_dir, run_data)
-    aborted = aborted_record(aborted_archive, tool_dir, carried_spend)
+    aborted = aborted_record(aborted_archive, tool_dir, carried_spend, attempt1)
     carried = aborted["carried_spend_usd"]
 
     sel_path, selected = _selected(data)
@@ -454,6 +491,10 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
         part["budget"] = dict(part["budget"], spent_usd=carried)
     _check_plans(pieces, selected, carried)
     _no_stale_run_dirs(run_data, pieces)
+    pilot_rids = {run.run_id(run.RunSpec(*s)) for s in pieces["plans"]["pilot"]["order"]}
+    if not set(aborted["run_ids"]) <= pilot_rids:
+        raise Refused(f"archived runIds {sorted(set(aborted['run_ids']) - pilot_rids)} are not in "
+                      f"this registration's pilot plan: they could not be re-run under it")
     mapping = pieces["registered_tasks"]
     prescan = analyze_study.prescan_reasons(mapping, root)
     if prescan:

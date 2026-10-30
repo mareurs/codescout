@@ -19,14 +19,18 @@ batch is refused until GO.json `acknowledged_stops` lists that id. `dry_run=True
 docker object, no CLI and no token: it writes `<data>/dry-run.json` (the specs, the plan hash
 and which reps table the plan follows) and returns.
 
-RUNBOOK (final review I-5 ruling, 2026-10-29). Stage 3 (pilot, then the extension) runs in ONE
-data dir, setup-ab-data/study, the one Stage 1 ran in: its journal already holds Stage 1's
-spend, and spent_usd() adds every journal row, so `--spent 0` (spend OUTSIDE this journal: none)
-and GO.json `spent_usd: 0`. Budget: `--cap 200 --per-call 5 --reserve 5` (STAGE3_*). A non-zero
-`--spent` in the same dir double-counts; a fresh data dir with `--spent 0` would forget the
-earlier spend, which is why GO.json binds `spent_usd`. Before the extension, move the pilot's
-GO.json aside (`GO.pilot.json`; the `start` event keeps its budget and plan hash) and write the
-extension's.
+RUNBOOK (final review I-5 ruling 2026-10-29; Task 12, 2026-10-30). Stage 3 (pilot and
+extension, in either order) runs in ONE data dir, setup-ab-data/study, the one Stage 1 ran in:
+its journal holds Stage 1's rows, and spent_usd() adds every journal row, so Stage 1's spend
+is counted there, once. `--spent` is the spend OUTSIDE this journal: the archived pilot
+attempt 1, i.e. the registration's `carried_spend_usd`, and GO.json `spent_usd` == `--spent` ==
+`carried_spend_usd` (check_go binds the first pair; run_batch refuses any other `--spent` under
+a Stage 2 registration). Admission: journal spend + carried + reserve + per-call <= cap. Budget:
+`--cap 200 --per-call 5 --reserve 5` (STAGE3_*). The printed `run.py run` commands of
+freeze_stage2 carry all of it. A fresh data dir would forget the journal's spend: run_batch
+refuses any data dir other than the registered run_data. Before the second part, move the
+first part's GO.json aside (the `start` event keeps its budget and plan hash) and write the
+second's.
 
 JOURNAL. `<data>/rows.jsonl`, append-only, every line fsynced. A run writes a `pending` row
 BEFORE the CLI call and its final row after; the latest row of a runId wins. At batch start every
@@ -320,8 +324,9 @@ def check_go(data, plan, budget, registration_sha256):
     """The operator's authorization, or Refused. Read only; the runner never writes GO.json.
 
     Binds cap_usd, per_call_usd and reserve_usd (fix round 1, I1b: the per-call cap is what an
-    unknown cost is charged at), spent_usd (final review I-5: the spend outside this data dir's
-    journal, 0 in the one study data dir), the plan hash and `registration_sha256` (final review
+    unknown cost is charged at), spent_usd (final review I-5; Task 12: the spend outside this
+    data dir's journal, which under a Stage 2 registration is its `carried_spend_usd`), the plan
+    hash and `registration_sha256` (final review
     I-5 / T10b M6: the registration the batch runs under). `acknowledged_stops`, optional, is the
     list of stop ids (batch.jsonl) the operator has inspected; see check_latch."""
     path = Path(data) / GO_FILE

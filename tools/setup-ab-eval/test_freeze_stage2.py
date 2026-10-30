@@ -104,7 +104,8 @@ class Env:
         (self.tool / "selection-rule.json").write_text('{"rule": 1}\n')
         (self.tool / "task4-live-control.json").write_text(json.dumps(LIVE_CONTROL))
         (self.tool / "stage1-registration.json").write_text(json.dumps(
-            {"stage": 1, "order": [list(s) for s in STAGE1_ORDER]}))
+            {"stage": 1, "order": [list(s) for s in STAGE1_ORDER],
+             "plan_sha256": run.plan_sha256(STAGE1_ORDER)}))
         git(self.repo, "init", "-q")
         git(self.repo, "config", "user.email", "t@t")
         git(self.repo, "config", "user.name", "t")
@@ -151,6 +152,11 @@ class Env:
         self.run_data.mkdir()
         (self.run_data / "setup-manifest.json").write_text(json.dumps(self.manifest_body))
         self.stage1_journal(self.run_data)
+        self.pieces = stage3.registration_pieces(
+            SELECTED, self.data / "tasks", split_seed=freeze_stage2.DRAW_SEED,
+            pilot_seed=freeze_stage2.PILOT_SEED, extension_seed=freeze_stage2.EXTENSION_SEED)
+        self.attempt = {"registration_sha256": "a" * 64,
+                        "plan_sha256": self.pieces["plans"]["pilot"]["plan_sha256"]}
         self.archive = self.tmp / "archive-pilot-1"
         self.aborted_pilot(self.archive)
         self.frozen = self.tmp / "study" / "frozen"
@@ -161,13 +167,14 @@ class Env:
         self.verify_reasons = {}
 
     def aborted_pilot(self, d, runs=10, stop_id=freeze_stage2.ABORTED_STOP_ID,
-                      with_stage1=False):
-        """Pilot attempt 1 as archived: `runs` main runs (the last one timed out: no cost,
-        charged the $5 per-call of its batch), then the `missing cost` stop."""
+                      with_stage1=False, start=None, starts=1, run_dirs=True, part="pilot"):
+        """Pilot attempt 1 as archived: the first `runs` specs of the pilot plan (the last one
+        timed out: no cost, charged the $5 per-call of its batch) in `starts` batch start(s)
+        naming attempt 1 (`start` overrides its fields), then the `missing cost` stop."""
         d.mkdir()
         if with_stage1:  # a full copy of the study journal, Stage 1 included
             self.stage1_journal(d)
-        specs = [run.RunSpec(t, m, "bare", 0) for t in SELECTED for m in run.MODELS][:runs]
+        specs = [run.RunSpec(*s) for s in self.pieces["plans"][part]["order"]][:runs]
         lines = (d / run.EVENTS).read_text().splitlines() if with_stage1 else []
         seq = len(lines)
 
@@ -175,7 +182,8 @@ class Env:
             nonlocal seq
             seq += 1
             lines.append(json.dumps(dict(e, seq=seq)))
-        event(event="start", plan_sha256="pilot", budget={"per_call_usd": 5.0})
+        for _ in range(starts):
+            event(event="start", budget={"per_call_usd": 5.0}, **dict(self.attempt, **(start or {})))
         for i, s in enumerate(specs):
             event(event="call", runId=run.run_id(s))
             last = i == len(specs) - 1
@@ -183,8 +191,9 @@ class Env:
                 s, "s", outcome="infra-other" if last else "scored",
                 costUsd=None if last else 1.0, grade=None if last else {"pass": True},
                 capHit=None if last else False, oomKills=None if last else 0))
-            (d / "runs" / run.run_id(s)).mkdir(parents=True)
-            (d / "runs" / run.run_id(s) / "stream.jsonl").write_text("{}\n")
+            if run_dirs:
+                (d / "runs" / run.run_id(s)).mkdir(parents=True)
+                (d / "runs" / run.run_id(s) / "stream.jsonl").write_text("{}\n")
         event(event="stop", reason="missing cost", stopId=stop_id, spent=0)
         (d / run.EVENTS).write_text("\n".join(lines) + "\n")
         return specs
@@ -244,7 +253,7 @@ class Env:
                     python_version=lambda: "3.14.8", executable=sys.executable,
                     python_on_path=lambda: PYTHON, frozen_root=self.frozen, s5_dir=self.s5,
                     node_version=lambda: NODE, aborted_archive=self.archive,
-                    carried_spend=CARRIED)
+                    carried_spend=CARRIED, attempt1=self.attempt)
         args.update(kw)
         with contextlib.redirect_stderr(io.StringIO()):
             return freeze_stage2.freeze_stage2(**args)
@@ -610,6 +619,52 @@ class CarriedSpendTest(Case):
             self.assertEqual(t["GO.json"]["spent_usd"], CARRIED)
             cmd = t["command"].split()
             self.assertEqual(float(cmd[cmd.index("--spent") + 1]), CARRIED)
+    def test_the_archive_is_tied_to_attempt_1_and_disposed(self):
+        reg = self.env.freeze()
+        ab = reg["aborted_pilot_1"]
+        self.assertEqual((ab["registration_sha256"], ab["plan_sha256"]),
+                         (self.env.attempt["registration_sha256"],
+                          self.env.attempt["plan_sha256"]))
+        self.assertEqual(ab["runs_listing"], ab["run_ids"])
+        self.assertEqual(ab["disposition"], "the 10 runIds listed here are re-run under this "
+                                            "registration; this attempt is archived and never "
+                                            "analysed")
+        self.assertIn("re-run from scratch under this registration",
+                      reg["decision_rule"]["re_runs"])
+        for part in freeze_stage2.PARTS:
+            self.assertIn(ab["disposition"], reg["go_templates"][part]["note"])
+        # The real attempt 1, as constants named in the record.
+        self.assertEqual(freeze_stage2.ATTEMPT1, {
+            "registration_sha256":
+                "433451495de3bc852db7c0d94aeddbc36e036734701597f5b3ad38f0565d2043",
+            "plan_sha256": "b47744e63924101bdcbf402cf7976a20e02d499e6e966d7c7407587c29dcbd42"})
+
+    def test_an_archive_of_another_attempt_refuses(self):
+        cases = (("another-reg", dict(start={"registration_sha256": "b" * 64}), "attempt 1"),
+                 ("another-plan", dict(start={"plan_sha256": "c" * 64}), "attempt 1"),
+                 ("two-starts", dict(starts=2), "attempt 1"),
+                 ("no-run-dirs", dict(run_dirs=False), "must be archived, not deleted"),
+                 ("extension-runs", dict(part="extension"), "not in this registration's pilot"))
+        for name, kw, pattern in cases:
+            with self.subTest(name):
+                d = self.env.tmp / f"archive-{name}"
+                self.env.aborted_pilot(d, **kw)
+                self.refused(pattern, aborted_archive=d)
+        self.refused("attempt 1", attempt1=dict(self.env.attempt, plan_sha256="d" * 64))
+
+    def test_a_runner_lock_or_a_nan_carry_refuses(self):
+        self.refused("finite", carried_spend=float("nan"))
+        (self.env.run_data / run.LOCK).write_text("123\n")
+        self.refused("runner.lock exists")
+
+    def test_the_runbook_describes_the_carried_spend(self):
+        for doc in (run.__doc__, stage3.__doc__, freeze_stage2.go_templates.__doc__,
+                    run.check_go.__doc__):
+            self.assertNotIn("--spent 0", doc)
+            self.assertNotIn("spent_usd: 0", doc)
+            self.assertNotIn("double-counts", doc)
+        self.assertIn("carried_spend_usd", run.__doc__)
+        self.assertIn("journal spend + carried + reserve + per-call <= cap", run.__doc__)
 
     def test_stage1_is_counted_once_and_the_carried_spend_once(self):
         reg = self.env.freeze()
@@ -761,7 +816,8 @@ class RecheckTest(Case):
     # -- m-4: unconditional for a Stage 3 plan ----------------------------------------------
 
     def test_a_stage3_plan_under_an_incomplete_registration_refuses(self):
-        for drop in ("stage", "node_version", "grader_inputs"):
+        for drop in ("stage", "node_version", "grader_inputs", "aborted_pilot_1",
+                     "carried_spend_usd"):
             with self.subTest(drop):
                 self.resign({k: v for k, v in self.registration.items() if k != drop})
                 self.env.commit(f"no {drop}")

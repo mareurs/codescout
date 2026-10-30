@@ -17,8 +17,10 @@ outcomes: for kind in ("foreign", "private"), in that order, rng.sample(sorted i
 3). The other 6 are the extension, which runs unconditionally (never conditioned on pilot
 results). Each part is a plan of its own: run.make_order(part's tasks in selection order,
 run.MODELS, part seed, run.STAGE3_REPS) = 6 tasks x 2 models x (bare x2, cs, full) = 48 specs,
-with its own seed, plan hash and budget (run.STAGE3_*: cap 200, spent 0, per-call 5, reserve 5;
-one data dir, setup-ab-data/study, whose journal holds the earlier spend).
+with its own seed, plan hash and budget (run.STAGE3_*: cap 200, per-call 5, reserve 5, and
+spent = the spend outside the study journal, which freeze_stage2 sets to the registration's
+carried_spend_usd, the archived pilot attempt 1; one data dir, setup-ab-data/study, whose
+journal holds Stage 1's spend, counted there once).
 
 CLI (writes plan files, prints hashes; $0, no docker):
     python3 stage3.py plans --split-seed N --pilot-seed N --extension-seed N --out <dir>
