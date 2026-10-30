@@ -632,6 +632,13 @@ fi
                         ;;
                 esac
             done
+            echo "          IF YOU STAGED THIS HUNK YOURSELF with \`git update-index --cacheinfo\`"
+            echo "          or \`git add -p\` (a split of a file a peer is also editing), the"
+            echo "          recorder does not see those as staging and stamps the row \`-\`, so"
+            echo "          none of the causes above is the fix, and re-adding the same content"
+            echo "          does not claim the row. Stage the snapshot with a real \`git add\`"
+            echo "          from a scratch work tree: docs/conventions/shared-checkout-commit-sequence.md"
+            echo "          § A hunk the recorder can attribute."
             echo "          Unknown ownership stays deliberate: it over-refuses, where"
             echo "          claiming would have gone silent."
             continue
