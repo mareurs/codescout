@@ -1,8 +1,14 @@
 ---
-status: active
 kind: tracker
+status: archived
 title: Session Log — Worktree Delta Semantic Search
-tags: [worktree, retrieval, semantic-search, sdd, session-log]
+tags:
+- worktree
+- retrieval
+- semantic-search
+- sdd
+- session-log
+archived_on: 2026-10-30
 ---
 
 # Session Log — Worktree Delta Semantic Search
@@ -17,6 +23,26 @@ tags: [worktree, retrieval, semantic-search, sdd, session-log]
 > Full per-task detail, every finding and every ruling, lives in the run ledger at
 > `.superpowers/sdd/2026-08-13-worktree-semantic-search/progress.md` (gitignored,
 > kept deliberately).
+
+## Outcomes digest — tracker-hygiene sweep 2026-10-30
+
+This section is an additional reading surface. It was written when the log was archived on 2026-10-30 (detector D10). Where it differs from the Index or Wins Index below, this section is newer. No entry heading below has changed.
+
+| Entry | Status now | Evidence |
+|---|---|---|
+| F-1, F-2, F-3, F-5, F-6 | fixed-verified | As recorded in the entries. The sweep did not re-verify them. |
+| F-4 | mitigated | A process gap: implementer reports overstate their own work. The reviewer instruction from W-2 catches it, and nothing prevents it at the source. |
+| W-3 | promoted-to-permanent-docs | `R-76` in `docs/trackers/reconnaissance-patterns.md` (law D, "A test that cannot fail is not coverage") and `docs/conventions/testing-discipline.md:138` (an observed RED, and mutate the production path). The exact "revert the fix in a scratch copy and report the pass/fail split" wording was not found. |
+| W-2, W-5 | validated, **fired and not applied** (promotion-due) | See below. |
+| W-1, W-4 | validated, unfired | See below. |
+
+**W-2** fired by the entry's own words ("Already load-bearing. Promote into the reviewer-prompt boilerplate."). The target lives outside this repository, in the superpowers and SDD skills, and was not checked. **W-5** also fired ("Already twice-used. Candidate for `docs/RELEASE.md`'s cross-repo section."). `docs/RELEASE.md` has no such rule. The owner chose on 2026-10-30 to carry both, not to apply them in the archive pass.
+
+**Unfired criteria (verbatim).** W-1: "A second work stream uses it and catches anything. At two datapoints, promote to the implementer-brief boilerplate." W-4: "A second independent use. Recorded in R-76 alongside W-3."
+
+**Correction to this log's preamble.** It says the originating bug is "still investigating, halves 1 and 3 open". `docs/issues/archive/2026-08-13-enter-worktree-desyncs-codescout-and-strands-semantic-search.md` is `fixed` and was closed 2026-08-15.
+
+This archive also deleted this file's name from `TEMPLATE_EXEMPT` in `src/librarian/tools/append_entry.rs`.
 
 ## Index
 

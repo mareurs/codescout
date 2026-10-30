@@ -1,11 +1,12 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Session Log — Response Envelope Redesign
 tags:
 - envelope
 - progressive-disclosure
 - context-cost
+archived_on: 2026-10-30
 entry_high_water_F: 5
 entry_prefix:
 - F
@@ -66,6 +67,21 @@ snapshot_anchor: '| ID | Date | Severity | Category | Status | Title |'
 >   stream wraps.
 
 ---
+
+## Outcomes digest — tracker-hygiene sweep 2026-10-30
+
+This section is an additional reading surface. It was written when the log was archived on 2026-10-30 (detector D10). Where it differs from the Index or Wins Index below, this section is newer. No entry heading below has changed.
+
+All five frictions stay **fixed-verified**. The log has no wins: the frontmatter declares the `W` prefix, but no `W-N` entry exists.
+
+Where the lessons live now:
+
+- F-4 (a range is a proxy for authorship) is at `docs/conventions/shared-checkout-commit-sequence.md:74`.
+- F-3 (`-m` goes before `--`) is at `shared-checkout-commit-sequence.md:128-129`.
+- F-5 (check the post-condition of a contended `git add`) is at `shared-checkout-commit-sequence.md:144-145`. Line 408 of that page lists F-2 to F-5 as a source.
+- F-1 (a dropped Task 3) is `Ruling 5` in `docs/trackers/sdd-ruling-log.md` (line 365).
+
+Not established: F-4 says the lesson is "worth upstreaming to the SDD skill", and that upstream copy is outside this repository. The request-aware envelope spec and plan (`docs/superpowers/specs/2026-09-01-request-aware-response-envelope-design.md` and `docs/superpowers/plans/2026-09-01-request-aware-response-envelopes.md`) are still `draft` in the catalog. The sweep did not establish whether that redesign has more waves to run.
 
 ## Index
 

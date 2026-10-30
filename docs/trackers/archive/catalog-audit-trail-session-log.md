@@ -1,6 +1,6 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Session Log — Catalog Audit Trail
 owners:
 - marius
@@ -8,6 +8,7 @@ tags:
 - session-log
 - audit-trail
 - librarian
+archived_on: 2026-10-30
 entry_high_water_F: 5
 entry_high_water_W: 3
 entry_prefix:
@@ -69,6 +70,25 @@ snapshot_anchor: '| ID | Date | Severity | Category | Status | Title |'
 >   stream wraps.
 
 ---
+
+## Outcomes digest — tracker-hygiene sweep 2026-10-30
+
+This section is an additional reading surface. It was written when the log was archived on 2026-10-30 (detector D10). Where it differs from the Index or Wins Index below, this section is newer. No entry heading below has changed.
+
+| Entry | Status now | Evidence |
+|---|---|---|
+| F-1, F-2, F-4 | fixed-verified | As recorded. The sweep did not re-verify the fixes. |
+| F-3 | promoted-to-bug-tracker | `docs/issues/2026-10-30-edit-code-replace-with-a-multi-symbol-body-adds-the-extra-symbols-and-the-response-does-not-say-so.md` (id `fe2de4189ce2abbd`, low). The sweep read `do_replace` and confirmed that its clean-path response is `{status, replaced_lines}`. It did not reproduce the leftover duplicate. |
+| F-5 | mitigated | Its `Valid:` condition is unresolved: the shell-mode eval's outcome and a settled `security.shell_command_mode`. The setting still exists, with default "warn" (`src/util/path_security.rs`). |
+| W-1, W-2, W-3 | validated, unfired | Criteria below. |
+
+**Where the work stream ended.** SRI-1 (the catalog audit trail) merged: `docs/trackers/system-retrospective-improvements.md` line 510 records the fast-forward to `10972335`. SRI-13 is the fix for F-1. SRI-7 (committed audit shards) appears shipped, because commits to `.codescout/audit` run from 2026-10-01 to 2026-10-16. The SRI-7 status row was not located, so its own status is not verified.
+
+**Unfired Promote-when criteria (verbatim).**
+
+- W-1: "a second design whose central claim is a volume/rate/population is falsified by measuring before reading. At 2 datapoints, promote to CLAUDE.md § Bug Tracking as a widening of "run the reproduction before reading the fix plan" ...". `R-151` in `docs/trackers/reconnaissance-patterns.md` holds a parallel unfired criterion. Neither is promoted.
+- W-2: "a second session where probing an embedded language's semantics before generating it changes the generated code. At 2 datapoints, promote to the `project-activation-bootstrap` guide's Phase 2 as a one-line extension of the verify-don't-hypothesise rule ... never a project memory."
+- W-3: "a third SDD run where the pre-flight scan finds a defect the plan's author put there. At 3, the promotion is not "scan your plan" — CLAUDE.md already says that — but the sharper form: the scan must be written as a row-per-pair table, and the clean rows are what make it work." `R-152`'s text says a datapoint where two loaded mechanisms both cover a catch counts for neither's threshold, so this win may count for neither.
 
 ## Index
 

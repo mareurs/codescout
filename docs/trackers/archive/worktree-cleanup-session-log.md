@@ -1,11 +1,12 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Session Log — Worktree Cleanup
 tags:
 - worktree
 - telemetry
 - cleanup
+archived_on: 2026-10-30
 entry_high_water_F: 1
 entry_high_water_W: 1
 entry_prefix:
@@ -67,6 +68,19 @@ snapshot_anchor: '| ID | Date | Severity | Category | Status | Title |'
 >   stream wraps.
 
 ---
+
+## Outcomes digest — tracker-hygiene sweep 2026-10-30
+
+This section is an additional reading surface. It was written when the log was archived on 2026-10-30 (detector D10). Where it differs from the Index or Wins Index below, this section is newer. No entry heading below has changed.
+
+| Entry | Status now | Evidence |
+|---|---|---|
+| F-1 | mitigated | The `usage.db` half is fixed: `docs/issues/archive/2026-08-20-worktree-removal-deletes-its-usage-telemetry.md` (fix `04e8e2c0`, per the entry). The generic half is still open and has no file. |
+| W-1 | validated, unfired | See the criterion below. |
+
+**The gap F-1 leaves.** Nothing warns that removing a merged worktree destroys gitignored per-worktree state. The sweep searched `docs/RELEASE.md`, `docs/conventions`, `scripts`, `CLAUDE.md`, `docs/manual`, `docs/issues`, the memories and `src` for a removal checklist and found none. Memory `worktree-merge-catalog-reconciliation` covers catalog rows only. The owner chose on 2026-10-30 to name this gap here and not to file a bug.
+
+**W-1, unfired Promote-when (verbatim):** "a second work stream where a citation grep overrides an agreeing set of native instruments. At two datapoints this is craft-shaped, not project-shaped — *count distinct substrates, not distinct commands, when corroborating a negative* — and belongs in the reconnaissance SKILL.md beside the negative-results law, not in a codescout memory." Half of that rule already lives in `docs/trackers/observer-blindness.md` `OB-4` (lines 866-875). The reconnaissance skill does not carry the substrates law.
 
 ## Index
 

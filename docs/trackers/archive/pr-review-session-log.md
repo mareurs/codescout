@@ -1,13 +1,14 @@
 ---
-id: fee90da3055f3e19
+id: b2d430f2bcac2779
 kind: tracker
-status: draft
+status: archived
 title: Session Log — PR Review
 tags:
 - reconnaissance
 - pr-review
 - session-log
 topic: pr-review
+archived_on: 2026-10-30
 ---
 
 # Session Log — PR Review
@@ -17,6 +18,28 @@ topic: pr-review
 > from reconnaissance performed while reviewing.
 
 ---
+
+## Outcomes digest — tracker-hygiene sweep 2026-10-30
+
+This section is an additional reading surface. It was written when the log was archived on 2026-10-30 (detector D10). Where it differs from the Index or Wins Index below, this section is newer. No entry heading below has changed. The frontmatter status moved from `draft` to `archived`.
+
+| Entry | Status now | Evidence |
+|---|---|---|
+| F-1, F-2 | wontfix-false-alarm | PRs #7 and #8 merged on 2026-07-19T22:05:20Z (`gh pr view`, 2026-10-30). Their descriptions cannot be amended any more. |
+| F-4 | pinned-as-eval-baseline | PR #9 is still open and unmerged. Its code exists only on `remotes/pr/9` (commit `09170aeba`). `docs/research/2026-09-18-deep-agent-observation-baseline.md:157` and `docs/trackers/local-semantic-evaluator-design.md:203` cite F-4 as open eval material, and the pin keeps them accurate. |
+| F-3, F-5, F-6 | fixed-verified | F-5 and F-6 were superseded by branch `feat/local-onnx-query-path`. PR #13 merged on 2026-08-19. |
+| W-1, W-2, W-3, W-4 | validated, unfired | Criteria below. |
+
+No entry was promoted.
+
+**Unfired Promote-when criteria (verbatim).**
+
+- W-1: "A second PR review where this same "file-list-first" check catches an undisclosed-scope PR before deep-diving. At 2 datapoints, promote into the `/review` skill's own instructions as a required first step: "before reading diff hunks, diff the PR's claimed file list against `gh`'s actual file list."" The `/review` skill is built in, so whether it already carries the rule was not checked.
+- W-2: "A second PR-merge session where independent fmt/clippy/test verification (not trusting the PR body) catches a real gap. At 2 datapoints, promote to this project's RELEASE.md / Standard Ship Sequence as a required step for any multi-PR merge, not just cherry-picks to `master`." The sweep did not read `docs/RELEASE.md` for it.
+- W-3: "A second PR review where executing a newly-added control against adversarial inputs surfaces a bypass that reading it did not. At 2 datapoints, promote to CLAUDE.md / the review skill as a required step for any PR adding a security or policy control. Sibling to W-2 ... **execute the thing, don't infer from its description.**"
+- W-4: "a second case where in-repo prior art for a third-party API decides a fix shape. At 2 datapoints, promote to the reconnaissance skill's Phase 1 as "grep the workspace for existing users of a third-party type before writing code that calls it.""
+
+This archive also deleted this file's name from `TEMPLATE_EXEMPT` in `src/librarian/tools/append_entry.rs`.
 
 ## Index
 

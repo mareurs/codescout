@@ -2036,10 +2036,7 @@ mod taxonomy_recipes {
     /// delete its line; the test reds until you do.
     const TEMPLATE_EXEMPT: &[&str] = &[
         "local-onnx-embedding-session-log.md",
-        "pr-review-session-log.md",
         "release-promotion-session-log.md",
-        "structural-edit-gate-session-log.md",
-        "worktree-semantic-search-session-log.md",
     ];
     /// The names `TEMPLATE_EXEMPT` landed with. Growing the list past these reds
     /// `the_template_exemption_list_only_shrinks`, which makes "shrink-only" a check, not a comment.

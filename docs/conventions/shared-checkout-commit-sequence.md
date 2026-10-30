@@ -405,5 +405,5 @@ per-session worktree does that, which is what
   `scripts/pre-commit-ledger-counts.py` — the three that print it
 - `docs/issues/archive/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`
-- `docs/trackers/response-envelope-session-log.md` — `F-2`, `F-3`, `F-4`, `F-5`
+- `docs/trackers/archive/response-envelope-session-log.md` — `F-2`, `F-3`, `F-4`, `F-5`
 - `CLAUDE.md` § *Reaching a Peer Session*

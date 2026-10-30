@@ -1,6 +1,6 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Session Log — Design-Decision Backlog Triage
 owners:
 - marius
@@ -10,6 +10,7 @@ tags:
 - design-decisions
 - capability-proposals
 topic: design backlog triage
+archived_on: 2026-10-30
 entry_high_water_F: 10
 entry_high_water_W: 1
 entry_prefix:
@@ -77,6 +78,20 @@ surfaces that each answer a different question — `docs/trackers/capability-pro
 >   stream wraps.
 
 ---
+
+## Outcomes digest — tracker-hygiene sweep 2026-10-30
+
+This section is an additional reading surface. It was written when the log was archived on 2026-10-30 (detector D10). Where it differs from the Index or Wins Index below, this section is newer. No entry heading below has changed.
+
+| Entry | Status now | Evidence |
+|---|---|---|
+| F-1, F-2, F-4, F-5, F-7, F-10 | fixed-verified | As recorded. The sweep did not re-verify them. F-6 stays wontfix-false-alarm. |
+| F-3 | fixed-verified | The Index already said so. The entry's own status line said `open`, and the sweep corrected it to match the "Resolved 2026-09-01" note in the entry. |
+| F-8 | fixed-verified, rehomed | `#9` (extract `exec_one_stage`) is not a prerequisite under Strategy C. Neither `exec_one_stage` nor `spawn_and_await` exists in `src`, and `src/tools/run_command/mod.rs` has no `pipeline=` code. The refactor survives only as an optional readability change. `docs/trackers/run-command-pipeline.md` carries the correction under Concern 2. On 2026-10-30 the sweep annotated its three older lines that still called `#9` a prerequisite. |
+| F-9 | mitigated | A reading discipline: a `;`-chained gate reports the exit status of the last command. No code to verify. |
+| W-1 | validated, unfired | Criterion below. |
+
+**W-1, unfired Promote-when (verbatim):** "A third instance of report-don't-attribute changing another session's action. Then it belongs next to CLAUDE.md § *Observer Blindness*'s existing "never route by adjacency" — which today tells you what **not** to do and names no positive move for the case where you can see something the owner cannot." The log says two instances exist. CLAUDE.md now holds only a pointer, and "never route by adjacency" lives at `docs/conventions/reaching-a-peer-session.md:70`. The positive move ("report, don't attribute") is not stated there or anywhere the sweep searched.
 
 ## Index
 
@@ -543,7 +558,7 @@ excluded.
 
 **Valid:** dated 2026-09-01
 
-**Category:** stale-substrate · **Severity:** high · **Status:** open
+**Category:** stale-substrate · **Severity:** high · **Status:** fixed-verified (reconciled 2026-10-30 to match the Index row and the "Resolved 2026-09-01" note below)
 
 **Observed.** `docs/trackers/run-command-pipeline.md` (`5d022cd3b41009f4`, `status: draft`,
 opened 2026-05-18, last touched 2026-08-16) was the design I recommended as "decision-ready

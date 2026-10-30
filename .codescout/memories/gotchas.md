@@ -535,7 +535,7 @@ added to `permissions.deny` in `settings.json` for all three profiles (`~/.claud
 harness-level and unconditional: it sits upstream of, and independent from,
 codescout-companion's `pre-tool-guard.mjs`, whose advisory-then-stand-down
 behaviour no longer decides anything here. Verdict and its location:
-`docs/trackers/shell-gating-session-log.md` § *Promotion status*; the hook inventory in
+`docs/trackers/archive/shell-gating-session-log.md` § *Promotion status*; the hook inventory in
 `docs/architecture/companion-plugin.md` states the same (CLAUDE.md § *Companion Plugin* now only
 points there).
 

@@ -355,7 +355,7 @@ rather than the lesson being recorded elsewhere.
 ## References
 
 - ADR: `docs/adrs/2026-07-25-embedding-transport-boundary.md`
-- Session log: `docs/trackers/pr-review-session-log.md` F-5, F-6, W-4
+- Session log: `docs/trackers/archive/pr-review-session-log.md` F-5, F-6, W-4
 - Recon ledger: `docs/trackers/reconnaissance-patterns.md` R-70, R-71, R-72
 - Bug files carried from PR #13 — branch-resident, absent from `experiments`,
   so named without code spans (see the note under the title):

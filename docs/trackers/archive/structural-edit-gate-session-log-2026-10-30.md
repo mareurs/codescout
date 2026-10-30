@@ -1,7 +1,8 @@
 ---
-status: active
-title: Session Log — Structural Edit Gate
 kind: tracker
+status: archived
+title: Session Log — Structural Edit Gate
+archived_on: 2026-10-30
 ---
 # Session Log — Template
 
@@ -27,6 +28,19 @@ kind: tracker
 >   stream wraps.
 
 ---
+
+## Outcomes digest — tracker-hygiene sweep 2026-10-30
+
+This section is an additional reading surface. It was written when the log was archived on 2026-10-30 (detector D10). Where it differs from the Index or Wins Index below, this section is newer. No entry heading below has changed.
+
+| Entry | Status now | Evidence |
+|---|---|---|
+| F-1 | fixed-verified | Fix `fb8fb7a7f` (experiments, 2026-06-27). `debug_enforce_symbol_tools` now appears only in a stale-key test at `src/config/project.rs:1529-1534`. Both bug files the entry names are in `docs/issues/archive/`. |
+| W-1 | promoted-to-permanent-docs | Home: `claude-plugins/codescout-companion/skills/reconnaissance/references/seam-classes.md:17` ("A proposed fix — and equally a prohibition — is a claim about CURRENT STATE"). The owner accepted that home on 2026-10-30. CLAUDE.md was the entry's own target, but its byte budget only moves down. |
+
+W-1 had one datapoint of its own. The sweep counted `worktree-cleanup-session-log:W-1` as the second. It counted `shell-gating-session-log:W-1` too, but that case adds a knob and does not retire one, so it fits the criterion only in part.
+
+This archive also deleted this file's name from `TEMPLATE_EXEMPT` in `src/librarian/tools/append_entry.rs`, because the check names every exempt file and the file left `docs/trackers/`.
 
 ## Index
 

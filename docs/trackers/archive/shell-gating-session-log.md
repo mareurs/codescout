@@ -1,10 +1,11 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Session Log — Shell Gating
 tags:
 - shell
 - run_command
+archived_on: 2026-10-30
 entry_high_water_F: 5
 entry_high_water_W: 3
 entry_prefix:
@@ -69,6 +70,24 @@ snapshot_anchor: '| ID | Date | Severity | Category | Status | Title |'
 >   stream wraps.
 
 ---
+
+## Outcomes digest — tracker-hygiene sweep 2026-10-30
+
+This section is an additional reading surface. It was written when the log was archived on 2026-10-30 (detector D10). Where it differs from the Index or Wins Index below, this section is newer. No entry heading below has changed.
+
+| Entry | Status now | Evidence |
+|---|---|---|
+| F-1 | fixed-verified | As recorded. |
+| F-2 | promoted-to-bug-tracker | `docs/issues/archive/2026-09-16-worktree-guard-reads-a-quoted-regex-alternation-as-a-bare-git-verb.md` (fixed) and `docs/issues/2026-09-13-worktree-guards-cd-chain-remedy-is-stripped-before-the-guard-sees-it.md` (zombie: the cd-strip was never observed because Bash is denied). |
+| F-3, F-5 | mitigated | Lessons. Their causes were already mitigated (the commit gate caught F-3; a peer retracted F-5). |
+| F-4 | fixed-verified, for the hint half | `docs/issues/archive/2026-09-18-the-worktree-write-block-names-an-arbitrary-worktree-as-the-remedy.md` (fix `fc6f5bb7`). `src/tools/core/guards.rs` now names the main repo first. |
+| W-1 | promoted-to-permanent-docs | `claude-plugins/codescout-companion/skills/reconnaissance/references/seam-classes.md:17`. The entry says "Phase 1 bullet in SKILL.md"; the text now lives in the reference file. |
+| W-2 | covered | `seam-classes.md:19` carries the positive-control law, one control per reportable state. |
+| W-3 | validated, carried | A related law is at `docs/conventions/testing-discipline.md:138`. The form "an immediate PASS is itself the signal" was not found stated anywhere. |
+
+**The half of F-4 that stays open.** Activation dies with the MCP process, so after a `/mcp` reconnect reads only warn and writes refuse. The archived bug above documents this as a workaround, and it has no file of its own. The owner chose on 2026-10-30 to carry it here and not to file a bug.
+
+The **Promotion status** section below keeps the 2026-09-23 decision about the Bash, Write and Edit deny rules as evidence.
 
 ## Index
 

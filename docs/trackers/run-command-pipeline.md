@@ -191,7 +191,7 @@ together" signal pointed at this fix correctly. See
 
 - Open #1 (schema) — leans `stages` XOR `command`, not `command + pipeline`. (Concern 3.)
 - Open #7 (strategy) — add **Strategy C: shell-pipeline rewrite with per-stage tee taps**. Lean C unless per-stage timeout requirement emerges. (Concern 1.)
-- New open #9 — extract `exec_one_stage` from `run_command_inner` before adding any new mode. Prerequisite for any strategy. (Concern 2.)
+- New open #9 — extract `exec_one_stage` from `run_command_inner` before adding any new mode. Prerequisite for any strategy. (Concern 2.) **[Superseded 2026-10-30: under Strategy C #9 is not a prerequisite. See the Concern 2 correction (`design-backlog-session-log:F-8`).]**
 - ~~New open #10 — companion hook must read `tool_input.stages` if schema lands as `stages`.~~
   **VOID 2026-09-01** — no wired companion hook exists (no `hooks.json` PreToolUse matcher
   targets `run_command`, measured 2026-08-27). Nothing to update. The enforcement this item
@@ -426,7 +426,7 @@ there as current; the measurement block above is.
 
 - **#4, #5, #8** — now decidable. All three encoded sequential stages; under C they follow from
   `PIPESTATUS`. Drafts are in the measurement block.
-- **#9** (`exec_one_stage` extraction) — the prerequisite is now known to serve C specifically.
+- **#9** (`exec_one_stage` extraction) — the prerequisite is now known to serve C specifically. **[Superseded 2026-10-30: under Strategy C #9 is not a prerequisite. See the Concern 2 correction (`design-backlog-session-log:F-8`).]**
 - **#3 (timeout policy) is RE-OPENED as a genuine choice.** It asked "total or per-stage?" and
   leaned total *because per-stage was believed impossible*. `F-7` removes that constraint, so
   the lean now rests on nothing but simplicity. Both are implementable; decide it on merit,
@@ -653,7 +653,7 @@ Open the next session with:
    knowing a long `cargo test` stage can then only be cancelled as a whole.
 3. **#1 is `stages` XOR `command`** — see the Concern 3 correction; the argument now rests on
    `src/tools/run_command/mod.rs:211`, not on the retired companion hook.
-4. **#9 is a prerequisite under every strategy** — extract `exec_one_stage` from
+4. **#9 is a prerequisite under every strategy** **[Superseded 2026-10-30: under Strategy C #9 is not a prerequisite. See the Concern 2 correction (`design-backlog-session-log:F-8`).]** — extract `exec_one_stage` from
    `run_command_inner` first. Verified 2026-09-01: `symbols(name="exec_one_stage")` returns
    **0 matches**, and `run_command_inner` is `src/tools/run_command/inner.rs:279-605`
    (326 lines).
