@@ -129,6 +129,10 @@ not evidence a convention holds.
 
 **Checked 2026-10-01 (doctor `open_bug_cited_from_source`) — live; the one source citation is rationale, not a fix.** `src/agent/build_check.rs:893-901` cites this file to explain why its test was observed red by mutation instead of by a pre-fix run, i.e. it describes the hazard and avoids it. Adoption of the prescribed marker is **zero**: a repo-wide search for `expected RED until the fix lands` finds nothing outside this file. The two later tests that call themselves reproductions (`src/librarian/tools/update_entry.rs:436`, `src/librarian/tools/mv.rs:920`) say so in a `///` doc comment, which an observer reading a red never sees, and neither assertion message carries the marker. So the convention has been written and has not been tried, which is what the Resume above asks for before proposing it anywhere durable.
 
+## Applied 2026-10-30 (Group F pass)
+
+Re-checked at HEAD: a repo-wide grep for `expected RED until the fix lands` still finds nothing outside this file; `update_entry.rs:450` and `mv.rs:1092` still carry `REPRODUCTION for` only in `///` doc comments. The convention is now written into `docs/conventions/testing-discipline.md` (last bullet of the laws list: marker text, the load-bearing wrong-reason clause, the `#[ignore]` rejection, remove the marker in the fix commit). `CLAUDE.md` was not touched (byte budget). No code path: an authoring convention, so no test. Status stays `open` until a reproduction test actually carries the marker; the next reproduction-first test written in this repo is the first use. This pass's own reproduction test lives in a private worktree, not a shared checkout, so it did not exercise the marker either.
+
 ## References
 
 - `docs/issues/archive/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`

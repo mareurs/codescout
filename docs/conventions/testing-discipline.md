@@ -193,3 +193,16 @@ premise that every addition falsifies.
   cycle has no step that asks. Derivation →
   [`docs/conventions/what-green-is-evidence-for.md`](docs/conventions/what-green-is-evidence-for.md)
   § *A red does not survive its assertion being edited*.
+- **A reproduction-first red is a TRUE red, and on a shared checkout no observer can attribute
+  it — so the assertion message carries its provenance.** Writing the failing test first (the
+  rule that makes the red real) leaves that red in every other session's gate run for minutes to
+  hours. A panic describes the DEFECT and says nothing of the test's STATUS, so a peer cannot tell
+  it from a regression they caused. Open the assertion message of a reproduction test with:
+  `REPRODUCTION for <bug id> — expected RED until the fix lands. Expected failure: <the specific
+  wrong behaviour>. A DIFFERENT failure here is not this; treat it as unexplained.` The last
+  sentence is load-bearing: a bare "expected RED" is monotone under wrong-reason (it tells the
+  reader to stand down for every red the assertion can produce, including a second regression).
+  Do **not** `#[ignore]` it: that is the same hole with no message, hides a live defect, and
+  rots into false coverage if the fix is abandoned. Remove the marker in the fix commit. A
+  `///` doc comment does not count: an observer reading a red never sees it. Record and
+  derivation → `docs/issues/2026-09-14-a-reproduction-first-red-is-a-true-red-no-observer-can-attribute.md`.
