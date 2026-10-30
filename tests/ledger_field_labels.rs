@@ -12,11 +12,11 @@
 //!
 //! - **Drift is never allowed.** A label present in the single-bold-span form is a mechanical
 //!   repair that touches no claim. The corpus has none today, so this gate costs nothing now.
-//! - **Absence is a pinned debt that only shrinks.** The template says "Drop no field — write
-//!   `unknown` or `none yet`", and 30 (entry, field) pairs are absent today (measured
-//!   2026-10-30, 28 entries). Authoring them is each entry's own judgement and is NOT done here.
-//!   [`KNOWN_ABSENT`] lists them. A new missing field fails, and so does fixing one without
-//!   removing it from the list, so the debt cannot grow and cannot hide a repair.
+//! - **Absence is gated by a shrink-only list.** The template says "Drop no field — write
+//!   `unknown` or `none yet`". 30 (entry, field) pairs were absent on 2026-10-30 (28 entries) and
+//!   were backfilled that day as explicit `unknown` lines, which states no claim for any entry.
+//!   [`KNOWN_ABSENT`] is therefore empty. A new missing field fails, and a pair listed there
+//!   fails once its field is written, so a debt can neither grow nor hide a repair.
 //!
 //! The template's own field list is read from the ledger, so a field added to the template is
 //! gated without editing this file.
@@ -30,40 +30,10 @@ use std::process::Command;
 
 const LEDGER: &str = "docs/trackers/observer-blindness.md";
 
-/// `(entry, field)` pairs absent on 2026-10-30. Shrink-only: remove a pair when its field is
-/// written, never add one — write the field (`unknown` or `none yet` is allowed) instead.
-const KNOWN_ABSENT: &[(&str, &str)] = &[
-    ("OB-2", "Instances"),
-    ("OB-3", "Instances"),
-    ("OB-5", "Instances"),
-    ("OB-9", "Instances"),
-    ("OB-12", "Instances"),
-    ("OB-12", "Status"),
-    ("OB-13", "Plausible-answer property"),
-    ("OB-13", "Vigilance"),
-    ("OB-13", "Instances"),
-    ("OB-13", "Status"),
-    ("OB-14", "Instances"),
-    ("OB-15", "Class"),
-    ("OB-15", "Blind party"),
-    ("OB-15", "Who can see it"),
-    ("OB-15", "Plausible-answer property"),
-    ("OB-15", "Vigilance"),
-    ("OB-15", "Instances"),
-    ("OB-18", "Plausible-answer property"),
-    ("OB-18", "Vigilance"),
-    ("OB-20", "Instances"),
-    ("OB-22", "Plausible-answer property"),
-    ("OB-22", "Vigilance"),
-    ("OB-22", "Instances"),
-    ("OB-22", "Status"),
-    ("OB-26", "Rests on"),
-    ("OB-26", "Class"),
-    ("OB-26", "Plausible-answer property"),
-    ("OB-26", "Vigilance"),
-    ("OB-26", "Instances"),
-    ("OB-26", "Status"),
-];
+/// `(entry, field)` pairs known to be absent, shrink-only. Empty since 2026-10-30, when the 30 pairs
+/// the ledger lacked were backfilled as explicit `unknown` lines. A new absence now fails, and the
+/// repair is to write the field (`unknown` or `none yet` is allowed), not to add a pair here.
+const KNOWN_ABSENT: &[(&str, &str)] = &[];
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

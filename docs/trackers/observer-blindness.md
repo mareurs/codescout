@@ -749,6 +749,9 @@ subject. That is `OB-22` on `OB-2`'s own record, and it is why the replacement n
 **Status:** validated — mechanism shipped and verified by running it (0 verbs after the
 lean lane, all 8 after the default lane)
 
+
+**Instances:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
 ## OB-3 — a peer listing is arbitrary with respect to the real population
 
 **Valid:** dated 2026-08-31
@@ -815,6 +818,8 @@ showed the ratio to be vantage-dependent and the both-directions property to be 
 invariant. A third instrument axis is `SendMessage` itself: resolution **by name** is
 profile-scoped and fails for an invisible peer, while the **socket address** works — the same
 split one layer up, and the reason a send-by-name failure must never be read as unreachability.
+
+**Instances:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
 
 ## OB-4 — a liveness marker with a good hit rate is more dangerous than a bad one
 
@@ -1156,6 +1161,7 @@ on the base rate, not the hit rate, and must not be absorbed as a near-catch.
 by `doctor.rs` and absent from its summary. And the same remedy shape is available and unbuilt:
 `-- --list` names the matched set **before** the run. Until something emits it, the reader-side rule
 is that **a filtered run owes its matched count**, precisely as a peer count owes its unit.
+**Instances:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
 ## OB-6 — a gate collapses "cannot observe" into the confident answer
 
 **Valid:** invariant
@@ -1456,6 +1462,8 @@ this row contributes is its **scope condition**.
 and `:429`, the last confirming n moved 20→18 with *no bug added, removed, fixed or
 re-examined* — only the boundary).
 
+**Instances:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
 ## OB-10 — a mutual-exclusion resource is invisible to the session holding it
 
 **Valid:** invariant
@@ -1670,6 +1678,9 @@ diagnosis — the one thing here that did not depend on getting the mechanism ri
 emission is *conditional*, since a fixed block has stable adjacency — so it is a rule about
 assembly, not about prose, and it would be wrong to apply it to a static document. Not built
 here; what shipped is the one-word scoping at the single known site.
+**Instances:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Status:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
 ## OB-13 — deleting a token cannot enumerate the negative assertions that survive it
 
 **Valid:** invariant
@@ -1741,6 +1752,14 @@ below, which is the cheaper half and covers a failure the trigger cannot.
 (`prompts/mod.rs:2603` retrospective, `augmentation.rs:3027` prospective — different subsystems,
 same day) and one of the repair half, all from the same work stream. One work stream is not two
 subsystems in the sense the promotion bar means, whatever the file paths say.
+
+**Plausible-answer property:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Vigilance:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Instances:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Status:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
 
 ## OB-14 — the sampling frame is unauditable from inside it, and review inherits it
 
@@ -1851,6 +1870,8 @@ it outright.
 an internal consistency check, or a reviewer with the analyst's data access and no independent
 knowledge of the inputs' provenance. That would make this ordinary carelessness with a careful
 remedy available, which is exactly what this ledger's admission test excludes.
+
+**Instances:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
 
 ## OB-15 — a silenced mechanism and an absent one produce identical observations, and the tie breaks toward building
 
@@ -1983,6 +2004,18 @@ emits it; grep the emitter.** Instance 3 argues the line should reach records to
 emitters.
 
 **Status:** open
+
+**Class:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Blind party:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Who can see it:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Plausible-answer property:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Vigilance:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Instances:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
 
 ## OB-16 — a cross-repo redirect names a capability neither repo's gates can evaluate, because neither holds both halves
 
@@ -2122,6 +2155,10 @@ true, which is why it was not the one that misled.
 
 **Status:** validated — comment verified against `lib.mjs:333` and `:348`, against a live slot's
 `hook_at` age, and against the companion's `session-start.mjs:76` stamping site.
+
+**Plausible-answer property:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Vigilance:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
 
 ## OB-19 — the event is observable in real time, and only by the party it does not affect
 
@@ -2646,6 +2683,8 @@ name being the failure this repo's rules on superseded prose exist to prevent.
 
 **Valid:** dated 2026-09-14
 
+**Instances:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
 ## OB-21 — a session cannot audit its own successive claims, because it never re-reads what it sent
 
 **Valid:** invariant
@@ -2825,6 +2864,14 @@ strongest and the filter is therefore least likely to be questioned. Instances: 
 two; the commit-count case is published as a **confirmation** rather than a catch, per
 `CLAUDE.md` § *Testing Discipline* — *when a re-derivation confirms, publish the confirmation;
 that is a denominator, never a catch.*
+
+**Plausible-answer property:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Vigilance:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Instances:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Status:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
 
 ## OB-23 — a notification that changes the recipient's behaviour cannot also measure it
 
@@ -3127,6 +3174,18 @@ an instance of both at once: a test written to refute a bug, which varied the pa
 while fixing the date prefix.
 
 **Valid:** dated 2026-09-13
+
+**Rests on:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Class:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Plausible-answer property:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Vigilance:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Instances:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
+
+**Status:** unknown — not recorded when this entry was written (backfilled 2026-10-30); see the entry's prose.
 
 ## OB-27 — a correction's authority does not transfer to its author's next claim
 
