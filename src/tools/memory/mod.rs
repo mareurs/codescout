@@ -1,6 +1,7 @@
 //! Memory tools: persistent per-project knowledge store.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use super::{parse_bool_param, OutputForm, RecoverableError, Tool, ToolContext};
 use serde_json::{json, Value};
@@ -228,7 +229,7 @@ fn topic_not_found_error(topic: &str, available: Vec<String>) -> RecoverableErro
 /// `p.config.embeddings.model_or_default()`, which is the raw project.toml-only
 /// copy that can diverge from what the shared embedder (`ctx.agent.memory_embedder_for`)
 /// was actually built from whenever an env var overrides project.toml. Shared by
-/// [`cross_embed_memory`] and [`create_semantic_anchors`], which segment the SAME
+/// [`cross_embed_memory`] and [`find_semantic_anchors`], which segment the SAME
 /// point id and must therefore agree with each other, not just with the config.
 ///
 /// Does not reuse the embedder's own model — `Agent::memory_embedder_for` caches the
@@ -241,21 +242,37 @@ fn resolved_chunk_budget(root: &std::path::Path) -> anyhow::Result<usize> {
     Ok(crate::embed::chunk_size_for_model(&model))
 }
 
-/// Best-effort cross-embed a markdown memory into the semantic store.
-/// Called on `write` so that structured memories are also discoverable via `recall`.
+/// Best-effort cross-embed a markdown memory into the semantic store, with its semantic
+/// anchors. Called on `write` so that structured memories are also discoverable via `recall`.
+///
+/// Embeds the content ONCE and upserts the point ONCE. It used to be two functions that each
+/// embedded the same content and each upserted it (the second overwriting the first's point).
+/// A failed anchor search does not lose the memory: the point is upserted without anchors and
+/// the failure comes back as a warning. A failure to embed or upsert is an `Err`.
+/// docs/issues/2026-10-30-memory-write-embeds-and-upserts-the-same-content-twice.md
 async fn cross_embed_memory(
     ctx: &ToolContext,
     input: &Value,
     topic: &str,
     content: &str,
-) -> anyhow::Result<()> {
+    path_anchor_files: &HashSet<String>,
+) -> anyhow::Result<Vec<String>> {
+    // One root for every resolution below, read once. docs/issues/2026-10-24-a-memory-call-resolves-its-root-three-times-so-a-concurrent-activate-can-split-the-row-from-its-database.md
+    let pin = call_pin(ctx).await;
+    let pin = pin.as_deref();
     // The key follows the call's `project_id`, not the focus: the file went to the named
     // project's directory, so its point must carry that project's key.
     // docs/issues/2026-10-29-memory-write-with-a-project-id-cross-embeds-under-the-focused-project-not-the-named-one.md
-    let project_id = semantic_project_key(input, ctx).await?;
-    let root = ctx
+    let project_id = semantic_project_key_at(input, ctx, pin).await?;
+    let (min_sim, top_n, root) = ctx
         .agent
-        .with_project_at(ctx.workspace_override.as_deref(), |p| Ok(p.root.clone()))
+        .with_project_at(pin, |p| {
+            Ok((
+                p.config.memory.semantic_anchor_min_similarity,
+                p.config.memory.semantic_anchor_top_n,
+                p.root.clone(),
+            ))
+        })
         .await?;
 
     // `embed_document`, not `embed`: this is a document being stored. `embed` is
@@ -277,13 +294,30 @@ async fn cross_embed_memory(
     // per-model arms. Memory content has no such benchmarked size; its only real
     // constraint is the ceiling, which is what this returns.
     let budget_chars = resolved_chunk_budget(&root)?;
-    let embedder = ctx
-        .agent
-        .memory_embedder_for(ctx.workspace_override.as_deref())
-        .await?;
+    let embedder = ctx.agent.memory_embedder_for(pin).await?;
     let dense =
         crate::embed::document::embed_document_pooled(embedder.as_ref(), content, budget_chars)
             .await?;
+
+    let mut warnings = Vec::new();
+    let anchors = match find_semantic_anchors(
+        ctx,
+        pin,
+        &project_id,
+        content,
+        path_anchor_files,
+        min_sim,
+        top_n,
+    )
+    .await
+    {
+        Ok(anchors) => anchors,
+        Err(e) => {
+            tracing::warn!("semantic anchor creation failed (non-fatal): {e}");
+            warnings.push(format!("semantic anchor creation failed: {e}"));
+            Vec::new()
+        }
+    };
 
     let now = now_epoch_string();
     let memory = crate::retrieval::memory_payload::SemanticMemory {
@@ -291,95 +325,76 @@ async fn cross_embed_memory(
         bucket: "structured".into(),
         title: topic.to_string(),
         content: content.to_string(),
-        anchors: Vec::new(),
+        anchors,
         created_at: now.clone(),
         updated_at: now,
     };
-    let store = ctx
-        .agent
-        .semantic_memory_store_for(ctx.workspace_override.as_deref())
-        .await?;
+    let store = ctx.agent.semantic_memory_store_for(pin).await?;
     store.upsert(&memory, &dense).await?;
-    Ok(())
+    Ok(warnings)
 }
 
 /// The key the semantic store files this call's memories under: the call's `project_id`
 /// when it names one, else the focused project's name (the unchanged default).
 async fn semantic_project_key(input: &Value, ctx: &ToolContext) -> anyhow::Result<String> {
+    semantic_project_key_at(input, ctx, ctx.workspace_override.as_deref()).await
+}
+
+/// [`semantic_project_key`] resolved against an explicit pin, for a caller that has already
+/// pinned its call to one root (see [`call_pin`]).
+async fn semantic_project_key_at(
+    input: &Value,
+    ctx: &ToolContext,
+    pin: Option<&Path>,
+) -> anyhow::Result<String> {
     match input.get("project_id").and_then(Value::as_str) {
-        Some(id) => {
-            ctx.agent
-                .semantic_key_for_project(ctx.workspace_override.as_deref(), id)
-                .await
-        }
+        Some(id) => ctx.agent.semantic_key_for_project(pin, id).await,
         None => {
             ctx.agent
-                .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                    Ok(p.config.project.name.clone())
-                })
+                .with_project_at(pin, |p| Ok(p.config.project.name.clone()))
                 .await
         }
     }
 }
 
-/// Create semantic anchors for a markdown memory by embedding it, asking the
-/// retrieval stack for similar code chunks, and re-upserting the memory with
-/// `anchors` populated. Excludes files already covered by path anchors.
+/// The root a multi-step memory call resolves everything against: its own `workspace=` pin,
+/// else the session default WORKSPACE root read ONCE here. Without this an unpinned call
+/// re-read "the current default" at every step, so a concurrent `activate` between two steps
+/// could file project A's row, embedded with B's model, into B's database.
 ///
-/// The re-upsert overwrites `cross_embed_memory`'s prior point (same
-/// deterministic id) but preserves the content the caller passed in here, so
-/// callers don't need to coordinate the two writes.
+/// Pinning the workspace root resolves to the same focused project `None` does. `None` is
+/// returned only when no project is active, which every step then refuses as before.
+/// Limit: `switch_focus` inside the same workspace still moves the focused project.
+/// docs/issues/2026-10-24-a-memory-call-resolves-its-root-three-times-so-a-concurrent-activate-can-split-the-row-from-its-database.md
+async fn call_pin(ctx: &ToolContext) -> Option<PathBuf> {
+    match &ctx.workspace_override {
+        Some(pin) => Some(pin.clone()),
+        None => ctx.agent.default_workspace_root().await,
+    }
+}
+
+/// Search the code index for the files a memory's content is about: the semantic anchors.
+/// Excludes files already covered by path anchors.
 ///
-/// Best-effort: failures are returned to the caller (which logs and ignores).
-async fn create_semantic_anchors(
+/// Embeds nothing: the caller already holds the memory's vector, and the anchor search is
+/// a query that the retrieval stack embeds on its own side.
+///
+/// Errors are returned to the caller, which files the memory without anchors and reports them.
+async fn find_semantic_anchors(
     ctx: &ToolContext,
-    input: &Value,
-    topic: &str,
+    pin: Option<&Path>,
+    project_id: &str,
     content: &str,
     path_anchor_files: &HashSet<String>,
-) -> anyhow::Result<()> {
-    // The SAME key `cross_embed_memory` used: this call re-upserts that point's id, and a
-    // different key would leave two points for one memory.
-    let project_id = semantic_project_key(input, ctx).await?;
-    let (min_sim, top_n, root) = ctx
-        .agent
-        .with_project_at(ctx.workspace_override.as_deref(), |p| {
-            Ok((
-                p.config.memory.semantic_anchor_min_similarity,
-                p.config.memory.semantic_anchor_top_n,
-                p.root.clone(),
-            ))
-        })
-        .await?;
-
-    // `embed_document` for the stored vector — see `cross_embed_memory`. The
-    // anchor *search* below is a query and stays on the query side, which is the
-    // asymmetry this seam exists to express.
-    //
-    // Segmented on the same budget as `cross_embed_memory`, and for the same reason:
-    // this call re-upserts the SAME point id, so leaving it unsegmented would let the
-    // anchor pass overwrite a correctly-pooled vector with a truncated or missing one
-    // — the second write silently undoing the first.
-    let budget_chars = resolved_chunk_budget(&root)?;
-    let embedder = ctx
-        .agent
-        .memory_embedder_for(ctx.workspace_override.as_deref())
-        .await?;
-    let dense =
-        crate::embed::document::embed_document_pooled(embedder.as_ref(), content, budget_chars)
-            .await?;
-
-    // Code chunk search goes through its own seam. The embedder seam above only
-    // covers the dense vector path, so until 2026-08-30 this line built a real
-    // client from ambient config even in tests that had stubbed the embedder —
-    // which is why the memory suite's runtime tracked the developer's local stack
-    // (1.16s up, 20.65s wedged, 76 passing either way). When the retrieval stack
-    // is offline, search_code errors and the anchor-creation step is skipped by
-    // the caller (logged at warn); that is unchanged.
-    let root = ctx
-        .agent
-        .require_project_root_for(ctx.workspace_override.as_deref())
-        .await?;
+    min_sim: f32,
+    top_n: usize,
+) -> anyhow::Result<Vec<crate::retrieval::memory_payload::MemoryAnchor>> {
+    // Code chunk search goes through its own seam. The embedder seam only covers the dense
+    // vector path, so until 2026-08-30 this line built a real client from ambient config even
+    // in tests that had stubbed the embedder — which is why the memory suite's runtime tracked
+    // the developer's local stack (1.16s up, 20.65s wedged, 76 passing either way). When the
+    // retrieval stack is offline, search_code errors and the memory is filed without anchors.
+    let root = ctx.agent.require_project_root_for(pin).await?;
     let client = ctx.agent.code_search(Some(&root)).await?;
 
     // Code chunk search via the retrieval stack. Overfetch so dedupe-by-file
@@ -394,7 +409,7 @@ async fn create_semantic_anchors(
         exclude_languages: vec!["markdown".to_string()],
         exclude_paths: Vec::new(),
     };
-    let hits = client.search_code(&project_id, content, opts).await?;
+    let hits = client.search_code(project_id, content, opts).await?;
 
     // Dedupe by file path, keep highest score, apply min_sim + path-anchor exclusions.
     // Prefer rerank_score when the reranker ran; fall back to RRF score otherwise.
@@ -422,24 +437,7 @@ async fn create_semantic_anchors(
         .map(|path| crate::retrieval::memory_payload::MemoryAnchor { path })
         .collect();
     anchors.sort_by(|a, b| a.path.cmp(&b.path)); // deterministic ordering
-
-    let now = now_epoch_string();
-    let memory = crate::retrieval::memory_payload::SemanticMemory {
-        project_id,
-        bucket: "structured".into(),
-        title: topic.to_string(),
-        content: content.to_string(),
-        anchors,
-        created_at: now.clone(),
-        updated_at: now,
-    };
-
-    let store = ctx
-        .agent
-        .semantic_memory_store_for(ctx.workspace_override.as_deref())
-        .await?;
-    store.upsert(&memory, &dense).await?;
-    Ok(())
+    Ok(anchors)
 }
 
 /// The directories a `memory` READ should consult, in precedence order.
@@ -1117,19 +1115,13 @@ impl Tool for Memory {
                 // best-effort indexing is still data loss from the POV of someone who
                 // explicitly asked for "memory write".
 
-                // Cross-embed into semantic store (best-effort, non-fatal)
-                if !private {
-                    if let Err(e) = cross_embed_memory(ctx, &input, topic, content).await {
-                        tracing::warn!("cross-embed memory failed (non-fatal): {e}");
-                        warnings.push(format!("cross-embed failed: {e}"));
-                    }
-                }
 
                 // Path anchors are seeded inside `guarded_write` above, beside the file
                 // it actually wrote. They used to be re-resolved here after the fact,
                 // which is how the store's directory and the sidecar's could disagree.
 
-                // Create semantic anchors (best-effort, non-fatal)
+                // Cross-embed into the semantic store, anchors included, in one embed and one
+                // upsert (best-effort, non-fatal)
                 if !private {
                     let path_files: HashSet<String> = {
                         if let Ok(root) = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await {
@@ -1146,11 +1138,12 @@ impl Tool for Memory {
                             HashSet::new()
                         }
                     };
-                    if let Err(e) =
-                        create_semantic_anchors(ctx, &input, topic, content, &path_files).await
-                    {
-                        tracing::warn!("semantic anchor creation failed (non-fatal): {e}");
-                        warnings.push(format!("semantic anchor creation failed: {e}"));
+                    match cross_embed_memory(ctx, &input, topic, content, &path_files).await {
+                        Ok(w) => warnings.extend(w),
+                        Err(e) => {
+                            tracing::warn!("cross-embed memory failed (non-fatal): {e}");
+                            warnings.push(format!("cross-embed failed: {e}"));
+                        }
                     }
                 }
 

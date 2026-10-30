@@ -102,6 +102,13 @@ pub struct Agent {
             >,
         >,
     >,
+    /// Test-only log of the `workspace_override` each `memory_embedder_for` /
+    /// `semantic_memory_store_for` call received, recorded BEFORE the test-double
+    /// bypass. The doubles ignore the root, so without this a test cannot see which
+    /// root a memory call resolved them against.
+    /// docs/issues/2026-10-24-a-memory-call-resolves-its-root-three-times-so-a-concurrent-activate-can-split-the-row-from-its-database.md
+    #[cfg(test)]
+    pub(crate) memory_pin_log: Arc<std::sync::Mutex<Vec<Option<PathBuf>>>>,
     /// Test-only capture of the `RetrievalClient.embedder` seen by the single
     /// `RetrievalClient::from_env()` call inside `memory_embedder()`, taken at
     /// the exact point that `Arc` is about to be moved into `CodeDenseAdapter`.
@@ -1087,6 +1094,8 @@ impl Agent {
             memory_embedder: Arc::new(tokio::sync::OnceCell::new()),
             memory_embedders_by_config: Arc::new(std::sync::Mutex::new(HashMap::new())),
             #[cfg(test)]
+            memory_pin_log: Arc::new(std::sync::Mutex::new(Vec::new())),
+            #[cfg(test)]
             test_seen_client_embedder: Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(test)]
             code_search_override: Arc::new(std::sync::Mutex::new(None)),
@@ -1190,6 +1199,14 @@ impl Agent {
         let ws = inner.build_workspace(&root, None, res);
         inner.workspaces.insert(root, ws);
         Ok(())
+    }
+
+    /// The root of the session's default WORKSPACE (not of its focused project), or `None`
+    /// before any activation. A call that reads the default more than once pins itself to
+    /// this value once, so a concurrent `activate` cannot make its reads disagree: a pin of
+    /// the workspace root resolves to the same focused project `None` does.
+    pub async fn default_workspace_root(&self) -> Option<PathBuf> {
+        self.inner.read().await.default_workspace_root.clone()
     }
 
     /// Run a closure with a read-lock on the project resolved by an optional
@@ -2742,6 +2759,11 @@ impl Agent {
         &self,
         workspace_override: Option<&Path>,
     ) -> anyhow::Result<Arc<dyn SemanticMemoryStore>> {
+        #[cfg(test)]
+        self.memory_pin_log
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(workspace_override.map(Path::to_path_buf));
         self.semantic_memory_store_for_backend(
             crate::retrieval::code_store::VectorBackend::resolve(),
             workspace_override,
@@ -2964,6 +2986,11 @@ impl Agent {
         &self,
         workspace_override: Option<&Path>,
     ) -> anyhow::Result<Arc<dyn crate::retrieval::embedder::DenseEmbedder>> {
+        #[cfg(test)]
+        self.memory_pin_log
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(workspace_override.map(Path::to_path_buf));
         #[cfg(test)]
         if let Some(installed) = self.memory_embedder.get() {
             return Ok(installed.clone());
