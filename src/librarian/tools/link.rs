@@ -37,6 +37,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // this reason.
     let (src_id, dst_write_id, dst) = {
         let mut cat = ctx.catalog.lock();
+        // Before ANY fork: a destination whose file the worktree lacks cannot take the
+        // frontmatter write, and forking the source first would leave rows behind.
+        if superseding {
+            super::worktree::require_shadow_file(&cat, ctx, &a.dst_id)?;
+        }
         let src_id = super::worktree::resolve_write_target(&mut cat, ctx, &a.src_id)?;
 
         if artifact::get(&cat, &src_id)?.is_none() {
@@ -249,6 +254,92 @@ mod tests {
             artifact::get(&cat, &dst).unwrap().unwrap().status,
             main_status_before,
             "the main row is merge_worktree's to move, not the link's"
+        );
+    }
+    /// docs/issues/2026-10-24-a-worktree-supersedes-of-a-main-file-the-worktree-lacks-fails-after-forking-shadow-rows.md
+    ///
+    /// The destination exists in the main checkout only (untracked there, or added after the
+    /// worktree's branch point). The write cannot land, so the call must refuse BEFORE the overlay
+    /// gate forks anything, name the real cause, and leave the catalog exactly as it was. The
+    /// assertions on the row counts are the discriminating half: a call that refuses with the
+    /// right words after committing two shadow rows and two lineage links still fails them.
+    #[tokio::test]
+    async fn supersedes_of_a_main_file_the_worktree_lacks_refuses_before_forking() {
+        use crate::librarian::current_project::CurrentProject;
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let wt = repo.join(".worktrees/feat");
+        std::fs::create_dir_all(repo.join("docs/specs")).unwrap();
+        std::fs::create_dir_all(wt.join("docs/specs")).unwrap();
+        let draft = "---\nstatus: draft\n---\nbody\n";
+        let main_dst_path = repo.join("docs/specs/other.md");
+        std::fs::write(&main_dst_path, draft).unwrap();
+        let src_path = repo.join("docs/trackers/t.md");
+
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: wt.clone(),
+                git_root: wt.clone(),
+                main_root: Some(repo.clone()),
+                umbrella: None,
+            }))
+            .build();
+        let src = crate::librarian::ids::artifact_id_from_abs(&src_path);
+        let dst = crate::librarian::ids::artifact_id_from_abs(&main_dst_path);
+        {
+            let cat = ctx.catalog.lock();
+            for (id, path, kind) in [(&src, &src_path, "tracker"), (&dst, &main_dst_path, "spec")] {
+                artifact::upsert(
+                    &cat,
+                    &TestArtifactRowBuilder::new(id)
+                        .with_abs_path(path.to_str().unwrap())
+                        .with_kind(kind)
+                        .build(),
+                )
+                .unwrap();
+            }
+        }
+        let count = |sql: &str| -> i64 {
+            ctx.catalog
+                .lock()
+                .conn
+                .query_row(sql, [], |r| r.get(0))
+                .unwrap()
+        };
+        let rows_before = count("SELECT count(*) FROM artifact");
+        let links_before = count("SELECT count(*) FROM artifact_link");
+
+        let err = call(
+            &ctx,
+            json!({"src_id": src, "dst_id": dst, "rel": "supersedes"}),
+        )
+        .await
+        .expect_err("the destination has no file in the worktree, so the write cannot land");
+
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("main checkout") && msg.contains("other.md"),
+            "the refusal must name the real cause and the file, got: {msg}"
+        );
+        assert!(
+            !msg.contains("deleted or moved"),
+            "the hint must not blame a deletion that did not happen, got: {msg}"
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM artifact"),
+            rows_before,
+            "a refused call must not leave shadow rows behind"
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM artifact_link"),
+            links_before,
+            "a refused call must not leave lineage links behind"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&main_dst_path).unwrap(),
+            draft,
+            "the main checkout's file is untouched"
         );
     }
 
