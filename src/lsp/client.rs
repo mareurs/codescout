@@ -391,6 +391,51 @@ pub(crate) enum LspTransport {
     Socket { socket_path: std::path::PathBuf },
 }
 
+/// Owns one in-flight request's bookkeeping for as long as its future is alive. If the future is
+/// dropped before a response arrives (an outer `tokio::time::timeout` such as the per-language
+/// budget in `search_project_symbols`, or a cancelled tool call), the pending entry is removed
+/// and, when the request had reached the wire, the server is sent `$/cancelRequest` so it stops
+/// computing an answer nobody awaits. The inner timeout path disarms it and sends its own cancel.
+struct InFlightRequest {
+    id: i64,
+    pending: PendingRequests,
+    writer: Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>,
+    /// The request message was fully written, so the server may be working on it.
+    sent: bool,
+    armed: bool,
+}
+
+impl Drop for InFlightRequest {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        self.pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.id);
+        if !self.sent {
+            return;
+        }
+        // `Drop` cannot await: hand the write to the runtime. No runtime (shutdown) means
+        // nobody is left to cancel for.
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let writer = self.writer.clone();
+        let id = self.id;
+        handle.spawn(async move {
+            let msg = json!({
+                "jsonrpc": "2.0",
+                "method": "$/cancelRequest",
+                "params": { "id": id },
+            });
+            let mut writer = writer.lock().await;
+            let _ = transport::write_message(&mut *writer, &msg).await;
+        });
+    }
+}
+
 /// A running LSP client session connected to a language server process.
 pub struct LspClient {
     writer: Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>,
@@ -916,6 +961,14 @@ impl LspClient {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, tx);
+        // From here the future can be dropped by an outer deadline; the guard cleans up.
+        let mut in_flight = InFlightRequest {
+            id,
+            pending: self.pending.clone(),
+            writer: self.writer.clone(),
+            sent: false,
+            armed: true,
+        };
 
         let msg = json!({
             "jsonrpc": "2.0",
@@ -927,6 +980,7 @@ impl LspClient {
         {
             let mut writer = self.writer.lock().await;
             if let Err(e) = transport::write_message(&mut *writer, &msg).await {
+                in_flight.armed = false;
                 self.pending
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -934,9 +988,13 @@ impl LspClient {
                 return Err(e);
             }
         }
+        in_flight.sent = true;
 
         // Await response with timeout
-        match tokio::time::timeout(timeout, rx).await {
+        let outcome = tokio::time::timeout(timeout, rx).await;
+        // Reached an outcome: the branches below own the cleanup from here.
+        in_flight.armed = false;
+        match outcome {
             Ok(Ok(result)) => {
                 match &result {
                     Ok(v) => {
@@ -2563,6 +2621,54 @@ struct Point {
             let _held = (pending, writer);
             std::future::pending::<()>().await;
         })
+    }
+    /// An outer deadline (the per-language budget in `search_project_symbols`) drops the in-flight
+    /// `request_with_timeout` future. The server must still be told to stop working on that id, and
+    /// the pending entry must not outlive the caller.
+    #[tokio::test(start_paused = true)]
+    async fn dropping_an_in_flight_request_sends_cancel_request_and_clears_pending() {
+        use tokio::io::AsyncReadExt;
+        let mut client = bare_client(
+            LspTransport::Socket {
+                socket_path: "/unused.sock".into(),
+            },
+            None,
+        );
+        let (server_end, mut capture) = tokio::io::duplex(64 * 1024);
+        client.writer = Arc::new(Mutex::new(Box::new(server_end)));
+
+        let outer = tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            client.request_with_timeout(
+                "workspace/symbol",
+                json!({"query": "x"}),
+                std::time::Duration::from_secs(30),
+            ),
+        )
+        .await;
+        assert!(outer.is_err(), "premise: the outer budget fires first");
+
+        // Let a spawned cancel task (if any) run.
+        for _ in 0..5 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            client.pending.lock().unwrap().is_empty(),
+            "the dropped request's pending entry must be removed"
+        );
+
+        drop(client);
+        let mut wire = Vec::new();
+        capture.read_to_end(&mut wire).await.unwrap();
+        let wire = String::from_utf8_lossy(&wire);
+        assert!(
+            wire.contains("\"method\":\"workspace/symbol\""),
+            "premise: the request itself was written: {wire}"
+        );
+        assert!(
+            wire.contains("$/cancelRequest") && wire.contains("\"id\":1"),
+            "a dropped request must send $/cancelRequest for its id: {wire}"
+        );
     }
 
     /// `shutdown` must not return while the reader is still alive: `handle.abort()` only REQUESTS
