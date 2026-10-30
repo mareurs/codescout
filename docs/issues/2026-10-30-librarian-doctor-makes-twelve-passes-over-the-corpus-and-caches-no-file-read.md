@@ -9,7 +9,7 @@ tags:
 - cluster/unclassified
 opened: 2026-10-30
 severity: medium
-unverified: Which scan dominates the 8.7 s is not measured; the 2-3 s target is an estimate.
+unverified: The remaining 6.2 s was not profiled after the fixes. sha256 in scan_artifact_paths (7.5% of instructions), frontmatter::parse (5.4%), preview::headings::parse (6%) and libgit2 commit-list parsing (4.2%) are the next measured shares; the 2-3 s target is an estimate.
 ---
 
 # BUG: librarian doctor makes about 12 full passes over the corpus and caches no file read (avg 8.7 s)
@@ -36,7 +36,10 @@ Catalog: 6,646 artifacts, 6,605 files on disk totalling 105 MB.
 
 ## Root cause
 
-Scans that each read every file (librarian explorer, 2026-10-30): `entry_indegree` (`src/librarian/tools/doctor.rs:4523`), `corpus_cited_tokens` (`:4342`), entry-validity scans (`:4945`, `:5104`, `:5232`, `:5351`), `scan_cited_prefix_with_no_definer` (`:5858`), `scan_premature_archive_citation` (`:6133`), `scan_unterminated_fence` (`:8516`), `scan_frontmatter_id_mismatches` (`:6577`), `scan_frontmatter_status_mismatches` (`:4061`); `check_row_behind_file` reads and hashes again (`:3859`); `params_backed_ledgers` at `:5429`, `:5549`, `:6262`, `:6479`. One raw pass over the corpus: 0.16 s (`sha256sum`), 0.5 s (`wc -l`). Which scan dominates is not measured.
+Measured 2026-10-30 (release build, `codescout doctor --json`, catalog of 6,617 distinct `.md` files across projects, not just this repo):
+
+- **File opens:** `strace -e openat` counted 93,883 opens of the 6,617 files, up to 19 per file, with about 2.1 million `readlink` calls (2.0 million errors) and 525,000 `statx` calls behind them. That was sys 3.4 s of an 11.3 s run.
+- **CPU, the larger part (user 7.9 s):** callgrind over the whole run (74.3 G instructions, symbol build): `link_scan::extract::extract` was **53%** inclusive, called by `scan_undefined_entries` (20%), `scan_cited_prefix_with_no_definer` (19.7%) and `entry_indegree` (18.3%) among others; `entry_sections` 13%; `sha256` in `scan_artifact_paths` 7.5%; `frontmatter::parse` 5.4%; `preview::headings::parse` 6%. The same text was extracted three to five times.
 
 ## Evidence
 
@@ -48,11 +51,18 @@ None.
 
 ## Fix
 
-A per-call `HashMap<PathBuf, Option<Arc<str>>>` in `DoctorScope`, and one parse per file shared by the scans. Corpus-wide metrics unchanged.
+Part done 2026-10-30; the issue stays open for the rest.
+
+1. `ReadDoor::cache_reads` (`src/librarian/read_door.rs`): an opt-in memo of successful reads, off by default; the door's open-then-verify read stays uncached for every verb that writes. `doctor`'s report (`call`, after the `--fix` early return) turns it on.
+2. `ExtractMemoScope` (`src/librarian/tools/link_scan/extract.rs`): a thread-local memo of `extract` and `entry_sections` keyed by a hash of the TEXT (plus length), so a changed file can never get a stale answer. `doctor`'s scans import the memoized forms under the plain names.
+
+Measured (release builds, same tree, `doctor --json`): 11.1-11.4 s before; 9.76 s with part 1 alone (sys 3.4 s to 2.0 s, user unchanged); **6.2 s** (6.29 / 6.23 s steady, 8.4 s first run) with both. The report is byte-identical to the old binary's on the same tree (243 violations).
+
+Not done: one parse per file shared by the scans (frontmatter, headings), the per-row sha256 in `scan_artifact_paths`, libgit2 commit-list parsing.
 
 ## Tests added
 
-None yet.
+`read_door::memo_tests` (the default door reads the file as it is now; an opted-in door serves the second read from memory, proved with a changed file; a missing file is not remembered; one door's memo does not reach another) and `link_scan::extract::memo_tests` (nothing remembered outside a scope; memoized answers equal plain ones; a changed text gets its own answer; dropping the scope frees the memo). Not mutation-tested.
 
 ## Workarounds
 
@@ -60,7 +70,7 @@ None.
 
 ## Resume
 
-Add a tracing span per scan (or `strace -c -e openat` on a CLI doctor run) to find which scans dominate before caching.
+Profile the 6.2 s again on a symbol build (`CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=line-tables-only`; `valgrind --tool=callgrind` takes about 7 min). Next measured shares: sha256 in `scan_artifact_paths`, `frontmatter::parse`, `preview::headings::parse`, libgit2. A debugger attach fails here (`ptrace_scope=1`); launching the binary under `gdb` and sending it SIGINT works.
 
 ## References
 

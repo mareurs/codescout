@@ -955,6 +955,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // this form has only one lock, so there is nothing to dodge.
     let cat = ctx.catalog.lock();
     let mut doctor_scope = scope::DoctorScope::new(effective_scope, ctx, &cat.conn)?;
+    // A report only reads, and its ~25 scans read the same files again and again.
+    doctor_scope.door().cache_reads();
+    // And they extract the same texts again and again; remember each result until the report
+    // is built. Keyed by text, so a changed file can never be served a stale answer.
+    let _extract_memo = crate::librarian::tools::link_scan::extract::ExtractMemoScope::begin();
 
     let mut all_violations: Vec<Violation> = Vec::new();
 
@@ -4337,7 +4342,7 @@ fn corpus_cited_tokens(
     door: &crate::librarian::read_door::ReadDoor,
     conn: &rusqlite::Connection,
 ) -> Result<CorpusTokens> {
-    use crate::librarian::tools::link_scan::extract::{extract, CitationKind};
+    use crate::librarian::tools::link_scan::extract::{extract_memoized as extract, CitationKind};
 
     let mut stmt = conn.prepare("SELECT abs_path FROM artifact ORDER BY abs_path")?;
     let paths: Vec<String> = stmt
@@ -4518,7 +4523,9 @@ fn entry_indegree(
     door: &crate::librarian::read_door::ReadDoor,
     conn: &rusqlite::Connection,
 ) -> Result<std::collections::BTreeMap<(String, String), usize>> {
-    use crate::librarian::tools::link_scan::extract::{entry_sections, extract, CitationKind};
+    use crate::librarian::tools::link_scan::extract::{
+        entry_sections_memoized as entry_sections, extract_memoized as extract, CitationKind,
+    };
 
     let mut stmt = conn.prepare("SELECT abs_path, status FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String)> = stmt
@@ -4676,7 +4683,9 @@ fn entry_indegree(
 /// name here for exactly that reason)
 /// — so the case this check exists to catch survives the filter untouched.
 fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u32>)> {
-    use crate::librarian::tools::link_scan::extract::entry_sections;
+    // The memoized forms, under their plain names: inside the report's `ExtractMemoScope` a
+    // text is extracted once however many scans read it; anywhere else they are the plain calls.
+    use crate::librarian::tools::link_scan::extract::entry_sections_memoized as entry_sections;
     use std::collections::BTreeMap;
 
     let mut by_id: BTreeMap<String, Vec<_>> = BTreeMap::new();
@@ -4940,7 +4949,9 @@ fn scan_conditional_past_due(
     indegree: &std::collections::BTreeMap<(String, String), usize>,
 ) -> Result<Vec<Violation>> {
     use crate::librarian::statements::{declared_section_text, parse_validity, Validity};
-    use crate::librarian::tools::link_scan::extract::entry_sections;
+    // The memoized forms, under their plain names: inside the report's `ExtractMemoScope` a
+    // text is extracted once however many scans read it; anywhere else they are the plain calls.
+    use crate::librarian::tools::link_scan::extract::entry_sections_memoized as entry_sections;
 
     let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String, String)> = stmt
@@ -5099,7 +5110,9 @@ fn scan_dated_stale(
     today_epoch_days: i64,
 ) -> Result<Vec<Violation>> {
     use crate::librarian::statements::{declared_section_text, parse_validity, Validity};
-    use crate::librarian::tools::link_scan::extract::entry_sections;
+    // The memoized forms, under their plain names: inside the report's `ExtractMemoScope` a
+    // text is extracted once however many scans read it; anywhere else they are the plain calls.
+    use crate::librarian::tools::link_scan::extract::entry_sections_memoized as entry_sections;
 
     let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String, String)> = stmt
@@ -5227,7 +5240,9 @@ fn scan_cited_but_undeclared(
     indegree: &std::collections::BTreeMap<(String, String), usize>,
 ) -> Result<Vec<Violation>> {
     use crate::librarian::statements::{declared_section_text, parse_validity};
-    use crate::librarian::tools::link_scan::extract::entry_sections;
+    // The memoized forms, under their plain names: inside the report's `ExtractMemoScope` a
+    // text is extracted once however many scans read it; anywhere else they are the plain calls.
+    use crate::librarian::tools::link_scan::extract::entry_sections_memoized as entry_sections;
 
     let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String, String)> = stmt
@@ -5346,7 +5361,9 @@ fn scan_validity_unparseable(
     conn: &rusqlite::Connection,
 ) -> Result<Vec<Violation>> {
     use crate::librarian::statements::{declared_section_text, parse_validity};
-    use crate::librarian::tools::link_scan::extract::entry_sections;
+    // The memoized forms, under their plain names: inside the report's `ExtractMemoScope` a
+    // text is extracted once however many scans read it; anywhere else they are the plain calls.
+    use crate::librarian::tools::link_scan::extract::entry_sections_memoized as entry_sections;
 
     let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String, String)> = stmt
@@ -5827,7 +5844,7 @@ fn scan_cited_prefix_with_no_definer(
     scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
 ) -> Result<Vec<Violation>> {
-    use crate::librarian::tools::link_scan::extract::{extract, CitationKind};
+    use crate::librarian::tools::link_scan::extract::{extract_memoized as extract, CitationKind};
 
     // Below this, a prefix reads as incidental prose rather than an abandoned namespace —
     // see the bug's own measurement note: not yet swept against the full catalog, so treat

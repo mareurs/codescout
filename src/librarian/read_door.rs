@@ -100,6 +100,8 @@ impl std::fmt::Display for ReadError {
 pub(crate) struct ReadDoor {
     roots: Vec<PathBuf>,
     judged: parking_lot::Mutex<HashMap<(PathBuf, PathBuf), Option<String>>>,
+    /// Successful reads, kept only after [`ReadDoor::cache_reads`]; `None` is the default.
+    memo: parking_lot::Mutex<Option<HashMap<PathBuf, std::sync::Arc<[u8]>>>>,
 }
 
 impl ReadDoor {
@@ -109,12 +111,39 @@ impl ReadDoor {
         Self {
             roots,
             judged: parking_lot::Mutex::new(HashMap::new()),
+            memo: parking_lot::Mutex::new(None),
         }
     }
 
     /// The file's bytes, if the door admits it (see the module doc for the order of the steps).
+    ///
+    /// Never served from memory unless [`Self::cache_reads`] was called on this door.
     pub(crate) fn bytes(&self, path: &Path) -> Result<Vec<u8>, ReadError> {
-        read_verified(path, |real| self.judge(path, real))
+        if let Some(hit) = self.memo.lock().as_ref().and_then(|m| m.get(path)) {
+            return Ok(hit.to_vec());
+        }
+        let bytes = read_verified(path, |real| self.judge(path, real))?;
+        if let Some(memo) = self.memo.lock().as_mut() {
+            memo.insert(path.to_path_buf(), std::sync::Arc::from(bytes.as_slice()));
+        }
+        Ok(bytes)
+    }
+
+    /// Remember every successful read for the rest of this door's life, so a run that reads the
+    /// same files many times (`doctor`'s report: about 25 scans, 93,883 opens of 6,617 files,
+    /// measured 2026-10-30) opens each once.
+    ///
+    /// For a READ-ONLY run only. A door that feeds a write must not turn this on: the write
+    /// has to start from the file as it is now. A refusal or a missing file is never
+    /// remembered, so it is asked, and judged, again each time.
+    pub(crate) fn cache_reads(&self) {
+        self.memo.lock().get_or_insert_with(HashMap::new);
+    }
+
+    /// How many files the memo holds; `0` while it is off.
+    #[cfg(test)]
+    pub(crate) fn remembered(&self) -> usize {
+        self.memo.lock().as_ref().map_or(0, |m| m.len())
     }
 
     /// [`Self::bytes`] as UTF-8 text; invalid UTF-8 is `ReadError::Io(InvalidData)`, as
@@ -1661,5 +1690,75 @@ fn after() -> &'static str { std::fs::File::open(q); "" }
         assert!(!door.stored_path_is_risky(&root.join("alias.md")));
         // A plain vanished path is an ordinary vanished row.
         assert!(!door.stored_path_is_risky(&root.join("real/gone.md")));
+    }
+}
+
+/// The opt-in read memo ([`ReadDoor::cache_reads`]). The proposition that matters is the
+/// default: a door nobody asked to remember must keep reading the file as it is NOW, because
+/// the verbs that write through it depend on that.
+#[cfg(test)]
+mod memo_tests {
+    use super::*;
+
+    fn fixture() -> (tempfile::TempDir, PathBuf, ReadDoor) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let file = root.join("a.md");
+        std::fs::write(&file, "one\n").unwrap();
+        let door = ReadDoor::new(vec![root]);
+        (dir, file, door)
+    }
+
+    #[test]
+    fn a_door_that_was_not_asked_to_remember_reads_the_file_as_it_is_now() {
+        let (_t, file, door) = fixture();
+        assert_eq!(door.text(&file).unwrap(), "one\n");
+        std::fs::write(&file, "two\n").unwrap();
+        assert_eq!(
+            door.text(&file).unwrap(),
+            "two\n",
+            "the default door must never serve a read from memory"
+        );
+        assert_eq!(door.remembered(), 0);
+    }
+
+    #[test]
+    fn a_door_asked_to_remember_serves_the_second_read_from_memory() {
+        let (_t, file, door) = fixture();
+        door.cache_reads();
+        assert_eq!(door.text(&file).unwrap(), "one\n");
+        std::fs::write(&file, "two\n").unwrap();
+        assert_eq!(
+            door.text(&file).unwrap(),
+            "one\n",
+            "a changed file proves the second read came from the memo, not the disk"
+        );
+        assert_eq!(door.bytes(&file).unwrap(), b"one\n", "bytes share the memo");
+        assert_eq!(door.remembered(), 1);
+    }
+
+    #[test]
+    fn a_missing_file_is_not_remembered_and_is_asked_again() {
+        let (_t, file, door) = fixture();
+        door.cache_reads();
+        let gone = file.with_file_name("gone.md");
+        assert!(door.text(&gone).is_err());
+        assert_eq!(door.remembered(), 0, "a failed read must leave no entry");
+        std::fs::write(&gone, "back\n").unwrap();
+        assert_eq!(
+            door.text(&gone).unwrap(),
+            "back\n",
+            "a file that appears after a miss must be read, not reported missing again"
+        );
+    }
+
+    #[test]
+    fn turning_the_memo_on_for_one_door_leaves_another_door_alone() {
+        let (_t, file, door) = fixture();
+        let other = ReadDoor::new(vec![file.parent().unwrap().to_path_buf()]);
+        door.cache_reads();
+        door.text(&file).unwrap();
+        std::fs::write(&file, "two\n").unwrap();
+        assert_eq!(other.text(&file).unwrap(), "two\n");
     }
 }

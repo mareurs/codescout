@@ -55,6 +55,8 @@ pub struct MockLspClient {
         std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, Vec<lsp_types::Location>>>,
     /// The edit `rename` answers with. `None` answers an empty edit.
     rename_edit: Option<lsp_types::WorkspaceEdit>,
+    /// How many times `document_symbols` was called, answered or failed.
+    pub document_symbols_calls: std::sync::atomic::AtomicUsize,
 }
 
 impl MockLspClient {
@@ -73,6 +75,7 @@ impl MockLspClient {
             outgoing_calls_results: std::sync::Mutex::new(std::collections::HashMap::new()),
             references_results: std::sync::Mutex::new(std::collections::HashMap::new()),
             rename_edit: None,
+            document_symbols_calls: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -173,6 +176,8 @@ impl LspClientOps for MockLspClient {
         path: &Path,
         _language_id: &str,
     ) -> anyhow::Result<Vec<SymbolInfo>> {
+        self.document_symbols_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if let Some(message) = self.symbols_errors.get(path) {
             return Err(anyhow::anyhow!("{message}"));
         }
@@ -329,6 +334,12 @@ impl MockLspProvider {
         Arc::new(Self {
             client: Arc::new(client),
         })
+    }
+
+    /// Like [`Self::with_client`], for a test that keeps its own handle on the client to read
+    /// what the code under test asked of it (`document_symbols_calls`).
+    pub fn with_shared_client(client: Arc<MockLspClient>) -> Arc<dyn LspProvider> {
+        Arc::new(Self { client })
     }
 }
 

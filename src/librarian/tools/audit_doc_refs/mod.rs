@@ -669,6 +669,9 @@ async fn call_with_index_cap(
 
     let mut all_findings: Vec<Finding> = Vec::new();
     let mut all_warnings: Vec<ParseWarning> = Vec::new();
+    // The loop below is synchronous. Within it, a file's symbols are fetched from the language
+    // server once however many references point into that file.
+    let _doc_symbols = resolver::DocSymbolMemoScope::begin();
     // Every scanned file is read through the read door, judged against the repository root.
     let door = crate::librarian::read_door::ReadDoor::new(vec![repo_root.clone()]);
 
@@ -721,6 +724,8 @@ async fn call_with_index_cap(
         }
         all_warnings.extend(warns);
     }
+    // Free the memo here, on the thread that filled it, not at the end of the function.
+    drop(_doc_symbols);
 
     // Split the (language, cause) pairs into the two shapes the surfaces want: the flat
     // language list the tracker template renders, and the per-language cause map that

@@ -586,6 +586,51 @@ fn resolve_module_path_v1(_c: &RefCandidate, _ctx: &ResolveCtx<'_>) -> Resolutio
         notes: None,
     }
 }
+/// `document_symbols` answers remembered for one [`DocSymbolMemoScope`], per (language, file).
+type DocSymbolMemo =
+    std::collections::HashMap<(String, std::path::PathBuf), Vec<crate::lsp::SymbolInfo>>;
+
+thread_local! {
+    static DOC_SYMBOLS: std::cell::RefCell<Option<DocSymbolMemo>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// While one of these is alive on a thread, `resolve_file_symbol` asks the language server for
+/// a file's symbols once and answers every later reference into that file from memory.
+///
+/// An audit asks per REFERENCE, and docs cite the same file's symbols many times (a grep found
+/// 629 file-and-symbol references across 259 files). Only an ANSWER is remembered: a call that
+/// failed or timed out is asked again, so a server that was cold for the first reference can
+/// still answer the next, exactly as before. Dropping the scope frees the memo.
+pub struct DocSymbolMemoScope(());
+
+impl DocSymbolMemoScope {
+    pub fn begin() -> Self {
+        DOC_SYMBOLS.with(|m| *m.borrow_mut() = Some(DocSymbolMemo::new()));
+        Self(())
+    }
+}
+
+impl Drop for DocSymbolMemoScope {
+    fn drop(&mut self) {
+        DOC_SYMBOLS.with(|m| *m.borrow_mut() = None);
+    }
+}
+
+fn remembered_doc_symbols(
+    key: &(String, std::path::PathBuf),
+) -> Option<Vec<crate::lsp::SymbolInfo>> {
+    DOC_SYMBOLS.with(|m| m.borrow().as_ref().and_then(|m| m.get(key).cloned()))
+}
+
+fn remember_doc_symbols(key: (String, std::path::PathBuf), syms: &[crate::lsp::SymbolInfo]) {
+    DOC_SYMBOLS.with(|m| {
+        if let Some(memo) = m.borrow_mut().as_mut() {
+            memo.insert(key, syms.to_vec());
+        }
+    });
+}
+
 fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     // Accept both `path::symbol` (Rust-style) and `path:symbol` (Python-style)
     // separators. Try `::` first so a trailing colon doesn't leak into the
@@ -644,6 +689,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     let repo_root = ctx.repo_root.to_path_buf();
     // `path` is moved into `fut` below; the AST cross-check after the await needs it too.
     let ast_path = path.clone();
+    let memo_key = (lang_id.clone(), path.clone());
     // `client_within_budget` bounds cold-start latency instead of an unbounded
     // wait a hung/slow LSP could otherwise stall on (see
     // docs/issues/archive/2026-07-05-audit-doc-refs-lsp-stubbed-off.md).
@@ -669,11 +715,20 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     // multi-threaded runtime — true for the server's `#[tokio::main]`
     // (default flavor); the one test exercising this branch is marked
     // `#[tokio::test(flavor = "multi_thread")]` for the same reason.
-    let result = match tokio::runtime::Handle::try_current() {
-        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(fut)),
-        Err(_) => tokio::runtime::Runtime::new()
-            .expect("tokio runtime")
-            .block_on(fut),
+    let result = match remembered_doc_symbols(&memo_key) {
+        Some(syms) => Some(syms),
+        None => {
+            let fresh = match tokio::runtime::Handle::try_current() {
+                Ok(handle) => tokio::task::block_in_place(|| handle.block_on(fut)),
+                Err(_) => tokio::runtime::Runtime::new()
+                    .expect("tokio runtime")
+                    .block_on(fut),
+            };
+            if let Some(syms) = &fresh {
+                remember_doc_symbols(memo_key, syms);
+            }
+            fresh
+        }
     };
     match result {
         Some(syms) => {
@@ -1765,6 +1820,67 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::Resolved);
     }
+
+    /// Inside a `DocSymbolMemoScope` a file's symbols are asked of the server once however many
+    /// references cite it; outside one every reference asks, as before; and a scope that has
+    /// ended leaves nothing behind.
+    #[test]
+    fn a_files_symbols_are_asked_once_inside_a_memo_scope_however_many_refs_cite_it() {
+        use crate::lsp::mock::{MockLspClient, MockLspProvider};
+        use crate::lsp::{SymbolInfo, SymbolKind};
+        use std::sync::atomic::Ordering::SeqCst;
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("foo.rs");
+        std::fs::write(&file, "pub fn bar() {}\npub fn baz() {}\n").unwrap();
+        let sym = |n: &str| SymbolInfo {
+            name: n.to_string(),
+            name_path: n.to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 0,
+            range_start_line: None,
+            start_col: 0,
+            children: vec![],
+            detail: None,
+        };
+        let client = std::sync::Arc::new(
+            MockLspClient::new().with_symbols(file.clone(), vec![sym("bar"), sym("baz")]),
+        );
+        let ctx = ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: Some(MockLspProvider::with_shared_client(client.clone())),
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
+            gitignore: None,
+        };
+        let resolve =
+            |raw: &str| resolve_ref(&cand(raw, "docs/spec.md", RefKind::FileSymbol), &ctx).verdict;
+        let calls = || client.document_symbols_calls.load(SeqCst);
+
+        assert_eq!(resolve("foo.rs:bar"), Verdict::Resolved);
+        assert_eq!(resolve("foo.rs:baz"), Verdict::Resolved);
+        assert_eq!(calls(), 2, "no scope: every reference asks the server");
+
+        {
+            let _scope = DocSymbolMemoScope::begin();
+            for raw in ["foo.rs:bar", "foo.rs:baz", "foo.rs:bar"] {
+                assert_eq!(resolve(raw), Verdict::Resolved);
+            }
+            assert_eq!(
+                calls(),
+                3,
+                "three references into one file are ONE more call"
+            );
+        }
+
+        assert_eq!(resolve("foo.rs:bar"), Verdict::Resolved);
+        assert_eq!(calls(), 4, "after the scope ends nothing is remembered");
+    }
+
     /// An impl method is a CHILD of its `impl` block in the document-symbol
     /// tree, so the old flat `syms.iter()` never saw it. Every
     /// `src/foo.rs::method` reference in the docs was reported

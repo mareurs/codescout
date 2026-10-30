@@ -231,7 +231,7 @@ impl Citation {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct DocExtract {
     pub definitions: Vec<Definition>,
     pub citations: Vec<Citation>,
@@ -319,6 +319,163 @@ fn double_qualified_re() -> &'static Regex {
 fn def_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+").unwrap())
+}
+
+/// Results remembered for the length of one [`ExtractMemoScope`], keyed by the text's content.
+#[derive(Default)]
+struct ExtractMemo {
+    extracts: std::collections::HashMap<(u64, usize), DocExtract>,
+    sections: std::collections::HashMap<(u64, usize), Vec<EntrySection>>,
+}
+
+thread_local! {
+    static MEMO: std::cell::RefCell<Option<ExtractMemo>> = const { std::cell::RefCell::new(None) };
+}
+
+/// While one of these is alive on a thread, [`extract_memoized`] and
+/// [`entry_sections_memoized`] remember what they computed for that thread, so a run that
+/// scans the same files several times extracts each once.
+///
+/// `doctor`'s report is the user: about a dozen of its scans each re-extract the same corpus,
+/// and `extract` alone was 53% of the instructions of a whole run (callgrind, 2026-10-30,
+/// 74 G instructions, 6,617 files). The memo is keyed by the TEXT, never by a path, so it
+/// cannot serve a stale answer for a file that changed; it only skips work whose input is
+/// byte-identical. Dropping the scope frees it. A thread without a scope computes every time.
+pub struct ExtractMemoScope(());
+
+impl ExtractMemoScope {
+    pub fn begin() -> Self {
+        MEMO.with(|m| *m.borrow_mut() = Some(ExtractMemo::default()));
+        Self(())
+    }
+}
+
+impl Drop for ExtractMemoScope {
+    fn drop(&mut self) {
+        MEMO.with(|m| *m.borrow_mut() = None);
+    }
+}
+
+/// Length is part of the key so a 64-bit hash collision would also have to collide in size.
+fn content_key(text: &str) -> (u64, usize) {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    (h.finish(), text.len())
+}
+
+fn memo_is_on() -> bool {
+    MEMO.with(|m| m.borrow().is_some())
+}
+
+/// [`extract`], remembered inside an [`ExtractMemoScope`] and plain outside one.
+pub fn extract_memoized(text: &str) -> DocExtract {
+    if !memo_is_on() {
+        return extract(text);
+    }
+    let key = content_key(text);
+    if let Some(hit) = MEMO.with(|m| {
+        m.borrow()
+            .as_ref()
+            .and_then(|m| m.extracts.get(&key).cloned())
+    }) {
+        return hit;
+    }
+    let fresh = extract(text);
+    MEMO.with(|m| {
+        if let Some(memo) = m.borrow_mut().as_mut() {
+            memo.extracts.insert(key, fresh.clone());
+        }
+    });
+    fresh
+}
+
+/// [`entry_sections`], remembered inside an [`ExtractMemoScope`] and plain outside one.
+pub fn entry_sections_memoized(text: &str) -> Vec<EntrySection> {
+    if !memo_is_on() {
+        return entry_sections(text);
+    }
+    let key = content_key(text);
+    if let Some(hit) = MEMO.with(|m| {
+        m.borrow()
+            .as_ref()
+            .and_then(|m| m.sections.get(&key).cloned())
+    }) {
+        return hit;
+    }
+    let fresh = entry_sections(text);
+    MEMO.with(|m| {
+        if let Some(memo) = m.borrow_mut().as_mut() {
+            memo.sections.insert(key, fresh.clone());
+        }
+    });
+    fresh
+}
+
+/// Entries held by the memo on this thread (extracts, sections); `(0, 0)` with no scope.
+#[cfg(test)]
+pub fn memo_len() -> (usize, usize) {
+    MEMO.with(|m| {
+        m.borrow()
+            .as_ref()
+            .map_or((0, 0), |m| (m.extracts.len(), m.sections.len()))
+    })
+}
+
+#[cfg(test)]
+mod memo_tests {
+    use super::*;
+
+    const LEDGER: &str =
+        "# L\n\n## A-1 — first\n\nSee A-2 and codescout:B-7.\n\n## A-2 — second\n\ntext\n";
+
+    #[test]
+    fn outside_a_scope_nothing_is_remembered() {
+        let _ = extract_memoized(LEDGER);
+        let _ = entry_sections_memoized(LEDGER);
+        assert_eq!(memo_len(), (0, 0));
+    }
+
+    #[test]
+    fn inside_a_scope_the_memoized_answers_equal_the_plain_ones() {
+        let _scope = ExtractMemoScope::begin();
+        let plain = extract(LEDGER);
+        for _ in 0..2 {
+            let got = extract_memoized(LEDGER);
+            assert_eq!(got.definitions, plain.definitions);
+            assert_eq!(got.citations, plain.citations);
+            assert_eq!(got.declared_prefixes, plain.declared_prefixes);
+            assert_eq!(entry_sections_memoized(LEDGER), entry_sections(LEDGER));
+        }
+        assert_eq!(
+            memo_len(),
+            (1, 1),
+            "two calls on one text hold ONE entry each"
+        );
+    }
+
+    /// The reason the key is the text and not a path: a file that changed is a different
+    /// input and must get its own answer, never the remembered one.
+    #[test]
+    fn a_changed_text_is_a_different_key_and_gets_its_own_answer() {
+        let _scope = ExtractMemoScope::begin();
+        let before = extract_memoized(LEDGER);
+        let edited = LEDGER.replace("A-2 — second", "A-3 — second");
+        let after = extract_memoized(&edited);
+        assert_ne!(before.definitions, after.definitions);
+        assert_eq!(after.definitions, extract(&edited).definitions);
+        assert_eq!(memo_len().0, 2);
+    }
+
+    #[test]
+    fn dropping_the_scope_frees_the_memo() {
+        {
+            let _scope = ExtractMemoScope::begin();
+            let _ = extract_memoized(LEDGER);
+            assert_eq!(memo_len().0, 1);
+        }
+        assert_eq!(memo_len(), (0, 0));
+    }
 }
 
 pub fn extract(text: &str) -> DocExtract {

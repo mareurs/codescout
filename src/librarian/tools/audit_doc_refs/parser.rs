@@ -22,8 +22,15 @@ pub fn parse_refs(
     // for the `ignore-refs` form that names individual tokens instead.
     let mut suppression = Suppression::None;
     let parser = Parser::new_ext(text, opts).into_offset_iter();
+    // Every event asks for its line; counting newlines from the top of the file for each one
+    // was O(events x size) and took ~20 s on a 24k-line ledger. Positions once, then a search.
+    let newlines: Vec<usize> = text
+        .bytes()
+        .enumerate()
+        .filter_map(|(i, b)| (b == b'\n').then_some(i))
+        .collect();
     for (event, span) in parser {
-        let line = byte_offset_to_line(text, span.start);
+        let line = byte_offset_to_line(&newlines, span.start);
         match event {
             Event::Html(html) | Event::InlineHtml(html)
                 if parse_ignore_marker(html.as_ref()).is_some() =>
@@ -1044,12 +1051,76 @@ fn has_known_ext(s: &str) -> bool {
     )
 }
 
-fn byte_offset_to_line(text: &str, offset: usize) -> u32 {
-    1 + text[..offset.min(text.len())]
-        .bytes()
-        .filter(|&b| b == b'\n')
-        .count() as u32
+/// 1-indexed line of byte `offset`: one plus the number of `\n` strictly before it.
+/// `newlines` are the byte positions of every `\n` in the text, ascending.
+fn byte_offset_to_line(newlines: &[usize], offset: usize) -> u32 {
+    1 + newlines.partition_point(|&p| p < offset) as u32
 }
+
+#[cfg(test)]
+mod line_lookup_tests {
+    use super::byte_offset_to_line;
+
+    /// The function this replaced: count the `\n` before `offset` from the top of the text.
+    fn counted_from_the_top(text: &str, offset: usize) -> u32 {
+        1 + text[..offset.min(text.len())]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count() as u32
+    }
+
+    fn newlines(text: &str) -> Vec<usize> {
+        text.bytes()
+            .enumerate()
+            .filter_map(|(i, b)| (b == b'\n').then_some(i))
+            .collect()
+    }
+
+    #[test]
+    fn it_agrees_with_counting_from_the_top_at_every_char_boundary_and_past_the_end() {
+        for text in [
+            "",
+            "\n",
+            "one",
+            "one\n",
+            "\n\nthree\n\n",
+            "a\nbb\nccc\n",
+            "héllo\nwörld — ünï\n\n✓ done\nno trailing newline",
+            "windows\r\nline\r\nendings\r\n",
+        ] {
+            let nl = newlines(text);
+            let boundaries = text.char_indices().map(|(i, _)| i).chain([
+                text.len(),
+                text.len() + 1,
+                text.len() + 100,
+            ]);
+            for offset in boundaries {
+                assert_eq!(
+                    byte_offset_to_line(&nl, offset),
+                    counted_from_the_top(text, offset),
+                    "text {text:?} offset {offset}"
+                );
+            }
+        }
+    }
+
+    /// An offset ON a newline is still on the line that newline ends; the next byte is the next line.
+    #[test]
+    fn a_newline_belongs_to_its_own_line_and_the_next_byte_to_the_next() {
+        let text = "ab\ncd\n";
+        let nl = newlines(text);
+        assert_eq!(byte_offset_to_line(&nl, 0), 1);
+        assert_eq!(
+            byte_offset_to_line(&nl, 2),
+            1,
+            "the `\\n` at byte 2 ends line 1"
+        );
+        assert_eq!(byte_offset_to_line(&nl, 3), 2);
+        assert_eq!(byte_offset_to_line(&nl, 5), 2);
+        assert_eq!(byte_offset_to_line(&nl, 6), 3);
+    }
+}
+
 fn fence_warnings(text: &str, md_file: &str) -> Vec<ParseWarning> {
     static FENCE_RE: OnceLock<Regex> = OnceLock::new();
     let re = FENCE_RE.get_or_init(|| Regex::new(r"(?m)^```").unwrap());
