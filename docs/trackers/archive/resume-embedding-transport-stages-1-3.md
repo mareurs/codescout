@@ -1,5 +1,5 @@
 ---
-id: d24bf146cf7c789f
+id: 0b6d1ba6500b0be9
 kind: tracker
 status: archived
 title: Embedding Transport Consolidation Stages 1–3 — CLOSED 2026-09-06 (ET-N, closed record)
@@ -12,6 +12,7 @@ tags:
 - codescout-embed
 - dependencies
 topic: embedding transport boundary
+archived_on: 2026-09-06
 entry_high_water_ET: 10
 entry_prefix: ET
 ---

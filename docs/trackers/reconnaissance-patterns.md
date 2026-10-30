@@ -468,7 +468,7 @@ pattern. Concrete addition: `SKILL.md § Phase 1 — Scout`, sub-bullet
 "For `include_str!`'d content files, grep `<CONST>.contains / .find /
 snapshot` to enumerate asserting tests."
 
-**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/references/seam-classes.md` — repointed 2026-10-30 (D11): the case law moved out of `SKILL.md`, whose Phase 1 now defers to this file, and the back-citation is present in the served `1.20.25` copy of all four profiles. Originally promoted to `SKILL.md`
 § Phase 1 — Scout. D11-verified 2026-08-20 in the **served** `1.16.13` cache: back-citation
 *"(R-1 + R-7 in codescout's `docs/trackers/reconnaissance-patterns.md`.)"* present,
 1 occurrence. This entry and [[R-3]] are the ledger's two oldest promotions and the only ones
@@ -501,7 +501,7 @@ their callers cross crate / module boundaries; assertion sites do too.
 fix: add a sentence to `SKILL.md § Phase 1 — Scout` — "Grep scope
 defaults to workspace root, not the file being modified."
 
-**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/references/seam-classes.md` — repointed 2026-10-30 (D11): the case law moved out of `SKILL.md`, whose Phase 1 now defers to this file, and the back-citation is present in the served `1.20.25` copy of all four profiles. Originally promoted to `SKILL.md`
 § Phase 1 — Scout. D11-verified 2026-08-20 in the **served** `1.16.13` cache: back-citation
 *"(R-3 → R-113 → R-77 → R-79 in codescout's `docs/trackers/reconnaissance-patterns.md` …)"*
 present, 1 occurrence. The bullet has been rewritten and extended repeatedly since 2026-05
@@ -1160,7 +1160,7 @@ dump output (AST 214 / LSP 216, matcher flips Some→None at 216); regression te
 
 ## R-41 — A table-rebuild migration's `INSERT … SELECT` column list is a silent allow-list
 
-**Status:** promoted — verdict `miss → promoted` (Index row). **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md` § Phase 1 — Scout, as the *seam class: schema-migration ordering* bullet. D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. The Index knew; the entry did not.
+**Status:** promoted — verdict `miss → promoted` (Index row). **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/references/seam-classes.md` (repointed 2026-10-30 by D11: originally `SKILL.md` § Phase 1 — Scout; the bullet moved to this file and the id is back-cited in the served `1.20.25` copy of all four profiles), as the *seam class: schema-migration ordering* bullet. D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. The Index knew; the entry did not.
 
 **Verdict:** miss → promoted (was a pending seam-class in SKILL.md Phase 1; Stage-2 is the confirming datapoint)
 
@@ -1178,7 +1178,7 @@ dump output (AST 214 / LSP 216, matcher flips Some→None at 216); regression te
 
 ## R-42 — A reader's None/absent branch that dead-ends silently drops every value the writer stored in that variant
 
-**Status:** promoted — verdict `miss → promoted` (Index row). **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md` § Phase 1 — Scout, as the *seam class: writer-shape ↔ reader-surfacing* bullet. D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. The Index knew; the entry did not.
+**Status:** promoted — verdict `miss → promoted` (Index row). **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/references/seam-classes.md` (repointed 2026-10-30 by D11: originally `SKILL.md` § Phase 1 — Scout; the bullet moved to this file and the id is back-cited in the served `1.20.25` copy of all four profiles), as the *seam class: writer-shape ↔ reader-surfacing* bullet. D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. The Index knew; the entry did not.
 
 **Verdict:** miss → promoted (was a pending seam-class in SKILL.md Phase 1; Stage-2 is the confirming datapoint)
 
@@ -1503,7 +1503,7 @@ seam — scout the root cause again; and when it cites two functions, read the l
 them."* Pairs naturally with the existing "plan code looks fictional" row in the
 composition table, which covers someone else's plan but not your own.
 
-**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/references/seam-classes.md` — repointed 2026-10-30 (D11): the case law moved out of `SKILL.md`, whose Phase 1 now defers to this file, and the back-citation is present in the served `1.20.25` copy of all four profiles. Originally promoted to `SKILL.md`
 § Phase 1 — Scout. D11-verified 2026-08-20 in the **served** `1.16.13` cache, not the repo
 source: back-citation *"(R-49 in codescout's `docs/trackers/reconnaissance-patterns.md`.)"*
 present, 1 occurrence.
@@ -1661,7 +1661,7 @@ An instrument writing into its own corpus is a hazard of the arrangement, not of
 probe. Corroborated by the project itself: this entry is already promoted into the served
 `SKILL.md`, which is what a law-shaped claim earns. Declared 2026-09-01.
 
-**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/references/seam-classes.md` — repointed 2026-10-30 (D11): the case law moved out of `SKILL.md`, whose Phase 1 now defers to this file, and the back-citation is present in the served `1.20.25` copy of all four profiles. Originally promoted to `SKILL.md`
 § Phase 1 — Scout. D11-verified 2026-08-20 in the served `1.16.14` cache: back-cited as
 *"(R-51, the complement of R-50, in codescout's `docs/trackers/reconnaissance-patterns.md`.)"*,
 1 occurrence. The bullet carries **both** forms this entry's verdict asked for — where output
@@ -2384,7 +2384,7 @@ failure recurs. The Phase-1 step should name both freshness axes: run a probe th
 can only succeed on the new build, and confirm the serving process postdates that
 build.
 
-**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/references/seam-classes.md` — repointed 2026-10-30 (D11): the case law moved out of `SKILL.md`, whose Phase 1 now defers to this file, and the back-citation is present in the served `1.20.25` copy of all four profiles. Originally promoted to `SKILL.md`
 § Phase 1 — Scout. D11-verified 2026-08-20 in the **served** `1.16.13` cache, not the repo
 source: back-citation *"(R-89 in codescout's `docs/trackers/reconnaissance-patterns.md`…)"*
 present, 1 occurrence. The back-citation was added *because* of this entry: its bullet was
@@ -2835,7 +2835,7 @@ craft-shaped half and belongs in the `reconnaissance` memory topic.
 the same day this entry was surfaced by the verify-open sweep, which had found it carrying no
 `**Status:**` line at all.
 
-**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/references/seam-classes.md` — repointed 2026-10-30 (D11): the case law moved out of `SKILL.md`, whose Phase 1 now defers to this file, and the back-citation is present in the served `1.20.25` copy of all four profiles. Originally promoted to `SKILL.md`
 § Phase 1 — Scout. D11-verified 2026-08-20 in the served `1.16.14` cache: back-cited as
 *"(R-95 + R-92 in codescout's `docs/trackers/reconnaissance-patterns.md`.)"*, 1 occurrence,
 all three profiles byte-identical at 37817 bytes.
@@ -3517,7 +3517,7 @@ is evidence for placement over wording: a law you can recite is not a law you ap
 2026-08-21) and was harvested the same day. Phase 1's search-zero bullet now carries the
 widened form and the positive-control remedy.
 
-**Promoted-to:** `codescout-companion/skills/reconnaissance/SKILL.md` § Phase 1 —
+**Promoted-to:** `codescout-companion/skills/reconnaissance/references/seam-classes.md` — repointed 2026-10-30 (D11): moved out of `SKILL.md`, and the back-citation is present in the served `1.20.25` copy of all four profiles. Originally `SKILL.md` § Phase 1 —
 `claude-plugins:577e8e1`, patch-id `300d76f780d15cb6466ad0ea94a1257166f42d4b`, shipped in
 plugin version **1.16.16** (`78d3284`).
 
@@ -3860,7 +3860,7 @@ own R-3 → R-113 → R-77 → R-79 chain is the cost of filing recurrences inst
 re-promoting. Add the population form with its fails-green tell, and update the
 provenance tail.
 
-**Status:** promoted — SKILL.md bullet widened this session.
+**Status:** promoted — SKILL.md bullet widened this session. Repointed 2026-10-30 (D11): that bullet now lives in `references/seam-classes.md` of the same skill, where `R-117` is back-cited in the served `1.20.25` copy of all four profiles.
 
 **Valid:** dated 2026-10-01
 

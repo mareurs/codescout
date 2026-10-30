@@ -1,5 +1,5 @@
 ---
-id: '25633146506bd8b3'
+id: a9c3ef700451346b
 kind: tracker
 status: archived
 title: Tool Surface — Structural Mechanisms — CLOSED 2026-09-06 (SM-N, closed record)
@@ -11,6 +11,7 @@ tags:
 - tools-list
 - mcp
 topic: prompt-surfaces
+archived_on: 2026-09-06
 entry_high_water_SM: 4
 entry_prefix: SM
 ---

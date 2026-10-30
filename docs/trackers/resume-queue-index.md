@@ -52,11 +52,11 @@ overstate every row. Treat it as "how much is in there", never "how much is left
 **Excluded on purpose — three closed records.**
 `docs/trackers/resume-tool-surface-budget.md` (`TB`) is `archived`: the stream shipped in full
 2026-08-18 and the queue was opened on a false-negative grep.
-`docs/trackers/resume-tool-surface-structural-mechanisms.md` (`SM`) joined it **2026-09-06**,
+`docs/trackers/archive/resume-tool-surface-structural-mechanisms.md` (`SM`) joined it **2026-09-06**,
 archived after all four of its entries were verified terminal — SM-1 `71c827f9`, SM-2
 `19c0fc09`, SM-3 refuted, SM-4 probed to a fired power probe whose own follow-up is *"a new
 pre-registration, not a re-run of this one"*.
-`docs/trackers/resume-embedding-transport-stages-1-3.md` (`ET`) joined them **2026-09-06**, when
+`docs/trackers/archive/resume-embedding-transport-stages-1-3.md` (`ET`) joined them **2026-09-06**, when
 ET-3's last residual — the empty `dense_model_name`, an operator decision rather than a code
 task — was decided and shipped at `9c03b32f`. All ten ET entries are terminal, and `ET-9`
 records T9/T16 as **declined** on its own measurement that they buy manifest honesty and zero
