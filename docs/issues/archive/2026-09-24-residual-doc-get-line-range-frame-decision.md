@@ -1,5 +1,5 @@
 ---
-id: d003063b9086c779
+id: b1abe1bb34d75c8b
 kind: bug
 status: fixed
 title: 'RESIDUAL: Decide whether to make doc(get)''s start_line/end_line file-relative (a breaking change to a tested contract) and implement if accepted'
@@ -37,6 +37,11 @@ Fixed in `e9eaf5f26` (`experiments`), patch-id `f36dc893e23baedf7762ea42fbe6f65c
 **Tests.** `line_slice_returns_requested_range` and `a_range_at_the_first_body_line_returns_it_not_the_blank_separator` were changed to the new frame. `a_line_outside_the_body_is_refused_naming_the_valid_span` replaces the old refusal test. `a_heading_maps_line_fed_back_as_start_line_returns_that_heading` is new. All four failed on the old code for the right reason (`L5` for `L1`, `## Beta` for `## Alpha`, a frontmatter range answered with body text) before the change.
 
 **Gate.** `./scripts/gate.sh` on an isolated worktree holding only this change: `PYTHON_LIGHT=0 FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. A first run failed `tool_surface_under_budget` (my longer schema text; fixed by shortening it) and `a_timed_out_filter_with_output_over_the_limit_stays_inline`, which passed alone and in the second full run; I did not find its cause, so I do not call it a proven flake.
+
+## Fix provenance
+
+- **SHA:** `e9eaf5f26` (`experiments`)
+- **patch-id:** `f36dc893e23baedf7762ea42fbe6f65c25173c42`
 
 ## References
 

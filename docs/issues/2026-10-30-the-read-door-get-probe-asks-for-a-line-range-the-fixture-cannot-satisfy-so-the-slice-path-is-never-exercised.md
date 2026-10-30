@@ -65,4 +65,4 @@ Read `site_get` and its positive-control tests; decide whether the control belon
 
 ## References
 
-- docs/issues/2026-09-24-residual-doc-get-line-range-frame-decision.md (found while fixing it)
+- docs/issues/archive/2026-09-24-residual-doc-get-line-range-frame-decision.md (found while fixing it)

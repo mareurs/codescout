@@ -71,7 +71,7 @@ fn find_heading_section<'q>(
 /// computed) to file-relative, matching `grep`/`link_scan`. `start_line`/`end_line` are file
 /// lines too, since 2026-10-30; see
 /// docs/issues/archive/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md
-/// and docs/issues/2026-09-24-residual-doc-get-line-range-frame-decision.md.
+/// and docs/issues/archive/2026-09-24-residual-doc-get-line-range-frame-decision.md.
 fn heading_miss_meta(
     name: &str,
     err: &crate::tools::RecoverableError,
@@ -800,7 +800,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 // `preview.headings[].line` use, so a number from any of them can be sent back
                 // as it is. Until 2026-10-30 they counted from the first body line, which made a
                 // grep line that still fell inside the body return other lines with no error.
-                // docs/issues/2026-09-24-residual-doc-get-line-range-frame-decision.md
+                // docs/issues/archive/2026-09-24-residual-doc-get-line-range-frame-decision.md
                 // `slice_lines` and `body_line_count` stay in body lines; only the request and
                 // the echo are converted. The frontmatter is not part of the returned body, so a
                 // line inside it is refused, and the refusal names the span that is valid.
@@ -1569,7 +1569,7 @@ mod tests {
     /// The composition this bug is about: a number from this tool's OWN heading map, or from
     /// `grep`, is sent back as `start_line` and must return the lines it names. Before the range
     /// was file-relative it returned lines `frontmatter_lines` further down, and no error said so.
-    /// docs/issues/2026-09-24-residual-doc-get-line-range-frame-decision.md
+    /// docs/issues/archive/2026-09-24-residual-doc-get-line-range-frame-decision.md
     #[tokio::test]
     async fn a_heading_maps_line_fed_back_as_start_line_returns_that_heading() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -1782,7 +1782,7 @@ mod tests {
         // NOTE: no blank line between the closing `---` and the content, so the frontmatter
         // offset is 3 and the body's first line (L1) is file line 4. The expected lines come
         // from the raw fixture text, never from the offset the code under test computes.
-        // docs/issues/2026-09-24-residual-doc-get-line-range-frame-decision.md
+        // docs/issues/archive/2026-09-24-residual-doc-get-line-range-frame-decision.md
         let fixture = "---\nkind: spec\n---\nL1\nL2\nL3\nL4\nL5\n";
         fs::write(dir.path().join("a.md"), fixture).unwrap();
 
