@@ -68,10 +68,10 @@ fn find_heading_section<'q>(
 /// instead of raising. Only the *label* was wrong, and then only the *hint*.
 ///
 /// `line_offset` converts `occurrences` from body-relative (what `resolve_section_range`
-/// computed) to file-relative, matching `grep`/`link_scan`. See
+/// computed) to file-relative, matching `grep`/`link_scan`. `start_line`/`end_line` are file
+/// lines too, since 2026-10-30; see
 /// docs/issues/archive/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md
-/// and bug-fix-session-log:F-128 for why this is offset here but `start_line`/`end_line`
-/// deliberately are not.
+/// and docs/issues/2026-09-24-residual-doc-get-line-range-frame-decision.md.
 fn heading_miss_meta(
     name: &str,
     err: &crate::tools::RecoverableError,
@@ -796,27 +796,32 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
                 (joined, None, extra)
             } else if let (Some(s), Some(e)) = (a.start_line, a.end_line) {
-                // `start_line`/`end_line` are body-relative (deliberately, per F-128 /
-                // docs/issues/archive/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md)
-                // while `preview.headings[].line` is file-relative (the sibling fix in the same
-                // bug). A number taken from the heading map and fed straight back in here is
-                // therefore in the wrong coordinate frame — and used to come back as a silently
-                // empty body rather than an error, reading as "the section moved" rather than
-                // "wrong units". Refuse anything that cannot possibly be a body-relative line,
-                // naming `line_offset` (== `frontmatter_lines`) so the caller can convert.
+                // `start_line`/`end_line` are FILE lines: the frame `grep`, `link_scan` and
+                // `preview.headings[].line` use, so a number from any of them can be sent back
+                // as it is. Until 2026-10-30 they counted from the first body line, which made a
+                // grep line that still fell inside the body return other lines with no error.
+                // docs/issues/2026-09-24-residual-doc-get-line-range-frame-decision.md
+                // `slice_lines` and `body_line_count` stay in body lines; only the request and
+                // the echo are converted. The frontmatter is not part of the returned body, so a
+                // line inside it is refused, and the refusal names the span that is valid.
                 let body_line_count = body.lines().count();
-                let bad = [s, e].into_iter().find(|n| *n == 0 || *n > body_line_count);
+                let first_line = line_offset + 1;
+                let last_line = line_offset + body_line_count;
+                let bad = [s, e]
+                    .into_iter()
+                    .find(|n| *n < first_line || *n > last_line);
                 if let Some(bad) = bad {
                     return Err(LibrarianRecoverableError::new(format!(
-                        "start_line/end_line are body-relative (frontmatter_lines: {line_offset}), \
-                         but {bad} exceeds this document's {body_line_count}-line body — \
-                         did you take {bad} from preview.headings[].line (file-relative)? \
-                         subtract frontmatter_lines: try {}",
-                        bad.saturating_sub(line_offset)
+                        "start_line/end_line are file lines (the numbers grep and \
+                         preview.headings[].line report), but {bad} is outside this document's \
+                         body, which spans lines {first_line}-{last_line} \
+                         (frontmatter_lines: {line_offset}). doc(get) does not return the \
+                         frontmatter. Earlier versions counted from the first body line: add \
+                         frontmatter_lines to such a number."
                     )));
                 }
                 (
-                    slice_lines(body, s, e),
+                    slice_lines(body, s - line_offset, e - line_offset),
                     None,
                     json!({ "start_line": s, "end_line": e }),
                 )
@@ -848,7 +853,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
             if let Some((shown, total, headings)) = overflow_meta {
                 let hint = format!(
-                    "Body exceeds soft cap ({SOFT_CAP_LINES} lines). Narrow with heading=\"<section>\" or start_line=N, end_line=M. Top-level headings: {headings:?}"
+                    "Body exceeds soft cap ({SOFT_CAP_LINES} lines). Narrow with heading=\"<section>\" or start_line=N, end_line=M (file lines, as grep counts them; the body starts at line {}). Top-level headings: {headings:?}",
+                    line_offset + 1
                 );
                 out["overflow"] = json!({
                     "shown_lines": shown,
@@ -1416,8 +1422,8 @@ mod tests {
     }
 
     /// Regression for docs/issues/archive/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md
-    /// (scoped fix: heading-map lines only — see bug-fix-session-log:F-128 for why
-    /// `start_line`/`end_line` semantics are deliberately untouched).
+    /// (the heading-map half of that fix; `start_line`/`end_line` followed on 2026-10-30, see
+    /// `line_slice_returns_requested_range`).
     ///
     /// The expected line is derived independently from the raw fixture text
     /// (`.lines().position`), never by re-deriving the offset the production code
@@ -1478,9 +1484,9 @@ mod tests {
         assert_eq!(occ, vec![7, 15]);
     }
 
-    /// `start_line`/`end_line` stay body-relative (see bug-fix-session-log:F-128), so
-    /// this field is the disambiguator a caller needs to convert a body-relative
-    /// number to a file-relative one themselves.
+    /// `start_line`/`end_line` are file lines, so a caller needs no conversion; this field still
+    /// says how many lines of frontmatter precede the body, which the refusal for a line inside
+    /// it names, and which a caller holding a body-relative number needs.
     #[tokio::test]
     async fn response_reports_frontmatter_line_count_for_offset_conversion() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -1508,15 +1514,14 @@ mod tests {
     }
 
     /// Regression for docs/issues/archive/2026-09-15-doc-get-numbers-headings-in-file-lines-and-reads-in-body-lines.md.
-    /// `preview.headings[].line` is file-relative (the sibling fix above) but
-    /// `start_line`/`end_line` stay body-relative (deliberately, per F-128) — nothing stopped a
-    /// caller composing this tool's OWN response with itself from feeding a heading's file-relative
-    /// line straight back into `start_line`, which used to silently return an empty body (no
-    /// error), reading as "the section is not there" rather than "wrong units". A number that
-    /// cannot possibly be a body-relative line (it exceeds the body's own line count) must be
-    /// refused, naming `frontmatter_lines` so the caller can convert — not answered with silence.
+    /// `start_line`/`end_line` used to count body lines while `preview.headings[].line` counted
+    /// file lines, so a caller composing this tool's own response with itself got other lines, or
+    /// a refusal that told it to subtract. Both now count file lines. A line that is not in the
+    /// body (inside the frontmatter, or past the end) is refused, and the refusal names the span
+    /// that is valid and `frontmatter_lines`, so a caller still holding a body-relative number can
+    /// convert it. Not answered with silence.
     #[tokio::test]
-    async fn start_line_that_cannot_be_body_relative_is_refused_not_silently_empty() {
+    async fn a_line_outside_the_body_is_refused_naming_the_valid_span() {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("a")).unwrap();
         let (ctx, dir) = mk_ctx_with_root(cat);
@@ -1525,31 +1530,83 @@ mod tests {
             "---\nkind: spec\na: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\n---\n\n## Only\n\nbody\n";
         fs::write(dir.path().join("a.md"), fixture).unwrap();
 
-        // Body line 1 == file line (idx + 1), so the frontmatter offset equals idx.
+        // The body spans file lines 12-14; the 11 lines before it are the frontmatter and its
+        // separator. Counted from the fixture text, not from the offset the code computes.
         let idx = fixture.lines().position(|l| l == "## Only").unwrap();
         assert_eq!(idx, 11, "fixture shape changed; recompute");
+        assert_eq!(
+            fixture.lines().count(),
+            14,
+            "fixture shape changed; recompute"
+        );
 
         let v = call(&ctx, json!({"id": "a"})).await.unwrap();
         assert_eq!(v["frontmatter_lines"], json!(idx));
-        let heading_line = v["preview"]["headings"][0]["line"].as_u64().unwrap();
-        assert_eq!(heading_line, 12, "fixture shape changed; recompute");
 
-        // Feed the file-relative number straight back in, exactly as composing doc(get)'s own
-        // heading map with itself would — the body is only 3 lines long, so 12 cannot be valid.
-        let res = call(
+        // A line inside the frontmatter is not a body line, and the old meaning of line 1 (the
+        // first body line) now lands there: refuse it, and say what the valid span is and how to
+        // convert a number counted from the body.
+        let in_frontmatter = call(&ctx, json!({"id": "a", "start_line": 1, "end_line": 3}))
+            .await
+            .expect_err(
+                "a range inside the frontmatter must be refused, not answered with silence",
+            );
+        let msg = format!("{in_frontmatter:#}");
+        for needle in ["12", "14", "frontmatter_lines", "11"] {
+            assert!(
+                msg.contains(needle),
+                "the refusal must name {needle:?} (body spans file lines 12-14, frontmatter_lines \
+                 is 11): {msg}"
+            );
+        }
+
+        // A line past the end of the file is refused the same way.
+        let past_end = call(&ctx, json!({"id": "a", "start_line": 12, "end_line": 15}))
+            .await
+            .expect_err("a line past the end of the file must be refused");
+        assert!(format!("{past_end:#}").contains("14"), "{past_end:#}");
+    }
+    /// The composition this bug is about: a number from this tool's OWN heading map, or from
+    /// `grep`, is sent back as `start_line` and must return the lines it names. Before the range
+    /// was file-relative it returned lines `frontmatter_lines` further down, and no error said so.
+    /// docs/issues/2026-09-24-residual-doc-get-line-range-frame-decision.md
+    #[tokio::test]
+    async fn a_heading_maps_line_fed_back_as_start_line_returns_that_heading() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        let fixture =
+            "---\nkind: spec\n---\n\n# Title\n\n## Alpha\n\nalpha body\n\n## Beta\n\nbeta body\n";
+        fs::write(dir.path().join("a.md"), fixture).unwrap();
+
+        // What grep would print for the heading, counted from the fixture text.
+        let grep_line = fixture.lines().position(|l| l == "## Alpha").unwrap() + 1;
+        assert_eq!(grep_line, 7, "fixture shape changed; recompute");
+
+        let map = call(&ctx, json!({"id": "a"})).await.unwrap();
+        let from_map = map["preview"]["headings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|h| h["text"] == "Alpha")
+            .and_then(|h| h["line"].as_u64())
+            .expect("Alpha is in the heading map");
+        assert_eq!(from_map as usize, grep_line, "the map and grep must agree");
+
+        let v = call(
             &ctx,
-            json!({"id": "a", "start_line": heading_line, "end_line": heading_line}),
+            json!({"id": "a", "start_line": grep_line, "end_line": grep_line + 2}),
         )
-        .await;
-        let err = res.expect_err(
-            "start_line taken from preview.headings[].line (12) exceeds this document's 3-line \
-             body and must be refused, not silently answered with an empty body",
-        );
-        let msg = format!("{err:#}");
+        .await
+        .unwrap();
+        let body = v["body"].as_str().unwrap();
         assert!(
-            msg.contains("11"),
-            "refusal must name the frontmatter offset (11) so the caller can convert: {msg}"
+            body.starts_with("## Alpha"),
+            "a line number from grep must return that line, not one {} lines later: {body:?}",
+            map["frontmatter_lines"]
         );
+        assert!(body.contains("alpha body"));
+        assert!(!body.contains("beta body"));
     }
 
     /// The over-correction guard: a heading that genuinely is not there must still say
@@ -1720,23 +1777,33 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("a")).unwrap();
         let (ctx, dir) = mk_ctx_with_root(cat);
-        // NOTE: no blank line between the closing `---` and the content so that
-        // start_line=1 corresponds to L1 in the parsed body.
-        fs::write(
-            dir.path().join("a.md"),
-            "---\nkind: spec\n---\nL1\nL2\nL3\nL4\nL5\n",
-        )
-        .unwrap();
+        // `start_line`/`end_line` count FILE lines, the frame grep, link_scan and this tool's own
+        // heading map use, so a number from any of them can be sent back as it is.
+        // NOTE: no blank line between the closing `---` and the content, so the frontmatter
+        // offset is 3 and the body's first line (L1) is file line 4. The expected lines come
+        // from the raw fixture text, never from the offset the code under test computes.
+        // docs/issues/2026-09-24-residual-doc-get-line-range-frame-decision.md
+        let fixture = "---\nkind: spec\n---\nL1\nL2\nL3\nL4\nL5\n";
+        fs::write(dir.path().join("a.md"), fixture).unwrap();
 
-        let v = call(&ctx, json!({"id": "a", "start_line": 2, "end_line": 4}))
-            .await
-            .unwrap();
+        let file_line = |text: &str| fixture.lines().position(|l| l == text).unwrap() + 1;
+        assert_eq!(file_line("L2"), 5, "fixture shape changed; recompute");
+
+        let v = call(
+            &ctx,
+            json!({"id": "a", "start_line": file_line("L2"), "end_line": file_line("L4")}),
+        )
+        .await
+        .unwrap();
         let body = v["body"].as_str().unwrap();
         assert!(body.contains("L2"));
         assert!(body.contains("L3"));
         assert!(body.contains("L4"));
         assert!(!body.contains("L1"));
         assert!(!body.contains("L5"));
+        // The echo is in the same frame as the request.
+        assert_eq!(v["body_meta"]["start_line"], json!(file_line("L2")));
+        assert_eq!(v["body_meta"]["end_line"], json!(file_line("L4")));
     }
 
     #[tokio::test]
@@ -2067,23 +2134,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn line_slice_start_line_1_returns_first_visible_content_line() {
-        // Regression for the real-world bug: a normally-created file has a blank
-        // separator line between the frontmatter's closing `---` and the body
-        // content, so start_line=1 must mean the first VISIBLE line ("L1"), not
-        // that invisible separator.
+    async fn a_range_at_the_first_body_line_returns_it_not_the_blank_separator() {
+        // A normally-created file has a blank separator line between the frontmatter's closing
+        // `---` and the body content. It is not part of the body, so the first body line is the
+        // line AFTER it, and a range that starts there must return "L1", not an empty string.
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("a")).unwrap();
         let (ctx, dir) = mk_ctx_with_root(cat);
-        fs::write(
-            dir.path().join("a.md"),
-            "---\nkind: spec\n---\n\nL1\nL2\nL3\nL4\nL5\n",
-        )
-        .unwrap();
+        let fixture = "---\nkind: spec\n---\n\nL1\nL2\nL3\nL4\nL5\n";
+        fs::write(dir.path().join("a.md"), fixture).unwrap();
 
-        let v = call(&ctx, json!({"id": "a", "start_line": 1, "end_line": 1}))
-            .await
-            .unwrap();
+        let first = fixture.lines().position(|l| l == "L1").unwrap() + 1;
+        assert_eq!(first, 5, "fixture shape changed; recompute");
+
+        let v = call(
+            &ctx,
+            json!({"id": "a", "start_line": first, "end_line": first}),
+        )
+        .await
+        .unwrap();
         assert_eq!(v["body"], "L1");
         assert_eq!(v["body_meta"]["line_count"], 1);
     }
