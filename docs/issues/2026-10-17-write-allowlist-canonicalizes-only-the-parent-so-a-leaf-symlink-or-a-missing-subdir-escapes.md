@@ -429,6 +429,12 @@ What this settles: on Linux, `create_file` and `edit_file` replace an in-project
 
 Not run: `edit_code` `rename` (the one writer that writes through a link), `doc(update)` and `doc(create)` on links, macOS, Windows, case-insensitive filesystems, and the check-versus-write race. The issue stays `open` for those.
 
+## Re-verification 2026-10-30
+
+On `experiments` at 573825fb7 (branch `worktree-agent-a88be249b09c25d52`), `cargo test --lib util::path_security` passed 365 tests, including `symlink_out_of_the_temp_dir_is_refused_even_below_a_missing_subdirectory`, `symlinked_temp_dir_allows_a_write_below_a_missing_subdirectory`, `a_leaf_link_to_a_deny_listed_file_is_refused_whatever_roots_are_approved` and `a_leaf_link_to_a_file_outside_every_root_is_allowed_as_the_link_and_asks_for_no_approval`. Both shapes (a missing subdirectory below a symlinked directory; a leaf symlink) are covered and legitimate in-root writes still pass. No code changed. The issue stays `open` only for the items already listed above (macOS, Windows, case-insensitive filesystems, check-versus-write race).
+
+## References
+
 ## References
 
 - `docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md`

@@ -68,6 +68,12 @@ Do not delete a project directory while a pinned call is running against it.
 
 Reproduce with a loop that deletes the pinned directory at a random 0-30 ms offset into a `create_file` call, then decide where the re-check belongs.
 
+## Re-verification 2026-10-30
+
+Checked, no code changed. `util::fs::write_utf8` still calls `create_dir_all(parent)` (`src/util/fs.rs` line 498), so the remaining window the Fix section lists is still there. The window is microseconds between the dispatch pin check and the write; it needs the root-aware directory-creation helper the Fix section names, which is an owner design choice. Verdict: needs design.
+
+## References
+
 ## References
 
 - `src/server.rs` (`call_tool_inner`, `refuse_pin`)
