@@ -1,16 +1,16 @@
 ---
 id: '4ffa75bf5548c47e'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the read-door probe for doc(get) asks for lines 1-40 of a 17-line body, so the line-slice path is refused and never exercised'
 tags:
 - cluster/unclassified
 - read-door
 - test-vacuity
+closed: 2026-10-30
 opened: 2026-10-30
 owner: marius
 severity: low
-unverified: Inferred from counting the fixture's body lines and reading the guard; site_get was not run to see the refusal.
 ---
 
 # BUG: the read-door probe for doc(get) asks for lines 1-40 of a 17-line body, so the line-slice path is refused and never exercised
@@ -49,11 +49,13 @@ None.
 
 ## Fix
 
-Not implemented. Candidate: send a range that lies inside the body, for example the file lines 6 to 22 derived from `doc_text()`, and assert in the positive-control layout that the call returns a body. This needs a positive control, because a refusal and a clean read look the same to `out_anyhow`.
+Fixed in `b27329082` (2026-10-30). `site_get` now sends the range `body_span()` derives from `doc_text()`: the file line of the title (6) to the last line (22). A new helper `get_body_lines` makes the call, and `site_get` and the control both use it, so the control tests the call the probe makes.
+
+Verified at the bytes: `doc(get)` refused `40` with "spans lines 6-22 (frontmatter_lines: 5)", which matches the guard read in `get.rs` and the line count in this record. The earlier "unverified" caveat is settled and removed.
 
 ## Tests added
 
-N/A: this file records a finding.
+`get_line_probe_range_reads_the_body_and_the_old_range_is_refused` in `src/librarian/tools/read_door_tests.rs`. On the first layout that admits the file, it asserts that `get_body_lines` returns the marker and that `1`-`40` is refused. Mutation-applied: with `body_span()` ending at `40` the test failed with the refusal text above, and it passed again after the revert. Gate at `b27329082`: `PYTHON_LIGHT=0 FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
 
 ## Workarounds
 
