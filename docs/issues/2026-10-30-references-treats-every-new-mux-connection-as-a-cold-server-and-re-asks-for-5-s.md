@@ -9,7 +9,7 @@ tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
 opened: 2026-10-30
 severity: medium
-unverified: Observed in one call in debug.log; the share of all references latency it explains is not measured.
+unverified: The 5 s empty-answer re-ask did NOT reproduce on a warm mux (an empty references answer took 0.95-1.6 s, first call 1.6 s). Whether it fires on a cold mux, which is where the logged 12-20 s first calls come from, is not established.
 ---
 
 # BUG: references treats every new mux socket connection as a cold server and re-asks an empty answer for 5 s
@@ -45,7 +45,15 @@ See Symptom.
 
 ## Hypotheses tried
 
-None.
+1. **Hypothesis (as filed):** every new mux connection is treated as cold, so an empty `references` answer is re-asked for 5 s instead of 1 s. The code part is real: `in_cold_start_window` (`src/lsp/client.rs:815-825`) anchors a socket client at construction, so `not_answered_budget` returns 5 s for 5 minutes after every connect.
+   **Verdict: not reproduced.** Measured 2026-10-30, release build, fresh server per run over stdio MCP, rust-analyzer behind a warm mux:
+   - `references` on `run_stdio_server` (dead code, no references): 1,632 / 1,223 / 947 ms. An empty answer did NOT cost 5 s.
+   - `references` on `rehome_call` (3 references): 2,887 / 304 / 280 ms.
+   - `references` on `extract_memoized`: server 1 12,040 / 1,296 / 1,299 ms, server 2 1,862 / 1,257 / 1,277 ms.
+   The first-call overhead on a warm mux is 0.4-2.6 s. The one 12 s first call was on a mux that was probably cold; that was not established.
+2. **Where the logged time is:** `usage.db` holds 143 successful `references` calls (p50 2.3 s, p90 about 20 s, max 55 s, 895 s total) and five 30-40 s timeouts. The p90 comes from cold rust-analyzer and timeouts, not from a fixed 5 s. The split into empty and non-empty answers could not be made from `output_json`.
+
+No code was changed.
 
 ## Fix
 
