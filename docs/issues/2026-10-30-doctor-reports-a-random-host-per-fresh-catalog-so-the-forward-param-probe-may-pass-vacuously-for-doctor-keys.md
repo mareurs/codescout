@@ -1,10 +1,11 @@
 ---
 id: '25d8de9cf59c0e49'
 kind: bug
-status: open
+status: fixed
 title: doctor reports a host id that differs per fresh catalog, so the forward param probe may pass vacuously for doctor keys
 tags:
 - cluster/unclassified
+closed: 2026-10-30
 opened: 2026-10-30
 owner: marius
 severity: low
@@ -34,7 +35,7 @@ Linux, `experiments` at `9173695c5`.
 
 ## Root cause
 
-The `host` difference is verified at the bytes. The consequence for the forward probe is NOT shown: I did not remove a `doctor` read and watch `every_action_labelled_schema_key_is_honored_by_that_action` stay green.
+The `host` difference is verified at the bytes. The consequence is now shown (2026-10-30): with `#[serde(skip)]` on `doctor::Args::offset`, the forward probe stayed GREEN. After masking `host` the same mutation fails with `doctor:offset (declared integer)`.
 
 ## Evidence
 
@@ -46,11 +47,11 @@ None beyond the above.
 
 ## Fix
 
-Not started. Candidates: mask `host` inside the shared `param_probe::outcome`, or share one context between the base and the probed call for tools whose output carries a per-context id. Demonstrate the bug first: delete one `doctor` read, expect the forward probe to stay green, then fix and expect red.
+Done 2026-10-30. The forward probe's call closure in `librarian::tools::librarian::tests::every_action_labelled_schema_key_is_honored_by_that_action` now masks `host` (`drop_host`, the helper the reverse probe already used) before the outcomes are compared. Fixed at the call site, not in the shared `param_probe::outcome`, because `host` is a `doctor` field and the shared helper serves other tools.
 
 ## Tests added
 
-None yet.
+No new test: the existing forward probe is the test. Mutation run: `#[serde(skip)]` on `Args::offset` in `src/librarian/tools/doctor.rs` stays green before the fix and fails after it; mutation reverted.
 
 ## Workarounds
 

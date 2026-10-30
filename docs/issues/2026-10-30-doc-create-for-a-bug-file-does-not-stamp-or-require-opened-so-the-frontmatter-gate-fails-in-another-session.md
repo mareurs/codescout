@@ -1,10 +1,11 @@
 ---
 id: f350eba20450a7f4
 kind: bug
-status: open
+status: fixed
 title: doc(create) for a bug file does not stamp or require opened, so the frontmatter gate fails in another session
 tags:
 - cluster/unclassified
+closed: 2026-10-30
 opened: 2026-10-30
 owner: marius
 severity: low
@@ -34,7 +35,7 @@ Linux, `experiments` at `327bf1705`.
 
 ## Root cause
 
-`grep` over `src/librarian` for `"opened"` finds one hit in the create path: a test in `src/librarian/tools/create.rs` (line 1439) that passes `opened` in `extra`. No create code sets it. Not read: whether `doc(create)` has a bug-specific default elsewhere, such as in the template path.
+`grep` over `src/librarian` for `"opened"` finds one hit in the create path: a test in `src/librarian/tools/create.rs` (line 1439) that passes `opened` in `extra`. No create code sets it. Verified 2026-10-30 on `experiments` 0f8705532: `call` builds `Frontmatter` from `a.extra` unchanged; no bug-specific default exists, and the new test failed before the fix.
 
 ## Evidence
 
@@ -46,11 +47,13 @@ None.
 
 ## Fix
 
-Not started. Candidates: default `extra.opened` to today for `kind=bug` under `docs/issues/`; or refuse the create with a recoverable error that names `extra.opened`. Either puts the failure in the creating call, where its author can act on it.
+Done 2026-10-30. `doc(create)` for `kind=bug` under `docs/issues/` now stamps `extra.opened` with today's date (UTC) when the caller gave none; a caller's own value wins. Other kinds and directories are untouched. Stamping was chosen over a refusal: it puts the field in the creating call with no retry, and the value is always knowable.
+
+Code: `src/librarian/tools/create.rs`, in `call`, after `resolve_status`.
 
 ## Tests added
 
-None yet.
+`librarian::tools::create::tests::a_bug_file_under_docs_issues_is_stamped_opened_unless_the_caller_gave_one`. Watched red first (`a bug created with no extra must carry opened`), green after the stamp. It also pins that an explicit `opened` wins and that a `spec` is not stamped.
 
 ## Workarounds
 

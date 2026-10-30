@@ -404,7 +404,14 @@ mod tests {
                 "tbl",
                 "until",
             ],
-            |args| async move { Librarian.call(&mk_ctx(), args).await },
+            |args| async move {
+                // `doctor` reports a per-context random host id, so two fresh-context calls
+                // differ whether or not the key was read: mask it (25d8de9cf59c0e49).
+                Librarian.call(&mk_ctx(), args).await.map(|mut v| {
+                    drop_host(&mut v);
+                    v
+                })
+            },
         )
         .await;
 
