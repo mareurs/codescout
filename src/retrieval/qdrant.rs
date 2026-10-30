@@ -421,6 +421,21 @@ impl QdrantWrap {
     ) -> Result<(usize, usize)> {
         let filter = Filter::must([Condition::matches("project_id", project_id.to_string())]);
 
+        // Check the index BEFORE counting. Without it the facet is refused, and the exact
+        // count that precedes it would have cost a full scan for nothing (2.7-5.7 s
+        // measured 2026-10-30 on the unindexed live collection), which made status slower
+        // than the scroll alone until the next index build added the index.
+        let has_file_path_index = self
+            .client
+            .collection_info(collection)
+            .await
+            .context("project_index_stats collection_info")?
+            .result
+            .is_some_and(|r| r.payload_schema.contains_key("file_path"));
+        if !has_file_path_index {
+            anyhow::bail!("{collection} has no file_path payload index to facet on");
+        }
+
         let chunks = self
             .client
             .count(
