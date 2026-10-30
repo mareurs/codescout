@@ -1,13 +1,13 @@
 {
   "stage": 2,
-  "head": "9d85855b08e6df3d8ffcc2a1e7e24dcaa0655170",
+  "head": "0b7a946beae6b7583798c5af68d03bc87d4527ee",
   "files": {
     "PROVENANCE.json": "17eff19c2502b39886fb680a867fccebf8483ae18488929450935715bbb53340",
     "agent-cs.Dockerfile": "a5891963c784217eb53f601f0aaaeb60c28dfb52babeb6513fb0f5cb886b74da",
     "agent.Dockerfile": "189455188ab17062926d44dff28b099e59e94ce8342a363f3b063135cd0bb24c",
     "analyze.py": "562a9285f98a493c0a89683119c92cc93375804683fc1358272cf4455da26295",
     "analyze_study.py": "12d1474440d72ab3fe948e3954728025c22891f43916cced51df314727649e94",
-    "arms.py": "68800c2bf648f2f20db373dff94bd41d4a1da8ff4cedc15a6d7ac8e4c7b6be03",
+    "arms.py": "206b95c4a228c10cb2550777605f20071bd06685c5350fb7189143613e9db822",
     "baseline.py": "3a1311976af2d9eb8bde99f0219958f2f297919d39c4517ae3a03e3729440db1",
     "capture_stub.py": "57b7b37927ca920868c63b12947f9b2894623729c9f985ef10adb7e02c231a75",
     "evidence.py": "fa4ce2e1aa77fb4bd3ffae5fb643325a1c8c89fe2ad76b9c38577f4139cedda4",
@@ -16,7 +16,7 @@
     "fixtures/full_valid.jsonl": "e5936c940961742ffdc8df3fd4b352a4a44e2b096b7893e31172c420836bfc6d",
     "freeze_setup.py": "def4faaa169a195db4722175e14af6c9ad4f3734110a20413371e98ad5d1a8c1",
     "freeze_stage1.py": "8484af5187fe7e28ff0a0264cd8f80eaa8f6b20cb4bced0cc459e0e0bf8c3ff8",
-    "freeze_stage2.py": "9f5aa3e79633d7a20ea81840e66154b2d38ed0f6e10234a4bc316a04a22cd6c1",
+    "freeze_stage2.py": "2abff6be4e98f0c9caa5595bbd0a1823293c228117265c111020da5574d7deff",
     "frozen.py": "503bee1ef1b7a4727a4c7493b5603162341637405c3e6a31c6123c68550f8e89",
     "integrity.py": "1fae826276e6c9cfccb8bdc0c3330689c556f518374fe6324a013be67b13a3cb",
     "leak_scan.py": "896e23869fab19668c8d7a61b92cdbd84afb7fb0bb248c2c8564bca2a0716f14",
@@ -24,31 +24,31 @@
     "mcp_probe.py": "5265138b67c7510c9a02c9cc6f7036b4785d15579dc1821ffab71c37c161ed07",
     "pilot-protocol.md": "57dec0d780ed5307150e19f8adee917dd4555f6ca103f96d79737833ca137801",
     "pilot.py": "61d5020fbc4de8791431d367106dac1246afe37bd462ca3100ef6a54afe63c38",
-    "registration.py": "5dd713ab1391c628712a9d6899664b4772485586ba207719aec3e2c346576239",
-    "run.py": "26227bf6f9435e8f408cdef883b3d41aef337a65771fd23c39167425489fde57",
+    "registration.py": "53afe5c969a5c8231a7a030b269e208e098a7589e1359c7fe15a113989671236",
+    "run.py": "8064d30c8e03d0c0f204d7bfb77f677c319fb89d018e1388a6a48a421609e3e1",
     "select_tasks.py": "f0379cede595b871d962cd8945329b1c66102882f51b9f804700cb9ccedd4439",
     "selection-rule.json": "6f0205bc6036495c0e0153a5a873754e31306f1b4df33cc146435f0d6fcd52c3",
     "smoke.py": "5245d350aa722e69a383f095ab87375505c8e7d3cb62b6c04fb78bc766eda411",
     "stack.py": "b6450629229fe81c5add15def405424b7cf49a4bd16d5839f31091efd18921b7",
     "stage1-registration.json": "58200b3e7c0e8b626b1861987968a66b2d6ae1efd93d2c1b60897a7520c39f3b",
-    "stage3.py": "00b1646ab2cb96d9eb3e918f22e7bcdc0ea1fd08aa63648a42c36697a0cc07f8",
+    "stage3.py": "aa58042884047e94e91ed334b80d09bd6974c8ac69e37d3da251ce5fdd6d77ee",
     "task4-live-control.json": "52821f57d48e134823615d031a8c42daf90207497e3200dc0115c05984390e71",
     "task4-rulings-control.json": "a5e8af417ce7d5df46a939ed749de69871b10781e6e0a2b593c912fe8b53ae29",
     "tasks.py": "ef5366307e7f7addff5e37fc8a009d9afd92ea3cf63481e990c932f75734d88e",
     "test_analyze.py": "0319e113606240928bbd291ee7d88161dc194f6c54818322591383ab11ab0c31",
     "test_analyze_study.py": "55c72668efbaf6fde8aaedb6c472204046d531af5a415f9b2445545378b6e6ba",
-    "test_arms.py": "92d54ff60861ff82cbc471634c5017d52824c82e46ab4cbeb28866853048ddba",
+    "test_arms.py": "bc66ac5f7fa3fa7806fc06cf521e9ff38ef5a2c6283f161c3e04e35be4c85aca",
     "test_baseline.py": "4679afd5e3ca43dcba3dcb20d01e93bb8a73abb3ca9884eefb65cc52c046d52e",
     "test_freeze_setup.py": "30b5c3da74e3d83ecb643b9b69618285cd361c531997eaaa483eeac65344054e",
     "test_freeze_stage1.py": "374a20d4bc0bb6b6407b2c28da461ad8066204763f25054750be67ee6e21d6f1",
-    "test_freeze_stage2.py": "ce8abde917d1450c94502335c8e16d1d1def3fadf320709648f14be2b1570662",
+    "test_freeze_stage2.py": "5512bb6b86e43f4e2926661c00db2d4708815f6ec7ce7382e7dffee87b457c98",
     "test_frozen.py": "40df751e2a0a7297b513b81fffa7584fe1d123cf8ee1778616e5ba80e9af1efd",
     "test_grader_boundary.py": "50c2739e04e7d5dc72c1dbe1d954652353fd14615473c0250cffc9daa909fe74",
-    "test_integrity.py": "ad6a8c5e8ef660aaa448264d828f205b3e1d933b91ce86cd4dbe8409421cab60",
+    "test_integrity.py": "24c9fa0ce9ee2016c291dbd18a4b83d8d20afd9c834d890e870b06061cdada66",
     "test_leak_scan.py": "a21ec0334d336f117f26c50e3149021b60cb393192f998b592f3db24488512bd",
     "test_pilot.py": "9a0d22a9f35c631583ad0366c2a8b352474f4fa56e90d11c93c9b69bd2984c92",
     "test_provenance.py": "a0faa189973f34cb10a27a5c3a7fdacaa4327d5c9db988a9d845d56d38eaa7c1",
-    "test_run.py": "0a978e69107a89424ddbe6cf009d35d9931ff48f6fee02de24980843a45f804e",
+    "test_run.py": "0c7f50e1a95d8b54796c281df0e6e363c90888de0b1452549bbaff7773d4be88",
     "test_smoke.py": "499cd01d4f56030e61a569731ca8fb2f4c613efb5f90faea503a028c3652cc6a",
     "test_stack.py": "938c8da8c1743cf016bed6183e8ffc4a449ca3627721d985edcf11a5a2c86101",
     "test_stage3.py": "30319121454ce59ab24b7cee622ec2ca9a1b509eb9da111410a4ab4b6f98c4af",
@@ -63,6 +63,47 @@
     "runs": 12,
     "spend_usd": 4.700854
   },
+  "aborted_pilot_1": {
+    "archive": "/home/marius/work/claude/setup-ab-data/study/aborted-pilot-1",
+    "files": {
+      "rows.jsonl": "282d8b534277bcc9ce7b0895689cf2beb2dde6f2b319715c4086412abcffdf52",
+      "batch.jsonl": "74fccf32c567e3ea86da04e9c3cf06dc6b0b18e7a9df313eed6e4860ceb64654"
+    },
+    "tree_sha256": "7538b1c3fd53a71c5fd3bc71608d58c50cb00913aa55a71474b102731270c5b1",
+    "runs_listing": [
+      "cs-p07.claude-sonnet-5-5.cs.0",
+      "cs-p07.claude-sonnet-5-5.full.0",
+      "cs-p08.claude-opus-5-5.bare.0",
+      "cs-p08.claude-opus-5-5.bare.1",
+      "cs-p08.claude-opus-5-5.cs.0",
+      "cs-p08.claude-opus-5-5.full.0",
+      "cs-p08.claude-sonnet-5-5.bare.0",
+      "cs-p08.claude-sonnet-5-5.bare.1",
+      "cs-p08.claude-sonnet-5-5.cs.0",
+      "cs-p08.claude-sonnet-5-5.full.0"
+    ],
+    "run_ids": [
+      "cs-p07.claude-sonnet-5-5.cs.0",
+      "cs-p07.claude-sonnet-5-5.full.0",
+      "cs-p08.claude-opus-5-5.bare.0",
+      "cs-p08.claude-opus-5-5.bare.1",
+      "cs-p08.claude-opus-5-5.cs.0",
+      "cs-p08.claude-opus-5-5.full.0",
+      "cs-p08.claude-sonnet-5-5.bare.0",
+      "cs-p08.claude-sonnet-5-5.bare.1",
+      "cs-p08.claude-sonnet-5-5.cs.0",
+      "cs-p08.claude-sonnet-5-5.full.0"
+    ],
+    "run_count": 10,
+    "registration_sha256": "433451495de3bc852db7c0d94aeddbc36e036734701597f5b3ad38f0565d2043",
+    "plan_sha256": "b47744e63924101bdcbf402cf7976a20e02d499e6e966d7c7407587c29dcbd42",
+    "reason": "timeout (RUN_TIMEOUT_S 1800) -> missing cost stop stop-48-82024115",
+    "stop_id": "stop-48-82024115",
+    "disposition": "the 10 runIds listed here are re-run under this registration; this attempt is archived and never analysed",
+    "pilot_spend_usd": 13.218307,
+    "carried_spend_usd": 13.218307
+  },
+  "carried_spend_usd": 13.218307,
   "manifest_path": "/home/marius/work/claude/setup-ab-data/study/setup-manifest.json",
   "manifest_sha256": "b6ad964e3c56a4e9df6f32de3eacd2eae362e6db4eadf9fd6eee2a532fb1d2a6",
   "selection_rule_sha256": "6f0205bc6036495c0e0153a5a873754e31306f1b4df33cc146435f0d6fcd52c3",
@@ -450,7 +491,7 @@
       "plan_sha256": "b47744e63924101bdcbf402cf7976a20e02d499e6e966d7c7407587c29dcbd42",
       "budget": {
         "cap_usd": 200.0,
-        "spent_usd": 0.0,
+        "spent_usd": 13.218307,
         "per_call_usd": 5.0,
         "reserve_usd": 5.0
       }
@@ -776,7 +817,7 @@
       "plan_sha256": "5fd253b9150b3d7957f63d2ffa3bdc4e8ac7d536aa744906cf4a2a12c735312d",
       "budget": {
         "cap_usd": 200.0,
-        "spent_usd": 0.0,
+        "spent_usd": 13.218307,
         "per_call_usd": 5.0,
         "reserve_usd": 5.0
       }
@@ -1194,18 +1235,18 @@
     "instrument": "instrument failures (analyze_study.instrument_failures): every `tasks.py verify` reason of a registered task, every private prescan reason, and per model and arm ARM_INTEGRITY_RULE",
     "zero_codescout_calls": "a result, reported as zero_codescout_runs; never invalid",
     "admission": "an admission stop (the $200 cap) in the extension: the rows are analysed as is, and the stop is disclosed; the cap is not raised",
-    "re_runs": "no re-runs: a runId with any journal row is never run again; a main row outside STAGE3_REPS is a re-run and is refused by analyze.check_row",
+    "re_runs": "no re-runs: a runId with any journal row is never run again; a main row outside STAGE3_REPS is a re-run and is refused by analyze.check_row; the one registered exception: the 10 runIds of the archived pilot attempt 1 (aborted_pilot_1, operator decision 2026-10-30, no grade read) left the journal and are re-run from scratch under this registration; that attempt is never analysed",
     "headline": "no single pooled headline: the foreign and private strata are decided separately and a headline claim needs both to agree (analyze_study.headline)",
     "agent_resources": [
       "--cpus",
       "4",
       "--memory",
-      "16g",
+      "24g",
       "--memory-swap",
-      "16g"
+      "24g"
     ],
     "per_call_usd": 5.0,
-    "run_timeout_s": 1800,
+    "run_timeout_s": 3600,
     "planned_reps": [
       [
         "bare",
@@ -1255,5 +1296,5 @@
   "python_version": "3.14.8",
   "python_executable": "/usr/bin/python3.14",
   "node_version": "v26.12.1",
-  "registration_sha256": "433451495de3bc852db7c0d94aeddbc36e036734701597f5b3ad38f0565d2043"
+  "registration_sha256": "b75ec48492a9743def87fbf57d327d6f0a221fe5b91635fd2b8ab537f020be49"
 }
