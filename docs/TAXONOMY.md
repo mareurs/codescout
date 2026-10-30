@@ -164,15 +164,15 @@ session or machine cannot keep its state in a git-ignored catalog).
 | **SV-N** | `resume-statement-validity-layers-3-5.md` | Statements: Layers 3c/5b — `asserted_at`, attestation storage, the decay default |
 | **GG-N** | `resume-get-guide-section-grain-phases-2-3.md` | `get_guide` section grain: Phase 2 (`tracker-conventions`) and Phase 3 (8 topics) |
 | **WP-N** | `resume-workspace-pinning-phase-4b-5.md` | Per-request workspace pinning: Phase 4b (per-`Workspace` locking, eviction) + Phase 5 |
-| **ET-N** | `resume-embedding-transport-stages-1-3.md` | Embedding transport consolidation: Stages 1–3 |
+| **ET-N** | `archive/resume-embedding-transport-stages-1-3.md` | Embedding transport consolidation: Stages 1–3 (closed record, archived 2026-10-30) |
 | **CM-N** | `resume-cross-machine-catalog-restore.md` (`f4923e5e894de62f`) | Work left after a cross-machine catalog resume — what was restored, what was decided against, what is permanently lost. 9 entries, prose. Opened by a concurrent session the same day; row added here per its own `CM-9`, which specified it rather than editing this file while a peer held it |
 | **TB-N** | `resume-tool-surface-budget.md` | Tool Surface Budget — **archived same day**: the stream had shipped in full on 2026-08-18 and the queue was opened on a false-negative grep. Kept as the only documentation of the live `TOOL_SURFACE_CHAR_BUDGET` gate |
-| **SM-N** | `resume-tool-surface-structural-mechanisms.md` (`a9c3ef700451346b`) | Tool Surface — structural mechanisms. **Row missing from this table until 2026-09-04**, which is the defect that exposed the three stale counts above |
+| **SM-N** | `archive/resume-tool-surface-structural-mechanisms.md` (`a9c3ef700451346b`) | Tool Surface — structural mechanisms (closed record, archived 2026-10-30). **Row missing from this table until 2026-09-04**, which is the defect that exposed the three stale counts above |
 | **AC-N** | `resume-artifact-chunk-grain-retrieval.md` (`9ba8a7a553b7a097`) | Artifact chunk-grain retrieval. `AC-1` states what a **wrong** result looks like alongside a right one — a stale MCP server returns *"changed nothing"* as a plausible number rather than an error, so its pre-flight is `readlink /proc/<pid>/exe` |
 | **RQ-N** | `resume-queue-index.md` (`ea6e212a549f9972`) | **tracker → remaining work**, across all repos. The index *of* the queues rather than one of them; restates none of them by design, and carries its own known holes as declared holes |
 
-**`TB-N` is the only closed record here; every other row is a live queue.** It is listed
-because its prefix is declared and its entries are citable, not because there is work in
+**`TB-N`, `ET-N` and `SM-N` are the closed records here; every other row is a live queue.** They are listed
+because their prefixes are declared and their entries are citable, not because there is work in
 it. **No count is given deliberately** — run the `grep -l` above.
 
 **Three sibling resume surfaces exist, answering different questions.** This table is
