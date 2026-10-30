@@ -666,13 +666,63 @@ async fn site_walk(fx: &Fx) -> bool {
     queued || stored > 0
 }
 
+/// The file lines `doc(get)` accepts for `start_line`/`end_line` on `doc_text()`: its first body
+/// line to its last. Derived, not written as numbers, so a change to the fixture's frontmatter or
+/// tail cannot push the probe's range out of the body, where `doc(get)` refuses it and the probe
+/// reads nothing.
+fn body_span() -> (usize, usize) {
+    let text = doc_text();
+    let first = text
+        .lines()
+        .position(|l| l == format!("# {MARK} title"))
+        .expect("doc_text has a title line")
+        + 1;
+    (first, text.lines().count())
+}
+
+/// The line-slice call `site_get` probes with: the whole body, as file lines.
+async fn get_body_lines(ctx: &ToolContext, id: &str) -> anyhow::Result<serde_json::Value> {
+    let (first, last) = body_span();
+    get::call(
+        ctx,
+        json!({"id": id, "start_line": first, "end_line": last}),
+    )
+    .await
+}
+
 async fn site_get(fx: &Fx) -> bool {
     let (ctx, _) = ctx_for(fx, None);
     let id = seed(&ctx, &fx.md, None);
     let full = get::call(&ctx, json!({"id": id, "full": true})).await;
-    let lines = get::call(&ctx, json!({"id": id, "start_line": 1, "end_line": 40})).await;
+    let lines = get_body_lines(&ctx, &id).await;
     let section = get::call(&ctx, json!({"id": id, "heading": "## A"})).await;
     out_anyhow(full) || out_anyhow(lines) || out_anyhow(section)
+}
+
+/// `site_get` ORs three selectors, and a refusal reads as "no marker" exactly as a safe door does.
+/// So the line probe is only a probe if its range reads the body. Control: on a layout that admits
+/// the file, the derived range returns the marker; the range the probe used to send (1-40, which
+/// starts inside the frontmatter and ends past the body) is refused.
+#[tokio::test]
+async fn get_line_probe_range_reads_the_body_and_the_old_range_is_refused() {
+    let layout = layouts()
+        .into_iter()
+        .find(|l| l.verdict == Verdict::Admit)
+        .expect("at least one layout admits the file");
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let fx = (layout.build)(&base);
+    let (ctx, _) = ctx_for(&fx, None);
+    let id = seed(&ctx, &fx.md, None);
+    let read = get_body_lines(&ctx, &id)
+        .await
+        .expect("the probe range lies inside the body, so doc(get) must not refuse it");
+    assert!(has(&read), "the slice returned no marker: {read}");
+    let old = get::call(&ctx, json!({"id": id, "start_line": 1, "end_line": 40})).await;
+    assert!(
+        old.is_err(),
+        "1-40 is outside the body, so doc(get) refuses it: {old:?}"
+    );
 }
 
 async fn site_context(fx: &Fx) -> bool {
