@@ -139,7 +139,12 @@ impl Tool for Librarian {
         {
             tracing::warn!("audit verb stamp failed: {e}");
         }
-        match action {
+        // Computed before dispatch consumes `args`. A key the schema does not declare is
+        // dropped by every action, so the caller must be told or `path="<one file>"` looks
+        // like a file-scoped run. docs/issues/2026-10-30-librarian-reindex-link-scan-and-audit-doc-refs-accept-a-path-argument-and-run-project-wide-without-saying-so.md
+        let ignored = undeclared_keys(&args, &self.input_schema());
+        let action = action.to_owned();
+        let mut out = match action.as_str() {
                 "context"            => super::context::call(ctx, args).await,
                 "reindex"            => super::reindex::call(ctx, args).await,
                 "status"             => super::status::call(ctx, args).await,
@@ -154,8 +159,56 @@ impl Tool for Librarian {
                 other => Err(LibrarianRecoverableError::new(format!(
                     "unknown action '{other}' — expected one of: context, reindex, status, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree, audit_log"
                 ))),
-            }
+            }?;
+        if let (false, Some(obj)) = (ignored.is_empty(), out.as_object_mut()) {
+            obj.insert(
+                "ignored_params".into(),
+                json!({ "keys": ignored, "hint": ignored_params_hint(&action, &ignored) }),
+            );
+        }
+        Ok(out)
     }
+}
+
+/// Top-level keys of `args` that `schema` does not declare, sorted.
+///
+/// `workspace` is exempt: the server injects it into the advertised schema of every
+/// pinnable tool after `input_schema()` returns (`CodeScoutServer::inject_workspace_param`),
+/// so the raw schema never lists it.
+fn undeclared_keys(args: &Value, schema: &Value) -> Vec<String> {
+    let (Some(given), Some(declared)) = (args.as_object(), schema["properties"].as_object()) else {
+        return Vec::new();
+    };
+    let mut keys: Vec<String> = given
+        .keys()
+        .filter(|k| k.as_str() != "workspace" && !declared.contains_key(k.as_str()))
+        .cloned()
+        .collect();
+    keys.sort();
+    keys
+}
+
+/// Say that `keys` had no effect and, for `path`, name what the action offers instead.
+fn ignored_params_hint(action: &str, keys: &[String]) -> String {
+    let list = keys
+        .iter()
+        .map(|k| format!("`{k}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut hint = format!(
+        "Not a parameter of librarian: {list}. It was ignored; action={action} ran with its declared parameters only."
+    );
+    if keys.iter().any(|k| k == "path") {
+        hint.push_str(match action {
+            "audit_doc_refs" => " To restrict the scan, pass paths=[\"<glob>\"].",
+            "reindex" => {
+                " reindex has no per-file scope; `repo` restricts it to one workspace root."
+            }
+            "link_scan" => " link_scan has no per-file scope; `scope` and `limit` bound it.",
+            _ => "",
+        });
+    }
+    hint
 }
 
 #[cfg(test)]
@@ -301,6 +354,40 @@ mod tests {
             .query_row("SELECT verb FROM audit_ctx", [], |r| r.get(0))
             .unwrap();
         assert_eq!(verb.as_deref(), Some("librarian.tracker_design"));
+    }
+    /// BUG 048fc80383fc1a75: `path="<one file>"` is not a `librarian` parameter. The three
+    /// actions ran project-wide and the response never said the key was dropped.
+    #[tokio::test]
+    async fn an_undeclared_key_is_reported_as_ignored_and_a_declared_one_is_not() {
+        let ctx = mk_ctx();
+        let out = Librarian
+            .call(
+                &ctx,
+                json!({"action": "tracker_design", "path": "docs/x.md", "workspace": "/w"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            out["ignored_params"]["keys"],
+            json!(["path"]),
+            "`path` is undeclared and `workspace` is injected by the server: {out}"
+        );
+        let clean = Librarian
+            .call(&ctx, json!({"action": "tracker_design", "intent": "x"}))
+            .await
+            .unwrap();
+        assert!(
+            clean.get("ignored_params").is_none(),
+            "a declared key must not be reported: {clean}"
+        );
+    }
+
+    #[test]
+    fn the_hint_for_path_names_what_each_action_offers_instead() {
+        let keys = vec!["path".to_string()];
+        assert!(ignored_params_hint("audit_doc_refs", &keys).contains("paths=["));
+        assert!(ignored_params_hint("reindex", &keys).contains("`repo`"));
+        assert!(ignored_params_hint("link_scan", &keys).contains("`scope`"));
     }
 
     /// `tracker_design`'s response tells the caller, twice (`archetype_detail`
