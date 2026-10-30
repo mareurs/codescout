@@ -1,13 +1,13 @@
 ---
 id: '37bfe6d301006240'
 kind: bug
-status: open
+status: fixed
 title: The labelled-sample spec says a packet has no date, but packet.py keeps bare calendar dates by design
 owners:
 - marius
 tags:
 - cluster/doc-contradicted-by-code
-closed: ''
+closed: 2026-10-30
 opened: 2026-10-24
 related: []
 severity: low
@@ -55,16 +55,15 @@ None. The cause is a wording difference between two texts.
 
 ## Fix
 
-Open. One of these two, the operator's call:
+Fixed 2026-10-30 by narrowing the spec, the first of the two options. The code stays as it is, so no packet hash changes. The *Blinding* bullet of `docs/superpowers/specs/2026-09-29-system1-labelled-sample-design.md` § *Packet rule* now says: no session id (a uuid becomes `<uuid-N>`), no API id (`<id-N>`) and no timestamp with hours, minutes and seconds (`<timestamp-N>`); a bare calendar date is kept, in prose and in file names.
 
-- Narrow the spec's *Blinding* bullet to match the code: "no session id, no uuid, no timestamp with a time of day."
-- Widen the code to blind bare dates too. That changes every packet's sha256, so any label bound to a packet hash would stop verifying. Do not choose this once labels exist.
+Checked against the code on 2026-10-30: the reproduction above still prints both bare dates and `2026-09-20 10:11` unchanged, and both full timestamps become `<timestamp-N>`.
 
-The intervention-judge design (`docs/superpowers/specs/2026-10-24-intervention-judge-design.md`) follows the code and says so.
+The operator chose this option on 2026-10-30, when they answered "ok, go" to a recommendation that named it. The other option, widening the code, stays unchosen: the record advises against it once labels exist.
 
 ## Tests added
 
-None. This is a wording defect in a spec. A test would pin the code's behaviour, which `tests/test_measure_packet.py` may already do. Whether it does was not checked.
+None new. `tests/test_measure_packet.py::Blinding::test_a_bare_calendar_date_is_kept_and_only_a_date_with_a_time_is_blinded` (line 835) already pins the code's side: a bare date and a `HH:MM` value stay, a `HH:MM:SS` value is blinded, and the module docstring says so. The spec now agrees with that test.
 
 ## Workarounds
 

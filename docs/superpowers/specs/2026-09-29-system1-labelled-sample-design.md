@@ -136,8 +136,10 @@ packet it was given.
   message, and the 6 messages are the subagent's own.
 - **Limits:** 20,000 characters in total, trimming the oldest material first. Only entries strictly
   before the unit are included; a test plants a later marker to prove it.
-- **Blinding:** no session id, date or absolute timestamp. Messages are shown as `−6 … −1`. A private
-  key file maps case ids to units.
+- **Blinding:** no session id (a uuid becomes `<uuid-N>`), no API id (`<id-N>`) and no timestamp with
+  hours, minutes and seconds (`<timestamp-N>`). A bare calendar date is kept, in prose and in file names;
+  the `scripts/measure/packet.py` module docstring records that choice (bug `37bfe6d301006240`). Messages
+  are shown as `−6 … −1`. A private key file maps case ids to units.
 - **Privacy:** every packet is scanned for GitHub-token-shaped strings before rendering, and rendering
   refuses on any match.
 
