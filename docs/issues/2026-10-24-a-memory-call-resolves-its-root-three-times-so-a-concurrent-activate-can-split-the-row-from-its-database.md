@@ -71,6 +71,16 @@ Pin the project (`workspace=`) on memory calls when several callers share the se
 
 Read `cross_embed_memory`, `create_semantic_anchors` and the `remember`/`recall`/`forget` arms of `Memory::call` in `src/tools/memory/mod.rs`; decide the no-project behaviour, then thread one resolved root through.
 
+**Re-read 2026-10-30, a narrower fix exists, and its test is the blocker.** Read this session: `cross_embed_memory` and `create_semantic_anchors` (`src/tools/memory/mod.rs`), `semantic_project_key`, `with_project_at`, `ensure_resident`, `memory_embedder_for_with`, `semantic_memory_store_for_backend`, `project_root`. Not run.
+
+- Both functions call `with_project_at(ctx.workspace_override, ..)` FIRST, and `with_project_at(None)` already errors `No active project`. So the no-project question the section above raises does not arise inside these two functions: no call reaches the embedder or the store without a default.
+- `AgentInner.default_workspace_root` is a field, and `activate` sets it. `ensure_resident(root)` returns at once when `root` is resident, and `with_project_at(Some(workspace_root))` takes the workspace's focused project, the same one `None` takes. So one new accessor, `Agent::default_workspace_root()`, read once at the top of each function and used as the pin for every later call, would make all resolutions agree. The sub-project concern above does not apply, because the pin is the WORKSPACE root and not the focused project's root.
+- The call is then consistent for A even after a concurrent `activate(B)`: `activate` clears the registry, and `ensure_resident(A)` reloads A. This keeps the documented rule that a store never outlives an `activate`, because the pin lives for one call.
+- Limit: `switch_focus` inside the same workspace still moves the focused project between reads. The pin does not cover it.
+- `create_semantic_anchors` also reads `require_project_root_for` and `code_search`, so it has more than three resolutions.
+
+**Why it was not built: no test can see the fix.** Under `cfg(test)`, `memory_embedder_for` returns an installed double before it resolves any root, and `semantic_memory_store_for_backend` does the same for the store. A test through `cross_embed_memory` therefore cannot observe which root either one resolved, so reverting the fix would leave every such test green. A test of the new accessor alone would not show that the two call sites use it. A real test needs the `_with` / `_backend` seams (which take an injected resolver) to be reachable from the memory call path, which is a larger change. Decide whether to build that seam first or accept a weak test.
+
 ## References
 
 - `src/tools/memory/mod.rs`
