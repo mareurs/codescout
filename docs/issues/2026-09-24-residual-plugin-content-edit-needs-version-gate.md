@@ -27,7 +27,7 @@ Remaining work split out of `docs/issues/archive/2026-08-17-plugin-content-edit-
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+Not started. Re-checked 2026-10-30 in the `claude-plugins` repo: `scripts/pre-push-guard.sh` Guard 2 (added 2026-08-28) runs `check-profile-parity.sh` when a push touches a `plugin.json`, so it covers a version bump without profile parity, not a content edit without a bump. The parent's option (a), a `content_matches_source` field, appears nowhere in the repo (grep, 0 matches). Options (b) and (c) were not searched for beyond the first 70 lines of the guard, so they are not shown absent. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
 
 ## References
 

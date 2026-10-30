@@ -27,7 +27,7 @@ Remaining work split out of `docs/issues/archive/2026-08-31-append-entry-high-wa
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+Not started. Re-read at HEAD 2026-10-30: `scan_entry_defined_twice` (`src/librarian/tools/doctor.rs`) calls `duplicate_definitions` over a ledger's `## PREFIX-N` headings, so a params ledger's `| PREFIX-N |` index rows are not read by it. Gap (2) stands as the parent states it. Not re-read and not run: Component B's upstream guard in `append_entry`. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
 
 ## References
 

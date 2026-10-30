@@ -32,7 +32,7 @@ Remaining work split out of `docs/issues/2026-09-14-the-gate-ordering-guarantee-
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+Not started. Re-checked against HEAD 2026-10-30: CLAUDE.md § Development Commands now says `./scripts/gate.sh` runs its lanes in a `target/` leased for that run from a pool, and routes targeted runs through `scripts/with-slot.sh`. During this session several sessions ran gates and targeted tests through slot leases (`with-slot.sh: CARGO_TARGET_DIR=…/slot-N (leased until this command exits)`), and none of my own gate runs hit a `cli_doc` or lean-lane collision. A bare `cargo test` typed by hand still uses the shared `target/`, and that exposure was not measured. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
 
 ## References
 

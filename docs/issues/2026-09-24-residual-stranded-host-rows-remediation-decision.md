@@ -27,7 +27,7 @@ Remaining work split out of `docs/issues/archive/2026-09-04-a-transported-catalo
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+Not started. Re-checked 2026-10-30: `doctor` reports `host_previous_stranded_rows` only when the catalog carries a `host_previous` id (`src/librarian/tools/doctor.rs`, near line 1342). A `doctor` run on this machine returned no such field (0 matches in the report), so the count cannot be read here. The ~5,566 figure belongs to the machine that holds the transported catalog; whether it is still that number, and which machine that is, was not verified. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
 
 ## References
 
