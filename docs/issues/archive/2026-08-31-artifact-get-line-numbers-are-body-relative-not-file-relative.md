@@ -14,7 +14,7 @@ owner: marius
 related:
 - bug-fix-session-log:F-128
 severity: med
-unverified: TRACKED d003063b9086c779 — start_line/end_line composability with grep/link_scan remains unfixed (deliberately, per F-128) — only headings/occurrences are file-relative now
+unverified: 'CLEARED 2026-10-30. Was: TRACKED d003063b9086c779, start_line/end_line composability with grep/link_scan remained unfixed (deliberately, per F-128). Fixed in e9eaf5f26 (patch-id f36dc893e23baedf7762ea42fbe6f65c25173c42): start_line/end_line now count file lines.'
 ---
 
 ## Summary
