@@ -1,15 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/unclassified
+closed: 2026-10-29
 opened: 2026-10-24
-closed:
-severity: low
 owner: marius
 related:
 - docs/issues/2026-10-18-append-entry-concurrency-test-failed-once-with-database-is-locked-in-catalog-open.md
-tags:
-- cluster/unclassified
-kind: bug
-unverified: 'Not established: that the two 2026-10-18 sightings were this busy_timeout expiring. The mechanism was reproduced only with fsync latency injected by strace; no real-process failure of two codescout servers opening one catalog has been observed, and what a server does after a failed open was not read.'
+severity: low
+unverified: 'Not established: that the two 2026-10-18 sightings were this busy_timeout expiring; nothing recorded them. The mechanism was reproduced only with fsync latency injected by strace. After the fix, every open succeeded in the six injected repeats of the two-process cold-start experiment of 2026-10-29 (3 s per fsync); the failures there were at each process''s first write, which is filed as 4012ad02db866d4d and accepted by the operator. The pre-rework test bodies were not re-run under injection against the fixed code, so there is no same-body before/after. What a server does after a failed open was not read. The commits (e2c0b85c3, d7d29171f) are local, not pushed.'
 ---
 
 # BUG: `Catalog::open` takes the write lock and commits fsync'd trigger DDL on every open, so two concurrent opens of one catalog can fail with "database is locked" when a commit stalls
@@ -106,7 +106,8 @@ None needed for the tests after the rework. For a real pair of servers: not know
 
 ## Resume
 
-1. Decide whether to close: the open path no longer writes or locks on an up-to-date catalog. The remaining injected-fsync failure is in `append_entry` and `allocate_entry_id`: 8 of 8 runs failed at HEAD `e312bdc20` on 2026-10-29, none inside `Catalog::open`. It is filed as `docs/issues/2026-10-29-two-concurrent-catalog-writes-exceed-the-5-s-busy-timeout-when-fsync-takes-3-s.md`.
+0. Closed 2026-10-29 as `fixed` at the operator's request; see `unverified:` for what is not shown.
+1. (Done, see 0) Decide whether to close: the open path no longer writes or locks on an up-to-date catalog. The remaining injected-fsync failure is in `append_entry` and `allocate_entry_id`: 8 of 8 runs failed at HEAD `e312bdc20` on 2026-10-29, none inside `Catalog::open`. It is filed as `docs/issues/2026-10-29-two-concurrent-catalog-writes-exceed-the-5-s-busy-timeout-when-fsync-takes-3-s.md`.
 2. Optionally re-run both strace reproductions with the pre-rework test bodies for a true before/after.
 3. Keep `migrations_current` in step with `apply_migrations_in_txn` when adding a migration.
 
