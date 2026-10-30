@@ -6,6 +6,7 @@ title: The MCP reindex wrote each embedded chunk to Qdrant as its own durable re
 tags:
 - cluster/unclassified
 closed: 2026-10-30
+opened: 2026-10-30
 severity: high
 unverified: The end-to-end figure is one reindex of 2,184 chunks compared with a logged linear model (R-squared 0.85), not with the old binary on the same work. The backfill and index_repo paths are batched and tested but their speedup was not measured end to end.
 ---
