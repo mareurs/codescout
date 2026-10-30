@@ -60,7 +60,7 @@ None.
 
 ## Resume
 
-Decide between the persistent negative cache and a fixture-only language filter.
+Re-verified 2026-10-30 (no code changed): `git ls-files '*.kt' '*.java' '*.kts'` lists 14 files, all under `tests/fixtures/{kotlin,java}-library`; `search_project_symbols` (`src/tools/symbol/symbols.rs`) takes its language set from an unfiltered `ignore` walk, so tracked fixtures select kotlin and java. Breaker constants are 5 failures / 60 s (`src/lsp/manager.rs`). Both fixes named above change which languages get an LSP answer or add persisted state, so the choice is a design decision, not made here.
 
 ## References
 
