@@ -5,6 +5,7 @@ status: open
 title: 'grep has no wall-clock budget: a search rooted at a parent of many repos ran 386 s, one at $HOME ran 135 s'
 tags:
 - cluster/unclassified
+opened: 2026-10-30
 ---
 
 # BUG: grep has no wall-clock budget: a search rooted at a parent of many repos ran 386 s, one at $HOME ran 135 s
