@@ -37,6 +37,7 @@ LIVE_CONTROL = {"image": {"codescout": {
     "sha": GIT_FULL, "binary_sha256": ARM_SHA,
     "version_json": {"version": "0.15.0", "git_sha": "f9b0fc9", "git_sha_full": GIT_FULL}}}}
 PYTHON = str(Path(sys.executable).resolve())
+NODE = "v22.12.0"
 STAGE1_ORDER = run.stage1_order(20261027)
 
 
@@ -111,8 +112,11 @@ class Env:
         (self.s5.parent.parent / "core").mkdir(parents=True)
         self.s5.mkdir(parents=True)
         (self.s5 / "grade.mjs").write_text(
-            "import { a } from './docker.mjs';\nimport {\n  b\n} from '../../core/decide.mjs';\n")
+            "import { a } from './docker.mjs';\nimport {\n  r\n} from './build-task.mjs';\n")
         (self.s5 / "docker.mjs").write_text("export const a = 1;\n")
+        # A two-hop import: grade.mjs -> build-task.mjs -> core/decide.mjs (as on the host).
+        (self.s5 / "build-task.mjs").write_text(
+            "import { b } from '../../core/decide.mjs';\nexport const r = b;\n")
         (self.s5.parent.parent / "core" / "decide.mjs").write_text("export const b = 2;\n")
         self.data = self.tmp / "data"
         for t in SELECTED:
@@ -206,7 +210,8 @@ class Env:
                     inspect=self.inspect, run_cli=lambda path: CLI_VERSION + "\n",
                     verify_fn=self.verify, docker=self.docker,
                     python_version=lambda: "3.14.8", executable=sys.executable,
-                    python_on_path=lambda: PYTHON, frozen_root=self.frozen, s5_dir=self.s5)
+                    python_on_path=lambda: PYTHON, frozen_root=self.frozen, s5_dir=self.s5,
+                    node_version=lambda: NODE)
         args.update(kw)
         with contextlib.redirect_stderr(io.StringIO()):
             return freeze_stage2.freeze_stage2(**args)
@@ -218,7 +223,8 @@ class Env:
 
     def check(self, reg, **kw):
         args = dict(data=self.run_data, tool_dir=self.tool, inspect=self.inspect, s5_dir=self.s5,
-                    docker=self.docker, tasks_root=self.data / "tasks")
+                    docker=self.docker, runner_tasks_root=self.data / "tasks",
+                    node_version=lambda: NODE)
         args.update(kw)
         with contextlib.redirect_stderr(io.StringIO()):
             registration.check(reg, **args)
@@ -303,7 +309,7 @@ class RecordsTest(Case):
         g = reg["grader_inputs"]
         self.assertEqual(g["s5_dir"], str(self.env.s5.resolve()))
         self.assertEqual(sorted(Path(p).name for p in g["grade_mjs"]),
-                         ["decide.mjs", "docker.mjs", "grade.mjs"])  # the import closure
+                         ["build-task.mjs", "decide.mjs", "docker.mjs", "grade.mjs"])
         s5_out = self.env.data / "tasks" / "cs-p08" / "build" / "s5" / "tasks" / "cs-p08"
         self.assertEqual(g["tasks"]["cs-p08"], {
             "hidden_tree": frozen.tree_sha256(s5_out / "hidden"),
@@ -376,6 +382,14 @@ class RecordsTest(Case):
         self.assertIn("keep Stage 1's GO.json history: replace GO.json, do not delete "
                       "rows.jsonl", go["note"])
         self.assertIn("GO.pilot.json", reg["go_templates"]["extension"]["note"])
+        for part in freeze_stage2.PARTS:
+            self.assertIn("the extension may run before or after the pilot (unconditional by "
+                          "ruling); never edit the tool dir, never pull claude-plugins, keep "
+                          "sab-* images until analysis has run; run `freeze_stage2.py --check "
+                          "--run-data <study>` before each part",
+                          reg["go_templates"][part]["note"])
+        self.assertEqual(reg["node_version"], NODE)
+        self.assertEqual(reg["tasks_root"], str((self.env.data / "tasks").resolve()))
 
 
 class RefusalTest(Case):
@@ -510,6 +524,21 @@ class RefusalTest(Case):
                                                    oomKills=0))
         run._event(extra, "stop", reason="plan complete")
         self.refused("not exactly Stage 1", run_data=extra)
+    def test_a_stage1_row_without_a_cost_refuses(self):
+        d = self.env.tmp / "study-nocost"
+        d.mkdir()
+        shutil.copy(self.env.run_data / "setup-manifest.json", d)
+        self.env.stage1_journal(d, STAGE1_ORDER[:-1])
+        last = STAGE1_ORDER[-1]
+        run._event(d, "start", plan_sha256="s1b", budget={"per_call_usd": 2.0})
+        run._event(d, "call", runId=run.run_id(last))
+        run._append(d / run.ROWS, run.make_row(last, "s", outcome="dev-scored", costUsd=None,
+                                               grade={"pass": True}))
+        run._event(d, "stop", reason="plan complete")
+        self.refused("not final or not development rows", run_data=d)
+
+    def test_node_must_answer(self):
+        self.refused("node --version", node_version=lambda: None)
 
     def test_main_prints_refused_and_exits_1(self):
         (self.env.tool / "a.py").write_text("dirty\n")
@@ -566,45 +595,90 @@ class WriteOnceTest(Case):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["data"], self.env.run_data.resolve())
         self.assertFalse(calls[0]["files"])
-
-
 class RecheckTest(Case):
-    """Round 1 (I-1, I-2, I-3): what run_batch, analyze_study and --check re-verify."""
+    """Rounds 1-2 (I-1, I-2, I-3, N-1, m-1..m-6): what run_batch, analyze_study and --check
+    re-verify."""
 
     def setUp(self):
         super().setUp()
         self.env.freeze()
         self.env.commit("register")
         self.registration = self.reg()
+        self.path = self.env.tool / freeze_stage2.REGISTRATION
 
-    def run_batch(self, part="pilot", data=None):
+    def run_batch(self, part="pilot", data=None, registration=None, **kw):
         plan = run.load_plan(freeze_stage2.plan_file(self.env.run_data, part))
+        args = dict(inspect=self.env.inspect, tool_dir=self.env.tool, s5_dir=self.env.s5,
+                    tasks_root=self.env.data / "tasks", node_version=lambda: NODE)
+        args.update(kw)
         with contextlib.redirect_stderr(io.StringIO()):
             run.run_batch(plan, stage3.stage3_budget(), data or self.env.run_data,
-                          dry_run=False, registration=self.env.tool / freeze_stage2.REGISTRATION,
-                          inspect=self.env.inspect, tool_dir=self.env.tool, s5_dir=self.env.s5)
+                          dry_run=False, registration=registration or self.path, **args)
 
     def assertBatchRefused(self, pattern, **kw):
         with self.assertRaisesRegex(run.Refused, pattern):
             self.run_batch(**kw)
 
+    def resign(self, body):
+        body = {k: v for k, v in body.items() if k != "registration_sha256"}
+        reg = dict(body, registration_sha256=run.registration_digest(body))
+        self.path.write_text(json.dumps(reg, indent=2) + "\n")
+        return reg
+
     def test_a_matching_host_passes_to_the_go_check(self):
         self.assertBatchRefused("GO.json is missing")  # every registration check passed
         self.env.check(self.registration, deep=True)
+
+    # -- N-1a: the committed registration --------------------------------------------------
+
+    def test_an_uncommitted_registration_refuses(self):
+        git(self.env.repo, "rm", "-q", "--cached", str(self.path))
+        git(self.env.repo, "commit", "-q", "-m", "unregister")
+        self.assertBatchRefused("not committed at HEAD")
+
+    def test_a_registration_edited_after_its_commit_refuses(self):
+        self.resign(dict(self.registration, bootstrap_seed=1))  # digest-valid, not committed
+        self.assertBatchRefused("differs from its committed bytes")
+
+    def test_a_registration_at_another_path_refuses(self):
+        other = self.env.tmp / "copy.json"
+        shutil.copy(self.path, other)
+        self.assertBatchRefused("the registration must be", registration=other)
+
+    # -- m-4: unconditional for a Stage 3 plan ----------------------------------------------
+
+    def test_a_stage3_plan_under_an_incomplete_registration_refuses(self):
+        for drop in ("stage", "node_version", "grader_inputs"):
+            with self.subTest(drop):
+                self.resign({k: v for k, v in self.registration.items() if k != drop})
+                self.env.commit(f"no {drop}")
+                self.assertBatchRefused("not a complete Stage 2 registration")
+
+    # -- host drift -------------------------------------------------------------------------
 
     def test_a_changed_manifest_copy_refuses(self):
         p = self.env.run_data / "setup-manifest.json"
         p.write_text(p.read_text() + " ")
         self.assertBatchRefused("setup-manifest.json hashes")
 
-    def test_a_retagged_image_refuses(self):
-        self.env.inspect.rebuilt.add("sab-arm-cs-p08:f9b0")
-        self.assertBatchRefused("sab-arm-cs-p08:f9b0 is .*registered")
+    def test_a_retagged_arm_or_run_image_refuses(self):
+        for tag in ("sab-arm-cs-p08:f9b0", "sab-run-tokio-rs__tokio-6603:f9b0"):
+            with self.subTest(tag):
+                self.env.inspect.rebuilt = {tag}
+                self.assertBatchRefused(f"{tag} is .*registered")
 
-    def test_a_changed_tool_file_refuses(self):
-        (self.env.tool / "a.py").write_text("a = 9\n")
-        self.env.commit()
-        self.assertBatchRefused("tool file a.py changed")
+    def test_every_registered_tool_file_is_compared(self):
+        names = sorted(self.registration["files"])
+        self.assertEqual(len(names), 4)
+        for name in names:
+            with self.subTest(name):
+                p = self.env.tool / name
+                old = p.read_bytes()
+                p.write_bytes(old + b"\n")
+                self.env.commit(f"edit {name}")
+                self.assertBatchRefused(f"tool file {name} changed")
+                p.write_bytes(old)
+                self.env.commit(f"restore {name}")
         (self.env.tool / "b.py").write_text("")
         self.env.commit()
         self.assertBatchRefused("differ from the registered set")
@@ -618,12 +692,38 @@ class RecheckTest(Case):
         shutil.copytree(self.env.run_data, other)
         self.assertBatchRefused("not the registered run_data", data=other)
 
+    def test_another_tasks_root_refuses(self):
+        # m-6: the runner loads bundles from tasks.DATA / "tasks" (SAB_DATA).
+        self.assertBatchRefused("the runner loads tasks from", tasks_root=self.env.tmp / "x")
+
+    def test_changed_task_files_refuse_at_batch_time(self):
+        # m-2: the four cheap hashes, without docker.
+        root = self.env.data / "tasks"
+        for t, rel, key in (("cs-p08", "bundle.json", "bundle_sha256"),
+                            ("cs-p04", "controls/controls.json", "controls_sha256"),
+                            ("cs-p07", "controls/qdrant-dump.jsonl", "template_dump_sha256"),
+                            (FOREIGN[1], "build/prompt.txt", "prompt_sha256"),
+                            ("cs-p15", "build/s5/tasks/cs-p15/prompt.txt", "prompt_sha256")):
+            with self.subTest(key=key, task=t):
+                p = root / t / rel
+                old = p.read_bytes()
+                if rel == "bundle.json":
+                    p.write_text(json.dumps(dict(json.loads(old), note="edited")))
+                else:
+                    p.write_bytes(old + b" ")
+                self.assertBatchRefused(f"{t}: {key} changed after the freeze")
+                p.write_bytes(old)
+
+    def test_another_node_refuses(self):
+        self.assertBatchRefused("node is v23", node_version=lambda: "v23.0.0")
+
     def test_changed_grader_inputs_refuse(self):
         hidden = (self.env.data / "tasks" / "cs-p08" / "build" / "s5" / "tasks" / "cs-p08"
                   / "hidden" / "tests" / "it.rs")
         hidden.write_text("// edited\n")
         self.assertBatchRefused("cs-p08: grader inputs changed")
         hidden.write_text("// hidden cs-p08\n")
+        # The SECOND hop of the import closure (grade -> build-task -> core/decide).
         (self.env.s5.parent.parent / "core" / "decide.mjs").write_text("export const b = 3;\n")
         self.assertBatchRefused("decide.mjs changed")
         (self.env.s5.parent.parent / "core" / "decide.mjs").write_text("export const b = 2;\n")
@@ -631,42 +731,101 @@ class RecheckTest(Case):
         rec.write_text(rec.read_text() + " ")
         self.assertBatchRefused(f"{FOREIGN[2]}: grader inputs changed")
 
-    def test_analyze_study_rechecks_code_and_inputs(self):
-        path = self.env.tool / freeze_stage2.REGISTRATION
+    # -- analyze_study ----------------------------------------------------------------------
 
-        def main():
-            with contextlib.redirect_stdout(io.StringIO()):
-                analyze_study.main(["--data", str(self.env.run_data), "--tasks-root",
-                                    str(self.env.data / "tasks"), "--registration", str(path)],
-                                   verify=self.env.verify, inspect=self.env.inspect,
-                                   tool_dir=self.env.tool)
-        main()
+    def analyze(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            analyze_study.main(["--data", str(self.env.run_data), "--tasks-root",
+                                str(self.env.data / "tasks"), "--registration", str(self.path)],
+                               verify=self.env.verify, inspect=self.env.inspect,
+                               tool_dir=self.env.tool)
+
+    def test_analyze_study_rechecks_code_and_inputs(self):
+        self.analyze()
         (self.env.tool / "a.py").write_text("RESAMPLES = 10\n")
         self.env.commit()
         with self.assertRaisesRegex(SystemExit, "tool file a.py changed"):
-            main()
+            self.analyze()
+
+    def test_analyze_study_refuses_rows_of_another_registration(self):
+        # N-1b: Stage 1's start (no registration, dev runs) is excluded; a Stage 3 start
+        # under THIS registration is fine; one under another registration is refused.
+        plan = run.load_plan(freeze_stage2.plan_file(self.env.run_data, "pilot"))
+        run._event(self.env.run_data, "start", plan_sha256=run.plan_sha256(plan),
+                   budget={"per_call_usd": 5.0},
+                   registration_sha256=self.registration["registration_sha256"])
+        run._event(self.env.run_data, "stop", reason="plan complete")
+        self.analyze()
+        run._event(self.env.run_data, "start", plan_sha256=run.plan_sha256(plan),
+                   budget={"per_call_usd": 5.0}, registration_sha256="f" * 64)
+        run._event(self.env.run_data, "stop", reason="plan complete")
+        with self.assertRaisesRegex(SystemExit, "rows of another registration.*" + "f" * 64):
+            self.analyze()
+
+    def test_stage1_is_recognised_by_its_plan_hash_or_its_dev_runs(self):
+        s1 = run.stage1_order(20261027)
+        events = [{"event": "start", "seq": 1, "plan_sha256": "s1-hash"},
+                  {"event": "call", "seq": 2, "runId": run.run_id(s1[0])}]
+        reg = {"registration_sha256": "r"}
+        self.assertEqual(registration.foreign_starts(events, reg, self.env.tool), [])
+        no_calls = [{"event": "start", "seq": 1, "plan_sha256": "other"}]
+        self.assertEqual(len(registration.foreign_starts(no_calls, reg, self.env.tool)), 1)
+        rec = json.loads((self.env.tool / "stage1-registration.json").read_text())
+        (self.env.tool / "stage1-registration.json").write_text(json.dumps(
+            dict(rec, plan_sha256="other")))
+        self.assertEqual(registration.foreign_starts(no_calls, reg, self.env.tool), [])
+
+    # -- --check ----------------------------------------------------------------------------
+
+    def check(self):
+        before = sorted(str(p) for p in self.env.tmp.rglob("*"))
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            rc = freeze_stage2.main(["--check", "--tool-dir", str(self.env.tool),
+                                     "--data", str(self.env.data),
+                                     "--run-data", str(self.env.run_data)],
+                                    inspect=self.env.inspect, docker=self.env.docker,
+                                    s5_dir=self.env.s5, node_version=lambda: NODE)
+        self.assertEqual(sorted(str(p) for p in self.env.tmp.rglob("*")), before)
+        return rc, err.getvalue()
 
     def test_the_check_mode_rechecks_deeply_and_writes_nothing(self):
-        def check():
-            before = sorted(str(p) for p in self.env.tmp.rglob("*"))
-            with contextlib.redirect_stdout(io.StringIO()), \
-                    contextlib.redirect_stderr(io.StringIO()) as err:
-                rc = freeze_stage2.main(["--check", "--tool-dir", str(self.env.tool),
-                                         "--data", str(self.env.data),
-                                         "--run-data", str(self.env.run_data)],
-                                        inspect=self.env.inspect, docker=self.env.docker,
-                                        s5_dir=self.env.s5)
-            self.assertEqual(sorted(str(p) for p in self.env.tmp.rglob("*")), before)
-            return rc, err.getvalue()
-        self.assertEqual(check()[0], 0)
+        self.assertEqual(self.check()[0], 0)
         self.env.docker.listing_gen = 1  # the template volume's bytes changed
-        rc, err = check()
+        rc, err = self.check()
         self.assertEqual(rc, 1)
         self.assertIn("template_volume differs", err)
         self.env.docker.listing_gen = 0
         self.env.docker.binary["sab-arm-cs-p01:f9b0"] = "2" * 64
-        rc, err = check()
-        self.assertIn("arm_binary_sha256 differs", err)
+        self.assertIn("arm_binary_sha256 differs", self.check()[1])
+        self.env.docker.binary.clear()
+        self.assertEqual(self.check()[0], 0)
+
+    def test_the_check_mode_rechecks_frozen_trees_and_scans_them(self):
+        late = self.env.frozen / "plugins" / "superpowers" / "late.md"
+        late.write_text("x")
+        rc, err = self.check()
+        self.assertEqual(rc, 1)
+        self.assertIn("frozen inputs changed after the freeze", err)
+        late.unlink()
+        # A secret slipped in while the registered tree hash was kept in step.
+        readme = self.env.frozen / "plugins" / "superpowers" / "README.md"
+        readme.write_text("PGPASSWORD=s3cr3t-pw psql\n")
+        reg = json.loads(self.path.read_text())
+        reg["frozen"]["trees"]["plugins/superpowers"] = frozen.tree_sha256(readme.parent)
+        self.resign(reg)
+        self.env.commit("resigned")
+        rc, err = self.check()
+        self.assertEqual(rc, 1)
+        self.assertIn("secret scan hit", err)
+
+    def test_the_check_mode_requires_the_committed_registration(self):
+        self.resign(dict(self.registration, bootstrap_seed=1))
+        rc, err = self.check()
+        self.assertEqual(rc, 1)
+        self.assertIn("committed bytes", err)
+
+
 
 
 if __name__ == "__main__":

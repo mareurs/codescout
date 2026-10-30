@@ -1350,7 +1350,8 @@ def _dry_run(plan, budget, data):
 
 def run_batch(plan, budget, data, dry_run, *, registration=None, docker=None, exec_cli=None,
               load_task=None, manifest=None, token_reader=None, clock=time.monotonic,
-              timeout=RUN_TIMEOUT_S, inspect=None, tool_dir=None, s5_dir=None):
+              timeout=RUN_TIMEOUT_S, inspect=None, tool_dir=None, s5_dir=None, tasks_root=None,
+              node_version=None):
     """Run `plan` in order, one spec at a time. Keyword-only additions to the brief's signature
     are the registration the batch runs under (required to spend: load_registration, and GO.json
     must name its registration_sha256; a Stage 2 registration is also re-checked against the
@@ -1367,11 +1368,16 @@ def run_batch(plan, budget, data, dry_run, *, registration=None, docker=None, ex
         raise Refused("a batch that spends runs under a registration: pass --registration")
     reg = load_registration(registration, plan)  # before any side effect
     check_registered_budget(reg, plan, budget)  # N-2
-    if reg.get("stage") == 2:  # Task 11 round 1 (I-1, I-2, I-3): the host is what was frozen
+    if plan_reps(plan) == "stage3" or reg.get("stage") == 2:
+        # Task 11 rounds 1-2 (I-1, I-2, I-3, N-1a, m-2, m-4..m-6): for every Stage 3 plan,
+        # whatever the registration says it is, the registration is the committed one and the
+        # host is what was frozen; a registration without those keys is refused.
         import registration as regcheck  # lazy: registration imports freeze_stage1 -> run
         try:
+            regcheck.check_committed(registration, tool_dir or HERE)
             regcheck.check(reg, data=data, tool_dir=tool_dir or HERE,
-                           inspect=inspect or tasks._inspect_image, s5_dir=s5_dir)
+                           inspect=inspect or tasks._inspect_image, s5_dir=s5_dir,
+                           runner_tasks_root=tasks_root, node_version=node_version)
         except regcheck.Mismatch as e:
             raise Refused(f"the registration no longer matches the host: {e}")
     go = check_go(data, plan, budget, reg["registration_sha256"])

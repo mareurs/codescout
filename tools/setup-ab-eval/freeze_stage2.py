@@ -97,6 +97,9 @@ ZERO_CALLS_RULE = "a result, reported as zero_codescout_runs; never invalid"
 COMPARISON_NOTE = "per model; full - bare is 'the setup', never 'codescout'"
 PILOT_GO_NOTE = ("keep Stage 1's GO.json history: replace GO.json, do not delete rows.jsonl "
                  "(move Stage 1's GO.json aside as GO.stage1.json first)")
+RUNBOOK_NOTE = ("the extension may run before or after the pilot (unconditional by ruling); never "
+                "edit the tool dir, never pull claude-plugins, keep sab-* images until analysis "
+                "has run; run `freeze_stage2.py --check --run-data <study>` before each part")
 
 Refused = freeze_stage1.Refused
 sha256_file = freeze_stage1.sha256_file
@@ -257,7 +260,7 @@ def go_templates(reg, tool_dir, python):
                f"--spent {b['spent_usd']} --per-call {b['per_call_usd']} "
                f"--reserve {b['reserve_usd']}")
         note = ("acknowledged_stops: list the id of the previous batch's stop when it was not "
-                "'plan complete' (run.check_latch); run `freeze_stage2.py --check` first")
+                "'plan complete' (run.check_latch); " + RUNBOOK_NOTE)
         if name == "pilot":
             note += "; " + PILOT_GO_NOTE
         else:
@@ -318,7 +321,7 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
                   verify_fn: Callable = tasks.verify, docker: Callable = None,
                   python_version: Callable = platform.python_version,
                   executable=sys.executable, python_on_path: Callable = None,
-                  frozen_root=None, s5_dir=None,
+                  frozen_root=None, s5_dir=None, node_version: Callable = None,
                   pieces_fn: Callable = stage3.registration_pieces) -> dict:
     tool_dir, data = Path(tool_dir), Path(data)
     run_data, manifest_path = Path(run_data).resolve(), Path(manifest_path).resolve()
@@ -384,6 +387,9 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
         graders = registration.grader_inputs(selected, root, s5_dir)
     except (OSError, ValueError, KeyError, registration.Mismatch) as e:
         raise Refused(f"grader inputs: {type(e).__name__}: {e}")
+    node = (node_version or registration.host_node_version)()
+    if not node:
+        raise Refused("`node --version` failed: node runs the private grader")
 
     body = {
         "stage": 2,
@@ -418,6 +424,7 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
         "codescout": codescout,
         "python_version": python_version(),
         "python_executable": str(python),
+        "node_version": node,
     }
     reg = dict(body, registration_sha256=run.registration_digest(body))
     templates = go_templates(reg, tool_dir, python)
@@ -432,7 +439,7 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
         tmp_reg.write_text(json.dumps(reg, indent=2) + "\n")
         _self_check(tmp_reg, tmp_plans, manifest, root,
                     dict(data=run_data, tool_dir=tool_dir, inspect=inspect, s5_dir=s5_dir,
-                         tasks_root=root))
+                         runner_tasks_root=root, node_version=lambda: node))
         for name in PARTS:
             os.replace(tmp_plans[name], plan_file(run_data, name))
         os.replace(tmp_reg, path)
@@ -442,18 +449,21 @@ def freeze_stage2(*, tool_dir, data, manifest_path, run_data, bootstrap_seed, ou
     return dict(reg, go_templates=templates)
 
 
-def check_main(a, *, inspect=tasks._inspect_image, docker=None, s5_dir=None) -> dict:
-    """--check: the committed registration against the live tree, data dir, images, template
-    content, per-image binary, grader inputs and frozen trees. Writes nothing."""
+def check_main(a, *, inspect=tasks._inspect_image, docker=None, s5_dir=None,
+               node_version=None) -> dict:
+    """--check: the committed registration (round 2, N-1a) against the live tree, data dir,
+    images, task files, template content, per-image binary, node, grader inputs and frozen
+    trees. Writes nothing."""
     path = a.registration or (a.tool_dir / REGISTRATION)
     reg = json.loads(Path(path).read_text())
     body = {k: v for k, v in reg.items() if k != "registration_sha256"}
     if reg.get("registration_sha256") != run.registration_digest(body):
         raise Refused(f"{path}: registration_sha256 does not match its content")
     try:
+        registration.check_committed(path, a.tool_dir)
         registration.check(reg, data=a.run_data, tool_dir=a.tool_dir, inspect=inspect,
                            s5_dir=s5_dir, deep=True, docker=docker,
-                           tasks_root=a.data / "tasks")
+                           runner_tasks_root=a.data / "tasks", node_version=node_version)
     except registration.Mismatch as e:
         raise Refused(str(e))
     return {"ok": True, "registration": str(path),

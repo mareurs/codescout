@@ -190,6 +190,24 @@ def template_volume_sha256(template, docker=None, timeout=3600):
             "probe_image_id": image_id}
 
 
+def cheap_task_hashes(task_id, tasks_root=None):
+    """The file hashes of a task's entry that need no docker (Task 11 round 2, m-2: run_batch
+    re-checks them): bundle, controls, template dump, prompt, and a private task's prescan."""
+    root = Path(tasks_root) if tasks_root is not None else tasks.DATA / "tasks"
+    bundle = root / task_id / "bundle.json"
+    rec = json.loads(bundle.read_text())
+    out = {"bundle_sha256": sha256_file(bundle),
+           "controls_sha256": sha256_file(root / task_id / "controls" / "controls.json"),
+           "template_dump_sha256": template_dump_sha256(task_id, root)}
+    if rec.get("kind") == "private":
+        out["prompt_sha256"] = sha256_file(Path(rec["out"]) / "s5" / "tasks" / task_id
+                                           / "prompt.txt")
+        out["prescan_sha256"] = sha256_file(root / task_id / "prescan" / "prescan.json")
+    else:
+        out["prompt_sha256"] = sha256_file(Path(rec["out"]) / "prompt.txt")
+    return out
+
+
 def task_freeze_entry(task_id, tasks_root=None, *, docker=None, inspect=None,
                       with_volume_hash=True):
     """One task's pinned identity for the Stage 2 registration."""
@@ -203,17 +221,9 @@ def task_freeze_entry(task_id, tasks_root=None, *, docker=None, inspect=None,
              "arm_image": {"tag": arm, "id": inspect(arm)[0]},
              "arm_binary_sha256": arm_binary_sha256(arm, docker),
              "template": rec["template"],
-             "template_dump_sha256": template_dump_sha256(task_id, root),
-             "bundle_sha256": sha256_file(bundle),
-             "controls_sha256": sha256_file(root / task_id / "controls" / "controls.json")}
+             **cheap_task_hashes(task_id, root)}
     if with_volume_hash:
         entry["template_volume"] = template_volume_sha256(rec["template"], docker)
-    if rec.get("kind") == "private":
-        entry["prompt_sha256"] = sha256_file(Path(rec["out"]) / "s5" / "tasks" / task_id
-                                             / "prompt.txt")
-        entry["prescan_sha256"] = sha256_file(root / task_id / "prescan" / "prescan.json")
-    else:
-        entry["prompt_sha256"] = sha256_file(Path(rec["out"]) / "prompt.txt")
     return entry
 
 

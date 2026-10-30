@@ -240,9 +240,13 @@ def main(argv=None, *, verify=tasks.verify, inspect=tasks._inspect_image, tool_d
             import registration as regcheck
             try:
                 regcheck.check(reg, data=a.data, tool_dir=tool_dir or HERE, inspect=inspect,
-                               graders=False)
+                               graders=False, runner_tasks_root=a.tasks_root)
             except regcheck.Mismatch as e:
                 raise SystemExit(f"the registration no longer matches the host: {e}")
+        import registration as regcheck
+        foreign = regcheck.foreign_starts(run.read_events(a.data), reg, tool_dir or HERE)
+        if foreign:  # Task 11 round 2 (N-1b): every Stage 3 batch ran under THIS registration
+            raise SystemExit("rows of another registration: " + "; ".join(foreign))
     else:
         if a.seed is None:
             ap.error("--seed is required without --registration")
