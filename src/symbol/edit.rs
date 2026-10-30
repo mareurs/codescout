@@ -336,6 +336,43 @@ pub fn collect_all_name_paths(
     out
 }
 
+/// Name paths a `replace` of `target` ADDED outside the target's own subtree.
+///
+/// Counts occurrences, not membership: the case this exists for is a body that redefines
+/// a symbol already present elsewhere in the file, where the name path is in the pre-edit
+/// set and a set difference would call it unchanged. A name path whose count grew is
+/// reported once per surplus copy. The target's own descendants are the replacement's
+/// content, not extras, so they are skipped. Sorted for a stable response.
+///
+/// docs/issues/2026-10-30-edit-code-replace-with-a-multi-symbol-body-adds-the-extra-symbols-and-the-response-does-not-say-so.md
+pub fn added_outside_target(
+    pre: &[crate::lsp::SymbolInfo],
+    post: &[crate::lsp::SymbolInfo],
+    target: &str,
+) -> Vec<String> {
+    use std::collections::HashMap;
+    fn tally(syms: &[crate::lsp::SymbolInfo], out: &mut HashMap<String, usize>) {
+        for s in syms {
+            *out.entry(s.name_path.clone()).or_insert(0) += 1;
+            tally(&s.children, out);
+        }
+    }
+    let (mut before, mut after) = (HashMap::new(), HashMap::new());
+    tally(pre, &mut before);
+    tally(post, &mut after);
+    let target_prefix = format!("{target}/");
+    let mut added = Vec::new();
+    for (name_path, n_after) in &after {
+        if name_path.starts_with(&target_prefix) {
+            continue;
+        }
+        let surplus = n_after.saturating_sub(before.get(name_path).copied().unwrap_or(0));
+        added.extend(std::iter::repeat(name_path.clone()).take(surplus));
+    }
+    added.sort();
+    added
+}
+
 /// Split a pre-edit name-path set into (everything outside `target`'s subtree,
 /// `target`'s own descendants sorted).
 ///
@@ -977,6 +1014,30 @@ mod tests {
             children: vec![],
             detail: None,
         }
+    }
+
+    /// BUG fe2de4189ce2abbd: a body that redefines a symbol already in the file leaves its
+    /// name path in the pre-edit set, so only a COUNT comparison sees the surplus copy.
+    #[test]
+    fn added_outside_target_counts_a_duplicate_of_an_existing_symbol() {
+        let pre = vec![sym("a"), sym("b")];
+        let post = vec![sym("a"), sym("b"), sym("b"), sym("c")];
+        assert_eq!(added_outside_target(&pre, &post, "a"), vec!["b", "c"]);
+    }
+
+    #[test]
+    fn added_outside_target_ignores_the_targets_own_new_children() {
+        let pre = vec![sym("a"), sym("b")];
+        let mut a = sym("a");
+        a.children = vec![sym("a/helper")];
+        let post = vec![a, sym("b")];
+        assert!(added_outside_target(&pre, &post, "a").is_empty());
+    }
+
+    #[test]
+    fn added_outside_target_is_empty_when_nothing_was_added() {
+        let pre = vec![sym("a"), sym("b")];
+        assert!(added_outside_target(&pre, &pre, "a").is_empty());
     }
 
     fn set(paths: &[&str]) -> HashSet<String> {

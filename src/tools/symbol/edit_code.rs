@@ -216,6 +216,13 @@ impl Tool for EditCode {
             s.push('\n');
             s.push_str(w);
         }
+        if let (Some(s), Some(names)) = (base.as_mut(), result["also_defined"].as_array()) {
+            let names: Vec<&str> = names.iter().filter_map(Value::as_str).collect();
+            s.push_str(&format!(
+                "\nalso defined outside the target: {}",
+                names.join(", ")
+            ));
+        }
         if let (Some(s), Some(h)) = (base.as_mut(), result["hint"].as_str()) {
             s.push('\n');
             s.push_str(h);
@@ -1506,6 +1513,17 @@ impl EditCode {
                 "The edit was written but NOT verified against dropped symbols. \
                  Re-read the file with symbols(path) to confirm it is intact."
             );
+        }
+        // The write added symbols the target did not contain. `replace` is symbol-scoped,
+        // so they were inserted, not reconciled against same-named definitions elsewhere,
+        // and `replaced_lines` alone says nothing about them. Report; never roll back —
+        // a body may add a helper on purpose.
+        if let (Some(pre), Some(post)) = (pre_ast.as_deref(), post_ast.as_deref()) {
+            let target = target_ast_name_path.as_deref().unwrap_or(&sym.name_path);
+            let added = crate::symbol::edit::added_outside_target(pre, post, target);
+            if !added.is_empty() {
+                response["also_defined"] = json!(added);
+            }
         }
         Ok(response)
     }

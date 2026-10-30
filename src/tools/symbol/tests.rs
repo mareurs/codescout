@@ -4758,6 +4758,72 @@ fn replace_symbol_format_compact_shows_range() {
     assert!(t.contains("L124"), "got: {t}");
 }
 
+/// BUG fe2de4189ce2abbd: a `replace` whose body also redefines a sibling adds a second copy of
+/// it. The response used to say `status: ok` and `replaced_lines` only.
+#[tokio::test]
+async fn edit_code_replace_reports_a_symbol_the_body_added_outside_the_target() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let file = root.join("src").join("lib.rs");
+    std::fs::write(
+        &file,
+        "fn a() -> u8 {\n    1\n}\nfn b() -> u8 {\n    2\n}\n",
+    )
+    .unwrap();
+    let target = SymbolInfo {
+        name: "a".to_string(),
+        name_path: "a".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 0,
+        end_line: 2,
+        start_col: 3,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let lsp = MockLspProvider::with_client(MockLspClient::new().with_symbols(&file, vec![target]));
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let out = EditCode
+        .call(
+            json!({
+                "action": "replace", "symbol": "a", "path": "src/lib.rs",
+                "body": "fn a() -> u8 {\n    3\n}\nfn b() -> u8 {\n    2\n}",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("the edit itself is allowed");
+
+    assert_eq!(
+        out["also_defined"],
+        json!(["b"]),
+        "the surplus copy of `b` must be reported: {out}"
+    );
+    let compact = EditCode.format_compact(&out).unwrap();
+    assert!(
+        compact.contains("also defined outside the target: b"),
+        "the compact form must carry it too: {compact}"
+    );
+}
+
 #[test]
 fn remove_symbol_format_compact_shows_range() {
     let tool = EditCode;
