@@ -142,8 +142,12 @@ echo
 export CODESCOUT_SKIP_ONNX_TESTS="${CODESCOUT_SKIP_ONNX_TESTS:-1}"
 
 # Run Python first so the default Cargo lane still finishes last, even if Python fails.
+GATE_T0=$SECONDS
+# Wall seconds per lane, printed in the summary below: the gate's duration was recorded
+# nowhere (bug e1515917e4215c93), and duration is the dimension that grows with the tests.
 python3 ./scripts/python-tests.py --lane light
 PYTHON_LIGHT=$?
+T_PYTHON=$((SECONDS - GATE_T0)); T_PREV=$SECONDS
 
 # `;` throughout, never `&&` — see the heredoc above. The default lane does two jobs,
 # reporting AND rebuilding, and only the first should ever be short-circuited.
@@ -159,16 +163,22 @@ else
     else FMT_STATE=tool-error
     fi
 fi
+T_FMT=$((SECONDS - T_PREV)); T_PREV=$SECONDS
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 CLIPPY=$?
+T_CLIPPY=$((SECONDS - T_PREV)); T_PREV=$SECONDS
 cargo test --workspace --no-default-features
 LEAN=$?
+T_LEAN=$((SECONDS - T_PREV)); T_PREV=$SECONDS
 cargo test --workspace
 DEFAULT=$?
+T_DEFAULT=$((SECONDS - T_PREV))
+T_TOTAL=$((SECONDS - GATE_T0))
 
 echo
 echo "gate.sh: tree size $(du -sh "$CARGO_TARGET_DIR" 2>/dev/null | cut -f1) at $CARGO_TARGET_DIR"
 [ -n "${SLOT_FD:-}" ] && echo "gate.sh: pool total $(du -sh "$GATE_POOL" 2>/dev/null | cut -f1) at $GATE_POOL"
+echo "GATE SECONDS -> TOTAL=$T_TOTAL PYTHON=$T_PYTHON FMT=$T_FMT CLIPPY=$T_CLIPPY LEAN=$T_LEAN DEFAULT=$T_DEFAULT"
 echo "PYTHON LIGHT EXIT -> PYTHON_LIGHT=$PYTHON_LIGHT"
 echo "GATE EXITS -> FMT=$FMT CLIPPY=$CLIPPY LEAN=$LEAN DEFAULT=$DEFAULT FMT_STATE=$FMT_STATE"
 

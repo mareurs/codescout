@@ -11,6 +11,58 @@ use crate::util::fs::to_forward_slash;
 
 // ── grep ───────────────────────────────────────────────────────
 
+/// Wall-clock ceiling for one filesystem walk, in milliseconds. A search rooted at a
+/// parent of many repositories ran 386 s and one rooted at `$HOME` 135 s, because
+/// nothing bounded the walk by time (docs/issues/2026-10-30-grep-has-no-wall-clock-budget-
+/// so-a-search-rooted-above-the-project-ran-for-6-minutes.md). Every other call in the
+/// usage sample finished in under 7 s.
+const DEFAULT_WALK_BUDGET_MS: u64 = 20_000;
+
+/// The walk's clock. `expired` is polled once per walk entry; when it fires the walk
+/// stops and `cut_notice` names where and why, so a partial result never reads as a
+/// complete one (docs/adrs/2026-08-27-negative-results-name-their-scope.md).
+struct WalkClock {
+    start: std::time::Instant,
+    budget: std::time::Duration,
+    cut_notice: Option<String>,
+}
+
+impl WalkClock {
+    fn new(budget_ms: u64) -> Self {
+        Self {
+            start: std::time::Instant::now(),
+            budget: std::time::Duration::from_millis(budget_ms),
+            cut_notice: None,
+        }
+    }
+
+    /// True once the budget is spent. Records the notice on the first expiry.
+    fn expired(
+        &mut self,
+        at: &std::path::Path,
+        files_read: usize,
+        search_path: &std::path::Path,
+    ) -> bool {
+        if self.cut_notice.is_some() {
+            return true;
+        }
+        if self.start.elapsed() < self.budget {
+            return false;
+        }
+        self.cut_notice = Some(format!(
+            "walk cut: the {} ms wall-clock budget ran out after {} files were read, while \
+             walking {} under {}. Results cover only the part already walked; a missing match \
+             proves nothing about the rest. Narrow `path` or `glob` (skip build and dependency \
+             directories), or raise `time_budget_ms`.",
+            self.budget.as_millis(),
+            files_read,
+            to_forward_slash(at),
+            to_forward_slash(search_path),
+        ));
+        true
+    }
+}
+
 pub struct Grep;
 
 #[async_trait::async_trait]
@@ -51,7 +103,8 @@ impl Tool for Grep {
                 "whole_word": { "type": "boolean", "default": false, "description": "Match whole words only (\\b boundaries)" },
                 "glob": { "type": ["string", "array"], "description": "Restrict to files matching glob(s), e.g. \"*.rs\" or [\"src/**\", \"*.md\"]" },
                 "include_hidden": { "type": "boolean", "default": false, "description": "Also search hidden files/dirs (dotfiles, .github/)" },
-                "mode": { "type": "string", "enum": ["lines", "files"], "default": "lines", "description": "\"files\": ranked files + per-file counts, no line content (tames broad searches)" }
+                "mode": { "type": "string", "enum": ["lines", "files"], "default": "lines", "description": "\"files\": ranked files + per-file counts, no line content (tames broad searches)" },
+                "time_budget_ms": { "type": "integer", "default": 20000, "description": "Wall-clock budget for the walk; when spent, the walk stops and the result says so" }
             }
         })
     }
@@ -194,6 +247,9 @@ impl Tool for Grep {
         }
         let walker = wb.build();
         let mut audit = WalkAudit::default();
+        let mut clock = WalkClock::new(
+            optional_u64_param(&input, "time_budget_ms").unwrap_or(DEFAULT_WALK_BUDGET_MS),
+        );
         if files_mode {
             use std::collections::BTreeMap;
             let mut counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -208,6 +264,9 @@ impl Tool for Grep {
                         continue;
                     }
                 };
+                if clock.expired(entry.path(), audit.accepted, &search_path) {
+                    break;
+                }
                 if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                     continue;
                 }
@@ -239,6 +298,9 @@ impl Tool for Grep {
             if skipped_binary > 0 {
                 r["skipped_binary"] = json!(skipped_binary);
             }
+            if let Some(cut) = &clock.cut_notice {
+                r["walk_cut"] = json!(cut);
+            }
             if total == 0 {
                 if let Some(w) = audit.completeness_warning(&search_path, include_hidden, &globs) {
                     r["completeness_warning"] = json!(w);
@@ -255,6 +317,9 @@ impl Tool for Grep {
                     continue;
                 }
             };
+            if clock.expired(entry.path(), audit.accepted, &search_path) {
+                break 'outer;
+            }
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
@@ -591,6 +656,9 @@ impl Tool for Grep {
         if skipped_binary > 0 {
             result["skipped_binary"] = json!(skipped_binary);
         }
+        if let Some(cut) = &clock.cut_notice {
+            result["walk_cut"] = json!(cut);
+        }
         if total_match_count == 0 {
             if let Some(w) = audit.completeness_warning(&search_path, include_hidden, &globs) {
                 result["completeness_warning"] = json!(w);
@@ -664,11 +732,16 @@ pub(super) fn format_grep(val: &Value) -> String {
     let warning = val.get("completeness_warning").and_then(|v| v.as_str());
     // A buffer that holds only a prefix: the same placement, for the same reason — a zero over a
     // cut buffer is exactly the result that must carry it.
-    let cut_notices: Vec<&str> = val
+    let mut cut_notices: Vec<&str> = val
         .get("buffer_truncated")
         .and_then(|v| v.as_array())
         .map(|a| a.iter().filter_map(|n| n.as_str()).collect())
         .unwrap_or_default();
+    // A walk cut by its wall-clock budget: same placement, same reason — a zero from a walk
+    // that did not finish must not read as a zero about the whole tree.
+    if let Some(cut) = val.get("walk_cut").and_then(|v| v.as_str()) {
+        cut_notices.push(cut);
+    }
 
     if total == 0 {
         let mut out = "0 matches".to_string();
@@ -3562,6 +3635,61 @@ mod tests {
             w.contains("and 2 more"),
             "10 entries with a cap of 8 must report the remainder: {w}"
         );
+    }
+
+    /// A walk that outlives its wall-clock budget must stop and SAY so, in both modes: a
+    /// partial result that reads as a complete one is the failure. A zero budget is the
+    /// deterministic stand-in for a slow tree. Bug 731747939c0bb764.
+    #[tokio::test]
+    async fn a_spent_walk_budget_cuts_the_walk_and_names_it_in_both_modes() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..5 {
+            std::fs::write(dir.path().join(format!("f{i}.txt")), "NEEDLE\n").unwrap();
+        }
+        let ctx = rooted_ctx(dir.path()).await;
+        for mode in ["lines", "files"] {
+            let res = Grep
+                .call(
+                    json!({
+                        "pattern": "NEEDLE",
+                        "path": dir.path().to_str().unwrap(),
+                        "mode": mode,
+                        "time_budget_ms": 0
+                    }),
+                    &ctx,
+                )
+                .await
+                .unwrap();
+            let cut = res["walk_cut"].as_str().unwrap_or_default();
+            assert!(
+                cut.contains("wall-clock budget"),
+                "{mode}: a cut walk must carry a walk_cut notice: {res}"
+            );
+            assert!(
+                format_grep(&res).contains("walk cut"),
+                "{mode}: the rendered text must show the cut, even over a zero: {}",
+                format_grep(&res)
+            );
+        }
+    }
+
+    /// The default budget must not cut an ordinary search: no `walk_cut` key at all.
+    #[tokio::test]
+    async fn an_ordinary_search_carries_no_walk_cut() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "NEEDLE\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        for mode in ["lines", "files"] {
+            let res = Grep
+                .call(
+                    json!({ "pattern": "NEEDLE", "path": dir.path().to_str().unwrap(), "mode": mode }),
+                    &ctx,
+                )
+                .await
+                .unwrap();
+            assert!(res.get("walk_cut").is_none(), "{mode}: {res}");
+            assert_eq!(res["total"].as_u64().unwrap(), 1, "{mode}: {res}");
+        }
     }
 }
 
