@@ -142,7 +142,9 @@ impl Tool for Librarian {
         // Computed before dispatch consumes `args`. A key the schema does not declare is
         // dropped by every action, so the caller must be told or `path="<one file>"` looks
         // like a file-scoped run. docs/issues/2026-10-30-librarian-reindex-link-scan-and-audit-doc-refs-accept-a-path-argument-and-run-project-wide-without-saying-so.md
-        let ignored = undeclared_keys(&args, &self.input_schema());
+        let schema = self.input_schema();
+        let ignored = undeclared_keys(&args, &schema);
+        let not_read = keys_for_other_actions(&args, &schema, action);
         let action = action.to_owned();
         let mut out = match action.as_str() {
                 "context"            => super::context::call(ctx, args).await,
@@ -160,10 +162,22 @@ impl Tool for Librarian {
                     "unknown action '{other}' — expected one of: context, reindex, status, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree, audit_log"
                 ))),
             }?;
-        if let (false, Some(obj)) = (ignored.is_empty(), out.as_object_mut()) {
+        if let (false, Some(obj)) = (
+            ignored.is_empty() && not_read.is_empty(),
+            out.as_object_mut(),
+        ) {
+            let mut keys: Vec<&String> = ignored.iter().chain(&not_read).collect();
+            keys.sort();
+            let hints: Vec<String> = [
+                (!ignored.is_empty()).then(|| ignored_params_hint(&action, &ignored)),
+                (!not_read.is_empty()).then(|| not_read_hint(&action, &not_read)),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
             obj.insert(
                 "ignored_params".into(),
-                json!({ "keys": ignored, "hint": ignored_params_hint(&action, &ignored) }),
+                json!({ "keys": keys, "hint": hints.join(" ") }),
             );
         }
         Ok(out)
@@ -186,6 +200,60 @@ fn undeclared_keys(args: &Value, schema: &Value) -> Vec<String> {
         .collect();
     keys.sort();
     keys
+}
+
+/// True when `desc` names `action`. A key's description is where its actions are written
+/// (`"reindex: …"`, `"context/reindex/link_scan: …"`), and prose after the label may name
+/// more (`scope` names `audit_doc_refs` after the label). Substring match: a false hit only
+/// exempts a key from the report, which is the safe direction.
+fn names_action(desc: &str, action: &str) -> bool {
+    desc.contains(action)
+}
+
+/// Declared keys of `args` that `action` does not read, sorted.
+///
+/// A key counts only when its description names at least one dispatched action and not this
+/// one, so a key labelled for no action stays exempt. `status` takes `_args` and reads
+/// nothing; every other action's reading is pinned by
+/// `tests::no_action_reads_a_key_its_description_does_not_name`, which fails when a label
+/// is incomplete, so this report cannot name a key the action does read.
+fn keys_for_other_actions(args: &Value, schema: &Value, action: &str) -> Vec<String> {
+    let (Some(given), Some(declared)) = (args.as_object(), schema["properties"].as_object()) else {
+        return Vec::new();
+    };
+    let actions: Vec<&str> = schema["properties"]["action"]["enum"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let mut keys: Vec<String> = given
+        .keys()
+        .filter(|k| {
+            let Some(desc) = declared
+                .get(k.as_str())
+                .and_then(|d| d["description"].as_str())
+            else {
+                return false;
+            };
+            k.as_str() != "action"
+                && actions.iter().any(|a| names_action(desc, a))
+                && !names_action(desc, action)
+        })
+        .cloned()
+        .collect();
+    keys.sort();
+    keys
+}
+
+/// Say that `keys` are parameters of librarian that `action` does not read.
+fn not_read_hint(action: &str, keys: &[String]) -> String {
+    let list = keys
+        .iter()
+        .map(|k| format!("`{k}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "Parameters of librarian, but not of action={action}: {list}. They were ignored; their descriptions name other actions."
+    )
 }
 
 /// Say that `keys` had no effect and, for `path`, name what the action offers instead.
@@ -222,6 +290,41 @@ mod tests {
         TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
     }
 
+    /// Minimum type-valid args per action, shared by both probe directions.
+    fn required(action: &str) -> serde_json::Map<String, Value> {
+        let mut m = serde_json::Map::new();
+        match action {
+            // Exactly one of commit|timestamp is required; a well-formed hash that
+            // resolves to nothing keeps the failure AFTER deserialisation, where the
+            // probe can see it.
+            "workspace_state_at" => {
+                m.insert(
+                    "commit".into(),
+                    json!("0000000000000000000000000000000000000000"),
+                );
+            }
+            "merge_worktree" => {
+                m.insert("root".into(), json!("/nonexistent/worktree-probe"));
+            }
+            _ => {}
+        }
+        m
+    }
+
+    /// Remove every `host` key. `doctor` reports the host name, and each fresh test context
+    /// mints a random one (`ripper-2b775b` against `ripper-ff9c14`), so two otherwise
+    /// identical `doctor` calls never compare equal.
+    fn drop_host(v: &mut Value) {
+        match v {
+            Value::Object(o) => {
+                o.remove("host");
+                o.values_mut().for_each(drop_host);
+            }
+            Value::Array(a) => a.iter_mut().for_each(drop_host),
+            _ => {}
+        }
+    }
+
     #[tokio::test]
     async fn unknown_action_returns_recoverable_error() {
         let err = Librarian
@@ -249,26 +352,6 @@ mod tests {
     #[tokio::test]
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
         use crate::tools::param_probe::{assert_all_honored, assert_required_are_advertised, Spec};
-
-        fn required(action: &str) -> serde_json::Map<String, Value> {
-            let mut m = serde_json::Map::new();
-            match action {
-                // Exactly one of commit|timestamp is required; a well-formed hash that
-                // resolves to nothing keeps the failure AFTER deserialisation, where the
-                // probe can see it.
-                "workspace_state_at" => {
-                    m.insert(
-                        "commit".into(),
-                        json!("0000000000000000000000000000000000000000"),
-                    );
-                }
-                "merge_worktree" => {
-                    m.insert("root".into(), json!("/nonexistent/worktree-probe"));
-                }
-                _ => {}
-            }
-            m
-        }
 
         let spec = Spec {
             actions: &[
@@ -388,6 +471,112 @@ mod tests {
         assert!(ignored_params_hint("audit_doc_refs", &keys).contains("paths=["));
         assert!(ignored_params_hint("reindex", &keys).contains("`repo`"));
         assert!(ignored_params_hint("link_scan", &keys).contains("`scope`"));
+    }
+
+    /// BUG 27d66ed4f2d89fa4: a key the schema declares, sent to an action that does not read
+    /// it, was accepted without a word. `status` reads nothing (`_args`), so every key
+    /// labelled for another action is a case.
+    #[tokio::test]
+    async fn a_declared_key_sent_to_another_action_is_reported_as_ignored() {
+        let out = Librarian
+            .call(
+                &mk_ctx(),
+                json!({"action": "status", "force": true, "write": true}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            out["ignored_params"]["keys"],
+            json!(["force", "write"]),
+            "{out}"
+        );
+        let hint = out["ignored_params"]["hint"].as_str().unwrap();
+        assert!(hint.contains("action=status"), "{hint}");
+    }
+
+    #[test]
+    fn a_key_named_for_the_action_or_for_no_action_is_not_reported() {
+        let schema = Librarian.input_schema();
+        // `force` is labelled `reindex:`.
+        assert!(keys_for_other_actions(&json!({"force": true}), &schema, "reindex").is_empty());
+        // `scope` names `audit_doc_refs` after its label, not in it.
+        assert!(
+            keys_for_other_actions(&json!({"scope": "project"}), &schema, "audit_doc_refs")
+                .is_empty()
+        );
+        // `action` and an undeclared key are not this report's business.
+        assert!(keys_for_other_actions(
+            &json!({"action": "status", "path": "x"}),
+            &schema,
+            "status"
+        )
+        .is_empty());
+    }
+
+    /// The guard that makes `keys_for_other_actions` safe to trust: it reports a key as
+    /// ignored on the strength of a description, so a description missing an action that
+    /// does read the key would turn the report into a false claim. Sends each key to every
+    /// action its description does NOT name, ill-typed, and fails when the outcome changes.
+    ///
+    /// `audit_log` is not swept for the reason its forward probe is not: every librarian
+    /// call writes an audit row, so two `audit_log` responses always differ and the
+    /// comparison would pass whether or not the key was read. It reads only keys that name it
+    /// (`audit_log::call`: `export`, `prune_before_ms`, `confirm`, `limit`, `tbl`, `row_id`,
+    /// `actor`, `op`, `since`, `until`).
+    #[tokio::test]
+    async fn no_action_reads_a_key_its_description_does_not_name() {
+        use crate::tools::param_probe::{ill_typed, outcome};
+
+        let schema = Librarian.input_schema();
+        let actions: Vec<&str> = schema["properties"]["action"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|a| *a != "audit_log")
+            .collect();
+        let mut read = Vec::new();
+        let mut checked = 0usize;
+        for (key, spec) in schema["properties"].as_object().unwrap() {
+            let desc = spec["description"].as_str().unwrap_or_default();
+            if key == "action" || !actions.iter().any(|a| names_action(desc, a)) {
+                continue;
+            }
+            let declared = spec["type"].as_str().unwrap_or("string");
+            for action in actions.iter().filter(|a| !names_action(desc, a)) {
+                let mut base = required(action);
+                base.insert("action".into(), json!(action));
+                let mut probe = base.clone();
+                probe.insert(key.clone(), ill_typed(declared));
+                let base = Librarian.call(&mk_ctx(), Value::Object(base)).await;
+                let probed = Librarian.call(&mk_ctx(), Value::Object(probe)).await;
+                checked += 1;
+                // `ignored_params` is what this change adds, so it is the one difference
+                // that must not count as a read.
+                let strip = |r: &anyhow::Result<Value>| match r {
+                    Ok(v) => {
+                        let mut v = v.clone();
+                        if let Some(o) = v.as_object_mut() {
+                            o.remove("ignored_params");
+                        }
+                        drop_host(&mut v);
+                        Ok(v)
+                    }
+                    Err(e) => Err(anyhow::anyhow!("{e}")),
+                };
+                if outcome(&strip(&base)) != outcome(&strip(&probed)) {
+                    read.push(format!("{action}:{key}"));
+                }
+            }
+        }
+        assert!(
+            read.is_empty(),
+            "these actions read a key their description does not name, so the key is wrongly \
+             reported as ignored — add the action to the key's label: {read:?}"
+        );
+        // Floor measured, not chosen: 259 action/key pairs, read 2026-10-30 from this sweep's
+        // own count. A key that loses its label drops out of the sweep and the count with it.
+        assert!(checked >= 259, "the sweep covered only {checked} pairs");
     }
 
     /// `tracker_design`'s response tells the caller, twice (`archetype_detail`

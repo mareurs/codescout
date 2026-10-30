@@ -79,7 +79,7 @@ pub(crate) struct Spec<'a> {
     pub required: fn(&str) -> Map<String, Value>,
 }
 
-fn ill_typed(declared: &str) -> Value {
+pub(crate) fn ill_typed(declared: &str) -> Value {
     if declared == "array" {
         json!(0)
     } else {
@@ -87,7 +87,7 @@ fn ill_typed(declared: &str) -> Value {
     }
 }
 
-fn outcome(r: &anyhow::Result<Value>) -> String {
+pub(crate) fn outcome(r: &anyhow::Result<Value>) -> String {
     match r {
         Ok(v) => format!("ok:{v}"),
         Err(e) => format!("err:{e}"),
