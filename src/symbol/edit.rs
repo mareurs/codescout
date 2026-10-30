@@ -367,7 +367,7 @@ pub fn added_outside_target(
             continue;
         }
         let surplus = n_after.saturating_sub(before.get(name_path).copied().unwrap_or(0));
-        added.extend(std::iter::repeat(name_path.clone()).take(surplus));
+        added.extend(std::iter::repeat_n(name_path.clone(), surplus));
     }
     added.sort();
     added
