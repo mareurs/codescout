@@ -1919,9 +1919,7 @@ async fn backfill_chunk_vectors_with(
                     write_embeddings_v2_with(&cat, &pairs_for_sqlite(&pending), false)?;
                 }
                 BackfillTarget::Store { store, project_id } => {
-                    for (chunk_id, artifact_id, vec) in &pending {
-                        store.upsert(project_id, chunk_id, artifact_id, vec).await?;
-                    }
+                    upsert_tuples(store, project_id, &pending).await?;
                 }
             }
             report.embedded += pending.len();
@@ -2016,6 +2014,27 @@ fn rebuild_artifact_vec_v2_at_dim(conn: &rusqlite::Connection, new_dim: usize) -
 
 use futures::stream::{self, StreamExt};
 
+/// Write `(chunk_id, artifact_id, vector)` tuples to `store` in batches, stopping at the first
+/// store error. Both ids ride to the store because a backend with no join cannot recover the
+/// second one. One request per [`crate::librarian::artifact_store::UPSERT_BATCH`] vectors
+/// instead of one per vector: see that constant for the measurement.
+async fn upsert_tuples(
+    store: &dyn crate::librarian::artifact_store::ArtifactVectorStore,
+    project_id: &str,
+    tuples: &[(String, String, Vec<f32>)],
+) -> Result<()> {
+    use crate::librarian::artifact_store::{upsert_in_batches, ChunkVector};
+    let items: Vec<ChunkVector<'_>> = tuples
+        .iter()
+        .map(|(chunk_id, artifact_id, vector)| ChunkVector {
+            chunk_id,
+            artifact_id,
+            vector,
+        })
+        .collect();
+    upsert_in_batches(store, project_id, &items).await
+}
+
 const EMBED_CONCURRENCY: usize = 8;
 
 /// High-level async entry point: sync walk + optional async embedding with bounded concurrency.
@@ -2078,9 +2097,7 @@ pub async fn index_repo(
             batch.push(res?);
             if batch.len() >= 100 {
                 if let Some(s) = store {
-                    for (chunk_id, artifact_id, vec) in &batch {
-                        s.upsert(project_id, chunk_id, artifact_id, vec).await?;
-                    }
+                    upsert_tuples(s, project_id, &batch).await?;
                 } else {
                     write_embeddings_v2(cat, &pairs_for_sqlite(&batch))?;
                 }
@@ -2091,9 +2108,7 @@ pub async fn index_repo(
         if !batch.is_empty() {
             report.embedded += batch.len();
             if let Some(s) = store {
-                for (chunk_id, artifact_id, vec) in &batch {
-                    s.upsert(project_id, chunk_id, artifact_id, vec).await?;
-                }
+                upsert_tuples(s, project_id, &batch).await?;
             } else {
                 write_embeddings_v2(cat, &pairs_for_sqlite(&batch))?;
             }
@@ -6697,5 +6712,112 @@ kind = "memory"
             )
             .unwrap();
         assert_eq!(v1_tables, 0, "the retired v1 table must not be re-created");
+    }
+
+    /// `index_repo` writing to a store must send vectors in batches, not one request each: a
+    /// single durable write costs a sync (24.7 ms per point against 0.66 ms in a batch of 64,
+    /// measured on this host's Qdrant). 130 files flush at 100 and then the remainder, so the
+    /// writes are at least three requests, none over `UPSERT_BATCH`, none single, and they carry
+    /// every vector the report counted.
+    #[tokio::test]
+    async fn index_repo_writes_a_store_in_batches_not_one_request_per_vector() {
+        use crate::librarian::artifact_store::{
+            test_support::BatchRecordingStore, ArtifactVectorStore, UPSERT_BATCH,
+        };
+        use std::sync::atomic::Ordering::SeqCst;
+        let tmp = tempfile::TempDir::new().unwrap();
+        for i in 0..130u32 {
+            std::fs::write(
+                tmp.path().join(format!("f{i:03}.md")),
+                format!("# File {i}\n\nContent {i}.\n"),
+            )
+            .unwrap();
+        }
+        let cat = Catalog::open_in_memory().unwrap();
+        let store = BatchRecordingStore::default();
+        let report = index_repo(
+            &cat,
+            &md_rules(),
+            tmp.path(),
+            &globset::GlobSet::empty(),
+            Some(&backfill_svc()),
+            Some(&store as &dyn ArtifactVectorStore),
+            "p",
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            report.embedded > 100,
+            "fixture must flush twice: {report:?}"
+        );
+        let sizes = store.batch_sizes.lock().clone();
+        assert!(
+            sizes.iter().all(|&s| s <= UPSERT_BATCH),
+            "oversized: {sizes:?}"
+        );
+        assert!(
+            sizes.len() >= 3,
+            "100 is two requests and the remainder one: {sizes:?}"
+        );
+        assert_eq!(sizes.iter().sum::<usize>(), report.embedded, "{sizes:?}");
+        assert_eq!(store.single_calls.load(SeqCst), 0, "no per-vector request");
+    }
+
+    /// The same for the backfill, whose page of pending vectors can hold thousands: it must be
+    /// sliced, never sent as one request that grows with the page.
+    #[tokio::test]
+    async fn the_backfill_writes_a_store_in_batches_not_one_request_per_vector() {
+        use crate::librarian::artifact_store::{test_support::BatchRecordingStore, UPSERT_BATCH};
+        use std::sync::atomic::Ordering::SeqCst;
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let tmp = tempfile::TempDir::new().unwrap();
+        for i in 0..70u32 {
+            std::fs::write(
+                tmp.path().join(format!("b{i:02}.md")),
+                format!("# Bare {i}\n\nbody {i}\n"),
+            )
+            .unwrap();
+        }
+        index_repo_sync(
+            &m.lock(),
+            &md_rules(),
+            tmp.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+
+        let store = BatchRecordingStore::default();
+        let project_id = tmp.path().to_string_lossy().into_owned();
+        let prefix = project_id.clone();
+        let report = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            Some(&prefix),
+            BackfillTarget::Store {
+                store: &store,
+                project_id: &project_id,
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            report.embedded >= 65,
+            "fixture must exceed one batch: {report:?}"
+        );
+        let sizes = store.batch_sizes.lock().clone();
+        assert!(
+            sizes.iter().all(|&s| s <= UPSERT_BATCH),
+            "oversized: {sizes:?}"
+        );
+        assert!(sizes.len() >= 2, "{sizes:?}");
+        assert_eq!(sizes.iter().sum::<usize>(), report.embedded, "{sizes:?}");
+        assert_eq!(store.single_calls.load(SeqCst), 0, "no per-vector request");
     }
 }

@@ -161,6 +161,30 @@ pub struct ChunkVector<'a> {
     pub artifact_id: &'a str,
     pub vector: &'a [f32],
 }
+/// How many embedded vectors go to the store in one request.
+///
+/// A durable single-point write costs a sync (24.7 ms per point on this host's Qdrant) that a
+/// batch of 64 pays once (0.66 ms per point), measured 2026-10-30. 64 vectors of 768 floats are
+/// ~200 KB, comfortably under a gRPC message limit, and a larger batch buys little: the
+/// per-request cost is already under a millisecond per point.
+pub const UPSERT_BATCH: usize = 64;
+
+/// Write `items` to `store` in requests of at most [`UPSERT_BATCH`] vectors.
+///
+/// For a caller that holds a list of any length (a backfill page, an indexing flush) and must
+/// stop at the first store error: a single request over the whole list would grow with the page
+/// and could pass the server's message limit. A failure stops at its batch, so the vectors of
+/// earlier batches have landed; upsert is idempotent on `chunk_id`, so a retry rewrites them.
+pub async fn upsert_in_batches(
+    store: &dyn ArtifactVectorStore,
+    project_id: &str,
+    items: &[ChunkVector<'_>],
+) -> Result<()> {
+    for part in items.chunks(UPSERT_BATCH) {
+        store.upsert_many(project_id, part).await?;
+    }
+    Ok(())
+}
 
 /// Backend-agnostic artifact vector store. Implementations:
 /// - [`QdrantArtifactStore`] — default.
@@ -699,6 +723,60 @@ pub mod test_support {
         points: parking_lot::Mutex<HashMap<String, StoredPoint>>,
     }
 
+    /// Wraps [`InMemoryArtifactStore`] and records HOW it was written to: single `upsert` calls,
+    /// and the size of every `upsert_many` request. For a test that asserts a caller batches,
+    /// which no count of what landed can express.
+    #[derive(Default)]
+    pub struct BatchRecordingStore {
+        inner: InMemoryArtifactStore,
+        pub single_calls: std::sync::atomic::AtomicUsize,
+        pub batch_sizes: parking_lot::Mutex<Vec<usize>>,
+    }
+
+    #[async_trait]
+    impl ArtifactVectorStore for BatchRecordingStore {
+        async fn upsert(
+            &self,
+            project_id: &str,
+            chunk_id: &str,
+            artifact_id: &str,
+            vector: &[f32],
+        ) -> Result<()> {
+            self.single_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner
+                .upsert(project_id, chunk_id, artifact_id, vector)
+                .await
+        }
+
+        async fn upsert_many(&self, project_id: &str, items: &[ChunkVector<'_>]) -> Result<()> {
+            self.batch_sizes.lock().push(items.len());
+            for i in items {
+                self.inner
+                    .upsert(project_id, i.chunk_id, i.artifact_id, i.vector)
+                    .await?;
+            }
+            Ok(())
+        }
+
+        async fn delete(&self, artifact_id: &str) -> Result<()> {
+            self.inner.delete(artifact_id).await
+        }
+
+        async fn refile(&self, old_artifact_id: &str, new_artifact_id: &str) -> Result<u64> {
+            self.inner.refile(old_artifact_id, new_artifact_id).await
+        }
+
+        async fn knn(
+            &self,
+            project_id: Option<&str>,
+            query: &[f32],
+            k: usize,
+        ) -> Result<Vec<(String, f32)>> {
+            self.inner.knn(project_id, query, k).await
+        }
+    }
+
     impl InMemoryArtifactStore {
         /// Every distinct `project_id` this store was written with, sorted.
         ///
@@ -831,6 +909,53 @@ pub mod test_support {
         }
     }
 }
+
+#[cfg(test)]
+mod batching_tests {
+    use super::test_support::BatchRecordingStore;
+    use super::*;
+
+    fn items(n: usize) -> (Vec<String>, Vec<Vec<f32>>) {
+        (
+            (0..n).map(|i| format!("c{i}")).collect(),
+            vec![vec![1.0, 0.0]; n],
+        )
+    }
+
+    /// 150 vectors are three requests of 64, 64 and 22, in order: the slice size is the cap, the
+    /// remainder is not dropped, and nothing is sent singly.
+    #[tokio::test]
+    async fn a_long_list_is_sliced_into_requests_of_at_most_the_batch_size() {
+        let (ids, vecs) = items(150);
+        let chunk_vectors: Vec<ChunkVector<'_>> = ids
+            .iter()
+            .zip(&vecs)
+            .map(|(c, v)| ChunkVector {
+                chunk_id: c,
+                artifact_id: "a",
+                vector: v,
+            })
+            .collect();
+        let store = BatchRecordingStore::default();
+        upsert_in_batches(&store, "p", &chunk_vectors)
+            .await
+            .unwrap();
+        assert_eq!(store.batch_sizes.lock().clone(), vec![64, 64, 22]);
+        assert_eq!(
+            store.single_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+    }
+
+    /// An empty list is no request at all, not an empty one.
+    #[tokio::test]
+    async fn an_empty_list_sends_nothing() {
+        let store = BatchRecordingStore::default();
+        upsert_in_batches(&store, "p", &[]).await.unwrap();
+        assert!(store.batch_sizes.lock().is_empty());
+    }
+}
+
 #[cfg(test)]
 mod backend_tests {
     use super::test_support::InMemoryArtifactStore;

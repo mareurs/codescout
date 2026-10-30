@@ -7,7 +7,7 @@ tags:
 - cluster/unclassified
 closed: 2026-10-30
 severity: high
-unverified: The end-to-end figure is one reindex of 2,184 chunks compared with a logged linear model (R-squared 0.85), not with the old binary on the same work. The backfill and index_repo loops still write one point per request.
+unverified: The end-to-end figure is one reindex of 2,184 chunks compared with a logged linear model (R-squared 0.85), not with the old binary on the same work. The backfill and index_repo paths are batched and tested but their speedup was not measured end to end.
 ---
 
 # BUG: The MCP reindex wrote each embedded chunk to Qdrant as its own durable request, ~25 ms of every ~43 ms spent per chunk
@@ -51,13 +51,14 @@ The two micro-benchmarks above (scratch scripts, collection deleted afterwards) 
 
 ## Fix
 
-Done 2026-10-30:
+Done 2026-10-30, in two commits:
 - `ArtifactVectorStore::upsert_many` (`src/librarian/artifact_store.rs`) with a default that loops `upsert`, so the sqlite-vec store and every test double are unchanged; the Qdrant store overrides it with one `upsert_points` call (`QdrantWrap::artifact_upsert_points`, `src/retrieval/artifact.rs`).
-- The reindex loop buffers `UPSERT_BATCH` (64) embedded vectors and writes them in one request (`flush_vectors`). If the store refuses a batch, the chunks are retried one by one, so only a chunk that cannot be written is reported and its artifact stays unstamped, as before.
+- The MCP reindex loop buffers `UPSERT_BATCH` (64) embedded vectors and writes them in one request (`flush_vectors`). If the store refuses a batch, the chunks are retried one by one, so only a chunk that cannot be written is reported and its artifact stays unstamped, as before.
+- Second commit: `upsert_in_batches` slices a list at `UPSERT_BATCH`; the `backfill_chunk_vectors_with` page write and both `index_repo` flushes use it. Those paths stop at the first store error, as they did.
 
 Measured end to end, release build, real catalog: one reindex that embedded 2,184 chunks (6 updated artifacts) took **34.3 s**; the logged model predicts 75.5 s for that count, so about 2.2 times faster (15.7 ms per chunk). The next two reindexes took 2.7 s and then reported 0 updated, 0 embedded, 0 vectorless, 0 errors.
 
-Not done: the `backfill` loop (`indexer.rs`) and `index_repo` still write one point per request; and the larger cost, re-embedding every chunk of a changed artifact, is the open issue `664ceb9fcb96230c`.
+Not done: the larger cost, re-embedding every chunk of a changed artifact, is the open issue `664ceb9fcb96230c`.
 
 ## Tests added
 
@@ -69,7 +70,9 @@ None needed after the fix.
 
 ## Resume
 
-Apply `upsert_many` to the `backfill_chunk_vectors_with` and `index_repo` loops, then the per-chunk skip in `664ceb9fcb96230c`.
+Done 2026-10-30, second commit: the `backfill_chunk_vectors_with` page write and both `index_repo` flushes now go through `upsert_in_batches` (`src/librarian/artifact_store.rs`), which slices at `UPSERT_BATCH` (64) so a backfill page of any size is never one request. Tests: `index_repo_writes_a_store_in_batches_not_one_request_per_vector`, `the_backfill_writes_a_store_in_batches_not_one_request_per_vector`, and `batching_tests` (150 vectors become 64, 64 and 22). Not measured end to end: these two paths are reached only through the librarian's own CLI and a backfill with work to do; the gain rests on the per-point Qdrant measurement above.
+
+Next: the per-chunk skip in `664ceb9fcb96230c`.
 
 ## References
 

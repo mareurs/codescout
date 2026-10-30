@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::librarian::artifact_store::UPSERT_BATCH;
 use crate::librarian::indexer;
 use crate::librarian::reindex_progress::{self, ReindexProgress};
 
@@ -33,14 +34,6 @@ struct Args {
     /// resolved, else `all`. Mirrors the read-tool scope semantics.
     scope: Option<super::scope::Scope>,
 }
-
-/// How many embedded vectors wait before they are written in one store request.
-///
-/// A durable single-point write costs a sync (24.7 ms per point on this host's Qdrant) that a
-/// batch of 64 pays once (0.66 ms per point), measured 2026-10-30. 64 vectors of 768 floats are
-/// ~200 KB, and a larger batch buys little: the per-request cost is already under a millisecond
-/// per point.
-const UPSERT_BATCH: usize = 64;
 
 /// Write the buffered `(item, vector)` pairs to `store` and fold the outcome into the counters,
 /// leaving `unwritten` empty.
