@@ -3265,6 +3265,10 @@ async fn memory_read_falls_back_to_the_other_layout_and_names_the_write_target()
         .unwrap();
 
     assert_eq!(read["content"], json!("# Local only"), "got: {read:?}");
+    assert!(
+        read.get("from_main_checkout").is_none(),
+        "a sub-project's other layout is not the main checkout: {read:?}"
+    );
     let from = read["resolved_from"].as_str().unwrap_or_default();
     let target = read["write_target"].as_str().unwrap_or_default();
     assert!(
@@ -3461,6 +3465,20 @@ async fn a_linked_worktree_reads_the_main_checkouts_memories_and_writes_only_its
         inherited["write_target"],
         json!(crate::util::fs::to_forward_slash(&wt_memories)),
         "{inherited:?}"
+    );
+    assert_eq!(
+        inherited["from_main_checkout"],
+        json!(true),
+        "{inherited:?}"
+    );
+    let rendered = format_read_memory(&inherited);
+    assert!(
+        rendered.contains("MAIN checkout"),
+        "the note must name the main checkout as the source: {rendered}"
+    );
+    assert!(
+        !rendered.contains("other memory store"),
+        "the sub-project wording must not be used for a worktree: {rendered}"
     );
 
     let shadowed = Memory

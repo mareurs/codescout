@@ -30,11 +30,19 @@ fn format_read_memory(result: &Value) -> String {
         result["resolved_from"].as_str(),
         result["write_target"].as_str(),
     ) {
-        head.push_str(&format!(
-            "⚠ read from {from} — this project's other memory store. \
-             memory(action='write') on this topic targets {target} instead, which \
-             would leave the text below untouched and shadowed by a second copy.\n\n"
-        ));
+        if result["from_main_checkout"].as_bool() == Some(true) {
+            head.push_str(&format!(
+                "⚠ read from {from} — the MAIN checkout's memory store, not this worktree's. \
+                 It may differ from this worktree's own commit. memory(action='write') on this \
+                 topic forks it into {target}; the main checkout's copy is never touched.\n\n"
+            ));
+        } else {
+            head.push_str(&format!(
+                "⚠ read from {from} — this project's other memory store. \
+                 memory(action='write') on this topic targets {target} instead, which \
+                 would leave the text below untouched and shadowed by a second copy.\n\n"
+            ));
+        }
     }
     if let Some(missing) = result["missing"].as_array() {
         let more = match result["missing_names_omitted"].as_u64() {
@@ -1197,7 +1205,7 @@ impl Tool for Memory {
                             // which returns `$.content` alone and would otherwise
                             // drop these fields silently. They go INTO the gate that
                             // decides inline-or-buffered, not on after it.
-                            let extra: Vec<(&str, serde_json::Value)> = if from != dirs.primary {
+                            let mut extra: Vec<(&str, serde_json::Value)> = if from != dirs.primary {
                                 vec![
                                     (
                                         "resolved_from",
@@ -1211,6 +1219,13 @@ impl Tool for Memory {
                             } else {
                                 Vec::new()
                             };
+                            // A linked worktree read this from the MAIN checkout. Say so by name:
+                            // "this project's other memory store" was written for a sub-project's
+                            // second layout and does not tell the reader the text may differ from
+                            // their own branch's commit.
+                            if dirs.inherited.contains(&from) {
+                                extra.push(("from_main_checkout", json!(true)));
+                            }
                             apply_sections_filter(
                                 content,
                                 topic,
