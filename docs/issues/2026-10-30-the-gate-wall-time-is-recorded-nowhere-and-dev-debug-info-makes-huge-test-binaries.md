@@ -51,6 +51,8 @@ None.
 
 Done on branch `worktree-agent-ac59e41db7b0d1eb3`, SHA `59d870c9d` (patch-id `902b9b617a5970f593b4138330fdaf5be0d302e6`): `scripts/gate.sh` now prints `GATE SECONDS -> TOTAL=.. PYTHON=.. FMT=.. CLIPPY=.. LEAN=.. DEFAULT=..` after the tree-size lines. Exit-code handling and lane order are unchanged (`;` throughout).
 
+Gate wall time, first measurements (2026-10-30/31, this worktree, slot partly warm, shared machine, other sessions running): `GATE SECONDS -> TOTAL=1065 PYTHON=167 FMT=5 CLIPPY=81 LEAN=272 DEFAULT=540` (red run) and `TOTAL=968 PYTHON=117 FMT=5 CLIPPY=83 LEAN=280 DEFAULT=483` (green run). The default lane is the largest share; the lib test binary alone ran 426 s in the first run. Later commit `299c5e78b` fixed the two reds the grep change caused.
+
 Measured 2026-10-30, cold `cargo test --workspace --no-run` in a fresh target dir, 64 cores, mold, machine shared with other sessions (timings are noisy), the profile switched with `--config` so `Cargo.toml` was not touched:
 
 | `profile.dev.debug` | build | tree | 51 test exes total | largest exe | `target/debug/codescout` |

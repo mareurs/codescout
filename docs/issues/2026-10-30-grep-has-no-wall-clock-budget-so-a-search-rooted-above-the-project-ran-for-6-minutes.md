@@ -47,6 +47,8 @@ None.
 
 Shipped on branch `worktree-agent-ac59e41db7b0d1eb3` (a worktree off `experiments`), SHA `59d870c9d`, patch-id `902b9b617a5970f593b4138330fdaf5be0d302e6`. `src/tools/grep.rs`: new `WalkClock` polled once per walk entry in both the lines and the files loop; `time_budget_ms` input (default `DEFAULT_WALK_BUDGET_MS` = 20000). When it is spent the walk stops and the result carries a `walk_cut` string naming the budget, the files read, the entry being walked and the root, and saying a missing match proves nothing about the rest. `format_grep` renders it in the zero-match early return and below the header otherwise, so a partial result cannot read as a complete one.
 
+Follow-up `299c5e78b` (same branch): `DEFAULT_WALK_BUDGET_MS` carries `cap-class: RESULT_CAP grep.walk_budget`, a probe row in `src/tools/core/cap_probe.rs` (mutation `NotYet`: the emission was not deleted and the row observed red), and `TOOL_SURFACE_CHAR_BUDGET` ratcheted 57_607 to 57_688 (+81, the new schema property). Full `./scripts/gate.sh` green on the final tree: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0.
+
 Not done: the 20 s default is the candidate from this file, not derived from a measurement of the cost of a real in-project search (the usage sample's p99 was 6.5 s); a tree needing more passes `time_budget_ms`.
 
 ## Tests added
