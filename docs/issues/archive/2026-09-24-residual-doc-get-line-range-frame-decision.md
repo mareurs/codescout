@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md
 severity: low
-unverified: 'Not tested: a doc(find) to doc(get) composition test (matched.start_line fed to start_line), macOS and Windows, CRLF files, and a caller that still counts from the body: such a caller gets other lines with no error unless its number lands inside the frontmatter. The usage log hides calls with empty input, so the measured caller count is a floor. The probe site_get in src/librarian/tools/read_door_tests.rs sends end_line 40 against a body of about 16 lines, which the old guard already refused, so that probe never reached the slice; it is unchanged and deserves its own bug.'
+unverified: 'Checked live on the rebuilt server, 2026-10-30, Linux: a heading line from grep returned that heading; start_line 1 was refused with the new message; two doc(find) hits (360ba099bdb3c1e5, 29b9d923faeaa232) fed their matched.start_line and end_line to doc(get) and returned exactly the snippet find showed. That is two hits by hand, not a regression test. Not tested: macOS and Windows, CRLF files, and a caller that still counts from the body: such a caller gets other lines with no error unless its number lands inside the frontmatter. The usage log hides calls with empty input, so the measured caller count is a floor. The probe site_get in src/librarian/tools/read_door_tests.rs is filed as 4ffa75bf5548c47e.'
 ---
 
 ## Summary
