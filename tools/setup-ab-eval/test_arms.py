@@ -431,7 +431,7 @@ class ArmsTest(unittest.TestCase):
             argv = arms.docker_run_args(f"sab-{arm}", "img", "sab-net", self.spec(arm),
                                         Path("/x/private.env"))
             self.assertIn("--cpus", argv)
-            self.assertEqual(argv[argv.index("--memory") + 1], "16g")  # fix round 2 ruling
+            self.assertEqual(argv[argv.index("--memory") + 1], "24g")  # Task 12 ruling
             # Round 3 ruling: no swap, i.e. --memory-swap equal to --memory.
             self.assertEqual(argv[argv.index("--memory-swap") + 1],
                              argv[argv.index("--memory") + 1])

@@ -353,9 +353,9 @@ class RecordsTest(Case):
             "admission": analyze.ADMISSION_RULE,
             "re_runs": freeze_stage2.NO_RERUN_RULE,
             "headline": freeze_stage2.HEADLINE_RULE,
-            "agent_resources": ["--cpus", "4", "--memory", "16g", "--memory-swap", "16g"],
+            "agent_resources": ["--cpus", "4", "--memory", "24g", "--memory-swap", "24g"],
             "per_call_usd": 5.0,
-            "run_timeout_s": run.RUN_TIMEOUT_S,
+            "run_timeout_s": 3600,
             "planned_reps": [["bare", 2], ["cs", 1], ["full", 1]],
             "models": list(run.MODELS)})
         self.assertIn("max(bare0_i, bare1_i) / min(bare0_i, bare1_i)", rule["floor_f"])

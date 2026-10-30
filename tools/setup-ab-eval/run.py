@@ -148,7 +148,7 @@ STAGE1_CAP_USD = 25.0
 STAGE3_CAP_USD = TOTAL_CAP_USD
 STAGE3_PER_CALL_USD = 5.00
 STAGE3_RESERVE_USD = STAGE3_PER_CALL_USD
-RUN_TIMEOUT_S = 1800
+RUN_TIMEOUT_S = 3600  # Task 12 (operator 2026-10-30): pilot attempt 1 lost a run at 1800 s
 AGENT_UID = "1000"
 
 # Fix round 1 (M5): a graded run of a development task is `dev-scored`, never `scored` (spec

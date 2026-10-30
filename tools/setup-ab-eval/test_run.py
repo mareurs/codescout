@@ -1065,6 +1065,20 @@ class CapHitTest(RunnerCase):
         self.assertTrue(run.cap_hit({"subtype": "error_max_budget_usd", "is_error": True}))
         self.assertTrue(run.cap_hit({"subtype": "error_during_execution",
                                      "terminal_reason": "budget_exhausted"}))
+class TimeoutTest(RunnerCase):
+    """Task 12 (operator 2026-10-30): pilot attempt 1 lost a run at RUN_TIMEOUT_S 1800 s."""
+
+    def test_the_run_timeout_is_3600_and_reaches_the_cli_exec(self):
+        self.assertEqual(run.RUN_TIMEOUT_S, 3600)
+        seen = []
+        cli = FakeCLI(self.world, self.data)
+
+        def timed(container, argv, timeout):
+            seen.append(timeout)
+            return cli(container, argv, timeout)
+        self.batch([spec()], BUDGET, cli=timed)
+        self.assertEqual(seen, [3600])
+
 class FrozenInputsTest(RunnerCase):
     """Final review I-7: the arms read only the frozen copy, and a changed copy stops a batch."""
 
@@ -1140,9 +1154,10 @@ class Stage1RowsTest(RunnerCase):
         if not (study / "rows.jsonl").is_file():
             self.skipTest("no Stage 1 journal on this machine")
         import analyze
-        rows = run.read_rows(study)  # read only
-        self.assertTrue(rows)
-        self.assertTrue(all(r["stage"] == "dev" and r["capHit"] is None for r in rows))
+        rows = run.read_rows(study)  # read only; Stage 3 rows may sit beside Stage 1's
+        stage1 = [r for r in rows if r["stage"] == "dev"]
+        self.assertEqual(len(run.latest_rows(stage1)), 12)
+        self.assertTrue(all(r["capHit"] is None for r in stage1))
         for r in rows:
             analyze.check_row(r)
 

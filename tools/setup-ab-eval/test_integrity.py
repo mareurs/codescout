@@ -170,7 +170,10 @@ class IntegrityTest(unittest.TestCase):
         if not runs.is_dir():
             self.skipTest("no Stage 1 runs on this machine")
         seen = 0
+        dev = ("burntsushi__ripgrep-2576", "astral-sh__ruff-15309")  # Stage 1's two tasks
         for d in sorted(runs.iterdir()):
+            if d.name.split(".")[0] not in dev:
+                continue  # Stage 3 runs (or an archived pilot) live beside Stage 1's
             arm = d.name.split(".")[-2]
             result = next(r for r in (json.loads(l) for l in (d / "stream.dedup.jsonl")
                                       .read_text().splitlines() if l.strip())

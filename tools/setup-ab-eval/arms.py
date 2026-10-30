@@ -67,11 +67,13 @@ MAX_BUDGET_USD = "1.25"
 # Copied from pilot.run_pilot's `docker run` (--cpus 4 --memory 8g): the prepare step and the
 # graders (tasks.private_grader / foreign_grader) keep it, as the Step-5 controls ran with it.
 RESOURCES = ("--cpus", "4", "--memory", "8g")
-# Fix round 2, operator decision 2026-10-30: every ARM container (docker_run_args) gets 16 GB,
-# the same in every arm (rust-analyzer on the codescout repo peaked at 7.3-8.5 GB of 8 GB in an
+# Fix round 2, operator decision 2026-10-30: every ARM container (docker_run_args) gets the same
+# memory in every arm (rust-analyzer on the codescout repo peaked at 7.3-8.5 GB of 8 GB in an
 # idle session). Round 3 ruling: --memory-swap equal to --memory, so the container has NO swap
 # and a memory-heavy run fails fast as an OOM kill instead of swapping toward the timeout.
-AGENT_MEMORY = "16g"
+# Task 12 (operator 2026-10-30): 16g -> 24g after pilot attempt 1 measured memory.peak up to
+# 14.8 GB (opus full, cs-p08) against 16 GB.
+AGENT_MEMORY = "24g"
 AGENT_RESOURCES = ("--cpus", "4", "--memory", AGENT_MEMORY, "--memory-swap", AGENT_MEMORY)
 # The non-secret part of pilot's private.env; the token and proxy are the runner's (Task 8).
 CONTAINER_ENV = {"CLAUDE_CONFIG_DIR": CONFIG_DIR, "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8192",
