@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: mitigated
+status: fixed
 tags:
 - cluster/selector-narrower-than-its-population
 closed: 2026-09-02
@@ -8,7 +8,7 @@ opened: 2026-09-02
 owner: marius
 related: []
 severity: medium
-unverified: TRACKED 7879e82a542864d3 — No regression test — nothing gates the field-label form, so the corpus can drift back the same way tomorrow. Four fields remain genuinely ABSENT (OB-12 Status; OB-13 Plausible-answer property, Vigilance, Status) and were deliberately not authored. The 6 repaired labels were verified by re-running the documented grep; the absent four were not repaired at all.
+unverified: 'RESOLVED 2026-10-30 — the gate exists (tests/ledger_field_labels.rs, commit 5c3ac45b7) and the absent fields are backfilled as explicit `unknown` lines (commit 6e5b57e05, tracked in 7879e82a542864d3, now fixed). The backfill is placeholders, not authored values, and the gate checks the label''s presence and form, not its content. Was: TRACKED 7879e82a542864d3 — No regression test — nothing gates the field-label form, so the corpus can drift back the same way tomorrow. Four fields remain genuinely ABSENT (OB-12 Status; OB-13 Plausible-answer property, Vigilance, Status) and were deliberately not authored. The 6 repaired labels were verified by re-running the documented grep; the absent four were not repaired at all.'
 ---
 
 # BUG: the observer-blindness ledger's own mining greps under-report on a drifted field label
@@ -165,7 +165,7 @@ Generalises to any declared ledger whose read interface is a documented grep —
 
 ## Tests added
 
-**None.** That is the gap, and the reason this is `mitigated` rather than `fixed`: the
+Added 2026-10-30: `tests/ledger_field_labels.rs` (commit `5c3ac45b7`), which fails on a label written inside a single bold span and, with `KNOWN_ABSENT` now empty, on any absent template field. Each of three staged ledger mutations failed the gate meant for it. Was: **None.** That was the gap, and the reason this was `mitigated` rather than `fixed`: the
 repair restores the query and adds no guard, so the defect recurs on the next entry written
 by anyone who copies a neighbouring entry rather than the template. The candidate test is
 described under **Fix**.
