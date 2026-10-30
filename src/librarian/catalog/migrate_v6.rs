@@ -569,7 +569,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 13);
+        assert_eq!(v, 14);
     }
 
     #[test]
@@ -584,7 +584,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 13);
+        assert_eq!(v, 14);
     }
     #[test]
     fn migration_v6_single_open_preserves_v9_entry_graph_shape() {

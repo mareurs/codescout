@@ -127,6 +127,14 @@ pub struct EmbedQueueItem {
     /// walk and this drain would leave us stamping a hash we never embedded.
     /// Several sessions share this checkout, so that race is live.
     pub file_sha256: Option<String>,
+    /// [`crate::librarian::catalog::chunk::embed_input_hash`] of `title` and `text`: what the
+    /// drain records as this chunk's `embedded_input_hash` once its vector has landed.
+    pub input_hash: String,
+    /// True when the chunk already carries a vector embedded from exactly this input. Set by
+    /// [`embed_queue_items`] from the stored marker and by nothing else. The MCP reindex drain
+    /// counts such an item as landed without embedding it; every other consumer ignores the
+    /// flag and embeds as before, which is always safe.
+    pub up_to_date: bool,
 }
 
 /// Return the text of the first H1 in a markdown body, or `None` if none is
@@ -169,7 +177,10 @@ pub fn first_h1(body: &str) -> Option<String> {
 /// holds a transaction can still call this: `BEGIN` inside a transaction is an error, a
 /// nested SAVEPOINT is not. The rollback also takes `replace_chunks`' sentinel ordinals
 /// (step 2 of its write) back with it when a later step fails.
-fn in_one_commit<T>(conn: &rusqlite::Connection, f: impl FnOnce() -> Result<T>) -> Result<T> {
+pub(crate) fn in_one_commit<T>(
+    conn: &rusqlite::Connection,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
     conn.execute_batch("SAVEPOINT one_commit")?;
     match f() {
         Ok(v) => {
@@ -259,7 +270,15 @@ pub(crate) fn embed_queue_items(
     // Built once per artifact, not per chunk: a ledger has hundreds of chunks and
     // one heading table.
     let titles = crate::librarian::entry_token::entry_titles_by_token(body);
-    Ok(embed_queue_from_chunks(id, title, stored, &titles))
+    let mut items = embed_queue_from_chunks(id, title, stored, &titles);
+    // A chunk whose stored marker equals its current input already has the vector this item
+    // would produce. Marked here, where the queue and the stored rows are both in hand; the
+    // flag only says so, and the reindex drain decides whether to honour it.
+    let markers = crate::librarian::catalog::chunk::embedded_input_hashes(cat, id)?;
+    for item in &mut items {
+        item.up_to_date = markers.get(&item.chunk_id) == Some(&item.input_hash);
+    }
+    Ok(items)
 }
 /// Compose embedding inputs from stored rows and their entry-title context.
 /// Ordinary indexing supplies the current body; repair supplies persisted chunks.
@@ -300,6 +319,8 @@ fn embed_queue_from_chunks(
                 }
                 _ => r.content,
             };
+            let input_hash =
+                crate::librarian::catalog::chunk::embed_input_hash(title.as_deref(), &text);
             EmbedQueueItem {
                 chunk_id: r.chunk_id,
                 // `id` is the artifact this whole call is about. It was being
@@ -311,6 +332,10 @@ fn embed_queue_from_chunks(
                 // Filled in by the caller that knows the walk's hash; see the
                 // field's doc comment for why it is not derived here.
                 file_sha256: None,
+                input_hash,
+                // Only `embed_queue_items` reads the stored markers. This function also
+                // serves the backfill repair arm, whose queue must never skip.
+                up_to_date: false,
             }
         })
         .collect()
@@ -1395,6 +1420,13 @@ pub fn write_embeddings_v2_with(
             "INSERT INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",
             rusqlite::params![chunk_id, blob],
         )?;
+        // This vector may come from an input other than the one a stored marker vouches
+        // for (the backfill repair arm embeds from persisted rows). Drop the marker; the
+        // reindex drain sets it again, after this write, for the vectors it produced.
+        cat.conn.execute(
+            "UPDATE artifact_chunk SET embedded_input_hash = NULL WHERE chunk_id = ?1",
+            rusqlite::params![chunk_id],
+        )?;
     }
     Ok(())
 }
@@ -1520,6 +1552,13 @@ pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
             rusqlite::params![id],
         )?;
     }
+    // The vectors the markers vouched for are gone, so the markers must go with them:
+    // a marker that outlives its vector makes the reindex drain skip a chunk that has
+    // none.
+    cat.conn.execute(
+        "UPDATE artifact_chunk SET embedded_input_hash = NULL WHERE artifact_id = ?1",
+        rusqlite::params![artifact_id],
+    )?;
     Ok(ids.len())
 }
 
@@ -2009,6 +2048,9 @@ fn rebuild_artifact_vec_v2_at_dim(conn: &rusqlite::Connection, new_dim: usize) -
          CREATE VIRTUAL TABLE artifact_vec_v2 USING vec0(id TEXT PRIMARY KEY, embedding FLOAT[{new_dim}]);"
     ))
     .context("rebuilding artifact_vec_v2 at new dimension")?;
+    // Every vector the markers vouched for was just dropped with the table.
+    conn.execute("UPDATE artifact_chunk SET embedded_input_hash = NULL", [])
+        .context("clearing embed markers after the vec rebuild")?;
     Ok(())
 }
 
@@ -6099,6 +6141,66 @@ kind = "memory"
             .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0, "every chunk vector must go, not only the first");
+    }
+
+    /// A marker vouches for a vector, so every path that removes or rewrites vectors outside
+    /// the reindex drain must drop it: the drain skips a marked chunk, and a marker that
+    /// outlives its vector leaves the chunk with no vector and no retry.
+    ///
+    /// Three paths, one mutation target each: `delete_chunk_vectors`, `write_embeddings_v2`
+    /// (the backfill repair writer) and `rebuild_artifact_vec_v2_at_dim`.
+    #[test]
+    fn a_marker_does_not_outlive_the_vector_it_vouched_for() {
+        let cat = Catalog::open_in_memory().unwrap();
+        crate::librarian::catalog::artifact::upsert(
+            &cat,
+            &crate::librarian::catalog::artifact::TestArtifactRowBuilder::new("a")
+                .with_kind("tracker")
+                .with_status("active")
+                .build(),
+        )
+        .unwrap();
+        let built = crate::librarian::catalog::chunk::build_chunks(
+            "a",
+            "# T\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n",
+            2048,
+            0,
+        );
+        let stored = crate::librarian::catalog::chunk::replace_chunks(&cat, "a", &built).unwrap();
+        assert!(stored.len() > 1, "fixture must yield >1 chunk");
+        let vecs: Vec<(String, Vec<f32>)> = stored
+            .iter()
+            .map(|r| (r.chunk_id.clone(), vec![0.5f32; 768]))
+            .collect();
+        let marked = |cat: &Catalog| -> i64 {
+            cat.conn
+                .query_row(
+                    "SELECT COUNT(*) FROM artifact_chunk WHERE embedded_input_hash IS NOT NULL",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        let mark_all = |cat: &Catalog| {
+            let marks: Vec<(&str, &str)> =
+                stored.iter().map(|r| (r.chunk_id.as_str(), "h")).collect();
+            crate::librarian::catalog::chunk::mark_embedded(cat, &marks).unwrap();
+            assert_eq!(marked(cat) as usize, stored.len(), "setup: all marked");
+        };
+
+        write_embeddings_v2(&cat, &vecs).unwrap();
+        mark_all(&cat);
+        write_embeddings_v2(&cat, &vecs).unwrap();
+        assert_eq!(marked(&cat), 0, "rewriting a vector drops its marker");
+
+        mark_all(&cat);
+        delete_chunk_vectors(&cat, "a").unwrap();
+        assert_eq!(marked(&cat), 0, "deleting the vectors drops their markers");
+
+        write_embeddings_v2(&cat, &vecs).unwrap();
+        mark_all(&cat);
+        rebuild_artifact_vec_v2_at_dim(&cat.conn, 768).unwrap();
+        assert_eq!(marked(&cat), 0, "a table rebuild drops every marker");
     }
 
     #[test]

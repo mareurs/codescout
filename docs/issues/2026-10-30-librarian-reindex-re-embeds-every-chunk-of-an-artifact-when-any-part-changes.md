@@ -1,15 +1,16 @@
 ---
 id: '664ceb9fcb96230c'
 kind: bug
-status: open
+status: fixed
 title: Librarian reindex re-embeds every chunk of an artifact when any part of it changes
 owners:
 - marius
 tags:
 - cluster/attribute-derived-at-container-granularity
+closed: 2026-10-30
 opened: 2026-10-30
 severity: high
-unverified: The saving (64 s to under 5 s for append edits) is estimated from the per-chunk embed cost, not measured.
+unverified: The saving is shown by tests that count embeds (an append embeds 1 chunk, a rename 2, reembed all), not yet by a run on the real 482 MB catalog. The migration (v14) has not run on that catalog.
 ---
 
 # BUG: Librarian reindex re-embeds every chunk of an artifact when any part of it changes
@@ -60,11 +61,25 @@ See Symptom. Code spot-checked 2026-10-30 at `src/librarian/indexer.rs:218-236`.
 
 ## Fix
 
-Plan: a per-chunk `embedded_input_hash` column (hash of the exact text sent to the embedder), set only after the upsert succeeds; queue only chunks whose hash differs; `reembed=true` ignores it. Needs a migration; `catalog-sql-hazards` applies (`migrate_v6` table copies must carry the column). If Qdrant loses points, the marker lies, so `reembed` is the escape.
+Done 2026-10-30. A nullable `artifact_chunk.embedded_input_hash` column (migration v14) holds a hash of the exact embed input: the artifact title and the composed chunk text (`chunk::embed_input_hash`). It is not `content_hash`, which misses the entry title; `replace_chunks` documents why.
+
+- `embed_queue_items` marks each queue item `up_to_date` when the stored marker equals its current input hash.
+- The MCP reindex drain counts an `up_to_date` item as landed without embedding it, unless `reembed=true`. The per-artifact stamp logic is unchanged, so an artifact whose chunks were all skipped still gets stamped.
+- The drain writes the markers after the vectors landed, in one commit. A failed upsert leaves its chunk unmarked.
+- A marker is cleared wherever a vector is removed or rewritten outside the drain: `delete_chunk_vectors`, `write_embeddings_v2_with`, `rebuild_artifact_vec_v2_at_dim`.
+- The response gains `embed_skipped_chunks`.
+
+Limits, stated plainly:
+- The embedder exposes no model identity, so a model or backend switch needs `reembed=true`, its documented lever.
+- A store that loses points leaves markers that lie (Qdrant has no foreign key to the catalog). `reembed=true` is the repair.
+- The CLI `index_repo` and the backfill ignore the flag and do not write markers. That under-claims and is safe.
+- An older binary on the shared catalog ignores the column. Its vector writes do not clear markers.
 
 ## Tests added
 
-None yet.
+In `src/librarian/tools/reindex.rs`: `appending_an_entry_embeds_only_the_chunk_that_is_new` (embeds 1, skips the rest, and a third run queues nothing), `renaming_an_entry_re_embeds_its_mid_entry_chunks`, `reembed_ignores_the_markers`, `a_chunk_whose_upsert_failed_is_not_marked_embedded`. In `indexer.rs`: `a_marker_does_not_outlive_the_vector_it_vouched_for`. In `catalog/mod.rs`: `v14_adds_a_nullable_embedded_input_hash_and_is_idempotent`; the eight version assertions moved from 13 to 14.
+
+Mutations run: hashing the chunk body without the entry title fails the rename test; marking a chunk whose upsert failed fails the failed-upsert test. Both reverted.
 
 ## Workarounds
 

@@ -349,6 +349,12 @@ pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> 
 /// is the guard, and it asserts the reuse actually happened so it cannot pass by
 /// the row being rebuilt instead.
 ///
+/// The one safe form of that filter keys on [`embed_input_hash`], the hash of the
+/// composed text the embedder actually receives, stored per chunk as
+/// `embedded_input_hash` and set only after the vector landed. `embed_queue_items`
+/// marks an item `up_to_date` when the stored value equals the current one, and only the
+/// MCP reindex drain honours that. `reembed=true` ignores it.
+///
 /// Backfill does filter, against `artifact_vec_v2`, and is safe for reasons of its
 /// own. It calls `embed_queue_items` only for an artifact with no stored chunks, so
 /// this writer reuses no row there and the filter drops nothing. Its repair arm
@@ -620,6 +626,58 @@ pub fn chunks_for(cat: &Catalog, artifact_id: &str) -> Result<Vec<ChunkRow>> {
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
+}
+
+/// Hash of the exact input a chunk's vector is embedded from: the artifact title and the
+/// composed chunk text, which are the two things `EmbeddingService::embed_artifact` joins.
+///
+/// Deliberately NOT `ChunkRow::content_hash`. That covers the chunk's bytes only, and the
+/// composed text also carries the entry's title, so a heading rename changes the input of
+/// every mid-entry chunk while every `content_hash` stays identical (see `replace_chunks`,
+/// "The reuse key is incomplete"). A skip keyed on `content_hash` would leave those chunks
+/// embedded under a title that no longer exists anywhere in the corpus.
+///
+/// The embedding model is not part of the hash: the embedder exposes no identity to hash.
+/// A model or backend switch therefore needs `reembed=true`, which already is its documented
+/// lever, or a dimension rebuild, which clears every marker.
+pub fn embed_input_hash(title: Option<&str>, text: &str) -> String {
+    let mut hasher = Sha256::new();
+    // Length-prefix the title so ("ab", "c") and ("a", "bc") cannot collide.
+    let title = title.unwrap_or("");
+    hasher.update((title.len() as u64).to_le_bytes());
+    hasher.update(title.as_bytes());
+    hasher.update(text.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// `chunk_id -> embedded_input_hash` for every chunk of `artifact_id` that carries a marker.
+pub fn embedded_input_hashes(
+    cat: &Catalog,
+    artifact_id: &str,
+) -> Result<std::collections::HashMap<String, String>> {
+    let mut stmt = cat.conn.prepare(
+        "SELECT chunk_id, embedded_input_hash FROM artifact_chunk
+          WHERE artifact_id = ?1 AND embedded_input_hash IS NOT NULL",
+    )?;
+    let rows = stmt
+        .query_map([artifact_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+/// Record that each `(chunk_id, input_hash)` now has a vector embedded from that input.
+///
+/// Call it only AFTER the vector landed in the store: a marker written first would turn a
+/// failed upsert into a permanent hole, because the next run would skip the chunk.
+/// Not wrapped in a transaction here; the caller batches it into one commit.
+pub fn mark_embedded(cat: &Catalog, marks: &[(&str, &str)]) -> Result<()> {
+    let mut stmt = cat
+        .conn
+        .prepare("UPDATE artifact_chunk SET embedded_input_hash = ?2 WHERE chunk_id = ?1")?;
+    for (chunk_id, hash) in marks {
+        stmt.execute([chunk_id, hash])?;
+    }
+    Ok(())
 }
 
 /// Chunk rows for a set of chunk ids, keyed by `chunk_id`.

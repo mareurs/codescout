@@ -49,6 +49,7 @@ async fn flush_vectors<'q>(
     project_id: &str,
     unwritten: &mut Vec<(&'q indexer::EmbedQueueItem, Vec<f32>)>,
     landed: &mut std::collections::HashMap<&'q str, usize>,
+    marks: &mut Vec<(&'q str, &'q str)>,
     total_embedded: &mut usize,
     embed_errors: &mut Vec<String>,
 ) {
@@ -83,6 +84,9 @@ async fn flush_vectors<'q>(
             Ok(()) => {
                 *total_embedded += 1;
                 *landed.entry(item.artifact_id.as_str()).or_insert(0) += 1;
+                // Marked only now that the vector is in the store, so a failed upsert leaves
+                // the chunk unmarked and the next run embeds it again.
+                marks.push((item.chunk_id.as_str(), item.input_hash.as_str()));
             }
             Err(e) => embed_errors.push(format!("{}: upsert failed: {e}", item.chunk_id)),
         }
@@ -407,6 +411,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // skipped by mistake — which is exactly how the `reembed` no-op stayed
     // invisible (docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md).
     let mut total_embedded = 0usize;
+    // Chunks the drain did not embed because their stored marker matched their current input.
+    let mut total_skipped = 0usize;
     // Fix (c) of docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
     // `None` until some target actually measures it, so "embeddings disabled"
     // stays distinguishable from "measured, nothing missing". A count that
@@ -583,23 +589,40 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // embedding itself stays one request at a time (the local server does not scale with
             // concurrency: 17-20 ms per text sequentially, 29-32 ms at 8 and 16 workers).
             let mut unwritten: Vec<(&indexer::EmbedQueueItem, Vec<f32>)> = Vec::new();
+            // `(chunk_id, input_hash)` of every chunk whose vector landed; written to the catalog
+            // after the loop, in one commit.
+            let mut marks: Vec<(&str, &str)> = Vec::new();
+            // `reembed=true` ignores every marker: it is the escape for a marker that lies
+            // (a store that lost its points, a model or backend switch).
+            let reembed = a.reembed.unwrap_or(false);
             for item in &embed_queue {
-                match svc.embed_artifact(item.title.as_deref(), &item.text).await {
-                    Ok(vec) => {
-                        unwritten.push((item, vec));
-                        if unwritten.len() >= UPSERT_BATCH {
-                            flush_vectors(
-                                store.as_ref(),
-                                &project_id,
-                                &mut unwritten,
-                                &mut landed,
-                                &mut total_embedded,
-                                &mut embed_errors,
-                            )
-                            .await;
+                if item.up_to_date && !reembed {
+                    // The chunk already has a vector embedded from exactly this input. Counted
+                    // as landed so the per-artifact stamp below sees every chunk covered, and
+                    // not as `embedded`, which counts only the embedder's work.
+                    *landed.entry(item.artifact_id.as_str()).or_insert(0) += 1;
+                    total_skipped += 1;
+                } else {
+                    match svc.embed_artifact(item.title.as_deref(), &item.text).await {
+                        Ok(vec) => {
+                            unwritten.push((item, vec));
+                            if unwritten.len() >= UPSERT_BATCH {
+                                flush_vectors(
+                                    store.as_ref(),
+                                    &project_id,
+                                    &mut unwritten,
+                                    &mut landed,
+                                    &mut marks,
+                                    &mut total_embedded,
+                                    &mut embed_errors,
+                                )
+                                .await;
+                            }
+                        }
+                        Err(e) => {
+                            embed_errors.push(format!("{}: embed failed: {e}", item.chunk_id))
                         }
                     }
-                    Err(e) => embed_errors.push(format!("{}: embed failed: {e}", item.chunk_id)),
                 }
 
                 // Counted per item PROCESSED, not per item embedded: a run that is
@@ -629,11 +652,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 &project_id,
                 &mut unwritten,
                 &mut landed,
+                &mut marks,
                 &mut total_embedded,
                 &mut embed_errors,
             )
             .await;
 
+            // Record which input each landed vector was embedded from, so the next run can skip
+            // those chunks. One commit for the whole batch of rows, not one fsync per chunk.
+            if !marks.is_empty() {
+                let cat = ctx.catalog.lock();
+                if let Err(e) = indexer::in_one_commit(&cat.conn, || {
+                    crate::librarian::catalog::chunk::mark_embedded(&cat, &marks)
+                }) {
+                    // Not fatal: unmarked chunks are embedded again next run, which costs time
+                    // and nothing else.
+                    embed_errors.push(format!("embed markers not recorded: {e}"));
+                }
+            }
             // The loop is over, so the row's claim — "a reindex is embedding right
             // now" — has stopped being true. Cleared here rather than at the end of
             // `call` so the row's meaning is exactly the loop's extent; the stamping
@@ -788,6 +824,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         },
         "unchanged": total_unchanged,
         "embedded": total_embedded,
+        "embed_skipped_chunks": total_skipped,
         "skipped_roots": skipped_roots,
         "vectorless": total_vectorless,
         "vectorless_note": match total_vectorless {
@@ -1601,6 +1638,221 @@ mod tests {
             store.landed.lock().iter().all(|(_, a)| a != &bad_id),
             "the bad artifact's vector must not be in the store"
         );
+    }
+
+    /// A ledger body for `docs/specs/`: an H1, then one `## <token> — <title>` section per entry,
+    /// each with `paragraphs` paragraphs of about 1,500 characters. Two of them overflow the
+    /// 2,048-character chunk budget, so the entry spans two chunks and its second chunk does not
+    /// open with a heading, which is the chunk that carries the entry title in its embed input.
+    fn ledger_text(entries: &[(&str, &str, usize)]) -> String {
+        let mut s = String::from("# Ledger\n\nintro\n\n");
+        for (token, title, paragraphs) in entries {
+            s.push_str(&format!("## {token} — {title}\n\n"));
+            for k in 0..*paragraphs {
+                let unit = format!("{token}-{k} ");
+                s.push_str(&unit.repeat(1500 / unit.len()));
+                s.push_str("\n\n");
+            }
+        }
+        s
+    }
+
+    fn marked_chunks(ctx: &ToolContext) -> i64 {
+        ctx.catalog
+            .lock()
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_chunk WHERE embedded_input_hash IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    /// Appending one entry to a ledger must embed that entry and nothing else. Before the
+    /// per-chunk marker, `embedded_sha256` was per artifact, so one appended entry re-embedded
+    /// every chunk of the file (499 for the largest tracker, about 8 s of embedder time).
+    ///
+    /// The third run is the other half: an artifact whose chunks were mostly SKIPPED must still
+    /// get its stamp, or it would be queued, and re-walked, on every run for ever.
+    #[tokio::test]
+    async fn appending_an_entry_embeds_only_the_chunk_that_is_new() {
+        let tmp = TempDir::new().unwrap();
+        let proj = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        let path = proj.join("docs/specs/ledger.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut entries = vec![
+            ("W-1", "alpha", 1),
+            ("W-2", "beta", 1),
+            ("W-3", "gamma", 1),
+            ("W-4", "delta", 1),
+        ];
+        std::fs::write(&path, ledger_text(&entries)).unwrap();
+
+        let store = RecordingStore::new(None);
+        let ctx = external_store_ctx(&[("proj", &proj)], store.clone());
+        let first = call(&ctx, json!({})).await.unwrap();
+        let n = first["embedded"].as_u64().unwrap();
+        assert!(n >= 5, "fixture must hold several chunks, got {n}: {first}");
+        assert_eq!(
+            first["embed_skipped_chunks"].as_u64().unwrap(),
+            0,
+            "{first}"
+        );
+        assert_eq!(
+            marked_chunks(&ctx) as u64,
+            n,
+            "every landed chunk is marked"
+        );
+
+        entries.push(("W-5", "epsilon", 1));
+        std::fs::write(&path, ledger_text(&entries)).unwrap();
+        let second = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            second["embedded"].as_u64().unwrap(),
+            1,
+            "only the appended entry is embedded: {second}"
+        );
+        assert_eq!(
+            second["embed_skipped_chunks"].as_u64().unwrap(),
+            n,
+            "every earlier chunk was skipped: {second}"
+        );
+        assert_eq!(second["embed_error_count"].as_u64().unwrap(), 0, "{second}");
+
+        let third = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            (
+                third["embedded"].as_u64().unwrap(),
+                third["embed_skipped_chunks"].as_u64().unwrap()
+            ),
+            (0, 0),
+            "the artifact was stamped, so nothing is queued at all: {third}"
+        );
+    }
+
+    /// Renaming an entry's heading changes the embed input of its MID-entry chunks while every
+    /// `content_hash` stays the same, so a skip keyed on `content_hash` would leave them embedded
+    /// under a title that no longer exists. Both chunks of the renamed entry must be embedded:
+    /// the heading chunk (new bytes) and the second chunk (same bytes, new title).
+    ///
+    /// Mutation target: keying the skip on `ChunkRow::content_hash`. That embeds 1 here, not 2.
+    #[tokio::test]
+    async fn renaming_an_entry_re_embeds_its_mid_entry_chunks() {
+        let tmp = TempDir::new().unwrap();
+        let proj = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        let path = proj.join("docs/specs/ledger.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            ledger_text(&[("W-1", "alpha", 2), ("W-2", "beta", 1), ("W-3", "gamma", 1)]),
+        )
+        .unwrap();
+
+        let store = RecordingStore::new(None);
+        let ctx = external_store_ctx(&[("proj", &proj)], store.clone());
+        let first = call(&ctx, json!({})).await.unwrap();
+        let n = first["embedded"].as_u64().unwrap();
+        let w1_chunks: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_chunk WHERE entry_token = 'W-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            w1_chunks, 2,
+            "fixture: W-1 must span two chunks or the rename proves nothing"
+        );
+
+        std::fs::write(
+            &path,
+            ledger_text(&[
+                ("W-1", "renamed", 2),
+                ("W-2", "beta", 1),
+                ("W-3", "gamma", 1),
+            ]),
+        )
+        .unwrap();
+        let second = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            second["embedded"].as_u64().unwrap(),
+            2,
+            "the heading chunk and the second chunk of the renamed entry: {second}"
+        );
+        assert_eq!(
+            second["embed_skipped_chunks"].as_u64().unwrap(),
+            n - 2,
+            "every other chunk was skipped: {second}"
+        );
+    }
+
+    /// `reembed=true` is the escape for a marker that lies (a store that lost its points, a model
+    /// switch), so it must ignore every marker.
+    #[tokio::test]
+    async fn reembed_ignores_the_markers() {
+        let tmp = TempDir::new().unwrap();
+        let proj = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        let path = proj.join("docs/specs/ledger.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            ledger_text(&[("W-1", "alpha", 1), ("W-2", "beta", 1), ("W-3", "gamma", 1)]),
+        )
+        .unwrap();
+
+        let store = RecordingStore::new(None);
+        let ctx = external_store_ctx(&[("proj", &proj)], store.clone());
+        let n = call(&ctx, json!({})).await.unwrap()["embedded"]
+            .as_u64()
+            .unwrap();
+
+        let again = call(&ctx, json!({"reembed": true})).await.unwrap();
+        assert_eq!(
+            (
+                again["embedded"].as_u64().unwrap(),
+                again["embed_skipped_chunks"].as_u64().unwrap()
+            ),
+            (n, 0),
+            "every chunk is embedded again and none is skipped: {again}"
+        );
+    }
+
+    /// A marker says a vector landed, so it must be written only for a chunk whose upsert
+    /// succeeded. Written first, a refused upsert would become a permanent hole: the next run
+    /// would skip a chunk that has no vector.
+    #[tokio::test]
+    async fn a_chunk_whose_upsert_failed_is_not_marked_embedded() {
+        let tmp = TempDir::new().unwrap();
+        let proj = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        let names: Vec<String> = ["a.md", "b.md", "bad.md", "c.md"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        write_specs(&proj, &names);
+        let bad_id = crate::librarian::ids::artifact_id_from_abs(&proj.join("docs/specs/bad.md"));
+
+        let store = RecordingStore::new(Some(bad_id.clone()));
+        let ctx = external_store_ctx(&[("proj", &proj)], store.clone());
+        let v = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(v["embed_error_count"].as_u64().unwrap(), 1, "{v}");
+
+        assert_eq!(marked_chunks(&ctx), 3, "the three that landed are marked");
+        let bad_marked: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_chunk
+                  WHERE artifact_id = ?1 AND embedded_input_hash IS NOT NULL",
+                [&bad_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(bad_marked, 0, "the refused chunk must stay unmarked");
     }
 
     /// A row dropped as an in-root symlink ALIAS (keyed `sha256(link path)`) takes only its OWN

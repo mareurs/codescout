@@ -135,7 +135,7 @@ fn apply_schema(conn: &Connection) -> Result<()> {
 
 const BASELINE_VERSIONS: [i64; 4] = [1, 2, 3, 6];
 /// Stamps `apply_migrations_in_txn` writes (v7 and v8 are column-only).
-const MIGRATION_VERSIONS: [i64; 7] = [4, 5, 9, 10, 11, 12, 13];
+const MIGRATION_VERSIONS: [i64; 8] = [4, 5, 9, 10, 11, 12, 13, 14];
 
 /// Baseline `schema_version` stamps that `schema.sql` used to insert with
 /// `INSERT OR IGNORE`. Read first, write only for a missing one.
@@ -183,6 +183,7 @@ fn migrations_current(conn: &Connection) -> Result<bool> {
         ("artifact", "abs_path"),
         ("artifact_chunk", "entry_part"),
         ("artifact_chunk", "entry_parts"),
+        ("artifact_chunk", "embedded_input_hash"),
         ("commits", "git_root"),
     ];
     for (table, column) in WANTED {
@@ -496,6 +497,26 @@ fn apply_migrations_in_txn(conn: &Connection, ws: Option<&WorkspaceConfig>) -> R
             [],
         )?;
     }
+    // v14: `artifact_chunk.embedded_input_hash` — a hash of the exact text this chunk's vector
+    // was embedded from (artifact title + composed chunk text), written only after the vector
+    // landed in the store. The reindex drain skips a chunk whose current input hashes to the
+    // stored value, so appending one entry to a 499-chunk ledger embeds that entry rather than
+    // all 499. NULL means "not known to be embedded from any input", which is the honest reading
+    // for every pre-existing row and queues it once. Nullable and unbackfilled on purpose, for
+    // the same reason as v12's columns.
+    //
+    // It is NOT `content_hash`: that covers the chunk's bytes only, and the embedded text also
+    // carries the entry's title (see `replace_chunks`' "reuse key is incomplete").
+    if !column_exists(conn, "artifact_chunk", "embedded_input_hash")? {
+        conn.execute(
+            "ALTER TABLE artifact_chunk ADD COLUMN embedded_input_hash TEXT",
+            [],
+        )?;
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version) VALUES (14)",
+        [],
+    )?;
     // v6: add abs_path/git_root alongside legacy columns, then backfill.
     // drop_legacy_and_stamp is called separately by open_with_workspace after
     // backfill — NOT here, because backfill requires a workspace config and
@@ -858,7 +879,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 13);
+        assert_eq!(v, 14);
     }
 
     #[test]
@@ -893,7 +914,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 13);
+        assert_eq!(v, 14);
     }
 
     #[test]
@@ -926,7 +947,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 13);
+        assert_eq!(v, 14);
         let n: i64 = cat
             .conn
             .query_row("SELECT COUNT(*) FROM artifact_chunk", [], |r| r.get(0))
@@ -949,7 +970,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 13, "re-running must not advance or duplicate");
+        assert_eq!(v, 14, "re-running must not advance or duplicate");
     }
 
     /// v12 adds `entry_part` / `entry_parts` to `artifact_chunk`.
@@ -981,7 +1002,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 13);
+        assert_eq!(v, 14);
 
         // Nullable, and NULL is the value a pre-v12 row carries.
         {
@@ -1018,6 +1039,58 @@ mod tests {
             (None, None),
             "a row written without them must read back NULL, not a fabricated 1-of-1"
         );
+    }
+
+    /// v14 adds `artifact_chunk.embedded_input_hash`, nullable, and re-running must not fail on
+    /// "duplicate column name".
+    ///
+    /// LOAD-BEARING: NULL, not a default. The reindex drain skips a chunk whose marker equals its
+    /// current input, so a row written before v14 must read as "not known to be embedded" and be
+    /// embedded once. A NOT NULL column would also refuse every insert that does not name it,
+    /// which `replace_chunks` does not.
+    #[test]
+    fn v14_adds_a_nullable_embedded_input_hash_and_is_idempotent() {
+        let cat = Catalog::open_in_memory().unwrap();
+        assert!(
+            column_exists(&cat.conn, "artifact_chunk", "embedded_input_hash").unwrap(),
+            "v14 must add embedded_input_hash"
+        );
+        apply_migrations_in_txn(&cat.conn, None).unwrap();
+        assert!(
+            migrations_current(&cat.conn).unwrap(),
+            "the up-to-date check must agree that v14 is applied, or every open pays a write txn"
+        );
+
+        {
+            use crate::librarian::catalog::artifact::{self, TestArtifactRowBuilder};
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new("a")
+                    .with_abs_path("/test/a.md")
+                    .with_kind("tracker")
+                    .with_status("active")
+                    .with_file_sha256("x")
+                    .build(),
+            )
+            .unwrap();
+        }
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_chunk \
+                 (chunk_id, artifact_id, chunk_ix, start_line, end_line, content, content_hash) \
+                 VALUES ('c1', 'a', 0, 1, 2, 'x', 'h')",
+                [],
+            )
+            .unwrap();
+        let marker: Option<String> = cat
+            .conn
+            .query_row(
+                "SELECT embedded_input_hash FROM artifact_chunk WHERE chunk_id = 'c1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(marker, None, "a row written without it reads NULL");
     }
 
     fn sqlite_master_has(conn: &Connection, kind: &str, name: &str) -> bool {
@@ -1077,7 +1150,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 13);
+        assert_eq!(v, 14);
 
         {
             use crate::librarian::catalog::artifact::{self, TestArtifactRowBuilder};
