@@ -1,5 +1,5 @@
 ---
-id: 1f70ca0cd916e7a0
+id: '1f70ca0cd916e7a0'
 kind: bug
 status: fixed
 title: 'BUG: audit_host_id lives in the catalog, so a transported catalog makes the receiving host write the sender''s audit lines into a committed merge=union shard'
@@ -18,7 +18,7 @@ related:
 - docs/conventions/cross-machine-catalog-resume.md
 - docs/superpowers/specs/2026-08-31-cross-machine-catalog-integration-design.md
 severity: high
-unverified: 'TRACKED 78d98432e98a15e5 — The audit_open_gaps question is UNCHANGED and still not established: whether the several-hundred-entry gap list was caused by cross-host sequence interleaving was never proven, and gaps have other documented causes (prune markers, rolled-back transactions burning seq). The fix stops future interleaving; it does not explain the existing gaps and no measurement here attributes them. Also still unestablished: whether any OTHER host merged rows into this shard, which would make the mixing bidirectional. AND NEW, created by the fix: the ~5,566 rows already exported under ripper-65e654 stay counted as exported by the per-repo watermark and will never re-emit under the corrected id without a deliberate rollback -- doctor reports them as host_previous_stranded_rows, but nothing remediates them and no one has decided whether to.'
+unverified: 'The audit_open_gaps question is UNCHANGED and still not established: whether the several-hundred-entry gap list was caused by cross-host sequence interleaving was never proven, and gaps have other documented causes (prune markers, rolled-back transactions burning seq). The fix stops future interleaving; it does not explain the existing gaps and no measurement here attributes them. Also still unestablished: whether any OTHER host merged rows into this shard, which would make the mixing bidirectional. DECIDED 2026-10-30 for the stranded rows: the rows the laptop exported under ripper-65e654 are NOT remediated, by the operator''s choice to accept the loss (tracking record 78d98432e98a15e5, wontfix). Their machine attribution is gone. Session attribution was measured to survive for 99.2% of 27,297 rows on 2026-09-06 and was not re-measured; that shard has since grown to 69,737 lines.'
 ---
 
 ## Summary
