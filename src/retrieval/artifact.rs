@@ -70,8 +70,8 @@ impl QdrantWrap {
 
         // Needed by `artifact_delete`, which matches on this key rather than on
         // a derived point id. Without the index Qdrant full-scans the whole
-        // collection per delete; `code_chunks` has no payload index and paid
-        // 37.29s vs 0.57s for exactly that (see qdrant.rs:46).
+        // collection per delete; `code_chunks`, before it got its own payload
+        // indexes (2026-10-30), paid 37.29s vs 0.57s for exactly that (see qdrant.rs:46).
         self.client
             .create_field_index(CreateFieldIndexCollectionBuilder::new(
                 name,

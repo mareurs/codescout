@@ -5,6 +5,10 @@ use qdrant_client::qdrant::{
     UpsertPointsBuilder, Vector, VectorInput,
 };
 use qdrant_client::qdrant::{
+    CountPointsBuilder, CreateFieldIndexCollectionBuilder, FacetCountsBuilder, FieldType,
+    KeywordIndexParamsBuilder,
+};
+use qdrant_client::qdrant::{
     CreateCollectionBuilder, SparseVectorParamsBuilder, SparseVectorsConfigBuilder,
     VectorParamsBuilder, VectorsConfigBuilder,
 };
@@ -30,6 +34,47 @@ fn chunk_id_to_point_id(s: &str) -> u64 {
     let hash = sha2::Sha256::digest(s.as_bytes());
     u64::from_le_bytes(hash[..8].try_into().unwrap())
 }
+/// One payload index a code collection must carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CodePayloadIndex {
+    field: &'static str,
+    /// Qdrant's multi-tenant layout: points of one `project_id` are stored together,
+    /// which is the shape of every filter on this collection (one project per query).
+    is_tenant: bool,
+}
+
+/// The keyword indexes every code collection carries, in creation order.
+///
+/// `project_id` is in every filter on the collection (`build_query_filter`,
+/// `scroll_chunk_refs`, `project_has_chunks`, `project_index_stats`); `file_path` is in
+/// the worktree exclusion (`must_not`) and is the key `project_index_stats` facets on.
+/// Without them each filtered request scans every point of a collection shared by
+/// every project on the host: measured 2026-10-30 on the live 737k-point
+/// `code_chunks`, an exact filtered count took 5.7 s and one 1000-point scroll page
+/// 0.58 s, where the `project_id`-indexed artifact collection answered in milliseconds.
+/// docs/issues/2026-10-30-code-chunks-collection-has-no-payload-index-so-every-project-filter-scans-every-point.md
+const CODE_PAYLOAD_INDEXES: [CodePayloadIndex; 2] = [
+    CodePayloadIndex {
+        field: "project_id",
+        is_tenant: true,
+    },
+    CodePayloadIndex {
+        field: "file_path",
+        is_tenant: false,
+    },
+];
+
+/// The code indexes absent from a collection whose payload schema has `existing` keys.
+///
+/// Pure, so the "which writes does a shared collection get" decision is testable
+/// without a live Qdrant. A key that is present counts as indexed whatever its type:
+/// this never replaces an index someone else made.
+fn missing_code_payload_indexes(existing: &[String]) -> Vec<CodePayloadIndex> {
+    CODE_PAYLOAD_INDEXES
+        .into_iter()
+        .filter(|ix| !existing.iter().any(|k| k == ix.field))
+        .collect()
+}
 
 /// The `Filter` every `hybrid_query` leg runs with.
 ///
@@ -41,8 +86,9 @@ fn chunk_id_to_point_id(s: &str) -> u64 {
 /// ## One `MatchAny`, not one condition per value (C2)
 ///
 /// `exclude_paths` collapses into a **single** `MatchAny` condition. Qdrant
-/// evaluates `must_not` conditions one at a time, and this collection carries
-/// no payload index on `file_path`, so N conditions cost N passes. Measured on
+/// evaluates `must_not` conditions one at a time, and when this was measured the
+/// collection carried no payload index on `file_path` (it gets one from
+/// `ensure_collection` since 2026-10-30), so N conditions cost N passes. Measured on
 /// the live 576k-point `code_chunks` collection, same query shape, identical
 /// top-10 ids and scores both ways:
 ///
@@ -174,32 +220,70 @@ impl QdrantWrap {
             .context("collection_exists")
     }
 
-    /// Ensure a collection exists with a named dense vector ("dense", Cosine, `dim` dimensions)
-    /// and a named sparse vector ("sparse", IDF modifier). Idempotent — no-op if the collection
-    /// already exists.
+    /// Ensure a collection exists with a named dense vector ("dense", Cosine, `dim` dimensions),
+    /// a named sparse vector ("sparse", IDF modifier) and the [`CODE_PAYLOAD_INDEXES`].
+    /// Idempotent: an existing collection is not re-created, but it still gets any payload
+    /// index it lacks — returning early before that step is how the live `code_chunks`
+    /// went without one.
     pub async fn ensure_collection(&self, name: &str, dim: u64) -> Result<()> {
-        if self.collection_exists(name).await? {
-            return Ok(());
+        if !self.collection_exists(name).await? {
+            let mut vectors = VectorsConfigBuilder::default();
+            vectors
+                .add_named_vector_params("dense", VectorParamsBuilder::new(dim, Distance::Cosine));
+
+            let mut sparse = SparseVectorsConfigBuilder::default();
+            sparse.add_named_vector_params(
+                "sparse",
+                SparseVectorParamsBuilder::default().modifier(Modifier::Idf),
+            );
+
+            self.client
+                .create_collection(
+                    CreateCollectionBuilder::new(name)
+                        .vectors_config(vectors)
+                        .sparse_vectors_config(sparse),
+                )
+                .await
+                .context("create_collection")?;
         }
 
-        let mut vectors = VectorsConfigBuilder::default();
-        vectors.add_named_vector_params("dense", VectorParamsBuilder::new(dim, Distance::Cosine));
+        // Not `?`: the index is a speed-up, never a precondition, so a Qdrant that refuses
+        // it (one older than 1.11 rejects `is_tenant`) must not turn into a failed sync.
+        if let Err(e) = self.ensure_code_payload_indexes(name).await {
+            tracing::warn!(collection = name, error = %e, "could not create code payload indexes; filtered queries will scan every point");
+        }
+        Ok(())
+    }
 
-        let mut sparse = SparseVectorsConfigBuilder::default();
-        sparse.add_named_vector_params(
-            "sparse",
-            SparseVectorParamsBuilder::default().modifier(Modifier::Idf),
-        );
-
-        self.client
-            .create_collection(
-                CreateCollectionBuilder::new(name)
-                    .vectors_config(vectors)
-                    .sparse_vectors_config(sparse),
-            )
+    /// Create whichever [`CODE_PAYLOAD_INDEXES`] the collection's payload schema lacks.
+    ///
+    /// `wait(false)`: on a collection that already holds points, Qdrant builds the index
+    /// in the background, so an index build is not held up by it. Nothing depends on the
+    /// index for correctness — every filter answers the same without it, only slower, and
+    /// `project_index_stats` falls back to a scroll while the facet's index is missing.
+    pub async fn ensure_code_payload_indexes(&self, name: &str) -> Result<()> {
+        let info = self
+            .client
+            .collection_info(name)
             .await
-            .context("create_collection")?;
+            .context("collection_info")?;
+        let existing: Vec<String> = info
+            .result
+            .map(|r| r.payload_schema.into_keys().collect())
+            .unwrap_or_default();
 
+        for ix in missing_code_payload_indexes(&existing) {
+            self.client
+                .create_field_index(
+                    CreateFieldIndexCollectionBuilder::new(name, ix.field, FieldType::Keyword)
+                        .field_index_params(
+                            KeywordIndexParamsBuilder::default().is_tenant(ix.is_tenant),
+                        )
+                        .wait(false),
+                )
+                .await
+                .with_context(|| format!("create_field_index({})", ix.field))?;
+        }
         Ok(())
     }
 
@@ -276,9 +360,11 @@ impl QdrantWrap {
 
     /// Existence only: does this project have at least one chunk?
     ///
-    /// One scroll, one page, no payloads, no vectors — constant work regardless of
-    /// corpus size. The sibling `project_index_stats` below cannot answer this
-    /// cheaply because `file_count` requires enumerating every point.
+    /// One scroll, one page, no payloads, no vectors. Its cost is constant in the
+    /// project's size only while the `project_id` index exists: without it Qdrant scans
+    /// the whole shared collection for the first match (0.59 s measured 2026-10-30 on the
+    /// unindexed 737k-point `code_chunks`). The sibling `project_index_stats` answers a
+    /// bigger question (`count` + a `facet` on `file_path`).
     pub async fn project_has_chunks(&self, collection: &str, project_id: &str) -> Result<bool> {
         use qdrant_client::qdrant::{Condition, Filter, ScrollPointsBuilder};
 
@@ -298,17 +384,84 @@ impl QdrantWrap {
         Ok(!resp.result.is_empty())
     }
 
-    /// Scroll all chunks for a project and return summary stats:
-    /// `(chunk_count, file_count)` where `file_count` is distinct `file_path`
-    /// values in the payload. Used by IndexStatus to surface the same numbers
-    /// the legacy sqlite stats used to report.
+    /// Summary stats for a project: `(chunk_count, file_count)` where `file_count` is the
+    /// number of distinct `file_path` values. Used by IndexStatus and `workspace` status.
+    ///
+    /// Two indexed requests: an exact `count`, then a `facet` on `file_path`. The facet's
+    /// `limit` is the chunk count, so it can never cut the distinct-file list (a project
+    /// has at most one file per chunk). The facet needs the `file_path` index; while that
+    /// is missing (an old collection before its next `ensure_collection`, or an index
+    /// Qdrant is still building) this falls back to [`Self::project_index_stats_by_scroll`],
+    /// which answers the same numbers by enumerating every chunk. Measured 2026-10-30 on
+    /// the live collection without indexes: `workspace` status spent 29-39 s here.
+    /// docs/issues/2026-10-30-workspace-and-index-status-scroll-every-chunk-of-the-project-to-count-them.md
     pub async fn project_index_stats(
         &self,
         collection: &str,
         project_id: &str,
     ) -> Result<(usize, usize)> {
-        use qdrant_client::qdrant::{Condition, Filter, ScrollPointsBuilder};
+        match self
+            .project_index_stats_by_facet(collection, project_id)
+            .await
+        {
+            Ok(stats) => Ok(stats),
+            Err(e) => {
+                tracing::debug!(collection, error = %e, "facet stats unavailable; scrolling the project instead");
+                self.project_index_stats_by_scroll(collection, project_id)
+                    .await
+            }
+        }
+    }
 
+    /// The indexed path of [`Self::project_index_stats`]: `count` + `facet`.
+    pub async fn project_index_stats_by_facet(
+        &self,
+        collection: &str,
+        project_id: &str,
+    ) -> Result<(usize, usize)> {
+        let filter = Filter::must([Condition::matches("project_id", project_id.to_string())]);
+
+        let chunks = self
+            .client
+            .count(
+                CountPointsBuilder::new(collection)
+                    .filter(filter.clone())
+                    .exact(true),
+            )
+            .await
+            .context("project_index_stats count")?
+            .result
+            .map(|r| r.count)
+            .unwrap_or(0);
+        if chunks == 0 {
+            return Ok((0, 0));
+        }
+
+        let files = self
+            .client
+            .facet(
+                FacetCountsBuilder::new(collection, "file_path")
+                    .filter(filter)
+                    .limit(chunks)
+                    .exact(true),
+            )
+            .await
+            .context("project_index_stats facet")?
+            .hits
+            .len();
+
+        Ok((chunks as usize, files))
+    }
+
+    /// The enumerating path of [`Self::project_index_stats`]: scroll every chunk of the
+    /// project and count distinct `file_path` values. Kept as the fallback for a
+    /// collection without a `file_path` index, and as the reference the facet path is
+    /// tested against.
+    pub async fn project_index_stats_by_scroll(
+        &self,
+        collection: &str,
+        project_id: &str,
+    ) -> Result<(usize, usize)> {
         let filter = Filter::must([Condition::matches("project_id", project_id.to_string())]);
 
         let mut chunk_count: usize = 0;
@@ -529,6 +682,48 @@ impl QdrantWrap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pure decision test for [`missing_code_payload_indexes`] — no Qdrant required.
+    ///
+    /// The case that carries the weight is the middle one: a collection that already
+    /// has SOME indexes. `ensure_collection` used to return early for any existing
+    /// collection, which is how the live `code_chunks` (737k points) went without a
+    /// single payload index while the artifact and memory collections had theirs.
+    /// docs/issues/2026-10-30-code-chunks-collection-has-no-payload-index-so-every-project-filter-scans-every-point.md
+    #[test]
+    fn missing_code_payload_indexes_names_only_the_fields_the_schema_lacks() {
+        let none: Vec<String> = Vec::new();
+        assert_eq!(
+            missing_code_payload_indexes(&none),
+            vec![
+                CodePayloadIndex {
+                    field: "project_id",
+                    is_tenant: true
+                },
+                CodePayloadIndex {
+                    field: "file_path",
+                    is_tenant: false
+                },
+            ],
+            "a collection with no payload schema needs every code index"
+        );
+
+        let partial = vec!["project_id".to_string(), "language".to_string()];
+        assert_eq!(
+            missing_code_payload_indexes(&partial),
+            vec![CodePayloadIndex {
+                field: "file_path",
+                is_tenant: false
+            }],
+            "an existing index must not be re-requested, and an unrelated one is ignored"
+        );
+
+        let complete = vec!["file_path".to_string(), "project_id".to_string()];
+        assert!(
+            missing_code_payload_indexes(&complete).is_empty(),
+            "a complete schema needs no write against the shared collection"
+        );
+    }
 
     /// Pure shape test for [`build_query_filter`] — no Qdrant required, so it
     /// runs in the ordinary suite rather than behind `--ignored`.
@@ -846,6 +1041,203 @@ mod tests {
         );
 
         // Cleanup.
+        wrap.client.delete_collection(coll).await.unwrap();
+    }
+    /// A collection in the shape `ensure_collection` made before 2026-10-30: vectors, no
+    /// payload index. Test helper for the upgrade path.
+    async fn create_pre_index_collection(wrap: &QdrantWrap, coll: &str) {
+        let _ = wrap.client.delete_collection(coll).await;
+        let mut vectors = VectorsConfigBuilder::default();
+        vectors.add_named_vector_params("dense", VectorParamsBuilder::new(2, Distance::Cosine));
+        let mut sparse = SparseVectorsConfigBuilder::default();
+        sparse.add_named_vector_params(
+            "sparse",
+            SparseVectorParamsBuilder::default().modifier(Modifier::Idf),
+        );
+        wrap.client
+            .create_collection(
+                CreateCollectionBuilder::new(coll)
+                    .vectors_config(vectors)
+                    .sparse_vectors_config(sparse),
+            )
+            .await
+            .expect("create pre-index collection");
+    }
+
+    /// The payload schema once every requested index is visible. `ensure_code_payload_indexes`
+    /// does not wait for Qdrant to apply its writes, so a test polls (10 s ceiling).
+    async fn payload_schema_with(
+        wrap: &QdrantWrap,
+        coll: &str,
+        fields: &[&str],
+    ) -> std::collections::HashMap<String, qdrant_client::qdrant::PayloadSchemaInfo> {
+        for _ in 0..100 {
+            let schema = wrap
+                .client
+                .collection_info(coll)
+                .await
+                .expect("collection_info")
+                .result
+                .expect("collection info result")
+                .payload_schema;
+            if fields.iter().all(|f| schema.contains_key(*f)) {
+                return schema;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        panic!("payload indexes {fields:?} never appeared on {coll}");
+    }
+
+    /// Three chunks of project `a` across two files, and one chunk of project `b`.
+    async fn upsert_stats_fixture(wrap: &QdrantWrap, coll: &str) {
+        use crate::retrieval::embedder::{EmbedOutput, SparseVector};
+        use crate::retrieval::payload::{payload_to_map, CodePayload};
+
+        let point = |project: &str, file: &str, chunk_id: &str| {
+            let p = CodePayload {
+                project_id: project.into(),
+                file_path: file.into(),
+                language: "rust".into(),
+                start_line: 1,
+                end_line: 2,
+                ast_header: String::new(),
+                content: format!("content of {chunk_id}"),
+                content_hash: "h".into(),
+                last_indexed_commit: String::new(),
+                chunk_id: chunk_id.into(),
+            };
+            (
+                chunk_id.to_string(),
+                payload_to_map(&p),
+                EmbedOutput {
+                    dense: vec![1.0, 0.0],
+                    sparse: SparseVector {
+                        indices: vec![],
+                        values: vec![],
+                    },
+                },
+            )
+        };
+        let points = vec![
+            point("a", "src/one.rs", "a1"),
+            point("a", "src/one.rs", "a2"),
+            point("a", "src/two.rs", "a3"),
+            point("b", "src/one.rs", "b1"),
+        ];
+        wrap.upsert_points(coll, &points).await.expect("upsert");
+    }
+
+    /// Full E2E test — requires a running Qdrant instance.
+    /// Run with: cargo test --features server-stack -- --ignored qdrant_ensure_collection_adds_payload_indexes
+    ///
+    /// The upgrade path: a collection made before the indexes existed must get them from
+    /// the next `ensure_collection`, which is the only call that reaches a live deployment.
+    #[tokio::test]
+    #[ignore]
+    async fn qdrant_ensure_collection_adds_payload_indexes_to_a_collection_that_predates_them() {
+        use qdrant_client::qdrant::payload_index_params::IndexParams;
+
+        let wrap = QdrantWrap::connect("http://localhost:6334")
+            .await
+            .expect("connect");
+        let coll = "test_ensure_collection_adds_payload_indexes";
+        create_pre_index_collection(&wrap, coll).await;
+
+        wrap.ensure_collection(coll, 2).await.expect("ensure");
+
+        let schema = payload_schema_with(&wrap, coll, &["project_id", "file_path"]).await;
+        let tenant = |field: &str| match schema[field]
+            .params
+            .as_ref()
+            .and_then(|p| p.index_params.as_ref())
+        {
+            Some(IndexParams::KeywordIndexParams(k)) => k.is_tenant,
+            other => panic!("{field}: expected keyword index params, got {other:?}"),
+        };
+        assert_eq!(
+            tenant("project_id"),
+            Some(true),
+            "project_id is the tenant key"
+        );
+        assert_ne!(
+            tenant("file_path"),
+            Some(true),
+            "file_path is not a tenant key"
+        );
+
+        // Idempotent on a fully indexed collection.
+        wrap.ensure_collection(coll, 2).await.expect("idempotent");
+
+        wrap.client.delete_collection(coll).await.unwrap();
+    }
+
+    /// Full E2E test — requires a running Qdrant instance.
+    /// Run with: cargo test --features server-stack -- --ignored qdrant_project_index_stats_facet_agrees_with_the_scroll
+    ///
+    /// The facet path must answer exactly what the enumerating scroll answers, for a
+    /// project with chunks, for a project another project's chunks share files with, and
+    /// for a project with none.
+    #[tokio::test]
+    #[ignore]
+    async fn qdrant_project_index_stats_facet_agrees_with_the_scroll() {
+        let wrap = QdrantWrap::connect("http://localhost:6334")
+            .await
+            .expect("connect");
+        let coll = "test_project_index_stats_facet";
+        let _ = wrap.client.delete_collection(coll).await;
+        wrap.ensure_collection(coll, 2).await.expect("ensure");
+        payload_schema_with(&wrap, coll, &["project_id", "file_path"]).await;
+        upsert_stats_fixture(&wrap, coll).await;
+
+        for (project, want) in [("a", (3, 2)), ("b", (1, 1)), ("absent", (0, 0))] {
+            let by_facet = wrap
+                .project_index_stats_by_facet(coll, project)
+                .await
+                .expect("facet path on an indexed collection");
+            let by_scroll = wrap
+                .project_index_stats_by_scroll(coll, project)
+                .await
+                .expect("scroll path");
+            assert_eq!(by_facet, want, "{project}: facet path");
+            assert_eq!(by_scroll, want, "{project}: scroll path");
+            assert_eq!(
+                wrap.project_index_stats(coll, project)
+                    .await
+                    .expect("stats"),
+                want,
+                "{project}: public entry point"
+            );
+        }
+
+        wrap.client.delete_collection(coll).await.unwrap();
+    }
+
+    /// Full E2E test — requires a running Qdrant instance.
+    /// Run with: cargo test --features server-stack -- --ignored qdrant_project_index_stats_falls_back
+    ///
+    /// On a collection with no `file_path` index the facet is refused, and the public entry
+    /// point must still answer correctly through the scroll. The `is_err` assertion is what
+    /// makes the fallback reachable rather than dead code: if Qdrant ever facets an
+    /// unindexed key, this test says so.
+    #[tokio::test]
+    #[ignore]
+    async fn qdrant_project_index_stats_falls_back_to_the_scroll_without_an_index() {
+        let wrap = QdrantWrap::connect("http://localhost:6334")
+            .await
+            .expect("connect");
+        let coll = "test_project_index_stats_fallback";
+        create_pre_index_collection(&wrap, coll).await;
+        upsert_stats_fixture(&wrap, coll).await;
+
+        assert!(
+            wrap.project_index_stats_by_facet(coll, "a").await.is_err(),
+            "a facet on an unindexed key should be refused, which is what the fallback is for"
+        );
+        assert_eq!(
+            wrap.project_index_stats(coll, "a").await.expect("stats"),
+            (3, 2)
+        );
+
         wrap.client.delete_collection(coll).await.unwrap();
     }
 
