@@ -1,13 +1,15 @@
 ---
 id: '27d66ed4f2d89fa4'
 kind: bug
-status: open
+status: fixed
 title: librarian accepts a declared key for an action that does not read it, and the response does not say so
 tags:
 - cluster/accepted-parameter-silently-dropped
+closed: 2026-10-30
 opened: 2026-10-30
 owner: marius
 severity: low
+unverified: Full gate at 9173695c5 stopped at the issue_frontmatter integration test, which blames a peer's bug file (731747939c0bb764, no `opened`), so the integration binaries after it did not run. Lib suites passed in both lanes (5381 lean, 8065 default, 0 failed).
 ---
 
 # BUG: librarian accepts a declared key for an action that does not read it, and the response does not say so
@@ -38,10 +40,10 @@ The live call above. The probe test shows the label grammar is already machine-r
 1. **Hypothesis:** the `ignored_params` check already covers declared-but-unread keys. **Test:** `librarian(action="status", force=true, write=true)` after the rebuild. **Verdict:** rejected, no note in the response.
 
 ## Fix
-Not started. Lead: derive the key-to-actions map from the same description labels the probe parses, and add the key to `ignored_params` when the chosen action is not among its labelled actions. A key labelled for no specific action must stay exempt. Risk: a label that is wrong or incomplete would then report a key the action does read, so the derivation needs the same probe that guards the labels today.
+Fixed in `9173695c5`. `keys_for_other_actions` in `src/librarian/tools/librarian.rs` adds a declared key to `ignored_params` when its description names at least one action and not the chosen one. A key whose description names no action stays exempt. The rule reads the description, not only the label, because `scope` names `audit_doc_refs` after its label. The risk named above is closed by `no_action_reads_a_key_its_description_does_not_name`: it sends each key, ill-typed, to every action that does not name it (259 pairs) and fails when the outcome changes. `audit_log` is skipped for the reason its forward probe is.
 
 ## Tests added
-None. Status is `open`.
+`a_declared_key_sent_to_another_action_is_reported_as_ignored`, `a_key_named_for_the_action_or_for_no_action_is_not_reported`, `no_action_reads_a_key_its_description_does_not_name`. Mutation: relabelling `force` from `reindex:` to `doctor:` turned the probe and the unit test red, and the probe named `reindex:force`. Side finding: `doctor` returns a random `host` per fresh test context, so two identical `doctor` calls never compare equal; the reverse probe masks it, and the forward probe is probably vacuous for `doctor` keys (not demonstrated).
 
 ## Workarounds
 Read the schema description of each key and send only the keys labelled for the action.
