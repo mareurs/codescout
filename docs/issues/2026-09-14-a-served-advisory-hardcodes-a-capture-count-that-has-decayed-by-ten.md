@@ -1,7 +1,7 @@
 ---
 id: c04e0d83106045d7
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a served advisory hardcodes "Four such captures are recorded" against a corpus now at fourteen'
 tags:
 - cluster/doc-contradicted-by-code
@@ -9,7 +9,7 @@ tags:
 - hooks
 - shared-checkout
 - stale-count
-unverified: 'PARTIAL FIX (ce9aa15f, claude-plugins:949c85e): both halves are fixed in source. The plugin half is merged on claude-plugins main but NOT released: the installed caches of all three profiles (codescout-companion 1.20.13 to 1.20.15) still serve ''Four such captures''. Closes when a release ships and the caches refresh.'
+closed: 2026-10-30
 ---
 
 # BUG: a served advisory hardcodes "Four such captures are recorded" against a corpus now at fourteen
@@ -177,6 +177,8 @@ Read at the bytes, not carried over from the sections above:
   installed copies of `hooks/pre-edit-dirty-check.mjs`: `~/.claude` 1.20.15;
   `~/.claude-sdd` 1.20.13, 1.20.14, 1.20.15; `~/.claude-kat` 1.20.14, 1.20.15. A reader
   therefore still gets "Four such captures" until a release ships and the caches refresh.
+
+**Closed 2026-10-30.** The release shipped. `grep -rlE "Four such captures"` over the `plugins/cache` of `~/.claude`, `~/.claude-sdd`, `~/.claude-kat` and `~/.claude-stef` finds no copy of `hooks/pre-edit-dirty-check.mjs` (exit 1). Each profile now holds codescout-companion 1.20.16 to 1.20.26, and `grep -c "captures are recorded in"` on the 1.20.26 copy returns 2 in all four. The remaining sentence below was true on 2026-10-16 and is kept as history.
 
 What is left is the release, which belongs to the `claude-plugins` repo and is not a change
 this repo can make. The wider guard (a stored-count scan over plugin served strings) still has
