@@ -1,14 +1,14 @@
 ---
 id: fe2de4189ce2abbd
 kind: bug
-status: open
+status: fixed
 title: edit_code replace with a multi-symbol body adds the extra symbols, and the response does not say so
 tags:
 - cluster/unclassified
+closed: 2026-10-30
 opened: 2026-10-30
 owner: marius
 severity: low
-unverified: The leftover-duplicate behaviour was observed on 2026-09-01 and not reproduced on 2026-10-30; only the response shape was read in do_replace.
 ---
 
 # BUG: edit_code replace with a multi-symbol body adds the extra symbols, and the response does not say so
@@ -38,10 +38,10 @@ The tool's contract is symbol-scoped by design. `do_replace` (`src/tools/symbol/
 1. **Hypothesis:** the duplicate is a correctness hazard. **Test:** read the 2026-09-01 entry. **Verdict:** rejected for Rust, where duplicate definitions do not compile. The entry notes it may be silent in Python, TypeScript or Go, which this record did not check.
 
 ## Fix
-Not started. Proposal from the entry: when `body` introduces symbols the target span did not contain, report `also_defined: [names]` in the response. The caller needs that information and already has to go and find it.
+Fixed in `6da10f715` and `69121f8c8` (clippy `repeat_n`). `do_replace` now compares name-path counts before and after the write with `added_outside_target` (`src/symbol/edit.rs`) and adds `also_defined: [names]` to the response, and the compact form prints `also defined outside the target: …`. Counts, not set membership, because the observed case redefined a name already in the file. The target's own new children are not reported. It reports and never rolls back, since a body may add a helper on purpose. Not reproduced against rust-analyzer: the end-to-end test uses the mock LSP and the tree-sitter AST.
 
 ## Tests added
-None. Status is `open`.
+Three unit tests on `added_outside_target` (`symbol::edit::tests`) and `tools::symbol::tests::edit_code_replace_reports_a_symbol_the_body_added_outside_the_target`. Mutation-applied: a set-membership version of the helper turned two of them red; reverted. Clippy clean and 8051 lib tests passed on a clean worktree at `69121f8c8`. The full gate was red on `tests/result_caps.rs::every_cap_constant_is_classified` because peer commit `70740aaf4` added `SHORT_LANG_BUDGET` (`src/tools/symbol/symbols.rs:722`) without a `cap-class:` annotation. That failure is not from this change.
 
 ## Workarounds
 Run `symbols(path)` after any multi-symbol replace, then `edit_code(action="remove", symbol=…, at_line=…)` for the leftovers. Better: one `edit_code` call per symbol.
