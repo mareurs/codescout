@@ -25,8 +25,9 @@
 #
 # It covers the pusher, and the author half is a HOLD. An author who is told to withhold a
 # commit records that with `scripts/hold-publish.sh set <reason>`, which writes a ref
-# refs/holds/<session-id> in the shared repo. This guard refuses any commit carrying a held
-# Session-Id, and CODESCOUT_PUSH_ACK does not override it: the ack is the pusher's authority
+# refs/holds/<sid> for Claude or refs/holds/_codex/<sid> for Codex in the shared repo.
+# Codex trailer/release tokens are codex:<sid>. This guard refuses any commit carrying a held
+# Session-Id or Co-Authored-Session-Id, and CODESCOUT_PUSH_ACK does not override it: the ack is the pusher's authority
 # over someone else's work, the hold is the author saying not yet. The author, or the operator,
 # lifts it with `scripts/hold-publish.sh release <sid>`. The hold logic sits between the
 # PUBLISH HOLD marker comments (helper, call site, refusal) so a test can delete it from a
@@ -66,7 +67,7 @@
 #     break every non-session push, so they are REPORTED and allowed. Stated here rather
 #     than left to be discovered: this guard cannot see a withheld commit that carries no
 #     trailer, and that is a real hole, not an oversight.
-#   - Anything, when the pusher has no CLAUDE_CODE_SESSION_ID. Without one there is no
+#   - Anything, when the pusher has no resolved Claude/Codex root identity. Without one there is no
 #     "mine" to compare against, so the guard has no predicate — a human running the
 #     release flow is exactly this case, and must not be blocked by a guard that cannot
 #     even form its question.
@@ -98,7 +99,8 @@ else
     hold_age() { return 1; }
 fi
 
-me="${CLAUDE_CODE_SESSION_ID:-}"
+. "$_guard_dir/publish-identity.sh" || exit 1
+me="$(publish_identity)" || exit 1
 if [ -z "$me" ]; then
     # No predicate — see "WHAT IT DELIBERATELY DOES NOT REFUSE". Silent: a human running
     # the release flow should not be told about a guard that does not apply to them.
@@ -175,6 +177,7 @@ hold_yes=","           # lookup cache: sids known held
 hold_no=","            # lookup cache: sids known not held (or unreadable)
 hold_warned=0          # the unreadable-store warning prints once per run
 hold_unlistable=0      # a push range could not be listed while holds exist
+hold_lookup_error=""  # a Codex hold lookup failed; never interpret it as absence
 push_remote="${1:-origin}"   # the remote NAME git hands a pre-push hook; names the prefix push
 _held=""               # held_sid_of's result
 # Every commit in the push, oldest first, for the computed stack table in the refusal.
@@ -201,29 +204,46 @@ total_n=0
 foreign_pre_ack_n=0
 
 # BEGIN PUBLISH HOLD (helper)
-# held_sid_of <comma-separated sids> -> sets `_held` to the first sid that has refs/holds/<sid>,
+# held_sid_of <comma-separated tokens> -> sets `_held` to the first token with a hold ref,
 # or to empty. A GLOBAL RESULT, NOT A PRINTED ONE, on purpose: a `$(...)` call would run in a
 # subshell and lose `hold_warned` and the lookup caches, so the unreadable-store warning would
 # print once per commit instead of once per run.
 #
-# The argument is the Session-Id column of the per-commit loop below, which is EMPTY for an
+# The argument combines Session-Id and Co-Authored-Session-Id from Git trailers. Each is empty for an
 # untrailered commit and a COMMA-SEPARATED LIST for a commit carrying two Session-Id values, so
 # every token is tested, not just the first.
 #
-# `git rev-parse -q --verify` exits 1 for "no such ref" and anything else (128) for a real
-# failure. Those are different facts: a failed lookup must NEVER be read as a hold, and must
-# not be read as the absence of one without saying so.
+# The legacy Claude path retains rev-parse plus its warning for hard failures; Git can
+# collapse a corrupt loose ref into absence there. The new Codex namespace uses show-ref
+# --exists so missing (2) and lookup failure (1) remain distinct and failures refuse.
 held_sid_of() {
     _held=""
-    local _toks=() _t _rc
+    local _toks=() _t _rc _ref
     IFS=, read -ra _toks <<< "${1:-}"
     for _t in ${_toks[@]+"${_toks[@]}"}; do
         _t="${_t//[[:space:]]/}"
         [ -n "$_t" ] || continue
         case "$hold_yes" in *",$_t,"*) _held="$_t"; return 0 ;; esac
         case "$hold_no" in *",$_t,"*) continue ;; esac
-        git rev-parse -q --verify "refs/holds/$_t" >/dev/null 2>&1 </dev/null
-        _rc=$?
+        _ref="$(publish_hold_ref "$_t")" || { hold_unlistable=1; continue; }
+        case "$_ref" in
+            refs/holds/_codex/*)
+                # rev-parse collapses a corrupt loose ref into its "absent" exit 1.
+                # --exists separates absence (2) from a lookup failure (1).
+                git show-ref --exists "$_ref" >/dev/null 2>&1 </dev/null
+                _rc=$?
+                case "$_rc" in
+                    0) ;;
+                    2) _rc=1 ;;
+                    *) hold_lookup_error="$_t"; continue ;;
+                esac
+                ;;
+            *)
+                # Preserve the legacy Claude lookup/error policy.
+                git rev-parse -q --verify "$_ref" >/dev/null 2>&1 </dev/null
+                _rc=$?
+                ;;
+        esac
         case "$_rc" in
             0) hold_yes="${hold_yes}${_t},"; _held="$_t"; return 0 ;;
             1) hold_no="${hold_no}${_t}," ;;
@@ -231,7 +251,7 @@ held_sid_of() {
                 hold_no="${hold_no}${_t},"
                 if [ "$hold_warned" -eq 0 ]; then
                     hold_warned=1
-                    printf '  note: could not read refs/holds/%s (git exited %s); commits are treated as not held.\n' "$_t" "$_rc" >&2
+                    printf '  note: could not read %s (git exited %s); commits are treated as not held.\n' "$_ref" "$_rc" >&2
                 fi
                 ;;
         esac
@@ -272,11 +292,9 @@ hold_scan_ref() {
     else
         _range=("$_tip" --not --remotes)
     fi
-    _out="$(git log --format='%H%x1f%(trailers:key=Session-Id,valueonly,separator=%x2C)%x1f%s' "${_range[@]}" 2>/dev/null </dev/null)"
+    _out="$(git log --format='%H%x1f%(trailers:key=Session-Id,valueonly,separator=%x2C),%(trailers:key=Co-Authored-Session-Id,valueonly,separator=%x2C)%x1f%s' "${_range[@]}" 2>/dev/null </dev/null)"
     _rc=$?
     if [ "$_rc" -ne 0 ]; then
-        # Could not list the range. With no hold anywhere that changes nothing (behave as the
-        # guard always did); with any hold present, say so and refuse rather than publish blind.
         if [ -n "$(git for-each-ref --count=1 refs/holds/ 2>/dev/null </dev/null)" ]; then
             hold_unlistable=1
         fi
@@ -291,13 +309,10 @@ hold_scan_ref() {
             *) held_sids="${held_sids:+$held_sids,}$_held" ;;
         esac
         held_report="${held_report}    ${_sha:0:8}  ${_held}  ${_subj}"$'\n'
-        # The prefix advice is about a BRANCH; a tag or refs/wip/x push gets none. The loop is
-        # newest-first, so the LAST held commit met is this ref's oldest.
         case "$_rr" in
             refs/heads/*) _oldest="$_sha" ;;
         esac
     done <<< "$_out"
-    # One row per ref, so a push of several refs gets advice per ref, not the last ref's.
     if [ -n "$_oldest" ]; then
         held_prefix_rows="${held_prefix_rows}${_rr#refs/heads/}"$'\x1f'"${_oldest}"$'\x1f'"${_rs}"$'\n'
     fi
@@ -511,6 +526,10 @@ done
 # Refuses, and exits 1 itself, BEFORE the untrailered note and the ack notes: a held commit is
 # never part of the ordinary refuse-or-ack path. Text is printf lines, never an unquoted
 # heredoc (see the heredoc-backtick case in the test suite).
+if [ -n "$hold_lookup_error" ]; then
+    printf '\n  REFUSING THE PUSH: cannot check publish hold for session %s; the hold ref is unreadable.\n\n' "$hold_lookup_error" >&2
+    exit 1
+fi
 if [ -z "$held_sids" ] && [ "$hold_unlistable" -eq 1 ]; then
     printf '\n  REFUSING THE PUSH: PUBLISH HOLD. The push range could not be listed while holds exist,\n' >&2
     printf '  so this guard cannot tell whether the push carries a held commit.\n\n' >&2
@@ -525,7 +544,8 @@ if [ -n "$held_sids" ]; then
     printf '\n  REFUSING THE PUSH: PUBLISH HOLD. It carries commit(s) whose author has withheld them:\n\n' >&2
     printf '%s\n' "$held_report" >&2
     for _s in "${_hs[@]}"; do
-        _blob="$(git cat-file -p "refs/holds/$_s" 2>/dev/null </dev/null)"
+        _ref="$(publish_hold_ref "$_s")" || exit 1
+        _blob="$(git cat-file -p "$_ref" 2>/dev/null </dev/null)"
         _reason="$(printf '%s\n' "$_blob" | awk 'sub(/^reason: ?/, "") { print; exit }')"
         _setat="$(printf '%s\n' "$_blob" | awk '/^set-at: / { print $2; exit }')"
         _state="$(printf '%s\n' "$held_table" | awk -F'\t' -v s="$_s" '$1 == s { print $2; exit }')"

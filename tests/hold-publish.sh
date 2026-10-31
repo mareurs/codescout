@@ -12,6 +12,9 @@
 
 set -uo pipefail
 
+# Each case declares its own harness; never inherit an enclosing Codex/explicit context.
+unset CODEX_SESSION_ID CODEX_THREAD_ID CODESCOUT_CONTEXT_FILE
+
 SCRIPT="$(cd "$(dirname "$0")/../scripts" && pwd)/hold-publish.sh"
 SID="aaaaaaaa-1111-2222-3333-444444444444"
 OTHER="bbbbbbbb-5555-6666-7777-888888888888"
@@ -221,6 +224,7 @@ echo
 echo "== list without resolve-sids.sh beside the script"
 ALONE="$(mktemp -d "$SCRATCH/alone-XXXXXX")"
 cp "$SCRIPT" "$ALONE/hold-publish.sh"
+cp "$(dirname "$SCRIPT")"/publish-identity.{sh,py} "$(dirname "$SCRIPT")/session_context.py" "$ALONE/"
 OUT="$(cd "$REPO" && HOME="$FAKEHOME" CLAUDE_CODE_SESSION_ID="$SID" bash "$ALONE/hold-publish.sh" list 2>&1)"
 EC=$?
 eq "list with the helper missing exits 0" "$EC" 0

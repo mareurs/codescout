@@ -69,7 +69,9 @@
 # leaving it sitting, is caught reliably, because those rows are written by the
 # peer's own hook at their `git add`.
 #
-# With no `CLAUDE_CODE_SESSION_ID` the owner is recorded as `-`. That is not a
+# With no resolvable session identity the owner is recorded as `-`. The id comes from
+# `scripts/publish-identity.sh`: the bare session id for Claude, `codex:<id>` for Codex, and
+# nothing (so `-`) when identity is missing or Claude and Codex variables conflict. That is not a
 # fabricated owner: at refuse time `-` is simply not equal to any real session id, so
 # terminal-staged content reads as foreign to a session, which is the conservative
 # answer. When NOBODY has an id the whole log is `-` and the guard is silent, which is
@@ -110,7 +112,25 @@ if [ -n "${GIT_INDEX_FILE:-}" ]; then
 fi
 log="$git_dir/session-stage-log"
 tmp="$log.$$"
-me="${CLAUDE_CODE_SESSION_ID:--}"
+_identity_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+# A hook must never fail the user's git command because identity could not be resolved: a missing
+# helper, a missing python3, an invalid session id, or publish_identity exiting non-zero
+# (conflicting Claude/Codex variables) all read as owner `-`.
+#
+# Identity is read ONLY on the staging path (`me` feeds `claimant` and `foreign_writer`), and
+# resolving it costs a python3 start (~150 ms), so it is resolved lazily, once, by `resolve_me`
+# below -- an index refresh that stages nothing never pays for it.
+# Default stub: replaced by the helper's real definition when it sources cleanly.
+publish_principal_equal() { return 1; }
+me="-"
+resolve_me() {
+    local _m=""
+    if [ -n "$_identity_dir" ] && . "$_identity_dir/publish-identity.sh" 2>/dev/null; then
+        _m="$(publish_identity 2>/dev/null)" || _m=""
+    fi
+    [ -n "$_m" ] && me="$_m"
+    return 0
+}
 # Retention bound. Tracking only staged pairs is what used to keep this file small, so
 # keeping unstaged rows removes that limit and this cap is what replaces it. Overridable
 # so the suite can reach the bound -- a cap no test can reach is a cap no test asserts.
@@ -539,6 +559,10 @@ foreign_writer() {
         IFS=, read -ra parts <<< "$sids"
         for s in "${parts[@]}"; do
             [ -n "$s" ] || continue
+            # A Codex commit's trailer is `codex:<id>` while usage.db (and `$sid` below) hold the
+            # BARE id: strip one host qualifier so a writer's own commit closes its write.
+            case "$s" in codex:*) s="${s#codex:}" ;; claude-code:*) s="${s#claude-code:}" ;; esac
+            [ -n "$s" ] || continue
             [ "${lastc[$s]:-0}" -ge "$ct" ] || lastc[$s]="$ct"
         done
     done < <(git log -n 300 \
@@ -555,7 +579,7 @@ foreign_writer() {
         # A strict `>`: a write in the same second as its writer's commit is taken as committed,
         # which errs toward not naming a peer.
         [ "$epoch" -gt "${lastc[$sid]:-0}" ] 2>/dev/null || continue
-        [ "$sid" = "$me" ] && return 0
+        publish_principal_equal "$sid" "$me" && return 0
         [ -n "$other" ] && continue
         # A live write is still not proof it is UNCOMMITTED: when a DIFFERENT session's commit
         # carries the writer's work (a session that ended before committing, a "commit all"),
@@ -579,6 +603,7 @@ foreign_writer() {
 }
 
 if staging_op; then
+    resolve_me
     claimant="$me"
     _NAMED="$(argv_paths)"
     # `-` here means the id was absent, which is route 1 and NOT the blanket form.

@@ -2,13 +2,15 @@
 #
 # hold-publish.sh - record "my work is not ready to publish" for the current session.
 #
-# A hold is a blob at refs/holds/<session-id> in the repo of the current directory:
+# A hold is a blob in the repo of the current directory:
+#   Claude: refs/holds/<sid> (legacy); Codex: refs/holds/_codex/<sid>.
+# The public Codex token is codex:<sid>; a bare token always means legacy Claude.
 #   reason: <text>
 #   set-at: <UTC ISO-8601>
 #   head: <sha at hold time>
 # The pre-push guard reads these refs (OB-20).
 #
-#   hold-publish.sh set [reason...]   hold the current session (CLAUDE_CODE_SESSION_ID); with no
+#   hold-publish.sh set [reason...]   hold the resolved Claude or Codex root session; with no
 #                                     reason, an existing hold keeps its reason
 #   hold-publish.sh release [sid]     drop a hold (default: the caller's own)
 #   hold-publish.sh list              one row per hold: sid, LIVE|gone|?, age, reason
@@ -17,13 +19,6 @@ set -uo pipefail
 
 usage() {
     printf 'usage: hold-publish.sh set [reason...] | release [sid] | list\n' >&2
-}
-
-valid_sid() {
-    case "$1" in
-        '' | *[!A-Za-z0-9-]*) return 1 ;;
-        *) return 0 ;;
-    esac
 }
 
 # `list` and `release` read refs/holds of the repo of the current directory; outside one, git's own
@@ -37,17 +32,21 @@ in_repo() {
 
 cmd="${1:-}"
 [ "$#" -gt 0 ] && shift
-sid="${CLAUDE_CODE_SESSION_ID:-}"
+_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$_dir/publish-identity.sh" || exit 2
+sid=""
+if [ "$cmd" != list ]; then
+    sid="$(publish_identity)" || exit 2
+fi
 
 case "$cmd" in
     set)
-        if ! valid_sid "$sid"; then
-            printf 'hold-publish: CLAUDE_CODE_SESSION_ID is empty or not [A-Za-z0-9-]+; cannot record a hold\n' >&2
+        if [ -z "$sid" ] || ! ref="$(publish_hold_ref "$sid")"; then
+            printf 'hold-publish: CLAUDE_CODE_SESSION_ID / CODEX_SESSION_ID or explicit context is missing or invalid; cannot record a hold\n' >&2
             exit 2
         fi
         # Flatten: a newline would shift the blob's fixed line layout, a tab would break `list` columns.
         reason="$(printf '%s' "$*" | tr '\n\r\t' '   ')"
-        ref="refs/holds/$sid"
         head="$(git rev-parse HEAD 2>/dev/null)" || head=""
         set_at=""
         if old="$(git cat-file -p "$ref" 2>/dev/null)"; then
@@ -67,15 +66,27 @@ case "$cmd" in
     release)
         in_repo || exit 2
         target="${1:-$sid}"
-        if ! valid_sid "$target"; then
-            printf 'hold-publish: no session id to release (pass one, or set CLAUDE_CODE_SESSION_ID)\n' >&2
+        if [ -z "$target" ] || ! ref="$(publish_hold_ref "$target")"; then
+            printf 'hold-publish: no session id to release (pass a legacy sid or codex:<sid>, or provide session context)\n' >&2
             exit 0
         fi
-        ref="refs/holds/$target"
-        if ! git rev-parse --verify -q "$ref" >/dev/null 2>&1; then
-            printf 'no hold for session %s\n' "$target"
-            exit 0
-        fi
+        case "$ref" in
+            refs/holds/_codex/*)
+                git show-ref --exists "$ref" >/dev/null 2>&1
+                rc=$?
+                case "$rc" in
+                    0) ;;
+                    2) printf 'no hold for session %s\n' "$target"; exit 0 ;;
+                    *) printf 'hold-publish: could not inspect the hold of %s (git exited %s)\n' "$target" "$rc" >&2; exit 1 ;;
+                esac
+                ;;
+            *)
+                if ! git rev-parse --verify -q "$ref" >/dev/null 2>&1; then
+                    printf 'no hold for session %s\n' "$target"
+                    exit 0
+                fi
+                ;;
+        esac
         if ! git update-ref -d "$ref"; then
             printf 'hold-publish: could not release the hold of %s (git update-ref -d failed)\n' "$target" >&2
             exit 1
@@ -96,11 +107,12 @@ case "$cmd" in
         if [ -r "$_dir/hold-age.sh" ]; then . "$_dir/hold-age.sh"; else hold_age() { return 1; }; fi
         sids=()
         while IFS= read -r r; do
-            [ -n "$r" ] && sids+=("${r#refs/holds/}")
+            [ -n "$r" ] && sids+=("$(publish_hold_token "$r")")
         done < <(git for-each-ref --format='%(refname)' refs/holds/)
         [ "${#sids[@]}" -gt 0 ] || exit 0
         while IFS="$(printf '\t')" read -r s state _sock; do
-            body="$(git cat-file -p "refs/holds/$s" 2>/dev/null || true)"
+            ref="$(publish_hold_ref "$s")" || continue
+            body="$(git cat-file -p "$ref" 2>/dev/null || true)"
             reason="$(printf '%s\n' "$body" | sed -n 's/^reason: //p' | sed -n 1p)"
             set_at="$(printf '%s\n' "$body" | sed -n 's/^set-at: //p' | sed -n 1p)"
             age="$(hold_age "$set_at")" || age="?"

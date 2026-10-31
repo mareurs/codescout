@@ -31,14 +31,16 @@ resolve_sids() {
     printf '%s\n' "$@" | python3 -c '
 import glob, json, os, sys
 want = [l.strip() for l in sys.stdin if l.strip()]
+# Codex identity never borrows a same-UUID Claude row. Qualified Claude is a legacy alias.
+lookup = {s: s.removeprefix("claude-code:") for s in want if not s.startswith("codex:")}
 rows = {}
-for f in glob.glob(os.path.expanduser("~/.claude*/sessions/*.json")):
+for f in glob.glob(os.path.expanduser("~/.claude*/sessions/*.json")) if lookup else []:
     try:
         d = json.load(open(f))
     except Exception:
         continue
     sid = d.get("sessionId")
-    if sid not in want:
+    if sid not in lookup.values():
         continue
     pid, sock, ps = d.get("pid"), d.get("messagingSocketPath"), d.get("procStart")
     state, addr = "gone", ""
@@ -52,7 +54,7 @@ for f in glob.glob(os.path.expanduser("~/.claude*/sessions/*.json")):
     if rows.get(sid, ("gone",))[0] != "LIVE":
         rows[sid] = (state, addr)
 for sid in want:
-    st, ad = rows.get(sid, ("?", ""))
+    st, ad = rows.get(lookup.get(sid), ("?", ""))
     print("%s\t%s\t%s" % (sid, st, ad))
 ' 2>/dev/null || printf '%s\t?\t\n' "$@"
 }

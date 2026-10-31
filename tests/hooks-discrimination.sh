@@ -27,6 +27,9 @@
 
 set -uo pipefail
 
+# Each case declares its own harness; never inherit an enclosing Codex/explicit context.
+unset CODEX_SESSION_ID CODEX_THREAD_ID CODESCOUT_CONTEXT_FILE
+
 SRC="$(cd "$(dirname "$0")/../scripts" && pwd)"
 REAL_REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PASS=0
@@ -891,6 +894,201 @@ eq "3: no write on record keeps the legacy claim" "$(owner_of f.txt)" "$A"
 eq "3: and the legacy route" "$(route_of f.txt)" "named"
 rm -rf "$T"
 
+# Codex stagers. The owner column is a cross-script contract: bare id for Claude, `codex:<id>`
+# for Codex, `-` when identity is missing or conflicting. usage.db stores BARE ids for both hosts.
+U="dddddddd-4444-4444-4444-dddddddddddd"
+V="eeeeeeee-5555-5555-5555-eeeeeeeeeeee"
+add_codex() { env -u CLAUDE_CODE_SESSION_ID CODESCOUT_USAGE_DB="$DB" CODEX_SESSION_ID="$U" git add -- "$@"; }
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+add_codex f.txt
+eq "codex_only_stager_is_recorded_qualified: owner" "$(owner_of f.txt)" "codex:$U"
+eq "codex_only_stager_is_recorded_qualified: route" "$(route_of f.txt)" "named"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+wrote "$DB" "$U" edit_file '{"action":"edit","path":"f.txt"}'
+add_codex f.txt
+eq "codex_own_prior_write_is_not_a_peer: owner" "$(owner_of f.txt)" "codex:$U"
+eq "codex_own_prior_write_is_not_a_peer: route" "$(route_of f.txt)" "named"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+wrote "$DB" "$V/agent1" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$U" f.txt
+eq "codex_child_write_attributes_to_root: owner" "$(owner_of f.txt)" "$V"
+eq "codex_child_write_attributes_to_root: route" "$(route_of f.txt)" "named-foreign"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+_err="$(CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U" git add -- f.txt 2>&1 >/dev/null)"
+eq "conflicting_identity_records_dash: git add prints nothing on stderr" "$_err" ""
+eq "conflicting_identity_records_dash: owner" "$(owner_of f.txt)" "-"
+eq "conflicting_identity_records_dash: route" "$(route_of f.txt)" "id-unset"
+rm -rf "$T"
+
+# Identity resolution runs python3 (~150 ms). Only a STAGING op reads it, so an index refresh must not
+# pay for it. A fake python3 first on PATH counts invocations and forwards to the real one.
+PYLOG="$(mktemp "${TMPDIR:-/tmp}/pylog-XXXXXX")"
+FAKEBIN="$(mktemp -d "${TMPDIR:-/tmp}/fakebin-XXXXXX")"
+REALPY=""  # a real interpreter, not a pyenv shim (a shim re-enters PATH and so would call the fake again)
+for _p in /usr/bin/python3 /usr/local/bin/python3; do [ -x "$_p" ] && { REALPY="$_p"; break; }; done
+printf '#!/bin/sh\necho call >> "%s"\nexec "%s" "$@"\n' "$PYLOG" "$REALPY" > "$FAKEBIN/python3"
+chmod +x "$FAKEBIN/python3"
+new_repo; mkdb "$DB"
+echo base > f.txt; git add f.txt; git commit -qm base
+echo new > g.txt
+CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" git add -- g.txt
+: > "$PYLOG"; rm -f .git/session-stage-log
+# `reset` is not a staging verb (staging_op: add rm mv restore apply update-index stash), yet it writes the index.
+PATH="$FAKEBIN:$PATH" CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" git reset -q -- g.txt
+eq "non_staging_index_write_does_not_resolve_identity" "$(wc -l < "$PYLOG" | tr -d ' ')" "0"
+[ -f .git/session-stage-log ] && ok "non_staging_index_write: the hook did fire" || no "non_staging_index_write: the hook did fire" "no stage log written"
+: > "$PYLOG"
+PATH="$FAKEBIN:$PATH" CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" git add -- g.txt
+[ "$(wc -l < "$PYLOG" | tr -d ' ')" -ge 1 ] && ok "staging_op_resolves_identity" || no "staging_op_resolves_identity" "python3 never ran"
+eq "staging_op_resolves_identity: owner" "$(owner_of g.txt)" "$A"
+rm -rf "$T" "$FAKEBIN" "$PYLOG"
+
+# The foreign-index guard reads that owner column. It resolves `me` through publish_identity and
+# compares with publish_principal_equal, so a Codex session classifies as a Claude one does, and a
+# row written before the upgrade (a BARE owner) still matches the same id under Codex.
+# `classify_as_codex` prints the raw `--classify` lines then `EXIT=<n>`; stderr is merged.
+classify_as_codex() {
+    env -u GIT_INDEX_FILE -u CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID="$1" \
+        bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1
+    echo "EXIT=$?"
+}
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+add_codex f.txt
+eq "codex_only_own_staged_is_mine" "$(classify_as_codex "$U")" "$(printf 'mine\tcodex:%s\tf.txt\nEXIT=0' "$U")"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo theirs > g.txt
+add_as "$B" g.txt
+eq "claude_peer_staged_is_theirs_with_bare_owner" "$(classify_as_codex "$U")" "$(printf 'theirs\t%s\tg.txt\nEXIT=0' "$B")"
+rm -rf "$T"
+
+# The raw Claude `--classify` line is the contract commit-mine parses: `mine<TAB><bare id><TAB><path>`.
+new_repo; mkdb "$DB"
+echo mine > f.txt
+add_as "$A" f.txt
+eq "claude_classify_raw_line_is_bare_id" \
+    "$(env -u GIT_INDEX_FILE -u CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID="$A" bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1; echo "EXIT=$?")" \
+    "$(printf 'mine\t%s\tf.txt\nEXIT=0' "$A")"
+# A warning on the resolver's stderr (a Python startup notice) must never be adopted as the identity.
+NOISY="$(mktemp -d "${TMPDIR:-/tmp}/noisy-py-XXXXXX")"
+printf '#!/bin/sh\n"%s" "$@"\nrc=$?\necho "python3: shutdown warning that is not an identity" >&2\nexit $rc\n' "$REALPY" > "$NOISY/python3"
+chmod +x "$NOISY/python3"
+eq "classify_ignores_resolver_stderr: owner is the id, not the warning" \
+    "$(env -u GIT_INDEX_FILE -u CODEX_SESSION_ID PATH="$NOISY:$PATH" CLAUDE_CODE_SESSION_ID="$A" bash "$SRC/pre-commit-foreign-index.sh" --classify 2>/dev/null; echo "EXIT=$?")" \
+    "$(printf 'mine\t%s\tf.txt\nEXIT=0' "$A")"
+rm -rf "$NOISY"
+rm -rf "$T"
+
+# A missing helper in the hook: owner `-`, and the git command stays silent and succeeds.
+NOHELP="$(mktemp -d "${TMPDIR:-/tmp}/nohelper-XXXXXX")"
+cp "$SRC/post-index-change-stage-log.sh" "$NOHELP/post-index-change-stage-log.sh"
+new_repo; mkdb "$DB"
+printf '#!/usr/bin/env bash\nexec "%s/post-index-change-stage-log.sh" "$@"\n' "$NOHELP" > .git/hooks/post-index-change
+echo mine > f.txt
+_err="$(CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" git add -- f.txt 2>&1 >/dev/null)"; _rc=$?
+eq "missing_helper_hook: git add succeeds" "$_rc" "0"
+eq "missing_helper_hook: nothing on stderr" "$_err" ""
+eq "missing_helper_hook: owner is -" "$(owner_of f.txt)" "-"
+rm -rf "$T" "$NOHELP"
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+add_as "$U" f.txt
+eq "pre_upgrade_bare_owner_row_matches_codex_self: row is bare" "$(owner_of f.txt)" "$U"
+eq "pre_upgrade_bare_owner_row_matches_codex_self" "$(classify_as_codex "$U")" "$(printf 'mine\tcodex:%s\tf.txt\nEXIT=0' "$U")"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo theirs > g.txt
+add_as "$B" g.txt
+out="$(env -u GIT_INDEX_FILE CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U" \
+    bash "$SRC/pre-commit-foreign-index.sh" 2>&1 >/dev/null; echo "EXIT=$?")"
+has "conflicting_is_silent_with_stderr_note: exit 0" "$out" "EXIT=0"
+has "conflicting_is_silent_with_stderr_note: names CLAUDE_CODE_SESSION_ID" "$out" "CLAUDE_CODE_SESSION_ID"
+has "conflicting_is_silent_with_stderr_note: names CODEX_SESSION_ID" "$out" "CODEX_SESSION_ID"
+eq "conflicting_is_silent_with_stderr_note: one stderr line" "$(printf '%s\n' "$out" | grep -vc '^EXIT=')" "1"
+eq "conflicting_is_silent_with_stderr_note: stdout empty" \
+    "$(env -u GIT_INDEX_FILE CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U" bash "$SRC/pre-commit-foreign-index.sh" 2>/dev/null)" ""
+out="$(env -u GIT_INDEX_FILE CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U" \
+    bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1 >/dev/null; echo "EXIT=$?")"
+has "classify_conflicting_exits_2: exit 2" "$out" "EXIT=2"
+has "classify_conflicting_exits_2: names CLAUDE_CODE_SESSION_ID" "$out" "CLAUDE_CODE_SESSION_ID"
+has "classify_conflicting_exits_2: names CODEX_SESSION_ID" "$out" "CODEX_SESSION_ID"
+eq "classify_conflicting_exits_2: one stderr line" "$(printf '%s\n' "$out" | grep -vc '^EXIT=')" "1"
+rm -rf "$T"
+
+# The guard's stderr line must name the REAL cause: a conflict, a single invalid id, and a missing or
+# broken python3 are three different faults. Exactly one line each, in the form
+#   pre-commit-foreign-index: identity not resolved (<resolver's first stderr line | resolver unavailable>), so treated as no identity
+BADPY="$(mktemp -d "${TMPDIR:-/tmp}/badpy-XXXXXX")"
+printf '#!/bin/sh\nexit 127\n' > "$BADPY/python3"
+chmod +x "$BADPY/python3"
+new_repo; mkdb "$DB"
+echo theirs > g.txt
+add_as "$B" g.txt
+# $1 = case label, $2 = expected cause substring; remaining args = env assignments for the guard
+guard_err() {
+    local label="$1" want="$2"
+    shift 2
+    local err rc
+    err="$(env -u GIT_INDEX_FILE -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID "$@" bash "$SRC/pre-commit-foreign-index.sh" 2>&1 >/dev/null)"
+    rc=$?
+    eq "$label: exit 0 (a hook never fails the commit)" "$rc" "0"
+    eq "$label: one stderr line" "$(printf '%s\n' "$err" | grep -c .)" "1"
+    has "$label: says the identity was not resolved" "$err" "pre-commit-foreign-index: identity not resolved ("
+    has "$label: names the real cause" "$err" "$want"
+    has "$label: and the outcome" "$err" "), so treated as no identity"
+}
+guard_err "identity_conflict_message" "conflicting context" CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U"
+guard_err "invalid_claude_id_message" "invalid session id a_b" CLAUDE_CODE_SESSION_ID="a_b"
+guard_err "invalid_claude_id_message (bad id!)" "invalid session id bad id!" CLAUDE_CODE_SESSION_ID="bad id!"
+guard_err "invalid_codex_id_message (a/b)" "invalid session id a/b" CODEX_SESSION_ID="a/b"
+guard_err "broken_python3_message" "resolver unavailable" PATH="$BADPY:$PATH" CLAUDE_CODE_SESSION_ID="$A"
+out="$(env -u GIT_INDEX_FILE -u CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID="a_b" bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1 >/dev/null; echo "EXIT=$?")"
+has "classify_invalid_id: exit 2" "$out" "EXIT=2"
+has "classify_invalid_id: names the cause" "$out" "invalid session id a_b"
+eq "classify_invalid_id: one stderr line" "$(printf '%s\n' "$out" | grep -vc '^EXIT=')" "1"
+out="$(env -u GIT_INDEX_FILE -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODESCOUT_CONTEXT_FILE \
+    bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1 >/dev/null; echo "EXIT=$?")"
+has "classify_missing_identity_names_context_file" "$out" "CODESCOUT_CONTEXT_FILE"
+has "classify_missing_identity_names_both_variables: claude" "$out" "CLAUDE_CODE_SESSION_ID"
+has "classify_missing_identity_names_both_variables: codex" "$out" "CODEX_SESSION_ID"
+rm -rf "$T"
+
+# A Codex owner cannot be looked up: resolve_session reads only the Claude registry, so the refusal must
+# not call a Codex peer a "dead incarnation" or send the reader to a `codex:<id>.jsonl` that cannot exist.
+new_repo; mkdb "$DB"
+echo theirs > g.txt
+add_codex g.txt
+out="$(guard "$A")"
+has "codex_peer_owner_refusal: refused" "$out" "EXIT=1"
+has "codex_peer_owner_refusal: names the owner qualified" "$out" "codex:$U"
+has "codex_peer_owner_refusal: liveness not checked" "$out" "Codex session — liveness not checked (the registry is Claude-only)"
+hasnt "codex_peer_owner_refusal: not called dead" "$out" "NOT LIVE"
+hasnt "codex_peer_owner_refusal: no jsonl hint" "$out" ".jsonl"
+rm -rf "$T"
+new_repo; mkdb "$DB"
+echo theirs > g.txt
+add_as "$B" g.txt
+out="$(guard "$A")"
+has "claude_peer_owner_refusal_unchanged: NOT LIVE text" "$out" "NOT LIVE"
+has "claude_peer_owner_refusal_unchanged: jsonl hint" "$out" "$B.jsonl"
+rm -rf "$T" "$BADPY"
+
 # 4. liveness: a write is live until its OWN writer commits the path after it. Rows carry
 # explicit times so no case depends on two events landing in different seconds.
 hrs() { date -u -d "$1" '+%Y-%m-%d %H:%M:%S.000'; }
@@ -910,6 +1108,31 @@ git reset -q -- g.txt
 wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}' success "$(hrs '1 hour')"
 add_as "$A" g.txt
 eq "4b: the same peer writing AFTER that commit is live again" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+
+# 4d. A Codex writer's commit carries `Session-Id: codex:<id>` (prepare-commit-msg-session-id.sh) while
+# usage.db stores the BARE id, so the closing lookup must strip the qualifier or a Codex writer's own
+# commit never closes its write.
+new_repo; mkdb "$DB"
+echo base > f.txt; git add f.txt; git commit -qm base
+wrote "$DB" "$U" edit_file '{"action":"edit","path":"f.txt","new_string":"codexline"}' success "$(hrs '2 hours ago')"
+echo codexline > f.txt
+commit_as "codex:$U" f.txt "$(giso '90 minutes ago')"
+echo bline > f.txt
+commit_as "$B" f.txt "$(giso '60 minutes ago')"
+echo aline > f.txt
+add_as "$A" f.txt
+eq "codex_own_commit_closes_its_write: owner" "$(owner_of f.txt)" "$A"
+eq "codex_own_commit_closes_its_write: route" "$(route_of f.txt)" "named"
+rm -rf "$T"
+
+# R7-5: a Codex stager whose own subagent wrote the path is not a peer (the child row names the parent).
+new_repo; mkdb "$DB"
+echo mine > f.txt
+wrote "$DB" "$U/agent1" edit_file '{"action":"edit","path":"f.txt"}'
+add_codex f.txt
+eq "codex_stager_own_child_row_is_named: owner" "$(owner_of f.txt)" "codex:$U"
+eq "codex_stager_own_child_row_is_named: route" "$(route_of f.txt)" "named"
 rm -rf "$T"
 
 # 4c. the case the old commit-time bound got wrong, from a measured tracker: B wrote, then a

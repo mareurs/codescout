@@ -32,3 +32,19 @@ Coverage and peer contact are separate capabilities. Known Codex ownership remai
 Source tests cover both hosts, mixed ownership, same-ID host collisions, child boundaries, refusals, gaps, literal paths, lease concurrency and default-lane continuation. Observed versions are Claude Code 2.1.296 and Codex 0.160.0, not a supported range. Actual main-profile Claude write/owned formatting, same-root resume, child/parent formatting and conservative fork refusal passed. All three Claude profiles cold-loaded the plugin; main/SDD authenticated smoke passed, Kat authentication remains pending.
 
 Native Codex MCP sessionId/threadId automatically reach spawned commands. Fresh, resumed, compacted, forked and child context probes passed. Actual native root 01a12f3a-ae7e-7882-87e8-8b6e4eb81706 has a recovered writer with exact arguments and full native root/thread/call identity. On same-root resume the normal formatter retained this writer, exited 1/UNKNOWN and left bytes unchanged because wrapper coverage remains incomplete. Successful Codex owned formatting and complete authored-history continuity remain unestablished. The coordinated plugin review records native evidence, applied mutations and dated installation observations.
+
+## Commit guards and Codex sessions
+
+Five commit-safety scripts accept a Codex session besides a Claude session: `commit-mine.sh`, `git-safe-reset.sh`, `mutation-probe.sh`, `pre-commit-foreign-index.sh` and `post-index-change-stage-log.sh`. All resolve identity through `scripts/publish-identity.sh`: `publish_identity` (the principal), `publish_principal_equal` (comparison) and `publish_principal_root` (strip one host qualifier).
+
+- Owner format. The stage-log owner is the bare id for Claude and `codex:<root id>` for Codex. It is `-` when identity is missing, conflicting, invalid, or the resolver cannot run. The write record in `usage.db` stores BARE ids for both hosts (no harness column), so every comparison strips one leading `codex:` or `claude-code:` first. `-` and empty never equal anything. A same-id collision across hosts counts as one writer; this trade-off is accepted.
+- Ack token. A Codex peer is acked as `CODESCOUT_INDEX_ACK="codex:<id>"`; a bare id for that peer is refused. A Codex writer found through the write record shows up with its bare id (see the limitations below).
+- Conflicting identity (both `CLAUDE_CODE_SESSION_ID` and `CODEX_SESSION_ID` set, for example a Codex run launched from inside a Claude session). The user-run scripts exit 2 with the resolver's reason. The hooks record `-` or stand down. The installed pre-commit dispatcher refuses the commit (the hold guard fails closed). Remedy: unset one of the two variables.
+- `python3` is a runtime dependency of attribution in the stage-log hook and the guard. Without it the hook records `-` (it never fails git) and the user-run scripts exit 2.
+- `mutation-probe.sh` marker files: the file name is the bare root (never a colon); the JSON `session_id` holds the full principal.
+
+Known limitations:
+
+- A Codex writer attributed through `usage.db` has a bare owner. The guard's refusal therefore describes it with the Claude liveness text, and the pre-push hold lookup maps its co-author token to `refs/holds/<id>` instead of `refs/holds/_codex/<id>`. The real fix is recording the harness in `usage.db` (the spec's option 3); it is not done.
+- The guard reads the resolver's stdout and stderr separately: the identity comes from stdout only, and the refusal reason from stderr. A warning on stderr (a Python startup or shutdown notice) cannot become an identity. This closed finding N1; `classify_ignores_resolver_stderr` in `tests/hooks-discrimination.sh` pins it.
+- No live Codex session ran these scripts. All verification is by source tests and fixtures.

@@ -136,15 +136,26 @@ count_lit() {
 # `mine` has no referent without a session id, and an unattributable marker is
 # worse than none: it tells a reader a mutation is live and gives them nobody to
 # ask. Same refusal shape as fmt-mine.sh.
-SID="${CLAUDE_CODE_SESSION_ID:-}"
+_identity_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+# User-run script: a missing helper is a clear refusal, not a silent "no identity".
+if [ -z "$_identity_dir" ] || ! . "$_identity_dir/publish-identity.sh" 2>/dev/null; then
+    echo "mutation-probe: cannot load scripts/publish-identity.sh (looked next to this script), so" >&2
+    echo "  the marker's author cannot be resolved." >&2
+    exit 2
+fi
+# SID is the principal: the bare id for Claude, codex:<id> for Codex. Conflicting or invalid
+# identity exits 2 with the resolver's own reason on stderr.
+SID="$(publish_identity)" || exit 2
 if [ -z "$SID" ]; then
-    echo "mutation-probe: CLAUDE_CODE_SESSION_ID is not set, so the marker would name no author." >&2
-    echo "  Outside a Claude session, mutate a scratch clone by hand instead." >&2
+    echo "mutation-probe: no session identity was found (neither CLAUDE_CODE_SESSION_ID nor" >&2
+    echo "  CODEX_SESSION_ID resolves to one); run this from inside a Claude Code or Codex session," >&2
+    echo "  so the marker names an author. Without one, mutate a scratch clone by hand instead." >&2
     exit 2
 fi
 
 MARKER_DIR="$ROOT/.codescout/mutations"
-MARKER="$MARKER_DIR/$SID.json"
+# The FILE NAME is the principal's bare root, never `codex:<id>`: no colon in a file name.
+MARKER="$MARKER_DIR/$(publish_principal_root "$SID").json"
 mkdir -p "$MARKER_DIR"
 
 if [ "$SHARED" -eq 1 ]; then

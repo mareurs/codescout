@@ -14,7 +14,7 @@ last_observed: 2026-09-13
 opened: 2026-09-06
 owner: marius
 severity: high
-unverified: STANDING Enforcement requires an explicit recorded hold, CLAUDE_CODE_SESSION_ID and active hooks. Unrecorded withholding, Codex identity without that variable, manual commits without it, and skipped hooks remain outside this mechanism.
+unverified: STANDING Enforcement requires an explicit recorded hold, a resolved Claude/Codex root identity and active hooks. Unrecorded withholding, manual/no-root operations, historical unstamped commits and skipped hooks remain outside this mechanism; legacy Claude corrupt-ref lookup limitations remain documented.
 ---
 
 # BUG: a push publishes every local commit, and nothing records that an author was withholding one pending their operator's say-so
@@ -1037,6 +1037,18 @@ The original proposal follows, unchanged.
 - **Weakest, and named so it is not mistaken for sufficient:** the pusher reads
   what it carries. It is worth doing anyway — it catches surprises of every other
   kind — but it is structurally incapable of catching this one.
+
+
+### Codex root identities, 2026-10-27
+
+The isolated Codex publish-hold branch extends set/release/list, commit refusal, commit trailer stamping and push scanning to session_context.py's resolved root identity. Claude keeps bare trailers and refs/holds/<sid>; Codex uses canonical codex:<sid> tokens and refs/holds/_codex/<sid>. The underscore avoids collision with every valid legacy ID, including the word codex. An implicit release selects the caller's own harness; a bare explicit target always means Claude. No existing refs or commit history are migrated. Child threads retain their root, conflicting native/explicit identity refuses, and Codex liveness stays unknown instead of borrowing a Claude registry row.
+
+Both primary and coauthor trailers now enter the hold scan. The distinct, preexisting coauthor omission is recorded in docs/issues/2026-10-27-coauthor-publish-hold-is-invisible-to-the-push-scan.md. Final verification: the full gate exited 0 with PYTHON_LIGHT=0, FMT=0, CLIPPY=0, LEAN=0 and DEFAULT=0. The final Python light rerun reported 1407 passed plus 445 subtests. Direct shell suites passed 91 hold, 412 push, 21 stamping and 298 index assertions. Independent review applied 10 mutations: 8 were killed and 2 survived the initial suite; both survivors were subsequently reapplied against added regression cases and killed. The new Codex path also refuses corrupt-ref push/release lookups, while the documented legacy Claude error policy remains. Detailed review and exclusions are retained in docs/superpowers/reviews/2026-10-27-codex-publish-holds.md and its implementation plan. This is verified feature-branch evidence; installed hooks and the shared experiments checkout have not been changed by this task.
+
+
+### Codex extension provenance
+
+Feature-branch commit f7d6c797e733275dce6f7455bb30de797e7dcb09; stable patch-id f4cbd8641d2bd78440c5078254b264af8a6ffb5e. This is isolated branch evidence, not an experiments merge or installed-hook update. The worktree and catalog overlay are retained for integration review.
 
 
 ## Fix provenance

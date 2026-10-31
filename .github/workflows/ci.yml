@@ -138,6 +138,8 @@ jobs:
           git config --global init.defaultBranch master
       - run: bash tests/pre-push-foreign-session-guard.sh
       - run: bash tests/hold-publish.sh
+      - run: bash tests/publish-principal.sh
+      - run: bash tests/git-safe-reset.sh
 
   # ITS OWN JOB, for the reason `push-guard-tests` gives above: `shell-tests` is the known-flaky
   # lane, and this suite's value is that R1-R3 are readable as the reproduction of

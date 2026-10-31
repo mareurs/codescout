@@ -82,7 +82,8 @@
 # `git diff --cached --name-only`, read in its own call before you commit, remains the
 # check that answers the question directly and depends on none of this.
 #
-# With no CLAUDE_CODE_SESSION_ID this exits silently rather than refusing. A commit
+# With no usable session identity (no CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID, or the two
+# in conflict) this exits silently rather than refusing. A commit
 # from a plain terminal is a deliberate human act, and this guard has no id to
 # discriminate with — blocking it would be a false alarm, and a guard that fires on
 # ordinary work teaches `--no-verify`, which disarms the quiet one that works.
@@ -106,9 +107,40 @@ set -uo pipefail
 classify=0
 [ "${1:-}" = "--classify" ] && classify=1
 
-me="${CLAUDE_CODE_SESSION_ID:-}"
+_identity_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+# A git hook must never fail the user's command because identity could not be resolved: a missing
+# helper reads as no identity, and a failing publish_identity (Claude and Codex variables both set,
+# an invalid id, or a missing/broken python3) reads as no identity PLUS one stderr line saying why.
+me=""
+_identity_failed=0
+_identity_why=""
+if [ -n "$_identity_dir" ] && . "$_identity_dir/publish-identity.sh" 2>/dev/null; then
+    # stdout (the id) and stderr (the reason) are captured SEPARATELY: a warning on stderr (a Python
+    # startup notice, say) must never be adopted as the caller's identity. The exit status rides on
+    # a final `rc=` marker. On success the id is the LAST line of stdout; on failure the reason is
+    # the first line of stderr (the first line of stdout if the resolver wrote nothing to stderr).
+    _ierr="$(mktemp 2>/dev/null)" || _ierr=/dev/null
+    _ires="$(publish_identity 2>"$_ierr"; echo "rc=$?")"
+    _irc="${_ires##*rc=}"
+    _ibody="${_ires%rc=*}"
+    _ibody="${_ibody%$'\n'}"
+    if [ "$_irc" = 0 ]; then
+        me="${_ibody##*$'\n'}"
+    else
+        _identity_failed=1
+        _identity_why=""
+        [ "$_ierr" = /dev/null ] || IFS= read -r _identity_why <"$_ierr" || true
+        [ -n "$_identity_why" ] || _identity_why="${_ibody%%$'\n'*}"
+        [ -n "$_identity_why" ] || _identity_why="resolver unavailable"
+    fi
+    [ "$_ierr" = /dev/null ] || rm -f "$_ierr"
+fi
 if [ -z "$me" ]; then
-    ((classify)) && { echo "classify: no CLAUDE_CODE_SESSION_ID, so no owner to classify for" >&2; exit 2; }
+    if ((_identity_failed)); then
+        echo "pre-commit-foreign-index: identity not resolved ($_identity_why), so treated as no identity" >&2
+        ((classify)) && exit 2
+    fi
+    ((classify)) && { echo "classify: no usable session identity (none of CLAUDE_CODE_SESSION_ID, CODEX_SESSION_ID or CODESCOUT_CONTEXT_FILE resolved), so no owner to classify for" >&2; exit 2; }
     exit 0
 fi
 
@@ -271,7 +303,7 @@ while IFS=$'\t' read -r blob path; do
     prior="$(awk -F'\t' -v b="$blob" -v p="$path" \
         '$2 == b && $3 == p { print $1 "\t" $4; exit }' "$log")"
     IFS=$'\t' read -r owner route <<< "$prior"
-    if [ -n "$owner" ] && [ "$owner" != "$me" ]; then
+    if [ -n "$owner" ] && ! publish_principal_equal "$owner" "$me"; then
         theirs+=("$path")
         owner_of["$path"]="$owner"
         case " ${foreign_owners[*]-} " in
@@ -619,7 +651,8 @@ fi
                         ;;
                     id-unset)
                         echo "            • no session id — whoever staged these had no"
-                        echo "              CLAUDE_CODE_SESSION_ID, so there was no id to"
+                        echo "              usable session identity (no Claude or Codex id,"
+                        echo "              or the two conflicted), so there was none to"
                         echo "              record. A terminal commit is the usual cause."
                         ;;
                     pre-route)
@@ -648,6 +681,11 @@ fi
             echo "      $owner"
             echo "          LIVE — ${info#*|} (pid ${info%%|*})"
             echo "          SendMessage(to: \"uds:/run/user/$(id -u)/cc-socks/${info%%|*}.sock\")"
+        elif [ "${owner#codex:}" != "$owner" ]; then
+            # resolve_session searches only the Claude registry, so "not found" proves nothing about a
+            # Codex owner, and `projects/<encoded>/codex:<id>.jsonl` cannot exist.
+            echo "      $owner"
+            echo "          Codex session — liveness not checked (the registry is Claude-only)"
         else
             echo "      $owner"
             echo "          NOT LIVE — a dead incarnation, not an abandoned file."

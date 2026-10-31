@@ -18,6 +18,9 @@
 
 set -uo pipefail
 
+# Each case declares its own harness; never inherit a Codex/explicit context.
+unset CODEX_SESSION_ID CODEX_THREAD_ID CODESCOUT_CONTEXT_FILE
+
 SRC="$(cd "$(dirname "$0")/../scripts" && pwd)"
 REAL_REPO="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK="$SRC/prepare-commit-msg-session-id.sh"

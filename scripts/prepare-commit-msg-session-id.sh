@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #
-# Stamp the Claude Code session id into every commit made by a session.
+# Stamp resolved root session ownership into commits.
+# Claude keeps its legacy bare Session-Id; Codex uses codex:<sid>.
+# Context resolution rejects competing native/explicit roots before editing the message.
+# Historical motivation and the preserved trailer replay/coauthor policy follow.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -70,7 +73,9 @@ msg_file="${1:-}"
 [ -n "$msg_file" ] || exit 0
 [ -f "$msg_file" ] || exit 0
 
-session_id="${CLAUDE_CODE_SESSION_ID:-}"
+_identity_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$_identity_dir/publish-identity.sh" || exit 1
+session_id="$(publish_identity)" || exit 1
 [ -n "$session_id" ] || exit 0
 
 # A `Session-Id:` LINE THE PARSER CANNOT SEE. git reads only the message's FINAL paragraph as
