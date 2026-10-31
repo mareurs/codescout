@@ -1,0 +1,11 @@
+{
+  "rule": "setup-ab-live-multilang-rust",
+  "version": 1,
+  "registered": "Registered before any control or outcome was read: selection uses record metadata only (created_at, gold patch size, non-empty required fields), never a result.",
+  "created_at_min": "2026-07-01",
+  "min_files": 2,
+  "min_added_lines": 40,
+  "max_added_lines": 600,
+  "require": ["FAIL_TO_PASS", "test_cmds", "log_parser"],
+  "draw": {"salt": "setup-ab-live-20261031"}
+}

@@ -1,0 +1,79 @@
+"""SWE-bench-Live MultiLang Rust records: load them, project them, select from them by metadata.
+
+    load_records(path, expected_sha256)  the jsonl, hash-checked, every REQUIRED key present
+    candidate(record)                    the fixed projection the rule may read
+    eligible(candidate, rule)            the registered rule (multilang-selection-rule.json)
+    select_eligible(records, rule)       eligible instance ids in select_tasks.draw_key order
+
+`candidate` projects a record to `id`, `repo`, `gold_files`, `gold_added_lines`, `created_at`,
+`expected_tests` and `nonempty` (which REQUIRED fields hold something) before `eligible` runs, so
+no other field (an outcome such as `pass`, or anything added later) can reach the rule. Selection
+reads metadata only, never a result. Stdlib only.
+"""
+import hashlib
+import json
+from pathlib import Path
+
+import select_tasks
+
+HERE = Path(__file__).resolve().parent
+RULE_PATH = HERE / "multilang-selection-rule.json"
+REQUIRED = ("instance_id", "repo", "base_commit", "created_at", "patch", "test_patch",
+            "FAIL_TO_PASS", "PASS_TO_PASS", "test_cmds", "print_cmds", "log_parser", "docker_image")
+
+
+def load_rule(path=RULE_PATH):
+    return json.loads(Path(path).read_text())
+
+
+def load_records(path, expected_sha256=None):
+    """The records of a jsonl file. ValueError on a hash mismatch, a missing REQUIRED key or a
+    duplicate instance_id; the hash is checked before the file is parsed."""
+    raw = Path(path).read_bytes()
+    if expected_sha256 is not None:
+        actual = hashlib.sha256(raw).hexdigest()
+        if actual != expected_sha256:
+            raise ValueError(f"{path}: sha256 {actual} is not the expected {expected_sha256}")
+    records, seen = [], set()
+    for n, line in enumerate(raw.decode().splitlines(), 1):
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        missing = [k for k in REQUIRED if k not in record]
+        if missing:
+            raise ValueError(f"{path}:{n}: record lacks {missing}")
+        if record["instance_id"] in seen:
+            raise ValueError(f"{path}:{n}: duplicate instance_id {record['instance_id']!r}")
+        seen.add(record["instance_id"])
+        records.append(record)
+    return records
+
+
+def candidate(record):
+    """The only fields the rule reads. `patch_stats` counts `diff --git` files and added lines
+    (`+`, not `+++`) of the gold patch; `expected_tests` is len(F2P) + len(P2P)."""
+    files, added = select_tasks.patch_stats(record["patch"])
+    return {"id": record["instance_id"], "repo": record["repo"], "gold_files": files,
+            "gold_added_lines": added, "created_at": record["created_at"],
+            "expected_tests": len(record["FAIL_TO_PASS"]) + len(record["PASS_TO_PASS"]),
+            "nonempty": sorted(k for k in REQUIRED if record[k])}
+
+
+def eligible(candidate, rule, *, ignore_size=False):
+    """The cutoff (by date) and the `require` fields always; unless `ignore_size`, also the
+    hardness test (files >= min_files or added lines >= min_added_lines) and max_added_lines."""
+    if candidate["created_at"][:10] < rule["created_at_min"]:
+        return False
+    if any(f not in candidate["nonempty"] for f in rule["require"]):
+        return False
+    if ignore_size:
+        return True
+    files, added = len(candidate["gold_files"]), candidate["gold_added_lines"]
+    hard = files >= rule["min_files"] or added >= rule["min_added_lines"]
+    return hard and added <= rule["max_added_lines"]
+
+
+def select_eligible(records, rule):
+    """Eligible instance ids, ascending by (draw key, id)."""
+    ids = [c["id"] for c in map(candidate, records) if eligible(c, rule)]
+    return sorted(ids, key=lambda i: (select_tasks.draw_key(rule, i), i))
