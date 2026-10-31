@@ -479,7 +479,7 @@ class MainTests(unittest.TestCase):
     def test_main_skips_ids_with_existing_control_json(self):
         self.write(full_record(instance_id="a__a-1"), full_record(instance_id="b__b-2"))
         (self.out / "a__a-1").mkdir(parents=True)
-        (self.out / "a__a-1" / "control.json").write_text("{}")
+        (self.out / "a__a-1" / "control.json").write_text('{"verdict": {"ok": true}}')
         rc, text = self.main("--ids", "a__a-1", "b__b-2")
         self.assertEqual(rc, 0)
         self.assertEqual(self.ran, ["b__b-2"])
@@ -532,6 +532,180 @@ class MainTests(unittest.TestCase):
         res = sp.run([sys.executable, "-B", "-c", code], cwd=os.path.dirname(os.path.abspath(__file__)),
                      capture_output=True, text=True)
         self.assertEqual(res.stdout.strip(), "[]", res.stderr)
+
+
+class RmiFailureTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.out = Path(tmp.name)
+        old = c.ensure_image
+        c.ensure_image = lambda image: True
+        self.addCleanup(setattr, c, "ensure_image", old)
+
+    def handler(self, rmi):
+        inner = happy_handler({})
+
+        def h(args, data):
+            if args[0] == "rmi":
+                return rmi
+            return inner(args, data)
+        return h
+
+    def test_failed_rmi_is_recorded_in_control_json(self):
+        import json
+        patch_docker(self, FakeDocker(self.handler(out("image is in use", rc=1))))
+        ev = c.run_one(record(), self.out)
+        self.assertIs(ev["image_removed"], False)
+        saved = json.loads((self.out / "o__r-1" / "control.json").read_text())
+        self.assertIs(saved["image_removed"], False)
+        self.assertIn("image is in use", saved["image_remove_error"])
+
+    def test_successful_rmi_is_recorded(self):
+        patch_docker(self, FakeDocker(self.handler(out())))
+        self.assertIs(c.run_one(record(), self.out)["image_removed"], True)
+
+    def test_rmi_timeout_does_not_mask_a_control_exception(self):
+        inner = happy_handler({})
+
+        def h(args, data):
+            if args[0] == "rmi":
+                return subprocess.TimeoutExpired("docker", 1)
+            if "reset --hard" in " ".join(args):
+                return KeyboardInterrupt()
+            return inner(args, data)
+        patch_docker(self, FakeDocker(h))
+        with self.assertRaises(KeyboardInterrupt):
+            c.run_one(record(), self.out)
+
+    def test_rmi_error_is_recorded_not_raised(self):
+        patch_docker(self, FakeDocker(self.handler(RuntimeError("daemon gone"))))
+        ev = c.run_one(record(), self.out)
+        self.assertIs(ev["image_removed"], False)
+        self.assertIn("daemon gone", ev["image_remove_error"])
+
+
+class PullFailureTests(unittest.TestCase):
+    def fake(self, pull_error, appears):
+        state = {"pulled": False}
+
+        def h(args, data):
+            if args[0] == "image":
+                return out(rc=0 if state["pulled"] else 1)
+            if args[0] == "pull":
+                state["pulled"] = appears
+                return pull_error
+        fake = FakeDocker(h)
+        patch_docker(self, fake)
+        old = c.free_gb
+        c.free_gb = lambda path="/": 500
+        self.addCleanup(setattr, c, "free_gb", old)
+        return fake
+
+    def test_failed_pull_whose_image_appears_is_removed_unforced(self):
+        for err in (RuntimeError("broken pipe"), subprocess.TimeoutExpired("docker", 1)):
+            fake = self.fake(err, True)
+            with self.assertRaises(c.ControlError):
+                c.ensure_image("img:1")
+            self.assertEqual(fake.joined()[-1], "rmi img:1")
+
+    def test_failed_pull_without_image_does_not_call_rmi(self):
+        fake = self.fake(RuntimeError("denied"), False)
+        with self.assertRaises(c.ControlError):
+            c.ensure_image("img:1")
+        self.assertFalse(any(x.startswith("rmi") for x in fake.joined()))
+
+    def test_interrupted_pull_removes_an_image_that_appears_and_reraises(self):
+        fake = self.fake(KeyboardInterrupt(), True)
+        with self.assertRaises(KeyboardInterrupt):
+            c.ensure_image("img:1")
+        self.assertEqual(fake.joined()[-1], "rmi img:1")
+
+
+class ResumeMarkerTests(MainTests):
+    def mark(self, text):
+        d = self.out / "a__a-1"
+        d.mkdir(parents=True)
+        (d / "control.json").write_text(text)
+
+    def test_truncated_control_json_is_rerun(self):
+        self.write(full_record(instance_id="a__a-1"))
+        self.mark('{"id": "a__a-1", "verd')
+        rc, text = self.main("--ids", "a__a-1")
+        self.assertEqual(self.ran, ["a__a-1"])
+        self.assertIn("RERUN a__a-1 control.json unreadable", text)
+
+    def test_verdictless_control_json_is_rerun(self):
+        self.write(full_record(instance_id="a__a-1"))
+        self.mark('{"id": "a__a-1"}')
+        self.main("--ids", "a__a-1")
+        self.assertEqual(self.ran, ["a__a-1"])
+
+    def test_non_object_control_json_is_rerun(self):
+        self.write(full_record(instance_id="a__a-1"))
+        self.mark("[]")
+        self.main("--ids", "a__a-1")
+        self.assertEqual(self.ran, ["a__a-1"])
+
+    def test_valid_control_json_is_skipped(self):
+        self.write(full_record(instance_id="a__a-1"))
+        self.mark('{"verdict": {"ok": true}}')
+        self.main("--ids", "a__a-1")
+        self.assertEqual(self.ran, [])
+
+    def test_main_warns_when_the_image_was_not_removed(self):
+        self.write(full_record(instance_id="a__a-1"))
+        c.run_one = lambda rec, out_dir, *, timeout=3600: {
+            "id": "a__a-1", "verdict": {"ok": True, "reasons": []}, "image_removed": False,
+            "image_remove_error": "in use"}
+        _, text = self.main("--ids", "a__a-1")
+        self.assertIn("WARN rmi failed img:1", text)
+
+
+class AtomicWriteTests(unittest.TestCase):
+    def test_control_json_is_written_via_tmp_and_os_replace(self):
+        import tempfile
+        from pathlib import Path
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        out_dir = Path(tmp.name)
+        seen = []
+        real = c.os.replace
+
+        def spy(src, dst):
+            seen.append((Path(src).name, Path(dst).name, Path(dst).exists(),
+                         Path(src).read_text().endswith("}\n")))
+            return real(src, dst)
+        c.os.replace = spy
+        self.addCleanup(setattr, c.os, "replace", real)
+        old = c.ensure_image
+        c.ensure_image = lambda image: False
+        self.addCleanup(setattr, c, "ensure_image", old)
+        patch_docker(self, FakeDocker(happy_handler({})))
+        c.run_one(record(), out_dir)
+        self.assertEqual(seen, [("control.json.tmp", "control.json", False, True)])
+        self.assertFalse((out_dir / "o__r-1" / "control.json.tmp").exists())
+
+    def test_failed_replace_leaves_no_control_json(self):
+        import tempfile
+        from pathlib import Path
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        real = c.os.replace
+
+        def boom(src, dst):
+            raise OSError("ENOSPC")
+        c.os.replace = boom
+        self.addCleanup(setattr, c.os, "replace", real)
+        old = c.ensure_image
+        c.ensure_image = lambda image: False
+        self.addCleanup(setattr, c, "ensure_image", old)
+        patch_docker(self, FakeDocker(happy_handler({})))
+        with self.assertRaises(OSError):
+            c.run_one(record(), Path(tmp.name))
+        self.assertFalse((Path(tmp.name) / "o__r-1" / "control.json").exists())
 
 
 if __name__ == "__main__":

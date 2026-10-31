@@ -14,6 +14,7 @@ Stdlib only.
 import argparse
 import base64
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -155,11 +156,36 @@ def ensure_image(image):
         raise ControlError(f"refusing to pull {image}: {free:.0f} GB free, need {MIN_FREE_GB}")
     try:
         pilot.docker("pull", image, timeout=3600)
-    except RuntimeError as e:
-        raise ControlError(f"pull failed: {str(e)[:300]}") from None
-    except subprocess.TimeoutExpired:
-        raise ControlError(f"pull of {image} timed out") from None
+    except BaseException as e:
+        # the daemon may have finished the pull after the CLI failed or was killed: such an image
+        # is ours and untracked, so remove it before the error leaves (never forced)
+        _remove_if_present(image)
+        if isinstance(e, RuntimeError):
+            raise ControlError(f"pull failed: {str(e)[:300]}") from None
+        if isinstance(e, subprocess.TimeoutExpired):
+            raise ControlError(f"pull of {image} timed out") from None
+        raise
     return True
+
+
+def _remove_image(image):
+    """(removed, reason) for `docker rmi <image>` (not forced); never raises an Exception."""
+    try:
+        res = pilot.docker("rmi", image, check=False, timeout=600)
+    except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
+        return False, f"{type(e).__name__}: {str(e)[:200]}"
+    if res.returncode:
+        return False, f"rmi exit {res.returncode}: {str(res.stdout)[-200:]}"
+    return True, ""
+
+
+def _remove_if_present(image):
+    try:
+        present = pilot.docker("image", "inspect", image, check=False, timeout=120).returncode == 0
+    except (RuntimeError, subprocess.TimeoutExpired, OSError):
+        return
+    if present:
+        _remove_image(image)
 
 
 def _safe_id(instance_id):
@@ -173,18 +199,37 @@ def run_one(record, out_dir, *, timeout=3600):
     An image this call pulled is removed afterwards (no force); a present one is left alone."""
     task_id = _safe_id(record["instance_id"])
     pulled = ensure_image(record["docker_image"])
+    removal = None
     try:
         evidence, base_log, gold_log = control(record, container=f"{CONTAINER_PREFIX}{task_id}",
                                                timeout=timeout)
     finally:
         if pulled:
-            pilot.docker("rmi", record["docker_image"], check=False, timeout=600)
+            removal = _remove_image(record["docker_image"])
+    if removal is not None:
+        evidence["image_removed"] = removal[0]
+        if not removal[0]:
+            evidence["image_remove_error"] = removal[1]
     d = Path(out_dir) / task_id
     d.mkdir(parents=True, exist_ok=True)
     (d / "base.log").write_text(base_log)
     (d / "gold.log").write_text(gold_log)
-    (d / "control.json").write_text(json.dumps(evidence, indent=2, allow_nan=False) + "\n")
+    # control.json is the resume marker: it appears whole or not at all
+    tmp = d / "control.json.tmp"
+    with tmp.open("w") as f:
+        f.write(json.dumps(evidence, indent=2, allow_nan=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, d / "control.json")
     return evidence
+
+
+def _done(path):
+    """True when `path` is a control.json that parses and carries a verdict."""
+    try:
+        return "verdict" in json.loads(Path(path).read_text())
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def _refusal(cand, rule):
@@ -222,15 +267,20 @@ def main(argv=None):
         chosen = chosen[:args.limit]
     out_dir, ran, accepted = Path(args.out), 0, 0
     for i in chosen:
-        if (out_dir / i / "control.json").exists():
-            print(f"{i} SKIP control.json exists")
-            continue
+        marker = out_dir / i / "control.json"
+        if marker.exists():
+            if _done(marker):
+                print(f"{i} SKIP control.json exists")
+                continue
+            print(f"RERUN {i} control.json unreadable")
         try:
             ev = run_one(by_id[i], out_dir)
         except ControlError as e:
             print(f"SKIPPED {i} {e}")
             continue
         verdict = ev["verdict"]
+        if ev.get("image_removed") is False:
+            print(f"WARN rmi failed {by_id[i]['docker_image']} {ev.get('image_remove_error', '')}".rstrip())
         ran += 1
         accepted += bool(verdict["ok"])
         print(f"{i} {'ok' if verdict['ok'] else 'REJECT'} {'; '.join(verdict.get('reasons', []))}".rstrip())
