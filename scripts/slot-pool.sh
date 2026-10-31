@@ -123,6 +123,128 @@ slot_tend() {
 
 slot_remove_dir() { rm -rf -- "$1"; }
 
+# ---------------------------------------------------------------------------------------
+# The RAM tier: an OPT-IN, machine-local pool of up to RAM_SLOTS build trees on a zram
+# filesystem, tried before the disk pool. Design: docs/superpowers/specs/2026-10-31-gate-ram-tier-design.md.
+# Nothing here runs, prints or changes an exit code unless this machine's config names a pool
+# (${XDG_CONFIG_HOME:-$HOME/.config}/codescout/gate-pool.env, or CODESCOUT_GATE_RAM_POOL in the
+# environment). The functions below are the admission half; every refusal sets RAM_SKIP to one
+# line, "<who>: RAM tier skipped: <cause> (<knob>)", and the caller falls back to the disk pool.
+#
+# THE CONFIG FILE IS PARSED, NEVER SOURCED. It lives in the operator's home and holds paths, so
+# sourcing it would run whatever a line says (`CODESCOUT_GATE_RAM_SLOTS=$(...)`). Each line is
+# matched against a fixed shape and only the seven CODESCOUT_GATE_RAM_* keys are read; any other
+# line is ignored. An environment value of the same name wins over the file's.
+#
+# TEST SEAMS (the suite sets them; CI has no zram device): `findmnt` is resolved through PATH;
+# CODESCOUT_GATE_RAM_MEMINFO (default /proc/meminfo) and CODESCOUT_GATE_RAM_MMSTAT (default
+# /sys/block/<dev>/mm_stat) replace the two kernel files.
+# ---------------------------------------------------------------------------------------
+
+# ram_tier_load_config <who> — read the config. Returns 0, and sets RAM_POOL RAM_SLOTS
+# RAM_GROWTH_MB RAM_COLD_MB RAM_MEM_FLOOR_MB RAM_IDLE_MIN RAM_CARGO_ENV, when a pool is named
+# and every value is valid. Returns 1 otherwise: with RAM_SKIP set when something is wrong
+# (a line that is not KEY=VALUE, a value that is not a whole number, a relative pool path),
+# and RAM_SKIP empty when the tier is simply not configured. A numeric value is read as
+# decimal (leading zeros are not octal) and capped at 12 digits so later arithmetic cannot wrap.
+ram_tier_load_config() {
+    local who="$1" file="${XDG_CONFIG_HOME:-$HOME/.config}/codescout/gate-pool.env"
+    local shape='^CODESCOUT_GATE_RAM_[A-Z_]+=[^[:space:]]*$'
+    local -A fromfile=() value=() default=([POOL]="" [SLOTS]=2 [GROWTH_MB]=4096 [COLD_MB]=10240
+        [MEM_FLOOR_MB]=12288 [IDLE_MIN]=60 [CARGO_ENV]=1)
+    local line key name var n=0
+    RAM_SKIP=""
+    if [ -r "$file" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            n=$((n + 1))
+            case "$line" in
+                ''|'#'*) continue ;;
+                CODESCOUT_GATE_RAM_*) ;;
+                *) continue ;;
+            esac
+            if [[ "$line" =~ $shape ]]; then
+                fromfile[${line%%=*}]="${line#*=}"
+            else
+                key="${line%%[[:space:]=]*}"
+                RAM_SKIP="$who: RAM tier skipped: $file line $n is not KEY=VALUE without spaces ($key)"
+                return 1
+            fi
+        done < "$file"
+    fi
+    for name in POOL SLOTS GROWTH_MB COLD_MB MEM_FLOOR_MB IDLE_MIN CARGO_ENV; do
+        var="CODESCOUT_GATE_RAM_$name"
+        value[$name]="${default[$name]}"
+        [ -z "${fromfile[$var]+set}" ] || value[$name]="${fromfile[$var]}"
+        [ -z "${!var:-}" ] || value[$name]="${!var}"
+    done
+    [ -n "${value[POOL]}" ] || return 1
+    case "${value[POOL]}" in
+        /*) ;;
+        *) RAM_SKIP="$who: RAM tier skipped: CODESCOUT_GATE_RAM_POOL must be an absolute path, got '${value[POOL]}'"
+           return 1 ;;
+    esac
+    for name in SLOTS GROWTH_MB COLD_MB MEM_FLOOR_MB IDLE_MIN CARGO_ENV; do
+        if ! [[ "${value[$name]}" =~ ^[0-9]{1,12}$ ]]; then
+            RAM_SKIP="$who: RAM tier skipped: CODESCOUT_GATE_RAM_$name must be a whole number (1 to 12 digits), got '${value[$name]}'"
+            return 1
+        fi
+    done
+    RAM_POOL="${value[POOL]}"
+    RAM_SLOTS=$((10#${value[SLOTS]})); RAM_GROWTH_MB=$((10#${value[GROWTH_MB]}))
+    RAM_COLD_MB=$((10#${value[COLD_MB]})); RAM_MEM_FLOOR_MB=$((10#${value[MEM_FLOOR_MB]}))
+    RAM_IDLE_MIN=$((10#${value[IDLE_MIN]})); RAM_CARGO_ENV=$((10#${value[CARGO_ENV]}))
+}
+
+# ram_mmstat_field <n> — print field <n> (1-based) of the first line of $RAM_MMSTAT.
+ram_mmstat_field() { awk -v n="$1" 'NR == 1 { print $n; exit }' "$RAM_MMSTAT" 2>/dev/null; }
+
+# ram_tier_check_mount <who> — $RAM_POOL must sit on a /dev/zram* device whose mm_stat field 4
+# (mem_limit, bytes) is above 0. A zram with no limit has no budget to check: the pool rule would
+# pass forever while the device grew into RAM. Sets RAM_DEV and RAM_MMSTAT. Returns 1 with RAM_SKIP.
+ram_tier_check_mount() {
+    local who="$1" src dev cap
+    src="$(findmnt -no SOURCE -T "$RAM_POOL" 2>/dev/null | head -n 1)"
+    dev="${src#/dev/}"; dev="${dev%%[!a-z0-9]*}"      # "/dev/zram1[/sub]" -> "zram1"
+    if [ "${src#/dev/}" = "$src" ] || ! [[ "$dev" =~ ^zram[0-9]+$ ]]; then
+        RAM_SKIP="$who: RAM tier skipped: $RAM_POOL is not a zram mount (mount source: ${src:-none}; CODESCOUT_GATE_RAM_POOL)"
+        return 1
+    fi
+    RAM_DEV="$dev"
+    RAM_MMSTAT="${CODESCOUT_GATE_RAM_MMSTAT:-/sys/block/$RAM_DEV/mm_stat}"
+    cap="$(ram_mmstat_field 4)"
+    if ! [[ "$cap" =~ ^[0-9]+$ ]]; then
+        RAM_SKIP="$who: RAM tier skipped: cannot read mm_stat of $RAM_DEV from $RAM_MMSTAT (CODESCOUT_GATE_RAM_POOL)"
+        return 1
+    fi
+    if [ "$cap" -le 0 ]; then
+        RAM_SKIP="$who: RAM tier skipped: $RAM_DEV has no RAM cap (mm_stat mem_limit is 0), so a budget cannot be checked; give the device a mem_limit (CODESCOUT_GATE_RAM_POOL)"
+        return 1
+    fi
+}
+
+# ram_mem_available_mb — print MemAvailable in whole MiB (rounded down); nothing when unreadable.
+ram_mem_available_mb() {
+    awk '/^MemAvailable:/ { print int($2 / 1024); exit }' "${CODESCOUT_GATE_RAM_MEMINFO:-/proc/meminfo}" 2>/dev/null
+}
+
+# ram_tier_check_floor <who> — MemAvailable must be at least RAM_MEM_FLOOR_MB, so the RAM tier
+# never starts a build on a machine that is already short of memory. Returns 1 with RAM_SKIP.
+ram_tier_check_floor() {
+    local who="$1" avail
+    avail="$(ram_mem_available_mb)"
+    if ! [[ "$avail" =~ ^[0-9]+$ ]]; then
+        RAM_SKIP="$who: RAM tier skipped: cannot read MemAvailable from ${CODESCOUT_GATE_RAM_MEMINFO:-/proc/meminfo}"
+        return 1
+    fi
+    if [ "$avail" -lt "$RAM_MEM_FLOOR_MB" ]; then
+        RAM_SKIP="$who: RAM tier skipped: MemAvailable ${avail}M is below the ${RAM_MEM_FLOOR_MB}M floor (CODESCOUT_GATE_RAM_MEM_FLOOR_MB)"
+        return 1
+    fi
+}
+
+# ram_tier_admit <who> — the mount, then the floor. Call it after ram_tier_load_config succeeded.
+ram_tier_admit() { ram_tier_check_mount "$1" && ram_tier_check_floor "$1"; }
+
 # slot_evict_foreign_build_scripts <who> <tree> <checkout> <cargo-home>
 # Call it holding a lease. Removes each compiled build script in <tree> whose recorded
 # CARGO_MANIFEST_DIR is neither inside <checkout> nor inside <cargo-home>, so cargo
@@ -270,6 +392,11 @@ slot_evict_foreign_members() {
 # and workspace crates compiled for another checkout, and export CARGO_TARGET_DIR. Sets GATE_POOL.
 lease_gate_target() {
     GATE_POOL="${CODESCOUT_GATE_POOL:-$HOME/.cache/codescout-gate}"
+    # The RAM tier is opt-in. Until it can lease (a later change), a configured tier that is
+    # refused says why on stderr and the disk lease below goes ahead; an unconfigured one says nothing.
+    RAM_SKIP=""
+    if [ -z "${2:-}" ] && ram_tier_load_config "$1"; then ram_tier_admit "$1"; fi
+    [ -z "$RAM_SKIP" ] || echo "$RAM_SKIP" >&2
     slot_lease "$GATE_POOL" slot- "$1" "${2:-}" || return 2
     # Three is the most concurrent gate runs observed on this machine.
     slot_tend "$1" "$GATE_POOL" slot- CODESCOUT_GATE_POOL_KEEP 3 "$SLOT_DIR" slot_remove_dir || return 2

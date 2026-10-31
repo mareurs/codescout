@@ -31,7 +31,14 @@
 # differs, a build script whose OUT_DIR differs, and the E0432 itself.
 #
 # The suite sets no CARGO_HOME of its own for the scripts it drives: `run_gate` and `run_with`
-# unset it, so an exported one cannot move the registry exemption the fixtures assume.
+# unset it, so an exported one cannot move the registry exemption the fixtures assume. They
+# likewise unset XDG_CONFIG_HOME and every CODESCOUT_GATE_RAM_* variable, so an operator's real
+# RAM-tier config cannot move cases A-R off the disk pool.
+#
+# Case S covers the admission half of the opt-in RAM tier (docs/superpowers/specs/2026-10-31-gate-ram-tier-design.md):
+# the config file is parsed, never sourced, and a pool is admitted only if it is a capped zram
+# mount on a machine with memory to spare. `findmnt` is a stub on PATH and the two kernel files
+# are fixtures, so nothing here reads this machine's real zram state.
 #
 # The real gate.sh is driven here, not a copy of its logic: `cargo` is a stub on PATH that
 # records the CARGO_TARGET_DIR each lane saw, `./scripts/fmt-mine.sh` is a stub in a fake
@@ -98,11 +105,21 @@ run_gate() {
         codex:*) session_env=(CODEX_SESSION_ID="${sid#codex:}") ;;
         "") session_env=(); mode=(--check) ;;
     esac
-    ( echo "$BASHPID" > "$WORK/gatepid-$tag"; cd "$WORK/repo" && exec env -u CARGO_TARGET_DIR -u CARGO_HOME \
+    scrub_ram_env
+    ( echo "$BASHPID" > "$WORK/gatepid-$tag"; cd "$WORK/repo" && exec env -u CARGO_TARGET_DIR -u CARGO_HOME "${SCRUB[@]}" \
         -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE \
         HOME="$WORK/home" PATH="$WORK/bin:$PATH" "${session_env[@]}" CODESCOUT_GATE_POOL="$POOL" \
         GATE_TEST_TAG="$tag" GATE_TEST_WORK="$WORK" "$@" bash "$GATE" "${mode[@]}" ) \
         > "$WORK/out-$tag" 2>&1
+}
+# `env` arguments that remove the operator's RAM-tier setup from a driven script: the config
+# file's directory (XDG_CONFIG_HOME) and every CODESCOUT_GATE_RAM_* variable of THIS shell, so a
+# real ~/.config/codescout/gate-pool.env or an exported knob cannot move cases A-R off the disk
+# pool. Computed per call: case S exports one on purpose. Fills the array `SCRUB`.
+scrub_ram_env() {
+    SCRUB=(-u XDG_CONFIG_HOME)
+    local v
+    while read -r v; do [ -n "$v" ] && SCRUB+=(-u "$v"); done < <(compgen -v CODESCOUT_GATE_RAM_)
 }
 first_seen() { head -1 "$WORK/seen-$1" 2>/dev/null; }
 wait_for()   { for _ in $(seq 1 100); do [ -e "$1" ] && return 0; sleep 0.1; done; return 1; }
@@ -244,7 +261,8 @@ echo "K. with-slot.sh runs one command inside a leased slot"
 WITH="$(dirname "$GATE")/with-slot.sh"
 run_with() { # run_with <tag> [VAR=value ...] bash "$WITH" <command...>
     local tag="$1"; shift
-    ( cd "${WITH_CWD:-$WORK/repo}" && exec env -u CARGO_TARGET_DIR -u CARGO_HOME HOME="$WORK/home" PATH="$WORK/bin:$PATH" \
+    scrub_ram_env
+    ( cd "${WITH_CWD:-$WORK/repo}" && exec env -u CARGO_TARGET_DIR -u CARGO_HOME "${SCRUB[@]}" HOME="$WORK/home" PATH="$WORK/bin:$PATH" \
         CODESCOUT_GATE_POOL="$POOL" "$@" ) > "$WORK/out-$tag" 2>&1
 }
 POOL="$WORK/pool-k"
@@ -400,7 +418,8 @@ eq "with no checkout nothing is evicted" "$(slot_script foreign-4444)$(slot_scri
 # The command's stdout is the command's: with-slot.sh sits in front of things like
 # `cargo metadata | jq`, so a lease may speak only on stderr.
 POOL="$WORK/pool-n3"; fixture_l "$POOL/slot-0"
-got="$( cd "$WORK/repo" && env -u CARGO_TARGET_DIR -u CARGO_HOME HOME="$WORK/home" PATH="$WORK/bin:$PATH" \
+scrub_ram_env
+got="$( cd "$WORK/repo" && env -u CARGO_TARGET_DIR -u CARGO_HOME "${SCRUB[@]}" HOME="$WORK/home" PATH="$WORK/bin:$PATH" \
     CODESCOUT_GATE_POOL="$POOL" bash "$WITH" echo hi 2>/dev/null )"
 eq "an eviction is reported on stderr only" "$got" "hi"
 eq "and the eviction did happen in that run" "$(slot_script foreign-4444)" "gone"
@@ -633,6 +652,127 @@ POOL="$WORK/pool-r4"; fixture_p "$POOL/slot-0"; echo "$REPO" > "$POOL/slot-0/.co
 direct "$POOL/slot-0" "" "$WORK/home/.cargo"
 eq "with no checkout nothing is evicted" "$(fp_p codescout-embed-aaaa111122223333)" "kept"
 eq "and the previous owner's stamp is removed" "$([ -e "$POOL/slot-0/.codescout-lessee" ] && echo stamped || echo none)" "none"
+
+echo "S. the opt-in RAM tier: a config is parsed, and a mount is admitted only if it is a capped zram"
+# Nothing here leases from RAM yet (case T does): admission is observed through what
+# `lease_gate_target` says on stderr and through the slot it still hands out. Every fixture
+# that expects admission sets CODESCOUT_GATE_RAM_MEMINFO far above the floor, because the real
+# /proc/meminfo of a CI runner or a busy machine may sit below 12G and turn the case into a flake.
+RAMCFG="$WORK/home/.config/codescout/gate-pool.env"
+mkdir -p "$WORK/ramstub" "$(dirname "$RAMCFG")"
+printf '#!/usr/bin/env bash\ncat "%s/findmnt-source"\n' "$WORK" > "$WORK/ramstub/findmnt"
+chmod +x "$WORK/ramstub/findmnt"
+printf '%s\n' "MemAvailable:   33554432 kB" > "$WORK/meminfo-high"      # 32 GiB
+printf '%s\n' "MemAvailable:    4194304 kB" > "$WORK/meminfo-low"       #  4 GiB
+printf '%s\n' "MemAvailable:   12582912 kB" > "$WORK/meminfo-edge"      # exactly 12288 MiB
+printf '%s\n' "1048576 524288 600000 8589934592 700000 0 0 0 0" > "$WORK/mmstat-capped"
+printf '%s\n' "0 0 0 0 0 0 0 0 0" > "$WORK/mmstat-uncapped"
+printf '%s\n' /dev/zram1 > "$WORK/findmnt-zram"
+ram_cfg()  { rm -f "$RAMCFG"; [ "$#" -eq 0 ] || printf '%s\n' "$@" > "$RAMCFG"; }
+ram_src()  { printf '%s\n' "$1" > "$WORK/findmnt-source"; }
+# s_run <tag> [VAR=value ...] — one lease through with-slot.sh, with the findmnt stub first on PATH.
+s_run() {
+    local tag="$1"; shift
+    rm -f "$WORK/tdir-$tag"
+    run_with "$tag" PATH="$WORK/ramstub:$WORK/bin:$PATH" "$@" bash "$WITH" \
+        sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-$tag"
+}
+s_target() { cat "$WORK/tdir-$1" 2>/dev/null; }
+POOL="$WORK/pool-s"
+S_OK=(CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-high" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-capped")
+
+ram_cfg; ram_src /dev/nvme0n1p2; rm -rf "$POOL"
+s_run s1
+eq "S1 no config: the disk slot is leased" "$(s_target s1)" "$POOL/slot-0"
+eq "S1 and the lease says nothing about a RAM tier" "$(grep -c 'RAM tier' "$WORK/out-s1")" "0"
+
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram"; ram_src /dev/nvme0n1p2; rm -rf "$POOL"
+s_run s2 "${S_OK[@]}"
+eq "S2 a pool that is not a zram mount: the disk slot is leased" "$(s_target s2)" "$POOL/slot-0"
+eq "S2 and the skip is reported" "$(grep -c 'RAM tier skipped' "$WORK/out-s2")" "1"
+eq "S2 with its cause" "$(grep -c 'not a zram mount' "$WORK/out-s2")" "1"
+eq "S2 and the knob that names the pool" "$(grep -c 'CODESCOUT_GATE_RAM_POOL' "$WORK/out-s2")" "1"
+
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram" "CODESCOUT_GATE_RAM_MEM_FLOOR_MB=12G"; ram_src /dev/zram1; rm -rf "$POOL"
+s_run s3 "${S_OK[@]}"; rc=$?
+eq "S3 a floor that is not a whole number: the disk slot is leased" "$(s_target s3)" "$POOL/slot-0"
+eq "S3 and the lease still exits 0" "$rc" "0"
+eq "S3 the message names the knob" "$(grep -c 'CODESCOUT_GATE_RAM_MEM_FLOOR_MB' "$WORK/out-s3")" "1"
+eq "S3 and the value" "$(grep -c '12G' "$WORK/out-s3")" "1"
+
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram"; ram_src /dev/zram1; rm -rf "$POOL"
+s_run s4 CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-low" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-capped"
+eq "S4 MemAvailable under the floor: the disk slot is leased" "$(s_target s4)" "$POOL/slot-0"
+eq "S4 the message names MemAvailable" "$(grep -c 'MemAvailable 4096M is below the 12288M floor' "$WORK/out-s4")" "1"
+eq "S4 and the knob" "$(grep -c 'CODESCOUT_GATE_RAM_MEM_FLOOR_MB' "$WORK/out-s4")" "1"
+
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram"; ram_src /dev/zram1; rm -rf "$POOL"
+s_run s5 CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-high" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-uncapped"
+eq "S5 a zram with no RAM cap: the disk slot is leased" "$(s_target s5)" "$POOL/slot-0"
+eq "S5 the message says there is no cap" "$(grep -c 'no RAM cap' "$WORK/out-s5")" "1"
+
+# The file is parsed, never sourced: a value that is a command must not run.
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram" "CODESCOUT_GATE_RAM_SLOTS=\$(touch $WORK/pwned)"; ram_src /dev/zram1
+rm -rf "$POOL" "$WORK/pwned"
+s_run s6 "${S_OK[@]}"
+eq "S6 a command in the file does not run" "$([ -e "$WORK/pwned" ] && echo ran || echo not-run)" "not-run"
+eq "S6 the disk slot is leased" "$(s_target s6)" "$POOL/slot-0"
+eq "S6 the message names the key" "$(grep -c 'CODESCOUT_GATE_RAM_SLOTS' "$WORK/out-s6")" "1"
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram" "CODESCOUT_GATE_RAM_SLOTS=\$(touch"$'\t'"$WORK/pwned2)"; rm -rf "$POOL" "$WORK/pwned2"
+s_run s6b "${S_OK[@]}"
+eq "S6 nor does one split across whitespace" "$([ -e "$WORK/pwned2" ] && echo ran || echo not-run)" "not-run"
+ram_cfg "CODESCOUT_GATE_RAM_POOL=\$(touch $WORK/pwned3)"; rm -rf "$POOL" "$WORK/pwned3"
+s_run s6c "${S_OK[@]}"
+eq "S6 nor one in the pool path" "$([ -e "$WORK/pwned3" ] && echo ran || echo not-run)" "not-run"
+
+# Only CODESCOUT_GATE_RAM_* keys are read from the file.
+ram_cfg "CODESCOUT_GATE_POOL=$WORK/elsewhere" "CODESCOUT_GATE_RAM_POOL_NOTE_IS_IGNORED_BUT_WELL_FORMED=1"; rm -rf "$POOL"
+s_run s7 "${S_OK[@]}"
+eq "S7 a non-RAM key in the file does not move the pool" "$(s_target s7)" "$POOL/slot-0"
+eq "S7 and nothing is said about a RAM tier" "$(grep -c 'RAM tier' "$WORK/out-s7")" "0"
+eq "S7 nor is anything leased under the key's path" "$([ -e "$WORK/elsewhere" ] && echo created || echo absent)" "absent"
+
+# The operator's own exported knob must not reach a driven script (the hermetic harness).
+ram_cfg; rm -rf "$POOL"
+export CODESCOUT_GATE_RAM_POOL="$WORK/ram-leak"
+run_gate s8 sid-s8
+unset CODESCOUT_GATE_RAM_POOL
+eq "S8 an exported CODESCOUT_GATE_RAM_POOL does not reach run_gate: the disk slot is leased" "$(first_seen s8)" "$POOL/slot-0"
+eq "S8 and the run says nothing about a RAM tier" "$(grep -c 'RAM tier' "$WORK/out-s8")" "0"
+
+# Admitted: no message, and (until case T) still the disk slot.
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram"; ram_src /dev/zram1; rm -rf "$POOL"
+s_run s9 "${S_OK[@]}"
+eq "S9 a capped zram with memory to spare is admitted without a word" "$(grep -c 'RAM tier' "$WORK/out-s9")" "0"
+eq "S9 and the disk slot is still leased" "$(s_target s9)" "$POOL/slot-0"
+rm -rf "$POOL"
+s_run s9b CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-edge" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-capped"
+eq "S9 MemAvailable exactly at the floor is admitted" "$(grep -c 'RAM tier' "$WORK/out-s9b")" "0"
+printf '%s\n' "MemAvailable:   12582911 kB" > "$WORK/meminfo-edge-1"
+rm -rf "$POOL"
+s_run s9c CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-edge-1" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-capped"
+eq "S9 and one kB under it is not (the floor is in whole MiB, rounded down)" "$(grep -c 'is below the 12288M floor' "$WORK/out-s9c")" "1"
+
+# An environment value overrides the file; the file alone may carry the whole config.
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram" "CODESCOUT_GATE_RAM_MEM_FLOOR_MB=99999999"; rm -rf "$POOL"
+s_run s10 "${S_OK[@]}" CODESCOUT_GATE_RAM_MEM_FLOOR_MB=1
+eq "S10 an environment floor overrides the file's" "$(grep -c 'RAM tier' "$WORK/out-s10")" "0"
+rm -rf "$POOL"
+s_run s10b "${S_OK[@]}"
+eq "S10 while the file's floor holds when the environment is silent" "$(grep -c 'is below the 99999999M floor' "$WORK/out-s10b")" "1"
+ram_cfg; ram_src /dev/nvme0n1p2; rm -rf "$POOL"
+s_run s10c "${S_OK[@]}" CODESCOUT_GATE_RAM_POOL="$WORK/ram"
+eq "S10 an environment pool needs no file" "$(grep -c 'not a zram mount' "$WORK/out-s10c")" "1"
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram"; ram_src /dev/zram1; rm -rf "$POOL"
+s_run s10d "${S_OK[@]}" CODESCOUT_GATE_RAM_COLD_MB=lots
+eq "S10 a bad value in the environment is named too" "$(grep -c 'CODESCOUT_GATE_RAM_COLD_MB' "$WORK/out-s10d")" "1"
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram" "# a comment" "" "CODESCOUT_GATE_RAM_SLOTS=1"; rm -rf "$POOL"
+s_run s10e "${S_OK[@]}"
+eq "S10 comments and blank lines are skipped" "$(grep -c 'RAM tier' "$WORK/out-s10e")" "0"
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram" "CODESCOUT_GATE_RAM_SLOTS"; rm -rf "$POOL"
+s_run s10f "${S_OK[@]}"
+eq "S10 a RAM key with no value is invalid and named" "$(grep -c 'CODESCOUT_GATE_RAM_SLOTS' "$WORK/out-s10f")" "1"
+ram_cfg
 
 echo
 echo "  $PASS passed, $FAIL failed"
