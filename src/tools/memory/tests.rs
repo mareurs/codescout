@@ -2975,6 +2975,123 @@ async fn remember_with_a_project_id_files_under_the_named_project() {
 
     assert_eq!(points_under(&store, "mcp-server").await, 1);
 }
+#[tokio::test]
+async fn forget_with_a_project_id_removes_the_named_projects_point() {
+    use crate::memory::semantic_store::{MemoryFilter, SemanticMemoryStore};
+
+    let (_dir, ctx, store) = multi_project_ctx_with_store().await;
+    Memory
+        .call(
+            json!({
+                "action": "remember",
+                "content": "The member builds with tsc",
+                "project_id": "mcp-server"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let hits = store
+        .list("mcp-server", MemoryFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        hits.len(),
+        1,
+        "precondition: remember filed a point under the named project"
+    );
+    let id = hits[0].id.to_string();
+
+    Memory
+        .call(
+            json!({ "action": "forget", "id": id, "project_id": "mcp-server" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        points_under(&store, "mcp-server").await,
+        0,
+        "forget must remove the point from the project the call names, not the focused one"
+    );
+}
+/// A memory filed for a member that was dormant at the time carries the member's id as its
+/// key. Once the member is activated and focused, a call without `project_id` reads under its
+/// `config.project.name`; the two must be the same string or the memory is stranded.
+#[tokio::test]
+async fn a_memory_filed_for_a_dormant_member_is_found_once_the_member_is_focused() {
+    let (_dir, ctx, _store) = multi_project_ctx_with_store().await;
+    Memory
+        .call(
+            json!({
+                "action": "remember",
+                "content": "The member builds with tsc",
+                "project_id": "mcp-server"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    ctx.agent
+        .activate_within_workspace("mcp-server", None)
+        .await
+        .unwrap();
+    ctx.agent.switch_focus("mcp-server").await.unwrap();
+    let out = Memory
+        .call(json!({ "action": "recall", "query": "tsc" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        out["count"], 1,
+        "the focused member must read the key the dormant filing used: {out}"
+    );
+}
+
+/// `project_id` may name the root project by its workspace id while a member is focused. That
+/// must file under the key the root uses when it is focused itself.
+#[tokio::test]
+async fn a_project_id_naming_the_root_files_under_the_roots_own_key() {
+    let (_dir, ctx, _store) = multi_project_ctx_with_store().await;
+    let root_id = ctx
+        .agent
+        .workspace_summary()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|p| p.root == ".")
+        .expect("the workspace lists its root project")
+        .id;
+    ctx.agent
+        .activate_within_workspace("mcp-server", None)
+        .await
+        .unwrap();
+    ctx.agent.switch_focus("mcp-server").await.unwrap();
+
+    Memory
+        .call(
+            json!({
+                "action": "remember",
+                "content": "The root builds with gradle",
+                "project_id": root_id
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    ctx.agent.switch_focus(&root_id).await.unwrap();
+    let out = Memory
+        .call(json!({ "action": "recall", "query": "gradle" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        out["count"], 1,
+        "the root, once focused, must read the key a project_id naming it filed under: {out}"
+    );
+}
 
 #[tokio::test]
 async fn recall_with_a_project_id_reads_the_named_projects_points() {

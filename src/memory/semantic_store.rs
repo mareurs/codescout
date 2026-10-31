@@ -252,8 +252,18 @@ pub(crate) mod test_support {
                 .collect())
         }
 
-        async fn delete(&self, _project_id: &str, id: Uuid) -> Result<()> {
-            self.inner.lock().unwrap().remove(&id);
+        async fn delete(&self, project_id: &str, id: Uuid) -> Result<()> {
+            // Scoped like the sqlite-vec store, which opens `project_id`'s own database and
+            // deletes there; a key that names the wrong project removes nothing. The Qdrant
+            // store deletes by id alone (its UUIDv5 is already project-scoped), so this is the
+            // stricter of the two backends, which is what lets a test see a wrong key.
+            let mut guard = self.inner.lock().unwrap();
+            if guard
+                .get(&id)
+                .is_some_and(|(m, _)| m.project_id == project_id)
+            {
+                guard.remove(&id);
+            }
             Ok(())
         }
 

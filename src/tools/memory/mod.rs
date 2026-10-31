@@ -1452,12 +1452,7 @@ impl Tool for Memory {
                     )
                 })?;
 
-                let project_id = ctx
-                    .agent
-                    .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                        Ok(p.config.project.name.clone())
-                    })
-                    .await?;
+                let project_id = semantic_project_key(&input, ctx).await?;
 
                 let store = ctx
                     .agent
