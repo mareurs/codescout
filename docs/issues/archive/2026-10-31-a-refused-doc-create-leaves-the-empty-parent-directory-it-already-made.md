@@ -1,10 +1,11 @@
 ---
-id: '4b53fc372ed9a3a2'
+id: 2570eea4939d4af4
 kind: bug
-status: open
+status: fixed
 title: a refused doc(create) leaves the empty parent directory it already made
 tags:
 - cluster/unclassified
+closed: 2026-10-31
 opened: 2026-10-31
 owner: marius
 severity: low
@@ -46,11 +47,19 @@ None beyond the code read.
 
 ## Fix
 
-Not started. Two candidates: run the content validators before `create_dir_all`, or remove the directories this call created when it refuses. The first must keep the symlink guard ahead of `create_dir_all`.
+Fixed in `343d77d9b`. `create_dir_all(parent)` in `src/librarian/tools/create.rs` `call` now runs just before `fs::write`, after every validator and after the catalog upsert. The symlink guards (`refuse_write_through_symlink`, `refuse_catalogued_path_outside_repo`) still run before everything, because they judge the path and not the directory. A comment at the new site names this record.
 
 ## Tests added
 
-None yet.
+`a_refused_create_does_not_leave_the_parent_directory_it_would_have_made` in `src/librarian/tools/create.rs`. Three cases, each writing under a directory that does not exist yet: a bad `opened` on a bug, a body that opens its own frontmatter, and an out-of-vocabulary bug status. Each must be refused and must leave no top directory.
+
+Red before the fix (`bad_opened: a refused create left its new parent directory on disk`). Mutation: putting the early `create_dir_all` back turned it red again, on the first case. The loop stops at the first failure, so the other two cases were not shown red by the mutant. The requirements-file refusal (`enforce_on_create`) and the taken-prefix refusal are not in the test.
+
+
+## Fix provenance
+
+- **SHA:** `343d77d9b` (`experiments`)
+- **patch-id:** `6c283949e15e3cb3ff045e48219dd414d5bcfa49`
 
 ## Workarounds
 
@@ -58,7 +67,7 @@ None yet.
 
 ## Resume
 
-Write a test that creates a bug with a bad `opened` under a new subdirectory, expects the refusal, and asserts the subdirectory does not exist. The existing test `a_bug_that_breaks_the_project_requirements_is_refused_before_anything_is_written` only checks that the file is absent.
+Fixed. Full gate: `CLIPPY=0 LEAN=0 DEFAULT=0`, `PYTHON_LIGHT=0`; `FMT=1` was `ownership-refused` (peer-owned dirty files), so I ran `rustfmt --edition 2021` on `create.rs` alone (one stray blank line) and the commit hook's `rustfmt --check` passed. Heavy Python suites not run. Not seen live on a rebuilt server: a refused `doc(create)` under a new subdirectory should leave no directory.
 
 ## References
 

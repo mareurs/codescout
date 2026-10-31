@@ -530,7 +530,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // The parent directory is built here and not earlier: every validator above can still refuse,
     // and a refusal that had already made the directory left it behind, empty. The symlink guards
     // stay ahead of everything because they judge the path, not the directory.
-    // docs/issues/2026-10-31-a-refused-doc-create-leaves-the-empty-parent-directory-it-already-made.md
+    // docs/issues/archive/2026-10-31-a-refused-doc-create-leaves-the-empty-parent-directory-it-already-made.md
     if let Some(parent) = full.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -743,7 +743,7 @@ mod tests {
     /// leave the tree as it found it. Each case names a different validator and a directory
     /// that does not exist yet.
     ///
-    /// See `docs/issues/2026-10-31-a-refused-doc-create-leaves-the-empty-parent-directory-it-already-made.md`.
+    /// See `docs/issues/archive/2026-10-31-a-refused-doc-create-leaves-the-empty-parent-directory-it-already-made.md`.
     #[tokio::test]
     async fn a_refused_create_does_not_leave_the_parent_directory_it_would_have_made() {
         let cases = [
