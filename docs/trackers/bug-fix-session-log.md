@@ -17587,6 +17587,24 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 
 **Valid:** dated 2026-10-15
 
+## F-200 — A declared nested-repo member would keep its memory in the parent checkout, not in its own .codescout/
+
+**Valid:** dated 2026-10-28
+
+**Severity:** med
+**Category:** plan-vs-reality
+**Status:** open
+
+**Observed:** Scouting before the `[[project]]` loading work from `docs/issues/2026-10-28-a-nested-git-repo-cannot-join-a-workspace-as-a-project-and-pinned-onboarding-mixes-in-the-home-workspace.md`. The plan said a declared member "keeps its own state". `Workspace::memory_dir_for_project` (`src/workspace.rs`, read this session) sends every non-root project to `<workspace root>/.codescout/projects/<id>/memories`. The path is built from the PARENT workspace root, never from the member's own root.
+
+**Consequence if unhandled:** A nested git repo declared as a member would have its memories written inside the parent checkout. That contradicts the issue's requirement that onboarding writes only the member's own state. It also puts files in the parent repo, which the issue wants to avoid.
+
+**Also observed:** `symbols(path="src/workspace.rs")` returned 0 symbols with a mux-lock warning ("another mux instance holds the lock") while 5 other sessions shared this checkout. The warning says the zero is not evidence of absence. I read the file with `read_file(force=true)` instead.
+
+**Not verified:** whether the Kodi checkout's `.codescout/` is gitignored, so whether the parent-side memory files would show in its `git status`. Consumers of `relative_root` and `manifest` were checked: `manifest: None` is already handled (`src/prompts/builders.rs:356`, `src/prompts/mod.rs:1151`, `src/tools/onboarding.rs:1029`), so a manifest-less member is safe there.
+
+**Decision needed:** where a member's memory lives. Options: keep the parent location, or add a per-project memory-root rule for a member that has its own `.git`.
+
 ## F-201 — The background-wake spec arms on an input flag that `@ack_*` replays never carry
 
 **Valid:** dated 2026-10-29
