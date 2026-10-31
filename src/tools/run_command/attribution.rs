@@ -204,6 +204,12 @@ pub(crate) struct AttributionEnv {
     pub enabled: bool,
     /// Ceiling on the scan — see [`ATTRIBUTION_TIMEOUT_DEFAULT`].
     pub timeout: Duration,
+    /// Variables set on the engine child on top of what it inherits. Empty on the shipped
+    /// path. A test uses it to point the engine at a history of its own, because the real
+    /// scan reads every transcript under the machine's `$HOME` and took 16 to 25 s here
+    /// (2026-10-31) against the 30 s ceiling: a test that waits for that answer measures the
+    /// corpus and the machine's load, not the engine. Set per call, never on the process.
+    pub engine_env: Vec<(String, String)>,
 }
 
 impl Default for AttributionEnv {
@@ -211,6 +217,7 @@ impl Default for AttributionEnv {
         Self {
             enabled: true,
             timeout: ATTRIBUTION_TIMEOUT_DEFAULT,
+            engine_env: Vec::new(),
         }
     }
 }
@@ -226,6 +233,7 @@ impl AttributionEnv {
                 .and_then(|v| v.parse().ok())
                 .map(Duration::from_millis)
                 .unwrap_or(ATTRIBUTION_TIMEOUT_DEFAULT),
+            engine_env: Vec::new(),
         }
     }
 }
@@ -552,6 +560,7 @@ pub(crate) async fn wip_author_diagnostic_in(
 
     let mut cmd = tokio::process::Command::from(engine_std_command(&script));
     cmd.current_dir(work_dir)
+        .envs(env.engine_env.iter().map(|(k, v)| (k, v)))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -596,6 +605,34 @@ mod tests {
             .arg("--version")
             .output()
             .is_ok_and(|o| o.status.success())
+    }
+
+    /// An env whose engine scans an empty transcript history.
+    ///
+    /// The shipped engine reads every transcript under `$HOME/.claude*` and
+    /// `$HOME/.codex*`. On a busy machine that scan takes 16-25 s against a 30 s
+    /// ceiling, so a test that needs the engine's answer, not its history,
+    /// loses to load. Pointing both roots at an empty directory keeps the same
+    /// engine and the same output in about 0.1 s.
+    /// See `docs/issues/2026-10-31-eight-lib-tests-fail-under-16-to-1-cpu-oversubscription-through-wall-clock-windows.md`.
+    ///
+    /// Keep the returned `TempDir` alive for as long as the env is in use.
+    fn no_history() -> (tempfile::TempDir, AttributionEnv) {
+        let history = tempfile::tempdir().expect("empty history dir");
+        let env = AttributionEnv {
+            engine_env: vec![
+                (
+                    "FILE_PROVENANCE_ROOTS".to_string(),
+                    history.path().display().to_string(),
+                ),
+                (
+                    "FILE_PROVENANCE_CODEX_ROOTS_JSON".to_string(),
+                    "[]".to_string(),
+                ),
+            ],
+            ..AttributionEnv::default()
+        };
+        (history, env)
     }
 
     /// `Some(name)` for each local sibling module that `body` imports and that exists
@@ -817,7 +854,7 @@ mod tests {
         };
         let base = tempfile::tempdir().expect("tmp");
         let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
-        let env = AttributionEnv::default();
+        let (_history, env) = no_history();
         let first = wip_author_diagnostic_in(base.path(), 101, red, repo.path(), &env).await;
         assert!(
             first.as_deref().is_some_and(|t| t.contains("src/held.rs")),
@@ -1200,7 +1237,7 @@ mod tests {
                 return;
             };
             let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
-            let env = AttributionEnv::default();
+            let (_history, env) = no_history();
             for variant in ["symlink", "world-writable"] {
                 let base = tempfile::tempdir().expect("tmp");
                 let first =
@@ -1551,7 +1588,8 @@ mod tests {
             return;
         };
         let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
-        let Some(got) = wip_author_diagnostic(101, red, dir.path()).await else {
+        let (_history, env) = no_history();
+        let Some(got) = wip_author_diagnostic_with(101, red, dir.path(), &env).await else {
             // Absent python3 is the only legitimate silence here (ceiling 3). With python3
             // present, no diagnostic means the engine is broken — the case 2026-10-13 hid for
             // two days behind a skip that only asked "python3 absent?".
@@ -1602,7 +1640,11 @@ mod tests {
         // Establish the engine can answer AT ALL here, at the exit code that always
         // worked. Without it an absent python3 yields the same `None` as a deleted gate,
         // and this test would pass while proving nothing.
-        if wip_author_diagnostic(101, red, dir.path()).await.is_none() {
+        let (_history, env) = no_history();
+        if wip_author_diagnostic_with(101, red, dir.path(), &env)
+            .await
+            .is_none()
+        {
             assert!(
                 !python3_present(),
                 "python3 is present but the engine produced no hint at exit 101, so this test \
@@ -1611,7 +1653,7 @@ mod tests {
             eprintln!("skipping: python3 absent");
             return;
         }
-        let got = wip_author_diagnostic(0, red, dir.path())
+        let got = wip_author_diagnostic_with(0, red, dir.path(), &env)
             .await
             .expect("the engine answers here at 101, so exit 0 with the same red must too");
         assert!(
