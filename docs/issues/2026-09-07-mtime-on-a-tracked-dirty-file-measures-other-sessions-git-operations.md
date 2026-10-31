@@ -208,6 +208,8 @@ stays open as a pointer rather than a task.
 
 **Count run 2026-10-29** (`grep -l '^last_observed:' docs/issues/*.md`, then filtered on `^status: open`; 27 files in `docs/issues/*.md` carry `status: open`): **6 files declare `last_observed:`, and 0 of them are `status: open`.** Their statuses are 5 zombie and 1 mitigated. The field is a zombie-record convention, not something open bugs carry. A doctor check over `last_observed:` on open bugs would have an empty population and could not fire today. Recommendation: do not build it; keep the finding as a triage rule and leave this file open as a pointer. Re-count if open bugs start declaring the field. (Counted over `docs/issues/*.md` only, not `docs/issues/archive/`.)
 
+**Re-verified 2026-10-31 (group G worktree pass, `experiments` @ `0f8705532`); status unchanged.** Buffer fix `4487a34c2` is an ancestor of HEAD. `grep -l '^last_observed:' docs/issues/*.md` still returns 6 files, matching the 2026-10-29 count, so the doctor check would have no population to fire on. No code change. Stays open as a triage-rule pointer; closing it as a property of git is the owner's call.
+
 ## References
 
 - `docs/trackers/issue-clusters/IC-17-shared-resource-carries-no-owner.md` — the class; its remedy

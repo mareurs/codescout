@@ -427,6 +427,8 @@ bare commit and from `commit-mine` alike. Fix item 2 is done (2026-10-26), inclu
 - A detector. `post-index-change` fires on the peer's unstage too, so the recorder is positioned to notice a
   session removing a pair that another session staged. Nothing is designed yet.
 
+**Re-read 2026-10-31 (group G worktree pass, `experiments` @ `0f8705532`); status unchanged.** The losing-half detector is still undesigned, and nothing in this pass touches the recorder. Its position (post-index-change sees a peer's unstage) is unchanged. Needs an owner decision before any change: a wrong guard here can drop or capture a peer's staged work. Related text change this pass: the unattributed-row refusal now names the scratch-work-tree recipe (`53ed87262cfbdcbf`, `1b53f5f1d`).
+
 ## References
 
 - `62d7fa4b` — the commit that closed the red window with the single-invocation form.

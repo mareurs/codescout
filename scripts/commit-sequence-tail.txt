@@ -25,6 +25,10 @@ on this checkout — the sequence, not the rules, is what nobody had written dow
        whole ledger entry, the check having run and changed nothing.
        Staging is what satisfies the unreviewed-content check; the pathspec is
        not. And -m goes BEFORE --, or git reads it as a pathspec.
+       A hunk of a file a peer also edits: `git update-index --cacheinfo` and
+       `git add -p` stage it UNATTRIBUTED (stamped `-`), and re-adding the same
+       content does not fix that. See the page below, § A hunk the recorder can
+       attribute: a real `git add` from a scratch work tree.
   5. Verify the INDEX, not the exit code. `git add` can fail on a contended
        lock, and a retry loop that exhausts looks identical to one that worked.
        The index is shared in the other direction too: never `git restore

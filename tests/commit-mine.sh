@@ -314,6 +314,27 @@ eq "F12 the closing line is the unchanged ordinary one" \
     "$(printf '%s\n' "$out" | tail -n 1)" \
     "commit-mine: committed 1 path(s) of yours; left 0 staged for their owners."
 
+# ------------------------------------------------------------ F13: the FIRST refusal names the recipe
+# 53ed87262cfbdcbf: a hunk staged with `git update-index --cacheinfo` is stamped `-`, and the
+# bare-commit refusal (the first one a session meets) said only "(unrecorded)" and pointed at
+# commit-mine, which refuses in turn. The route to the page that holds the working recipe cost
+# two refusals and a wrong repair (a re-add of identical content, which the page says does not
+# claim the row). The refusal a session meets FIRST must name the section, and must not offer
+# the re-add as the repair for this cause.
+cd "$(new_repo)" || exit 1
+printf 'snapshot\n' > "$WORK/snap13"
+blob=$(git hash-object -w "$WORK/snap13")
+as "$A" git update-index --cacheinfo "100644,$blob,old.txt"
+awk -F'\t' '$1 == "-" && $3 == "old.txt" { f = 1 } END { exit !f }' .git/session-stage-log \
+    && ok || no "F13 fixture: old.txt must be recorded as \`-\`"
+h0=$(head_of)
+out=$(as "$A" git commit -qm f13 2>&1); rc=$?
+[ "$rc" -ne 0 ] && ok || no "F13 the bare commit is refused"
+eq "F13 refusal leaves HEAD alone" "$(head_of)" "$h0"
+has "F13 the first refusal names update-index / add -p as an unattributed route" "$out" "update-index"
+has "F13 the first refusal names the page's section" "$out" "A hunk the recorder can attribute"
+has "F13 the first refusal says the scratch-work-tree add is the repair" "$out" "scratch work tree"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]
