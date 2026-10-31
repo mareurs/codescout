@@ -13,13 +13,15 @@ tags:
 
 # Gate RAM tier — how to set it up on one machine
 
-The RAM tier is an opt-in pool of build trees on a zram filesystem. `scripts/gate.sh` tries it before the disk pool. Design and measurements: [`docs/superpowers/specs/2026-10-31-gate-ram-tier-design.md`](../superpowers/specs/2026-10-31-gate-ram-tier-design.md). Code: `scripts/slot-pool.sh` and `scripts/gate-ram-evict.sh`.
+The RAM tier is an opt-in pool of build trees on a zram filesystem. `scripts/gate.sh` and `scripts/with-slot.sh` try it before the disk pool. Design and measurements: [`docs/superpowers/specs/2026-10-31-gate-ram-tier-design.md`](../superpowers/specs/2026-10-31-gate-ram-tier-design.md). Code: `scripts/slot-pool.sh` and `scripts/gate-ram-evict.sh`.
 
-**None of it is installed by the repo.** The repo holds the scripts and this document. The zram drop-in, the pool unit, the config file and the timer exist only on a machine where an operator creates them. A machine without `gate-pool.env` behaves as it did before the tier existed, and prints nothing about it.
+**None of it is installed by the repo.** The repo holds the scripts and this document. The zram drop-in, the pool unit, the config file and the timer exist only on a machine where an operator creates them. The operator runs every root step by hand. No repo script runs `sudo`, writes to `/etc`, or touches the zram device.
 
-The examples below use the user name `<user>` and the checkout path `<checkout>`. Replace them.
+A machine behaves as it did before the tier existed, and prints nothing about it, when two conditions hold. No `gate-pool.env` file exists, and `CODESCOUT_GATE_RAM_POOL` is not set in the environment. A malformed `CODESCOUT_GATE_RAM_` line in an existing file is reported even when no pool is named.
 
-## 1. The zram device (root)
+The examples below use `<user>`, `<group>` and `<checkout>`. Replace them.
+
+## 1. The zram device (as root)
 
 Create `/etc/systemd/zram-generator.conf.d/codescout-gate.conf`:
 
@@ -45,15 +47,16 @@ The gate needs these settings:
 
 The contents of the device are lost at every unmount and reboot. The next lease builds cold.
 
-## 2. The pool directory (root)
+## 2. The pool directory (as root)
 
-The root directory of the new filesystem belongs to root. A oneshot unit must make the pool directory for the operator after each mount. It must also set the ext4 root reserve to 0. By default ext4 reserves 5% for root, and `df` hides that reserve from the operator.
+The root directory of the new filesystem belongs to root. A oneshot unit must make the pool directory for your user after each mount. It must also set the ext4 root reserve to 0. By default ext4 reserves 5% for root, and `df` hides that reserve from your user.
 
 Create `/etc/systemd/system/codescout-gate-ram-pool.service`:
 
 ```ini
 [Unit]
 Description=Pool directory for the codescout gate RAM tier
+RequiresMountsFor=/var/cache/codescout-gate-ram
 Requires=var-cache-codescout\x2dgate\x2dram.mount
 After=var-cache-codescout\x2dgate\x2dram.mount
 
@@ -61,15 +64,29 @@ After=var-cache-codescout\x2dgate\x2dram.mount
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/bin/tune2fs -m 0 /dev/zram1
-ExecStart=/usr/bin/install -d -o <user> -g <user> /var/cache/codescout-gate-ram/pool
+ExecStart=/usr/bin/install -d -o <user> -g <group> /var/cache/codescout-gate-ram/pool
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=multi-user.target var-cache-codescout\x2dgate\x2dram.mount
 ```
 
-`var-cache-codescout\x2dgate\x2dram.mount` is the output of `systemd-escape -p --suffix=mount /var/cache/codescout-gate-ram`. Then run `systemctl daemon-reload` and `systemctl enable codescout-gate-ram-pool.service`.
+`var-cache-codescout\x2dgate\x2dram.mount` is the output of `systemd-escape -p --suffix=mount /var/cache/codescout-gate-ram`.
 
-## 3. The config file (operator)
+Two `WantedBy=` targets give two triggers. `multi-user.target` starts the unit at boot. The mount unit starts it each time the mount returns. `Requires=` stops this unit when the mount stops. Without the second trigger, nothing would start the unit again after a remount.
+
+This behaviour is reasoned from systemd semantics. It is not measured. Go-live check 5 tests it.
+
+Then run these commands as root:
+
+```
+systemctl daemon-reload
+systemctl enable codescout-gate-ram-pool.service
+systemctl start codescout-gate-ram-pool.service
+```
+
+The `start` makes the pool directory now. Without it, the directory exists only after the next boot or the next mount.
+
+## 3. The config file (as your user)
 
 Create `${XDG_CONFIG_HOME:-$HOME/.config}/codescout/gate-pool.env`. The values below are the defaults. Only `CODESCOUT_GATE_RAM_POOL` has no default.
 
@@ -83,12 +100,14 @@ CODESCOUT_GATE_RAM_IDLE_MIN=60
 CODESCOUT_GATE_RAM_CARGO_ENV=1
 ```
 
+Every `_MB` value is in MiB.
+
 | Key | Meaning |
 |---|---|
-| `CODESCOUT_GATE_RAM_POOL` | Absolute path of the RAM pool. Unset means no RAM tier. |
+| `CODESCOUT_GATE_RAM_POOL` | Absolute path of the RAM pool. Unset or empty means no RAM tier. |
 | `CODESCOUT_GATE_RAM_SLOTS` | Number of RAM slots. `0` means no RAM slots: every lease uses the disk pool, and the lease prints no RAM-tier message. |
-| `CODESCOUT_GATE_RAM_GROWTH_MB` | Growth that the budget assumes for a run in a warm slot. |
-| `CODESCOUT_GATE_RAM_COLD_MB` | Logical size of a cold slot. The budget assumes a small slot still needs `COLD` minus its size. |
+| `CODESCOUT_GATE_RAM_GROWTH_MB` | Growth that the pool rule assumes for a run in a warm slot. |
+| `CODESCOUT_GATE_RAM_COLD_MB` | Logical size of a cold slot. The pool rule assumes a small slot still needs `COLD` minus its size. |
 | `CODESCOUT_GATE_RAM_MEM_FLOOR_MB` | `MemAvailable` below this value skips the RAM tier at lease time. The evictor uses the same value as its pressure limit. |
 | `CODESCOUT_GATE_RAM_IDLE_MIN` | Idle minutes after which the evictor empties a slot. |
 | `CODESCOUT_GATE_RAM_CARGO_ENV` | `1` exports `CARGO_PROFILE_DEV_DEBUG=line-tables-only` and `CARGO_INCREMENTAL=0` in a RAM lease. A variable that the caller already set is left alone. `0` turns this off. Any other whole number also counts as off, and the tier does not warn about it. |
@@ -102,14 +121,29 @@ CODESCOUT_GATE_RAM_CARGO_ENV=1
 - The parser ignores blank lines and lines that start with `#`.
 - The parser ignores every line that does not start with `CODESCOUT_GATE_RAM_`. This includes a line with `export` or with indentation. It ignores them silently, so such a key has no effect.
 - A line that starts with `CODESCOUT_GATE_RAM_` must match `^CODESCOUT_GATE_RAM_[A-Z_]+=[^[:space:]]*$`. Otherwise the whole RAM tier is skipped, with a message that names the file and the line.
-- A misspelled key that matches that shape (uppercase letters and underscores only) is also ignored silently. For example, `CODESCOUT_GATE_RAM_SLOT=3` does nothing.
+- A trailing space or a CRLF line ending breaks that match. The RAM tier is then skipped, with a message.
+- A misspelled key that matches that shape (uppercase letters and underscores only) is ignored silently. For example, `CODESCOUT_GATE_RAM_SLOT=3` does nothing.
 - A quote is part of the value. A quoted number is not a whole number, and a quoted path is not absolute. Both skip the RAM tier, with a message.
-- A number must be a whole number of 1 to 12 digits. A value such as `48G` skips the RAM tier, with a message that names the key and the value. The gate then uses the disk pool.
+- `CODESCOUT_GATE_RAM_POOL=` with an empty value counts as "not configured". The tier stays off, and nothing is printed.
+- A number must be a whole number of 1 to 12 digits. A value such as `48G`, or an empty number, skips the RAM tier, with a message that names the key and the value. The gate then uses the disk pool.
 - A non-empty environment variable of the same name overrides the value in the file.
 
-Every skip writes one line to stderr in the form `<who>: RAM tier skipped: <cause> (<knob>)`.
+Each skip writes one line to stderr. The line starts with `<who>: RAM tier skipped: ` and names the cause. Most lines end with the knob that controls the cause.
 
-## 4. The evictor timer (operator)
+### The pool rule
+
+The RAM slots share one filesystem and one RAM cap. A lease counts every held RAM slot, this lease included. For each of them it computes the growth that is still to come, in MiB:
+
+    need = max(GROWTH_MB, COLD_MB - size)
+
+`size` is the `du -sm` size of the slot. The lease is admitted when both budgets cover the sum of the needs:
+
+- The free space that `df -Pm` reports for the pool is at least the sum.
+- The RAM left, `mem_limit - mem_used_total` from `mm_stat` in MiB, is at least the sum times 10 divided by 22. In other words, the RAM left is at least the sum divided by 2.2.
+
+A slot that no run holds is not counted. When a budget is short, the lease empties idle slots, the oldest `.codescout-lessee` stamp first, and checks again after each one. It never empties its own slot. If the budgets still fail, the lease releases the RAM slot and uses the disk pool, with a message that names both budgets.
+
+## 4. The evictor timer (as your user)
 
 A lease empties idle RAM slots only when a gate runs. Something else must run when no gate does. `scripts/gate-ram-evict.sh` is that script. It takes no arguments. Point the timer at your main checkout, not at a worktree that you may delete.
 
@@ -138,7 +172,17 @@ OnUnitActiveSec=10min
 WantedBy=timers.target
 ```
 
-Then run `systemctl --user daemon-reload` and `systemctl --user enable --now codescout-gate-ram-evict.timer`.
+Then run these commands as your user:
+
+```
+systemctl --user daemon-reload
+systemctl --user enable --now codescout-gate-ram-evict.timer
+loginctl enable-linger <user>
+```
+
+Without linger, the user manager stops at your last logout, and the timer stops with it. Idle RAM then stays pinned.
+
+The service reads `${XDG_CONFIG_HOME:-$HOME/.config}` from the environment of the user manager. If you set `XDG_CONFIG_HOME` in a shell only, the service does not see it. Variables such as `CODESCOUT_GATE_RAM_SLOTS` that you export in a shell also do not reach the service. Put them in `gate-pool.env`.
 
 ### What the evictor does
 
@@ -158,13 +202,13 @@ If it cannot read `MemAvailable`, it prints a note to stderr on each run. An unr
 
 | Code | Meaning |
 |---|---|
-| 0 | Nothing is due, or the tier is not configured. |
+| 0 | Nothing is due, slots were emptied, or the tier is not configured. |
 | 1 | A removal failed. |
-| 2 | An argument was given, `flock` is missing, the config is invalid, or the pool is not a zram mount. |
+| 2 | An argument was given, `flock` is missing, `slot-pool.sh` did not load, or the config is invalid. Also: the pool is not a zram mount, the device has no RAM cap, or `mm_stat` is unreadable. |
 
 Exit 2 for "not a zram mount" makes the timer unit go failed on every tick while the mount is down.
 
-`CODESCOUT_GATE_RAM_SLOTS=0` makes the evictor exit 0 before it checks the mount. A bad pool with zero slots is therefore not reported.
+`CODESCOUT_GATE_RAM_SLOTS=0` makes the evictor exit 0 before it checks the mount. A pool that is not a zram mount is therefore not reported when the slot count is zero.
 
 ### Two limits of the idle rule
 
@@ -173,13 +217,14 @@ Exit 2 for "not a zram mount" makes the timer unit go failed on every tick while
 
 ## 5. Naming a RAM slot
 
-`scripts/with-slot.sh --slot ram-N` names exactly one RAM slot. A named slot never falls back to the disk pool, and the budget rule does not apply to it. The command stops with exit 2 when the tier is not configured or admitted, `N` is out of range, or the slot is held.
+`scripts/with-slot.sh --slot ram-N` names exactly one RAM slot. A named slot never falls back to the disk pool, and the pool rule does not apply to it. The command stops with exit 2 when the tier is not configured or admitted, `N` is out of range, or the slot is held.
 
 ## 6. Go-live checks
 
-Do these four checks on the machine before you rely on the tier.
+Do these five checks on the machine before you rely on the tier.
 
-1. **A green gate in a RAM slot.** Run `./scripts/gate.sh`. The output must contain a line that starts with `gate.sh: tier RAM (zram1)`, and `GATE EXITS` must show all lanes at 0. The design measurements ran the test lanes as `--no-run` only.
-2. **Discard frees RAM.** Read `cat /sys/block/zram1/mm_stat` and note field 3 (`mem_used_total`). Delete an idle slot, for example `rm -rf /var/cache/codescout-gate-ram/pool/slot-0`. Run `sync`. Read `mm_stat` again. Field 3 must fall. The fall can lag until the next journal commit.
+1. **A green gate in a RAM slot.** Run `./scripts/gate.sh` with `CARGO_TARGET_DIR` unset. A preset `CARGO_TARGET_DIR` bypasses the tier completely, for `gate.sh` and for `with-slot.sh`. The output must contain a line that starts with `gate.sh: tier RAM (zram1)`, and `GATE EXITS` must show all lanes at 0. The design measurements ran the test lanes as `--no-run` only.
+2. **Discard frees RAM.** Run `cat /sys/block/zram1/mm_stat` and note field 3 (`mem_used_total`). Delete an idle slot under its lock: `flock -n /var/cache/codescout-gate-ram/pool/slot-0.lock rm -rf /var/cache/codescout-gate-ram/pool/slot-0`. A failed `flock -n` means a run holds the slot. Wait, then retry. Run `sync`. Read `mm_stat` again. Field 3 must fall. The fall can lag until the next journal commit.
 3. **The real ratio.** With a full slot, divide field 1 (`orig_data_size`) by field 3. The result must stay above 2.2. A lower ratio means the RAM cap can fill before the filesystem does.
 4. **Growth of a warm slot.** Run the gate several times, and once after a `Cargo.lock` change. Measure the slot with `du -sm`. The growth per run must stay under `CODESCOUT_GATE_RAM_GROWTH_MB` (4096).
+5. **The pool unit follows the mount.** As root, run `systemctl restart systemd-zram-setup@zram1.service`. This empties the device and every slot. Then check that `/var/cache/codescout-gate-ram/pool` exists again and that `tune2fs -l /dev/zram1` shows `Reserved block count: 0`. If the mount does not return by itself, or the pool directory is missing, the unit in section 2 does not deliver "after each mount". Start the mount unit by hand and fix the unit.
