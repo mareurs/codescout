@@ -1,16 +1,18 @@
 ---
 id: '762915bf35f7a909'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: doc(update, patch={status: "fixed"}) on a bug file neither sets nor asks for `closed:`, so the gate fails in the next session that runs it'
 tags:
 - cluster/declared-not-wired
 - librarian
 - frontmatter-gate
 - doc-update
+closed: 2026-10-31
 opened: 2026-10-31
 owner: marius
 severity: low
+unverified: 'The fix is verified by unit tests and the gate, not live: the codescout server running when this was closed was built before it, so no doc(update) call after a rebuild has been seen to write `closed` itself.'
 ---
 
 # BUG: doc(update, patch={status: "fixed"}) on a bug file neither sets nor asks for `closed:`, so the gate fails in the next session that runs it
@@ -57,13 +59,21 @@ No production code sets or requires `closed` on a status change. Checked on 2026
 None needed for the cause. Not checked: whether `doc(update)` already warns in its response when a bug is set to `fixed` without `closed` (I did not see the agent's response).
 
 ## Fix
-Not done. Options:
-- When a bug file's status becomes `fixed` and the patch carries no `extra.closed` and the file has none, set `closed` to today's UTC date, as `doc(create)` now does for `opened`.
-- Or refuse the update with a message naming the fix, as `doc(create)` does for a missing cluster tag.
-Stamping fits the earlier decision for `opened` (a value the server always knows).
+
+Landed on experiments in edb9839b9 (`src/librarian/tools/update.rs`, in `call`, before the patch is borrowed). When the file is a `kind: bug` and the patch sets `status` to `fixed`, `mitigated` or `wontfix`, the server writes today's UTC date as `closed` unless a usable one exists. A `closed` the same call carries, or the file already has, is kept. An empty or null `closed` counts as absent, because the gate reads it as missing. Other kinds and other statuses are untouched. This is the stamp option from the earlier list, and it mirrors the `opened` stamp in `doc(create)`; the refusal option was not taken.
 
 ## Tests added
-N/A: no fix yet.
+
+Six tests in `librarian::tools::update::tests`:
+
+- a bug set to `fixed`, `mitigated` and `wontfix` without `closed` is stamped with today's date
+- a `closed` sent with the status is kept
+- an existing `closed` is not moved by a second status write
+- an empty `closed` is replaced by the stamp
+- a non-closing status (`investigating`, `taken`) or a title-only update does not stamp
+- a spec set to `fixed` is not stamped
+
+Red before the fix (the stamp test and the empty-`closed` test failed, the other four passed). Mutation-checked: dropping the `kind == "bug"` condition fails the spec test, and ignoring the file's own `closed` fails the not-moved test. Gate green (FMT/CLIPPY/LEAN/DEFAULT/PYTHON_LIGHT = 0) on the tree before the last rebase; on the final tree I ran clippy and the 90 `update` tests.
 
 ## Workarounds
 Pass `extra={"closed": "<YYYY-MM-DD>"}` in the same `doc(update)` that sets `status: fixed`.
