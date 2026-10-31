@@ -253,5 +253,7 @@ must not then refer to its commands by number.
   `development-commands`.
 - The binary symlink gotcha, and why a rebuild does not reach a running MCP server → memory
   `gotchas` (§ *MCP Binary Symlink*).
+- Setting up the opt-in RAM tier for the gate's build trees on one machine:
+  [`gate-ram-tier.md`](gate-ram-tier.md).
 - The five-transcriptions problem and the ruling that keeps this split:
   `docs/trackers/gate-contract-consolidation.md`.

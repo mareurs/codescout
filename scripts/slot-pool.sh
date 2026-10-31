@@ -1,5 +1,6 @@
 # scripts/slot-pool.sh — the leased pool of build trees behind scripts/gate.sh,
 # scripts/with-slot.sh and scripts/mutation-probe.sh. SOURCE it; it runs nothing itself.
+# The opt-in RAM tier below is set up per machine as docs/conventions/gate-ram-tier.md says.
 #
 # A run takes the lowest-numbered free slot and holds a `flock` on it until it exits, so
 # a tree is reused by whichever run comes next rather than kept per session: keying on
