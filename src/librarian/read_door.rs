@@ -93,8 +93,9 @@ impl std::fmt::Display for ReadError {
 
 /// The door, for one caller's roots. Build one per tool call (or per walk) and reuse it: it
 /// remembers its verdict for each `(spelling, resolved path)` it has judged. The judgement walks
-/// the spelling's ancestors and asks the deny-list (~40 canonicalizations), so a `doctor` run that
-/// reads every row several times pays for it once per file; the open-then-verify read itself is
+/// the spelling's ancestors and asks the deny-list. The list is resolved once per door (about 270
+/// `readlink` calls), not once per file; a `doctor` run that reads every row several times pays
+/// for the judgement once per file; the open-then-verify read itself is
 /// never cached.
 #[derive(Debug)]
 pub(crate) struct ReadDoor {
@@ -102,6 +103,10 @@ pub(crate) struct ReadDoor {
     judged: parking_lot::Mutex<HashMap<(PathBuf, PathBuf), Option<String>>>,
     /// Successful reads, kept only after [`ReadDoor::cache_reads`]; `None` is the default.
     memo: parking_lot::Mutex<Option<HashMap<PathBuf, std::sync::Arc<[u8]>>>>,
+    /// The read deny list, resolved at the first judgement and kept for the door's lifetime.
+    /// Resolving it is the cost of one `readlink` per entry ancestor (about 270), so it is paid
+    /// once per door and not once per file.
+    deny: std::sync::OnceLock<crate::util::path_security::ReadDenyList>,
 }
 
 impl ReadDoor {
@@ -112,6 +117,7 @@ impl ReadDoor {
             roots,
             judged: parking_lot::Mutex::new(HashMap::new()),
             memo: parking_lot::Mutex::new(None),
+            deny: std::sync::OnceLock::new(),
         }
     }
 
@@ -283,7 +289,11 @@ impl ReadDoor {
                 }
             }
         }
-        if deny_listed(real) {
+        if self
+            .deny
+            .get_or_init(crate::util::path_security::ReadDenyList::resolve)
+            .refuses(real)
+        {
             return Some(DENIED.to_string());
         }
         None
@@ -351,12 +361,7 @@ pub(crate) fn withhold_row_fields(obj: &mut serde_json::Value, why: &anyhow::Err
 /// A path that is not valid UTF-8 is checked through its lossy spelling, which matches no entry;
 /// with a non-UTF-8 home the layer is therefore blind (containment still applies).
 fn deny_listed(real: &Path) -> bool {
-    crate::util::path_security::validate_read_path(
-        &real.to_string_lossy(),
-        None,
-        &crate::util::path_security::PathSecurityConfig::default(),
-    )
-    .is_err()
+    crate::util::path_security::ReadDenyList::resolve().refuses(real)
 }
 /// The door for a catalog-level reader, which takes no `ToolContext`: the managed roots the
 /// calling tool armed on the catalog (`Catalog::arm_write_roots`), or none, in which case each
@@ -1760,5 +1765,34 @@ mod memo_tests {
         door.text(&file).unwrap();
         std::fs::write(&file, "two\n").unwrap();
         assert_eq!(other.text(&file).unwrap(), "two\n");
+    }
+}
+
+/// The deny list is a cost of about 270 `readlink` calls, so a door resolves it once and not
+/// once per file. `doctor` judges every artifact row through one door: resolving per file made
+/// 2.05 million `readlink` calls in a 7 s run.
+///
+/// **The mutation this must die on:** call `ReadDenyList::resolve()` inside `ReadDoor::verdict`
+/// instead of reading `self.deny`. The count reads 5, not 1.
+#[cfg(test)]
+mod deny_list_tests {
+    use super::*;
+
+    #[test]
+    fn a_door_resolves_the_deny_list_once_however_many_files_it_judges() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let door = ReadDoor::new(vec![root.clone()]);
+        let before = crate::util::path_security::RESOLVES.with(|n| n.get());
+        for i in 0..5 {
+            let file = root.join(format!("f{i}.md"));
+            std::fs::write(&file, "x\n").unwrap();
+            assert_eq!(door.text(&file).unwrap(), "x\n");
+        }
+        let resolved = crate::util::path_security::RESOLVES.with(|n| n.get()) - before;
+        assert_eq!(
+            resolved, 1,
+            "five distinct files judged through one door must resolve the deny list once"
+        );
     }
 }

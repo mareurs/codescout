@@ -9,7 +9,7 @@ tags:
 - cluster/unclassified
 opened: 2026-10-30
 severity: medium
-unverified: The remaining 6.2 s was not profiled after the fixes. sha256 in scan_artifact_paths (7.5% of instructions), frontmatter::parse (5.4%), preview::headings::parse (6%) and libgit2 commit-list parsing (4.2%) are the next measured shares; the 2-3 s target is an estimate.
+unverified: The user-time shares are callgrind instruction counts, not seconds; the sha256 share in particular is overstated under valgrind. The saving of part 3 is measured as CPU time over three runs on a shared machine; wall time is not.
 ---
 
 # BUG: librarian doctor makes about 12 full passes over the corpus and caches no file read (avg 8.7 s)
@@ -58,11 +58,15 @@ Part done 2026-10-30; the issue stays open for the rest.
 
 Measured (release builds, same tree, `doctor --json`): 11.1-11.4 s before; 9.76 s with part 1 alone (sys 3.4 s to 2.0 s, user unchanged); **6.2 s** (6.29 / 6.23 s steady, 8.4 s first run) with both. The report is byte-identical to the old binary's on the same tree (243 violations).
 
-Not done: one parse per file shared by the scans (frontmatter, headings), the per-row sha256 in `scan_artifact_paths`, libgit2 commit-list parsing.
+3. `ReadDenyList` (`src/util/path_security.rs`), held by each `ReadDoor` in a `OnceLock` (2026-10-31). Profiling the 6.2 s run showed 2,054,784 `readlink` calls (2,032,491 errors) behind only 7,431 `validate_read_path` calls: each call re-resolved the whole read deny list, about 276 `readlink` calls per file. The door now resolves the list once per door. `validate_read_path` itself is unchanged.
+
+Measured 2026-10-31 (release builds, three alternating runs each, shared machine): `sys` 2.83 / 2.06 / 2.40 s before, 1.54 / 1.36 / 2.03 s after; `user` 4.45 / 4.20 / 4.44 s before, 4.23 / 4.14 / 4.37 s after. CPU time (user + sys) fell by about 0.8 s, about 12%. Wall time is too noisy to state on a shared machine (5.5-9.0 s after, 6.3-11.7 s before). The two reports differ only in live peer state that changed between the runs (a claim ended, one bug came under live edit, audit row counts).
+
+Not done: `user` time, 4.2 s. Instruction shares from callgrind (74.3 G before the fixes, 43.9 G after; callgrind counts instructions, and its `sha2` soft path overstates the hash because valgrind hides SHA-NI): `link_scan::extract::extract` 31.8% (one pass over the corpus now, `scan_tokens` regex 16%), `scan_artifact_paths` 18.3% (sha256 12.8%), `scan_open_bug_cited_from_source_walking` 16.7%, `frontmatter::parse` 6.4% (serde_yml), `content_key` 4.3% (the memo's own hash), `ReadDoor::bytes` copy 3-4%, `gc::detect_move_candidates` 3.8%, `headings::parse` 2.9%.
 
 ## Tests added
 
-`read_door::memo_tests` (the default door reads the file as it is now; an opted-in door serves the second read from memory, proved with a changed file; a missing file is not remembered; one door's memo does not reach another) and `link_scan::extract::memo_tests` (nothing remembered outside a scope; memoized answers equal plain ones; a changed text gets its own answer; dropping the scope frees the memo). Not mutation-tested.
+`read_door::memo_tests` (the default door reads the file as it is now; an opted-in door serves the second read from memory, proved with a changed file; a missing file is not remembered; one door's memo does not reach another) and `link_scan::extract::memo_tests` (nothing remembered outside a scope; memoized answers equal plain ones; a changed text gets its own answer; dropping the scope frees the memo). The first two groups were not mutation-tested. For part 3: `read_door::deny_list_tests::a_door_resolves_the_deny_list_once_however_many_files_it_judges` (a thread-local counter on `ReadDenyList::resolve`; resolving per file instead reads 5, not 1: verified by mutation, reverted) and `path_security::tests::a_resolved_deny_list_refuses_what_validate_read_path_refuses`. The door's refusal itself stays covered by `deny_listed_target_inside_a_managed_root_reaches_no_read_site`.
 
 ## Workarounds
 
@@ -70,7 +74,7 @@ None.
 
 ## Resume
 
-Profile the 6.2 s again on a symbol build (`CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=line-tables-only`; `valgrind --tool=callgrind` takes about 7 min). Next measured shares: sha256 in `scan_artifact_paths`, `frontmatter::parse`, `preview::headings::parse`, libgit2. A debugger attach fails here (`ptrace_scope=1`); launching the binary under `gdb` and sending it SIGINT works.
+Part 3 is done; the next lever is `user` time (see the shares under Fix). Profile again on a symbol build (`CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=line-tables-only`; `valgrind --tool=callgrind` takes about 7 min). Next measured shares: sha256 in `scan_artifact_paths`, `frontmatter::parse`, `preview::headings::parse`, libgit2. A debugger attach fails here (`ptrace_scope=1`); launching the binary under `gdb` and sending it SIGINT works.
 
 ## References
 
