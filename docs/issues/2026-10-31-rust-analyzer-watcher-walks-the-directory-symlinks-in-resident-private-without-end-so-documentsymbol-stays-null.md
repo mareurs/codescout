@@ -119,6 +119,11 @@ State on 2026-10-31: mitigated. The 109 links are gone from the real tree, and V
 Open:
 
 - V1 is one run of 120 s. The watcher was still at 8% of a core at the end. Check it again over a longer run.
+  - Longer check, 2026-10-31, on the live mux server after `/mcp` reconnect. One `rust-analyzer` process had run 1622 s, with 9.2 GB RSS and 109 threads.
+  - A 10 s sample of `/proc/<pid>/task/*/stat` showed `notify-rs` at 2 ticks, which is 0.2% of one core (`CLK_TCK` is 100). The `LspServer` thread used 125 ticks, which is 12.5% of one core.
+  - `symbols` on `src/tools/symbol/symbols.rs` returned 34 symbols with signatures. `references` on `LspLegHealth/note_start_failure` returned 7 locations. Neither returned the null error.
+  - `find .codescout/resident-private -type l -xtype d` found no directory symlink, so none came back.
+  - This is one sample, 27 minutes after the start. It shows the watcher quiet at that moment. It does not show that new links cannot bring the spin back.
 - The mitigation is local and unversioned. A new experiment can bring the links back. Product options 1 to 3 under Fix are the durable answer, and none is chosen.
 - The bug stays `mitigated`, not `fixed`: no product change and no regression test exist.
 
