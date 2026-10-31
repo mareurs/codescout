@@ -317,7 +317,7 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
 
 /// `true` for a JSON string of exactly `YYYY-MM-DD` that names a real calendar day. This is the
 /// shape `tests/issue_frontmatter.rs` requires of a bug's `opened`, with the calendar check on top.
-fn is_iso_date(v: &Value) -> bool {
+pub(super) fn is_iso_date(v: &Value) -> bool {
     v.as_str()
         .is_some_and(|s| s.len() == 10 && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok())
 }

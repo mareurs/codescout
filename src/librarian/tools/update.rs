@@ -629,6 +629,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             &full,
             &crate::librarian::catalog::augmentation::claimed_prefixes(extra),
         )?;
+        // The rule `create` applies to a bug's `opened` (see `create::is_iso_date`): the gate
+        // refuses anything but a `YYYY-MM-DD` date, and `merge_extra` upserts whatever it is
+        // given. A `null` is refused too, since it would delete the key the gate requires.
+        // Checked here, before any write, so a refusal leaves the file byte-identical.
+        if row.kind == "bug" {
+            if let Some(opened) = extra.get("opened") {
+                if !super::create::is_iso_date(opened) {
+                    return Err(super::LibrarianRecoverableError::with_hint(
+                        format!(
+                            "doc(action=\"update\") kind=bug: extra.opened {opened} is not a YYYY-MM-DD date"
+                        ),
+                        "Pass patch={\"extra\": {\"opened\": \"YYYY-MM-DD\"}}. A bug must keep a valid `opened`, so it cannot be removed with null.",
+                    ));
+                }
+            }
+        }
     }
 
     let body_changing = patch.body.is_some() || patch.body_edits.is_some();
@@ -1077,6 +1093,113 @@ mod tests {
         assert!(content.contains("title: New"), "file should have new title");
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_eq!(row.title.as_deref(), Some("New"));
+    }
+
+    /// `tests/issue_frontmatter.rs` refuses a bug whose `opened` is not `YYYY-MM-DD`. `create` now
+    /// refuses a bad value (`30721b865`), but `merge_extra` upserts any `extra` value, so the
+    /// same bad value could still arrive through `update`. The refusal must come before the
+    /// write: the file stays byte-identical.
+    ///
+    /// See `docs/issues/2026-10-31-doc-update-accepts-a-malformed-opened-on-a-bug-so-the-frontmatter-gate-can-fail-in-another-session.md`.
+    #[tokio::test]
+    async fn a_malformed_opened_on_a_bug_is_refused_by_update_and_leaves_the_file_unchanged() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "docs/issues/2026-10-31-u.md",
+                "kind": "bug", "title": "U", "body": "# BUG: u",
+                "extra": {"opened": "2026-10-31"}
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+        let path = tmp.path().join("docs/issues/2026-10-31-u.md");
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        for bad in [
+            serde_json::json!("yesterday"),
+            serde_json::json!("2026/10/17"),
+            serde_json::json!("2026-1-2"),
+            serde_json::json!("2026-13-45"),
+            serde_json::json!(20261017),
+            serde_json::json!(null),
+        ] {
+            let result = call(
+                &ctx,
+                serde_json::json!({"id": id, "patch": {"extra": {"opened": bad}}}),
+            )
+            .await;
+            assert!(result.is_err(), "update accepted opened {bad}");
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                before,
+                "a refused update changed the file (opened {bad})"
+            );
+        }
+    }
+
+    /// The refusal is about `opened` only. A calendar-valid `opened`, and a patch to another
+    /// `extra` key, must still go through on a bug.
+    #[tokio::test]
+    async fn a_valid_opened_and_other_extra_keys_are_accepted_by_update_on_a_bug() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "docs/issues/2026-10-31-v.md",
+                "kind": "bug", "title": "V", "body": "# BUG: v"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"extra": {"severity": "low"}}}),
+        )
+        .await
+        .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"extra": {"opened": "2026-01-02"}}}),
+        )
+        .await
+        .unwrap();
+
+        let content =
+            std::fs::read_to_string(tmp.path().join("docs/issues/2026-10-31-v.md")).unwrap();
+        assert!(content.contains("opened: 2026-01-02"), "{content}");
+        assert!(content.contains("severity: low"), "{content}");
+    }
+
+    /// Another kind may carry an `opened` key of its own meaning; the rule belongs to the bug
+    /// schema.
+    #[tokio::test]
+    async fn a_non_date_opened_on_a_non_bug_kind_is_accepted_by_update() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "docs/specs/w.md",
+                "kind": "spec", "title": "W", "body": "hello"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"extra": {"opened": "soon"}}}),
+        )
+        .await
+        .unwrap();
     }
 
     /// **Slice 4's prerequisite, run.** `docs/trackers/architecture-boundary-measurement.md`
