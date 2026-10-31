@@ -1029,6 +1029,73 @@ eq "U8 a short budget with no neighbour does not refuse a named slot" "$rc" "0"
 eq "U8 and the command ran in that slot" "$(s_target u8e)" "$RAM_U/slot-1"
 rm -f "$WORK/df-cap"; ram_cfg
 
+echo "V. a RAM slot is built with line-tables-only debug info and no incremental; a disk run is not"
+# The settings belong to a KEPT RAM lease only (spec 5): they are exported after the pool rule, so a
+# RAM lease the rule gives up cannot carry them into the disk run. The caller's own value wins, per
+# variable, even an empty one. This shell's own CARGO_* values must not decide the cases.
+unset CARGO_PROFILE_DEV_DEBUG CARGO_INCREMENTAL
+RAM_V="$WORK/ram-v"; POOL="$WORK/pool-v"; rm -rf "$RAM_V" "$POOL" "$WORK/df-cap"; mkdir -p "$RAM_V"
+ram_src /dev/zram1
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM_V"
+# v_seen <tag> — what the command recorded: "<debug> <incremental>", `<unset>` for an unset or empty one.
+v_seen() { cat "$WORK/vseen-$1" 2>/dev/null; }
+# v_run <tag> [VAR=value ...] — one with-slot.sh run whose command records its target dir (tdir-<tag>)
+# and the two settings (vseen-<tag>).
+V_PROBE='echo "$CARGO_TARGET_DIR" > "$2"; echo "${CARGO_PROFILE_DEV_DEBUG:-<unset>} ${CARGO_INCREMENTAL:-<unset>}" > "$1"'
+v_run() {
+    local tag="$1"; shift
+    rm -f "$WORK/vseen-$tag"
+    t_run "$tag" "$@" bash "$WITH" sh -c "$V_PROBE" _ "$WORK/vseen-$tag" "$WORK/tdir-$tag"
+}
+v_run_slot() { # v_run_slot <tag> <slot> [VAR=value ...]
+    local tag="$1" slot="$2"; shift 2
+    rm -f "$WORK/vseen-$tag"
+    t_run "$tag" "$@" bash "$WITH" --slot "$slot" sh -c "$V_PROBE" _ "$WORK/vseen-$tag" "$WORK/tdir-$tag"
+}
+v_run v1
+eq "V1 a RAM lease is in a RAM slot" "$(s_target v1 2>/dev/null)" "$RAM_V/slot-0"
+eq "V1 and sees line-tables-only and no incremental" "$(v_seen v1)" "line-tables-only 0"
+v_run v2 CARGO_INCREMENTAL=1
+eq "V2 a preset CARGO_INCREMENTAL=1 stays, the other is still exported" "$(v_seen v2)" "line-tables-only 1"
+v_run v2b CARGO_PROFILE_DEV_DEBUG=full
+eq "V2 a preset CARGO_PROFILE_DEV_DEBUG=full stays, the other is still exported" "$(v_seen v2b)" "full 0"
+rm -f "$WORK/vempty"
+t_run v2c CARGO_INCREMENTAL= CARGO_PROFILE_DEV_DEBUG= bash "$WITH" sh -c 'echo "${CARGO_PROFILE_DEV_DEBUG+set}:${CARGO_PROFILE_DEV_DEBUG} ${CARGO_INCREMENTAL+set}:${CARGO_INCREMENTAL}" > "$1"' _ "$WORK/vempty"
+eq "V2 a variable present but empty counts as set and stays empty" "$(cat "$WORK/vempty" 2>/dev/null)" "set: set:"
+v_run v3 CODESCOUT_GATE_RAM_CARGO_ENV=0
+eq "V3 CODESCOUT_GATE_RAM_CARGO_ENV=0 exports neither" "$(v_seen v3)" "<unset> <unset>"
+eq "V3 and the run was still in the RAM tier" "$(s_target v3 2>/dev/null)" "$RAM_V/slot-0"
+if hold_lock v4a "$RAM_V/slot-0.lock" && hold_lock v4b "$RAM_V/slot-1.lock"; then
+    v_run v4
+    eq "V4 with both RAM slots held, the run is on disk" "$(s_target v4 2>/dev/null)" "$POOL/slot-0"
+    eq "V4 and exports neither" "$(v_seen v4)" "<unset> <unset>"
+    t_release v4a "$RAM_V/slot-0.lock"; t_release v4b "$RAM_V/slot-1.lock"
+else
+    no "V4 both locks were held" "hold_lock failed"
+fi
+# V5: the pool rule gives the RAM lease up, and the disk run must not inherit the settings.
+RAM_U="$RAM_V"; U_KNOBS=(CODESCOUT_GATE_RAM_COLD_MB=8 CODESCOUT_GATE_RAM_GROWTH_MB=2)
+u_fresh; u_cap 5
+v_run v5 "${U_KNOBS[@]}"
+eq "V5 the rule gives the RAM lease up: the run is on disk" "$(s_target v5 2>/dev/null)" "$POOL/slot-0"
+eq "V5 and the disk run sees neither setting" "$(v_seen v5)" "<unset> <unset>"
+u_fresh; u_cap 9
+v_run v5b "${U_KNOBS[@]}"
+eq "V5 the same budget with room keeps the RAM lease" "$(s_target v5b 2>/dev/null)" "$RAM_V/slot-0"
+eq "V5 and that kept lease carries both settings" "$(v_seen v5b)" "line-tables-only 0"
+# V6: a named RAM slot is a RAM-slot lease too.
+u_fresh; mkdir -p "$RAM_V/slot-1"
+v_run_slot v6 ram-1
+eq "V6 --slot ram-1 leases RAM slot-1" "$(s_target v6 2>/dev/null)" "$RAM_V/slot-1"
+eq "V6 and sees line-tables-only and no incremental" "$(v_seen v6)" "line-tables-only 0"
+v_run_slot v6b ram-1 CODESCOUT_GATE_RAM_CARGO_ENV=0
+eq "V6 with CODESCOUT_GATE_RAM_CARGO_ENV=0 a named slot gets neither" "$(v_seen v6b)" "<unset> <unset>"
+# A numeric --slot is the disk pool: neither setting.
+mkdir -p "$POOL/slot-0"
+v_run_slot v6c 0
+eq "V6 a numeric --slot is the disk pool, with neither setting" "$(v_seen v6c)" "<unset> <unset>"
+rm -f "$WORK/df-cap"; ram_cfg
+
 echo
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

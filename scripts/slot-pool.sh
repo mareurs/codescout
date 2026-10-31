@@ -583,6 +583,14 @@ lease_gate_target() {
         slot_tend "$who" "$GATE_POOL" slot- CODESCOUT_GATE_POOL_KEEP 3 "$SLOT_DIR" slot_remove_dir || return 2
         lease_evict_lessee "$who"
     fi
+    # Build settings of a KEPT RAM lease (spec 5): they halve a slot and drop `incremental`, the main
+    # source of slot growth. They come AFTER the pool block, so a RAM lease given up above never carries
+    # them into the disk run, and lease_ram_target stays free of exports. A variable the caller already
+    # set, even to an empty value, is left alone; each is decided on its own.
+    if [ "$GATE_TIER" = ram ] && [ "$RAM_CARGO_ENV" -eq 1 ]; then
+        [ -n "${CARGO_PROFILE_DEV_DEBUG+x}" ] || export CARGO_PROFILE_DEV_DEBUG=line-tables-only
+        [ -n "${CARGO_INCREMENTAL+x}" ] || export CARGO_INCREMENTAL=0
+    fi
     export CARGO_TARGET_DIR="$SLOT_DIR"
 }
 
