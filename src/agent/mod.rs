@@ -830,6 +830,39 @@ async fn resolve_projects(root: &std::path::Path) -> Result<Vec<DiscoveredProjec
     .await
     .map_err(|e| anyhow::anyhow!("discover_projects task failed: {e}"))
 }
+/// The id the workspace above `member_root` gives the member at that directory, or `None` when no
+/// workspace above it lists the directory as a member.
+///
+/// The server keys a member by its workspace id; opening the directory on its own (the CLI
+/// `index` and `migrate-memories` do) knows only the name on disk. This asks the same
+/// [`resolve_projects`] the loaders use, so the answer cannot differ from the server's.
+///
+/// Only an ancestor with a `.codescout/workspace.toml` is asked: `.codescout` alone also marks
+/// `$HOME` and every directory a session once opened, and a manifest walk of those would be
+/// slow and meaningless. A member of a parent that never wrote a `workspace.toml` gets `None`
+/// and keeps the key the caller already has.
+/// docs/issues/2026-10-31-the-cli-index-keys-a-declared-member-by-its-directory-name-not-its-declared-id.md
+pub async fn workspace_member_id(member_root: &std::path::Path) -> Option<String> {
+    let member = std::fs::canonicalize(member_root).ok()?;
+    for ancestor in member.ancestors().skip(1) {
+        if !crate::config::workspace::workspace_config_path(ancestor).is_file() {
+            continue;
+        }
+        let Ok(projects) = resolve_projects(ancestor).await else {
+            continue;
+        };
+        let found = projects.into_iter().find(|p| {
+            std::fs::canonicalize(ancestor.join(&p.relative_root))
+                .ok()
+                .as_deref()
+                == Some(member.as_path())
+        });
+        if let Some(p) = found {
+            return Some(p.id);
+        }
+    }
+    None
+}
 
 /// The most bytes `.codescout/system-prompt.md` may hold before it is not served. The file goes
 /// into the `initialize` instructions, i.e. into the model's context; generated prompts are a few

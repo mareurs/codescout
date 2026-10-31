@@ -312,6 +312,11 @@ async fn main() -> Result<()> {
             let project_id = agent
                 .with_project(|p| Ok(p.project_id().to_string()))
                 .await?;
+            // A member opened by its directory is keyed by the id the workspace above gives it,
+            // as the server keys it; `Agent::new` saw only the name on disk.
+            let project_id = codescout::agent::workspace_member_id(&root)
+                .await
+                .unwrap_or(project_id);
             let client =
                 codescout::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
             let opts = codescout::retrieval::sync::SyncOpts {
@@ -342,6 +347,10 @@ async fn main() -> Result<()> {
             let project_id = agent
                 .with_project(|p| Ok(p.project_id().to_string()))
                 .await?;
+            // Keyed as the server keys a member of a workspace; see `Commands::Index`.
+            let project_id = codescout::agent::workspace_member_id(&root)
+                .await
+                .unwrap_or(project_id);
             let store = agent.semantic_memory_store().await?;
 
             // Build the embedder once — re-embedding happens per-row inside

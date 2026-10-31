@@ -128,3 +128,65 @@ async fn a_reload_keeps_a_declared_member_keyed_by_its_declared_id() {
         .unwrap();
     assert_eq!(key, "thecrew-module");
 }
+
+/// The CLI `index` and `migrate-memories` open a member by its directory. The key they need is
+/// the one the workspace above gives it, not the name on disk.
+/// docs/issues/2026-10-31-the-cli-index-keys-a-declared-member-by-its-directory-name-not-its-declared-id.md
+#[tokio::test]
+async fn a_member_opened_by_its_directory_resolves_its_declared_id() {
+    let (_host, root) = workspace_declaring_a_manifestless_member();
+    let member = root.join("remote-fixes/addon");
+
+    assert_eq!(
+        workspace_member_id(&member).await.as_deref(),
+        Some("thecrew-module")
+    );
+}
+
+/// An auto-discovered member has no declared entry. The server still keys it by its workspace
+/// id, which is its directory name, so the lookup must answer for it too. The parent must have
+/// a `workspace.toml` (onboarding writes one); without it the walk up cannot tell a workspace
+/// from any directory that happens to hold a `.codescout`, and the caller keeps its key.
+#[tokio::test]
+async fn a_discovered_member_resolves_its_directory_name_as_its_id() {
+    let host = tempdir().unwrap();
+    let root = std::fs::canonicalize(host.path()).unwrap();
+    std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+    let member = root.join("mcp-server");
+    std::fs::create_dir_all(&member).unwrap();
+    std::fs::write(
+        member.join("package.json"),
+        r#"{"name":"other-name","scripts":{"build":"tsc"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    std::fs::write(
+        crate::config::workspace::workspace_config_path(&root),
+        "[workspace]\nname = \"home\"\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        workspace_member_id(&member).await.as_deref(),
+        Some("mcp-server")
+    );
+}
+
+/// A directory no workspace above lists is not a member, so the caller keeps the key it has.
+#[tokio::test]
+async fn a_directory_outside_any_workspace_has_no_member_id() {
+    let host = tempdir().unwrap();
+    let dir = std::fs::canonicalize(host.path()).unwrap().join("lone");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"lone\"\n").unwrap();
+
+    assert_eq!(workspace_member_id(&dir).await, None);
+}
+
+/// The workspace root itself is not a member of anything above it.
+#[tokio::test]
+async fn a_workspace_root_has_no_member_id() {
+    let (_host, root) = workspace_declaring_a_manifestless_member();
+
+    assert_eq!(workspace_member_id(&root).await, None);
+}
