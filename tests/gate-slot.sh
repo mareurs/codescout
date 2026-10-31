@@ -1005,6 +1005,28 @@ eq "U6 4 MiB left against 4 needed: the run stays in RAM" "$(s_target u6b)" "$RA
 u_fresh
 u_run u6c CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-left3"
 eq "U6 3 MiB left is under it: the run goes to disk" "$(s_target u6c)" "$POOL/slot-0"
+
+# A NAMED RAM slot is the operator's explicit choice, often to repair that very tree, so the pool
+# rule never applies to it: with a budget far too short (free 0 against a need of 7 or more), the
+# command still runs in exactly that slot, no idle neighbour is emptied, and the status passes through.
+u_fresh; u_slot 0 3 "2 hours ago"; u_slot 1 1; u_cap 0
+t_run u8 "${U_KNOBS[@]}" bash "$WITH" --slot ram-1 sh -c 'echo "$CARGO_TARGET_DIR" > "$1"; exit 7' _ "$WORK/tdir-u8"; rc=$?
+eq "U8 --slot ram-1 with the budget short runs in RAM slot-1" "$(s_target u8)" "$RAM_U/slot-1"
+eq "U8 and its exit status passes through" "$rc" "7"
+eq "U8 the idle neighbour slot-0 keeps its contents" "$(state "$RAM_U/slot-0/f3")" "kept"
+eq "U8 and its stamp" "$(state "$RAM_U/slot-0/.codescout-lessee")" "kept"
+eq "U8 nothing is said about the pool budget" "$(grep -c 'pool budget' "$WORK/out-u8")" "0"
+eq "U8 the lock of slot-1 is released after the command" "$(wait_free "$RAM_U/slot-1.lock" && echo free || echo held)" "free"
+eq "U8 the disk pool is untouched" "$([ -e "$POOL" ] && echo created || echo absent)" "absent"
+t_run u8c "${U_KNOBS[@]}" bash "$WITH" --slot ram-1 sh -c 'rm -rf "$CARGO_TARGET_DIR"/*'; rc=$?
+eq "U8 the repair, rm -rf of the named tree's contents, succeeds with the budget short" "$rc" "0"
+eq "U8 and removes the tree's files" "$(state "$RAM_U/slot-1/f1")" "gone"
+eq "U8 while the neighbour still keeps its contents" "$(state "$RAM_U/slot-0/f3")" "kept"
+# No neighbour to empty at all: the budget alone must not refuse a named slot.
+u_fresh; u_slot 1 1; u_cap 0
+t_run u8e "${U_KNOBS[@]}" bash "$WITH" --slot ram-1 sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-u8e"; rc=$?
+eq "U8 a short budget with no neighbour does not refuse a named slot" "$rc" "0"
+eq "U8 and the command ran in that slot" "$(s_target u8e)" "$RAM_U/slot-1"
 rm -f "$WORK/df-cap"; ram_cfg
 
 echo

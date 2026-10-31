@@ -513,9 +513,10 @@ lease_ram_target() {
 #            not admitted, N is outside 0 … RAM_SLOTS-1, or the slot is held or absent: a named
 #            slot never falls back to the other tier.
 # A disk lease is tended; both tiers evict build scripts and workspace crates compiled for
-# another checkout. A RAM lease is then admitted against the pool budget (ram_pool_fits), idle RAM
-# slots being emptied oldest lease first to make room; when it still does not fit, an unnamed lease
-# releases the RAM slot and goes to disk, saying why, and a named one returns 2. Whether the RAM tier is configured is read off the RETURN CODES of
+# another checkout. An UNNAMED RAM lease is then admitted against the pool budget (ram_pool_fits), idle
+# RAM slots being emptied oldest lease first to make room; when it still does not fit, it releases the
+# RAM slot and goes to disk, saying why. A named ram-N slot is never budgeted, never empties a
+# neighbour and is never refused for budget. Whether the RAM tier is configured is read off the RETURN CODES of
 # ram_tier_load_config and ram_tier_admit, never off the RAM_* globals: after a refusal they
 # keep stale values.
 lease_gate_target() {
@@ -561,20 +562,19 @@ lease_gate_target() {
     # A RAM lease is admitted against the pool AFTER the lessee evictions, which shrink the own slot
     # and so change its need. When the pool cannot fit it, even after emptying every idle RAM slot,
     # the RAM lock is released and the disk lease below runs in full, as if the tier did not exist.
+    # A NAMED slot (--slot ram-N) is the operator's explicit choice, often to repair or inspect that
+    # very tree: it is never budgeted, never empties a neighbour and is never refused for budget.
     if [ "$GATE_TIER" = ram ]; then
         lease_evict_lessee "$who"
-        rc=0; ram_pool_fits "$who" || rc=$?
-        if [ "$rc" -eq 1 ]; then rc=0; ram_pool_make_room "$who" || rc=1; fi
-        if [ "$rc" -ne 0 ]; then
-            echo "$RAM_SKIP" >&2
-            exec {SLOT_FD}>&-
-            unset SLOT SLOT_DIR SLOT_FD
-            case "$slot" in
-                ram-*)
-                    echo "$who: --slot $slot names a RAM slot the pool budget cannot fit now, and a named slot never falls back to the disk pool; nothing was run" >&2
-                    return 2 ;;
-            esac
-            GATE_POOL="$disk_pool"; GATE_TIER=disk
+        if [ -z "$slot" ]; then
+            rc=0; ram_pool_fits "$who" || rc=$?
+            if [ "$rc" -eq 1 ]; then rc=0; ram_pool_make_room "$who" || rc=1; fi
+            if [ "$rc" -ne 0 ]; then
+                echo "$RAM_SKIP" >&2
+                exec {SLOT_FD}>&-
+                unset SLOT SLOT_DIR SLOT_FD
+                GATE_POOL="$disk_pool"; GATE_TIER=disk
+            fi
         fi
     fi
     if [ "$GATE_TIER" != ram ]; then
