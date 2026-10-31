@@ -1079,13 +1079,25 @@ mod single_embed_and_upsert {
         Arc<AtomicUsize>,
         Arc<Mutex<Vec<Vec<String>>>>,
     ) {
-        let (dir, ctx) = test_ctx_with_project_raw().await;
         let embeds = Arc::new(AtomicUsize::new(0));
+        let (dir, ctx, upserts) = ctx_with_embedder(
+            search,
+            Arc::new(CountingEmbedder(embeds.clone())) as Arc<dyn DenseEmbedder>,
+        )
+        .await;
+        (dir, ctx, embeds, upserts)
+    }
+
+    /// `ctx_with`, for a test that supplies its own embedder. The embedder slot is a
+    /// `OnceCell`, so a test cannot swap it after `ctx_with` has installed one.
+    async fn ctx_with_embedder(
+        search: anyhow::Result<Vec<crate::retrieval::search::Hit>>,
+        embedder: Arc<dyn DenseEmbedder>,
+    ) -> (tempfile::TempDir, ToolContext, Arc<Mutex<Vec<Vec<String>>>>) {
+        let (dir, ctx) = test_ctx_with_project_raw().await;
         let upserts = Arc::new(Mutex::new(Vec::new()));
         ctx.agent
-            .set_memory_embedder_for_test(
-                Arc::new(CountingEmbedder(embeds.clone())) as Arc<dyn DenseEmbedder>
-            )
+            .set_memory_embedder_for_test(embedder)
             .map_err(|_| ())
             .expect("set embedder");
         ctx.agent
@@ -1098,7 +1110,7 @@ mod single_embed_and_upsert {
         ctx.agent.set_code_search_for_test(
             Arc::new(Search(search)) as Arc<dyn crate::retrieval::search::CodeChunkSearch>
         );
-        (dir, ctx, embeds, upserts)
+        (dir, ctx, upserts)
     }
 
     fn hit(path: &str) -> crate::retrieval::search::Hit {
@@ -1110,6 +1122,22 @@ mod single_embed_and_upsert {
             content: String::new(),
             score: 1.0,
             rerank_score: Some(1.0),
+        }
+    }
+    /// An embedder that is down: counts the attempts and fails every one.
+    struct FailingEmbedder(Arc<AtomicUsize>);
+    #[async_trait::async_trait]
+    impl DenseEmbedder for FailingEmbedder {
+        async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+            self.embed_document(text).await
+        }
+        async fn embed_document(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(anyhow::anyhow!("embedder is down"))
+        }
+        #[cfg(test)]
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 
@@ -1152,6 +1180,48 @@ mod single_embed_and_upsert {
         );
         assert_eq!(embeds.load(Ordering::SeqCst), 1);
         assert_eq!(*upserts.lock().unwrap(), vec![Vec::<String>::new()]);
+    }
+    /// The other failure of the one embed+upsert: with the embedder down nothing can be
+    /// stored, so the write must upsert nothing and report the failure exactly once —
+    /// not once per former embed call, and not as a silent success.
+    #[tokio::test]
+    async fn a_failed_embed_stores_nothing_and_warns_once() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let (_dir, ctx, upserts) = ctx_with_embedder(
+            Ok(vec![hit("src/lib.rs")]),
+            Arc::new(FailingEmbedder(attempts.clone())) as Arc<dyn DenseEmbedder>,
+        )
+        .await;
+        let r = Memory
+            .call(
+                json!({"action": "write", "topic": "embed-down", "content": "# Down\n\nbody"}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r["status"],
+            json!("ok"),
+            "the file write itself succeeds: {r}"
+        );
+        let warnings = r["warnings"].as_array().expect("a warnings array");
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|w| w.as_str().unwrap_or("").contains("cross-embed failed"))
+                .count(),
+            1,
+            "the failed embed must be reported exactly once: {r}"
+        );
+        assert!(
+            upserts.lock().unwrap().is_empty(),
+            "nothing can be stored without an embedding"
+        );
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            1,
+            "one embed attempt per write, with no retry"
+        );
     }
 }
 
