@@ -1261,14 +1261,18 @@ x_run x6b "${X_OK[@]}"
 eq "X6 the lease's stamp makes it fresh: the evictor keeps it" "$(state "$RAM_X/slot-0")" "kept"
 
 # X3: a 10 min stamp is not idle. Boundaries use seconds: the age is (now - mtime) / 60, rounded down.
+# The "under" case keeps a 10 s margin on purpose: the stamp's mtime and `date +%s` both have 1 s
+# resolution, so a stamp set to -299 s turns into 300 s whenever a second boundary falls between the
+# `touch` and the script's `date` (4 of 300 runs measured). The "exactly" case needs no margin: a delay
+# only makes that slot more due.
 x_fresh; x_slot 0 '-10 minutes'
 x_run x3 "${X_OK[@]}"; rc=$?
 eq "X3 a 10 min old stamp: kept" "$(state "$RAM_X/slot-0")" "kept"
 eq "X3 with no output" "$(x_lines x3)" "0"
 eq "X3 and exit 0" "$rc" "0"
-x_slot 0 '-299 seconds'
+x_slot 0 '-290 seconds'
 x_run x3b "${X_OK[@]}" CODESCOUT_GATE_RAM_IDLE_MIN=5
-eq "X3 one second under RAM_IDLE_MIN minutes: kept" "$(state "$RAM_X/slot-0")" "kept"
+eq "X3 just under RAM_IDLE_MIN minutes: kept" "$(state "$RAM_X/slot-0")" "kept"
 x_slot 0 '-300 seconds'
 x_run x3c "${X_OK[@]}" CODESCOUT_GATE_RAM_IDLE_MIN=5
 eq "X3 exactly RAM_IDLE_MIN minutes: emptied (due is >=, not >)" "$(state "$RAM_X/slot-0")" "gone"
