@@ -124,6 +124,17 @@ N/A, with reason: this is documentation and deployment drift, with no code path 
 
 Fixed on `experiments` in `7a51ebd1`, patch-id `993069eb31bd085c022069dace0a7443dcba1cb4`. `./scripts/gate.sh` passed: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, and `retrieval_default_ports_match_published_compose_ports`, which parses this compose file, passed in both test lanes. Nothing left to resume. The one open follow-up is measurement, not repair: `sparse-amd`'s `--max-batch-requests 4` applies at its next recreate, when SPLADE returns from the `sparse-cpu` fallback; measure its VRAM and a reindex then.
 
+**Follow-up measurement, 2026-10-28.** `sparse-amd` replaced `sparse-cpu` (up since 2026-09-27) and started with `--max-batch-requests 4`. `sparse-cpu` was stopped, not removed.
+
+- Card: 15.98 GiB total. Used 3.71 GiB before the swap and 5.23 GiB after it.
+- SPLADE process (`python-text-emb`, `rocm-smi --showpids`): 1,640,251,392 B (1.53 GiB) right after start. 1,644,445,696 B (1.53 GiB) about two minutes later, while a project reindex ran.
+- Container: 1.29–1.31 GiB RAM. CPU 0.24% idle and 98% during the reindex. The CPU fallback ran at about 3200% for the same kind of load.
+- Single-request `inference_time`: 16–17 ms on the GPU, against 0.5–1 s on CPU. `queue_time` fell from 1.3–4.6 s to under 0.4 ms.
+
+Forced reindex (`index(action="build", force=true)`, project `codescout`, same day): `elapsed_ms=1840955`, which is 30 m 41 s, for 100,032 chunks in 2,969 files. That is about 54 chunks/s. The 6 m 36 s / 21,115-chunk baseline is about 53 chunks/s, so throughput is the same within rounding. SPLADE process VRAM after the build: 1,644,445,696 B (1.53 GiB), identical to the reading before it. The earlier 35 s run on the same day was incremental (270 files) and is not comparable.
+
+Still open: VRAM after days of serving (12 days gave 2.89 GiB to 5.30 GiB before the request cap). Whether the cap changes reindex throughput is not shown by this run, because the baseline predates the cap and the hardware load differed.
+
 ## References
 
 - `4036bb9a` — the profile consolidation.
