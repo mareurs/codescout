@@ -15,7 +15,7 @@ tags:
 
 The RAM tier is an opt-in pool of build trees on a zram filesystem. `scripts/gate.sh` and `scripts/with-slot.sh` try it before the disk pool. Design and measurements: [`docs/superpowers/specs/2026-10-31-gate-ram-tier-design.md`](../superpowers/specs/2026-10-31-gate-ram-tier-design.md). Code: `scripts/slot-pool.sh` and `scripts/gate-ram-evict.sh`.
 
-**None of it is installed by the repo.** The repo holds the scripts and this document. The zram drop-in, the pool unit, the config file and the timer exist only on a machine where an operator creates them. The operator runs every root step by hand. No repo script runs `sudo`, writes to `/etc`, or touches the zram device.
+**None of it is installed by the repo.** The repo holds the scripts and this document. The zram drop-in, the pool unit, the config file and the timer exist only on a machine where an operator creates them. The operator runs every root step by hand. No RAM-tier script runs `sudo`, writes to `/etc`, or touches the zram device.
 
 A machine behaves as it did before the tier existed, and prints nothing about it, when two conditions hold. No `gate-pool.env` file exists, and `CODESCOUT_GATE_RAM_POOL` is not set in the environment. A malformed `CODESCOUT_GATE_RAM_` line in an existing file is reported even when no pool is named.
 
@@ -105,7 +105,7 @@ Every `_MB` value is in MiB.
 | Key | Meaning |
 |---|---|
 | `CODESCOUT_GATE_RAM_POOL` | Absolute path of the RAM pool. Unset or empty means no RAM tier. |
-| `CODESCOUT_GATE_RAM_SLOTS` | Number of RAM slots. `0` means no RAM slots: every lease uses the disk pool, and the lease prints no RAM-tier message. |
+| `CODESCOUT_GATE_RAM_SLOTS` | Number of RAM slots, `0` to `64`. `0` means no RAM slots: every lease uses the disk pool, and the lease prints no RAM-tier message. A larger number skips the RAM tier, with a message, because every unnamed lease and the evictor test the slot numbers one by one. |
 | `CODESCOUT_GATE_RAM_GROWTH_MB` | Growth that the pool rule assumes for a run in a warm slot. |
 | `CODESCOUT_GATE_RAM_COLD_MB` | Logical size of a cold slot. The pool rule assumes a small slot still needs `COLD` minus its size. |
 | `CODESCOUT_GATE_RAM_MEM_FLOOR_MB` | `MemAvailable` below this value skips the RAM tier at lease time. The evictor uses the same value as its pressure limit. |
@@ -125,10 +125,15 @@ Every `_MB` value is in MiB.
 - A misspelled key that matches that shape (uppercase letters and underscores only) is ignored silently. For example, `CODESCOUT_GATE_RAM_SLOT=3` does nothing.
 - A quote is part of the value. A quoted number is not a whole number, and a quoted path is not absolute. Both skip the RAM tier, with a message.
 - `CODESCOUT_GATE_RAM_POOL=` with an empty value counts as "not configured". The tier stays off, and nothing is printed.
-- A number must be a whole number of 1 to 12 digits. A value such as `48G`, or an empty number, skips the RAM tier, with a message that names the key and the value. The gate then uses the disk pool.
+- A number must be a whole number of 1 to 12 digits. A value such as `48G`, or an empty number, skips the RAM tier, with a message that names the key and the value. The gate then uses the disk pool. `CODESCOUT_GATE_RAM_SLOTS` is further limited to 64: `65` or `99999999999` skips the RAM tier the same way, with `CODESCOUT_GATE_RAM_SLOTS must be 0 to 64`.
 - A non-empty environment variable of the same name overrides the value in the file.
+- With neither `XDG_CONFIG_HOME` nor `HOME` set (an `env -i` run), there is no config directory and no file is read. The environment variables can still name the whole config.
 
-Each skip writes one line to stderr. The line starts with `<who>: RAM tier skipped: ` and names the cause. Most lines end with the knob that controls the cause.
+Each skip writes one line to stderr. The line starts with `<who>: RAM tier skipped: ` and names the cause. Most lines end with the knob that controls the cause. Besides the config and mount causes above, a lease prints a skip line in these cases:
+
+- All the RAM slots are held. The line is `RAM tier skipped: all N RAM slots are held (CODESCOUT_GATE_RAM_SLOTS)`, and the run uses the disk pool.
+- The pool directory cannot be made or written by your user. The line names the pool and `CODESCOUT_GATE_RAM_POOL`. The shell's own `mkdir:` or `Permission denied` text is not shown.
+- The pool budget does not cover the held slots (see the next section).
 
 ### The pool rule
 
@@ -198,6 +203,8 @@ The evictor removes the slot directory under the lock. It leaves the lock file. 
 
 If it cannot read `MemAvailable`, it prints a note to stderr on each run. An unreadable `MemAvailable` does not count as pressure.
 
+If `flock -n` on a slot lock fails with a status other than 1 (1 means a run holds the slot), the evictor prints `flock failed with exit N` to stderr and skips that slot. The exit code does not change.
+
 ### Exit codes
 
 | Code | Meaning |
@@ -217,14 +224,14 @@ Exit 2 for "not a zram mount" makes the timer unit go failed on every tick while
 
 ## 5. Naming a RAM slot
 
-`scripts/with-slot.sh --slot ram-N` names exactly one RAM slot. A named slot never falls back to the disk pool, and the pool rule does not apply to it. The command stops with exit 2 when the tier is not configured or admitted, `N` is out of range, or the slot is held.
+`scripts/with-slot.sh --slot ram-N` names exactly one RAM slot. A named slot never falls back to the disk pool, and the pool rule does not apply to it. The command stops with exit 2 when the tier is not configured or admitted, `N` is out of range, the slot directory does not exist, or the slot is held.
 
 ## 6. Go-live checks
 
 Do these five checks on the machine before you rely on the tier.
 
-1. **A green gate in a RAM slot.** Run `./scripts/gate.sh` with `CARGO_TARGET_DIR` unset. A preset `CARGO_TARGET_DIR` bypasses the tier completely, for `gate.sh` and for `with-slot.sh`. The output must contain a line that starts with `gate.sh: tier RAM (zram1)`, and `GATE EXITS` must show all lanes at 0. The design measurements ran the test lanes as `--no-run` only.
+1. **A green gate in a RAM slot.** Run `./scripts/gate.sh` with `CARGO_TARGET_DIR` unset. A preset `CARGO_TARGET_DIR` bypasses the tier completely, for `gate.sh` and for `with-slot.sh`. The output must contain a line that starts with `gate.sh: tier RAM (zram1)`, a pool line that starts with `gate.sh: RAM pool total`, and `GATE EXITS` must show all lanes at 0. The design measurements ran the test lanes as `--no-run` only.
 2. **Discard frees RAM.** Run `cat /sys/block/zram1/mm_stat` and note field 3 (`mem_used_total`). Delete an idle slot under its lock: `flock -n /var/cache/codescout-gate-ram/pool/slot-0.lock rm -rf /var/cache/codescout-gate-ram/pool/slot-0`. A failed `flock -n` means a run holds the slot. Wait, then retry. Run `sync`. Read `mm_stat` again. Field 3 must fall. The fall can lag until the next journal commit.
 3. **The real ratio.** With a full slot, divide field 1 (`orig_data_size`) by field 3. The result must stay above 2.2. A lower ratio means the RAM cap can fill before the filesystem does.
 4. **Growth of a warm slot.** Run the gate several times, and once after a `Cargo.lock` change. Measure the slot with `du -sm`. The growth per run must stay under `CODESCOUT_GATE_RAM_GROWTH_MB` (4096).
-5. **The pool unit follows the mount.** As root, run `systemctl restart systemd-zram-setup@zram1.service`. This empties the device and every slot. Then check that `/var/cache/codescout-gate-ram/pool` exists again and that `tune2fs -l /dev/zram1` shows `Reserved block count: 0`. If the mount does not return by itself, or the pool directory is missing, the unit in section 2 does not deliver "after each mount". Start the mount unit by hand and fix the unit.
+5. **The pool unit follows the mount.** Run it when no gate runs. As root, run `systemctl restart systemd-zram-setup@zram1.service`. This empties the device and every slot. Then check that `/var/cache/codescout-gate-ram/pool` exists again and that `tune2fs -l /dev/zram1` shows `Reserved block count: 0`. If the mount does not return by itself, or the pool directory is missing, the unit in section 2 does not deliver "after each mount". Start the mount unit by hand and fix the unit. A pass may come from `Requires=` propagation alone, and then it does not prove the `WantedBy=` link to the mount unit.
