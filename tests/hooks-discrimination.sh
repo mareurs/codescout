@@ -931,6 +931,54 @@ eq "conflicting_identity_records_dash: owner" "$(owner_of f.txt)" "-"
 eq "conflicting_identity_records_dash: route" "$(route_of f.txt)" "id-unset"
 rm -rf "$T"
 
+# The foreign-index guard reads that owner column. It resolves `me` through publish_identity and
+# compares with publish_principal_equal, so a Codex session classifies as a Claude one does, and a
+# row written before the upgrade (a BARE owner) still matches the same id under Codex.
+# `classify_as_codex` prints the raw `--classify` lines then `EXIT=<n>`; stderr is merged.
+classify_as_codex() {
+    env -u GIT_INDEX_FILE -u CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID="$1" \
+        bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1
+    echo "EXIT=$?"
+}
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+add_codex f.txt
+eq "codex_only_own_staged_is_mine" "$(classify_as_codex "$U")" "$(printf 'mine\tcodex:%s\tf.txt\nEXIT=0' "$U")"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo theirs > g.txt
+add_as "$B" g.txt
+eq "claude_peer_staged_is_theirs_with_bare_owner" "$(classify_as_codex "$U")" "$(printf 'theirs\t%s\tg.txt\nEXIT=0' "$B")"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+add_as "$U" f.txt
+eq "pre_upgrade_bare_owner_row_matches_codex_self: row is bare" "$(owner_of f.txt)" "$U"
+eq "pre_upgrade_bare_owner_row_matches_codex_self" "$(classify_as_codex "$U")" "$(printf 'mine\tcodex:%s\tf.txt\nEXIT=0' "$U")"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo theirs > g.txt
+add_as "$B" g.txt
+out="$(env -u GIT_INDEX_FILE CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U" \
+    bash "$SRC/pre-commit-foreign-index.sh" 2>&1 >/dev/null; echo "EXIT=$?")"
+has "conflicting_is_silent_with_stderr_note: exit 0" "$out" "EXIT=0"
+has "conflicting_is_silent_with_stderr_note: names CLAUDE_CODE_SESSION_ID" "$out" "CLAUDE_CODE_SESSION_ID"
+has "conflicting_is_silent_with_stderr_note: names CODEX_SESSION_ID" "$out" "CODEX_SESSION_ID"
+eq "conflicting_is_silent_with_stderr_note: one stderr line" "$(printf '%s\n' "$out" | grep -vc '^EXIT=')" "1"
+eq "conflicting_is_silent_with_stderr_note: stdout empty" \
+    "$(env -u GIT_INDEX_FILE CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U" bash "$SRC/pre-commit-foreign-index.sh" 2>/dev/null)" ""
+out="$(env -u GIT_INDEX_FILE CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U" \
+    bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1 >/dev/null; echo "EXIT=$?")"
+has "classify_conflicting_exits_2: exit 2" "$out" "EXIT=2"
+has "classify_conflicting_exits_2: names CLAUDE_CODE_SESSION_ID" "$out" "CLAUDE_CODE_SESSION_ID"
+has "classify_conflicting_exits_2: names CODEX_SESSION_ID" "$out" "CODEX_SESSION_ID"
+eq "classify_conflicting_exits_2: one stderr line" "$(printf '%s\n' "$out" | grep -vc '^EXIT=')" "1"
+rm -rf "$T"
+
 # 4. liveness: a write is live until its OWN writer commits the path after it. Rows carry
 # explicit times so no case depends on two events landing in different seconds.
 hrs() { date -u -d "$1" '+%Y-%m-%d %H:%M:%S.000'; }
