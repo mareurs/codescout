@@ -574,7 +574,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         ));
     }
 
-    let a = {
+    let mut a = {
         let mut cat = ctx.catalog.lock();
         let id = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
         Args { id, ..a }
@@ -590,6 +590,36 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let original = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx))
         .text_for_write(&full)
         .map_err(crate::librarian::read_door::ReadError::into_anyhow)?;
+    // A bug that becomes `fixed`, `mitigated` or `wontfix` must carry the day it closed:
+    // `tests/issue_frontmatter.rs` refuses `status: fixed` without `closed: YYYY-MM-DD`, and the
+    // bug template asks for it on all three. The server knows the date, so it writes it rather
+    // than leave the gate to refuse the file in whichever session next runs it (the stamp
+    // `create` writes for `opened`). A `closed` the call carries, or the file already has, is the
+    // caller's own fact and is kept; an empty one counts as absent, as it does for the gate.
+    if row.kind == "bug"
+        && matches!(
+            a.patch.status.as_deref(),
+            Some("fixed" | "mitigated" | "wontfix")
+        )
+    {
+        let has_date = |v: &Value| !v.is_null() && v.as_str().is_none_or(|s| !s.trim().is_empty());
+        let in_patch = a
+            .patch
+            .extra
+            .as_ref()
+            .and_then(|e| e.get("closed"))
+            .is_some_and(has_date);
+        let in_file = crate::librarian::frontmatter::parse(&original)
+            .ok()
+            .and_then(|(fm, _)| fm)
+            .is_some_and(|fm| fm.extra.get("closed").is_some_and(has_date));
+        if !in_patch && !in_file {
+            a.patch.extra.get_or_insert_with(Default::default).insert(
+                "closed".to_string(),
+                Value::String(chrono::Utc::now().format("%Y-%m-%d").to_string()),
+            );
+        }
+    }
     let patch = &a.patch;
 
     if patch.body.is_some() && patch.body_edits.is_some() {
@@ -1175,6 +1205,186 @@ mod tests {
             std::fs::read_to_string(tmp.path().join("docs/issues/2026-10-31-v.md")).unwrap();
         assert!(content.contains("opened: 2026-01-02"), "{content}");
         assert!(content.contains("severity: low"), "{content}");
+    }
+
+    /// Value of the frontmatter key `key` in `content`, unquoted.
+    fn fm_value(content: &str, key: &str) -> Option<String> {
+        let prefix = format!("{key}:");
+        content.lines().find_map(|l| {
+            l.strip_prefix(&prefix)
+                .map(|v| v.trim().trim_matches('\'').trim_matches('"').to_string())
+        })
+    }
+
+    async fn create_bug(ctx: &ToolContext, rel_path: &str, extra: serde_json::Value) -> String {
+        let v = crate::librarian::tools::create::call(
+            ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": rel_path,
+                "kind": "bug", "title": "B", "body": "# BUG: b",
+                "extra": extra
+            }),
+        )
+        .await
+        .unwrap();
+        v["id"].as_str().unwrap().to_string()
+    }
+
+    /// `tests/issue_frontmatter.rs` refuses a live bug with `status: fixed` and no `closed`, and the
+    /// bug template asks for `closed` when the status becomes `fixed`, `mitigated` or `wontfix`.
+    /// `update` wrote the status and nothing else, so the failure surfaced at gate time in another
+    /// session. The server knows the date, so it writes it, as `create` does for `opened`.
+    ///
+    /// See `docs/issues/2026-10-31-doc-update-to-fixed-does-not-set-or-ask-for-closed-so-the-gate-fails-later.md`.
+    #[tokio::test]
+    async fn a_bug_set_to_a_closing_status_without_closed_is_stamped_with_todays_date() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        for status in ["fixed", "mitigated", "wontfix"] {
+            let rel = format!("docs/issues/2026-10-31-{status}.md");
+            let id = create_bug(&ctx, &rel, serde_json::json!({})).await;
+            // Read the date on both sides of the call, so a run across midnight UTC is not a flake.
+            let before = chrono::Utc::now().format("%Y-%m-%d").to_string();
+            call(
+                &ctx,
+                serde_json::json!({"id": id, "patch": {"status": status}}),
+            )
+            .await
+            .unwrap();
+            let after = chrono::Utc::now().format("%Y-%m-%d").to_string();
+            let content = std::fs::read_to_string(tmp.path().join(&rel)).unwrap();
+            let closed = fm_value(&content, "closed")
+                .unwrap_or_else(|| panic!("status {status}: no `closed` written:\n{content}"));
+            assert!(
+                closed == before || closed == after,
+                "status {status}: closed {closed:?} is neither {before} nor {after}"
+            );
+        }
+    }
+
+    /// A `closed` the caller sends in the same call is their own fact (a fix that landed on an
+    /// earlier day), so the stamp must not overwrite it.
+    #[tokio::test]
+    async fn a_closed_sent_with_the_status_is_kept() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = create_bug(&ctx, "docs/issues/2026-10-31-k.md", serde_json::json!({})).await;
+        call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": {"status": "fixed", "extra": {"closed": "2026-01-02"}}
+            }),
+        )
+        .await
+        .unwrap();
+        let content =
+            std::fs::read_to_string(tmp.path().join("docs/issues/2026-10-31-k.md")).unwrap();
+        assert_eq!(
+            fm_value(&content, "closed").as_deref(),
+            Some("2026-01-02"),
+            "{content}"
+        );
+    }
+
+    /// Setting a closing status again must not move a `closed` the file already carries.
+    #[tokio::test]
+    async fn an_existing_closed_is_not_moved_by_a_second_status_write() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = create_bug(
+            &ctx,
+            "docs/issues/2026-10-31-e.md",
+            serde_json::json!({"closed": "2026-01-02"}),
+        )
+        .await;
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"status": "fixed"}}),
+        )
+        .await
+        .unwrap();
+        let content =
+            std::fs::read_to_string(tmp.path().join("docs/issues/2026-10-31-e.md")).unwrap();
+        assert_eq!(
+            fm_value(&content, "closed").as_deref(),
+            Some("2026-01-02"),
+            "{content}"
+        );
+    }
+
+    /// The template leaves `closed:` empty at creation, and the gate reads an empty value as
+    /// missing, so an empty `closed` must be stamped like an absent one.
+    #[tokio::test]
+    async fn an_empty_closed_is_replaced_by_the_stamp() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = create_bug(
+            &ctx,
+            "docs/issues/2026-10-31-m.md",
+            serde_json::json!({"closed": ""}),
+        )
+        .await;
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"status": "fixed"}}),
+        )
+        .await
+        .unwrap();
+        let content =
+            std::fs::read_to_string(tmp.path().join("docs/issues/2026-10-31-m.md")).unwrap();
+        let closed = fm_value(&content, "closed").unwrap_or_default();
+        assert!(
+            chrono::NaiveDate::parse_from_str(&closed, "%Y-%m-%d").is_ok(),
+            "closed {closed:?} is not a date:\n{content}"
+        );
+    }
+
+    /// A status that is not closing, and an update that does not touch the status, leave `closed`
+    /// absent: stamping them would claim a bug is closed that is not.
+    #[tokio::test]
+    async fn a_non_closing_status_or_no_status_does_not_stamp_closed() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = create_bug(&ctx, "docs/issues/2026-10-31-n.md", serde_json::json!({})).await;
+        for patch in [
+            serde_json::json!({"status": "investigating"}),
+            serde_json::json!({"status": "taken"}),
+            serde_json::json!({"title": "renamed"}),
+        ] {
+            call(&ctx, serde_json::json!({"id": id, "patch": patch}))
+                .await
+                .unwrap();
+        }
+        let content =
+            std::fs::read_to_string(tmp.path().join("docs/issues/2026-10-31-n.md")).unwrap();
+        assert_eq!(fm_value(&content, "closed"), None, "{content}");
+    }
+
+    /// Only a bug has the `closed` obligation. A spec may use the word `fixed` for a status of its
+    /// own and must not gain an unasked-for key.
+    #[tokio::test]
+    async fn a_non_bug_set_to_fixed_is_not_stamped_with_closed() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "docs/specs/s.md",
+                "kind": "spec", "title": "S", "body": "x"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"status": "fixed"}}),
+        )
+        .await
+        .unwrap();
+        let content = std::fs::read_to_string(tmp.path().join("docs/specs/s.md")).unwrap();
+        assert_eq!(fm_value(&content, "closed"), None, "{content}");
     }
 
     /// Another kind may carry an `opened` key of its own meaning; the rule belongs to the bug
