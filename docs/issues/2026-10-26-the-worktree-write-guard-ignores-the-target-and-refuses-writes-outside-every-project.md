@@ -1,10 +1,13 @@
 ---
 id: ecb3508a7f51f803
 kind: bug
-status: open
+status: investigating
 title: guard_worktree_write refuses writes whose target is outside every project, because it decides on the session and not on the target
 tags:
 - cluster/unclassified
+local_fix_branch: research/checked-real-task-20261024
+local_fix_commit: bc32dc291ebee89bc630181fac72f82290f6f6af
+local_fix_patch_id: 7e747cb09376244a88ffc05c50488b671dd3a389
 opened: 2026-10-26
 owner: marius
 severity: low
@@ -46,11 +49,15 @@ Whether an outside-project write would be refused later by the write-root checks
 
 ## Fix
 
-Open. Skip the guard when the resolved target is outside every project root.
+Implemented and verified locally on 2026-10-27 in `/tmp/codescout-real-task-20261024`, branch `research/checked-real-task-20261024`, commit `bc32dc291ebee89bc630181fac72f82290f6f6af`, patch-id `7e747cb09376244a88ffc05c50488b671dd3a389`. Not merged or installed; the main checkout still needs integration.
+
+The three arbitrary-target callers now skip the project-selection guard only outside active, linked and discovered project roots; normal authorization still runs. Atomic file writes classify the parent plus unresolved leaf, while directory approvals resolve the leaf directory. Independent review reproduced a file-symlink defect in the initial low-effort candidate, and the supervisor repaired it before acceptance.
 
 ## Tests added
 
-None. A test would create a file in a temp dir outside the root, with worktrees present and no activation, and expect success.
+The local branch adds `/tmp/codescout-real-task-20261024/tests/worktree_write_scope.rs` (six original acceptance tests, baseline outside-target failures observed first) and `/tmp/codescout-real-task-20261024/tests/worktree_write_scope_review.rs` (eleven independent review tests through the production call_content entry). Coverage includes outside controls, main/linked roots, directory aliases, discovered and relocated members, malformed/opaque paths, normalized aliases and both file-symlink directions.
+
+Final applied mutation review: eight killed, zero survivors. The original candidate had four kills and one survivor; the exact survivor was observed killed after adding its regression. Full `./scripts/gate.sh --check` passed Python light, formatting, clippy, lean and default lanes; gate source hashes stayed unchanged. Evidence and limitations are recorded on the local branch in `/tmp/codescout-real-task-20261024/docs/research/2026-10-27-checked-real-use-worktree-write.md`.
 
 ## Workarounds
 
@@ -65,7 +72,7 @@ Not a hint fix, so it was held back from the 2026-10-27 batch. Checked 2026-10-2
 - "Outside every project root" must be decided with care. A linked worktree path is outside the main root but is exactly what the guard exists for, so the test must count every worktree from `list_git_worktrees` and every workspace member as a project.
 - Still not checked: whether the write-root checks refuse a `/tmp` target regardless. If they do, skipping the guard only changes which error the caller sees.
 
-Next action: decide the "inside a project" predicate, then add a failing test that creates a file in a temp dir outside the root with worktrees present and no activation.
+Next action: integrate the locally verified branch cited above when authorized, then verify the integrated checkout. The implementation claim has been released; status remains investigating because this main checkout has not received the fix.
 
 ## References
 

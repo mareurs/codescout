@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 51
+entry_high_water_F: 52
 entry_high_water_W: 28
 entry_prefix:
 - F
@@ -79,6 +79,7 @@ surfaces, not the definition.
 | F-49 | One fact had four representations, and three review rounds each fixed the one named — a grep over the known phrasings cannot find the form nobody has described yet | open |
 | F-50 | I attributed three files from index membership while citing the Session-Id trailer as the right channel in the same message — and the true author was a third session | open |
 | F-51 | The stage log is keyed by blob; I queried it by path and got a confident wrong owner from a `retained` pre-image row | open |
+| F-52 | Setup A/B spec assumed the S5 snapshot keeps `.codescout/` state; S5's task builder removes it at every depth | fixed |
 
 ## Wins Index
 
@@ -4327,6 +4328,19 @@ done | sort | uniq -c
 **Remedy.** Query by blob, never by path, and treat a `retained` row as history rather than state. `docs/PROBES.md`'s row for this log should say so at the read surface — an instrument documented without its key is documented for an author who already knows it.
 
 **Rests on:** `prompt-surface-measurement-session-log:F-50`; `issue-clusters:IC-6`.
+
+## F-52 — Setup A/B spec assumed the S5 snapshot keeps `.codescout/` state; S5's task builder removes it at every depth
+
+**Valid:** dated 2026-10-27
+**Status:** fixed
+
+**Observed:** The first draft of `docs/superpowers/specs/2026-10-27-codescout-setup-ab-design.md` (branch `research/setup-ab-eval-20261027`, commit before `f56419866`) had leakage gate 3 say "codescout state in the snapshot is the state at the task's parent commit". It also left "does S5 replace the repository CLAUDE.md?" as an open question. Reading `claude-plugins/effort-steering/spikes/s5/build-task.mjs` (lines 13–14 and 63) showed that `buildTask` removes `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.codescout/` and `.buddy/` at every depth. It then writes the tool-neutral `task-claude.md.tmpl`.
+
+**Cost if missed (med):** The spec would have promised that the `cs` arm sees project memories and trackers, which the reused task builder removes. A null result could then have been read as "memories do not help", although no arm had them.
+
+**Fix:** Gate 3 now states the removal and its consequence. Project-memory value is moved out of scope (§ 9 item 1), and the CLAUDE.md question is closed by gate 3.
+
+**Rests on:** `build-task.mjs:13-14,63,228-231` and `task-claude.md.tmpl`, read 2026-10-27.
 
 ## Template for new entries
 
