@@ -1,15 +1,15 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-10-29
+tags:
+- cluster/declared-not-wired
 closed: 2026-10-30
-severity: medium
+opened: 2026-10-29
 owner: marius
 related:
 - docs/issues/2026-10-28-a-nested-git-repo-cannot-join-a-workspace-as-a-project-and-pinned-onboarding-mixes-in-the-home-workspace.md
-tags:
-- cluster/declared-not-wired
-kind: bug
-unverified: "CLEARED 2026-10-30. Was: gate not run on a clean tree. Still not run: a member whose own project.toml names a project differently from its id; the other readers of config.project.name for a member (project_status, dashboard, prompt builders, activation response)."
+severity: medium
+unverified: 'TRACKED 4b2dacc49345f964 — the CLI index and migrate-memories open a member by its directory and key it by the directory name. Read 2026-10-31 and found consistent with the declared id: project_status and the activation response (display), the prompt builder''s preference key, and the keys in semantic_search, index and onboarding. Not run: a member whose own project.toml names a project differently from its id; the dashboard on a member root (display only, noted in the tracked issue). The earlier doubt about a clean-tree gate was CLEARED 2026-10-30.'
 ---
 
 # BUG: semantic_search(project_id=<declared member id>) returns no results because an index is keyed by the member's directory name
