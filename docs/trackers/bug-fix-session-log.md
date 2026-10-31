@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 201
-entry_high_water_W: 151
+entry_high_water_F: 205
+entry_high_water_W: 153
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -66,7 +66,13 @@ entry_high_water_W: 151
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-197 | 2026-10-15 | med | stale-doc | fixed-verified | **The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it** — the live collection is per project (`artifact_chunks_<base>_<hash>`, 48,223 points here), so my "the Qdrant index looks stale" was wrong. Corrected in `934946e9`. |
+| F-198 | 2026-10-21 | med | tool-behavior | fixed-verified | **Quiet ref verification conflates absence with corruption** — a real commit passed until the lookup distinguished missing from failure. |
+| F-199 | 2026-10-24 | high | eval-design | fixed-verified | **Direct build-script checks missed Cargo scheduling** — all4 passed frozen17; real warm Cargo checks exposed stale metadata, and final38 mutations are detected. |
 | F-201 | 2026-10-29 | high | plan-drift | open | **The background-wake spec arms on an input flag that `@ack_*` replays never carry** — plus `set_job_state` no-ops after eviction and the re-arm rule cannot locate a record from a handle. |
+| F-205 | 2026-10-31 | med | process | open | **A mutation check run in the shared checkout was compiled by a peer's gate and cost it a red run** — I hand-mutated a filter with `edit_file`; `scripts/mutation-probe.sh` already isolates mutants and I did not use it. |
+| F-204 | 2026-10-31 | low | tool-behavior | fixed-verified | **A pinned lookup in a stale worktree said `0 matches` for a test that existed one commit later** — a peer committed to the same file right after I branched; compare `HEAD` in both trees before suspecting the name. |
+| F-203 | 2026-10-31 | low | process | fixed-verified | **A bug marked `open` and unclaimed was already being edited by a peer, uncommitted** — I claimed it, saw `engine_env` in a modified `attribution.rs`, and released; check `git status` on the files a bug names before claiming. |
+| F-202 | 2026-10-31 | med | test-design | fixed-verified | **A new lint passed on the real corpus while blind to four of the five citations it checks** — a heading rename survived it until the mutation ran; fixed in `55bfa87fb` with a floor of 5. |
 | F-196 | 2026-10-15 | med | plan-drift | fixed-verified | **The artifact backend is resolved per process, and the plan treated it as a property of the project** — env outranks `project.toml`, no project in the catalog sets one, and `--all` spans projects, so a per-project selector would have been wrong for it. Fixed in `8c02ad77` and `934946e9`. |
 | F-195 | 2026-10-14 | med | plan-drift | fixed-verified | **"An empty workspace.toml is a reasonable default" was false for classification** — built-in rules cover none of specs, plans, ADRs, audits, handoffs, runbooks, ROADMAP or manual; the only copy of those nine rules is test-only `import_codescout`. |
 | F-194 | 2026-10-14 | med | api-contract | fixed-verified | **Remote embedder dimensions are unknown until the first response** — three observed RED regressions now pass; probe ordering/counts and the full gate are verified. |
@@ -272,7 +278,9 @@ entry_high_water_W: 151
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-153 | 2026-10-31 | med | **A scout of the gate pool's test runner found that only CI runs `tests/gate-slot.sh`, through a hit the default grep hid.** Re-running a negative search with `include_hidden=true` before planning on it. | Inferred: a plan that trusted gate-green for the pool tests and read real `/sys/block/zram*` in CI. Observed: 23 files without `.github/workflows/ci.yml`, 27 with it. | validated |
 | W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
+| W-152 | 2026-10-31 | med | **A write-side fix was verified live on a record I could restore byte for byte.** Clean in git, one call, read the diff, restore, clean again; then the `unverified:` caveat was discharged. | Inferred: gate-green read as live-verified on a server that predated the fix, or a real bug left closed by the probe. Observed: `closed: 2026-10-31` written by a status-only call, `git status` empty after the restore. | validated |
 | W-150 | 2026-10-01 | med | **Three mutants at three sites separated "the label says repo" from "the population is repo", and only the third reached the population assertion.** Reading which assertion killed each mutant, not how many died. | Inferred: M2's kill would have been reported as covering the whole property while the population assertion behind the label check stayed unexercised. Observed: M3 failed at `:427` alone, with the label still `repo`. | validated |
 | W-148 | 2026-09-30 | med | **A red baseline on files I had not touched was an authorship question, and asking it before the first edit kept two sessions from writing the same markers.** Suite, then `git status`, then provenance, then the peer's diff read-only. | Inferred, not observed: a second marker helper over three of the peer's uncommitted functions in a hash-frozen file, plus literals re-invalidated. Observed: the peer's claim that the markers were done held at the bytes. Second data point after `W-135`. | validated |
 | W-149 | 2026-09-30 | med | **A comment predicting the exact regression sat beside a fixture that could not see it.** Reading what the fixture PASSES (`is_write=false` hard-coded for `"workspace"`), not what it asserts, exposed the gap. | Inferred: an exemption fix with both old guards green and the exemption unguarded. Observed: widening it was caught by the new exact-set pin alone. | validated |
@@ -17587,6 +17595,37 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 
 **Valid:** dated 2026-10-15
 
+## F-198 — Quiet ref verification conflates an absent hold with a corrupted hold
+
+**Valid:** dated 2026-10-21
+
+**Severity:** med
+**Category:** tool-behavior
+**Status:** fixed-verified
+**Observed:** While implementing the commit-side publish hold check on 2026-10-21, a real-commit regression test with a broken loose ref still committed. In the same fixture, `git show-ref --verify --quiet refs/holds/<sid>` returned 1 with no diagnostics, while `git show-ref --exists refs/holds/<sid>` returned 1 with a lookup error. For an absent ref, the latter returned 2. The assumption that quiet verification reserved 1 for absence was false.
+
+**Resolution:** The dispatcher now uses `--exists` and permits only its explicit missing-ref result. The corrupted-ref regression test failed before that change and passed after it. Git versions without the operation refuse with a lookup error; this compatibility limit is documented. See `docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`.
+
+## F-199 — Direct build-script checks missed Cargo scheduling, so all four passing candidates retained production gaps
+
+**Observed:** 2026-10-24, matched ordinary-low versus checked-low trial on build.rs, issue 5f247e864d241b0f. Four raw candidates passed the frozen17 unittest methods; both checked attempts passed first Stop with no repair.
+
+**Expected:** The checks would reject a source metadata implementation that reports clean after a changed source is compiled.
+
+**Actual:** The check compiled the actual build.rs but executed it directly on every fixture. That observation cannot express Cargo declining to rerun the script. Independent stabilized offline Cargo fixtures compiled a changed source marker with DIRTY=0. Linked worktrees additionally reran perpetually because hardcoded administrative watch paths were missing. After the fixture included actual warm Cargo scheduling, all four raw candidates failed retrospective24-method validation. Frozen17 scores were retained, not relabeled.
+
+**Correction:** Watch the conservative source scope and resolved Git administrative locations; use --no-optional-locks after a fingerprint trace showed status refreshing the watched index. Warm ordinary/linked fixtures now observe source additions, index-only changes, loose refs, packed-only refs, detached HEAD and stable no-op output mtimes. Actual final38 mutation replay detects all38;37 assertion failures and one runtime missing-output detection, no compiler failures. HEAD/packed-ref watch mutants initially survived and were observed before discriminating tests were added.
+
+**Counterfactual:** Directly executing a build script always reruns it, so a broken Cargo schedule produces the same original17 green result. Passing those checks established conditional output behavior, not incremental-build correctness. No claimed causal benefit from Stop enforcement.
+
+**Severity:** high — would leave false-clean production metadata after an ordinary source rebuild despite a passing checker.
+
+**Status:** fixed-verified — executable scheduling regressions and actually applied site mutations verified; full repository gate remains a separate in-progress check.
+
+**Valid:** dated 2026-10-24
+
+**Pointers:** Worktree /tmp/codescout-real-task-20261024, local issue7876532ee3fda7b6, docs/research/2026-10-24-matched-checked-completion.md; persistent evidence .codescout/resident-private/matched-real-task-20261024. No merge, push or global hook change.
+
 ## F-200 — A declared nested-repo member would keep its memory in the parent checkout, not in its own .codescout/
 
 **Valid:** dated 2026-10-28
@@ -17620,6 +17659,86 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Cost if missed:** (1) is a silent loss of the wake-up on every acked background command — the case goal 3 forbids. (2) and (3) would surface only in the builder's integration run, after both repos changed.
 
 **Resolution:** fold into the spec before planning — arm on the spawn response shape (`output_id` starts `@bg_` and no `exit_code`), write the record from the supervisor directly, keep a per-session handle→record map written at arm time.
+
+## F-202 — A new lint passed on the real corpus while blind to four of the five things it checks
+
+**Valid:** dated 2026-10-31
+
+**Observed:** Writing `every_section_citation_in_the_guides_resolves_to_a_heading` (`src/prompts/guide_index.rs`, `55bfa87fb`, for `7579b32b1cd2362f`). The first scanner wanted ` § ` straight after `get_guide("t")`. Four of the five citations in `src/prompts/guides/*.md` write `` `get_guide("t")` § *H* `` with a closing backtick between `)` and the section sign, so the scanner saw one citation. Its only guard was `checked > 0`, which the one visible citation satisfied. The test was green, and a plain grep (`get_guide(...)[^\n]{0,12}§`) had already shown five.
+
+**Caught by:** renaming a cited heading in `librarian-runtime.md` and re-running the lint. The first version stayed green with a heading that no longer existed. Only that mutation on the real corpus showed the blind spot; the synthetic-corpus tests I had written could not, because they used the same form the scanner expected.
+
+**Cost if missed:** a guard that reports "0 dangling" while covering 20% of its population. The next heading rename would have shipped with the lint green.
+
+**Resolution:** the scanner accepts the backtick, a test pins that form, and the real-corpus test asserts `checked >= 5` with a message saying why. Pattern: a lint's floor on how many things it examined is part of its correctness, and a mutation on the real input is the check that finds a scanner narrower than its target.
+
+**Status:** fixed-verified
+
+## F-203 — A bug marked open and unclaimed was already being edited by a peer, uncommitted
+
+**Valid:** dated 2026-10-31
+
+**Observed:** I claimed bug `20927ccfe293c34e` (status `taken`, my session id) after reading its body and `AttributionEnv`. The next grep showed `engine_env` in `src/tools/run_command/attribution.rs`, a field the bug's Resume says does not exist yet. `git log` had no commit for it and `git status` showed the file modified: a peer, `codescout-5a`, was mid-edit on exactly the bug I had just claimed. The bug was `open` and unclaimed, so its own claim query offered it to me.
+
+**Cost if missed:** two sessions editing one file for one defect, and a `taken` claim in the catalog that was false for the real owner. Here it cost a claim and release pair on the bug's event log and two cross-session messages. The peer replied that the edit was theirs and asked me to leave the file and bug alone.
+
+**Resolution:** I released the claim back to `open` and did not touch the file. Rule for next time: before claiming a bug, run `git status` on the files its Resume or Fix section names, and check the bug's own `updated_at`. An `open` status with unclaimed fields says nobody has claimed it, not that nobody is working on it. A peer's uncommitted diff is the signal the catalog does not carry.
+
+**Status:** fixed-verified
+
+## F-204 — A pinned lookup in a stale worktree said 0 matches for a test that existed one commit later
+
+**Valid:** dated 2026-10-31
+
+**Observed:** For `762915bf35f7a909` I created a worktree from `experiments`; it reported `HEAD is now at 3cbce3ed6`. A symbol lookup pinned to the worktree, `a_valid_opened_and_other_extra_keys_are_accepted_by_update_on_a_bug`, returned `0 matches`, and a pinned grep for it also returned 0. The same file in the main checkout, read a minute earlier, contained that test. An unpinned `git log` then showed the main checkout at `a10e819bf`, 4241 lines against the worktree's 4118: a peer had committed `fix(librarian): doc(update) refuses a bug whose extra.opened is not a real YYYY-MM-DD date` to `update.rs` just after I branched, in the area I was about to edit.
+
+**Cost if missed:** an `insert after` on a symbol that did not exist in my tree, or a rebase conflict in the same hunk later. It cost four diagnostic calls. The `0 matches` carried no hint that the tree, not the name, was the difference.
+
+**Resolution:** I rebased the still-empty branch onto `experiments` before writing any code, and the test was there. Rule for next time: when a pinned lookup disagrees with a read from the other tree, compare `git rev-parse --short HEAD` in both before suspecting the name. And branch a worktree and write code in the same short window, or rebase first; `experiments` moved four times during this session's 20-minute gate runs.
+
+**Status:** fixed-verified
+
+## W-152 — A write-side fix was verified live on a record restored byte for byte
+
+**Valid:** dated 2026-10-31
+
+**What worked:** Closing `762915bf35f7a909` (`doc(update)` to `fixed` writes no `closed`). Unit tests and a green gate had landed, but the server running at close time predated the fix, so the bug carried an `unverified:` caveat. After the rebuild I ran the live check on a record I could restore byte for byte: confirmed the server contains the fix (`git merge-base --is-ancestor`), confirmed the target file was clean in git, sent only `status: fixed` on a bug with no `closed`, read the diff (`closed: 2026-10-31` appeared), restored the bug (`status: open`, `closed: null`), and confirmed `git status` was empty for that file. Then I discharged the caveat with a `CLEARED` marker that kept the sentence recording what had been doubted.
+
+**Counterfactual:** the caveat would have stayed open until someone else noticed it, and a gate-green fix of a write path would have been read as live-verified. The obvious shortcut, flipping a real bug and leaving it, would have either closed an open bug by accident or left a stray `closed:` key in a tracked file. Cost of the check: six tool calls.
+
+**Promote-when:** a second write-side fix is verified live with the same shape (clean-before, one call, read the diff, restore, clean-after).
+
+**Status:** validated
+
+## F-205 — A mutation check run in the shared checkout was compiled by a peer's gate and cost it a red run
+
+**Valid:** dated 2026-10-31
+
+**Observed:** While I tested `local_evidence_dirs` in `src/lsp/init_options.rs`, I removed its `is_dir` filter in place, ran the tests red, and restored the filter. A second mutant removed the root guard the same way. During the first mutant, a peer session ran `./scripts/gate.sh` on the same checkout. Its lean lane failed three tests: the new `local_evidence_dirs_lists_only_the_directories_that_exist` (line 376, the line my mutant broke) and the two handshake tests `the_mux_handshake_excludes_nested_worktrees_for_rust_analyzer` and `initialize_excludes_nested_worktrees_for_rust_analyzer`. The handshake tests run in a temp workspace. They saw `.codescout/resident-private` only because the mutant returned the directory for every workspace.
+
+**Cost:** One red gate run for the peer, and one question to me. The peer did not edit the file and waited. I needed two tool calls to read both handshake tests, and one run on the restored file, before I could say the failures were mine and transient.
+
+**Counterfactual:** Run `./scripts/mutation-probe.sh --file <path> --find <literal> --replace <literal> --test <filter>`. By default it mutates a leased worktree under `<root>.worktrees` and carries the working tree into it. The peer's gate would not have seen the mutants, and the evidence would have been the same.
+
+**Check:** The peer's three red tests all trace to the one mutant. On the restored file, `init_options` 15 of 15 and both handshake tests pass. I then read `scripts/mutation-probe.sh`. It isolates by default, and its `--shared` flag is only for mutations whose subject is the shared checkout. The cause is a tool I did not use, not a tool that was missing. I mutated by hand with `edit_file`. I did not read the script's flags or run it, so I have not confirmed that it handles this file.
+
+**Promote-when:** The rule already exists: `CLAUDE.md` § Testing Discipline names `./scripts/mutation-probe.sh`, and the script's header gives the reason. A second hand-mutation that costs a peer a red gate means the rule does not reach the session, and then it needs a hook, not a document.
+
+**Status:** open
+
+## W-153 — The gate pool's test suite is run only by CI, and the default grep hid that
+
+**Valid:** dated 2026-10-31
+
+**Context:** planning the gate RAM tier (`docs/superpowers/specs/2026-10-31-gate-ram-tier-design.md`), whose tasks extend `tests/gate-slot.sh`.
+
+**Observed:** `grep(pattern="gate-slot", mode="files")` returned 23 files and no runner for `tests/gate-slot.sh`. `include_hidden=true` returned 27, including `.github/workflows/ci.yml`, where the job `gate-slot-tests` runs `bash tests/gate-slot.sh` on `ubuntu-latest`. `scripts/gate.sh` does not run the suite. Filed the silent partial result as `e313cba4b1d3d738`.
+
+**What the scout changed in the plan:**
+- every RAM-tier probe (`findmnt`, `/proc/meminfo`, `mm_stat`, `df`) must be injectable, because the CI runner has no zram device;
+- every task runs `bash tests/gate-slot.sh` itself, because a green `./scripts/gate.sh` says nothing about this suite.
+
+**Counterfactual:** inferred, a plan that trusted "gate green" for the pool tests, plus tests that read the real `/sys/block/zram*`, which fail on the CI runner. Observed: the 23-file result with no `.github/` hit and no warning.
 
 ## Template for new entries
 
