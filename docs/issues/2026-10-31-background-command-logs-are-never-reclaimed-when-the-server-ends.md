@@ -83,7 +83,7 @@ The census quoted under Symptom. The scripts are session scratch files, not kept
 
 Not fixed. Options, in order of cost:
 
-1. Put the log path into `JobRecord` (a schema bump) so that `sweep_stale` unlinks the log together with its record. This covers only logs created after the change: the logs that exist now have no record, so it needs option 2 as well.
+1. Put the log path into `JobRecord` as an ADDITIVE field, and do NOT bump `RECORD_SCHEMA`: the companion plugin's wake hook returns early for any record whose `schema` is not 1 (`claude-plugins/codescout-companion/hooks/wake-on-job-end.mjs:160` and `:230`, tested by cases 20c and 20e of `wake-on-job-end.test.sh`), so a bump would silence the wake for every new job. Then `sweep_stale` can unlink the log together with its record. This covers only logs created after the change: the logs that exist now have no record, so it needs option 2 as well.
 2. Sweep orphan `codescout-bg-*.log` files by mtime at server start and on the existing housekeeping pass, with an age shorter than the 7 days used for records (a log is a copy of output the agent has already read).
 3. Delete a log when the wake has been delivered and the output read (the `.delivered` sidecar exists today), as an explicit acknowledgement.
 
