@@ -1501,6 +1501,214 @@ Body Mu.
         }
     }
 
+    /// Every `get_guide("topic") § heading` citation in `body`, as `(topic, heading)`.
+    ///
+    /// A citation is `get_guide("t")` followed by ` § ` and a heading: `*emphasised*` (which may
+    /// itself contain commas) or plain text up to the next comma. Lines inside a fenced block are
+    /// skipped, because the guides teach call syntax by example and an example may be fictional;
+    /// the cost is that a real citation placed inside a fence is not checked.
+    fn citations(body: &str) -> Vec<(String, String)> {
+        let mut found = Vec::new();
+        let mut in_fence = false;
+        for line in body.lines() {
+            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+                in_fence = !in_fence;
+                continue;
+            }
+            if in_fence {
+                continue;
+            }
+            let mut rest = line;
+            while let Some(at) = rest.find("get_guide(") {
+                rest = &rest[at + "get_guide(".len()..];
+                let after_open = rest.trim_start_matches(['\\', '"']);
+                let topic: String = after_open
+                    .chars()
+                    .take_while(|c| c.is_ascii_lowercase() || *c == '-')
+                    .collect();
+                if topic.is_empty() {
+                    continue;
+                }
+                let after_topic = after_open[topic.len()..].trim_start_matches(['\\', '"']);
+                let Some(after_paren) = after_topic.strip_prefix(')') else {
+                    continue;
+                };
+                let Some(cited) = after_paren
+                    .strip_prefix('`')
+                    .unwrap_or(after_paren)
+                    .strip_prefix(" § ")
+                else {
+                    continue;
+                };
+                let heading = match cited.strip_prefix('*') {
+                    Some(emphasised) => emphasised.split('*').next().unwrap_or("").to_string(),
+                    None => cited
+                        .split(',')
+                        .next()
+                        .unwrap_or("")
+                        .trim_end_matches('.')
+                        .to_string(),
+                };
+                found.push((topic, heading.trim().to_string()));
+            }
+        }
+        found
+    }
+
+    /// Whether `cited` names a heading in `headings`: an exact match, case-insensitively, or,
+    /// failing that, a prefix of exactly one heading. The prefix arm exists because the guides
+    /// cite `*Bug files*` for the heading `Bug files (docs/issues/)`; an exact match wins so a
+    /// short heading is not made ambiguous by a longer one that starts with it.
+    fn heading_resolves(cited: &str, headings: &[String]) -> bool {
+        let want = cited.trim().to_lowercase();
+        let lowered: Vec<String> = headings.iter().map(|h| h.to_lowercase()).collect();
+        lowered.contains(&want) || lowered.iter().filter(|h| h.starts_with(&want)).count() == 1
+    }
+
+    /// `(citations checked, one message per citation that names no real heading)` over a
+    /// `(topic, body)` corpus.
+    fn check_citations(corpus: &[(&'static str, &'static str)]) -> (usize, Vec<String>) {
+        let headings_of = |topic: &str| -> Option<Vec<String>> {
+            let (_, body) = corpus.iter().find(|(t, _)| *t == topic)?;
+            Some(
+                split_sections(body)
+                    .1
+                    .into_iter()
+                    .map(|s| s.heading)
+                    .collect(),
+            )
+        };
+        let mut checked = 0;
+        let mut dangling = Vec::new();
+        for (from, body) in corpus {
+            for (topic, heading) in citations(body) {
+                checked += 1;
+                match headings_of(&topic) {
+                    None => dangling.push(format!(
+                        "{from} cites get_guide(\"{topic}\") § {heading}, but there is no topic `{topic}`"
+                    )),
+                    Some(headings) if !heading_resolves(&heading, &headings) => {
+                        dangling.push(format!(
+                            "{from} cites get_guide(\"{topic}\") § {heading}, which is not a heading of `{topic}`"
+                        ))
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        (checked, dangling)
+    }
+
+    #[test]
+    fn every_section_citation_in_the_guides_resolves_to_a_heading() {
+        // `get_guide` takes a topic and nothing narrower, so a caller cannot follow a
+        // section-qualified citation with the tool: it must read the heading in the body it
+        // already holds. A renamed heading turns the citation into a pointer at nothing.
+        let corpus: Vec<(&'static str, &'static str)> = crate::prompts::GUIDE_TOPICS
+            .iter()
+            .map(|t| (*t, crate::prompts::topic_body(t).unwrap()))
+            .collect();
+        let (checked, dangling) = check_citations(&corpus);
+        assert!(
+            checked >= 5,
+            "the citation scan checked {checked} citations; the guides held 5 when this test was \
+             written (4 of them wrapped in backticks, which a first version of the scanner missed). \
+             A drop means the scanner lost a citation form, or citations were removed on purpose: \
+             lower this floor only for the second reason."
+        );
+        assert!(
+            dangling.is_empty(),
+            "dangling guide citations:\n{}",
+            dangling.join("\n")
+        );
+    }
+
+    #[test]
+    fn a_citation_of_a_renamed_heading_is_reported() {
+        let corpus = [
+            ("a", "see get_guide(\"b\") § *Old name*.\n"),
+            ("b", "## New name\nbody\n"),
+        ];
+        let (checked, dangling) = check_citations(&corpus);
+        assert_eq!(checked, 1);
+        assert_eq!(dangling.len(), 1, "{dangling:?}");
+        assert!(dangling[0].contains("Old name"), "{dangling:?}");
+    }
+
+    #[test]
+    fn a_citation_of_an_unknown_topic_is_reported() {
+        let corpus = [("a", "see get_guide(\"nope\") § *Anything*.\n")];
+        let (_, dangling) = check_citations(&corpus);
+        assert_eq!(dangling.len(), 1, "{dangling:?}");
+        assert!(dangling[0].contains("no topic `nope`"), "{dangling:?}");
+    }
+
+    #[test]
+    fn a_citation_whose_call_is_wrapped_in_backticks_is_checked() {
+        // Four of the five citations in the guides are written `get_guide("t")` § *H*, with the
+        // closing backtick between the parenthesis and the section sign. A scanner that wants
+        // " § " straight after ")" checks only the unwrapped one and passes with the rest broken.
+        let corpus = [
+            ("a", "see `get_guide(\"t\")` § *Gone*.\n"),
+            ("t", "## Present\nx\n"),
+        ];
+        let (checked, dangling) = check_citations(&corpus);
+        assert_eq!(checked, 1);
+        assert_eq!(dangling.len(), 1, "{dangling:?}");
+    }
+
+    #[test]
+    fn a_unique_prefix_of_a_heading_resolves_and_an_ambiguous_one_does_not() {
+        let target = "## Bug files (docs/issues/)\nx\n## Declaring an augmentation — why\ny\n## Declaring an augmentation — how\nz\n";
+        let unique = [("a", "get_guide(\"t\") § *Bug files*.\n"), ("t", target)];
+        assert!(check_citations(&unique).1.is_empty());
+        let ambiguous = [
+            ("a", "get_guide(\"t\") § *Declaring an augmentation*.\n"),
+            ("t", target),
+        ];
+        assert_eq!(check_citations(&ambiguous).1.len(), 1);
+    }
+
+    #[test]
+    fn an_exact_heading_beats_a_longer_heading_that_starts_with_it() {
+        let target = "## Declaring an augmentation\nx\n### Declaring an augmentation — why\ny\n";
+        let corpus = [
+            ("a", "get_guide(\"t\") § *Declaring an augmentation*.\n"),
+            ("t", target),
+        ];
+        assert!(check_citations(&corpus).1.is_empty());
+    }
+
+    #[test]
+    fn a_plain_heading_ends_at_the_comma_and_an_emphasised_one_may_contain_it() {
+        let target = "## Path-relative annotation\nx\n### One entry format, never two\ny\n";
+        let corpus = [
+            (
+                "a",
+                "is get_guide(\"t\") § Path-relative annotation, which owns it.\n",
+            ),
+            (
+                "b",
+                "get_guide(\"t\") § *One entry format, never two* has the numbers.\n",
+            ),
+            ("t", target),
+        ];
+        let (checked, dangling) = check_citations(&corpus);
+        assert_eq!(checked, 2);
+        assert!(dangling.is_empty(), "{dangling:?}");
+    }
+
+    #[test]
+    fn a_citation_inside_a_fenced_example_is_not_checked() {
+        let corpus = [
+            ("a", "```\nget_guide(\"t\") § *Fictional*\n```\n"),
+            ("t", "## Real\nx\n"),
+        ];
+        let (checked, dangling) = check_citations(&corpus);
+        assert_eq!(checked, 0);
+        assert!(dangling.is_empty());
+    }
+
     #[test]
     fn librarian_declares_the_six_highest_volume_artifact_shapes() {
         // These six are 9,695 of 10,920 observed artifact/librarian calls (89%).
