@@ -72,6 +72,12 @@ pub struct JobRecord {
     pub error: Option<String>,
     pub started_at: String,
     pub finished_at: Option<String>,
+    /// The file the job's output goes to. A record written before this field existed has
+    /// none, and so does one for a job whose log is not known: absent, never `null`, so a
+    /// record that names no log is byte-identical to an old one. `RECORD_SCHEMA` stays 1
+    /// on purpose: the wake hook ignores any other schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_path: Option<String>,
 }
 
 impl JobRecord {
@@ -88,7 +94,15 @@ impl JobRecord {
             error: None,
             started_at: chrono::Utc::now().to_rfc3339(),
             finished_at: None,
+            log_path: None,
         }
+    }
+
+    /// Name the file this job's output goes to. Kept apart from `running` so that
+    /// constructor keeps its signature; a record built without this names no log.
+    pub fn with_log_path(mut self, path: &Path) -> Self {
+        self.log_path = Some(path.display().to_string());
+        self
     }
 
     /// Fold an observed terminal `JobState` into the record. A `Running` state leaves
@@ -307,6 +321,51 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(back, rec);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+    /// The ten fields an old (pre-`log_path`) writer produced. A record written before the
+    /// log was named must still parse: the plugin and the sweep read records of any age.
+    #[test]
+    fn a_record_without_log_path_still_parses() {
+        let old = r#"{
+            "schema": 1,
+            "handle": "@bg_00000001",
+            "command": "true",
+            "server_pid": 4242,
+            "job_pid": 4243,
+            "state": "running",
+            "exit_code": null,
+            "error": null,
+            "started_at": "2026-10-29T00:00:00+00:00",
+            "finished_at": null
+        }"#;
+        let rec: JobRecord = serde_json::from_str(old).unwrap();
+        assert_eq!(rec.log_path, None);
+        assert_eq!(rec.handle, "@bg_00000001");
+    }
+
+    /// The wake hook ignores any record whose `schema` is not 1, so naming the log must not
+    /// bump it: a bump would silence the wake for every new job.
+    #[test]
+    fn a_record_with_log_path_round_trips_and_stays_schema_1() {
+        let dir = private_tempdir();
+        let path = record_path(dir.path(), "00000000", "@bg_00000001");
+        let rec = JobRecord::running("@bg_00000001", "true", Some(1))
+            .with_log_path(Path::new("/x/codescout-bg-abc.log"));
+        write_record(&path, &rec).unwrap();
+        let back = read_record(&path).expect("record reads back");
+        assert_eq!(back.log_path.as_deref(), Some("/x/codescout-bg-abc.log"));
+        assert_eq!(back.schema, 1);
+        assert_eq!(back, rec);
+    }
+
+    /// A record that names no log writes no `log_path` key at all (not `null`), so its bytes
+    /// are what an old writer would have produced.
+    #[test]
+    fn a_record_without_log_path_serialises_no_log_path_key() {
+        let rec = JobRecord::running("@bg_00000001", "true", None);
+        assert_eq!(rec.log_path, None);
+        let json = serde_json::to_string(&rec).unwrap();
+        assert!(!json.contains("log_path"), "{json}");
     }
 
     #[cfg(unix)]

@@ -115,7 +115,7 @@ async fn spawn_background_command(
     let job_pid = child.id();
 
     let ref_id = ctx.output_buffer.store_background(BackgroundJob {
-        log_path,
+        log_path: log_path.clone(),
         command: resolved_command.to_string(),
         state: JobState::Running,
     });
@@ -128,7 +128,8 @@ async fn spawn_background_command(
         ctx.output_buffer.record_token(),
         &ref_id,
     );
-    let mut record = JobRecord::running(&ref_id, resolved_command, job_pid);
+    let mut record =
+        JobRecord::running(&ref_id, resolved_command, job_pid).with_log_path(&log_path);
     let first_write = write_record(&record_file, &record);
 
     // The supervisor outlives this call deliberately: it is not tied to the tool

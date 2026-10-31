@@ -13822,6 +13822,36 @@ async fn a_background_spawn_writes_a_running_record_and_returns_its_path() {
 }
 
 #[tokio::test]
+async fn a_background_job_record_names_its_real_log() {
+    let (_p, _r, ctx) = record_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "true", "run_in_background": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let record = result["record"].as_str().expect("record path in response");
+    let rec = read_job_record(record);
+    let log = rec.log_path.expect("the record names its log");
+    let log = std::path::Path::new(&log);
+    assert!(
+        log.is_file(),
+        "{} must be the job's real log",
+        log.display()
+    );
+    let name = log.file_name().unwrap().to_str().unwrap();
+    assert!(
+        name.starts_with("codescout-bg-") && name.ends_with(".log"),
+        "unexpected log name {name}"
+    );
+    // Let the job end so its supervisor is not left writing a record behind us, then
+    // remove only the log this test created.
+    finished_record(record).await;
+    let _ = std::fs::remove_file(log);
+}
+
+#[tokio::test]
 async fn the_record_reaches_exited_with_the_code_when_the_job_ends() {
     let (_p, _r, ctx) = record_ctx().await;
     let result = RunCommand
