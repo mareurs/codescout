@@ -49,6 +49,11 @@ class ControlError(RuntimeError):
     """The container could not be brought to a trustworthy base state, or a step failed."""
 
 
+class ImageRefused(ControlError):
+    """An image must not be pulled now: too large, not enough free space, or its size is unknown.
+    Not a task verdict and not an infrastructure error; `main` reports it as SKIPPED."""
+
+
 def _exec(container, workdir, *cmd, data=None, timeout=600, check=True):
     """`docker exec` in `workdir`; a failing step or a timeout is a ControlError when `check`."""
     args = ["exec"]
@@ -236,6 +241,9 @@ def control(record, *, container, timeout=3600):
 
 
 MIN_FREE_GB = 40
+MAX_IMAGE_GB = 12.0  # cap on the compressed registry size of an image to pull
+UNPACK_FACTOR = 5  # unpacked is at most about this many times the compressed size (measured 4.4-4.6x)
+FREE_MARGIN_GB = 10  # room for the container's own writes
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 PULLED_MARKER = "pulled-image"
 
@@ -254,16 +262,51 @@ def _marked_as_ours(marker, image):
         return False
 
 
-def ensure_image(image, marker=None):
+def registry_gb(image):
+    """Compressed registry size of `image` in GB, from `docker manifest inspect` (nothing is
+    pulled). ImageRefused (fail closed) when the size cannot be established."""
+    def unknown(why):
+        return ImageRefused(f"registry size unknown: {why}")
+    try:
+        res = pilot.docker("manifest", "inspect", image, check=False, timeout=180)
+    except subprocess.TimeoutExpired:
+        raise unknown("manifest inspect timed out") from None
+    except (RuntimeError, OSError) as e:
+        raise unknown(f"{type(e).__name__}: {str(e)[-120:]}") from None
+    if res.returncode:
+        raise unknown(f"manifest inspect exit {res.returncode}: {str(res.stdout)[-120:]!r}")
+    try:
+        doc = json.loads(res.stdout)
+    except (ValueError, TypeError):
+        raise unknown("manifest is not JSON") from None
+    layers = doc.get("layers") if isinstance(doc, dict) else None
+    if not isinstance(layers, list) or not layers:
+        raise unknown("manifest has no layers")
+    total = 0
+    for layer in layers:
+        size = layer.get("size") if isinstance(layer, dict) else None
+        if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+            raise unknown(f"layer size missing or not a positive integer: {size!r}")
+        total += size
+    return total / 1e9
+
+
+def ensure_image(image, marker=None, *, max_image_gb=MAX_IMAGE_GB):
     """True when `image` is ours to remove: this call pulled it, or it is present and `marker`
     (written before any pull, deleted only after a successful rmi) says an earlier run pulled it.
-    False when it was present without that marker (nothing is pulled). ControlError when free
-    space is below MIN_FREE_GB before a pull, or the pull fails."""
+    False when it was present without that marker (nothing is pulled). Before a pull the
+    compressed registry size must be known and at most `max_image_gb`, and the free space must
+    cover UNPACK_FACTOR times it plus FREE_MARGIN_GB (never less than MIN_FREE_GB): otherwise
+    ImageRefused, with no marker written and nothing pulled. ControlError when the pull fails."""
     if pilot.docker("image", "inspect", image, check=False, timeout=120).returncode == 0:
         return _marked_as_ours(marker, image)
+    size = registry_gb(image)
+    if size > max_image_gb:
+        raise ImageRefused(f"image {size:.1f} GB compressed is over the {max_image_gb:g} GB cap")
+    required = max(MIN_FREE_GB, UNPACK_FACTOR * size + FREE_MARGIN_GB)
     free = free_gb()
-    if free < MIN_FREE_GB:
-        raise ControlError(f"refusing to pull {image}: {free:.0f} GB free, need {MIN_FREE_GB}")
+    if free < required:
+        raise ImageRefused(f"{free:.0f} GB free, {required:.0f} GB needed for a {size:.1f} GB image")
     if marker is not None:
         # written before the pull: a run killed during or after it leaves a record that it is ours
         Path(marker).parent.mkdir(parents=True, exist_ok=True)
@@ -311,14 +354,14 @@ def _safe_id(instance_id):
     return instance_id
 
 
-def run_one(record, out_dir, *, timeout=3600):
+def run_one(record, out_dir, *, timeout=3600, max_image_gb=MAX_IMAGE_GB):
     """Control one record; write control.json (last), base.log, gold.log under `<out_dir>/<id>`.
     An image this call (or an interrupted earlier one, per `<id>/pulled-image`) pulled is removed
     afterwards (no force); a present one is left alone."""
     task_id = _safe_id(record["instance_id"])
     d = Path(out_dir) / task_id
     marker = d / PULLED_MARKER
-    pulled = ensure_image(record["docker_image"], marker=marker)
+    pulled = ensure_image(record["docker_image"], marker=marker, max_image_gb=max_image_gb)
     removal = None
     try:
         evidence, base_log, gold_log = control(record, container=f"{CONTAINER_PREFIX}{task_id}",
@@ -403,6 +446,9 @@ def main(argv=None):
     ap.add_argument("--ignore-size", action="store_true",
                     help="without --ids, select every record past the cutoff with the required "
                          "fields, in draw order (the size filter is applied later, from metadata)")
+    ap.add_argument("--max-image-gb", type=float, default=MAX_IMAGE_GB,
+                    help="skip a task whose image is over this many GB compressed in the registry "
+                         f"(default {MAX_IMAGE_GB:g}); its free-space need is derived from the size")
     args = ap.parse_args(argv)
     out_dir = Path(args.out)
     lock = _lock(out_dir)
@@ -456,7 +502,7 @@ def _run(args, out_dir):
             print(f"RERUN {i} previous run was an error" if state == "error"
                   else f"RERUN {i} control.json unreadable")
         try:
-            ev = run_one(by_id[i], out_dir)
+            ev = run_one(by_id[i], out_dir, max_image_gb=args.max_image_gb)
         except ControlError as e:
             print(f"SKIPPED {i} {e}")
             counts["skipped"] += 1

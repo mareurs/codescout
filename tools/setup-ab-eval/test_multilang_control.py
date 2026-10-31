@@ -51,6 +51,20 @@ class FakeDocker:
         return [" ".join(x["args"]) for x in self.calls]
 
 
+def manifest_out(*layer_bytes):
+    """What `docker manifest inspect` prints for an image whose layers have these sizes."""
+    return out(json.dumps({"layers": [{"size": n} for n in layer_bytes]}))
+
+
+def with_manifest(handler, gb=1.0):
+    """`handler` plus a `manifest inspect` reply for an image of `gb` GB compressed."""
+    def h(args, data):
+        if args[0] == "manifest":
+            return manifest_out(int(gb * 1e9))
+        return handler(args, data)
+    return h
+
+
 def patch_docker(testcase, fake):
     old = c.pilot.docker
     c.pilot.docker = fake
@@ -650,15 +664,15 @@ class DiskGuardTests(unittest.TestCase):
         self.addCleanup(setattr, c, "free_gb", old)
 
     def test_ensure_image_refuses_pull_below_min_free(self):
-        fake = FakeDocker(lambda a, d: out(rc=1) if "inspect" in a else None)
+        fake = FakeDocker(with_manifest(lambda a, d: out(rc=1) if a[0] == "image" else None))
         patch_docker(self, fake)
         self.patch_free(c.MIN_FREE_GB - 1)
-        with self.assertRaises(c.ControlError):
+        with self.assertRaises(c.ImageRefused):
             c.ensure_image("img:1")
         self.assertFalse(any(x.startswith("pull") for x in fake.joined()))
 
     def test_ensure_image_pulls_when_absent_and_space_ok(self):
-        fake = FakeDocker(lambda a, d: out(rc=1) if "inspect" in a else None)
+        fake = FakeDocker(with_manifest(lambda a, d: out(rc=1) if a[0] == "image" else None))
         patch_docker(self, fake)
         self.patch_free(c.MIN_FREE_GB + 1)
         self.assertTrue(c.ensure_image("img:1"))
@@ -669,14 +683,180 @@ class DiskGuardTests(unittest.TestCase):
         patch_docker(self, fake)
         self.patch_free(0)  # even a full disk does not matter: nothing is pulled
         self.assertFalse(c.ensure_image("img:1"))
-        self.assertFalse(any(x.startswith(("pull", "rmi")) for x in fake.joined()))
+        self.assertFalse(any(x.startswith(("pull", "rmi", "manifest")) for x in fake.joined()))
 
     def test_ensure_image_pull_failure_is_control_error(self):
-        fake = FakeDocker(lambda a, d: out(rc=1))
+        fake = FakeDocker(with_manifest(lambda a, d: out(rc=1)))
         patch_docker(self, fake)
         self.patch_free(c.MIN_FREE_GB + 1)
         with self.assertRaises(c.ControlError):
             c.ensure_image("img:1")
+
+
+class RegistryGbTests(unittest.TestCase):
+    def reg(self, reply):
+        fake = FakeDocker(lambda a, d: reply)
+        patch_docker(self, fake)
+        return fake
+
+    def refused(self, reply):
+        self.reg(reply)
+        with self.assertRaises(c.ImageRefused) as cm:
+            c.registry_gb("img:1")
+        self.assertIn("registry size unknown", str(cm.exception))
+
+    def test_sums_layer_sizes_and_runs_manifest_inspect_unchecked_with_a_180s_timeout(self):
+        fake = self.reg(manifest_out(3_000_000_000, 306_475_781))
+        self.assertAlmostEqual(c.registry_gb("img:1"), 3.306475781)
+        self.assertEqual(fake.joined(), ["manifest inspect img:1"])
+        self.assertIs(fake.calls[0]["check"], False)
+        self.assertEqual(fake.calls[0]["timeout"], 180)
+
+    def test_non_zero_exit_is_unknown(self):
+        self.refused(out("no such manifest", rc=1))
+
+    def test_timeout_is_unknown(self):
+        self.refused(subprocess.TimeoutExpired("docker", 180))
+
+    def test_non_json_is_unknown(self):
+        self.refused(out("not json"))
+
+    def test_manifest_list_without_layers_is_unknown(self):
+        self.refused(out(json.dumps({"manifests": [{"size": 5}]})))
+
+    def test_layers_that_is_not_a_list_is_unknown(self):
+        self.refused(out(json.dumps({"layers": "x"})))
+
+    def test_layer_without_size_is_unknown(self):
+        self.refused(out(json.dumps({"layers": [{"size": 5}, {"digest": "sha256:x"}]})))
+
+    def test_zero_or_negative_size_is_unknown(self):
+        self.refused(manifest_out(5, 0))
+        self.refused(manifest_out(5, -7))
+
+    def test_non_integer_size_is_unknown(self):
+        self.refused(out(json.dumps({"layers": [{"size": "5"}]})))
+        self.refused(out(json.dumps({"layers": [{"size": 5.5}]})))
+        self.refused(out(json.dumps({"layers": [{"size": True}]})))
+
+    def test_empty_layer_list_is_unknown(self):
+        self.refused(out(json.dumps({"layers": []})))
+
+
+class SizeCapTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.marker = Path(tmp.name) / "o__r-1" / "pulled-image"
+
+    def patch_free(self, gb):
+        self.free_calls = 0
+
+        def free(path="/"):
+            self.free_calls += 1
+            return gb
+        old = c.free_gb
+        c.free_gb = free
+        self.addCleanup(setattr, c, "free_gb", old)
+
+    def absent(self, gb):
+        fake = FakeDocker(with_manifest(lambda a, d: out(rc=1) if a[0] == "image" else None, gb))
+        patch_docker(self, fake)
+        return fake
+
+    def test_constants(self):
+        self.assertEqual((c.MAX_IMAGE_GB, c.UNPACK_FACTOR, c.FREE_MARGIN_GB), (12.0, 5, 10))
+        self.assertTrue(issubclass(c.ImageRefused, c.ControlError))
+
+    def test_over_the_cap_refuses_pulls_nothing_and_writes_no_marker(self):
+        fake = self.absent(12.5)
+        self.patch_free(10_000)
+        with self.assertRaises(c.ImageRefused) as cm:
+            c.ensure_image("img:1", marker=self.marker)
+        self.assertIn("12.5 GB compressed is over the 12 GB cap", str(cm.exception))
+        self.assertFalse(any(x.startswith(("pull", "rmi")) for x in fake.joined()))
+        self.assertFalse(self.marker.exists())
+        self.assertFalse(self.marker.parent.exists())
+
+    def test_exactly_the_cap_passes(self):
+        self.absent(12.0)
+        self.patch_free(10_000)
+        self.assertTrue(c.ensure_image("img:1", marker=self.marker))
+
+    def test_free_space_boundary_above_the_floor(self):
+        # 10 GB image: required = max(40, 5 * 10 + 10) = 60
+        fake = self.absent(10)
+        self.patch_free(60)
+        self.assertTrue(c.ensure_image("img:1", marker=self.marker))
+        self.assertIn("pull img:1", fake.joined())
+
+    def test_one_gb_below_the_requirement_refuses_without_marker_or_pull(self):
+        fake = self.absent(10)
+        self.patch_free(59)
+        with self.assertRaises(c.ImageRefused) as cm:
+            c.ensure_image("img:1", marker=self.marker)
+        self.assertIn("59 GB free, 60 GB needed for a 10.0 GB image", str(cm.exception))
+        self.assertFalse(any(x.startswith("pull") for x in fake.joined()))
+        self.assertFalse(self.marker.exists())
+
+    def test_small_image_keeps_the_min_free_floor(self):
+        # 2 GB image: 5 * 2 + 10 = 20 < 40, so the floor of 40 applies
+        self.absent(2)
+        self.patch_free(c.MIN_FREE_GB - 1)
+        with self.assertRaises(c.ImageRefused):
+            c.ensure_image("img:1")
+        self.patch_free(c.MIN_FREE_GB)
+        self.assertTrue(c.ensure_image("img:1"))
+
+    def test_present_image_makes_no_manifest_call_and_no_free_space_check(self):
+        fake = FakeDocker(lambda a, d: out(rc=0))
+        patch_docker(self, fake)
+        self.patch_free(0)
+        self.assertFalse(c.ensure_image("img:1", marker=self.marker))
+        self.assertFalse(any(x.startswith("manifest") for x in fake.joined()))
+        self.assertEqual(self.free_calls, 0)
+
+    def test_max_image_gb_override(self):
+        self.absent(15)
+        self.patch_free(10_000)
+        with self.assertRaises(c.ImageRefused):
+            c.ensure_image("img:1")
+        self.assertTrue(c.ensure_image("img:1", max_image_gb=20))
+
+    def test_unknown_size_refuses_before_the_marker_and_the_pull(self):
+        fake = FakeDocker(lambda a, d: out(rc=1) if a[0] in ("image", "manifest") else None)
+        patch_docker(self, fake)
+        self.patch_free(10_000)
+        with self.assertRaises(c.ImageRefused):
+            c.ensure_image("img:1", marker=self.marker)
+        self.assertFalse(any(x.startswith("pull") for x in fake.joined()))
+        self.assertFalse(self.marker.exists())
+
+    def test_run_one_forwards_max_image_gb_and_a_refusal_leaves_no_trace(self):
+        seen = {}
+
+        def refuse(image, marker=None, *, max_image_gb=c.MAX_IMAGE_GB):
+            seen["cap"] = max_image_gb
+            raise c.ImageRefused("too big")
+        old = c.ensure_image
+        c.ensure_image = refuse
+        self.addCleanup(setattr, c, "ensure_image", old)
+        patch_docker(self, FakeDocker())
+        out_dir = self.marker.parent.parent
+        with self.assertRaises(c.ImageRefused):
+            c.run_one(record(), out_dir, max_image_gb=7.5)
+        self.assertEqual(seen["cap"], 7.5)
+        self.assertFalse((out_dir / "o__r-1").exists())
+
+    def test_the_refusal_is_not_turned_into_an_error_verdict_by_the_real_pipeline(self):
+        fake = self.absent(20)
+        self.patch_free(10_000)
+        out_dir = self.marker.parent.parent
+        with self.assertRaises(c.ImageRefused):
+            c.run_one(record(), out_dir)
+        self.assertFalse((out_dir / "o__r-1" / "control.json").exists())
+        self.assertFalse(any(x.startswith(("pull", "run")) for x in fake.joined()))
+
 
 
 class PulledMarkerTests(unittest.TestCase):
@@ -697,7 +877,7 @@ class PulledMarkerTests(unittest.TestCase):
                 return out(rc=1)
             if args[0] == "pull":
                 seen.append(self.marker.read_text(encoding="utf-8").strip() if self.marker.exists() else None)
-        patch_docker(self, FakeDocker(h))
+        patch_docker(self, FakeDocker(with_manifest(h)))
         self.assertTrue(c.ensure_image("img:1", marker=self.marker))
         self.assertEqual(seen, ["img:1"])
         self.assertTrue(self.marker.exists())
@@ -718,8 +898,8 @@ class PulledMarkerTests(unittest.TestCase):
         self.assertFalse(c.ensure_image("img:1", marker=self.marker))
 
     def test_failed_pull_with_no_image_left_deletes_the_marker(self):
-        patch_docker(self, FakeDocker(
-            lambda a, d: out(rc=1) if a[0] == "image" else (RuntimeError("denied") if a[0] == "pull" else None)))
+        patch_docker(self, FakeDocker(with_manifest(
+            lambda a, d: out(rc=1) if a[0] == "image" else (RuntimeError("denied") if a[0] == "pull" else None))))
         with self.assertRaises(c.ControlError):
             c.ensure_image("img:1", marker=self.marker)
         self.assertFalse(self.marker.exists())
@@ -735,7 +915,7 @@ class PulledMarkerTests(unittest.TestCase):
                 return subprocess.TimeoutExpired("docker", 1)
             if args[0] == "rmi":
                 return out("image is in use", rc=1)
-        patch_docker(self, FakeDocker(h))
+        patch_docker(self, FakeDocker(with_manifest(h)))
         with self.assertRaises(c.ControlError):
             c.ensure_image("img:1", marker=self.marker)
         self.assertTrue(self.marker.exists())  # the next run finds it and removes the image
@@ -778,7 +958,7 @@ class PulledMarkerTests(unittest.TestCase):
 
 def stub_ensure(testcase, pulled):
     old = c.ensure_image
-    c.ensure_image = lambda image, marker=None: pulled
+    c.ensure_image = lambda image, marker=None, **_kw: pulled
     testcase.addCleanup(setattr, c, "ensure_image", old)
 
 
@@ -833,7 +1013,7 @@ class RunOneTests(unittest.TestCase):
         here = os.path.dirname(os.path.abspath(__file__))
         code = (
             "import json, sys, multilang_control as c\n"
-            "c.ensure_image = lambda image, marker=None: False\n"
+            "c.ensure_image = lambda image, marker=None, **kw: False\n"
             "c.control = lambda record, *, container, timeout=3600: "
             "({'id': 'o__r-1', 'note': 'caf\\u00e9', 'verdict': {'ok': True}}, 'b\\u00e9', 'g\\u00e9')\n"
             "c.run_one({'instance_id': 'o__r-1', 'docker_image': 'img:1'}, sys.argv[1])\n"
@@ -859,9 +1039,9 @@ class MainTests(unittest.TestCase):
         self.recs = self.dir / "r.jsonl"
         self.out = self.dir / "out"
         self.ran = []
-        old = c.run_one
+        old = self._real_run_one = c.run_one
 
-        def fake_run_one(rec, out_dir, *, timeout=3600):
+        def fake_run_one(rec, out_dir, *, timeout=3600, **_kw):
             self.ran.append(rec["instance_id"])
             return {"id": rec["instance_id"], "verdict": {"ok": False, "reasons": ["why"]}}
         c.run_one = fake_run_one
@@ -923,7 +1103,7 @@ class MainTests(unittest.TestCase):
     def test_main_skipped_pull_does_not_abort_the_run(self):
         self.write(full_record(instance_id="a__a-1"), full_record(instance_id="b__b-2"))
 
-        def boom(rec, out_dir, *, timeout=3600):
+        def boom(rec, out_dir, *, timeout=3600, **_kw):
             self.ran.append(rec["instance_id"])
             if rec["instance_id"] == "a__a-1":
                 raise c.ControlError("disk low")
@@ -935,6 +1115,57 @@ class MainTests(unittest.TestCase):
         self.assertIn("SKIPPED a__a-1 disk low", text)
         self.assertIn("b__b-2 ok", text)
 
+    def test_main_image_refusal_is_skipped_writes_nothing_and_the_batch_continues(self):
+        self.write(full_record(instance_id="a__a-1"), full_record(instance_id="b__b-2"))
+
+        def refuse_first(rec, out_dir, *, timeout=3600, **_kw):
+            self.ran.append(rec["instance_id"])
+            if rec["instance_id"] == "a__a-1":
+                raise c.ImageRefused("image 75.0 GB compressed is over the 12 GB cap")
+            return {"id": rec["instance_id"], "verdict": {"ok": True, "reasons": []}}
+        c.run_one = refuse_first
+        rc, text = self.main("--ids", "a__a-1", "b__b-2")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.ran, ["a__a-1", "b__b-2"])
+        self.assertIn("SKIPPED a__a-1 image 75.0 GB compressed is over the 12 GB cap", text)
+        self.assertNotIn("a__a-1 ERROR", text)
+        self.assertFalse((self.out / "a__a-1" / "control.json").exists())
+        self.assertFalse((self.out / "a__a-1" / "pulled-image").exists())
+        self.assertEqual(text.strip().splitlines()[-1],
+                         "ran 1: ok 1, REJECT 0, ERROR 0; SKIPPED 1, REFUSED 0, already done 0")
+        # nothing blocks it: the next invocation tries it again
+        self.ran.clear()
+        self.main("--ids", "a__a-1")
+        self.assertEqual(self.ran, ["a__a-1"])
+
+    def test_main_max_image_gb_reaches_run_one_and_defaults_to_the_constant(self):
+        self.write(full_record(instance_id="a__a-1"))
+        seen = []
+
+        def spy(rec, out_dir, *, timeout=3600, max_image_gb=None):
+            seen.append(max_image_gb)
+            return {"id": rec["instance_id"], "verdict": {"ok": True, "reasons": []}}
+        c.run_one = spy
+        self.main("--ids", "a__a-1", "--max-image-gb", "20")
+        (self.out / "a__a-1" / "control.json").unlink(missing_ok=True)
+        self.main("--ids", "a__a-1")
+        self.assertEqual(seen, [20.0, c.MAX_IMAGE_GB])
+
+    def test_main_max_image_gb_reaches_ensure_image(self):
+        self.write(full_record(instance_id="a__a-1"))
+        c.run_one = self._real_run_one
+        seen = []
+
+        def refuse(image, marker=None, *, max_image_gb=c.MAX_IMAGE_GB):
+            seen.append(max_image_gb)
+            raise c.ImageRefused("cap")
+        old = c.ensure_image
+        c.ensure_image = refuse
+        self.addCleanup(setattr, c, "ensure_image", old)
+        _, text = self.main("--ids", "a__a-1", "--max-image-gb", "3.5")
+        self.assertEqual(seen, [3.5])
+        self.assertIn("SKIPPED a__a-1 cap", text)
+
     def test_main_counts_each_outcome_separately(self):
         ids = ["ok__o-1", "rej__r-1", "err__e-1", "skip__s-1", "done__d-1"]
         self.write(*[full_record(instance_id=i) for i in ids])
@@ -944,7 +1175,7 @@ class MainTests(unittest.TestCase):
                     "rej__r-1": {"ok": False, "reasons": ["fail-to-pass test passes at base"]},
                     "err__e-1": {"ok": False, "error": True, "reasons": ["control error: x"]}}
 
-        def fake(rec, out_dir, *, timeout=3600):
+        def fake(rec, out_dir, *, timeout=3600, **_kw):
             if rec["instance_id"] == "skip__s-1":
                 raise c.ControlError("disk low")
             return {"id": rec["instance_id"], "verdict": verdicts[rec["instance_id"]]}
@@ -996,7 +1227,7 @@ class MainTests(unittest.TestCase):
         self.write(full_record(instance_id="a__a-1"))
         seen = {}
 
-        def probe(rec, out_dir, *, timeout=3600):
+        def probe(rec, out_dir, *, timeout=3600, **_kw):
             seen["lock_free"] = c._lock(self.out) is not None
             seen["term"] = signal.getsignal(signal.SIGTERM)
             seen["hup"] = signal.getsignal(signal.SIGHUP)
@@ -1010,7 +1241,7 @@ class MainTests(unittest.TestCase):
     def test_sigterm_during_a_run_unwinds_as_keyboard_interrupt_and_restores_handlers(self):
         self.write(full_record(instance_id="a__a-1"))
 
-        def killed(rec, out_dir, *, timeout=3600):
+        def killed(rec, out_dir, *, timeout=3600, **_kw):
             os.kill(os.getpid(), signal.SIGTERM)
             time.sleep(5)  # the handler interrupts this
             self.fail("SIGTERM did not interrupt the run")
@@ -1109,7 +1340,7 @@ class PullFailureTests(unittest.TestCase):
             if args[0] == "pull":
                 state["pulled"] = appears
                 return pull_error
-        fake = FakeDocker(h)
+        fake = FakeDocker(with_manifest(h))
         patch_docker(self, fake)
         old = c.free_gb
         c.free_gb = lambda path="/": 500
@@ -1175,7 +1406,7 @@ class ResumeMarkerTests(MainTests):
 
     def test_main_warns_when_the_image_was_not_removed(self):
         self.write(full_record(instance_id="a__a-1"))
-        c.run_one = lambda rec, out_dir, *, timeout=3600: {
+        c.run_one = lambda rec, out_dir, *, timeout=3600, **_kw: {
             "id": "a__a-1", "verdict": {"ok": True, "reasons": []}, "image_removed": False,
             "image_remove_error": "in use"}
         _, text = self.main("--ids", "a__a-1")
@@ -1183,7 +1414,7 @@ class ResumeMarkerTests(MainTests):
 
     def test_main_warns_when_the_container_was_not_removed(self):
         self.write(full_record(instance_id="a__a-1"))
-        c.run_one = lambda rec, out_dir, *, timeout=3600: {
+        c.run_one = lambda rec, out_dir, *, timeout=3600, **_kw: {
             "id": "a__a-1", "verdict": {"ok": True, "reasons": []}, "container_removed": False,
             "container_remove_error": "TimeoutExpired"}
         _, text = self.main("--ids", "a__a-1")
