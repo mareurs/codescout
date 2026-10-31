@@ -27,6 +27,24 @@ publish_hold_ref() {
     fi
 }
 
+# Print the token without one leading host qualifier. Parameter expansion only.
+publish_principal_root() {
+    local t="${1:-}"
+    case "$t" in codex:*) t="${t#codex:}" ;; claude-code:*) t="${t#claude-code:}" ;; esac
+    printf '%s\n' "$t"
+}
+
+# 0 iff both are non-empty, neither is "-", and their roots are equal.
+# "codex:U" vs "claude-code:U" compare equal: a documented trade-off (same session id).
+publish_principal_equal() {
+    local a="${1:-}" b="${2:-}"
+    case "$a" in '' | -) return 1 ;; esac
+    case "$b" in '' | -) return 1 ;; esac
+    case "$a" in codex:*) a="${a#codex:}" ;; claude-code:*) a="${a#claude-code:}" ;; esac
+    case "$b" in codex:*) b="${b#codex:}" ;; claude-code:*) b="${b#claude-code:}" ;; esac
+    [ -n "$a" ] && [ -n "$b" ] && [ "$a" = "$b" ]
+}
+
 publish_hold_token() {
     local suffix="${1#refs/holds/}"
     case "$suffix" in
