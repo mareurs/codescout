@@ -101,6 +101,58 @@ fn pid_alive(_pid: u32) -> bool {
     true
 }
 
+/// The directory whose `codescout-bg-*.log` files the loose-log sweep may reclaim: the OS
+/// temp directory in a server, `None` in a test build. A test that spawns a background job
+/// reaches the housekeeping, and a scan of the real temp directory from there would delete
+/// the logs of other people's sessions; a test that wants the sweep passes a directory of its
+/// own through `OutputBuffer::with_log_dir`.
+fn default_log_dir() -> Option<PathBuf> {
+    if cfg!(test) {
+        None
+    } else {
+        Some(std::env::temp_dir())
+    }
+}
+
+/// The once-per-server housekeeping of background-job files, in order: stale records (and
+/// the logs they name), finished jobs' logs past their lifetime, then, when `log_dir` is
+/// `Some`, the loose logs that no record names. Never fails: every step ignores its errors.
+///
+/// With `log_dir` `None` the two record-linked sweeps still run, with the OS temp directory
+/// as the directory a record's `log_path` must sit in; only the loose sweep, which lists a
+/// directory, is skipped. The record-linked sweeps are safe in a test build: they act only
+/// on logs that a record in `record_dir` names (and a test's records name its own files or
+/// the logs of its own spawned jobs), never on a file found by listing the temp directory.
+fn run_housekeeping(record_dir: &Path, log_dir: Option<&Path>) {
+    use crate::tools::job_record::{
+        recorded_log_paths, sweep_logs, sweep_loose_logs, sweep_stale, LOG_GRACE_AFTER_DELIVERY,
+        LOG_MAX_AGE, RECORD_MAX_AGE,
+    };
+    let guard_dir = log_dir.map_or_else(std::env::temp_dir, Path::to_path_buf);
+    let records = sweep_stale(record_dir, &guard_dir, RECORD_MAX_AGE, pid_alive);
+    let logs = sweep_logs(
+        record_dir,
+        &guard_dir,
+        LOG_GRACE_AFTER_DELIVERY,
+        LOG_MAX_AGE,
+        pid_alive,
+    );
+    let mut loose = 0;
+    if let Some(log_dir) = log_dir {
+        let recorded = recorded_log_paths(record_dir);
+        let open = crate::platform::open_file_paths();
+        // Without the open-file scan a running job's log cannot be told from an abandoned
+        // one, so only a log older than a whole record retention is taken.
+        let min_age = if open.is_some() {
+            LOG_MAX_AGE
+        } else {
+            RECORD_MAX_AGE
+        };
+        loose = sweep_loose_logs(log_dir, &recorded, min_age, open.as_ref());
+    }
+    tracing::debug!(records, logs, loose, "background housekeeping done");
+}
+
 /// How a `@file_*` store finds the entry it may reuse ([`OutputBuffer::store_file_inner`]).
 enum FileStore {
     /// The WHOLE text of the file at `source`, by a reader that observed the file's mtime as
@@ -485,8 +537,12 @@ pub struct OutputBuffer {
     /// Random 8-hex token in every record file name, so two runs that reuse one pid
     /// cannot collide.
     record_token: String,
-    /// Runs the stale-record sweep once, on the first `store_background`.
+    /// Runs the housekeeping (record and log sweeps) once, on the first `store_background`.
     record_sweep: std::sync::Once,
+    /// The directory background logs are written to, which the loose-log sweep may scan:
+    /// `Some(std::env::temp_dir())` in a server, `None` in a test build (see
+    /// [`default_log_dir`]), so no test can reach the real temp directory.
+    log_dir: Option<PathBuf>,
 }
 
 struct BufferInner {
@@ -565,8 +621,17 @@ impl OutputBuffer {
             record_dir: crate::tools::job_record::default_record_dir(),
             record_token: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(),
             record_sweep: std::sync::Once::new(),
+            log_dir: default_log_dir(),
         }
     }
+    /// Let the loose-log sweep scan `dir` (a test's own temp dir). Test builds default to no
+    /// log directory, so a test must opt in, and only ever with a directory it created.
+    #[cfg(test)]
+    pub fn with_log_dir(mut self, dir: PathBuf) -> Self {
+        self.log_dir = Some(dir);
+        self
+    }
+
     /// Write this buffer's job records under `dir` instead of the default directory.
     pub fn with_record_dir(mut self, dir: PathBuf) -> Self {
         self.record_dir = dir;
@@ -1668,13 +1733,20 @@ impl OutputBuffer {
     pub fn store_background(&self, job: BackgroundJob) -> String {
         // Housekeeping, once per buffer: the first spawn is the first moment the record
         // directory matters. Done before taking the pool lock, because it touches the disk.
+        // A server runs it on a detached thread (a large temp directory must not delay the
+        // first background spawn); a test build runs it inline, so a test can read its effect.
         self.record_sweep.call_once(|| {
-            crate::tools::job_record::sweep_stale(
-                &self.record_dir,
-                &std::env::temp_dir(),
-                crate::tools::job_record::RECORD_MAX_AGE,
-                pid_alive,
-            );
+            if cfg!(test) {
+                run_housekeeping(&self.record_dir, self.log_dir.as_deref());
+            } else {
+                let record_dir = self.record_dir.clone();
+                let log_dir = self.log_dir.clone();
+                // A failed spawn is ignored: housekeeping is best effort and runs again at
+                // the next server start.
+                let _ = std::thread::Builder::new()
+                    .name("bg-housekeeping".into())
+                    .spawn(move || run_housekeeping(&record_dir, log_dir.as_deref()));
+            }
         });
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.counter = inner.counter.wrapping_add(1);
@@ -2312,6 +2384,144 @@ mod tests {
         let mut s = record.as_os_str().to_owned();
         s.push(".delivered");
         PathBuf::from(s)
+    }
+
+    const DAY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+    /// Set `path`'s mtime to `age` ago.
+    fn age_file(path: &Path, age: std::time::Duration) {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - age)
+            .unwrap();
+    }
+
+    /// Write `name` into `dir` with the given age.
+    fn aged_file(dir: &Path, name: &str, age: std::time::Duration) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, b"output").unwrap();
+        age_file(&path, age);
+        path
+    }
+
+    #[test]
+    fn housekeeping_removes_an_old_loose_log_and_keeps_a_young_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let logs = tmp.path().join("logs");
+        std::fs::create_dir(&logs).unwrap();
+        let record_dir = tmp.path().join("bg");
+        let old = aged_file(&logs, "codescout-bg-old.log", 30 * DAY);
+        let young = aged_file(&logs, "codescout-bg-young.log", std::time::Duration::ZERO);
+        let foreign = aged_file(&logs, "unrelated.log", 30 * DAY);
+
+        run_housekeeping(&record_dir, Some(&logs));
+
+        assert!(
+            !old.exists(),
+            "an old loose log no record names is reclaimed"
+        );
+        assert!(young.exists(), "a young loose log is kept");
+        assert!(
+            foreign.exists(),
+            "a file that is not a codescout-bg log is never touched"
+        );
+    }
+
+    #[test]
+    fn housekeeping_keeps_a_running_jobs_logs() {
+        use crate::tools::job_record::{record_path, write_record, JobRecord};
+        let tmp = tempfile::tempdir().unwrap();
+        let logs = tmp.path().join("logs");
+        std::fs::create_dir(&logs).unwrap();
+        let record_dir = tmp.path().join("bg");
+
+        // A running job on a live server (this process): kept however old the files are.
+        let live_log = aged_file(&logs, "codescout-bg-live.log", 30 * DAY);
+        let live_rec = record_path(&record_dir, "00000001", "@bg_00000001");
+        let rec = JobRecord::running("@bg_00000001", "sleep 1", None).with_log_path(&live_log);
+        write_record(&live_rec, &rec).unwrap();
+        age_file(&live_rec, 30 * DAY);
+
+        // A running job whose server is gone, inside RECORD_MAX_AGE: it may be an orphan that
+        // still writes, so its log is kept.
+        let orphan_log = aged_file(&logs, "codescout-bg-orphan.log", 2 * DAY);
+        let orphan_rec = record_path(&record_dir, "00000002", "@bg_00000002");
+        let mut rec =
+            JobRecord::running("@bg_00000002", "sleep 1", None).with_log_path(&orphan_log);
+        rec.server_pid = i32::MAX as u32;
+        write_record(&orphan_rec, &rec).unwrap();
+        age_file(&orphan_rec, 2 * DAY);
+
+        // The witness: an old unrecorded log goes, so the sweeps really ran.
+        let witness = aged_file(&logs, "codescout-bg-witness.log", 30 * DAY);
+
+        run_housekeeping(&record_dir, Some(&logs));
+
+        assert!(!witness.exists(), "the housekeeping ran");
+        assert!(
+            live_log.exists() && live_rec.exists(),
+            "a live running job keeps log and record"
+        );
+        assert!(
+            orphan_log.exists() && orphan_rec.exists(),
+            "a dead server's running job keeps its log"
+        );
+    }
+
+    /// Removes the planted file even when an assertion fails first.
+    struct Planted(PathBuf);
+    impl Drop for Planted {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_test_built_output_buffer_never_scans_the_real_temp_dir() {
+        // An old, unrecorded `codescout-bg-*.log` in the REAL temp dir: the loose sweep would
+        // reclaim it if it ever ran against that directory.
+        let planted = Planted(std::env::temp_dir().join(format!(
+            "codescout-bg-reaper-isolation-{}.log",
+            uuid::Uuid::new_v4().simple()
+        )));
+        std::fs::write(&planted.0, b"planted by a test; safe to delete").unwrap();
+        age_file(&planted.0, 30 * DAY);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let buf = record_buffer(&tmp);
+        // The field is the guarantee; the planted file below only shows it held this time
+        // (a real server's own housekeeping could race a bare file check).
+        assert!(
+            buf.log_dir.is_none(),
+            "a test-built buffer has no log directory"
+        );
+        buf.store_background(exited_job(tmp.path()));
+
+        assert!(
+            planted.0.exists(),
+            "a test-built buffer must not scan the real temp dir"
+        );
+    }
+
+    #[test]
+    fn store_background_runs_the_housekeeping_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let logs = tmp.path().join("logs");
+        std::fs::create_dir(&logs).unwrap();
+        let buf = record_buffer(&tmp).with_log_dir(logs.clone());
+        let first = aged_file(&logs, "codescout-bg-first.log", 30 * DAY);
+
+        buf.store_background(exited_job(tmp.path()));
+        assert!(
+            !first.exists(),
+            "the first background store runs the housekeeping"
+        );
+
+        let second = aged_file(&logs, "codescout-bg-second.log", 30 * DAY);
+        buf.store_background(exited_job(tmp.path()));
+        assert!(second.exists(), "a later store does not run it again");
     }
 
     #[test]
