@@ -437,6 +437,49 @@ pub fn validate_read_path(
     validate_read_path_in(raw, project_root, config, &protected_homes())
 }
 
+/// The read deny list, resolved once.
+///
+/// [`validate_read_path`] resolves the whole deny list on every call: each entry and each of its
+/// ancestors is read back through `readlink`, about 270 calls per path. That is right for a tool
+/// call that checks one path. A walk that checks thousands of files (`doctor`, which reads every
+/// artifact row) paid it per file: 2.05 million `readlink` calls and about 2 s of system time in a
+/// 7 s run, measured 2026-10-31. The list is resolved when this value is built, so it is as fresh
+/// as the caller's own lifetime: one tool call or one walk, not the process.
+/// docs/issues/2026-10-30-librarian-doctor-makes-twelve-passes-over-the-corpus-and-caches-no-file-read.md
+#[derive(Debug)]
+pub(crate) struct ReadDenyList(Vec<PathBuf>);
+
+// How many times [`ReadDenyList::resolve`] ran on this thread. Thread-local so a test counts its
+// own resolutions while others run in parallel.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static RESOLVES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl ReadDenyList {
+    /// Resolve the deny list as [`validate_read_path`] would for this call.
+    pub(crate) fn resolve() -> Self {
+        #[cfg(test)]
+        RESOLVES.with(|n| n.set(n.get() + 1));
+        Self(denied_paths_with(
+            &protected_homes(),
+            best_effort_canonicalize,
+        ))
+    }
+
+    /// Would [`validate_read_path`] refuse `real`, with the default profile and no project root?
+    /// A path that is not valid UTF-8 is checked through its lossy spelling, which matches no entry.
+    pub(crate) fn refuses(&self, real: &Path) -> bool {
+        validate_read_path_with(
+            &real.to_string_lossy(),
+            None,
+            &PathSecurityConfig::default(),
+            || self.0.as_slice(),
+        )
+        .is_err()
+    }
+}
+
 /// `validate_read_path` over an explicit list of protected homes, so a test can inject them
 /// (including an account home, which the ambient lookup only finds on a host whose uid has a
 /// passwd entry).
@@ -445,6 +488,21 @@ fn validate_read_path_in(
     project_root: Option<&Path>,
     config: &PathSecurityConfig,
     homes: &[PathBuf],
+) -> Result<PathBuf> {
+    validate_read_path_with(raw, project_root, config, || {
+        denied_paths_with(homes, best_effort_canonicalize)
+    })
+}
+
+/// The read check with the deny list supplied by `denied`, which runs only when the profile
+/// checks the deny list at all. Resolving that list costs about 270 `readlink` calls (every
+/// entry, every ancestor), so a caller that checks many paths resolves it once, through
+/// [`ReadDenyList`], instead of once per path.
+fn validate_read_path_with<D: AsRef<[PathBuf]>>(
+    raw: &str,
+    project_root: Option<&Path>,
+    config: &PathSecurityConfig,
+    denied: impl FnOnce() -> D,
 ) -> Result<PathBuf> {
     if raw.is_empty() {
         bail!("path must not be empty");
@@ -477,8 +535,8 @@ fn validate_read_path_in(
     // Canonicalize to resolve symlinks and `..` components.
     let resolved = best_effort_canonicalize(&resolved);
 
-    let denied = denied_paths_with(homes, best_effort_canonicalize);
-    if is_denied(&resolved, &denied) {
+    let denied = denied();
+    if is_denied(&resolved, denied.as_ref()) {
         bail!("access denied: '{}' is in a protected location", raw);
     }
 
@@ -8299,6 +8357,37 @@ EOF"#;
         );
         assert_eq!(protected_homes_of(Some(a.clone()), None), vec![a]);
         assert!(protected_homes_of(None, None).is_empty());
+    }
+
+    /// A resolved deny list answers as `validate_read_path` answers. The list exists to be resolved
+    /// once and asked many times; it must not become a second, different judge.
+    #[test]
+    fn a_resolved_deny_list_refuses_what_validate_read_path_refuses() {
+        let list = ReadDenyList::resolve();
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("plain.txt");
+        std::fs::write(&plain, "x").unwrap();
+        // `/etc/shadow` is on the default list on linux; the plain file is on no list.
+        let probes = [
+            Path::new("/etc/shadow").to_path_buf(),
+            Path::new("/etc/gshadow").to_path_buf(),
+            plain,
+        ];
+        for p in &probes {
+            let direct =
+                validate_read_path(&p.to_string_lossy(), None, &PathSecurityConfig::default())
+                    .is_err();
+            assert_eq!(list.refuses(p), direct, "{}", p.display());
+        }
+        #[cfg(target_os = "linux")]
+        assert!(
+            list.refuses(Path::new("/etc/shadow")),
+            "the list must still refuse a path on it"
+        );
+        assert!(
+            !list.refuses(&probes[2]),
+            "the list must not refuse a path on no list"
+        );
     }
 
     #[cfg(unix)]

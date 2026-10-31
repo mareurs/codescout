@@ -1,15 +1,15 @@
 ---
+kind: bug
 status: fixed
+tags:
+- cluster/declared-not-wired
+closed: 2026-10-31
 opened: 2026-10-29
-closed: 2026-10-30
-severity: medium
 owner: marius
 related:
 - docs/issues/2026-10-29-semantic-search-project-id-takes-the-directory-name-not-the-declared-member-id.md
-tags:
-- cluster/declared-not-wired
-kind: bug
-unverified: "CLEARED 2026-10-30. Was: gate not run on a clean tree (two OP-2 failures from a peer's edits). Gate green on a clean worktree. Still not checked: a member that is dormant when a memory is filed; forget (unchanged, the Qdrant delete ignores its project_id)."
+severity: medium
+unverified: TRACKED c351f4a6969588c7 — forget ignoring project_id, a member dormant when a memory is filed, and the root project named by its workspace id while a member is focused. The fix, the four regression tests and a clean-tree gate are verified; those three cases are not.
 ---
 
 # BUG: memory(write, project_id=<member>) puts the file in the member but cross-embeds it under the focused project's key
@@ -43,7 +43,10 @@ The line references above. No runtime run.
 None yet.
 
 ## Fix
-Done 2026-10-30 in 4c32d4341.
+
+- **SHA:** `4c32d4341` (`experiments`)
+- **patch-id:** `718e5c2dbf189ea8bdfcbae575afa3eb28972b04`
+Done 2026-10-30 in 4c32d4341 (branch `experiments`; patch-id 718e5c2dbf189ea8bdfcbae575afa3eb28972b04, from `git show 4c32d4341 | git patch-id --stable`).
 - `Agent::semantic_key_for_project` (src/agent/mod.rs) gives the key for a named project: an activated project answers with `config.project.name`, a dormant one with its id, an unknown id is refused by name with the valid ids.
 - `semantic_project_key` (src/tools/memory/mod.rs) returns that key when the call carries `project_id`, else the focused project's name, as before.
 - `cross_embed_memory` and `create_semantic_anchors` take the call's `input` and use the helper. The anchor pass re-upserts the cross-embed's point id, so both must use one key.
@@ -65,12 +68,11 @@ Mutation probe: restoring the old focused-name lookup in the delete arm turned t
 - Focus the member (`workspace(action="activate", path=<member id>)`) before writing, so the focused project and the named project agree.
 
 ## Resume
-1. Run the gate on a clean tree, so the two OP-2 failures can be shown to come from the peer's uncommitted files.
-2. Done 2026-10-30 on a live server (binary built after 4c32d4341), on the shared store, not an isolated one: `memory(write, project_id="codescout-embed")` then `recall(project_id="codescout-embed")` found the point (similarity 0.47); the same recall without `project_id` did not return it; after `delete(project_id="codescout-embed")` the named recall returned 0 results and no file was left. The member was activated or dormant as the server held it; the dormant-key case is still not told apart.
-3. Then move the issue to `docs/issues/archive/` with `doc(action="move", ...)`, the fix SHA 4c32d4341 and its `git patch-id --stable`.
 
-
-**Re-verified and closed 2026-10-30 on a clean worktree** (branch worktree-agent-a3aee1a8919a0949f, fast-forwarded to experiments 573825fb7, which contains 4c32d4341). Read at the bytes: `cross_embed_memory` and the other arms key through `semantic_project_key`, which uses `Agent::semantic_key_for_project` when the call carries `project_id`. The four named tests pass (`tools::memory` 112 passed in a targeted run) and the full gate was green on this tree, so the two OP-2 failures noted above were the peer's uncommitted files, as suspected. Fix 4c32d4341, patch-id `718e5c2dbf189ea8bdfcbae575afa3eb28972b04`. Not archived: no `doc(move)` run from the worktree.
+Closed 2026-10-31.
+1. Clean-tree gate: done. `./scripts/gate.sh` in a throwaway worktree at `dd4737085` (experiments): PYTHON_LIGHT=0, FMT=0, CLIPPY=0, LEAN=0, DEFAULT=0, FMT_STATE=passed. The two OP-2 failures seen on the combined tree are gone once the peer's retirement of OP-2 is committed. The gate does not cover the heavy Python suites, server-stack, librarian code under LEAN, or the two ONNX weight tests; CI covers those.
+2. Live check: done 2026-10-30 on a live server, on the shared store, not an isolated one: write, named recall, unscoped recall and delete with `project_id="codescout-embed"` behaved as fixed.
+3. Remaining cases: `docs/issues/2026-10-31-memory-project-id-residuals-forget-ignores-it-and-two-key-cases-are-unobserved.md` (id c351f4a6969588c7).
 
 ## References
 - docs/issues/2026-10-29-semantic-search-project-id-takes-the-directory-name-not-the-declared-member-id.md (the same id-versus-key theme; its fix made a member's `config.project.name` equal its workspace id, which hides this mismatch only when the member is focused)
