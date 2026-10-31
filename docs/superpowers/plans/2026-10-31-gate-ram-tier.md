@@ -18,7 +18,7 @@
 - The RAM tier never makes an unnamed lease return 2. A malformed value, a missing mount, a low floor or a short budget each skip to disk with one message naming the cause and the knob. The one exception is an explicitly named `--slot ram-N`, which refuses with 2 rather than fall back (next line but one).
 - Without a configured `CODESCOUT_GATE_RAM_POOL`, `slot-pool.sh`, `gate.sh` and `with-slot.sh` behave exactly as today, and print nothing new.
 - Every removal happens under the slot's `flock`. Lock files are never unlinked.
-- RAM slots are `<RAM_POOL>/slot-N` with `<RAM_POOL>/slot-N.lock`, N in `0 … RAM_SLOTS-1`. `with-slot.sh --slot ram-N` names one; a named slot never falls back to the other tier.
+- RAM slots are `<RAM_POOL>/slot-N` with `<RAM_POOL>/slot-N.lock`, N in `0 … RAM_SLOTS-1`. `with-slot.sh --slot ram-N` names one; a named slot never falls back to the other tier, and it is never budgeted: no pool rule, no `ram_pool_make_room`, no neighbour emptied (operator's explicit choice; it exists to repair or inspect that tree, and a repair such as `rm -rf "$CARGO_TARGET_DIR"/*` must work when the pool is short). The lessee evictions still run for it.
 - In a RAM slot, export `CARGO_PROFILE_DEV_DEBUG=line-tables-only` and `CARGO_INCREMENTAL=0` when `RAM_CARGO_ENV=1`, unless the caller already set either one.
 - The disk ceiling `CODESCOUT_SLOT_CEILING_MB` does not apply to RAM slots.
 - The last-lease time of a slot is the mtime of `<slot>/.codescout-lessee`. A slot with no stamp counts as the oldest.
@@ -145,11 +145,12 @@
   - `V1` RAM lease → `line-tables-only 0`;
   - `V2` RAM lease with preset `CARGO_INCREMENTAL=1` → `line-tables-only 1`;
   - `V3` RAM lease with `CODESCOUT_GATE_RAM_CARGO_ENV=0` → `<unset> <unset>`;
-  - `V4` disk lease (both RAM locks held) → `<unset> <unset>`.
+  - `V4` disk lease (both RAM locks held) → `<unset> <unset>`;
+  - `V5` a RAM lease that the pool rule gives up (budget short, so the run goes to disk) → the disk run sees `<unset> <unset>`.
 
 - [ ] **Step 2: Run** `bash tests/gate-slot.sh`. Expected: V1 and V2 FAIL.
 
-- [ ] **Step 3: Implement** the two conditional exports in `lease_gate_target`'s RAM branch.
+- [ ] **Step 3: Implement** the two conditional exports in `lease_gate_target`, AFTER the pool block (the rule and `ram_pool_make_room`) and only once the RAM lease is kept, so a given-up RAM lease never carries them into the disk run. Task 2/3's `lease_gate_target` keeps `lease_ram_target` free of exports; keep it so.
 
 - [ ] **Step 4: Run** `bash tests/gate-slot.sh`. Expected: `0 failed`.
 
@@ -211,7 +212,7 @@
 - Create: `docs/conventions/gate-ram-tier.md`
 - Modify: `docs/conventions/gate-ordering.md` (one pointer line), `scripts/slot-pool.sh` header (one line pointing at the new doc)
 
-- [ ] **Step 1: Write `docs/conventions/gate-ram-tier.md`** with: the zram-generator drop-in from spec §1 verbatim; a oneshot unit `codescout-gate-ram-pool.service` (`After=` and `Requires=` the mount unit of `/var/cache/codescout-gate-ram`, running `tune2fs -m 0 /dev/zram1` and `install -d -o <user> -g <user> /var/cache/codescout-gate-ram/pool`); an example `gate-pool.env` naming `/var/cache/codescout-gate-ram/pool` and the defaults; a systemd user timer `codescout-gate-ram-evict.timer` (`OnBootSec=10min`, `OnUnitActiveSec=10min`) with its service running `<checkout>/scripts/gate-ram-evict.sh`; and the four go-live checks from the spec's Testing section. State that none of it is installed by the repo. State two limits of the idle rule: the idle clock runs from the start of the last lease (the mtime of `.codescout-lessee`), not from its end; and a lease from outside a git tree leaves no stamp (`slot_evict_foreign_members` removes it), so that slot counts as due at the next timer tick once it is idle. State the config file format as `ram_tier_load_config` parses it: plain `KEY=VALUE` lines, no `export`, no indentation, no quotes, exact key names. A line that does not start with `CODESCOUT_GATE_RAM_` is ignored silently, which includes an `export` or indented line; a misspelled key that does start with it is also ignored silently. State that `CODESCOUT_GATE_RAM_SLOTS=0` means no RAM slots, so every lease uses disk.
+- [ ] **Step 1: Write `docs/conventions/gate-ram-tier.md`** with: the zram-generator drop-in from spec §1 verbatim; a oneshot unit `codescout-gate-ram-pool.service` (`After=` and `Requires=` the mount unit of `/var/cache/codescout-gate-ram`, running `tune2fs -m 0 /dev/zram1` and `install -d -o <user> -g <user> /var/cache/codescout-gate-ram/pool`); an example `gate-pool.env` naming `/var/cache/codescout-gate-ram/pool` and the defaults; a systemd user timer `codescout-gate-ram-evict.timer` (`OnBootSec=10min`, `OnUnitActiveSec=10min`) with its service running `<checkout>/scripts/gate-ram-evict.sh`; and the four go-live checks from the spec's Testing section. State that none of it is installed by the repo. State two limits of the idle rule: the idle clock runs from the start of the last lease (the mtime of `.codescout-lessee`), not from its end; and a lease from outside a git tree leaves no stamp (`slot_evict_foreign_members` removes it), so that slot counts as due at the next timer tick once it is idle. State the config file format as `ram_tier_load_config` parses it: plain `KEY=VALUE` lines, no `export`, no indentation, no quotes, exact key names. A line that does not start with `CODESCOUT_GATE_RAM_` is ignored silently, which includes an `export` or indented line; a misspelled key that does start with it is also ignored silently. State that `CODESCOUT_GATE_RAM_SLOTS=0` means no RAM slots, so every lease uses disk. State that the zram mount needs `discard` (without it deleted files never free zram RAM, and the RAM budget would keep refusing), and that freed RAM may show in `mm_stat` only after the next journal commit.
 
 - [ ] **Step 2: Run** `bash tests/gate-slot.sh`. Expected: `0 failed`.
 
@@ -226,7 +227,7 @@ Every step that uses `sudo` needs the operator's explicit approval in the sessio
 - [ ] **Step 1:** With approval, install the drop-in and the oneshot unit from `docs/conventions/gate-ram-tier.md`, then `sudo systemctl daemon-reload` and start the zram1 setup unit and the oneshot unit. Check: `findmnt -no SOURCE,FSTYPE,OPTIONS /var/cache/codescout-gate-ram` shows `/dev/zram1 ext4` with `discard`, and `awk '{print $4}' /sys/block/zram1/mm_stat` prints `21474836480`.
 - [ ] **Step 2:** Write `~/.config/codescout/gate-pool.env`. Run `scripts/with-slot.sh sh -c 'echo $CARGO_TARGET_DIR'`. Expected: `/var/cache/codescout-gate-ram/pool/slot-0`.
 - [ ] **Step 3: Go-live check 1.** Run `./scripts/gate.sh`. Expected: all lanes exit 0 in the RAM slot, with the `tier RAM` lines.
-- [ ] **Step 4: Go-live checks 2 and 3.** Record `mm_stat` fields 1 and 3 after the run (ratio against 2.2), then `scripts/with-slot.sh --slot ram-0 sh -c 'rm -rf "$CARGO_TARGET_DIR"/*'` and confirm that field 3 falls.
+- [ ] **Step 4: Go-live checks 2 and 3.** Record `mm_stat` fields 1 and 3 after the run (ratio against 2.2), then `scripts/with-slot.sh --slot ram-0 sh -c 'rm -rf "$CARGO_TARGET_DIR"/*'` and confirm that field 3 falls. Time how long field 3 takes to fall after the `rm -rf`: ext4 sends discards when the journal commits, not at unlink, so a reading right after an eviction may still be stale, and `ram_pool_fits` re-checks right after each removal and could over-evict on a stale reading. Record the lag; if it exceeds a few seconds, the fix is to flush (`sync -f` on the pool) before the re-check, as a follow-up.
 - [ ] **Step 5: Go-live check 4.** Over the next several gate runs and one `Cargo.lock` change, record the slot size after each run against the 4096 MiB `GROWTH`.
 - [ ] **Step 6:** Install and start the user timer. Check `systemctl --user list-timers codescout-gate-ram-evict.timer`.
 - [ ] **Step 7:** Write the four results into the spec under a new `## Go-live results (YYYY-MM-DD)` section and commit it.
