@@ -251,7 +251,7 @@ async fn cross_embed_memory(
 ) -> anyhow::Result<()> {
     // The key follows the call's `project_id`, not the focus: the file went to the named
     // project's directory, so its point must carry that project's key.
-    // docs/issues/2026-10-29-memory-write-with-a-project-id-cross-embeds-under-the-focused-project-not-the-named-one.md
+    // docs/issues/archive/2026-10-29-memory-write-with-a-project-id-cross-embeds-under-the-focused-project-not-the-named-one.md
     let project_id = semantic_project_key(input, ctx).await?;
     let root = ctx
         .agent

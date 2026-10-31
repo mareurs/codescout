@@ -2606,7 +2606,7 @@ async fn points_under(
 /// The `memory` tool takes `project_id` to scope a call to a workspace project. The file
 /// write honors it; the cross-embed read the FOCUSED project's name instead, so a member's
 /// memory was filed under another project's key.
-/// docs/issues/2026-10-29-memory-write-with-a-project-id-cross-embeds-under-the-focused-project-not-the-named-one.md
+/// docs/issues/archive/2026-10-29-memory-write-with-a-project-id-cross-embeds-under-the-focused-project-not-the-named-one.md
 #[tokio::test]
 async fn a_write_with_a_project_id_cross_embeds_under_the_named_project() {
     let (_dir, ctx, store) = multi_project_ctx_with_store().await;
