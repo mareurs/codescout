@@ -6886,7 +6886,12 @@ async fn a_timed_out_filter_with_output_over_the_limit_stays_inline() {
         parsed["truncated"], true,
         "a cut stdout says so: {text:.400}"
     );
-    assert_eq!(parsed["stdout_total"], 200000, "{text:.400}");
+    // How many of the 200000 lines the producer wrote before the one-second kill depends on machine
+    // load (40081 to 177372 were seen under contention), so the total is bounded, not exact. What the
+    // clamp promises is that the total counts the lines it cut away.
+    let total = parsed["stdout_total"].as_u64().expect("a stdout_total");
+    let shown = parsed["stdout_shown"].as_u64().expect("a stdout_shown");
+    assert!(shown < total && total <= 200000, "{text:.400}");
 }
 
 /// Bug bc0cb248b224d1dd on the timeout path: the filter reads the capture file as it is on disk, so
