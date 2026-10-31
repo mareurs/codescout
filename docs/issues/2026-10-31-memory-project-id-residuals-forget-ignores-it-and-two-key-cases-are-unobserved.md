@@ -12,7 +12,7 @@ opened: 2026-10-31
 related:
 - docs/issues/archive/2026-10-29-memory-write-with-a-project-id-cross-embeds-under-the-focused-project-not-the-named-one.md
 severity: low
-unverified: The gate format lane refused on ownership (rustfmt --check was clean); forget was not run end to end on a live sqlite-vec server. The fix, the regression test and the clippy, lean, default and Python lanes are verified.
+unverified: The gate format lane refused on ownership (rustfmt --check was clean); forget was run live on Qdrant only, not on a live sqlite-vec server. The fix, the regression test, the real sqlite-vec store's delete and the clippy, lean, default and Python lanes are verified.
 ---
 
 # BUG: memory forget ignores project_id, and two project_id key cases of the write fix are unobserved
@@ -65,7 +65,7 @@ Focus the member, then call without `project_id`.
 ## Resume
 
 1. Re-run `./scripts/gate.sh` once the format lane can prove ownership. The run of 2026-10-31 passed clippy, LEAN, DEFAULT and the Python lane; the format lane refused (`FMT_STATE=ownership-refused`, coverage gaps in the history), and `rustfmt --check` on the changed files was clean after three hand edits.
-2. Optionally run `forget` with `project_id` on a live server with the sqlite-vec backend. Not done: only the in-memory seam and the real store's delete were tested.
+2. Live check on 2026-10-31 (binary built after 1644629e5): `remember`, named `recall`, `forget(id, project_id="codescout-embed")` and a second named `recall` (0 results) all behaved. The server used Qdrant, which deletes by id, so this shows no regression there; it does not exercise the sqlite-vec fix. Still open: `forget` with `project_id` on a live server with the sqlite-vec backend.
 3. Then archive with `doc(action="move", ...)`.
 
 ## References
