@@ -760,3 +760,17 @@ Verified at the bytes in `src/prompts/guides/*.md`, `src/prompts/guide_index.rs`
 4. Direction (c): derive the citation edges from a declared `requires`/`see-also` and lint dangling ones. Only after 1 shows whether callers use section addressing.
 
 Explicitly not done and not proposed here: splitting topics (still contraindicated, see (b)), moving bodies out of the binary. Status stays `open`; the Phase 2 and `topic_declaring` text above predates the shipped work and the first bullet list is the correction.
+
+
+## Plan step 1, citation half, landed 2026-10-31 — the lint exists, and the count is 0 dangling of 5
+
+The build test `every_section_citation_in_the_guides_resolves_to_a_heading` (`src/prompts/guide_index.rs`, commit 55bfa87fb on experiments) checks every `get_guide("t") § H` citation in `src/prompts/guides/*.md` against the headings of `t`. A heading resolves by exact match (case-insensitive), else by a prefix of exactly one heading. The run the plan asked for ("run it first to see the true count") found **5 citations and 0 dangling**: `librarian.md:145`, `:423`, `librarian-runtime.md:133`, `tracker-conventions.md:1068`, `workspace-state.md:89`. The earlier worry that "three guides cite sections the API cannot serve" is therefore about the tool, not about broken links: every cited heading exists, but a caller cannot fetch it with `get_guide`.
+
+Two things the first version of the lint got wrong, both caught by mutation-checking on the real corpus:
+
+- It missed 4 of the 5 citations. They are written `` `get_guide("t")` § *H* ``, with a closing backtick between `)` and the section sign. A rename of a cited heading in `librarian-runtime.md` passed the first version. The scanner now accepts the backtick, a test pins the form, and the test asserts `checked >= 5`, so a scanner that loses a citation form fails.
+- `Bug files` is cited for the heading `Bug files (docs/issues/)`, so the prefix arm is needed.
+
+Gate green (FMT/CLIPPY/LEAN/DEFAULT/PYTHON_LIGHT = 0) on the tree before the last rebase; the rebase pulled in three docs-only commits.
+
+**Not done, and not decided:** the `section` argument on `get_guide`. It adds schema bytes to `tools/list` on every request of every session, which `docs/PROGRESSIVE_DISCOVERABILITY.md` § the tool-surface budget treats as a per-request cost, so it needs an owner decision. The lint shows only 5 section-qualified citations exist; a caller that holds the guide body can read the heading there. Steps 2 to 4 are untouched.
