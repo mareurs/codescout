@@ -734,3 +734,29 @@ would both survive a bad sampling design, so the sample is the thing to get righ
 measurement. It is the kind of premise that reads as settled because it is stated
 by someone who knows the file, and it deserves re-costing before anyone builds on
 it.
+
+## Re-verified at HEAD 2026-10-30 (Group F pass) — what holds, what is stale, and the plan
+
+Verified at the bytes in `src/prompts/guides/*.md`, `src/prompts/guide_index.rs` and `src/tools/guide.rs`; nothing was changed and no guide was restructured.
+
+**Stale in this file (do not quote):**
+
+- *"`tracker-conventions` declares no `serves:` sections"* (§ *The headline is a BLEND*, § *Phase 1.5*). It now declares about 30, in the `doc.<action>(path~docs/issues/|docs/trackers/)` form (`tracker-conventions.md` L14-L1071). The Phase 2 blocker "cross-topic shape disambiguation" is therefore resolved: `path_contains` specificity is modelled (`Shape::path_contains`, `guide_index.rs:112`; `ambiguous_across_topics` L722 treats a qualified shape beside an unqualified one as a narrowing, test `a_path_qualified_shape_beside_an_unqualified_one_is_a_narrowing_not_an_ambiguity`). Reachability and size are gated by `tracker_conventions_ships_sections_to_each_shape_that_routes_to_it`, `no_tracker_conventions_section_is_reachable_without_a_result`, `declared_sections_are_within_the_size_cap`, `WRITE_CEILING_APPEND_ENTRY` / `WRITE_CEILING_UPDATE_ENTRY` (`guide_index.rs:291,293`).
+- *"9 of the 10 topics declare nothing"* is now 8 of 10: only `librarian.md` and `tracker-conventions.md` carry `serves:` (grep over `src/prompts/guides`; `src/prompts/README.md` mentions the syntax only).
+
+**Still true:**
+
+- `get_guide` takes `topic` only (`src/tools/guide.rs`); there is no `section` parameter, so direction (a)'s explicit addressing was never built. Section grain exists only as server-side auto-inject selection by call shape.
+- Section-qualified citations still cannot be followed by a caller: `librarian.md:145`, `:423`, `librarian-runtime.md:133`, `tracker-conventions.md:1068`, `workspace-state.md:89` (five now, was three) write `get_guide("x")` § *Section* and the tool returns the whole topic.
+- The citation edges (direction (c)) are still prose; no lint or router reads them.
+- `names_tracker_path` still exists (`src/librarian/adapter.rs:708`, used at L591), so Phase 2's stated payoff, retiring it, has not happened.
+- Eight topics (error-handling, iron-laws-detail, librarian-runtime, progressive-disclosure, project-activation-bootstrap, symbol-navigation, untrusted-content, workspace-state) still deliver whole.
+
+**Plan (ordered; each step is separately shippable and none needs a restructure):**
+
+1. *Cheapest, closes the file's "cheapest observable form".* Give `get_guide` an optional `section` argument resolving a heading with the same `split_sections` the auto-inject path uses (`guide_index.rs:33`); an unknown heading returns a `RecoverableError` listing the topic's headings. Add a build test that every `get_guide("t") § *H*` citation in the guides resolves to a real heading of `t` (it fails today for any citation whose heading was renamed; run it first to see the true count). Prompt-surface change: follow `src/prompts/README.md`.
+2. *Largest lever by the 2026-08-31 probe: subagent delivery* (92.5% of delivered bytes never engaged). Needs the delivery path to know it is serving a subagent; that signal is an open question, so spike it before designing.
+3. Extend `serves:` to the next topic by delivered bytes after measuring with `scripts/probe_guide_section_use.py`, stratified by project and by main/subagent as § *The DISTRIBUTION probe* requires. Do not decompose `Entry-level standard` first (59% engagement).
+4. Direction (c): derive the citation edges from a declared `requires`/`see-also` and lint dangling ones. Only after 1 shows whether callers use section addressing.
+
+Explicitly not done and not proposed here: splitting topics (still contraindicated, see (b)), moving bodies out of the binary. Status stays `open`; the Phase 2 and `topic_declaring` text above predates the shipped work and the first bullet list is the correction.

@@ -224,6 +224,14 @@ Status stays `open` and the frontmatter `unverified:` caveat is kept: it concern
 
 Tier 1 is in on `experiments` (local, not pushed at the time of writing). Remaining, needs a human decision: Tier 2 (*Open question 1*, the write path, and *Open question 2*, what of the command to store), and whether Tier 2 still has a demand argument now that `permissions.deny` blocks native `Bash` in all three profiles (the `Bash` half is closed by policy; `Read`, `Grep`, `Glob`, `Agent`, `WebFetch` remain unrecorded). Smaller follow-ups: reconcile `.claude/skills/analyze-usage/SKILL.md` ~255 / ~387 with `RECORDER_SCOPE` so there is one wording, and retitle the file to the native-non-shell-tool blind spot (only if the id-rekey cost named in `## Summary` is judged acceptable).
 
+## Re-verified at HEAD 2026-10-30 (Group F pass) — fix vs marker decision
+
+Verified at the bytes: `usage::RECORDER_SCOPE` exists (`src/usage/mod.rs:13`) and is attached at `src/mcp_resources/tool_usage.rs:157` (`doctor://tool-usage` Report) and `src/dashboard/api/usage.rs:29` (`/api/usage`, counts only). `usage::db::query_stats` has exactly one non-dashboard reader, `AgentUsageSource::snapshot` (`tool_usage.rs:197`), which is the same `doctor://tool-usage` path, so no read surface of `tool_calls` lacks the scope label (this closes the "did not exhaustively audit" caveat above; `/api/lsp` reads `lsp_events`). So **the marker is done and holds**.
+
+**Decision for the recorder (Tier 2): marker, not fix.** Reasons: (1) the original demand, native `Bash`, is gone by policy (`permissions.deny`); (2) what remains unrecorded is `Read`/`Grep`/`Glob`/`Agent`/`WebFetch`, and the recorder is mounted at the MCP boundary, so recording them needs a second capture point in the `codescout-companion` plugin repo (`hooks.json` `PostToolUse`), outside this repository; (3) the three write-path options and the "what of the command to store" question are owner decisions the file already tabulates, and `H-8` itself says to ship nothing tuned before a denominator exists. No code changed in this pass. If the owner later wants Tier 2, the first test is the one `## Tests added` already specifies (absence assertion paired with a positive row-shape assertion, red before the hook exists).
+
+Status stays `open`: needs an owner decision on Tier 2, or a close as `mitigated` (Tier 1 label) if the owner declines it.
+
 ## References
 
 - `docs/trackers/codescout-usage-hookify.md` § `H-8` — the recorder proposal and its measurement

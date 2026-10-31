@@ -4725,6 +4725,88 @@ fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u3
     }
     out
 }
+/// Tokens whose `| PREFIX-N |` INDEX-TABLE row appears more than once, with every
+/// row's line, sorted by token.
+///
+/// The params-ledger half of `entry_defined_twice`. `duplicate_definitions` reads
+/// `## PREFIX-N` headings only, so a ledger whose body carries an index TABLE and no
+/// headings produced no `EntrySection` and a duplicated id there was invisible —
+/// `docs/issues/2026-09-24-residual-params-ledger-cross-host-high-water.md`. The
+/// surface is the same one `body_claimed_indices` (`catalog/augmentation.rs`) counts
+/// toward allocation: the leading cell of a table row, optionally wrapped in
+/// backticks, bold or link brackets.
+///
+/// Rows are compared within ONE contiguous table, never across tables: a ledger may
+/// list an id in an index and again in an analysis table (`docs/trackers/operator-rules.md`
+/// does, for OP-1..OP-4 — measured as a false positive on the real corpus before this
+/// was scoped), while a merge collision puts both rows into the same table.
+/// Rows are compared with rows only, never with headings: a prose ledger that keeps
+/// both a `## A-1` section and an `| A-1 |` index row is the documented flow, not a
+/// duplicate. Lines inside YAML frontmatter and fenced code blocks are not rows.
+fn duplicate_index_rows(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u32>)> {
+    use std::collections::BTreeMap;
+    let Ok(re) = regex::Regex::new(r"^\|[ \t]*[`*\[]*([A-Z]{1,3})-(\d+)\b") else {
+        return Vec::new();
+    };
+    let mut dups: BTreeMap<String, Vec<u32>> = BTreeMap::new();
+    // Rows of the CURRENT contiguous table only. A ledger may legitimately list the
+    // same id in several tables (an index, then analysis tables — `operator-rules.md`
+    // lists OP-1..OP-4 twice); a merge collision puts both rows into ONE table, so
+    // the comparison resets whenever a non-table line intervenes.
+    let mut table: BTreeMap<String, Vec<u32>> = BTreeMap::new();
+    let mut flush = |table: &mut BTreeMap<String, Vec<u32>>| {
+        for (id, lines) in std::mem::take(table) {
+            if lines.len() > 1 {
+                dups.entry(id).or_default().extend(lines);
+            }
+        }
+    };
+    let mut in_frontmatter = false;
+    let mut fence: Option<char> = None;
+    for (i, line) in text.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if i == 0 && line.trim_end() == "---" {
+            in_frontmatter = true;
+            continue;
+        }
+        if in_frontmatter {
+            if line.trim_end() == "---" {
+                in_frontmatter = false;
+            }
+            continue;
+        }
+        if let Some(c) = trimmed
+            .chars()
+            .next()
+            .filter(|c| (*c == '`' || *c == '~') && trimmed.starts_with(&c.to_string().repeat(3)))
+        {
+            flush(&mut table);
+            match fence {
+                None => fence = Some(c),
+                Some(open) if open == c => fence = None,
+                Some(_) => {}
+            }
+            continue;
+        }
+        if fence.is_some() {
+            continue;
+        }
+        if !trimmed.starts_with('|') {
+            flush(&mut table);
+            continue;
+        }
+        if let Some(c) = re.captures(line) {
+            if prefixes.iter().any(|p| p == &c[1]) {
+                table
+                    .entry(format!("{}-{}", &c[1], &c[2]))
+                    .or_default()
+                    .push(i as u32 + 1);
+            }
+        }
+    }
+    flush(&mut table);
+    dups.into_iter().collect()
+}
 
 /// `entry_defined_twice`: one ledger defines the same `PREFIX-N` token twice.
 ///
@@ -4774,7 +4856,18 @@ fn scan_entry_defined_twice(
         if prefixes.is_empty() {
             continue;
         }
-        for (token, lines) in duplicate_definitions(&text, &prefixes) {
+        // Headings first, then `| PREFIX-N |` index rows: a params ledger carries its
+        // committed ids in an index table and no headings, so heading detection alone
+        // never sees its duplicates.
+        let found = duplicate_definitions(&text, &prefixes)
+            .into_iter()
+            .map(|(t, l)| (t, l, ""))
+            .chain(
+                duplicate_index_rows(&text, &prefixes)
+                    .into_iter()
+                    .map(|(t, l)| (t, l, " (as `| PREFIX-N |` index-table rows)")),
+            );
+        for (token, lines, surface) in found {
             if !scope.admit("entry_defined_twice", &id, &abs_path) {
                 continue;
             }
@@ -4788,7 +4881,7 @@ fn scan_entry_defined_twice(
                 Some(id.clone()),
                 abs_path.clone(),
                 format!(
-                    "`{token}` is defined {} times in this ledger, at lines {lines_str}. \
+                    "`{token}` is defined {} times{surface} in this ledger, at lines {lines_str}. \
                          Every citation of `{token}` binds the EARLIER of these definitions — \
                          `extract()`'s `seen_defs` keeps the first heading in file order and \
                      discards the rest — whichever one the citer actually meant, and \
@@ -23553,6 +23646,60 @@ body
         assert!(
             duplicate_definitions(body, &["R".to_string()]).is_empty(),
             "the frontmatter comment must not count as a second definition"
+        );
+    }
+
+    /// Params-ledger gap: a ledger whose body is an index TABLE (no `## R-N` headings)
+    /// that carries `| R-7 |` twice. `duplicate_definitions` sees no `EntrySection`
+    /// there, so this surface was uncovered
+    /// (`docs/issues/2026-09-24-residual-params-ledger-cross-host-high-water.md`).
+    #[test]
+    fn duplicate_index_rows_finds_a_row_token_listed_twice() {
+        let body = "# L\n\n| ID | t |\n|---|---|\n| R-7 | a |\n| R-8 | b |\n| `R-7` | c |\n";
+        let got = duplicate_index_rows(body, &["R".to_string()]);
+        assert_eq!(got, vec![("R-7".to_string(), vec![5, 7])], "{got:?}");
+    }
+
+    /// Negative direction, and the false-positive boundary: a heading plus its own
+    /// index row is the documented prose flow, a prefix the ledger does not declare is
+    /// not its namespace, prose/frontmatter/fenced mentions are not rows, and `R-1`
+    /// must not match `R-12`.
+    #[test]
+    fn duplicate_index_rows_is_silent_on_the_legitimate_shapes() {
+        let p = ["R".to_string()];
+        let heading_and_row = "# L\n\n| R-1 | a |\n\n## R-1 — a\n";
+        assert!(duplicate_index_rows(heading_and_row, &p).is_empty());
+        let undeclared = "| T-1 | a |\n| T-1 | b |\n";
+        assert!(duplicate_index_rows(undeclared, &p).is_empty());
+        let prose = "| R-1 | a |\n\nsee | R-1 | inline and R-1 again\n";
+        assert!(duplicate_index_rows(prose, &p).is_empty());
+        let prefix_boundary = "| R-1 | a |\n| R-12 | b |\n";
+        assert!(duplicate_index_rows(prefix_boundary, &p).is_empty());
+        let frontmatter = "---\n| R-1 | a |\nentry_prefix: R\n---\n| R-1 | a |\n";
+        assert!(duplicate_index_rows(frontmatter, &p).is_empty());
+        let two_tables = "| R-1 | a |\n\ntext\n\n| R-1 | b |\n";
+        assert!(duplicate_index_rows(two_tables, &p).is_empty());
+        let fenced = "| R-1 | a |\n```\n| R-1 | a |\n```\n";
+        assert!(duplicate_index_rows(fenced, &p).is_empty());
+    }
+
+    /// Wired end to end: the doctor reports the table-row duplicate under the same
+    /// `entry_defined_twice` check, naming the lines.
+    #[tokio::test]
+    async fn entry_defined_twice_fires_on_a_duplicated_index_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("active-project");
+        let cat = Catalog::open_in_memory().unwrap();
+        let body = "---\nentry_prefix: R\n---\n\n| ID | t |\n| R-7 | a |\n| R-7 | b |\n";
+        seed_ledger(&cat, "bbbbbbbbbbbbbbbb", &root.join("docs/ledger.md"), body);
+        let ctx = ctx_rooted_at(cat, &root);
+        let out = call(&ctx, json!({})).await.unwrap();
+        let found = violations_named(&out, "entry_defined_twice");
+        assert_eq!(found.len(), 1, "{out:#?}");
+        let detail = found[0]["detail"].as_str().unwrap();
+        assert!(
+            detail.contains("R-7") && detail.contains("at lines 6, 7"),
+            "{detail}"
         );
     }
 

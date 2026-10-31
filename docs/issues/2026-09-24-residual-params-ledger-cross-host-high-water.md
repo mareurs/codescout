@@ -1,7 +1,7 @@
 ---
 id: c035180192023734
 kind: bug
-status: open
+status: mitigated
 title: 'RESIDUAL: Extend the cross-host high-water guard and entry_defined_twice detection to params ledgers (params allocation path and ''| PREFIX-N |'' index tables)'
 tags:
 - cluster/shared-resource-carries-no-owner
@@ -27,7 +27,18 @@ Remaining work split out of `docs/issues/archive/2026-08-31-append-entry-high-wa
 
 ## Fix
 
-Not started. Re-read at HEAD 2026-10-30: `scan_entry_defined_twice` (`src/librarian/tools/doctor.rs`) calls `duplicate_definitions` over a ledger's `## PREFIX-N` headings, so a params ledger's `| PREFIX-N |` index rows are not read by it. Gap (2) stands as the parent states it. Not re-read and not run: Component B's upstream guard in `append_entry`. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+**Re-verified at the bytes 2026-10-30 (Group F pass); the bug text is half stale.**
+
+- *Component B no longer exists, for prose or params ledgers.* `append_entry.rs` (the prose branch, `if a.entry_collection.is_none()`) carries the comment `ALLOCATE OPTIMISTICALLY` — the unpushed-ledger refusal was removed 2026-09-11 (`docs/issues/archive/2026-09-10-append-entry-refuses-on-unpushed-commits-with-a-remedy-no-session-may-perform.md`) because its only remedy was a push no session may perform, and the collision is now caught at `pre-push` (`scripts/pre-push-foreign-session-guard.sh`). So "extend the upstream guard to the params path" has no guard to extend; that half is **withdrawn, not done**. Re-adding allocate-time refusal would reverse a recorded decision and is not proposed.
+- *Component A's params-ledger gap was real* and is fixed here: `duplicate_definitions` reads `## PREFIX-N` headings only, so a duplicated `| PREFIX-N |` index row was invisible.
+
+**Fix.** New `duplicate_index_rows` (`src/librarian/tools/doctor.rs`, beside `duplicate_definitions`), called from `scan_entry_defined_twice` under the same `entry_defined_twice` check, with the message labelled `(as | PREFIX-N | index-table rows)`. It reads the same leading-cell surface `body_claimed_indices` counts toward allocation. Two scoping rules, the second found by running the first version over this repo's `docs/`: rows are compared with rows only (a heading plus its own index row is the documented flow), and **within one contiguous table only**, because `docs/trackers/operator-rules.md` lists OP-1..OP-4 in an index and again in an analysis table (8 false positives in the first version). Frontmatter and fenced lines are skipped.
+
+**Not covered.** The detector has still never fired on a real collision; only fixtures. A duplicate row split across two tables is not seen, by design of the false-positive rule. The peer-ahead prevention gap (1) is unchanged and stays a `pre-push` concern. Observed red only at unit level: `duplicate_index_rows_finds_a_row_token_listed_twice` failed against an empty-returning stub with `left: [] right: [("R-7", [5, 7])]`; the integration test `entry_defined_twice_fires_on_a_duplicated_index_row` was written with the implementation and its pre-fix red was not separately observed.
+
+## Tests added
+
+`duplicate_index_rows_finds_a_row_token_listed_twice`, `duplicate_index_rows_is_silent_on_the_legitimate_shapes` (heading plus row, undeclared prefix, prose mention, `R-1` vs `R-12`, frontmatter, two separate tables, fenced), `entry_defined_twice_fires_on_a_duplicated_index_row` — all in `src/librarian/tools/doctor.rs`. The 4 existing `entry_defined_twice*` and 9 `duplicate_definitions*` tests still pass.
 
 ## References
 

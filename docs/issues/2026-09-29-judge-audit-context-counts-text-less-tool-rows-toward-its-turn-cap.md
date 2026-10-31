@@ -83,6 +83,10 @@ there rather than patching R117 alone.
 
 `tests/test_measure_judge.py::BoundedContextTests::test_text_less_rows_do_not_spend_the_turn_cap` (2026-10-24): 14 prompt rows, each followed by a text-less `tool_use` and a text-less `tool_result`. It expects the 12 newest TEXT-BEARING rows. It failed before the change (the context lost `p02`, and kept text-less rows) and passes after. `tests/test_measure_judge.py` as a whole: 60 passed.
 
+## Re-verified at HEAD 2026-10-30 (Group F pass)
+
+Checked at the bytes, not from this file: `scripts/measure/judge.py` `_session_part` (L435-475) skips `if not text:` rows before the `CONTEXT_MAX_TURNS` check, so option B is in the code, and `tests/test_measure_judge.py:285` `test_text_less_rows_do_not_spend_the_turn_cap` exists. The residual defect (no tool call or tool result ever reaches the judge, so operator example D stays hidden) is real and is exactly what option C addresses. It is not fixable inside `_session_part` without choosing the packet rule, which `docs/superpowers/specs/2026-10-24-intervention-judge-design.md` assigns to a new module, and the operator recorded on 2026-10-16 and 2026-10-24 that this stays open until that spec lands. No code changed in this pass; a second patch to `_session_part` would pre-empt a decision the operator made. Verdict: needs owner decision (retire the old audit/correction modes, or accept option B as final and close as `mitigated`).
+
 ## References
 
 - `docs/superpowers/specs/2026-09-26-system1-base-rate-measurement-design.md` (Amendment 8, R117)
