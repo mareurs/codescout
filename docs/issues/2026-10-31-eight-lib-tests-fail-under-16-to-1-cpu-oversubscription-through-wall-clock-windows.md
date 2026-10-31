@@ -32,7 +32,12 @@ The 8 failures and their first panic line:
 Linux, `experiments` at `6ad4a5e4d` plus peers' uncommitted edits in the tree. A rust-analyzer started cold inside the run.
 
 ## Root cause
-Unknown. The panic text names a deadline in each of the three groups. Nothing here shows that a deadline is too short at a realistic load.
+
+Migrate group (3 tests): confirmed. The probe samples the test thread's `/proc/self/task/<tid>/syscall` for a `clock_nanosleep` for at most 5 s. With a diagnostic added, one failing run showed 107 samples in 5 s: 105 `running` and two syscall 74 (`fsync`), never a sleep. The rebuild had not reached SQLite's busy wait; it was still doing its own work, starved of CPU. So the 5 s deadline measured the load.
+
+LSP test: not confirmed. Alone it passed 4 of 4 under the load that failed it in the suite, so it needs the whole suite's contention.
+
+Attribution group (4 tests): cause not yet read. Each passes alone without load and fails 4 of 4 alone under load, and `the_same_red_at_exit_zero_still_answers` also failed once in a quiet run, so it is not purely a load effect.
 
 ## Evidence
 `suite-load.txt` in that scratchpad: `5386 passed; 8 failed; 12 ignored; finished in 1600.35s`. Not checked: whether any of the 8 fails alone, whether the attribution failures are the python engine's own timeout or something else, and whether the tree's uncommitted edits play a part.
@@ -41,7 +46,13 @@ Unknown. The panic text names a deadline in each of the three groups. Nothing he
 None.
 
 ## Fix
-Not done. Check each group alone under the same load before changing a test. `78f30eb614d3fba3` shows the pattern: an assertion that depends on how much work finished in a window can be replaced by one that holds at any load.
+
+Migrate group: fixed. The probe's deadline is 60 s instead of 5 s, and its failure message carries the syscall counts it saw. No assertion changed. Under the same load, 4 of 4 runs of each of the three pass (12 of 12; 12 of 12 failed before).
+
+- Fix SHA (on `experiments`): `0e59c5cd19af0d2e4ea8c7d91451b1b7a0c0e11e`
+- patch-id: `393bd5aea1ffe752a18612582ca7e59dee85ef42`
+
+LSP and attribution groups: not fixed.
 
 ## Tests added
 N/A.
@@ -50,7 +61,8 @@ N/A.
 At a normal gate load these have not been seen to fail, except the two sightings recorded in `78f30eb614d3fba3`.
 
 ## Resume
-Re-run each of the 8 alone under 64 loops on two cores. Fix those that fail by the `78f30eb614d3fba3` method, and close the rest as not reproduced.
+
+Open: the four `attribution` tests (the python engine gives no hint under load, and one test also failed in a quiet run) and `lsp::client::tests::workspace_symbols_returns_project_symbols` (30 s LSP request timeout; passes alone under load). Read the engine's own deadline in `src/tools/run_command/attribution.rs` first; the four tests share it.
 
 ## References
 - `docs/issues/2026-10-31-a-timed-out-filter-test-fails-in-the-loaded-gate-and-passes-alone.md`
