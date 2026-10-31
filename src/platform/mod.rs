@@ -88,12 +88,13 @@ pub fn process_alive(pid: u32) -> bool {
 }
 
 /// The files that processes on this machine hold open, as the targets of the readable
-/// `/proc/<pid>/fd/*` symlinks (Linux). Entries that cannot be read (other users'
-/// processes, a process that exited mid-scan) are skipped, never an error. `None` when
+/// `/proc/<pid>/fd/*` symlinks (Linux). The set is complete for the processes this user may
+/// inspect, and only for those: entries that cannot be read (other users' processes, a
+/// process that exited mid-scan) are skipped, never an error. `None` when
 /// `/proc` itself cannot be listed, and on every other platform: the caller must then
 /// treat "is it open?" as unknown. The paths are the kernel's canonical ones.
 #[cfg(target_os = "linux")]
-pub fn open_file_paths() -> Option<std::collections::HashSet<PathBuf>> {
+pub(crate) fn open_file_paths() -> Option<std::collections::HashSet<PathBuf>> {
     let mut open = std::collections::HashSet::new();
     for proc_entry in std::fs::read_dir("/proc").ok()?.flatten() {
         let name = proc_entry.file_name();
@@ -116,7 +117,7 @@ pub fn open_file_paths() -> Option<std::collections::HashSet<PathBuf>> {
 /// See the Linux version: there is no portable way to list open files here, so the answer
 /// is "unknown".
 #[cfg(not(target_os = "linux"))]
-pub fn open_file_paths() -> Option<std::collections::HashSet<PathBuf>> {
+pub(crate) fn open_file_paths() -> Option<std::collections::HashSet<PathBuf>> {
     None
 }
 
