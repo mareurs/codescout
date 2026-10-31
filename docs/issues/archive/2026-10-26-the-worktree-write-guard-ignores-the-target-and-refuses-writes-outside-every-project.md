@@ -74,7 +74,9 @@ Pin `workspace="<abs path>"` on the call.
 
 ## Resume
 
-Fixed and archived. Gate on `experiments` with the fix: `PYTHON_LIGHT=0 CLIPPY=0 LEAN=0 DEFAULT=0`; `FMT=1` was `ownership-refused` because peers have dirty files, and `rustfmt --check` passes on the six files. The heavy Python suites were not run. Not seen live: the running server was built before this commit. After the next `/mcp` rebuild, `create_file` of a scratch file under `~/.cache` with worktrees present and no `activate` should succeed, and a write into a linked worktree path should still be refused.
+Fixed and archived. Gate on `experiments` with the fix: `PYTHON_LIGHT=0 CLIPPY=0 LEAN=0 DEFAULT=0`; `FMT=1` was `ownership-refused` because peers have dirty files, and `rustfmt --check` passes on the six files. The heavy Python suites were not run.
+
+**Seen live 2026-10-31** on a server rebuilt after `67e971a7b`, in a session with no project activated and nine linked worktrees present. `create_file` of a scratch file under the session scratchpad, outside every project, returned `status: ok` and the file existed on disk. `create_file` of a probe file under the linked worktree `/tmp/codescout-real-task-20261024` was refused with `Write blocked: git worktrees detected but workspace(action='activate') has not been called`, and the probe file was not created. Only the `create_file` path was run live. `edit_file` and `approve_write` were not, and `workspace=` pinned calls were not tried. The pre-fix refusal for the first case was not re-run on the old binary here; the 72 logged refusals and the red test run stand for it.
 
 ## References
 
