@@ -111,6 +111,102 @@ pub async fn guard_worktree_write(ctx: &ToolContext) -> anyhow::Result<()> {
     .into())
 }
 
+/// Canonicalize `path` through its deepest existing ancestor, keeping missing
+/// descendants verbatim. `None` when a `..` survives (cannot be judged).
+fn resolve_target(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut below = Vec::new();
+    let mut cur = path;
+    loop {
+        if let Ok(canon) = std::fs::canonicalize(cur) {
+            let out = below.iter().rev().fold(canon, |acc, c| acc.join(c));
+            return Some(out);
+        }
+        let up = cur.parent()?;
+        match cur.components().next_back()? {
+            std::path::Component::Normal(n) => below.push(n.to_os_string()),
+            _ => return None,
+        }
+        cur = up;
+    }
+}
+
+/// The filesystem entry changed by a write decision.
+#[derive(Clone, Copy)]
+pub enum WorktreeWriteTarget {
+    /// Atomic file writes replace this entry, including a leaf symlink.
+    File,
+    /// Directory approval follows the directory itself, including a leaf symlink.
+    Directory,
+}
+
+/// Target-aware variant of [`guard_worktree_write`] for `create_file`,
+/// `edit_file` and `approve_write`. A target that resolves outside the active
+/// project, its linked worktrees and its workspace members is not a project
+/// selection question, so it proceeds to the normal write authorization.
+/// Anything missing, unparseable or unresolved keeps the project guard.
+pub async fn guard_worktree_write_for_target(
+    ctx: &ToolContext,
+    input: &serde_json::Value,
+    kind: WorktreeWriteTarget,
+) -> anyhow::Result<()> {
+    if ctx.workspace_override.is_some() || ctx.agent.is_project_chosen_this_session().await {
+        return Ok(());
+    }
+    if target_outside_known_projects(ctx, input, kind).await {
+        return Ok(());
+    }
+    guard_worktree_write(ctx).await
+}
+
+async fn target_outside_known_projects(
+    ctx: &ToolContext,
+    input: &serde_json::Value,
+    kind: WorktreeWriteTarget,
+) -> bool {
+    let Some(raw) = input.get("path").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    if raw.is_empty() || raw.contains('\0') {
+        return false;
+    }
+    let Ok(root) = ctx.agent.require_project_root_for(None).await else {
+        return false;
+    };
+    let raw_path = std::path::Path::new(raw);
+    let joined = if raw_path.is_absolute() {
+        raw_path.to_path_buf()
+    } else {
+        root.join(raw_path)
+    };
+    let target = match kind {
+        WorktreeWriteTarget::File => joined
+            .parent()
+            .zip(joined.file_name())
+            .and_then(|(parent, name)| resolve_target(parent).map(|resolved| resolved.join(name))),
+        WorktreeWriteTarget::Directory => resolve_target(&joined),
+    };
+    let Some(target) = target else {
+        return false;
+    };
+    let mut roots = vec![root.clone()];
+    roots.extend(crate::util::path_security::list_git_worktrees(&root));
+    for p in ctx.agent.discovered_projects().await {
+        roots.push(root.join(&p.relative_root));
+    }
+    for r in roots {
+        // Compare both the literal and the resolved spelling of each root.
+        if target.starts_with(&r) {
+            return false;
+        }
+        match resolve_target(&r) {
+            Some(c) if target.starts_with(&c) => return false,
+            Some(_) => {}
+            None => return false,
+        }
+    }
+    true
+}
+
 /// Returns true if the input looks like it was intended as a regex pattern
 /// rather than a plain symbol name or literal text.
 // Used by symbols and search_pattern.

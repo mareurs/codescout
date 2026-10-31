@@ -59,7 +59,8 @@ impl Tool for CreateFile {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        super::guard_worktree_write(ctx).await?;
+        super::guard_worktree_write_for_target(ctx, &input, super::WorktreeWriteTarget::File)
+            .await?;
         let input = super::maybe_replay_ack(ctx, input, "create_file").await?;
         let path = super::require_str_param_or_hint(
             &input,

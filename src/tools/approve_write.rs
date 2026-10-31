@@ -45,7 +45,8 @@ impl Tool for ApproveWrite {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        super::guard_worktree_write(ctx).await?;
+        super::guard_worktree_write_for_target(ctx, &input, super::WorktreeWriteTarget::Directory)
+            .await?;
         // `path` means three different things across its three call sites, so the
         // shared table in params.rs deliberately has no entry for it. BL-3 Class B.
         let raw = super::require_str_param_or_hint(
