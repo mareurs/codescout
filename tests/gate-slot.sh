@@ -44,6 +44,10 @@
 # CODESCOUT_GATE_RAM_SLOTS, and `with-slot.sh --slot ram-N` names exactly one RAM slot and never
 # falls back to the other tier. It reuses case S's stubs and adds a `df` stub that models a filesystem.
 #
+# Case W covers the reporting (spec 7): a RAM run names its tier near the top and prints the zram
+# figures after the tree size, a red lane in a RAM slot adds one line that names the tier, and a disk
+# run prints none of it. The stub cargo exits with GATE_TEST_EXIT, so a lane can be red.
+#
 # The real gate.sh is driven here, not a copy of its logic: `cargo` is a stub on PATH that
 # records the CARGO_TARGET_DIR each lane saw, `./scripts/fmt-mine.sh` is a stub in a fake
 # checkout (gate.sh calls it relative to its cwd), and HOME plus CODESCOUT_GATE_POOL point
@@ -79,8 +83,9 @@ POOL="$WORK/pool"
 mkdir -p "$WORK/repo/scripts" "$WORK/bin" "$WORK/home"
 git -C "$WORK/repo" init -q
 cp "$(dirname "$GATE")/session_context.py" "$(dirname "$GATE")/session-context-v1.schema.json" "$WORK/repo/scripts/"
-printf "# Fixture Python lane.\n" > "$WORK/repo/scripts/python-tests.py"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$WORK/repo/scripts/fmt-mine.sh"
+# Both exit 0 unless the case sets GATE_TEST_PY_EXIT / GATE_TEST_FMT_EXIT (case W).
+printf '# Fixture Python lane.\nimport os, sys\nsys.exit(int(os.environ.get("GATE_TEST_PY_EXIT", "0")))\n' > "$WORK/repo/scripts/python-tests.py"
+printf '#!/usr/bin/env bash\nexit "${GATE_TEST_FMT_EXIT:-0}"\n' > "$WORK/repo/scripts/fmt-mine.sh"
 chmod +x "$WORK/repo/scripts/fmt-mine.sh"
 
 # The stub records one line per lane. With `hold-<tag>` present, its FIRST call parks
@@ -96,7 +101,7 @@ if [ -e "$w/hold-$tag" ] && [ ! -e "$w/started-$tag" ] && { [ "${GATE_TEST_HOLD_
     : > "$w/started-$tag"
     for _ in $(seq 1 300); do [ -e "$w/hold-$tag" ] || break; sleep 0.1; done
 fi
-exit 0
+exit "${GATE_TEST_EXIT:-0}"
 EOF
 chmod +x "$WORK/bin/cargo"
 
@@ -1094,6 +1099,99 @@ eq "V6 with CODESCOUT_GATE_RAM_CARGO_ENV=0 a named slot gets neither" "$(v_seen 
 mkdir -p "$POOL/slot-0"
 v_run_slot v6c 0
 eq "V6 a numeric --slot is the disk pool, with neither setting" "$(v_seen v6c)" "<unset> <unset>"
+rm -f "$WORK/df-cap"; ram_cfg
+
+echo "W. gate.sh names the tier it used, prints the zram figures, and says so when a lane is red in a RAM slot"
+# Spec 7. Three lines, each printed only for a RAM lease: the tier and why near the top, the figures
+# after the tree size, and on any red lane one line after GATE EXITS that names the tier and says that
+# a `No space left on device` or I/O error in the lane output is the tier, not the code. gate.sh does not
+# read lane output to decide, so the line is printed on every red RAM run. A disk run, configured or not,
+# prints none of them. The stub cargo exits with GATE_TEST_EXIT, the fixture fmt and python lanes with
+# GATE_TEST_FMT_EXIT and GATE_TEST_PY_EXIT. mmstat-w is chosen to print as 10.1G / 3.5G / 20.0G.
+RAM_W="$WORK/ram-w"; POOL="$WORK/pool-w"; rm -rf "$RAM_W" "$POOL"; mkdir -p "$RAM_W"
+printf '%s\n' "10842275840 524288 3758096384 21474836480 700000 0 0 0 0" > "$WORK/mmstat-w"
+echo 20480 > "$WORK/df-cap"
+ram_src /dev/zram1; ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM_W"
+W_OK=(PATH="$T_PATH" CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-high" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-w")
+W_REPORT='gate.sh: tier RAM (zram1): 10.1G logical, 3.5G RAM of 20.0G cap, 20.0G free'
+w_line()  { grep -n -m1 -F -- "$2" "$WORK/out-$1" | cut -d: -f1; }                  # w_line <tag> <text>: first line number
+w_count() { grep -c -F -- "$2" "$WORK/out-$1"; }                                   # w_count <tag> <text>
+w_red()   { grep -F 'RAM tier' "$WORK/out-$1" | grep -c -F 'No space left on device'; }
+w_after() { [ "$(w_line "$1" "$2")" -gt "$(w_line "$1" "$3")" ] 2>/dev/null && echo after || echo not-after; }
+
+run_gate w1 sid-w1 "${W_OK[@]}"; rc=$?
+eq "W1 a green RAM run exits 0" "$rc" "0"
+eq "W1 it ran in the RAM slot" "$(seen_all w1)" "$RAM_W/slot-0"
+eq "W1 two 'gate.sh: tier RAM (' lines: one near the top, one with the figures" "$(w_count w1 'gate.sh: tier RAM (')" "2"
+eq "W1 the first follows the CARGO_TARGET_DIR line directly" \
+    "$(w_line w1 'gate.sh: tier RAM (')" "$(( $(w_line w1 'gate.sh: CARGO_TARGET_DIR=') + 1 ))"
+eq "W1 and names the RAM pool" "$(grep -m1 -F 'gate.sh: tier RAM (' "$WORK/out-w1" | grep -c -F -- "$RAM_W")" "1"
+eq "W1 the figures line is exact" "$(grep -c -Fx -- "$W_REPORT" "$WORK/out-w1")" "1"
+eq "W1 and comes after the tree size" "$(w_after w1 "$W_REPORT" 'gate.sh: tree size')" "after"
+eq "W1 a green run prints no red-run line" "$(w_count w1 'RAM tier')" "0"
+
+run_gate w2 sid-w2 "${W_OK[@]}" GATE_TEST_EXIT=1; rc=$?
+eq "W2 a red RAM run still exits non-zero" "$([ "$rc" -ne 0 ] && echo nonzero || echo "$rc")" "nonzero"
+eq "W2 it prints one line naming the RAM tier and No space left on device" "$(w_red w2)" "1"
+eq "W2 after GATE EXITS" "$(w_after w2 'No space left on device' 'GATE EXITS ->')" "after"
+eq "W2 with the I/O error half" "$(grep -F 'RAM tier' "$WORK/out-w2" | grep -c -F 'I/O error')" "1"
+eq "W2 and the mm_stat figures and free space" "$(grep -F 'RAM tier' "$WORK/out-w2" | grep -c -F -- '10.1G logical, 3.5G RAM of 20.0G cap, 20.0G free')" "1"
+eq "W2 and the figures line is still printed" "$(grep -c -Fx -- "$W_REPORT" "$WORK/out-w2")" "1"
+# Every lane in the red set counts, not only the cargo ones.
+run_gate w2b sid-w2b "${W_OK[@]}" GATE_TEST_FMT_EXIT=2; rc=$?
+eq "W2 a red formatter lane alone prints the line" "$(w_red w2b)" "1"
+eq "W2 and exits non-zero" "$([ "$rc" -ne 0 ] && echo nonzero || echo "$rc")" "nonzero"
+run_gate w2c sid-w2c "${W_OK[@]}" GATE_TEST_PY_EXIT=1; rc=$?
+eq "W2 a red Python lane alone prints the line" "$(w_red w2c)" "1"
+eq "W2 and exits non-zero" "$([ "$rc" -ne 0 ] && echo nonzero || echo "$rc")" "nonzero"
+
+# A disk run prints none of it: unconfigured, and configured but not admitted.
+ram_cfg; rm -rf "$POOL"
+run_gate w3 sid-w3 PATH="$T_PATH" GATE_TEST_EXIT=1; rc=$?
+eq "W3 a red disk run (no RAM config) names no RAM tier" "$(w_count w3 'RAM tier')" "0"
+eq "W3 prints no tier line" "$(w_count w3 'tier RAM')" "0"
+eq "W3 nor the No space left on device hint" "$(w_count w3 'No space left on device')" "0"
+eq "W3 and exits non-zero" "$([ "$rc" -ne 0 ] && echo nonzero || echo "$rc")" "nonzero"
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM_W"; rm -rf "$POOL"
+run_gate w3b sid-w3b PATH="$T_PATH" CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-low" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-w" GATE_TEST_EXIT=1; rc=$?
+eq "W3 a red run that fell back to disk says the tier was skipped" "$(w_count w3b 'RAM tier skipped')" "1"
+eq "W3 and prints no tier line" "$(w_count w3b 'tier RAM')" "0"
+eq "W3 nor the red-run hint" "$(w_count w3b 'No space left on device')" "0"
+eq "W3 and ran on disk" "$(seen_all w3b)" "$POOL/slot-0"
+
+# W4: the Python light lane's fixture (tests/test_python_runner.py gate_fixture) replaces slot-pool.sh with
+# a one-line comment and presets CARGO_TARGET_DIR, so no ram_* function exists and GATE_TIER is unset. An
+# unguarded call there prints `command not found` yet leaves the exit status alone, which is why the pytest
+# lane does not see it. Run gate.sh in that shape here, green and red, and read its output.
+FX="$WORK/fixture-w4"; mkdir -p "$FX/scripts"
+cp "$POOLDIR/gate.sh" "$POOLDIR/session_context.py" "$POOLDIR/session-context-v1.schema.json" "$FX/scripts/"
+cp "$WORK/repo/scripts/python-tests.py" "$WORK/repo/scripts/fmt-mine.sh" "$FX/scripts/"
+printf '# Fixture supplies CARGO_TARGET_DIR.\n' > "$FX/scripts/slot-pool.sh"
+git -C "$FX" init -q
+w4_run() { # w4_run <tag> [VAR=value ...]
+    local tag="$1"; shift
+    scrub_ram_env
+    ( cd "$FX" && env "${SCRUB[@]}" -u GATE_TIER -u RAM_DEV -u RAM_MMSTAT -u CODESCOUT_CONTEXT_FILE \
+        HOME="$WORK/home" PATH="$WORK/bin:$PATH" CARGO_TARGET_DIR="$WORK/fixture-w4-target" \
+        GATE_TEST_TAG="$tag" GATE_TEST_WORK="$WORK" "$@" bash scripts/gate.sh --check ) > "$WORK/out-$tag" 2>&1
+}
+w4_run w4; rc=$?
+eq "W4 the empty slot-pool fixture, green: exits 0" "$rc" "0"
+eq "W4 with no 'command not found'" "$(w_count w4 'command not found')" "0"
+eq "W4 and no unbound variable" "$(w_count w4 'unbound variable')" "0"
+eq "W4 and no tier line" "$(w_count w4 'tier RAM')" "0"
+eq "W4 the lanes ran in the preset tree" "$(seen_all w4)" "$WORK/fixture-w4-target"
+w4_run w4b GATE_TEST_EXIT=1; rc=$?
+eq "W4 the same fixture, red: exits non-zero" "$([ "$rc" -ne 0 ] && echo nonzero || echo "$rc")" "nonzero"
+eq "W4 with no 'command not found'" "$(w_count w4b 'command not found')" "0"
+eq "W4 no unbound variable" "$(w_count w4b 'unbound variable')" "0"
+eq "W4 and no RAM tier line" "$(w_count w4b 'RAM tier')" "0"
+
+# Unreadable mm_stat or df must not break the gate: the report prints what it can and returns 0.
+W_FIG="$( . "$POOLDIR/slot-pool.sh"; GATE_TIER=ram; RAM_DEV=zram9; RAM_MMSTAT="$WORK/no-such-mmstat"; GATE_POOL="$WORK/no-such-pool"
+          PATH="$WORK/ramstub-none:$PATH"; ram_tier_report; echo "rc=$?" )"
+eq "W5 an unreadable mm_stat and pool still report, saying what is unknown" \
+    "$W_FIG" "$(printf 'gate.sh: tier RAM (zram9): ? logical, ? RAM of ? cap, ? free\nrc=0')"
 rm -f "$WORK/df-cap"; ram_cfg
 
 echo

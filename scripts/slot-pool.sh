@@ -594,6 +594,32 @@ lease_gate_target() {
     export CARGO_TARGET_DIR="$SLOT_DIR"
 }
 
+# ram_gib <bytes> — print <bytes> in GiB with one decimal and a G, or ? when it is not a whole number (an
+# unreadable mm_stat or df field). The tier's figures are report only: they never decide anything.
+ram_gib() {
+    if [[ "$1" =~ ^[0-9]{1,15}$ ]]; then awk -v n="$1" 'BEGIN { printf "%.1fG", n / 1073741824 }'
+    else printf '?'
+    fi
+}
+
+# ram_tier_figures — print the zram figures of the leased RAM tier, for gate.sh: mm_stat fields 1
+# (orig_data_size, the logical bytes), 3 (mem_used_total, the RAM bytes) and 4 (mem_limit, the cap), and
+# the free space of $GATE_POOL from `df -Pm`. A figure that cannot be read prints as ?; it never fails.
+ram_tier_figures() {
+    local free
+    free="$(df -Pm -- "$GATE_POOL" 2>/dev/null | awk 'NR == 2 { print $4; exit }')"
+    if [[ "$free" =~ ^[0-9]{1,15}$ ]]; then free=$((free * 1048576)); else free=""; fi
+    printf '%s logical, %s RAM of %s cap, %s free' \
+        "$(ram_gib "$(ram_mmstat_field 1)")" "$(ram_gib "$(ram_mmstat_field 3)")" \
+        "$(ram_gib "$(ram_mmstat_field 4)")" "$(ram_gib "$free")"
+}
+
+# ram_tier_report — print `gate.sh: tier RAM (<dev>): <figures>`. Call it only after a RAM lease
+# (GATE_TIER=ram, with RAM_DEV, RAM_MMSTAT and GATE_POOL set by it). Always returns 0.
+ram_tier_report() {
+    printf 'gate.sh: tier RAM (%s): %s\n' "$RAM_DEV" "$(ram_tier_figures)"
+}
+
 # lease_evict_lessee <who> — call it holding a lease. The lessee is whichever checkout the command
 # will build, which is the cwd's, not the one this script lives in. Outside a git tree there is
 # none, and nothing is evicted.

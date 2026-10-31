@@ -110,6 +110,12 @@ fi
 mkdir -p "$CARGO_TARGET_DIR" || exit 2
 
 echo "gate.sh: CARGO_TARGET_DIR=$CARGO_TARGET_DIR"
+# The RAM tier is opt-in and machine-local; a disk run prints nothing about it. The guard is
+# `GATE_TIER`, which only the real lease_gate_target sets: the Python light lane's fixture replaces
+# slot-pool.sh and presets CARGO_TARGET_DIR, so no ram_* function exists there (tests/test_python_runner.py).
+if [ "${GATE_TIER:-}" = ram ]; then
+    echo "gate.sh: tier RAM (${RAM_DEV:-?}): leased from $GATE_POOL (CODESCOUT_GATE_RAM_POOL): a zram mount with MemAvailable above the floor and the pool budget covered"
+fi
 [ -n "${SLOT_FD:-}" ] && echo "gate.sh: leased for THIS run only. For a targeted run, lease your own: scripts/with-slot.sh cargo test --lib -- <filter>"
 echo
 
@@ -178,9 +184,16 @@ T_TOTAL=$((SECONDS - GATE_T0))
 echo
 echo "gate.sh: tree size $(du -sh "$CARGO_TARGET_DIR" 2>/dev/null | cut -f1) at $CARGO_TARGET_DIR"
 [ -n "${SLOT_FD:-}" ] && echo "gate.sh: pool total $(du -sh "$GATE_POOL" 2>/dev/null | cut -f1) at $GATE_POOL"
+# The RAM figures are how the revisit trigger (a ratio worse than 1/2.2) becomes visible.
+if [ "${GATE_TIER:-}" = ram ]; then ram_tier_report; fi
 echo "GATE SECONDS -> TOTAL=$T_TOTAL PYTHON=$T_PYTHON FMT=$T_FMT CLIPPY=$T_CLIPPY LEAN=$T_LEAN DEFAULT=$T_DEFAULT"
 echo "PYTHON LIGHT EXIT -> PYTHON_LIGHT=$PYTHON_LIGHT"
 echo "GATE EXITS -> FMT=$FMT CLIPPY=$CLIPPY LEAN=$LEAN DEFAULT=$DEFAULT FMT_STATE=$FMT_STATE"
+# A red lane in a RAM slot may be the tier, not the code. The gate does not read lane output, so this
+# is printed on every red RAM run, with the figures a reader needs to judge it.
+if [ "${GATE_TIER:-}" = ram ] && { [ "$PYTHON_LIGHT" -ne 0 ] || [ "$FMT" -ne 0 ] || [ "$CLIPPY" -ne 0 ] || [ "$LEAN" -ne 0 ] || [ "$DEFAULT" -ne 0 ]; }; then
+    echo "gate.sh: this red run built in the RAM tier (${RAM_DEV:-?}; $(ram_tier_figures)): a 'No space left on device' or I/O error in a lane's output above means the RAM tier, not the code (CODESCOUT_GATE_RAM_POOL, CODESCOUT_GATE_RAM_GROWTH_MB, CODESCOUT_GATE_RAM_COLD_MB)"
+fi
 
 # What a green run here does NOT cover. Printed every time because this output is what a
 # session reads when it decides "green". Pinned by gate_script_prints_what_green_does_not_cover
