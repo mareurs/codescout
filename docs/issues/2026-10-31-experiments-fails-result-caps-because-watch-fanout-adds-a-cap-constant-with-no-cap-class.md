@@ -1,7 +1,7 @@
 ---
 id: '6fda4eca9da69652'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: experiments fails result_caps::every_cap_constant_is_classified because src/lsp/watch_fanout.rs adds FANOUT_MAX_ENTRIES with no cap-class annotation'
 owners:
 - marius
@@ -11,6 +11,7 @@ tags:
 - result_caps
 - red-on-experiments
 topic: gate red on experiments
+closed: 2026-10-31
 opened: 2026-10-31
 severity: medium
 unverified: The author of eee623216 has not been told. Whether a fix is already pending in a session that has not yet committed was checked only through git status of the main checkout.
@@ -85,7 +86,7 @@ One side effect worth recording: when one integration binary fails, `cargo test`
 
 ## Fix
 
-Not fixed here. The author of `eee623216` (work on bug `35bcf086deeb7cbe`) owns the choice. Add one line above the constant, in its doc comment:
+Fixed at `820d4c564` by the author of `eee623216`: one `// cap-class: NOT_A_CAP` line above `FANOUT_MAX_ENTRIES`. The bound only limits a diagnostic scan on a failure path, and a cut is marked in the hint (`at least N`, `The scan stopped at its limit`). `cargo test -p codescout --test result_caps` then gave `71 passed; 0 failed` on 2026-10-31. The original text of this section follows. It said: not fixed here. The author of `eee623216` (work on bug `35bcf086deeb7cbe`) owns the choice. Add one line above the constant, in its doc comment:
 
 - `// cap-class: NOT_A_CAP — <why this never shapes a result>`, or
 - `// cap-class: RESULT_CAP <surface>.<what> — probed`, which then needs a probe row in `src/tools/core/cap_probe.rs`.
