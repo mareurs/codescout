@@ -11,6 +11,7 @@ git-ignored prebuilt output and is kept). Containers run `--network none`, are n
 `sab-ml-ctl-*`, and are always removed. Any control or parser failure becomes a not-ok verdict.
 Stdlib only.
 """
+import base64
 import subprocess
 import time
 from collections import Counter
@@ -57,7 +58,11 @@ def reset_to_base(container, workdir, base_commit):
     dirty_before = before.splitlines()[:MAX_DIRTY_LINES]
     _exec(container, workdir, "git", "reset", "--hard", "-q", base_commit, timeout=300)
     _exec(container, workdir, "git", "clean", "-fdq", "-e", "target", timeout=300)
-    _exec(container, workdir, "rm", "-rf", f"{workdir}/reports", timeout=60)
+    # Some records tee into `reports/` without creating it, and some run from `/testbed` while the
+    # repo is `/testbed/repo`: leave an empty `reports` at both places (empty dirs are not in status).
+    report_dirs = list(dict.fromkeys([f"{workdir}/reports", "/testbed/reports"]))
+    _exec(container, workdir, "rm", "-rf", *report_dirs, timeout=60)
+    _exec(container, workdir, "mkdir", "-p", *report_dirs, timeout=60)
     head = _exec(container, workdir, "git", "rev-parse", "HEAD", timeout=60).stdout.strip()
     if head != base_commit:
         raise ControlError(f"HEAD is {head[:12]!r} after reset, expected {base_commit[:12]!r}")
@@ -72,9 +77,20 @@ def run_tests(container, workdir, record, timeout=3600):
     if not record["test_cmds"]:
         raise ControlError("record has no test_cmds")
     for cmd in record["test_cmds"]:
-        _exec(container, workdir, "bash", "-o", "pipefail", "-c", cmd, timeout=timeout, check=False)
-    parts = [_exec(container, workdir, "bash", "-o", "pipefail", "-c", cmd, timeout=600,
-                   check=False).stdout for cmd in record["print_cmds"]]
+        # output is discarded inside the container: the log is read back through print_cmds
+        _exec(container, workdir, "bash", "-o", "pipefail", "-c", f"(\n{cmd}\n) >/dev/null 2>&1",
+              timeout=timeout, check=False)
+    parts = []
+    for cmd in record["print_cmds"]:
+        # bounded and base64-encoded inside the container, so a huge or non-UTF-8 log neither
+        # fills memory nor breaks the strict text decoding of pilot.command
+        wrapped = f"(\n{cmd}\n) 2>&1 | head -c {MAX_LOG_BYTES} | base64 -w0"
+        encoded = _exec(container, workdir, "bash", "-o", "pipefail", "-c", wrapped, timeout=600,
+                        check=False).stdout
+        try:
+            parts.append(base64.b64decode(encoded.strip(), validate=True).decode("utf-8", "replace"))
+        except ValueError:
+            raise ControlError(f"print command output is not base64: {encoded[:200]!r}") from None
     return "".join(parts)[:MAX_LOG_BYTES]
 
 
@@ -105,8 +121,9 @@ def control(record, *, container, timeout=3600):
         gold = grade.run_parser(record["log_parser"], gold_log)
         evidence["gold"] = dict(Counter(gold.values()))
         evidence["verdict"] = grade.control_verdict(base, gold, f2p, p2p)
-    except (ControlError, grade.ParserError, RuntimeError, subprocess.TimeoutExpired) as e:
-        evidence["verdict"] = {"ok": False, "reasons": [f"control error: {e}"]}
+    except (ControlError, grade.ParserError, RuntimeError, subprocess.TimeoutExpired,
+            ValueError) as e:  # ValueError: odd bytes in docker output (UnicodeDecodeError)
+        evidence["verdict"] = {"ok": False, "reasons": [f"control error: {str(e)[:300]}"]}
     finally:
         pilot.docker("rm", "-f", container, check=False)
     evidence["wall_seconds"] = round(time.monotonic() - started, 1)
