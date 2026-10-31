@@ -21,8 +21,10 @@
 #
 # stdout: one line per emptied slot, naming it and the reason. Nothing else is printed there.
 # Exit 0: the tier is not configured, nothing is due, or slots were emptied.
-# Exit 2: the config is invalid, the pool is not a zram mount with a RAM cap, or an argument was given
-#         (stderr says which). Exit 1: a slot could not be emptied (stderr says which).
+# Exit 2: the config is invalid, the pool is not a zram mount with a RAM cap, `flock` is not found,
+#         or an argument was given (stderr says which). Exit 1: a slot could not be emptied (stderr
+#         says which). A `flock -n` that fails with a status other than 1 (1 is "held") is said on
+#         stderr and skips that slot; it does not change the exit status.
 
 set -u
 
@@ -64,7 +66,13 @@ for ((n = 0; n < RAM_SLOTS; n++)); do
     lock="$dir.lock"
     [ -e "$lock" ] || continue              # never create a lock file; no lock, no proof of idleness
     exec {fd}>"$lock" || continue
-    if flock -n "$fd"; then
+    if flock -n "$fd"; then flock_rc=0; else flock_rc=$?; fi
+    # 1 is "held", the normal case. Any other status means flock itself failed, which proves nothing
+    # about the slot: say so, or a broken flock reads as a machine with nothing to empty.
+    if [ "$flock_rc" -gt 1 ]; then
+        echo "$who: flock failed with exit $flock_rc on $lock; slot-$n was not examined" >&2
+    fi
+    if [ "$flock_rc" -eq 0 ]; then
         # Everything below is decided under the lock, so a lease cannot change the slot meanwhile.
         if [ -d "$dir" ] && [ ! -L "$dir" ]; then
             stamp="$dir/.codescout-lessee"

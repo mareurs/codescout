@@ -46,7 +46,9 @@
 #
 # Case W covers the reporting (spec 7): a RAM run names its tier near the top and prints the zram
 # figures after the tree size, a red lane in a RAM slot adds one line that names the tier, and a disk
-# run prints none of it. The stub cargo exits with GATE_TEST_EXIT, so a lane can be red.
+# run prints none of it (W0 pins the unconfigured run, W6 an inherited GATE_TIER). The stub cargo exits
+# with GATE_TEST_EXIT, so a lane can be red. S11-S13 cover the config edges that must not abort or hang a
+# lease: too many slots, HOME unset, a pool directory this user cannot write.
 #
 # The real gate.sh is driven here, not a copy of its logic: `cargo` is a stub on PATH that
 # records the CARGO_TARGET_DIR each lane saw, `./scripts/fmt-mine.sh` is a stub in a fake
@@ -122,19 +124,22 @@ run_gate() {
         > "$WORK/out-$tag" 2>&1
 }
 # `env` arguments that remove the operator's RAM-tier setup from a driven script: the config
-# file's directory (XDG_CONFIG_HOME) and every CODESCOUT_GATE_RAM_* variable of THIS shell, so a
-# real ~/.config/codescout/gate-pool.env or an exported knob cannot move cases A-R off the disk
-# pool. Computed per call: case S exports one on purpose. Fills the array `SCRUB`.
+# file's directory (XDG_CONFIG_HOME), every CODESCOUT_GATE_RAM_* variable of THIS shell, and the
+# three internal names a leaked export would let into the scripts (GATE_TIER, RAM_DEV, RAM_MMSTAT),
+# so a real ~/.config/codescout/gate-pool.env, an exported knob or a stray tier name cannot move
+# cases A-R off the disk pool. Computed per call: case S exports one on purpose. Fills the array `SCRUB`.
 scrub_ram_env() {
-    SCRUB=(-u XDG_CONFIG_HOME)
+    SCRUB=(-u XDG_CONFIG_HOME -u GATE_TIER -u RAM_DEV -u RAM_MMSTAT)
     local v
     while read -r v; do [ -n "$v" ] && SCRUB+=(-u "$v"); done < <(compgen -v CODESCOUT_GATE_RAM_)
 }
 first_seen() { head -1 "$WORK/seen-$1" 2>/dev/null; }
 wait_for()   { for _ in $(seq 1 100); do [ -e "$1" ] && return 0; sleep 0.1; done; return 1; }
 slot_dirs()  { find "$POOL" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' '; }
-# 2 MiB of real blocks: `du -sm` must read it as over a 1M ceiling and under a 64M one.
-fill()       { mkdir -p "$(dirname "$1")"; head -c 2097152 /dev/zero > "$1"; }
+# 2 MiB of real blocks: `du -sm` must read it as over a 1M ceiling and under a 64M one. Random bytes,
+# not zeros: a filesystem that compresses or sparsifies zero blocks (btrfs, zfs, a zram-backed
+# tmpfs) would read all-zero data as nearly empty and move every size this suite sets.
+fill()       { mkdir -p "$(dirname "$1")"; head -c 2097152 /dev/urandom > "$1"; }
 state()      { [ -e "$1" ] && echo kept || echo gone; }
 # Hold a lock from a background shell until $WORK/hold-<tag> is removed. It exits by
 # itself on that, and cleanup kills it by pid in case it does not.
@@ -794,6 +799,64 @@ eq "S10 comments and blank lines are skipped" "$(grep -c 'RAM tier' "$WORK/out-s
 ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram" "CODESCOUT_GATE_RAM_SLOTS"; rm -rf "$POOL"
 s_run s10f "${S_OK[@]}"
 eq "S10 a RAM key with no value is invalid and named" "$(grep -c 'CODESCOUT_GATE_RAM_SLOTS' "$WORK/out-s10f")" "1"
+
+# S11: SLOTS is bounded at 64. Every unnamed lease and the evictor walk the slot numbers one `[ -e ]`
+# at a time, so an unbounded value (12 digits pass the shape check) is a hang, not a refusal. The
+# lease runs under `timeout 30` so a hang is RED (124) instead of stalling the suite.
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram"; ram_src /dev/zram1; rm -rf "$POOL"; rm -f "$WORK/tdir-s11"
+run_with s11 PATH="$WORK/ramstub:$WORK/bin:$PATH" "${S_OK[@]}" CODESCOUT_GATE_RAM_SLOTS=99999999999 \
+    timeout 30 bash "$WITH" sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-s11"; rc=$?
+eq "S11 SLOTS=99999999999: the lease finishes and exits 0 (124 would be a hang)" "$rc" "0"
+eq "S11 and lands on the disk pool" "$(s_target s11)" "$POOL/slot-0"
+eq "S11 the message names the knob and the range" "$(grep -c "CODESCOUT_GATE_RAM_SLOTS must be 0 to 64, got '99999999999'" "$WORK/out-s11")" "1"
+eq "S11 as a RAM tier skip" "$(grep -c 'RAM tier skipped: CODESCOUT_GATE_RAM_SLOTS' "$WORK/out-s11")" "1"
+rm -rf "$POOL" "$WORK/ram"
+s_run s11b "${S_OK[@]}" CODESCOUT_GATE_RAM_SLOTS=64
+eq "S11 64 slots is the largest accepted: the RAM slot is leased" "$(s_target s11b)" "$WORK/ram/slot-0"
+eq "S11 without a word" "$(grep -c 'RAM tier' "$WORK/out-s11b")" "0"
+rm -rf "$POOL" "$WORK/ram"
+s_run s11c "${S_OK[@]}" CODESCOUT_GATE_RAM_SLOTS=65
+eq "S11 65 slots is refused: the disk slot is leased" "$(s_target s11c)" "$POOL/slot-0"
+eq "S11 saying so" "$(grep -c "must be 0 to 64, got '65'" "$WORK/out-s11c")" "1"
+
+# S12: HOME unset. The config file's directory is ${XDG_CONFIG_HOME:-$HOME/.config}, and a bare
+# $HOME aborts a `set -u` script under `env -i` even for a lease that never needed the file. No
+# directory means no file; the environment can still name the whole config.
+rm -rf "$POOL" "$WORK/ram"; rm -f "$WORK/tdir-s12" "$WORK/tdir-s12b"
+( cd "$WORK/repo" && exec env -i PATH="$WORK/bin:$PATH" CODESCOUT_GATE_POOL="$POOL" CARGO_HOME="$WORK/home/.cargo" \
+    bash "$WITH" sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-s12" ) > "$WORK/out-s12" 2>&1; rc=$?
+eq "S12 a lease with HOME and XDG_CONFIG_HOME unset exits 0" "$rc" "0"
+eq "S12 with no unbound variable" "$(grep -c 'unbound variable' "$WORK/out-s12")" "0"
+eq "S12 on the disk pool" "$(s_target s12)" "$POOL/slot-0"
+( cd "$WORK/repo" && exec env -i PATH="$WORK/ramstub:$WORK/bin:$PATH" CODESCOUT_GATE_POOL="$POOL" CARGO_HOME="$WORK/home/.cargo" \
+    "${S_OK[@]}" CODESCOUT_GATE_RAM_POOL="$WORK/ram" \
+    bash "$WITH" sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-s12b" ) > "$WORK/out-s12b" 2>&1; rc=$?
+eq "S12 with HOME unset the environment alone can still name the RAM pool: exit 0" "$rc" "0"
+eq "S12 and the RAM slot is leased" "$(s_target s12b)" "$WORK/ram/slot-0"
+eq "S12 with no unbound variable there either" "$(grep -c 'unbound variable' "$WORK/out-s12b")" "0"
+
+# S13: a pool directory this user cannot write. The lease falls back to disk and says why in ONE
+# line of the tier's own, not in the shell's raw `mkdir:` / `Permission denied`.
+if [ "$(id -u)" != 0 ]; then
+    ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram-ro"; rm -rf "$POOL" "$WORK/ram-ro"; mkdir -p "$WORK/ram-ro"; chmod 555 "$WORK/ram-ro"
+    s_run s13 "${S_OK[@]}"; rc=$?
+    chmod 755 "$WORK/ram-ro"
+    eq "S13 an unwritable pool directory: exit 0" "$rc" "0"
+    eq "S13 the disk slot is leased" "$(s_target s13)" "$POOL/slot-0"
+    eq "S13 one RAM tier skipped line" "$(grep -c 'RAM tier skipped' "$WORK/out-s13")" "1"
+    eq "S13 which names the pool and the knob" "$(grep 'RAM tier skipped' "$WORK/out-s13" | grep -c "$WORK/ram-ro.*CODESCOUT_GATE_RAM_POOL")" "1"
+    eq "S13 and no raw shell error" "$(grep -c -E 'Permission denied|mkdir:' "$WORK/out-s13")" "0"
+    rm -rf "$POOL" "$WORK/ro-parent"; mkdir -p "$WORK/ro-parent"; chmod 555 "$WORK/ro-parent"
+    ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ro-parent/pool"
+    s_run s13b "${S_OK[@]}"; rc=$?
+    chmod 755 "$WORK/ro-parent"
+    eq "S13 a pool that cannot be created: exit 0" "$rc" "0"
+    eq "S13 the disk slot is leased" "$(s_target s13b)" "$POOL/slot-0"
+    eq "S13 one RAM tier skipped line" "$(grep -c 'RAM tier skipped' "$WORK/out-s13b")" "1"
+    eq "S13 and no raw shell error" "$(grep -c -E 'Permission denied|mkdir:' "$WORK/out-s13b")" "0"
+else
+    echo "  SKIP  S13 runs as root, which can write a mode 555 directory"
+fi
 ram_cfg
 
 echo "T. a lease takes a RAM slot before the disk pool, bounded to RAM_SLOTS; --slot ram-N never falls back"
@@ -831,7 +894,9 @@ if hold_lock t3a "$RAM/slot-0.lock" && hold_lock t3b "$RAM/slot-1.lock"; then
     eq "T3 with both RAM slots held, the run sees the disk slot" "$(seen_all t3)" "$POOL/slot-0"
     eq "T3 and no RAM slot-2 directory is created" "$([ -e "$RAM/slot-2" ] && echo created || echo absent)" "absent"
     eq "T3 nor a RAM slot-2 lock file" "$([ -e "$RAM/slot-2.lock" ] && echo created || echo absent)" "absent"
-    eq "T3 and nothing was said about the tier" "$(grep -c 'RAM tier' "$WORK/out-t3")" "0"
+    eq "T3 and one line says why: all the RAM slots are held, with the knob" \
+        "$(grep -c 'gate.sh: RAM tier skipped: all 2 RAM slots are held (CODESCOUT_GATE_RAM_SLOTS)' "$WORK/out-t3")" "1"
+    eq "T3 and it is the only RAM tier line" "$(grep -c 'RAM tier' "$WORK/out-t3")" "1"
     t_release t3a "$RAM/slot-0.lock"; t_release t3b "$RAM/slot-1.lock"
 else
     no "T3 both locks were held" "hold_lock failed"
@@ -859,6 +924,14 @@ eq "T4 and runs nothing" "$([ -e "$WORK/ran-t4d" ] && echo ran || echo none)" "n
 t_run t4e bash "$WITH" --slot ram-2 sh -c ': > "$1"' _ "$WORK/ran-t4e"; rc=$?
 eq "T4 a RAM slot at RAM_SLOTS exits 2" "$rc" "2"
 eq "T4 and creates no lock file for it" "$([ -e "$RAM/slot-2.lock" ] && echo created || echo absent)" "absent"
+# With slot-2's directory PRESENT, only the range check stands between RAM_SLOTS=2 and a third slot.
+mkdir -p "$RAM/slot-2"
+t_run t4e2 bash "$WITH" --slot ram-2 sh -c ': > "$1"' _ "$WORK/ran-t4e2"; rc=$?
+eq "T4 an existing directory at RAM_SLOTS is still out of range: exit 2" "$rc" "2"
+eq "T4 saying it is outside the RAM tier's slots" "$(grep -c "outside the RAM tier's slots (CODESCOUT_GATE_RAM_SLOTS=2" "$WORK/out-t4e2")" "1"
+eq "T4 running nothing" "$([ -e "$WORK/ran-t4e2" ] && echo ran || echo none)" "none"
+eq "T4 and creating no lock file for it" "$([ -e "$RAM/slot-2.lock" ] && echo created || echo absent)" "absent"
+rm -rf "$RAM/slot-2"
 t_run t4f bash "$WITH" --slot ram- sh -c ': > "$1"' _ "$WORK/ran-t4f"; rc=$?
 eq "T4 'ram-' with no number exits 2" "$rc" "2"
 eq "T4 and runs nothing (it must not turn into an unnamed lease)" "$([ -e "$WORK/ran-t4f" ] && echo ran || echo none)" "none"
@@ -953,6 +1026,7 @@ eq "U3 the slot leased 2 h ago is emptied" "$(state "$RAM_U/slot-1")" "gone"
 eq "U3 the slot leased 1 h ago is kept" "$(state "$RAM_U/slot-2/f1")" "kept"
 eq "U3 the emptied slot's lock file is not unlinked" "$(state "$RAM_U/slot-1.lock")" "kept"
 eq "U3 and the message names it" "$(grep -c 'emptying idle RAM slot-1' "$WORK/out-u3")" "1"
+eq "U3 with the date of its last lease" "$(grep -c -E 'emptying idle RAM slot-1 \(last leased [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8}\)' "$WORK/out-u3")" "1"
 u_fresh; u_slot 1 3 "1 hour ago"; u_slot 2 3 "2 hours ago"; u_cap 5
 u_run u3b CODESCOUT_GATE_RAM_SLOTS=3
 eq "U3 with the ages swapped, slot-2 is the one emptied" "$(state "$RAM_U/slot-2")" "gone"
@@ -962,6 +1036,8 @@ u_fresh; u_slot 1 3 "2 hours ago"; u_slot 2 3; u_cap 5
 u_run u4 CODESCOUT_GATE_RAM_SLOTS=3
 eq "U4 the run is in RAM slot-0" "$(s_target u4)" "$RAM_U/slot-0"
 eq "U4 the slot with no stamp is emptied first" "$(state "$RAM_U/slot-2")" "gone"
+eq "U4 and the message says it was never stamped, not a 1970 date" "$(grep -c 'emptying idle RAM slot-2 (never stamped) to make room' "$WORK/out-u4")" "1"
+eq "U4 with no date in it" "$(grep -c '1970' "$WORK/out-u4")" "0"
 eq "U4 and the one stamped 2 h ago is kept" "$(state "$RAM_U/slot-1/f1")" "kept"
 # The rule is computed again after each removal: with 1 MiB free, one idle slot (at least 4 MiB) is not enough.
 u_fresh; u_slot 1 2 "2 hours ago"; u_slot 2 2 "1 hour ago"; u_cap 1
@@ -1018,6 +1094,7 @@ u_fresh; u_slot 0 3 "2 hours ago"; u_slot 1 1; u_cap 0
 t_run u8 "${U_KNOBS[@]}" bash "$WITH" --slot ram-1 sh -c 'echo "$CARGO_TARGET_DIR" > "$1"; exit 7' _ "$WORK/tdir-u8"; rc=$?
 eq "U8 --slot ram-1 with the budget short runs in RAM slot-1" "$(s_target u8)" "$RAM_U/slot-1"
 eq "U8 and its exit status passes through" "$rc" "7"
+eq "U8 the named slot carries the lessee stamp of the checkout" "$(cat "$RAM_U/slot-1/.codescout-lessee" 2>/dev/null)" "$CHECKOUT"
 eq "U8 the idle neighbour slot-0 keeps its contents" "$(state "$RAM_U/slot-0/f3")" "kept"
 eq "U8 and its stamp" "$(state "$RAM_U/slot-0/.codescout-lessee")" "kept"
 eq "U8 nothing is said about the pool budget" "$(grep -c 'pool budget' "$WORK/out-u8")" "0"
@@ -1074,6 +1151,7 @@ if hold_lock v4a "$RAM_V/slot-0.lock" && hold_lock v4b "$RAM_V/slot-1.lock"; the
     v_run v4
     eq "V4 with both RAM slots held, the run is on disk" "$(s_target v4 2>/dev/null)" "$POOL/slot-0"
     eq "V4 and exports neither" "$(v_seen v4)" "<unset> <unset>"
+    eq "V4 and says why the RAM tier was skipped" "$(grep -c 'RAM tier skipped: all 2 RAM slots are held (CODESCOUT_GATE_RAM_SLOTS)' "$WORK/out-v4")" "1"
     t_release v4a "$RAM_V/slot-0.lock"; t_release v4b "$RAM_V/slot-1.lock"
 else
     no "V4 both locks were held" "hold_lock failed"
@@ -1099,6 +1177,7 @@ eq "V6 with CODESCOUT_GATE_RAM_CARGO_ENV=0 a named slot gets neither" "$(v_seen 
 mkdir -p "$POOL/slot-0"
 v_run_slot v6c 0
 eq "V6 a numeric --slot is the disk pool, with neither setting" "$(v_seen v6c)" "<unset> <unset>"
+eq "V6 and the slot used is the disk slot" "$(s_target v6c 2>/dev/null)" "$POOL/slot-0"
 rm -f "$WORK/df-cap"; ram_cfg
 
 echo "W. gate.sh names the tier it used, prints the zram figures, and says so when a lane is red in a RAM slot"
@@ -1119,6 +1198,26 @@ w_count() { grep -c -F -- "$2" "$WORK/out-$1"; }                                
 w_red()   { grep -F 'RAM tier' "$WORK/out-$1" | grep -c -F 'No space left on device'; }
 w_after() { [ "$(w_line "$1" "$2")" -gt "$(w_line "$1" "$3")" ] 2>/dev/null && echo after || echo not-after; }
 
+# W0 (spec 9): a machine with no RAM-tier config runs the gate exactly as it did before the tier
+# existed. Without the `GATE_TIER` guard around `ram_tier_report`, RAM_DEV is never set and the
+# report dies on `RAM_DEV: unbound variable` before the gate can print GATE EXITS. The `gate.sh:`
+# lines are compared as a whole list (volatile tails cut off), so a new line of the tier's cannot
+# slip into a disk run unnoticed.
+ram_cfg; rm -rf "$POOL"
+run_gate w0 sid-w0; rc=$?
+eq "W0 an unconfigured green run exits 0" "$rc" "0"
+eq "W0 with no unbound variable" "$(w_count w0 'unbound variable')" "0"
+eq "W0 and no command not found" "$(w_count w0 'command not found')" "0"
+eq "W0 the GATE EXITS line is reached, all four lanes at 0" "$(w_count w0 'GATE EXITS -> FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0')" "1"
+eq "W0 and so is what green does not cover" "$(w_count w0 'gate.sh: green here does not cover:')" "1"
+eq "W0 no 'RAM tier' text" "$(w_count w0 'RAM tier')" "0"
+eq "W0 no 'tier RAM' line" "$(w_count w0 'tier RAM')" "0"
+eq "W0 the disk lease is the one used" "$(seen_all w0)" "$POOL/slot-0"
+eq "W0 the gate.sh: lines are the pre-tier ones, in order" \
+    "$(grep '^gate\.sh:' "$WORK/out-w0" | sed -E 's/^(gate\.sh: (CARGO_TARGET_DIR=|leased for THIS run only|tree size|pool total|green here does not cover:)).*/\1/')" \
+    "$(printf '%s\n' 'gate.sh: CARGO_TARGET_DIR=' 'gate.sh: leased for THIS run only' 'gate.sh: tree size' 'gate.sh: pool total' 'gate.sh: green here does not cover:')"
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM_W"; rm -rf "$POOL"
+
 run_gate w1 sid-w1 "${W_OK[@]}"; rc=$?
 eq "W1 a green RAM run exits 0" "$rc" "0"
 eq "W1 it ran in the RAM slot" "$(seen_all w1)" "$RAM_W/slot-0"
@@ -1129,6 +1228,8 @@ eq "W1 and names the RAM pool" "$(grep -m1 -F 'gate.sh: tier RAM (' "$WORK/out-w
 eq "W1 the figures line is exact" "$(grep -c -Fx -- "$W_REPORT" "$WORK/out-w1")" "1"
 eq "W1 and comes after the tree size" "$(w_after w1 "$W_REPORT" 'gate.sh: tree size')" "after"
 eq "W1 a green run prints no red-run line" "$(w_count w1 'RAM tier')" "0"
+eq "W1 the pool total is labelled as the RAM pool's, with its path" "$(grep -c -E "^gate\.sh: RAM pool total [^ ]+ at $RAM_W\$" "$WORK/out-w1")" "1"
+eq "W1 and there is no unlabelled pool total" "$(w_count w1 'gate.sh: pool total')" "0"
 
 run_gate w2 sid-w2 "${W_OK[@]}" GATE_TEST_EXIT=1; rc=$?
 eq "W2 a red RAM run still exits non-zero" "$([ "$rc" -ne 0 ] && echo nonzero || echo "$rc")" "nonzero"
@@ -1187,6 +1288,22 @@ eq "W4 with no 'command not found'" "$(w_count w4b 'command not found')" "0"
 eq "W4 no unbound variable" "$(w_count w4b 'unbound variable')" "0"
 eq "W4 and no RAM tier line" "$(w_count w4b 'RAM tier')" "0"
 
+# W6: an inherited GATE_TIER=ram must not turn the tier branches on. With a preset CARGO_TARGET_DIR
+# lease_gate_target never runs, so nothing but gate.sh itself can clear a name the environment brought
+# in; left alone, the branches read GATE_POOL, RAM_DEV and ram_tier_report, which nothing has set.
+run_gate w6 sid-w6 CARGO_TARGET_DIR="$WORK/mine-w6" GATE_TIER=ram RAM_DEV=zram9; rc=$?
+eq "W6 a preset CARGO_TARGET_DIR with an inherited GATE_TIER=ram: exits 0" "$rc" "0"
+eq "W6 with no unbound variable" "$(w_count w6 'unbound variable')" "0"
+eq "W6 and no command not found" "$(w_count w6 'command not found')" "0"
+eq "W6 every lane ran, in the preset tree" "$(seen_all w6)" "$WORK/mine-w6"
+eq "W6 the normal summary is printed" "$(w_count w6 'GATE EXITS -> FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0')" "1"
+eq "W6 no tier line" "$(w_count w6 'tier RAM')" "0"
+eq "W6 and no RAM pool total" "$(w_count w6 'RAM pool total')" "0"
+run_gate w6b sid-w6b CARGO_TARGET_DIR="$WORK/mine-w6" GATE_TIER=ram RAM_DEV=zram9 GATE_TEST_EXIT=1; rc=$?
+eq "W6 the same, red: exits non-zero" "$([ "$rc" -ne 0 ] && echo nonzero || echo "$rc")" "nonzero"
+eq "W6 and prints no red-run RAM line" "$(w_count w6b 'RAM tier')" "0"
+eq "W6 nor an unbound variable" "$(w_count w6b 'unbound variable')" "0"
+
 # Unreadable mm_stat or df must not break the gate: the report prints what it can and returns 0.
 W_FIG="$( . "$POOLDIR/slot-pool.sh"; GATE_TIER=ram; RAM_DEV=zram9; RAM_MMSTAT="$WORK/no-such-mmstat"; GATE_POOL="$WORK/no-such-pool"
           PATH="$WORK/ramstub-none:$PATH"; ram_tier_report; echo "rc=$?" )"
@@ -1208,7 +1325,7 @@ X_ARGV=()
 x_run() {
     local tag="$1"; shift
     scrub_ram_env
-    ( cd "$WORK/repo" && exec env "${SCRUB[@]}" HOME="$WORK/home" PATH="$T_PATH" "$@" bash "$EVICT" "${X_ARGV[@]}" ) \
+    ( cd "$WORK/repo" && exec env "${SCRUB[@]}" HOME="$WORK/home" PATH="$T_PATH" "$@" timeout 30 bash "$EVICT" "${X_ARGV[@]}" ) \
         > "$WORK/out-$tag" 2> "$WORK/err-$tag"
 }
 x_fresh() { rm -rf "$RAM_X" "$POOL"; mkdir -p "$RAM_X"; }
@@ -1292,6 +1409,7 @@ if hold_lock x4 "$RAM_X/slot-0.lock"; then
     eq "X4 a held slot with a 2 h old stamp: kept" "$(state "$RAM_X/slot-0")" "kept"
     eq "X4 its file is intact" "$(cat "$RAM_X/slot-0/f" 2>/dev/null)" "data"
     eq "X4 with no output" "$(x_lines x4)" "0"
+    eq "X4 and nothing on stderr: a held slot is the normal case, not a failure" "$(wc -c < "$WORK/err-x4" | tr -d ' ')" "0"
     eq "X4 and exit 0" "$rc" "0"
     x_run x4b CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-low" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-20g"
     eq "X4 held under memory pressure: kept" "$(state "$RAM_X/slot-0")" "kept"
@@ -1407,6 +1525,30 @@ eq "X13 an argument is a usage error: exit 2" "$rc" "2"
 eq "X13 with a usage line on stderr" "$(x_err x13 'usage')" "1"
 eq "X13 and nothing is removed" "$(state "$RAM_X/slot-0")" "kept"
 
+# SLOTS is bounded at 64 by the shared loader: the evictor walks the slot numbers one `[ -e ]` at a
+# time, so 12 digits would be a hang. x_run runs under `timeout 30`, so a hang shows as 124.
+x_fresh; x_slot 0 '-3 hours'; ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM_X"
+x_run x15 "${X_OK[@]}" CODESCOUT_GATE_RAM_SLOTS=99999999999; rc=$?
+eq "X15 SLOTS=99999999999 is refused: exit 2 (124 would be a hang)" "$rc" "2"
+eq "X15 the message on stderr names the knob and the range" "$(x_err x15 "CODESCOUT_GATE_RAM_SLOTS must be 0 to 64, got '99999999999'")" "1"
+eq "X15 nothing on stdout" "$(x_lines x15)" "0"
+eq "X15 and nothing is removed" "$(state "$RAM_X/slot-0")" "kept"
+x_run x15b "${X_OK[@]}" CODESCOUT_GATE_RAM_SLOTS=65; rc=$?
+eq "X15 65 slots is refused too" "$rc" "2"
+x_run x15c "${X_OK[@]}" CODESCOUT_GATE_RAM_SLOTS=64; rc=$?
+eq "X15 64 slots is accepted: exit 0" "$rc" "0"
+eq "X15 and the idle slot is emptied" "$(state "$RAM_X/slot-0")" "gone"
+
+# A flock that fails with a status other than 1 (1 is "held") proves nothing about the slot. It must be
+# said on stderr, once per slot it hid, or a broken flock looks like a machine with nothing to empty.
+mkdir -p "$WORK/flock3"; printf '#!/usr/bin/env bash\nexit 3\n' > "$WORK/flock3/flock"; chmod +x "$WORK/flock3/flock"
+x_fresh; x_slot 0 '-3 hours'; x_slot 1 '-3 hours'
+x_run x16 "${X_OK[@]}" PATH="$WORK/flock3:$T_PATH"; rc=$?
+eq "X16 a flock failing with exit 3 is reported on stderr, naming the status" "$(x_err x16 'flock failed with exit 3')" "2"
+eq "X16 once for each of the two slots it hid" "$(x_err x16 "$RAM_X/slot-")" "2"
+eq "X16 neither slot is emptied" "$(state "$RAM_X/slot-0")$(state "$RAM_X/slot-1")" "keptkept"
+eq "X16 and nothing is said on stdout" "$(x_lines x16)" "0"
+
 # A removal that fails is reported, not announced as done (a directory that cannot be emptied).
 if [ "$(id -u)" != 0 ]; then
     x_fresh; x_slot 0 '-3 hours'; mkdir -p "$RAM_X/slot-0/ro"; echo x > "$RAM_X/slot-0/ro/f"; chmod 555 "$RAM_X/slot-0/ro"
@@ -1420,5 +1562,4 @@ ram_cfg; rm -rf "$RAM_X" "$POOL" "$WORK/x-target"
 
 echo
 echo "  $PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ]
 [ "$FAIL" -eq 0 ]

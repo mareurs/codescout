@@ -104,6 +104,10 @@ fi
 # The pool is outside the repo on purpose: nothing there needs gitignoring, a peer's
 # `git clean` cannot reach it, and no tool that walks the worktree will scan it.
 . "$(dirname "${BASH_SOURCE[0]}")/slot-pool.sh" || exit 2
+# GATE_TIER is this script's own state: only lease_gate_target sets it. With a preset CARGO_TARGET_DIR
+# that function never runs, and a GATE_TIER=ram brought in by the environment would turn on tier
+# branches whose GATE_POOL, RAM_DEV and report function nothing has set.
+GATE_TIER=
 if [ -z "${CARGO_TARGET_DIR:-}" ]; then
     lease_gate_target gate.sh || exit 2
 fi
@@ -183,7 +187,11 @@ T_TOTAL=$((SECONDS - GATE_T0))
 
 echo
 echo "gate.sh: tree size $(du -sh "$CARGO_TARGET_DIR" 2>/dev/null | cut -f1) at $CARGO_TARGET_DIR"
-[ -n "${SLOT_FD:-}" ] && echo "gate.sh: pool total $(du -sh "$GATE_POOL" 2>/dev/null | cut -f1) at $GATE_POOL"
+if [ -n "${SLOT_FD:-}" ]; then
+    # After a RAM lease the pool is the RAM pool; the disk text stays as it was.
+    if [ "${GATE_TIER:-}" = ram ]; then POOL_LABEL="RAM pool total"; else POOL_LABEL="pool total"; fi
+    echo "gate.sh: $POOL_LABEL $(du -sh "$GATE_POOL" 2>/dev/null | cut -f1) at $GATE_POOL"
+fi
 # The RAM figures are how the revisit trigger (a ratio worse than 1/2.2) becomes visible.
 if [ "${GATE_TIER:-}" = ram ]; then ram_tier_report; fi
 echo "GATE SECONDS -> TOTAL=$T_TOTAL PYTHON=$T_PYTHON FMT=$T_FMT CLIPPY=$T_CLIPPY LEAN=$T_LEAN DEFAULT=$T_DEFAULT"

@@ -152,15 +152,19 @@ slot_remove_dir() { rm -rf -- "$1"; }
 # and every value is valid. Returns 1 otherwise: with RAM_SKIP set when something is wrong
 # (a line that is not KEY=VALUE, a value that is not a whole number, a relative pool path),
 # and RAM_SKIP empty when the tier is simply not configured. A numeric value is read as
-# decimal (leading zeros are not octal) and capped at 12 digits so later arithmetic cannot wrap.
+# decimal (leading zeros are not octal) and capped at 12 digits so later arithmetic cannot wrap; SLOTS
+# is further capped at 64. With neither XDG_CONFIG_HOME nor HOME set there is no file to read.
 ram_tier_load_config() {
-    local who="$1" file="${XDG_CONFIG_HOME:-$HOME/.config}/codescout/gate-pool.env"
+    local who="$1" cfgdir="${XDG_CONFIG_HOME:-${HOME:+$HOME/.config}}" file=""
     local shape='^CODESCOUT_GATE_RAM_[A-Z_]+=[^[:space:]]*$'
     local -A fromfile=() value=() default=([POOL]="" [SLOTS]=2 [GROWTH_MB]=4096 [COLD_MB]=10240
         [MEM_FLOOR_MB]=12288 [IDLE_MIN]=60 [CARGO_ENV]=1)
     local line key name var n=0
     RAM_SKIP=""
-    if [ -r "$file" ]; then
+    # No XDG_CONFIG_HOME and no HOME (an `env -i` run) leaves no directory, so no file: the
+    # environment alone can still name the whole config.
+    [ -z "$cfgdir" ] || file="$cfgdir/codescout/gate-pool.env"
+    if [ -n "$file" ] && [ -r "$file" ]; then
         while IFS= read -r line || [ -n "$line" ]; do
             n=$((n + 1))
             case "$line" in
@@ -195,6 +199,13 @@ ram_tier_load_config() {
             return 1
         fi
     done
+    # Every unnamed lease and the evictor test the slot numbers one `[ -e ]` at a time, so the shape check
+    # above (12 digits) would still let a typo turn into hours of walking: cap the count where no machine
+    # has a use for more (each slot is a whole build tree).
+    if [ "$((10#${value[SLOTS]}))" -gt 64 ]; then
+        RAM_SKIP="$who: RAM tier skipped: CODESCOUT_GATE_RAM_SLOTS must be 0 to 64, got '${value[SLOTS]}'"
+        return 1
+    fi
     RAM_POOL="${value[POOL]}"
     RAM_SLOTS=$((10#${value[SLOTS]})); RAM_GROWTH_MB=$((10#${value[GROWTH_MB]}))
     RAM_COLD_MB=$((10#${value[COLD_MB]})); RAM_MEM_FLOOR_MB=$((10#${value[MEM_FLOOR_MB]}))
@@ -319,13 +330,16 @@ ram_pool_fits() {
 # the pool fits, 1 when no idle slot is left or the budgets cannot be read; RAM_SKIP is then the last
 # ram_pool_fits verdict.
 ram_pool_make_room() {
-    local who="$1" m n dir fd rc
+    local who="$1" m n dir fd rc when
     while read -r m n; do
         [ -n "$n" ] || continue
         dir="$RAM_POOL/slot-$n"
         exec {fd}>"$dir.lock" || continue
         if flock -n "$fd"; then
-            echo "$who: emptying idle RAM slot-$n (last leased $(date -d "@$m" '+%F %T' 2>/dev/null || echo unknown)) to make room in the pool" >&2
+            # A slot that was never stamped reads mtime 0, which `date` would print as 1970.
+            if [ "$m" -gt 0 ] 2>/dev/null; then when="last leased $(date -d "@$m" '+%F %T' 2>/dev/null || echo unknown)"
+            else when="never stamped"; fi
+            echo "$who: emptying idle RAM slot-$n ($when) to make room in the pool" >&2
             rm -rf -- "$dir"
             exec {fd}>&-
             rc=0; ram_pool_fits "$who" || rc=$?
@@ -494,12 +508,35 @@ slot_evict_foreign_members() {
 # and GATE_TIER=ram; returns 1, holding nothing, otherwise. The slot's directory is created here:
 # the evictor empties a RAM slot and leaves only its lock file, so a free slot may have none.
 # It does not tend: the disk ceiling and the high-water bound are disk rules.
+# An UNNAMED lease that returns 1 sets RAM_SKIP to the one line that says why (every slot held, or
+# a pool directory that cannot be made or written), so the caller's fall to disk is never silent and
+# never a raw `mkdir:` / `Permission denied`. A named lease says its own refusal and leaves RAM_SKIP.
 lease_ram_target() {
-    local who="$1" n="${2:-}"
-    if [ -n "$n" ]; then slot_lease "$RAM_POOL" slot- "$who" "$n" || return 1
-    else slot_lease "$RAM_POOL" slot- "$who" "" "$RAM_SLOTS" || return 1
+    local who="$1" n="${2:-}" rc
+    if [ -n "$n" ]; then
+        slot_lease "$RAM_POOL" slot- "$who" "$n" || return 1
+    else
+        # slot_lease's stderr here is the shell's own error text, which the line set below replaces.
+        { slot_lease "$RAM_POOL" slot- "$who" "" "$RAM_SLOTS"; } 2>/dev/null; rc=$?
+        case "$rc" in
+            0) ;;
+            1) RAM_SKIP="$who: RAM tier skipped: all $RAM_SLOTS RAM slots are held (CODESCOUT_GATE_RAM_SLOTS)"
+               return 1 ;;
+            *) if [ ! -d "$RAM_POOL" ]; then
+                   RAM_SKIP="$who: RAM tier skipped: cannot create $RAM_POOL; check that its parent directory is writable by this user (CODESCOUT_GATE_RAM_POOL)"
+               elif [ ! -w "$RAM_POOL" ]; then
+                   RAM_SKIP="$who: RAM tier skipped: $RAM_POOL is not writable by this user (CODESCOUT_GATE_RAM_POOL)"
+               else
+                   RAM_SKIP="$who: RAM tier skipped: cannot take a slot lock in $RAM_POOL, or flock failed (CODESCOUT_GATE_RAM_POOL)"
+               fi
+               return 1 ;;
+        esac
     fi
-    mkdir -p "$SLOT_DIR" || { exec {SLOT_FD}>&-; return 1; }
+    mkdir -p "$SLOT_DIR" 2>/dev/null || {
+        exec {SLOT_FD}>&-
+        RAM_SKIP="$who: RAM tier skipped: cannot create $SLOT_DIR (CODESCOUT_GATE_RAM_POOL)"
+        return 1
+    }
     GATE_POOL="$RAM_POOL"; GATE_TIER=ram
 }
 
