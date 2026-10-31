@@ -428,6 +428,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // other validators and BEFORE the file and the catalog row are written, so a refusal leaves neither.
     crate::librarian::requirements::enforce_on_create(&base_dir, &a.kind, &a.tags, &a.body)?;
     let status = resolve_status(&a.kind, a.status.as_deref())?;
+    // `tests/issue_frontmatter.rs` requires `opened:` on a live issue file; stamp it here so the
+    // creating call satisfies it rather than a later gate run in another session (f350eba20450a7f4).
+    // A caller's own value wins.
+    if a.kind == "bug" && a.rel_path.starts_with("docs/issues/") && !a.extra.contains_key("opened")
+    {
+        a.extra.insert(
+            "opened".into(),
+            serde_json::Value::String(chrono::Utc::now().format("%Y-%m-%d").to_string()),
+        );
+    }
     let fm = Frontmatter {
         id: Some(id.clone()),
         kind: Some(a.kind.clone()),
@@ -565,6 +575,53 @@ mod tests {
         assert!(content.contains("title: X"));
         let id = v["id"].as_str().unwrap();
         assert!(artifact::get(&ctx.catalog.lock(), id).unwrap().is_some());
+    }
+    /// f350eba20450a7f4: `tests/issue_frontmatter.rs` requires `opened:` on a live issue file, and
+    /// the create path used to leave it to the caller, so the omission surfaced in another
+    /// session's gate. A bug under `docs/issues/` is stamped with today; a caller's own value wins;
+    /// other kinds and other directories are left alone.
+    ///
+    /// Mutation caught: deleting the stamp in `call()`, or widening it past `kind=bug` under
+    /// `docs/issues/`.
+    #[tokio::test]
+    async fn a_bug_file_under_docs_issues_is_stamped_opened_unless_the_caller_gave_one() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let read = |p: &str| std::fs::read_to_string(tmp.path().join(p)).unwrap();
+
+        call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "docs/issues/2026-10-30-a.md",
+                   "kind": "bug", "title": "A", "body": "x"}),
+        )
+        .await
+        .unwrap();
+        assert!(
+            read("docs/issues/2026-10-30-a.md").contains(&format!("opened: {today}")),
+            "a bug created with no extra must carry opened"
+        );
+
+        call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "docs/issues/2026-10-30-b.md",
+                   "kind": "bug", "title": "B", "body": "x",
+                   "extra": {"opened": "2026-01-02"}}),
+        )
+        .await
+        .unwrap();
+        let b = read("docs/issues/2026-10-30-b.md");
+        assert!(b.contains("opened: 2026-01-02"), "{b}");
+        assert!(!b.contains(&format!("opened: {today}")), "{b}");
+
+        call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "docs/specs/c.md",
+                   "kind": "spec", "title": "C", "body": "x"}),
+        )
+        .await
+        .unwrap();
+        assert!(!read("docs/specs/c.md").contains("opened:"));
     }
 
     // ---- a create never lands outside the repository root through a symbolic link ------------

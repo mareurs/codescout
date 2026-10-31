@@ -320,6 +320,17 @@ the grammar for `doctor` (`check~<name>`); and where `One entry format` / `Compa
 should be delivered if not on an update. Whichever is taken, delete the waiver rows it makes
 reachable from `SECTION_WAIVERS` and declare the sections; Gate 5 then holds them to their size cap.
 
+
+### Design plan (2026-10-30, not implemented: this is a design change, so no code was written)
+
+Re-checked at the bytes on `experiments` 0f8705532: `move`, `append_entry`, `update_entry`, `augment` and `link` are routed as the Fix section says; the three remaining items are still decisions, not defects.
+
+1. **Multi-topic emission.** `relevant_guide_topic` returns one topic. Make it return an ordered list for a status-changing `update` (librarian's anti-wipe sections first, then tracker-conventions' close/archive sections), emitted within the existing per-call byte ceiling and spent-section ledger. Then drop the `Settled caveats`, `Closing a bug - patch-id and fix provenance` and `Archiving a tracker` rows from `SECTION_WAIVERS` and declare `serves: doc.update(...)`. Risk: the `update` path is the one the anti-wipe guard depends on; pin with the existing `a_status_update_keeps_the_librarians_anti_wipe_sections_first` plus a new byte ceiling.
+2. **`check~<name>` in `Shape`.** A grammar amendment so `librarian.doctor` can qualify on a violation class in the result (`violations[].check`). Then declare `Entry ids - when two hosts allocate anyway` and `Entry headings - a prefix with no definer` on `doctor(check~...)`. Needs the matcher to read a result field, not a path, so `names_path_containing` generalises to a result-predicate.
+3. **`One entry format` and `Compaction and archival`.** Inform `body_edits` updates, which route to librarian. Decide: serve on `update` with a `body_edits` predicate, or leave waived with the reason. Recommend leaving waived until 1 lands.
+
+Order: 1, then 2, then 3. Each step deletes the waiver rows it makes reachable; Gate 5 holds the sections to their size cap.
+
 ## References
 
 - `docs/issues/2026-10-17-p50-emission-budget-fixture-never-archives-a-bug-file-so-the-largest-doc-move-delivery-is-unbudgeted.md`
