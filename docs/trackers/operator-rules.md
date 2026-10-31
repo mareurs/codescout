@@ -23,7 +23,7 @@ Spec: `docs/superpowers/specs/2026-08-27-operator-rules-engine-design.md`.
 | ID | Binding | Covers | Evidence | Status |
 |---|---|---|---|---|
 | OP-1 | always | unverified-assertion | measured: conclude-last/b2 0% -> 100% (n=35) | active |
-| OP-2 | triggered | underpowered-subagent-dispatch | unmeasured | active |
+| OP-2 | triggered | underpowered-subagent-dispatch | unmeasured | **retired** |
 | OP-3 | triggered | durable-fact-written-to-per-profile-store | unmeasured | active |
 | OP-4 | triggered | partial-profile-config-update | unmeasured | active |
 | OP-5 | always | unverified-assertion | measured: a3 13.3% alone; stacked it cuts OP-1 7/10 → 2/10 | **retired** |
@@ -93,7 +93,9 @@ So the rule that ships is now the rule that was measured, and the arm varies onl
 **Serves:** Agent, Task
 **Evidence:** unmeasured
 **Rests on:** `~/.claude/CLAUDE.md` § Iron Rules → *Subagent Dispatch — Model Floor + Review Escalation*
-**Status:** active
+**Status:** retired
+
+**Retired 2026-10-28 by the operator: the floor is no longer true.** Haiku 5.5 is good enough for implementer and reviewer subagents, so "never dispatch on Haiku" no longer holds. This is the `**Valid:**` condition below firing (a new Haiku tier shipped). The review-escalation clause is not retired: it stays in `~/.claude*/CLAUDE.md` § Subagent Dispatch, whose heading no longer says "Model Floor". The entry is kept, not deleted, as the record of what the floor said.
 
 **Valid:** conditional — the model lineup changes (a new Haiku tier ships, or the named tiers are renamed)
 

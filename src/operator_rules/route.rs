@@ -68,20 +68,21 @@ mod tests {
 
     #[test]
     fn a_rule_with_several_selectors_routes_on_any_one_of_them() {
-        // OP-2 declares `**Serves:** Agent, Task` — the ledger's only rule
-        // with more than one selector. `serves.iter().any(...)` is what
+        // OP-4 declares `**Serves:** edit_file(path~/.claude), create_file(path~/.claude)`
+        // — the ledger's only active rule with more than one selector (OP-2, which
+        // served `Agent, Task`, is retired). `serves.iter().any(...)` is what
         // routes it on either one; mutating that `.any` to `.all` would
         // require a single call's selector to equal both at once (never
-        // true) and silently stop OP-2 from ever firing, while every other
-        // test in this module stays green — no other rule has a second
+        // true) and silently stop OP-4 from ever firing, while every other
+        // test in this module stays green — no other active rule has a second
         // selector to expose the bug. Both selectors are exercised here, not
         // just the first, so the second position in the list is confirmed
         // reachable too.
-        for sel in ["Agent", "Task"] {
-            let hit = route(Some(sel), &json!({"status": "ok"}));
+        for sel in ["edit_file", "create_file"] {
+            let hit = route(Some(sel), &json!({"abs_path": "/home/u/.claude/CLAUDE.md"}));
             assert!(
-                hit.iter().any(|r| r.id == "OP-2"),
-                "{sel} must route OP-2; got {:?}",
+                hit.iter().any(|r| r.id == "OP-4"),
+                "{sel} must route OP-4; got {:?}",
                 hit.iter().map(|r| &r.id).collect::<Vec<_>>()
             );
         }
