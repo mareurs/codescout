@@ -21,7 +21,7 @@
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
@@ -189,7 +189,7 @@ pub fn write_record(path: &Path, record: &JobRecord) -> std::io::Result<()> {
 
 #[cfg(unix)]
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -197,10 +197,7 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     // `create` succeeds on a directory that already exists, whatever its owner or mode.
     // The name is fixed and predictable in a shared temp dir, so another user may have
     // made it first: refuse anything we do not own or that others can touch.
-    let meta = std::fs::symlink_metadata(dir)?;
-    // SAFETY: geteuid has no preconditions and cannot fail.
-    let euid = unsafe { libc::geteuid() };
-    if !meta.is_dir() || meta.uid() != euid || meta.mode() & 0o077 != 0 {
+    if !is_private_dir(dir) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             format!(
@@ -215,6 +212,28 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)
+}
+
+/// Whether `dir` is a real directory (not a symlink) owned by this user that no other user
+/// can read, write or enter. `write_record` refuses any other record directory, and the
+/// sweeps that act on what a record names must refuse the same ones: a record in a directory
+/// another user can write may be theirs, naming one of OUR logs. A path whose metadata
+/// cannot be read is not private.
+#[cfg(unix)]
+pub(crate) fn is_private_dir(dir: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = std::fs::symlink_metadata(dir) else {
+        return false;
+    };
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    let euid = unsafe { libc::geteuid() };
+    meta.is_dir() && meta.uid() == euid && meta.mode() & 0o077 == 0
+}
+
+/// No owner or mode to check here; `create_private_dir` makes no such check either.
+#[cfg(not(unix))]
+pub(crate) fn is_private_dir(_dir: &Path) -> bool {
+    true
 }
 
 /// Delete a record once its outcome has been delivered. Returns `true` only when the
@@ -235,9 +254,9 @@ pub fn remove_if_delivered(path: &Path) -> bool {
 /// nothing will ever finish it. Unreadable or unparsable files are skipped, never an
 /// error: this is housekeeping, and a file it cannot judge is not its to delete.
 ///
-/// A record's log goes with it, through `unlink_log_if_ours` (so only a regular
-/// `codescout-bg-*.log` file directly in `log_dir`), so a record is never removed while
-/// its log stays behind with nothing left to name it.
+/// The log a removed record names goes with it when `unlink_log_if_ours` accepts it (a
+/// regular `codescout-bg-*.log` file directly in `log_dir`, last written no later than the
+/// record); a log it refuses is left for `sweep_loose_logs`.
 pub fn sweep_stale(
     dir: &Path,
     log_dir: &Path,
@@ -253,12 +272,10 @@ pub fn sweep_stale(
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        let Some(age) = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .map(|t| t.elapsed().unwrap_or(Duration::ZERO))
-        else {
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let (Ok(record_mtime), Some(age)) = (meta.modified(), mtime_age(&meta)) else {
             continue;
         };
         if age < max_age {
@@ -271,7 +288,7 @@ pub fn sweep_stale(
             continue;
         }
         if let Some(log) = rec.log_path.as_deref() {
-            unlink_log_if_ours(log_dir, log);
+            unlink_log_if_ours(log_dir, log, record_mtime);
         }
         remove_with_sidecars(&path);
         removed += 1;
@@ -280,10 +297,19 @@ pub fn sweep_stale(
 }
 
 /// Unlink the log a record names, but only when it is certainly one of ours: a regular
-/// file (not a symlink, not a directory) whose parent is exactly `log_dir` and whose
-/// file name starts with `codescout-bg-` and ends with `.log`. Returns whether a file
-/// was removed. A record is data on disk another process could have written or damaged,
-/// so its `log_path` is never trusted: anything that fails a check is left alone.
+/// file (not a symlink, not a directory) whose parent is exactly `log_dir`, whose file
+/// name starts with `codescout-bg-` and ends with `.log`, and whose mtime is no later than
+/// `not_newer_than`. Returns whether a file was removed. A record is data on disk another
+/// process could have written or damaged, so its `log_path` is never trusted: anything
+/// that fails a check is left alone.
+///
+/// The record sweeps pass the record file's mtime as `not_newer_than`. A finished job's
+/// last log write comes before its supervisor writes the `finished` record (a temp file,
+/// then `rename`), so a record's own log is never newer than the record. A newer file is
+/// someone else's: `tempfile` handed the name to a new job after an earlier sweep unlinked
+/// the old log while the record kept naming it, or an orphan still writes it. That file is
+/// kept, and once its record is gone `sweep_loose_logs` judges it (open-file scan, the
+/// log's own age). An mtime that cannot be read keeps the file too.
 ///
 /// The parent is compared to `log_dir` LITERALLY, with no `canonicalize` on either side:
 /// canonicalizing would follow the very symlinks this rule exists to refuse. A temp dir
@@ -291,7 +317,7 @@ pub fn sweep_stale(
 /// direction. The parent check is also what makes the lossy `display()` string stored by
 /// `JobRecord::with_log_path` harmless: a path that does not round-trip cannot equal
 /// `log_dir`, so it is skipped rather than resolved to some other file.
-fn unlink_log_if_ours(log_dir: &Path, log_path: &str) -> bool {
+fn unlink_log_if_ours(log_dir: &Path, log_path: &str, not_newer_than: SystemTime) -> bool {
     let path = Path::new(log_path);
     if path.parent() != Some(log_dir) {
         return false;
@@ -302,37 +328,43 @@ fn unlink_log_if_ours(log_dir: &Path, log_path: &str) -> bool {
     if !(name.starts_with("codescout-bg-") && name.ends_with(".log")) {
         return false;
     }
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_file() => {}
-        _ => return false,
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !meta.file_type().is_file() {
+        return false;
+    }
+    if meta.modified().map_or(true, |m| m > not_newer_than) {
+        return false;
     }
     std::fs::remove_file(path).is_ok()
 }
 
-/// How long ago `path` was last modified. A modification time in the future (clock
-/// skew) is age zero, never "very old"; `None` when the metadata cannot be read.
-fn age_of(path: &Path) -> Option<Duration> {
-    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+/// How long ago the file `meta` describes was last modified. A modification time in the
+/// future (clock skew) is age zero, never "very old"; `None` when the platform reports no
+/// mtime. Each caller picks `stat` or `lstat` for `meta` itself.
+fn mtime_age(meta: &std::fs::Metadata) -> Option<Duration> {
+    let modified = meta.modified().ok()?;
     Some(modified.elapsed().unwrap_or(Duration::ZERO))
 }
 
 /// Unlink the logs of finished jobs and return how many were removed. The record stays
 /// (`sweep_stale` owns it). For each finished record naming a log, the log goes when its
 /// `.delivered` sidecar is at least `grace` old, or the record file is at least `max_age`
-/// old. A missing or unreadable `.delivered` sidecar means "not delivered"; a record whose
-/// metadata cannot be read is skipped.
+/// old, and `unlink_log_if_ours` accepts it (a log newer than the record is not the
+/// record's own, so it is kept). A missing or unreadable `.delivered` sidecar means "not
+/// delivered"; a record whose metadata cannot be read is skipped.
 ///
-/// A `running` record is never acted on, whatever `is_alive` says: with a live server the
-/// job is writing its log, and with a dead server the job may be an orphan that still
-/// writes, so that log waits for `RECORD_MAX_AGE`, where `sweep_stale` removes it with the
-/// record. `_is_alive` is therefore not consulted; it stays in the signature so the two
-/// sweeps are called alike.
-pub fn sweep_logs(
+/// A `running` record is never acted on, whether or not its server is alive: with a live
+/// server the job is writing its log, and with a dead server the job may be an orphan that
+/// still writes, so that log is left to `sweep_stale` at `RECORD_MAX_AGE` (which keeps a
+/// log written after the record) and then to `sweep_loose_logs`. No liveness test is taken
+/// for that reason.
+pub(crate) fn sweep_logs(
     record_dir: &Path,
     log_dir: &Path,
     grace: Duration,
     max_age: Duration,
-    _is_alive: impl Fn(u32) -> bool,
 ) -> usize {
     let Ok(entries) = std::fs::read_dir(record_dir) else {
         return 0;
@@ -343,12 +375,10 @@ pub fn sweep_logs(
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        let Some(record_age) = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .map(|t| t.elapsed().unwrap_or(Duration::ZERO))
-        else {
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let (Ok(record_mtime), Some(record_age)) = (meta.modified(), mtime_age(&meta)) else {
             continue;
         };
         let Some(rec) = read_record(&path) else {
@@ -360,9 +390,16 @@ pub fn sweep_logs(
         let Some(log) = rec.log_path.as_deref() else {
             continue;
         };
-        let delivered_long_enough =
-            age_of(&sidecar(&path, ".delivered")).is_some_and(|a| a >= grace);
-        if (delivered_long_enough || record_age >= max_age) && unlink_log_if_ours(log_dir, log) {
+        // `stat`, as `remove_if_delivered`'s `exists()` does: the marker only ever widens
+        // when a log may go, and the record dir is owner-only (`is_private_dir`).
+        let delivered_long_enough = std::fs::metadata(sidecar(&path, ".delivered"))
+            .ok()
+            .as_ref()
+            .and_then(mtime_age)
+            .is_some_and(|a| a >= grace);
+        if (delivered_long_enough || record_age >= max_age)
+            && unlink_log_if_ours(log_dir, log, record_mtime)
+        {
             removed += 1;
         }
     }
@@ -372,7 +409,7 @@ pub fn sweep_logs(
 /// records and non-record files are skipped; an unlistable directory yields an empty set.
 /// The strings are taken as written, with no normalisation, so `sweep_loose_logs` compares
 /// them exactly against `log_dir.join(name)`.
-pub fn recorded_log_paths(record_dir: &Path) -> HashSet<PathBuf> {
+pub(crate) fn recorded_log_paths(record_dir: &Path) -> HashSet<PathBuf> {
     let Ok(entries) = std::fs::read_dir(record_dir) else {
         return HashSet::new();
     };
@@ -398,20 +435,30 @@ pub fn recorded_log_paths(record_dir: &Path) -> HashSet<PathBuf> {
 ///
 /// "Held open" is judged against both `log_dir.join(name)` and the same name under the
 /// canonical `log_dir`: `/proc/<pid>/fd` links resolve to real paths, while `log_dir` may be
-/// reached through a symlink. A mismatch can therefore only make a file be KEPT. The unlink
-/// itself goes through `unlink_log_if_ours`, so the regular-file, not-a-symlink, direct-child,
-/// name-prefix and suffix rules are the ones that guard a record-named log.
-pub fn sweep_loose_logs(
+/// reached through a symlink. When `log_dir` cannot be canonicalized the held-open test
+/// could miss a file, so nothing is removed; a mismatch can therefore only make a file be
+/// KEPT. The unlink itself goes through `unlink_log_if_ours` with `now - min_age` as the
+/// newest mtime it accepts, so the age in (b) is judged on the same `lstat` that applies the
+/// regular-file, not-a-symlink, direct-child, prefix and suffix rules.
+pub(crate) fn sweep_loose_logs(
     log_dir: &Path,
     recorded: &HashSet<PathBuf>,
     min_age: Duration,
     open: Option<&HashSet<PathBuf>>,
 ) -> usize {
+    // No file can be `min_age` old when that reaches back past the clock's origin.
+    let Some(cutoff) = SystemTime::now().checked_sub(min_age) else {
+        return 0;
+    };
     let Ok(entries) = std::fs::read_dir(log_dir) else {
         return 0;
     };
-    // Computed once: a failure leaves only the literal join to compare against.
+    // Computed once. Without it a held file under a symlinked `log_dir` would not be
+    // recognised, so with an open set to consult, a failure stops the sweep.
     let canonical_dir = log_dir.canonicalize().ok();
+    if open.is_some() && canonical_dir.is_none() {
+        return 0;
+    }
     let mut removed = 0;
     for entry in entries.flatten() {
         let file_name = entry.file_name();
@@ -434,19 +481,9 @@ pub fn sweep_loose_logs(
                 continue;
             }
         }
-        let Some(age) = std::fs::symlink_metadata(&path)
-            .and_then(|m| m.modified())
-            .ok()
-            .map(|t| t.elapsed().unwrap_or(Duration::ZERO))
-        else {
-            continue;
-        };
-        if age < min_age {
-            continue;
-        }
         if path
             .to_str()
-            .is_some_and(|p| unlink_log_if_ours(log_dir, p))
+            .is_some_and(|p| unlink_log_if_ours(log_dir, p, cutoff))
         {
             removed += 1;
         }
@@ -715,6 +752,33 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn is_private_dir_accepts_only_an_owner_only_directory_that_is_not_a_symlink() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let dir = base.path().join("bg");
+        std::fs::create_dir(&dir).unwrap();
+        for (mode, want) in [
+            (0o700, true),
+            (0o750, false),
+            (0o755, false),
+            (0o777, false),
+        ] {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(is_private_dir(&dir), want, "mode {mode:o}");
+        }
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let link = base.path().join("link");
+        std::os::unix::fs::symlink(&dir, &link).unwrap();
+        assert!(!is_private_dir(&link), "a symlink to a private dir");
+        assert!(!is_private_dir(&base.path().join("missing")));
+        let file = base.path().join("file");
+        std::fs::write(&file, b"x").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(!is_private_dir(&file), "a regular file");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn write_record_does_not_follow_a_symlink_at_the_temp_name() {
         let dir = tempfile::tempdir().unwrap();
         let victim = dir.path().join("victim");
@@ -850,7 +914,6 @@ mod tests {
             logs.path(),
             LOG_GRACE_AFTER_DELIVERY,
             LOG_MAX_AGE,
-            |_| false,
         );
         assert_eq!(n, 1);
         assert!(!log.exists());
@@ -876,7 +939,6 @@ mod tests {
             logs.path(),
             LOG_GRACE_AFTER_DELIVERY,
             LOG_MAX_AGE,
-            |_| false,
         );
         assert_eq!(n, 0);
         assert!(log.exists() && rec.exists());
@@ -895,6 +957,8 @@ mod tests {
             false,
         );
         set_mtime(&old_rec, ago(LOG_MAX_AGE + HOUR));
+        // Each log was last written before its record, as a real job's is.
+        set_mtime(&old_log, ago(LOG_MAX_AGE + 2 * HOUR));
         let (young_rec, young_log) = seed_with_log(
             dir.path(),
             logs.path(),
@@ -904,12 +968,12 @@ mod tests {
             false,
         );
         set_mtime(&young_rec, ago(LOG_MAX_AGE - HOUR));
+        set_mtime(&young_log, ago(LOG_MAX_AGE));
         let n = sweep_logs(
             dir.path(),
             logs.path(),
             LOG_GRACE_AFTER_DELIVERY,
             LOG_MAX_AGE,
-            |_| false,
         );
         assert_eq!(n, 1);
         assert!(!old_log.exists() && old_rec.exists());
@@ -932,14 +996,7 @@ mod tests {
         );
         set_mtime(&rec, ago(10 * LOG_MAX_AGE));
         set_mtime(&sidecar(&rec, ".delivered"), ago(10 * LOG_MAX_AGE));
-        let me = std::process::id();
-        let n = sweep_logs(
-            dir.path(),
-            logs.path(),
-            Duration::ZERO,
-            Duration::ZERO,
-            |pid| pid == me,
-        );
+        let n = sweep_logs(dir.path(), logs.path(), Duration::ZERO, Duration::ZERO);
         assert_eq!(n, 0);
         assert!(log.exists() && rec.exists());
     }
@@ -968,7 +1025,6 @@ mod tests {
             logs.path(),
             LOG_GRACE_AFTER_DELIVERY,
             LOG_MAX_AGE,
-            |_| false,
         );
         assert_eq!(n, 0);
         assert!(log.exists() && rec.exists());
@@ -978,62 +1034,78 @@ mod tests {
             0
         );
         assert!(log.exists() && rec.exists());
-        // ...until the record itself goes, and then the log goes with it.
+        // ...until the record itself goes. Its log was written after the record (as a
+        // running job's always is), so it may still be an orphan's: it is kept, and becomes a
+        // loose log that `sweep_loose_logs` judges by the open-file scan and its own age.
         set_mtime(&rec, ago(RECORD_MAX_AGE + HOUR));
         assert_eq!(
             sweep_stale(dir.path(), logs.path(), RECORD_MAX_AGE, |_| false),
             1
         );
-        assert!(!log.exists() && !rec.exists());
+        assert!(!rec.exists());
+        assert!(log.exists(), "a log newer than its running record is kept");
     }
 
-    #[cfg(unix)]
     #[test]
     fn sweep_logs_skips_a_log_path_outside_the_log_dir_a_symlink_and_a_directory() {
         let dir = private_tempdir();
         let logs = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        let old = ago(2 * LOG_MAX_AGE);
+        // `max_age = ZERO` and records written AFTER every file they name: each record is old
+        // enough and no named file is newer than its record, so only the path and type rules
+        // can keep a file. (Aging the records instead would make every file newer than its
+        // record, and the mtime rule alone would keep them all.)
         let finished_naming = |token: &str, handle: &str, named: &Path| -> PathBuf {
             let path = record_path(dir.path(), token, handle);
             let mut rec = JobRecord::running(handle, "true", None).with_log_path(named);
             rec.state = RecordState::Exited;
             write_record(&path, &rec).unwrap();
-            set_mtime(&path, old);
             path
         };
 
         // 1. a well-named file, but in a different directory
         let elsewhere = outside.path().join("codescout-bg-out.log");
         std::fs::write(&elsewhere, b"x").unwrap();
-        finished_naming("00000001", "@bg_00000001", &elsewhere);
 
         // 2. a symlink inside log_dir whose target is a file in the other directory
         let target = outside.path().join("target.txt");
         std::fs::write(&target, b"precious").unwrap();
-        let link = logs.path().join("codescout-bg-link.log");
-        std::os::unix::fs::symlink(&target, &link).unwrap();
-        finished_naming("00000002", "@bg_00000002", &link);
+        #[cfg(unix)]
+        let link = {
+            let link = logs.path().join("codescout-bg-link.log");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            link
+        };
 
         // 3. a directory with a log-like name
         let a_dir = logs.path().join("codescout-bg-x.log");
         std::fs::create_dir(&a_dir).unwrap();
-        finished_naming("00000003", "@bg_00000003", &a_dir);
 
         // 4. a regular file in log_dir with the wrong name
         let wrong = logs.path().join("notes.log");
         std::fs::write(&wrong, b"x").unwrap();
+
+        // Positive control: a regular, well-named log in log_dir goes in the same call.
+        let control = logs.path().join("codescout-bg-control.log");
+        std::fs::write(&control, b"x").unwrap();
+
+        finished_naming("00000001", "@bg_00000001", &elsewhere);
+        #[cfg(unix)]
+        finished_naming("00000002", "@bg_00000002", &link);
+        finished_naming("00000003", "@bg_00000003", &a_dir);
         finished_naming("00000004", "@bg_00000004", &wrong);
+        finished_naming("00000005", "@bg_00000005", &control);
 
         let n = sweep_logs(
             dir.path(),
             logs.path(),
             LOG_GRACE_AFTER_DELIVERY,
-            LOG_MAX_AGE,
-            |_| false,
+            Duration::ZERO,
         );
-        assert_eq!(n, 0);
+        assert_eq!(n, 1, "only the control log may be removed");
+        assert!(!control.exists(), "the control log was kept");
         assert!(elsewhere.exists(), "a file outside log_dir was removed");
+        #[cfg(unix)]
         assert!(link.symlink_metadata().is_ok(), "the symlink was removed");
         assert!(target.exists(), "the symlink target was removed");
         assert!(a_dir.is_dir(), "the directory was removed");
@@ -1070,7 +1142,6 @@ mod tests {
             logs.path(),
             LOG_GRACE_AFTER_DELIVERY,
             LOG_MAX_AGE,
-            |_| false,
         );
         assert_eq!(n, 0);
         assert!(log_a.exists() && log_b.exists());
@@ -1090,9 +1161,7 @@ mod tests {
         );
         assert!(!sidecar(&rec, ".delivered").exists());
         // A zero grace would remove a log whose delivery age was taken as zero.
-        let n = sweep_logs(dir.path(), logs.path(), Duration::ZERO, LOG_MAX_AGE, |_| {
-            false
-        });
+        let n = sweep_logs(dir.path(), logs.path(), Duration::ZERO, LOG_MAX_AGE);
         assert_eq!(n, 0);
         assert!(log.exists() && rec.exists());
     }
@@ -1123,6 +1192,131 @@ mod tests {
         assert!(!rec_a.exists() && !log_a.exists());
         assert!(!rec_b.exists());
     }
+
+    /// A finished record whose outcome was delivered long ago, naming a log whose mtime is
+    /// NEWER than the record's own. A finished job's last log write comes before the
+    /// supervisor writes the `finished` record, so such a log is not this record's: the name
+    /// was handed to a new job after an earlier sweep unlinked the old log (the record keeps
+    /// naming it for `RECORD_MAX_AGE`). Returns (record path, log path).
+    fn finished_record_naming_a_newer_log(dir: &Path, logs: &Path) -> (PathBuf, PathBuf) {
+        let (rec, log) = seed_with_log(
+            dir,
+            logs,
+            "00000001",
+            "@bg_00000001",
+            RecordState::Exited,
+            true,
+        );
+        set_mtime(&rec, ago(RECORD_MAX_AGE + HOUR));
+        set_mtime(&sidecar(&rec, ".delivered"), ago(RECORD_MAX_AGE + HOUR));
+        set_mtime(&log, ago(HOUR));
+        (rec, log)
+    }
+
+    /// The control: the same record, with its log last written before the record.
+    fn finished_record_naming_an_older_log(dir: &Path, logs: &Path) -> (PathBuf, PathBuf) {
+        let (rec, log) = finished_record_naming_a_newer_log(dir, logs);
+        set_mtime(&log, ago(RECORD_MAX_AGE + 2 * HOUR));
+        (rec, log)
+    }
+
+    #[test]
+    fn sweep_logs_keeps_a_log_newer_than_the_record_that_names_it() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (rec, log) = finished_record_naming_a_newer_log(dir.path(), logs.path());
+        let n = sweep_logs(
+            dir.path(),
+            logs.path(),
+            LOG_GRACE_AFTER_DELIVERY,
+            LOG_MAX_AGE,
+        );
+        assert_eq!(n, 0);
+        assert!(
+            log.exists(),
+            "a log newer than its record may be a new job's"
+        );
+        assert!(rec.exists());
+    }
+
+    #[test]
+    fn sweep_logs_removes_a_log_older_than_the_record_that_names_it() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (rec, log) = finished_record_naming_an_older_log(dir.path(), logs.path());
+        let n = sweep_logs(
+            dir.path(),
+            logs.path(),
+            LOG_GRACE_AFTER_DELIVERY,
+            LOG_MAX_AGE,
+        );
+        assert_eq!(n, 1);
+        assert!(!log.exists() && rec.exists());
+    }
+
+    #[test]
+    fn sweep_stale_removes_the_record_but_keeps_a_log_newer_than_it() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (rec, log) = finished_record_naming_a_newer_log(dir.path(), logs.path());
+        let n = sweep_stale(dir.path(), logs.path(), RECORD_MAX_AGE, |_| false);
+        assert_eq!(n, 1, "the stale record itself still goes");
+        assert!(!rec.exists());
+        assert!(
+            log.exists(),
+            "a log newer than its record may be a new job's"
+        );
+    }
+
+    #[test]
+    fn sweep_stale_removes_a_log_older_than_its_record_with_the_record() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (rec, log) = finished_record_naming_an_older_log(dir.path(), logs.path());
+        let n = sweep_stale(dir.path(), logs.path(), RECORD_MAX_AGE, |_| false);
+        assert_eq!(n, 1);
+        assert!(!rec.exists() && !log.exists());
+    }
+
+    /// `>=`, not `>`: a `.delivered` sidecar whose age is exactly the grace (here a future
+    /// mtime, age zero, against a zero grace) lets the log go.
+    #[test]
+    fn sweep_logs_removes_the_log_when_the_delivery_age_equals_the_grace() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (rec, log) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000001",
+            "@bg_00000001",
+            RecordState::Exited,
+            true,
+        );
+        set_mtime(
+            &sidecar(&rec, ".delivered"),
+            std::time::SystemTime::now() + 3 * LOG_MAX_AGE,
+        );
+        let n = sweep_logs(dir.path(), logs.path(), Duration::ZERO, LOG_MAX_AGE);
+        assert_eq!(n, 1);
+        assert!(!log.exists() && rec.exists());
+    }
+
+    /// The suffix rule on its own: a `codescout-bg-` file that does not end in `.log` is
+    /// kept, while the `.log` twin in the same directory goes.
+    #[test]
+    fn unlink_log_if_ours_keeps_a_file_without_the_log_suffix() {
+        let logs = tempfile::tempdir().unwrap();
+        let txt = logs.path().join("codescout-bg-x.txt");
+        std::fs::write(&txt, b"x").unwrap();
+        let log = logs.path().join("codescout-bg-x.log");
+        std::fs::write(&log, b"x").unwrap();
+        let now = std::time::SystemTime::now() + HOUR;
+        assert!(!unlink_log_if_ours(logs.path(), txt.to_str().unwrap(), now));
+        assert!(txt.exists());
+        assert!(unlink_log_if_ours(logs.path(), log.to_str().unwrap(), now));
+        assert!(!log.exists());
+    }
+
     /// A `codescout-bg-<n>.log` in `dir`, last modified `age` ago.
     fn loose_log(dir: &Path, n: u32, age: Duration) -> PathBuf {
         let log = dir.join(format!("codescout-bg-{n:08}.log"));

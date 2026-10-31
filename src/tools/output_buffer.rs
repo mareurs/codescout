@@ -105,7 +105,9 @@ fn pid_alive(_pid: u32) -> bool {
 /// temp directory in a server, `None` in a test build. A test that spawns a background job
 /// reaches the housekeeping, and a scan of the real temp directory from there would delete
 /// the logs of other people's sessions; a test that wants the sweep passes a directory of its
-/// own through `OutputBuffer::with_log_dir`.
+/// own through `OutputBuffer::with_log_dir`. `cfg!(test)` holds only in this crate's own unit
+/// tests: an integration test under `tests/` links the library built without it, so a buffer
+/// it builds gets the production behaviour (`Some(std::env::temp_dir())`).
 fn default_log_dir() -> Option<PathBuf> {
     if cfg!(test) {
         None
@@ -118,39 +120,54 @@ fn default_log_dir() -> Option<PathBuf> {
 /// the logs they name), finished jobs' logs past their lifetime, then, when `log_dir` is
 /// `Some`, the loose logs that no record names. Never fails: every step ignores its errors.
 ///
+/// The two record-linked sweeps run only when `record_dir` is owner-only
+/// (`is_private_dir`, the test `write_record` applies): the directory name is fixed and
+/// predictable, so another user may have made it, and a record they planted there could
+/// name one of OUR logs. The loose sweep still reads that directory's records, because a
+/// recorded path only ever makes a file be kept. The `recorded` set is read AFTER the record
+/// sweeps, so a log whose record `sweep_stale` just removed is judged as loose in this pass.
+///
 /// With `log_dir` `None` the two record-linked sweeps still run, with the OS temp directory
 /// as the directory a record's `log_path` must sit in; only the loose sweep, which lists a
 /// directory, is skipped. The record-linked sweeps are safe in a test build: they act only
-/// on logs that a record in `record_dir` names (and a test's records name its own files or
-/// the logs of its own spawned jobs), never on a file found by listing the temp directory.
+/// on records in the shared test record dir, which name only logs that test runs spawned,
+/// never on a file found by listing the temp directory.
 fn run_housekeeping(record_dir: &Path, log_dir: Option<&Path>) {
     use crate::tools::job_record::{
-        recorded_log_paths, sweep_logs, sweep_loose_logs, sweep_stale, LOG_GRACE_AFTER_DELIVERY,
-        LOG_MAX_AGE, RECORD_MAX_AGE,
+        is_private_dir, recorded_log_paths, sweep_logs, sweep_loose_logs, sweep_stale,
+        LOG_GRACE_AFTER_DELIVERY, LOG_MAX_AGE, RECORD_MAX_AGE,
     };
     let guard_dir = log_dir.map_or_else(std::env::temp_dir, Path::to_path_buf);
-    let records = sweep_stale(record_dir, &guard_dir, RECORD_MAX_AGE, pid_alive);
-    let logs = sweep_logs(
-        record_dir,
-        &guard_dir,
-        LOG_GRACE_AFTER_DELIVERY,
-        LOG_MAX_AGE,
-        pid_alive,
-    );
+    let (mut records, mut logs) = (0, 0);
+    if is_private_dir(record_dir) {
+        records = sweep_stale(record_dir, &guard_dir, RECORD_MAX_AGE, pid_alive);
+        logs = sweep_logs(
+            record_dir,
+            &guard_dir,
+            LOG_GRACE_AFTER_DELIVERY,
+            LOG_MAX_AGE,
+        );
+    }
     let mut loose = 0;
     if let Some(log_dir) = log_dir {
         let recorded = recorded_log_paths(record_dir);
         let open = crate::platform::open_file_paths();
-        // Without the open-file scan a running job's log cannot be told from an abandoned
-        // one, so only a log older than a whole record retention is taken.
-        let min_age = if open.is_some() {
-            LOG_MAX_AGE
-        } else {
-            RECORD_MAX_AGE
-        };
+        let min_age = loose_min_age(open.is_some());
         loose = sweep_loose_logs(log_dir, &recorded, min_age, open.as_ref());
     }
     tracing::debug!(records, logs, loose, "background housekeeping done");
+}
+
+/// The age a loose log must reach before the loose sweep takes it. Without the open-file
+/// scan (`open_known` false) a running job's log cannot be told from an abandoned one, so
+/// only a log older than a whole record retention is taken.
+fn loose_min_age(open_known: bool) -> std::time::Duration {
+    use crate::tools::job_record::{LOG_MAX_AGE, RECORD_MAX_AGE};
+    if open_known {
+        LOG_MAX_AGE
+    } else {
+        RECORD_MAX_AGE
+    }
 }
 
 /// How a `@file_*` store finds the entry it may reuse ([`OutputBuffer::store_file_inner`]).
@@ -1892,7 +1909,9 @@ impl OutputBuffer {
         let unavailable = |e: std::io::Error| {
             RecoverableError::with_hint(
                 format!("background job log unavailable: {}: {e}", log.display()),
-                "Check if the process is still running; its log file no longer exists.",
+                "Check if the process is still running; its log file no longer exists. \
+                 Background logs are removed 1 h after their outcome is delivered, or 24 h \
+                 after the job ended.",
             )
         };
         let len = std::fs::metadata(&log).map_err(unavailable)?.len();
@@ -2062,7 +2081,9 @@ impl OutputBuffer {
                 if !log_path.exists() {
                     return Err(RecoverableError::with_hint(
                         format!("background job log unavailable: {}", log_path.display()),
-                        "Check if the process is still running; its log file no longer exists.",
+                        "Check if the process is still running; its log file no longer exists. \
+                         Background logs are removed 1 h after their outcome is delivered, or \
+                         24 h after the job ended.",
                     )
                     .into());
                 }
@@ -2468,6 +2489,94 @@ mod tests {
             orphan_log.exists() && orphan_rec.exists(),
             "a dead server's running job keeps its log"
         );
+    }
+
+    /// A record dir holding one exited record, a month old, that names a log in `logs` last
+    /// written before it; the dir is then set to `mode`. Returns (record, log).
+    #[cfg(unix)]
+    fn old_record_naming_its_log(record_dir: &Path, logs: &Path, mode: u32) -> (PathBuf, PathBuf) {
+        use crate::tools::job_record::{record_path, write_record, JobRecord};
+        use std::os::unix::fs::PermissionsExt;
+        let log = aged_file(logs, "codescout-bg-planted.log", 31 * DAY);
+        let rec_path = record_path(record_dir, "00000001", "@bg_00000001");
+        let mut rec = JobRecord::running("@bg_00000001", "true", None).with_log_path(&log);
+        rec.finish(&JobState::Exited { code: Some(0) });
+        write_record(&rec_path, &rec).unwrap();
+        age_file(&rec_path, 30 * DAY);
+        std::fs::set_permissions(record_dir, std::fs::Permissions::from_mode(mode)).unwrap();
+        (rec_path, log)
+    }
+
+    /// Another local user can pre-create the fixed-name record dir open to all and plant a
+    /// record naming one of OUR logs: `write_record` refuses such a dir, and so must the
+    /// sweeps that act on what a record names.
+    #[cfg(unix)]
+    #[test]
+    fn housekeeping_ignores_the_records_of_a_record_dir_others_can_reach() {
+        let tmp = tempfile::tempdir().unwrap();
+        let logs = tmp.path().join("logs");
+        std::fs::create_dir(&logs).unwrap();
+        let record_dir = tmp.path().join("bg");
+        let (rec, log) = old_record_naming_its_log(&record_dir, &logs, 0o755);
+
+        run_housekeeping(&record_dir, Some(&logs));
+
+        assert!(
+            log.exists(),
+            "a record in a dir others can reach removed a log"
+        );
+        assert!(
+            rec.exists(),
+            "a record in a dir others can reach was acted on"
+        );
+    }
+
+    /// The control for the test above: the same record in an owner-only dir is acted on.
+    #[cfg(unix)]
+    #[test]
+    fn housekeeping_acts_on_the_records_of_an_owner_only_record_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let logs = tmp.path().join("logs");
+        std::fs::create_dir(&logs).unwrap();
+        let record_dir = tmp.path().join("bg");
+        let (rec, log) = old_record_naming_its_log(&record_dir, &logs, 0o700);
+
+        run_housekeeping(&record_dir, Some(&logs));
+
+        assert!(!log.exists() && !rec.exists());
+    }
+
+    /// The loose sweep's `recorded` set is read AFTER the record sweeps: a record
+    /// `sweep_stale` removed no longer shields the log it named. Here that log is newer than
+    /// its record, so `sweep_stale` keeps it; old and held by nobody, the loose sweep takes it.
+    #[test]
+    fn housekeeping_reads_the_recorded_logs_after_the_record_sweeps() {
+        use crate::tools::job_record::{record_path, write_record, JobRecord};
+        let tmp = tempfile::tempdir().unwrap();
+        let logs = tmp.path().join("logs");
+        std::fs::create_dir(&logs).unwrap();
+        let record_dir = tmp.path().join("bg");
+        let log = aged_file(&logs, "codescout-bg-after.log", 10 * DAY);
+        let rec_path = record_path(&record_dir, "00000001", "@bg_00000001");
+        let mut rec = JobRecord::running("@bg_00000001", "true", None).with_log_path(&log);
+        rec.finish(&JobState::Exited { code: Some(0) });
+        write_record(&rec_path, &rec).unwrap();
+        age_file(&rec_path, 30 * DAY);
+
+        run_housekeeping(&record_dir, Some(&logs));
+
+        assert!(!rec_path.exists(), "the stale record is swept");
+        assert!(
+            !log.exists(),
+            "a log whose record was swept in this pass is a loose log in the same pass"
+        );
+    }
+
+    #[test]
+    fn the_loose_sweep_waits_a_whole_record_retention_without_the_open_file_scan() {
+        use crate::tools::job_record::{LOG_MAX_AGE, RECORD_MAX_AGE};
+        assert_eq!(loose_min_age(true), LOG_MAX_AGE);
+        assert_eq!(loose_min_age(false), RECORD_MAX_AGE);
     }
 
     /// Removes the planted file even when an assertion fails first.
@@ -3891,6 +4000,33 @@ mod tests {
         assert!(
             err.to_string().contains("background job log unavailable"),
             "unexpected error: {err}"
+        );
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("a RecoverableError");
+        assert!(
+            rec.hint().unwrap_or("").contains(LOG_RETENTION_SENTENCE),
+            "the hint must say when background logs are removed: {:?}",
+            rec.hint()
+        );
+    }
+
+    /// Both "log unavailable" errors name the reaper's lifetimes: a reader whose log was
+    /// reclaimed must not be sent to look for a process that ended long ago.
+    const LOG_RETENTION_SENTENCE: &str = "Background logs are removed 1 h after their outcome \
+                                          is delivered, or 24 h after the job ended.";
+
+    #[test]
+    fn get_stream_or_job_log_names_the_log_lifetimes_when_the_log_is_gone() {
+        let buf = OutputBuffer::new(10);
+        let id = buf.store_background(bg_job(std::path::PathBuf::from(
+            "/tmp/nonexistent-codescout-bg-test-xyz.log",
+        )));
+        let err = buf.get_stream_or_job_log(&id).unwrap_err();
+        assert!(
+            err.hint().unwrap_or("").contains(LOG_RETENTION_SENTENCE),
+            "the hint must say when background logs are removed: {:?}",
+            err.hint()
         );
     }
 
