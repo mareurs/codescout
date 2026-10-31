@@ -15,6 +15,7 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 
 PASS = "pass"
 MAX_EXAMPLES = 10
@@ -40,25 +41,44 @@ class ParserError(ValueError):
     """The record's log parser did not produce a usable {test name: status} mapping."""
 
 
+def _kill_group(proc):
+    """SIGKILL the child's process group, then reap the child; never blocks for long."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass  # a SIGKILLed child is unreapable only if the kernel is stuck; do not hang on it
+
+
+
 def run_parser(parser_src, log, timeout=30.0):
     """`parser(log)` of the untrusted `parser_src`, as a dict of str to str. ParserError on a
     timeout, a non-zero exit, output that is not JSON, a non-dict, or a non-string key or value."""
     request = json.dumps({"src": parser_src, "log": log})
-    proc = subprocess.Popen(
-        [sys.executable, "-I", "-c", _DRIVER],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
-        text=True, start_new_session=True,
-    )
-    try:
-        out, err = proc.communicate(request, timeout=timeout)
-    except subprocess.TimeoutExpired:
+    # stdin, stdout and stderr are temp files, not pipes: a descendant that escapes the process
+    # group (setsid) and keeps a pipe open would block a read-to-EOF forever, but it cannot make
+    # a file read or `wait(timeout)` block.
+    with tempfile.TemporaryFile("w+") as fin, tempfile.TemporaryFile("w+") as fout, \
+            tempfile.TemporaryFile("w+") as ferr:
+        fin.write(request)
+        fin.seek(0)
+        proc = subprocess.Popen(
+            [sys.executable, "-I", "-c", _DRIVER], stdin=fin, stdout=fout, stderr=ferr,
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")}, start_new_session=True,
+        )
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        proc.communicate()
-        raise ParserError(f"log parser timed out after {timeout}s") from None
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_group(proc)
+            raise ParserError(f"log parser timed out after {timeout}s") from None
+        _kill_group(proc)  # the child exited; reap anything it left in its group
+        fout.seek(0)
+        out = fout.read()
+        ferr.seek(0)
+        err = ferr.read()
     if proc.returncode != 0:
         tail = (err or "").strip().splitlines()[-1:] or [""]
         raise ParserError(f"log parser exited {proc.returncode}: {tail[0][:200]}")

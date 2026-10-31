@@ -1,4 +1,7 @@
 import json
+import os
+import signal
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -38,6 +41,53 @@ class RunParserTests(unittest.TestCase):
             with self.subTest(src=src):
                 with self.assertRaises(g.ParserError):
                     g.run_parser(src, "log")
+
+    def _setsid_grandchild_src(self, pidfile, tail):
+        """A parser that forks a grandchild into its own session (out of the killed group) that
+        sleeps 30 s holding the inherited descriptors, then runs `tail`."""
+        pf = repr(str(pidfile))
+        return (
+            "import os, time\n"
+            "def parser(log):\n"
+            "    pid = os.fork()\n"
+            "    if pid == 0:\n"
+            "        os.setsid()\n"
+            f"        open({pf}, 'w').write(str(os.getpid()))\n"
+            "        time.sleep(30)\n"
+            "        os._exit(0)\n"
+            f"    while not os.path.exists({pf}) or not open({pf}).read():\n"
+            "        time.sleep(0.01)\n"
+            + tail
+        )
+
+    def _reap_grandchild(self, pidfile):
+        try:
+            os.kill(int(Path(pidfile).read_text()), signal.SIGKILL)
+        except (OSError, ValueError):
+            pass
+
+    def test_run_parser_timeout_is_bounded_when_a_setsid_grandchild_holds_descriptors(self):
+        with tempfile.TemporaryDirectory() as d:
+            pidfile = Path(d) / "pid"
+            self.addCleanup(self._reap_grandchild, pidfile)
+            src = self._setsid_grandchild_src(pidfile, "    time.sleep(60)\n")
+            t = time.monotonic()
+            with self.assertRaises(g.ParserError):
+                g.run_parser(src, "x", timeout=2)
+            self.assertLess(time.monotonic() - t, 2 + 5)
+
+    def test_run_parser_normal_path_is_bounded_when_a_setsid_grandchild_holds_descriptors(self):
+        with tempfile.TemporaryDirectory() as d:
+            pidfile = Path(d) / "pid"
+            self.addCleanup(self._reap_grandchild, pidfile)
+            src = self._setsid_grandchild_src(pidfile, "    return {'t': 'pass'}\n")
+            t = time.monotonic()
+            try:
+                g.run_parser(src, "x", timeout=2)
+            except g.ParserError:
+                pass  # either outcome is acceptable; hanging is not
+            self.assertLess(time.monotonic() - t, 2 + 5)
+
 
     def test_run_parser_cannot_read_parent_environment(self):
         src = "import os\ndef parser(log):\n    return {os.environ.get('HOME', 'none'): 'pass'}\n"
