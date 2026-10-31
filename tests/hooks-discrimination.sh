@@ -1002,6 +1002,62 @@ has "classify_conflicting_exits_2: names CODEX_SESSION_ID" "$out" "CODEX_SESSION
 eq "classify_conflicting_exits_2: one stderr line" "$(printf '%s\n' "$out" | grep -vc '^EXIT=')" "1"
 rm -rf "$T"
 
+# The guard's stderr line must name the REAL cause: a conflict, a single invalid id, and a missing or
+# broken python3 are three different faults. Exactly one line each, in the form
+#   pre-commit-foreign-index: identity not resolved (<resolver's first stderr line | resolver unavailable>), so treated as no identity
+BADPY="$(mktemp -d "${TMPDIR:-/tmp}/badpy-XXXXXX")"
+printf '#!/bin/sh\nexit 127\n' > "$BADPY/python3"
+chmod +x "$BADPY/python3"
+new_repo; mkdb "$DB"
+echo theirs > g.txt
+add_as "$B" g.txt
+# $1 = case label, $2 = expected cause substring; remaining args = env assignments for the guard
+guard_err() {
+    local label="$1" want="$2"
+    shift 2
+    local err rc
+    err="$(env -u GIT_INDEX_FILE -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID "$@" bash "$SRC/pre-commit-foreign-index.sh" 2>&1 >/dev/null)"
+    rc=$?
+    eq "$label: exit 0 (a hook never fails the commit)" "$rc" "0"
+    eq "$label: one stderr line" "$(printf '%s\n' "$err" | grep -c .)" "1"
+    has "$label: says the identity was not resolved" "$err" "pre-commit-foreign-index: identity not resolved ("
+    has "$label: names the real cause" "$err" "$want"
+    has "$label: and the outcome" "$err" "), so treated as no identity"
+}
+guard_err "identity_conflict_message" "conflicting context" CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U"
+guard_err "invalid_claude_id_message" "invalid session id a_b" CLAUDE_CODE_SESSION_ID="a_b"
+guard_err "broken_python3_message" "resolver unavailable" PATH="$BADPY:$PATH" CLAUDE_CODE_SESSION_ID="$A"
+out="$(env -u GIT_INDEX_FILE -u CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID="a_b" bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1 >/dev/null; echo "EXIT=$?")"
+has "classify_invalid_id: exit 2" "$out" "EXIT=2"
+has "classify_invalid_id: names the cause" "$out" "invalid session id a_b"
+eq "classify_invalid_id: one stderr line" "$(printf '%s\n' "$out" | grep -vc '^EXIT=')" "1"
+out="$(env -u GIT_INDEX_FILE -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODESCOUT_CONTEXT_FILE \
+    bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1 >/dev/null; echo "EXIT=$?")"
+has "classify_missing_identity_names_context_file" "$out" "CODESCOUT_CONTEXT_FILE"
+has "classify_missing_identity_names_both_variables: claude" "$out" "CLAUDE_CODE_SESSION_ID"
+has "classify_missing_identity_names_both_variables: codex" "$out" "CODEX_SESSION_ID"
+rm -rf "$T"
+
+# A Codex owner cannot be looked up: resolve_session reads only the Claude registry, so the refusal must
+# not call a Codex peer a "dead incarnation" or send the reader to a `codex:<id>.jsonl` that cannot exist.
+new_repo; mkdb "$DB"
+echo theirs > g.txt
+add_codex g.txt
+out="$(guard "$A")"
+has "codex_peer_owner_refusal: refused" "$out" "EXIT=1"
+has "codex_peer_owner_refusal: names the owner qualified" "$out" "codex:$U"
+has "codex_peer_owner_refusal: liveness not checked" "$out" "Codex session — liveness not checked (the registry is Claude-only)"
+hasnt "codex_peer_owner_refusal: not called dead" "$out" "NOT LIVE"
+hasnt "codex_peer_owner_refusal: no jsonl hint" "$out" ".jsonl"
+rm -rf "$T"
+new_repo; mkdb "$DB"
+echo theirs > g.txt
+add_as "$B" g.txt
+out="$(guard "$A")"
+has "claude_peer_owner_refusal_unchanged: NOT LIVE text" "$out" "NOT LIVE"
+has "claude_peer_owner_refusal_unchanged: jsonl hint" "$out" "$B.jsonl"
+rm -rf "$T" "$BADPY"
+
 # 4. liveness: a write is live until its OWN writer commits the path after it. Rows carry
 # explicit times so no case depends on two events landing in different seconds.
 hrs() { date -u -d "$1" '+%Y-%m-%d %H:%M:%S.000'; }

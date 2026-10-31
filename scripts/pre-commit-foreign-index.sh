@@ -110,20 +110,31 @@ classify=0
 _identity_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 # A git hook must never fail the user's command because identity could not be resolved: a missing
 # helper reads as no identity, and a failing publish_identity (Claude and Codex variables both set,
-# or an invalid id) reads as no identity PLUS one stderr line saying why.
+# an invalid id, or a missing/broken python3) reads as no identity PLUS one stderr line saying why.
 me=""
-_identity_conflict=0
+_identity_failed=0
+_identity_why=""
 if [ -n "$_identity_dir" ] && . "$_identity_dir/publish-identity.sh" 2>/dev/null; then
-    me="$(publish_identity 2>/dev/null)" || { me=""; _identity_conflict=1; }
-else
-    publish_principal_equal() { return 1; }
+    # stdout (the id) and stderr (the reason) share one capture; the exit status rides on a final
+    # `rc=` marker. On success the id is the LAST line; on failure the first line is the reason.
+    _ires="$(publish_identity 2>&1; echo "rc=$?")"
+    _irc="${_ires##*rc=}"
+    _ibody="${_ires%rc=*}"
+    _ibody="${_ibody%$'\n'}"
+    if [ "$_irc" = 0 ]; then
+        me="${_ibody##*$'\n'}"
+    else
+        _identity_failed=1
+        _identity_why="${_ibody%%$'\n'*}"
+        [ -n "$_identity_why" ] || _identity_why="resolver unavailable"
+    fi
 fi
 if [ -z "$me" ]; then
-    if ((_identity_conflict)); then
-        echo "pre-commit-foreign-index: identity conflict or invalid id (CLAUDE_CODE_SESSION_ID and CODEX_SESSION_ID cannot both identify the caller), so treated as no identity" >&2
+    if ((_identity_failed)); then
+        echo "pre-commit-foreign-index: identity not resolved ($_identity_why), so treated as no identity" >&2
         ((classify)) && exit 2
     fi
-    ((classify)) && { echo "classify: no usable session identity (neither CLAUDE_CODE_SESSION_ID nor CODEX_SESSION_ID resolved), so no owner to classify for" >&2; exit 2; }
+    ((classify)) && { echo "classify: no usable session identity (none of CLAUDE_CODE_SESSION_ID, CODEX_SESSION_ID or CODESCOUT_CONTEXT_FILE resolved), so no owner to classify for" >&2; exit 2; }
     exit 0
 fi
 
@@ -657,6 +668,11 @@ fi
             echo "      $owner"
             echo "          LIVE — ${info#*|} (pid ${info%%|*})"
             echo "          SendMessage(to: \"uds:/run/user/$(id -u)/cc-socks/${info%%|*}.sock\")"
+        elif [ "${owner#codex:}" != "$owner" ]; then
+            # resolve_session searches only the Claude registry, so "not found" proves nothing about a
+            # Codex owner, and `projects/<encoded>/codex:<id>.jsonl` cannot exist.
+            echo "      $owner"
+            echo "          Codex session — liveness not checked (the registry is Claude-only)"
         else
             echo "      $owner"
             echo "          NOT LIVE — a dead incarnation, not an abandoned file."
