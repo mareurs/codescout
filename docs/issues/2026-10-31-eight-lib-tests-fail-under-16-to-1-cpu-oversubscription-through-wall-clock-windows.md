@@ -37,7 +37,9 @@ Migrate group (3 tests): confirmed. The probe samples the test thread's `/proc/s
 
 LSP test: not confirmed. Alone it passed 4 of 4 under the load that failed it in the suite, so it needs the whole suite's contention.
 
-Attribution group (4 tests): cause not yet read. Each passes alone without load and fails 4 of 4 alone under load, and `the_same_red_at_exit_zero_still_answers` also failed once in a quiet run, so it is not purely a load effect.
+Attribution group (4 tests): confirmed, and it is a product limit as well as a test one. The shipped path `wip_author_diagnostic` spawns `python3 -I scripts/attribute-red.py`, which scans every transcript under `$HOME/.claude*` and `$HOME/.codex*` (`discover_claude_histories`, `discover_codex_histories`), with a ceiling of `ATTRIBUTION_TIMEOUT_DEFAULT` = 30 s. Timed alone on a small dirty fixture repo on 2026-10-31, with no load from me but on a machine shared with peers: 16.1 s, 20.7 s, 25.5 s (three runs, exit 0, 470 bytes out each). So a quiet call already uses 54 to 85% of the ceiling; any load pushes the scan past 30 s, the timeout returns `None`, and the test asserts "python3 is present but the engine produced no hint". That also explains the quiet-run failure of `the_same_red_at_exit_zero_still_answers`. The module comment recorded 5.0 s then 7.0 s in six days; it is 16 to 25 s now. The tests scan the real corpus of whoever runs them, so they depend on the size of that machine's history.
+
+Product effect, not yet measured in use: on this machine the red-attribution hint is silently absent whenever the scan exceeds 30 s. The code treats a timeout as silence by design (`_ => return None`).
 
 ## Evidence
 `suite-load.txt` in that scratchpad: `5386 passed; 8 failed; 12 ignored; finished in 1600.35s`. Not checked: whether any of the 8 fails alone, whether the attribution failures are the python engine's own timeout or something else, and whether the tree's uncommitted edits play a part.
@@ -62,7 +64,12 @@ At a normal gate load these have not been seen to fail, except the two sightings
 
 ## Resume
 
-Open: the four `attribution` tests (the python engine gives no hint under load, and one test also failed in a quiet run) and `lsp::client::tests::workspace_symbols_returns_project_symbols` (30 s LSP request timeout; passes alone under load). Read the engine's own deadline in `src/tools/run_command/attribution.rs` first; the four tests share it.
+Open: the four `attribution` tests and `lsp::client::tests::workspace_symbols_returns_project_symbols` (30 s LSP request timeout; passes alone under load).
+
+Attribution needs a design choice before a change; none is made:
+- Point the engine at an empty history in the tests. The engine reads `HOME` (and `FILE_PROVENANCE_ROOTS` as an override). The shipped spawn path sets no environment on the child, so this needs a field on `AttributionEnv` that `wip_author_diagnostic_in` applies with `Command::env`. This keeps the tests off the machine's corpus and matches the module's rule of no process-global state (see `docs/issues/archive/2026-09-13-an-env-var-set-across-an-await-races-every-sibling-test-that-reads-it.md`). It leaves the product limit as it is. The fixture's file is unattributable, so the `COVERAGE` assertion should hold with an empty history; that is not checked.
+- Raise `ATTRIBUTION_TIMEOUT_DEFAULT`. This moves the cliff and changes how long a failing `run_command` can wait.
+- Make the scan cheaper (an index or a cache of the transcript scan). This addresses the product limit, and it is the largest change.
 
 ## References
 - `docs/issues/2026-10-31-a-timed-out-filter-test-fails-in-the-loaded-gate-and-passes-alone.md`
