@@ -25,6 +25,8 @@
 # is armed, or left behind after a revert. A marker that over-reports is worse
 # than none, because it teaches readers to ignore it.
 set -uo pipefail
+# Each case declares its own identity; never inherit an enclosing Claude/Codex/explicit context.
+unset CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID CODEX_THREAD_ID CODESCOUT_CONTEXT_FILE
 
 SELF_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PROBE="$SELF_ROOT/scripts/mutation-probe.sh"

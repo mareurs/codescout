@@ -7,6 +7,8 @@
 #   tests/publish-principal.sh     # non-zero exit on any failure
 
 set -uo pipefail
+# Pure functions, but a sourced helper must never see an enclosing Claude/Codex/explicit context.
+unset CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID CODEX_THREAD_ID CODESCOUT_CONTEXT_FILE
 
 HELPER="$(cd "$(dirname "$0")/../scripts" && pwd)/publish-identity.sh"
 U="aaaaaaaa-1111-2222-3333-444444444444"

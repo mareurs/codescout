@@ -20,6 +20,8 @@
 # index to test a script whose whole purpose is protecting a shared index would be
 # the exact failure mode this exists to prevent.
 set -u
+# Each case declares its own identity; never inherit an enclosing Claude/Codex/explicit context.
+unset CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID CODEX_THREAD_ID CODESCOUT_CONTEXT_FILE
 
 SRC="$(cd "$(dirname "$0")/../scripts" && pwd)"
 TOOL="$SRC/git-safe-reset.sh"
