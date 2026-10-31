@@ -10,6 +10,7 @@ pub mod mock;
 pub(crate) mod progress;
 pub mod servers;
 pub mod symbols;
+pub(crate) mod watch_fanout;
 pub use mock::{MockLspClient, MockLspProvider};
 pub mod call_hierarchy;
 pub mod ops;

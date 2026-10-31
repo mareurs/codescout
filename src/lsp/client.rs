@@ -1483,10 +1483,15 @@ impl LspClient {
                         path.display(),
                         waited.as_millis()
                     ),
-                    "null means the server has not answered, not that the file has no symbols \
-                     — rust-analyzer sends it while it reloads its workspace. A repo with many \
-                     nested linked worktrees (for example under `.claude/worktrees`) can keep \
-                     it answering null for about a minute after start-up. Retry shortly.",
+                    crate::lsp::watch_fanout::hint_with_fanout(
+                        "null means the server has not answered, not that the file has no symbols \
+                         — rust-analyzer sends it while it reloads its workspace. A repo with many \
+                         nested linked worktrees (for example under `.claude/worktrees`) can keep \
+                         it answering null for about a minute after start-up. Retry shortly.",
+                        crate::lsp::watch_fanout::probe(&self.workspace_root)
+                            .await
+                            .as_ref(),
+                    ),
                 )
                 .into());
             }
@@ -2209,7 +2214,16 @@ struct Point {
         null_seconds: u32,
         announce: bool,
     ) -> (Result<Vec<crate::lsp::SymbolInfo>>, std::time::Duration) {
-        let dir = tempdir().unwrap();
+        document_symbols_in(tempdir().unwrap(), null_seconds, announce).await
+    }
+
+    /// [`document_symbols_from_a_slow_starting_server`] in a workspace the caller has prepared.
+    #[cfg(unix)]
+    async fn document_symbols_in(
+        dir: tempfile::TempDir,
+        null_seconds: u32,
+        announce: bool,
+    ) -> (Result<Vec<crate::lsp::SymbolInfo>>, std::time::Duration) {
         let file = dir.path().join("lib.rs");
         std::fs::write(&file, "fn ready_symbol() {}\n").unwrap();
         let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2272,6 +2286,51 @@ struct Point {
         assert!(
             elapsed < std::time::Duration::from_secs(7),
             "gave up at the 5 s budget, not after the 7 s null window; took {elapsed:?}"
+        );
+    }
+
+    /// The hint of a `RecoverableError`, which is where the failure path puts its advice. It is read
+    /// through `Debug` because `Guidance` is not exported outside `tools::core`.
+    #[cfg(unix)]
+    fn hint_of(err: &anyhow::Error) -> String {
+        let recoverable = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap_or_else(|| panic!("not a RecoverableError: {err:?}"));
+        format!("{:?}", recoverable.guidance)
+    }
+
+    /// A null that outlasts the budget in a workspace holding many directory symlinks says so in
+    /// the hint, and keeps the advice it already gave. This is the bug's shape: 109 links under a
+    /// gitignored directory, and nothing named them.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_null_answer_in_a_workspace_full_of_directory_symlinks_names_them() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        for i in 0..25 {
+            std::os::unix::fs::symlink(&target, dir.path().join(format!("l{i}"))).unwrap();
+        }
+        let (result, _) = document_symbols_in(dir, 7, false).await;
+        let err = result.expect_err("no progress was announced, so the 5 s budget applies");
+        let hint = hint_of(&err);
+        assert!(hint.contains("25 directory symlinks"), "got: {hint}");
+        assert!(
+            hint.contains("Retry shortly"),
+            "the old advice stays: {hint}"
+        );
+    }
+
+    /// The control: the same null in a workspace with no directory symlink gets the old hint, with
+    /// no sentence about links. A hint that always mentioned them would pass the test above.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_null_answer_in_a_workspace_without_directory_symlinks_gets_the_old_hint() {
+        let (result, _) = document_symbols_from_a_slow_starting_server(7, false).await;
+        let err = result.expect_err("no progress was announced, so the 5 s budget applies");
+        assert!(
+            !hint_of(&err).contains("directory symlinks"),
+            "got: {err:?}"
         );
     }
 

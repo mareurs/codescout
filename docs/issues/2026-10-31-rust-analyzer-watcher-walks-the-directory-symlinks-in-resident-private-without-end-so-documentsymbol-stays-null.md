@@ -100,12 +100,12 @@ The directory is gitignored, so no commit carries the removal. Experiment sessio
 Not done:
 
 1. DONE 2026-10-31 (product, memory only): `initialization_options` in `src/lsp/init_options.rs` now takes the local-evidence directories that exist under the root. `local_evidence_dirs` returns `.codescout/resident-private` only when it exists, so other projects still send no options. In run B the exclusion cut RSS from about 5.4 GB to 756 MB. It does not stop the watcher walk or the null answers. The live server loads the new list only after a restart, and no live RSS check was made after the change.
-2. Product: warn when a directory symlink fan-out sits under the workspace root.
+2. DONE 2026-10-31 (product, diagnosis only): `src/lsp/watch_fanout.rs` walks the workspace root without `.gitignore` and without following links. It stops at 50,000 entries. When it finds 20 or more directory symlinks, the null-exhausted `documentSymbol` error in `src/lsp/client.rs` adds one sentence to its hint: the count, the first link, and that rust-analyzer has been seen to walk such links without end. It runs on that failure path only, so healthy calls pay nothing. It does not fix the spin. A scan that finds nothing, or stops at its limit with nothing, adds no sentence and proves no absence.
 3. Product: avoid rust-analyzer's server-side watcher. This needs a design decision and is untested.
 
 ## Tests added
 
-Six tests in `src/lsp/init_options.rs` cover the exclusion list: the directory alone, with worktrees, named twice, outside the root or the root itself, a server that is not rust-analyzer, and `local_evidence_dirs` on a missing and an existing directory. Two mutants went red: no `is_dir` check, and no root guard. They cover only the exclusion list, not the spin. The spin has no regression test: it needs a decision on the fix first.
+Six tests in `src/lsp/init_options.rs` cover the exclusion list: the directory alone, with worktrees, named twice, outside the root or the root itself, a server that is not rust-analyzer, and `local_evidence_dirs` on a missing and an existing directory. Two mutants went red: no `is_dir` check, and no root guard. Eleven tests in `src/lsp/watch_fanout.rs` and two in `src/lsp/client.rs` (a null answer with 25 links names them; a control without links keeps the old hint) cover the diagnosis. Six mutants run with `./scripts/mutation-probe.sh` were killed: re-entering `.git`, counting every symlink, no entry bound, no minimum, losing the lower bound, and a probe that never finds. All tests cover the exclusion list and the diagnosis, not the spin. The spin has no regression test: it needs a decision on the fix first.
 
 ## Workarounds
 
