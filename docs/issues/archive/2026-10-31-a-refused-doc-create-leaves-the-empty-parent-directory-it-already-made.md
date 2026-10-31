@@ -67,7 +67,9 @@ Red before the fix (`bad_opened: a refused create left its new parent directory 
 
 ## Resume
 
-Fixed. Full gate: `CLIPPY=0 LEAN=0 DEFAULT=0`, `PYTHON_LIGHT=0`; `FMT=1` was `ownership-refused` (peer-owned dirty files), so I ran `rustfmt --edition 2021` on `create.rs` alone (one stray blank line) and the commit hook's `rustfmt --check` passed. Heavy Python suites not run. Not seen live on a rebuilt server: a refused `doc(create)` under a new subdirectory should leave no directory.
+Fixed. Full gate: `CLIPPY=0 LEAN=0 DEFAULT=0`, `PYTHON_LIGHT=0`; `FMT=1` was `ownership-refused` (peer-owned dirty files), so I ran `rustfmt --edition 2021` on `create.rs` alone (one stray blank line) and the commit hook's `rustfmt --check` passed. Heavy Python suites not run.
+
+**Seen live 2026-10-31** on a server rebuilt after `343d77d9b`: `doc(action="create", kind="bug", rel_path="docs/issues/zz-live-dir/deeper/probe.md", extra={"opened": "yesterday"})` was refused with `extra.opened "yesterday" is not a YYYY-MM-DD date`, and `docs/issues/zz-live-dir` did not exist before or after. Only the bad-`opened` refusal was run live. The leading-frontmatter and bad-status refusals are covered by the unit test, not by a live call.
 
 ## References
 
