@@ -250,6 +250,100 @@ ram_tier_check_floor() {
 # ram_tier_admit <who> — the mount, then the floor. Call it after ram_tier_load_config succeeded.
 ram_tier_admit() { ram_tier_check_mount "$1" && ram_tier_check_floor "$1"; }
 
+# THE POOL BUDGET. The RAM slots share one filesystem and one RAM cap, and two of them can build at
+# the same time, so a lease is admitted against what EVERY held RAM slot still has to write, not
+# against its own tree alone (spec 2 and 4.d). For each held slot i, this lease included:
+#     need_i = max(GROWTH, COLD - size_i)      (size_i is `du -sm`, which rounds UP)
+# and the lease fits when both budgets cover the sum:
+#     logical: df free MiB                       >= sum
+#     RAM:     (mm_stat field 4 - field 3) in MiB >= sum * 10 / 22      (the revisit ratio 2.2)
+# "Held" means `flock -n` on the other slot's lock fails. The caller takes its own lock BEFORE
+# asking, so two leases that start together each count the other one. An idle slot is not counted:
+# ram_pool_make_room may empty it, and a slot it leaves alone is idle and can be taken.
+
+# ram_slot_need_mb <tree> — print max(RAM_GROWTH_MB, RAM_COLD_MB - size of <tree> in MiB); a tree
+# that is missing has size 0.
+ram_slot_need_mb() {
+    local size need
+    size="$(du -sm "$1" 2>/dev/null | cut -f1)"
+    [[ "$size" =~ ^[0-9]+$ ]] || size=0
+    need=$((RAM_COLD_MB - size))
+    [ "$need" -ge "$RAM_GROWTH_MB" ] || need="$RAM_GROWTH_MB"
+    echo "$need"
+}
+
+# ram_pool_fits <who> — call it holding the lease (SLOT and SLOT_DIR set by lease_ram_target, after
+# the lessee evictions, which change the own slot's size). Returns 0 when both budgets cover the sum
+# of need over the own slot and every other RAM slot whose lock is held; 1 when one of them does
+# not, with RAM_SKIP naming both budgets and both sums; 2, with RAM_SKIP, when df or mm_stat cannot
+# be read, so the caller can tell "short" (empty slots) from "unknown" (empty nothing).
+ram_pool_fits() {
+    local who="$1" n lock fd rc sum held=1 free used cap left ram_need
+    sum="$(ram_slot_need_mb "$SLOT_DIR")"
+    for ((n = 0; n < RAM_SLOTS; n++)); do
+        [ "$n" -ne "$SLOT" ] || continue
+        lock="$RAM_POOL/slot-$n.lock"
+        [ -e "$lock" ] || continue          # never create a lock file to look at it
+        exec {fd}>"$lock" || continue
+        if flock -n "$fd"; then rc=0; else rc=$?; fi
+        exec {fd}>&-
+        [ "$rc" -eq 1 ] || continue         # taken (idle) or not testable: not counted
+        sum=$((sum + $(ram_slot_need_mb "$RAM_POOL/slot-$n"))); held=$((held + 1))
+    done
+    free="$(df -Pm -- "$RAM_POOL" 2>/dev/null | awk 'NR == 2 { print $4; exit }')"
+    used="$(ram_mmstat_field 3)"; cap="$(ram_mmstat_field 4)"
+    if ! [[ "$free" =~ ^[0-9]{1,15}$ ]]; then
+        RAM_SKIP="$who: RAM tier skipped: cannot read the free space of $RAM_POOL from df (CODESCOUT_GATE_RAM_POOL)"
+        return 2
+    fi
+    if ! [[ "$used" =~ ^[0-9]{1,15}$ && "$cap" =~ ^[0-9]{1,15}$ ]]; then
+        RAM_SKIP="$who: RAM tier skipped: cannot read mem_used_total and mem_limit from $RAM_MMSTAT (CODESCOUT_GATE_RAM_POOL)"
+        return 2
+    fi
+    left=$(((cap - used) / 1048576))
+    ram_need=$(((sum * 10 + 21) / 22))
+    if [ "$free" -ge "$sum" ] && [ $((left * 22)) -ge $((sum * 10)) ]; then
+        RAM_SKIP=""
+        return 0
+    fi
+    RAM_SKIP="$who: RAM tier skipped: the pool budget does not cover the $held held RAM slot(s): logical (df) ${free}M free, ${sum}M needed; RAM (mm_stat) ${left}M left, ${ram_need}M needed (CODESCOUT_GATE_RAM_GROWTH_MB, CODESCOUT_GATE_RAM_COLD_MB)"
+    return 1
+}
+
+# ram_pool_make_room <who> — empty idle RAM slots until ram_pool_fits holds, the slot leased longest
+# ago first (the oldest mtime of <slot>/.codescout-lessee, none counting as the oldest, ties by slot
+# number). Idle means `flock -n` on the slot's lock succeeds, and the lock is held across the
+# `rm -rf`; the lock file stays. The own slot is never a candidate (its lock is ours, and it is
+# skipped by number as well): the lease would only trade a warm slot for a cold build. Returns 0 when
+# the pool fits, 1 when no idle slot is left or the budgets cannot be read; RAM_SKIP is then the last
+# ram_pool_fits verdict.
+ram_pool_make_room() {
+    local who="$1" m n dir fd rc
+    while read -r m n; do
+        [ -n "$n" ] || continue
+        dir="$RAM_POOL/slot-$n"
+        exec {fd}>"$dir.lock" || continue
+        if flock -n "$fd"; then
+            echo "$who: emptying idle RAM slot-$n (last leased $(date -d "@$m" '+%F %T' 2>/dev/null || echo unknown)) to make room in the pool" >&2
+            rm -rf -- "$dir"
+            exec {fd}>&-
+            rc=0; ram_pool_fits "$who" || rc=$?
+            [ "$rc" -ne 0 ] || return 0
+            [ "$rc" -eq 1 ] || return 1
+        else
+            exec {fd}>&-
+        fi
+    done < <(
+        for ((n = 0; n < RAM_SLOTS; n++)); do
+            [ "$n" -ne "$SLOT" ] || continue
+            [ -e "$RAM_POOL/slot-$n.lock" ] && [ -e "$RAM_POOL/slot-$n" ] || continue
+            m="$(stat -c %Y -- "$RAM_POOL/slot-$n/.codescout-lessee" 2>/dev/null)" || m=0
+            echo "${m:-0} $n"
+        done | sort -k1,1n -k2,2n
+    )
+    return 1
+}
+
 # slot_evict_foreign_build_scripts <who> <tree> <checkout> <cargo-home>
 # Call it holding a lease. Removes each compiled build script in <tree> whose recorded
 # CARGO_MANIFEST_DIR is neither inside <checkout> nor inside <cargo-home>, so cargo
@@ -419,12 +513,15 @@ lease_ram_target() {
 #            not admitted, N is outside 0 … RAM_SLOTS-1, or the slot is held or absent: a named
 #            slot never falls back to the other tier.
 # A disk lease is tended; both tiers evict build scripts and workspace crates compiled for
-# another checkout. Whether the RAM tier is configured is read off the RETURN CODES of
+# another checkout. A RAM lease is then admitted against the pool budget (ram_pool_fits), idle RAM
+# slots being emptied oldest lease first to make room; when it still does not fit, an unnamed lease
+# releases the RAM slot and goes to disk, saying why, and a named one returns 2. Whether the RAM tier is configured is read off the RETURN CODES of
 # ram_tier_load_config and ram_tier_admit, never off the RAM_* globals: after a refusal they
 # keep stale values.
 lease_gate_target() {
-    local who="$1" slot="${2:-}" n
+    local who="$1" slot="${2:-}" n disk_pool rc
     GATE_POOL="${CODESCOUT_GATE_POOL:-$HOME/.cache/codescout-gate}"
+    disk_pool="$GATE_POOL"
     GATE_TIER=disk
     RAM_SKIP=""
     case "$slot" in
@@ -461,16 +558,40 @@ lease_gate_target() {
             [ -z "$RAM_SKIP" ] || echo "$RAM_SKIP" >&2
             ;;
     esac
+    # A RAM lease is admitted against the pool AFTER the lessee evictions, which shrink the own slot
+    # and so change its need. When the pool cannot fit it, even after emptying every idle RAM slot,
+    # the RAM lock is released and the disk lease below runs in full, as if the tier did not exist.
+    if [ "$GATE_TIER" = ram ]; then
+        lease_evict_lessee "$who"
+        rc=0; ram_pool_fits "$who" || rc=$?
+        if [ "$rc" -eq 1 ]; then rc=0; ram_pool_make_room "$who" || rc=1; fi
+        if [ "$rc" -ne 0 ]; then
+            echo "$RAM_SKIP" >&2
+            exec {SLOT_FD}>&-
+            unset SLOT SLOT_DIR SLOT_FD
+            case "$slot" in
+                ram-*)
+                    echo "$who: --slot $slot names a RAM slot the pool budget cannot fit now, and a named slot never falls back to the disk pool; nothing was run" >&2
+                    return 2 ;;
+            esac
+            GATE_POOL="$disk_pool"; GATE_TIER=disk
+        fi
+    fi
     if [ "$GATE_TIER" != ram ]; then
         slot_lease "$GATE_POOL" slot- "$who" "$slot" || return 2
         # Three is the most concurrent gate runs observed on this machine.
         slot_tend "$who" "$GATE_POOL" slot- CODESCOUT_GATE_POOL_KEEP 3 "$SLOT_DIR" slot_remove_dir || return 2
+        lease_evict_lessee "$who"
     fi
-    # The lessee is whichever checkout the command will build, which is the cwd's, not the
-    # one this script lives in. Outside a git tree there is none, and nothing is evicted.
+    export CARGO_TARGET_DIR="$SLOT_DIR"
+}
+
+# lease_evict_lessee <who> — call it holding a lease. The lessee is whichever checkout the command
+# will build, which is the cwd's, not the one this script lives in. Outside a git tree there is
+# none, and nothing is evicted.
+lease_evict_lessee() {
     slot_evict_foreign_build_scripts "$1" "$SLOT_DIR" \
         "$(git rev-parse --show-toplevel 2>/dev/null)" "${CARGO_HOME:-$HOME/.cargo}"
     slot_evict_foreign_members "$1" "$SLOT_DIR" \
         "$(git rev-parse --show-toplevel 2>/dev/null)" "${CARGO_HOME:-$HOME/.cargo}"
-    export CARGO_TARGET_DIR="$SLOT_DIR"
 }

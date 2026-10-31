@@ -666,6 +666,19 @@ RAMCFG="$WORK/home/.config/codescout/gate-pool.env"
 mkdir -p "$WORK/ramstub" "$(dirname "$RAMCFG")"
 printf '#!/usr/bin/env bash\ncat "%s/findmnt-source"\n' "$WORK" > "$WORK/ramstub/findmnt"
 chmod +x "$WORK/ramstub/findmnt"
+# A `df` that models a real filesystem, so the pool rule sees free space fall as a slot grows and
+# rise as the evictor empties one: it prints, in `df -Pm` format, Available = $WORK/df-cap (MiB,
+# default 1000000) minus `du -sm` of the path it is asked about (its last argument, the RAM pool).
+# `du -sm` rounds UP and counts directory blocks, which is how the rule itself measures a slot.
+cat > "$WORK/ramstub/df" <<EOF
+#!/usr/bin/env bash
+cap=\$(cat "$WORK/df-cap" 2>/dev/null || echo 1000000)
+used=\$(du -sm "\${@: -1}" 2>/dev/null | cut -f1)
+avail=\$((cap - \${used:-0})); [ "\$avail" -ge 0 ] || avail=0
+printf 'Filesystem 1048576-blocks Used Available Capacity Mounted on\n'
+printf '/dev/zram1 %s %s %s 1%% /mnt/zram1\n' "\$cap" "\${used:-0}" "\$avail"
+EOF
+chmod +x "$WORK/ramstub/df"
 printf '%s\n' "MemAvailable:   33554432 kB" > "$WORK/meminfo-high"      # 32 GiB
 printf '%s\n' "MemAvailable:    4194304 kB" > "$WORK/meminfo-low"       #  4 GiB
 printf '%s\n' "MemAvailable:   12582912 kB" > "$WORK/meminfo-edge"      # exactly 12288 MiB
@@ -779,13 +792,8 @@ eq "S10 a RAM key with no value is invalid and named" "$(grep -c 'CODESCOUT_GATE
 ram_cfg
 
 echo "T. a lease takes a RAM slot before the disk pool, bounded to RAM_SLOTS; --slot ram-N never falls back"
-# Case S's stubs, plus a `df` that models a real filesystem: it prints, in `df -Pm` format, the
-# value of $WORK/df-cap (MiB, default 1000000) minus `du -sm` of the RAM pool as Available.
-# Nothing in this change reads df yet; it is here so the admission rule that does can be tested.
+# Case S's stubs (the `df` among them), plus the 20 GiB mm_stat fixture below.
 RAM="$WORK/ram-t"
-printf '#!/usr/bin/env bash\ncap=$(cat "%s/df-cap" 2>/dev/null || echo 1000000)\nused=$(du -sm "%s" 2>/dev/null | cut -f1)\nprintf "Filesystem 1048576-blocks Used Available Capacity Mounted on\\n"\nprintf "/dev/zram1 %%s %%s %%s 1%%%% %s\\n" "$cap" "${used:-0}" "$((cap - ${used:-0}))"\n' \
-    "$WORK" "$RAM" "$RAM" > "$WORK/ramstub/df"
-chmod +x "$WORK/ramstub/df"
 printf '%s\n' "1048576 524288 600000 21474836480 700000 0 0 0 0" > "$WORK/mmstat-20g"       # a 20 GiB cap
 T_OK=(CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-high" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-20g")
 T_PATH="$WORK/ramstub:$WORK/bin:$PATH"
@@ -880,6 +888,126 @@ t_run t7b bash "$WITH" --slot ram-0 sh -c ': > "$1"' _ "$WORK/ran-t7b"; rc=$?
 eq "T7 --slot ram-0 with no RAM slots exits 2" "$rc" "2"
 ram_cfg
 
+echo "U. the RAM slots share one budget: a lease counts every held slot, and idle slots are emptied least-recently-leased first"
+# The pool rule (spec 2, 4.d) is: need_i = max(GROWTH, COLD - size_i) summed over the own slot and
+# every OTHER slot whose lock is held; admit when df free >= sum AND (mm_stat cap - used) * 22 >= sum * 10.
+# `du -sm` rounds up and counts directory blocks, so the sizes the rule sees are read the same way
+# here: an empty slot (a directory and a stamp) reads 1 MiB, a slot of N `fill`s (2 MiB each) reads
+# 2N+1. Each sub-case sets df-cap to the measured `du -sm` of the pool plus the free space it wants,
+# and keeps the free space 2 MiB or more away from the threshold.
+RAM_U="$WORK/ram-u"; POOL="$WORK/pool-u"
+U_KNOBS=(CODESCOUT_GATE_RAM_COLD_MB=8 CODESCOUT_GATE_RAM_GROWTH_MB=2)
+ram_src /dev/zram1
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM_U"
+# u_slot <n> <fills> [<touch -d age of the stamp>] — an idle RAM slot with its lock file; no age, no stamp.
+u_slot() {
+    local d="$RAM_U/slot-$1" i
+    rm -rf "$d"; mkdir -p "$d"; : > "$RAM_U/slot-$1.lock"
+    for i in $(seq 1 "$2"); do fill "$d/f$i"; done
+    if [ -n "${3:-}" ]; then printf '%s\n' /elsewhere > "$d/.codescout-lessee"; touch -d "$3" "$d/.codescout-lessee"; fi
+}
+u_fresh() { rm -rf "$RAM_U" "$POOL" "$WORK/df-cap"; mkdir -p "$RAM_U"; }
+u_cap()   { echo $(( $(du -sm "$RAM_U" | cut -f1) + $1 )) > "$WORK/df-cap"; }
+# u_run <tag> [VAR=value ...] — one with-slot.sh lease. The command records its target dir and
+# whether the lock of RAM slot-0 can be taken from inside it: a lock fd that leaked from a given-up
+# RAM lease would still be held there.
+u_run() {
+    local tag="$1"; shift
+    rm -f "$WORK/state-$tag"
+    t_run "$tag" "${U_KNOBS[@]}" "$@" bash "$WITH" bash -c \
+        'echo "$CARGO_TARGET_DIR" > "$1"; exec {f}>"$2"; flock -n "$f" && echo free > "$3" || echo held > "$3"' \
+        _ "$WORK/tdir-$tag" "$RAM_U/slot-0.lock" "$WORK/state-$tag"
+}
+u_state() { cat "$WORK/state-$1" 2>/dev/null; }
+mkdir -p "$WORK/probe-u" "$WORK/probe-u0"; echo /x > "$WORK/probe-u0/.codescout-lessee"; fill "$WORK/probe-u/a"; fill "$WORK/probe-u/b"
+eq "U0 precondition: a directory and a stamp read 1 MiB" "$(du -sm "$WORK/probe-u0" | cut -f1)" "1"
+eq "U0 precondition: two fills read at least 4 MiB" "$([ "$(du -sm "$WORK/probe-u/a" "$WORK/probe-u/b" | awk '{s+=$1} END {print s}')" -ge 4 ] && echo yes || echo no)" "yes"
+
+# An empty own slot needs max(2, 8-1) = 7 MiB.
+u_fresh; u_cap 5
+u_run u1; rc=$?
+eq "U1 5 MiB free against a need of 7: the run goes to the disk pool" "$(s_target u1)" "$POOL/slot-0"
+eq "U1 and exits 0" "$rc" "0"
+eq "U1 the message names the logical budget" "$(grep -c 'logical (df) [0-9]*M free, 7M needed' "$WORK/out-u1")" "1"
+eq "U1 and the RAM budget" "$(grep -c 'RAM (mm_stat) [0-9]*M left, 4M needed' "$WORK/out-u1")" "1"
+eq "U1 the given-up RAM lease holds no lock fd in the disk run" "$(u_state u1)" "free"
+eq "U1 the disk lease was whole: its slot carries the lessee stamp" "$(cat "$POOL/slot-0/.codescout-lessee" 2>/dev/null)" "$CHECKOUT"
+u_fresh; u_cap 9
+u_run u2
+eq "U2 9 MiB free against a need of 7: the run stays in RAM slot-0" "$(s_target u2)" "$RAM_U/slot-0"
+eq "U2 without a word about the tier" "$(grep -c 'RAM tier' "$WORK/out-u2")" "0"
+eq "U2 and the lease still holds that lock inside the run" "$(u_state u2)" "held"
+eq "U2 and the disk pool is untouched" "$([ -e "$POOL" ] && echo created || echo absent)" "absent"
+
+# Idle slots are emptied oldest stamp first, and only as many as the rule needs. The own slot's
+# need is 7, free is 5; each idle slot of 3 fills holds at least 6 MiB, so one is enough.
+u_fresh; u_slot 1 3 "2 hours ago"; u_slot 2 3 "1 hour ago"; u_cap 5
+u_run u3 CODESCOUT_GATE_RAM_SLOTS=3
+eq "U3 the run is in RAM slot-0" "$(s_target u3)" "$RAM_U/slot-0"
+eq "U3 the slot leased 2 h ago is emptied" "$(state "$RAM_U/slot-1")" "gone"
+eq "U3 the slot leased 1 h ago is kept" "$(state "$RAM_U/slot-2/f1")" "kept"
+eq "U3 the emptied slot's lock file is not unlinked" "$(state "$RAM_U/slot-1.lock")" "kept"
+eq "U3 and the message names it" "$(grep -c 'emptying idle RAM slot-1' "$WORK/out-u3")" "1"
+u_fresh; u_slot 1 3 "1 hour ago"; u_slot 2 3 "2 hours ago"; u_cap 5
+u_run u3b CODESCOUT_GATE_RAM_SLOTS=3
+eq "U3 with the ages swapped, slot-2 is the one emptied" "$(state "$RAM_U/slot-2")" "gone"
+eq "U3 and slot-1 is kept" "$(state "$RAM_U/slot-1/f1")" "kept"
+# A slot with no stamp counts as the oldest.
+u_fresh; u_slot 1 3 "2 hours ago"; u_slot 2 3; u_cap 5
+u_run u4 CODESCOUT_GATE_RAM_SLOTS=3
+eq "U4 the run is in RAM slot-0" "$(s_target u4)" "$RAM_U/slot-0"
+eq "U4 the slot with no stamp is emptied first" "$(state "$RAM_U/slot-2")" "gone"
+eq "U4 and the one stamped 2 h ago is kept" "$(state "$RAM_U/slot-1/f1")" "kept"
+# The rule is computed again after each removal: with 1 MiB free, one idle slot (at least 4 MiB) is not enough.
+u_fresh; u_slot 1 2 "2 hours ago"; u_slot 2 2 "1 hour ago"; u_cap 1
+u_run u4b CODESCOUT_GATE_RAM_SLOTS=3
+eq "U4 two removals needed: the run is in RAM slot-0" "$(s_target u4b)" "$RAM_U/slot-0"
+eq "U4 the older is emptied" "$(state "$RAM_U/slot-1")" "gone"
+eq "U4 and the newer too" "$(state "$RAM_U/slot-2")" "gone"
+
+# A held slot is counted and never emptied; with GROWTH 4 a slot of 4 fills (reads 9) needs 4 MiB,
+# so own 4 + held 4 = 8, against an own need alone of 4.
+u_fresh; u_slot 0 4; u_slot 1 4 "1 hour ago"; u_cap 6
+if hold_lock u5 "$RAM_U/slot-1.lock"; then
+    u_run u5 CODESCOUT_GATE_RAM_GROWTH_MB=4
+    eq "U5 6 MiB free covers the own slot (4) but not the held one too (8): the run goes to disk" "$(s_target u5)" "$POOL/slot-0"
+    eq "U5 the held slot keeps its contents" "$(state "$RAM_U/slot-1/f4")" "kept"
+    eq "U5 and so does the own slot, which is not emptied to make room" "$(state "$RAM_U/slot-0/f4")" "kept"
+    eq "U5 the message counts both slots (a sum of 8)" "$(grep -c 'logical (df) [0-9]*M free, 8M needed' "$WORK/out-u5")" "1"
+    t_release u5 "$RAM_U/slot-1.lock"
+    u_cap 10
+    hold_lock u5b "$RAM_U/slot-1.lock" >/dev/null
+    u_run u5b CODESCOUT_GATE_RAM_GROWTH_MB=4
+    eq "U5 10 MiB free covers both: the run stays in RAM slot-0" "$(s_target u5b)" "$RAM_U/slot-0"
+    t_release u5b "$RAM_U/slot-1.lock"
+else
+    no "U5 the lock was held" "hold_lock failed"
+fi
+# Only the own slot is there and it cannot fit: nothing else to empty, and its contents stay.
+u_fresh; u_slot 0 2; u_cap 0
+u_run u7
+eq "U7 a lone own slot that does not fit: the run goes to disk" "$(s_target u7)" "$POOL/slot-0"
+eq "U7 and the own slot keeps its contents" "$(state "$RAM_U/slot-0/f2")" "kept"
+eq "U7 the verdict is a short budget, not an unreadable one" "$(grep -c 'logical (df) [0-9]*M free, 3M needed' "$WORK/out-u7")" "1"
+
+# Only the RAM budget is short: free space is large (df-cap defaults to 1000000), mm_stat leaves
+# cap - used = 1 MiB. The own need is 7, so the RAM side wants 7 * 10 / 22 = 4 MiB (rounded up).
+printf '%s\n' "1048576 524288 8588886016 8589934592 8589934592 0 0 0 0" > "$WORK/mmstat-left1"
+printf '%s\n' "1048576 524288 8585740288 8589934592 8589934592 0 0 0 0" > "$WORK/mmstat-left4"
+printf '%s\n' "1048576 524288 8586788864 8589934592 8589934592 0 0 0 0" > "$WORK/mmstat-left3"
+u_fresh
+u_run u6 CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-left1"
+eq "U6 RAM short, space plentiful: the run goes to the disk pool" "$(s_target u6)" "$POOL/slot-0"
+eq "U6 the message names mm_stat and what is left" "$(grep -c 'RAM (mm_stat) 1M left, 4M needed' "$WORK/out-u6")" "1"
+u_fresh
+u_run u6b CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-left4"
+eq "U6 4 MiB left against 4 needed: the run stays in RAM" "$(s_target u6b)" "$RAM_U/slot-0"
+u_fresh
+u_run u6c CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-left3"
+eq "U6 3 MiB left is under it: the run goes to disk" "$(s_target u6c)" "$POOL/slot-0"
+rm -f "$WORK/df-cap"; ram_cfg
+
 echo
 echo "  $PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]
 [ "$FAIL" -eq 0 ]
