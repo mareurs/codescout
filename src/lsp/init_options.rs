@@ -48,13 +48,19 @@ pub(crate) fn wants_progress(server_command: &str) -> bool {
 }
 
 /// The `initializationOptions` for `server_command` in `workspace_root`, given the linked
-/// worktrees of the repository (`worktrees`, absolute roots). `None` means "send none".
+/// worktrees of the repository (`worktrees`, absolute roots) and the local-evidence directories
+/// that exist under the root (`local_evidence`, absolute, see [`local_evidence_dirs`]). `None`
+/// means "send none".
 ///
-/// Pure: the caller supplies the worktrees, so a test needs no git repository.
+/// A local-evidence directory is excluded as it is, with no worktree rule applied. A path outside
+/// the root, and the root itself, are dropped.
+///
+/// Pure: the caller supplies both lists, so a test needs no git repository and no directory.
 pub(crate) fn initialization_options(
     server_command: &str,
     workspace_root: &Path,
     worktrees: &[PathBuf],
+    local_evidence: &[PathBuf],
 ) -> Option<Value> {
     if !is_rust_analyzer(server_command) {
         return None;
@@ -66,17 +72,19 @@ pub(crate) fn initialization_options(
         .filter(|relative| relative.components().next().is_some())
         .map(|relative| {
             // A directory dedicated to worktrees is excluded whole (see `is_worktrees_dir`).
-            let excluded = match relative.parent() {
-                Some(parent) if is_worktrees_dir(parent) => parent,
-                _ => relative,
-            };
-            excluded
-                .components()
-                .map(|c| c.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("/")
+            match relative.parent() {
+                Some(parent) if is_worktrees_dir(parent) => slash_joined(parent),
+                _ => slash_joined(relative),
+            }
         })
         .collect();
+    exclude.extend(
+        local_evidence
+            .iter()
+            .filter_map(|dir| dir.strip_prefix(workspace_root).ok())
+            .filter(|relative| relative.components().next().is_some())
+            .map(slash_joined),
+    );
     if exclude.is_empty() {
         return None;
     }
@@ -85,12 +93,38 @@ pub(crate) fn initialization_options(
     Some(json!({"files": {"excludeDirs": exclude}}))
 }
 
+/// `path` as `files.excludeDirs` wants it: its components joined by `/`.
+fn slash_joined(path: &Path) -> String {
+    path.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Directories, relative to the workspace root, that hold local gitignored experiment evidence
+/// and no source the project builds. `resident-private` holds whole copies of repo trees:
+/// 29,154 `.rs` files made rust-analyzer's RSS 5.4 GB where excluding it left 756 MB
+/// (`35bcf086deeb7cbe`). The exclusion lowers memory only. It does not stop the file watcher's
+/// walk, which is the same bug's cause of the null `documentSymbol` answers.
+const LOCAL_EVIDENCE_DIRS: &[&str] = &[".codescout/resident-private"];
+
+/// The [`LOCAL_EVIDENCE_DIRS`] that exist under `workspace_root`, absolute. A project without
+/// them gets none, so it keeps sending no options.
+pub(crate) fn local_evidence_dirs(workspace_root: &Path) -> Vec<PathBuf> {
+    LOCAL_EVIDENCE_DIRS
+        .iter()
+        .map(|dir| workspace_root.join(dir))
+        .filter(|dir| dir.is_dir())
+        .collect()
+}
+
 /// [`initialization_options`] with the worktrees read from the repository at `workspace_root`.
 pub(crate) fn for_workspace(server_command: &str, workspace_root: &Path) -> Option<Value> {
     initialization_options(
         server_command,
         workspace_root,
         &crate::util::path_security::list_git_worktrees(workspace_root),
+        &local_evidence_dirs(workspace_root),
     )
 }
 
@@ -177,7 +211,7 @@ mod tests {
             PathBuf::from("/repo/crates/b-wt"),
             PathBuf::from("/repo/a-wt"),
         ];
-        let options = initialization_options("rust-analyzer", &root(), &worktrees)
+        let options = initialization_options("rust-analyzer", &root(), &worktrees, &[])
             .expect("nested worktrees must produce options");
         assert_eq!(
             options,
@@ -200,7 +234,7 @@ mod tests {
             PathBuf::from("/repo/.worktrees/albert"),
         ];
         assert_eq!(
-            initialization_options("rust-analyzer", &root(), &worktrees),
+            initialization_options("rust-analyzer", &root(), &worktrees, &[]),
             Some(json!({"files": {"excludeDirs": [".claude/worktrees", ".worktrees"]}})),
             "the whole directory, not each child (a child is covered by its parent)"
         );
@@ -212,7 +246,7 @@ mod tests {
     fn an_ordinary_parent_directory_is_never_excluded() {
         let worktrees = vec![PathBuf::from("/repo/crates/scratch-wt")];
         assert_eq!(
-            initialization_options("rust-analyzer", &root(), &worktrees),
+            initialization_options("rust-analyzer", &root(), &worktrees, &[]),
             Some(json!({"files": {"excludeDirs": ["crates/scratch-wt"]}}))
         );
     }
@@ -221,7 +255,7 @@ mod tests {
     fn a_worktree_outside_the_root_is_not_excluded() {
         let worktrees = vec![PathBuf::from("/elsewhere/wt")];
         assert_eq!(
-            initialization_options("rust-analyzer", &root(), &worktrees),
+            initialization_options("rust-analyzer", &root(), &worktrees, &[]),
             None,
             "rust-analyzer never scans a directory outside the workspace root"
         );
@@ -231,7 +265,7 @@ mod tests {
     fn the_root_itself_is_never_excluded() {
         let worktrees = vec![root()];
         assert_eq!(
-            initialization_options("rust-analyzer", &root(), &worktrees),
+            initialization_options("rust-analyzer", &root(), &worktrees, &[]),
             None,
             "excluding the empty relative path would exclude the whole workspace"
         );
@@ -246,7 +280,7 @@ mod tests {
             "typescript-language-server",
         ] {
             assert_eq!(
-                initialization_options(command, &root(), &worktrees),
+                initialization_options(command, &root(), &worktrees, &[]),
                 None,
                 "{command}: `files.excludeDirs` is a rust-analyzer setting"
             );
@@ -268,21 +302,88 @@ mod tests {
 
     #[test]
     fn no_worktrees_means_no_options() {
-        assert_eq!(initialization_options("rust-analyzer", &root(), &[]), None);
+        assert_eq!(
+            initialization_options("rust-analyzer", &root(), &[], &[]),
+            None
+        );
     }
 
     #[test]
     fn the_command_is_matched_by_file_name() {
         let worktrees = vec![PathBuf::from("/repo/.worktrees/a")];
         assert!(
-            initialization_options("/home/u/.cargo/bin/rust-analyzer", &root(), &worktrees)
+            initialization_options("/home/u/.cargo/bin/rust-analyzer", &root(), &worktrees, &[])
                 .is_some(),
             "an absolute path to rust-analyzer counts"
         );
         assert_eq!(
-            initialization_options("my-rust-analyzer-wrapper", &root(), &worktrees),
+            initialization_options("my-rust-analyzer-wrapper", &root(), &worktrees, &[]),
             None,
             "a wrapper under another name is not assumed to be rust-analyzer"
         );
+    }
+    #[test]
+    fn local_evidence_is_excluded_even_when_there_are_no_worktrees() {
+        let evidence = vec![PathBuf::from("/repo/.codescout/resident-private")];
+        assert_eq!(
+            initialization_options("rust-analyzer", &root(), &[], &evidence),
+            Some(json!({"files": {"excludeDirs": [".codescout/resident-private"]}})),
+            "a checkout with no linked worktree still sends the evidence directory"
+        );
+    }
+
+    #[test]
+    fn local_evidence_and_worktrees_share_one_sorted_list() {
+        let worktrees = vec![PathBuf::from("/repo/a-wt")];
+        let evidence = vec![PathBuf::from("/repo/.codescout/resident-private")];
+        assert_eq!(
+            initialization_options("rust-analyzer", &root(), &worktrees, &evidence),
+            Some(json!({"files": {"excludeDirs": [".codescout/resident-private", "a-wt"]}})),
+        );
+    }
+
+    #[test]
+    fn a_path_named_twice_is_excluded_once() {
+        let worktrees = vec![PathBuf::from("/repo/.codescout/resident-private")];
+        let evidence = vec![
+            PathBuf::from("/repo/.codescout/resident-private"),
+            PathBuf::from("/repo/.codescout/resident-private"),
+        ];
+        assert_eq!(
+            initialization_options("rust-analyzer", &root(), &worktrees, &evidence),
+            Some(json!({"files": {"excludeDirs": [".codescout/resident-private"]}})),
+        );
+    }
+
+    #[test]
+    fn evidence_outside_the_root_or_the_root_itself_is_never_excluded() {
+        let evidence = vec![PathBuf::from("/elsewhere/resident-private"), root()];
+        assert_eq!(
+            initialization_options("rust-analyzer", &root(), &[], &evidence),
+            None,
+            "an outside path has no root-relative form, and excluding the root excludes everything"
+        );
+    }
+
+    #[test]
+    fn a_server_that_is_not_rust_analyzer_gets_no_evidence_exclusion() {
+        let evidence = vec![PathBuf::from("/repo/.codescout/resident-private")];
+        assert_eq!(
+            initialization_options("pyright", &root(), &[], &evidence),
+            None
+        );
+    }
+
+    #[test]
+    fn local_evidence_dirs_lists_only_the_directories_that_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            local_evidence_dirs(dir.path()),
+            Vec::<PathBuf>::new(),
+            "a project without the directory must get no options"
+        );
+        let evidence = dir.path().join(".codescout/resident-private");
+        std::fs::create_dir_all(&evidence).unwrap();
+        assert_eq!(local_evidence_dirs(dir.path()), vec![evidence]);
     }
 }

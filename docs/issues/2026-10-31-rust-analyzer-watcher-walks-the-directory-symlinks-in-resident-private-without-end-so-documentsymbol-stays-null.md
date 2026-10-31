@@ -99,13 +99,13 @@ The directory is gitignored, so no commit carries the removal. Experiment sessio
 
 Not done:
 
-1. Product: add `.codescout/resident-private` to `files.excludeDirs` in `src/lsp/init_options.rs`. In run B the exclusion cut RSS from about 5.4 GB to 756 MB. V1 holds 9.5 GB because rust-analyzer loads the 29,154 `.rs` files.
+1. DONE 2026-10-31 (product, memory only): `initialization_options` in `src/lsp/init_options.rs` now takes the local-evidence directories that exist under the root. `local_evidence_dirs` returns `.codescout/resident-private` only when it exists, so other projects still send no options. In run B the exclusion cut RSS from about 5.4 GB to 756 MB. It does not stop the watcher walk or the null answers. The live server loads the new list only after a restart, and no live RSS check was made after the change.
 2. Product: warn when a directory symlink fan-out sits under the workspace root.
 3. Product: avoid rust-analyzer's server-side watcher. This needs a design decision and is untested.
 
 ## Tests added
 
-N/A. Nothing is fixed. A regression test needs a decision on the fix first.
+Six tests in `src/lsp/init_options.rs` cover the exclusion list: the directory alone, with worktrees, named twice, outside the root or the root itself, a server that is not rust-analyzer, and `local_evidence_dirs` on a missing and an existing directory. Two mutants went red: no `is_dir` check, and no root guard. They cover only the exclusion list, not the spin. The spin has no regression test: it needs a decision on the fix first.
 
 ## Workarounds
 
