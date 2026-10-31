@@ -40,6 +40,10 @@
 # mount on a machine with memory to spare. `findmnt` is a stub on PATH and the two kernel files
 # are fixtures, so nothing here reads this machine's real zram state.
 #
+# Case T covers the lease itself: a gate run takes a RAM slot before the disk pool, bounded to
+# CODESCOUT_GATE_RAM_SLOTS, and `with-slot.sh --slot ram-N` names exactly one RAM slot and never
+# falls back to the other tier. It reuses case S's stubs and adds a `df` stub that models a filesystem.
+#
 # The real gate.sh is driven here, not a copy of its logic: `cargo` is a stub on PATH that
 # records the CARGO_TARGET_DIR each lane saw, `./scripts/fmt-mine.sh` is a stub in a fake
 # checkout (gate.sh calls it relative to its cwd), and HOME plus CODESCOUT_GATE_POOL point
@@ -654,8 +658,8 @@ eq "with no checkout nothing is evicted" "$(fp_p codescout-embed-aaaa11112222333
 eq "and the previous owner's stamp is removed" "$([ -e "$POOL/slot-0/.codescout-lessee" ] && echo stamped || echo none)" "none"
 
 echo "S. the opt-in RAM tier: a config is parsed, and a mount is admitted only if it is a capped zram"
-# Nothing here leases from RAM yet (case T does): admission is observed through what
-# `lease_gate_target` says on stderr and through the slot it still hands out. Every fixture
+# Admission is observed through what `lease_gate_target` says on stderr (case T pins the lease
+# itself, and its order against the disk pool). Every fixture
 # that expects admission sets CODESCOUT_GATE_RAM_MEMINFO far above the floor, because the real
 # /proc/meminfo of a CI runner or a busy machine may sit below 12G and turn the case into a flake.
 RAMCFG="$WORK/home/.config/codescout/gate-pool.env"
@@ -740,11 +744,11 @@ unset CODESCOUT_GATE_RAM_POOL
 eq "S8 an exported CODESCOUT_GATE_RAM_POOL does not reach run_gate: the disk slot is leased" "$(first_seen s8)" "$POOL/slot-0"
 eq "S8 and the run says nothing about a RAM tier" "$(grep -c 'RAM tier' "$WORK/out-s8")" "0"
 
-# Admitted: no message, and (until case T) still the disk slot.
+# Admitted: no message, and the RAM slot is the one leased.
 ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram"; ram_src /dev/zram1; rm -rf "$POOL"
 s_run s9 "${S_OK[@]}"
 eq "S9 a capped zram with memory to spare is admitted without a word" "$(grep -c 'RAM tier' "$WORK/out-s9")" "0"
-eq "S9 and the disk slot is still leased" "$(s_target s9)" "$POOL/slot-0"
+eq "S9 and the RAM slot is the one leased" "$(s_target s9)" "$WORK/ram/slot-0"
 rm -rf "$POOL"
 s_run s9b CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-edge" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-capped"
 eq "S9 MemAvailable exactly at the floor is admitted" "$(grep -c 'RAM tier' "$WORK/out-s9b")" "0"
@@ -772,6 +776,108 @@ eq "S10 comments and blank lines are skipped" "$(grep -c 'RAM tier' "$WORK/out-s
 ram_cfg "CODESCOUT_GATE_RAM_POOL=$WORK/ram" "CODESCOUT_GATE_RAM_SLOTS"; rm -rf "$POOL"
 s_run s10f "${S_OK[@]}"
 eq "S10 a RAM key with no value is invalid and named" "$(grep -c 'CODESCOUT_GATE_RAM_SLOTS' "$WORK/out-s10f")" "1"
+ram_cfg
+
+echo "T. a lease takes a RAM slot before the disk pool, bounded to RAM_SLOTS; --slot ram-N never falls back"
+# Case S's stubs, plus a `df` that models a real filesystem: it prints, in `df -Pm` format, the
+# value of $WORK/df-cap (MiB, default 1000000) minus `du -sm` of the RAM pool as Available.
+# Nothing in this change reads df yet; it is here so the admission rule that does can be tested.
+RAM="$WORK/ram-t"
+printf '#!/usr/bin/env bash\ncap=$(cat "%s/df-cap" 2>/dev/null || echo 1000000)\nused=$(du -sm "%s" 2>/dev/null | cut -f1)\nprintf "Filesystem 1048576-blocks Used Available Capacity Mounted on\\n"\nprintf "/dev/zram1 %%s %%s %%s 1%%%% %s\\n" "$cap" "${used:-0}" "$((cap - ${used:-0}))"\n' \
+    "$WORK" "$RAM" "$RAM" > "$WORK/ramstub/df"
+chmod +x "$WORK/ramstub/df"
+printf '%s\n' "1048576 524288 600000 21474836480 700000 0 0 0 0" > "$WORK/mmstat-20g"       # a 20 GiB cap
+T_OK=(CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-high" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-20g")
+T_PATH="$WORK/ramstub:$WORK/bin:$PATH"
+# t_run <tag> [VAR=value ...] bash "$WITH" ... — one with-slot.sh run on the RAM-tier fixtures.
+t_run() { local tag="$1"; shift; rm -f "$WORK/tdir-$tag"; run_with "$tag" PATH="$T_PATH" "${T_OK[@]}" "$@"; }
+seen_all() { sort -u "$WORK/seen-$1" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; }
+# Wait until nothing holds <lock>: the holder polls for its hold-file every 0.1 s.
+wait_free() { local f; for _ in $(seq 1 50); do ( exec {f}>"$1"; flock -n "$f" ) 2>/dev/null && return 0; sleep 0.1; done; return 1; }
+t_release() { rm -f "$WORK/hold-$1"; wait_free "$2"; }
+CHECKOUT="$(git -C "$WORK/repo" rev-parse --show-toplevel)"
+
+POOL="$WORK/pool-t"; rm -rf "$POOL" "$RAM"; mkdir -p "$RAM"; ram_src /dev/zram1
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM"
+run_gate t1 sid-t1 PATH="$T_PATH" "${T_OK[@]}"
+eq "T1 a gate run's lanes all see the first RAM slot" "$(seen_all t1)" "$RAM/slot-0"
+eq "T1 and the disk pool is untouched" "$([ -e "$POOL" ] && echo created || echo absent)" "absent"
+eq "T6 the lessee stamp is written in the RAM slot (the eviction runs there)" "$(cat "$RAM/slot-0/.codescout-lessee" 2>/dev/null)" "$CHECKOUT"
+
+if hold_lock t2 "$RAM/slot-0.lock"; then
+    run_gate t2 sid-t2 PATH="$T_PATH" "${T_OK[@]}"
+    eq "T2 with slot-0 held, the run sees the second RAM slot" "$(seen_all t2)" "$RAM/slot-1"
+    eq "T2 and slot-1 was created for it" "$([ -d "$RAM/slot-1" ] && echo dir || echo none)" "dir"
+    t_release t2 "$RAM/slot-0.lock"
+else
+    no "T2 the lock was held" "hold_lock failed"
+fi
+
+if hold_lock t3a "$RAM/slot-0.lock" && hold_lock t3b "$RAM/slot-1.lock"; then
+    run_gate t3 sid-t3 PATH="$T_PATH" "${T_OK[@]}"
+    eq "T3 with both RAM slots held, the run sees the disk slot" "$(seen_all t3)" "$POOL/slot-0"
+    eq "T3 and no RAM slot-2 directory is created" "$([ -e "$RAM/slot-2" ] && echo created || echo absent)" "absent"
+    eq "T3 nor a RAM slot-2 lock file" "$([ -e "$RAM/slot-2.lock" ] && echo created || echo absent)" "absent"
+    eq "T3 and nothing was said about the tier" "$(grep -c 'RAM tier' "$WORK/out-t3")" "0"
+    t_release t3a "$RAM/slot-0.lock"; t_release t3b "$RAM/slot-1.lock"
+else
+    no "T3 both locks were held" "hold_lock failed"
+fi
+
+# A named RAM slot: exactly that one, or a refusal that runs nothing.
+mkdir -p "$RAM/slot-1"
+t_run t4 bash "$WITH" --slot ram-1 sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-t4"; rc=$?
+eq "T4 --slot ram-1 leases exactly RAM slot-1 although slot-0 is free" "$(s_target t4)" "$RAM/slot-1"
+eq "T4 and exits 0" "$rc" "0"
+if hold_lock t4h "$RAM/slot-1.lock"; then
+    t_run t4b bash "$WITH" --slot ram-1 sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-t4b"; rc=$?
+    eq "T4 a held RAM slot-1 exits 2" "$rc" "2"
+    eq "T4 and runs nothing, not even on the free RAM slot-0 or on disk" "$([ -e "$WORK/tdir-t4b" ] && echo ran || echo none)" "none"
+    t_release t4h "$RAM/slot-1.lock"
+else
+    no "T4 slot-1 lock was held" "hold_lock failed"
+fi
+t_run t4c bash "$WITH" --slot ram-1 sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-t4c"
+eq "T4 freed, it is leased again" "$(s_target t4c)" "$RAM/slot-1"
+rm -rf "$RAM/slot-1"
+t_run t4d bash "$WITH" --slot ram-1 sh -c ': > "$1"' _ "$WORK/ran-t4d"; rc=$?
+eq "T4 an absent RAM slot exits 2" "$rc" "2"
+eq "T4 and runs nothing" "$([ -e "$WORK/ran-t4d" ] && echo ran || echo none)" "none"
+t_run t4e bash "$WITH" --slot ram-2 sh -c ': > "$1"' _ "$WORK/ran-t4e"; rc=$?
+eq "T4 a RAM slot at RAM_SLOTS exits 2" "$rc" "2"
+eq "T4 and creates no lock file for it" "$([ -e "$RAM/slot-2.lock" ] && echo created || echo absent)" "absent"
+t_run t4f bash "$WITH" --slot ram- sh -c ': > "$1"' _ "$WORK/ran-t4f"; rc=$?
+eq "T4 'ram-' with no number exits 2" "$rc" "2"
+eq "T4 and runs nothing (it must not turn into an unnamed lease)" "$([ -e "$WORK/ran-t4f" ] && echo ran || echo none)" "none"
+t_run t4g bash "$WITH" --slot ram-x sh -c ': > "$1"' _ "$WORK/ran-t4g"; rc=$?
+eq "T4 a RAM slot that is not a number exits 2" "$rc" "2"
+t_run t4h2 CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-low" bash "$WITH" --slot ram-0 sh -c ': > "$1"' _ "$WORK/ran-t4h"; rc=$?
+eq "T4 an unadmitted tier exits 2 rather than fall back to disk" "$rc" "2"
+eq "T4 saying why" "$(grep -c 'is below the 12288M floor' "$WORK/out-t4h2")" "1"
+eq "T4 and runs nothing" "$([ -e "$WORK/ran-t4h" ] && echo ran || echo none)" "none"
+
+# Numeric --slot is the disk pool, as before, even with a RAM tier configured and free.
+mkdir -p "$POOL/slot-0"
+t_run t4i bash "$WITH" --slot 0 sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-t4i"
+eq "T4 a numeric --slot leases the disk slot" "$(s_target t4i)" "$POOL/slot-0"
+eq "T4 and says nothing about the tier" "$(grep -c 'RAM tier' "$WORK/out-t4i")" "0"
+
+ram_cfg
+t_run t5 bash "$WITH" --slot ram-1 sh -c ': > "$1"' _ "$WORK/ran-t5"; rc=$?
+eq "T5 --slot ram-1 with no RAM config exits 2" "$rc" "2"
+eq "T5 naming the RAM tier" "$(grep -c 'RAM tier' "$WORK/out-t5")" "1"
+eq "T5 and runs nothing" "$([ -e "$WORK/ran-t5" ] && echo ran || echo none)" "none"
+
+# RAM_SLOTS=0 is a valid config with no RAM slots: the disk slot, silently, exit 0.
+RAM7="$WORK/ram-t7"; rm -rf "$RAM7" "$POOL"
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM7" "CODESCOUT_GATE_RAM_SLOTS=0"
+t_run t7 bash "$WITH" sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-t7"; rc=$?
+eq "T7 RAM_SLOTS=0: the disk slot is leased" "$(s_target t7)" "$POOL/slot-0"
+eq "T7 and says nothing about a RAM tier" "$(grep -c 'RAM tier' "$WORK/out-t7")" "0"
+eq "T7 and exits 0" "$rc" "0"
+eq "T7 and touches nothing under the RAM pool" "$([ -e "$RAM7" ] && echo created || echo absent)" "absent"
+t_run t7b bash "$WITH" --slot ram-0 sh -c ': > "$1"' _ "$WORK/ran-t7b"; rc=$?
+eq "T7 --slot ram-0 with no RAM slots exits 2" "$rc" "2"
 ram_cfg
 
 echo

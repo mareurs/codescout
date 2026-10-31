@@ -21,12 +21,16 @@ set -u
 
 if [ $# -eq 0 ]; then
     cat >&2 <<'EOF'
-usage: scripts/with-slot.sh [--slot N] <command> [args...]
+usage: scripts/with-slot.sh [--slot N | --slot ram-N] <command> [args...]
   Runs the command with CARGO_TARGET_DIR set to a build tree leased from the gate's pool
-  (~/.cache/codescout-gate). The lease ends when the command exits.
-  --slot N leases exactly slot-N, to repair or inspect that tree (for example
+  (~/.cache/codescout-gate, or a free slot of the opt-in RAM tier when this machine configures
+  one). The lease ends when the command exits.
+  --slot N leases exactly disk slot-N, to repair or inspect that tree (for example
   `--slot 0 cargo clean -p codescout`). It refuses, running nothing, when slot-N is held
   or does not exist, rather than falling back to another slot.
+  --slot ram-N does the same for RAM slot-N. A named slot never falls back to the other
+  tier: it also refuses, with exit 2 and nothing run, when the RAM tier is not configured or
+  not admitted, or N is outside 0 ... CODESCOUT_GATE_RAM_SLOTS-1.
 EOF
     exit 2
 fi

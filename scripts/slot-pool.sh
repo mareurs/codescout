@@ -44,11 +44,14 @@
 # the gate pool near 144G.
 SLOT_CEILING_MB_DEFAULT=49152
 
-# slot_lease <pool> <prefix> <who> [slot] — take the lowest free slot, or exactly <slot>,
+# slot_lease <pool> <prefix> <who> [slot] [max] — take the lowest free slot, or exactly <slot>,
 # and hold it on an fd every child inherits. Sets SLOT, SLOT_FD and SLOT_DIR. Returns 2,
 # holding nothing, when flock cannot run, or when a named slot is held, absent or malformed.
+# With <max> (a whole number) and no <slot> the search is bounded: it tries 0 … max-1 only,
+# opens no lock file for a slot numbered <max> or higher, and returns 1, holding nothing, when
+# every one of them is held. <max> is ignored for a named slot; the caller range-checks that.
 slot_lease() {
-    local pool="$1" prefix="$2" who="$3" only="${4:-}" rc
+    local pool="$1" prefix="$2" who="$3" only="${4:-}" max="${5:-}" rc
     mkdir -p "$pool" || return 2
     SLOT=0
     if [ -n "$only" ]; then
@@ -69,6 +72,8 @@ slot_lease() {
         return 0
     fi
     while :; do
+        # Checked before the open: the bound must also keep the lock file from being created.
+        [ -z "$max" ] || [ "$SLOT" -lt "$max" ] || return 1
         exec {SLOT_FD}>"$pool/$prefix$SLOT.lock" || return 2
         flock -n "$SLOT_FD"; rc=$?
         [ "$rc" -eq 0 ] && break
@@ -387,19 +392,80 @@ slot_evict_foreign_members() {
     mkdir -p "$tree" 2>/dev/null && printf '%s\n' "$checkout" > "$stamp"
 }
 
-# lease_gate_target <who> [slot] — lease a cargo target dir from the pool gate.sh and
-# with-slot.sh share (the lowest free one, or exactly <slot>), tend it, evict build scripts
-# and workspace crates compiled for another checkout, and export CARGO_TARGET_DIR. Sets GATE_POOL.
+# lease_ram_target <who> [n] — lease a RAM slot from $RAM_POOL (the caller has loaded the config
+# and admitted the tier). With no <n> it takes the lowest free of the RAM_SLOTS slots, and never
+# creates a slot or a lock file numbered RAM_SLOTS or higher; with <n> it takes exactly slot-<n>
+# (the caller has range-checked it). Returns 0 with SLOT SLOT_FD SLOT_DIR set, GATE_POOL=$RAM_POOL
+# and GATE_TIER=ram; returns 1, holding nothing, otherwise. The slot's directory is created here:
+# the evictor empties a RAM slot and leaves only its lock file, so a free slot may have none.
+# It does not tend: the disk ceiling and the high-water bound are disk rules.
+lease_ram_target() {
+    local who="$1" n="${2:-}"
+    if [ -n "$n" ]; then slot_lease "$RAM_POOL" slot- "$who" "$n" || return 1
+    else slot_lease "$RAM_POOL" slot- "$who" "" "$RAM_SLOTS" || return 1
+    fi
+    mkdir -p "$SLOT_DIR" || { exec {SLOT_FD}>&-; return 1; }
+    GATE_POOL="$RAM_POOL"; GATE_TIER=ram
+}
+
+# lease_gate_target <who> [slot] — lease a cargo target dir and export CARGO_TARGET_DIR. Sets
+# GATE_POOL and GATE_TIER (ram|disk). <slot> is:
+#   (none)   the lowest free RAM slot when the opt-in RAM tier is configured and admitted,
+#            else the lowest free slot of the disk pool gate.sh and with-slot.sh share. A tier
+#            that is configured but refused says why on stderr and the disk lease goes ahead; an
+#            unconfigured one says nothing, and RAM_SLOTS=0 is configured with no slots to lease.
+#   N        exactly disk slot-N.
+#   ram-N    exactly RAM slot-N. Returns 2, running nothing, when the tier is not configured or
+#            not admitted, N is outside 0 … RAM_SLOTS-1, or the slot is held or absent: a named
+#            slot never falls back to the other tier.
+# A disk lease is tended; both tiers evict build scripts and workspace crates compiled for
+# another checkout. Whether the RAM tier is configured is read off the RETURN CODES of
+# ram_tier_load_config and ram_tier_admit, never off the RAM_* globals: after a refusal they
+# keep stale values.
 lease_gate_target() {
+    local who="$1" slot="${2:-}" n
     GATE_POOL="${CODESCOUT_GATE_POOL:-$HOME/.cache/codescout-gate}"
-    # The RAM tier is opt-in. Until it can lease (a later change), a configured tier that is
-    # refused says why on stderr and the disk lease below goes ahead; an unconfigured one says nothing.
+    GATE_TIER=disk
     RAM_SKIP=""
-    if [ -z "${2:-}" ] && ram_tier_load_config "$1"; then ram_tier_admit "$1"; fi
-    [ -z "$RAM_SKIP" ] || echo "$RAM_SKIP" >&2
-    slot_lease "$GATE_POOL" slot- "$1" "${2:-}" || return 2
-    # Three is the most concurrent gate runs observed on this machine.
-    slot_tend "$1" "$GATE_POOL" slot- CODESCOUT_GATE_POOL_KEEP 3 "$SLOT_DIR" slot_remove_dir || return 2
+    case "$slot" in
+        ram-*)
+            n="${slot#ram-}"
+            case "$n" in
+                ''|*[!0-9]*) echo "$who: --slot wants ram-<whole number>, got '$slot'; nothing was run" >&2; return 2 ;;
+            esac
+            if ! ram_tier_load_config "$who"; then
+                [ -z "$RAM_SKIP" ] || echo "$RAM_SKIP" >&2
+                echo "$who: --slot $slot names the RAM tier, which is not configured or not usable here, and a named slot never falls back to the disk pool; nothing was run (CODESCOUT_GATE_RAM_POOL)" >&2
+                return 2
+            fi
+            if ! ram_tier_admit "$who"; then
+                echo "$RAM_SKIP" >&2
+                echo "$who: --slot $slot names the RAM tier, which is not admitted now, and a named slot never falls back to the disk pool; nothing was run" >&2
+                return 2
+            fi
+            # More than 9 digits is out of range whatever RAM_SLOTS is, and keeps the arithmetic safe.
+            if [ "${#n}" -gt 9 ] || [ "$((10#$n))" -ge "$RAM_SLOTS" ]; then
+                echo "$who: --slot $slot is outside the RAM tier's slots (CODESCOUT_GATE_RAM_SLOTS=$RAM_SLOTS, numbered from 0); nothing was run" >&2
+                return 2
+            fi
+            lease_ram_target "$who" "$((10#$n))" || {
+                echo "$who: --slot $slot was not leased from the RAM tier ($RAM_POOL); nothing was run" >&2
+                return 2
+            }
+            ;;
+        '')
+            # RAM_SLOTS=0 is a valid config with no slots to lease: straight to disk, saying nothing.
+            if ram_tier_load_config "$who" && [ "$RAM_SLOTS" -gt 0 ]; then
+                if ram_tier_admit "$who"; then lease_ram_target "$who" || true; fi
+            fi
+            [ -z "$RAM_SKIP" ] || echo "$RAM_SKIP" >&2
+            ;;
+    esac
+    if [ "$GATE_TIER" != ram ]; then
+        slot_lease "$GATE_POOL" slot- "$who" "$slot" || return 2
+        # Three is the most concurrent gate runs observed on this machine.
+        slot_tend "$who" "$GATE_POOL" slot- CODESCOUT_GATE_POOL_KEEP 3 "$SLOT_DIR" slot_remove_dir || return 2
+    fi
     # The lessee is whichever checkout the command will build, which is the cwd's, not the
     # one this script lives in. Outside a git tree there is none, and nothing is evicted.
     slot_evict_foreign_build_scripts "$1" "$SLOT_DIR" \
