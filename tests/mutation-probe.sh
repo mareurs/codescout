@@ -67,7 +67,8 @@ newrepo() { # newrepo -> echoes the repo path
 
 run() { # run <repo> <env-sid> <args...> -> sets OUT and RC
     local repo="$1" sid="$2"; shift 2
-    OUT=$(cd "$repo" && CLAUDE_CODE_SESSION_ID="$sid" "$PROBE" "$@" 2>&1)
+    OUT=$(cd "$repo" && env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID \
+        -u CODESCOUT_CONTEXT_FILE CLAUDE_CODE_SESSION_ID="$sid" "$PROBE" "$@" 2>&1)
     RC=$?
 }
 
@@ -75,7 +76,39 @@ run() { # run <repo> <env-sid> <args...> -> sets OUT and RC
 R=$(newrepo)
 run "$R" "" --file src/lib.rs --find 'guard();' --replace '' -- true
 eq   "1 no sid exits 2" "$RC" "2"
-has  "1 says why 'mine' has no referent" "$OUT" "CLAUDE_CODE_SESSION_ID is not set"
+has  "1 says why 'mine' has no referent" "$OUT" "no session identity"
+has  "1 names the Claude variable" "$OUT" "CLAUDE_CODE_SESSION_ID"
+has  "1 names the Codex variable" "$OUT" "CODEX_SESSION_ID"
+
+# --- 1b. codex_only_marker_names_codex_principal -----------------------------
+# A Codex-only run arms, and the marker's JSON names `codex:<id>` while its FILE NAME is the
+# bare id (no colon). Shared mode, with a test command that copies the live marker out.
+R=$(newrepo)
+CID="cdx-0000-aaaa"
+OUT=$(cd "$R" && env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID \
+    -u CODESCOUT_CONTEXT_FILE CODEX_SESSION_ID="$CID" "$PROBE" --shared --file src/lib.rs \
+    --find 'guard();' --replace '' -- bash -c "cp .codescout/mutations/*.json '$WORK/codex-marker.json'; ls .codescout/mutations > '$WORK/codex-marker.names'" 2>&1)
+eq   "1b codex-only run armed" "$(printf '%s' "$OUT" | grep -c 'ARMED')" "1"
+eq   "1b marker file is named <id>.json" "$(cat "$WORK/codex-marker.names" 2>/dev/null)" "$CID.json"
+eq   "1b no colon in the marker file name" "$(grep -c ':' "$WORK/codex-marker.names" 2>/dev/null)" "0"
+eq   "1b marker session_id is the codex principal" \
+    "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session_id"])' "$WORK/codex-marker.json" 2>/dev/null)" "codex:$CID"
+
+# --- 1c. Claude keeps the bare id in both file name and JSON (byte for byte) --
+R=$(newrepo)
+OUT=$(cd "$R" && env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID \
+    -u CODESCOUT_CONTEXT_FILE CLAUDE_CODE_SESSION_ID="$SID" "$PROBE" --shared --file src/lib.rs \
+    --find 'guard();' --replace '' -- bash -c "cp .codescout/mutations/$SID.json '$WORK/claude-marker.json'" 2>&1)
+eq   "1c claude marker session_id is the bare id" \
+    "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session_id"])' "$WORK/claude-marker.json" 2>/dev/null)" "$SID"
+
+# --- 1d. conflicting_identity_exits_2 ----------------------------------------
+R=$(newrepo)
+OUT=$(cd "$R" && env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID \
+    -u CODESCOUT_CONTEXT_FILE CLAUDE_CODE_SESSION_ID="$SID" CODEX_SESSION_ID="$CID" "$PROBE" \
+    --file src/lib.rs --find 'guard();' --replace '' -- true 2>&1); RC=$?
+eq   "1d conflicting identity exits 2" "$RC" "2"
+eq   "1d a conflicting run arms nothing" "$(ls "$R/.codescout/mutations" 2>/dev/null | wc -l)" "0"
 
 # --- 2. Pattern occurring zero times ----------------------------------------
 R=$(newrepo)
