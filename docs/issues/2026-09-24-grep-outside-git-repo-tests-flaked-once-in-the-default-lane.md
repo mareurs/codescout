@@ -1,7 +1,7 @@
 ---
 id: '3c5fa35d9d2754a7'
 kind: bug
-status: open
+status: investigating
 title: 'BUG: three tools::grep "outside a git repo" tests failed once in the gate''s default lane and passed on re-run'
 tags:
 - cluster/unclassified
@@ -73,6 +73,18 @@ The shell suites under `tests/` build their repos under `mktemp -d`. I read the 
 ### Re-checked 2026-10-30 — no recurrence in 80 more runs, including 40 under CPU load
 
 In a worktree off `experiments` (`0f8705532`), `scripts/with-slot.sh cargo test --lib -- tools::grep` (65 tests, the three named ones included): 40 sequential runs, then 40 more with 32 busy-loop processes pinning cores. Counted every `test result` line: 80 of 80 `ok. 65 passed; 0 failed`. The test module was extended by two tests the same day; none is affected. The failure did not recur, so no fix was guessed and no code was changed. The 2026-10-16 finding (an ancestor `.git` above the tempdir reproduces the exact failure) is still the only known mechanism. Left open.
+
+
+### Re-checked 2026-10-31 — the unscoped `git init` sites outside the Rust tests target their own directory
+
+Grep over `*.sh`, `*.py`, `*.mjs` and `*.js` for `git init`, `jj init` and a quoted `"init"` returned 61 matches in 37 files. The tool printed 50 and its `offset` pages by file, so the last 11 matches were not isolated. I read the setup of the sites that name no directory in the call:
+
+- `tests/prepare-commit-msg-session-id.sh:51` follows `T="$(mktemp -d)"` and `cd "$T" || exit 1`.
+- `tests/test_measure_join.py:261` and `:1009` pass `cwd=` of a temp repo directory.
+- `tests/test_build_git_dirty.py:49` runs in a `TemporaryDirectory` repo.
+- `tests/count-with-members.sh:56` and `tests/hooks-discrimination.sh:105` were read on 2026-10-16.
+
+The rest use `git -C <dir>`, `cwd=<dir>` or a path argument. No site initialises `~`, `~/.cache`, `~/.cache/cc-tmp` or `/tmp`. This does not name the creator of the 2026-09-24 `.git`: it was not found, and the unread matches stay unread. No code changed. Left open until a recurrence gives a `TMPDIR` and an ancestor listing.
 
 ## Symptom (Effect)
 
