@@ -894,6 +894,43 @@ eq "3: no write on record keeps the legacy claim" "$(owner_of f.txt)" "$A"
 eq "3: and the legacy route" "$(route_of f.txt)" "named"
 rm -rf "$T"
 
+# Codex stagers. The owner column is a cross-script contract: bare id for Claude, `codex:<id>`
+# for Codex, `-` when identity is missing or conflicting. usage.db stores BARE ids for both hosts.
+U="dddddddd-4444-4444-4444-dddddddddddd"
+V="eeeeeeee-5555-5555-5555-eeeeeeeeeeee"
+add_codex() { env -u CLAUDE_CODE_SESSION_ID CODESCOUT_USAGE_DB="$DB" CODEX_SESSION_ID="$U" git add -- "$@"; }
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+add_codex f.txt
+eq "codex_only_stager_is_recorded_qualified: owner" "$(owner_of f.txt)" "codex:$U"
+eq "codex_only_stager_is_recorded_qualified: route" "$(route_of f.txt)" "named"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+wrote "$DB" "$U" edit_file '{"action":"edit","path":"f.txt"}'
+add_codex f.txt
+eq "codex_own_prior_write_is_not_a_peer: owner" "$(owner_of f.txt)" "codex:$U"
+eq "codex_own_prior_write_is_not_a_peer: route" "$(route_of f.txt)" "named"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+wrote "$DB" "$V/agent1" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$U" f.txt
+eq "codex_child_write_attributes_to_root: owner" "$(owner_of f.txt)" "$V"
+eq "codex_child_write_attributes_to_root: route" "$(route_of f.txt)" "named-foreign"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo mine > f.txt
+CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U" git add -- f.txt
+eq "conflicting_identity_records_dash: git add still succeeds" "$?" "0"
+eq "conflicting_identity_records_dash: owner" "$(owner_of f.txt)" "-"
+eq "conflicting_identity_records_dash: route" "$(route_of f.txt)" "id-unset"
+rm -rf "$T"
+
 # 4. liveness: a write is live until its OWN writer commits the path after it. Rows carry
 # explicit times so no case depends on two events landing in different seconds.
 hrs() { date -u -d "$1" '+%Y-%m-%d %H:%M:%S.000'; }

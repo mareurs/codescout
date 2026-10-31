@@ -94,7 +94,8 @@ new_repo() {
     echo "same content" > "$p/old.txt"
     for f in pre-commit-foreign-index.sh pre-commit-unreviewed-content.sh \
              pre-commit-ledger-counts.py post-index-change-stage-log.sh \
-             commit-sequence-tail.txt commit-mine.sh; do
+             commit-sequence-tail.txt commit-mine.sh publish-identity.sh publish-identity.py \
+             session_context.py; do
         [ -f "$SELF_ROOT/scripts/$f" ] && cp "$SELF_ROOT/scripts/$f" "$p/scripts/"
     done
     git -C "$p" add -A >/dev/null
