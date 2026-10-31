@@ -63,4 +63,4 @@ Write a test that creates a bug with a bad `opened` under a new subdirectory, ex
 ## References
 
 - `src/librarian/tools/create.rs` `call`
-- `docs/issues/2026-10-31-doc-create-accepts-a-malformed-opened-on-a-bug-so-the-frontmatter-gate-fails-in-another-session.md`
+- `docs/issues/archive/2026-10-31-doc-create-accepts-a-malformed-opened-on-a-bug-so-the-frontmatter-gate-fails-in-another-session.md`

@@ -681,7 +681,7 @@ mod tests {
     /// reach the file and fail the gate in another session. The create must refuse it, and a
     /// refusal must leave no file behind.
     ///
-    /// See `docs/issues/2026-10-31-doc-create-accepts-a-malformed-opened-on-a-bug-so-the-frontmatter-gate-fails-in-another-session.md`.
+    /// See `docs/issues/archive/2026-10-31-doc-create-accepts-a-malformed-opened-on-a-bug-so-the-frontmatter-gate-fails-in-another-session.md`.
     #[tokio::test]
     async fn a_malformed_opened_on_a_bug_is_refused_and_writes_no_file() {
         for (i, bad) in [

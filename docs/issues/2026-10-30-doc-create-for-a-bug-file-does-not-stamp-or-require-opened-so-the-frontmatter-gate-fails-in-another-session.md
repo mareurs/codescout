@@ -47,7 +47,7 @@ None.
 
 ## Fix
 
-Done 2026-10-31, commit `1d79382e1`. `doc(create)` for `kind=bug` stamps `extra.opened` with today's date (UTC) when the caller gave none, at any `rel_path`; a caller's own value wins. Other kinds are untouched. Stamping was chosen over a refusal: it puts the field in the creating call with no retry, and the value is always knowable. A malformed supplied value is still kept as given; that is filed separately as `325bb3e77164836a`.
+Done 2026-10-31, commit `1d79382e1`. `doc(create)` for `kind=bug` stamps `extra.opened` with today's date (UTC) when the caller gave none, at any `rel_path`; a caller's own value wins. Other kinds are untouched. Stamping was chosen over a refusal: it puts the field in the creating call with no retry, and the value is always knowable. A malformed supplied value was kept as given until `30721b865`; that was filed separately as `58636f57c701952b` (archived, fixed).
 
 A narrower variant that stamped only under `docs/issues/` (commit `27c47ab19`, written independently in a parallel session) was dropped when this one landed. A generic tool must not hard-code one repo's directory, so the wider rule stands.
 

@@ -1,5 +1,5 @@
 ---
-id: '325bb3e77164836a'
+id: 58636f57c701952b
 kind: bug
 status: fixed
 title: doc(create) accepts a malformed extra.opened on a bug, so the frontmatter gate fails in another session
@@ -47,11 +47,19 @@ None.
 
 ## Fix
 
-Fixed in `30721b865` (`src/librarian/tools/create.rs`). On create for `kind=bug`, `call` stamps `opened` when it is absent (the earlier fix, `1d79382e1`) and then refuses a supplied value unless `is_iso_date` accepts it: a JSON string of length 10 that `chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")` parses. The refusal is a `LibrarianRecoverableError` that names the value and the form. It runs before the file and the catalog row are written, so a refusal leaves neither.
+Fixed on `experiments` in `30721b865` (`src/librarian/tools/create.rs`). On create for `kind=bug`, `call` stamps `opened` when it is absent (the earlier fix, `1d79382e1` on `experiments`) and then refuses a supplied value unless `is_iso_date` accepts it: a JSON string of length 10 that `chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")` parses. The refusal is a `LibrarianRecoverableError` that names the value and the form. It runs before the file and the catalog row are written, so a refusal leaves neither. A refused call does leave the empty parent directory; that is bug `4b53fc372ed9a3a2`.
+
+Verified live on the rebuilt server 2026-10-31: `extra.opened: "yesterday"` on a bug create was refused with `extra.opened "yesterday" is not a YYYY-MM-DD date`.
 
 The earlier candidate said `parse_validity` in `src/librarian/statements.rs` could be shared. That was wrong: `parse_validity` parses a `**Valid:**` section, and its date check is one inline expression (`iso_re().is_match(d) && chrono::NaiveDate::parse_from_str(..)`), not a function. `is_iso_date` repeats that expression for a `Value`. Extracting one shared predicate is possible and was not done.
 
 `chrono`'s `%Y-%m-%d` alone accepts `2026-1-2`, so the length check is needed.
+
+
+## Fix provenance
+
+- **SHA:** `30721b865` (`experiments`)
+- **patch-id:** `bc154797f0df4104bc8230ba1f273fa0168e1568`
 
 ## Tests added
 
@@ -66,7 +74,7 @@ Pass a well-formed date, or omit `opened` and let the server stamp it.
 
 ## Resume
 
-One question stays open. `merge_extra` in `src/librarian/tools/update.rs` upserts any `extra` value with no check, so `doc(update, patch={extra: {opened: "yesterday"}})` on a bug looks like it writes a malformed `opened` the same way. This is a code read only: I did not run it. If it is real, it needs its own bug file and a check shared with create.
+Closed. The `doc(update)` path has the same gap by code read; it is bug `3773f11d0aeaada8`.
 
 ## References
 

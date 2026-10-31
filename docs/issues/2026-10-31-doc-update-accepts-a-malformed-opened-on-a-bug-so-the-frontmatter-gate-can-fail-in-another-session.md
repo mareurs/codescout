@@ -64,4 +64,4 @@ First run the failing case on a throwaway bug to confirm the bug is real. Then d
 
 - `src/librarian/tools/update.rs` `merge_extra`
 - `src/librarian/tools/create.rs` `is_iso_date`
-- `docs/issues/2026-10-31-doc-create-accepts-a-malformed-opened-on-a-bug-so-the-frontmatter-gate-fails-in-another-session.md`
+- `docs/issues/archive/2026-10-31-doc-create-accepts-a-malformed-opened-on-a-bug-so-the-frontmatter-gate-fails-in-another-session.md`
