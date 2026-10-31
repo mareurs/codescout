@@ -23,6 +23,7 @@
 - The disk ceiling `CODESCOUT_SLOT_CEILING_MB` does not apply to RAM slots.
 - The last-lease time of a slot is the mtime of `<slot>/.codescout-lessee`. A slot with no stamp counts as the oldest.
 - Test seams (documented as such in the code): `findmnt` and `df` are resolved through `PATH`; `CODESCOUT_GATE_RAM_MEMINFO` (default `/proc/meminfo`) and `CODESCOUT_GATE_RAM_MMSTAT` (default `/sys/block/<dev>/mm_stat`) override the two kernel files. CI (`gate-slot-tests`, `ubuntu-latest`) has no zram device.
+- Every test case that expects the RAM tier to be used sets `CODESCOUT_GATE_RAM_MEMINFO` to a fixture with `MemAvailable` far above the floor. The real `/proc/meminfo` of a CI runner or of a busy machine may be below 12G, which would turn those cases into flakes.
 - Shared checkout: commit by pathspec with a `Session-Id:` trailer, per `docs/conventions/shared-checkout-commit-sequence.md`. Each task's code and its tests land in one commit.
 
 ## Review Focus
@@ -74,6 +75,7 @@
 
 **Files:**
 - Modify: `scripts/slot-pool.sh` (`slot_lease`, `lease_gate_target`; new `lease_ram_target`)
+- Modify: `scripts/with-slot.sh` (the usage text only: document `--slot ram-N` and that a named slot never falls back to the other tier)
 - Test: `tests/gate-slot.sh` (new case T)
 
 **Interfaces:**
@@ -87,7 +89,7 @@
   - `T1` a gate run's lanes all see `$RAM/slot-0`;
   - `T2` with `slot-0.lock` held (`hold_lock`), the run sees `$RAM/slot-1`;
   - `T3` with both RAM locks held, the run sees `$POOL/slot-0`, and no `$RAM/slot-2` directory or lock appears;
-  - `T4` `run_with … bash "$WITH" --slot ram-1 …` sees `$RAM/slot-1`; with `slot-1.lock` held it exits 2 and runs nothing;
+  - `T4` after creating the directory `$RAM/slot-1` (a named lease keeps `slot_lease`'s existing refusal of an absent slot), `run_with … bash "$WITH" --slot ram-1 …` sees `$RAM/slot-1`; with `slot-1.lock` held it exits 2 and runs nothing;
   - `T5` `--slot ram-1` with no config exits 2 and names the RAM tier;
   - `T6` the lessee eviction still runs in a RAM slot: `$RAM/slot-0/.codescout-lessee` holds the fake checkout's path after T1.
 
@@ -166,13 +168,13 @@
   - `W1` a RAM run prints one `gate.sh: tier RAM (` line near the top and one `ram_tier_report` line after the tree size;
   - `W2` a RAM run with `GATE_TEST_EXIT=1` prints a line after `GATE EXITS` that contains `RAM tier` and `No space left on device`;
   - `W3` a disk run with `GATE_TEST_EXIT=1` and no config prints no line containing `RAM tier`;
-  - `W4` `python3 -m pytest tests/test_python_runner.py -q` passes (the empty-fixture `slot-pool.sh` path).
+  - `W4` `python3 ./scripts/python-tests.py --lane light` passes (the empty-fixture `slot-pool.sh` path; this is the lane the gate itself runs).
 
 - [ ] **Step 2: Run** `bash tests/gate-slot.sh`. Expected: W1 and W2 FAIL.
 
 - [ ] **Step 3: Implement** `ram_tier_report` and three `gate.sh` lines, each guarded by `[ "${GATE_TIER:-}" = ram ]`, so the fixture `slot-pool.sh` never reaches an undefined function. The red-run line is printed when any of `PYTHON_LIGHT FMT CLIPPY LEAN DEFAULT` is non-zero.
 
-- [ ] **Step 4: Run** `bash tests/gate-slot.sh` and `python3 -m pytest tests/test_python_runner.py -q`. Expected: `0 failed` and a passing pytest summary.
+- [ ] **Step 4: Run** `bash tests/gate-slot.sh` and `python3 ./scripts/python-tests.py --lane light`. Expected: `0 failed` and a passing pytest summary.
 
 - [ ] **Step 5: Commit** `scripts/slot-pool.sh scripts/gate.sh tests/gate-slot.sh`: `feat(gate): print the RAM tier and its zram figures, and name the tier on a red run`.
 
@@ -208,7 +210,7 @@
 - Create: `docs/conventions/gate-ram-tier.md`
 - Modify: `docs/conventions/gate-ordering.md` (one pointer line), `scripts/slot-pool.sh` header (one line pointing at the new doc)
 
-- [ ] **Step 1: Write `docs/conventions/gate-ram-tier.md`** with: the zram-generator drop-in from spec §1 verbatim; a oneshot unit `codescout-gate-ram-pool.service` (`After=` and `Requires=` the mount unit of `/var/cache/codescout-gate-ram`, running `tune2fs -m 0 /dev/zram1` and `install -d -o <user> -g <user> /var/cache/codescout-gate-ram/pool`); an example `gate-pool.env` naming `/var/cache/codescout-gate-ram/pool` and the defaults; a systemd user timer `codescout-gate-ram-evict.timer` (`OnBootSec=10min`, `OnUnitActiveSec=10min`) with its service running `<checkout>/scripts/gate-ram-evict.sh`; and the four go-live checks from the spec's Testing section. State that none of it is installed by the repo.
+- [ ] **Step 1: Write `docs/conventions/gate-ram-tier.md`** with: the zram-generator drop-in from spec §1 verbatim; a oneshot unit `codescout-gate-ram-pool.service` (`After=` and `Requires=` the mount unit of `/var/cache/codescout-gate-ram`, running `tune2fs -m 0 /dev/zram1` and `install -d -o <user> -g <user> /var/cache/codescout-gate-ram/pool`); an example `gate-pool.env` naming `/var/cache/codescout-gate-ram/pool` and the defaults; a systemd user timer `codescout-gate-ram-evict.timer` (`OnBootSec=10min`, `OnUnitActiveSec=10min`) with its service running `<checkout>/scripts/gate-ram-evict.sh`; and the four go-live checks from the spec's Testing section. State that none of it is installed by the repo. State two limits of the idle rule: the idle clock runs from the start of the last lease (the mtime of `.codescout-lessee`), not from its end; and a lease from outside a git tree leaves no stamp (`slot_evict_foreign_members` removes it), so that slot counts as due at the next timer tick once it is idle.
 
 - [ ] **Step 2: Run** `bash tests/gate-slot.sh`. Expected: `0 failed`.
 
