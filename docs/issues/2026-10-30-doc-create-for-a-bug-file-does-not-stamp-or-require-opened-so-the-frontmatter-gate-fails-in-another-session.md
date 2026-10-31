@@ -5,7 +5,7 @@ status: fixed
 title: doc(create) for a bug file does not stamp or require opened, so the frontmatter gate fails in another session
 tags:
 - cluster/unclassified
-closed: 2026-10-30
+closed: 2026-10-31
 opened: 2026-10-30
 owner: marius
 severity: low
@@ -47,13 +47,15 @@ None.
 
 ## Fix
 
-Done 2026-10-30. `doc(create)` for `kind=bug` under `docs/issues/` now stamps `extra.opened` with today's date (UTC) when the caller gave none; a caller's own value wins. Other kinds and directories are untouched. Stamping was chosen over a refusal: it puts the field in the creating call with no retry, and the value is always knowable.
+Done 2026-10-31, commit `1d79382e1`. `doc(create)` for `kind=bug` stamps `extra.opened` with today's date (UTC) when the caller gave none, at any `rel_path`; a caller's own value wins. Other kinds are untouched. Stamping was chosen over a refusal: it puts the field in the creating call with no retry, and the value is always knowable. A malformed supplied value is still kept as given; that is filed separately as `325bb3e77164836a`.
 
-Code: `src/librarian/tools/create.rs`, in `call`, after `resolve_status`.
+A narrower variant that stamped only under `docs/issues/` (commit `27c47ab19`, written independently in a parallel session) was dropped when this one landed. A generic tool must not hard-code one repo's directory, so the wider rule stands.
+
+Code: `src/librarian/tools/create.rs`, in `call`.
 
 ## Tests added
 
-`librarian::tools::create::tests::a_bug_file_under_docs_issues_is_stamped_opened_unless_the_caller_gave_one`. Watched red first (`a bug created with no extra must carry opened`), green after the stamp. It also pins that an explicit `opened` wins and that a `spec` is not stamped.
+`librarian::tools::create::tests::a_bug_created_without_opened_is_stamped_with_todays_date` (read on both sides of the call, so a run across midnight UTC is not a flake), `a_supplied_opened_on_a_bug_is_kept` and `a_non_bug_kind_is_not_stamped_with_opened`. Per the author, the first was red before the fix, overwriting a supplied value turns the second red, and stamping every kind turns the third red. A mutation that deletes the stamp was not run.
 
 ## Workarounds
 
