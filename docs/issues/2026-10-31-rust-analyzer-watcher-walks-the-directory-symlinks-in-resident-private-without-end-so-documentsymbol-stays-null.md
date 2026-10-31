@@ -1,16 +1,17 @@
 ---
 id: '35bcf086deeb7cbe'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: rust-analyzer''s file watcher walks the 109 directory symlinks in .codescout/resident-private without end, so documentSymbol stays null and RSS passes 15 GB; files.excludeDirs does not stop the walk'
 tags:
 - cluster/guard-narrower-than-its-name
+closed: 2026-10-31
 opened: 2026-10-31
 related:
 - docs/issues/archive/2026-10-23-documentsymbol-null-window-outlasts-the-5s-cold-budget-because-rust-analyzer-scans-the-nested-worktrees.md
 - docs/issues/2026-10-30-references-treats-every-new-mux-connection-as-a-cold-server-and-re-asks-for-5-s.md
 severity: high
-unverified: That rust-analyzer's notify watcher follows symlinks is inferred from the path shape and from one run per variant (H1, H2). Its source was not read. The fix is not applied and no regression test exists.
+unverified: That rust-analyzer's notify watcher follows symlinks is inferred from the path shape and from one run per variant (H1, H2, V1). Its source was not read. The mitigation is local and unversioned, V1 ran 120 s, and no product fix or regression test exists.
 ---
 
 ## Summary
@@ -48,6 +49,7 @@ Single-variable runs on 2026-10-31 (90 to 300 s each, one run per row):
 | F | `git archive HEAD` copy | light | 290 | idle from 30 s | symbols in 9 of 9 asks |
 | H1 | F plus a copy of `resident-private` with its symlinks | light | 36,218 to 37,111 | busy from about 76 s | null in 8 of 8 asks |
 | H2 | H1 with the 109 directory symlinks deleted | light | 32,426, fixed | idle from 31 s | null once at 12 s, then symbols in 7 of 7 asks |
+| V1 | real repo after the 109 links were deleted there | default | 48,816, fixed from 30 s | 36%, 21%, 20%, 8% of a core in successive 16 s windows | null until 52 s, then symbols in 6 of 6 asks |
 
 "Light" means `checkOnSave`, `cargo.buildScripts` and `procMacro` are off.
 
@@ -87,12 +89,19 @@ Not established:
 
 ## Fix
 
-Not applied. Options, none chosen:
+Applied on 2026-10-31 to the data, not to the product. This is a mitigation.
 
-1. Data: replace the directory symlinks in `.codescout/resident-private` with relative paths or file lists. The experiment sessions own that data.
-2. Data: move `resident-private` out of the workspace root. The tests that name it in `src/prompts/mod.rs` would need a change. A symlink back into the repo would be walked too.
-3. Product: make codescout detect a directory-symlink fan-out under the root, and warn, before it starts rust-analyzer.
-4. Product: avoid rust-analyzer's server-side watcher. This needs a design decision, and I did not test it.
+- I removed the 109 directory symlinks from `.codescout/resident-private`. `RESTORE-DIR-SYMLINKS.tsv` and `restore-dir-symlinks.sh` in that directory restore them. I tested the restore on a scratch copy: it rebuilt 109 links identical to the manifest. `README-RESTORE-SYMLINKS.md` there explains the removal. The 146 file symlinks were not touched. Directory and file counts match the counts before the removal, plus the 3 new files.
+- Before the delete, no process had its working directory in the tree, and no file had changed in the last 30 minutes.
+- Validation run V1 on the real tree used the default config and no exclusion. `documentSymbol` was null until 52 s and returned symbols in 6 of 6 asks from 62 s on. The null window of about 55 s is close to the 53.5 s cold-start window in the archived sibling bug. The watch count stayed at 48,816. `notify-rs inoti` stayed the busiest thread, but its use fell from 36% to 8% of a core over four 16 s windows. Before the fix it stayed near 95%. RSS reached 9.5 GB and stayed flat from 77 s.
+
+The directory is gitignored, so no commit carries the removal. Experiment sessions may create new directory symlinks. No script in this repo creates them.
+
+Not done:
+
+1. Product: add `.codescout/resident-private` to `files.excludeDirs` in `src/lsp/init_options.rs`. In run B the exclusion cut RSS from about 5.4 GB to 756 MB. V1 holds 9.5 GB because rust-analyzer loads the 29,154 `.rs` files.
+2. Product: warn when a directory symlink fan-out sits under the workspace root.
+3. Product: avoid rust-analyzer's server-side watcher. This needs a design decision and is untested.
 
 ## Tests added
 
@@ -101,11 +110,17 @@ N/A. Nothing is fixed. A regression test needs a decision on the fix first.
 ## Workarounds
 
 - Adding `.codescout/resident-private` to `files.excludeDirs` lowers memory by about 7 times. It does not stop the spin or the null answers.
-- Deleting the directory symlinks ended the spin in a scratch copy (H2). Nobody applied this to the real tree.
+- Deleting the directory symlinks ended the spin in a scratch copy (H2). It was applied to the real tree on 2026-10-31. See Fix.
 
 ## Resume
 
-Opened 2026-10-31. Next step: choose option 1, 2, 3 or 4 under Fix. Until then, a fresh rust-analyzer on this checkout spins again, and edits that need `edit_code` on Rust symbols fail. The test scripts lived in a session scratchpad and are not kept. Step 1 to 5 under Reproduction rebuild them.
+State on 2026-10-31: mitigated. The 109 links are gone from the real tree, and V1 shows a finite null window and a quiet watcher.
+
+Open:
+
+- V1 is one run of 120 s. The watcher was still at 8% of a core at the end. Check it again over a longer run.
+- The mitigation is local and unversioned. A new experiment can bring the links back. Product options 1 to 3 under Fix are the durable answer, and none is chosen.
+- The bug stays `mitigated`, not `fixed`: no product change and no regression test exist.
 
 ## References
 
