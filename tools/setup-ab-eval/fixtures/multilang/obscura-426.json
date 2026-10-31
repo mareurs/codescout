@@ -1,0 +1,13 @@
+{
+ "FAIL_TO_PASS": [
+  "obscura-cdp::form_submit_method_bypasses_listener$request_submit_validates_its_submitter_argument"
+ ],
+ "PASS_TO_PASS": [
+  "obscura::interception$on_response_callback_can_be_detached",
+  "obscura-cli::mcp_client$test_evaluate",
+  "obscura-cli::mcp_client$test_initialize",
+  "obscura-cli::mcp_client$test_navigate_and_snapshot",
+  "obscura-cli::mcp_client$test_evaluate_math"
+ ],
+ "log_parser": "def parser(log: str) -> dict[str, str]:\n    import json\n\n    results: dict[str, str] = {}\n\n    pass_events = {\"ok\", \"pass\", \"passed\", \"success\", \"succeeded\"}\n    skip_events = {\"skip\", \"skipped\", \"ignore\", \"ignored\"}\n    fail_events = {\n        \"fail\", \"failed\",\n        \"error\", \"errored\",\n        \"timeout\", \"timed_out\",\n        \"cancelled\", \"canceled\",\n        \"aborted\", \"terminated\",\n    }\n\n    for line in log.splitlines():\n        line = line.strip().lstrip(\"\\ufeff\")\n        if not line:\n            continue\n\n        try:\n            record = json.loads(line)\n        except (json.JSONDecodeError, TypeError):\n            continue\n\n        if not isinstance(record, dict):\n            continue\n\n        record_type = record.get(\"type\")\n        if not isinstance(record_type, str) or record_type.lower() != \"test\":\n            continue\n\n        name = record.get(\"name\")\n        event = record.get(\"event\")\n        if not isinstance(name, str) or not name.strip():\n            continue\n        if not isinstance(event, str):\n            continue\n\n        event = event.strip().lower().replace(\"-\", \"_\").replace(\" \", \"_\")\n\n        if event in {\"started\", \"start\"}:\n            # If the log ends before a terminal event, the test did not\n            # complete successfully and must not disappear from the results.\n            results[name] = \"fail\"\n        elif event in pass_events:\n            results[name] = \"pass\"\n        elif event in skip_events:\n            results[name] = \"skip\"\n        elif event in fail_events:\n            results[name] = \"fail\"\n\n    return results"
+}
