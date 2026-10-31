@@ -59,6 +59,14 @@ class LoadTests(unittest.TestCase):
             write(p, [record("o__r-1"), record("o__r-1")])
             with self.assertRaisesRegex(ValueError, "duplicate"):
                 m.load_records(p)
+    def test_load_records_rejects_unparseable_created_at_naming_path_and_line(self):
+        for bad in ("unknown", "July 15, 2026", None, 20260715):
+            with tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "r.jsonl"
+                write(p, [record("o__r-1"), record("o__r-2", created_at=bad)])
+                with self.assertRaisesRegex(ValueError, rf"{p.name}:2: created_at"):
+                    m.load_records(p)
+
 
     def test_fixture_loads_and_selects_one(self):
         records = m.load_records(FIXTURE)
@@ -73,12 +81,24 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(c["gold_added_lines"], 5)  # the +++ headers are not counted
         self.assertEqual(c["expected_tests"], 2)
         self.assertEqual((c["id"], c["repo"], c["created_at"]), ("o__r-1", "o/r", "2026-07-15T08:12:03Z"))
+    def test_candidate_projects_to_exactly_the_registered_keys(self):
+        c = m.candidate(record(**{"pass": True, "cost": 1.5}))
+        self.assertEqual(set(c), {"id", "repo", "gold_files", "gold_added_lines", "created_at",
+                                  "expected_tests", "nonempty"})
+
 
 
 class EligibleTests(unittest.TestCase):
     def test_eligible_rejects_before_cutoff(self):
         self.assertFalse(m.eligible(cand(created_at="2026-06-30T23:59:59Z"), RULE))
         self.assertTrue(m.eligible(cand(created_at="2026-07-01T00:00:00Z"), RULE))
+    def test_eligible_fails_closed_on_unparseable_created_at(self):
+        for bad in ("unknown", "July 15, 2026", None, 20260715):
+            c = cand()
+            c["created_at"] = bad
+            self.assertIs(m.eligible(c, RULE), False, repr(bad))
+            self.assertIs(m.eligible(c, RULE, ignore_size=True), False, repr(bad))
+
 
     def test_eligible_size_is_or_of_files_and_lines(self):
         self.assertTrue(m.eligible(cand(files=2, added=1), RULE))    # files only

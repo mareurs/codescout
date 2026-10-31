@@ -12,6 +12,7 @@ reads metadata only, never a result. Stdlib only.
 """
 import hashlib
 import json
+from datetime import date, datetime
 from pathlib import Path
 
 import select_tasks
@@ -20,6 +21,16 @@ HERE = Path(__file__).resolve().parent
 RULE_PATH = HERE / "multilang-selection-rule.json"
 REQUIRED = ("instance_id", "repo", "base_commit", "created_at", "patch", "test_patch",
             "FAIL_TO_PASS", "PASS_TO_PASS", "test_cmds", "print_cmds", "log_parser", "docker_image")
+
+
+def _day(created_at):
+    """The calendar date of an ISO timestamp (`Z` accepted), or None for anything else."""
+    if not isinstance(created_at, str):
+        return None
+    try:
+        return datetime.fromisoformat(created_at).date()
+    except ValueError:
+        return None
 
 
 def load_rule(path=RULE_PATH):
@@ -42,6 +53,8 @@ def load_records(path, expected_sha256=None):
         missing = [k for k in REQUIRED if k not in record]
         if missing:
             raise ValueError(f"{path}:{n}: record lacks {missing}")
+        if _day(record["created_at"]) is None:
+            raise ValueError(f"{path}:{n}: created_at is not an ISO date string: {record['created_at']!r}")
         if record["instance_id"] in seen:
             raise ValueError(f"{path}:{n}: duplicate instance_id {record['instance_id']!r}")
         seen.add(record["instance_id"])
@@ -62,8 +75,9 @@ def candidate(record):
 def eligible(candidate, rule, *, ignore_size=False):
     """The cutoff (by date) and the `require` fields always; unless `ignore_size`, also the
     hardness test (files >= min_files or added lines >= min_added_lines) and max_added_lines."""
-    if candidate["created_at"][:10] < rule["created_at_min"]:
-        return False
+    day = _day(candidate["created_at"])
+    if day is None or day < date.fromisoformat(rule["created_at_min"]):
+        return False  # fail closed: an unparseable date never passes the contamination cutoff
     if any(f not in candidate["nonempty"] for f in rule["require"]):
         return False
     if ignore_size:
