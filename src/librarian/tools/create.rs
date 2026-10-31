@@ -315,6 +315,13 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
     parse_args(args.clone()).map(|_| ())
 }
 
+/// `true` for a JSON string of exactly `YYYY-MM-DD` that names a real calendar day. This is the
+/// shape `tests/issue_frontmatter.rs` requires of a bug's `opened`, with the calendar check on top.
+fn is_iso_date(v: &Value) -> bool {
+    v.as_str()
+        .is_some_and(|s| s.len() == 10 && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok())
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut a = parse_args(args)?;
 
@@ -433,9 +440,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // gate. A supplied value is the caller's own fact (a late filing) and is kept as given.
     let mut extra = a.extra.clone();
     if a.kind == "bug" {
-        extra
+        let opened = extra
             .entry("opened".to_string())
             .or_insert_with(|| Value::String(chrono::Utc::now().format("%Y-%m-%d").to_string()));
+        // The gate refuses anything but a `YYYY-MM-DD` date, and a supplied value is kept as
+        // given, so refuse a bad one here, before the file and the catalog row exist.
+        if !is_iso_date(opened) {
+            return Err(LibrarianRecoverableError::with_hint(
+                format!("doc(action=\"create\") kind=bug: extra.opened {opened} is not a YYYY-MM-DD date"),
+                "Pass extra={\"opened\": \"YYYY-MM-DD\"}, or omit `opened` and the server writes today's UTC date.",
+            ));
+        }
     }
     let fm = Frontmatter {
         id: Some(id.clone()),
@@ -659,6 +674,63 @@ mod tests {
         .unwrap();
         let content = std::fs::read_to_string(tmp.path().join("docs/specs/z.md")).unwrap();
         assert_eq!(frontmatter_value(&content, "opened"), None, "{content}");
+    }
+
+    /// `tests/issue_frontmatter.rs` refuses a bug whose `opened` is not `YYYY-MM-DD`. A supplied
+    /// value is kept as given (see `a_supplied_opened_on_a_bug_is_kept`), so a malformed one would
+    /// reach the file and fail the gate in another session. The create must refuse it, and a
+    /// refusal must leave no file behind.
+    ///
+    /// See `docs/issues/2026-10-31-doc-create-accepts-a-malformed-opened-on-a-bug-so-the-frontmatter-gate-fails-in-another-session.md`.
+    #[tokio::test]
+    async fn a_malformed_opened_on_a_bug_is_refused_and_writes_no_file() {
+        for (i, bad) in [
+            json!("yesterday"),
+            json!("2026/10/17"),
+            json!("2026-1-2"),
+            json!("2026-13-45"),
+            json!(20261017),
+            json!(null),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let tmp = TempDir::new().unwrap();
+            let ctx = mk_ctx(tmp.path().to_path_buf());
+            let rel = format!("docs/issues/2026-10-31-bad{i}.md");
+            let result = call(
+                &ctx,
+                json!({
+                    "repo": "r", "rel_path": rel,
+                    "kind": "bug", "title": "B", "body": "# BUG: b",
+                    "extra": {"opened": bad}
+                }),
+            )
+            .await;
+            assert!(result.is_err(), "opened {bad} was accepted");
+            assert!(
+                !tmp.path().join(&rel).exists(),
+                "a refused create left {rel} on disk"
+            );
+        }
+    }
+
+    /// The check is about the bug schema's `opened`. Another kind may carry an `opened` key of its
+    /// own meaning, and refusing it there would be an unasked-for rule on every kind.
+    #[tokio::test]
+    async fn a_non_date_opened_on_a_non_bug_kind_is_not_refused() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/specs/w.md",
+                "kind": "spec", "title": "W", "body": "hello",
+                "extra": {"opened": "soon"}
+            }),
+        )
+        .await
+        .unwrap();
     }
 
     // ---- a create never lands outside the repository root through a symbolic link ------------
