@@ -70,6 +70,10 @@ The shell suites under `tests/` build their repos under `mktemp -d`. I read the 
 
 **State of the root cause.** Still unknown. Narrowed: every `git init` / `.git` writer in the Rust tests targets its own tempdir (audited twice); a full run plants nothing in the tempdir's parent; the CWD-changing tests do not reproduce it in a loop. What remains is a `.git` (or `.jj` / `.ignore`) created by a process outside this test binary, present for the minutes the default lane ran. The 2026-09-24 `/tmp` check may also have looked at the wrong directory: sessions under the Claude harness have `TMPDIR=~/.cache/cc-tmp`, whose ancestors are `~/.cache`, `~`, `/home`, `/`, not `/tmp`.
 
+### Re-checked 2026-10-30 — no recurrence in 80 more runs, including 40 under CPU load
+
+In a worktree off `experiments` (`0f8705532`), `scripts/with-slot.sh cargo test --lib -- tools::grep` (65 tests, the three named ones included): 40 sequential runs, then 40 more with 32 busy-loop processes pinning cores. Counted every `test result` line: 80 of 80 `ok. 65 passed; 0 failed`. The test module was extended by two tests the same day; none is affected. The failure did not recur, so no fix was guessed and no code was changed. The 2026-10-16 finding (an ancestor `.git` above the tempdir reproduces the exact failure) is still the only known mechanism. Left open.
+
 ## Symptom (Effect)
 
 Gate run 2026-09-24 22:25:50 local, `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=101`, `5812 passed; 3 failed`:

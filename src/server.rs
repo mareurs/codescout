@@ -6001,6 +6001,13 @@ mod tests {
     /// overwrite requirement. Removing that guidance would hide how to acknowledge
     /// an intentional reduction; both tools now refuse instead of silently writing.
     ///
+    /// **Ratcheted UP 2026-10-31, 57_607 → 57_688 (+81), for `grep`'s `time_budget_ms`.**
+    /// Measured by the failing `tool_surface_under_budget` itself: TOTAL 57_688 with the
+    /// property, 57_607 without. What the bytes buy: the one input that lets a caller raise
+    /// (or, in a test, zero) the walk's wall-clock budget; the description was already cut to
+    /// `Walk wall-clock ms (default 20000)` and the `default` key dropped before measuring.
+    /// Bug 731747939c0bb764.
+    ///
     /// **Ratcheted UP 2026-10-10, 57_491 → 57_607 (+116), for the librarian param-honored
     /// sweep's labels and `update_entry`'s `key` addressing.** Measured, not estimated:
     /// `tool_surface_report_lengths` at the tip `f2b30bf7` reports TOTAL 57_491 (headroom 0)
@@ -6013,7 +6020,7 @@ mod tests {
     /// the thirteen keys it could not read. The first draft was +239; the rewrites that only
     /// restated a description were cut before measuring.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_607;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_688;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

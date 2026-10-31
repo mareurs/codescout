@@ -1,11 +1,12 @@
 ---
 id: '731747939c0bb764'
 kind: bug
-status: open
+status: fixed
 title: 'grep has no wall-clock budget: a search rooted at a parent of many repos ran 386 s, one at $HOME ran 135 s'
 tags:
 - cluster/unclassified
 opened: 2026-10-30
+closed: 2026-10-30
 ---
 
 # BUG: grep has no wall-clock budget: a search rooted at a parent of many repos ran 386 s, one at $HOME ran 135 s
@@ -32,7 +33,7 @@ Linux, release build, 2026-10-06 to 2026-10-20 calls.
 
 ## Root cause
 
-Unknown - under investigation. Not read this session: whether the walk honours `.gitignore` outside a git root, whether `max_results` stops the walk early when the match count is small, and whether any deadline exists.
+Confirmed 2026-10-30 by reading `src/tools/grep.rs` (`Grep::call`): the walk is `ignore::WalkBuilder` with `git_ignore(true)` and nothing that reads a clock. Lines mode stops only on the match cap (`collect_limit`) or the byte cap; files mode (`mode="files"`) has no early stop at all and reads every admitted file. A search with few matches over a huge tree therefore walks the whole tree. `require_git` defaults to true, so outside a git root `.gitignore` is not honoured and `node_modules`/build trees are walked in full.
 
 ## Evidence
 
@@ -44,11 +45,15 @@ None.
 
 ## Fix
 
-Candidate, not chosen: a wall-clock budget (for example 20 s) after which the call returns the matches found so far with a scope line saying the walk was cut and where, per `docs/adrs/2026-08-27-negative-results-name-their-scope.md`. A partial result must never read as a complete one.
+Shipped on branch `worktree-agent-ac59e41db7b0d1eb3` (a worktree off `experiments`), SHA `59d870c9d`, patch-id `902b9b617a5970f593b4138330fdaf5be0d302e6`. `src/tools/grep.rs`: new `WalkClock` polled once per walk entry in both the lines and the files loop; `time_budget_ms` input (default `DEFAULT_WALK_BUDGET_MS` = 20000). When it is spent the walk stops and the result carries a `walk_cut` string naming the budget, the files read, the entry being walked and the root, and saying a missing match proves nothing about the rest. `format_grep` renders it in the zero-match early return and below the header otherwise, so a partial result cannot read as a complete one.
+
+Follow-up `299c5e78b` (same branch): `DEFAULT_WALK_BUDGET_MS` carries `cap-class: RESULT_CAP grep.walk_budget`, a probe row in `src/tools/core/cap_probe.rs` (mutation `NotYet`: the emission was not deleted and the row observed red), and `TOOL_SURFACE_CHAR_BUDGET` ratcheted 57_607 to 57_688 (+81, the new schema property). Full `./scripts/gate.sh` green on the final tree: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0.
+
+Not done: the 20 s default is the candidate from this file, not derived from a measurement of the cost of a real in-project search (the usage sample's p99 was 6.5 s); a tree needing more passes `time_budget_ms`.
 
 ## Tests added
 
-None yet.
+`tools::grep::tests::a_spent_walk_budget_cuts_the_walk_and_names_it_in_both_modes` (watched fail first: result had no `walk_cut`; budget 0 is the deterministic stand-in for a slow tree) and `tools::grep::tests::an_ordinary_search_carries_no_walk_cut`. The 6-minute reproduction itself was not run.
 
 ## Workarounds
 
