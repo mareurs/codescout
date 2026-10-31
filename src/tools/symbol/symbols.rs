@@ -726,11 +726,23 @@ const SHORT_LANG_BUDGET: std::time::Duration = std::time::Duration::from_millis(
 /// call probes the server again.
 const LANG_TIMEOUT_MEMORY: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// How long a language whose server failed to START is left alone by the project-wide leg.
+///
+/// The LSP circuit-breaker opens only after 5 failures inside 60 s, so a start that fails
+/// every minute or so never trips it: kotlin and java (fixture-only on this repo) failed
+/// 10 and 74 times in a week, each failure costing a start attempt on every project-wide
+/// call. The tree-sitter pass covers the language's files meanwhile, so skipping the LSP
+/// leg loses only matches the tree-sitter pass could not name.
+// cap-class: NOT_A_CAP — a retry cooldown after a failed server start; the skipped language is still searched by the tree-sitter pass
+const LANG_START_FAILURE_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(600);
+
 /// Per (language, workspace root) memory of the last time `workspace/symbol` used up the
-/// FULL budget. Pure over an injected `now` so the policy is testable without a clock.
+/// FULL budget, and of the last time the server failed to start. Pure over an injected
+/// `now` so the policy is testable without a clock.
 #[derive(Default)]
 struct LspLegHealth {
     last_full_timeout: std::collections::HashMap<String, std::time::Instant>,
+    last_start_failure: std::collections::HashMap<String, std::time::Instant>,
 }
 
 impl LspLegHealth {
@@ -759,9 +771,26 @@ impl LspLegHealth {
         }
     }
 
-    /// An answer, even an empty one, proves the server is serving: forget the timeout.
+    /// An answer, even an empty one, proves the server is serving: forget the timeout and
+    /// any start failure.
     fn note_answer(&mut self, key: &str) {
         self.last_full_timeout.remove(key);
+        self.last_start_failure.remove(key);
+    }
+
+    /// The server for `key` failed to start. A failure inside the cooldown does not
+    /// refresh it, so the window is measured from the failure that opened it.
+    fn note_start_failure(&mut self, key: &str, now: std::time::Instant) {
+        if !self.in_start_cooldown(key, now) {
+            self.last_start_failure.insert(key.to_owned(), now);
+        }
+    }
+
+    /// True while `key` must not be started again by the project-wide leg.
+    fn in_start_cooldown(&self, key: &str, now: std::time::Instant) -> bool {
+        self.last_start_failure
+            .get(key)
+            .is_some_and(|at| now.saturating_duration_since(*at) < LANG_START_FAILURE_COOLDOWN)
     }
 }
 
@@ -859,11 +888,24 @@ async fn search_project_symbols(
         let lsp = ctx.lsp.clone();
         let root = root.to_path_buf();
         let pattern = pattern_lower.to_owned();
+        let key = leg_key(lang, &root);
+        // A server that failed to start recently is not started again by every
+        // project-wide call: the tree-sitter pass below covers its files either way.
+        if LSP_LEG_HEALTH
+            .lock()
+            .is_ok_and(|h| h.in_start_cooldown(&key, std::time::Instant::now()))
+        {
+            tracing::debug!(
+                language = lang,
+                "workspace/symbol skipped: the server failed to start recently; \
+                 this language falls back to tree-sitter"
+            );
+            continue;
+        }
         let mux_override = ctx
             .agent
             .lsp_mux_override(ctx.workspace_override.as_deref(), lang)
             .await;
-        let key = leg_key(lang, &root);
         // A server seen to burn the whole budget recently gets a short one: the
         // tree-sitter pass below covers its files either way.
         let budget = LSP_LEG_HEALTH
@@ -874,10 +916,14 @@ async fn search_project_symbols(
             // The mapping lives in `lang_outcome` so its three-into-two collapse is
             // testable; what remains HERE is wiring that only a live LSP reaches.
             let attempt = tokio::time::timeout(budget, async {
-                let client = lsp.get_or_start(lang, &root, mux_override).await?;
-                client.workspace_symbols(&pattern).await
+                match lsp.get_or_start(lang, &root, mux_override).await {
+                    Err(e) => (true, Err(e)),
+                    Ok(client) => (false, client.workspace_symbols(&pattern).await),
+                }
             })
             .await;
+            let start_failed = matches!(&attempt, Ok((true, _)));
+            let attempt = attempt.map(|(_, outcome)| outcome);
             if let Ok(mut health) = LSP_LEG_HEALTH.lock() {
                 match &attempt {
                     Err(_) => health.note_timeout(
@@ -886,8 +932,12 @@ async fn search_project_symbols(
                         std::time::Instant::now(),
                     ),
                     Ok(Ok(_)) => health.note_answer(&key),
-                    // A start failure or LSP error says nothing about how long this
-                    // server takes to answer; leave the memory as it was.
+                    // A start failure opens the start cooldown. An LSP error AFTER a
+                    // successful start says nothing about how long this server takes to
+                    // answer; leave the memory as it was.
+                    Ok(Err(_)) if start_failed => {
+                        health.note_start_failure(&key, std::time::Instant::now())
+                    }
                     Ok(Err(_)) => {}
                 }
             }
@@ -1824,7 +1874,10 @@ mod lang_outcome_tests {
 /// The adaptive per-language budget and the text prefilter of `search_project_symbols`.
 #[cfg(test)]
 mod project_search_cost_tests {
-    use super::{name_prefilter_needle, LspLegHealth, LANG_TIMEOUT_MEMORY, SHORT_LANG_BUDGET};
+    use super::{
+        name_prefilter_needle, LspLegHealth, LANG_START_FAILURE_COOLDOWN, LANG_TIMEOUT_MEMORY,
+        SHORT_LANG_BUDGET,
+    };
     use std::time::{Duration, Instant};
 
     const FULL: Duration = Duration::from_secs(8);
@@ -1878,6 +1931,49 @@ mod project_search_cost_tests {
         h.note_timeout("rust", true, t0);
         h.note_answer("rust");
         assert_eq!(h.budget("rust", t0, FULL), FULL);
+    }
+    #[test]
+    fn a_language_that_never_failed_to_start_is_not_in_the_cooldown() {
+        let h = LspLegHealth::default();
+        assert!(!h.in_start_cooldown("kotlin", Instant::now()));
+    }
+
+    #[test]
+    fn a_start_failure_opens_a_cooldown_that_outlasts_the_sixty_second_breaker_window() {
+        let mut h = LspLegHealth::default();
+        let t0 = Instant::now();
+        h.note_start_failure("kotlin", t0);
+        // The breaker forgets a failure after 60 s; the cooldown must still hold there.
+        assert!(h.in_start_cooldown("kotlin", t0 + Duration::from_secs(90)));
+        let just_before = t0 + LANG_START_FAILURE_COOLDOWN - Duration::from_secs(1);
+        assert!(h.in_start_cooldown("kotlin", just_before));
+        assert!(!h.in_start_cooldown("kotlin", t0 + LANG_START_FAILURE_COOLDOWN));
+    }
+
+    #[test]
+    fn a_start_failure_inside_the_cooldown_does_not_extend_it() {
+        let mut h = LspLegHealth::default();
+        let t0 = Instant::now();
+        h.note_start_failure("kotlin", t0);
+        h.note_start_failure("kotlin", t0 + Duration::from_secs(400));
+        assert!(!h.in_start_cooldown("kotlin", t0 + LANG_START_FAILURE_COOLDOWN));
+    }
+
+    #[test]
+    fn the_cooldown_is_per_key() {
+        let mut h = LspLegHealth::default();
+        let t0 = Instant::now();
+        h.note_start_failure("kotlin", t0);
+        assert!(!h.in_start_cooldown("java", t0));
+    }
+
+    #[test]
+    fn an_answer_ends_the_start_cooldown() {
+        let mut h = LspLegHealth::default();
+        let t0 = Instant::now();
+        h.note_start_failure("kotlin", t0);
+        h.note_answer("kotlin");
+        assert!(!h.in_start_cooldown("kotlin", t0));
     }
 
     #[test]
