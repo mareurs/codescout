@@ -11,12 +11,19 @@ git-ignored prebuilt output and is kept). Containers run `--network none`, are n
 `sab-ml-ctl-*`, and are always removed. Any control or parser failure becomes a not-ok verdict.
 Stdlib only.
 """
+import argparse
 import base64
+import json
+import re
+import shutil
 import subprocess
+import sys
 import time
 from collections import Counter
+from pathlib import Path
 
 import multilang_grade as grade
+import multilang_records as records_mod
 import pilot
 
 CONTAINER_PREFIX = "sab-ml-ctl-"
@@ -128,3 +135,108 @@ def control(record, *, container, timeout=3600):
         pilot.docker("rm", "-f", container, check=False)
     evidence["wall_seconds"] = round(time.monotonic() - started, 1)
     return evidence, base_log, gold_log
+
+
+MIN_FREE_GB = 40
+SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
+
+
+def free_gb(path="/"):
+    return shutil.disk_usage(path).free / 1e9
+
+
+def ensure_image(image):
+    """True when this call pulled `image`; False when it was already present (nothing is pulled).
+    ControlError when free space is below MIN_FREE_GB before a pull, or the pull fails."""
+    if pilot.docker("image", "inspect", image, check=False, timeout=120).returncode == 0:
+        return False
+    free = free_gb()
+    if free < MIN_FREE_GB:
+        raise ControlError(f"refusing to pull {image}: {free:.0f} GB free, need {MIN_FREE_GB}")
+    try:
+        pilot.docker("pull", image, timeout=3600)
+    except RuntimeError as e:
+        raise ControlError(f"pull failed: {str(e)[:300]}") from None
+    except subprocess.TimeoutExpired:
+        raise ControlError(f"pull of {image} timed out") from None
+    return True
+
+
+def _safe_id(instance_id):
+    if not isinstance(instance_id, str) or not SAFE_ID.match(instance_id) or len(instance_id) > 120:
+        raise ControlError(f"unsafe instance id for a path or container name: {instance_id!r}")
+    return instance_id
+
+
+def run_one(record, out_dir, *, timeout=3600):
+    """Control one record; write control.json (last), base.log, gold.log under `<out_dir>/<id>`.
+    An image this call pulled is removed afterwards (no force); a present one is left alone."""
+    task_id = _safe_id(record["instance_id"])
+    pulled = ensure_image(record["docker_image"])
+    try:
+        evidence, base_log, gold_log = control(record, container=f"{CONTAINER_PREFIX}{task_id}",
+                                               timeout=timeout)
+    finally:
+        if pulled:
+            pilot.docker("rmi", record["docker_image"], check=False, timeout=600)
+    d = Path(out_dir) / task_id
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "base.log").write_text(base_log)
+    (d / "gold.log").write_text(gold_log)
+    (d / "control.json").write_text(json.dumps(evidence, indent=2, allow_nan=False) + "\n")
+    return evidence
+
+
+def _refusal(cand, rule):
+    """Why `eligible(ignore_size=True)` said no (the check itself stays in multilang_records)."""
+    missing = [f for f in rule["require"] if f not in cand["nonempty"]]
+    return f"required fields empty: {missing}" if missing else \
+        f"created {cand['created_at']} is before the cutoff {rule['created_at_min']}"
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--records", required=True)
+    ap.add_argument("--rule", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--ids", nargs="+")
+    ap.add_argument("--limit", type=int)
+    args = ap.parse_args(argv)
+    records = records_mod.load_records(args.records)
+    rule = records_mod.load_rule(args.rule)
+    by_id = {r["instance_id"]: r for r in records}
+    if args.ids:
+        chosen = []
+        for i in dict.fromkeys(args.ids):
+            if i not in by_id:
+                print(f"REFUSED {i} not in the records file")
+                continue
+            cand = records_mod.candidate(by_id[i])
+            if records_mod.eligible(cand, rule, ignore_size=True):
+                chosen.append(i)
+            else:
+                print(f"REFUSED {i} {_refusal(cand, rule)}")
+    else:
+        chosen = records_mod.select_eligible(records, rule)
+    if args.limit is not None:
+        chosen = chosen[:args.limit]
+    out_dir, ran, accepted = Path(args.out), 0, 0
+    for i in chosen:
+        if (out_dir / i / "control.json").exists():
+            print(f"{i} SKIP control.json exists")
+            continue
+        try:
+            ev = run_one(by_id[i], out_dir)
+        except ControlError as e:
+            print(f"SKIPPED {i} {e}")
+            continue
+        verdict = ev["verdict"]
+        ran += 1
+        accepted += bool(verdict["ok"])
+        print(f"{i} {'ok' if verdict['ok'] else 'REJECT'} {'; '.join(verdict.get('reasons', []))}".rstrip())
+    print(f"ran {ran}, ok {accepted}, rejected {ran - accepted}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

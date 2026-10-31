@@ -340,5 +340,199 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(fake.joined()[-1], "rm -f sab-ml-ctl-x")
 
 
+RULE = {"created_at_min": "2025-06-01", "require": ["patch"], "min_files": 99,
+        "min_added_lines": 99, "max_added_lines": 1000, "draw": {"salt": "s"}}
+
+
+def full_record(**kw):
+    r = record(**kw)
+    r.setdefault("repo", "o/r")
+    r.setdefault("created_at", "2026-01-01T00:00:00Z")
+    r["patch"] = kw.get("patch", "diff --git a/a.rs b/a.rs\n+x\n")
+    return r
+
+
+class DiskGuardTests(unittest.TestCase):
+    def patch_free(self, gb):
+        old = c.free_gb
+        c.free_gb = lambda path="/": gb
+        self.addCleanup(setattr, c, "free_gb", old)
+
+    def test_ensure_image_refuses_pull_below_min_free(self):
+        fake = FakeDocker(lambda a, d: out(rc=1) if "inspect" in a else None)
+        patch_docker(self, fake)
+        self.patch_free(c.MIN_FREE_GB - 1)
+        with self.assertRaises(c.ControlError):
+            c.ensure_image("img:1")
+        self.assertFalse(any(x.startswith("pull") for x in fake.joined()))
+
+    def test_ensure_image_pulls_when_absent_and_space_ok(self):
+        fake = FakeDocker(lambda a, d: out(rc=1) if "inspect" in a else None)
+        patch_docker(self, fake)
+        self.patch_free(c.MIN_FREE_GB + 1)
+        self.assertTrue(c.ensure_image("img:1"))
+        self.assertIn("pull img:1", fake.joined())
+
+    def test_ensure_image_does_not_pull_or_remove_a_present_image(self):
+        fake = FakeDocker(lambda a, d: out(rc=0))
+        patch_docker(self, fake)
+        self.patch_free(0)  # even a full disk does not matter: nothing is pulled
+        self.assertFalse(c.ensure_image("img:1"))
+        self.assertFalse(any(x.startswith(("pull", "rmi")) for x in fake.joined()))
+
+    def test_ensure_image_pull_failure_is_control_error(self):
+        fake = FakeDocker(lambda a, d: out(rc=1))
+        patch_docker(self, fake)
+        self.patch_free(c.MIN_FREE_GB + 1)
+        with self.assertRaises(c.ControlError):
+            c.ensure_image("img:1")
+
+
+class RunOneTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.out = Path(tmp.name)
+
+    def stub(self, pulled):
+        old = c.ensure_image
+        c.ensure_image = lambda image: pulled
+        self.addCleanup(setattr, c, "ensure_image", old)
+
+    def test_run_one_removes_only_an_image_it_pulled(self):
+        for pulled in (True, False):
+            fake = FakeDocker(happy_handler({}))
+            patch_docker(self, fake)
+            self.stub(pulled)
+            ev = c.run_one(record(), self.out / str(pulled))
+            self.assertTrue(ev["verdict"]["ok"])
+            self.assertEqual("rmi img:1" in fake.joined(), pulled)
+            d = self.out / str(pulled) / "o__r-1"
+            for name in ("control.json", "base.log", "gold.log"):
+                self.assertTrue((d / name).exists(), name)
+            if pulled:
+                self.assertEqual(fake.joined()[-1], "rmi img:1")  # no -f
+
+    def test_run_one_removes_pulled_image_when_control_raises(self):
+        inner = happy_handler({})
+        fake = FakeDocker(lambda a, d: KeyboardInterrupt() if "reset --hard" in " ".join(a)
+                          else inner(a, d))
+        patch_docker(self, fake)
+        self.stub(True)
+        with self.assertRaises(KeyboardInterrupt):
+            c.run_one(record(), self.out)
+        self.assertEqual(fake.joined()[-1], "rmi img:1")
+
+    def test_run_one_writes_json_for_early_error_without_base_gold_keys(self):
+        import json
+        fake = FakeDocker(lambda a, d: RuntimeError("no such image") if a[0] == "run" else None)
+        patch_docker(self, fake)
+        self.stub(False)
+        ev = c.run_one(record(), self.out)
+        self.assertFalse(ev["verdict"]["ok"])
+        saved = json.loads((self.out / "o__r-1" / "control.json").read_text())
+        self.assertFalse(saved["verdict"]["ok"])
+
+    def test_run_one_refuses_unsafe_id(self):
+        patch_docker(self, FakeDocker())
+        self.stub(False)
+        with self.assertRaises(c.ControlError):
+            c.run_one(record(instance_id="../evil"), self.out)
+
+
+class MainTests(unittest.TestCase):
+    def setUp(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        self.rule = self.dir / "rule.json"
+        self.rule.write_text(json.dumps(RULE))
+        self.recs = self.dir / "r.jsonl"
+        self.out = self.dir / "out"
+        self.ran = []
+        old = c.run_one
+
+        def fake_run_one(rec, out_dir, *, timeout=3600):
+            self.ran.append(rec["instance_id"])
+            return {"id": rec["instance_id"], "verdict": {"ok": False, "reasons": ["why"]}}
+        c.run_one = fake_run_one
+        self.addCleanup(setattr, c, "run_one", old)
+
+    def write(self, *recs):
+        import json
+        self.recs.write_text("".join(json.dumps(r) + "\n" for r in recs))
+
+    def main(self, *extra):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = c.main(["--records", str(self.recs), "--rule", str(self.rule),
+                         "--out", str(self.out), *extra])
+        return rc, buf.getvalue()
+
+    def test_main_skips_ids_with_existing_control_json(self):
+        self.write(full_record(instance_id="a__a-1"), full_record(instance_id="b__b-2"))
+        (self.out / "a__a-1").mkdir(parents=True)
+        (self.out / "a__a-1" / "control.json").write_text("{}")
+        rc, text = self.main("--ids", "a__a-1", "b__b-2")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.ran, ["b__b-2"])
+        self.assertIn("b__b-2 REJECT why", text)
+
+    def test_main_ids_overrides_selection_order_but_not_the_cutoff(self):
+        self.write(full_record(instance_id="a__a-1"),
+                   full_record(instance_id="old__o-1", created_at="2024-01-01T00:00:00Z"),
+                   full_record(instance_id="c__c-3"))
+        rc, text = self.main("--ids", "c__c-3", "old__o-1", "a__a-1", "nope__n-0")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.ran, ["c__c-3", "a__a-1"])  # given order; size filter bypassed
+        self.assertIn("REFUSED old__o-1", text)
+        self.assertIn("REFUSED nope__n-0", text)
+
+    def test_main_without_ids_uses_select_eligible_and_limit(self):
+        import json
+        self.rule.write_text(json.dumps(dict(RULE, min_files=1)))
+        self.write(full_record(instance_id="a__a-1"), full_record(instance_id="b__b-2"))
+        rc, _ = self.main("--limit", "1")
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(self.ran), 1)
+
+    def test_main_without_ids_applies_the_size_filter(self):
+        self.write(full_record(instance_id="a__a-1"))  # RULE demands 99 files or lines
+        self.main()
+        self.assertEqual(self.ran, [])
+
+    def test_main_skipped_pull_does_not_abort_the_run(self):
+        self.write(full_record(instance_id="a__a-1"), full_record(instance_id="b__b-2"))
+
+        def boom(rec, out_dir, *, timeout=3600):
+            self.ran.append(rec["instance_id"])
+            if rec["instance_id"] == "a__a-1":
+                raise c.ControlError("disk low")
+            return {"id": rec["instance_id"], "verdict": {"ok": True, "reasons": []}}
+        c.run_one = boom
+        rc, text = self.main("--ids", "a__a-1", "b__b-2")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.ran, ["a__a-1", "b__b-2"])
+        self.assertIn("SKIPPED a__a-1 disk low", text)
+        self.assertIn("b__b-2 ok", text)
+
+    def test_main_never_imports_run_or_arms(self):
+        import os
+        import subprocess as sp
+        import sys
+        code = ("import sys, multilang_control; "
+                "print([m for m in ('run','arms','registration') if m in sys.modules])")
+        res = sp.run([sys.executable, "-B", "-c", code], cwd=os.path.dirname(os.path.abspath(__file__)),
+                     capture_output=True, text=True)
+        self.assertEqual(res.stdout.strip(), "[]", res.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
