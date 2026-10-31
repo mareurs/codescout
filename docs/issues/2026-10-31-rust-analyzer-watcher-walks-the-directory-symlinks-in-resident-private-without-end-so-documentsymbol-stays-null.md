@@ -66,7 +66,7 @@ Established:
 - One thread made 1,000,195 `inotify_add_watch` calls in 87.7 s, about 11,400 per second, under `strace -f`. 1,000,191 of the paths were distinct. 999,428 were under `.codescout/resident-private`. The deepest path had 26 components.
 - The tree has 109 directory symlinks. 57 resolve into `matched-workflow-20261031`, 15 into `workflow-transfer-20261030`, 14 into `prechecked-repair-20261030` and 10 into each of `compile-mechanism-r2-20261029` and `compile-mechanism-20261029`. One resolves into the repo's `scripts`. I found no link whose target is an ancestor of the link. I did not test for indirect cycles.
 - H1 against H2 changes one thing, the symlinks in a scratch copy. The spin and the null answers disappear with them.
-- `files.excludeDirs` lowers RSS from about 5.4 GB to 756 MB, because rust-analyzer then does not load the 29,154 `.rs` files. It does not lower the watch walk. Runs B, G and D all excluded the directory and still walked it.
+- `files.excludeDirs` lowers RSS (run B measured about 5.4 GB to 756 MB; the controlled pair under Resume measured 10.2 GB to 3.9 GB, so the run B figure does not hold), because rust-analyzer then does not load the 29,154 `.rs` files. It does not lower the watch walk. Runs B, G and D all excluded the directory and still walked it.
 
 Not established:
 
@@ -99,7 +99,7 @@ The directory is gitignored, so no commit carries the removal. Experiment sessio
 
 Not done:
 
-1. DONE 2026-10-31 (product, memory only): `initialization_options` in `src/lsp/init_options.rs` now takes the local-evidence directories that exist under the root. `local_evidence_dirs` returns `.codescout/resident-private` only when it exists, so other projects still send no options. In run B the exclusion cut RSS from about 5.4 GB to 756 MB. It does not stop the watcher walk or the null answers. The live server loads the new list only after a restart, and no live RSS check was made after the change.
+1. DONE 2026-10-31 (product, memory only): `initialization_options` in `src/lsp/init_options.rs` now takes the local-evidence directories that exist under the root. `local_evidence_dirs` returns `.codescout/resident-private` only when it exists, so other projects still send no options. The exclusion lowers RSS; see the controlled pair under Resume (10.2 GB to 3.9 GB). Run B's 5.4 GB to 756 MB was not reproduced. It does not stop the watcher walk or the null answers. The live mux was restarted on the new build on 2026-10-31 and sends the option (captured).
 2. DONE 2026-10-31 (product, diagnosis only): `src/lsp/watch_fanout.rs` walks the workspace root without `.gitignore` and without following links. It stops at 50,000 entries. When it finds 20 or more directory symlinks, the null-exhausted `documentSymbol` error in `src/lsp/client.rs` adds one sentence to its hint: the count, the first link, and that rust-analyzer has been seen to walk such links without end. It runs on that failure path only, so healthy calls pay nothing. It does not fix the spin. A scan that finds nothing, or stops at its limit with nothing, adds no sentence and proves no absence.
 3. Product: avoid rust-analyzer's server-side watcher. This needs a design decision and is untested.
 
@@ -113,6 +113,14 @@ Six tests in `src/lsp/init_options.rs` cover the exclusion list: the directory a
 - Deleting the directory symlinks ended the spin in a scratch copy (H2). It was applied to the real tree on 2026-10-31. See Fix.
 
 ## Resume
+
+- Check, 2026-10-31, after the rebuild and a kill of the old mux (the mux outlives `/mcp`, so a reconnect alone left the old rust-analyzer running):
+  - Captured the `initialize` request of a fresh mux on the real root. It carries `"initializationOptions":{"files":{"excludeDirs":[".codescout/resident-private",".worktrees"]}}`.
+  - Controlled pair, two rust-analyzer processes started directly at the same time on the real root, same binary: no option settled at 10.2 GB RSS after 180 s; with the option it settled at 3.9 GB after 60 s. Both reported `Loaded 463 packages`.
+  - The live server's rust-analyzer held 5.0 GB at 253 s, between the two. Not explained.
+  - 10 s CPU sample of the live process: `LspServer` about 9.5% of a core, no `notify-rs` thread in the top five. Sampler joined threads by name, so the split is approximate. The watcher spin was not seen.
+  - `resident-private` held 146 symlinks and 29,157 real `.rs` files at that time.
+  - Not checked: that rust-analyzer's status text names the exclusion (only its first 25 lines were saved); whether the spin returns under load.
 
 State on 2026-10-31: mitigated. The 109 links are gone from the real tree, and V1 shows a finite null window and a quiet watcher.
 
