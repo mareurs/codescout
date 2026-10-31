@@ -12,7 +12,7 @@ opened: 2026-10-31
 related:
 - docs/issues/2026-10-29-semantic-search-project-id-takes-the-directory-name-not-the-declared-member-id.md
 severity: low
-unverified: 'The CLI wiring in src/main.rs was not run: no test and no live run of codescout index --project <member>. The dashboard display for a member root is unchanged and unchecked. A member of a parent with no workspace.toml keeps the directory-name key by design. The function, its tests, and the clippy, lean, default, Python and format lanes of the 2026-10-31 gate are verified.'
+unverified: migrate-memories was not run live (it calls the same helper at a second site); the Qdrant backend was not run (the live check forced sqlite-vec); the dashboard display for a member root is unchanged and unchecked; a member of a parent with no workspace.toml keeps the directory-name key by design. The function, its tests, the live CLI index check on a replica, and the clippy, lean, default, Python and format lanes of the 2026-10-31 gate are verified.
 ---
 
 # BUG: the CLI index and migrate-memories key a declared member by its directory name, the server keys it by the declared id
@@ -39,6 +39,11 @@ Branch `experiments`, tree at `45ef054e4`. Not run against a real store or a rea
 Read 2026-10-31. `Commands::Index` (src/main.rs) and `Commands::MigrateMemories` call `Agent::new(Some(root))` and then `project_id()`. `Agent::new` opens `root` as the workspace root, so it never reads the parent's `workspace.toml`, which is where the declared id lives. The declared id is applied only in `activate_within_workspace`. Not read: whether `Agent::new` could find a parent `workspace.toml` upward, and whether any other caller opens a member by directory.
 
 ## Evidence
+
+Live check, 2026-10-31, on a replica of the Kodi shape (parent repo, a nested git repo `script.module.thecrew` declared as `thecrew-module`). The store was forced to sqlite-vec (`CODESCOUT_VECTOR_BACKEND`), so it lived in the replica. Script `kodi-cli.py` in the session scratchpad: `codescout index --project <member dir>`, then a server on the parent, `workspace(activate, path="thecrew-module")`, then `index status` and `semantic_search`, without building.
+- Control, old release binary built 12:55, before the fix commit at 13:31: the CLI added 1 chunk. `index status` for `thecrew-module` said `No chunks indexed`. A search by `thecrew-module` returned 0 results. A search by `script.module.thecrew` returned `addon.py`.
+- Fixed, debug binary built 13:34 from a tree with no uncommitted `src` changes: the CLI added 1 chunk. `index status` showed `file_count: 1`, `chunk_count: 1`. A search by `thecrew-module` returned `addon.py`. A search by `script.module.thecrew` returned 0 results and a hint naming `thecrew-module`.
+- A behavior change: a CLI index built before the fix for a declared member sits under the directory name and needs a rebuild.
 The probe result above. The sibling issue, `docs/issues/2026-10-29-semantic-search-project-id-takes-the-directory-name-not-the-declared-member-id.md`, fixed the server path only.
 
 ## Hypotheses tried
@@ -69,7 +74,7 @@ Build the member's index through the MCP `index(action="build")` after `workspac
 
 ## Resume
 
-1. Run `codescout index --project <member>` for a declared member against a real store and embedder, then `semantic_search(project_id=<declared id>)`. Not done.
+1. Live check of `codescout index --project <member>`: done 2026-10-31, see Evidence. Not run: `migrate-memories` (same helper, a second call site), the Qdrant backend, and a member of a parent with no `workspace.toml`.
 2. Decide the dashboard display (see Also observed).
 3. Then archive with `doc(action="move", ...)`.
 
