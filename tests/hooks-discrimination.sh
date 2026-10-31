@@ -931,6 +931,29 @@ eq "conflicting_identity_records_dash: owner" "$(owner_of f.txt)" "-"
 eq "conflicting_identity_records_dash: route" "$(route_of f.txt)" "id-unset"
 rm -rf "$T"
 
+# Identity resolution runs python3 (~150 ms). Only a STAGING op reads it, so an index refresh must not
+# pay for it. A fake python3 first on PATH counts invocations and forwards to the real one.
+PYLOG="$(mktemp "${TMPDIR:-/tmp}/pylog-XXXXXX")"
+FAKEBIN="$(mktemp -d "${TMPDIR:-/tmp}/fakebin-XXXXXX")"
+REALPY=""  # a real interpreter, not a pyenv shim (a shim re-enters PATH and so would call the fake again)
+for _p in /usr/bin/python3 /usr/local/bin/python3; do [ -x "$_p" ] && { REALPY="$_p"; break; }; done
+printf '#!/bin/sh\necho call >> "%s"\nexec "%s" "$@"\n' "$PYLOG" "$REALPY" > "$FAKEBIN/python3"
+chmod +x "$FAKEBIN/python3"
+new_repo; mkdb "$DB"
+echo base > f.txt; git add f.txt; git commit -qm base
+echo new > g.txt
+CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" git add -- g.txt
+: > "$PYLOG"; rm -f .git/session-stage-log
+# `reset` is not a staging verb (staging_op: add rm mv restore apply update-index stash), yet it writes the index.
+PATH="$FAKEBIN:$PATH" CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" git reset -q -- g.txt
+eq "non_staging_index_write_does_not_resolve_identity" "$(wc -l < "$PYLOG" | tr -d ' ')" "0"
+[ -f .git/session-stage-log ] && ok "non_staging_index_write: the hook did fire" || no "non_staging_index_write: the hook did fire" "no stage log written"
+: > "$PYLOG"
+PATH="$FAKEBIN:$PATH" CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" git add -- g.txt
+[ "$(wc -l < "$PYLOG" | tr -d ' ')" -ge 1 ] && ok "staging_op_resolves_identity" || no "staging_op_resolves_identity" "python3 never ran"
+eq "staging_op_resolves_identity: owner" "$(owner_of g.txt)" "$A"
+rm -rf "$T" "$FAKEBIN" "$PYLOG"
+
 # The foreign-index guard reads that owner column. It resolves `me` through publish_identity and
 # compares with publish_principal_equal, so a Codex session classifies as a Claude one does, and a
 # row written before the upgrade (a BARE owner) still matches the same id under Codex.

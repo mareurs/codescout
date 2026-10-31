@@ -114,14 +114,23 @@ log="$git_dir/session-stage-log"
 tmp="$log.$$"
 _identity_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 # A hook must never fail the user's git command because identity could not be resolved: a missing
-# helper, or publish_identity exiting non-zero (conflicting Claude/Codex variables), reads as `-`.
-me=""
-if [ -n "$_identity_dir" ] && . "$_identity_dir/publish-identity.sh" 2>/dev/null; then
-    me="$(publish_identity 2>/dev/null)" || me=""
-else
-    publish_principal_equal() { return 1; }
-fi
-[ -n "$me" ] || me="-"
+# helper, a missing python3, an invalid session id, or publish_identity exiting non-zero
+# (conflicting Claude/Codex variables) all read as owner `-`.
+#
+# Identity is read ONLY on the staging path (`me` feeds `claimant` and `foreign_writer`), and
+# resolving it costs a python3 start (~150 ms), so it is resolved lazily, once, by `resolve_me`
+# below -- an index refresh that stages nothing never pays for it.
+# Default stub: replaced by the helper's real definition when it sources cleanly.
+publish_principal_equal() { return 1; }
+me="-"
+resolve_me() {
+    local _m=""
+    if [ -n "$_identity_dir" ] && . "$_identity_dir/publish-identity.sh" 2>/dev/null; then
+        _m="$(publish_identity 2>/dev/null)" || _m=""
+    fi
+    [ -n "$_m" ] && me="$_m"
+    return 0
+}
 # Retention bound. Tracking only staged pairs is what used to keep this file small, so
 # keeping unstaged rows removes that limit and this cap is what replaces it. Overridable
 # so the suite can reach the bound -- a cap no test can reach is a cap no test asserts.
@@ -594,6 +603,7 @@ foreign_writer() {
 }
 
 if staging_op; then
+    resolve_me
     claimant="$me"
     _NAMED="$(argv_paths)"
     # `-` here means the id was absent, which is route 1 and NOT the blanket form.
