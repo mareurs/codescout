@@ -119,7 +119,9 @@ HOOK
     echo "$p"
 }
 
-as() { local sid="$1"; shift; CLAUDE_CODE_SESSION_ID="$sid" "$@"; }
+as() { local sid="$1"; shift; env -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE CLAUDE_CODE_SESSION_ID="$sid" "$@"; }
+# A Codex-only caller: no Claude variable, CODEX_SESSION_ID set.
+asx() { local sid="$1"; shift; env -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE CODEX_SESSION_ID="$sid" "$@"; }
 
 # The entangled state, built the way two sessions actually reach it:
 #   A files a bug in class demo-a and names it on IC-1's Members line, staging both;
@@ -219,6 +221,37 @@ has "F3 says why" "$out" "nothing staged is yours"
 # ------------------------------------------------------------ F5: no session id
 out=$(env -u CLAUDE_CODE_SESSION_ID bash scripts/commit-mine.sh -m x 2>&1); rc=$?
 eq "F5 no session id -> exit 2" "$rc" "2"
+out=$(env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE bash scripts/commit-mine.sh -m x 2>&1); rc=$?
+eq "F5 no identity at all -> exit 2" "$rc" "2"
+has "F5 message names CLAUDE_CODE_SESSION_ID" "$out" "CLAUDE_CODE_SESSION_ID"
+has "F5 message names CODEX_SESSION_ID" "$out" "CODEX_SESSION_ID"
+hasnt "F5 message does not send the caller to plain git commit" "$out" "plain \`git commit\`"
+
+# ------------------------------------------------------------ F5c: Codex-only caller
+cd "$(new_repo)" || exit 1
+CX=cx-own-1; CP=peer-claude-1
+echo mine > own.txt
+asx "$CX" git add -- own.txt
+echo theirs > peer.txt
+as "$CP" git add -- peer.txt
+h0=$(head_of)
+out=$(asx "$CX" bash scripts/commit-mine.sh -m codex 2>&1); rc=$?
+eq "F5c codex_only_commits_own_and_leaves_peer exits 0" "$rc" "0"
+[ "$rc" -eq 0 ] || printf '  output: %s\n' "$out"
+eq "F5c the commit carries only own.txt" "$(git show --name-only --format= HEAD)" "own.txt"
+eq "F5c the peer's path is still staged" "$(git diff --cached --name-only)" "peer.txt"
+
+# ------------------------------------------------------------ F5d: conflicting identity
+echo more > own2.txt
+asx "$CX" git add -- own2.txt
+h0=$(head_of)
+out=$(env CLAUDE_CODE_SESSION_ID=claude-one CODEX_SESSION_ID=cx-two bash scripts/commit-mine.sh -m x 2>&1); rc=$?
+eq "F5d conflicting_identity_exits_2_with_reason" "$rc" "2"
+has "F5d reason is the resolver's own" "$out" "conflicting context"
+eq "F5d nothing is committed" "$(head_of)" "$h0"
+out=$(env -u CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID='bad id!' bash scripts/commit-mine.sh -m x 2>&1); rc=$?
+eq "F5d invalid id -> exit 2" "$rc" "2"
+has "F5d invalid reason shown" "$out" "invalid session id"
 
 # ------------------------------------------------------------ F7: a pathspec defeats the helper
 echo mine > a.txt

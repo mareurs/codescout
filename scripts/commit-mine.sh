@@ -35,13 +35,25 @@
 # inside one entry would need hunk-level ownership, which nothing records.
 #
 # Exit: 0 committed | 1 nothing of yours, a split rename, or the commit was refused
-#       2 usage (no session id, or an argument that re-selects paths) | 3 cannot classify
+#       2 usage (no or conflicting/invalid session identity, missing identity helper, or an
+#         argument that re-selects paths) | 3 cannot classify
 set -uo pipefail
 
-me="${CLAUDE_CODE_SESSION_ID:-}"
+_identity_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+# Unlike a git hook, this is a user-run script: a missing helper is a clear refusal, not a silent
+# fall back to "no identity".
+if [ -z "$_identity_dir" ] || ! . "$_identity_dir/publish-identity.sh" 2>/dev/null; then
+    echo "commit-mine: cannot load scripts/publish-identity.sh (looked next to this script), so the" >&2
+    echo "  caller's session identity cannot be resolved." >&2
+    exit 2
+fi
+# publish_identity prints the principal (bare id for Claude, codex:<id> for Codex), nothing when
+# no identity is set, and exits 2 with its own reason on stderr for a conflict or invalid id.
+me="$(publish_identity)" || exit 2
 if [ -z "$me" ]; then
-    echo "commit-mine: no CLAUDE_CODE_SESSION_ID. Outside a Claude session there is no" >&2
-    echo "  per-session ownership to split by — use plain \`git commit\`." >&2
+    echo "commit-mine: no session identity. Set CLAUDE_CODE_SESSION_ID (Claude) or" >&2
+    echo "  CODEX_SESSION_ID (Codex) so staged paths can be split by owner; this helper will" >&2
+    echo "  not guess whose paths are whose." >&2
     exit 2
 fi
 
