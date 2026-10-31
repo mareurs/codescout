@@ -442,10 +442,16 @@ fn start_backup_corruption(
         // IMMEDIATE publication. A clock_nanosleep here is SQLite's busy
         // wait for our reservation, after the initial backup has been sealed.
         let waiting_task = format!("/proc/self/task/{parent_tid}/syscall");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // The deadline is generous on purpose: it is spent only when the rebuild never reaches the
+        // wait. Under CPU contention the rebuild reaches it late (5 s was not enough at 16 to 1).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         let mut publication_waiting = false;
+        let mut seen = std::collections::BTreeMap::<String, u32>::new();
         while std::time::Instant::now() < deadline {
             let state = std::fs::read_to_string(&waiting_task)?;
+            *seen
+                .entry(state.split_whitespace().next().unwrap_or("").to_string())
+                .or_default() += 1;
             if state
                 .split_whitespace()
                 .next()
@@ -459,7 +465,7 @@ fn start_backup_corruption(
         }
         anyhow::ensure!(
             publication_waiting,
-            "public rebuild did not reach the coordinated writer wait"
+            "public rebuild did not reach the coordinated writer wait; saw {seen:?}"
         );
         match mutation {
             BackupMutation::ReplaceIdentical => {
