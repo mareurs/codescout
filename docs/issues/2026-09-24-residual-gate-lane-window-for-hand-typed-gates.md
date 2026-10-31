@@ -1,11 +1,12 @@
 ---
 id: b8f756b54ac934a5
 kind: bug
-status: open
+status: mitigated
 title: 'RESIDUAL: Close the cli_doc/lean-lane race for sessions that run the four gate commands by hand (per-session CARGO_TARGET_DIR is only applied by scripts/gate.sh)'
 tags:
 - cluster/transient-shared-state-lies-to-readers
-closed: null
+closed: 2026-10-31
+no_fix_commit: 'The mitigation is a decision and a measurement, not a code change: no companion-plugin hook was built (only this repository has scripts/with-slot.sh) and nothing in this repository changed. See ## Fix.'
 opened: 2026-09-24
 owner: marius
 related:
@@ -32,7 +33,19 @@ Remaining work split out of `docs/issues/2026-09-14-the-gate-ordering-guarantee-
 
 ## Fix
 
-Re-checked 2026-10-30 in this worktree, not fixed. The `unverified` window is real for any session that types `cargo test` by hand: `scripts/gate.sh` and `scripts/with-slot.sh` lease a slot (`CARGO_TARGET_DIR`), a bare `cargo test` uses the shared `target/`. `.cargo/config.toml` sets no `target-dir`, and a repo-level config cannot hand out a per-run lease, so no code in this repository can close it for hand-typed gates. `tests/cli_doc.rs::pinned_binary` hardlinks the binary at first use, which narrows the window to the interval between a peer's lean build and this suite's first use, but does not remove it. What would close it lives outside this repo: a hook (companion plugin, `../claude-plugins`) that refuses or rewrites a bare `cargo test` / `cargo clippy` run in a checkout without `CARGO_TARGET_DIR`, or the gate sentence in CLAUDE.md staying the only instruction. Needs an operator decision on that policy; no change made.
+Mitigated 2026-10-31. Nothing in this repository changes, and no companion-plugin hook was built.
+
+**Why no hook.** The only hook that could act is one that advises or refuses a bare `cargo test` in `../claude-plugins`. Its gate would be the file `scripts/with-slot.sh`, and only this repository has that file: a check of `scripts/with-slot.sh` and `scripts/gate.sh` in `~/work/*/` and `~/work/*/*/` (two directory levels) found them only here. A plugin hook for one repository would carry that repository's logic into every project that loads the plugin. The plugin's own history argues against both forms: a deny hook on `run_command` was downgraded to warn-only because it was high-friction (`il3-deny-hook.sh`), and the warn hook that replaced it was deleted because it fired on legal commands (`claude-plugins:a989d73`).
+
+**Measured 2026-10-31** (`.codescout/usage.db`, `run_command` rows, 2026-10-01 to 2026-10-31):
+
+- 3,941 calls ran through `scripts/with-slot.sh` or `scripts/gate.sh`.
+- 22 more set `CARGO_TARGET_DIR=` themselves.
+- 16 calls started a bare `cargo test`, `clippy`, `build` or `check`. Seven were `cargo build --release`, which writes `target/release`. Four used `--manifest-path`. Five ran against the shared `target/`: three `cargo test` calls (2026-10-17, 2026-10-21, 2026-10-28) and two `cargo clippy` calls (2026-10-18, 2026-10-29).
+
+So hand-typed gate commands are about 0.1% of the cargo traffic. The window in `target/debug/codescout` is still open for those five, and the race is not closed. I did not check how many of the five overlapped a peer's gate run, and I did not check which of `clippy`, `build` and `test` replaces the shared binary.
+
+**What a fix would need.** A per-run lease of `target/`, which a repo-level `.cargo/config.toml` cannot hand out, or a hook in a project-aware layer. Revisit if a second repository adopts per-run target leases, or if the count of bare commands grows.
 
 ## References
 
