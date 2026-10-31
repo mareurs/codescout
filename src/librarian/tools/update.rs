@@ -1100,7 +1100,7 @@ mod tests {
     /// same bad value could still arrive through `update`. The refusal must come before the
     /// write: the file stays byte-identical.
     ///
-    /// See `docs/issues/2026-10-31-doc-update-accepts-a-malformed-opened-on-a-bug-so-the-frontmatter-gate-can-fail-in-another-session.md`.
+    /// See `docs/issues/archive/2026-10-31-doc-update-accepts-a-malformed-opened-on-a-bug-so-the-frontmatter-gate-can-fail-in-another-session.md`.
     #[tokio::test]
     async fn a_malformed_opened_on_a_bug_is_refused_by_update_and_leaves_the_file_unchanged() {
         let tmp = TempDir::new().unwrap();
