@@ -36,13 +36,20 @@ publish_principal_root() {
 
 # 0 iff both are non-empty, neither is "-", and their roots are equal.
 # "codex:U" vs "claude-code:U" compare equal: a documented trade-off (same session id).
+# The strip below is deliberately INLINE and repeats the one in publish_principal_root above (the three
+# sites: root, and the `a` and `b` lines here): a function that must be called as `$(...)` forks a
+# subshell, and this runs per comparison on hook paths, so _equal cannot call _root. Keep all three in
+# step: ONE leading `codex:` or `claude-code:`, nothing more.
 publish_principal_equal() {
     local a="${1:-}" b="${2:-}"
     case "$a" in '' | -) return 1 ;; esac
     case "$b" in '' | -) return 1 ;; esac
     case "$a" in codex:*) a="${a#codex:}" ;; claude-code:*) a="${a#claude-code:}" ;; esac
     case "$b" in codex:*) b="${b#codex:}" ;; claude-code:*) b="${b#claude-code:}" ;; esac
-    [ -n "$a" ] && [ -n "$b" ] && [ "$a" = "$b" ]
+    # A qualified sentinel ("codex:-", "codex:") is a sentinel too, so test the ROOTS.
+    case "$a" in '' | -) return 1 ;; esac
+    case "$b" in '' | -) return 1 ;; esac
+    [ "$a" = "$b" ]
 }
 
 publish_hold_token() {

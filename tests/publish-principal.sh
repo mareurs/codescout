@@ -38,6 +38,17 @@ eq "dash_never_equal (dash vs id)"           "$(same - "$U")" 1
 eq "empty_never_equal (empty vs empty)"      "$(same "" "")" 1
 eq "empty_never_equal (empty vs id)"         "$(same "" "$U")" 1
 eq "codex_and_claude_qualified_same_id_equal (documented trade-off)" "$(same "codex:$U" "claude-code:$U")" 0
+eq "sentinel_in_second_position (id vs dash)"  "$(same "$U" -)" 1
+eq "sentinel_in_second_position (id vs empty)" "$(same "$U" "")" 1
+eq "unknown_prefix_is_not_stripped"            "$(same "foo:$U" "$U")" 1
+eq "double_prefix_strips_only_one"             "$(same "codex:codex:$U" "$U")" 1
+eq "double_prefix_strips_only_one (mixed)"     "$(same "codex:claude-code:$U" "$U")" 1
+eq "qualified_dash_never_equal (codex:- twice)" "$(same "codex:-" "codex:-")" 1
+eq "qualified_dash_never_equal (claude-code:- vs dash)" "$(same "claude-code:-" -)" 1
+eq "qualified_dash_never_equal (dash vs codex:-)" "$(same - "codex:-")" 1
+eq "qualified_empty_never_equal (codex: twice)" "$(same "codex:" "codex:")" 1
+eq "qualified_empty_never_equal (codex: vs claude-code:)" "$(same "codex:" "claude-code:")" 1
+eq "qualified_dash_second_position (id vs codex:-)" "$(same "$U" "codex:-")" 1
 
 echo "== publish_principal_root"
 eq "root strips codex:"       "$(publish_principal_root "codex:$U")" "$U"
