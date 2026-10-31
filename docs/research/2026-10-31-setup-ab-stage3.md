@@ -71,7 +71,7 @@ Every `cs` and `full` run called codescout at least once. The codescout arms rea
 - The frozen CLI is 2.1.309 (interactive use was 2.1.312). `--verbose` may inflate cost. Default effort was `medium`.
 - The reranker had no listener. The LD_PRELOAD and exec-only caveats apply. Rust-analyzer OOM risk exists only in `cs` and `full`.
 - Dev-task outcomes (Stage 1) are never scored or quoted.
-- Deferred minor findings are listed in the SDD ledger. One of them is that the runner's `docker network create --internal sab-ab-net` has no explicit subnet.
+- Deferred minor findings are kept in the archived SDD ledger `/home/marius/work/claude/setup-ab-data/sdd-ledger-2026-10-27.md` (not in git). One of them is that the runner's `docker network create --internal sab-ab-net` has no explicit subnet.
 
 ## Reading the result
 
