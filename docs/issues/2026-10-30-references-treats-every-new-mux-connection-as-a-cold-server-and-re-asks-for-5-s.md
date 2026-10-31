@@ -1,7 +1,7 @@
 ---
 id: '810ca8288c04661b'
 kind: bug
-status: open
+status: investigating
 title: references treats every new mux socket connection as a cold server and re-asks an empty answer for 5 s
 owners:
 - marius
@@ -70,6 +70,13 @@ None.
 ## Resume
 
 Re-verified 2026-10-30 (no code changed): `references` passes `includeDeclaration: true` (`LspClient::references`), so a resolved symbol never answers `[]`; only an unresolved position does, and only that costs the 5 s. `in_cold_start_window` does anchor a socket client at construction (`src/lsp/client.rs`, ~line 820), so the code claim holds, but its cost on a warm mux is not shown. Needs design before a fix: the mux exposes no server cold/warm state to a socket client, so the proposed fix needs a new mux message. Still to do: count `textDocument/references` re-ask runs ending at 5 s vs 1 s per client age across debug.log.
+
+
+## Re-checked 2026-10-31
+
+No code changed. The one measurement the Resume section lists, counting `textDocument/references` re-ask runs that end at 5 s against 1 s per client age, cannot be made from the logs on this machine now. `.codescout/debug.log` and its three rotated files (`.1`, `.2`, `.3`) all start on 2026-10-31 at 14:51 or later, so the 2026-10-30 span quoted under Symptom is gone. I grepped `debug.log` for `no locations at all` and `debug.log.2` for re-ask text; `debug.log.1` and `.3` (41 KB each) were not searched. The one match in `debug.log` is a tool response and the three in `debug.log.2` are tool output that quotes bug records, so no `references` re-ask run was found.
+
+What is left: a fresh capture on a cold mux, which needs a `post_compact` flush or a mux restart, a `references` call on a symbol with no callers, and `debug.log` kept for that run. The fix still needs the mux to tell a socket client whether the server is cold. That is a new mux message and an owner design choice. The rust-analyzer watcher bug `35bcf086deeb7cbe` made `documentSymbol` answer null for as long as the process ran on 2026-10-31. It is a separate cause of long first calls and may account for part of the logged 12 to 20 s.
 
 ## References
 
