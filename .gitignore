@@ -212,3 +212,8 @@ __pycache__/
 # bash instead of discarding output). Recurs across sessions; harmless to
 # delete, never intentional.
 /nul
+
+# Stray codescout project directory at the repo root. It holds one tool call's
+# runtime state (usage.db with its -wal/-shm files and the write lock), which
+# is per-process and never belongs in git.
+/x/
