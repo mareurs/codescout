@@ -58,7 +58,7 @@ The error string and the two counts under Reproduction.
 
 ## Fix
 
-FIXED for the reported shape (a `supersedes` link) in `b8b57586d` (branch `worktree-agent-a88be249b09c25d52`, not merged). Owner choice (a): `link::call` now calls `worktree::require_shadow_file` BEFORE `resolve_write_target` of either id, so a `supersedes` destination with no file at the shadow path is refused with "<main path> exists in the main checkout only: this worktree has no file at <shadow path>" and a hint to commit or copy it onto the worktree's branch. Nothing is forked, so the catalog is untouched. Options (b) and (c) were not taken.
+FIXED for the reported shape (a `supersedes` link) in `b8b57586d`, on `experiments` (the branch it was written on is deleted). Owner choice (a): `link::call` now calls `worktree::require_shadow_file` BEFORE `resolve_write_target` of either id, so a `supersedes` destination with no file at the shadow path is refused with "<main path> exists in the main checkout only: this worktree has no file at <shadow path>" and a hint to commit or copy it onto the worktree's branch. Nothing is forked, so the catalog is untouched. Options (b) and (c) were not taken.
 
 Not covered: the other overlay writers that edit a file (`update`, `append_entry`, `augment`, `update_entry`) were NOT checked for the same leftover rows; they call `resolve_write_target` directly and the new check is not wired into them.
 
