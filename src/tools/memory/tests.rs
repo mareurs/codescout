@@ -114,7 +114,7 @@ impl crate::retrieval::embedder::DenseEmbedder for FixedEmbedder {
 ///
 /// One override IS installed here, and deliberately not left to callers: the
 /// code-chunk search behind anchor creation. It is a THIRD resolution path —
-/// `create_semantic_anchors` embeds via the embedder seam and then searches code
+/// anchor creation embeds via the embedder seam and then searches code
 /// through a client neither the store nor the embedder seam covers — so no caller
 /// stubbing "its own isolation" was ever closing it. No memory test wants a real
 /// one, and unlike the other two seams this override is read per call instead of
@@ -241,7 +241,7 @@ async fn test_ctx_with_project_writes_land_in_an_isolated_store() {
 /// (slower when the stack is DOWN).
 ///
 /// **The mutation this must die on:** restore
-/// `RetrievalClient::from_env(Some(&root))` at the `create_semantic_anchors` call
+/// `RetrievalClient::from_env(Some(&root))` at the `find_semantic_anchors` call
 /// site. `calls` then stays 0, because the real client is used instead of the seam.
 /// Asserting `> 0` rather than on any search result is deliberate — the assertion
 /// is about which code path ran, and a hit-count assertion would pass for a real
@@ -289,7 +289,7 @@ async fn a_memory_write_reaches_code_search_through_the_seam() {
     assert!(
         calls.load(Ordering::SeqCst) > 0,
         "a memory write must reach code search through Agent::code_search; a count \
-         of 0 means create_semantic_anchors built its own RetrievalClient again and \
+         of 0 means find_semantic_anchors built its own RetrievalClient again and \
          the suite is back to talking to the developer's live retrieval stack"
     );
 }
@@ -914,6 +914,7 @@ async fn cross_embed_memory_stores_under_pinned_project_not_session_default() {
         &json!({}),
         "pinned-note",
         "belongs to the pinned project",
+        &std::collections::HashSet::new(),
     )
     .await
     .unwrap();
@@ -935,6 +936,223 @@ async fn cross_embed_memory_stores_under_pinned_project_not_session_default() {
         0,
         "cross-embed must NOT store under the session-default project_id"
     );
+}
+/// An UNPINNED cross-embed resolves the session default once and hands that one root to
+/// every consumer. It used to pass `None` to the embedder and the store, so each
+/// re-resolved "the current default" on its own and a concurrent `activate` between the
+/// two could split a row from its database.
+/// docs/issues/2026-10-24-a-memory-call-resolves-its-root-three-times-so-a-concurrent-activate-can-split-the-row-from-its-database.md
+#[tokio::test]
+async fn an_unpinned_cross_embed_pins_every_resolution_to_one_default_root() {
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::SemanticMemoryStore;
+    use crate::retrieval::embedder::DenseEmbedder;
+    use std::sync::Arc;
+
+    let (_dir, ctx) = test_ctx_with_project_raw().await;
+    assert!(ctx.workspace_override.is_none(), "test setup: unpinned");
+    ctx.agent
+        .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
+        .map_err(|_| ())
+        .expect("set embedder");
+    ctx.agent
+        .set_semantic_memory_store_for_test(
+            Arc::new(InMemorySemanticMemoryStore::new()) as Arc<dyn SemanticMemoryStore>
+        )
+        .map_err(|_| ())
+        .expect("set store");
+    let default_root = ctx
+        .agent
+        .default_workspace_root()
+        .await
+        .expect("an activated default workspace");
+
+    super::cross_embed_memory(
+        &ctx,
+        &json!({}),
+        "note",
+        "some content",
+        &std::collections::HashSet::new(),
+    )
+    .await
+    .unwrap();
+
+    let seen = ctx.agent.memory_pin_log.lock().unwrap().clone();
+    assert_eq!(
+        seen,
+        vec![Some(default_root.clone()), Some(default_root)],
+        "the embedder and the store must each receive the one root resolved at the top of the call"
+    );
+}
+/// A markdown `write` embeds the content once and upserts the point once, anchors included.
+/// `cross_embed_memory` and the old `create_semantic_anchors` each used to embed the same content and
+/// each upsert it, one after the other (two embeds and two upserts per write).
+/// docs/issues/2026-10-30-memory-write-embeds-and-upserts-the-same-content-twice.md
+mod single_embed_and_upsert {
+    use super::*;
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::{MemoryFilter, SemanticMemoryStore};
+    use crate::retrieval::embedder::DenseEmbedder;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    struct CountingEmbedder(Arc<AtomicUsize>);
+    #[async_trait::async_trait]
+    impl DenseEmbedder for CountingEmbedder {
+        async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+            self.embed_document(text).await
+        }
+        async fn embed_document(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        }
+        #[cfg(test)]
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// Records the anchors of every upsert, then delegates.
+    struct RecordingStore {
+        inner: InMemorySemanticMemoryStore,
+        upserted_anchors: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+    #[async_trait::async_trait]
+    impl SemanticMemoryStore for RecordingStore {
+        async fn upsert(
+            &self,
+            m: &crate::retrieval::memory_payload::SemanticMemory,
+            dense: &[f32],
+        ) -> anyhow::Result<()> {
+            self.upserted_anchors
+                .lock()
+                .unwrap()
+                .push(m.anchors.iter().map(|a| a.path.clone()).collect());
+            self.inner.upsert(m, dense).await
+        }
+        async fn search(
+            &self,
+            project_id: &str,
+            query: &[f32],
+            top_n: usize,
+            bucket: Option<&str>,
+        ) -> anyhow::Result<Vec<crate::retrieval::memory::MemoryHit>> {
+            self.inner.search(project_id, query, top_n, bucket).await
+        }
+        async fn delete(&self, project_id: &str, id: uuid::Uuid) -> anyhow::Result<()> {
+            self.inner.delete(project_id, id).await
+        }
+        async fn list(
+            &self,
+            project_id: &str,
+            filter: MemoryFilter,
+        ) -> anyhow::Result<Vec<crate::retrieval::memory::MemoryHit>> {
+            self.inner.list(project_id, filter).await
+        }
+        #[cfg(test)]
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    struct Search(anyhow::Result<Vec<crate::retrieval::search::Hit>>);
+    #[async_trait::async_trait]
+    impl crate::retrieval::search::CodeChunkSearch for Search {
+        async fn search_code(
+            &self,
+            _project_id: &str,
+            _query: &str,
+            _opts: crate::retrieval::search::SearchOpts,
+        ) -> anyhow::Result<Vec<crate::retrieval::search::Hit>> {
+            match &self.0 {
+                Ok(h) => Ok(h.clone()),
+                Err(e) => Err(anyhow::anyhow!("{e}")),
+            }
+        }
+    }
+
+    async fn ctx_with(
+        search: anyhow::Result<Vec<crate::retrieval::search::Hit>>,
+    ) -> (
+        tempfile::TempDir,
+        ToolContext,
+        Arc<AtomicUsize>,
+        Arc<Mutex<Vec<Vec<String>>>>,
+    ) {
+        let (dir, ctx) = test_ctx_with_project_raw().await;
+        let embeds = Arc::new(AtomicUsize::new(0));
+        let upserts = Arc::new(Mutex::new(Vec::new()));
+        ctx.agent
+            .set_memory_embedder_for_test(
+                Arc::new(CountingEmbedder(embeds.clone())) as Arc<dyn DenseEmbedder>
+            )
+            .map_err(|_| ())
+            .expect("set embedder");
+        ctx.agent
+            .set_semantic_memory_store_for_test(Arc::new(RecordingStore {
+                inner: InMemorySemanticMemoryStore::new(),
+                upserted_anchors: upserts.clone(),
+            }) as Arc<dyn SemanticMemoryStore>)
+            .map_err(|_| ())
+            .expect("set store");
+        ctx.agent.set_code_search_for_test(
+            Arc::new(Search(search)) as Arc<dyn crate::retrieval::search::CodeChunkSearch>
+        );
+        (dir, ctx, embeds, upserts)
+    }
+
+    fn hit(path: &str) -> crate::retrieval::search::Hit {
+        crate::retrieval::search::Hit {
+            chunk_id: "c".into(),
+            file_path: path.into(),
+            start_line: 1,
+            end_line: 2,
+            content: String::new(),
+            score: 1.0,
+            rerank_score: Some(1.0),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_write_embeds_once_and_upserts_once_with_its_anchors() {
+        let (_dir, ctx, embeds, upserts) = ctx_with(Ok(vec![hit("src/lib.rs")])).await;
+        let r = Memory
+            .call(
+                json!({"action": "write", "topic": "once", "content": "# Once\n\nbody"}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(r, json!("ok"), "no side effect may warn: {r}");
+        assert_eq!(embeds.load(Ordering::SeqCst), 1, "one embed per write");
+        assert_eq!(
+            *upserts.lock().unwrap(),
+            vec![vec!["src/lib.rs".to_string()]],
+            "one upsert, and it already carries the anchors"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_anchor_search_still_files_the_memory_once_without_anchors() {
+        let (_dir, ctx, embeds, upserts) = ctx_with(Err(anyhow::anyhow!("search is down"))).await;
+        let r = Memory
+            .call(
+                json!({"action": "write", "topic": "once", "content": "# Once\n\nbody"}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(r["status"], json!("ok"), "{r}");
+        assert!(
+            r["warnings"][0]
+                .as_str()
+                .unwrap()
+                .contains("semantic anchor creation failed"),
+            "the failed search must still be reported: {r}"
+        );
+        assert_eq!(embeds.load(Ordering::SeqCst), 1);
+        assert_eq!(*upserts.lock().unwrap(), vec![Vec::<String>::new()]);
+    }
 }
 
 /// CONSERVATION: segmenting must not drop or duplicate a single character.

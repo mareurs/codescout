@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-10-29
-closed:
+closed: 2026-10-30
 severity: medium
 owner: marius
 related:
@@ -9,7 +9,7 @@ related:
 tags:
 - cluster/declared-not-wired
 kind: bug
-unverified: 'The fix is tested through Agent and project_id() only. Gate on b358e9aab, 2026-10-29: lean 5356 passed and 2 failed, default 8020 passed and 2 failed; both failures are OP-2 routing tests (operator_rules::route::tests::a_rule_with_several_selectors_routes_on_any_one_of_them and server::tests::every_triggered_rule_names_a_tool_that_can_deliver_it) while a peer holds uncommitted edits to docs/trackers/operator-rules.md and src/operator_rules/profiles.rs; not re-run on a clean tree. Not run: a member whose own project.toml names a project differently from its id; other readers of config.project.name for a member: the memory tool was read and filed separately (docs/issues/2026-10-29-memory-write-with-a-project-id-cross-embeds-under-the-focused-project-not-the-named-one.md); project_status, the dashboard, the prompt builders and the activation response were not read.'
+unverified: "CLEARED 2026-10-30. Was: gate not run on a clean tree. Still not run: a member whose own project.toml names a project differently from its id; the other readers of config.project.name for a member (project_status, dashboard, prompt builders, activation response)."
 ---
 
 # BUG: semantic_search(project_id=<declared member id>) returns no results because an index is keyed by the member's directory name
@@ -77,6 +77,9 @@ These cover the pure function. The wiring in `SemanticSearch::call` has no unit 
 3. Done 2026-10-29: the replica script on the rebuilt binary (see Evidence, after the fix).
 4. Done 2026-10-29: the empty-result hint (see Fix and Tests added). Not covered by a test: the async wiring.
 5. Gate run 2026-10-29 on b358e9aab: only the two OP-2 failures, not mine (see the `unverified:` line). Close or archive after 3 and a clean-tree gate, with the fix SHA and its patch-id.
+
+
+**Re-verified and closed 2026-10-30 on a clean worktree** (branch worktree-agent-a3aee1a8919a0949f, fast-forwarded to experiments 573825fb7, which contains b358e9aab). `ActiveProject.member_id` (src/agent/mod.rs:488), its set in `activate_within_workspace` (:1903-1948) and its reapply in `reload_config_from_disk` (:533) are present, and the `declared_member_tests` / `empty_result_scope_hint` tests ran green (targeted run, 112 passed together with `tools::memory`), and the full gate was green on this tree, so the two OP-2 failures were the peer's uncommitted files. Fix b358e9aab, patch-id `5baf23783161b647444ee3326be8d59e00d12377`. Not archived: no `doc(move)` run from the worktree.
 
 ## References
 - docs/issues/2026-10-28-a-nested-git-repo-cannot-join-a-workspace-as-a-project-and-pinned-onboarding-mixes-in-the-home-workspace.md (Evidence 7)

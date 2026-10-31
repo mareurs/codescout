@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-10-29
-closed:
+closed: 2026-10-30
 severity: medium
 owner: marius
 related:
@@ -9,7 +9,7 @@ related:
 tags:
 - cluster/declared-not-wired
 kind: bug
-unverified: 'Fixed in 4c32d4341 and tested through the in-memory store seam, then run once live (write, recall, delete with project_id=codescout-embed, shared store; see Resume 2). Gate 2026-10-30 on the combined tree: clippy clean; lean 5368 passed and 2 failed, default 8032 passed and 2 failed; both failures are the OP-2 routing tests (operator_rules::route::tests::a_rule_with_several_selectors_routes_on_any_one_of_them and server::tests::every_triggered_rule_names_a_tool_that_can_deliver_it) while a peer holds uncommitted edits to docs/trackers/operator-rules.md and src/operator_rules/profiles.rs; not re-run on a clean tree. The format step refused (ownership: peer 76494b3d is a live writer of the same files); the narrow rustfmt on the three files was run on the operator''s word that this session is the sole writer. The committed part was re-run alone in a throwaway worktree: tools::memory 103 passed, 0 failed. Not checked: a member that is dormant when a memory is filed (its key is its id; activation later sets the same name, not observed); the root project named by its workspace id while a member is focused; forget (unchanged, the Qdrant delete ignores its project_id argument).'
+unverified: "CLEARED 2026-10-30. Was: gate not run on a clean tree (two OP-2 failures from a peer's edits). Gate green on a clean worktree. Still not checked: a member that is dormant when a memory is filed; forget (unchanged, the Qdrant delete ignores its project_id)."
 ---
 
 # BUG: memory(write, project_id=<member>) puts the file in the member but cross-embeds it under the focused project's key
@@ -68,6 +68,9 @@ Mutation probe: restoring the old focused-name lookup in the delete arm turned t
 1. Run the gate on a clean tree, so the two OP-2 failures can be shown to come from the peer's uncommitted files.
 2. Done 2026-10-30 on a live server (binary built after 4c32d4341), on the shared store, not an isolated one: `memory(write, project_id="codescout-embed")` then `recall(project_id="codescout-embed")` found the point (similarity 0.47); the same recall without `project_id` did not return it; after `delete(project_id="codescout-embed")` the named recall returned 0 results and no file was left. The member was activated or dormant as the server held it; the dormant-key case is still not told apart.
 3. Then move the issue to `docs/issues/archive/` with `doc(action="move", ...)`, the fix SHA 4c32d4341 and its `git patch-id --stable`.
+
+
+**Re-verified and closed 2026-10-30 on a clean worktree** (branch worktree-agent-a3aee1a8919a0949f, fast-forwarded to experiments 573825fb7, which contains 4c32d4341). Read at the bytes: `cross_embed_memory` and the other arms key through `semantic_project_key`, which uses `Agent::semantic_key_for_project` when the call carries `project_id`. The four named tests pass (`tools::memory` 112 passed in a targeted run) and the full gate was green on this tree, so the two OP-2 failures noted above were the peer's uncommitted files, as suspected. Fix 4c32d4341, patch-id `718e5c2dbf189ea8bdfcbae575afa3eb28972b04`. Not archived: no `doc(move)` run from the worktree.
 
 ## References
 - docs/issues/2026-10-29-semantic-search-project-id-takes-the-directory-name-not-the-declared-member-id.md (the same id-versus-key theme; its fix made a member's `config.project.name` equal its workspace id, which hides this mismatch only when the member is focused)

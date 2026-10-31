@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-10-24
-closed:
+closed: 2026-10-30
 severity: low
 owner: marius
 related:
@@ -9,7 +9,7 @@ related:
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'Inferred from the code (three separate root resolutions per memory call); not reproduced, and the window is the time between three async calls.'
+unverified: "The race itself was never reproduced: the window is between async calls and no hook provokes a concurrent activate. The fix is pinned by a test of what the call hands each consumer (Agent.memory_pin_log), not by an observed split. Gate 2026-10-30 green on a clean worktree (fmt, clippy, lean, default, python light). switch_focus inside one workspace is not covered."
 ---
 
 # BUG: a memory call resolves its root three times, so a concurrent `activate` between them can write project A's row into B's database embedded with B's model
@@ -59,9 +59,16 @@ Not implemented. Candidate: resolve the root (or `None`) once at the top of each
 
 Not started. Classified as a design item, not a mechanical fix.
 
+
+**Done 2026-10-30 in the commit that follows this file's `fix(memory): pin a write's resolutions to one root` (SHA in Resume).** The narrow fix from "Re-read 2026-10-30":
+- `Agent::default_workspace_root()` (src/agent/mod.rs) reads `AgentInner.default_workspace_root`.
+- `call_pin` (src/tools/memory/mod.rs) returns the call's own pin, else that root read once. `cross_embed_memory` pins at the top and passes the pin to the project key, `with_project_at`, `memory_embedder_for`, `semantic_memory_store_for` and (via `find_semantic_anchors`) `require_project_root_for`. The two functions that were `cross_embed_memory` and `create_semantic_anchors` are one now (see the double-embed bug), so the "more than three resolutions" of the anchor pass collapsed into the same pin.
+- The test blocker was removed with a test-only seam: `Agent.memory_pin_log` records the `workspace_override` each `memory_embedder_for` / `semantic_memory_store_for` call received, BEFORE the test-double bypass.
+- Not covered: `switch_focus` inside one workspace still moves the focused project between reads; the other `Memory/call` arms (remember, recall, delete) were not changed and resolve once each; the log shows the pin handed over, it does not provoke a real concurrent `activate`.
+
 ## Tests added
 
-N/A: not fixed; this file records a finding.
+`an_unpinned_cross_embed_pins_every_resolution_to_one_default_root` (src/tools/memory/tests.rs). Red first for the stated reason: `left: [None, None]`, `right: [Some(root), Some(root)]`. Green after the fix. It pins that the embedder and the store receive one explicit root; it cannot show a race, only that the shared pin is what the code hands to each. No mutation probe beyond the red-before state (the unfixed code is the mutation).
 
 ## Workarounds
 
@@ -80,6 +87,9 @@ Read `cross_embed_memory`, `create_semantic_anchors` and the `remember`/`recall`
 - `create_semantic_anchors` also reads `require_project_root_for` and `code_search`, so it has more than three resolutions.
 
 **Why it was not built: no test can see the fix.** Under `cfg(test)`, `memory_embedder_for` returns an installed double before it resolves any root, and `semantic_memory_store_for_backend` does the same for the store. A test through `cross_embed_memory` therefore cannot observe which root either one resolved, so reverting the fix would leave every such test green. A test of the new accessor alone would not show that the two call sites use it. A real test needs the `_with` / `_backend` seams (which take an injected resolver) to be reachable from the memory call path, which is a larger change. Decide whether to build that seam first or accept a weak test.
+
+
+**Fixed 2026-10-30, SHA f12eb6b3e on branch worktree-agent-a3aee1a8919a0949f (patch-id `ba13f6189dab68acd8e45f8296b1584cf94fa97d`).** Re-verified at the bytes first: the separate `workspace_override` resolutions were still in `cross_embed_memory` / `create_semantic_anchors`. Test and limits in Fix and Tests added.
 
 ## References
 
