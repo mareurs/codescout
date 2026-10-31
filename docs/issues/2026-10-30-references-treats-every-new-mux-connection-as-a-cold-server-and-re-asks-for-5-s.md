@@ -69,7 +69,7 @@ None.
 
 ## Resume
 
-Count `textDocument/references` re-ask runs ending at 5 s vs 1 s per client age across debug.log to confirm the share beyond one call.
+Re-verified 2026-10-30 (no code changed): `references` passes `includeDeclaration: true` (`LspClient::references`), so a resolved symbol never answers `[]`; only an unresolved position does, and only that costs the 5 s. `in_cold_start_window` does anchor a socket client at construction (`src/lsp/client.rs`, ~line 820), so the code claim holds, but its cost on a warm mux is not shown. Needs design before a fix: the mux exposes no server cold/warm state to a socket client, so the proposed fix needs a new mux message. Still to do: count `textDocument/references` re-ask runs ending at 5 s vs 1 s per client age across debug.log.
 
 ## References
 

@@ -555,6 +555,14 @@ async fn handle_client_message(
         }
     }
 
+    // A cancel names a request by the id the CLIENT chose, but the server only knows the
+    // tagged id this mux gave it. Tag `params.id` the same way, or the cancel matches nothing.
+    if method.as_deref() == Some("$/cancelRequest") {
+        if let Some(id) = msg.get("params").and_then(|p| p.get("id")).cloned() {
+            msg["params"]["id"] = protocol::tag_request_id(&id, tag);
+        }
+    }
+
     // Handle document synchronization
     if let Some(ref method) = method {
         let mut st = state.lock().await;
@@ -1591,6 +1599,30 @@ mod tests {
         assert_eq!(forwarded["id"], "a:3", "{forwarded}");
         assert!(to_client.is_empty(), "nothing is answered locally");
     }
+    /// The mux tags every request id with the client (`"a:3"`) before forwarding, so the server
+    /// only knows tagged ids. A `$/cancelRequest` carrying the client's own id names no request the
+    /// server has, and is ignored: the abandoned query keeps running. The cancel's `params.id` must
+    /// be tagged the same way.
+    #[tokio::test]
+    async fn a_cancel_request_names_the_tagged_id_the_server_was_given() {
+        for id in [json!(3), json!("req-9")] {
+            let h = client_harness();
+            let mut msg = json!({
+                "jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": id}
+            });
+            handle_client_message("a", &mut msg, &h.server_writer, &h.state)
+                .await
+                .unwrap();
+            let (to_server, _) = h.finish().await;
+            let forwarded = read_message(&mut BufReader::new(&to_server[..]))
+                .await
+                .unwrap();
+            assert_eq!(forwarded["method"], "$/cancelRequest");
+            let want = protocol::tag_request_id(&id, "a");
+            assert_eq!(forwarded["params"]["id"], want, "{forwarded}");
+        }
+    }
+
     /// The answer is the REQUESTING client's, under the id it sent whatever its JSON type: a
     /// number, `0`, or a string. Echoing to every client would resolve another client's pending
     /// request that happens to carry the same id with `null`.
