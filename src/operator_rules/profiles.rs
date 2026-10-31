@@ -7,7 +7,7 @@ use crate::operator_rules::render::{BEGIN, END};
 /// The Claude Code profile directories whose `CLAUDE.md` receives the resident
 /// block. Machine-scoped by design — the spec puts cross-machine sync out of
 /// scope.
-pub const PROFILE_DIRS: [&str; 3] = [".claude", ".claude-sdd", ".claude-kat"];
+pub const PROFILE_DIRS: [&str; 4] = [".claude", ".claude-sdd", ".claude-kat", ".claude-stef"];
 
 /// Resolved profile paths.
 ///

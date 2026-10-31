@@ -9088,8 +9088,8 @@ mod tests {
     /// (`Agent` is a valid identifier), the router's own tests pass against synthetic corpora,
     /// the delivery tests for its *siblings* are green, and the ledger's index can honestly say
     /// "routing landed". So the defect is invisible from every direction at once — which is
-    /// `observer-blindness:OB-7`, and is exactly the state `OP-2` has been in since it was
-    /// written.
+    /// `observer-blindness:OB-7`, and is exactly the state `OP-2` was in from the day it was
+    /// written until it was retired.
     ///
     /// The exemption list is keyed by rule id and carries a reason, so adding a rule that
     /// cannot fire requires **writing down that it cannot**. That is the whole mechanism: not a
@@ -9112,7 +9112,7 @@ mod tests {
     ///
     /// | arm | mutation | result |
     /// |---|---|---|
-    /// | unregistered tool | empty `HARNESS_BLOCKED` | fires, naming `OP-2` and `Agent` |
+    /// | unregistered tool | empty `HARNESS_BLOCKED` | fired naming `OP-2` and `Agent` while `OP-2` was active. **No live rule exercises this arm since `OP-2` was retired (2026-10-28)**; the list is empty and the arm is written but unproven against the live corpus |
     /// | stale exemption | add `OP-9` to `HARNESS_BLOCKED` | fires, naming `OP-9` |
     /// | selector precondition | — | **not exercised here.** A tool returning `None` reds `every_registered_tool_supplies_a_selector_key` too, so this arm is a second, better-located signal rather than the only one |
     /// | action enum | — | **NOT exercised, and left unclaimed.** Reaching it means mutating `Serves:` in the live ledger, a guarded artifact and a real corpus. The arm is written and untested; do not read this gate's green as covering it |
@@ -9123,12 +9123,9 @@ mod tests {
 
         // Deliberate, reasoned exemptions — never an acquired allowlist. An entry here is an
         // admission that the rule reaches no one, not permission to ship it.
-        const HARNESS_BLOCKED: &[(&str, &str)] = &[(
-            "OP-2",
-            "serves `Agent` / `Task`, which are Claude Code HARNESS tools and not \
-             `crate::tools::Tool` implementors in this process, so no `selector_key` work in \
-             this codebase could ever route them — it needs a companion-plugin hook",
-        )];
+        // Empty since `OP-2` (serves `Agent` / `Task`, Claude Code HARNESS tools that are not
+        // `crate::tools::Tool` implementors) was retired on 2026-10-28.
+        const HARNESS_BLOCKED: &[(&str, &str)] = &[];
 
         let (_dir, server) = make_server().await;
 
