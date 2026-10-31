@@ -131,6 +131,20 @@ class SelectTests(unittest.TestCase):
             r["pass"] = i % 2 == 0
         self.assertEqual(m.select_eligible(records, RULE), got)
 
+    def test_select_eligible_ignore_size_keeps_cutoff_and_required_fields_in_draw_order(self):
+        records = [record("o__r-big", files=1, added=601), record("o__r-small", files=1, added=1),
+                   record("o__r-ok", files=2, added=5),
+                   record("o__r-old", files=1, added=1, created_at="2026-01-01T00:00:00Z"),
+                   record("o__r-nof2p", files=1, added=1, FAIL_TO_PASS=[])]
+        self.assertEqual(m.select_eligible(records, RULE), ["o__r-ok"])
+        got = m.select_eligible(records, RULE, ignore_size=True)
+        self.assertEqual(sorted(got), ["o__r-big", "o__r-ok", "o__r-small"])
+        self.assertEqual(got, sorted(got, key=lambda i: (select_tasks.draw_key(RULE, i), i)))
+
+    def test_dataset_sha256_is_the_pinned_constant(self):
+        self.assertEqual(m.DATASET_SHA256,
+                         "bf2dd8252a07d0f275663ef8f6ab87571dd9bc4ce386abf9ec98d3cd6bb51a81")
+
     def test_registered_rule_loads(self):
         rule = m.load_rule()
         self.assertEqual((rule["created_at_min"], rule["min_files"], rule["min_added_lines"],

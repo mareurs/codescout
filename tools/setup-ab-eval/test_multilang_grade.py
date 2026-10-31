@@ -1,6 +1,7 @@
 import json
 import os
 import signal
+import subprocess
 import tempfile
 import time
 import unittest
@@ -94,6 +95,58 @@ class RunParserTests(unittest.TestCase):
         self.assertEqual(g.run_parser(src, "log"), {"none": "pass"})
 
 
+CONNECT_SRC = (
+    "import socket\n"
+    "def parser(log):\n"
+    "    socket.create_connection(('127.0.0.1', int(log)), timeout=3).close()\n"
+    "    return {'connected': 'pass'}\n"
+)
+
+
+class NetworkIsolationTests(unittest.TestCase):
+    def listener(self):
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.addCleanup(s.close)
+        s.bind(("127.0.0.1", 0))
+        s.listen(1)
+        return s.getsockname()[1]
+
+    def test_isolated_parser_cannot_reach_a_host_loopback_listener(self):
+        if not g.network_isolation_available():
+            self.skipTest("`unshare -rn true` does not work on this machine: no network namespace")
+        port = self.listener()
+        # the same parser reaches the listener without isolation, so the failure below is the namespace
+        self.assertEqual(g.run_parser(CONNECT_SRC, str(port), isolate_network=False),
+                         {"connected": "pass"})
+        with self.assertRaises(g.ParserError):
+            g.run_parser(CONNECT_SRC, str(port))
+
+    def test_isolation_is_the_default_and_refuses_without_unshare(self):
+        old = g._UNSHARE
+        g._UNSHARE = ""  # probed: not available
+        self.addCleanup(setattr, g, "_UNSHARE", old)
+        with self.assertRaisesRegex(g.ParserError, "no network isolation available"):
+            g.run_parser("def parser(log):\n    return {}\n", "x")
+        self.assertEqual(g.run_parser("def parser(log):\n    return {}\n", "x", isolate_network=False), {})
+
+    def test_probe_runs_once_and_is_cached(self):
+        old_cache, old_run = g._UNSHARE, g.subprocess.run
+        calls = []
+
+        def fake_run(args, **kw):
+            calls.append(list(args))
+            return subprocess.CompletedProcess(args, 0, "", "")
+        g._UNSHARE = None
+        g.subprocess.run = fake_run
+        self.addCleanup(setattr, g, "_UNSHARE", old_cache)
+        self.addCleanup(setattr, g.subprocess, "run", old_run)
+        self.assertTrue(g.network_isolation_available())
+        self.assertTrue(g.network_isolation_available())
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1:], ["-rn", "true"])
+
+
 class VerdictTests(unittest.TestCase):
     def test_verdict_requires_every_expected_name_to_pass(self):
         st = {"a": "pass", "b": "fail", "c": "skip", "d": "PASS"}
@@ -140,6 +193,30 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(v["expected"], 330)
         self.assertEqual(v["expected_not_passing_at_gold"], 71)
         self.assertEqual(v["reasons"], ["expected tests do not pass with the gold patch"])
+
+    def test_control_gold_repeat_without_mismatch_is_ok(self):
+        gold = {"f": "pass", "p": "pass"}
+        v = g.control_verdict({"f": "fail"}, gold, ["f"], ["p"], gold_repeat=dict(gold, other="fail"))
+        self.assertTrue(v["ok"], v)
+        self.assertEqual(v["gold_repeat_mismatch"], {"count": 0, "names": []})
+
+    def test_control_gold_repeat_mismatch_is_not_ok_with_reason(self):
+        gold = {"f": "pass", "p": "pass"}
+        v = g.control_verdict({"f": "fail"}, gold, ["f"], ["p"], gold_repeat={"f": "pass", "p": "fail"})
+        self.assertFalse(v["ok"])
+        self.assertEqual(v["reasons"], ["tests differ between two gold runs"])
+        self.assertEqual(v["gold_repeat_mismatch"], {"count": 1, "names": ["p"]})
+
+    def test_control_gold_repeat_missing_names_count_and_names_are_capped(self):
+        names = [f"p{i}" for i in range(15)]
+        gold = {n: "pass" for n in ["f"] + names}
+        v = g.control_verdict({}, gold, ["f"], names, gold_repeat={"f": "pass"})
+        self.assertEqual(v["gold_repeat_mismatch"]["count"], 15)
+        self.assertEqual(v["gold_repeat_mismatch"]["names"], names[:10])
+
+    def test_control_without_gold_repeat_has_no_mismatch_field(self):
+        v = g.control_verdict({"f": "fail"}, {"f": "pass"}, ["f"], [])
+        self.assertNotIn("gold_repeat_mismatch", v)
 
 
 if __name__ == "__main__":

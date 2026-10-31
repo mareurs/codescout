@@ -4,6 +4,7 @@
     candidate(record)                    the fixed projection the rule may read
     eligible(candidate, rule)            the registered rule (multilang-selection-rule.json)
     select_eligible(records, rule)       eligible instance ids in select_tasks.draw_key order
+    DATASET_SHA256                       the sha256 of the registered multilang-rust.jsonl
 
 `candidate` projects a record to `id`, `repo`, `gold_files`, `gold_added_lines`, `created_at`,
 `expected_tests` and `nonempty` (which REQUIRED fields hold something) before `eligible` runs, so
@@ -19,6 +20,8 @@ import select_tasks
 
 HERE = Path(__file__).resolve().parent
 RULE_PATH = HERE / "multilang-selection-rule.json"
+# sha256 of the SWE-bench-Live MultiLang Rust export (171 records) the controls are run on
+DATASET_SHA256 = "bf2dd8252a07d0f275663ef8f6ab87571dd9bc4ce386abf9ec98d3cd6bb51a81"
 REQUIRED = ("instance_id", "repo", "base_commit", "created_at", "patch", "test_patch",
             "FAIL_TO_PASS", "PASS_TO_PASS", "test_cmds", "print_cmds", "log_parser", "docker_image")
 
@@ -87,7 +90,8 @@ def eligible(candidate, rule, *, ignore_size=False):
     return hard and added <= rule["max_added_lines"]
 
 
-def select_eligible(records, rule):
-    """Eligible instance ids, ascending by (draw key, id)."""
-    ids = [c["id"] for c in map(candidate, records) if eligible(c, rule)]
+def select_eligible(records, rule, *, ignore_size=False):
+    """Eligible instance ids, ascending by (draw key, id). `ignore_size` is passed to `eligible`
+    (the cutoff and the required fields still apply)."""
+    ids = [c["id"] for c in map(candidate, records) if eligible(c, rule, ignore_size=ignore_size)]
     return sorted(ids, key=lambda i: (select_tasks.draw_key(rule, i), i))

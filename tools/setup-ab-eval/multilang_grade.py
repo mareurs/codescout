@@ -2,16 +2,20 @@
 
     run_parser(parser_src, log, timeout)       the record's `log_parser` run on a test log, in a subprocess
     verdict(statuses, f2p, p2p)                did every expected test pass
-    control_verdict(base, gold, f2p, p2p)      is the task itself sound (fails at base, passes with gold)
+    control_verdict(base, gold, f2p, p2p,      is the task itself sound (fails at base, passes with gold,
+                    gold_repeat=None)          and a second gold run agrees with the first)
 
-`log_parser` is untrusted dataset code. It runs only in a child `python -I` with a timeout and an
-environment of PATH alone (no HOME, no tokens), and the child is killed with its process group on
-timeout. A parser that hangs, raises, prints garbage or returns non-strings is a `ParserError`,
-which a caller must grade as a failure, never as a pass. Only the exact status `"pass"` passes;
-`"fail"`, `"skip"` and anything unknown do not. Stdlib only.
+`log_parser` is untrusted dataset code. It runs in a child `python -I` with a timeout, inside a
+private network namespace (`unshare -rn`: no interface, so no network at all), with an
+environment of PATH alone (so no inherited variable, such as a token, reaches it), and the child
+is killed with its process group on timeout. This is not a sandbox: the child runs as the same
+user and can read every file that user can read. A parser that hangs, raises, prints garbage or
+returns non-strings is a `ParserError`, which a caller must grade as a failure, never as a pass.
+Only the exact status `"pass"` passes; `"fail"`, `"skip"` and anything unknown do not. Stdlib only.
 """
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -41,6 +45,24 @@ class ParserError(ValueError):
     """The record's log parser did not produce a usable {test name: status} mapping."""
 
 
+_UNSHARE = None  # None: not probed yet; "": probed, unavailable; else the path of a working unshare
+
+
+def network_isolation_available():
+    """True when `unshare -rn true` works here (probed once per process, then cached)."""
+    global _UNSHARE
+    if _UNSHARE is None:
+        path = shutil.which("unshare") or "unshare"
+        try:
+            ok = subprocess.run([path, "-rn", "true"], stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                timeout=10).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+        _UNSHARE = path if ok else ""
+    return bool(_UNSHARE)
+
+
 def _kill_group(proc):
     """SIGKILL the child's process group, then reap the child; never blocks for long."""
     try:
@@ -54,9 +76,19 @@ def _kill_group(proc):
 
 
 
-def run_parser(parser_src, log, timeout=30.0):
+def run_parser(parser_src, log, timeout=30.0, *, isolate_network=True):
     """`parser(log)` of the untrusted `parser_src`, as a dict of str to str. ParserError on a
-    timeout, a non-zero exit, output that is not JSON, a non-dict, or a non-string key or value."""
+    timeout, a non-zero exit, output that is not JSON, a non-dict, or a non-string key or value.
+
+    What is removed from the child: the environment (only PATH is passed) and, with
+    `isolate_network` (the default), the network (`unshare -rn`; ParserError("no network
+    isolation available") when that does not work here). What is not: the filesystem. The child
+    runs as this user and can read whatever this user can read; do not run it where that matters."""
+    prefix = []
+    if isolate_network:
+        if not network_isolation_available():
+            raise ParserError("no network isolation available")
+        prefix = [_UNSHARE, "-rn"]
     request = json.dumps({"src": parser_src, "log": log})
     # stdin, stdout and stderr are temp files, not pipes: a descendant that escapes the process
     # group (setsid) and keeps a pipe open would block a read-to-EOF forever, but it cannot make
@@ -66,7 +98,7 @@ def run_parser(parser_src, log, timeout=30.0):
         fin.write(request)
         fin.seek(0)
         proc = subprocess.Popen(
-            [sys.executable, "-I", "-c", _DRIVER], stdin=fin, stdout=fout, stderr=ferr,
+            [*prefix, sys.executable, "-I", "-c", _DRIVER], stdin=fin, stdout=fout, stderr=ferr,
             env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")}, start_new_session=True,
         )
         try:
@@ -105,11 +137,16 @@ def verdict(statuses, f2p, p2p):
             "examples": failing[:MAX_EXAMPLES]}
 
 
-def control_verdict(base, gold, f2p, p2p):
+def control_verdict(base, gold, f2p, p2p, gold_repeat=None):
     """Is the task sound: no FAIL_TO_PASS test passes at the base commit, and every expected
-    test passes with the gold patch. A task failing this cannot separate arms and is not ok."""
+    test passes with the gold patch. A task failing this cannot separate arms and is not ok.
+    With `gold_repeat` (the statuses of a second gold run), any expected test whose status
+    differs between the two gold runs also makes it not ok (`gold_repeat_mismatch`)."""
     f2p_at_base = sum(1 for n in f2p if base.get(n) == PASS)
     not_passing_gold = sum(1 for n in list(f2p) + list(p2p) if gold.get(n) != PASS)
+    mismatch = None
+    if gold_repeat is not None:
+        mismatch = [n for n in dict.fromkeys(list(f2p) + list(p2p)) if gold.get(n) != gold_repeat.get(n)]
     reasons = []
     if not f2p:
         reasons.append("no fail-to-pass tests")
@@ -117,5 +154,10 @@ def control_verdict(base, gold, f2p, p2p):
         reasons.append("fail-to-pass test passes at base")
     if not_passing_gold:
         reasons.append("expected tests do not pass with the gold patch")
-    return {"ok": not reasons, "reasons": reasons, "f2p_passing_at_base": f2p_at_base,
-            "expected_not_passing_at_gold": not_passing_gold, "expected": len(f2p) + len(p2p)}
+    if mismatch:
+        reasons.append("tests differ between two gold runs")
+    result = {"ok": not reasons, "reasons": reasons, "f2p_passing_at_base": f2p_at_base,
+              "expected_not_passing_at_gold": not_passing_gold, "expected": len(f2p) + len(p2p)}
+    if mismatch is not None:
+        result["gold_repeat_mismatch"] = {"count": len(mismatch), "names": mismatch[:MAX_EXAMPLES]}
+    return result
