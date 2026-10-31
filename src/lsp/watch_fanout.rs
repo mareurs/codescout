@@ -17,6 +17,7 @@ pub(crate) const FANOUT_MIN_LINKS: usize = 20;
 
 /// The most entries one scan visits. The 32,192 directories under `.codescout` took 1.9 s to
 /// walk, warm, on 2026-10-31, so 50,000 entries costs seconds, not minutes.
+// cap-class: NOT_A_CAP — bounds the cost of a diagnostic scan on a failure path; a cut is marked in the hint (`at least N`, `The scan stopped at its limit`), so nothing is presented as complete and no tool result is shortened
 pub(crate) const FANOUT_MAX_ENTRIES: usize = 50_000;
 
 /// What [`find`] saw.
