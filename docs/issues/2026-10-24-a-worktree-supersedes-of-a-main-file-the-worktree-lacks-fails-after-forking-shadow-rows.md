@@ -1,7 +1,7 @@
 ---
 id: '3822f951e9d78ddf'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a supersedes link from a worktree session to a main file the worktree does not hold fails after forking shadow rows, and the error hint blames a deleted file'
 owners:
 - marius
@@ -10,6 +10,7 @@ tags:
 - librarian
 - worktree-overlay
 opened: 2026-10-24
+closed: 2026-10-30
 related:
 - docs/issues/archive/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md
 severity: low
@@ -57,11 +58,13 @@ The error string and the two counts under Reproduction.
 
 ## Fix
 
-Not started. Owner choices, none of them small: (a) refuse before forking when no file exists at the shadow path, naming the real cause (the destination exists in the main checkout only; commit it on the worktree's branch first); (b) copy the main file into the worktree at fork time (writes a file the user did not ask for); (c) roll the fork back when the write fails. Whatever is chosen, make the hint say which file is missing and why.
+FIXED for the reported shape (a `supersedes` link) in `b8b57586d` (branch `worktree-agent-a88be249b09c25d52`, not merged). Owner choice (a): `link::call` now calls `worktree::require_shadow_file` BEFORE `resolve_write_target` of either id, so a `supersedes` destination with no file at the shadow path is refused with "<main path> exists in the main checkout only: this worktree has no file at <shadow path>" and a hint to commit or copy it onto the worktree's branch. Nothing is forked, so the catalog is untouched. Options (b) and (c) were not taken.
+
+Not covered: the other overlay writers that edit a file (`update`, `append_entry`, `augment`, `update_entry`) were NOT checked for the same leftover rows; they call `resolve_write_target` directly and the new check is not wired into them.
 
 ## Tests added
 
-N/A: reported only, no behaviour changed.
+`supersedes_of_a_main_file_the_worktree_lacks_refuses_before_forking` (`src/librarian/tools/link.rs`). It failed first with the old "deleted or moved" error, then passed. It asserts the message, that the hint does not blame a deletion, that the `artifact` and `artifact_link` row counts are unchanged, and that the main file is untouched. The existing `supersedes_from_a_worktree_session_writes_the_shadow_and_not_the_main_file` stays green; `cargo test --lib librarian::tools::link` passed 190.
 
 ## Workarounds
 

@@ -116,6 +116,41 @@ pub(crate) fn peek_write_target(cat: &Catalog, ctx: &ToolContext, id: &str) -> R
         Ok(id.to_string())
     }
 }
+/// Refuse, BEFORE anything is forked, a write whose overlay shadow could not hold the file.
+///
+/// [`resolve_write_target`] commits a shadow row on the assumption that the file at the shadow
+/// path is git's checkout copy of the main file. When the main file is untracked in main, or was
+/// added to main after the worktree's branch point, no such copy exists: the later file write
+/// fails with "deleted or moved" and the committed fork stays behind. A caller that is about to
+/// WRITE THE FILE (a `supersedes` destination) calls this first, so the refusal names the real
+/// cause and the catalog is untouched. Passes (`Ok`) for every case `resolve_write_target` would
+/// pass through, and for a target that is already forked (its file is the update path's to find).
+pub(crate) fn require_shadow_file(cat: &Catalog, ctx: &ToolContext, id: &str) -> Result<()> {
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return Ok(());
+    };
+    let Some(main_root) = cp.main_root.as_ref() else {
+        return Ok(());
+    };
+    let Some(row) = artifact::get(cat, id)? else {
+        return Ok(());
+    };
+    if !is_main_checkout_artifact(cp, &row.abs_path) {
+        return Ok(());
+    }
+    let (shadow_id, shadow_path) = shadow_coordinates(cp, main_root.as_path(), &row);
+    if artifact::get(cat, &shadow_id)?.is_some() || std::path::Path::new(&shadow_path).exists() {
+        return Ok(());
+    }
+    Err(super::LibrarianRecoverableError::with_hint(
+        format!(
+            "`{}` exists in the main checkout only: this worktree has no file at {shadow_path}",
+            row.abs_path.display()
+        ),
+        "a worktree session never writes the main checkout. Commit the file on this worktree's \
+         branch (or copy it there) and retry, or run the call from the main checkout.",
+    ))
+}
 
 /// The overlay write gate. A mutating action targeting a MAIN-root artifact
 /// from a worktree session forks it: shadow row at the worktree path (seeded

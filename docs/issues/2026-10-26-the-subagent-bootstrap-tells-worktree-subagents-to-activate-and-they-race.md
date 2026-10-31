@@ -80,6 +80,12 @@ Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-
 
 Committed as `claude-plugins:968f7b9` (`main`, 4 files, not pushed). To finish: release a new `codescout-companion` version, then update `installed_plugins.json` in all three profiles. Each profile loads `1.20.20` from its own `cache/` copy, so the source edit changes no behaviour on this machine until then. After that, run a worktree subagent campaign and confirm no `activate` race and no write block.
 
+## Re-verification 2026-10-30
+
+A subagent dispatched on this date in a linked worktree (`.claude/worktrees/agent-a88be249b09c25d52`) received the new bootstrap: "do NOT call workspace(action=\"activate\")" and "pin EVERY codescout call with workspace=<abs worktree>". So the companion hook change is live for that profile; the 2026-10-29 observation of the old text is not reproduced. Cause B reproduced: that worktree was cut from `5a8b14691` (July), while the issue files the brief named exist only on `experiments`; the subagent had to `git reset --hard` its own branch to `experiments`. No code in this repo changed. Still open: a pin that differs only by a symlink in the companion's write guard (companion repo, not touched here), and the base-commit mismatch, which the worktree creator owns.
+
+## References
+
 ## References
 
 - `docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
