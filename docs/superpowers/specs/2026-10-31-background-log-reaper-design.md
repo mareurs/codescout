@@ -62,8 +62,10 @@ A new function `sweep_logs(dir, grace, max_age, is_alive)`, called right after `
 
 - For a record that is finished and has a `log_path`: unlink the log when the `.delivered` sidecar is older than the grace, or the record file is older than `LOG_MAX_AGE`. The record itself stays until `RECORD_MAX_AGE`.
 - For a record that is `running` with a live server: never touch its log.
-- For a record that is `running` with a dead server: leave its log to the existing record rule (the job may be an orphan that still writes), so the log goes with the record at `RECORD_MAX_AGE`.
-- `sweep_stale` also unlinks `rec.log_path` when it removes a record, so a record is never removed while its log stays.
+- For a record that is `running` with a dead server: leave its log to the existing record rule (the job may be an orphan that still writes). At `RECORD_MAX_AGE` the record goes, and its log goes with it only when the log was last written no later than the record; a log written after its record (always the case for a running job's log, and for a name `tempfile` handed to a new job) is kept and left to the legacy sweep below.
+- `sweep_stale` also unlinks `rec.log_path` when it removes a record, under the same rule: a log whose mtime is later than its record's is not that record's own and is kept, so it becomes a loose log that the legacy sweep judges by the open-file scan and its own age in the same pass.
+- Every record-linked unlink (in `sweep_logs` too) requires the log's mtime to be no later than its record's: a finished job's last log write comes before the supervisor writes the `finished` record.
+- Both record-linked sweeps run only when the record directory is owner-only (the check `write_record` applies), because another user could pre-create it and plant a record naming one of our logs.
 - A file that cannot be judged (unreadable record, log path outside `temp_dir()`, symlink) is skipped.
 
 ### 4. Legacy sweep
