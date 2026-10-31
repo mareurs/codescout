@@ -12,7 +12,7 @@ closed: 2026-10-31
 opened: 2026-10-31
 owner: marius
 severity: low
-unverified: 'The fix is verified by unit tests and the gate, not live: the codescout server running when this was closed was built before it, so no doc(update) call after a rebuild has been seen to write `closed` itself.'
+unverified: 'CLEARED 2026-10-31. Was: verified by unit tests and the gate, not live, because the server running at close time predated the fix. Live check: on a server built from a6d175ee0 (contains edb9839b9), doc(update, patch={status: fixed}) on bug 13cffc336e09af35, which had no closed, wrote `closed: 2026-10-31` into the file and nothing else; the file was restored afterwards and git reported it clean.'
 ---
 
 # BUG: doc(update, patch={status: "fixed"}) on a bug file neither sets nor asks for `closed:`, so the gate fails in the next session that runs it
