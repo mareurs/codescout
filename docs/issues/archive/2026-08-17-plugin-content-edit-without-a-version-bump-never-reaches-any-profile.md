@@ -12,7 +12,7 @@ opened: 2026-08-17
 owner: marius
 related: []
 severity: medium
-unverified: TRACKED 3870c801cf7bdf57 — Only this instance was repaired (codescout-companion bumped to 1.16.8, all three profiles re-synced and verified). Nothing gates the NEXT content edit without a version bump — durable options a/b/c in § Fix are all unshipped — and § Root cause records that remembering failed one commit after succeeding.
+unverified: RESOLVED 2026-10-31 — option b was shipped as Guard 3 in claude-plugins commit 32ce0ff (local on main, not pushed). The remaining doubt, that the guard has not been seen refusing a real push and is not pushed, is carried by its own record 3870c801cf7bdf57. The earlier text follows unchanged. Only this instance was repaired (codescout-companion bumped to 1.16.8, all three profiles re-synced and verified). Nothing gates the NEXT content edit without a version bump — durable options a/b/c in § Fix are all unshipped — and § Root cause records that remembering failed one commit after succeeding.
 ---
 
 # BUG: a plugin content edit without a version bump is committed, correct, and live nowhere
