@@ -354,4 +354,34 @@ mod tests {
         let hits = store.search("p", &[1.0, 0.0], 10, None).await.unwrap();
         assert!(hits.is_empty());
     }
+    /// The premise the in-memory test store's scoped `delete` models: the sqlite-vec store
+    /// opens `project_id`'s own database, so a key naming another project deletes nothing there.
+    #[tokio::test]
+    async fn a_delete_under_another_projects_key_removes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SqliteVecSemanticMemoryStore::at(tmp.path().to_path_buf());
+        store
+            .upsert(&mem("p", "notes", "n1", None), &[1.0, 0.0])
+            .await
+            .unwrap();
+        let id = mem("p", "notes", "n1", None).point_id();
+
+        store.delete("q", id).await.unwrap();
+        assert_eq!(
+            store
+                .list("p", MemoryFilter::default())
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "a key naming another project must not delete this project's point"
+        );
+
+        store.delete("p", id).await.unwrap();
+        assert!(store
+            .list("p", MemoryFilter::default())
+            .await
+            .unwrap()
+            .is_empty());
+    }
 }
