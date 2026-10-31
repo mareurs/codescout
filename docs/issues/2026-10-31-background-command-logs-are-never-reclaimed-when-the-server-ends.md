@@ -64,7 +64,7 @@ Read 2026-10-31:
 
 - `src/tools/run_command/inner.rs:99-104` creates the log with `tempfile::Builder::new().prefix("codescout-bg-").suffix(".log").tempfile()?` and then calls `log_tmp.keep()?`, which turns off the automatic delete.
 - `src/tools/output_buffer.rs:1711-1717` removes a log (`std::fs::remove_file(&job.log_path)`) only when the buffer evicts a finished job from its bounded in-memory list. `:1727` states that a live job is evicted without unlinking its log.
-- `src/tools/job_record.rs:36` sets `RECORD_MAX_AGE` to 7 days, and `:212` `sweep_stale` removes old finished records and records whose server is gone. It handles records only.
+- `src/tools/job_record.rs:36` sets `RECORD_MAX_AGE` to 7 days, and `:212` `sweep_stale` removes old finished records and records whose server is gone. It handles records only. Job records exist only since 2026-10-29 (commit `09cbba443`), which is why the oldest record is 3 days old: nothing has had time to expire yet. The 10,749 logs older than 7 days predate the records and have none, so a record-based sweep can never reach them.
 - `JobRecord` (`job_record.rs:62-75`) has the fields `schema, handle, command, server_pid, job_pid, state, exit_code, error, started_at, finished_at`. It has no log path, so the sweeper could not unlink a log even if it tried.
 - A grep for `codescout-bg` over `src/` finds only these sites and tests: no startup sweep of `codescout-bg-*.log` exists.
 
@@ -83,7 +83,7 @@ The census quoted under Symptom. The scripts are session scratch files, not kept
 
 Not fixed. Options, in order of cost:
 
-1. Put the log path into `JobRecord` (a schema bump) so that `sweep_stale` unlinks the log together with its record.
+1. Put the log path into `JobRecord` (a schema bump) so that `sweep_stale` unlinks the log together with its record. This covers only logs created after the change: the logs that exist now have no record, so it needs option 2 as well.
 2. Sweep orphan `codescout-bg-*.log` files by mtime at server start and on the existing housekeeping pass, with an age shorter than the 7 days used for records (a log is a copy of output the agent has already read).
 3. Delete a log when the wake has been delivered and the output read (the `.delivered` sidecar exists today), as an explicit acknowledgement.
 
