@@ -1,13 +1,14 @@
 ---
 id: '78f30eb614d3fba3'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a_timed_out_filter_with_output_over_the_limit_stays_inline fails once in a loaded gate lane and passes alone (seen twice, cause unproven)'
 tags:
 - cluster/repro-env-diverges-from-gate-env
 - gate
 - flaky-test
 - run_command
+closed: 2026-10-31
 opened: 2026-10-31
 owner: marius
 severity: low
@@ -35,17 +36,15 @@ Line 6889 is the last assertion of the test, `assert_eq!(parsed["stdout_total"],
 First sighting: `docs/issues/archive/2026-09-24-residual-doc-get-line-range-frame-decision.md`, line 39. A first full run failed this test, it "passed alone and in the second full run", and its author "did not find its cause".
 
 ## Reproduction
-Not yet reproducible: best lead is to run the lean lane while the machine is busy with other test runs.
 
-What I did observe myself, on 2026-10-31:
-- `scripts/with-slot.sh cargo test --no-default-features --lib a_timed_out_filter_with_output_over_the_limit_stays_inline` in the same worktree: `1 passed; 0 failed`, 1.26 s.
-- Four later full gates on merged trees: lean lane `LEAN=0` every time, the test among them.
+Reproduced on demand on 2026-10-31. The suite's test binary was pinned with `taskset -c 62,63` and 64 `yes > /dev/null` loops ran on the same two cores. The test ran 20 times: 14 passed and 6 failed. The failing runs reported `stdout_total` 148115, 177372, 156307, 42811, 72849 and 40081, each time on the last assertion. Without load, 30 of 30 runs passed (10 with no loops, 20 with 8 loops). The scripts are `flaky-load.sh` and `lease-run.sh` in the session scratchpad; the first needs only the test binary path in `BIN`.
 
 ## Environment
 Linux, `experiments` branch. Several Claude sessions and their gates ran on the machine at the same time; `scripts/peer-sessions.sh` listed 28 live sessions that day.
 
 ## Root cause
-Unknown, under investigation. Hypothesis, untested: the test runs `sh -c 'seq 1 200000; sleep 30' | grep .` with `timeout_secs: 1` (`src/tools/run_command/tests.rs:6862-6890`) and asserts that `stdout_total` is `200000`. That assertion holds only if `seq` and `grep` finish all 200000 lines inside the one-second wall-clock window, before the timeout kills the process group. On a loaded machine they may not, and then the capture holds only the lines written so far. 90598 of 200000 is consistent with a kill part way through. The `sleep 30` makes the timeout fire on purpose, so the one-second window is also the test's own deadline.
+
+The load hypothesis is confirmed. The test runs `sh -c 'seq 1 200000; sleep 30' | grep .` with `timeout_secs: 1`. The process group is killed at the timeout, so `stdout_total` is the number of lines the producer and the filter finished before the kill. That is 200000 only when the machine is quiet. The assertion `stdout_total == 200000` tested the producer's speed, which the clamp does not promise.
 
 ## Evidence
 - The test body, read at `src/tools/run_command/tests.rs:6862-6890`.
@@ -53,13 +52,21 @@ Unknown, under investigation. Hypothesis, untested: the test runs `sh -c 'seq 1 
 - Not checked: whether the failing run's `stdout_total` varies from run to run, and whether the other assertions in the test passed in the failing run.
 
 ## Hypotheses tried
-None run. The load hypothesis above could be tested by running the test under artificial CPU contention (for example with many `yes > /dev/null` processes) and watching `stdout_total`.
+
+Load: confirmed, see Reproduction. A first load run with 8 loops on two cores did not reproduce it (20 of 20 passed); 64 loops did.
 
 ## Fix
-Not done. Options, none tried: raise `timeout_secs` so the producer always finishes first (the test then takes that long); make the producer's output bounded by something other than wall-clock time; or assert `stdout_total` is positive and at most 200000 and keep the clamp assertions, which are what the test is about.
+
+The exact total is replaced by a bound: `shown < total && total <= 200000`. The test is about the clamp, so it keeps what the clamp promises: the total counts the lines the clamp cut away, and never exceeds what the producer could write.
+
+- Fix SHA (on `experiments`): `1910afb125440aebb993f8170ae99532b4533bd7`
+- patch-id: `e8912e70e20ceaf872eb8872457a7e48014efb34`
+
+After the change, 30 of 30 runs passed under the same 64-loop load that failed 6 of 20 before. That count is weak evidence alone: at a 30% failure rate, 30 clean runs have a chance of about 0.00002, but a clean run also fits a test that cannot fail. The mutation below is the stronger check.
 
 ## Tests added
-N/A: no fix yet, and the test is the thing under suspicion.
+
+No new test: the changed assertion in `tools::run_command::tests::a_timed_out_filter_with_output_over_the_limit_stays_inline` is the regression test. Mutation: in `attach_partial_capture` (`src/tools/run_command/output.rs`), `response["stdout_total"] = json!(cut.shown)` instead of `json!(cut.total)`. The test failed at `tests.rs:6894`, the new assertion. The mutant was reverted.
 
 ## Workarounds
 Re-run the test alone. If it passes, treat the gate failure as this bug, and say so in the report instead of calling the lane green.
