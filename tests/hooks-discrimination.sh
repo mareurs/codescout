@@ -983,6 +983,14 @@ add_as "$A" f.txt
 eq "claude_classify_raw_line_is_bare_id" \
     "$(env -u GIT_INDEX_FILE -u CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID="$A" bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1; echo "EXIT=$?")" \
     "$(printf 'mine\t%s\tf.txt\nEXIT=0' "$A")"
+# A warning on the resolver's stderr (a Python startup notice) must never be adopted as the identity.
+NOISY="$(mktemp -d "${TMPDIR:-/tmp}/noisy-py-XXXXXX")"
+printf '#!/bin/sh\n"%s" "$@"\nrc=$?\necho "python3: shutdown warning that is not an identity" >&2\nexit $rc\n' "$REALPY" > "$NOISY/python3"
+chmod +x "$NOISY/python3"
+eq "classify_ignores_resolver_stderr: owner is the id, not the warning" \
+    "$(env -u GIT_INDEX_FILE -u CODEX_SESSION_ID PATH="$NOISY:$PATH" CLAUDE_CODE_SESSION_ID="$A" bash "$SRC/pre-commit-foreign-index.sh" --classify 2>/dev/null; echo "EXIT=$?")" \
+    "$(printf 'mine\t%s\tf.txt\nEXIT=0' "$A")"
+rm -rf "$NOISY"
 rm -rf "$T"
 
 # A missing helper in the hook: owner `-`, and the git command stays silent and succeeds.

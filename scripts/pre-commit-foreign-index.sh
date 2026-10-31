@@ -115,9 +115,12 @@ me=""
 _identity_failed=0
 _identity_why=""
 if [ -n "$_identity_dir" ] && . "$_identity_dir/publish-identity.sh" 2>/dev/null; then
-    # stdout (the id) and stderr (the reason) share one capture; the exit status rides on a final
-    # `rc=` marker. On success the id is the LAST line; on failure the first line is the reason.
-    _ires="$(publish_identity 2>&1; echo "rc=$?")"
+    # stdout (the id) and stderr (the reason) are captured SEPARATELY: a warning on stderr (a Python
+    # startup notice, say) must never be adopted as the caller's identity. The exit status rides on
+    # a final `rc=` marker. On success the id is the LAST line of stdout; on failure the reason is
+    # the first line of stderr (the first line of stdout if the resolver wrote nothing to stderr).
+    _ierr="$(mktemp 2>/dev/null)" || _ierr=/dev/null
+    _ires="$(publish_identity 2>"$_ierr"; echo "rc=$?")"
     _irc="${_ires##*rc=}"
     _ibody="${_ires%rc=*}"
     _ibody="${_ibody%$'\n'}"
@@ -125,9 +128,12 @@ if [ -n "$_identity_dir" ] && . "$_identity_dir/publish-identity.sh" 2>/dev/null
         me="${_ibody##*$'\n'}"
     else
         _identity_failed=1
-        _identity_why="${_ibody%%$'\n'*}"
+        _identity_why=""
+        [ "$_ierr" = /dev/null ] || IFS= read -r _identity_why <"$_ierr" || true
+        [ -n "$_identity_why" ] || _identity_why="${_ibody%%$'\n'*}"
         [ -n "$_identity_why" ] || _identity_why="resolver unavailable"
     fi
+    [ "$_ierr" = /dev/null ] || rm -f "$_ierr"
 fi
 if [ -z "$me" ]; then
     if ((_identity_failed)); then

@@ -46,5 +46,5 @@ Five commit-safety scripts accept a Codex session besides a Claude session: `com
 Known limitations:
 
 - A Codex writer attributed through `usage.db` has a bare owner. The guard's refusal therefore describes it with the Claude liveness text, and the pre-push hold lookup maps its co-author token to `refs/holds/<id>` instead of `refs/holds/_codex/<id>`. The real fix is recording the harness in `usage.db` (the spec's option 3); it is not done.
-- The guard captures the resolver's output with `2>&1`, so a Python startup warning on stderr can be read as an identity. The direction is conservative (it refuses or labels `theirs`). Open finding N1.
+- The guard reads the resolver's stdout and stderr separately: the identity comes from stdout only, and the refusal reason from stderr. A warning on stderr (a Python startup or shutdown notice) cannot become an identity. This closed finding N1; `classify_ignores_resolver_stderr` in `tests/hooks-discrimination.sh` pins it.
 - No live Codex session ran these scripts. All verification is by source tests and fixtures.
