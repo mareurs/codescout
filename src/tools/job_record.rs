@@ -35,6 +35,16 @@ pub const RECORD_SCHEMA: u32 = 1;
 /// cap-class: NOT_A_CAP — retention age for stale job records, not a bound on returned output.
 pub const RECORD_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
+/// How long a finished job's log outlives the moment its outcome was delivered (the
+/// `.delivered` sidecar's mtime); the agent reads the log right after the wake.
+/// cap-class: NOT_A_CAP — retention age for a delivered job's log file, not a bound on returned output.
+pub const LOG_GRACE_AFTER_DELIVERY: Duration = Duration::from_secs(60 * 60);
+
+/// How long a finished job's log may sit when its outcome was never delivered or read
+/// (measured from the record file's mtime, which is the moment the job ended).
+/// cap-class: NOT_A_CAP — retention age for an undelivered job's log file, not a bound on returned output.
+pub const LOG_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
 /// Where records live. Test builds get a different directory so that the many existing
 /// tests which spawn background jobs never write into the real one.
 pub fn default_record_dir() -> PathBuf {
@@ -223,7 +233,16 @@ pub fn remove_if_delivered(path: &Path) -> bool {
 /// or it is `running` but its server is gone (`is_alive(server_pid)` is false) so
 /// nothing will ever finish it. Unreadable or unparsable files are skipped, never an
 /// error: this is housekeeping, and a file it cannot judge is not its to delete.
-pub fn sweep_stale(dir: &Path, max_age: Duration, is_alive: impl Fn(u32) -> bool) -> usize {
+///
+/// A record's log goes with it, through `unlink_log_if_ours` (so only a regular
+/// `codescout-bg-*.log` file directly in `log_dir`), so a record is never removed while
+/// its log stays behind with nothing left to name it.
+pub fn sweep_stale(
+    dir: &Path,
+    log_dir: &Path,
+    max_age: Duration,
+    is_alive: impl Fn(u32) -> bool,
+) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
@@ -250,8 +269,101 @@ pub fn sweep_stale(dir: &Path, max_age: Duration, is_alive: impl Fn(u32) -> bool
         if rec.state == RecordState::Running && is_alive(rec.server_pid) {
             continue;
         }
+        if let Some(log) = rec.log_path.as_deref() {
+            unlink_log_if_ours(log_dir, log);
+        }
         remove_with_sidecars(&path);
         removed += 1;
+    }
+    removed
+}
+
+/// Unlink the log a record names, but only when it is certainly one of ours: a regular
+/// file (not a symlink, not a directory) whose parent is exactly `log_dir` and whose
+/// file name starts with `codescout-bg-` and ends with `.log`. Returns whether a file
+/// was removed. A record is data on disk another process could have written or damaged,
+/// so its `log_path` is never trusted: anything that fails a check is left alone.
+///
+/// The parent is compared to `log_dir` LITERALLY, with no `canonicalize` on either side:
+/// canonicalizing would follow the very symlinks this rule exists to refuse. A temp dir
+/// reached through a symlink therefore makes the log be KEPT, which is the safe
+/// direction. The parent check is also what makes the lossy `display()` string stored by
+/// `JobRecord::with_log_path` harmless: a path that does not round-trip cannot equal
+/// `log_dir`, so it is skipped rather than resolved to some other file.
+fn unlink_log_if_ours(log_dir: &Path, log_path: &str) -> bool {
+    let path = Path::new(log_path);
+    if path.parent() != Some(log_dir) {
+        return false;
+    }
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if !(name.starts_with("codescout-bg-") && name.ends_with(".log")) {
+        return false;
+    }
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_file() => {}
+        _ => return false,
+    }
+    std::fs::remove_file(path).is_ok()
+}
+
+/// How long ago `path` was last modified. A modification time in the future (clock
+/// skew) is age zero, never "very old"; `None` when the metadata cannot be read.
+fn age_of(path: &Path) -> Option<Duration> {
+    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+    Some(modified.elapsed().unwrap_or(Duration::ZERO))
+}
+
+/// Unlink the logs of finished jobs and return how many were removed. The record stays
+/// (`sweep_stale` owns it). For each finished record naming a log, the log goes when its
+/// `.delivered` sidecar is at least `grace` old, or the record file is at least `max_age`
+/// old. A missing or unreadable `.delivered` sidecar means "not delivered"; a record whose
+/// metadata cannot be read is skipped.
+///
+/// A `running` record is never acted on, whatever `is_alive` says: with a live server the
+/// job is writing its log, and with a dead server the job may be an orphan that still
+/// writes, so that log waits for `RECORD_MAX_AGE`, where `sweep_stale` removes it with the
+/// record. `_is_alive` is therefore not consulted; it stays in the signature so the two
+/// sweeps are called alike.
+pub fn sweep_logs(
+    record_dir: &Path,
+    log_dir: &Path,
+    grace: Duration,
+    max_age: Duration,
+    _is_alive: impl Fn(u32) -> bool,
+) -> usize {
+    let Ok(entries) = std::fs::read_dir(record_dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(record_age) = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .map(|t| t.elapsed().unwrap_or(Duration::ZERO))
+        else {
+            continue;
+        };
+        let Some(rec) = read_record(&path) else {
+            continue;
+        };
+        if rec.state == RecordState::Running {
+            continue;
+        }
+        let Some(log) = rec.log_path.as_deref() else {
+            continue;
+        };
+        let delivered_long_enough =
+            age_of(&sidecar(&path, ".delivered")).is_some_and(|a| a >= grace);
+        if (delivered_long_enough || record_age >= max_age) && unlink_log_if_ours(log_dir, log) {
+            removed += 1;
+        }
     }
     removed
 }
@@ -485,11 +597,14 @@ mod tests {
         let me = std::process::id();
 
         // A real max_age keeps every young record, whatever its state.
-        assert_eq!(sweep_stale(dir.path(), RECORD_MAX_AGE, |_| false), 0);
+        assert_eq!(
+            sweep_stale(dir.path(), dir.path(), RECORD_MAX_AGE, |_| false),
+            0
+        );
         assert!(exited.exists() && live.exists() && dead.exists());
 
         // max_age = 0: exited removed; running with a live pid kept; dead pid removed.
-        let n = sweep_stale(dir.path(), Duration::ZERO, |pid| pid == me);
+        let n = sweep_stale(dir.path(), dir.path(), Duration::ZERO, |pid| pid == me);
         assert_eq!(n, 2);
         assert!(!exited.exists() && !sidecar(&exited, ".watch").exists());
         assert!(live.exists());
@@ -562,10 +677,18 @@ mod tests {
         std::fs::write(&garbage, "not json {").unwrap();
         let json_dir = dir.path().join("dir.json");
         std::fs::create_dir(&json_dir).unwrap();
-        assert_eq!(sweep_stale(dir.path(), Duration::ZERO, |_| false), 0);
+        assert_eq!(
+            sweep_stale(dir.path(), dir.path(), Duration::ZERO, |_| false),
+            0
+        );
         assert!(garbage.exists() && json_dir.exists());
         assert_eq!(
-            sweep_stale(&dir.path().join("absent"), Duration::ZERO, |_| false),
+            sweep_stale(
+                &dir.path().join("absent"),
+                dir.path(),
+                Duration::ZERO,
+                |_| false
+            ),
             0
         );
     }
@@ -581,5 +704,337 @@ mod tests {
         std::fs::write(sidecar(&bad, ".delivered"), b"").unwrap();
         assert!(!remove_if_delivered(&bad));
         assert!(bad.exists() && sidecar(&bad, ".delivered").exists());
+    }
+    /// Like `seed`, plus a `codescout-bg-<handle>.log` in `log_dir` that the record names.
+    /// Returns (record path, log path).
+    fn seed_with_log(
+        dir: &Path,
+        log_dir: &Path,
+        token: &str,
+        handle: &str,
+        state: RecordState,
+        delivered: bool,
+    ) -> (PathBuf, PathBuf) {
+        let log = log_dir.join(format!(
+            "codescout-bg-{}.log",
+            handle.trim_start_matches('@')
+        ));
+        std::fs::write(&log, b"output").unwrap();
+        let path = record_path(dir, token, handle);
+        let mut rec = JobRecord::running(handle, "true", None).with_log_path(&log);
+        rec.state = state;
+        write_record(&path, &rec).unwrap();
+        std::fs::write(sidecar(&path, ".watch"), b"").unwrap();
+        if delivered {
+            std::fs::write(sidecar(&path, ".delivered"), b"").unwrap();
+        }
+        (path, log)
+    }
+
+    fn set_mtime(path: &Path, when: std::time::SystemTime) {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    fn ago(d: Duration) -> std::time::SystemTime {
+        std::time::SystemTime::now() - d
+    }
+
+    const HOUR: Duration = Duration::from_secs(60 * 60);
+
+    #[test]
+    fn sweep_logs_removes_the_log_one_grace_after_delivery_and_keeps_the_record() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (rec, log) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000001",
+            "@bg_00000001",
+            RecordState::Exited,
+            true,
+        );
+        set_mtime(&sidecar(&rec, ".delivered"), ago(2 * HOUR));
+        let n = sweep_logs(
+            dir.path(),
+            logs.path(),
+            LOG_GRACE_AFTER_DELIVERY,
+            LOG_MAX_AGE,
+            |_| false,
+        );
+        assert_eq!(n, 1);
+        assert!(!log.exists());
+        assert!(rec.exists());
+        assert!(sidecar(&rec, ".delivered").exists() && sidecar(&rec, ".watch").exists());
+    }
+
+    #[test]
+    fn sweep_logs_keeps_a_delivered_log_inside_the_grace() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (rec, log) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000001",
+            "@bg_00000001",
+            RecordState::Exited,
+            true,
+        );
+        set_mtime(&sidecar(&rec, ".delivered"), ago(HOUR / 6));
+        let n = sweep_logs(
+            dir.path(),
+            logs.path(),
+            LOG_GRACE_AFTER_DELIVERY,
+            LOG_MAX_AGE,
+            |_| false,
+        );
+        assert_eq!(n, 0);
+        assert!(log.exists() && rec.exists());
+    }
+
+    #[test]
+    fn sweep_logs_removes_an_undelivered_finished_log_after_max_age_and_keeps_it_before() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (old_rec, old_log) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000001",
+            "@bg_00000001",
+            RecordState::Exited,
+            false,
+        );
+        set_mtime(&old_rec, ago(LOG_MAX_AGE + HOUR));
+        let (young_rec, young_log) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000002",
+            "@bg_00000002",
+            RecordState::Failed,
+            false,
+        );
+        set_mtime(&young_rec, ago(LOG_MAX_AGE - HOUR));
+        let n = sweep_logs(
+            dir.path(),
+            logs.path(),
+            LOG_GRACE_AFTER_DELIVERY,
+            LOG_MAX_AGE,
+            |_| false,
+        );
+        assert_eq!(n, 1);
+        assert!(!old_log.exists() && old_rec.exists());
+        assert!(young_log.exists() && young_rec.exists());
+    }
+
+    #[test]
+    fn sweep_logs_never_touches_a_running_jobs_log_with_a_live_server() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        // Old record and old .delivered: both finished-record rules would fire if the
+        // state were not consulted.
+        let (rec, log) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000001",
+            "@bg_00000001",
+            RecordState::Running,
+            true,
+        );
+        set_mtime(&rec, ago(10 * LOG_MAX_AGE));
+        set_mtime(&sidecar(&rec, ".delivered"), ago(10 * LOG_MAX_AGE));
+        let me = std::process::id();
+        let n = sweep_logs(
+            dir.path(),
+            logs.path(),
+            Duration::ZERO,
+            Duration::ZERO,
+            |pid| pid == me,
+        );
+        assert_eq!(n, 0);
+        assert!(log.exists() && rec.exists());
+    }
+
+    #[test]
+    fn sweep_logs_leaves_a_dead_servers_running_log_to_the_record_rule() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (rec, log) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000001",
+            "@bg_00000001",
+            RecordState::Running,
+            true,
+        );
+        let mut r: JobRecord =
+            serde_json::from_str(&std::fs::read_to_string(&rec).unwrap()).unwrap();
+        r.server_pid = 7;
+        write_record(&rec, &r).unwrap();
+        set_mtime(&rec, ago(2 * LOG_MAX_AGE));
+        set_mtime(&sidecar(&rec, ".delivered"), ago(2 * LOG_MAX_AGE));
+        // sweep_logs leaves it...
+        let n = sweep_logs(
+            dir.path(),
+            logs.path(),
+            LOG_GRACE_AFTER_DELIVERY,
+            LOG_MAX_AGE,
+            |_| false,
+        );
+        assert_eq!(n, 0);
+        assert!(log.exists() && rec.exists());
+        // ...and sweep_stale before RECORD_MAX_AGE leaves it too...
+        assert_eq!(
+            sweep_stale(dir.path(), logs.path(), RECORD_MAX_AGE, |_| false),
+            0
+        );
+        assert!(log.exists() && rec.exists());
+        // ...until the record itself goes, and then the log goes with it.
+        set_mtime(&rec, ago(RECORD_MAX_AGE + HOUR));
+        assert_eq!(
+            sweep_stale(dir.path(), logs.path(), RECORD_MAX_AGE, |_| false),
+            1
+        );
+        assert!(!log.exists() && !rec.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sweep_logs_skips_a_log_path_outside_the_log_dir_a_symlink_and_a_directory() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let old = ago(2 * LOG_MAX_AGE);
+        let finished_naming = |token: &str, handle: &str, named: &Path| -> PathBuf {
+            let path = record_path(dir.path(), token, handle);
+            let mut rec = JobRecord::running(handle, "true", None).with_log_path(named);
+            rec.state = RecordState::Exited;
+            write_record(&path, &rec).unwrap();
+            set_mtime(&path, old);
+            path
+        };
+
+        // 1. a well-named file, but in a different directory
+        let elsewhere = outside.path().join("codescout-bg-out.log");
+        std::fs::write(&elsewhere, b"x").unwrap();
+        finished_naming("00000001", "@bg_00000001", &elsewhere);
+
+        // 2. a symlink inside log_dir whose target is a file in the other directory
+        let target = outside.path().join("target.txt");
+        std::fs::write(&target, b"precious").unwrap();
+        let link = logs.path().join("codescout-bg-link.log");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        finished_naming("00000002", "@bg_00000002", &link);
+
+        // 3. a directory with a log-like name
+        let a_dir = logs.path().join("codescout-bg-x.log");
+        std::fs::create_dir(&a_dir).unwrap();
+        finished_naming("00000003", "@bg_00000003", &a_dir);
+
+        // 4. a regular file in log_dir with the wrong name
+        let wrong = logs.path().join("notes.log");
+        std::fs::write(&wrong, b"x").unwrap();
+        finished_naming("00000004", "@bg_00000004", &wrong);
+
+        let n = sweep_logs(
+            dir.path(),
+            logs.path(),
+            LOG_GRACE_AFTER_DELIVERY,
+            LOG_MAX_AGE,
+            |_| false,
+        );
+        assert_eq!(n, 0);
+        assert!(elsewhere.exists(), "a file outside log_dir was removed");
+        assert!(link.symlink_metadata().is_ok(), "the symlink was removed");
+        assert!(target.exists(), "the symlink target was removed");
+        assert!(a_dir.is_dir(), "the directory was removed");
+        assert!(wrong.exists(), "a wrongly named file was removed");
+    }
+
+    #[test]
+    fn sweep_logs_treats_a_future_mtime_as_age_zero() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let future = std::time::SystemTime::now() + 3 * LOG_MAX_AGE;
+        // undelivered: the record's mtime is in the future
+        let (rec_a, log_a) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000001",
+            "@bg_00000001",
+            RecordState::Exited,
+            false,
+        );
+        set_mtime(&rec_a, future);
+        // delivered: the .delivered mtime is in the future
+        let (rec_b, log_b) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000002",
+            "@bg_00000002",
+            RecordState::Exited,
+            true,
+        );
+        set_mtime(&sidecar(&rec_b, ".delivered"), future);
+        let n = sweep_logs(
+            dir.path(),
+            logs.path(),
+            LOG_GRACE_AFTER_DELIVERY,
+            LOG_MAX_AGE,
+            |_| false,
+        );
+        assert_eq!(n, 0);
+        assert!(log_a.exists() && log_b.exists());
+    }
+
+    #[test]
+    fn sweep_logs_treats_a_missing_delivered_sidecar_as_not_delivered() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (rec, log) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000001",
+            "@bg_00000001",
+            RecordState::Exited,
+            false,
+        );
+        assert!(!sidecar(&rec, ".delivered").exists());
+        // A zero grace would remove a log whose delivery age was taken as zero.
+        let n = sweep_logs(dir.path(), logs.path(), Duration::ZERO, LOG_MAX_AGE, |_| {
+            false
+        });
+        assert_eq!(n, 0);
+        assert!(log.exists() && rec.exists());
+    }
+
+    #[test]
+    fn sweep_stale_removes_the_log_with_its_record_and_survives_a_record_whose_log_is_gone() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (rec_a, log_a) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000001",
+            "@bg_00000001",
+            RecordState::Exited,
+            true,
+        );
+        let (rec_b, log_b) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000002",
+            "@bg_00000002",
+            RecordState::Exited,
+            false,
+        );
+        std::fs::remove_file(&log_b).unwrap();
+        let n = sweep_stale(dir.path(), logs.path(), Duration::ZERO, |_| false);
+        assert_eq!(n, 2);
+        assert!(!rec_a.exists() && !log_a.exists());
+        assert!(!rec_b.exists());
     }
 }

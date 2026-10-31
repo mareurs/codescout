@@ -1671,6 +1671,7 @@ impl OutputBuffer {
         self.record_sweep.call_once(|| {
             crate::tools::job_record::sweep_stale(
                 &self.record_dir,
+                &std::env::temp_dir(),
                 crate::tools::job_record::RECORD_MAX_AGE,
                 pid_alive,
             );
