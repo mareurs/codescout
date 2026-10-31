@@ -428,6 +428,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // other validators and BEFORE the file and the catalog row are written, so a refusal leaves neither.
     crate::librarian::requirements::enforce_on_create(&base_dir, &a.kind, &a.tags, &a.body)?;
     let status = resolve_status(&a.kind, a.status.as_deref())?;
+    // A bug's `opened` is the day it was filed. The server knows it, so it writes it rather than
+    // leave `tests/issue_frontmatter.rs` to refuse the file in whichever session next runs the
+    // gate. A supplied value is the caller's own fact (a late filing) and is kept as given.
+    let mut extra = a.extra.clone();
+    if a.kind == "bug" {
+        extra
+            .entry("opened".to_string())
+            .or_insert_with(|| Value::String(chrono::Utc::now().format("%Y-%m-%d").to_string()));
+    }
     let fm = Frontmatter {
         id: Some(id.clone()),
         kind: Some(a.kind.clone()),
@@ -437,7 +446,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         tags: a.tags.clone(),
         topic: a.topic.clone(),
         time_scope: a.time_scope.clone(),
-        extra: a.extra.clone(),
+        extra,
     };
     let content = crate::librarian::frontmatter::write(
         &fm,
@@ -565,6 +574,91 @@ mod tests {
         assert!(content.contains("title: X"));
         let id = v["id"].as_str().unwrap();
         assert!(artifact::get(&ctx.catalog.lock(), id).unwrap().is_some());
+    }
+    /// The frontmatter value of `key` in a created file, or `None` when the key is absent.
+    fn frontmatter_value(content: &str, key: &str) -> Option<String> {
+        let prefix = format!("{key}: ");
+        content
+            .lines()
+            .skip(1)
+            .take_while(|l| *l != "---")
+            .find_map(|l| l.strip_prefix(&prefix).map(|v| v.trim().to_string()))
+    }
+
+    /// `tests/issue_frontmatter.rs` requires `opened: YYYY-MM-DD` on a bug file dated 2026-09-24
+    /// or later, and `doc(create)` neither wrote nor asked for it, so the failure surfaced at gate
+    /// time in another session (twice on 2026-10-30). The server knows the creation date, so it
+    /// writes it.
+    ///
+    /// See `docs/issues/2026-10-30-doc-create-for-a-bug-file-does-not-stamp-or-require-opened-so-the-frontmatter-gate-fails-in-another-session.md`.
+    #[tokio::test]
+    async fn a_bug_created_without_opened_is_stamped_with_todays_date() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        // Read the date on both sides of the call, so a run across midnight UTC is not a flake.
+        let before = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/issues/2026-10-31-x.md",
+                "kind": "bug", "title": "X", "body": "# BUG: x"
+            }),
+        )
+        .await
+        .unwrap();
+        let after = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let content =
+            std::fs::read_to_string(tmp.path().join("docs/issues/2026-10-31-x.md")).unwrap();
+        let opened = frontmatter_value(&content, "opened")
+            .unwrap_or_else(|| panic!("no `opened` in the created bug file:\n{content}"));
+        assert!(
+            opened == before || opened == after,
+            "opened {opened:?} is neither {before} nor {after}"
+        );
+    }
+
+    /// A caller-supplied `opened` is the caller's fact (a bug filed late for an earlier
+    /// observation), so the stamp must not overwrite it.
+    #[tokio::test]
+    async fn a_supplied_opened_on_a_bug_is_kept() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/issues/2026-10-31-y.md",
+                "kind": "bug", "title": "Y", "body": "# BUG: y",
+                "extra": {"opened": "2026-01-02"}
+            }),
+        )
+        .await
+        .unwrap();
+        let content =
+            std::fs::read_to_string(tmp.path().join("docs/issues/2026-10-31-y.md")).unwrap();
+        assert_eq!(
+            frontmatter_value(&content, "opened").as_deref(),
+            Some("2026-01-02"),
+            "{content}"
+        );
+    }
+
+    /// Only a bug carries `opened`. A spec or a tracker has no such field in its schema, and a
+    /// stamp there would be an unasked-for key in every artifact of every kind.
+    #[tokio::test]
+    async fn a_non_bug_kind_is_not_stamped_with_opened() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/specs/z.md",
+                "kind": "spec", "title": "Z", "body": "hello"
+            }),
+        )
+        .await
+        .unwrap();
+        let content = std::fs::read_to_string(tmp.path().join("docs/specs/z.md")).unwrap();
+        assert_eq!(frontmatter_value(&content, "opened"), None, "{content}");
     }
 
     // ---- a create never lands outside the repository root through a symbolic link ------------
