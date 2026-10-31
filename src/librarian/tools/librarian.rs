@@ -406,7 +406,7 @@ mod tests {
             ],
             |args| async move {
                 // `doctor` reports a per-context random host id, so two fresh-context calls
-                // differ whether or not the key was read: mask it (25d8de9cf59c0e49).
+                // differ whether or not the key was read: mask it (ab99663291a364a0).
                 Librarian.call(&mk_ctx(), args).await.map(|mut v| {
                     drop_host(&mut v);
                     v

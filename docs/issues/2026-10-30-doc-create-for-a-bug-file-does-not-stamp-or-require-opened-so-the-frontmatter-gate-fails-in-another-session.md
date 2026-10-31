@@ -27,7 +27,7 @@ On 2026-10-30 `every_tracked_issue_file_has_wellformed_frontmatter` failed twice
 
 ## Reproduction
 
-Call `doc(action="create", kind="bug", rel_path="docs/issues/<date>-x.md", title=…, body=…)` with no `extra`, then run `scripts/with-slot.sh cargo test -p codescout --test issue_frontmatter`. NOT run in this session as a clean repro: I created one bug that way (`25d8de9cf59c0e49`) and added `opened` by `update` before reading the frontmatter or running the test. The claim rests on the code, below, and on the two peer files.
+Call `doc(action="create", kind="bug", rel_path="docs/issues/<date>-x.md", title=…, body=…)` with no `extra`, then run `scripts/with-slot.sh cargo test -p codescout --test issue_frontmatter`. NOT run in this session as a clean repro: I created one bug that way (`ab99663291a364a0`) and added `opened` by `update` before reading the frontmatter or running the test. The claim rests on the code, below, and on the two peer files.
 
 ## Environment
 
@@ -68,4 +68,4 @@ Run the reproduction above to confirm, then read `create.rs` for a bug-kind bran
 ## References
 
 - `tests/issue_frontmatter.rs`
-- `docs/issues/2026-10-30-doctor-reports-a-random-host-per-fresh-catalog-so-the-forward-param-probe-may-pass-vacuously-for-doctor-keys.md`
+- `docs/issues/archive/2026-10-30-doctor-reports-a-random-host-per-fresh-catalog-so-the-forward-param-probe-may-pass-vacuously-for-doctor-keys.md`

@@ -1,5 +1,5 @@
 ---
-id: '25d8de9cf59c0e49'
+id: ab99663291a364a0
 kind: bug
 status: fixed
 title: doctor reports a host id that differs per fresh catalog, so the forward param probe may pass vacuously for doctor keys
@@ -52,6 +52,14 @@ Done 2026-10-30. The forward probe's call closure in `librarian::tools::libraria
 ## Tests added
 
 No new test: the existing forward probe is the test. Mutation run: `#[serde(skip)]` on `Args::offset` in `src/librarian/tools/doctor.rs` stays green before the fix and fails after it; mutation reverted.
+
+
+## Fix provenance
+
+- **SHA:** `27c47ab19` (`experiments`)
+- **patch-id:** `2382a78204c632918ea21b36de98c71a9f8821bd`
+
+The commit also carries the `doc(create)` `opened` stamp (`f350eba20450a7f4`), so the patch-id covers both changes. The `drop_host` mask for this bug is the `librarian.rs` hunk.
 
 ## Workarounds
 
