@@ -1,0 +1,113 @@
+"""Control run of one SWE-bench-Live MultiLang Rust task in its own image, offline.
+
+    detect_workdir(container)                      `/testbed/repo` or `/testbed`, whichever holds `.git`
+    reset_to_base(container, workdir, base_commit)  the image ships the gold fix uncommitted; undo it
+    run_tests(container, workdir, record, timeout)  the record's test_cmds, then its print_cmds as the log
+    control(record, container=...)                  base + test patch, then + gold patch; the verdict
+
+The image holds the answer: the raw tree carries the gold fix and old reports, so a run is only
+meaningful after `reset_to_base` proves HEAD is `base_commit` and the tree is clean (`target/` is
+git-ignored prebuilt output and is kept). Containers run `--network none`, are named
+`sab-ml-ctl-*`, and are always removed. Any control or parser failure becomes a not-ok verdict.
+Stdlib only.
+"""
+import subprocess
+import time
+from collections import Counter
+
+import multilang_grade as grade
+import pilot
+
+CONTAINER_PREFIX = "sab-ml-ctl-"
+MAX_LOG_BYTES = 64 * 1024 * 1024
+MAX_DIRTY_LINES = 50
+START_TIMEOUT = 600
+
+
+class ControlError(RuntimeError):
+    """The container could not be brought to a trustworthy base state, or a step failed."""
+
+
+def _exec(container, workdir, *cmd, data=None, timeout=600, check=True):
+    """`docker exec` in `workdir`; a failing step or a timeout is a ControlError when `check`."""
+    args = ["exec"]
+    if data is not None:
+        args.append("-i")
+    if workdir:
+        args += ["-w", workdir]
+    try:
+        return pilot.docker(*args, container, *cmd, data=data, timeout=timeout, check=check)
+    except RuntimeError as e:
+        raise ControlError(str(e)) from None
+    except subprocess.TimeoutExpired:
+        raise ControlError(f"timed out after {timeout}s: {' '.join(map(str, cmd))[:200]}") from None
+
+
+def detect_workdir(container):
+    """`/testbed/repo` when it holds a `.git`, else `/testbed`; ControlError when neither does."""
+    for path in ("/testbed/repo", "/testbed"):
+        if _exec(container, None, "test", "-d", f"{path}/.git", check=False, timeout=60).returncode == 0:
+            return path
+    raise ControlError("no git repository at /testbed/repo or /testbed")
+
+
+def reset_to_base(container, workdir, base_commit):
+    """Reset the tree to `base_commit` and prove it: HEAD equals it and `git status` is empty."""
+    before = _exec(container, workdir, "git", "status", "--porcelain", timeout=120).stdout
+    dirty_before = before.splitlines()[:MAX_DIRTY_LINES]
+    _exec(container, workdir, "git", "reset", "--hard", "-q", base_commit, timeout=300)
+    _exec(container, workdir, "git", "clean", "-fdq", "-e", "target", timeout=300)
+    _exec(container, workdir, "rm", "-rf", f"{workdir}/reports", timeout=60)
+    head = _exec(container, workdir, "git", "rev-parse", "HEAD", timeout=60).stdout.strip()
+    if head != base_commit:
+        raise ControlError(f"HEAD is {head[:12]!r} after reset, expected {base_commit[:12]!r}")
+    after = _exec(container, workdir, "git", "status", "--porcelain", timeout=120).stdout.strip()
+    if after:
+        raise ControlError(f"tree not clean after reset: {after.splitlines()[0][:200]}")
+    return {"dirty_before": dirty_before}
+
+
+def run_tests(container, workdir, record, timeout=3600):
+    """Run `test_cmds` (exit codes ignored: a failing test is data), return the `print_cmds` output."""
+    if not record["test_cmds"]:
+        raise ControlError("record has no test_cmds")
+    for cmd in record["test_cmds"]:
+        _exec(container, workdir, "bash", "-o", "pipefail", "-c", cmd, timeout=timeout, check=False)
+    parts = [_exec(container, workdir, "bash", "-o", "pipefail", "-c", cmd, timeout=600,
+                   check=False).stdout for cmd in record["print_cmds"]]
+    return "".join(parts)[:MAX_LOG_BYTES]
+
+
+def _apply(container, workdir, patch):
+    _exec(container, workdir, "git", "apply", "-", data=patch, timeout=300)
+
+
+def control(record, *, container, timeout=3600):
+    """(evidence, base_log, gold_log) for one record. Never raises for a task-level failure."""
+    if not container.startswith(CONTAINER_PREFIX):
+        raise ControlError(f"container name must start with {CONTAINER_PREFIX!r}: {container!r}")
+    f2p, p2p = list(record["FAIL_TO_PASS"]), list(record["PASS_TO_PASS"])
+    evidence = {"id": record["instance_id"], "image": record["docker_image"]}
+    base_log = gold_log = ""
+    started = time.monotonic()
+    try:
+        pilot.docker("run", "-d", "--name", container, "--network", "none", "--cpus", "4",
+                     "--memory", "24g", "--memory-swap", "24g", record["docker_image"],
+                     "sleep", "infinity", timeout=START_TIMEOUT)
+        workdir = evidence["workdir"] = detect_workdir(container)
+        evidence.update(reset_to_base(container, workdir, record["base_commit"]))
+        _apply(container, workdir, record["test_patch"])
+        base_log = run_tests(container, workdir, record, timeout)
+        base = grade.run_parser(record["log_parser"], base_log)
+        evidence["base"] = dict(Counter(base.values()))
+        _apply(container, workdir, record["patch"])
+        gold_log = run_tests(container, workdir, record, timeout)
+        gold = grade.run_parser(record["log_parser"], gold_log)
+        evidence["gold"] = dict(Counter(gold.values()))
+        evidence["verdict"] = grade.control_verdict(base, gold, f2p, p2p)
+    except (ControlError, grade.ParserError, RuntimeError, subprocess.TimeoutExpired) as e:
+        evidence["verdict"] = {"ok": False, "reasons": [f"control error: {e}"]}
+    finally:
+        pilot.docker("rm", "-f", container, check=False)
+    evidence["wall_seconds"] = round(time.monotonic() - started, 1)
+    return evidence, base_log, gold_log
