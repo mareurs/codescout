@@ -10,7 +10,6 @@ tags:
 closed: 2026-10-30
 opened: 2026-10-30
 severity: high
-unverified: The saving is shown by tests that count embeds (an append embeds 1 chunk, a rename 2, reembed all), not yet by a run on the real 482 MB catalog. The migration (v14) has not run on that catalog.
 ---
 
 # BUG: Librarian reindex re-embeds every chunk of an artifact when any part of it changes
@@ -80,6 +79,10 @@ Limits, stated plainly:
 In `src/librarian/tools/reindex.rs`: `appending_an_entry_embeds_only_the_chunk_that_is_new` (embeds 1, skips the rest, and a third run queues nothing), `renaming_an_entry_re_embeds_its_mid_entry_chunks`, `reembed_ignores_the_markers`, `a_chunk_whose_upsert_failed_is_not_marked_embedded`. In `indexer.rs`: `a_marker_does_not_outlive_the_vector_it_vouched_for`. In `catalog/mod.rs`: `v14_adds_a_nullable_embedded_input_hash_and_is_idempotent`; the eight version assertions moved from 13 to 14.
 
 Mutations run: hashing the chunk body without the entry title fails the rename test; marking a chunk whose upsert failed fails the failed-upsert test. Both reverted.
+
+## Verified
+
+2026-10-31, on the real catalog (482 MB, binary built after `0f8705532`). Migration v14 ran without error. The first reindex wrote markers (56 embedded, 0 skipped). A throwaway 41-chunk file then took one appended section: `embedded` 2, `embed_skipped_chunks` 40. The reindex took 2,686 ms, against 3,016 ms for the first embed of the same file. The scan of 2,220 artifacts costs about 2.7-3.1 s, so the saving here is about 0.3 s; it grows with chunk count, and a tracker of hundreds of chunks is not yet measured. The second embedded chunk was not identified. The probe file was deleted afterwards.
 
 ## Workarounds
 
