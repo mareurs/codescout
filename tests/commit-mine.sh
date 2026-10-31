@@ -225,6 +225,8 @@ out=$(env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CO
 eq "F5 no identity at all -> exit 2" "$rc" "2"
 has "F5 message names CLAUDE_CODE_SESSION_ID" "$out" "CLAUDE_CODE_SESSION_ID"
 has "F5 message names CODEX_SESSION_ID" "$out" "CODEX_SESSION_ID"
+has "F5 message says to run inside a session" "$out" "run this from inside a Claude Code or Codex session"
+hasnt "F5 message does not invite setting an identity by hand" "$out" "Set CLAUDE_CODE_SESSION_ID"
 hasnt "F5 message does not send the caller to plain git commit" "$out" "plain \`git commit\`"
 
 # ------------------------------------------------------------ F5c: Codex-only caller

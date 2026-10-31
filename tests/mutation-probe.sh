@@ -45,6 +45,13 @@ eq() { # eq <label> <actual> <expected>
         FAIL=$((FAIL + 1)); echo "FAIL: $1"; echo "  actual:   $2"; echo "  expected: $3"
     fi
 }
+hasnt() { # hasnt <label> <haystack> <needle>
+    if printf '%s' "$2" | grep -qF -- "$3"; then
+        FAIL=$((FAIL + 1)); echo "FAIL: $1"; echo "  must NOT contain: $3"; echo "  in: $2"
+    else
+        PASS=$((PASS + 1))
+    fi
+}
 
 WORK=$(mktemp -d)
 BGPIDS=()
@@ -77,6 +84,8 @@ R=$(newrepo)
 run "$R" "" --file src/lib.rs --find 'guard();' --replace '' -- true
 eq   "1 no sid exits 2" "$RC" "2"
 has  "1 says why 'mine' has no referent" "$OUT" "no session identity"
+has  "1 says to run inside a session" "$OUT" "run this from inside a Claude Code or Codex session"
+hasnt "1 does not invite setting an identity by hand" "$OUT" "Set CLAUDE_CODE_SESSION_ID"
 has  "1 names the Claude variable" "$OUT" "CLAUDE_CODE_SESSION_ID"
 has  "1 names the Codex variable" "$OUT" "CODEX_SESSION_ID"
 

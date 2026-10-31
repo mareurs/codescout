@@ -51,8 +51,9 @@
 # Exit: 0 the --soft reset ran.
 #       1 refused — --mixed/--hard would touch the shared index (and, for
 #         --hard, every peer's unstaged working-tree edits too).
-#       2 could not answer the question at all: no session id, or not a git
-#         repository.
+#       2 could not answer the question at all: no session id, conflicting or
+#         invalid session identity, the identity helper (publish-identity.sh)
+#         cannot be loaded, or not a git repository.
 
 set -u
 
@@ -76,12 +77,10 @@ fi
 me="$(publish_identity)" || exit 2
 if [ -z "$me" ]; then
     cat >&2 <<'EOF'
-git-safe-reset.sh: no session identity (CLAUDE_CODE_SESSION_ID and CODEX_SESSION_ID are both
-unset). Without one this script cannot attribute a peer's staged work, so it refuses:
-there is no session identity to attribute it to.
-
-Set CLAUDE_CODE_SESSION_ID (Claude) or CODEX_SESSION_ID (Codex) and re-run. For reference, the
-forms of the raw command are:
+git-safe-reset.sh: no session identity was found (neither CLAUDE_CODE_SESSION_ID nor
+CODEX_SESSION_ID resolves to one); run this from inside a Claude Code or Codex session.
+Without one this script cannot attribute a peer's staged work, so it refuses. For reference,
+the forms of the raw command are:
 
   git reset --soft <commit>      # move HEAD, keep the index
   git reset --mixed <commit>     # also unstages everything (git's own default)

@@ -51,9 +51,9 @@ fi
 # no identity is set, and exits 2 with its own reason on stderr for a conflict or invalid id.
 me="$(publish_identity)" || exit 2
 if [ -z "$me" ]; then
-    echo "commit-mine: no session identity. Set CLAUDE_CODE_SESSION_ID (Claude) or" >&2
-    echo "  CODEX_SESSION_ID (Codex) so staged paths can be split by owner; this helper will" >&2
-    echo "  not guess whose paths are whose." >&2
+    echo "commit-mine: no session identity was found (neither CLAUDE_CODE_SESSION_ID nor" >&2
+    echo "  CODEX_SESSION_ID resolves to one); run this from inside a Claude Code or Codex session." >&2
+    echo "  This helper will not guess whose staged paths are whose." >&2
     exit 2
 fi
 

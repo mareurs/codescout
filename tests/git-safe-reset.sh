@@ -176,7 +176,10 @@ OUT=$(cd "$R" && env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THRE
     GIT_SAFE_RESET_TEST_MARKER="$WORK/consulted" "$TOOL" --mixed HEAD~1 2>&1); RC=$?
 eq "no sid exits 2, not 1" "$RC" "2"
 eq "no sid left HEAD alone" "$(git -C "$R" rev-parse HEAD)" "$BEFORE_HEAD"
-has "no sid names the missing referent" "$OUT" "there is no session identity"
+has "no sid names the missing referent" "$OUT" "no session identity was found"
+has "no sid says to run inside a session" "$OUT" "run this from inside a Claude Code or Codex session"
+hasnt "no sid does not invite setting an identity by hand" "$OUT" "and re-run"
+hasnt "no sid does not claim both variables are unset" "$OUT" "are both"
 # Changed ON PURPOSE: the old assertion pinned the solo-checkout fallback text, a claim of
 # exclusive ownership the identity spec rejects. It now pins that both variables are named.
 has "no sid names CLAUDE_CODE_SESSION_ID" "$OUT" "CLAUDE_CODE_SESSION_ID"

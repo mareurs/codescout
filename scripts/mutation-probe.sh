@@ -147,9 +147,9 @@ fi
 # identity exits 2 with the resolver's own reason on stderr.
 SID="$(publish_identity)" || exit 2
 if [ -z "$SID" ]; then
-    echo "mutation-probe: no session identity. Set CLAUDE_CODE_SESSION_ID (Claude) or" >&2
-    echo "  CODEX_SESSION_ID (Codex), so the marker names an author." >&2
-    echo "  Without either, mutate a scratch clone by hand instead." >&2
+    echo "mutation-probe: no session identity was found (neither CLAUDE_CODE_SESSION_ID nor" >&2
+    echo "  CODEX_SESSION_ID resolves to one); run this from inside a Claude Code or Codex session," >&2
+    echo "  so the marker names an author. Without one, mutate a scratch clone by hand instead." >&2
     exit 2
 fi
 
