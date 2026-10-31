@@ -925,8 +925,8 @@ rm -rf "$T"
 
 new_repo; mkdb "$DB"
 echo mine > f.txt
-CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U" git add -- f.txt
-eq "conflicting_identity_records_dash: git add still succeeds" "$?" "0"
+_err="$(CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U" git add -- f.txt 2>&1 >/dev/null)"
+eq "conflicting_identity_records_dash: git add prints nothing on stderr" "$_err" ""
 eq "conflicting_identity_records_dash: owner" "$(owner_of f.txt)" "-"
 eq "conflicting_identity_records_dash: route" "$(route_of f.txt)" "id-unset"
 rm -rf "$T"
@@ -975,6 +975,27 @@ echo theirs > g.txt
 add_as "$B" g.txt
 eq "claude_peer_staged_is_theirs_with_bare_owner" "$(classify_as_codex "$U")" "$(printf 'theirs\t%s\tg.txt\nEXIT=0' "$B")"
 rm -rf "$T"
+
+# The raw Claude `--classify` line is the contract commit-mine parses: `mine<TAB><bare id><TAB><path>`.
+new_repo; mkdb "$DB"
+echo mine > f.txt
+add_as "$A" f.txt
+eq "claude_classify_raw_line_is_bare_id" \
+    "$(env -u GIT_INDEX_FILE -u CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID="$A" bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1; echo "EXIT=$?")" \
+    "$(printf 'mine\t%s\tf.txt\nEXIT=0' "$A")"
+rm -rf "$T"
+
+# A missing helper in the hook: owner `-`, and the git command stays silent and succeeds.
+NOHELP="$(mktemp -d "${TMPDIR:-/tmp}/nohelper-XXXXXX")"
+cp "$SRC/post-index-change-stage-log.sh" "$NOHELP/post-index-change-stage-log.sh"
+new_repo; mkdb "$DB"
+printf '#!/usr/bin/env bash\nexec "%s/post-index-change-stage-log.sh" "$@"\n' "$NOHELP" > .git/hooks/post-index-change
+echo mine > f.txt
+_err="$(CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" git add -- f.txt 2>&1 >/dev/null)"; _rc=$?
+eq "missing_helper_hook: git add succeeds" "$_rc" "0"
+eq "missing_helper_hook: nothing on stderr" "$_err" ""
+eq "missing_helper_hook: owner is -" "$(owner_of f.txt)" "-"
+rm -rf "$T" "$NOHELP"
 
 new_repo; mkdb "$DB"
 echo mine > f.txt
@@ -1026,6 +1047,8 @@ guard_err() {
 }
 guard_err "identity_conflict_message" "conflicting context" CLAUDE_CODE_SESSION_ID="$A" CODEX_SESSION_ID="$U"
 guard_err "invalid_claude_id_message" "invalid session id a_b" CLAUDE_CODE_SESSION_ID="a_b"
+guard_err "invalid_claude_id_message (bad id!)" "invalid session id bad id!" CLAUDE_CODE_SESSION_ID="bad id!"
+guard_err "invalid_codex_id_message (a/b)" "invalid session id a/b" CODEX_SESSION_ID="a/b"
 guard_err "broken_python3_message" "resolver unavailable" PATH="$BADPY:$PATH" CLAUDE_CODE_SESSION_ID="$A"
 out="$(env -u GIT_INDEX_FILE -u CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID="a_b" bash "$SRC/pre-commit-foreign-index.sh" --classify 2>&1 >/dev/null; echo "EXIT=$?")"
 has "classify_invalid_id: exit 2" "$out" "EXIT=2"

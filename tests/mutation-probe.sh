@@ -109,9 +109,10 @@ eq   "1b marker session_id is the codex principal" \
 R=$(newrepo)
 OUT=$(cd "$R" && env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID \
     -u CODESCOUT_CONTEXT_FILE CLAUDE_CODE_SESSION_ID="$SID" "$PROBE" --shared --file src/lib.rs \
-    --find 'guard();' --replace '' -- bash -c "cp .codescout/mutations/$SID.json '$WORK/claude-marker.json'" 2>&1)
+    --find 'guard();' --replace '' -- bash -c "cp .codescout/mutations/$SID.json '$WORK/claude-marker.json'; ls .codescout/mutations > '$WORK/claude-marker.names'" 2>&1)
 eq   "1c claude marker session_id is the bare id" \
     "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session_id"])' "$WORK/claude-marker.json" 2>/dev/null)" "$SID"
+eq   "1c claude marker file is named <bare id>.json, byte for byte" "$(cat "$WORK/claude-marker.names" 2>/dev/null)" "$SID.json"
 
 # --- 1d. conflicting_identity_exits_2 ----------------------------------------
 R=$(newrepo)
@@ -119,7 +120,30 @@ OUT=$(cd "$R" && env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THRE
     -u CODESCOUT_CONTEXT_FILE CLAUDE_CODE_SESSION_ID="$SID" CODEX_SESSION_ID="$CID" "$PROBE" \
     --file src/lib.rs --find 'guard();' --replace '' -- true 2>&1); RC=$?
 eq   "1d conflicting identity exits 2" "$RC" "2"
+has  "1d the resolver's reason is shown" "$OUT" "conflicting context"
 eq   "1d a conflicting run arms nothing" "$(ls "$R/.codescout/mutations" 2>/dev/null | wc -l)" "0"
+
+# --- 1e. an invalid id exits 2 with the resolver's reason, for either host ----
+for spec in "CLAUDE_CODE_SESSION_ID=bad id!|bad id!" "CODEX_SESSION_ID=a/b|a/b"; do
+    envset="${spec%%|*}"; badid="${spec##*|}"
+    R=$(newrepo)
+    OUT=$(cd "$R" && env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID \
+        -u CODESCOUT_CONTEXT_FILE "$envset" "$PROBE" \
+        --file src/lib.rs --find 'guard();' --replace '' -- true 2>&1); RC=$?
+    eq   "1e invalid id ($badid) exits 2" "$RC" "2"
+    has  "1e invalid id ($badid): the resolver's reason is shown" "$OUT" "invalid session id $badid"
+    eq   "1e invalid id ($badid) arms nothing" "$(ls "$R/.codescout/mutations" 2>/dev/null | wc -l)" "0"
+done
+
+# --- 1f. the identity helper is missing: a clear refusal, exit 2 -------------
+mkdir -p "$WORK/nohelper"
+cp "$PROBE" "$WORK/nohelper/mutation-probe.sh"
+R=$(newrepo)
+OUT=$(cd "$R" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$WORK/nohelper/mutation-probe.sh" \
+    --file src/lib.rs --find 'guard();' --replace '' -- true 2>&1); RC=$?
+eq   "1f missing helper exits 2" "$RC" "2"
+has  "1f missing helper says it cannot load it" "$OUT" "cannot load scripts/publish-identity.sh"
+eq   "1f missing helper arms nothing" "$(ls "$R/.codescout/mutations" 2>/dev/null | wc -l)" "0"
 
 # --- 2. Pattern occurring zero times ----------------------------------------
 R=$(newrepo)

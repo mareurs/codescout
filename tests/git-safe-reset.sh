@@ -203,10 +203,39 @@ has "codex-only reached the provenance scan" "$(consulted)" "yes"
 has "codex-only gets the normal REFUSED text" "$OUT" "REFUSED"
 R=$(newrepo)
 BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
+rm -f "$WORK/consulted"
 OUT=$(cd "$R" && env -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE \
-    CLAUDE_CODE_SESSION_ID=claude-one CODEX_SESSION_ID=cx-two "$TOOL" --soft HEAD~1 2>&1); RC=$?
+    CLAUDE_CODE_SESSION_ID=claude-one CODEX_SESSION_ID=cx-two GIT_SAFE_RESET_PROVENANCE="$PROV_STUB" \
+    GIT_SAFE_RESET_TEST_MARKER="$WORK/consulted" "$TOOL" --mixed HEAD~1 2>&1); RC=$?
 eq "conflicting_identity_exits_2" "$RC" "2"
+has "conflict shows the resolver's reason" "$OUT" "conflicting context"
 eq "conflict left HEAD alone" "$(git -C "$R" rev-parse HEAD)" "$BEFORE_HEAD"
+hasnt "conflict never reached the provenance scan" "$(consulted)" "yes"
+
+echo "== 7c. an invalid id exits 2 with the resolver's reason, for either host =="
+for spec in "CLAUDE_CODE_SESSION_ID=bad id!|bad id!" "CODEX_SESSION_ID=a/b|a/b"; do
+    envset="${spec%%|*}"; badid="${spec##*|}"
+    R=$(newrepo)
+    BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
+    rm -f "$WORK/consulted"
+    OUT=$(cd "$R" && env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE \
+        "$envset" GIT_SAFE_RESET_PROVENANCE="$PROV_STUB" \
+        GIT_SAFE_RESET_TEST_MARKER="$WORK/consulted" "$TOOL" --mixed HEAD~1 2>&1); RC=$?
+    eq "invalid id ($badid) exits 2" "$RC" "2"
+    has "invalid id ($badid): the resolver's reason is shown" "$OUT" "invalid session id $badid"
+    eq "invalid id ($badid) left HEAD alone" "$(git -C "$R" rev-parse HEAD)" "$BEFORE_HEAD"
+    hasnt "invalid id ($badid) never reached the provenance scan" "$(consulted)" "yes"
+done
+
+echo "== 7d. the identity helper is missing: a clear refusal, exit 2 =="
+mkdir -p "$WORK/nohelper"
+cp "$TOOL" "$WORK/nohelper/git-safe-reset.sh"
+R=$(newrepo)
+BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
+OUT=$(cd "$R" && env CLAUDE_CODE_SESSION_ID=test-sid bash "$WORK/nohelper/git-safe-reset.sh" --soft HEAD~1 2>&1); RC=$?
+eq "missing helper exits 2" "$RC" "2"
+has "missing helper says it cannot load it" "$OUT" "cannot load scripts/publish-identity.sh"
+eq "missing helper left HEAD alone" "$(git -C "$R" rev-parse HEAD)" "$BEFORE_HEAD"
 
 echo "== 8. outside a git repo: exits 2 rather than crashing =="
 OUT=$(cd "$WORK" && env -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE CLAUDE_CODE_SESSION_ID=test-sid "$TOOL" --mixed HEAD 2>&1); RC=$?

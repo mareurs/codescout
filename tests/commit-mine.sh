@@ -238,7 +238,6 @@ echo mine > own.txt
 asx "$CX" git add -- own.txt
 echo theirs > peer.txt
 as "$CP" git add -- peer.txt
-h0=$(head_of)
 out=$(asx "$CX" bash scripts/commit-mine.sh -m codex 2>&1); rc=$?
 eq "F5c codex_only_commits_own_and_leaves_peer exits 0" "$rc" "0"
 [ "$rc" -eq 0 ] || printf '  output: %s\n' "$out"
@@ -249,13 +248,30 @@ eq "F5c the peer's path is still staged" "$(git diff --cached --name-only)" "pee
 echo more > own2.txt
 asx "$CX" git add -- own2.txt
 h0=$(head_of)
-out=$(env CLAUDE_CODE_SESSION_ID=claude-one CODEX_SESSION_ID=cx-two bash scripts/commit-mine.sh -m x 2>&1); rc=$?
+# own2.txt is staged by CX, and the Codex half of the conflict names CX too: a resolver that silently
+# preferred Codex would resolve to the stager, commit own2.txt, and fail the two assertions below.
+out=$(env CLAUDE_CODE_SESSION_ID=claude-one CODEX_SESSION_ID="$CX" bash scripts/commit-mine.sh -m x 2>&1); rc=$?
 eq "F5d conflicting_identity_exits_2_with_reason" "$rc" "2"
 has "F5d reason is the resolver's own" "$out" "conflicting context"
 eq "F5d nothing is committed" "$(head_of)" "$h0"
 out=$(env -u CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID='bad id!' bash scripts/commit-mine.sh -m x 2>&1); rc=$?
 eq "F5d invalid id -> exit 2" "$rc" "2"
 has "F5d invalid reason shown" "$out" "invalid session id"
+has "F5d invalid reason names the id" "$out" "bad id!"
+eq "F5d invalid Claude id commits nothing" "$(head_of)" "$h0"
+out=$(env -u CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID='a/b' bash scripts/commit-mine.sh -m x 2>&1); rc=$?
+eq "F5d invalid Codex id -> exit 2" "$rc" "2"
+has "F5d invalid Codex reason shown" "$out" "invalid session id a/b"
+eq "F5d invalid Codex id commits nothing" "$(head_of)" "$h0"
+
+# ------------------------------------------------------------ F5e: the identity helper is missing
+# A user-run script refuses clearly instead of falling back to "no identity".
+mkdir -p "$WORK/nohelper"
+cp scripts/commit-mine.sh "$WORK/nohelper/commit-mine.sh"
+out=$(as "$A" bash "$WORK/nohelper/commit-mine.sh" -m x 2>&1); rc=$?
+eq "F5e missing helper -> exit 2" "$rc" "2"
+has "F5e missing helper says it cannot load it" "$out" "cannot load scripts/publish-identity.sh"
+eq "F5e missing helper commits nothing" "$(head_of)" "$h0"
 
 # ------------------------------------------------------------ F7: a pathspec defeats the helper
 echo mine > a.txt
