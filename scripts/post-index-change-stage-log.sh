@@ -550,6 +550,10 @@ foreign_writer() {
         IFS=, read -ra parts <<< "$sids"
         for s in "${parts[@]}"; do
             [ -n "$s" ] || continue
+            # A Codex commit's trailer is `codex:<id>` while usage.db (and `$sid` below) hold the
+            # BARE id: strip one host qualifier so a writer's own commit closes its write.
+            case "$s" in codex:*) s="${s#codex:}" ;; claude-code:*) s="${s#claude-code:}" ;; esac
+            [ -n "$s" ] || continue
             [ "${lastc[$s]:-0}" -ge "$ct" ] || lastc[$s]="$ct"
         done
     done < <(git log -n 300 \

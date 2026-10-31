@@ -1000,6 +1000,31 @@ add_as "$A" g.txt
 eq "4b: the same peer writing AFTER that commit is live again" "$(owner_of g.txt)" "$B"
 rm -rf "$T"
 
+# 4d. A Codex writer's commit carries `Session-Id: codex:<id>` (prepare-commit-msg-session-id.sh) while
+# usage.db stores the BARE id, so the closing lookup must strip the qualifier or a Codex writer's own
+# commit never closes its write.
+new_repo; mkdb "$DB"
+echo base > f.txt; git add f.txt; git commit -qm base
+wrote "$DB" "$U" edit_file '{"action":"edit","path":"f.txt","new_string":"codexline"}' success "$(hrs '2 hours ago')"
+echo codexline > f.txt
+commit_as "codex:$U" f.txt "$(giso '90 minutes ago')"
+echo bline > f.txt
+commit_as "$B" f.txt "$(giso '60 minutes ago')"
+echo aline > f.txt
+add_as "$A" f.txt
+eq "codex_own_commit_closes_its_write: owner" "$(owner_of f.txt)" "$A"
+eq "codex_own_commit_closes_its_write: route" "$(route_of f.txt)" "named"
+rm -rf "$T"
+
+# R7-5: a Codex stager whose own subagent wrote the path is not a peer (the child row names the parent).
+new_repo; mkdb "$DB"
+echo mine > f.txt
+wrote "$DB" "$U/agent1" edit_file '{"action":"edit","path":"f.txt"}'
+add_codex f.txt
+eq "codex_stager_own_child_row_is_named: owner" "$(owner_of f.txt)" "codex:$U"
+eq "codex_stager_own_child_row_is_named: route" "$(route_of f.txt)" "named"
+rm -rf "$T"
+
 # 4c. the case the old commit-time bound got wrong, from a measured tracker: B wrote, then a
 # DIFFERENT session committed the file from a blob that predates B's write, so B's lines are
 # still uncommitted. Someone else's commit must not clear B.
