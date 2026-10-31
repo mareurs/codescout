@@ -56,27 +56,40 @@
 
 set -u
 
-if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+_identity_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    echo "git-safe-reset.sh: not inside a git repository" >&2
+    exit 2
+}
+cd "$ROOT" || exit 2
+
+# Repository check comes first: the identity resolver itself needs a git repository, and its
+# "not a git repository" would otherwise replace this script's own message.
+# User-run script, not a git hook: a missing helper is a clear refusal, not a silent fallback.
+if [ -z "$_identity_dir" ] || ! . "$_identity_dir/publish-identity.sh" 2>/dev/null; then
+    echo "git-safe-reset.sh: cannot load scripts/publish-identity.sh (looked next to this script)," >&2
+    echo "  so the caller's session identity cannot be resolved." >&2
+    exit 2
+fi
+# Prints the principal (bare id for Claude, codex:<id> for Codex), nothing when no identity is
+# set, and exits 2 with its own reason on stderr for a conflict or an invalid id.
+me="$(publish_identity)" || exit 2
+if [ -z "$me" ]; then
     cat >&2 <<'EOF'
-git-safe-reset.sh: CLAUDE_CODE_SESSION_ID is unset, so there is no session identity
-this script could use to attribute a peer's staged work if it had to refuse.
+git-safe-reset.sh: no session identity (CLAUDE_CODE_SESSION_ID and CODEX_SESSION_ID are both
+unset). Without one this script cannot attribute a peer's staged work, so it refuses:
+there is no session identity to attribute it to.
 
-Outside a Claude session you are almost certainly the only writer to this checkout,
-which is the case bare `git reset` is already correct for. Run it directly:
+Set CLAUDE_CODE_SESSION_ID (Claude) or CODEX_SESSION_ID (Codex) and re-run. For reference, the
+forms of the raw command are:
 
-  git reset --soft <commit>      # move HEAD, keep the index -- usually what you want
+  git reset --soft <commit>      # move HEAD, keep the index
   git reset --mixed <commit>     # also unstages everything (git's own default)
   git reset --hard <commit>      # also discards working-tree changes
 
 EOF
     exit 2
 fi
-
-ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
-    echo "git-safe-reset.sh: not inside a git repository" >&2
-    exit 2
-}
-cd "$ROOT" || exit 2
 
 # Overridable so the test suite can stub attribution without a live transcript
 # corpus -- same escape `fmt-mine.sh` gives itself via FMT_MINE_PROVENANCE, and

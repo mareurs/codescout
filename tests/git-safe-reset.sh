@@ -94,7 +94,8 @@ newrepo() {
 run() { # run <repodir> [args...] -> sets OUT and RC; always injects sid + stub
     local d="$1"; shift
     rm -f "$WORK/consulted"
-    OUT=$(cd "$d" && GIT_SAFE_RESET_PROVENANCE="$PROV_STUB" CLAUDE_CODE_SESSION_ID=test-sid \
+    OUT=$(cd "$d" && env -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE \
+        GIT_SAFE_RESET_PROVENANCE="$PROV_STUB" CLAUDE_CODE_SESSION_ID=test-sid \
         GIT_SAFE_RESET_TEST_MARKER="$WORK/consulted" "$TOOL" "$@" 2>&1)
     RC=$?
 }
@@ -171,16 +172,39 @@ echo staged > "$R/c.txt"
 git -C "$R" add c.txt
 BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
 rm -f "$WORK/consulted"
-OUT=$(cd "$R" && env -u CLAUDE_CODE_SESSION_ID GIT_SAFE_RESET_PROVENANCE="$PROV_STUB" \
+OUT=$(cd "$R" && env -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE GIT_SAFE_RESET_PROVENANCE="$PROV_STUB" \
     GIT_SAFE_RESET_TEST_MARKER="$WORK/consulted" "$TOOL" --mixed HEAD~1 2>&1); RC=$?
 eq "no sid exits 2, not 1" "$RC" "2"
 eq "no sid left HEAD alone" "$(git -C "$R" rev-parse HEAD)" "$BEFORE_HEAD"
 has "no sid names the missing referent" "$OUT" "there is no session identity"
-has "no sid names the solo-checkout fallback" "$OUT" "git reset --soft <commit>"
+# Changed ON PURPOSE: the old assertion pinned the solo-checkout fallback text, a claim of
+# exclusive ownership the identity spec rejects. It now pins that both variables are named.
+has "no sid names CLAUDE_CODE_SESSION_ID" "$OUT" "CLAUDE_CODE_SESSION_ID"
+has "no sid names CODEX_SESSION_ID" "$OUT" "CODEX_SESSION_ID"
+hasnt "missing_identity_message_does_not_claim_exclusivity" "$OUT" "only writer"
+hasnt "no sid does not call bare git reset already correct" "$OUT" "already correct"
 hasnt "no sid ever reached the provenance scan" "$(consulted)" "yes"
 
+echo "== 7b. Codex-only identity is not refused for identity; conflict and invalid exit 2 =="
+R=$(newrepo)
+echo staged > "$R/c.txt"
+git -C "$R" add c.txt
+rm -f "$WORK/consulted"
+OUT=$(cd "$R" && env -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE \
+    CODEX_SESSION_ID=cx-one GIT_SAFE_RESET_PROVENANCE="$PROV_STUB" \
+    GIT_SAFE_RESET_TEST_MARKER="$WORK/consulted" "$TOOL" --mixed HEAD~1 2>&1); RC=$?
+eq "codex_only_is_not_refused_for_identity: reaches the --mixed refusal, exit 1" "$RC" "1"
+has "codex-only reached the provenance scan" "$(consulted)" "yes"
+has "codex-only gets the normal REFUSED text" "$OUT" "REFUSED"
+R=$(newrepo)
+BEFORE_HEAD=$(git -C "$R" rev-parse HEAD)
+OUT=$(cd "$R" && env -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE \
+    CLAUDE_CODE_SESSION_ID=claude-one CODEX_SESSION_ID=cx-two "$TOOL" --soft HEAD~1 2>&1); RC=$?
+eq "conflicting_identity_exits_2" "$RC" "2"
+eq "conflict left HEAD alone" "$(git -C "$R" rev-parse HEAD)" "$BEFORE_HEAD"
+
 echo "== 8. outside a git repo: exits 2 rather than crashing =="
-OUT=$(cd "$WORK" && CLAUDE_CODE_SESSION_ID=test-sid "$TOOL" --mixed HEAD 2>&1); RC=$?
+OUT=$(cd "$WORK" && env -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE CLAUDE_CODE_SESSION_ID=test-sid "$TOOL" --mixed HEAD 2>&1); RC=$?
 eq "non-repo exits 2" "$RC" "2"
 has "non-repo names the reason" "$OUT" "not inside a git repository"
 
