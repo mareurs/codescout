@@ -1210,32 +1210,40 @@ mod tests {
     fn sweep_loose_logs_ignores_other_names_symlinks_and_directories() {
         let logs = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
-        let old = 10 * DAY;
+        // The sweep runs with `min_age = ZERO`, so every entry is old enough: only the name
+        // rule, the symlink rule and the directory rule can keep one. (With a real age, the
+        // freshly created symlink and directory would be skipped for being young, and the
+        // type rules would never be reached.)
         let other = logs.path().join("notes.log");
         std::fs::write(&other, b"x").unwrap();
-        set_mtime(&other, ago(old));
         let no_suffix = logs.path().join("codescout-bg-00000009.txt");
         std::fs::write(&no_suffix, b"x").unwrap();
-        set_mtime(&no_suffix, ago(old));
         let no_prefix = logs.path().join("other-bg-00000009.log");
         std::fs::write(&no_prefix, b"x").unwrap();
-        set_mtime(&no_prefix, ago(old));
         let dir = logs.path().join("codescout-bg-00000003.log");
         std::fs::create_dir(&dir).unwrap();
         let target = elsewhere.path().join("precious");
         std::fs::write(&target, b"keep me").unwrap();
-        set_mtime(&target, ago(old));
         #[cfg(unix)]
         let link = {
             let link = logs.path().join("codescout-bg-00000004.log");
             std::os::unix::fs::symlink(&target, &link).unwrap();
             link
         };
-        let n = sweep_loose_logs(logs.path(), &HashSet::new(), DAY, Some(&HashSet::new()));
-        assert_eq!(n, 0);
+        // Positive control: a plain regular log is removed by the same call, so the sweep ran.
+        let control = logs.path().join("codescout-bg-00000005.log");
+        std::fs::write(&control, b"x").unwrap();
+        let n = sweep_loose_logs(
+            logs.path(),
+            &HashSet::new(),
+            Duration::ZERO,
+            Some(&HashSet::new()),
+        );
+        assert_eq!(n, 1, "only the control log may be removed");
+        assert!(!control.exists());
         assert!(other.exists() && no_suffix.exists() && no_prefix.exists());
         assert!(dir.is_dir());
-        assert!(target.exists());
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep me");
         #[cfg(unix)]
         assert!(link.symlink_metadata().is_ok());
     }
