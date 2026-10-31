@@ -418,9 +418,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         &full,
         "create",
     )?;
-    if let Some(parent) = full.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let id = crate::librarian::ids::artifact_id_from_abs(&full);
     reject_reserved_extra_keys(&a.extra, ExtraKeySurface::Create)?;
     // One owner per prefix per repository. Checked before anything is written, so a refusal
@@ -529,6 +526,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Disk write last — the file is the user-visible side effect; the DB row
     // is the durable record. If a catalog upsert above fails, no orphan file
     // is left on disk to block a retry (BUG-058).
+    //
+    // The parent directory is built here and not earlier: every validator above can still refuse,
+    // and a refusal that had already made the directory left it behind, empty. The symlink guards
+    // stay ahead of everything because they judge the path, not the directory.
+    // docs/issues/2026-10-31-a-refused-doc-create-leaves-the-empty-parent-directory-it-already-made.md
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(&full, &content)?;
 
     // A worktree-born artifact has no main-checkout twin to fork — just make
@@ -731,6 +736,43 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+    /// `call` used to run `create_dir_all(parent)` before the validators that can still refuse, so a
+    /// refused create left the new, empty directory behind: no file and no row, but a changed
+    /// tree. The directory is now built just before the file is written, so every refusal must
+    /// leave the tree as it found it. Each case names a different validator and a directory
+    /// that does not exist yet.
+    ///
+    /// See `docs/issues/2026-10-31-a-refused-doc-create-leaves-the-empty-parent-directory-it-already-made.md`.
+    #[tokio::test]
+    async fn a_refused_create_does_not_leave_the_parent_directory_it_would_have_made() {
+        let cases = [
+            (
+                "bad_opened",
+                json!({"kind": "bug", "body": "# BUG: b", "extra": {"opened": "yesterday"}}),
+            ),
+            (
+                "leading_frontmatter",
+                json!({"kind": "spec", "body": "---\nkey: v\n---\n\ntext"}),
+            ),
+            (
+                "bad_status",
+                json!({"kind": "bug", "body": "# BUG: b", "status": "not-a-status"}),
+            ),
+        ];
+        for (name, mut args) in cases {
+            let tmp = TempDir::new().unwrap();
+            let ctx = mk_ctx(tmp.path().to_path_buf());
+            args["repo"] = json!("r");
+            args["title"] = json!("T");
+            args["rel_path"] = json!(format!("fresh-{name}/deeper/x.md"));
+            let result = call(&ctx, args).await;
+            assert!(result.is_err(), "{name}: the create was accepted");
+            assert!(
+                !tmp.path().join(format!("fresh-{name}")).exists(),
+                "{name}: a refused create left its new parent directory on disk"
+            );
+        }
     }
 
     // ---- a create never lands outside the repository root through a symbolic link ------------
