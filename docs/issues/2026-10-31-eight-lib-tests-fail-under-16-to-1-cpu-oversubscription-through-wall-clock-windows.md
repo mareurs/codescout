@@ -8,7 +8,7 @@ tags:
 opened: 2026-10-31
 owner: marius
 severity: low
-unverified: One run at an artificial 16-to-1 load; none of the 8 failures was re-run alone, and the cause of each is not established.
+unverified: The migrate and four-test attribution fixes are measured (16 of 16 loaded runs and a mutant that fails 0 of 16 for the attribution tests). The three tests in run_command/tests.rs are not covered. The LSP test does not fail alone. The peer's sighting of four tests failing once at normal load was not re-checked.
 ---
 
 # BUG: eight lib tests fail when the suite runs on cores oversubscribed 16 to 1, each through a wall-clock window or a subprocess deadline
@@ -54,22 +54,37 @@ Migrate group: fixed. The probe's deadline is 60 s instead of 5 s, and its failu
 - Fix SHA (on `experiments`): `0e59c5cd19af0d2e4ea8c7d91451b1b7a0c0e11e`
 - patch-id: `393bd5aea1ffe752a18612582ca7e59dee85ef42`
 
-LSP and attribution groups: not fixed.
+Attribution group, the four tests listed under Symptom: fixed in the test code only. `AttributionEnv` has a new field, `engine_env`, a list of variables set on the engine child. It is empty on the shipped path. A test helper, `no_history`, points `FILE_PROVENANCE_ROOTS` at an empty directory and `FILE_PROVENANCE_CODEX_ROOTS_JSON` at `[]`. The engine then takes about 0.12 s and prints the same 470 bytes. Each of the four tests alone, 64 busy loops on 2 cores: before the fix 4 of 4 runs failed for each test. After the fix 16 of 16 loaded runs and 4 of 4 quiet runs pass. With the `.envs(...)` line removed, 0 of 16 loaded runs pass and 4 of 4 quiet runs pass. Gate: `./scripts/gate.sh` in a clean worktree at `304a66a55` with only this diff, every lane exit 0. A gate in the shared tree was red in other sessions' unfinished files.
+
+- Fix SHA (on `experiments`): `b33315316110f787b58cb88997ed3e3bf13939a5`
+- patch-id: `3449c12dd208615c1fcb7a069a59b015c0be17c9`
+
+Not fixed:
+
+- The product limit: the real transcript scan takes 16 to 25 s against a 30 s ceiling.
+- Three tests in `src/tools/run_command/tests.rs`: `a_red_attaches_wip_authors_on_the_main_arm`, `a_red_attaches_wip_authors_on_the_buffer_only_arm` and `a_red_naming_many_dirty_files_carries_a_bounded_wip_authors`. They reach the engine through `output::handle_successful_output`, which calls `wip_author_diagnostic` with `from_env`. The env must be threaded through that path.
+- `lsp::client::tests::workspace_symbols_returns_project_symbols`.
 
 ## Tests added
-N/A.
+
+No new test. The fix changes four existing tests so they scan an empty history. The mutation check above shows that they detect a missing `.envs(...)` line: 0 of 16 loaded runs pass without it.
 
 ## Workarounds
-At a normal gate load these have not been seen to fail, except the two sightings recorded in `78f30eb614d3fba3`.
+
+The attribution tests have a fix in their own code. Before it, at a normal gate load these were not seen to fail, except the sightings below.
+
+- Two sightings are recorded in `78f30eb614d3fba3`.
+- A peer session (`codescout-5f`) reported that four attribution-family tests in `run_command` failed once in a gate at normal load (lib lane 696 s) and passed alone and in the next two gates: `dir_trust::a_directory_swapped_in_after_first_use_is_not_run` and the three tests in `src/tools/run_command/tests.rs` listed under Fix. I did not re-check that report. It contradicts the earlier statement that these were not seen at normal load.
 
 ## Resume
 
-Open: the four `attribution` tests and `lsp::client::tests::workspace_symbols_returns_project_symbols` (30 s LSP request timeout; passes alone under load).
+State on 2026-10-31: migrate group fixed, the four attribution tests fixed, the rest open.
 
-Attribution needs a design choice before a change; none is made:
-- Point the engine at an empty history in the tests. The engine reads `HOME` (and `FILE_PROVENANCE_ROOTS` as an override). The shipped spawn path sets no environment on the child, so this needs a field on `AttributionEnv` that `wip_author_diagnostic_in` applies with `Command::env`. This keeps the tests off the machine's corpus and matches the module's rule of no process-global state (see `docs/issues/archive/2026-09-13-an-env-var-set-across-an-await-races-every-sibling-test-that-reads-it.md`). It leaves the product limit as it is. The fixture's file is unattributable, so the `COVERAGE` assertion should hold with an empty history; that is not checked.
-- Raise `ATTRIBUTION_TIMEOUT_DEFAULT`. This moves the cliff and changes how long a failing `run_command` can wait.
-- Make the scan cheaper (an index or a cache of the transcript scan). This addresses the product limit, and it is the largest change.
+Open:
+
+- Three tests in `src/tools/run_command/tests.rs` that go through `output::handle_successful_output`. They need `engine_env` threaded through that path, which is a wider change.
+- `lsp::client::tests::workspace_symbols_returns_project_symbols`: a 30 s LSP request timeout. It passes alone under load, so it needs the whole suite's contention.
+- The product limit: the red-attribution hint is silently absent whenever the transcript scan exceeds 30 s. Options, none chosen: raise `ATTRIBUTION_TIMEOUT_DEFAULT`, or make the scan cheaper with an index or a cache. The cheaper scan is the larger change.
 
 ## References
 - `docs/issues/2026-10-31-a-timed-out-filter-test-fails-in-the-loaded-gate-and-passes-alone.md`
