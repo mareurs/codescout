@@ -13835,6 +13835,13 @@ async fn a_background_job_record_names_its_real_log() {
     let rec = read_job_record(record);
     let log = rec.log_path.expect("the record names its log");
     let log = std::path::Path::new(&log);
+    // The very file the buffer reads for this handle, not merely a log-shaped name.
+    let handle = result["output_id"].as_str().expect("output_id in response");
+    assert_eq!(
+        ctx.output_buffer.get_background_log(handle).as_deref(),
+        Some(log),
+        "the record's log_path must be the buffer's log for {handle}"
+    );
     assert!(
         log.is_file(),
         "{} must be the job's real log",
