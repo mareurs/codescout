@@ -1194,6 +1194,226 @@ eq "W5 an unreadable mm_stat and pool still report, saying what is unknown" \
     "$W_FIG" "$(printf 'gate.sh: tier RAM (zram9): ? logical, ? RAM of ? cap, ? free\nrc=0')"
 rm -f "$WORK/df-cap"; ram_cfg
 
+echo "X. scripts/gate-ram-evict.sh empties idle or pressured RAM slots, and only under the slot's lock"
+# Spec 6. A machine-local timer runs this when no gate does. A slot is emptied when `flock -n` takes
+# its lock AND (its .codescout-lessee stamp is at least RAM_IDLE_MIN minutes old, or it has no stamp, or
+# MemAvailable is under the floor). The directory goes, the lock file stays, and nothing numbered
+# RAM_SLOTS or higher is touched. Case S-W's stubs and fixtures are reused; x_run scrubs every
+# CODESCOUT_GATE_RAM_* variable and XDG_CONFIG_HOME, as run_gate does, so the operator's config cannot leak.
+EVICT="$POOLDIR/gate-ram-evict.sh"
+RAM_X="$WORK/ram-x"; POOL="$WORK/pool-x"
+X_OK=(CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-high" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-20g")
+X_ARGV=()
+# x_run <tag> [VAR=value ...] — one evictor run: stdout to out-<tag>, stderr to err-<tag>.
+x_run() {
+    local tag="$1"; shift
+    scrub_ram_env
+    ( cd "$WORK/repo" && exec env "${SCRUB[@]}" HOME="$WORK/home" PATH="$T_PATH" "$@" bash "$EVICT" "${X_ARGV[@]}" ) \
+        > "$WORK/out-$tag" 2> "$WORK/err-$tag"
+}
+x_fresh() { rm -rf "$RAM_X" "$POOL"; mkdir -p "$RAM_X"; }
+# x_slot <n> [<touch -d age of the stamp>] — a RAM slot with a file in it and its lock file; no age, no stamp.
+x_slot() {
+    local d="$RAM_X/slot-$1"
+    rm -rf "$d"; mkdir -p "$d"; echo data > "$d/f"; : > "$RAM_X/slot-$1.lock"
+    if [ -n "${2:-}" ]; then printf '%s\n' /elsewhere > "$d/.codescout-lessee"; touch -d "$2" "$d/.codescout-lessee"; fi
+}
+x_lines() { grep -c . "$WORK/out-$1"; }                       # non-empty stdout lines
+x_has()   { grep -c -F -- "$2" "$WORK/out-$1"; }
+x_err()   { grep -c -F -- "$2" "$WORK/err-$1"; }
+ram_src /dev/zram1
+
+# X1: nothing configured, nothing said, nothing touched.
+x_fresh; ram_cfg; x_slot 0 '-3 hours'
+x_run x1 "${X_OK[@]}"; rc=$?
+eq "X1 no config: exit 0" "$rc" "0"
+eq "X1 prints nothing on stdout" "$(x_lines x1)" "0"
+eq "X1 nor on stderr" "$(wc -c < "$WORK/err-x1" | tr -d ' ')" "0"
+eq "X1 and the slot is untouched" "$(state "$RAM_X/slot-0")" "kept"
+# The operator's own exported knob must not reach the evictor either (the hermetic harness).
+export CODESCOUT_GATE_RAM_POOL="$RAM_X"
+x_run x1b "${X_OK[@]}"; rc=$?
+unset CODESCOUT_GATE_RAM_POOL
+eq "X1 an exported CODESCOUT_GATE_RAM_POOL does not reach x_run: exit 0" "$rc" "0"
+eq "X1 and the slot is still untouched" "$(state "$RAM_X/slot-0")" "kept"
+
+# X2: a stamp 61 min old is idle; the directory goes, the lock file stays.
+x_fresh; ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM_X"; x_slot 0 '-61 minutes'
+x_run x2 "${X_OK[@]}"; rc=$?
+eq "X2 exit 0" "$rc" "0"
+eq "X2 the idle slot's directory is gone" "$(state "$RAM_X/slot-0")" "gone"
+eq "X2 its lock file is still there" "$(state "$RAM_X/slot-0.lock")" "kept"
+eq "X2 one stdout line" "$(x_lines x2)" "1"
+eq "X2 naming the slot" "$(x_has x2 "$RAM_X/slot-0")" "1"
+eq "X2 and the reason, with the age in whole minutes" "$(x_has x2 'idle for 61 min')" "1"
+eq "X2 nothing on stderr" "$(wc -c < "$WORK/err-x2" | tr -d ' ')" "0"
+x_run x2b "${X_OK[@]}"; rc=$?
+eq "X2 a second run finds the emptied slot (lock file only) and says nothing" "$(x_lines x2b)" "0"
+eq "X2 exit 0 again" "$rc" "0"
+
+# X6 (Review Focus 5): the next lease recreates the emptied slot and builds in it.
+run_gate x6 sid-x6 PATH="$T_PATH" "${X_OK[@]}"; rc=$?
+eq "X6 a gate run after the eviction exits 0" "$rc" "0"
+eq "X6 its lanes all see the emptied RAM slot" "$(seen_all x6)" "$RAM_X/slot-0"
+eq "X6 whose directory exists again" "$([ -d "$RAM_X/slot-0" ] && echo dir || echo none)" "dir"
+eq "X6 and carries the lessee stamp" "$(cat "$RAM_X/slot-0/.codescout-lessee" 2>/dev/null)" "$CHECKOUT"
+x_run x6b "${X_OK[@]}"
+eq "X6 the lease's stamp makes it fresh: the evictor keeps it" "$(state "$RAM_X/slot-0")" "kept"
+
+# X3: a 10 min stamp is not idle. Boundaries use seconds: the age is (now - mtime) / 60, rounded down.
+x_fresh; x_slot 0 '-10 minutes'
+x_run x3 "${X_OK[@]}"; rc=$?
+eq "X3 a 10 min old stamp: kept" "$(state "$RAM_X/slot-0")" "kept"
+eq "X3 with no output" "$(x_lines x3)" "0"
+eq "X3 and exit 0" "$rc" "0"
+x_slot 0 '-299 seconds'
+x_run x3b "${X_OK[@]}" CODESCOUT_GATE_RAM_IDLE_MIN=5
+eq "X3 one second under RAM_IDLE_MIN minutes: kept" "$(state "$RAM_X/slot-0")" "kept"
+x_slot 0 '-300 seconds'
+x_run x3c "${X_OK[@]}" CODESCOUT_GATE_RAM_IDLE_MIN=5
+eq "X3 exactly RAM_IDLE_MIN minutes: emptied (due is >=, not >)" "$(state "$RAM_X/slot-0")" "gone"
+eq "X3 saying so" "$(x_has x3c 'idle for 5 min')" "1"
+# The age comes from the stamp, not from the lock file: a fresh lock file must not hide an old stamp.
+x_slot 0 '-3 hours'; touch "$RAM_X/slot-0.lock"
+x_run x3d "${X_OK[@]}"
+eq "X3 a fresh lock file does not make an old stamp young" "$(state "$RAM_X/slot-0")" "gone"
+x_slot 0 '-1 minute'; touch -d '-3 hours' "$RAM_X/slot-0.lock"
+x_run x3e "${X_OK[@]}"
+eq "X3 nor an old lock file make a fresh stamp old" "$(state "$RAM_X/slot-0")" "kept"
+
+# X4: a held slot is never emptied, whatever its stamp or the memory says.
+x_fresh; x_slot 0 '-2 hours'
+if hold_lock x4 "$RAM_X/slot-0.lock"; then
+    x_run x4 "${X_OK[@]}"; rc=$?
+    eq "X4 a held slot with a 2 h old stamp: kept" "$(state "$RAM_X/slot-0")" "kept"
+    eq "X4 its file is intact" "$(cat "$RAM_X/slot-0/f" 2>/dev/null)" "data"
+    eq "X4 with no output" "$(x_lines x4)" "0"
+    eq "X4 and exit 0" "$rc" "0"
+    x_run x4b CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-low" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-20g"
+    eq "X4 held under memory pressure: kept" "$(state "$RAM_X/slot-0")" "kept"
+    rm -f "$RAM_X/slot-0/.codescout-lessee"
+    x_run x4c "${X_OK[@]}"
+    eq "X4 held with no stamp: kept" "$(state "$RAM_X/slot-0")" "kept"
+    t_release x4 "$RAM_X/slot-0.lock"
+    x_run x4d "${X_OK[@]}"
+    eq "X4 released, the same slot (no stamp) is emptied" "$(state "$RAM_X/slot-0")" "gone"
+else
+    no "X4 the lock was held" "hold_lock failed"
+fi
+
+# X5: memory pressure empties an idle slot that is not old.
+x_fresh; x_slot 0 '-10 minutes'
+x_run x5 CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-low" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-20g"; rc=$?
+eq "X5 a 10 min stamp with MemAvailable under the floor: emptied" "$(state "$RAM_X/slot-0")" "gone"
+eq "X5 saying memory pressure" "$(x_has x5 'memory pressure')" "1"
+eq "X5 naming the slot" "$(x_has x5 "$RAM_X/slot-0")" "1"
+eq "X5 and exit 0" "$rc" "0"
+x_slot 0 '-10 minutes'
+x_run x5b CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-edge" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-20g"
+eq "X5 MemAvailable exactly at the floor is not pressure: kept" "$(state "$RAM_X/slot-0")" "kept"
+x_run x5c CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-edge-1" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-20g"
+eq "X5 one kB under it is pressure (the floor is in whole MiB, rounded down)" "$(state "$RAM_X/slot-0")" "gone"
+x_slot 0 '-10 minutes'
+x_run x5d CODESCOUT_GATE_RAM_MEMINFO="$WORK/no-such-meminfo" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-20g"; rc=$?
+eq "X5 an unreadable MemAvailable is not pressure: kept" "$(state "$RAM_X/slot-0")" "kept"
+eq "X5 but it is said on stderr" "$(x_err x5d 'MemAvailable')" "1"
+eq "X5 and the exit status is 0" "$rc" "0"
+x_slot 0 '-10 minutes'
+x_run x5e "${X_OK[@]}" CODESCOUT_GATE_RAM_MEM_FLOOR_MB=99999999
+eq "X5 the floor is the configured one, not the default" "$(state "$RAM_X/slot-0")" "gone"
+
+# A slot with no stamp counts as due.
+x_fresh; x_slot 0; x_slot 1 '-1 minute'
+x_run x7 "${X_OK[@]}"; rc=$?
+eq "X7 a slot with no stamp is emptied" "$(state "$RAM_X/slot-0")" "gone"
+eq "X7 saying so" "$(x_has x7 'no stamp')" "1"
+eq "X7 while its fresh neighbour is kept" "$(state "$RAM_X/slot-1")" "kept"
+eq "X7 one line only" "$(x_lines x7)" "1"
+
+# Only slots 0 ... RAM_SLOTS-1 are the evictor's.
+x_fresh; x_slot 0 '-3 hours'; x_slot 1 '-3 hours'; x_slot 2 '-3 hours'; x_slot 5
+x_run x8 "${X_OK[@]}" CODESCOUT_GATE_RAM_SLOTS=1
+eq "X8 RAM_SLOTS=1: slot-0 is emptied" "$(state "$RAM_X/slot-0")" "gone"
+eq "X8 slot-1 (= RAM_SLOTS) survives although old" "$(state "$RAM_X/slot-1")" "kept"
+eq "X8 so does slot-2" "$(state "$RAM_X/slot-2")" "kept"
+eq "X8 and a stampless slot-5" "$(state "$RAM_X/slot-5")" "kept"
+x_run x8b "${X_OK[@]}"
+eq "X8 the default is two slots: slot-1 goes" "$(state "$RAM_X/slot-1")" "gone"
+eq "X8 and slot-2 still stays" "$(state "$RAM_X/slot-2")" "kept"
+x_slot 0 '-3 hours'
+x_run x8c "${X_OK[@]}" CODESCOUT_GATE_RAM_SLOTS=0; rc=$?
+eq "X8 RAM_SLOTS=0: nothing to do, exit 0" "$rc" "0"
+eq "X8 nothing is emptied" "$(state "$RAM_X/slot-0")" "kept"
+eq "X8 nothing is said" "$(x_lines x8c)" "0"
+
+# A lock file is never created, and a slot without one cannot be proven idle.
+x_fresh; x_slot 0 '-3 hours'; rm -f "$RAM_X/slot-0.lock"
+x_run x9 "${X_OK[@]}"; rc=$?
+eq "X9 a slot with no lock file is kept" "$(state "$RAM_X/slot-0")" "kept"
+eq "X9 and no lock file is created for it" "$(state "$RAM_X/slot-0.lock")" "gone"
+eq "X9 nor for the slot that has no directory" "$(state "$RAM_X/slot-1.lock")" "gone"
+eq "X9 exit 0 and silence" "$rc$(x_lines x9)" "00"
+
+# A slot directory that is a symlink is not followed.
+x_fresh; x_slot 0 '-3 hours'; x_slot 1 '-3 hours'
+rm -rf "$WORK/x-target"; mkdir -p "$WORK/x-target"; echo data > "$WORK/x-target/f"
+printf '%s\n' /elsewhere > "$WORK/x-target/.codescout-lessee"; touch -d '-3 hours' "$WORK/x-target/.codescout-lessee"
+rm -rf "$RAM_X/slot-0"; ln -s "$WORK/x-target" "$RAM_X/slot-0"
+x_run x10 "${X_OK[@]}"; rc=$?
+eq "X10 a symlinked slot directory is left in place" "$([ -L "$RAM_X/slot-0" ] && echo link || echo gone)" "link"
+eq "X10 and its target keeps its contents" "$(cat "$WORK/x-target/f" 2>/dev/null)" "data"
+eq "X10 while the real neighbour is emptied" "$(state "$RAM_X/slot-1")" "gone"
+eq "X10 and only that one is reported" "$(x_lines x10)" "1"
+eq "X10 exit 0" "$rc" "0"
+
+# An invalid config, or a pool that is not a capped zram, is exit 2 on stderr and removes nothing.
+x_fresh; x_slot 0 '-3 hours'
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM_X" "CODESCOUT_GATE_RAM_SLOTS=two"
+x_run x11 "${X_OK[@]}"; rc=$?
+eq "X11 an invalid config: exit 2" "$rc" "2"
+eq "X11 the message is on stderr and names the knob" "$(x_err x11 'CODESCOUT_GATE_RAM_SLOTS')" "1"
+eq "X11 the message already carries the script name once" "$(x_err x11 'gate-ram-evict.sh: RAM tier skipped')" "1"
+eq "X11 nothing on stdout" "$(x_lines x11)" "0"
+eq "X11 and nothing is removed" "$(state "$RAM_X/slot-0")" "kept"
+ram_cfg "CODESCOUT_GATE_RAM_POOL=relative/path"
+x_run x11b "${X_OK[@]}"; rc=$?
+eq "X11 a relative pool path: exit 2" "$rc" "2"
+ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM_X"
+ram_src /dev/nvme0n1p2
+x_run x12 "${X_OK[@]}"; rc=$?
+eq "X12 a pool that is not a zram mount: exit 2" "$rc" "2"
+eq "X12 saying so on stderr" "$(x_err x12 'not a zram mount')" "1"
+eq "X12 and nothing on a disk-backed path is removed" "$(state "$RAM_X/slot-0")" "kept"
+ram_src /dev/zram1
+x_run x12b CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-high" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-uncapped"; rc=$?
+eq "X12 a zram with no RAM cap: exit 2" "$rc" "2"
+eq "X12 saying so on stderr" "$(x_err x12b 'no RAM cap')" "1"
+eq "X12 and nothing is removed" "$(state "$RAM_X/slot-0")" "kept"
+# Low memory is a reason to evict, not to stop: the evictor never calls the admission floor check.
+x_run x12c CODESCOUT_GATE_RAM_MEMINFO="$WORK/meminfo-low" CODESCOUT_GATE_RAM_MMSTAT="$WORK/mmstat-20g"; rc=$?
+eq "X12 MemAvailable under the floor is not a refusal: exit 0" "$rc" "0"
+eq "X12 and the slot is emptied" "$(state "$RAM_X/slot-0")" "gone"
+
+# The script takes no arguments; one that looks like a switch must not be read as consent to anything.
+x_fresh; x_slot 0 '-3 hours'
+X_ARGV=(--dry-run)
+x_run x13 "${X_OK[@]}"; rc=$?
+X_ARGV=()
+eq "X13 an argument is a usage error: exit 2" "$rc" "2"
+eq "X13 with a usage line on stderr" "$(x_err x13 'usage')" "1"
+eq "X13 and nothing is removed" "$(state "$RAM_X/slot-0")" "kept"
+
+# A removal that fails is reported, not announced as done (a directory that cannot be emptied).
+if [ "$(id -u)" != 0 ]; then
+    x_fresh; x_slot 0 '-3 hours'; mkdir -p "$RAM_X/slot-0/ro"; echo x > "$RAM_X/slot-0/ro/f"; chmod 555 "$RAM_X/slot-0/ro"
+    x_run x14 "${X_OK[@]}"; rc=$?
+    chmod 755 "$RAM_X/slot-0/ro"
+    eq "X14 a removal that fails exits 1" "$rc" "1"
+    eq "X14 does not claim the slot was emptied" "$(x_has x14 'emptied')" "0"
+    eq "X14 and says on stderr which slot" "$(x_err x14 "could not empty $RAM_X/slot-0")" "1"
+fi
+ram_cfg; rm -rf "$RAM_X" "$POOL" "$WORK/x-target"
+
 echo
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
