@@ -87,6 +87,39 @@ pub fn process_alive(pid: u32) -> bool {
     imp::process_alive(pid)
 }
 
+/// The files that processes on this machine hold open, as the targets of the readable
+/// `/proc/<pid>/fd/*` symlinks (Linux). Entries that cannot be read (other users'
+/// processes, a process that exited mid-scan) are skipped, never an error. `None` when
+/// `/proc` itself cannot be listed, and on every other platform: the caller must then
+/// treat "is it open?" as unknown. The paths are the kernel's canonical ones.
+#[cfg(target_os = "linux")]
+pub fn open_file_paths() -> Option<std::collections::HashSet<PathBuf>> {
+    let mut open = std::collections::HashSet::new();
+    for proc_entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let name = proc_entry.file_name();
+        let Some(pid) = name.to_str() else { continue };
+        if pid.is_empty() || !pid.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
+            continue;
+        };
+        for fd in fds.flatten() {
+            if let Ok(target) = std::fs::read_link(fd.path()) {
+                open.insert(target);
+            }
+        }
+    }
+    Some(open)
+}
+
+/// See the Linux version: there is no portable way to list open files here, so the answer
+/// is "unknown".
+#[cfg(not(target_os = "linux"))]
+pub fn open_file_paths() -> Option<std::collections::HashSet<PathBuf>> {
+    None
+}
+
 /// Platform-aware rename that overwrites the destination.
 /// On Unix this is a no-op wrapper around `std::fs::rename`.
 /// On Windows this uses `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`.

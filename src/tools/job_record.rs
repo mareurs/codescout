@@ -18,6 +18,7 @@
 //! docs/trackers/bug-fix-session-log.md F-201;
 //! docs/superpowers/specs/2026-10-29-background-job-wake-design.md
 
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -362,6 +363,91 @@ pub fn sweep_logs(
         let delivered_long_enough =
             age_of(&sidecar(&path, ".delivered")).is_some_and(|a| a >= grace);
         if (delivered_long_enough || record_age >= max_age) && unlink_log_if_ours(log_dir, log) {
+            removed += 1;
+        }
+    }
+    removed
+}
+/// The `log_path` of every record in `record_dir` that names one. Unreadable or malformed
+/// records and non-record files are skipped; an unlistable directory yields an empty set.
+/// The strings are taken as written, with no normalisation, so `sweep_loose_logs` compares
+/// them exactly against `log_dir.join(name)`.
+pub fn recorded_log_paths(record_dir: &Path) -> HashSet<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(record_dir) else {
+        return HashSet::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+        .filter_map(|p| read_record(&p))
+        .filter_map(|rec| rec.log_path)
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// Unlink the `codescout-bg-*.log` files directly in `log_dir` that no record names: logs
+/// from before records carried a `log_path`, or whose record was swept. Returns how many
+/// were removed.
+///
+/// A file goes only when (a) its exact path is not in `recorded` (a log a record names is
+/// left to the record rules), (b) its mtime is at least `min_age` old (a future mtime is age
+/// zero; a file whose metadata cannot be read is skipped) and (c) no process holds it open.
+/// When `open` is `None` (the open-file scan was impossible) the caller passes the larger
+/// age; this function only compares ages.
+///
+/// "Held open" is judged against both `log_dir.join(name)` and the same name under the
+/// canonical `log_dir`: `/proc/<pid>/fd` links resolve to real paths, while `log_dir` may be
+/// reached through a symlink. A mismatch can therefore only make a file be KEPT. The unlink
+/// itself goes through `unlink_log_if_ours`, so the regular-file, not-a-symlink, direct-child,
+/// name-prefix and suffix rules are the ones that guard a record-named log.
+pub fn sweep_loose_logs(
+    log_dir: &Path,
+    recorded: &HashSet<PathBuf>,
+    min_age: Duration,
+    open: Option<&HashSet<PathBuf>>,
+) -> usize {
+    let Ok(entries) = std::fs::read_dir(log_dir) else {
+        return 0;
+    };
+    // Computed once: a failure leaves only the literal join to compare against.
+    let canonical_dir = log_dir.canonicalize().ok();
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if !(name.starts_with("codescout-bg-") && name.ends_with(".log")) {
+            continue;
+        }
+        let path = log_dir.join(name);
+        if recorded.contains(&path) {
+            continue;
+        }
+        if let Some(open) = open {
+            let held = open.contains(&path)
+                || canonical_dir
+                    .as_ref()
+                    .is_some_and(|dir| open.contains(&dir.join(name)));
+            if held {
+                continue;
+            }
+        }
+        let Some(age) = std::fs::symlink_metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .map(|t| t.elapsed().unwrap_or(Duration::ZERO))
+        else {
+            continue;
+        };
+        if age < min_age {
+            continue;
+        }
+        if path
+            .to_str()
+            .is_some_and(|p| unlink_log_if_ours(log_dir, p))
+        {
             removed += 1;
         }
     }
@@ -1036,5 +1122,176 @@ mod tests {
         assert_eq!(n, 2);
         assert!(!rec_a.exists() && !log_a.exists());
         assert!(!rec_b.exists());
+    }
+    /// A `codescout-bg-<n>.log` in `dir`, last modified `age` ago.
+    fn loose_log(dir: &Path, n: u32, age: Duration) -> PathBuf {
+        let log = dir.join(format!("codescout-bg-{n:08}.log"));
+        std::fs::write(&log, b"output").unwrap();
+        set_mtime(&log, ago(age));
+        log
+    }
+
+    const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+
+    #[test]
+    fn sweep_loose_logs_removes_an_old_log_nobody_names() {
+        let logs = tempfile::tempdir().unwrap();
+        let log = loose_log(logs.path(), 1, 2 * DAY);
+        let n = sweep_loose_logs(logs.path(), &HashSet::new(), DAY, Some(&HashSet::new()));
+        assert_eq!(n, 1);
+        assert!(!log.exists());
+    }
+
+    #[test]
+    fn sweep_loose_logs_keeps_a_young_log() {
+        let logs = tempfile::tempdir().unwrap();
+        let log = loose_log(logs.path(), 1, DAY - HOUR);
+        let n = sweep_loose_logs(logs.path(), &HashSet::new(), DAY, Some(&HashSet::new()));
+        assert_eq!(n, 0);
+        assert!(log.exists());
+    }
+
+    #[test]
+    fn sweep_loose_logs_treats_a_future_mtime_as_age_zero() {
+        let logs = tempfile::tempdir().unwrap();
+        let log = logs.path().join("codescout-bg-00000001.log");
+        std::fs::write(&log, b"output").unwrap();
+        set_mtime(&log, std::time::SystemTime::now() + 10 * DAY);
+        let n = sweep_loose_logs(logs.path(), &HashSet::new(), DAY, Some(&HashSet::new()));
+        assert_eq!(n, 0);
+        assert!(log.exists());
+    }
+
+    #[test]
+    fn sweep_loose_logs_keeps_a_log_a_record_names() {
+        let logs = tempfile::tempdir().unwrap();
+        let named = loose_log(logs.path(), 1, 10 * DAY);
+        let loose = loose_log(logs.path(), 2, 10 * DAY);
+        let recorded: HashSet<PathBuf> = [named.clone()].into_iter().collect();
+        let n = sweep_loose_logs(logs.path(), &recorded, DAY, Some(&HashSet::new()));
+        assert_eq!(n, 1);
+        assert!(named.exists());
+        assert!(!loose.exists());
+    }
+
+    #[test]
+    fn sweep_loose_logs_keeps_a_log_a_process_holds_open() {
+        let logs = tempfile::tempdir().unwrap();
+        let held = loose_log(logs.path(), 1, 10 * DAY);
+        let free = loose_log(logs.path(), 2, 10 * DAY);
+        let _handle = std::fs::File::open(&held).unwrap();
+        let open: HashSet<PathBuf> = [held.clone()].into_iter().collect();
+        let n = sweep_loose_logs(logs.path(), &HashSet::new(), DAY, Some(&open));
+        assert_eq!(n, 1);
+        assert!(held.exists());
+        assert!(!free.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sweep_loose_logs_matches_the_open_set_through_a_symlinked_log_dir() {
+        // /proc reports canonical paths; the caller's log dir may be a symlink to the real one.
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = base.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let log = loose_log(&real, 1, 10 * DAY);
+        let real = real.canonicalize().unwrap();
+        let open: HashSet<PathBuf> = [real.join("codescout-bg-00000001.log")]
+            .into_iter()
+            .collect();
+        let n = sweep_loose_logs(&link, &HashSet::new(), DAY, Some(&open));
+        assert_eq!(n, 0);
+        assert!(log.exists());
+    }
+
+    #[test]
+    fn sweep_loose_logs_ignores_other_names_symlinks_and_directories() {
+        let logs = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let old = 10 * DAY;
+        let other = logs.path().join("notes.log");
+        std::fs::write(&other, b"x").unwrap();
+        set_mtime(&other, ago(old));
+        let no_suffix = logs.path().join("codescout-bg-00000009.txt");
+        std::fs::write(&no_suffix, b"x").unwrap();
+        set_mtime(&no_suffix, ago(old));
+        let no_prefix = logs.path().join("other-bg-00000009.log");
+        std::fs::write(&no_prefix, b"x").unwrap();
+        set_mtime(&no_prefix, ago(old));
+        let dir = logs.path().join("codescout-bg-00000003.log");
+        std::fs::create_dir(&dir).unwrap();
+        let target = elsewhere.path().join("precious");
+        std::fs::write(&target, b"keep me").unwrap();
+        set_mtime(&target, ago(old));
+        #[cfg(unix)]
+        let link = {
+            let link = logs.path().join("codescout-bg-00000004.log");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            link
+        };
+        let n = sweep_loose_logs(logs.path(), &HashSet::new(), DAY, Some(&HashSet::new()));
+        assert_eq!(n, 0);
+        assert!(other.exists() && no_suffix.exists() && no_prefix.exists());
+        assert!(dir.is_dir());
+        assert!(target.exists());
+        #[cfg(unix)]
+        assert!(link.symlink_metadata().is_ok());
+    }
+
+    #[test]
+    fn sweep_loose_logs_without_an_open_set_still_applies_the_age_it_is_given() {
+        let logs = tempfile::tempdir().unwrap();
+        let mid = loose_log(logs.path(), 1, 3 * DAY);
+        let old = loose_log(logs.path(), 2, 8 * DAY);
+        let n = sweep_loose_logs(logs.path(), &HashSet::new(), RECORD_MAX_AGE, None);
+        assert_eq!(n, 1);
+        assert!(mid.exists() && !old.exists());
+    }
+
+    #[test]
+    fn recorded_log_paths_collects_every_named_log_and_skips_garbage() {
+        let dir = private_tempdir();
+        let logs = tempfile::tempdir().unwrap();
+        let (_, log_a) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000001",
+            "@bg_00000001",
+            RecordState::Exited,
+            false,
+        );
+        let (_, log_b) = seed_with_log(
+            dir.path(),
+            logs.path(),
+            "00000002",
+            "@bg_00000002",
+            RecordState::Running,
+            false,
+        );
+        // A record without a log_path, a garbage record, and a non-record file.
+        write_record(
+            &record_path(dir.path(), "00000003", "@bg_00000003"),
+            &JobRecord::running("@bg_00000003", "true", None),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("garbage.json"), "not json").unwrap();
+        std::fs::write(dir.path().join("x.json.watch"), b"").unwrap();
+        let got = recorded_log_paths(dir.path());
+        let want: HashSet<PathBuf> = [log_a, log_b].into_iter().collect();
+        assert_eq!(got, want);
+        assert!(recorded_log_paths(&dir.path().join("missing")).is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn open_file_paths_contains_a_file_this_process_holds_open() {
+        let logs = tempfile::tempdir().unwrap();
+        let held = loose_log(logs.path(), 1, Duration::ZERO);
+        let _handle = std::fs::File::open(&held).unwrap();
+        let open = crate::platform::open_file_paths().expect("/proc is listable on linux");
+        let canonical = held.canonicalize().unwrap();
+        assert!(open.contains(&canonical), "{canonical:?} not in open set");
     }
 }
