@@ -1,10 +1,11 @@
 ---
 id: '325bb3e77164836a'
 kind: bug
-status: open
+status: fixed
 title: doc(create) accepts a malformed extra.opened on a bug, so the frontmatter gate fails in another session
 tags:
 - cluster/unclassified
+closed: 2026-10-31
 opened: 2026-10-31
 owner: marius
 severity: low
@@ -46,11 +47,18 @@ None.
 
 ## Fix
 
-Not started. Candidate: on create for `kind=bug`, refuse a supplied `opened` that is not a calendar-valid `YYYY-MM-DD`, with a recoverable error that names the value and the form. `parse_validity` in `src/librarian/statements.rs` already rejects a calendar-invalid ISO date, so its check can be shared instead of written again.
+Fixed in `30721b865` (`src/librarian/tools/create.rs`). On create for `kind=bug`, `call` stamps `opened` when it is absent (the earlier fix, `1d79382e1`) and then refuses a supplied value unless `is_iso_date` accepts it: a JSON string of length 10 that `chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")` parses. The refusal is a `LibrarianRecoverableError` that names the value and the form. It runs before the file and the catalog row are written, so a refusal leaves neither.
+
+The earlier candidate said `parse_validity` in `src/librarian/statements.rs` could be shared. That was wrong: `parse_validity` parses a `**Valid:**` section, and its date check is one inline expression (`iso_re().is_match(d) && chrono::NaiveDate::parse_from_str(..)`), not a function. `is_iso_date` repeats that expression for a `Value`. Extracting one shared predicate is possible and was not done.
+
+`chrono`'s `%Y-%m-%d` alone accepts `2026-1-2`, so the length check is needed.
 
 ## Tests added
 
-None yet.
+- `librarian::tools::create::tests::a_malformed_opened_on_a_bug_is_refused_and_writes_no_file`: six bad values (`"yesterday"`, `"2026/10/17"`, `"2026-1-2"`, `"2026-13-45"`, `20261017`, `null`); each must be refused and leave no file. Red before the fix (`opened "yesterday" was accepted`).
+- `librarian::tools::create::tests::a_non_date_opened_on_a_non_bug_kind_is_not_refused`: a `spec` with `opened: "soon"` is still created.
+
+Mutations, each reverted: dropping the length check reds the first test on `"2026-1-2"`; replacing the `chrono` parse with a digit-and-dash shape check reds it on `"2026-13-45"`. I did not run a mutation that applies the check to every kind; the non-bug test is the guard for that and was not shown red.
 
 ## Workarounds
 
@@ -58,7 +66,7 @@ Pass a well-formed date, or omit `opened` and let the server stamp it.
 
 ## Resume
 
-Decide whether the update path needs the same check. Then write a failing create test for `"yesterday"` and for `"2026/10/17"`, and a passing one for a calendar-valid past date.
+One question stays open. `merge_extra` in `src/librarian/tools/update.rs` upserts any `extra` value with no check, so `doc(update, patch={extra: {opened: "yesterday"}})` on a bug looks like it writes a malformed `opened` the same way. This is a code read only: I did not run it. If it is real, it needs its own bug file and a check shared with create.
 
 ## References
 
