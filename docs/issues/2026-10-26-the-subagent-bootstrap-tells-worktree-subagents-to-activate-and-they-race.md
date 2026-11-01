@@ -54,7 +54,7 @@ Whether the soft notice ("warns the switcher; tells the harmed party once per mo
 
 ## Fix
 
-Parts 1 and 2 are committed in `claude-plugins` as `968f7b9` (an ancestor of `origin/main`) and shipped in codescout-companion 1.20.21 (`1db0234`). Verified 2026-10-29: all four profiles' `installed_plugins.json` record 1.20.21 with an `installPath` under their own cache, and a read-only review ran the three test suites green (25, 43, `run-all.sh` exit 0). Part 3 has no code fix. Status stays `open` for two reasons. First, a subagent dispatched 2026-10-29 was still told to `activate` by its bootstrap; whether that profile loaded an older hook or its cwd was not a linked worktree was not checked. Second, a pin that differs only by symlink is accepted by the write guard, and no test covers it.
+Parts 1 and 2 are committed in `claude-plugins` as `968f7b9` (an ancestor of `origin/main`) and shipped in codescout-companion 1.20.21 (`1db0234`). Verified 2026-10-29: all four profiles' `installed_plugins.json` record 1.20.21 with an `installPath` under their own cache, and a read-only review ran the three test suites green (25, 43, `run-all.sh` exit 0). Part 3 has no code fix. Status stays `open` for one reason. A subagent dispatched 2026-10-29 was still told to `activate` by its bootstrap; whether that profile loaded an older hook or its cwd was not a linked worktree was not checked. The second reason, a pin that differs only by symlink, is closed: see § Resume.
 
 **A text-only change to the bootstrap was not enough** (checked 2026-10-26). `claude-plugins:codescout-companion/hooks/worktree-write-guard.mjs` denies `edit_code`, `edit_file` and `create_file` in a worktree while `.cs-worktree-pending` exists in the worktree root. It never looked at a `workspace=` pin on the call. Only `cs-activate-project.mjs` deletes the marker, and only on `activate`. A subagent told to pin would still have been blocked from writing.
 
@@ -78,7 +78,11 @@ Brief each subagent explicitly to pin `workspace="<abs worktree>"` on every call
 
 Found by the 2026-10 friction deep dive (`docs/trackers/friction-deep-dive-2026-10.md`, groups G3 and G4). Cite the fix as `claude-plugins:codescout-companion/hooks/subagent-guidance.mjs`.
 
-Committed as `claude-plugins:968f7b9` (`main`, 4 files, not pushed). To finish: release a new `codescout-companion` version, then update `installed_plugins.json` in all three profiles. Each profile loads `1.20.20` from its own `cache/` copy, so the source edit changes no behaviour on this machine until then. After that, run a worktree subagent campaign and confirm no `activate` race and no write block.
+The code, the release and the installs are done. Parts 1 and 2 are in `claude-plugins:968f7b9`. On 2026-11-01 all four profiles' `installed_plugins.json` record `1.20.26` with an `installPath` under their own cache, and `plugin.json` in the source says `1.20.26`. The installed `1.20.26` copy in `~/.claude-stef` carries both changes: `subagent-guidance.mjs` has 3 `workspace=` lines and `worktree-write-guard.mjs` has 1 `tool_input.workspace` read.
+
+The symlink gap is closed by a test, `claude-plugins:2dca6fa` (local, not pushed). `pin-symlink-to-self` and `pin-symlink-to-sibling` pass 27 of 27, and `tests/run-all.sh` passed in full. A mutant that compares the pins as plain strings fails `pin-symlink-to-self` and no other case.
+
+One item stays open. To close it, run a worktree subagent campaign and confirm the bootstrap does not tell the subagent to `activate`, and that no write is blocked. The 2026-10-29 observation of a subagent told to `activate` is unexplained: it is not known whether that profile loaded an older hook or whether its cwd was not a linked worktree.
 
 ## Re-verification 2026-10-30
 
