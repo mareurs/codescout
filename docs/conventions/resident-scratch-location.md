@@ -33,9 +33,9 @@ rust-analyzer's file watcher walks every directory under the workspace root and 
 
 ## Moving what is already there
 
-`scripts/resident-scratch-migrate.sh` is a dry run. `--apply` moves closed directories and retargets the absolute links between them. It leaves a pointer **file** at the old path, never a link, because a link would bring the walk back.
+`scripts/resident-scratch-migrate.sh` is a dry run. `--apply` moves closed directories and leaves a pointer **file** at the old path, never a link, because a link would bring the walk back. It does **not** rewrite symlinks unless you pass `--retarget`: a seal can cover link targets (`closure.py` in the sealed experiment directories records `os.readlink`), so rewriting one changes sealed bytes. Links between moved directories keep their old absolute target and dangle. `--force-referenced` moves a directory a memory names; update that memory's path first.
 
-It leaves alone a directory with a file changed in the last hour, a directory a memory names by path, and a destination that exists. A link in a directory that stays, pointing into one that moved, now dangles. A dangling link is not a directory link, so the watcher skips it. The script counts them.
+It leaves alone a directory with a file changed in the last hour, a directory a memory names by path, and a destination that exists. A link in a directory that stays, pointing into one that moved, also dangles. A dangling link is not a directory link, so the watcher skips it. The script counts them.
 
 ## What stays in the code for now
 
