@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 209
-entry_high_water_W: 154
+entry_high_water_F: 210
+entry_high_water_W: 155
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -65,7 +65,9 @@ entry_high_water_W: 154
 
 | ID | Date | Severity | Category | Status | Title |
 | F-207 | 2026-11-01 | med | test-design | fixed-verified | **A diagnostic hint passed its tests and did not fire on the one tree it was built for** — a 50,000-entry bound taken from a count of directories met 311,890 entries; found only by reading the live warning. |
+| F-210 | 2026-11-01 | med | process | mitigated | **A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path** — `fmt-mine` named three of my files UNKNOWN after a 19-minute gate; `rustfmt --check` on the diff's files beforehand takes seconds. |
 | F-209 | 2026-11-01 | low | claim-vs-state | mitigated | **"Leaving these two directories costs nothing" was said before the directory counts were read** — I counted symlinks, the watcher counts directories; one remaining directory holds 1,808. |
+| F-208 | 2026-11-01 | low | plan-drift | fixed-verified | **A bug record's guessed cause for a remedy that did not clear a refusal pointed at a row state, and the cause was the lookup running again** — `581b05bbe41134f3`: the remedy's reset then add makes the row `retained`, and a named add clears a `retained` row and runs the file-level write lookup again on an unchanged record; fixed in `300cb29ea`. |
 |----|------|---------:|----------|--------|-------|
 | F-206 | 2026-11-01 | med | plan-drift | open | **"Owners only" holds for the red hint but not for `file-provenance.py`, which the gate and the pre-edit hook also run** — a floor on operations would change the CLI's MINE/SHARED verdicts; the hook's "~7s" is now 16 to 23 s warm. |
 | F-197 | 2026-10-15 | med | stale-doc | fixed-verified | **The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it** — the live collection is per project (`artifact_chunks_<base>_<hash>`, 48,223 points here), so my "the Qdrant index looks stale" was wrong. Corrected in `934946e9`. |
@@ -281,6 +283,7 @@ entry_high_water_W: 154
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 | W-154 | 2026-11-01 | high | **Read the seal's own code before a bulk move that rewrites sealed data.** `closure.py` records `os.readlink`, so link retargeting would have changed every sealed directory. | Retargeting on by default would have rewritten ~7,300 links across sealed directories with no error, found at the next verification. | validated |
+| W-155 | 2026-11-01 | med | **A zero from a text pattern over a serialized column was checked against a sibling count that could not be zero.** `output_json` is JSON inside JSON, so `like '%"wip_authors":%'` saw nothing; red calls read NULL on every day, which exposed the query. | Inferred: a design doc saying no hint was ever recorded, and a hunt for the cause in the engine. Observed: hinted 0 and red NULL over 29,805 rows, then 16 hinted on 2026-10-20 after parsing `$[0].text`. | validated |
 |----|------|-------:|---------|----------------|--------|
 | W-153 | 2026-10-31 | med | **A scout of the gate pool's test runner found that only CI runs `tests/gate-slot.sh`, through a hit the default grep hid.** Re-running a negative search with `include_hidden=true` before planning on it. | Inferred: a plan that trusted gate-green for the pool tests and read real `/sys/block/zram*` in CI. Observed: 23 files without `.github/workflows/ci.yml`, 27 with it. | validated |
 | W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
@@ -17786,6 +17789,18 @@ Also seen, not a gap: background children run in their own process group (`proce
 
 **Status:** validated.
 
+## F-208 — A bug record's guessed cause for a remedy that did not clear a refusal pointed at a row state, and the cause was the lookup running again
+
+**Valid:** dated 2026-11-01
+
+**Observed:** Bug `581b05bbe41134f3` said its remedy (reset the staged path, add it again) did not clear the refusal, and its Resume asked for a trace of why a `retained` row survives a reset and add. I read `foreign_writer` in `scripts/post-index-change-stage-log.sh` before planning. The remedy's reset then add takes the pair out of the index and puts it back. The row turns `retained`, and a named add clears a `retained` row and calls `foreign_writer` again. So the marker did not keep the peer. The new lookup gave the old answer. A plain re-add of a pair that stays staged is different: it keeps the old row and asks nothing, and the guard's own text says so. The refusal came from the file-level write record: a peer's edit text, `response["stdout_total"] = json!(cut.shown);`, is in neither `HEAD` nor the committed blob, so the write stayed live for three days.
+
+**Plan vs reality:** the plan was a trace of why the `retained` row survives a reset and add. Reality was that it does not survive: the `retained` branch clears the owner and the lookup runs again. The answer repeats because the file-level write record has not changed. The scout took four reads and no trace.
+
+**Resolution:** fixed in `300cb29ea` with a staged-blob content test (`write_absent_from_index`, tests 27a to 27e). The cause of the unclearable remedy is read from the code and was not run against the old guard, as the record says in its `unverified` field.
+
+**Rule:** when a record offers a cause for a refusal, read the code path that produces the refusal before tracing the offered state. A state that the path never reads cannot be the cause.
+
 ## F-209 — "Leaving these two directories costs nothing" was said before the directory counts were read
 
 **Valid:** dated 2026-11-01
@@ -17797,6 +17812,38 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Fix:** Corrected in the conversation. The remaining move is `blind-challenger-20261101`, once it has been idle for 60 minutes. The count that carries the claim is the one the claim is about: directories for watches, symlinks for fan-out.
 
 **Status:** mitigated.
+
+## F-210 — A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path
+
+**Valid:** dated 2026-11-01
+
+**Observed:** 2026-11-01, the gate for commit `498b84bc4` (bug `20927ccfe293c34e`), run in a clean worktree as the method says. After 19 minutes: Python 1454 passed, clippy, lean and default exit 0, and `GATE EXITS -> FMT=1 FMT_STATE=ownership-refused`. `fmt-mine` named three files `UNKNOWN`: `src/tools/run_command/attribution.rs`, `src/usage/attribution_outcome.rs`, `src/usage/mod.rs`. In the shared tree the same tool named `attribution.rs` `SHARED`, with the line "no record of any session writing this path in the window" for the worktree copy. I read this as: the worktree is another path, and no transcript records a write to it, so ownership cannot be proven there. `rustfmt --check` in the shared tree showed that only lines I wrote needed changes: my tests, and three edit sites made with text edits that matched after normalising indentation.
+
+**Cost:** a gate whose format lane could not pass, a `rustfmt` run, a 2 m 25 s re-verification in the worktree (format check, `usage::` 108 passed, `run_command::attribution` 40 passed), and a ruling that the full gate was not rerun on the formatted bytes.
+
+**Counterfactual:** `rustfmt --check --edition 2021` on the files in the diff, in the checkout where I made the edits, takes seconds and would have shown all three files before the 19-minute gate.
+
+**Check:** before a clean-worktree gate, run `rustfmt --check --edition 2021` on every Rust file in the diff, in the checkout where the edits were made. Related: F-206 (same tool, a different gap: it reads ownership from transcripts).
+
+**Promote-when:** a second gate's format lane refuses a fresh worktree for a file that needed formatting.
+
+**Status:** mitigated (the check above is the workaround; the gate method and `fmt-mine` are unchanged).
+
+## W-155 — A zero from a text pattern over a serialized column was checked against a sibling count that could not be zero
+
+**Valid:** dated 2026-11-01
+
+**Observed:** 2026-11-01, reading `usage.db` to find out why no red `run_command` carried a `wip_authors` hint after 2026-10-20. `tool_calls.output_json` holds a content array whose first element's `text` is itself a JSON string. My first query, `output_json like '%wip_authors%'`, matched 30 rows, most of them commands that merely quote the word (false positives). My second, `like '%"wip_authors":%'`, matched 0 rows on every day, and its sibling count of red calls was NULL on every day. That sibling count cannot be NULL when 29,805 calls ran, and it exposed the query. Parsing `$[0].text` and then `json_extract` on it gave 16 hinted runs on 2026-10-20 and the 138-red-run reading.
+
+**Pattern:** when a pattern query over a serialized column returns zero everywhere, run a sibling count that must be non-zero in the same pass, before writing "never recorded". A zero is a finding only when the instrument is shown to be able to see the thing.
+
+**Counterfactual:** the design doc would have said that no hint was ever recorded, and the cause would have been sought in the engine instead of in a query. Observed: hinted 0 and red NULL for all 29,805 valid rows in the first strict query; 16 hinted on 2026-10-20 in the second.
+
+**Impact:** med. One wrong sentence in a design doc, avoided.
+
+**Promote-when:** a second zero from a text-pattern query over a serialized column is shown to be an instrument fault.
+
+**Status:** validated (one datapoint; the false-positive direction of the first query is part of it).
 
 ## Template for new entries
 
