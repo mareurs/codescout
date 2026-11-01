@@ -408,7 +408,7 @@ and commits in one call, so the unsafe shape is not reachable by following the d
 | no `named-foreign` filter | 13l |
 | the guard keeps the reported note | 13c, 13e |
 
-`tests/commit-mine.sh` 85 of 85; gate `PYTHON_LIGHT=0 FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`; `cargo test --test hook_config` 12 of 12 after the tail edit. An unrelated section 5 case ("and it still offers the narrowing remedy") failed in 2 of 6 full runs, both while another copy of the suite ran at the same time; its fixture alone passed 40 of 40 with these scripts and 40 of 40 with the `HEAD` scripts. Filed separately as `333f9ed846f4f778` (`docs/issues/2026-11-01-hooks-discrimination-narrowing-remedy-case-fails-when-two-suite-runs-overlap.md`).
+`tests/commit-mine.sh` 85 of 85; gate `PYTHON_LIGHT=0 FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`; `cargo test --test hook_config` 12 of 12 after the tail edit. An unrelated section 5 case ("and it still offers the narrowing remedy") failed in 2 of 6 full runs, both while another copy of the suite ran at the same time; its fixture alone passed 40 of 40 with these scripts and 40 of 40 with the `HEAD` scripts. Filed separately as `6974efe45c7f28b7` (`docs/issues/archive/2026-11-01-hooks-discrimination-narrowing-remedy-case-fails-when-two-suite-runs-overlap.md`); the cause was a race in the test's `has` helper, fixed in `d0ef9e995`.
 
 ## Workarounds
 

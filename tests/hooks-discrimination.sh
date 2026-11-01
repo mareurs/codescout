@@ -47,7 +47,7 @@ eq() { [ "$2" = "$3" ] && ok "$1" || no "$1" "want '$3' got '$2'"; }
 # can find the needle in the first and exit, and the second write then dies of SIGPIPE (141).
 # `has` then failed with the text present (2 of 6 runs under load, 2026-11-01), and `hasnt`
 # PASSED with it present, which nothing would ever report.
-# docs/issues/2026-11-01-hooks-discrimination-narrowing-remedy-case-fails-when-two-suite-runs-overlap.md
+# docs/issues/archive/2026-11-01-hooks-discrimination-narrowing-remedy-case-fails-when-two-suite-runs-overlap.md
 has() { [[ "$2" == *"$3"* ]] && ok "$1" || no "$1" "missing: $3"; }
 hasnt() { [[ "$2" == *"$3"* ]] && no "$1" "must NOT contain: $3" || ok "$1"; }
 
