@@ -1852,6 +1852,45 @@ wt_add "$W" "$A" f.txt
 eq "26h: with an unreadable database the staging is the legacy claim" "$(wt_owner "$W" f.txt)" "$A"
 rm -rf "$T" "$T.worktrees"
 
+# 27. A live write names its writer only while the STAGED bytes carry that writer's text. The write record is
+# kept per FILE: a peer's edit that was later reverted, or never reached the tree this stager edited, stays
+# live for the whole lookback, and a stager whose staged blob holds none of the peer's lines was named as the
+# peer's all the same (bug 581b05bbe41134f3: `output.rs`, a peer's edit a day old, a staged diff that was
+# entirely the stager's). Re-adding the pair did not clear it, because the lookup is asked again and answers
+# the same. The test reads the writer's own new text, as case 24 does, and asks whether the INDEX holds it.
+# Every case below passes on unchanged code except 27a, whose evidence is the mutation that drops the test.
+LINE="a distinctive sentence the writer put in, longer than sixteen characters"
+LINE2="a second distinctive sentence the same writer put in later on"
+# stale_peer_case <what the peer's new_string holds> <what the file holds>: base is committed, B's write is
+# recorded an hour ago, then A edits the file by hand and stages it by name.
+stale_peer_case() {
+    new_repo; mkdb "$DB"
+    echo base > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(giso '3 hours ago')" git commit -qm base
+    wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"$1\"}" success "$(hrs '1 hour ago')"
+    printf 'base\n%b' "$2" > g.txt
+    add_as "$A" g.txt
+}
+stale_peer_case "$LINE" "mine\n"
+eq "27a: a peer's write whose text the staged blob does not hold is not the peer's" "$(owner_of g.txt)" "$A"
+eq "27a: so the stager's own claim stands" "$(route_of g.txt)" "named"
+rm -rf "$T"
+stale_peer_case "$LINE" "$LINE\n"
+eq "27b: the staged blob holds the peer's text: still the peer's" "$(owner_of g.txt)" "$B"
+eq "27b: on the by-write route" "$(route_of g.txt)" "named-foreign"
+rm -rf "$T"
+stale_peer_case "$LINE\\n$LINE2" "$LINE2\n"
+eq "27c: one of the peer's lines is in the blob: the peer's, as case 24n-b reads it" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+stale_peer_case "ok" "mine\n"
+eq "27d: a write with no distinctive line cannot be told apart, so it stays the peer's" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+stale_peer_case "$LINE" "mine\n"
+git reset -q -- g.txt
+rm g.txt
+add_as "$A" g.txt
+eq "27e: a staged deletion has no blob to read, so the test does not apply" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+
 echo "== sequencer stand-down"
 
 # Ownership lookup that survives a linked worktree, where `.git` is a file, not a dir.

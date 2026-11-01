@@ -387,8 +387,11 @@ EOF
 # the text the write REMOVED. EVERY line must be in HEAD, so a write only part of whose words landed
 # stays live, and a line already present before the write proves nothing, so a move or a reorder
 # stays live. A short or empty write has no line to find and stays live.
-write_in_head() {
-    local db="$1" rowid="$2" epoch="$3" rel="$4" text probes head pre rev line
+#
+# `write_probes` prints those lines and is shared by `write_in_head` (are they committed?) and
+# `write_absent_from_index` (are they staged?), so the two cannot disagree on what the write's text is.
+write_probes() {
+    local db="$1" rowid="$2" text
     local tab=$'\t'
     # The new text of each item of an array-valued argument. `json_type` guards it because json_each over
     # a scalar yields a row whose `value` is not JSON, and json_extract on that raises for the whole row.
@@ -412,8 +415,28 @@ write_in_head() {
         || $(items '$.edits') || char(10)
         || $(items '$.patch.body_edits')
         FROM tool_calls WHERE id = $rowid;" 2>/dev/null)"
-    probes="$(printf '%s\n' "$text" | awk '{ sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "");
-            if (length($0) >= 16) print length($0) "\t" $0 }' | sort -u | sort -t "$tab" -k1,1nr | head -n 3 | cut -f2-)"
+    printf '%s\n' "$text" | awk '{ sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "");
+            if (length($0) >= 16) print length($0) "\t" $0 }' | sort -u | sort -t "$tab" -k1,1nr | head -n 3 | cut -f2-
+}
+# Whether the writer's text, read by `write_probes`, is certainly NOT in the version staged for $rel. It
+# answers the question `write_in_head` cannot: a write the record calls live is the writer's only while the
+# bytes about to be committed can carry it. Not absent when the call has no distinctive line (nothing to
+# find), when ANY probe is in the staged copy (a partly kept write is still theirs), or when the path is not
+# in the index (a staged deletion has no blob). `|| return 1` on `git show` is load-bearing: a deletion would
+# otherwise read as an empty copy and clear every writer.
+write_absent_from_index() {
+    local db="$1" rowid="$2" rel="$3" probes staged line
+    probes="$(write_probes "$db" "$rowid")"
+    [ -n "$probes" ] || return 1
+    staged="$(git show ":$rel" 2>/dev/null)" || return 1
+    while IFS= read -r line; do
+        grep -qF -e "$line" <<< "$staged" && return 1
+    done <<< "$probes"
+    return 0
+}
+write_in_head() {
+    local db="$1" rowid="$2" epoch="$3" rel="$4" probes head pre rev line
+    probes="$(write_probes "$db" "$rowid")"
     [ -n "$probes" ] || return 1
     head="$(git show "HEAD:$rel" 2>/dev/null)"
     while IFS= read -r line; do
@@ -599,6 +622,10 @@ foreign_writer() {
         [ -n "${asked[$sid]:-}" ] && continue
         asked[$sid]=1
         write_in_head "$db" "$rowid" "$epoch" "$rel" && continue
+        # Nor is it the writer's when the bytes STAGED for this path hold none of the write's text:
+        # the record is per file, so a reverted or never-landed edit stays live for the lookback and
+        # named a peer as the owner of a diff that was wholly the stager's (bug 581b05bbe41134f3).
+        write_absent_from_index "$db" "$rowid" "$rel" && continue
         other="$sid"
     done <<< "$out"
     printf '%s' "$other"
