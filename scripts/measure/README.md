@@ -13,7 +13,8 @@ than re-deriving it.
   `usage` — one model completion is often split across several lines (thinking/text/tool_use),
   each carrying an identical `usage` payload, and naive per-line summing overcounts 2.1-2.6x.
   **Declined as a dependency for Stage 0**: it lives in llm-proxy behind this repo's
-  `.claude/skills/claude-traces` symlink and ships no test suite (the bug file's own "Tests
+  `claude-traces` skill link (a tracked symlink under `.claude/skills/` whose target is an
+  absolute path on the author's machine, so it dangles on a clean checkout) and ships no test suite (the bug file's own "Tests
   added" section says so). Its `~/.claude`-only base is **not** an open issue — per
   `docs/PROBES.md`'s claude-traces row, that limitation "has since been fixed", and this was
   independently re-verified against the live script in this session:
