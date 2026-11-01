@@ -61,8 +61,8 @@ no() {
     FAIL=$((FAIL + 1))
 }
 eq() { [ "$2" = "$3" ] && ok "$1" || no "$1" "want exit $3, got $2"; }
-has() { printf '%s' "$2" | grep -qF -- "$3" && ok "$1" || no "$1" "expected to find: $3"; }
-hasnt() { printf '%s' "$2" | grep -qF -- "$3" && no "$1" "should NOT contain: $3" || ok "$1"; }
+has() { [[ "$2" == *"$3"* ]] && ok "$1" || no "$1" "expected to find: $3"; }
+hasnt() { [[ "$2" == *"$3"* ]] && no "$1" "should NOT contain: $3" || ok "$1"; }
 
 # Just the per-commit rows of a refusal (`    <sha8>  <sid>  <subject>`). Asserting
 # "your sid is absent from the OUTPUT" would be wrong: the message prints `Your session

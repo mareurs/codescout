@@ -34,7 +34,7 @@ PASS=0
 FAIL=0
 
 has() { # has <label> <haystack> <needle>
-    if printf '%s' "$2" | grep -qF -- "$3"; then
+    if [[ "$2" == *"$3"* ]]; then
         PASS=$((PASS + 1))
     else
         FAIL=$((FAIL + 1)); echo "FAIL: $1"; echo "  expected to find: $3"; echo "  in: $2"
@@ -48,7 +48,7 @@ eq() { # eq <label> <actual> <expected>
     fi
 }
 hasnt() { # hasnt <label> <haystack> <needle>
-    if printf '%s' "$2" | grep -qF -- "$3"; then
+    if [[ "$2" == *"$3"* ]]; then
         FAIL=$((FAIL + 1)); echo "FAIL: $1"; echo "  must NOT contain: $3"; echo "  in: $2"
     else
         PASS=$((PASS + 1))

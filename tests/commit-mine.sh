@@ -66,8 +66,8 @@ ok() { PASS=$((PASS + 1)); }
 no() { FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && printf '  %s\n' "$2"; }
 eq() { [ "$2" = "$3" ] && ok || no "$1" "actual:   $2
   expected: $3"; }
-has() { printf '%s' "$2" | grep -qF -- "$3" && ok || no "$1" "missing: $3"; }
-hasnt() { printf '%s' "$2" | grep -qF -- "$3" && no "$1" "unexpected: $3" || ok; }
+has() { [[ "$2" == *"$3"* ]] && ok || no "$1" "missing: $3"; }
+hasnt() { [[ "$2" == *"$3"* ]] && no "$1" "unexpected: $3" || ok; }
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT

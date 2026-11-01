@@ -42,8 +42,14 @@ no() {
     FAIL=$((FAIL + 1))
 }
 eq() { [ "$2" = "$3" ] && ok "$1" || no "$1" "want '$3' got '$2'"; }
-has() { printf '%s' "$2" | grep -qF "$3" && ok "$1" || no "$1" "missing: $3"; }
-hasnt() { printf '%s' "$2" | grep -qF "$3" && no "$1" "must NOT contain: $3" || ok "$1"; }
+# `[[ == *needle* ]]`, NOT `printf | grep -qF`. Under `pipefail` that pipe is racy: bash's
+# printf writes a 4.5 KB refusal in two chunks (4096 + rest, measured with strace), `grep -q`
+# can find the needle in the first and exit, and the second write then dies of SIGPIPE (141).
+# `has` then failed with the text present (2 of 6 runs under load, 2026-11-01), and `hasnt`
+# PASSED with it present, which nothing would ever report.
+# docs/issues/2026-11-01-hooks-discrimination-narrowing-remedy-case-fails-when-two-suite-runs-overlap.md
+has() { [[ "$2" == *"$3"* ]] && ok "$1" || no "$1" "missing: $3"; }
+hasnt() { [[ "$2" == *"$3"* ]] && no "$1" "must NOT contain: $3" || ok "$1"; }
 
 # Assert the stage log is THERE, before a case that reads it after deliberately removing
 # it. Nothing here recreates that file directly: `post-index-change` fires on index

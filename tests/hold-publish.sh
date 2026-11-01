@@ -28,8 +28,8 @@ no() {
     FAIL=$((FAIL + 1))
 }
 eq() { [ "$2" = "$3" ] && ok "$1" || no "$1" "want '$3', got '$2'"; }
-has() { printf '%s' "$2" | grep -qF -- "$3" && ok "$1" || no "$1" "expected to find: $3 (in: $2)"; }
-hasnt() { printf '%s' "$2" | grep -qF -- "$3" && no "$1" "should NOT contain: $3" || ok "$1"; }
+has() { [[ "$2" == *"$3"* ]] && ok "$1" || no "$1" "expected to find: $3 (in: $2)"; }
+hasnt() { [[ "$2" == *"$3"* ]] && no "$1" "should NOT contain: $3" || ok "$1"; }
 
 [ -x "$SCRIPT" ] || { echo "FATAL: $SCRIPT is not executable"; exit 1; }
 
