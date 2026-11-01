@@ -2445,10 +2445,24 @@ struct Point {
         // than skip the test and lose Windows coverage of workspace/symbol.
         let attempts = if cfg!(windows) { 120 } else { 30 };
         let mut symbols = vec![];
+        // A timeout of the 30 s request ceiling is treated as "not ready yet", like an
+        // empty answer. Under CPU load one workspace/symbol request did time out
+        // (bug 20927ccfe293c34e: 1 failure in 3 runs under 64 busy loops on 4 cores).
+        // Any other error still fails the test at once. A third timeout fails it too,
+        // so a server that never answers is not hidden.
+        let mut timeouts = 0;
         for _ in 0..attempts {
-            symbols = client.workspace_symbols("add").await.unwrap();
-            if !symbols.is_empty() {
-                break;
+            match client.workspace_symbols("add").await {
+                Ok(found) => {
+                    symbols = found;
+                    if !symbols.is_empty() {
+                        break;
+                    }
+                }
+                Err(e) if e.to_string().contains("timed out") && timeouts < 2 => {
+                    timeouts += 1;
+                }
+                Err(e) => panic!("workspace/symbol 'add' failed: {e:#}"),
             }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
