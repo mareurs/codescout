@@ -1,7 +1,7 @@
 ---
 id: f2ef1c72d0fb9618
 kind: bug
-status: open
+status: fixed
 title: 'BUG: seven server tests build their librarian from the developer''s global workspace file, so a CI runner without it answers `unknown tool: ''doc''`'
 owners:
 - marius
@@ -11,6 +11,7 @@ tags:
 - ci
 - librarian
 - server
+closed: 2026-11-01
 opened: 2026-11-01
 severity: medium
 unverified: The 7 tests are verified RED (122 passed, 7 failed) and GREEN (129 passed, 0 failed) with an empty home on this machine; the ubuntu CI result after the fix is not yet observed.
@@ -71,7 +72,9 @@ codescout `experiments` at `60dc3569e`. Local machine has `~/.config/librarian/w
 
 ## Fix
 
-`test_support::librarian_env(dir)` in `src/server.rs` writes an empty workspace file and returns a `LibrarianEnv` with `workspace` and `db` set inside `dir`. All 18 literals now call it. Fix SHA is added when the fix is on `experiments`.
+`test_support::librarian_env(dir)` in `src/server.rs` writes an empty workspace file and returns a `LibrarianEnv` with `workspace` and `db` set inside `dir`. All 18 literals now call it.
+
+Fixed by `bef7eb8e1` on `experiments` (patch-id `900da4f7e82f3afa3a60a5efa8245d3a5d8428f6`). With a fresh empty HOME the server tests went from 122 passed / 7 failed to 129 passed / 0 failed. The full local gate was green on the merged tip `abba2def5`. The ubuntu CI result is not yet observed.
 
 ## Tests added
 
