@@ -94,6 +94,7 @@ from provenance_records import CoverageGap, HistoryBatch, Operation, ProvenanceS
 from codex_history import discover_codex_histories, read_codex_history
 from typing import Iterable
 from session_context import principal_key, resolve_context
+from history_cache import cache_dir as history_cache_dir, caching as caching_reader
 
 # Tool calls whose input names a write TARGET. Read tools are deliberately absent:
 # including one would make every reader an author.
@@ -949,10 +950,16 @@ def scan_provenance(root: Path, environ: dict[str, str], modified_since: float |
     codex_files, codex_gaps = discover_codex_histories(root, environ)
     claude_files = _modified_since(claude_files, modified_since)
     codex_files = _modified_since(codex_files, modified_since)
+    # Each file's decoded history is stored once and reused while the file is unchanged: see
+    # `history_cache`. The cache is keyed on this call's `environ`, so a test that hands in its
+    # own HOME gets its own cache.
+    cache = history_cache_dir(environ)
+    read_claude = caching_reader(read_claude_history, cache)
+    read_codex = caching_reader(read_codex_history, cache)
     batch = merge_history_batches([
         HistoryBatch([], claude_gaps + codex_gaps),
-        *(read_claude_history(path) for path in claude_files),
-        *(read_codex_history(path) for path in codex_files),
+        *(read_claude(path) for path in claude_files),
+        *(read_codex(path) for path in codex_files),
     ])
     owners, evidence, gaps = {}, {}, list(batch.gaps)
     streams = {}

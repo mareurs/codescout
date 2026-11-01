@@ -348,7 +348,11 @@ def test_duplicate_discovery_copied_original_event_and_gaps(checkout):
     scan = fp.scan_provenance(root, env)
     assert scan.owners["own.rs"] == [("codex:me", "2026-10-10T12:01:00Z")]
     assert not scan.gaps
-    assert len(fp.scan_with_evidence(root)) == 2
+    # `scan_with_evidence` reads `os.environ`: point it at the fixture's histories and HOME, or the
+    # call decodes this machine's real history and writes the real history cache.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(fp.os, "environ", env)
+        assert len(fp.scan_with_evidence(root)) == 2
 
 
 def test_unreadable_codex_source_cannot_hide_behind_claude_scan(checkout, monkeypatch):
