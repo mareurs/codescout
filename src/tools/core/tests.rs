@@ -1196,12 +1196,14 @@ async fn guard_worktree_write_hint_names_the_main_repo_not_an_arbitrary_worktree
         .expect("a refusal whose whole point is naming a route must carry guidance")
         .text();
 
+    // The hint carries the path as a JSON string literal (`activate_call`), so a Windows
+    // backslash is written `\\`: compare the quoted form, which is what a caller pastes.
     assert!(
-        hint.contains(&root.display().to_string()),
+        hint.contains(&crate::util::text::json_quote(&root.display().to_string())),
         "the hint must name the main repo — the answer in essentially every case; got: {hint}"
     );
     assert!(
-        !hint.contains(&wt.display().to_string()),
+        !hint.contains(&crate::util::text::json_quote(&wt.display().to_string())),
         "the hint must not prescribe a worktree the caller never named; got: {hint}"
     );
 }
@@ -1234,8 +1236,9 @@ async fn worktree_read_notice_activate_remedy_names_the_main_repo_not_a_worktree
 
     // The list is the disclosure half and must survive: a caller who genuinely wants
     // the worktree needs it named somewhere. Guards the "fix" of deleting the list.
+    // `git worktree list` prints the plain form, while `wt` here is canonical (verbatim on Windows).
     assert!(
-        notice.contains(&wt.display().to_string()),
+        notice.contains(&crate::util::fs::strip_verbatim(&wt).display().to_string()),
         "the worktree list is the disclosure and must stay in the notice; got: {notice}"
     );
     // The argument is a JSON string literal, read back the way the caller's parser reads it: the

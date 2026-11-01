@@ -4,6 +4,7 @@ pub mod gitignore;
 pub mod librarian_guard;
 pub mod librarian_response;
 pub mod librarian_sync;
+pub mod long_path;
 pub mod markdown_fence;
 pub mod path_security;
 pub mod private_dir;

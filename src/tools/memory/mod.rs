@@ -1206,7 +1206,9 @@ impl Tool for Memory {
                                     ),
                                     (
                                         "write_target",
-                                        json!(crate::util::fs::to_forward_slash(&dirs.primary)),
+                                        json!(crate::util::fs::to_forward_slash(
+                                            &crate::util::fs::strip_verbatim(&dirs.primary)
+                                        )),
                                     ),
                                 ]
                             } else {

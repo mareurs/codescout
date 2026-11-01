@@ -347,7 +347,9 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         if !file_accepts_value_nav(&source.to_string_lossy(), nav) {
             return None;
         }
-        let source = source.display().to_string();
+        let source = crate::util::fs::strip_verbatim(&source)
+            .display()
+            .to_string();
         Some(if value.len() <= INPUT_ECHO_CLIP {
             let literal = serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""));
             // The file's path sits inside a JSON string in the call, as the key beside it does.

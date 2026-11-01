@@ -180,9 +180,12 @@ impl LibraryRegistry {
     /// Check whether an absolute path falls inside any registered library.
     /// Returns the matching entry if found.
     pub fn is_library_path(&self, absolute_path: &Path) -> Option<&LibraryEntry> {
+        // Compare spellings that name one location: a read path is canonical (`\\?\C:\…`, long
+        // names on Windows) while a registered path is what the caller typed.
+        let target = crate::util::long_path::comparable(absolute_path);
         self.entries
             .iter()
-            .find(|e| absolute_path.starts_with(&e.path))
+            .find(|e| target.starts_with(crate::util::long_path::comparable(&e.path)))
     }
 
     /// Return registered libraries where `version != version_indexed` (stale).

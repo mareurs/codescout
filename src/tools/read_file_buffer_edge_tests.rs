@@ -207,7 +207,11 @@ async fn read_through(
         let c = route
             .captures(next)
             .unwrap_or_else(|| panic!("{label}: next {next:?} is not a line route"));
-        assert_eq!(&c[1], input_ref, "{label}: next leaves the ref");
+        assert_eq!(
+            crate::tools::route_path_tests_util::unquote_route_path(&c[1]),
+            input_ref,
+            "{label}: next leaves the ref"
+        );
         let jp: Option<String> = c
             .get(2)
             .map(|m| serde_json::from_str(m.as_str()).expect("a JSON string literal"));
@@ -1101,7 +1105,7 @@ fn next_input(v: &Value, label: &str) -> Option<Value> {
         .captures(next)
         .unwrap_or_else(|| panic!("{label}: next {next:?} is not a line route"));
     let mut input = json!({
-        "path": &c[1],
+        "path": crate::tools::route_path_tests_util::unquote_route_path(&c[1]),
         "start_line": c[3].parse::<u64>().unwrap(),
         "end_line": c[4].parse::<u64>().unwrap(),
     });
@@ -2073,7 +2077,7 @@ async fn follow_value(
         let (p, n, k, s, e) = if let Some(c) = route.captures(next) {
             let k: String = serde_json::from_str(&c[3]).expect("a JSON string literal");
             (
-                c[1].to_string(),
+                crate::tools::route_path_tests_util::unquote_route_path(&c[1]),
                 c[2].to_string(),
                 k,
                 c[4].to_string(),
@@ -2919,7 +2923,8 @@ async fn the_text_form_of_a_real_files_value_page_counts_and_continues() {
             "{input}: want {want:?} in {text:.300}"
         );
         let next = format!(
-            "Next: read_file(\"{path}\", json_path=\"$.k\", start_line={}, end_line={})",
+            "Next: read_file({}, json_path=\"$.k\", start_line={}, end_line={})",
+            crate::util::text::json_quote(path),
             b + 1,
             input["end_line"].as_u64().unwrap_or(600)
         );
@@ -3048,7 +3053,7 @@ fn next_value_input(v: &Value) -> Option<Value> {
     let c = route.captures(next).expect("a route-shaped next");
     let key: String = serde_json::from_str(&c[3]).unwrap();
     Some(json!({
-        "path": &c[1],
+        "path": crate::tools::route_path_tests_util::unquote_route_path(&c[1]),
         &c[2]: key,
         "start_line": c[4].parse::<u64>().unwrap(),
         "end_line": c[5].parse::<u64>().unwrap(),
@@ -3283,11 +3288,12 @@ async fn a_value_read_of_a_real_files_handle_names_the_files_route() {
         let c = route
             .captures(&hint)
             .unwrap_or_else(|| panic!("{nav}: the hint names no route: {hint}"));
-        assert_eq!(&c[1], file, "{nav}: the route names another path");
+        let routed_path = crate::tools::route_path_tests_util::unquote_route_path(&c[1]);
+        assert_eq!(routed_path, file, "{nav}: the route names another path");
         assert_eq!(&c[2], nav);
         let k: String = serde_json::from_str(&c[3]).unwrap();
         let v = ReadFile
-            .call(json!({ "path": &c[1], &c[2]: k }), &ctx)
+            .call(json!({ "path": routed_path, &c[2]: k }), &ctx)
             .await
             .unwrap_or_else(|e| panic!("{nav}: the route failed: {e}"));
         assert!(v["content"].is_string(), "{nav}: {v:.200}");
@@ -3335,7 +3341,10 @@ async fn a_handle_refusal_quotes_a_key_of_exactly_the_clip_whole() {
         .to_string();
     let lit = serde_json::to_string(&jp).unwrap();
     assert!(
-        err.contains(&format!("read_file(\"{file}\", json_path={lit})")),
+        err.contains(&format!(
+            "read_file({}, json_path={lit})",
+            crate::util::text::json_quote(file)
+        )),
         "{err:.400}"
     );
 }

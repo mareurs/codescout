@@ -7,14 +7,16 @@
 //! (`db5303eb3b9c2781`).
 //!
 //! [`same_location`] is the pure comparison and runs on every platform, so Linux tests can pin
-//! it. [`long_form`] is the one Windows call that expands 8.3 short names; it does not resolve
-//! links, so a link still leaves the two sides different.
+//! it. [`long_form`] (in `util::long_path`) is the one Windows call that expands 8.3 short
+//! names; it does not resolve links, so a link still leaves the two sides different.
 
 // Off Windows only `agrees` is called; the rest is the Windows path, kept compiled so the
 // Linux tests can pin it.
-#![cfg_attr(not(windows), allow(dead_code))]
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+pub(crate) use crate::util::long_path::long_form;
 
 /// `p` with the respellings that name no other file removed: the `\\?\` or `\\?\UNC\` prefix,
 /// `/` as `\`, a trailing separator, and letter case (NTFS is case-insensitive).
@@ -34,34 +36,6 @@ fn normalise(p: &str) -> String {
 /// names already expanded by [`long_form`]) name the same location on Windows.
 pub(crate) fn same_location(real: &str, spelled: &str) -> bool {
     normalise(real) == normalise(spelled)
-}
-
-/// `path` with its 8.3 short names (`RUNNER~1`) expanded to the long names on disk. A link is
-/// not followed. Returns `path` unchanged when the call fails, which keeps the door strict.
-#[cfg(windows)]
-pub(crate) fn long_form(path: &Path) -> PathBuf {
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-    use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
-
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    // SAFETY: `wide` is NUL-terminated and outlives both calls; a null buffer of length 0 asks
-    // for the required size, and the second call is given a buffer of exactly that size.
-    let needed = unsafe { GetLongPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0) };
-    if needed == 0 {
-        return path.to_path_buf();
-    }
-    let mut buf = vec![0u16; needed as usize];
-    let written = unsafe { GetLongPathNameW(wide.as_ptr(), buf.as_mut_ptr(), needed) };
-    if written == 0 || written >= needed {
-        return path.to_path_buf();
-    }
-    PathBuf::from(std::ffi::OsString::from_wide(&buf[..written as usize]))
-}
-
-/// Other platforms have no short names: the spelling is already its long form.
-#[cfg(not(windows))]
-pub(crate) fn long_form(path: &Path) -> PathBuf {
-    path.to_path_buf()
 }
 
 /// Whether the door may treat `real` as the file the caller's `lexical` spelling names, with

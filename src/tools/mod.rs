@@ -35,6 +35,8 @@ pub(crate) mod param_probe;
 pub mod probe;
 pub mod progress;
 pub mod read_file;
+#[cfg(test)]
+pub(crate) mod route_path_tests_util;
 pub mod run_command;
 pub mod section_coverage;
 pub mod semantic;

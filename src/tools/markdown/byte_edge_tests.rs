@@ -466,7 +466,11 @@ async fn md_read_through(
         let c = route
             .captures(next)
             .unwrap_or_else(|| panic!("{label}: next {next:?} is not a line route"));
-        assert_eq!(&c[1], path, "{label}: next leaves the path");
+        assert_eq!(
+            crate::tools::route_path_tests_util::unquote_route_path(&c[1]),
+            path,
+            "{label}: next leaves the path"
+        );
         if forced {
             assert!(
                 c.get(4).is_some(),

@@ -3694,7 +3694,9 @@ async fn a_memory_read_from_the_other_layout_counts_its_provenance_keys_in_the_g
     let (_dir, root, ctx) = workspace_ctx_with_sub_project().await;
     let mut buffered = 0;
     let mut inline = 0;
-    for n in 9_800..=9_990 {
+    // The window opens at 9_000, not at the Unix edge: a Windows path is longer and its
+    // backslashes are doubled in JSON, so the same edge sits lower there.
+    for n in 9_000..=9_990 {
         let topic = format!("shadow-{n}");
         seed(&local_layout_dir(&root), &topic, &"a".repeat(n));
         let read = Memory
@@ -4034,7 +4036,14 @@ async fn a_worktree_delete_refuses_a_main_only_topic_and_warns_when_a_copy_shows
         "# M-both",
         "the main checkout's copy is not touched"
     );
-    let warnings = shadowed["warnings"].to_string();
+    // Read the warning strings themselves: `Value::to_string` escapes a Windows backslash.
+    let warnings = shadowed["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|w| w.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
         warnings.contains(&main_memories.display().to_string()),
         "the answer must say a copy still shows through: {shadowed:?}"
