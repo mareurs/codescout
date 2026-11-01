@@ -156,15 +156,20 @@ second.
 
 ```bash
 python3 -m pip install -r requirements-python-light.txt
+cargo install cargo-nextest --locked   # once: the two test lanes below run under nextest
 python3 scripts/python-tests.py --lane light
 cargo fmt
 cargo clippy -- -D warnings
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
-cargo test --workspace --no-default-features
-cargo test --workspace
+cargo nextest run --workspace --no-default-features --no-fail-fast
+cargo test --workspace --doc --no-default-features
+cargo nextest run --workspace --no-fail-fast
+cargo test --workspace --doc
 ```
 
-The two `cargo test` lanes follow the same logic as the two clippy ones. CI's test matrix is
+The two test lanes follow the same logic as the two clippy ones. Each is a `cargo nextest run` plus a
+`cargo test --doc` step, because nextest does not run doctests; `./scripts/gate.sh` runs all four and
+needs nextest installed. CI's test matrix is
 three configs — `default`, `local-embed`, `no-features` (`.github/workflows/ci.yml:70`) — and
 the lean lane is what mirrors `no-features`. A test that reaches a `#[cfg(feature = "librarian")]`
 item without gating itself compiles and passes under default features, so the default lane

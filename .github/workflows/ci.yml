@@ -403,6 +403,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}-${{ matrix.config.name }}
+      # nextest runs the tests, one process per test: the default lib tests took 72-80 s under
+      # nextest and 369-575 s under libtest on the 64-core dev box (docs/conventions/gate-ordering.md,
+      # "Why the test lanes run nextest"). CI runs it too so that the gate and CI run the tests the
+      # same way. The gain on a runner with few cores is NOT measured. The version is pinned.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.149
       # Tests with the librarian feature on (default + local-embed configs)
       # construct CodeScoutServer instances which try to build_tool_context.
       # That call requires a librarian workspace file; seed an empty one so
@@ -491,7 +498,11 @@ jobs:
       # `codescout-embed` only in the Compiling lines, never in a `Running`
       # line; adding `--workspace` makes it appear and all 27 of its tests
       # execute, with 0 regressions across all three configs.
-      - run: cargo test --workspace ${{ matrix.config.flags }}
+      # `cargo nextest run --workspace` has the same default-member rule as `cargo test` above, so it
+      # carries --workspace too. nextest does not run doctests; the second step does, with the
+      # same flags, so a doctest failure still reds this job.
+      - run: cargo nextest run --workspace ${{ matrix.config.flags }}
+      - run: cargo test --workspace --doc ${{ matrix.config.flags }}
 
   # The configuration `cargo rb` actually ships.
   #
@@ -522,6 +533,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ubuntu-latest-server-stack
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.149
       # server-stack sits on top of the default feature set, so `librarian` is on and
       # build_tool_context needs a workspace file — same seeding as the matrix job.
       - name: Seed empty librarian workspace
@@ -531,7 +545,8 @@ jobs:
           touch "${{ runner.temp }}/codescout-ci/workspace.toml"
           echo "LIBRARIAN_WORKSPACE=${{ runner.temp }}/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
       - run: cargo clippy --features server-stack --all-targets -- -D warnings
-      - run: cargo test --features server-stack
+      - run: cargo nextest run --features server-stack
+      - run: cargo test --doc --features server-stack
 
   # Build lanes for the opt-in features nothing else builds.
   #
@@ -561,7 +576,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ubuntu-latest-feature-check
-      - run: cargo test --features dashboard --all-targets
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.149
+      # `--all-targets` never included doctests, so moving this step to nextest drops nothing.
+      - run: cargo nextest run --features dashboard --all-targets
       # `--no-default-features --features local-embed-dynamic`, never the bare
       # `--features local-embed-dynamic`. The two ONNX backends are mutually exclusive
       # (crates/codescout-embed/src/lib.rs `compile_error!`), and `local-embed` joined

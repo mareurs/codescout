@@ -75,7 +75,9 @@ fn repo_root() -> PathBuf {
 
 /// Every feature named in a `--features <list>` flag in one workflow's text.
 ///
-/// `only_cargo_test` restricts the scan to lines that also run `cargo test`. That
+/// `only_cargo_test` restricts the scan to lines that also RUN tests: `cargo test` or
+/// `cargo nextest run` (CI moved its test jobs to nextest on 2026-11-01). `cargo nextest
+/// list` is not a run, so it does not count, exactly like `cargo check`. That
 /// distinction is the whole point of this function taking text rather than reading the
 /// directory: it makes the parser fixture-drivable, so
 /// [`the_workflow_scan_distinguishes_check_from_test`] can prove it discriminates against
@@ -95,7 +97,7 @@ fn repo_root() -> PathBuf {
 fn features_from_text(text: &str, only_cargo_test: bool) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
     for line in text.lines() {
-        if only_cargo_test && !line.contains("cargo test") {
+        if only_cargo_test && !(line.contains("cargo test") || line.contains("cargo nextest run")) {
             continue;
         }
         let mut rest = line;
@@ -296,6 +298,8 @@ fn the_workflow_scan_distinguishes_check_from_test() {
       - run: cargo check --features only-checked --all-targets\n\
       - run: cargo test --features only-tested\n\
       - run: cargo test --features a,b --workspace\n\
+      - run: cargo nextest run --features via-nextest --workspace\n\
+      - run: cargo nextest list --features only-listed\n\
       - name: mentions only-checked in a step name\n";
 
     let named = features_from_text(FIXTURE, false);
@@ -304,6 +308,21 @@ fn the_workflow_scan_distinguishes_check_from_test() {
     assert!(
         named.contains("only-checked") && named.contains("only-tested"),
         "the any-line scan must still see both; it feeds the COMPILE question: {named:?}"
+    );
+    assert!(
+        named.contains("via-nextest") && named.contains("only-listed"),
+        "the any-line scan must see the nextest lines too: {named:?}"
+    );
+    assert!(
+        tested.contains("via-nextest"),
+        "a `cargo nextest run` lane RUNS tests and must count (the gate and CI moved to \
+         nextest on 2026-11-01; without this every nextest feature lane reads as untested): \
+         {tested:?}"
+    );
+    assert!(
+        !tested.contains("only-listed"),
+        "`cargo nextest list` only lists tests, it runs none — it must NOT count, exactly \
+         like `cargo check`: {tested:?}"
     );
     assert!(
         !tested.contains("only-checked"),
