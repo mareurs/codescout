@@ -42,13 +42,33 @@ codescout `experiments` at `0d48ddaa6`; `claude-plugins/codescout-companion` at 
 
 The three sites above, read 2026-11-01 (grep of `\.delivered` over the plugin, test files excluded, gave exactly the two non-test lines named).
 
+### The receipt, read 2026-11-01
+
+The v1 engine keeps one receipt per wake event, as JSON in private per-profile storage. `background-wake/receipt_txn.py` writes it under an OS lock. Its states run `pending`, `claimed`, `sending`, then `accepted`, `continuation_observed` and `completed`. The last three each need correlated host evidence (event id, attempt id, and a thread, turn or item id). The other states are `failed` (retryable) and `unknown` (not retryable). The send budget is 4.
+
+The Claude Code adapter (`background-wake/adapters/claude-code.mjs`) writes the text to stderr and returns `emitted-unconfirmed` with the reason `stderr emission; asyncRewake acceptance unobservable`. In `apply_command`, that result only stores `lastEvidence = {kind: 'emitted-unconfirmed'}`. The state stays `sending`. `engine.mjs` hands the adapter an `observe(evidence)` callback, but the adapter's `deliver` never calls it. So a Claude Code receipt on v1 never leaves `sending`.
+
+Not read: what the legacy `claimDelivery` (`hooks/wake-on-job-end.mjs:108`) treats as delivered beyond its line number, and what the server does with a `sending` receipt after a long time.
+
 ## Hypotheses tried
 
 None beyond reading the code.
 
 ## Fix
 
-Not decided. Options: the v1 engine writes `.delivered` when a receipt reaches a confirmed state (a cross-repo change in `claude-plugins`); or the server treats a v1 receipt as delivery (needs the receipt format); or the 24-hour bound is accepted for v1 and the design doc says so.
+Not decided. The first draft of this section assumed the receipt reaches a confirmed state for Claude Code. It does not (read 2026-11-01, see § Evidence), so two of the three first options do not work as written.
+
+Options that remain:
+
+1. **Weaken the claim.** The v1 engine writes `.delivered` at `emitted-unconfirmed`, so "emitted" counts as enough for the log grace period. The reaper only needs to know the wake was sent. This is a cross-repo change in `claude-plugins`, and `background-wake/adapters/claude-code.test.mjs:41` must change with it, because it asserts the marker is absent on purpose.
+2. **Accept the 24-hour bound for v1** and state it in the design doc. No code changes.
+
+Ruled out:
+
+- "Write `.delivered` when a receipt reaches a confirmed state": no confirmed state is reachable for Claude Code.
+- "The server treats a v1 receipt as delivery": the receipt cannot distinguish delivery from non-delivery.
+
+Reopen trigger (for a close as accepted): a profile selects the v1 engine, or a v1 job's log is seen on disk longer than 1 hour after its record ended.
 
 ## Tests added
 
@@ -60,7 +80,7 @@ None needed for correctness: the 24-hour bound still reclaims the log.
 
 ## Resume
 
-Decide who owns the marker. Split from bug `eaf02545987b4bc5`, whose sidecar leak is fixed in `0d48ddaa6`.
+Decide who owns the marker, and whether "delivered" for the log reaper may mean "emitted". Status stays `open` by the owner's decision on 2026-11-01, so this can be checked later. Check when a profile starts using v1: look for `codescout-wake.json` in the four profile roots, then compare the age of a finished v1 job's log with the one-hour grace. Split from bug `eaf02545987b4bc5`, whose sidecar leak is fixed in `0d48ddaa6`.
 
 ## References
 
