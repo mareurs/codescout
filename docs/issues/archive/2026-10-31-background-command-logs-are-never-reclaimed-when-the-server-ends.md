@@ -1,5 +1,5 @@
 ---
-id: '45b69c70b723a089'
+id: 670481b9fea0679f
 kind: bug
 status: fixed
 title: 'BUG: background-command logs are never reclaimed when the server ends, so codescout-bg-*.log piles up (18,798 files, 687 MiB)'
@@ -14,7 +14,7 @@ topic: background job logs
 closed: 2026-11-01
 opened: 2026-10-31
 severity: medium
-unverified: 'The reclaimed amount was NOT measured (the 448 MiB in the design is an estimate), and the full ./scripts/gate.sh has not been run on the merged experiments; only the focused tests (719 passed) were run. The production loose sweep has never run against the real temp dir: test builds disable it by design.'
+unverified: 'CLEARED 2026-11-01. Was: the reclaimed amount was not measured and the full gate had not run on the merged experiments. Now: measured 19982 -> 2425 logs (713 -> 112 MiB allocated) on the first background spawn of the rebuilt server, and ./scripts/gate.sh is green on experiments e090efdfb.'
 ---
 
 # BUG: background-command logs are never reclaimed when the server ends, so codescout-bg-*.log piles up (18,798 files, 687 MiB)
@@ -116,7 +116,12 @@ Delete old logs by hand, for example those older than 7 days that no live server
 
 ## Resume
 
-Verify, then archive: (1) run `./scripts/gate.sh` on the merged `experiments` (not done for this fix; only the focused tests above ran); (2) measure the reclaimed amount on this machine: the first server start after the new binary is installed runs the loose sweep once, so compare `ls ~/.cache/cc-tmp/codescout-bg-*.log | wc -l` and `du` before and after. The 448 MiB figure in the design is an ESTIMATE from the census above, not a measurement. Then `doc(action="move")` to `docs/issues/archive/`.
+Done 2026-11-01, then archived. Verified: (1) `./scripts/gate.sh --check` on `experiments` at `e090efdfb` (clean worktree, RAM tier slot-0): `GATE EXITS -> FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, `PYTHON_LIGHT=0`, TOTAL=2007 s under heavy peer load (not a speed figure). (2) MEASURED on this machine, first background spawn of the server rebuilt from the merged `experiments` (binary built 12:36:39): `ls ~/.cache/cc-tmp/codescout-bg-*.log | wc -l` went 19,982 -> 2,425 and `du` allocated 730,204 -> 114,968 KiB (713 -> 112 MiB), i.e. 17,557 logs and about 601 MiB reclaimed; 0 logs older than 24 h remained; job records 1,267 -> 1,269 (none removed). The design's 448 MiB was an estimate; one machine, one run. The original plan was: the first server start after the new binary is installed runs the loose sweep once, so compare `ls ~/.cache/cc-tmp/codescout-bg-*.log | wc -l` and `du` before and after. The 448 MiB figure in the design is an ESTIMATE from the census above, not a measurement. Then `doc(action="move")` to `docs/issues/archive/`.
+
+## Fix provenance
+
+- **SHA:** `695f73dca` (`experiments`), the record-linked sweep; the full change is the nine commits in the table under *Fix*
+- **patch-id:** `d33b6c176082271e5981af0e342e17d415e950ae`
 
 ## References
 

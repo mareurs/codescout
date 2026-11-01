@@ -72,4 +72,4 @@ Add the suffix to `remove_with_sidecars`, fix the module doc, add the test. Then
 - `src/tools/job_record.rs:12-16,153`
 - `claude-plugins/codescout-companion/background-wake/intake.mjs:13`
 - `claude-plugins/codescout-companion/background-wake/adapters/claude-code.test.mjs:41`
-- bug `45b69c70b723a089` (the log reaper)
+- bug `670481b9fea0679f` (the log reaper, archived)
