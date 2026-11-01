@@ -97,7 +97,7 @@ cat > "$WORK/bin/cargo" <<'EOF'
 tag="${GATE_TEST_TAG:?}"; w="${GATE_TEST_WORK:?}"
 # The nextest presence check is a subcommand lookup that gate.sh runs BEFORE the lease, so it is
 # neither a lane nor a leased call: recording it would make the first line of seen-<tag> `<unset>`.
-[ "$1 ${2:-}" = "nextest --version" ] && exit 0
+[ "$1 ${2:-}" = "nextest --version" ] && { [ -z "${GATE_TEST_NO_NEXTEST:-}" ]; exit $?; }
 echo "${CARGO_TARGET_DIR:-<unset>}" >> "$w/seen-$tag"
 if [ -e "$w/hold-$tag" ] && [ ! -e "$w/started-$tag" ] && { [ "${GATE_TEST_HOLD_DEFAULT:-0}" != 1 ] || [ "$*" = "nextest run --workspace --no-fail-fast" ]; }; then
     echo $$ > "$w/worker-$tag.pid"
@@ -228,6 +228,17 @@ else
     wait "$PI"; eq "the gate exits 2" "$?" "2"
 fi
 eq "no cargo lane ran without a lease" "$([ -e "$WORK/seen-i" ] && echo ran || echo none)" "none"
+
+echo "F2. a missing cargo-nextest stops the gate BEFORE the lease, not after"
+# The check is a subcommand lookup the stub answers with GATE_TEST_NO_NEXTEST. A gate that took its
+# lease first and then found nextest missing would exit 2 just the same, and every other assertion
+# here would pass; only an empty pool tells the two orders apart (final review 2026-11-01).
+POOL="$WORK/pool-nx"
+run_gate nx sid-nx GATE_TEST_NO_NEXTEST=1; NX_RC=$?
+eq "the gate exits 2" "$NX_RC" "2"
+eq "and names the install command" "$(grep -c 'cargo install cargo-nextest --locked' "$WORK/out-nx")" "1"
+eq "no cargo lane ran" "$([ -e "$WORK/seen-nx" ] && echo ran || echo none)" "none"
+eq "and the pool holds nothing, so no lease was taken" "$(find "$POOL" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')" "0"
 
 echo "G. a slot grown past the ceiling is emptied under its lock before the lanes run"
 POOL="$WORK/pool-g"; fill "$POOL/slot-0/stale"
