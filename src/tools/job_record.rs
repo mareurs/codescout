@@ -12,11 +12,13 @@
 //!
 //! Sidecars sit next to the record and are named by appending to its full path:
 //! `<record>.watch` (a watcher is attached), `<record>.delivered` (the watcher has
-//! reported the outcome) and `<record>.wake-owner.json` (the wake plugin's engine v1 records
-//! which engine owns the record). Only `*.json` files are records. The first two sidecars and
+//! reported the outcome) and `<record>.wake-owner.json` (the wake plugin records which engine,
+//! `legacy` or `v1`, owns the record). Only `*.json` files are records. The first two sidecars and
 //! temp files never match that filter. The owner sidecar does match it, because its name ends
-//! in `.json`, but its body is not a `JobRecord`, so `read_record` returns `None` and the
-//! sweeps skip it. `remove_with_sidecars` removes all three with their record.
+//! in `.json`, but its body is not a `JobRecord`, so `read_record` returns `None` and no sweep
+//! reads it as a record. `remove_with_sidecars` removes all three with their record, and
+//! `sweep_stale` removes an owner sidecar whose record is already gone once it is
+//! `RECORD_MAX_AGE` old.
 //!
 //! docs/trackers/bug-fix-session-log.md F-201;
 //! docs/superpowers/specs/2026-10-29-background-job-wake-design.md
@@ -256,7 +258,9 @@ pub fn remove_if_delivered(path: &Path) -> bool {
 /// is stale when its file is at least `max_age` old (mtime) and either it is finished,
 /// or it is `running` but its server is gone (`is_alive(server_pid)` is false) so
 /// nothing will ever finish it. Unreadable or unparsable files are skipped, never an
-/// error: this is housekeeping, and a file it cannot judge is not its to delete.
+/// error: this is housekeeping, and a file it cannot judge is not its to delete. The one
+/// exception is a `.wake-owner.json` sidecar whose record is gone: it is removed at the same
+/// age and is not counted.
 ///
 /// The log a removed record names goes with it when `unlink_log_if_ours` accepts it (a
 /// regular `codescout-bg-*.log` file directly in `log_dir`, last written no later than the
@@ -283,6 +287,19 @@ pub fn sweep_stale(
             continue;
         };
         if age < max_age {
+            continue;
+        }
+        // An owner sidecar parses as no record, so the read below would skip it for good. One whose
+        // record is gone is an orphan: removing the record before this fix left it behind. One beside
+        // its record stays: `remove_with_sidecars` takes it with the record. Not counted, since the
+        // return value is the number of records removed.
+        if let Some(record) = path
+            .to_str()
+            .and_then(|p| p.strip_suffix(".wake-owner.json"))
+        {
+            if !Path::new(record).exists() {
+                let _ = std::fs::remove_file(&path);
+            }
             continue;
         }
         let Some(rec) = read_record(&path) else {
@@ -775,6 +792,44 @@ mod tests {
         assert_eq!(n, 1, "the sidecar is not a record and is not counted");
         assert!(!stale.exists());
         assert!(!stale_owner.exists(), "sweep_stale left the owner sidecar");
+    }
+
+    /// Records removed before the fix above left their owner sidecar behind (224 of 786 on the
+    /// first machine measured, 2026-11-01), and the sweeps never read an unparsable `*.json`.
+    /// An owner sidecar with no record and at least `RECORD_MAX_AGE` old is removed. A young
+    /// one may belong to a record about to be armed, and one beside its record is the record's
+    /// to remove (bug eaf02545987b4bc5).
+    #[test]
+    fn sweep_stale_removes_an_old_wake_owner_sidecar_whose_record_is_gone_and_only_that() {
+        let dir = private_tempdir();
+        let body = br#"{"version":1,"engine":"legacy","target":null}"#;
+        let orphan = |name: &str| {
+            let path = dir.path().join(format!("{name}.json.wake-owner.json"));
+            std::fs::write(&path, body).unwrap();
+            path
+        };
+        let old_orphan = orphan("1-aaaaaaaa-@bg_00000001");
+        set_mtime(&old_orphan, ago(RECORD_MAX_AGE + HOUR));
+        let young_orphan = orphan("1-aaaaaaaa-@bg_00000002");
+        let live = seed(
+            dir.path(),
+            "00000003",
+            "@bg_00000003",
+            RecordState::Running,
+            false,
+        );
+        let live_owner = sidecar(&live, ".wake-owner.json");
+        std::fs::write(&live_owner, body).unwrap();
+        set_mtime(&live_owner, ago(RECORD_MAX_AGE + HOUR));
+
+        let n = sweep_stale(dir.path(), dir.path(), RECORD_MAX_AGE, |_| true);
+        assert_eq!(n, 0, "no record was removed");
+        assert!(!old_orphan.exists(), "an old orphan owner sidecar stayed");
+        assert!(young_orphan.exists(), "a young orphan was removed");
+        assert!(
+            live.exists() && live_owner.exists(),
+            "a sidecar beside its record was removed"
+        );
     }
 
     #[cfg(unix)]
