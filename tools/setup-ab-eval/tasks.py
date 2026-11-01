@@ -615,6 +615,9 @@ def grader_for(record, image, gdir):
     if record["kind"] == "private":
         a = load_private(Path(record["out"]))
         return private_grader(a, image, gdir)
+    if record["kind"] == "live":
+        import multilang_tasks  # lazy: multilang_tasks imports this module
+        return multilang_tasks.live_grader_from_record(record, image, gdir)
     return foreign_grader(json.loads(Path(record["record_path"]).read_text()), image, gdir)
 
 

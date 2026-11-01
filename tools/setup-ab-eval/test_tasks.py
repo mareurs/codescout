@@ -707,6 +707,25 @@ class ControlOrder(unittest.TestCase):
             # The unordered set trips the false ControlFailed the review described.
             with self.assertRaises(leak_scan.ControlFailed):
                 leak_scan.positive_control([Path(td)], ns, None)
+class GraderForDispatch(unittest.TestCase):
+    def test_grader_for_dispatches_live(self):
+        bundle = {"kind": "live", "out": "o", "record_path": "r.json"}
+        with unittest.mock.patch("multilang_tasks.live_grader_from_record",
+                                 return_value="LIVE") as live, \
+                unittest.mock.patch.object(tasks, "foreign_grader") as foreign:
+            got = tasks.grader_for(bundle, "sab-arm-x:t", Path("g"))
+        self.assertEqual(got, "LIVE")
+        live.assert_called_once_with(bundle, "sab-arm-x:t", Path("g"))
+        foreign.assert_not_called()
+
+    def test_grader_for_still_falls_through_to_foreign(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "r.json").write_text("{}")
+            with unittest.mock.patch.object(tasks, "foreign_grader", return_value="F") as foreign:
+                got = tasks.grader_for({"kind": "foreign", "record_path": str(Path(d) / "r.json")},
+                                       "img", Path("g"))
+        self.assertEqual(got, "F")
+        foreign.assert_called_once()
 
 
 if __name__ == "__main__":

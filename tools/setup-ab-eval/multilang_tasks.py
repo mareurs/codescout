@@ -22,7 +22,10 @@ import hashlib
 import json
 import re
 import shlex
+import subprocess
 import sys
+import time
+import uuid
 from pathlib import Path
 
 import arms
@@ -227,8 +230,104 @@ def assemble_live(record, out, task_image, workdir):
     return needles, prompt, rec
 
 
-def _no_grader(patch, name):
-    raise RuntimeError("the Live grader is not built yet (Task 2: multilang_tasks grade)")
+GRADE_PREFIX = "sab-grade-"
+GRADE_STEP_TIMEOUT = 3600
+_GRADE_ERRORS = (control.ControlError, grade.ParserError, RuntimeError, subprocess.TimeoutExpired,
+                 ValueError, OSError)  # ValueError: odd bytes in docker output (UnicodeDecodeError)
+
+
+def expected_sets(record, bundle):
+    """(fail_to_pass, pass_to_pass) the grader demands: the record's lists, the bundle's dropped
+    names removed from PASS_TO_PASS. Read from the bundle's stored `expected["dropped"]`, never
+    recomputed from a control."""
+    dropped = set(bundle["expected"]["dropped"])
+    f2p = list(tasks._f2p(record["FAIL_TO_PASS"]))
+    p2p = [n for n in tasks._f2p(record["PASS_TO_PASS"]) if n not in dropped]
+    return f2p, p2p
+
+
+def live_grader(record, bundle, image, gdir):
+    """`grade(patch, name) -> dict` for a Live task: a fresh container of `image`
+    (`--network none`, the arm resources, always removed, `sab-grade-<id>-<name>-<hex>`), the
+    agent's patch (when not empty), the agent-touched test files restored and the record's
+    `test_patch` applied, the record's rebuild, test and print commands, the record's `log_parser`
+    over the log, and `verdict` over the bundle's expected set. A failure of the grader itself
+    (parser error, timeout, docker error, a patch that does not apply) is `pass: False` with an
+    `error` field, never an exception and never a pass; an empty patch never passes."""
+    f2p, p2p = expected_sets(record, bundle)
+    workdir = bundle["workdir"]
+    if workdir != tasks.WORKDIR:
+        raise LiveRefused(f"workdir {workdir!r}; the runner works in {tasks.WORKDIR!r} only")
+    test_files = tasks.patch_files(record["test_patch"])
+    tid = record["instance_id"]
+    gdir = Path(gdir)
+
+    def grade_one(patch, name):
+        container = f"{GRADE_PREFIX}{tid}-{name}-{uuid.uuid4().hex[:8]}"
+        result = {"pass": False, "name": name, "oom_killed": False, "container": container,
+                  "restored": test_files}
+        log = ""
+        started = time.monotonic()
+        steps = []
+        try:
+            run_dir = gdir / f"{name}-{uuid.uuid4().hex[:8]}"
+            run_dir.mkdir(parents=True)
+            result["log"] = str(run_dir / "grade.log")
+            try:
+                pilot.docker("run", "-d", "--name", container, "--network", "none", *arms.RESOURCES,
+                             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+                             "--pids-limit", "4096", image, "sleep", "infinity",
+                             timeout=control.START_TIMEOUT)
+                if patch:
+                    control._exec(container, workdir, "git", "apply", "--binary", "-", data=patch,
+                                  timeout=300)
+                control._exec(container, workdir, "sh", "-c", tasks.RESTORE_SH, "restore", *test_files,
+                              timeout=300)
+                control._exec(container, workdir, "git", "apply", "-", data=record["test_patch"],
+                              timeout=300)
+                control.rebuild(container, workdir, record, GRADE_STEP_TIMEOUT, steps=steps, state="grade")
+                log = control.run_tests(container, workdir, record, GRADE_STEP_TIMEOUT, steps=steps,
+                                        state="grade")
+                statuses = grade.run_parser(record["log_parser"], log)
+                result.update(grade.verdict(statuses, f2p, p2p))
+                if not patch and result["pass"]:
+                    result.update({"pass": False, "error": "an empty patch passed the tests"})
+            finally:
+                try:
+                    oom = pilot.docker("inspect", "-f", "{{.State.OOMKilled}}", container, check=False,
+                                       timeout=120).stdout.strip()
+                    result["oom_killed"] = oom == "true"
+                except _GRADE_ERRORS:
+                    pass
+        except _GRADE_ERRORS as e:
+            result.update({"pass": False, "error": f"{type(e).__name__}: {str(e)[-300:]}"})
+        finally:
+            removed, why = control._remove_container(container)
+            result["container_removed"] = removed
+            if not removed:
+                result["pass"] = False
+                result["error"] = result.get("error") or f"container not removed: {why}"
+        if result["oom_killed"]:
+            result["pass"] = False
+        result["wall_seconds"] = round(time.monotonic() - started, 1)
+        result["steps"] = [{k: s[k] for k in ("name", "returncode")} for s in steps]
+        try:
+            if "log" in result:
+                Path(result["log"]).write_text(log)
+                (Path(result["log"]).parent / "grade.json").write_text(
+                    json.dumps(dict(result, steps=steps), indent=2) + "\n")
+        except OSError as e:
+            result.update({"pass": False, "error": f"cannot write the grade evidence: {e}"})
+        return result
+
+    return grade_one
+
+
+def live_grader_from_record(bundle, image, gdir):
+    """`live_grader` for a bundle.json dict (what `tasks.grader_for` is handed)."""
+    record = json.loads(Path(bundle["record_path"]).read_text())
+    return live_grader(record, bundle, image, gdir)
+
 
 
 def agent_image_name(task_image):
@@ -259,7 +358,8 @@ def build_live(record, out, control_json):
               "record_path": str(out / "record.json"), "workdir": workdir, "expected": expected,
               "control_sha256": hashlib.sha256(control_json.read_bytes()).hexdigest()}
     (out.parent / "bundle.json").write_text(json.dumps(bundle, indent=2) + "\n")
-    return tasks.TaskBundle(tid, image, prompt, needles, _no_grader, "", bundle)
+    return tasks.TaskBundle(tid, image, prompt, needles,
+                            live_grader(record, bundle, image, out / "grades"), "", bundle)
 
 
 def load_live(bundle_json):
@@ -274,7 +374,7 @@ def load_live(bundle_json):
     needles = leak_scan.baseline_needles(leak_scan.needles_for(leak_record(record)),
                                          lambda: tasks.tree_files(out / "baseline-tree" / "testbed"))
     return tasks.TaskBundle(record["instance_id"], rec["image"], out / "prompt.txt", needles,
-                            _no_grader, "", rec)
+                            live_grader(record, rec, rec["image"], out / "grades"), "", rec)
 
 
 def arm_live(bundle_json):

@@ -430,7 +430,10 @@ class PrescanLiveTests(unittest.TestCase):
         (out / "record.json").write_text(json.dumps(record()))
         self.bj = self.tmp / "t" / "bundle.json"
         self.bj.write_text(json.dumps({"kind": "live", "out": str(out), "record_path": str(out / "record.json"),
-                                       "task_image": "sab-task-o__r-1:t1", "image": "sab-agent-cs-o__r-1:t1"}))
+                                       "task_image": "sab-task-o__r-1:t1", "image": "sab-agent-cs-o__r-1:t1",
+                                       "workdir": "/testbed",
+                                       "expected": {"fail_to_pass": 1, "pass_to_pass_kept": 3,
+                                                    "pass_to_pass_dropped": 0, "dropped": []}}))
         self.data = self.tmp / "t" / "prescan"
         self.data.mkdir()
         self.docker = []
@@ -482,6 +485,150 @@ class PrescanLiveTests(unittest.TestCase):
                 mock.patch.object(mt.pilot, "docker", lambda *a, **k: SimpleNamespace(
                     stdout=json.dumps(self.good()), returncode=0)):
             self.assertFalse(mt.prescan_live(self.bj, {}, self.data)["ok"])
+class FakeDocker:
+    """Just enough docker for `live_grader`: the tests' logs depend on whether the agent's patch
+    was applied (gold state) or not (base state)."""
+    BASE_LOG = "".join(f"{k}={v}\n" for k, v in GOOD_BASE.items())
+    GOLD_LOG = "".join(f"{k}={v}\n" for k, v in GOOD_GOLD.items())
+
+    def __init__(self, fail=None):
+        self.calls, self.patched, self.fail, self.applied = [], False, fail, []
+
+    def __call__(self, *args, **kw):
+        import base64
+        args = [str(a) for a in args]
+        self.calls.append(args)
+        out = lambda text="", rc=0: SimpleNamespace(returncode=rc, stdout=text)
+        if self.fail and self.fail in args[:1] + args[1:2]:
+            raise RuntimeError(f"docker {self.fail} failed")
+        if args[0] != "exec":
+            return out("false\n" if args[0] == "inspect" else "")
+        i = next(n for n, a in enumerate(args) if a.startswith(mt.GRADE_PREFIX))
+        cmd = args[i + 1:]
+        if cmd[:2] == ["git", "apply"]:
+            self.applied.append(kw.get("data"))
+            if cmd[2:3] == ["--binary"]:
+                self.patched = True
+            return out()
+        if cmd[0] == "bash":
+            script = cmd[-1]
+            if "head -c" in script:  # a print command
+                return out(base64.b64encode((self.GOLD_LOG if self.patched else self.BASE_LOG).encode()).decode())
+            return out(base64.b64encode(b"").decode())
+        return out()
+
+    def containers(self):
+        return [a[a.index("--name") + 1] for a in self.calls if a[0] == "run"]
+
+    def removed(self):
+        return [a[-1] for a in self.calls if a[0] == "rm"]
+
+
+def live_bundle(tmp, dropped=("t::p2",)):
+    return {"kind": "live", "workdir": "/testbed", "record_path": str(Path(tmp) / "record.json"),
+            "expected": {"fail_to_pass": 1, "pass_to_pass_kept": 2,
+                         "pass_to_pass_dropped": len(dropped), "dropped": list(dropped)}}
+
+
+class LiveGraderTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.fake = FakeDocker()
+
+    def grade(self, patch, rec=None, bundle=None, fake=None, name="r0"):
+        fake = fake or self.fake
+        grader = mt.live_grader(rec or record(), bundle or live_bundle(self.tmp), "sab-arm-o__r-1:t",
+                                self.tmp / "grades")
+        with mock.patch("pilot.docker", fake):
+            return grader(patch, name)
+
+    def test_live_grader_empty_patch_fails_and_gold_passes_with_fake_docker(self):
+        empty = self.grade("")
+        self.assertFalse(empty["pass"])
+        self.assertEqual(empty["not_passing"], 1)  # t::f1 fails at base
+        self.assertFalse(self.fake.patched)
+        self.assertEqual(self.fake.applied, [TEST_PATCH])  # no agent patch, only the test patch
+        gold = self.grade(PATCH, fake=FakeDocker())
+        self.assertTrue(gold["pass"], gold)
+        self.assertNotIn("error", gold)
+        self.assertEqual((gold["expected"], gold["missing"]), (3, 0))
+        for r in (empty, gold):
+            self.assertEqual(r["name"], "r0")
+            self.assertFalse(r["oom_killed"])
+            self.assertTrue(r["container_removed"])
+            self.assertIn("wall_seconds", r)
+            self.assertTrue(Path(r["log"]).is_file())
+            self.assertTrue(r["container"].startswith("sab-grade-o__r-1-r0-"))
+
+    def test_live_grader_container_is_isolated_resourced_and_always_removed(self):
+        self.grade(PATCH)
+        run = next(a for a in self.fake.calls if a[0] == "run")
+        self.assertEqual(run[run.index("--network") + 1], "none")
+        self.assertEqual(run[run.index("--cpus") + 1], "4")
+        self.assertEqual(run[run.index("--memory") + 1], "8g")
+        self.assertIn("sab-arm-o__r-1:t", run)
+        self.assertEqual(self.fake.removed(), self.fake.containers())
+
+    def test_live_grader_error_is_a_failed_grade_not_an_exception(self):
+        import subprocess
+        bad_parser = "def parser(log):\n    raise ValueError('boom')\n"
+        cases = {
+            "parser error": dict(rec=record(log_parser=bad_parser)),
+            "docker start error": dict(fake=FakeDocker(fail="run")),
+            "patch does not apply": dict(fake=FakeDocker(fail="exec")),
+        }
+        for label, kw in cases.items():
+            with self.subTest(label):
+                r = self.grade(PATCH, **kw)
+                self.assertIs(r["pass"], False)
+                self.assertTrue(r.get("error"), r)
+                self.assertTrue(r["container_removed"])
+        fake = FakeDocker()
+        real_call = fake.__call__
+
+        def slow(*args, **kw):
+            if str(args[0]) == "exec" and "bash" in map(str, args):
+                raise subprocess.TimeoutExpired("docker", 1)
+            return real_call(*args, **kw)
+        r = self.grade(PATCH, fake=slow)
+        self.assertIs(r["pass"], False)
+        self.assertIn("timed out", r["error"])
+
+    def test_an_empty_patch_that_would_pass_is_an_error_not_a_pass(self):
+        class AlwaysGold(FakeDocker):
+            def __init__(self):
+                super().__init__()
+                self.patched = True
+        r = self.grade("", fake=AlwaysGold())
+        self.assertIs(r["pass"], False)
+        self.assertIn("empty patch", r["error"])
+
+    def test_live_grader_uses_the_bundles_expected_set_not_the_records_p2p(self):
+        # t::p2 fails at gold: with it dropped the gold patch passes, without it it cannot
+        self.assertTrue(self.grade(PATCH)["pass"])
+        r = self.grade(PATCH, bundle=live_bundle(self.tmp, dropped=()), fake=FakeDocker())
+        self.assertFalse(r["pass"])
+        self.assertEqual(r["expected"], 4)
+        self.assertEqual(r["examples"], ["t::p2"])
+        # a name the bundle does not drop is demanded even when the log lacks it
+        rec = record(PASS_TO_PASS=["t::p1", "t::p2", "t::p3", "t::absent"])
+        r = self.grade(PATCH, rec=rec, fake=FakeDocker())
+        self.assertFalse(r["pass"])
+        self.assertEqual(r["missing"], 1)
+        self.assertEqual(mt.expected_sets(rec, live_bundle(self.tmp, dropped=("t::p2", "t::absent"))),
+                         (["t::f1"], ["t::p1", "t::p3"]))
+
+    def test_live_grader_refuses_another_workdir(self):
+        bundle = dict(live_bundle(self.tmp), workdir="/testbed/repo")
+        with self.assertRaises(mt.LiveRefused):
+            mt.live_grader(record(), bundle, "img", self.tmp)
+
+    def test_live_grader_from_record_reads_the_dataset_record_from_the_bundle(self):
+        (self.tmp / "record.json").write_text(json.dumps(record()))
+        g = mt.live_grader_from_record(live_bundle(self.tmp), "img", self.tmp / "g")
+        with mock.patch("pilot.docker", self.fake):
+            self.assertTrue(g(PATCH, "x")["pass"])
 
 
 

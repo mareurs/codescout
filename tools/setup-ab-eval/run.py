@@ -236,6 +236,7 @@ class TaskInfo(NamedTuple):
     prompt: str
     template: str              # the task's Qdrant template volume, sab-tpl-<id>
     grader: Callable           # grader(gdir) -> grade(patch, name) -> dict
+    kind: str = ""             # the bundle's kind; `live` tasks run the bare arm only
 
 
 # --- plan, budget, authorization -----------------------------------------------------------------
@@ -960,13 +961,18 @@ def load_task_from_bundle(task_id, tasks_root=None, *, inspect=None, grader_for=
         prompt = Path(rec["out"]) / "s5" / "tasks" / task_id / "prompt.txt"
     elif rec.get("kind") == "foreign":
         prompt = Path(rec["out"]) / "prompt.txt"
+    elif rec.get("kind") == "live":
+        prompt = Path(rec["out"]) / "prompt.txt"
     else:
         raise RuntimeError(f"{bundle_json}: unknown kind {rec.get('kind')!r}")
     template = rec.get("template") or ""
-    if not template.startswith(stack.TEMPLATE_PREFIX):
+    if rec.get("kind") == "live":
+        template = ""  # a Live bundle has no index, so no Qdrant template: bare arm only
+    elif not template.startswith(stack.TEMPLATE_PREFIX):
         raise RuntimeError(f"{bundle_json}: no Qdrant template recorded")
     make = grader_for or tasks.grader_for
-    return TaskInfo(image, prompt.read_text(), template, lambda gdir: make(rec, image, gdir))
+    return TaskInfo(image, prompt.read_text(), template, lambda gdir: make(rec, image, gdir),
+                    rec["kind"])
 
 
 def docker_exec_cli(container, argv, timeout):
@@ -1108,6 +1114,9 @@ def _run_one(ctx, spec):
     name = AGENT_PREFIX + key
     has_qdrant = spec.arm != "bare"
     info = ctx.load_task(spec.task_id)
+    if info.kind == "live" and spec.arm != "bare":
+        raise RuntimeError(f"task {spec.task_id} is a live task (bare arm only, no index); "
+                           f"arm {spec.arm!r} is refused before any container starts")
     run_dir = ctx.data / "runs" / rid
     run_dir.mkdir(parents=True)  # exists -> raise: a run dir is never reused (see M6 in run.py)
     session = str(uuid.uuid4())

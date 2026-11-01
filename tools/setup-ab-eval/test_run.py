@@ -968,6 +968,54 @@ class ContainerTest(RunnerCase):
         kwargs.update(kw)
         run.run_batch(plan, budget, self.data, dry_run=False, **kwargs)
         return cli
+class LiveTaskTest(RunnerCase):
+    def bundle(self, kind, template=None):
+        root = self.tmp / "tasks"
+        (root / "t1").mkdir(parents=True, exist_ok=True)
+        out = root / "t1" / "build"
+        out.mkdir(exist_ok=True)
+        (out / "prompt.txt").write_text("Fix it.\n")
+        rec = {"kind": kind, "out": str(out), "run_image": "sab-run-t1:x",
+               "arm_image": "sab-arm-t1:x", "image": "sab-arm-t1:x"}
+        if template is not None:
+            rec["template"] = template
+        (root / "t1" / "bundle.json").write_text(json.dumps(rec))
+        ids = {"sab-run-t1:x": ("sha256:run", None), "sab-arm-t1:x": ("sha256:arm", "sha256:run")}
+        return root, lambda image: ids.get(image, (None, None))
+
+    def test_load_task_from_bundle_accepts_live_without_template(self):
+        root, inspect = self.bundle("live")
+        made = []
+        info = run.load_task_from_bundle("t1", root, inspect=inspect,
+                                         grader_for=lambda rec, image, gdir: made.append(rec) or "G")
+        self.assertEqual((info.image, info.prompt, info.template, info.kind),
+                         ("sab-arm-t1:x", "Fix it.\n", "", "live"))
+        self.assertEqual(info.grader(self.tmp), "G")
+        self.assertEqual(made[0]["kind"], "live")
+
+    def test_load_task_from_bundle_still_requires_template_for_foreign_and_private(self):
+        for kind in ("foreign", "private"):
+            root, inspect = self.bundle(kind)
+            if kind == "private":
+                (root / "t1" / "build" / "s5" / "tasks" / "t1").mkdir(parents=True)
+                (root / "t1" / "build" / "s5" / "tasks" / "t1" / "prompt.txt").write_text("p")
+            with self.subTest(kind), self.assertRaisesRegex(RuntimeError, "no Qdrant template"):
+                run.load_task_from_bundle("t1", root, inspect=inspect, grader_for=lambda *a: None)
+        root, inspect = self.bundle("other")
+        with self.assertRaisesRegex(RuntimeError, "unknown kind"):
+            run.load_task_from_bundle("t1", root, inspect=inspect, grader_for=lambda *a: None)
+
+    def test_run_one_refuses_cs_arm_on_a_live_task_before_any_container(self):
+        live = lambda t: self.load(t)._replace(kind="live")
+        with self.assertRaisesRegex(RuntimeError, r"t1.*live.*'cs'"):
+            self.batch([spec(arm="cs")], BUDGET, load_task=live)
+        self.assertEqual([n for n, *_ in self.world.started if n.startswith(run.AGENT_PREFIX)], [])
+        self.assertFalse((self.data / "runs").exists() and any((self.data / "runs").iterdir()))
+    def test_run_one_still_runs_the_bare_arm_on_a_live_task(self):
+        live = lambda t: self.load(t)._replace(kind="live")
+        cli = self.batch([spec(arm="bare")], BUDGET, load_task=live)
+        self.assertTrue(cli.calls)
+        self.assertEqual(len([n for n, *_ in self.world.started if n.startswith(run.AGENT_PREFIX)]), 1)
 
 
 class PatchTest(unittest.TestCase):
