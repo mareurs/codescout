@@ -11,9 +11,12 @@
 //! still nobody else's business on a shared machine.
 //!
 //! Sidecars sit next to the record and are named by appending to its full path:
-//! `<record>.watch` (a watcher is attached) and `<record>.delivered` (the watcher has
-//! reported the outcome). Only `*.json` files are records; sidecars and temp files never
-//! match that filter, so sweeping cannot mistake one for a record.
+//! `<record>.watch` (a watcher is attached), `<record>.delivered` (the watcher has
+//! reported the outcome) and `<record>.wake-owner.json` (the wake plugin's engine v1 records
+//! which engine owns the record). Only `*.json` files are records. The first two sidecars and
+//! temp files never match that filter. The owner sidecar does match it, because its name ends
+//! in `.json`, but its body is not a `JobRecord`, so `read_record` returns `None` and the
+//! sweeps skip it. `remove_with_sidecars` removes all three with their record.
 //!
 //! docs/trackers/bug-fix-session-log.md F-201;
 //! docs/superpowers/specs/2026-10-29-background-job-wake-design.md
@@ -154,6 +157,7 @@ fn remove_with_sidecars(path: &Path) {
     let _ = std::fs::remove_file(path);
     let _ = std::fs::remove_file(sidecar(path, ".delivered"));
     let _ = std::fs::remove_file(sidecar(path, ".watch"));
+    let _ = std::fs::remove_file(sidecar(path, ".wake-owner.json"));
 }
 
 fn read_record(path: &Path) -> Option<JobRecord> {
@@ -733,6 +737,46 @@ mod tests {
         assert!(live.exists());
         assert!(!dead.exists() && !sidecar(&dead, ".watch").exists());
     }
+    /// Engine v1 of the wake plugin writes `<record>.wake-owner.json` beside a record
+    /// (`background-wake/intake.mjs`). Its name ends in `.json`, so the sweeps list it, but its
+    /// body is not a `JobRecord`, so they skip it. Removing the record must remove it too, or one
+    /// file per armed job stays for good (bug eaf02545987b4bc5).
+    #[test]
+    fn a_record_leaves_no_wake_owner_sidecar_behind_by_either_removal_path() {
+        let dir = private_tempdir();
+        let owner = |rec: &Path| {
+            let side = sidecar(rec, ".wake-owner.json");
+            std::fs::write(&side, br#"{"version":1,"engine":"v1","target":null}"#).unwrap();
+            side
+        };
+        let delivered = seed(
+            dir.path(),
+            "00000001",
+            "@bg_00000001",
+            RecordState::Exited,
+            true,
+        );
+        let delivered_owner = owner(&delivered);
+        assert!(remove_if_delivered(&delivered));
+        assert!(
+            !delivered_owner.exists(),
+            "remove_if_delivered left the owner sidecar"
+        );
+
+        let stale = seed(
+            dir.path(),
+            "00000002",
+            "@bg_00000002",
+            RecordState::Exited,
+            false,
+        );
+        let stale_owner = owner(&stale);
+        let n = sweep_stale(dir.path(), dir.path(), Duration::ZERO, |_| false);
+        assert_eq!(n, 1, "the sidecar is not a record and is not counted");
+        assert!(!stale.exists());
+        assert!(!stale_owner.exists(), "sweep_stale left the owner sidecar");
+    }
+
     #[cfg(unix)]
     #[test]
     fn write_record_refuses_a_pre_existing_directory_others_can_reach() {
