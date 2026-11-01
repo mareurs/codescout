@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 206
-entry_high_water_W: 153
+entry_high_water_F: 207
+entry_high_water_W: 154
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -64,6 +64,7 @@ entry_high_water_W: 153
 ## Index
 
 | ID | Date | Severity | Category | Status | Title |
+| F-207 | 2026-11-01 | med | test-design | fixed-verified | **A diagnostic hint passed its tests and did not fire on the one tree it was built for** — a 50,000-entry bound taken from a count of directories met 311,890 entries; found only by reading the live warning. |
 |----|------|---------:|----------|--------|-------|
 | F-206 | 2026-11-01 | med | plan-drift | open | **"Owners only" holds for the red hint but not for `file-provenance.py`, which the gate and the pre-edit hook also run** — a floor on operations would change the CLI's MINE/SHARED verdicts; the hook's "~7s" is now 16 to 23 s warm. |
 | F-197 | 2026-10-15 | med | stale-doc | fixed-verified | **The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it** — the live collection is per project (`artifact_chunks_<base>_<hash>`, 48,223 points here), so my "the Qdrant index looks stale" was wrong. Corrected in `934946e9`. |
@@ -278,6 +279,7 @@ entry_high_water_W: 153
 
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
+| W-154 | 2026-11-01 | high | **Read the seal's own code before a bulk move that rewrites sealed data.** `closure.py` records `os.readlink`, so link retargeting would have changed every sealed directory. | Retargeting on by default would have rewritten ~7,300 links across sealed directories with no error, found at the next verification. | validated |
 |----|------|-------:|---------|----------------|--------|
 | W-153 | 2026-10-31 | med | **A scout of the gate pool's test runner found that only CI runs `tests/gate-slot.sh`, through a hit the default grep hid.** Re-running a negative search with `include_hidden=true` before planning on it. | Inferred: a plan that trusted gate-green for the pool tests and read real `/sys/block/zram*` in CI. Observed: 23 files without `.github/workflows/ci.yml`, 27 with it. | validated |
 | W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
@@ -17754,6 +17756,34 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Cost:** Had the leaner path been built for both callers, the CLI would have lost the pre-floor records and its MINE/SHARED verdicts would have changed with no test of the red path noticing. Not built; caught before any edit.
 
 **Not checked:** how often `fmt-mine.sh` really reaches the provenance call in a gate run, and whether the companion hook's "~7s" is also stated elsewhere in the plugin.
+
+## F-207 — A diagnostic hint passed its tests and did not fire on the one tree it was built for
+
+**Valid:** dated 2026-11-01
+
+**Observed:** `src/lsp/watch_fanout.rs` (commit `eee623216`, bug `35bcf086deeb7cbe`) bounded its scan at 50,000 entries. I took that number from a measurement of 32,192 directories under `.codescout`, but the scan counts files as well. On 2026-11-01 the real root held 311,890 entries. A read-only replay of the algorithm gave 50,000 visited, truncated, 0 links, so `find` returned `None` and the null-answer warning carried no sentence, although 1,876 directory symlinks existed. Every test used a tree of fewer than 10,000 entries. The gap showed only when I read the live warning after a rebuild. Fixed at `824548df5`, bound 1,000,000, with a test that puts 60,000 files before the links.
+
+**Cost:** one day of a hint that looked shipped and was inert; the bug record said "DONE" for it.
+
+**Counterfactual:** a bound derived from a measurement should be checked in the same unit against the real population before it ships, and the test population should exceed the bound. The first version of the new test failed for a weaker reason (it depended on directory read order); it passed for the right reason only after the files went into the root.
+
+**Check:** when a limit comes from a count, name the unit in the constant's doc comment, and ask what the unit's total is on the one tree the feature exists for.
+
+**Promote-when:** a second bound or threshold is found to be inert on the real tree.
+
+**Status:** fixed-verified (`824548df5`, live hint seen 2026-11-01).
+
+## W-154 — Read the seal's own code before a bulk move that rewrites sealed data
+
+**Valid:** dated 2026-11-01
+
+**Pattern:** before running a bulk move that rewrites data other sessions sealed, read the seal's own code. The migration script rewrote absolute symlinks as a feature, and its tests passed. A memory said a directory was "sealed" and "verified over 71 links". I grepped the sealed directory's `closure.py` and found `links[rel]=os.readlink(p)`: link targets are part of the seal, so retargeting would have changed sealed bytes in every moved experiment directory. I made retargeting opt-in (`51a3eed0a`) before the first `--apply`, and moved 34 directories with sealed content unchanged. The same pass found 58 files in a live experiment naming old paths, which turned a "move them all" into a question to the operator.
+
+**Counterfactual:** `--apply` with retargeting on by default would have rewritten about 7,300 links across sealed directories, with no test and no error, and the seals would have failed at their next verification, long after the move. The memory told me the dir was sealed; only the verifier's source said what the seal covers.
+
+**Promote-when:** the next bulk operation on another session's recorded evidence is preceded by reading that evidence's verifier first. Then promote to `docs/conventions/resident-scratch-location.md` § Moving what is already there as a rule for any tool that rewrites links.
+
+**Status:** validated.
 
 ## Template for new entries
 
