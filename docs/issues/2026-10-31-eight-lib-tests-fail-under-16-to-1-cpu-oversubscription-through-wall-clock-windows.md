@@ -8,7 +8,7 @@ tags:
 opened: 2026-10-31
 owner: marius
 severity: low
-unverified: The migrate fix and the seven attribution test fixes are measured. The mutation check detects a missing env for six of the seven attribution tests, and cannot for the many-dirty-files test, which still turns a missing diagnostic into a green skip. The LSP test does not fail alone. The peer's sighting of four tests failing once at normal load was not re-checked. Commit 421b0f896 used --no-verify on the user's approval after a hook flagged output.rs; its checks were run by hand.
+unverified: 'The migrate fix and the seven attribution test fixes are measured. The mutation check detects a missing env for six of the seven attribution tests, and cannot for the many-dirty-files test, which still turns a missing diagnostic into a green skip. The LSP test: 1 failure in 3 loaded runs before the change, 0 in 28 after, but the before sample is three runs, the cause of the slow request is unknown, and it is not shown that the new timeout branch ever ran. The peer''s sighting of four tests failing once at normal load was not re-checked. Commit 421b0f896 used --no-verify on the user''s approval after a hook flagged output.rs; its checks were run by hand.'
 ---
 
 # BUG: eight lib tests fail when the suite runs on cores oversubscribed 16 to 1, each through a wall-clock window or a subprocess deadline
@@ -35,7 +35,7 @@ Linux, `experiments` at `6ad4a5e4d` plus peers' uncommitted edits in the tree. A
 
 Migrate group (3 tests): confirmed. The probe samples the test thread's `/proc/self/task/<tid>/syscall` for a `clock_nanosleep` for at most 5 s. With a diagnostic added, one failing run showed 107 samples in 5 s: 105 `running` and two syscall 74 (`fsync`), never a sleep. The rebuild had not reached SQLite's busy wait; it was still doing its own work, starved of CPU. So the 5 s deadline measured the load.
 
-LSP test: not confirmed. Alone it passed 4 of 4 under the load that failed it in the suite, so it needs the whole suite's contention.
+LSP test: reproduced, cause of the slow request not confirmed. Alone it passed 4 of 4 under the load that failed it in the suite. Run with the whole `lsp::client::tests::` module (all rust-analyzer tests in parallel) under 64 busy loops on cores 60 to 63, it failed 1 run in 3: `called Result::unwrap() on an Err value: LSP request timed out after 30s: workspace/symbol`, the run took 51 s against 17 to 20 s for the passing runs. The test retried only on an empty answer, so a timed-out request went through `.unwrap()`. Why one request passes the 30 s ceiling is not known.
 
 Attribution group (4 tests): confirmed, and it is a product limit as well as a test one. The shipped path `wip_author_diagnostic` spawns `python3 -I scripts/attribute-red.py`, which scans every transcript under `$HOME/.claude*` and `$HOME/.codex*` (`discover_claude_histories`, `discover_codex_histories`), with a ceiling of `ATTRIBUTION_TIMEOUT_DEFAULT` = 30 s. Timed alone on a small dirty fixture repo on 2026-10-31, with no load from me but on a machine shared with peers: 16.1 s, 20.7 s, 25.5 s (three runs, exit 0, 470 bytes out each). So a quiet call already uses 54 to 85% of the ceiling; any load pushes the scan past 30 s, the timeout returns `None`, and the test asserts "python3 is present but the engine produced no hint". That also explains the quiet-run failure of `the_same_red_at_exit_zero_still_answers`. The module comment recorded 5.0 s then 7.0 s in six days; it is 16 to 25 s now. The tests scan the real corpus of whoever runs them, so they depend on the size of that machine's history.
 
@@ -66,10 +66,14 @@ The commit hook refused the commit twice. It named `output.rs` as written by ano
 - Fix SHA (on `experiments`): `421b0f896cd5facc527453fc2304796977677690`
 - patch-id: `6c0483bc99a64b23305f96606bcaaa662b9d2e55`
 
+LSP test: the retry loop treats a request timeout as "not ready yet", like an empty answer. A third timeout fails the test, and any other error fails it at once with its text. 28 of 28 loaded runs of the module passed (8, then 20), where 1 of 3 failed before. One of the 20 took 57 s, the same slowness as the failing run, and passed. The test prints nothing on a retry, so it is not shown that the new branch ran in that run. Gate: `./scripts/gate.sh` in a clean worktree at `d00107d9b` with only this diff, every lane exit 0.
+
+- Fix SHA (on `experiments`): `56457a853`
+- patch-id: `074c352b69bac3ea6f8155309d52eace357f39ce`
+
 Not fixed:
 
 - The product limit: the real transcript scan takes 16 to 25 s against a 30 s ceiling.
-- `lsp::client::tests::workspace_symbols_returns_project_symbols`.
 - The many-dirty-files test still turns a missing diagnostic into a green skip. The tests in `attribution.rs` check `python3_present` instead. Under a load slow enough to time out even the empty-history engine, it would pass without checking anything.
 
 ## Tests added
@@ -91,7 +95,7 @@ State on 2026-11-01: migrate group fixed, seven attribution tests fixed, the res
 
 Open:
 
-- `lsp::client::tests::workspace_symbols_returns_project_symbols`: a 30 s LSP request timeout. It passes alone under load, so it needs the whole suite's contention.
+- `lsp::client::tests::workspace_symbols_returns_project_symbols`: tolerant of a timeout since `56457a853`. Open: why one request passes 30 s under load, and proof that the timeout branch runs (the test prints nothing on a retry).
 - The product limit: the red-attribution hint is silently absent whenever the transcript scan exceeds 30 s. Options, none chosen: raise `ATTRIBUTION_TIMEOUT_DEFAULT`, or make the scan cheaper with an index or a cache. The cheaper scan is the larger change.
 - Harden `a_red_naming_many_dirty_files_carries_a_bounded_wip_authors`: check `python3_present` instead of printing a skip.
 - The commit hook named a stale writer for `output.rs` (see Fix). It may deserve its own bug.
