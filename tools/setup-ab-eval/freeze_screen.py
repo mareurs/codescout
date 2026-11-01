@@ -19,6 +19,7 @@ The registration is stage "screen": run.run_batch applies its heavy host re-chec
 """
 import argparse
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -43,7 +44,9 @@ REGISTERED = "2026-11-01"
 SEED = 20261101
 MODELS = run.MODELS
 REPS = 2
-BUDGET = {"cap_usd": 40.0, "per_call_usd": 5.0, "reserve_usd": 5.0}
+# cap 50: run k is admitted iff the first k-1 runs cost <= cap - reserve - per_call = $40, so 36 runs
+# at an average <= $1.11 all start (at $1.0 each: all 36; at $1.2 each: the batch stops after 34)
+BUDGET = {"cap_usd": 50.0, "per_call_usd": 5.0, "reserve_usd": 5.0}
 # F2P / kept P2P / dropped P2P of the nine saved controls (task 1 report); a pool file that
 # disagrees is not written.
 SANITY = {
@@ -156,11 +159,28 @@ def _control_path(data, tid):
     return Path(data) / "live" / "controls-batch" / tid / "control.json"
 
 
-def task_entry(data, entry, inspect) -> dict:
+def runner_bundle(runner_root, data, tid) -> Path:
+    """The bundle.json the runner opens for `tid` (run.load_task_from_bundle: <tasks root>/<id>/
+    bundle.json, tasks.DATA / "tasks" by default). It must exist and be the very file of the
+    frozen `<data>/live-tasks/<id>/bundle.json` (a symlink tasks/<id> -> live-tasks/<id> is the
+    intended arrangement); Refused otherwise, naming the task and the path."""
+    root = Path(runner_root) if runner_root is not None else tasks.DATA / "tasks"
+    rp = root / tid / "bundle.json"
+    frozen_bj = Path(data) / "live-tasks" / tid / "bundle.json"
+    if not rp.is_file():
+        raise Refused(f"{tid}: the runner would open {rp}, which does not exist: link "
+                      f"{root / tid} -> {frozen_bj.parent}")
+    if os.path.realpath(rp) != os.path.realpath(frozen_bj):
+        raise Refused(f"{tid}: the runner would open {rp} (real path {os.path.realpath(rp)}), "
+                      f"not the frozen bundle {os.path.realpath(frozen_bj)}")
+    return rp
+
+
+def task_entry(data, entry, inspect, runner_root=None) -> dict:
     """The registered record of one pool task; Refused when its bundle, control or images do not
-    fit the pool entry."""
+    fit the pool entry. Every byte the runner reads is read through the runner's own path."""
     tid = entry["id"]
-    bj = Path(data) / "live-tasks" / tid / "bundle.json"
+    bj = runner_bundle(runner_root, data, tid)
     try:
         bundle = json.loads(bj.read_text())
     except (OSError, ValueError) as e:
@@ -178,7 +198,8 @@ def task_entry(data, entry, inspect) -> dict:
         raise Refused(f"{tid}: control.json sha256 {csha}, bundle {bundle.get('control_sha256')}, "
                       f"pool {entry['control_sha256']}: the control is not the pooled one")
     try:
-        record = json.loads(Path(bundle["record_path"]).read_text())
+        record_path = Path(bundle["record_path"])
+        record = json.loads(record_path.read_text())
         exp = mt.relaxed_expected(record, cj)  # raises unless the control is relaxed ok
     except (mt.LiveRefused, OSError, ValueError, KeyError) as e:
         raise Refused(f"{tid}: the control is not relaxed ok: {type(e).__name__}: {e}")
@@ -194,13 +215,27 @@ def task_entry(data, entry, inspect) -> dict:
     except (OSError, RuntimeError) as e:
         raise Refused(f"{tid}: arm image / exec-only check failed: {e}")
     run_tag = bundle["run_image"]
+    try:
+        # what the agent sees (run.load_task_from_bundle reads <out>/prompt.txt) and how it is
+        # graded (the grader reads record_path); gold.patch is read by neither (written only by
+        # assemble_live), so it is not hashed
+        prompt_sha = sha256_file(Path(bundle["out"]) / "prompt.txt")
+        record_sha = sha256_file(record_path)
+    except (OSError, KeyError) as e:
+        raise Refused(f"{tid}: prompt or record unreadable: {e}")
     return {"task_id": tid, "kind": mt.KIND,
             "run_image": {"tag": run_tag, "id": inspect(run_tag)[0]},
             "arm_image": {"tag": arm, "id": inspect(arm)[0]},
             "bundle_sha256": sha256_file(bj),
+            "prompt_sha256": prompt_sha,
+            "record_sha256": record_sha,
             # relaxed_expected reads the control's logs, which control_sha256 (control.json only)
             # does not cover: freeze their bytes too
             "control_logs_sha256": {n: sha256_file(cj.parent / n) for n in ("base.log", "gold.log")}}
+
+
+def _runner_root(runner_root):
+    return Path(runner_root) if runner_root is not None else tasks.DATA / "tasks"
 
 
 def _frozen_from_stage3(tool_dir) -> dict:
@@ -240,7 +275,7 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
                   seed=SEED, head_fn: Callable = _git_head,
                   inspect: Callable = tasks._inspect_image,
                   run_cli: Callable = freeze_stage1.default_run_cli,
-                  python=sys.executable) -> dict:
+                  python=sys.executable, runner_tasks_root=None) -> dict:
     tool_dir, data, run_data = Path(tool_dir), Path(data), Path(run_data)
     pool_path, plan_path, out = Path(pool_path), Path(plan_path), Path(out)
     if out.exists() and not replace:
@@ -268,8 +303,11 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
     problems = plan_problems(plan, pool)
     if problems:
         raise Refused("; ".join(problems))
+    if plan != screen_plan(pool, MODELS, REPS, seed):
+        raise Refused(f"the plan is not screen_plan(pool, seed={seed}): same runs, other order or "
+                      f"seed")
 
-    entries = [task_entry(data, e, inspect) for e in pool["tasks"]]
+    entries = [task_entry(data, e, inspect, runner_tasks_root) for e in pool["tasks"]]
 
     copy = run_data / "setup-manifest.json"
     if not copy.is_file():
@@ -299,6 +337,7 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
         "reps": [["bare", REPS]],
         "data": str(data.resolve()),
         "run_data": str(run_data.resolve()),
+        "runner_tasks_root": str(_runner_root(runner_tasks_root).resolve()),
         "manifest_sha256": sha256_file(copy),
         "claude_cli_version": got_cli,
         "claude_cli_sha256": manifest["cli"]["sha256"],
@@ -328,7 +367,7 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
 # --- check -------------------------------------------------------------------------------------
 
 def check_screen(*, tool_dir, data, run_data, registration, inspect: Callable = tasks._inspect_image,
-                 run_cli: Callable = freeze_stage1.default_run_cli) -> list:
+                 run_cli: Callable = freeze_stage1.default_run_cli, runner_tasks_root=None) -> list:
     """Re-hash what the registration froze; the list of reasons it no longer holds ([] = ok)."""
     tool_dir, data, run_data = Path(tool_dir), Path(data), Path(run_data)
     try:
@@ -341,6 +380,10 @@ def check_screen(*, tool_dir, data, run_data, registration, inspect: Callable = 
         why.append("registration_sha256 does not match the registration's content")
     if reg.get("stage") != "screen":
         why.append(f"stage {reg.get('stage')!r}, not 'screen'")
+    for key, got in (("data", data), ("run_data", run_data),
+                     ("runner_tasks_root", _runner_root(runner_tasks_root))):
+        if str(Path(got).resolve()) != reg.get(key):
+            why.append(f"{key} {Path(got).resolve()} is not the registered {reg.get(key)}")
     for f, want in (reg.get("files") or {}).items():
         try:
             if sha256_file(tool_dir / f) != want:
@@ -369,6 +412,8 @@ def check_screen(*, tool_dir, data, run_data, registration, inspect: Callable = 
             why.append("the plan file changed after the freeze")
         if pool is not None:
             why += plan_problems(plan, pool)
+            if not plan_problems(plan, pool) and plan != screen_plan(pool, MODELS, REPS, reg.get("seed")):
+                why.append("the plan is not screen_plan(pool, the registered seed)")
     except (OSError, ValueError, KeyError) as e:
         why.append(f"plan: {type(e).__name__}: {e}")
     if reg.get("budget") != BUDGET:
@@ -377,7 +422,7 @@ def check_screen(*, tool_dir, data, run_data, registration, inspect: Callable = 
         by_id = {t["task_id"]: t for t in reg.get("tasks") or []}
         for e in pool["tasks"]:
             try:
-                now_entry = task_entry(data, e, inspect)
+                now_entry = task_entry(data, e, inspect, runner_tasks_root)
             except Refused as ex:
                 why.append(str(ex))
                 continue

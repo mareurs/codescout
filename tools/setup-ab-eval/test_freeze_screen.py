@@ -3,6 +3,7 @@
 fake inspect and `claude`. No model, token, container or real data dir is touched."""
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -76,8 +77,11 @@ class Env:
         for tid in IDS:
             write_control(controls / tid, GOOD_BASE, GOOD_GOLD, rid=tid)
         self.pool = fs.make_pool(self.records, controls)
+        self.runner = self.tmp / "runner-tasks"
+        self.runner.mkdir()
         for tid in IDS:
             self.write_bundle(tid)
+            os.symlink(self.data / "live-tasks" / tid, self.runner / tid)
         # the git checkout
         self.tool.mkdir()
         git(self.tool, "init", "-q")
@@ -104,6 +108,7 @@ class Env:
         d = self.data / "live-tasks" / tid
         (d / "build").mkdir(parents=True, exist_ok=True)
         (d / "build" / "record.json").write_text(json.dumps(self.records[tid]))
+        (d / "build" / "prompt.txt").write_text(f"fix {tid}\n")
         cj = self.data / "live" / "controls-batch" / tid / "control.json"
         exp = mt.relaxed_expected(self.records[tid], cj)
         (d / "bundle.json").write_text(json.dumps({
@@ -115,7 +120,7 @@ class Env:
     def kw(self, **over):
         kw = dict(tool_dir=self.tool, data=self.data, run_data=self.run_data,
                   pool_path=self.tool / fs.POOL, plan_path=self.plan_path, out=self.out,
-                  head_fn=lambda d: "h" * 40, inspect=self.inspect,
+                  head_fn=lambda d: "h" * 40, inspect=self.inspect, runner_tasks_root=self.runner,
                   run_cli=lambda p: CLI_VERSION + "\n")
         kw.update(over)
         return kw
@@ -126,6 +131,7 @@ class Env:
     def check(self, **over):
         return fs.check_screen(tool_dir=self.tool, data=self.data, run_data=self.run_data,
                                registration=self.out, inspect=over.get("inspect", self.inspect),
+                               runner_tasks_root=over.get("runner_tasks_root", self.runner),
                                run_cli=lambda p: CLI_VERSION)
 
 
@@ -198,14 +204,14 @@ class FreezeTests(Case):
         reg = self.env.freeze()
         plan = run.load_plan(self.env.plan_path)
         loaded = run.load_registration(self.env.out, plan)
-        budget = run.check_budget(run.Budget(40.0, 0.0, 5.0, 5.0))
+        budget = run.check_budget(run.Budget(50.0, 0.0, 5.0, 5.0))
         run.check_registered_budget(loaded, plan, budget)
         run._frozen_inputs(loaded, self.env.manifest)
         self.assertEqual(loaded["registration_sha256"], reg["registration_sha256"])
         self.assertEqual(loaded["stage"], "screen")
         self.assertNotEqual(loaded["stage"], 2)  # run_batch's heavy re-check is for stage 3 / 2 only
         self.assertIsNone(run.plan_reps(plan))
-        self.assertEqual(loaded["budget"], {"cap_usd": 40.0, "per_call_usd": 5.0, "reserve_usd": 5.0})
+        self.assertEqual(loaded["budget"], {"cap_usd": 50.0, "per_call_usd": 5.0, "reserve_usd": 5.0})
         self.assertEqual(loaded["frozen"], {"root": str(self.env.froot), "trees": self.env.trees})
         self.assertEqual(loaded["models"], list(run.MODELS))
         self.assertEqual(loaded["reps"], [["bare", 2]])
@@ -229,14 +235,14 @@ class FreezeTests(Case):
         t = json.loads((self.env.run_data / fs.GO_TEMPLATE).read_text())
         go = t["GO.json"]
         self.assertEqual((go["cap_usd"], go["per_call_usd"], go["reserve_usd"], go["spent_usd"]),
-                         (40.0, 5.0, 5.0, 0.0))
+                         (50.0, 5.0, 5.0, 0.0))
         self.assertEqual(go["plan_sha256"], reg["plan_sha256"])
         self.assertEqual(go["registration_sha256"], reg["registration_sha256"])
         self.assertIn("--registration", t["command"])
         # the template, copied to GO.json by the operator, passes the runner's own check
         (self.env.run_data / "GO.json").write_text(json.dumps(go))
         plan = run.load_plan(self.env.plan_path)
-        run.check_go(self.env.run_data, plan, run.Budget(40.0, 0.0, 5.0, 5.0),
+        run.check_go(self.env.run_data, plan, run.Budget(50.0, 0.0, 5.0, 5.0),
                      reg["registration_sha256"])
 
     def test_freeze_refuses_a_task_outside_the_pool(self):
@@ -304,6 +310,54 @@ class FreezeTests(Case):
         with self.assertRaisesRegex(fs.Refused, "GO.json exists"):
             self.env.freeze()
 
+    def test_freeze_refuses_when_the_runner_path_is_missing(self):
+        os.unlink(self.env.runner / IDS[2])
+        with self.assertRaises(fs.Refused) as cm:
+            self.env.freeze()
+        self.assertIn(IDS[2], str(cm.exception))
+        self.assertIn(str(self.env.runner / IDS[2] / "bundle.json"), str(cm.exception))
+        self.assertNothingWritten()
+
+    def test_freeze_refuses_when_the_runner_path_is_another_bundle(self):
+        os.unlink(self.env.runner / IDS[2])
+        shutil.copytree(self.env.data / "live-tasks" / IDS[2], self.env.runner / IDS[2])  # a copy
+        with self.assertRaises(fs.Refused) as cm:
+            self.env.freeze()
+        self.assertIn(IDS[2], str(cm.exception))
+        self.assertIn("not the frozen bundle", str(cm.exception))
+        self.assertNothingWritten()
+        os.unlink(self.env.runner / IDS[2] / "bundle.json")  # still wrong: points at nothing
+        shutil.rmtree(self.env.runner / IDS[2])
+        os.symlink(self.env.data / "live-tasks" / IDS[3], self.env.runner / IDS[2])
+        self.refused("not the frozen bundle")
+
+    def test_freeze_passes_when_the_runner_path_is_a_symlink_to_the_frozen_bundle(self):
+        self.assertTrue((self.env.runner / IDS[0]).is_symlink())
+        reg = self.env.freeze()
+        self.assertEqual(reg["runner_tasks_root"], str(self.env.runner.resolve()))
+        self.assertEqual(reg["tasks"][0]["bundle_sha256"], sha(self.env.runner / IDS[0] / "bundle.json"))
+
+    def test_freeze_refuses_a_plan_in_another_order_than_the_seed_gives(self):
+        plan = list(reversed(self.env.plan))
+        fs.write_plan(plan, self.env.plan_path)
+        self.refused("not screen_plan")
+
+    def test_the_budget_is_pinned_and_admits_36_runs_at_one_dollar_not_at_1_2(self):
+        self.assertEqual(fs.BUDGET, {"cap_usd": 50.0, "per_call_usd": 5.0, "reserve_usd": 5.0})
+        b = run.check_budget(run.Budget(50.0, 0.0, 5.0, 5.0))
+
+        def started(cost):
+            spent, n = 0.0, 0
+            for _ in range(36):
+                if not run.admit(b, spent):
+                    break
+                spent, n = spent + cost, n + 1
+            return n
+        self.assertEqual(started(1.0), 36)
+        self.assertEqual(started(1.2), 34)
+        self.assertEqual(started(0.0), 36)
+
+
     def test_freeze_refuses_a_cli_that_reports_another_version(self):
         self.refused("reports", run_cli=lambda p: "9.9.9\n")
 
@@ -324,6 +378,43 @@ class CheckTests(Case):
         b.write_text(b.read_text() + " ")
         why = self.env.check()
         self.assertTrue(any(IDS[4] in w and "bundle" in w for w in why), why)
+
+    def test_check_detects_a_repointed_runner_symlink(self):
+        link = self.env.runner / IDS[1]
+        os.unlink(link)
+        os.symlink(self.env.data / "live-tasks" / IDS[0], link)
+        why = self.env.check()
+        self.assertTrue(any(IDS[1] in w and "not the frozen bundle" in w for w in why), why)
+        os.unlink(link)
+        why = self.env.check()
+        self.assertTrue(any(IDS[1] in w and "does not exist" in w for w in why), why)
+
+    def test_check_detects_a_changed_prompt(self):
+        p = self.env.data / "live-tasks" / IDS[2] / "build" / "prompt.txt"
+        p.write_text("another prompt\n")
+        why = self.env.check()
+        self.assertTrue(any(IDS[2] in w and "changed after the freeze" in w for w in why), why)
+
+    def test_check_detects_a_changed_record(self):
+        p = self.env.data / "live-tasks" / IDS[3] / "build" / "record.json"
+        rec = json.loads(p.read_text())
+        rec["rebuild_cmds"] = ["something else"]
+        p.write_text(json.dumps(rec))
+        why = self.env.check()
+        self.assertTrue(any(IDS[3] in w and "changed after the freeze" in w for w in why), why)
+
+    def test_check_flags_other_data_dirs_runner_root_and_plan_order(self):
+        why = fs.check_screen(tool_dir=self.env.tool, data=self.env.tmp, run_data=self.env.run_data,
+                              registration=self.env.out, inspect=self.env.inspect,
+                              runner_tasks_root=self.env.runner, run_cli=lambda p: CLI_VERSION)
+        self.assertTrue(any("data " in w and "registered" in w for w in why), why)
+        other = self.env.tmp / "other-runner"
+        other.mkdir()
+        self.assertTrue(any("runner_tasks_root" in w for w in self.env.check(runner_tasks_root=other)))
+        fs.write_plan(list(reversed(self.env.plan)), self.env.plan_path)
+        why = self.env.check()
+        self.assertTrue(any("registered seed" in w for w in why), why)
+
 
     def test_check_detects_a_retagged_image_and_changed_frozen_tree(self):
         self.env.inspect.rebuilt.add(f"sab-arm-{IDS[0]}:t1")
