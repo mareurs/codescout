@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 205
+entry_high_water_F: 206
 entry_high_water_W: 153
 ---
 
@@ -65,6 +65,7 @@ entry_high_water_W: 153
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-206 | 2026-11-01 | med | plan-drift | open | **"Owners only" holds for the red hint but not for `file-provenance.py`, which the gate and the pre-edit hook also run** — a floor on operations would change the CLI's MINE/SHARED verdicts; the hook's "~7s" is now 16 to 23 s warm. |
 | F-197 | 2026-10-15 | med | stale-doc | fixed-verified | **The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it** — the live collection is per project (`artifact_chunks_<base>_<hash>`, 48,223 points here), so my "the Qdrant index looks stale" was wrong. Corrected in `934946e9`. |
 | F-198 | 2026-10-21 | med | tool-behavior | fixed-verified | **Quiet ref verification conflates absence with corruption** — a real commit passed until the lookup distinguished missing from failure. |
 | F-199 | 2026-10-24 | high | eval-design | fixed-verified | **Direct build-script checks missed Cargo scheduling** — all4 passed frozen17; real warm Cargo checks exposed stale metadata, and final38 mutations are detected. |
@@ -17732,13 +17733,27 @@ Also seen, not a gap: background children run in their own process group (`proce
 
 **Context:** planning the gate RAM tier (`docs/superpowers/specs/2026-10-31-gate-ram-tier-design.md`), whose tasks extend `tests/gate-slot.sh`.
 
-**Observed:** `grep(pattern="gate-slot", mode="files")` returned 23 files and no runner for `tests/gate-slot.sh`. `include_hidden=true` returned 27, including `.github/workflows/ci.yml`, where the job `gate-slot-tests` runs `bash tests/gate-slot.sh` on `ubuntu-latest`. `scripts/gate.sh` does not run the suite. Filed the silent partial result as `e313cba4b1d3d738`.
+**Observed:** `grep(pattern="gate-slot", mode="files")` returned 23 files and no runner for `tests/gate-slot.sh`. `include_hidden=true` returned 27, including `.github/workflows/ci.yml`, where the job `gate-slot-tests` runs `bash tests/gate-slot.sh` on `ubuntu-latest`. `scripts/gate.sh` does not run the suite. Filed the silent partial result as `80fee58db6c3a95d`.
 
 **What the scout changed in the plan:**
 - every RAM-tier probe (`findmnt`, `/proc/meminfo`, `mm_stat`, `df`) must be injectable, because the CI runner has no zram device;
 - every task runs `bash tests/gate-slot.sh` itself, because a green `./scripts/gate.sh` says nothing about this suite.
 
 **Counterfactual:** inferred, a plan that trusted "gate green" for the pool tests, plus tests that read the real `/sys/block/zram*`, which fail on the CI runner. Observed: the 23-file result with no `.github/` hit and no warning.
+
+## F-206 — "Owners only" holds for the red hint but not for the CLI the gate and the pre-edit hook run
+
+**Valid:** dated 2026-11-01
+
+**Observed:** Brainstorming the policy loop in `scan_provenance` (bug `20927ccfe293c34e`), I first told the user that `attribute-red.py` uses only the owners and so "a leaner path that returns owners only" might serve everyone. The recon of the consumers shows two different needs.
+
+- `attribute-red.py` takes `fp.scan(...)`, which is the owners only, and then drops records older than each path's last commit.
+- The `file-provenance.py` CLI (`main`, `scripts/file-provenance.py:1229` onward) takes owners, evidence (`absorbed_writes`), gaps (`relevant_gaps`) and streams (`session_grain_note`). It also uses records OLDER than the floor: `hidden_peer` (line 1351) downgrades MINE to SHARED when a dated peer write precedes the floor. A floor on operations would change its verdicts.
+- The CLI is not a rare tool. `scripts/fmt-mine.sh` runs it (`PROVENANCE=...file-provenance.py`, line 35) inside the gate's format lane, and the companion hook `pre-edit-dirty-check.mjs:124` tells agents to run it on a dirty file and says "~7s, scans transcripts". Measured on 2026-11-01 over the real histories: 16 to 23 s warm, 123 to 190 s uncached, so that figure is stale by a factor of 2 to 20.
+
+**Cost:** Had the leaner path been built for both callers, the CLI would have lost the pre-floor records and its MINE/SHARED verdicts would have changed with no test of the red path noticing. Not built; caught before any edit.
+
+**Not checked:** how often `fmt-mine.sh` really reaches the provenance call in a gate run, and whether the companion hook's "~7s" is also stated elsewhere in the plugin.
 
 ## Template for new entries
 
