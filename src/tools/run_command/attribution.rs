@@ -16,7 +16,7 @@
 //!
 //! The engine is `scripts/attribute-red.py`; the ordering and its measurements live
 //! there. In one line: `git status` costs 0.01 s and usually ends it, the transcript
-//! scan costs ~7 s and runs only when a red actually names a dirty path. This module
+//! scan costs about 13 s warm (measured 2026-11-01) and runs only when a red actually names a dirty path. This module
 //! adds the outermost gate — a zero exit never spawns anything at all.
 //!
 //! # Why the scripts are EMBEDDED and not read from disk
@@ -167,8 +167,9 @@ const EMBEDDED_SCRIPTS: [(&str, &str); 7] = [
     ),
 ];
 
-/// Ceiling on stage 3. The scan measured ~7 s on this corpus and grows with it (the bug
-/// file recorded 5.0 s six days earlier), so the budget is generous rather than tight —
+/// Ceiling on stage 3. A warm scan measured 12.8 to 13.1 s on 2026-11-01, and the scan
+/// grows with the corpus (the bug file recorded 5.0 s six days before it recorded 7.0 s),
+/// so the budget is generous rather than tight —
 /// but it is finite, because a pathological transcript set must not hang the tool that
 /// was only trying to explain someone else's build failure.
 const ATTRIBUTION_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
@@ -279,7 +280,7 @@ fn extraction_dir(base: &Path, uid: Uid) -> PathBuf {
 /// lives (`systemd-tmpfiles` age cleanup, `tmpreaper`, an `rm -rf /tmp/codescout-*`) and its
 /// name recreated by someone else, and a path verified once would then be run unverified.
 /// The price is a few `stat`s and a 120 KB read per failure-shaped command, against a scan
-/// measured at ~7 s.
+/// measured at 12.8 to 13.1 s warm (2026-11-01).
 ///
 /// A relative `base` is refused outright. `std::env::temp_dir` returns `$TMPDIR` as it finds
 /// it (`""` included), the spawn resolves a relative script under `current_dir(work_dir)` —
@@ -596,6 +597,7 @@ pub(crate) async fn wip_author_diagnostic_in(
     let ms = || started.elapsed().as_millis() as i64;
     let Some(script) = materialize_into(base) else {
         attribution_outcome::record(Outcome::SpawnFailed, ms());
+        tracing::warn!("attribution: the engine could not be extracted; no hint is attached");
         return None;
     };
 
@@ -608,8 +610,9 @@ pub(crate) async fn wip_author_diagnostic_in(
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
-        Err(_) => {
+        Err(e) => {
             attribution_outcome::record(Outcome::SpawnFailed, ms());
+            tracing::warn!(error = %e, "attribution: the engine could not be started; no hint is attached");
             return None;
         }
     };
