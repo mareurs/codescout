@@ -8,7 +8,7 @@ tags:
 opened: 2026-10-31
 owner: marius
 severity: low
-unverified: The migrate and four-test attribution fixes are measured (16 of 16 loaded runs and a mutant that fails 0 of 16 for the attribution tests). The three tests in run_command/tests.rs are not covered. The LSP test does not fail alone. The peer's sighting of four tests failing once at normal load was not re-checked.
+unverified: The migrate fix and the seven attribution test fixes are measured. The mutation check detects a missing env for six of the seven attribution tests, and cannot for the many-dirty-files test, which still turns a missing diagnostic into a green skip. The LSP test does not fail alone. The peer's sighting of four tests failing once at normal load was not re-checked. Commit 421b0f896 used --no-verify on the user's approval after a hook flagged output.rs; its checks were run by hand.
 ---
 
 # BUG: eight lib tests fail when the suite runs on cores oversubscribed 16 to 1, each through a wall-clock window or a subprocess deadline
@@ -59,15 +59,24 @@ Attribution group, the four tests listed under Symptom: fixed in the test code o
 - Fix SHA (on `experiments`): `b33315316110f787b58cb88997ed3e3bf13939a5`
 - patch-id: `3449c12dd208615c1fcb7a069a59b015c0be17c9`
 
+Three tests in `src/tools/run_command/tests.rs`: fixed in the test code and one signature. `handle_successful_output_with` has a tenth parameter, `attribution: Option<&AttributionEnv>`. `None` is the shipped path and calls the same `wip_author_diagnostic` as before. `Some(env)` calls `wip_author_diagnostic_with`. The three tests, `a_red_attaches_wip_authors_on_the_main_arm`, `a_red_attaches_wip_authors_on_the_buffer_only_arm` and `a_red_naming_many_dirty_files_carries_a_bounded_wip_authors`, run the engine over an empty history in the precheck and in the call under test. `no_history` moved to module level under `#[cfg(test)]`, so `tests.rs` shares it. Each test alone, 64 busy loops on 2 cores: fixed, 12 of 12 loaded runs and 3 of 3 quiet runs pass. With the `Some(env)` arm calling the shipped function, the main-arm and buffer-only tests pass 0 of 4 loaded runs each. The many-dirty-files test passes 4 of 4 either way, because it turns a missing diagnostic into a green skip: against the mutant it printed `skipping: no diagnostic at 3 files` and passed in 32.7 s (one run). On the fixed build it skipped 0 of 4 loaded runs, each 24 to 32 s. Gate: `./scripts/gate.sh` in a clean worktree at `8a12d9920` with only this diff, every lane exit 0.
+
+The commit hook refused the commit twice. It named `output.rs` as written by another session, `f6c27cf1-225c-4791-9084-17cffa386faf`, which is the older id of this conversation. The staged diff of the file was byte-identical to my diff of it in the worktree (45 lines), no peer commit touched it since my base, and the file was clean before I applied the patch. I committed with `--no-verify` on the user's explicit approval, after `rustfmt --check` on the four files. A question to the other session was held, not delivered.
+
+- Fix SHA (on `experiments`): `421b0f896cd5facc527453fc2304796977677690`
+- patch-id: `6c0483bc99a64b23305f96606bcaaa662b9d2e55`
+
 Not fixed:
 
 - The product limit: the real transcript scan takes 16 to 25 s against a 30 s ceiling.
-- Three tests in `src/tools/run_command/tests.rs`: `a_red_attaches_wip_authors_on_the_main_arm`, `a_red_attaches_wip_authors_on_the_buffer_only_arm` and `a_red_naming_many_dirty_files_carries_a_bounded_wip_authors`. They reach the engine through `output::handle_successful_output`, which calls `wip_author_diagnostic` with `from_env`. The env must be threaded through that path.
 - `lsp::client::tests::workspace_symbols_returns_project_symbols`.
+- The many-dirty-files test still turns a missing diagnostic into a green skip. The tests in `attribution.rs` check `python3_present` instead. Under a load slow enough to time out even the empty-history engine, it would pass without checking anything.
 
 ## Tests added
 
 No new test. The fix changes four existing tests so they scan an empty history. The mutation check above shows that they detect a missing `.envs(...)` line: 0 of 16 loaded runs pass without it.
+
+The three tests in `tests.rs`: the mutation check detects a missing env for two of them (0 of 4 loaded runs pass each). It cannot for the many-dirty-files test, which skips instead of failing. Its evidence is the skip count under Fix: 0 of 4 on the fixed build, a skip against the mutant.
 
 ## Workarounds
 
@@ -78,13 +87,14 @@ The attribution tests have a fix in their own code. Before it, at a normal gate 
 
 ## Resume
 
-State on 2026-10-31: migrate group fixed, the four attribution tests fixed, the rest open.
+State on 2026-11-01: migrate group fixed, seven attribution tests fixed, the rest open.
 
 Open:
 
-- Three tests in `src/tools/run_command/tests.rs` that go through `output::handle_successful_output`. They need `engine_env` threaded through that path, which is a wider change.
 - `lsp::client::tests::workspace_symbols_returns_project_symbols`: a 30 s LSP request timeout. It passes alone under load, so it needs the whole suite's contention.
 - The product limit: the red-attribution hint is silently absent whenever the transcript scan exceeds 30 s. Options, none chosen: raise `ATTRIBUTION_TIMEOUT_DEFAULT`, or make the scan cheaper with an index or a cache. The cheaper scan is the larger change.
+- Harden `a_red_naming_many_dirty_files_carries_a_bounded_wip_authors`: check `python3_present` instead of printing a skip.
+- The commit hook named a stale writer for `output.rs` (see Fix). It may deserve its own bug.
 
 ## References
 - `docs/issues/2026-10-31-a-timed-out-filter-test-fails-in-the-loaded-gate-and-passes-alone.md`
