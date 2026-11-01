@@ -105,6 +105,11 @@ fn with_security(body: &str) -> String {
 /// while the rest of the file stays well-formed TOML.
 const BAD_ENTRY: &str = "extra_write_roots = [\"relative/dir\"]\n";
 
+/// A directory the loader accepts as ABSOLUTE. `/probe` has no drive, so on Windows it is a
+/// rooted path the loader refuses; `C:/probe` is absolute there and `display()` keeps it as
+/// written.
+const PROBE: &str = if cfg!(windows) { "C:/probe" } else { "/probe" };
+
 async fn security(server: &CodeScoutServer) -> crate::util::path_security::PathSecurityConfig {
     server.agent.security_config().await
 }
@@ -304,9 +309,9 @@ async fn an_invalid_reload_ends_the_root_profile_unless_the_file_confirms_it() {
 /// along with everything the file added.
 #[tokio::test]
 async fn an_invalid_reload_keeps_only_the_write_roots_the_file_still_lists() {
-    let (dir, server) = make_server_with_project_toml(Some(&with_security(
-        "extra_write_roots = [\"/probe/a\", \"/probe/b\"]\n",
-    )))
+    let (dir, server) = make_server_with_project_toml(Some(&with_security(&format!(
+        "extra_write_roots = [\"{PROBE}/a\", \"{PROBE}/b\"]\n"
+    ))))
     .await;
     let roots = |c: crate::util::path_security::PathSecurityConfig| {
         c.extra_write_roots
@@ -316,22 +321,27 @@ async fn an_invalid_reload_keeps_only_the_write_roots_the_file_still_lists() {
     };
     assert_eq!(
         roots(security(&server).await),
-        ["/probe/a", "/probe/b"],
+        [format!("{PROBE}/a"), format!("{PROBE}/b")],
         "control"
     );
 
     save(
         &dir,
-        &with_security("extra_write_roots = [\"/probe/a\", \"/probe/c\", \"relative/dir\"]\n"),
+        &with_security(&format!(
+            "extra_write_roots = [\"{PROBE}/a\", \"{PROBE}/c\", \"relative/dir\"]\n"
+        )),
     );
     assert_eq!(
         roots(security(&server).await),
-        ["/probe/a"],
+        [format!("{PROBE}/a")],
         "/probe/b was removed (narrowing applies); /probe/c was added (widening must not)"
     );
 
     // A key that is not a list of strings confirms nothing.
-    save(&dir, &with_security("extra_write_roots = \"/probe/a\"\n\n"));
+    save(
+        &dir,
+        &with_security(&format!("extra_write_roots = \"{PROBE}/a\"\n\n")),
+    );
     assert!(
         roots(security(&server).await).is_empty(),
         "an unreadable extra_write_roots confirms no root"
@@ -374,9 +384,9 @@ async fn a_non_boolean_gate_value_counts_as_closed() {
 /// `a_write_refused_because_the_file_failed_to_load_says_so`.)
 #[tokio::test]
 async fn an_unparseable_project_toml_confirms_no_root_profile_and_no_write_roots() {
-    let (dir, server) = make_server_with_project_toml(Some(&with_security(
-        "profile = \"root\"\nextra_write_roots = [\"/probe/a\"]\n",
-    )))
+    let (dir, server) = make_server_with_project_toml(Some(&with_security(&format!(
+        "profile = \"root\"\nextra_write_roots = [\"{PROBE}/a\"]\n"
+    ))))
     .await;
     let before = security(&server).await;
     assert!(

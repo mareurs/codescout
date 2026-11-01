@@ -949,6 +949,10 @@ async fn a_refused_pin_is_echoed_capped_and_escaped() {
 
 /// L3: telemetry never re-creates a project that is gone. The session's default root was
 /// deleted; a refused pin must not bring `<root>/.codescout/usage.db` (and the root) back.
+///
+/// Unix only: Windows refuses to delete a directory while the server holds `usage.db` open in
+/// it (a sharing violation), so the premise, a deleted root under a live server, cannot be built.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_refused_pin_does_not_recreate_a_deleted_default_root() {
     let (home, server) = make_server().await;
@@ -1033,8 +1037,12 @@ async fn a_pin_whose_project_cannot_be_opened_is_recoverable_and_does_not_blame_
             .unwrap_or_else(|e| panic!("{label}: must not be a protocol error: {e:?}"));
         let body = recoverable_body(label, &result);
         let error = body["error"].as_str().unwrap_or_default();
+        // The OS words the same cause (a file where a directory is needed) its own way:
+        // `Not a directory` on Unix, `File already exists. (os error 183)` on Windows.
+        let cause = error.to_lowercase();
         assert!(
-            error.contains(&pin) && error.to_lowercase().contains("not a directory"),
+            error.contains(&pin)
+                && (cause.contains("not a directory") || cause.contains("already exists")),
             "{label}: must name the pin and the real cause; got: {body}"
         );
         assert!(

@@ -1218,11 +1218,18 @@ mod tests {
         );
 
         // A path that cannot be stat'ed for a reason other than "not there" is not "missing".
+        // Below a FILE, Unix answers ENOTDIR (unreadable, so writes close); Windows answers a
+        // not-found error, and no `project.toml` can exist below a file, so it is missing there.
         let blocked = tempfile::tempdir().unwrap();
         std::fs::write(blocked.path().join(".codescout"), "a file, not a directory").unwrap();
+        let below_a_file = if cfg!(windows) {
+            Some(toml::Table::new())
+        } else {
+            None
+        };
         assert_eq!(
             ProjectConfig::read_project_toml_table(blocked.path()),
-            None,
+            below_a_file,
             "an unreadable path is not an empty file"
         );
     }
@@ -1921,7 +1928,11 @@ model = "local:test"
             msg.contains("security.extra_write_roots") && msg.contains("'..'"),
             "the error must name the field and the `..` rule, got {msg}"
         );
-        assert!(msg.contains(&spelled), "the entry is named, got {msg}");
+        // The message quotes the entry with `{:?}`, so a Windows backslash is written `\\`.
+        assert!(
+            msg.contains(&format!("{spelled:?}")),
+            "the entry is named, got {msg}"
+        );
     }
 
     /// The stderr line for a project that will not start must name the file: before, it read

@@ -1092,7 +1092,22 @@ fn unsatisfiable_absolute_glob(globs: &[String], search_path: &std::path::Path) 
         .iter()
         .find(|g| {
             let p = std::path::Path::new(g.as_str());
-            p.is_absolute() && !p.starts_with(search_path)
+            if !p.is_absolute() {
+                return false;
+            }
+            // The glob's literal prefix, up to its first wildcard component. A Windows glob and
+            // the walk root can spell one directory differently (`\\?\C:\Users\runneradmin` against
+            // `C:\Users\RUNNER~1`), so both are compared in their long, marker-free form.
+            let literal: std::path::PathBuf = p
+                .components()
+                .take_while(|c| {
+                    !c.as_os_str()
+                        .to_string_lossy()
+                        .contains(['*', '?', '[', '{'])
+                })
+                .collect();
+            !crate::util::long_path::comparable(&literal)
+                .starts_with(crate::util::long_path::comparable(search_path))
         })
         .cloned()
 }

@@ -50,7 +50,10 @@ async fn a_tool_cannot_raise_its_own_profile_through_project_toml() {
     let outside = tempfile::Builder::new()
         .prefix("cs-root-profile-")
         .tempdir_in(
+            // `HOME` on Unix; Windows has `USERPROFILE`. Either way a directory outside the
+            // project root and outside the system temp directory.
             std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
                 .map(std::path::PathBuf::from)
                 .unwrap(),
         )
@@ -276,14 +279,30 @@ async fn ordinary_files_under_dot_codescout_are_still_writable() {
 #[tokio::test]
 async fn the_protected_name_is_matched_ignoring_ascii_case() {
     let (dir, server) = make_server_with_project_toml(Some(PROJECT_TOML)).await;
+    // On a case-insensitive filesystem (Windows, default macOS) `.CodeScout/Project.TOML` IS the
+    // real `project.toml`, so `exists()` is true before and after and proves nothing. Probe that
+    // first; the file being unchanged and the call failing holds on every filesystem.
+    let same_file_on_this_fs = dir.path().join(".CodeScout").join("Project.TOML").exists();
+    let before = on_disk(&dir);
     let (err, text) = call(
         &server,
         "create_file",
         json!({"path": ".CodeScout/Project.TOML", "content": ROOT_PROFILE}),
     )
     .await;
+    // On a case-insensitive filesystem the existence check of `create_file` refuses first (a
+    // recoverable error, so `err` is false there); the guard's own case rule is pinned directly,
+    // on every platform, by `protected_files::tests::project_toml_is_matched_ignoring_ascii_case`.
+    let refused = if same_file_on_this_fs {
+        err || text.contains("already exists")
+    } else {
+        err
+    };
     assert!(
-        err && !dir.path().join(".CodeScout").join("Project.TOML").exists(),
+        refused
+            && on_disk(&dir) == before
+            && (same_file_on_this_fs
+                || !dir.path().join(".CodeScout").join("Project.TOML").exists()),
         "a differently-cased spelling names the same file on some filesystems: {text}"
     );
 }

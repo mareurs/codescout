@@ -42,9 +42,12 @@ async fn ctx_with(
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
     std::fs::write(&file, CATALOG_SRC).unwrap();
+    // The tool resolves the file to its canonical path before it asks the language server, so
+    // the replay is keyed by that spelling (`\\?\C:\…` on Windows, `/private/var/…` on macOS).
+    let canonical_file = std::fs::canonicalize(&file).unwrap();
     let ctx = ToolContext {
         agent: Agent::new(Some(dir.path().to_path_buf())).await.unwrap(),
-        lsp: lsp_for(&file),
+        lsp: lsp_for(&canonical_file),
         output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
         progress: None,
         peer: None,

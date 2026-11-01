@@ -719,7 +719,10 @@ mod tests {
         .await;
         result.unwrap();
         assert_eq!(
-            std::fs::read_to_string(p.join("tracked.txt")).unwrap(),
+            // Git for Windows checks out with CRLF (`core.autocrlf`): compare the content.
+            std::fs::read_to_string(p.join("tracked.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "other\n",
             "premise: the checkout ran"
         );

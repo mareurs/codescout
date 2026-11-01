@@ -10219,8 +10219,12 @@ mod tests {
         )
         .await;
         assert_ne!(is_error, Some(true), "unpinned control failed: {text}");
+        // `text` is serialised JSON, so a Windows backslash in `wrote_to` is written `\\`.
         assert!(
-            text.contains("wrote_to") && text.contains(&main_root.to_string_lossy().to_string()),
+            text.contains("wrote_to")
+                && text.contains(&crate::util::text::json_quote(
+                    &main_root.to_string_lossy()
+                )),
             "an unpinned write in a repo with linked worktrees names the checkout it reached: {text}"
         );
         assert!(
@@ -13746,8 +13750,11 @@ mod guide_hint_tests {
         );
 
         let out = dispatch_text(&server, "run_command", json!({"command": "echo hi"}), None).await;
+        // Separators differ by platform (and JSON doubles a Windows backslash), so compare with
+        // every `/` and `\` removed: `sess-1/agent-a` and `packages/api` stay adjacent words.
+        let flat = out.replace(['/', '\\'], "");
         assert!(
-            out.contains("sess-1/agent-a") && out.contains("packages/api"),
+            flat.contains("sess-1agent-a") && flat.contains("packagesapi"),
             "the parent must be told the by-id switch moved it, and to where: {out}"
         );
 

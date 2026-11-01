@@ -465,10 +465,8 @@ mod tests {
             crate::librarian::tools::doctor::call(&ctx, Value::Object(to_tool_args(&repo_args)))
                 .await
                 .expect("doctor runs");
-        let foreign_path = foreign_root
-            .join("docs/theirs.md")
-            .to_string_lossy()
-            .into_owned();
+        // The catalog (and so the report) holds forward-slash paths on every platform.
+        let foreign_path = crate::util::fs::to_forward_slash(&foreign_root.join("docs/theirs.md"));
         let has_foreign_id_mismatch = |report: &Value| {
             report["violations"]
                 .as_array()
