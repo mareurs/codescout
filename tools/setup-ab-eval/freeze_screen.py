@@ -1,7 +1,7 @@
 """Freeze the Live Rust screen: write screen-registration.json, the record the operator's go is bound to.
 
-The screen is the bare arm only, over the tasks of the pool file (default multilang-pool-v2.json: eight
-tasks), two models, two reps (32 runs). This script calls no model, reads no token, writes no GO.json (only
+The screen is the bare arm only, over the tasks of the pool file (default multilang-pool-v3.json: seven
+tasks), two models, two reps (28 runs). This script calls no model, reads no token, writes no GO.json (only
 GO.template.json, which the operator turns into GO.json by hand) and starts no container: it
 reads files, runs `git`, `<claude> --version` and `docker image inspect` (through
 tasks._inspect_image, injectable). Stdlib only.
@@ -36,19 +36,20 @@ import tasks
 
 REGISTRATION = "screen-registration.json"
 POOL_V1 = "multilang-pool-v1.json"  # the registered history, never edited
-POOL = "multilang-pool-v2.json"
+POOL_V2 = "multilang-pool-v2.json"  # superseded by v3, never edited
+POOL = "multilang-pool-v3.json"  # the current pool: the only one freeze and check accept
 STAGE3_REGISTRATION = "stage3-registration.json"
 GO_TEMPLATE = "GO.template.json"
 PLAN_NAME = "screen-plan.json"
-POOL_NAME = "setup-ab live rust v2"
-AMENDS = "setup ab live rust v1"
+POOL_NAME = "setup-ab live rust v3"
+AMENDS = "setup-ab live rust v2"
 GATE = "relaxed (spec 2026-11-01)"
 REGISTERED = "2026-11-01"
 SEED = 20261101
 MODELS = run.MODELS
 REPS = 2
-# cap 50: run k is admitted iff the first k-1 runs cost <= cap - reserve - per_call = $40, so all 32
-# runs of pool v2 start iff the first 31 average <= $1.29 (at $1.0 each all 32; at $1.4 not all)
+# cap 50: run k is admitted iff the first k-1 runs cost <= cap - reserve - per_call = $40, so all 28
+# runs of pool v3 start iff the first 27 average <= $1.48 (at $1.0 each all 28; at $1.6 not all)
 BUDGET = {"cap_usd": 50.0, "per_call_usd": 5.0, "reserve_usd": 5.0}
 # F2P / kept P2P / dropped P2P of the nine saved controls (task 1 report): a sanity table for the
 # `pool` command only (a pool file that disagrees is not written); freeze reads the pool file's own
@@ -56,7 +57,17 @@ BUDGET = {"cap_usd": 50.0, "per_call_usd": 5.0, "reserve_usd": 5.0}
 DROPPED = [{"id": "pola-rs__polars-28484",
             "reason": "its build and sweep pass, but the empty and the gold grade were both OOM-killed at "
                       "the frozen 8 GB limit (0 of 1555 tests ran; gold grade 1595 s; image 85.9 GB); "
-                      "decided before any model run"}]
+                      "decided before any model run"},
+           {"id": "gitbutlerapp__gitbutler-14920",
+            "reason": "round-3 prescan had 0 hits, but the gold grade fails in the grading environment: "
+                      "3 expected tests fail identically in the empty and the gold run (the F2P test "
+                      "passes): read_file_from_workspace_security::rejects_dotdot_traversal and "
+                      "::rejects_symlink_escape write to workdir.parent() and get Permission denied as "
+                      "uid 1000 (/ is root-owned 755), and command::land::land_no_ff_creates_signed_merge_"
+                      "commit fails with 'ssh-keygen should produce a signing key' (cause not isolated); "
+                      "the control ran as root, the grade runs as the image user; keeping the task needs a "
+                      "second post-hoc rule plus an unexplained failure; decided before any model run; it "
+                      "may return in a later pool version after investigation"}]
 SANITY = {
     "rust-lang__rust-analyzer-22789": (1, 8119, 0),
     "pola-rs__polars-28484": (1, 1554, 0),
@@ -175,7 +186,7 @@ def screen_plan(pool, models=MODELS, reps=REPS, seed=SEED) -> list:
 
 def plan_problems(plan, pool) -> list:
     """Reasons a plan is not the screen: a task outside the pool, a non-bare arm, or a shape other
-    than every pool task x both models x reps 0..REPS-1 (32 runs for 8 tasks)."""
+    than every pool task x both models x reps 0..REPS-1 (28 runs for 7 tasks)."""
     ids = {t["id"] for t in pool["tasks"]}
     out = []
     outside = sorted({s.task_id for s in plan} - ids)
@@ -315,11 +326,28 @@ def _git_head(tool_dir) -> str:
     return freeze_stage1._git(tool_dir, "rev-parse", "HEAD").strip()
 
 
+def pool_guard(pool, rel_pool, current_pool=None, dropped=None) -> list:
+    """Reasons this pool is not the one freeze and check accept: a pool other than the current one
+    (name or path), or a pool listing an id the code has dropped. `current_pool` ((name, path)) and
+    `dropped` exist for the tests; the CLI never passes them."""
+    name, path = current_pool if current_pool is not None else (POOL_NAME, POOL)
+    gone = {d["id"]: d for d in (DROPPED if dropped is None else dropped)}
+    out = []
+    if pool.get("pool") != name or rel_pool != path:
+        out.append(f"pool {pool.get('pool')!r} at {rel_pool!r} is not the current pool {name!r} at "
+                   f"{path!r}: an older pool is history, a screen is frozen on the current one only")
+    for t in pool["tasks"]:
+        if t["id"] in gone:
+            out.append(f"{t['id']} is in the pool but was dropped from it ({gone[t['id']]['reason'][:80]}...)")
+    return out
+
+
 def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replace=False,
                   seed=SEED, head_fn: Callable = _git_head,
                   inspect: Callable = tasks._inspect_image,
                   run_cli: Callable = freeze_stage1.default_run_cli,
-                  python=sys.executable, runner_tasks_root=None) -> dict:
+                  python=sys.executable, runner_tasks_root=None, current_pool=None,
+                  dropped=None) -> dict:
     tool_dir, data, run_data = Path(tool_dir), Path(data), Path(run_data)
     pool_path, plan_path, out = Path(pool_path), Path(plan_path), Path(out)
     if out.exists() and not replace:
@@ -344,6 +372,9 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
         plan = run.load_plan(plan_path)
     except (OSError, ValueError) as e:
         raise Refused(f"pool or plan unreadable: {type(e).__name__}: {e}")
+    guard = pool_guard(pool, rel_pool, current_pool, dropped)
+    if guard:
+        raise Refused("; ".join(guard))
     problems = plan_problems(plan, pool)
     if problems:
         raise Refused("; ".join(problems))
@@ -411,7 +442,8 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
 # --- check -------------------------------------------------------------------------------------
 
 def check_screen(*, tool_dir, data, run_data, registration, inspect: Callable = tasks._inspect_image,
-                 run_cli: Callable = freeze_stage1.default_run_cli, runner_tasks_root=None) -> list:
+                 run_cli: Callable = freeze_stage1.default_run_cli, runner_tasks_root=None,
+                 pool_path=None, current_pool=None, dropped=None) -> list:
     """Re-hash what the registration froze; the list of reasons it no longer holds ([] = ok)."""
     tool_dir, data, run_data = Path(tool_dir), Path(data), Path(run_data)
     try:
@@ -447,6 +479,9 @@ def check_screen(*, tool_dir, data, run_data, registration, inspect: Callable = 
         if sha256_file(pool_file) != reg.get("pool_sha256"):
             why.append("the pool file changed after the freeze")
         pool = check_pool(json.loads(pool_file.read_text()))
+        why += pool_guard(pool, reg["pool_path"], current_pool, dropped)
+        if pool_path is not None and Path(pool_path).resolve() != pool_file.resolve():
+            why.append(f"--pool {Path(pool_path).resolve()} is not the registered pool {pool_file.resolve()}")
     except (OSError, ValueError, KeyError, Refused) as e:
         why.append(f"pool: {e}")
     plan = None
@@ -555,7 +590,8 @@ def main(argv=None) -> int:
                               "plan_sha256": reg["plan_sha256"], "runs": len(run.load_plan(plan_path)),
                               "go_template": str(run_data / GO_TEMPLATE)}))
         else:
-            why = check_screen(tool_dir=a.tool_dir, data=a.data, run_data=run_data, registration=out)
+            why = check_screen(tool_dir=a.tool_dir, data=a.data, run_data=run_data, registration=out,
+                               pool_path=a.pool)
             print(json.dumps({"ok": not why, "reasons": why}))
             return 1 if why else 0
     except (Refused, OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as e:

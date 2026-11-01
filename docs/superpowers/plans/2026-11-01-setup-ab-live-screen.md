@@ -95,7 +95,7 @@
 
 ### Task 4: Prepare the screen (no spend)
 
-> Pool v2 amendment: eight tasks, 32 runs, `multilang-pool-v2.json` (polars-28484 dropped); see the spec amendment. Every `nine` and `36` below reads eight and 32. Before `freeze`, link each runner path `<data>/tasks/<id>` to `<data>/live-tasks/<id>`.
+> Pool amendments (v2, v3): seven tasks, 28 runs, `multilang-pool-v3.json` (polars-28484 and gitbutler-14920 dropped); see the spec amendments. Every `nine` and `36` below reads seven and 28. Before `freeze`, link each runner path `<data>/tasks/<id>` to `<data>/live-tasks/<id>`.
 
 **Files:** none in git beyond evidence notes; operational.
 

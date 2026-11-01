@@ -19,7 +19,9 @@ from test_multilang_tasks import GOOD_BASE, GOOD_GOLD, record, write_control
 CLI_VERSION = "2.1.309 (Claude Code)"
 IDS = list(fs.SANITY)  # the nine v1 ids (fixture pool)
 POLARS = "pola-rs__polars-28484"
+GITBUTLER = "gitbutlerapp__gitbutler-14920"
 V2_IDS = [i for i in IDS if i != POLARS]
+V3_IDS = [i for i in V2_IDS if i != GITBUTLER]
 
 
 def git(repo, *args):
@@ -125,6 +127,7 @@ class Env:
         kw = dict(tool_dir=self.tool, data=self.data, run_data=self.run_data,
                   pool_path=self.tool / fs.POOL, plan_path=self.plan_path, out=self.out,
                   head_fn=lambda d: "h" * 40, inspect=self.inspect, runner_tasks_root=self.runner,
+                  dropped=[] if self.ids == IDS else None,
                   run_cli=lambda p: CLI_VERSION + "\n")
         kw.update(over)
         return kw
@@ -136,6 +139,8 @@ class Env:
         return fs.check_screen(tool_dir=self.tool, data=self.data, run_data=self.run_data,
                                registration=self.out, inspect=over.get("inspect", self.inspect),
                                runner_tasks_root=over.get("runner_tasks_root", self.runner),
+                               dropped=[] if self.ids == IDS else None,
+                               pool_path=over.get("pool_path"),
                                run_cli=lambda p: CLI_VERSION)
 
 
@@ -198,9 +203,16 @@ class PoolTests(Case):
         ok = {"tasks": [{"id": IDS[0], "expected_count": 8120, "dropped_count": 0}]}
         self.assertEqual(fs.sanity_mismatches(ok), [])
 
-    def test_the_committed_pool_files_are_v1_history_and_the_eight_task_v2(self):
+    def test_the_committed_pool_files_are_v1_v2_history_and_the_seven_task_v3(self):
         v1 = fs.check_pool(json.loads(Path(__file__).with_name(fs.POOL_V1).read_text()))
-        v2 = fs.check_pool(json.loads(Path(__file__).with_name(fs.POOL).read_text()))
+        v2 = fs.check_pool(json.loads(Path(__file__).with_name(fs.POOL_V2).read_text()))
+        v3 = fs.check_pool(json.loads(Path(__file__).with_name(fs.POOL).read_text()))
+        self.assertEqual([t["id"] for t in v3["tasks"]], V3_IDS)
+        self.assertEqual(v3["amends"], v2["pool"])
+        self.assertEqual([d["id"] for d in v3["dropped"]], [POLARS, GITBUTLER])
+        self.assertEqual(v3["dropped"], fs.DROPPED)
+        self.assertEqual(v3["dropped"][:1], v2["dropped"])
+        self.assertEqual(v3["pool"], fs.POOL_NAME)
         self.assertEqual([t["id"] for t in v1["tasks"]], IDS)
         self.assertEqual([t["id"] for t in v2["tasks"]], V2_IDS)
         self.assertEqual(v2["amends"], "setup ab live rust v1")
@@ -209,14 +221,14 @@ class PoolTests(Case):
         self.assertTrue(all(by1[t["id"]] == t for t in v2["tasks"]))
 
 
-class PoolV2Tests(unittest.TestCase):
+class PoolV3Tests(unittest.TestCase):
     """The pool file's own ids and counts drive the plan and the refusals; each entry is
     re-verified against its real control."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.env = Env(self.tmp, V2_IDS)
+        self.env = Env(self.tmp, V3_IDS)
         self.controls = self.env.data / "live" / "controls-batch"
 
     def refused(self, text, **over):
@@ -225,13 +237,14 @@ class PoolV2Tests(unittest.TestCase):
         self.assertIn(text, str(cm.exception))
         self.assertFalse(self.env.out.exists())
         self.assertFalse((self.env.run_data / fs.GO_TEMPLATE).exists())
+        self.assertFalse((self.env.run_data / "GO.json").exists())
 
-    def test_the_plan_is_eight_tasks_32_runs_and_the_freeze_accepts_it(self):
-        self.assertEqual([t["id"] for t in self.env.pool["tasks"]], V2_IDS)
-        self.assertEqual(len(self.env.plan), 32)
-        self.assertEqual({s.task_id for s in self.env.plan}, set(V2_IDS))
+    def test_the_plan_is_seven_tasks_28_runs_and_the_freeze_accepts_it(self):
+        self.assertEqual([t["id"] for t in self.env.pool["tasks"]], V3_IDS)
+        self.assertEqual(len(self.env.plan), 28)
+        self.assertEqual({s.task_id for s in self.env.plan}, set(V3_IDS))
         reg = self.env.freeze()
-        self.assertEqual(len(reg["tasks"]), 8)
+        self.assertEqual(len(reg["tasks"]), 7)
         self.assertEqual(self.env.check(), [])
         loaded = run.load_registration(self.env.out, run.load_plan(self.env.plan_path))
         self.assertEqual(loaded["reps"], [["bare", 2]])
@@ -245,10 +258,10 @@ class PoolV2Tests(unittest.TestCase):
     def test_plan_problems_names_a_partial_plan_and_the_expected_size(self):
         why = fs.plan_problems(self.env.plan[:-1], self.env.pool)
         self.assertEqual(len(why), 1)
-        self.assertIn("32 runs", why[0])
-        self.assertIn("it has 31", why[0])
+        self.assertIn("28 runs", why[0])
+        self.assertIn("it has 27", why[0])
         fs.write_plan(self.env.plan[:-1], self.env.plan_path)
-        self.refused("not the screen's 32 runs")
+        self.refused("not the screen's 28 runs")
 
     def test_a_pool_file_that_lies_about_its_counts_or_hash_is_refused(self):
         pool = json.loads(json.dumps(self.env.pool))
@@ -257,7 +270,7 @@ class PoolV2Tests(unittest.TestCase):
         self.env.write_pool()
         self.env.commit("lie")
         self.refused("the pool says")
-        self.assertTrue(any(V2_IDS[0] in w for w in
+        self.assertTrue(any(V3_IDS[0] in w for w in
                             fs.verify_pool(pool, self.env.records, self.controls)))
         pool["tasks"][0]["expected_count"] -= 1
         pool["tasks"][1]["control_sha256"] = "0" * 64
@@ -265,7 +278,7 @@ class PoolV2Tests(unittest.TestCase):
         self.env.write_pool()
         self.env.commit("lie2")
         self.refused("not the pooled one")
-        self.assertTrue(any(V2_IDS[1] in w for w in
+        self.assertTrue(any(V3_IDS[1] in w for w in
                             fs.verify_pool(pool, self.env.records, self.controls)))
 
     def test_verify_pool_passes_the_true_file_and_fails_clearly_on_a_missing_id(self):
@@ -280,19 +293,78 @@ class PoolV2Tests(unittest.TestCase):
         self.assertTrue(any("o__ghost-1" in w and "control.json" in w for w in why), why)
 
     def test_a_pool_task_without_a_control_or_a_bundle_fails_the_freeze(self):
-        shutil.rmtree(self.controls / V2_IDS[2])
+        shutil.rmtree(self.controls / V3_IDS[2])
         self.refused("control.json unreadable")
-        self.assertIn(V2_IDS[2], fs.verify_pool(self.env.pool, self.env.records, self.controls)[0])
-        shutil.copytree(self.env.data / "live" / "controls-batch" / V2_IDS[0], self.controls / V2_IDS[2])
-        write_control(self.controls / V2_IDS[2], GOOD_BASE, GOOD_GOLD, rid=V2_IDS[2])  # restored
-        shutil.rmtree(self.env.data / "live-tasks" / V2_IDS[3])
+        self.assertIn(V3_IDS[2], fs.verify_pool(self.env.pool, self.env.records, self.controls)[0])
+        shutil.copytree(self.env.data / "live" / "controls-batch" / V3_IDS[0], self.controls / V3_IDS[2])
+        write_control(self.controls / V3_IDS[2], GOOD_BASE, GOOD_GOLD, rid=V3_IDS[2])  # restored
+        shutil.rmtree(self.env.data / "live-tasks" / V3_IDS[3])
         self.refused("does not exist")
+
+    def test_freeze_refuses_an_older_pool_by_name_or_by_path(self):
+        pool = dict(self.env.pool, pool="setup-ab live rust v2")
+        self.env.pool = pool
+        self.env.write_pool()
+        self.env.commit("older name")
+        self.refused("is not the current pool")
+        self.assertIn("setup-ab live rust v2", self._msg())
+        self.env.pool = dict(pool, pool=fs.POOL_NAME)
+        old = self.env.tool / fs.POOL_V2
+        old.write_text(json.dumps(self.env.pool))
+        self.env.commit("older path")
+        self.refused(fs.POOL_V2, pool_path=old)
+
+    def _msg(self):
+        with self.assertRaises(fs.Refused) as cm:
+            self.env.freeze()
+        return str(cm.exception)
+
+    def test_freeze_refuses_a_pool_that_lists_a_dropped_id(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        env = Env(tmp)  # the nine-entry pool: polars and gitbutler are in it
+        with self.assertRaises(fs.Refused) as cm:
+            fs.freeze_screen(**env.kw(dropped=None))
+        msg = str(cm.exception)
+        self.assertIn(POLARS, msg)
+        self.assertIn(GITBUTLER, msg)
+        self.assertIn("was dropped from it", msg)
+        self.assertFalse(env.out.exists())
+        self.assertFalse((env.run_data / fs.GO_TEMPLATE).exists())
+        self.assertFalse((env.run_data / "GO.json").exists())
+
+    def test_check_reports_an_older_pool_a_dropped_id_and_a_different_pool_argument(self):
+        self.env.freeze()
+        base = dict(tool_dir=self.env.tool, data=self.env.data, run_data=self.env.run_data,
+                    registration=self.env.out, inspect=self.env.inspect,
+                    runner_tasks_root=self.env.runner, run_cli=lambda p: CLI_VERSION)
+        self.assertEqual(fs.check_screen(**base), [])
+        why = fs.check_screen(**base, current_pool=("setup-ab live rust v4", "multilang-pool-v4.json"))
+        self.assertTrue(any("is not the current pool" in w for w in why), why)
+        why = fs.check_screen(**base, dropped=[{"id": V3_IDS[0], "reason": "x"}])
+        self.assertTrue(any(V3_IDS[0] in w and "was dropped from it" in w for w in why), why)
+        why = fs.check_screen(**base, pool_path=self.env.tool / fs.POOL_V1)
+        self.assertTrue(any("is not the registered pool" in w for w in why), why)
+        self.assertEqual(fs.check_screen(**base, pool_path=self.env.tool / fs.POOL), [])
+
+    def test_verify_pool_is_read_only_on_an_older_pool(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        env = Env(tmp)  # an older (nine-entry) pool
+
+        def snapshot():
+            return {str(p): p.stat().st_mtime_ns for p in Path(tmp).rglob("*") if p.is_file()
+                    and ".git" not in p.parts}
+        before = snapshot()
+        self.assertEqual(fs.verify_pool(env.pool, env.records, env.data / "live" / "controls-batch"), [])
+        self.assertEqual(snapshot(), before)
+
 
     def test_check_pool_shape_rules(self):
         base = self.env.pool
         for bad in (dict(base, tasks=[]), dict(base, gate="strict"),
                     dict(base, tasks=base["tasks"] + [base["tasks"][0]]),
-                    dict(base, dropped=[{"id": V2_IDS[0], "reason": "x"}]),
+                    dict(base, dropped=[{"id": V3_IDS[0], "reason": "x"}]),
                     dict(base, dropped=[{"id": POLARS}])):
             with self.assertRaises(fs.Refused):
                 fs.check_pool(bad)
@@ -454,12 +526,14 @@ class FreezeTests(Case):
                     break
                 spent, k = spent + cost, k + 1
             return k
-        for n in (len(self.env.plan), 32, 36):  # the fixture's plan, pool v2, pool v1
+        for n in (len(self.env.plan), 28, 32, 36):  # the fixture's plan, pool v3, v2, v1
             self.assertEqual(started(1.0, n), n)
             self.assertEqual(started(0.0, n), n)
         self.assertEqual(started(1.2, 36), 34)   # v1: (k-1)*1.2 <= 40
         self.assertEqual(started(1.4, 32), 29)   # v2: (k-1)*1.4 <= 40 -> not all start
-        self.assertEqual(started(40 / 31, 32), 32)  # the v2 break-even, $1.29 per run
+        self.assertEqual(started(1.48, 28), 28)  # the v3 break-even: 27 * 1.48 = 39.96 <= 40
+        self.assertLess(started(1.6, 28), 28)    # not all start (stops after about 26)
+        self.assertEqual(started(40 / 27, 28), 28)
 
 
     def test_freeze_refuses_a_cli_that_reports_another_version(self):

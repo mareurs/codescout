@@ -10,7 +10,11 @@ The control batch ended on 2026-11-01 02:29 (50 tasks, `setup-ab-data/live/contr
 
 **Pool (9 tasks).** `rust-lang__rust-analyzer-22789`, `pola-rs__polars-28484`, `gitbutlerapp__gitbutler-14920`, `modelcontextprotocol__rust-sdk-1021`, `h4ckf0r0day__obscura-412`, `-477`, `-414`, `-447`, `-390`. Five of nine are from one repository: stratum and clustering effects must be disclosed in any analysis. The evidence is `controls-batch/<id>/control.json`; `stage4-followup.json` lists the strict-ok set.
 
+> Superseded: the amendments at the end of this document (pool v2, pool v3) replace this pool; the current pool is seven tasks.
+
 **Screen.** Bare arm only; models `claude-sonnet-5-5` and `claude-opus-5-5`; 2 reps per task and model: 36 runs. Purpose: measure the plain agent's pass rate per task so the comparison can use tasks where it fails 30 to 70% of the time. Screen rows are calibration data in their own data dir (`setup-ab-data/live-screen/`), never rows of the comparison: a later comparison on the selected tasks needs a fresh registration and fresh runs (selecting on the screen's outcomes and reusing them would bias against bare). A screen outcome is not a claim about codescout.
+
+> Superseded: 36 runs became 32 (pool v2) and then 28 (pool v3); see the amendments at the end of this document.
 
 ## Decision record
 
@@ -54,3 +58,11 @@ Decided after the build and grade attempts and before any model run; recorded in
 - **Runs.** 8 tasks x 2 models x 2 reps = 32 bare runs. The budget is unchanged (cap 50.0, per-call 5.0, reserve 5.0 USD): all 32 runs start iff the first 31 cost on average at most (50 - 10) / 31 = 1.29 USD.
 - **Known limitation, accepted and to be disclosed: `rust-analyzer-22789` and CRLF.** `run.py` captures the agent's patch with universal newlines, and the image keeps `* -text` for three CRLF blobs. An agent edit to `crates/hir-def/src/nameres/tests/imports.rs`, `crates/proc-macro-srv-cli/README.md` or `crates/proc-macro-srv/src/bridge.rs` would grade "patch does not apply", whatever the edit.
 - **Provenance.** The relaxed gate and the pool were registered after seeing the controls (as stated above); this amendment was decided from infrastructure results, not from any agent outcome. Five of the eight tasks are still from one repository (obscura).
+
+## Amendment 2026-11-01 (pool v3)
+
+Decided after grade attempts and before any model run; recorded in `tools/setup-ab-eval/multilang-pool-v3.json` (v1 and v2 stay in git as history; `freeze_screen.py` freezes only the current pool and refuses a pool that lists a dropped id).
+
+- **Pool.** Seven tasks: `h4ckf0r0day__obscura-412`, `-477`, `-414`, `-447`, `-390`, `modelcontextprotocol__rust-sdk-1021`, `rust-lang__rust-analyzer-22789`. `gitbutlerapp__gitbutler-14920` is dropped. Its round-3 prescan had 0 hits and `/mnt_tmp` was empty, but the gold grade fails in the grading environment: three expected tests fail identically in the empty and the gold run (the FAIL_TO_PASS test passes). `read_file_from_workspace_security::rejects_dotdot_traversal` and `::rejects_symlink_escape` write to `workdir.parent()` and get Permission denied as uid 1000 (`/` is root-owned, mode 755; reproduced in a throwaway container); `command::land::land_no_ff_creates_signed_merge_commit` fails with "ssh-keygen should produce a signing key" (cause not isolated). The control ran as root; the grade runs as the image user. Keeping the task would need a second post-hoc rule plus an unexplained failure, so it leaves the pool; it may return in a later pool version after investigation.
+- **Runs.** 7 tasks x 2 models x 2 reps = 28 bare runs. The budget is unchanged (cap 50.0, per-call 5.0, reserve 5.0 USD): all 28 runs start iff the first 27 cost on average at most (50 - 10) / 27 = 1.48 USD.
+- **Provenance.** As for v2: decided from infrastructure and grade results, not from any agent outcome. Five of the seven tasks are from one repository (obscura).

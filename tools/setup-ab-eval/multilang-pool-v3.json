@@ -1,0 +1,67 @@
+{
+  "pool": "setup-ab live rust v3",
+  "registered": "2026-11-01",
+  "gate": "relaxed (spec 2026-11-01)",
+  "amends": "setup-ab live rust v2",
+  "dropped": [
+    {
+      "id": "pola-rs__polars-28484",
+      "reason": "its build and sweep pass, but the empty and the gold grade were both OOM-killed at the frozen 8 GB limit (0 of 1555 tests ran; gold grade 1595 s; image 85.9 GB); decided before any model run"
+    },
+    {
+      "id": "gitbutlerapp__gitbutler-14920",
+      "reason": "round-3 prescan had 0 hits, but the gold grade fails in the grading environment: 3 expected tests fail identically in the empty and the gold run (the F2P test passes): read_file_from_workspace_security::rejects_dotdot_traversal and ::rejects_symlink_escape write to workdir.parent() and get Permission denied as uid 1000 (/ is root-owned 755), and command::land::land_no_ff_creates_signed_merge_commit fails with 'ssh-keygen should produce a signing key' (cause not isolated); the control ran as root, the grade runs as the image user; keeping the task needs a second post-hoc rule plus an unexplained failure; decided before any model run; it may return in a later pool version after investigation"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "rust-lang__rust-analyzer-22789",
+      "repo": "rust-lang/rust-analyzer",
+      "control_sha256": "a37cdbfd757c2134b20339a4d1e8dd011bc67d5cd75c1c4995780fc34d46b050",
+      "expected_count": 8120,
+      "dropped_count": 0
+    },
+    {
+      "id": "modelcontextprotocol__rust-sdk-1021",
+      "repo": "modelcontextprotocol/rust-sdk",
+      "control_sha256": "f739b29a0881cb440084ccd04022c03f6eda4e28f85cfcff2a794d872b29a61c",
+      "expected_count": 663,
+      "dropped_count": 0
+    },
+    {
+      "id": "h4ckf0r0day__obscura-412",
+      "repo": "h4ckf0r0day/obscura",
+      "control_sha256": "2f19c5e94f394eaf24f222d0461d5ed8e3323e19a4b3af5dfe205909bb65cbf1",
+      "expected_count": 248,
+      "dropped_count": 71
+    },
+    {
+      "id": "h4ckf0r0day__obscura-477",
+      "repo": "h4ckf0r0day/obscura",
+      "control_sha256": "bdef7fa08f38a5f8158c081c19cb5cdb85c7fe9651fa9955dc6be135f8df556f",
+      "expected_count": 359,
+      "dropped_count": 3
+    },
+    {
+      "id": "h4ckf0r0day__obscura-414",
+      "repo": "h4ckf0r0day/obscura",
+      "control_sha256": "4e62b5f6218559a870fd85be9d2c8f062639e16fa4c7e8b722019e834eafc12f",
+      "expected_count": 259,
+      "dropped_count": 71
+    },
+    {
+      "id": "h4ckf0r0day__obscura-447",
+      "repo": "h4ckf0r0day/obscura",
+      "control_sha256": "df60e314dd3a561a8c12792052bb7f605d3014bcf4bb04771268f361fac52cba",
+      "expected_count": 275,
+      "dropped_count": 71
+    },
+    {
+      "id": "h4ckf0r0day__obscura-390",
+      "repo": "h4ckf0r0day/obscura",
+      "control_sha256": "7ac7a2c14ceb90d8b352c47565c54b082a49afae8aecac32bf08bacdae4d854c",
+      "expected_count": 239,
+      "dropped_count": 71
+    }
+  ]
+}
