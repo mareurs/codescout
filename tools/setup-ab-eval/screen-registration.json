@@ -1,6 +1,6 @@
 {
   "stage": "screen",
-  "head": "3a151b11397c6b722952c4f9092bf551bad6087e",
+  "head": "c039145b03df2af5e4b69504815440dca42dc3b2",
   "files": {
     "PROVENANCE.json": "17eff19c2502b39886fb680a867fccebf8483ae18488929450935715bbb53340",
     "agent-cs.Dockerfile": "a5891963c784217eb53f601f0aaaeb60c28dfb52babeb6513fb0f5cb886b74da",
@@ -17,7 +17,7 @@
     "fixtures/multilang/obscura-426-gold.log": "f7287da30ff503203bcce044eedf84508e94c497211893dd4e2a22e2d184f3d0",
     "fixtures/multilang/obscura-426.json": "168f8a3d51a409b05ab352a29ab8d0ecc6e0fbf6cb833b2ae79888248e6a1b4c",
     "fixtures/multilang/records-mini.jsonl": "5a18ee5f053565f1857b2a5c966db00f809f46c01bf2dc83ac555199730fea40",
-    "freeze_screen.py": "f7da16d60b7c7a4763918860770d9aab5c5d4381fce220096250db1cae105340",
+    "freeze_screen.py": "754ef0e9d55b95ac8829773e5a7e9fb706b7ab697b0d35110345790143859599",
     "freeze_setup.py": "def4faaa169a195db4722175e14af6c9ad4f3734110a20413371e98ad5d1a8c1",
     "freeze_stage1.py": "8484af5187fe7e28ff0a0264cd8f80eaa8f6b20cb4bced0cc459e0e0bf8c3ff8",
     "freeze_stage2.py": "2abff6be4e98f0c9caa5595bbd0a1823293c228117265c111020da5574d7deff",
@@ -30,11 +30,12 @@
     "multilang-pool-v1.json": "f292f09b69fd3aa81a0ef9d4bbc87d8f33b849640d7db17d4646b894bd347a18",
     "multilang-pool-v2.json": "2bf50c8075d873bd0cde1ff5a0246ac3f8b436841dda23b541a1996983410ef2",
     "multilang-pool-v3.json": "06045c454635bfb7d849c5faec539f2b31e04776960d21dc6265192d6ae55ba8",
+    "multilang-pool-v4.json": "cad2a914ae0cba1d571d3b99cd2287f03869566d5a5c7bfe5ecbe03f535ec617",
     "multilang-selection-rule.json": "d48bc6f8ec910f60e268fef6dbf232458109eef9dafa7ef17c77b0289d70d82b",
     "multilang_control.py": "2678d7d76e2506cbc72cac449a886827ccf0d039a8aae98f6a59dff1cbbede53",
     "multilang_grade.py": "3ed7d3822a596140bc062b1518c399ff67f4b9984a4109819ac290c5f6d484bb",
     "multilang_records.py": "714e4d266840887fdf795fb80db4f0fa3f949724f4deaa4ae7321b9f4ce4bb27",
-    "multilang_tasks.py": "550994925cab1cc080e22795994a330236d3ef747ffb8c9f233284829a6b0f1c",
+    "multilang_tasks.py": "856d6d835ec1297d713e68d6c20bd5583c2adcdad33b5b33e436b487a51b3b6a",
     "pilot-protocol.md": "57dec0d780ed5307150e19f8adee917dd4555f6ca103f96d79737833ca137801",
     "pilot.py": "61d5020fbc4de8791431d367106dac1246afe37bd462ca3100ef6a54afe63c38",
     "registration.py": "53afe5c969a5c8231a7a030b269e208e098a7589e1359c7fe15a113989671236",
@@ -53,7 +54,7 @@
     "test_analyze_study.py": "55c72668efbaf6fde8aaedb6c472204046d531af5a415f9b2445545378b6e6ba",
     "test_arms.py": "bc66ac5f7fa3fa7806fc06cf521e9ff38ef5a2c6283f161c3e04e35be4c85aca",
     "test_baseline.py": "4679afd5e3ca43dcba3dcb20d01e93bb8a73abb3ca9884eefb65cc52c046d52e",
-    "test_freeze_screen.py": "d754caa67e501b265aafeed33e949908edb291bb14163d4020017cfd7f55965b",
+    "test_freeze_screen.py": "303333ac5df008e9b402b865c31c4fc8b7725081ba08555ee81016b9f2d8373a",
     "test_freeze_setup.py": "30b5c3da74e3d83ecb643b9b69618285cd361c531997eaaa483eeac65344054e",
     "test_freeze_stage1.py": "374a20d4bc0bb6b6407b2c28da461ad8066204763f25054750be67ee6e21d6f1",
     "test_freeze_stage2.py": "5512bb6b86e43f4e2926661c00db2d4708815f6ec7ce7382e7dffee87b457c98",
@@ -64,7 +65,7 @@
     "test_multilang_control.py": "7b45af6044b3b77ff69aeb71842849e22260ba28c70a809e80ed632a250e6e1a",
     "test_multilang_grade.py": "53fe3606dbca7c634dbda0a8ff521bc03f91ee8654dbc05a3ac8651a788ed2e6",
     "test_multilang_records.py": "d84c114ba6c5ca2a435de0482f56d71245b785de93fd7012dc41572ee606c7e2",
-    "test_multilang_tasks.py": "29cd337714dc2cffef272e4368a06c9f14da615dd2b9cc03c6c9e5dd923e6503",
+    "test_multilang_tasks.py": "b6d83b408d0b925335db9715640b05eef7b8212f5b993a0bd227af2d84d0a074",
     "test_pilot.py": "9a0d22a9f35c631583ad0366c2a8b352474f4fa56e90d11c93c9b69bd2984c92",
     "test_provenance.py": "a0faa189973f34cb10a27a5c3a7fdacaa4327d5c9db988a9d845d56d38eaa7c1",
     "test_run.py": "bf021a084a13261e80479739bb538012b93a9c36feac23c635f5b0ee9d0b9f6f",
@@ -77,8 +78,8 @@
     "vendor/claude-plugins/effort-steering/spikes/s5/images/tinyproxy.conf.tmpl": "f44e1a4ddeb5efa887c456e661034a602605faa15aea767671f431bf3e7ebd8c",
     "vendor/claude-plugins/effort-steering/spikes/s5/usage.mjs": "4d1e0b76bb61762bbbfe077a7d7d3c4d95a4be45f2c57d9490a8d47c8e2d5534"
   },
-  "pool_sha256": "06045c454635bfb7d849c5faec539f2b31e04776960d21dc6265192d6ae55ba8",
-  "pool_path": "multilang-pool-v3.json",
+  "pool_sha256": "cad2a914ae0cba1d571d3b99cd2287f03869566d5a5c7bfe5ecbe03f535ec617",
+  "pool_path": "multilang-pool-v4.json",
   "tasks": [
     {
       "task_id": "rust-lang__rust-analyzer-22789",
@@ -97,25 +98,6 @@
       "control_logs_sha256": {
         "base.log": "581be08b952e82ceb1f31b782b8f8b5252a932d90a11c48200603fb2641821a3",
         "gold.log": "1bf13c220984d6c5196f9937b99b1e0f804dbbfb7df11d9092dcb20dca096bb2"
-      }
-    },
-    {
-      "task_id": "modelcontextprotocol__rust-sdk-1021",
-      "kind": "live",
-      "run_image": {
-        "tag": "sab-run-modelcontextprotocol__rust-sdk-1021:f9b0fc9f8",
-        "id": "sha256:98615679a564ca33f07f17c843ba7b7ffa535a19d5683f87663cbeae17958a0c"
-      },
-      "arm_image": {
-        "tag": "sab-arm-modelcontextprotocol__rust-sdk-1021:f9b0fc9f8",
-        "id": "sha256:c29cc1ffebf3c954c9db373bd104daa46e0b105b46807ae5922f4926bd028947"
-      },
-      "bundle_sha256": "a564a23dcfab1988b8e7ce23c6bb1b5b838bf6d27db942b0be35ae1fea012a59",
-      "prompt_sha256": "15a90a9f12256be39e08ecf43a6ff09cf80713bcac54f7c42a535c48b16f7f5d",
-      "record_sha256": "d2cfebf84e18f3dc9232aba8cd2b7e7b1ea8544637f047ad1f361dca972526c1",
-      "control_logs_sha256": {
-        "base.log": "d686906a63679f8f0a82424abd646e9fc6ef0252f7e14e81d3737331ee48e1e4",
-        "gold.log": "be330c66f559210fb6c8066054a2f6d5d84204ebc6c4b6f6df35e441937134d7"
       }
     },
     {
@@ -186,7 +168,7 @@
         "tag": "sab-arm-h4ckf0r0day__obscura-447:f9b0fc9f8",
         "id": "sha256:0afa663b98c9b262777999e65fdd4096267d95beff0d99791592b91c98bc8932"
       },
-      "bundle_sha256": "6c0e97fc9f256263b7ba4bfd2360cceb3d36bc992ce0af06a740e9c88a7e2db9",
+      "bundle_sha256": "e91bf5e4a0c24bbc0a1e7d617db32fc44305d35d322df5763744eb08affb3cdc",
       "prompt_sha256": "36f9ec9711c88bf75bd0f5e0bc5bb284638321f33ea48d34afb4fbb2bafcac9f",
       "record_sha256": "615fd6d236972c86764e0a5b51d185d01959da138c78b0d388c44f944af2c244",
       "control_logs_sha256": {
@@ -216,7 +198,7 @@
   ],
   "seed": 20261101,
   "plan_path": "/home/marius/work/claude/setup-ab-data/live-screen/screen-plan.json",
-  "plan_sha256": "37f85183d97d86a501331e466ffe582b431fa96e0079b20bef5e4d88518f6ef0",
+  "plan_sha256": "bdf4c33ec80d4092ee43fe8028c12208f5082830a9b1c81ac507be3473651350",
   "budget": {
     "cap_usd": 50.0,
     "per_call_usd": 5.0,
@@ -254,5 +236,5 @@
   },
   "frozen_source_sha256": "b44b0132172e40dcb03122a2cbb0c84f781ce3fe8a7d456dfc660a15eb0c8410",
   "python_version": "3.14.8",
-  "registration_sha256": "d9181a7a24e05ebbd78bc470293f30bcd4a7e1f1c02860a5a77502c49eeef1dd"
+  "registration_sha256": "466a57feea7b01c1c0c70d1e2027569b0bb4b248d2509e32ab0b2134265afce0"
 }
