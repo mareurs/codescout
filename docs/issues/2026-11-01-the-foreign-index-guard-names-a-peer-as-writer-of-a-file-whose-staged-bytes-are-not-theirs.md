@@ -1,14 +1,15 @@
 ---
 id: '581b05bbe41134f3'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the foreign-index guard names a peer as the writer of a file when the staged bytes are not theirs, and its own remedy does not clear the refusal'
 tags:
 - cluster/unclassified
+closed: 2026-11-01
 opened: 2026-11-01
 owner: marius
 severity: low
-unverified: The mechanism is read from the scripts and the record rows below. It is not shown that the peer's earlier edits are the only input to the wrong answer, and the commit was never re-run against a fixed guard.
+unverified: The refusal was reproduced in a scratch repo by case 27a, not on the real shared index. The first live check is the next pathspec commit of a file whose peer write was reverted or never landed. The reported cause of the unclearable remedy (re-adding asks the same lookup again) is read from the code, not run against the old guard.
 ---
 
 # BUG: the foreign-index guard names a peer as the writer of a file when the staged bytes are not theirs, and its own remedy does not clear the refusal
@@ -51,18 +52,38 @@ Rows above, from `.git/session-stage-log` lines 15, 469, 471, 832, 856 (`grep -n
 None beyond reading the scripts.
 
 ## Fix
-None yet. Options, none chosen: a `named-foreign` owner should hold only while the staged blob still contains an edit of that writer (a content test, not a file test); or the guard's remedy should say when it cannot clear a `retained` row.
+
+`300cb29ea`. `foreign_writer` in `scripts/post-index-change-stage-log.sh` now asks a second question after `write_in_head`: `write_absent_from_index`. A live write names its writer only while the version STAGED for the path holds some of the write's text. The probes are the same lines `write_in_head` uses, now printed by one shared function, `write_probes`.
+
+The test stays conservative. The write stays the peer's when the call has no distinctive line (under 16 characters), when ANY probe line is in the staged blob, and when the path is not in the index (a staged deletion).
+
+The cause was measured, not guessed. The peer's `new_string` was `response["stdout_total"] = json!(cut.shown);` (tool_calls 239423 and 239437). That line is in neither `HEAD` nor `421b0f896`, where line 1461 reads `stdout_shown`. So the write stayed live for its three-day window, and the file-level lookup named the peer. Re-adding the pair could not clear it because `foreign_writer` runs again on every add and answers the same.
 
 ## Tests added
-N/A: not fixed.
+
+`tests/hooks-discrimination.sh` section 27, cases 27a to 27e. Red first: on the old code only 27a failed (owner and route). Suite 429 of 429.
+
+| Mutant | Killed by |
+|---|---|
+| drop the `write_absent_from_index` call | 27a |
+| drop the `return 1` that guards the staged `git show` | 27e |
+| the probe loop always says absent | 27b, 27c and 22 cases of section 24 |
+
+Survives, and is equivalent: the `[ -n "$probes" ] || return 1` guard in `write_absent_from_index`. With no probe, the loop reads one empty line and `grep -F ""` matches it, which gives the same answer. I kept it as an explicit line.
+
+Gate: run in a clean detached worktree at `HEAD` with only these two files copied in, exit 0 (5476 and 8192 lib tests, no failure). The shared tree's own gate run was red on a peer's uncommitted `src/usage/` change that does not compile (`MeasurementLinkage` missing `attribution_ms` and `attribution_outcome`).
 
 ## Workarounds
 Commit with `--no-verify` after checking by hand: `rustfmt --check`, the staged diff equals the worktree diff, no peer commit touched the file. Only with the operator's explicit approval.
 
 ## Resume
-- Reproduce: edit a file in session A, revert it, then edit and stage it in session B and commit by pathspec.
-- Trace why the `retained` row survives a reset and add.
-- Decide the content test or the changed remedy text.
+
+Fixed in `300cb29ea`. Not yet seen on the real index (see `unverified`). Left open by design: a write whose text IS in the staged blob but was written by a peer in an earlier, since-reverted pass still names that peer, because text equality cannot tell the two apart.
+
+## Fix provenance
+
+- **SHA:** `300cb29ea` (`experiments`)
+- **patch-id:** `ecc5728d0784f0984b642898f6e80a20661d1366`
 
 ## References
 - `docs/issues/2026-10-31-eight-lib-tests-fail-under-16-to-1-cpu-oversubscription-through-wall-clock-windows.md` (the commit that was refused)
