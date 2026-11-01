@@ -18,17 +18,21 @@
 use std::cell::RefCell;
 
 /// How the engine ended. NULL in the column (no value recorded) means it did not start:
-/// a green command, the opt-out, or a red with no diagnostic text.
+/// exit 0 with nothing failure-shaped in the output, or the opt-out. Any NON-ZERO exit starts
+/// the engine whatever the text says, so a failed `ls` or a `grep` with no match is `Silent`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Outcome {
-    /// The engine finished and printed a hint.
+    /// The engine finished and printed a hint: any text other than its own failure notice.
     Hinted,
-    /// The engine finished and printed nothing. This covers an early exit (no dirty file
-    /// named, about 0.1 s) and a full scan with no output; `attribution_ms` separates them.
+    /// The engine finished and printed nothing. That covers a clean tree, a red that names no
+    /// path, a red whose named paths are not dirty (each an early exit of about 0.1 s), and a
+    /// full scan with no output. A non-zero exit starts the engine whatever the text says, so a
+    /// failed `ls` or a `grep` with no match lands here too. `attribution_ms` separates the cases.
     Silent,
     /// The ceiling passed before the engine finished. The response says nothing.
     TimedOut,
-    /// The engine exited non-zero, or the wait on it failed.
+    /// The engine exited non-zero, or the wait on it failed, or it exited 0 with its own
+    /// failure notice ("red attribution is unavailable").
     ToolingFailure,
     /// The engine could not be extracted or spawned.
     SpawnFailed,

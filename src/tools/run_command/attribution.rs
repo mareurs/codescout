@@ -423,13 +423,23 @@ fn materialize_into(base: &Path) -> Option<PathBuf> {
     Some(dir.join(EMBEDDED_SCRIPTS[0].0))
 }
 
+/// The opening words of the engine's own failure notice, shared by [`engine_outcome`] (which
+/// builds one when the engine crashes) and [`finished_outcome`] (which must also recognise the
+/// one `scripts/attribute-red.py` prints and exits 0 on when `file-provenance.py` cannot be
+/// imported). The script's copy is a Python string; a test keeps the two in step.
+const ENGINE_UNAVAILABLE_PREFIX: &str = "[codescout] red attribution is unavailable";
+
 /// How a FINISHED engine process is filed in `usage.db`'s `attribution_outcome`.
 ///
 /// Pure, and keyed on the exit status rather than on the text: a crash is a tooling failure
 /// whatever it printed, and silence from a crash must never be filed as `silent`. `answer` is
 /// what [`engine_outcome`] returned for the same process.
 fn finished_outcome(success: bool, answer: &Option<String>) -> Outcome {
-    if !success {
+    if !success
+        || answer
+            .as_deref()
+            .is_some_and(|text| text.trim_start().starts_with(ENGINE_UNAVAILABLE_PREFIX))
+    {
         Outcome::ToolingFailure
     } else if answer.is_some() {
         Outcome::Hinted
@@ -464,7 +474,7 @@ fn engine_outcome(
             None => "was ended by a signal".to_string(),
         };
         return Some(format!(
-            "[codescout] red attribution is unavailable: its helper {how} ({cause}). \
+            "{ENGINE_UNAVAILABLE_PREFIX}: its helper {how} ({cause}). \
              This is a tooling failure, NOT evidence that the red is nobody's."
         ));
     }
@@ -1755,6 +1765,76 @@ mod tests {
         let bare = wip_author_diagnostic_with(101, red, dir.path(), &env).await;
         assert!(recorded.is_some(), "the scoped call must have recorded");
         assert_eq!(scoped, bare, "a hint must read the same with a recorder");
+    }
+
+    /// A NON-ZERO exit starts the engine whatever the text says: stage 0 skips only `exit 0`
+    /// with nothing failure-shaped. So a failed `ls` or a `grep` with no match lands as
+    /// `silent`, never as NULL. The column's first docs said a red with no diagnostic text
+    /// records nothing; a production row (`ls` on a missing file, exit 2, `silent`, 145 ms)
+    /// showed the opposite, and this pins what is true.
+    #[tokio::test]
+    async fn a_non_zero_exit_with_plain_text_starts_the_engine_and_records_silent() {
+        let Some(dir) = dirty_fixture_repo() else {
+            eprintln!("skipping: git unavailable");
+            return;
+        };
+        if !python3_present() {
+            eprintln!("skipping: python3 absent");
+            return;
+        }
+        let plain = "ls: cannot access 'nope': No such file or directory\n";
+        assert!(
+            !names_a_diagnostic(plain),
+            "the fixture must carry nothing failure-shaped, or this test proves nothing"
+        );
+        let (_history, env) = no_history();
+        let (got, recorded) =
+            with_attribution_sink(wip_author_diagnostic_with(2, plain, dir.path(), &env)).await;
+        assert!(
+            got.is_none(),
+            "plain text names no dirty file; got: {got:?}"
+        );
+        assert_eq!(
+            recorded.map(|r| r.outcome),
+            Some(Outcome::Silent),
+            "a non-zero exit starts the engine, so the row must say so"
+        );
+    }
+
+    /// The engine's own exit-0 failure notice is a tooling failure, not a hint. When
+    /// `file-provenance.py` cannot be imported, `attribute-red.py` prints that notice and exits
+    /// 0, so the exit status alone says "success". Filing it as `hinted` would report hints
+    /// flowing while the engine is broken, which is the 2026-10-14 failure class. Text that only
+    /// MENTIONS the words later on stays a hint.
+    #[test]
+    fn the_engines_own_failure_notice_is_filed_as_tooling_failure() {
+        let notice = Some(format!(
+            "{ENGINE_UNAVAILABLE_PREFIX}: file-provenance.py could not be imported (boom). \
+             This is a tooling failure, NOT evidence that the red is nobody's."
+        ));
+        assert_eq!(finished_outcome(true, &notice), Outcome::ToolingFailure);
+        let padded = Some(format!("\n{}", notice.as_deref().unwrap()));
+        assert_eq!(finished_outcome(true, &padded), Outcome::ToolingFailure);
+        let hint = Some(format!(
+            "\n[codescout] this failure names files with UNCOMMITTED changes:\n  \
+             src/a.rs mentions: {ENGINE_UNAVAILABLE_PREFIX}"
+        ));
+        assert_eq!(finished_outcome(true, &hint), Outcome::Hinted);
+    }
+
+    /// The Rust classifier and the engine must agree on the notice's opening words. The
+    /// engine's copy is a Python string, so only a test notices one side changing.
+    #[test]
+    fn the_engine_script_still_opens_its_failure_notice_with_the_shared_prefix() {
+        let script = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/attribute-red.py"
+        ));
+        assert!(
+            script.contains(ENGINE_UNAVAILABLE_PREFIX),
+            "scripts/attribute-red.py no longer contains {ENGINE_UNAVAILABLE_PREFIX:?}: update the \
+             constant and `finished_outcome` together"
+        );
     }
 
     /// A helper that CRASHED is a tooling failure, and it must not read as "nothing to say".

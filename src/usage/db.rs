@@ -265,14 +265,19 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     // on purpose (a missing hint must never read as "nobody wrote it"), so these columns are the
     // only place a reader can tell a scan that ran out of time from a red that named no dirty file.
     //
-    // - NULL in both — the engine did not start: a green command, the opt-out, or a red with no
-    //   diagnostic text. Also every row written before this migration.
-    // - `attribution_outcome` is one of `hinted` (the engine printed a hint), `silent` (it
-    //   finished and printed nothing: an early exit when no dirty file is named, or a full scan
-    //   with no output), `timed_out` (the ceiling passed first), `tooling_failure` (it exited
-    //   non-zero, or the wait on it failed) or `spawn_failed` (it could not be extracted or spawned).
-    // - `attribution_ms` is the wall time from the first engine step to the end of the wait. It
-    //   is what separates a 0.1 s `silent` from a 14 s one, and it shows the margin to the ceiling.
+    // - NULL in both — the engine did not start: exit 0 with nothing failure-shaped in the
+    //   output, or the opt-out. Any NON-ZERO exit starts the engine whatever the text says. Also
+    //   every row written before this migration.
+    // - `attribution_outcome` is one of `hinted` (the engine printed a hint: any text other than
+    //   its own failure notice), `silent` (it finished and printed nothing: a clean tree, a red
+    //   that names no path, a red whose named paths are not dirty, or a full scan with no output;
+    //   a failed `ls` or a `grep` with no match lands here), `timed_out` (the ceiling passed
+    //   first), `tooling_failure` (it exited non-zero, the wait on it failed, or it exited 0 with
+    //   its own "red attribution is unavailable" notice) or `spawn_failed` (it could not be
+    //   extracted or spawned).
+    // - `attribution_ms` is the wall time from the first engine step to the end of the wait,
+    //   which includes writing the red text to the engine's stdin. It is what separates a 0.1 s
+    //   `silent` from a 14 s one, and it shows the margin to the ceiling.
     //
     // A value says what the ENGINE did. It never says who wrote a file.
     // Mechanism: `src/usage/attribution_outcome.rs`.

@@ -24,7 +24,7 @@
 ## Review Focus
 
 1. **Response bytes.** A timed-out or hinted call returns the same value with the sink in scope and out of scope. Pinned in Task 3.
-2. **NULL is not `silent`.** A green command, an opt-out and a red with no diagnostic text start no engine and record nothing. Pinned in Task 3.
+2. **NULL is not `silent`.** A green command (exit 0, nothing failure-shaped) and an opt-out start no engine and record nothing. A non-zero exit with plain text DOES start the engine and records `silent` (corrected after the final review: the first text said a red with no diagnostic text records nothing). Pinned in Task 3.
 3. **No leak between calls.** A row that recorded `timed_out` must not colour the next call's row. Pinned in Task 2.
 4. **Migration.** An old database opens, gains both columns, and a second open does not fail. Pinned in Task 2.
 5. **Concurrent calls.** Two calls in flight each keep their own value. Pinned in Task 1.

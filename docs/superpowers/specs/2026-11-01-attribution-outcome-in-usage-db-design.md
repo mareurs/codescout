@@ -28,7 +28,7 @@ One new task-local sink, built on the pattern of `usage::observed` (`OBSERVED_SI
 
 - New module `src/usage/attribution_outcome.rs`, shaped like `observed.rs`: a sink, and `record(outcome, elapsed_ms)` that replaces any earlier value and does nothing outside a scope.
 - Two new nullable columns on `tool_calls`, added by the same probe-and-`ALTER` that `open_db` uses for `observed_changed` (`SELECT … LIMIT 0`, then `ALTER TABLE … ADD COLUMN`):
-  - `attribution_outcome TEXT`: one of `hinted`, `silent`, `timed_out`, `tooling_failure`, `spawn_failed`. NULL means the engine did not start (green command, opt-out, no diagnostic text).
+  - `attribution_outcome TEXT`: one of `hinted`, `silent`, `timed_out`, `tooling_failure`, `spawn_failed`. NULL means the engine did not start (exit 0 with nothing failure-shaped in the output, or the opt-out; any non-zero exit starts it, whatever the text says — corrected after the final review).
   - `attribution_ms INTEGER`: wall time from spawn to the end of the wait.
 - `wip_author_diagnostic_in` calls `record` at each exit after the spawn. The `timed_out` branch also logs `tracing::warn!` with the ceiling and the elapsed time.
 - `usage/mod.rs` scopes the sink and passes the drained value down to `write_record` through `MeasurementLinkage`, as `observed_changed` does.
