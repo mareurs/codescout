@@ -34,7 +34,7 @@ which command they justify.
 > It scopes to the run beginning ``**Run `./scripts/gate.sh``` and ending `before completing any task.**`,
 > then asserts the four backtick-delimited commands appear in ascending byte order *within that
 > slice*. Its own panic message reads: *"if it moved, move this test with it — do not delete it."*
-> Two traps it is shaped around: `cargo test --workspace` is a **prefix** of the lean form, so a
+> Two traps it is shaped around: `cargo nextest run --workspace` is a **prefix** of the lean form, so a
 > bare-substring index finds the wrong lane; and both forms appear several times in surrounding
 > prose, so any whole-file index is arbitrary.
 
@@ -101,8 +101,10 @@ short-circuited.
 on the chain to surface them:
 
 ```
-cargo test --workspace --no-default-features 2>&1; echo "===LEAN exit $?==="
-cargo test --workspace                       2>&1; echo "===DEFAULT exit $?==="
+cargo nextest run --workspace --no-default-features --no-fail-fast 2>&1; echo "===LEAN exit $?==="
+cargo test --workspace --doc --no-default-features                 2>&1; echo "===LEAN doc exit $?==="
+cargo nextest run --workspace --no-fail-fast                       2>&1; echo "===DEFAULT exit $?==="
+cargo test --workspace --doc                                       2>&1; echo "===DEFAULT doc exit $?==="
 ```
 
 This does not weaken the gate: nothing is being committed on a red either way, and the change
@@ -138,7 +140,7 @@ Measured 2026-08-27: ten task gates, ten task reviews and a whole-branch review 
 
 ## Why the lean lane exists at all
 
-The lean `cargo test --workspace --no-default-features` is there for the same reason one command
+The lean `cargo nextest run --workspace --no-default-features` is there for the same reason one command
 over: every other gate command runs **with** default features, so an unconditional module reaching a
 `#[cfg(feature = "librarian")]` one compiles clean locally and fails only in CI's `no-features`
 *test-matrix* lane — the slow 3-OS job, not the fast clippy job, which never runs that config at
@@ -238,6 +240,22 @@ set-difference, **0** tests present in bare and absent from workspace (4924 → 
 warm (23.5s → 26.1s, two runs each, stable), so the gate is still four commands; that `+2.6s` is the
 default lane **alone**, not the gate total — the whole gate measures 71.8s in the pre-reorder order
 and 80.4s reordered.
+
+## Why the test lanes run nextest, and why each has a doctest step
+
+Both test lanes run `cargo nextest run`, not `cargo test`, since 2026-11-01. Measurements are in codescout memory `research/gate-speed-20261101`. The sections above and below name `cargo test` where they describe the command of their date; the live commands are in `CLAUDE.md` and `scripts/gate.sh`.
+
+**Why.** The default lane's lib unit tests (8192 tests) took 72–80 s under nextest and 369–575 s under libtest, on the same binary and the same machine (64 cores, other sessions running; load medians 21–44). libtest runs every test as a thread of one process. In the one run measured for CPU split, that process used 776.5 s of user time and 6006.8 s of kernel time, so 88.5% of its CPU was in the kernel. The same tests under nextest used 1074.3 s of user time and 279.5 s of kernel time. The cause of the kernel time is not proven. The best candidate is contention on the process's memory lock while 64 threads fault pages and create thread stacks. One alternative is refuted: setting the glibc malloc thresholds so that malloc keeps its memory made the run worse (999.6 s).
+
+**What it does not show.** Nothing here shows the gain on a runner with few cores. CI has few cores, so its gain is probably much smaller than this machine's. CI runs nextest anyway so that the gate and CI run the tests the same way.
+
+**The doctest step.** nextest does not run doctests. Each test lane has a second command, `cargo test --workspace --doc` with the lane's feature flags. A lane is red when either command is red. The doctest step runs even when the nextest step is red (`;` and `||`, never `&&`, for the reason in the `&&` section above).
+
+**`--no-fail-fast`.** nextest's default stops at the first failed test. The old `cargo test` stopped only after the failed test binary, so it ran every test in that binary. The gate keeps every failure visible.
+
+**No retries, no fallback.** nextest can retry a failed test; no profile here sets `retries`, because a retry turns a flaky red into a green. If nextest is not installed, `gate.sh` exits 2 before the lease and prints `cargo install cargo-nextest --locked`. It does not fall back to libtest, because two machines would then run two different gates under one name.
+
+**The dev profile.** `build_id_of` (`src/retrieval/index_state.rs`) hashes the whole running test binary, about 402 MB, once per process. Under nextest each test is its own process, and with `sha2` at `opt-level = 0` the hash took 11.8 s. `[profile.dev.package.sha2] opt-level = 3` (`Cargo.toml`) cut `tools::config::tests::project_status_compact_shape` from 11.815 s to 0.564 s.
 
 ## Name the commands, never number them
 

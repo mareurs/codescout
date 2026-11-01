@@ -12,7 +12,7 @@ A line earns residency here only if a session that never opens another doc would
 
 ## Development Commands
 
-**Run `./scripts/gate.sh`: Python tests, then `./scripts/fmt-mine.sh`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test --workspace` in a `target/` leased for that run from a pool, before completing any task.** Use `--check` without identity; [context/modes](docs/conventions/harness-neutral-session-context.md). Targeted: `scripts/with-slot.sh cargo test …`. [Order and limits](docs/conventions/gate-ordering.md); the gate prints coverage limits. Release: `./scripts/rb.sh`, then `/mcp` (memory `development-commands`).
+**Run `./scripts/gate.sh`: Python tests, then `./scripts/fmt-mine.sh`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo nextest run --workspace --no-default-features`, `cargo nextest run --workspace` in a `target/` leased for that run from a pool, before completing any task.** Use `--check` without identity; [context/modes](docs/conventions/harness-neutral-session-context.md). Targeted: `scripts/with-slot.sh cargo test …`. [Order and limits](docs/conventions/gate-ordering.md); the gate prints coverage limits. Release: `./scripts/rb.sh`, then `/mcp` (memory `development-commands`).
 
 ## Testing Discipline — what a green suite is evidence for
 

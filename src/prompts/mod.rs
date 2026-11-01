@@ -3176,18 +3176,22 @@ mod tests {
     /// Two traps this test is shaped around, both measured against CLAUDE.md on
     /// 2026-08-31 rather than reasoned about:
     ///
-    /// 1. **Prefix collision.** `cargo test --workspace` is a prefix of
-    ///    `cargo test --workspace --no-default-features`, so a bare-substring
+    /// 1. **Prefix collision.** `cargo nextest run --workspace` is a prefix of
+    ///    `cargo nextest run --workspace --no-default-features`, so a bare-substring
     ///    `find()` for the default lane returns the LEAN lane's offset. An ordering
     ///    assertion built that way compares the lean lane against itself — `n < n`,
     ///    which fails on a correct file, or passes unconditionally if written the
     ///    other way round. Either way it never tests the order. The needles below
     ///    are backtick-DELIMITED; the closing backtick is what discriminates them.
-    /// 2. **Repeated mentions.** File-wide, `cargo test --workspace` matches 4
-    ///    times and the lean form 3, because the prose after the directive
-    ///    discusses both at length. Any whole-file index read is therefore
-    ///    arbitrary. So this scopes to the directive sentence FIRST, then asserts
-    ///    order within that slice.
+    ///    (Written for `cargo test --workspace` on 2026-08-31; the gate's test lanes
+    ///    moved to nextest on 2026-11-01 and the trap is the same shape.)
+    /// 2. **Repeated mentions.** File-wide, `cargo nextest run --workspace` matches 2
+    ///    times and the lean form once, measured on CLAUDE.md on 2026-11-01. On
+    ///    2026-08-31, when the file was 33,646 bytes, the counts were 4 and 3, because
+    ///    the prose after the directive discussed both at length. The file is pointers
+    ///    now, but prose can return, and any whole-file index read is arbitrary. So
+    ///    this scopes to the directive sentence FIRST, then asserts order within that
+    ///    slice.
     ///
     /// Mutations it must die on, all demonstrated rather than assumed:
     /// swapping the last two commands (ordering assertion), deleting the
@@ -3238,8 +3242,8 @@ mod tests {
         const GATE: [&str; 4] = [
             "`./scripts/fmt-mine.sh`",
             "`cargo clippy --workspace --all-targets --features local-embed -- -D warnings`",
-            "`cargo test --workspace --no-default-features`",
-            "`cargo test --workspace`",
+            "`cargo nextest run --workspace --no-default-features`",
+            "`cargo nextest run --workspace`",
         ];
 
         let mut cursor = 0usize;

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run the light Python lane and four Rust commands in a `target/` LEASED for this run, so the
+# Run the light Python lane and the Rust lanes (clippy, then for each of the lean and default test lanes a
+# nextest run and a doctest run) in a `target/` LEASED for this run, so the
 # lane cannot be corrupted by — or corrupt — another session sharing this checkout.
 #
 # WHY THIS EXISTS, and why ordering the lanes correctly is not enough.
@@ -67,6 +68,15 @@ ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "gate.sh: not inside
 cd "$ROOT" || exit 2
 ROOT=$(pwd -P)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# nextest runs both test lanes (docs/conventions/gate-ordering.md, "Why the test lanes run nextest").
+# The check comes before the formatter context, the lease and every lane, and there is NO fallback to
+# `cargo test`: a gate that silently ran libtest on one machine and nextest on another would be two
+# different gates under one name. `cargo nextest --version` is a subcommand lookup, not a lane.
+cargo nextest --version >/dev/null 2>&1 || {
+    echo "gate.sh: cargo-nextest is not installed, and the gate's test lanes need it (no fallback to libtest)." >&2
+    echo "gate.sh: install it with: cargo install cargo-nextest --locked" >&2
+    exit 2
+}
 if [ -n "$EXCLUSIVE" ]; then
     python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); raise SystemExit(0 if p.is_absolute() and p.resolve(strict=True)==pathlib.Path(sys.argv[2]) else 2)' "$EXCLUSIVE" "$ROOT" || {
         echo "gate.sh: exclusive declaration must match the actual Git root" >&2; exit 2;
@@ -177,11 +187,20 @@ T_FMT=$((SECONDS - T_PREV)); T_PREV=$SECONDS
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 CLIPPY=$?
 T_CLIPPY=$((SECONDS - T_PREV)); T_PREV=$SECONDS
-cargo test --workspace --no-default-features
+cargo nextest run --workspace --no-default-features --no-fail-fast
 LEAN=$?
+# nextest does not run doctests, so each test lane has a second command. A lane is red when EITHER is:
+# the nextest exit wins when it is non-zero, else the doctest exit is the lane's. `;` and `||` only,
+# never `&&` (see the heredoc above): the doctest step must run even when the nextest step is red.
+cargo test --workspace --doc --no-default-features
+LEAN_DOC=$?
+[ "$LEAN" -ne 0 ] || LEAN=$LEAN_DOC
 T_LEAN=$((SECONDS - T_PREV)); T_PREV=$SECONDS
-cargo test --workspace
+cargo nextest run --workspace --no-fail-fast
 DEFAULT=$?
+cargo test --workspace --doc
+DEFAULT_DOC=$?
+[ "$DEFAULT" -ne 0 ] || DEFAULT=$DEFAULT_DOC
 T_DEFAULT=$((SECONDS - T_PREV))
 T_TOTAL=$((SECONDS - GATE_T0))
 

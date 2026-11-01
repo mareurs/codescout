@@ -151,11 +151,14 @@ def gate_fixture(tmp_path):
     cargo = commands / "cargo"
     cargo.write_text(
         "#!/usr/bin/env bash\n"
+        # The presence check is a subcommand lookup, not a lane: answered first, never recorded.
+        "if [ \"$1\" = nextest ] && [ \"${2:-}\" = --version ]; then [ -z \"${NO_NEXTEST:-}\" ]; exit $?; fi\n"
         "echo \"cargo $*\" >> \"$CALLS\"\n"
         "echo \"$CARGO_TARGET_DIR\" >> \"$TARGETS\"\n"
         "lane=default\n"
         "[ \"$1\" = clippy ] && lane=clippy\n"
         "case \"$*\" in *--no-default-features*) lane=lean ;; esac\n"
+        "case \"$*\" in *--doc*) lane=$lane-doc ;; esac\n"
         "if [ \"$lane\" = default ] && [ -n \"${HOLD_DEFAULT:-}\" ]; then\n"
         "  touch \"$DEFAULT_STARTED\"\n"
         "  while [ -e \"$HOLD_DEFAULT\" ]; do sleep 0.05; done\n"
@@ -191,20 +194,27 @@ def run_gate_fixture(fixture, *args, **changes):
                           env=env | changes, text=True, capture_output=True, timeout=30)
 
 
-def assert_gate_calls(root, fmt_args=None):
+def assert_gate_calls(root, fmt_args=None, interrupted=False):
     expected = ["python3 ./scripts/python-tests.py --lane light"]
     if fmt_args is not None:
         expected.append("fmt " + fmt_args)
     expected += [
         "cargo clippy --workspace --all-targets --features local-embed -- -D warnings",
-        "cargo test --workspace --no-default-features",
-        "cargo test --workspace",
+        "cargo nextest run --workspace --no-default-features --no-fail-fast",
+        "cargo test --workspace --doc --no-default-features",
+        "cargo nextest run --workspace --no-fail-fast",
+        "cargo test --workspace --doc",
     ]
+    # An interrupted gate stops when the command it was inside returns: bash runs the TERM trap's
+    # `exit 143` only after that foreground command, so the doctest step after it never starts.
+    if interrupted:
+        expected = expected[:-1]
     assert (root / "calls.txt").read_text().splitlines() == expected
-    assert (root / "targets.txt").read_text().splitlines() == [str(root / "target")] * 3
+    cargo_calls = 4 if interrupted else 5
+    assert (root / "targets.txt").read_text().splitlines() == [str(root / "target")] * cargo_calls
 
 
-@pytest.mark.parametrize("failed_lane", ["none", "python", "fmt", "clippy", "lean", "default"])
+@pytest.mark.parametrize("failed_lane", ["none", "python", "fmt", "clippy", "lean", "lean-doc", "default", "default-doc"])
 @pytest.mark.parametrize("mode", ["claude-code", "codex", "check"])
 def test_gate_runs_every_lane_and_keeps_default_cargo_last(tmp_path, failed_lane, mode):
     fixture = gate_fixture(tmp_path)
@@ -218,8 +228,10 @@ def test_gate_runs_every_lane_and_keeps_default_cargo_last(tmp_path, failed_lane
     assert_gate_calls(root, "--check" if mode == "check" else "")
     assert result.returncode == (0 if failed_lane == "none" else 1), result.stderr
     fields = {"PYTHON_LIGHT": "python", "FMT": "fmt", "CLIPPY": "clippy", "LEAN": "lean", "DEFAULT": "default"}
+    # A lane's doctest step belongs to that lane: its failure turns the lane's own field red.
+    failed_field_lane = failed_lane.removesuffix("-doc")
     for field, lane in fields.items():
-        assert f"{field}={1 if failed_lane == lane else 0}" in result.stdout
+        assert f"{field}={1 if failed_field_lane == lane else 0}" in result.stdout
     state = ("differences" if mode == "check" else "ownership-refused") if failed_lane == "fmt" else "passed"
     assert f"FMT_STATE={state}" in result.stdout
     if mode != "check":
@@ -229,6 +241,27 @@ def test_gate_runs_every_lane_and_keeps_default_cargo_last(tmp_path, failed_lane
         assert record["context"]["harness"] == mode
         assert not Path(record["path"]).is_relative_to(root)
         assert not Path(record["path"]).exists()
+def test_gate_lane_is_red_when_only_its_doctests_fail(tmp_path):
+    # nextest does not run doctests, so each test lane has a second command. A green nextest run
+    # followed by a red doctest run must still turn the lane red, and the other lane must still run.
+    fixture = gate_fixture(tmp_path)
+    root, env = fixture
+    env["CODEX_SESSION_ID"] = "runner-gate-fixture"
+    result = run_gate_fixture(fixture, FAILED_LANE="lean-doc")
+    assert_gate_calls(root, "")
+    assert result.returncode == 1, result.stderr
+    assert "LEAN=1" in result.stdout and "DEFAULT=0" in result.stdout
+
+
+def test_gate_without_nextest_exits_2_before_any_lane(tmp_path):
+    # No fallback to libtest: a gate that ran `cargo test` on one machine and nextest on another
+    # would be two gates under one name. The check comes before every lane and before the lease.
+    fixture = gate_fixture(tmp_path)
+    result = run_gate_fixture(fixture, NO_NEXTEST="1")
+    assert result.returncode == 2
+    assert "cargo install cargo-nextest --locked" in result.stderr
+    assert not (tmp_path / "calls.txt").exists()
+    assert not (tmp_path / "format-called").exists()
 
 
 @pytest.mark.parametrize("context", ["missing", "conflicting", "unsupported"])
@@ -318,7 +351,7 @@ def test_interrupted_gate_cleans_private_context_snapshot(tmp_path):
         process.communicate(timeout=10)
         assert process.returncode == 143
         assert not snapshot.exists()
-        assert_gate_calls(root, "")
+        assert_gate_calls(root, "", interrupted=True)
     finally:
         hold.unlink(missing_ok=True)
         if process.poll() is None:

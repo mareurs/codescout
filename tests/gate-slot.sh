@@ -95,8 +95,11 @@ chmod +x "$WORK/repo/scripts/fmt-mine.sh"
 cat > "$WORK/bin/cargo" <<'EOF'
 #!/usr/bin/env bash
 tag="${GATE_TEST_TAG:?}"; w="${GATE_TEST_WORK:?}"
+# The nextest presence check is a subcommand lookup that gate.sh runs BEFORE the lease, so it is
+# neither a lane nor a leased call: recording it would make the first line of seen-<tag> `<unset>`.
+[ "$1 ${2:-}" = "nextest --version" ] && exit 0
 echo "${CARGO_TARGET_DIR:-<unset>}" >> "$w/seen-$tag"
-if [ -e "$w/hold-$tag" ] && [ ! -e "$w/started-$tag" ] && { [ "${GATE_TEST_HOLD_DEFAULT:-0}" != 1 ] || [ "$*" = "test --workspace" ]; }; then
+if [ -e "$w/hold-$tag" ] && [ ! -e "$w/started-$tag" ] && { [ "${GATE_TEST_HOLD_DEFAULT:-0}" != 1 ] || [ "$*" = "nextest run --workspace --no-fail-fast" ]; }; then
     echo $$ > "$w/worker-$tag.pid"
     # The stub's parent IS the gate's bash. `$!` in the suite is only a wrapper subshell.
     echo "$PPID" > "$w/gate-$tag.pid"
@@ -153,8 +156,8 @@ hold_lock() {
 echo "A. an empty pool leases slot-0 for the whole run"
 run_gate a sid-a
 eq "first run leases slot-0" "$(first_seen a)" "$POOL/slot-0"
-eq "the stub was reached once per cargo lane" "$(wc -l < "$WORK/seen-a" | tr -d ' ')" "3"
-eq "all three cargo lanes share ONE target dir" "$(sort -u "$WORK/seen-a" | wc -l | tr -d ' ')" "1"
+eq "the stub was reached once per cargo command" "$(wc -l < "$WORK/seen-a" | tr -d ' ')" "5"
+eq "all five cargo commands share ONE target dir" "$(sort -u "$WORK/seen-a" | wc -l | tr -d ' ')" "1"
 # The remedy for bug 097aa5ca2222a91d has to sit where the path appears, or the path
 # stays the invitation.
 eq "the printed path names the leased way to reuse it" "$(grep -c 'scripts/with-slot.sh' "$WORK/out-a")" "1"
