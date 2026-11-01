@@ -2408,6 +2408,128 @@ struct Point {
         assert!(result.is_err());
     }
 
+    /// What `poll_until_nonempty` learned: the answer, and how many requests hit the ceiling.
+    #[derive(Debug)]
+    struct Polled<T> {
+        found: Vec<T>,
+        timeouts: u32,
+    }
+
+    /// Calls `query` until it answers with something, or `attempts` calls have run.
+    ///
+    /// A server that is still indexing answers empty, and under CPU load one request can pass
+    /// the 30 s ceiling instead (bug 20927ccfe293c34e). Both mean "not ready yet". The first
+    /// `max_timeouts` timeouts are retried and counted in `Polled::timeouts`; the next one is
+    /// returned as an error, so a server that never answers is not hidden. Any other error is
+    /// returned at once. Kept apart from the rust-analyzer test so these three rules run
+    /// without a language server.
+    async fn poll_until_nonempty<T, F, Fut>(
+        attempts: u32,
+        pause: std::time::Duration,
+        max_timeouts: u32,
+        mut query: F,
+    ) -> Result<Polled<T>>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<Vec<T>>>,
+    {
+        let mut found = Vec::new();
+        let mut timeouts = 0;
+        for _ in 0..attempts {
+            match query().await {
+                Ok(answer) => {
+                    found = answer;
+                    if !found.is_empty() {
+                        break;
+                    }
+                }
+                Err(e) if e.to_string().contains("timed out") && timeouts < max_timeouts => {
+                    timeouts += 1;
+                }
+                Err(e) => return Err(e),
+            }
+            tokio::time::sleep(pause).await;
+        }
+        Ok(Polled { found, timeouts })
+    }
+
+    /// A scripted answer for `poll_until_nonempty`: the server's reply to each successive call.
+    fn scripted(
+        replies: Vec<Result<Vec<u32>>>,
+    ) -> (
+        std::sync::Arc<std::sync::atomic::AtomicU32>,
+        impl FnMut() -> std::future::Ready<Result<Vec<u32>>>,
+    ) {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let seen = calls.clone();
+        let mut replies = replies.into_iter();
+        let query = move || {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::future::ready(replies.next().expect("the script ran out of replies"))
+        };
+        (calls, query)
+    }
+
+    /// The error `LspClient::request` returns when the 30 s ceiling passes, built the same way.
+    fn request_timeout() -> anyhow::Error {
+        RecoverableError::with_hint(
+            "LSP request timed out after 30s: workspace/symbol",
+            "The server did not respond in time.",
+        )
+        .into()
+    }
+
+    #[tokio::test]
+    async fn a_timeout_is_retried_and_counted() {
+        let (calls, query) = scripted(vec![Err(request_timeout()), Ok(vec![]), Ok(vec![7])]);
+        let polled = poll_until_nonempty(5, std::time::Duration::ZERO, 2, query)
+            .await
+            .expect("one timeout is within the allowance");
+        assert_eq!(polled.found, vec![7]);
+        assert_eq!(
+            polled.timeouts, 1,
+            "the timeout must be counted, not silent"
+        );
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn a_third_timeout_fails_so_a_silent_server_is_not_hidden() {
+        let (calls, query) = scripted(vec![
+            Err(request_timeout()),
+            Err(request_timeout()),
+            Err(request_timeout()),
+        ]);
+        let err = poll_until_nonempty(5, std::time::Duration::ZERO, 2, query)
+            .await
+            .expect_err("a third timeout must fail the poll");
+        assert!(err.to_string().contains("timed out"), "got: {err:#}");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn an_error_that_is_not_a_timeout_fails_at_once() {
+        let (calls, query) = scripted(vec![Err(anyhow::anyhow!(
+            "LSP error (code -32603): internal error"
+        ))]);
+        let err = poll_until_nonempty(5, std::time::Duration::ZERO, 2, query)
+            .await
+            .expect_err("an internal error is not 'not ready yet'");
+        assert!(err.to_string().contains("internal error"), "got: {err:#}");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn an_answer_that_stays_empty_uses_every_attempt_and_reports_empty() {
+        let (calls, query) = scripted(vec![Ok(vec![]), Ok(vec![]), Ok(vec![])]);
+        let polled = poll_until_nonempty(3, std::time::Duration::ZERO, 2, query)
+            .await
+            .expect("empty answers are not errors");
+        assert!(polled.found.is_empty());
+        assert_eq!(polled.timeouts, 0);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
     #[tokio::test]
     async fn workspace_symbols_returns_project_symbols() {
         if !rust_analyzer_available() {
@@ -2449,29 +2571,21 @@ struct Point {
         // runner is the difference, not a logic fault, so widen the budget rather
         // than skip the test and lose Windows coverage of workspace/symbol.
         let attempts = if cfg!(windows) { 120 } else { 30 };
-        let mut symbols = vec![];
-        // A timeout of the 30 s request ceiling is treated as "not ready yet", like an
-        // empty answer. Under CPU load one workspace/symbol request did time out
-        // (bug 20927ccfe293c34e: 1 failure in 3 runs under 64 busy loops on 4 cores).
-        // Any other error still fails the test at once. A third timeout fails it too,
-        // so a server that never answers is not hidden.
-        let mut timeouts = 0;
-        for _ in 0..attempts {
-            match client.workspace_symbols("add").await {
-                Ok(found) => {
-                    symbols = found;
-                    if !symbols.is_empty() {
-                        break;
-                    }
-                }
-                Err(e) if e.to_string().contains("timed out") && timeouts < 2 => {
-                    timeouts += 1;
-                }
-                Err(e) => panic!("workspace/symbol 'add' failed: {e:#}"),
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let polled =
+            poll_until_nonempty(attempts, std::time::Duration::from_millis(500), 2, || {
+                client.workspace_symbols("add")
+            })
+            .await
+            .unwrap_or_else(|e| panic!("workspace/symbol 'add' failed: {e:#}"));
+        // Visible when the test fails or under `--nocapture`: a pass that needed a retry
+        // otherwise looks the same as a pass that did not.
+        if polled.timeouts > 0 {
+            eprintln!(
+                "workspace/symbol 'add': {} request(s) passed the ceiling before it answered",
+                polled.timeouts
+            );
         }
-
+        let symbols = polled.found;
         assert!(
             !symbols.is_empty(),
             "workspace/symbol 'add' should return results within the retry budget"
