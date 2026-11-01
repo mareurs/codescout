@@ -438,7 +438,7 @@ fn a_nested_independent_checkout_is_walked_through_not_reported() {
 /// ended: measured on 2026-11-01, a copy of this walk passed 1.43 million directories in 60 s
 /// against 19,340 without links, and the gate's `cargo test --workspace` sat in the two tests
 /// above for over 30 minutes.
-/// docs/issues/2026-11-01-config-propagation-worktree-walk-follows-directory-symlinks-and-never-ends.md
+/// docs/issues/archive/2026-11-01-config-propagation-worktree-walk-follows-directory-symlinks-and-never-ends.md
 ///
 /// The fixture is a link back to the root. Followed, it re-enters the root at every level until
 /// the path is too long to open, so the failure is the worktree reported many times over rather

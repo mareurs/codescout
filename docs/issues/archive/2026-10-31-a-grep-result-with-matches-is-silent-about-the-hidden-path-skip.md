@@ -1,7 +1,7 @@
 ---
-id: e313cba4b1d3d738
+id: 80fee58db6c3a95d
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a grep result with matches is silent about the hidden-path skip, so a missing .github/ hit reads as absent'
 owners:
 - marius
@@ -11,8 +11,10 @@ tags:
 - completeness-warning
 - false-negative
 topic: grep completeness
+closed: 2026-11-01
 opened: 2026-10-31
 severity: medium
+unverified: 'Not yet seen live: the running codescout server predates 21229c864, so a real grep from this repo''s root was not checked for the note after a rebuild and /mcp.'
 ---
 
 # BUG: a grep result with matches is silent about the hidden-path skip, so a missing `.github/` hit reads as absent
@@ -68,11 +70,31 @@ The two results quoted under Symptom.
 
 ## Fix
 
-Not fixed. A likely shape: attach a short hidden-root note to every result whose walk pruned a hidden root entry that is not excluded (the `.git` and `.codescout` exclusions from `790e34f82ec93c1b` stay). The open design point is noise: most searches never need hidden paths, so the note must be short, for example one line naming the pruned directories.
+`21229c864`. A result with matches now carries `hidden_skipped`: one line naming up to four hidden root DIRECTORIES and the `include_hidden=true` remedy. `format_grep` prints it below the count header, in the same place as the zero warning. Both producers set it: the files-mode early return and the main tail.
+
+- The builder is `hidden_skip_note` in `src/tools/grep_hidden_note.rs`. It reuses the zero warning's two predicates, `WalkAudit::hidden_at_root` and `WalkAudit::globs_can_reach_a_root_dot_entry`, so the two halves agree on what was hidden and a glob anchored under a visible directory stays bare.
+- It is a separate key from `completeness_warning`, whose text opens with "this zero" and would be false on a non-zero result.
+- **Hidden files are left out**, unlike the zero warning. Nearly every repository has a root `.gitignore`, so counting dotfiles made the note ride almost every search. The first version did exactly that in its own bare-tree test. A pruned directory hides a whole subtree, which is the `.github/` case the note exists for.
+- On this repo the note still rides most searches from the root, because several hidden directories sit there (`.github/`, `.buddy/`, `.claude/` and more). That is the cost the record accepted: one short line.
+- Written as text edits, with the user's approval, while rust-analyzer's watcher spun on the `resident-private` symlinks (`35bcf086deeb7cbe`) and `edit_code` could not run. `edit_file` refuses new definitions, so the builder and its tests sit in `#[path]` modules beside `grep.rs`, the pattern `grep_route_path_tests.rs` already used.
 
 ## Tests added
 
-None yet. A test needs a tree with one visible match and one match under a hidden directory, and must assert the note on the non-zero result.
+`src/tools/grep_hidden_note_tests.rs`, two tests:
+
+- `a_result_with_matches_names_the_hidden_root_entries_it_skipped`: content and files mode both carry the note naming `.github/` and `include_hidden`, no `completeness_warning`, and the rendered text holds the note. Positive twin: `include_hidden=true` finds 2 matches and carries no note.
+- `a_result_with_matches_stays_bare_when_nothing_hidden_was_reachable`: a root with only `.git`, `.gitignore` and `.env`, and a glob anchored under `src/`.
+
+Red first: the first test failed on the missing key. Mutants with `scripts/mutation-probe.sh`, each killed:
+
+| Mutant | Killed by |
+|---|---|
+| drop the directories-only filter | the bare test |
+| drop the glob-reach check | the bare test |
+| drop the renderer line | the first test |
+| drop the files-mode producer | the first test |
+
+`cargo test --lib tools::grep::` 67 of 67. Gate: `PYTHON_LIGHT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, `FMT=1 ownership-refused` on one line of `grep_hidden_note_tests.rs`, which I then formatted; `rustfmt --check` passes on every file I touched. The gate was not rerun for that whitespace change.
 
 ## Workarounds
 
@@ -80,7 +102,12 @@ Pass `include_hidden=true` whenever the question is "where is X mentioned at all
 
 ## Resume
 
-Read the `completeness_warning` attachment sites in `src/tools/grep.rs`, then decide whether a non-zero result gets the same warning or a shorter note.
+Fixed in `21229c864`. Not yet seen on a rebuilt server (see `unverified`).
+
+## Fix provenance
+
+- **SHA:** `21229c864` (`experiments`)
+- **patch-id:** `deefcbd015a24aa55f1a7480bbfa9eeec21d0861`
 
 ## References
 

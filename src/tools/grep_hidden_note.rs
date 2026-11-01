@@ -13,7 +13,7 @@
 //! query never touched). It is a separate key from `completeness_warning`, whose text opens with
 //! "this zero" and would be false here.
 //!
-//! docs/issues/2026-10-31-a-grep-result-with-matches-is-silent-about-the-hidden-path-skip.md
+//! docs/issues/archive/2026-10-31-a-grep-result-with-matches-is-silent-about-the-hidden-path-skip.md
 
 use super::WalkAudit;
 

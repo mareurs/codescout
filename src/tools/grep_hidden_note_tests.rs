@@ -4,7 +4,7 @@
 //! workflow that is the only runner of the suite. The zero-match result already said so (its
 //! `completeness_warning`); these tests hold the non-zero half, `hidden_skipped`.
 //!
-//! docs/issues/2026-10-31-a-grep-result-with-matches-is-silent-about-the-hidden-path-skip.md
+//! docs/issues/archive/2026-10-31-a-grep-result-with-matches-is-silent-about-the-hidden-path-skip.md
 
 use super::*;
 use crate::agent::Agent;
