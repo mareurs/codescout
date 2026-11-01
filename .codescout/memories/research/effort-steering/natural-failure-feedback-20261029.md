@@ -1,7 +1,7 @@
 # Natural failure feedback diagnostic — 2026-10-29/30
 
 ## Current state
-COMPLETE, locally committed and sealed. R=/home/marius/work/claude/codescout/.codescout/resident-private/natural-failure-feedback-20261029. Worktree /tmp/codescout-real-task-20261024 branch research/checked-real-task-20261024 retained, clean after local commit60f912622083859217e5313797480fcdb32f1ac2, parentd291f9ed41bea1b8f7023dbb2bb8459ca6f1a667. Stable patch-id257ec1b377ae9607737658929416f1b8cf2e4b3a. Commit contains only public design/plan/report/tracker; no source changes, merge/push/global config/upstream publication. Trailer Codex-Session-Id01a15ca9-f939-7603-acb5-01c6b02f68e2.
+COMPLETE, locally committed and sealed. R=/home/marius/.cache/codescout-resident/codescout/natural-failure-feedback-20261029. Worktree /tmp/codescout-real-task-20261024 branch research/checked-real-task-20261024 retained, clean after local commit60f912622083859217e5313797480fcdb32f1ac2, parentd291f9ed41bea1b8f7023dbb2bb8459ca6f1a667. Stable patch-id257ec1b377ae9607737658929416f1b8cf2e4b3a. Commit contains only public design/plan/report/tracker; no source changes, merge/push/global config/upstream publication. Trailer Codex-Session-Id01a15ca9-f939-7603-acb5-01c6b02f68e2.
 
 R/final-outcome.json SHA256df23f863e3428aa28c8ac2fba28396df259d1b00036cdd70e810ebae86c8bce8. Independent repeat of close_phase.py verify succeeds:1065 evidence files and9 recorded Git publications. Closure verifies the exact physical file set, file bytes, registered inputs, commit parent/blobs, source-bound reviews and independently recomputed budget. Do not mutate R or old sealed phases; root seal-verification.log is the documented excluded verification log.
 

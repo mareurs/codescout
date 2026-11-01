@@ -1,7 +1,7 @@
 # External feedback calibration — 2026-10-29
 
 ## Current state
-COMPLETE bounded external-feedback phase, not a solved general low/xhigh mechanism. Local commit d291f9ed41bea1b8f7023dbb2bb8459ca6f1a667 on research/checked-real-task-20261024; worktree /tmp/codescout-real-task-20261024 retained, clean after commit, no merge/push. Parent36f3c3e32f54b767bd68292e6ebea77c19bc8bd0. Session01a15ca9-f939-7603-acb5-01c6b02f68e2. R=/home/marius/work/claude/codescout/.codescout/resident-private/external-feedback-20261029.
+COMPLETE bounded external-feedback phase, not a solved general low/xhigh mechanism. Local commit d291f9ed41bea1b8f7023dbb2bb8459ca6f1a667 on research/checked-real-task-20261024; worktree /tmp/codescout-real-task-20261024 retained, clean after commit, no merge/push. Parent36f3c3e32f54b767bd68292e6ebea77c19bc8bd0. Session01a15ca9-f939-7603-acb5-01c6b02f68e2. R=/home/marius/.cache/codescout-resident/codescout/external-feedback-20261029.
 Immutable new anchor R/final-outcome.json SHA256 d202704b19aa0d29fecb50dbc71cf562e4c372bc4433ac5823d7b3b2f9a9902f. Seal and independent subsequent verify both pass497physical evidence files plus22recorded Git publications. Budget metadata independently recomputed from raw receipts. No more paid calls under this registration.
 
 ## Paid population and budget

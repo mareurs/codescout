@@ -4,7 +4,7 @@
 COMPLETE, locally committed and sealed. No model calls active or pending. Worktree /tmp/codescout-real-task-20261024, branch research/checked-real-task-20261024, clean index/worktree. Commit3cc1ed50c90fc98b96b3dbc6223bf4d920a754df, parentf489cd3daad81538596954f766df1053b374744c, stablepatch-id9c0e7deb6d6d84774b572234b01ef898f2ed8352. Native Codex-Session-Id01a15ca9-f939-7603-acb5-01c6b02f68e2 verified from environment. Eleven exact owned publication paths, normal hooks passed; no production source change, merge, push, upstream publication or global config change.
 
 LATEST SEALED BUDGET ANCHOR:
-R=/home/marius/work/claude/codescout/.codescout/resident-private/workflow-transfer-20261030
+R=/home/marius/.cache/codescout-resident/codescout/workflow-transfer-20261030
 R/final-outcome.json SHA256903775c124c39ae00dbcd81571a2ddf755894c111d9d51b3029d8dee7e3ea3cf.
 Cumulative clientUSD18.188802799999999785 of40, remaining21.811197200000000215. PriorP17.397892399999999825 is historical now. Native orchestration/review/CPU/checking/billed dollars unknown.
 Seal plus two separate verify invocations all exit0:5089physical evidence files+11Git publication files, exact source/receipt/budget/commit/parent bytes. Only final-outcome self-reference, seal-verification.log, runtime__pycache__, and separately bound symlink rules excluded as documented. Never reopen/retry this registration, edit R, or remove worktrees/evidence. Future research needs NEW phase/registration anchored here.

@@ -1,7 +1,7 @@
 # Prechecked repair diagnostic — 2026-10-30
 
 ## State
-COMPLETE, locally committed and sealed; no active or pending model calls. R=/home/marius/work/claude/codescout/.codescout/resident-private/prechecked-repair-20261030; retained cleanworktree /tmp/codescout-real-task-20261024 branch research/checked-real-task-20261024.
+COMPLETE, locally committed and sealed; no active or pending model calls. R=/home/marius/.cache/codescout-resident/codescout/prechecked-repair-20261030; retained cleanworktree /tmp/codescout-real-task-20261024 branch research/checked-real-task-20261024.
 Commitf489cd3daad81538596954f766df1053b374744c, parent60f912622083859217e5313797480fcdb32f1ac2; stablepatch-id3332b7ba04fa0103ce60bdbfb3aa513796afb62e. Codex-Session-Id01a15ca9-f939-7603-acb5-01c6b02f68e2. Fivepublicationpaths only: design,plan,report,LEMtracker,private-launchissue. No production source changes/merge/push/upstream/globalconfig.
 
 LATEST BUDGET ANCHOR R/final-outcome.json SHA256ceb2e6238ab9dd677b94cff658312ee5328eaef1f3d3b3b0a0675cf2bcd33a89. Independent repeatedverifyexit0:1204evidencefiles+10recordedGitpublications, exactphysicalfileset/sourceinputs/budget/commitparent/bytes. Cumulative17.397892399999999825 of40, remaining22.602107600000000175. Native orchestration/review/billedUSDunknown. Never reopen/retry this registration or mutate R; only rootseal-verification.log is a documented excludedverificationlog. User's standingautonomousscope and global40authorization persist.
