@@ -1,7 +1,7 @@
 ---
 id: '45b69c70b723a089'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: background-command logs are never reclaimed when the server ends, so codescout-bg-*.log piles up (18,798 files, 687 MiB)'
 owners:
 - marius
@@ -11,9 +11,10 @@ tags:
 - background-job
 - disk-leak
 topic: background job logs
+closed: 2026-11-01
 opened: 2026-10-31
 severity: medium
-unverified: That an MCP restart is the main leak path is inferred from the code (logs of a dead server are never swept), not measured by tracing which logs belonged to which server.
+unverified: 'The reclaimed amount was NOT measured (the 448 MiB in the design is an estimate), and the full ./scripts/gate.sh has not been run on the merged experiments; only the focused tests (719 passed) were run. The production loose sweep has never run against the real temp dir: test builds disable it by design.'
 ---
 
 # BUG: background-command logs are never reclaimed when the server ends, so codescout-bg-*.log piles up (18,798 files, 687 MiB)
@@ -81,17 +82,33 @@ The census quoted under Symptom. The scripts are session scratch files, not kept
 
 ## Fix
 
-Not fixed. Options, in order of cost:
+Fixed on `experiments` 2026-11-01 (SHAs are `experiments` SHAs; the patch-id is the stable handle after a rebase). Options considered, in order of cost; the fix is options 1, 2 and 3 together, with the changes listed under *What landed*:
 
 1. Put the log path into `JobRecord` as an ADDITIVE field, and do NOT bump `RECORD_SCHEMA`: the companion plugin's wake hook returns early for any record whose `schema` is not 1 (`claude-plugins/codescout-companion/hooks/wake-on-job-end.mjs:160` and `:230`, tested by cases 20c and 20e of `wake-on-job-end.test.sh`), so a bump would silence the wake for every new job. Then `sweep_stale` can unlink the log together with its record. This covers only logs created after the change: the logs that exist now have no record, so it needs option 2 as well.
 2. Sweep orphan `codescout-bg-*.log` files by mtime at server start and on the existing housekeeping pass, with an age shorter than the 7 days used for records (a log is a copy of output the agent has already read).
 3. Delete a log when the wake has been delivered and the output read (the `.delivered` sidecar exists today), as an explicit acknowledgement.
 
+**What landed** (log reaper, design `docs/superpowers/specs/2026-10-31-background-log-reaper-design.md`):
+
+| Commit (`experiments`) | patch-id (`git patch-id --stable`) | What |
+|---|---|---|
+| `61674b8ba` | `04d2a7eaa4a8` | the job record names its log (`log_path`, additive, schema stays 1) |
+| `695f73dca` | `d33b6c176082` | record-linked sweep: a finished job's log goes 1 h after delivery or 24 h after the job ended |
+| `6543e08d8` | `ba687979e515` | loose-log sweep for logs no record names (skips a log a process holds open) |
+| `8e461e10c` | `de209f6629e5` | test: the loose sweep's name and type rules without the age shortcut |
+| `a5845641c` | `a3581ec0bd67` | housekeeping at the first background spawn of each server (inline in tests, a detached thread in production; the loose sweep never runs in a test build) |
+| `e4070ac02` | `071c9b62097c` | final-review fix: a log newer than its record is kept (name reuse), and the record sweeps trust only an owner-only record dir |
+| `776b9f74d` | `c2f2789f8685` | `open_file_paths` is crate-private |
+| `f390c6542` | `87c4ee9c5b5b` | test: the record names the very log the buffer reads |
+| `04ade16e9` | `684f660ddc5b` | design doc narrowed to match the code |
+
+A record that names a log is the only thing the record sweeps may unlink; a log written after its record, or one a process holds open, is left to the loose sweep, which needs it unnamed, unheld and 24 h old. The older wake engine never writes `.delivered`, so for those sessions the 1 h grace never fires and the 24 h limit applies; see bug `eaf02545987b4bc5`.
+
 A live job's log must never be removed: its mtime moves while it writes, so an age test is safe, but a job that is silent for a long time needs the `is_alive(server_pid)` test the record sweep already has.
 
 ## Tests added
 
-None yet. A test needs a temp `TMPDIR` with an old orphan log, a young log, and a log of a live job, and must assert that only the old orphan goes.
+In `src/tools/job_record.rs`: `a_record_without_log_path_still_parses`, `a_record_with_log_path_round_trips_and_stays_schema_1`, `a_record_without_log_path_serialises_no_log_path_key`, the `sweep_logs_*` tests (removes after the grace and keeps the record, keeps inside the grace, `>=` boundary, never touches a running job's log, a dead server's running log, outside-dir/symlink/directory paths, future mtime, missing sidecar, a log newer than its record), `sweep_stale_removes_the_log_with_its_record_and_survives_a_record_whose_log_is_gone`, and the `sweep_loose_logs_*` tests (old log nobody names, young log, log a record names, log a process holds open, a symlinked log directory, other names/symlinks/directories at zero age). In `src/tools/output_buffer.rs`: `a_test_built_output_buffer_never_scans_the_real_temp_dir` (asserts `log_dir` is `None`), `store_background_runs_the_housekeeping_once`, `housekeeping_removes_an_old_loose_log_and_keeps_a_young_one`, `housekeeping_keeps_a_running_jobs_logs`, the owner-only record dir pair. In `src/tools/run_command/tests.rs`: `a_background_job_record_names_its_real_log`. Focused run on the final head `04ade16e9`: `cargo test --lib -- tools::job_record tools::output_buffer tools::run_command platform` = 719 passed, 0 failed.
 
 ## Workarounds
 
@@ -99,7 +116,7 @@ Delete old logs by hand, for example those older than 7 days that no live server
 
 ## Resume
 
-Decide between Fix options 1–3. Option 1 plus option 2 together make a tested change in `src/tools/job_record.rs` and `src/tools/run_command/inner.rs`.
+Verify, then archive: (1) run `./scripts/gate.sh` on the merged `experiments` (not done for this fix; only the focused tests above ran); (2) measure the reclaimed amount on this machine: the first server start after the new binary is installed runs the loose sweep once, so compare `ls ~/.cache/cc-tmp/codescout-bg-*.log | wc -l` and `du` before and after. The 448 MiB figure in the design is an ESTIMATE from the census above, not a measurement. Then `doc(action="move")` to `docs/issues/archive/`.
 
 ## References
 
