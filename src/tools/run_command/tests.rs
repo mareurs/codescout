@@ -3782,6 +3782,7 @@ async fn late_keys_are_inside_the_gate_at_the_exact_edge() {
                 std::path::Path::new("."),
                 ctx,
                 late,
+                None,
             )
             .await
             .unwrap()
@@ -3877,6 +3878,7 @@ async fn a_tee_capture_behind_an_empty_stdout_is_inside_the_gate_at_the_exact_ed
                     tee_skipped: Some("n".repeat(note)),
                     ..Default::default()
                 },
+                None,
             )
             .await
             .unwrap()
@@ -3958,6 +3960,7 @@ async fn a_truncated_page_counts_the_late_keys_it_carries() {
             tee_skipped: Some("n".repeat(400)),
             ..Default::default()
         },
+        None,
     )
     .await
     .unwrap();
@@ -4046,10 +4049,14 @@ fn red_naming(files: &[String]) -> String {
 #[tokio::test]
 async fn a_red_naming_many_dirty_files_carries_a_bounded_wip_authors() {
     let (_ctx_dir, ctx) = project_ctx().await;
+    // Empty history, so the scan cost does not depend on the machine's transcripts: see bug
+    // `20927ccfe293c34e`. Kept alive by this binding for every engine call below.
+    let (_history, env) = super::attribution::no_history();
     let run = |dir: std::path::PathBuf, red: String| {
-        let ctx = &ctx;
+        let (ctx, env) = (&ctx, &env);
         async move {
-            super::output::handle_successful_output(
+            use super::output::{handle_successful_output_with, LateKeys};
+            handle_successful_output_with(
                 "cargo build",
                 red,
                 String::new(),
@@ -4058,6 +4065,8 @@ async fn a_red_naming_many_dirty_files_carries_a_bounded_wip_authors() {
                 None,
                 &dir,
                 ctx,
+                LateKeys::default(),
+                Some(env),
             )
             .await
             .expect("a completed command returns a response")
@@ -9901,7 +9910,11 @@ async fn a_red_attaches_wip_authors_on_the_main_arm() {
     // this into the assertion below -- "no field? maybe python3 is missing, skip" -- is
     // satisfied by precisely the state a deleted attachment produces, and both of these
     // cases survived a mutation deleting their site until the two were separated.
-    if super::attribution::wip_author_diagnostic(101, HELD_RED, dir.path())
+    // This and the call below run the engine over an empty history, not the machine's: the
+    // real scan took 16 to 25 s against a 30 s ceiling (bug `20927ccfe293c34e`), so under
+    // load the precheck timed out into a vacuous skip or the call under test timed out.
+    let (_history, env) = super::attribution::no_history();
+    if super::attribution::wip_author_diagnostic_with(101, HELD_RED, dir.path(), &env)
         .await
         .is_none()
     {
@@ -9909,7 +9922,8 @@ async fn a_red_attaches_wip_authors_on_the_main_arm() {
         return;
     }
 
-    let result = super::output::handle_successful_output(
+    use super::output::{handle_successful_output_with, LateKeys};
+    let result = handle_successful_output_with(
         "cargo check",
         String::new(),
         HELD_RED.to_string(),
@@ -9918,6 +9932,8 @@ async fn a_red_attaches_wip_authors_on_the_main_arm() {
         None,
         dir.path(),
         &ctx,
+        LateKeys::default(),
+        Some(&env),
     )
     .await
     .expect("a failing command still returns a response");
@@ -9942,7 +9958,9 @@ async fn a_red_attaches_wip_authors_on_the_buffer_only_arm() {
     // this into the assertion below -- "no field? maybe python3 is missing, skip" -- is
     // satisfied by precisely the state a deleted attachment produces, and both of these
     // cases survived a mutation deleting their site until the two were separated.
-    if super::attribution::wip_author_diagnostic(101, HELD_RED, dir.path())
+    // Empty history, as in the main-arm case above: see bug `20927ccfe293c34e`.
+    let (_history, env) = super::attribution::no_history();
+    if super::attribution::wip_author_diagnostic_with(101, HELD_RED, dir.path(), &env)
         .await
         .is_none()
     {
@@ -9955,7 +9973,8 @@ async fn a_red_attaches_wip_authors_on_the_buffer_only_arm() {
     // this test silently re-tests the main arm, which the case above already covers, and
     // the early-return attachment goes back to being unguarded.
     let padded = format!("{HELD_RED}{}", "note: filler\n".repeat(2_000));
-    let result = super::output::handle_successful_output(
+    use super::output::{handle_successful_output_with, LateKeys};
+    let result = handle_successful_output_with(
         "cargo check",
         padded,
         String::new(),
@@ -9964,6 +9983,8 @@ async fn a_red_attaches_wip_authors_on_the_buffer_only_arm() {
         None,
         dir.path(),
         &ctx,
+        LateKeys::default(),
+        Some(&env),
     )
     .await
     .expect("a failing command still returns a response");
@@ -10425,6 +10446,7 @@ async fn a_compacted_response_is_judged_with_its_late_keys_and_its_real_handle_a
                     tee_skipped: Some("n".repeat(note)),
                     ..Default::default()
                 },
+                None,
             )
             .await
             .unwrap()
@@ -10506,6 +10528,7 @@ async fn a_compacted_run_is_judged_without_the_cut_record_it_never_delivers() {
         dir.path(),
         &ctx,
         LateKeys::default(),
+        None,
     )
     .await
     .unwrap();
@@ -10587,6 +10610,7 @@ async fn a_summary_budgets_around_the_late_keys_it_carries() {
             tee_skipped: Some("n".repeat(7_000)),
             ..Default::default()
         },
+        None,
     )
     .await
     .unwrap();

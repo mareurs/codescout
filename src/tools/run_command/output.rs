@@ -1527,6 +1527,7 @@ pub(crate) async fn handle_successful_output(
         work_dir,
         ctx,
         LateKeys::default(),
+        None,
     )
     .await
 }
@@ -1549,6 +1550,11 @@ pub(crate) async fn handle_successful_output_with(
     work_dir: &std::path::Path,
     ctx: &ToolContext,
     mut late_keys: LateKeys,
+    // The attribution configuration. `None` on the shipped path: the diagnostic then resolves it
+    // from the process environment, as `wip_author_diagnostic` does. A test passes `Some` to give
+    // the engine a history of its own, never by setting the environment, which every
+    // concurrently running test shares.
+    attribution: Option<&super::attribution::AttributionEnv>,
 ) -> anyhow::Result<Value> {
     use super::super::command_summary::{
         count_lines, detect_command_type, inline_response_exceeds_limit, strip_ansi_codes,
@@ -1617,12 +1623,14 @@ pub(crate) async fn handle_successful_output_with(
     // Same placement, same reason. The non-zero-exit gate lives inside the callee, not
     // here, so the one place that decides "is this a red" is the one place documenting
     // what it costs to be wrong about it. A green command spawns nothing at all.
-    let wip_authors = super::attribution::wip_author_diagnostic(
-        exit_code,
-        &format!("{raw_stdout}\n{raw_stderr}"),
-        work_dir,
-    )
-    .await
+    let red_text = format!("{raw_stdout}\n{raw_stderr}");
+    let wip_authors = match attribution {
+        Some(env) => {
+            super::attribution::wip_author_diagnostic_with(exit_code, &red_text, work_dir, env)
+                .await
+        }
+        None => super::attribution::wip_author_diagnostic(exit_code, &red_text, work_dir).await,
+    }
     .map(|text| {
         let bounded = bound_wip_authors(text.clone());
         // Cut iff changed: `elide_middle_escaped` returns fitting text unchanged, and a cut is

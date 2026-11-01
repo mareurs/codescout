@@ -892,6 +892,8 @@ pub(crate) async fn run_command_inner(
                     producer_exit_code,
                     terminated_by_signal: super::output::terminating_signal(&output.status),
                 },
+                // The shipped path reads the attribution knobs from the process environment.
+                None,
             )
             .await?;
             Ok(result)

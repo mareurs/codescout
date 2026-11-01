@@ -587,6 +587,37 @@ pub(crate) async fn wip_author_diagnostic_in(
     )
 }
 
+/// An env whose engine scans an empty transcript history.
+///
+/// The shipped engine reads every transcript under `$HOME/.claude*` and
+/// `$HOME/.codex*`. On a busy machine that scan takes 16-25 s against a 30 s
+/// ceiling, so a test that needs the engine's answer, not its history,
+/// loses to load. Pointing both roots at an empty directory keeps the same
+/// engine and the same output in about 0.1 s.
+/// See `docs/issues/2026-10-31-eight-lib-tests-fail-under-16-to-1-cpu-oversubscription-through-wall-clock-windows.md`.
+///
+/// Shared with the tests of `output.rs` and `tests.rs`, which reach the engine through
+/// `handle_successful_output_with`. Keep the returned `TempDir` alive for as long as the env is
+/// in use.
+#[cfg(test)]
+pub(crate) fn no_history() -> (tempfile::TempDir, AttributionEnv) {
+    let history = tempfile::tempdir().expect("empty history dir");
+    let env = AttributionEnv {
+        engine_env: vec![
+            (
+                "FILE_PROVENANCE_ROOTS".to_string(),
+                history.path().display().to_string(),
+            ),
+            (
+                "FILE_PROVENANCE_CODEX_ROOTS_JSON".to_string(),
+                "[]".to_string(),
+            ),
+        ],
+        ..AttributionEnv::default()
+    };
+    (history, env)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,34 +636,6 @@ mod tests {
             .arg("--version")
             .output()
             .is_ok_and(|o| o.status.success())
-    }
-
-    /// An env whose engine scans an empty transcript history.
-    ///
-    /// The shipped engine reads every transcript under `$HOME/.claude*` and
-    /// `$HOME/.codex*`. On a busy machine that scan takes 16-25 s against a 30 s
-    /// ceiling, so a test that needs the engine's answer, not its history,
-    /// loses to load. Pointing both roots at an empty directory keeps the same
-    /// engine and the same output in about 0.1 s.
-    /// See `docs/issues/2026-10-31-eight-lib-tests-fail-under-16-to-1-cpu-oversubscription-through-wall-clock-windows.md`.
-    ///
-    /// Keep the returned `TempDir` alive for as long as the env is in use.
-    fn no_history() -> (tempfile::TempDir, AttributionEnv) {
-        let history = tempfile::tempdir().expect("empty history dir");
-        let env = AttributionEnv {
-            engine_env: vec![
-                (
-                    "FILE_PROVENANCE_ROOTS".to_string(),
-                    history.path().display().to_string(),
-                ),
-                (
-                    "FILE_PROVENANCE_CODEX_ROOTS_JSON".to_string(),
-                    "[]".to_string(),
-                ),
-            ],
-            ..AttributionEnv::default()
-        };
-        (history, env)
     }
 
     /// `Some(name)` for each local sibling module that `body` imports and that exists
