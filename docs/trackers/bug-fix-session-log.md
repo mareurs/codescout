@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 207
+entry_high_water_F: 209
 entry_high_water_W: 154
 ---
 
@@ -65,6 +65,7 @@ entry_high_water_W: 154
 
 | ID | Date | Severity | Category | Status | Title |
 | F-207 | 2026-11-01 | med | test-design | fixed-verified | **A diagnostic hint passed its tests and did not fire on the one tree it was built for** — a 50,000-entry bound taken from a count of directories met 311,890 entries; found only by reading the live warning. |
+| F-209 | 2026-11-01 | low | claim-vs-state | mitigated | **"Leaving these two directories costs nothing" was said before the directory counts were read** — I counted symlinks, the watcher counts directories; one remaining directory holds 1,808. |
 |----|------|---------:|----------|--------|-------|
 | F-206 | 2026-11-01 | med | plan-drift | open | **"Owners only" holds for the red hint but not for `file-provenance.py`, which the gate and the pre-edit hook also run** — a floor on operations would change the CLI's MINE/SHARED verdicts; the hook's "~7s" is now 16 to 23 s warm. |
 | F-197 | 2026-10-15 | med | stale-doc | fixed-verified | **The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it** — the live collection is per project (`artifact_chunks_<base>_<hash>`, 48,223 points here), so my "the Qdrant index looks stale" was wrong. Corrected in `934946e9`. |
@@ -17784,6 +17785,18 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Promote-when:** the next bulk operation on another session's recorded evidence is preceded by reading that evidence's verifier first. Then promote to `docs/conventions/resident-scratch-location.md` § Moving what is already there as a rule for any tool that rewrites links.
 
 **Status:** validated.
+
+## F-209 — "Leaving these two directories costs nothing" was said before the directory counts were read
+
+**Valid:** dated 2026-11-01
+
+**Observed:** After the scratch move I told the operator that the two directories left in `.codescout/resident-private` cost nothing, because the tree held 0 directory symlinks. I had counted symlinks only. A count of directories, run when the operator invoked reconnaissance, gave: `blind-challenger-20261101` 1,808 directories, 4,871 files, 0 links; `worktree-cleanup-20261101` 1 directory, 8 files, 0 links.
+
+**Cost:** The claim was true for `worktree-cleanup-20261101` and false for `blind-challenger-20261101`. The earlier measurement (34,425 of 51,028 inotify watches on `resident-private` directories, taken while the tree still had symlinks) shows that the watcher walks real directories too, and `files.excludeDirs` does not stop it. So up to 1,808 watches remain, against 15,667 measured on the fresh rust-analyzer. That is about 12%, an upper bound from two samples, not measured on a running server. No decision depended on the claim: the operator had not acted on it.
+
+**Fix:** Corrected in the conversation. The remaining move is `blind-challenger-20261101`, once it has been idle for 60 minutes. The count that carries the claim is the one the claim is about: directories for watches, symlinks for fan-out.
+
+**Status:** mitigated.
 
 ## Template for new entries
 
