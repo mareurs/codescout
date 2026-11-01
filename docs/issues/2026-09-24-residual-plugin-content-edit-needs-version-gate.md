@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-17-plugin-content-edit-without-a-version-bump-never-reaches-any-profile.md
 severity: low
-unverified: The guard was driven by the test with synthetic stdin and on real ranges. It has not been seen refusing a real `git push`, and the commit is local on claude-plugins `main`, not pushed. Until it is pushed it protects only the clones that hold the commit.
+unverified: The guard was driven by the test with synthetic stdin and on real ranges. It is published (pushed 2026-11-01). That push changed only scripts/, so the guard had nothing to refuse and showed no refusal. It has not been seen refusing a real `git push`. Commit 7a3c3b1, already on main, still has no version bump.
 ---
 
 ## Summary
@@ -28,7 +28,7 @@ Remaining work split out of `docs/issues/archive/2026-08-17-plugin-content-edit-
 
 ## Fix
 
-Shipped 2026-10-31 as option b of the parent record, in the push-time form, in `claude-plugins` commit `32ce0ff` (local on `main`, not pushed). `scripts/pre-push-guard.sh` has a Guard 3: when a push to `main` changes a plugin's content and that plugin's `version` is the same at both tips, the push is refused. The refusal names the plugin, the first content path and `./scripts/release.sh <plugin> <version>`. Override: `SKIP_VERSION_BUMP_CHECK=1`.
+Shipped 2026-10-31 as option b of the parent record, in the push-time form, in `claude-plugins` commit `32ce0ff`. It was pushed to `origin/main` on 2026-11-01 (`0d656b1..32ce0ff`), and `origin/main` equals `32ce0ff`. `scripts/pre-push-guard.sh` has a Guard 3: when a push to `main` changes a plugin's content and that plugin's `version` is the same at both tips, the push is refused. The refusal names the plugin, the first content path and `./scripts/release.sh <plugin> <version>`. Override: `SKIP_VERSION_BUMP_CHECK=1`.
 
 Content here is every changed path under the plugin except `.claude-plugin/plugin.json`, `docs/`, `tests/`, and the top-level `README*` and `CHANGELOG*`. The version is compared between the two tips, so content commits followed by a bump commit in one push pass. The guard skips a branch the remote does not have yet, a plugin added in the push, and a version it cannot read (no `jq`, bad JSON). Option a, the `content_matches_source` field in the `version-bump-checklist` augmentation, was not built.
 
@@ -45,7 +45,7 @@ Mutations: disabling Guard 3 fails five deny cases; removing the `docs/` and `te
 
 ## Fix provenance
 
-- **SHA:** `claude-plugins:32ce0ff` (`main`, local, not pushed)
+- **SHA:** `claude-plugins:32ce0ff` (`main`, pushed 2026-11-01)
 - **patch-id:** `2a30b7ff2157de8581532e3322d1d5a8570dae91`
 
 ## References
