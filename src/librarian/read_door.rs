@@ -920,6 +920,27 @@ mod tests {
         assert!(door.refusal(&root.join("dangling.md")).is_some());
         assert!(door.refusal(&root.join("never-existed.md")).is_none());
     }
+    /// The precondition ~250 other tests silently assume: the temp dir is spelled WITHOUT a symbolic
+    /// link. `tempfile::tempdir()` lives under `std::env::temp_dir()`, which is `$TMPDIR`. On macOS
+    /// that is `/var/folders/…/T`, and `/var` is a link to `/private/var`, so every fixture is spelled
+    /// through a link, and this door (which, with no managed root to name, refuses any spelling that
+    /// crosses one) refuses to read it. macOS CI lost 243 of its 263 lib-test failures to that, and a
+    /// further test to the `/private/var` respelling; on Linux the same failures reproduce with
+    /// `TMPDIR` pointing at a symlink. This test fails FIRST and says why, instead of 250 tests
+    /// failing with messages that read as door bugs.
+    #[cfg(unix)]
+    #[test]
+    fn the_temp_dir_is_spelled_without_a_symbolic_link() {
+        let spelled: PathBuf = std::env::temp_dir().components().collect();
+        let real = std::fs::canonicalize(&spelled).expect("the temp dir must exist");
+        assert_eq!(
+            spelled, real,
+            "the temp dir is spelled through a symbolic link ({spelled:?} is really {real:?}), so \
+         every fixture made with tempfile is too, and the read door refuses them. Point TMPDIR \
+         at the real path: export TMPDIR=\"$(cd \"${{TMPDIR:-/tmp}}\" && pwd -P)\" (CI does this \
+         on macOS)"
+        );
+    }
 
     // ---------------------------------------------------------------------------------------
     // The source gate.

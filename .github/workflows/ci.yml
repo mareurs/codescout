@@ -484,6 +484,20 @@ jobs:
           echo "CODESCOUT_TEST_ONNX_DIR=${{ runner.temp }}/codescout-onnx/all-MiniLM-L6-v2" >> "$GITHUB_ENV"
           echo "FASTEMBED_CACHE_DIR=${{ runner.temp }}/codescout-onnx/fastembed-cache" >> "$GITHUB_ENV"
 
+      # macOS: the runner's default TMPDIR is /var/folders/..., and /var is a symlink to
+      # /private/var. Every tempfile fixture is then spelled through a link, and the librarian's
+      # read door refuses any spelling that crosses one when no managed root can be named: 243 of
+      # macOS's 263 lib-test failures (docs/issues/2026-11-01-macos-ci-fixtures-are-spelled-through-the-var-symlink.md).
+      # `pwd -P` is the physical path, so this holds whatever the runner image does with its
+      # temp dir. The runner's own temp dir is also shorter than /var/folders/xx/<hash>/T, which
+      # keeps unix-socket fixtures under macOS's 104-byte SUN_LEN. The test
+      # `the_temp_dir_is_spelled_without_a_symbolic_link` (src/librarian/read_door.rs) fails first
+      # and names this step if it is ever dropped.
+      - name: Point TMPDIR at a canonical path (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: echo "TMPDIR=$(cd "${{ runner.temp }}" && pwd -P)" >> "$GITHUB_ENV"
+
       - name: Opt out of ONNX tests (non-local-embed lanes)
         if: matrix.config.name != 'local-embed'
         shell: bash
