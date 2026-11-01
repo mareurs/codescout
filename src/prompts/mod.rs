@@ -3260,6 +3260,47 @@ mod tests {
             cursor += offset + needle.len();
         }
     }
+    /// The gate's test-lane commands are restated on three more LIVE surfaces: the committed
+    /// system prompt (injected into every session, subagents included) and two memories, one of
+    /// which calls itself "the executable summary" of `scripts/gate.sh`. The final review of the
+    /// nextest move (2026-11-01) found all three still prescribing `cargo test`, because the
+    /// order test above reads only `CLAUDE.md`. A surface that names the lean lane must name the
+    /// current one; the retired lean form is the discriminating needle, because the default
+    /// lane's old text (`cargo test --workspace`) still occurs legitimately in
+    /// `cargo test --workspace --doc`.
+    #[test]
+    fn live_gate_surfaces_name_the_same_test_lanes_as_claude_md() {
+        const SURFACES: [&str; 3] = [
+            ".codescout/system-prompt.md",
+            ".codescout/memories/development-commands.md",
+            ".codescout/memories/conventions.md",
+        ];
+        const LANES: [&str; 2] = [
+            "cargo nextest run --workspace --no-default-features",
+            "cargo nextest run --workspace",
+        ];
+        const RETIRED_LEAN: &str = "cargo test --workspace --no-default-features";
+
+        for rel in SURFACES {
+            let path = format!("{}/{rel}", env!("CARGO_MANIFEST_DIR"));
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
+            for lane in LANES {
+                assert!(
+                    text.contains(lane),
+                    "{rel} does not name `{lane}`. The gate's test lanes run under nextest \
+                     (CLAUDE.md § Development Commands); update this surface with them."
+                );
+            }
+            assert!(
+                !text.contains(RETIRED_LEAN),
+                "{rel} still names the retired lean lane `{RETIRED_LEAN}`; the gate runs \
+                 `cargo nextest run --workspace --no-default-features` followed by a \
+                 `cargo test --workspace --doc --no-default-features` doctest step."
+            );
+        }
+    }
+
     /// `scripts/gate.sh` must keep PRINTING what a green run does not cover. Its output is
     /// what a session reads when it decides "green", so the bound lives there; it moved from
     /// `CLAUDE.md` § Development Commands on 2026-10-04, where it had been the fix for

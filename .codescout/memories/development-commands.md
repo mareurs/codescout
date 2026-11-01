@@ -12,8 +12,10 @@ carries the full evidence for each command; this is the executable summary.
 ```bash
 ./scripts/fmt-mine.sh                           # replaces bare `cargo fmt`: formats only own/CLEAN paths
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
-cargo test --workspace --no-default-features    # LEAN lane — runs THIRD
-cargo test --workspace                          # default lane — runs LAST
+cargo nextest run --workspace --no-default-features --no-fail-fast   # LEAN lane — runs THIRD
+cargo test --workspace --doc --no-default-features                   # its doctest step (nextest runs none)
+cargo nextest run --workspace --no-fail-fast                         # default lane — runs LAST
+cargo test --workspace --doc                                         # its doctest step
 ```
 
 How the script behaves, so you read its output right:
@@ -72,7 +74,9 @@ librarian-bearing binary.
   `tests/`-directory quirk, an inline `#[cfg(test)]` module is equally unreachable.
   `--workspace` strictly subsumes the bare form (verified by `-- --list` set-difference: 0
   tests present in bare and absent from workspace). CI's own test job uses
-  `cargo test --workspace ${{ matrix.config.flags }}` (`ci.yml:493`).
+  `cargo nextest run --workspace ${{ matrix.config.flags }}` plus
+  `cargo test --workspace --doc ${{ matrix.config.flags }}` (the `test` job in
+  `.github/workflows/ci.yml`; named by job, not line number, because the line moves).
 
 ## codescout (main MCP server) — builds
 
