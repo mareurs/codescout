@@ -1,14 +1,14 @@
 ---
-status: open
-opened: 2026-10-28
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/declared-not-wired
-kind: bug
-unverified: 'Parts A and B are fixed and tested (711b8c3a4, 0d95ee8bf). Replica run 2026-10-29 passed (Evidence 6). Not verified: the live Kodi checkout; whether the ignore crate honors .git/info/exclude; the gate on a clean tree (two OP-2 tests were red from a peer edit). The manual page for library scope still disagrees with the code (Evidence 5).'
+closed: 2026-11-01
+opened: 2026-10-28
+owner: marius
+related: []
+severity: medium
+unverified: Whether the ignore crate honors .git/info/exclude during the discovery walk is not tested (declared entries bypass the walk). The manual page for library scope still disagrees with the code (Evidence 5), a separate issue. The Kodi session pid 48775 has not been reconnected onto the rebuilt binary.
 ---
 
 # BUG: a nested or sibling git repo cannot join a workspace as a project, and onboarding under a workspace pin mixes in the home workspace
@@ -109,6 +109,17 @@ Measured with `target/release/codescout` (rebuilt 2026-11-01 23:05; `~/.cargo/bi
 
 Not done: index build and search on a member (covered by Evidence 7), and the live Kodi tree. The remaining live step is the owner's: reconnect the Kodi session onto the rebuilt binary, add the two `[[project]]` entries, and repeat `list_projects` and the member onboarding.
 
+### 9. Live run on the real Kodi checkout, 2026-11-01
+
+Measured with `target/release/codescout` (rebuilt 2026-11-01 23:05), driven by `codescout start --project /home/marius/work/personal/media/kodi` over stdio. A Kodi session (pid 48775) was running in the same checkout, so the probe was one short second server (about 3 s). The Kodi `workspace.toml` was backed up first (sha256 `1c24e3dd…`), then two `[[project]]` entries were appended, as in the reproduction.
+
+- `workspace(list_projects)` returned `kodi`, `xbmc`, `addons`, `libUPnP`, `packaging`, `thecrew-module` and `thecrew-video`. Both hidden repos are members, and `/remote-fixes/` is in the parent's `.git/info/exclude`.
+- `onboarding(workspace=<script.module.thecrew>)` returned the single-project prompt (`[python] · config created`). The add-on got no `workspace.toml`; the Kodi `workspace.toml` still has 7 `[[project]]` entries. `git status` in the Kodi checkout was the same before and after: ` M .gitignore`, `?? .buddy/`, `?? .codescout/`. All three were already there.
+- The add-on shows ` M .gitignore` (one added line, `.codescout/private-memories/`), as in the replica (Evidence 8). It is an uncommitted change in the add-on repo. The add-on's own `.codescout/` holds `memories`, `private-memories`, `project.toml`, `tmp`, `usage.db` and the lock files.
+- The add-on's `project.toml` holds `model = "local:JinaEmbeddingsV2BaseCode"`, the same as the Kodi parent's own `project.toml`, while `CODESCOUT_EMBED_MODEL=CodeRankEmbed` was set in the probe's environment. So the on-disk model is not the effective one; the environment decides. The original report's mismatch comes from the default value, not from nesting.
+- The server log has a warning on every start: `workspace.toml [[project]] entry is not a member: its root is not a relative path below the workspace root id=kodi root=.`. It comes from the generated `kodi` entry, which the live checkout carries. It is noise for a generated file and answers the question left open in Evidence 7.
+- Left in place on purpose: the two `[[project]]` entries in the Kodi `workspace.toml`, which is the setup the report asked for, and the add-on's `.gitignore` line and `.codescout/`. The backup is in the session scratchpad only; the previous file is the current one minus its last 12 lines. The running Kodi session loads the new entries after a reconnect.
+
 ## Hypotheses tried
 1. **Hypothesis:** roots outside the workspace root are rejected. **Test:** first `../kodi-refs/...` roots, then in-tree `remote-fixes/...` roots. **Verdict:** rejected. Both failed the same way.
 2. **Hypothesis:** the server caches the workspace across re-activation. **Test:** `/mcp` reconnect and a full Claude Code restart. **Verdict:** rejected.
@@ -149,14 +160,24 @@ Gate at Part B: format, clippy and Python light pass. Two tests fail, `operator_
 
 ## Resume
 
-Parts A and B are committed on `experiments` (`711b8c3a4`, `0d95ee8bf`) and are on `origin/experiments` (pushed by another session on the user's instruction, verified 2026-10-29 with `git branch -r --contains`). Next:
+Parts A and B are committed on `experiments` (`711b8c3a4`, `0d95ee8bf`) and are on `origin/experiments` (verified 2026-10-29 and again 2026-11-01 with `git branch -r --contains 0d95ee8bf`). Closed 2026-11-01 as fixed; items 1 to 3 are done:
 1. Done 2026-10-29: per-member git identity holds for a member that is its own repo, and the member without its own `.git` is probed (Evidence 4).
-2. Done 2026-10-29 on a scratchpad replica (Evidence 6 and 7, including an index build and a search on a member), and again 2026-11-01 on a replica built from the real add-on repos and the real Kodi `workspace.toml` (Evidence 8). Still open: the live Kodi checkout, which has a running session.
-3. Re-run the gate once the peer's `OP-2` edit is committed or reverted.
-4. Close or archive only after 1 and 2, with the fix SHAs and their patch-ids.
+2. Done 2026-10-29 on a scratchpad replica (Evidence 6 and 7, including an index build and a search on a member), on 2026-11-01 on a replica built from the real add-on repos (Evidence 8), and on 2026-11-01 on the live Kodi checkout (Evidence 9).
+3. Done 2026-10-30: the full gate was green on a clean worktree.
+4. Done 2026-11-01: closed as fixed. The fix SHAs and patch-ids are in § Fix provenance. Still unverified, kept in the `unverified` field: whether the `ignore` crate honors `.git/info/exclude` during the discovery walk, and the library-scope manual drift (Evidence 5, a separate issue). If the add-on's `.gitignore` line is unwanted, `git -C remote-fixes/script.module.thecrew checkout .gitignore` removes it.
 
 
 **Re-checked 2026-10-30 (branch worktree-agent-a3aee1a8919a0949f, experiments 573825fb7): no further code change made, and none is owed by this file.** Parts A (711b8c3a4) and B (0d95ee8bf) are in the tree and the full gate is green on a clean worktree, which includes their tests (`a_pinned_onboarding_describes_the_pinned_directory_not_the_home_workspace`, `startup_lists_a_declared_manifestless_member`, `onboarding_writes_a_nested_repo_members_memory_into_the_member` and the `merge_declared_projects` unit tests). Everything under "Still open, not fixed" is a judged-acceptable limit, a separate issue (lib scope manual drift) or a no-effect probe gap, not a design change. Left `status: open` on purpose: Resume item 2 (the live Kodi checkout) cannot be done from a worktree, and the gate re-run of item 3 is now done. Whoever owns the Kodi checkout closes it after one live run.
+
+## Fix provenance
+
+Parts A and B, both on `origin/experiments`. Both values were re-read on 2026-11-01 (`git merge-base --is-ancestor` for each commit, `git show <sha> | git patch-id --stable` for each patch-id).
+
+- **SHA:** `711b8c3a4a27a5cb2c8b591e1e356f5513160012`
+- **patch-id:** `058b1e1ece94955a2129b1e53dc65c6b4c0cf62a`
+
+- **SHA:** `0d95ee8bf5271dc802fa183e4286431e735c49ec`
+- **patch-id:** `12ee0cdba01a8665fe3259545f540ee8e1d0de22`
 
 ## References
 - Kodi side notes: `/home/marius/work/personal/media/kodi-notes/`
