@@ -1,7 +1,7 @@
 ---
 id: '8a695dda7dfdf476'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a shell and cargo resolve different sccache binaries, so shell sccache commands reach the wrong server'
 owners:
 - marius
@@ -11,6 +11,7 @@ tags:
 - gate
 - machine-env
 topic: gate build pool and sccache
+closed: 2026-11-01
 opened: 2026-10-31
 severity: medium
 unverified: 'Which sccache version pairs are wire-compatible is not established: only 0.19 server with 0.15 client (and the reverse, for --show-stats) was observed to fail. The effect on the shared default port 4226 is inferred, not measured.'
@@ -103,7 +104,7 @@ A scratch measurement for the gate tmpfs/zram design started a 0.19.0 server on 
 
 ## Fix
 
-Not fixed. This is a machine-local defect, so no repo code is required. Options:
+Fixed 2026-11-01 with option 1 (see § Resume). This was a machine-local defect, so no repo code is required. Options:
 
 1. Remove the stale copy (`cargo uninstall sccache`), so `sccache` names one binary everywhere. Then restart the shared server with that binary, at a moment when no gate or `with-slot.sh` run holds a slot. If the 0.15.0 server keeps running after its binary changes, new 0.19.0 clients fail against it exactly as above, so the restart is required.
 2. Keep both and always call the cargo one by its full path in diagnostic commands. This is fragile, because a bare `sccache` stays wrong.
@@ -121,7 +122,20 @@ Use the binary that cargo runs: `~/.cargo/bin/sccache --show-stats`, `~/.cargo/b
 
 ## Resume
 
-Decide between Fix options 1 and 3. For option 1: when `flock -n` succeeds on every `~/.cache/codescout-gate/slot-*.lock`, run `cargo uninstall sccache`, then `sccache --stop-server` with the 0.15.0 binary path, then let the next build start a 0.19.0 server. Then check that `readlink /proc/<server pid>/exe` is `/usr/bin/sccache`.
+Fixed 2026-11-01 on this machine by Fix option 1. No repo commit exists, so there is no SHA or patch-id.
+
+Steps run, with all 13 `~/.cache/codescout-gate/slot-*.lock` held by one script (every `flock -n` succeeded):
+
+1. `~/.cargo/bin/sccache --stop-server` (exit 0; the 0.15.0 server was the only sccache process).
+2. `cargo uninstall sccache` (exit 0; `~/.cargo/bin/sccache` is gone).
+
+Measured afterwards:
+
+- `which -a sccache` → `/usr/bin/sccache` only; `sccache --show-stats` from the shell works and reports `Version (client) 0.19.0`.
+- `readlink /proc/<pid>/exe` of the new server → `/usr/bin/sccache`.
+- A scratch crate built with `RUSTC_WRAPPER=sccache cargo build` finished with exit 0.
+
+Not established: the stats of the new server showed 705 cache misses and 0 hits. The cause is inferred to be a cold cache key space after the version change, not measured. The first gate runs may be slow.
 
 ## References
 
