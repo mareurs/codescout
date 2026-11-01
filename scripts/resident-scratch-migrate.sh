@@ -104,7 +104,7 @@ while IFS=$'\t' read -r link target; do
         first=${rest%%/*}
         if [ -n "${moving[$first]:-}" ]; then
             dangling=$((dangling + 1))
-            echo "  would dangle: $link -> $target"
+            [ "$dangling" -gt 3 ] || echo "  would dangle: $link -> $target"
         fi
         ;;
     esac
@@ -116,7 +116,7 @@ echo "to move:      ${#moving[@]}"
 for name in "${!moving[@]}"; do echo "  move  $name"; done | sort
 echo "to leave:     ${#why[@]}"
 for name in "${!why[@]}"; do echo "  stay  $name — ${why[$name]}"; done | sort
-echo "links left dangling in directories that stay: $dangling"
+echo "links left dangling in directories that stay: $dangling (the first 3 are listed above)"
 
 if [ "$apply" = 0 ]; then
     echo "dry run: nothing was changed. Pass --apply to move."

@@ -197,3 +197,14 @@ def test_force_referenced_moves_a_directory_a_memory_names(world):
     result = run("bash", str(MIGRATE), "--apply", "--only", "ref", "--force-referenced")
     assert result.returncode == 0, result.stdout + result.stderr
     assert (cache / "myrepo/ref/data.txt").is_file() and not (base / "ref").exists()
+
+
+def test_the_dangling_list_is_capped_and_the_count_is_not(world):
+    repo, _, run = world
+    base = scratch_tree(repo)
+    for i in range(6):
+        (base / "live" / f"extra-{i}").symlink_to(base / "old")
+    result = run("bash", str(MIGRATE))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("would dangle:") == 3, result.stdout
+    assert "links left dangling in directories that stay: 7 " in result.stdout
