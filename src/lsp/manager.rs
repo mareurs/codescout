@@ -946,6 +946,8 @@ impl LspManager {
 
         // Resolve the server config early — fail fast for unknown languages
         // before touching the barrier map at all.
+        // `config` is written only in the `#[cfg(unix)]` mux path below.
+        #[cfg_attr(not(unix), allow(unused_mut))]
         let mut config =
             server_config_for(language, workspace_root, mux_override).ok_or_else(|| {
                 anyhow::anyhow!("No LSP server configured for language: {}", language)

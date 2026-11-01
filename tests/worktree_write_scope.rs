@@ -108,6 +108,8 @@ async fn approve_outside_project_is_independent_of_linked_worktrees() {
 async fn still_protects_projects(operation: &str) {
     let (temp, context, _, linked) = fixture(true).await;
     let root = temp.path().join("main");
+    // `roots` grows only in the `#[cfg(unix)]` symlink block below.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut roots = vec![root, linked.clone()];
     #[cfg(unix)]
     {

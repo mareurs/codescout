@@ -687,6 +687,8 @@ pub(crate) fn no_history() -> (tempfile::TempDir, AttributionEnv) {
 
 /// `tests.rs` of this module's parent needs the same probe for its own engine tests.
 #[cfg(test)]
+// Its only importer, in `tests.rs`, is a `#[cfg(unix)]` test, so Windows would warn.
+#[cfg_attr(windows, allow(unused_imports))]
 pub(crate) use tests::python3_present;
 
 #[cfg(test)]
