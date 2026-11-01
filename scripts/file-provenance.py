@@ -131,6 +131,21 @@ ARTIFACT_WRITE_ACTIONS = {"create", "update", "move", "delete", "graft", "link",
 # not named `*_TOOLS`: the registry drift gate reads every such constant as a tool-name list.
 _NON_ATOMIC_NAMES = ("Bash", "mcp__codescout__run_command")
 
+# Every tool name `write_targets` has a branch for. Any other name yields nothing, so the function
+# returns at once for it. One scan of the real corpus makes 249,056 calls, 33,017 of them for
+# `read_file` (bug 20927ccfe293c34e). These are the ONLY writers: add a name here when you add a
+# branch there (`test_the_set_names_every_tool_the_branches_name` reds if you forget). Deliberately
+# not named `*_TOOLS`, for the reason `_NON_ATOMIC_NAMES` gives: that gate reads such a constant as
+# a list of registered codescout tools, and this one holds the Codex tool `apply_patch`.
+_TARGET_NAMES = frozenset(CS_WRITE_TOOLS | NATIVE_WRITE_TOOLS | {
+    "apply_patch",
+    "Bash",
+    "mcp__codescout__run_command",
+    "mcp__codescout__doc",
+    "mcp__codescout__artifact",          # legacy -> doc: pre-ceb5b57a name
+    "mcp__codescout__artifact_augment",  # legacy -> doc: now doc(action="augment")
+})
+
 # Prefilter for `refused_call_ids`: a tool_result line that CAN be a refusal. `is_error` for the
 # harness's own refusals; the escaped `\"ok\": false` for a codescout refusal, which is JSON text
 # inside a JSON string; `pending_ack` for the unacknowledged out-of-project write.
@@ -542,10 +557,15 @@ def normalize(p: str, root: Path, base: Path | None = None) -> str | None:
     if not q.is_absolute() and base is not None:
         q = base / q
     if q.is_absolute():
-        try:
-            return str(q.resolve().relative_to(root))
-        except ValueError:
-            return None          # another tree entirely — says nothing about here
+        # A string test on the resolved path, not `Path.relative_to`: that call was 5.8 of this
+        # function's 10.8 profiled seconds over the real corpus (bug 20927ccfe293c34e). The
+        # separator is part of the prefix, so a sibling `<root>-other` is outside, not a remainder.
+        resolved, top = str(q.resolve()), str(root)
+        if resolved == top:
+            return "."
+        prefix = top if top.endswith(os.sep) else top + os.sep
+        # Another tree entirely says nothing about here.
+        return resolved[len(prefix):] if resolved.startswith(prefix) else None
     return os.path.normpath(p)
 
 
@@ -568,6 +588,8 @@ def patch_write_targets(patch: str) -> list[str]:
 def write_targets(name: str, inp: dict, root: Path):
     """Paths this ONE tool call wrote. Empty for every read-only call."""
     if not isinstance(inp, dict):
+        return
+    if name not in _TARGET_NAMES:
         return
     if name == "apply_patch":
         yield from patch_write_targets(inp.get("patch"))
@@ -962,6 +984,10 @@ def scan_provenance(root: Path, environ: dict[str, str], modified_since: float |
         *(read_codex(path) for path in codex_files),
     ])
     owners, evidence, gaps = {}, {}, list(batch.gaps)
+    # `normalize` answers for THIS call only. It resolves symlinks, which is the filesystem as it
+    # is now, so the memo is a local and never a module global: a second scan must see a retargeted
+    # link. 27,707 of 76,207 calls over the real corpus had distinct arguments (bug 20927ccfe293c34e).
+    memo: dict = {}
     streams = {}
     operations = sorted(batch.operations, key=lambda op: op.timestamp or "")
     facts = operation_activations(operations)
@@ -996,7 +1022,9 @@ def scan_provenance(root: Path, environ: dict[str, str], modified_since: float |
             if ((unknowable and not pinned) or base is UNKNOWN_TREE) and relative_cs and not Path(raw).is_absolute():
                 gaps.append(CoverageGap(op.source_id, "relative write has ambiguous shared MCP workspace", None))
                 continue
-            rel = normalize(raw, root, base)
+            if (raw, base) not in memo:
+                memo[(raw, base)] = normalize(raw, root, base)
+            rel = memo[(raw, base)]
             if rel:
                 if who is None:
                     gaps.append(CoverageGap(op.source_id, "native writer identity is unresolved", root, (rel,)))
