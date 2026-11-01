@@ -1,19 +1,19 @@
 ---
 kind: bug
-status: open
+status: investigating
 title: 'tracker-conventions sections that a write needs are declared-but-unreachable: the sections only a status-changing update needs stay waived (routing it delays librarian''s anti-wipe sections), and doctor cannot be served per violation class (move, append_entry, update_entry, augment and link were fixed 2026-10-17)'
 tags:
 - cluster/declared-not-wired
 - guides
 - section-grain-delivery
 - topic-routing
+closed: null
 opened: 2026-10-16
-closed:
 owner: marius
-severity: low
 related:
 - docs/issues/2026-09-24-residual-tracker-conventions-serves-sections.md
 - docs/issues/archive/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md
+severity: low
 ---
 
 # BUG: the half of tracker-conventions that a write needs cannot be delivered by section
@@ -330,6 +330,17 @@ Re-checked at the bytes on `experiments` 0f8705532: `move`, `append_entry`, `upd
 3. **`One entry format` and `Compaction and archival`.** Inform `body_edits` updates, which route to librarian. Decide: serve on `update` with a `body_edits` predicate, or leave waived with the reason. Recommend leaving waived until 1 lands.
 
 Order: 1, then 2, then 3. Each step deletes the waiver rows it makes reachable; Gate 5 holds the sections to their size cap.
+
+### Scout of step 1, 2026-11-01 (friction `bug-fix-session-log:F-211`): step 1 is four coupled changes
+
+Read at the bytes on `experiments`. Nothing was changed.
+
+1. **The single-topic limit is in the loop.** `emit_guide_sections` (`src/engines/emitters.rs:75`) already tries two candidates, the tool's topic and `topic_declaring`, but returns at the first that ships blocks. `topic_declaring` (`src/prompts/guide_index.rs:427`) returns one topic. Both must return more than one. The `Tool::relevant_guide_topic` trait, which has 11 implementations, does not need to change.
+2. **The shape grammar cannot name a status-changing update.** `Shape` is `tool[.action][(path~substring)]` and matches on the call's RESULT. The update result is `{"id": ..., "updated": true}` plus optional fields (`src/librarian/tools/update.rs:941`), with no status and no path. So the step needs a grammar amendment and a field in the update result.
+3. **A gate forbids the overlap.** `no_two_topics_declare_an_overlapping_shape` allows a cross-topic pair only when one shape narrows the other by path. A status predicate must count as a narrowing.
+4. **A byte ceiling bounds the result.** `a_p50_session_stays_under_the_committed_emission_byte_ceiling` (`src/server.rs`) holds 12,000 B. The two `librarian` waiver texts record a 54 B margin, a dated figure that was not re-measured. The sizes of the three `tracker-conventions` sections are not measured yet.
+
+The design decision for the owner: amend the grammar and the update result (items 2 and 3), or find another way to know that a call changes status. Measure the three section sizes against the ceiling first. Until then the three waivers stay.
 
 ## References
 

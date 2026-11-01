@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 210
+entry_high_water_F: 211
 entry_high_water_W: 155
 ---
 
@@ -66,6 +66,7 @@ entry_high_water_W: 155
 | ID | Date | Severity | Category | Status | Title |
 | F-207 | 2026-11-01 | med | test-design | fixed-verified | **A diagnostic hint passed its tests and did not fire on the one tree it was built for** — a 50,000-entry bound taken from a count of directories met 311,890 entries; found only by reading the live warning. |
 | F-210 | 2026-11-01 | med | process | mitigated | **A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path** — `fmt-mine` named three of my files UNKNOWN after a 19-minute gate; `rustfmt --check` on the diff's files beforehand takes seconds. |
+| F-211 | 2026-11-01 | med | plan-vs-reality | open | **A plan step that read "make update return a list of topics" hid four coupled changes, and the grammar cannot express the call it names** — the loop, the shape grammar, the overlap gate and the byte ceiling all move together; found by scouting before code. |
 | F-209 | 2026-11-01 | low | claim-vs-state | mitigated | **"Leaving these two directories costs nothing" was said before the directory counts were read** — I counted symlinks, the watcher counts directories; one remaining directory holds 1,808. |
 | F-208 | 2026-11-01 | low | plan-drift | fixed-verified | **A bug record's guessed cause for a remedy that did not clear a refusal pointed at a row state, and the cause was the lookup running again** — `581b05bbe41134f3`: the remedy's reset then add makes the row `retained`, and a named add clears a `retained` row and runs the file-level write lookup again on an unchanged record; fixed in `300cb29ea`. |
 |----|------|---------:|----------|--------|-------|
@@ -17844,6 +17845,25 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Promote-when:** a second zero from a text-pattern query over a serialized column is shown to be an instrument fault.
 
 **Status:** validated (one datapoint; the false-positive direction of the first query is part of it).
+
+## F-211 — A plan step that read "make update return a list of topics" hid four coupled changes, and the grammar cannot express the call it names
+
+**Observed:** Resume step 1 of bug `b9eec23561e3299b` says to make `relevant_guide_topic` return an ordered list for a status-changing `update`, then drop three waiver rows and declare `serves: doc.update(...)`. I claimed the bug and scouted before I changed code. The scout found that the step needs four coupled changes, and the plan names one.
+
+**The plan said:** change `relevant_guide_topic`, delete waivers, declare sections.
+
+**Reality, each read this session:**
+
+1. **The single-topic limit is in the loop, not the trait.** `emit_guide_sections` (`src/engines/emitters.rs:75`) already has two candidates, the tool's topic and `topic_declaring`, but it returns at the first candidate that ships blocks. `topic_declaring` (`src/prompts/guide_index.rs:427`) returns one topic. Both need to return more than one. The trait change in the plan is not the needed change, and it would touch 11 `relevant_guide_topic` implementations.
+2. **The shape grammar cannot name the call.** `Shape` is `tool[.action][(path~substring)]` (`parse_shape`, `src/prompts/guide_index.rs`). It matches on the result. A status-changing update has no path predicate to use, and the update result is `{"id": ..., "updated": true}` plus optional fields (`src/librarian/tools/update.rs:941`). It carries neither the status nor a path. So `serves: doc.update(...)` for "status changes" needs a grammar amendment and a field in the update result.
+3. **A gate forbids the overlap.** `no_two_topics_declare_an_overlapping_shape` allows a cross-topic pair only when one shape narrows the other by path (`ambiguous_across_topics`). A new status predicate must count as a narrowing, or `tracker-conventions` and `librarian` both declaring `doc.update` fails the build.
+4. **A byte ceiling bounds the result.** `a_p50_session_stays_under_the_committed_emission_byte_ceiling` (`src/server.rs`) holds a 12,000 B ceiling, and its own comment records a draft that failed at 12,308 B. The `SECTION_WAIVERS` text for two `librarian` sections records a 54 B margin. That figure is dated and was not re-measured. The size of the three `tracker-conventions` sections against that margin is not known yet.
+
+**Cost avoided:** a first edit to `relevant_guide_topic` and the trait would have touched 11 implementations and still left item 2 unsolved, because no declaration could name a status change. That is inferred from the grammar; I did not try the edit.
+
+**Resume:** this is an engine change plus a grammar amendment, not a step. It needs a design decision before code, with the section sizes measured first.
+
+**Valid:** dated 2026-11-01
 
 ## Template for new entries
 
