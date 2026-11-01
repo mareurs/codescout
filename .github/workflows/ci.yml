@@ -687,9 +687,18 @@ jobs:
           . /etc/os-release
           sudo dpkg --add-architecture i386
           sudo mkdir -pm755 /etc/apt/keyrings
-          sudo wget -qO /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
+          # The key is saved as `.asc`, and the `Signed-By` line of the downloaded `.sources`
+          # file is rewritten to match. WineHQ ships the key ASCII-armored, and the apt on
+          # Ubuntu 26.04 (`resolute`) trusts a keyring only when its name ends in `.gpg` or
+          # `.asc`: with the old `.key` name it prints "ignored as the file has an unsupported
+          # filetype" and `apt-get update` exits 100 ("repository ... is not signed").
+          # Reproduced in a clean ubuntu:26.04 container, before and after.
+          # docs/issues/2026-11-01-the-windows-gnu-lane-dies-at-apt-update-because-apt-ignores-a-key-named-dot-key.md
+          sudo wget -qO /etc/apt/keyrings/winehq-archive.asc https://dl.winehq.org/wine-builds/winehq.key
           sudo wget -qNP /etc/apt/sources.list.d/ \
             "https://dl.winehq.org/wine-builds/ubuntu/dists/${UBUNTU_CODENAME}/winehq-${UBUNTU_CODENAME}.sources"
+          sudo sed -i 's#/etc/apt/keyrings/winehq-archive\.key#/etc/apt/keyrings/winehq-archive.asc#' \
+            "/etc/apt/sources.list.d/winehq-${UBUNTU_CODENAME}.sources"
           # Pin the whole family, including the i386 sub-package by arch; see the comment above.
           printf 'Package: winehq-devel wine-devel* wine-devel*:i386\nPin: version %s\nPin-Priority: 1001\n' \
             "${WINE_PIN}~${UBUNTU_CODENAME}-1" | sudo tee /etc/apt/preferences.d/winehq-pin >/dev/null
