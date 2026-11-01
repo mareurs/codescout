@@ -15,10 +15,12 @@ use std::path::{Path, PathBuf};
 /// Directory symlinks below this count are normal, so nothing is reported.
 pub(crate) const FANOUT_MIN_LINKS: usize = 20;
 
-/// The most entries one scan visits. The 32,192 directories under `.codescout` took 1.9 s to
-/// walk, warm, on 2026-10-31, so 50,000 entries costs seconds, not minutes.
+/// The most entries one scan visits, files and directories alike. On 2026-11-01 the real tree
+/// held 311,890 entries and a full walk took 1.2 s, warm, so 1,000,000 entries costs seconds, not
+/// minutes. The first bound, 50,000, came from a count of directories only. It stopped the scan
+/// before the first link on that tree.
 // cap-class: NOT_A_CAP — bounds the cost of a diagnostic scan on a failure path; a cut is marked in the hint (`at least N`, `The scan stopped at its limit`), so nothing is presented as complete and no tool result is shortened
-pub(crate) const FANOUT_MAX_ENTRIES: usize = 50_000;
+pub(crate) const FANOUT_MAX_ENTRIES: usize = 1_000_000;
 
 /// What [`find`] saw.
 #[derive(Debug, PartialEq, Eq)]
@@ -193,6 +195,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         links_in(dir.path(), 3);
         let found = find(dir.path(), 1, 10_000).unwrap();
+        assert!(!found.truncated);
+    }
+
+    #[test]
+    fn links_below_a_directory_with_more_files_than_the_old_bound_are_still_found() {
+        // On 2026-11-01 the real tree held 311,890 entries and the first link came at entry 97,906,
+        // so a bound of 50,000 stopped the scan with no links and the hint never named them.
+        // The files sit in the root itself, so every one of them is counted before any
+        // subdirectory is entered: the order `read_dir` returns them in cannot matter.
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..60_000 {
+            std::fs::File::create(dir.path().join(format!("f{i}"))).unwrap();
+        }
+        let nested = dir.path().join("zz");
+        std::fs::create_dir_all(&nested).unwrap();
+        links_in(&nested, 25);
+        let found = find(dir.path(), FANOUT_MIN_LINKS, FANOUT_MAX_ENTRIES)
+            .expect("the links sit after 60,000 files and inside the bound");
+        assert_eq!(found.links, 25);
         assert!(!found.truncated);
     }
 
