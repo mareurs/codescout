@@ -242,6 +242,12 @@ debug = 1
 [profile.dev.build-override]
 opt-level = 3
 
+# `build_id_of` (src/retrieval/index_state.rs) hashes the whole running test binary, ~402 MB,
+# once per process. At opt-level 0 that cost 11.8 s in every test that reaches it under nextest.
+# Measured 2026-11-01 on tools::config::tests::project_status_compact_shape: 11.815 s -> 0.564 s.
+[profile.dev.package.sha2]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 # LTO off: measured 2026-07-02 (W-1, docs/trackers/perf-windows-session-log.md) —
