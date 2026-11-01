@@ -20,9 +20,11 @@ a Live bundle is bare-only. Stdlib only; Docker through `pilot.docker`.
 import argparse
 import hashlib
 import json
+import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -108,11 +110,48 @@ TRACKED_LIST = "/tmp/sab-tracked.lst"
 GIT_ATTRIBUTES = "* -text -ident -filter"
 
 
+KEEP_IGNORED = ("target", "Cargo.lock", ".venv", "generated-do-not-edit")
+IMAGE_DEBRIS = ("/tmp/testdir",)
+
+
+def debris_sh(paths=None, tmp="/tmp"):
+    """Shell: remove the test-run debris of the original image from `tmp`: the fixed IMAGE_DEBRIS
+    paths, and every top-level entry of `tmp` that holds a path the agent user (uid 1000) cannot
+    read (a file without `o+r`, a directory without `o+rx`), each printed as `Removing-debris`.
+
+    Measured: rust-analyzer's `/tmp/testdir` (63 MB of fixture projects its own test suite made on
+    2026-08-12, the image build day) holds 27 zero-byte `*.lock` files, mode 0600 root; gitbutler's
+    `/tmp` holds 123 entries of the same day (`.tmpXXXX`, `tmp.XXXX`) of which 55 paths (53 files
+    0600, 2 dirs 0700, all root) are unreadable. The export refuses an unreadable path outside the
+    exec-only allowlist, and the allowlist stays as it is: what the agent cannot read is removed
+    with the directory that holds it, and the list is in the build log. Readable debris stays and
+    is scanned by the gate."""
+    names = " ".join(shlex.quote(p) for p in (IMAGE_DEBRIS if paths is None else paths))
+    fixed = (f"for p in {names}; do [ -e \"$p\" ] && echo \"Removing-debris $p\"; rm -rf \"$p\"; done")
+    t = shlex.quote(tmp)
+    unreadable = r"\( \( -type d ! -perm -o=rx \) -o \( ! -type d ! -type l ! -perm -o=r \) \)"
+    return (f"{fixed} && for e in {t}/* {t}/.[!.]* {t}/..?*; do [ -e \"$e\" ] || [ -L \"$e\" ] || continue; "
+            f"if [ -n \"$(find \"$e\" {unreadable} -print -quit)\" ]; then echo \"Removing-debris $e\"; "
+            "rm -rf \"$e\"; fi; done")
+
+
+
 def reset_sh(base):
-    """Shell steps: reset the tree to `base`, remove untracked files (not `target/`), remember the
-    base tree hash in `$TREE` and the tracked file list, NUL separated, in TRACKED_LIST (outside
-    the workdir). Must run before the `.git` is removed. Run from the workdir."""
-    return [f"git reset --hard -q {base}", "git clean -fdq -e target",
+    """Shell steps: reset the tree to `base`, remove every untracked file (`-x`: the ignored ones
+    too, `-ff`: nested repositories too) except KEEP_IGNORED, remember the base tree hash in
+    `$TREE` and the tracked file list, NUL separated, in TRACKED_LIST (outside the workdir). Must
+    run before the `.git` is removed. Run from the workdir.
+
+    The raw image is a third party's snapshot taken after running the tests of the gold tree: an
+    ignored file such as rust-analyzer's `test-output.log` (564 KB, the gold run's output, naming
+    the FAIL_TO_PASS test with `... ok`) is untracked and ignored, so a plain `git clean` kept it,
+    and the needle baseline then took its content for part of the base tree. What is kept:
+    `target/` (prebuilt output, rebuilt from base by `_workspace_clean_and_rebuild`), `Cargo.lock`
+    (ignored in rust-sdk, needed by the offline build), `.venv`, and `generated-do-not-edit`
+    (gix-testtools' fixture cache, which the control ran with; the leak gate scans it). The
+    removals are printed (`Removing ...`), so they land in task-image-build.log."""
+    keep = " ".join(f"-e {shlex.quote(k)}" for k in KEEP_IGNORED)
+    return [f"git reset --hard -q {base}", f"git clean -ffdx {keep}",
             "TREE=$(git rev-parse HEAD^{tree})", f"git ls-files -z > {TRACKED_LIST}"]
 
 
@@ -147,7 +186,7 @@ def live_dockerfile(source_ref, record, workdir):
     return (f"FROM {source_ref}\nUSER root\n"
             "RUN " + " \\\n && ".join(steps) + " \\\n"
             f" &&{_workspace_clean_and_rebuild(record, workdir)} \\\n"
-            f" && rm -rf {reports} \\\n && "
+            f" && rm -rf {reports} \\\n && {debris_sh()} \\\n && "
             + " \\\n && ".join(recreate_repo_sh(gits)) + " \\\n"
             " && (getent group 1000 >/dev/null || groupadd --gid 1000 agent) \\\n"
             " && (id -u 1000 >/dev/null 2>&1 || useradd --uid 1000 --gid 1000 --create-home "
@@ -224,6 +263,64 @@ def leak_record(record):
     return dict(record, FAIL_TO_PASS=[needle_name(n) for n in tasks._f2p(record["FAIL_TO_PASS"])])
 
 
+def regular_files(root, skipped=None):
+    """(relative path, bytes) of every regular file under `root` except the top-level `.git` and
+    `target/`, as `tasks.tree_files` yields them, but a FIFO, socket or device is never opened
+    (`tasks.tree_files` read a FIFO and blocked for ever on gitbutler's
+    `generated-do-not-edit/.../named-pipe`): it is appended to `skipped` as {path, kind} and so
+    recorded, not lost. A link contributes its target string and is never followed."""
+    root = Path(root)
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel_dir = Path(dirpath).relative_to(root)
+        if rel_dir == Path("."):
+            dirnames[:] = [d for d in dirnames if d not in (".git", "target")]
+        for name in dirnames + filenames:
+            p = Path(dirpath) / name
+            if p.is_symlink():
+                yield (rel_dir / name).as_posix(), os.readlink(p).encode()
+        for name in filenames:
+            p = Path(dirpath) / name
+            if p.is_symlink():
+                continue
+            mode = os.lstat(p).st_mode
+            if not stat.S_ISREG(mode):
+                if skipped is not None:
+                    skipped.append({"path": (rel_dir / name).as_posix(), "kind": live_sweep._kind(mode)})
+                continue
+            yield (rel_dir / name).as_posix(), p.read_bytes()
+
+
+def remove_specials(root):
+    """Delete every FIFO, socket and device under `root` (an export copy) and return them as
+    [{path, kind}]: leak_scan refuses a scan that met a non-regular file, and reading a FIFO would
+    block. They hold no content an agent could read; the list goes into the evidence."""
+    root = Path(root)
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in filenames:
+            p = Path(dirpath) / name
+            mode = os.lstat(p).st_mode
+            if not stat.S_ISREG(mode) and not stat.S_ISLNK(mode):
+                found.append({"path": p.relative_to(root).as_posix(), "kind": live_sweep._kind(mode)})
+                p.unlink()
+    return found
+
+
+_REMOVING = re.compile(r"^(?:#\d+ [\d.]+ )?Removing (.+)$")
+_DEBRIS = re.compile(r"^(?:#\d+ [\d.]+ )?Removing-debris (.+)$")
+
+
+def scrubbed_paths(build_log, pattern=_REMOVING):
+    """The paths `git clean` removed in the image build (`Removing <path>` lines of the log), or
+    with `_DEBRIS` the /tmp entries `debris_sh` removed (`Removing-debris <path>`)."""
+    try:
+        text = Path(build_log).read_text(errors="replace")
+    except OSError:
+        return []
+    return [m.group(1) for line in text.splitlines() if (m := pattern.match(line.rstrip()))]
+
+
+
 def assemble_live(record, out, task_image, workdir):
     """The task image (built here), its baseline tree, the baselined needles and the files."""
     out = tasks._fresh_dir(out)
@@ -235,7 +332,8 @@ def assemble_live(record, out, task_image, workdir):
     base_tree = out / "baseline-tree"
     tasks.export_tree(task_image, ["testbed"], base_tree, excludes=["testbed/target", "testbed/.git"])
     raw = leak_scan.needles_for(leak_record(record))
-    needles = leak_scan.baseline_needles(raw, lambda: tasks.tree_files(base_tree / "testbed"))
+    skipped = []
+    needles = leak_scan.baseline_needles(raw, lambda: regular_files(base_tree / "testbed", skipped))
     prompt = out / "prompt.txt"
     prompt.write_text(tasks.PROMPT_PREFIX + record["problem_statement"].replace("\r\n", "\n"))
     gold = out / "gold.patch"
@@ -246,6 +344,8 @@ def assemble_live(record, out, task_image, workdir):
            "needles": {"kept": needles.kept, "dropped": needles.dropped,
                        "baseline_files": needles.baseline_files, "baseline_bytes": needles.baseline_bytes,
                        "baseline": "the task image's /testbed without .git and target/"},
+           "baseline_specials": skipped, "scrubbed": scrubbed_paths(out / "task-image-build.log"),
+           "debris_removed": scrubbed_paths(out / "task-image-build.log", _DEBRIS),
            "gold_patch": str(gold)}
     (out / "assembly.json").write_text(json.dumps(rec, indent=2) + "\n")
     return needles, prompt, rec
@@ -419,7 +519,7 @@ def baseline_tool_layer(needles, tool_root):
     shingles = [n for n in needles.needles if leak_scan.kind_of(n) == "shingle"]
     if not shingles:
         return needles, 0
-    kept = set(leak_scan.baseline_needles(shingles, lambda: tasks.tree_files(tool_root)).needles)
+    kept = set(leak_scan.baseline_needles(shingles, lambda: regular_files(tool_root)).needles)
     new = [n for n in needles.needles if leak_scan.kind_of(n) != "shingle" or n in kept]
     counts = dict.fromkeys(leak_scan.KINDS, 0)
     for n in new:
@@ -473,7 +573,7 @@ def _base_needles(rec):
     record = json.loads(Path(rec["record_path"]).read_text())
     out = Path(rec["out"])
     return record, leak_scan.baseline_needles(leak_scan.needles_for(leak_record(record)),
-                                              lambda: tasks.tree_files(out / "baseline-tree" / "testbed"))
+                                              lambda: regular_files(out / "baseline-tree" / "testbed"))
 
 
 def load_live(bundle_json):
@@ -548,7 +648,7 @@ def gold_literals(record, baseline_root):
                 s = line[1:].strip()
                 if len(s) >= SWEEP_MIN_LITERAL:
                     cands.setdefault(s, s.encode())
-    for _, data in tasks.tree_files(baseline_root):
+    for _, data in regular_files(baseline_root):
         for s in [s for s, b in cands.items() if b in data]:
             del cands[s]
         if not cands:
@@ -591,15 +691,55 @@ def sweep_reasons(report):
     return reasons
 
 
+def prescan_agent_image(bundle, manifest, data, image):
+    """`tasks.prescan_task` for a Live agent image: the same roots (testbed minus target, home,
+    /opt/sab, tmp, the git object stream, the config roots) and the same positive control, with
+    one difference: the export is cleared of FIFOs, sockets and devices before the scan
+    (`remove_specials`; leak_scan refuses a tree holding one and a read of a FIFO would block) and
+    they are listed in the evidence as `specials_removed`. `tasks.prescan_task` itself cannot do
+    that: it exports and scans in one call. Evidence: `<data>/prescan.json`."""
+    data = Path(data)
+    if data.exists():
+        shutil.rmtree(data)
+    data.mkdir(parents=True)
+    export = data / "export"
+    unreadable = []
+    present = tasks.export_tree(image, tasks.SCAN_PATHS, export, excludes=list(tasks.SCAN_EXCLUDED),
+                                unreadable=unreadable)
+    specials = remove_specials(export)
+    objects = data / "git-objects.bin"
+    objects.write_bytes(subprocess.run(
+        ["docker", "run", "--rm", "--network", "none", "-w", tasks.WORKDIR, "--entrypoint", "git", image,
+         "cat-file", "--batch-all-objects", "--batch"], capture_output=True, check=True, timeout=1800).stdout)
+    links = data / "broken-symlinks.txt"
+    roots = [links] if tasks.unlink_broken_links(export, links) else []
+    roots += [export / p for p in present
+              if any(f.is_file() or f.is_symlink() for f in (export / p).rglob("*"))]
+    roots += [objects] + tasks.config_roots(manifest)
+    try:
+        report = leak_scan.positive_control(roots, tasks.control_order(bundle.needles), None)
+        out = {"id": bundle.id, "image": image, "control": "pass", "unreadable_to_agent": unreadable,
+               "reasons": ([f"unreadable to the agent-user export but not exec-only: {bad}"]
+                           if (bad := tasks.unreadable_not_allowed(unreadable)) else []),
+               "hits": [{"path": str(h.path), "needle": h.needle, "offset": h.offset} for h in report.hits],
+               "per_root": [list(x) for x in report.per_root], "needle_counts": report.needle_counts}
+    except leak_scan.ControlFailed as e:
+        out = {"id": bundle.id, "image": image, "control": "FAILED", "error": str(e)}
+    out["specials_removed"] = specials
+    (data / "prescan.json").write_text(json.dumps(out, indent=2) + "\n")
+    return out
+
+
+
 def prescan_live(bundle_json, manifest, data):
-    """The leak gate on the agent image: tasks.prescan_task (testbed minus target, home, /opt/sab,
+    """The leak gate on the agent image: `prescan_agent_image` (testbed minus target, home, /opt/sab,
     tmp, git objects, config roots) plus the Live sweep (everything the agent user can read under /
     on this filesystem, `target/` included, with the gold-only literals). Writes
     `<data>/prescan.json` with `sweep` and `reasons`; `ok` is True iff `reasons` is empty."""
     bundle_json = Path(bundle_json)
     b = load_live(bundle_json)
     image = agent_image_name(b.record["task_image"])
-    out = dict(tasks.prescan_task(b._replace(image=image), manifest, data, image=image))
+    out = dict(prescan_agent_image(b._replace(image=image), manifest, data, image))
     reasons = list(out.get("reasons") or [])
     if out.get("control") != "pass":
         reasons.append(f"prescan control {out.get('control')}: {out.get('error')}")

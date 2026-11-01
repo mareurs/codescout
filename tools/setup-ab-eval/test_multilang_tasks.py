@@ -50,7 +50,7 @@ class LiveDockerfileTests(unittest.TestCase):
         text = mt.live_dockerfile("src@sha256:" + "a" * 64, record(), "/testbed")
         self.assertTrue(text.startswith("FROM src@sha256:" + "a" * 64 + "\nUSER root\n"))
         self.assertIn(f"git reset --hard -q {BASE}", text)
-        self.assertIn("git clean -fdq -e target", text)
+        self.assertIn("git clean -ffdx -e target -e Cargo.lock -e .venv -e generated-do-not-edit", text)
         for line in text.splitlines():
             if "rm -rf" in line:
                 self.assertNotIn("rm -rf target ", line + " ", "target/ is kept, never removed whole")
@@ -163,6 +163,22 @@ class AssembleLiveTests(unittest.TestCase):
         needles, _, _ = self.run_assemble(record(FAIL_TO_PASS=[
             "Doc-tests rmcp::crates/rmcp/src/t.rs - transport::Cfg::custom_headers (line 1725) - compile"]))
         self.assertIn("custom_headers", needles.needles)
+
+
+    def test_a_name_needle_is_kept_unless_the_base_tree_really_holds_the_name(self):
+        """rust-analyzer's id shape gave name needle 0 because `test-output.log`, a gold-run log the
+        image kept as ignored debris, held the name: the baseline took it for base content. The name
+        is derived correctly; with the log scrubbed from the tree the needle stays."""
+        tid = "target/debug/deps/hir_ty-491963d1a8621083::mir::lower::tests::borrowck_opaque_downcast_ok"
+        rec = record(FAIL_TO_PASS=[tid])
+        self.assertIn("borrowck_opaque_downcast_ok", mt.leak_scan.needles_for(mt.leak_record(rec)))
+        needles, _, _ = self.run_assemble(rec)
+        self.assertIn("borrowck_opaque_downcast_ok", needles.needles)
+        self.base_files["test-output.log"] = "test mir::lower::tests::borrowck_opaque_downcast_ok ... ok\n"
+        (self.tmp / "b").rename(self.tmp / "b1")
+        needles, _, _ = self.run_assemble(rec)
+        self.assertNotIn("borrowck_opaque_downcast_ok", needles.needles,
+                         "an excusing file in the baseline tree drops the name")
 
 
     def test_assemble_live_refuses_to_merge_into_an_existing_dir(self):
@@ -472,7 +488,7 @@ class PrescanLiveTests(unittest.TestCase):
             return SimpleNamespace(stdout=json.dumps(report), returncode=0)
 
         clean = {"id": "o__r-1", "control": "pass", "hits": [], "reasons": []}
-        with mock.patch.object(tasks, "prescan_task", return_value=clean), \
+        with mock.patch.object(mt, "prescan_agent_image", return_value=clean), \
                 mock.patch.object(mt.pilot, "docker", fake_docker):
             return mt.prescan_live(self.bj, {}, self.data)
 
@@ -509,7 +525,7 @@ class PrescanLiveTests(unittest.TestCase):
 
     def test_live_prescan_fails_when_the_base_prescan_failed(self):
         clean = {"id": "o__r-1", "control": "FAILED", "error": "boom"}
-        with mock.patch.object(tasks, "prescan_task", return_value=clean), \
+        with mock.patch.object(mt, "prescan_agent_image", return_value=clean), \
                 mock.patch.object(mt.pilot, "docker", lambda *a, **k: SimpleNamespace(
                     stdout=json.dumps(self.good()), returncode=0)):
             self.assertFalse(mt.prescan_live(self.bj, {}, self.data)["ok"])
@@ -604,6 +620,219 @@ class RepoRecreateTests(unittest.TestCase):
         self.make_repo()
         steps = [*mt.reset_sh(self.base), "echo changed > src/new.rs", *mt.recreate_repo_sh(".git")]
         self.assertNotEqual(self.run_steps(steps).returncode, 0)
+
+
+class ScrubAndDebrisTests(unittest.TestCase):
+    """The shell that removes the third party's run debris, run on a real repository."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        self.env = {**os.environ, "HOME": str(self.tmp), "GIT_CONFIG_GLOBAL": os.devnull,
+                    "GIT_CONFIG_SYSTEM": os.devnull}
+        p = mock.patch.object(mt, "TRACKED_LIST", str(self.tmp / "tracked.lst"))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def git(self, *args):
+        import subprocess
+        return subprocess.run(["git", *args], cwd=self.repo, env=self.env, check=True,
+                              capture_output=True, text=True)
+
+    def write(self, rel, text="x\n"):
+        p = self.repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+
+    def test_ignored_run_output_is_removed_and_the_build_inputs_are_kept(self):
+        import subprocess
+        self.git("init", "-q")
+        self.git("config", "user.email", "a@b.invalid")
+        self.git("config", "user.name", "x")
+        self.write(".gitignore", "*.log\ntarget/\nCargo.lock\n.venv/\ngenerated-do-not-edit/\n")
+        self.write("src/lib.rs")
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.write("test-output.log", "test mir::lower::tests::the_gold_test ... ok\n")  # ignored debris
+        self.write("crates/a/run.log")  # ignored debris, nested
+        self.write("Cargo.lock")
+        self.write(".venv/bin/python")
+        self.write("crates/b/tests/fixtures/generated-do-not-edit/x/data.txt")
+        self.write("target/debug/x.o")
+        self.write("stray.txt")  # untracked, not ignored
+        (self.repo / "nested").mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=self.repo / "nested", env=self.env, check=True)
+        self.write("nested/ignored.log")
+        r = subprocess.run(["bash", "-c", "set -eu; " + " && ".join(mt.reset_sh(base))], cwd=self.repo,
+                           env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        left = {p.relative_to(self.repo).as_posix() for p in self.repo.rglob("*")
+                if p.is_file() and ".git/" not in p.as_posix() + "/" and not p.as_posix().endswith("/.git")}
+        gone = {"test-output.log", "crates/a/run.log", "stray.txt", "nested/ignored.log"}
+        self.assertFalse(left & gone, left & gone)
+        for kept in ("Cargo.lock", ".venv/bin/python", "target/debug/x.o", "src/lib.rs",
+                     "crates/b/tests/fixtures/generated-do-not-edit/x/data.txt"):
+            self.assertIn(kept, left)
+        self.assertIn("Removing test-output.log", r.stdout, "the removals are printed for the build log")
+
+    def test_the_removals_in_a_build_log_are_parsed_with_and_without_buildkit_prefixes(self):
+        log = self.tmp / "build.log"
+        log.write_text("#7 12.5 Removing test-output.log\n#7 12.6 Removing crates/a/run.log\n"
+                       "Removing plain.log\nRemoving-not a line\n#7 DONE\n")
+        self.assertEqual(mt.scrubbed_paths(log), ["test-output.log", "crates/a/run.log", "plain.log"])
+        self.assertEqual(mt.scrubbed_paths(self.tmp / "missing.log"), [])
+
+    def test_debris_is_removed_even_when_a_root_only_lock_file_sits_inside(self):
+        import subprocess
+        tmp = self.tmp / "tmp"
+        for rel, mode in (("testdir/123_4/target/incremental/x.lock", 0o600),   # rust-analyzer
+                          (".tmpAbC/.git/virtual-branches.toml", 0o600),         # gitbutler
+                          ("tmp.Xyz/readable.txt", 0o644), ("fine/a.txt", 0o644), ("fine/sub/b.txt", 0o644)):
+            p = tmp / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("x")
+            os.chmod(p, mode)
+        (tmp / "rootonly").mkdir()
+        (tmp / "rootonly" / "inner").write_text("x")
+        os.chmod(tmp / "rootonly", 0o700)
+        (tmp / "plain-secret").write_text("x")
+        os.chmod(tmp / "plain-secret", 0o600)
+        os.symlink("fine/a.txt", tmp / "a-link")
+        os.symlink("/nonexistent", tmp / "dangling")
+        r = subprocess.run(["bash", "-c", "set -eu; " + mt.debris_sh([str(tmp / "testdir")], str(tmp))],
+                           capture_output=True, text=True, check=True)
+        left = sorted(p.name for p in tmp.iterdir())
+        self.assertEqual(left, ["a-link", "dangling", "fine", "tmp.Xyz"])
+        removed = sorted(line.split()[-1].rsplit("/", 1)[-1]
+                         for line in r.stdout.splitlines() if line.startswith("Removing-debris"))
+        self.assertEqual(removed, [".tmpAbC", "plain-secret", "rootonly", "testdir"])
+        self.assertTrue((tmp / "fine" / "sub" / "b.txt").exists(), "readable debris stays for the gate")
+        log = self.tmp / "b.log"
+        log.write_text("".join(f"#9 1.0 {line}\n" for line in r.stdout.splitlines()))
+        self.assertEqual(len(mt.scrubbed_paths(log, mt._DEBRIS)), 4)
+        self.assertEqual(mt.scrubbed_paths(log), [], "git clean's lines are a different class")
+
+    def test_the_dockerfile_removes_the_debris_before_the_user_and_arm_layers(self):
+        t = mt.live_dockerfile("src", record(), "/testbed")
+        self.assertIn("rm -rf \"$p\"", t)
+        self.assertIn("/tmp/testdir", t)
+        self.assertLess(t.index("/tmp/testdir"), t.index("chown -R"))
+        self.assertLess(t.index("git clean -ffdx"), t.index("/tmp/testdir"))
+        self.assertEqual(mt.IMAGE_DEBRIS, ("/tmp/testdir",))
+
+
+class SpecialFileTests(unittest.TestCase):
+    """A FIFO in a tree must not block the baseline, the export scan or the sweep (gitbutler)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.root = self.tmp / "testbed"
+        (self.root / "crates" / "fix").mkdir(parents=True)
+        (self.root / "src.rs").write_text("fn plain() {}\n")
+        (self.root / "crates" / "fix" / "link").symlink_to("../../src.rs")
+        os.mkfifo(self.root / "crates" / "fix" / "named-pipe")
+
+    def run_py(self, code, timeout=30):
+        """Run python code with the tool dir on the path; a hang fails the test instead of the suite."""
+        import subprocess
+        import sys
+        here = str(Path(mt.__file__).resolve().parent)
+        try:
+            r = subprocess.run([sys.executable, "-B", "-c", f"import sys; sys.path.insert(0, {here!r})\n{code}"],
+                               capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.fail("blocked on a FIFO (the reader opened it)")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_regular_files_returns_without_reading_the_fifo_and_records_it(self):
+        out = self.run_py(f"""
+import json, multilang_tasks as mt
+skipped = []
+files = {{rel: data.decode() for rel, data in mt.regular_files({str(self.root)!r}, skipped)}}
+print(json.dumps({{"files": files, "skipped": skipped}}))""")
+        self.assertEqual(out["files"], {"src.rs": "fn plain() {}\n", "crates/fix/link": "../../src.rs"})
+        self.assertEqual(out["skipped"], [{"path": "crates/fix/named-pipe", "kind": "fifo"}])
+
+    def test_the_needle_baseline_over_a_tree_with_a_fifo_finishes(self):
+        out = self.run_py(f"""
+import json, leak_scan, multilang_tasks as mt
+skipped = []
+ns = leak_scan.baseline_needles(["plain_name_only", "not_there_x"], lambda: mt.regular_files({str(self.root)!r}, skipped))
+print(json.dumps({{"kept": ns.kept, "skipped": len(skipped)}}))""")
+        self.assertEqual(out["skipped"], 1)
+
+    def test_prescan_agent_image_clears_fifos_from_the_export_and_lists_them(self):
+        cfg = self.tmp / "cfg.json"
+        cfg.write_text("{}")
+        plug = self.tmp / "plugin"
+        plug.mkdir()
+        (plug / "p.txt").write_text("plugin text")
+        manifest = {"full_config_files": [str(cfg)], "plugins_cs": {"install_path": str(plug)},
+                    "plugins_full": []}
+        needles = mt.leak_scan.baseline_needles(
+            ["zz_gold_only_name", "alpha_x beta_y gamma_z delta_w epsilon_v zeta_u eta_t theta_s"],
+            lambda: iter([("a.rs", b"nothing")]))
+
+        def export(image, paths, dest, **kw):
+            (Path(dest) / "testbed").mkdir(parents=True)
+            (Path(dest) / "testbed" / "a.rs").write_text("fn clean() {}\n")
+            os.mkfifo(Path(dest) / "testbed" / "p")
+            return ["testbed"]
+
+        bundle = SimpleNamespace(id="o__r-1", needles=needles)
+        with mock.patch.object(tasks, "export_tree", side_effect=export), \
+                mock.patch.object(mt.subprocess, "run",
+                                  return_value=SimpleNamespace(stdout=b"git objects")):
+            out = mt.prescan_agent_image(bundle, manifest, self.tmp / "data", "sab-agent-cs-o__r-1:t1")
+        self.assertEqual(out["control"], "pass")
+        self.assertEqual(out["hits"], [])
+        self.assertEqual(out["specials_removed"], [{"path": "testbed/p", "kind": "fifo"}])
+        saved = json.loads((self.tmp / "data" / "prescan.json").read_text())
+        self.assertEqual(saved["specials_removed"], out["specials_removed"])
+        self.assertFalse((self.tmp / "data" / "export" / "testbed" / "p").exists())
+
+
+    def test_old_tree_files_reader_is_what_blocked(self):
+        # documents the cause without hanging the suite: tasks.tree_files opens every non-link file
+        import inspect
+        self.assertIn("p.read_bytes()", inspect.getsource(tasks.tree_files))
+        self.assertNotIn("S_ISREG", inspect.getsource(tasks.tree_files))
+
+    def test_remove_specials_lists_and_deletes_them_so_leak_scan_can_scan(self):
+        out = self.run_py(f"""
+import json, leak_scan, multilang_tasks as mt
+gone = mt.remove_specials({str(self.root)!r})
+rep = leak_scan.scan([__import__("pathlib").Path({str(self.root)!r})], None,
+                     leak_scan.baseline_needles(["zz_needle_name"], lambda: iter([("a.rs", b"x")])))
+print(json.dumps({{"gone": gone, "skipped": len(rep.skipped), "files": rep.files_scanned}}))""")
+        self.assertEqual(out["gone"], [{"path": "crates/fix/named-pipe", "kind": "fifo"}])
+        self.assertEqual(out["skipped"], 0)
+        self.assertFalse((self.root / "crates" / "fix" / "named-pipe").exists())
+        self.assertTrue((self.root / "src.rs").exists())
+
+    def test_the_sweep_lists_the_fifo_and_counts_links_without_opening_either(self):
+        out = self.run_py(f"""
+import json, live_sweep
+r = live_sweep.sweep({str(self.tmp)!r}, [], ["a literal that is not in the tree anywhere"], [])
+print(json.dumps({{k: r[k] for k in ("files", "specials", "specials_count", "symlinks", "hits")}}))""")
+        self.assertEqual(out["specials"], [{"path": "/testbed/crates/fix/named-pipe", "kind": "fifo"}])
+        self.assertEqual((out["specials_count"], out["symlinks"], out["files"], out["hits"]), (1, 1, 1, []))
+
+    def test_a_planted_needle_next_to_a_fifo_is_still_found_by_sweep_and_baseline_reader(self):
+        (self.root / "planted.rs").write_text("// planted_secret_literal_line_for_the_gate\n")
+        out = self.run_py(f"""
+import json, live_sweep, multilang_tasks as mt
+r = live_sweep.sweep({str(self.tmp)!r}, [], ["planted_secret_literal_line_for_the_gate"], [])
+files = [rel for rel, data in mt.regular_files({str(self.root)!r}) if b"planted_secret" in data]
+print(json.dumps({{"hits": [h["path"] for h in r["hits"]], "files": files}}))""")
+        self.assertEqual(out["hits"], ["/testbed/planted.rs"])
+        self.assertEqual(out["files"], ["planted.rs"])
+
 
 
 class ToolLayerTests(unittest.TestCase):

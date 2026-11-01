@@ -15,7 +15,9 @@ the `excludes` (the pseudo filesystems and the toolchain dirs, each recorded in 
   * a file whose name looks like a patch, a diff, an eval script or a gold file is listed.
 
 The unreadable directories and files are counted and the first few named (the agent cannot read
-them either). The report is one JSON object on stdout; the exit code is 0 when the sweep finished,
+them either). A FIFO, socket or device is never opened (opening a FIFO blocks for ever): it is
+listed under `specials` with its kind, links are counted under `symlinks`, nothing is skipped
+silently. The report is one JSON object on stdout; the exit code is 0 when the sweep finished,
 whatever it found: the caller decides. Stdlib only.
 """
 import json
@@ -61,6 +63,15 @@ def _literal_hits(path, size, literals, window=WINDOW):
     return [(lit.decode("utf-8", "replace"), off) for lit, off in found.items()]
 
 
+def _kind(mode):
+    for check, name in ((stat.S_ISFIFO, "fifo"), (stat.S_ISSOCK, "socket"), (stat.S_ISCHR, "char-device"),
+                        (stat.S_ISBLK, "block-device")):
+        if check(mode):
+            return name
+    return "other"
+
+
+
 def sweep(root, needles, literals, excludes, *, token_max=TOKEN_MAX, window=WINDOW):
     import leak_scan
     matcher = leak_scan._Matcher(list(needles), leak_scan.SHINGLE_TOKENS) if needles else None
@@ -70,6 +81,7 @@ def sweep(root, needles, literals, excludes, *, token_max=TOKEN_MAX, window=WIND
     excl = {os.path.normpath(os.path.join(root, e.lstrip("/"))): e for e in excludes}
     report = {"root": root, "files": 0, "bytes": 0, "token_scanned": 0, "literal_only": 0,
               "hits": [], "suspicious": [], "unreadable": [], "unreadable_count": 0,
+              "specials": [], "specials_count": 0, "symlinks": 0,
               "pruned": [], "excluded": {e: os.path.lexists(os.path.join(root, e.lstrip("/"))) for e in excludes}}
 
     def unreadable(path, why):
@@ -104,7 +116,15 @@ def sweep(root, needles, literals, excludes, *, token_max=TOKEN_MAX, window=WIND
                 report["suspicious"].append("/" + rel)
             try:
                 st = os.lstat(p)
+                if stat.S_ISLNK(st.st_mode):
+                    report["symlinks"] += 1
+                    continue
                 if not stat.S_ISREG(st.st_mode):
+                    # a FIFO would block `open` for ever, a socket or device is no file content:
+                    # never opened, always listed
+                    report["specials_count"] += 1
+                    if len(report["specials"]) < MAX_LISTED:
+                        report["specials"].append({"path": "/" + rel, "kind": _kind(st.st_mode)})
                     continue
                 report["files"] += 1
                 report["bytes"] += st.st_size
