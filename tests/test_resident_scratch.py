@@ -150,7 +150,7 @@ def test_a_dry_run_changes_nothing_and_says_what_would_move_and_stay(world):
     assert not (cache / "myrepo").exists() or not any((cache / "myrepo").iterdir())
 
 
-def test_apply_moves_closed_directories_retargets_links_and_leaves_pointer_files(world):
+def test_apply_moves_closed_directories_keeps_link_text_and_leaves_pointer_files(world):
     repo, cache, run = world
     base = scratch_tree(repo)
     result = run("bash", str(MIGRATE), "--apply")
@@ -161,9 +161,9 @@ def test_apply_moves_closed_directories_retargets_links_and_leaves_pointer_files
     pointer = base / "old.moved"
     assert pointer.is_file() and not pointer.is_symlink(), "a link would bring the walk back"
     assert pointer.read_text().strip() == str(dest / "old")
-    # A link between two moved directories follows the move.
-    assert os.readlink(dest / "old/to-old2") == str(dest / "old2")
-    assert (dest / "old/to-old2").is_dir()
+    # A link between two moved directories keeps its old target: a seal can cover link text.
+    assert os.readlink(dest / "old/to-old2") == str(base / "old2")
+    assert not (dest / "old/to-old2").exists()
     # A link out of a moved directory into one that stays is left as it was, and still works.
     assert os.readlink(dest / "old/to-live") == str(base / "live")
     # Directories that stay are untouched; a link from one into a moved directory now dangles.
@@ -208,3 +208,24 @@ def test_the_dangling_list_is_capped_and_the_count_is_not(world):
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("would dangle:") == 3, result.stdout
     assert "links left dangling in directories that stay: 7 " in result.stdout
+
+
+def test_retarget_rewrites_links_between_moved_directories_and_nothing_else(world):
+    repo, cache, run = world
+    base = scratch_tree(repo)
+    result = run("bash", str(MIGRATE), "--apply", "--retarget")
+    assert result.returncode == 0, result.stdout + result.stderr
+    dest = cache / "myrepo"
+    assert os.readlink(dest / "old/to-old2") == str(dest / "old2")
+    assert (dest / "old/to-old2").is_dir()
+    # A link into a directory that stays is not a link between moved directories.
+    assert os.readlink(dest / "old/to-live") == str(base / "live")
+
+
+def test_the_dry_run_counts_links_between_moved_directories(world):
+    repo, _, run = world
+    scratch_tree(repo)
+    result = run("bash", str(MIGRATE))
+    assert "name another moved directory: 1 (left as they are" in result.stdout, result.stdout
+    retarget = run("bash", str(MIGRATE), "--retarget")
+    assert "name another moved directory: 1 (will be rewritten)" in retarget.stdout
