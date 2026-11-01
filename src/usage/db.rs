@@ -260,6 +260,35 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN observed_changed INTEGER;")?;
     }
 
+    // `attribution_outcome` / `attribution_ms` — what the red-attribution engine did on a
+    // `run_command` call, and how long it took. Record-only. A timeout is silent in the response
+    // on purpose (a missing hint must never read as "nobody wrote it"), so these columns are the
+    // only place a reader can tell a scan that ran out of time from a red that named no dirty file.
+    //
+    // - NULL in both — the engine did not start: a green command, the opt-out, or a red with no
+    //   diagnostic text. Also every row written before this migration.
+    // - `attribution_outcome` is one of `hinted` (the engine printed a hint), `silent` (it
+    //   finished and printed nothing: an early exit when no dirty file is named, or a full scan
+    //   with no output), `timed_out` (the ceiling passed first), `tooling_failure` (it exited
+    //   non-zero, or the wait on it failed) or `spawn_failed` (it could not be extracted or spawned).
+    // - `attribution_ms` is the wall time from the first engine step to the end of the wait. It
+    //   is what separates a 0.1 s `silent` from a 14 s one, and it shows the margin to the ceiling.
+    //
+    // A value says what the ENGINE did. It never says who wrote a file.
+    // Mechanism: `src/usage/attribution_outcome.rs`.
+    let has_attribution_outcome: bool = conn
+        .prepare("SELECT attribution_outcome FROM tool_calls LIMIT 0")
+        .is_ok();
+    if !has_attribution_outcome {
+        conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN attribution_outcome TEXT;")?;
+    }
+    let has_attribution_ms: bool = conn
+        .prepare("SELECT attribution_ms FROM tool_calls LIMIT 0")
+        .is_ok();
+    if !has_attribution_ms {
+        conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN attribution_ms INTEGER;")?;
+    }
+
     backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
 
     Ok(conn)
@@ -355,6 +384,14 @@ pub struct MeasurementLinkage<'a> {
     /// Record-only. See the `observed_changed` migration in `open_db` for what each state
     /// does and does not mean on a shared checkout — it is NOT "this command wrote".
     pub observed_changed: Option<bool>,
+    /// What the red-attribution engine did on a `run_command` call: one of the five values
+    /// of `attribution_outcome::Outcome::as_column`, or `None` when the engine did not start.
+    /// Record-only. See the `attribution_outcome` migration in `open_db`: it says what the
+    /// engine did, never who wrote a file.
+    pub attribution_outcome: Option<&'a str>,
+    /// Wall time of that engine run in milliseconds. `Some` exactly when `attribution_outcome`
+    /// is.
+    pub attribution_ms: Option<i64>,
 }
 
 /// The current UTC instant in the exact textual shape `write_record`'s
@@ -408,8 +445,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
         // lexicographic compare against a `datetime()`-shaped literal, and the shared
         // prefix is fixed-width, so a `.SSS` suffix always sorts after the same second
         // and before the next one.
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class, tool_use_id, deliveries_json, observed_changed)
-                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class, tool_use_id, deliveries_json, observed_changed, attribution_outcome, attribution_ms)
+                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
         params![
             tool_name,
             latency_ms,
@@ -435,6 +472,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             measurement.tool_use_id,
             measurement.deliveries_json,
             measurement.observed_changed.map(i64::from),
+            measurement.attribution_outcome,
+            measurement.attribution_ms,
             ],
     )?;
     // `pika_observations` is not codescout's table (a buddy-plugin skill creates it,
@@ -1738,6 +1777,105 @@ mod tests {
                 ("unobserved".to_string(), None),
             ]
         );
+    }
+
+    /// `attribution_outcome` and `attribution_ms` (what the red-attribution engine did on a
+    /// `run_command` call): a real pre-migration table gains both columns, the old row reads
+    /// NULL in both, each of the five outcome values and its time survive a `write_record`
+    /// round-trip, and a row with no value stays NULL, which is a different claim from any of
+    /// the five ("the engine did not start"). A second `open_db` on the migrated file must
+    /// not fail, because the probe-and-`ALTER` runs on every open.
+    #[test]
+    fn open_db_adds_the_attribution_columns_and_they_round_trip() {
+        use crate::usage::attribution_outcome::Outcome;
+
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join(".codescout").join("usage.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        {
+            let pre = Connection::open(&db_path).unwrap();
+            pre.execute_batch(
+                "CREATE TABLE tool_calls (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tool_name  TEXT NOT NULL,
+                    called_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+                    latency_ms INTEGER NOT NULL,
+                    outcome    TEXT NOT NULL,
+                    overflowed INTEGER NOT NULL DEFAULT 0,
+                    error_msg  TEXT
+                );
+                INSERT INTO tool_calls (tool_name, latency_ms, outcome)
+                    VALUES ('legacy', 1, 'success');",
+            )
+            .unwrap();
+        }
+
+        let conn = open_db(dir.path()).unwrap();
+
+        let written = [
+            Some(Outcome::Hinted),
+            Some(Outcome::Silent),
+            Some(Outcome::TimedOut),
+            Some(Outcome::ToolingFailure),
+            Some(Outcome::SpawnFailed),
+            None,
+        ];
+        for (i, outcome) in written.iter().enumerate() {
+            write_record(
+                &conn,
+                &format!("row{i}"),
+                1,
+                "success",
+                false,
+                None,
+                "unknown",
+                None,
+                "s",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Default::default(),
+                None,
+                MeasurementLinkage {
+                    attribution_outcome: outcome.map(Outcome::as_column),
+                    attribution_ms: outcome.map(|_| 100 + i as i64),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+
+        let got: Vec<(String, Option<String>, Option<i64>)> = conn
+            .prepare(
+                "SELECT tool_name, attribution_outcome, attribution_ms FROM tool_calls ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(
+            got,
+            vec![
+                ("legacy".to_string(), None, None),
+                ("row0".to_string(), s("hinted"), Some(100)),
+                ("row1".to_string(), s("silent"), Some(101)),
+                ("row2".to_string(), s("timed_out"), Some(102)),
+                ("row3".to_string(), s("tooling_failure"), Some(103)),
+                ("row4".to_string(), s("spawn_failed"), Some(104)),
+                ("row5".to_string(), None, None),
+            ]
+        );
+
+        drop(conn);
+        open_db(dir.path()).expect("a second open on a migrated file must not fail");
     }
 
     #[test]

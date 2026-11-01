@@ -96,8 +96,9 @@
 //! rather than left for a reader to discover from the silence.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use crate::usage::attribution_outcome::{self, Outcome};
 use crate::util::private_dir::{create_private_dir, effective_uid, verify_private_dir, Uid};
 // The refusal type is named only by the tests; the non-test code reads it through `Display`.
 #[cfg(all(test, unix))]
@@ -422,6 +423,21 @@ fn materialize_into(base: &Path) -> Option<PathBuf> {
     Some(dir.join(EMBEDDED_SCRIPTS[0].0))
 }
 
+/// How a FINISHED engine process is filed in `usage.db`'s `attribution_outcome`.
+///
+/// Pure, and keyed on the exit status rather than on the text: a crash is a tooling failure
+/// whatever it printed, and silence from a crash must never be filed as `silent`. `answer` is
+/// what [`engine_outcome`] returned for the same process.
+fn finished_outcome(success: bool, answer: &Option<String>) -> Outcome {
+    if !success {
+        Outcome::ToolingFailure
+    } else if answer.is_some() {
+        Outcome::Hinted
+    } else {
+        Outcome::Silent
+    }
+}
+
 /// Turn the engine's finished process into the line a red carries, if any.
 ///
 /// The engine exits 0 for every outcome it chooses, so only a non-zero exit — an uncaught
@@ -563,7 +579,15 @@ pub(crate) async fn wip_author_diagnostic_in(
         return None;
     }
 
-    let script = materialize_into(base)?;
+    // The clock starts after the two gates and before extraction: extraction takes a few ms,
+    // and leaving it out would give `spawn_failed` no time at all. Every state recorded
+    // below carries the time since this line, which is what shows the margin to the ceiling.
+    let started = Instant::now();
+    let ms = || started.elapsed().as_millis() as i64;
+    let Some(script) = materialize_into(base) else {
+        attribution_outcome::record(Outcome::SpawnFailed, ms());
+        return None;
+    };
 
     let mut cmd = tokio::process::Command::from(engine_std_command(&script));
     cmd.current_dir(work_dir)
@@ -572,7 +596,13 @@ pub(crate) async fn wip_author_diagnostic_in(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    let mut child = cmd.spawn().ok()?;
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(_) => {
+            attribution_outcome::record(Outcome::SpawnFailed, ms());
+            return None;
+        }
+    };
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
         // A broken pipe here is the ENGINE deciding it has read enough, not an error:
@@ -583,15 +613,35 @@ pub(crate) async fn wip_author_diagnostic_in(
 
     let out = match tokio::time::timeout(env.timeout, child.wait_with_output()).await {
         Ok(Ok(o)) => o,
-        // Timed out or failed. Silent, per the doc above — never "nobody wrote it".
-        _ => return None,
+        // The ceiling passed. Silent in the RESPONSE, per the doc above — never "nobody
+        // wrote it" — but not in the log or in `usage.db` (`attribution_outcome`), where a
+        // reader needs to tell it from a red that named no dirty file.
+        Err(_) => {
+            let elapsed_ms = ms();
+            attribution_outcome::record(Outcome::TimedOut, elapsed_ms);
+            tracing::warn!(
+                ceiling_ms = env.timeout.as_millis() as u64,
+                elapsed_ms,
+                "attribution: the scan passed its ceiling, so no hint is attached; \
+                     this says nothing about who wrote the files"
+            );
+            return None;
+        }
+        // The wait itself failed. Still no hint, as before; now recorded and logged.
+        Ok(Err(e)) => {
+            attribution_outcome::record(Outcome::ToolingFailure, ms());
+            tracing::warn!(error = %e, "attribution: waiting for the engine failed; no hint is attached");
+            return None;
+        }
     };
-    engine_outcome(
+    let answer = engine_outcome(
         out.status.success(),
         out.status.code(),
         &out.stdout,
         &out.stderr,
-    )
+    );
+    attribution_outcome::record(finished_outcome(out.status.success(), &answer), ms());
+    answer
 }
 
 /// An env whose engine scans an empty transcript history.
@@ -1517,6 +1567,196 @@ mod tests {
             "a scan that ran out of time must say nothing at all; got: {got:?}"
         );
     }
+
+    /// Run `fut` inside a fresh attribution sink, as `UsageRecorder::record_content` does, and
+    /// return its value together with what the engine path recorded (`None` = nothing).
+    async fn with_attribution_sink<T>(
+        fut: impl std::future::Future<Output = T>,
+    ) -> (T, Option<crate::usage::attribution_outcome::Recorded>) {
+        use crate::usage::attribution_outcome::ATTRIBUTION_SINK;
+        ATTRIBUTION_SINK
+            .scope(std::cell::RefCell::new(None), async {
+                let out = fut.await;
+                (out, ATTRIBUTION_SINK.with(|s| *s.borrow()))
+            })
+            .await
+    }
+
+    /// The classification is pure, and a non-zero exit is a tooling failure whatever the
+    /// engine printed: silence from a crash must never be filed as `silent`.
+    #[test]
+    fn finished_outcome_separates_hinted_silent_and_tooling_failure() {
+        let text = Some("a hint".to_string());
+        assert_eq!(finished_outcome(true, &text), Outcome::Hinted);
+        assert_eq!(finished_outcome(true, &None), Outcome::Silent);
+        assert_eq!(finished_outcome(false, &text), Outcome::ToolingFailure);
+        assert_eq!(finished_outcome(false, &None), Outcome::ToolingFailure);
+    }
+
+    /// A ceiling that passes is recorded as `timed_out`, and the response is still silence.
+    /// Needs python3: without it the spawn fails first and the outcome is `spawn_failed`.
+    #[tokio::test]
+    async fn a_timed_out_scan_records_timed_out_and_still_says_nothing() {
+        let Some(dir) = dirty_fixture_repo() else {
+            eprintln!("skipping: git unavailable");
+            return;
+        };
+        if !python3_present() {
+            eprintln!("skipping: python3 absent");
+            return;
+        }
+        let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
+        let env = AttributionEnv {
+            timeout: Duration::from_millis(1),
+            ..Default::default()
+        };
+        let (got, recorded) =
+            with_attribution_sink(wip_author_diagnostic_with(101, red, dir.path(), &env)).await;
+        assert!(got.is_none(), "a timeout says nothing; got: {got:?}");
+        let recorded = recorded.expect("a timed-out scan must leave a record");
+        assert_eq!(recorded.outcome, Outcome::TimedOut);
+        assert!(
+            (1..30_000).contains(&recorded.elapsed_ms),
+            "a 1 ms ceiling cannot record {} ms",
+            recorded.elapsed_ms
+        );
+    }
+
+    /// An engine that prints a hint is recorded as `hinted`.
+    #[tokio::test]
+    async fn an_engine_that_answers_records_hinted() {
+        let Some(dir) = dirty_fixture_repo() else {
+            eprintln!("skipping: git unavailable");
+            return;
+        };
+        let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
+        let (_history, env) = no_history();
+        let (got, recorded) =
+            with_attribution_sink(wip_author_diagnostic_with(101, red, dir.path(), &env)).await;
+        if got.is_none() {
+            assert!(
+                !python3_present(),
+                "python3 is present but the engine said nothing"
+            );
+            eprintln!("skipping: python3 absent");
+            return;
+        }
+        let recorded = recorded.expect("an engine that answered must leave a record");
+        assert_eq!(recorded.outcome, Outcome::Hinted);
+        assert!(recorded.elapsed_ms >= 0, "got {} ms", recorded.elapsed_ms);
+    }
+
+    /// An engine that finishes and prints nothing is recorded as `silent`. The red names a
+    /// path that is not dirty, so stage 2 of the engine ends the run with no output.
+    #[tokio::test]
+    async fn an_engine_with_nothing_to_say_records_silent() {
+        let Some(dir) = dirty_fixture_repo() else {
+            eprintln!("skipping: git unavailable");
+            return;
+        };
+        if !python3_present() {
+            eprintln!("skipping: python3 absent");
+            return;
+        }
+        let red = "error[E0425]: cannot find value `x`\n  --> src/not_dirty.rs:1:1\n";
+        let (_history, env) = no_history();
+        let (got, recorded) =
+            with_attribution_sink(wip_author_diagnostic_with(101, red, dir.path(), &env)).await;
+        assert!(
+            got.is_none(),
+            "a red naming no dirty file stays silent; got: {got:?}"
+        );
+        let recorded = recorded.expect("an engine that finished must leave a record");
+        assert_eq!(recorded.outcome, Outcome::Silent);
+    }
+
+    /// An engine that cannot be extracted never starts, and says so as `spawn_failed`. A
+    /// relative base is refused before anything is created (see `a_relative_base_is_refused`).
+    #[tokio::test]
+    async fn an_engine_that_cannot_be_extracted_records_spawn_failed() {
+        let rel = Path::new("attribution-outcome-relative-base-probe");
+        let _ = std::fs::remove_dir_all(rel);
+        let red = "error[E0425]: x\n  --> src/held.rs:1:13\n";
+        let (got, recorded) = with_attribution_sink(wip_author_diagnostic_in(
+            rel,
+            101,
+            red,
+            Path::new("."),
+            &AttributionEnv::default(),
+        ))
+        .await;
+        let created = rel.exists();
+        let _ = std::fs::remove_dir_all(rel);
+        assert!(!created, "a relative base must create nothing");
+        assert!(got.is_none());
+        assert_eq!(
+            recorded.map(|r| r.outcome),
+            Some(Outcome::SpawnFailed),
+            "an engine that never started must say so, not stay NULL"
+        );
+    }
+
+    /// A call that starts no engine records nothing: NULL is "the engine did not start", and
+    /// it must stay distinct from `silent`, which is "it ran and had nothing to say".
+    #[tokio::test]
+    async fn a_call_that_starts_no_engine_records_nothing() {
+        let quiet = "   Compiling codescout v0.15.0\n    Finished `dev` profile in 3.21s\n";
+        let (got, recorded) =
+            with_attribution_sink(wip_author_diagnostic(0, quiet, Path::new("."))).await;
+        assert!(got.is_none());
+        assert!(
+            recorded.is_none(),
+            "a green command started no engine; got {recorded:?}"
+        );
+
+        let red = "error[E0425]: x\n  --> src/held.rs:1:13\n";
+        let off = AttributionEnv {
+            enabled: false,
+            ..Default::default()
+        };
+        let (got, recorded) =
+            with_attribution_sink(wip_author_diagnostic_with(101, red, Path::new("."), &off)).await;
+        assert!(got.is_none());
+        assert!(
+            recorded.is_none(),
+            "the opt-out started no engine; got {recorded:?}"
+        );
+    }
+
+    /// Recording must not change what the caller receives. The same call returns equal values
+    /// with the sink in scope and out of scope, for a timeout (`None`) and for a hint.
+    #[tokio::test]
+    async fn the_response_is_the_same_in_and_out_of_a_scope() {
+        let Some(dir) = dirty_fixture_repo() else {
+            eprintln!("skipping: git unavailable");
+            return;
+        };
+        if !python3_present() {
+            eprintln!("skipping: python3 absent");
+            return;
+        }
+        let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
+
+        let timeout = AttributionEnv {
+            timeout: Duration::from_millis(1),
+            ..Default::default()
+        };
+        let (scoped, _) =
+            with_attribution_sink(wip_author_diagnostic_with(101, red, dir.path(), &timeout)).await;
+        let bare = wip_author_diagnostic_with(101, red, dir.path(), &timeout).await;
+        assert_eq!(
+            scoped, bare,
+            "a timeout must answer the same with a recorder"
+        );
+
+        let (_history, env) = no_history();
+        let (scoped, recorded) =
+            with_attribution_sink(wip_author_diagnostic_with(101, red, dir.path(), &env)).await;
+        let bare = wip_author_diagnostic_with(101, red, dir.path(), &env).await;
+        assert!(recorded.is_some(), "the scoped call must have recorded");
+        assert_eq!(scoped, bare, "a hint must read the same with a recorder");
+    }
+
     /// A helper that CRASHED is a tooling failure, and it must not read as "nothing to say".
     ///
     /// The engine exits 0 for every outcome it chooses (nothing dirty, nothing named, a notice

@@ -1,3 +1,4 @@
+pub(crate) mod attribution_outcome;
 pub mod db;
 pub(crate) mod deliveries;
 pub(crate) mod observed;
@@ -109,17 +110,29 @@ impl UsageRecorder {
         // The observed-effect sink (`observed`) is scoped the same way, for the same
         // reasons: a fresh `None` per call, drained inside the scope. NULL is "nothing was
         // observed"; only `run_command` calls that declared `read` ever write it.
-        let ((result, delivered), observed_changed) = observed::OBSERVED_SINK
-            .scope(std::cell::RefCell::new(None), async {
-                let out = deliveries::DELIVERY_SINK
-                    .scope(std::cell::RefCell::new(None), async {
-                        let r = f().await;
-                        (r, deliveries::DELIVERY_SINK.with(|s| s.borrow_mut().take()))
-                    })
-                    .await;
-                (out, observed::OBSERVED_SINK.with(|s| *s.borrow()))
-            })
-            .await;
+        let (((result, delivered), observed_changed), attribution) =
+            attribution_outcome::ATTRIBUTION_SINK
+                .scope(std::cell::RefCell::new(None), async {
+                    let out = observed::OBSERVED_SINK
+                        .scope(std::cell::RefCell::new(None), async {
+                            let out = deliveries::DELIVERY_SINK
+                                .scope(std::cell::RefCell::new(None), async {
+                                    let r = f().await;
+                                    (r, deliveries::DELIVERY_SINK.with(|s| s.borrow_mut().take()))
+                                })
+                                .await;
+                            (out, observed::OBSERVED_SINK.with(|s| *s.borrow()))
+                        })
+                        .await;
+                    // The attribution sink is the third of the same shape: a fresh `None`
+                    // per call, drained inside its scope. NULL is "the engine did not
+                    // start"; only a `run_command` that reached the engine ever writes it.
+                    (
+                        out,
+                        attribution_outcome::ATTRIBUTION_SINK.with(|s| *s.borrow()),
+                    )
+                })
+                .await;
         let latency_ms = start.elapsed().as_millis() as i64;
         let deliveries_json = deliveries::to_column(&delivered);
         // Best-effort — never let recording fail the tool call
@@ -133,12 +146,13 @@ impl UsageRecorder {
                 &result,
                 deliveries_json.as_deref(),
                 observed_changed,
+                attribution,
             )
             .await;
         result
     }
 
-    // Nine parameters since `observed_changed` joined; `db::write_record`, which
+    // Ten parameters since `attribution` joined; `db::write_record`, which
     // this feeds, carries the same allow.
     #[allow(clippy::too_many_arguments)]
     async fn write_content(
@@ -151,6 +165,7 @@ impl UsageRecorder {
         result: &Result<Vec<Content>>,
         deliveries_json: Option<&str>,
         observed_changed: Option<bool>,
+        attribution: Option<attribution_outcome::Recorded>,
     ) -> Result<()> {
         let (project_root, head_sha) = self
             .agent
@@ -262,6 +277,10 @@ impl UsageRecorder {
                 // behind `self.debug`, for the same reason as `tool_use_id`.
                 deliveries_json,
                 observed_changed,
+                // Drained from the task-local attribution sink by `record_content`, never
+                // behind `self.debug`, for the same reason: a column, not a debug-only fact.
+                attribution_outcome: attribution.map(|r| r.outcome.as_column()),
+                attribution_ms: attribution.map(|r| r.elapsed_ms),
             },
         )?;
         Ok(())
@@ -1098,6 +1117,121 @@ mod content_tests {
             .collect::<rusqlite::Result<_>>()
             .unwrap();
         assert_eq!(got, vec![Some(1), None]);
+    }
+
+    /// The attribution outcome is the sink's value, carried through `record_content`: the
+    /// closure stands in for a `run_command` whose engine ended. Both columns hold what was
+    /// recorded, and a call that records nothing (the engine never started) must read NULL
+    /// in both, which is a different claim from any of the five outcomes.
+    #[tokio::test]
+    async fn record_content_stores_the_attribution_sink_value_and_null_when_the_engine_did_not_start(
+    ) {
+        use crate::usage::attribution_outcome::{self, Outcome};
+        use serde_json::json;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent,
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            None,
+        );
+        for recorded in [
+            Some((Outcome::TimedOut, 31_000)),
+            Some((Outcome::Hinted, 18_500)),
+            None,
+        ] {
+            let _ = recorder
+                .record_content(
+                    "run_command",
+                    &json!({"command": "ls"}),
+                    None,
+                    || async move {
+                        if let Some((outcome, ms)) = recorded {
+                            attribution_outcome::record(outcome, ms);
+                        }
+                        Ok(vec![Content::text("ok")])
+                    },
+                )
+                .await;
+        }
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let got: Vec<(Option<String>, Option<i64>)> = conn
+            .prepare("SELECT attribution_outcome, attribution_ms FROM tool_calls ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            got,
+            vec![
+                (Some("timed_out".to_string()), Some(31_000)),
+                (Some("hinted".to_string()), Some(18_500)),
+                (None, None),
+            ]
+        );
+    }
+
+    /// The sink must not leak between calls: a call that records nothing after one that
+    /// recorded `timed_out` has to read NULL, not the previous call's outcome. A sink that
+    /// was a plain static (or scoped outside the per-call future) would carry it over.
+    #[tokio::test]
+    async fn the_attribution_sink_does_not_leak_into_the_next_call() {
+        use crate::usage::attribution_outcome::{self, Outcome};
+        use serde_json::json;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent,
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            None,
+        );
+        let input = json!({"command": "ls"});
+        // One enclosing scope across both calls: if `record_content` did not open its own
+        // fresh scope per call, the second call would inherit the first's record.
+        attribution_outcome::ATTRIBUTION_SINK
+            .scope(std::cell::RefCell::new(None), async {
+                let _ = recorder
+                    .record_content("run_command", &input, None, || async {
+                        attribution_outcome::record(Outcome::TimedOut, 30_001);
+                        Ok(vec![Content::text("ok")])
+                    })
+                    .await;
+                let _ = recorder
+                    .record_content("run_command", &input, None, || async {
+                        Ok(vec![Content::text("ok")])
+                    })
+                    .await;
+            })
+            .await;
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let got: Vec<(Option<String>, Option<i64>)> = conn
+            .prepare("SELECT attribution_outcome, attribution_ms FROM tool_calls ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            got,
+            vec![(Some("timed_out".to_string()), Some(30_001)), (None, None)]
+        );
     }
 
     #[tokio::test]
