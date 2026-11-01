@@ -3259,6 +3259,17 @@ mod tests {
             });
             cursor += offset + needle.len();
         }
+
+        // nextest runs no doctests, so each test lane has a second command, `cargo test --doc`.
+        // The sentence a session executes by hand must say so, or it skips them (final review of
+        // the nextest move, 2026-11-01, minor 4). This is a presence check, not an order check:
+        // the doctest step belongs to its lane and is described, not listed as a fifth command.
+        assert!(
+            directive.contains("`cargo test --doc`"),
+            "gate directive does not mention the doctest step `cargo test --doc`; nextest runs \
+             no doctests, so a session typing the lanes by hand would skip them. \
+             Directive as found: {directive:?}"
+        );
     }
     /// The gate's test-lane commands are restated on three more LIVE surfaces: the committed
     /// system prompt (injected into every session, subagents included) and two memories, one of
