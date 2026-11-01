@@ -10,6 +10,7 @@
 //! other walker in this crate honours it. It never follows a link, so a link to an ancestor ends.
 //! It is bounded by entries, and a scan that hits the bound says so.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Directory symlinks below this count are normal, so nothing is reported.
@@ -27,8 +28,12 @@ pub(crate) const FANOUT_MAX_ENTRIES: usize = 1_000_000;
 pub(crate) struct Fanout {
     /// Directory symlinks seen. A lower bound when `truncated`.
     pub(crate) links: usize,
-    /// The first one found, relative to the root.
-    pub(crate) example: PathBuf,
+    /// The deepest directory that holds more than half of the links, counted over its whole
+    /// subtree, relative to the root. Empty when no directory holds that many.
+    pub(crate) cluster: PathBuf,
+    /// How many of the links are under `cluster`. A lower bound when `truncated`. It is `links`
+    /// when `cluster` is empty.
+    pub(crate) cluster_links: usize,
     /// The scan stopped at its entry bound before it finished.
     pub(crate) truncated: bool,
 }
@@ -37,7 +42,7 @@ pub(crate) struct Fanout {
 /// visited at most `max_entries` entries. `.git` is not entered.
 pub(crate) fn find(root: &Path, min_links: usize, max_entries: usize) -> Option<Fanout> {
     let mut links = 0;
-    let mut example: Option<PathBuf> = None;
+    let mut per_dir: HashMap<PathBuf, usize> = HashMap::new();
     let mut visited = 0;
     let mut truncated = false;
     let mut pending = vec![root.to_path_buf()];
@@ -61,19 +66,44 @@ pub(crate) fn find(root: &Path, min_links: usize, max_entries: usize) -> Option<
                 // directory links. The link itself is never entered, so a cycle ends here.
                 if std::fs::metadata(&path).is_ok_and(|m| m.is_dir()) {
                     links += 1;
-                    if example.is_none() {
-                        example = path.strip_prefix(root).ok().map(Path::to_path_buf);
-                    }
+                    let parent = path
+                        .parent()
+                        .and_then(|p| p.strip_prefix(root).ok())
+                        .unwrap_or_else(|| Path::new(""));
+                    *per_dir.entry(parent.to_path_buf()).or_default() += 1;
                 }
             } else if kind.is_dir() && entry.file_name() != ".git" {
                 pending.push(path);
             }
         }
     }
-    (links >= min_links.max(1)).then(|| Fanout {
-        links,
-        example: example.unwrap_or_default(),
-        truncated,
+    (links >= min_links.max(1)).then(|| {
+        // Links counted over each directory's whole subtree: every direct count is added to all
+        // of the directory's ancestors, and the root is the empty path.
+        let mut subtree: HashMap<PathBuf, usize> = HashMap::new();
+        for (dir, n) in &per_dir {
+            for ancestor in dir.ancestors() {
+                *subtree.entry(ancestor.to_path_buf()).or_default() += n;
+            }
+        }
+        // From the root, step into the child that holds more than half of all the links, while
+        // one does. At most one child can, so read order cannot change the answer. Exactly half is
+        // not a majority.
+        let mut cluster = PathBuf::new();
+        let mut cluster_links = links;
+        while let Some((child, n)) = subtree
+            .iter()
+            .find(|(dir, n)| dir.parent() == Some(cluster.as_path()) && **n * 2 > links)
+        {
+            cluster = child.clone();
+            cluster_links = *n;
+        }
+        Fanout {
+            links,
+            cluster,
+            cluster_links,
+            truncated,
+        }
     })
 }
 
@@ -93,10 +123,21 @@ pub(crate) fn hint_with_fanout(base: &str, fanout: Option<&Fanout>) -> String {
     let Some(fanout) = fanout else {
         return base.to_owned();
     };
-    let count = if fanout.truncated {
-        format!("at least {}", fanout.links)
+    let bound = |n: usize| {
+        if fanout.truncated {
+            format!("at least {n}")
+        } else {
+            n.to_string()
+        }
+    };
+    let held = if fanout.cluster.as_os_str().is_empty() {
+        "with no single directory holding most of them".to_owned()
     } else {
-        fanout.links.to_string()
+        format!(
+            "{} of them under `{}`",
+            bound(fanout.cluster_links),
+            fanout.cluster.display()
+        )
     };
     let tail = if fanout.truncated {
         " The scan stopped at its limit."
@@ -104,10 +145,10 @@ pub(crate) fn hint_with_fanout(base: &str, fanout: Option<&Fanout>) -> String {
         ""
     };
     format!(
-        "{base} The workspace root holds {count} directory symlinks, the first at `{}`. A file \
-         watcher can walk such links without end. rust-analyzer has been seen to, and then it \
-         answers null for as long as it runs.{tail}",
-        fanout.example.display()
+        "{base} The workspace root holds {} directory symlinks, {held}. A file watcher can walk \
+         such links without end. rust-analyzer has been seen to, and then it answers null for as \
+         long as it runs. Such links should live outside the workspace root.{tail}",
+        bound(fanout.links)
     )
 }
 
@@ -140,11 +181,8 @@ mod tests {
         let found = find(dir.path(), 20, 10_000).expect("20 links meet a minimum of 20");
         assert_eq!(found.links, 20);
         assert!(!found.truncated);
-        assert!(
-            found.example.starts_with("a/b"),
-            "the example is relative to the root and below it: {:?}",
-            found.example
-        );
+        assert_eq!(found.cluster, PathBuf::from("a/b"));
+        assert_eq!(found.cluster_links, 20);
     }
 
     #[test]
@@ -199,6 +237,69 @@ mod tests {
     }
 
     #[test]
+    fn links_spread_over_many_leaf_directories_are_reported_as_their_common_parent() {
+        // The shape of the real tree: one experiment holds mutant copies, each with the same
+        // handful of links. No leaf holds most of the links, but the farm does.
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..6 {
+            let leaf = dir.path().join(format!("farm/m{i}"));
+            std::fs::create_dir_all(&leaf).unwrap();
+            links_in(&leaf, 10);
+        }
+        let other = dir.path().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        links_in(&other, 5);
+        let found = find(dir.path(), 1, 10_000).unwrap();
+        assert_eq!(found.links, 65);
+        assert_eq!(found.cluster, PathBuf::from("farm"));
+        assert_eq!(found.cluster_links, 60);
+    }
+
+    #[test]
+    fn a_few_links_elsewhere_do_not_hide_where_the_links_are() {
+        // A bystander directory may be read first, and is never the answer.
+        let dir = tempfile::tempdir().unwrap();
+        let bystander = dir.path().join(".worktrees/w");
+        std::fs::create_dir_all(&bystander).unwrap();
+        links_in(&bystander, 2);
+        let scratch = dir.path().join(".codescout/resident-private/run");
+        std::fs::create_dir_all(&scratch).unwrap();
+        links_in(&scratch, 30);
+        let found = find(dir.path(), 1, 10_000).unwrap();
+        assert_eq!(
+            found.cluster,
+            PathBuf::from(".codescout/resident-private/run")
+        );
+        assert_eq!(found.cluster_links, 30);
+    }
+
+    #[test]
+    fn exactly_half_the_links_is_not_a_majority() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a", "b"] {
+            let sub = dir.path().join(name);
+            std::fs::create_dir_all(&sub).unwrap();
+            links_in(&sub, 10);
+        }
+        let found = find(dir.path(), 1, 10_000).unwrap();
+        assert!(found.cluster.as_os_str().is_empty(), "{:?}", found.cluster);
+        assert_eq!(found.cluster_links, 20);
+    }
+
+    #[test]
+    fn links_in_the_root_itself_have_no_cluster_and_the_hint_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        links_in(dir.path(), 25);
+        let found = find(dir.path(), 20, 10_000).unwrap();
+        assert!(found.cluster.as_os_str().is_empty(), "{:?}", found.cluster);
+        let hint = hint_with_fanout("base hint.", Some(&found));
+        assert!(
+            hint.contains("25 directory symlinks, with no single directory holding most of them"),
+            "{hint}"
+        );
+    }
+
+    #[test]
     fn links_below_a_directory_with_more_files_than_the_old_bound_are_still_found() {
         // On 2026-11-01 the real tree held 311,890 entries and the first link came at entry 97,906,
         // so a bound of 50,000 stopped the scan with no links and the hint never named them.
@@ -246,15 +347,20 @@ mod tests {
     fn the_hint_names_the_count_and_the_example() {
         let fanout = Fanout {
             links: 109,
-            example: PathBuf::from(".codescout/resident-private/run/l0"),
+            cluster: PathBuf::from(".codescout/resident-private/run"),
+            cluster_links: 100,
             truncated: false,
         };
         let hint = hint_with_fanout("base hint.", Some(&fanout));
         assert!(hint.starts_with("base hint."), "{hint}");
         assert!(hint.contains("109 directory symlinks"), "{hint}");
         assert!(
-            hint.contains(".codescout/resident-private/run/l0"),
+            hint.contains("100 of them under `.codescout/resident-private/run`"),
             "{hint}"
+        );
+        assert!(
+            hint.contains("should live outside the workspace root"),
+            "the advice names what to do: {hint}"
         );
         assert!(
             !hint.contains("at least"),
@@ -266,10 +372,12 @@ mod tests {
     fn a_truncated_scan_gives_its_count_as_a_lower_bound() {
         let fanout = Fanout {
             links: 40,
-            example: PathBuf::from("a/l0"),
+            cluster: PathBuf::from("a"),
+            cluster_links: 12,
             truncated: true,
         };
         let hint = hint_with_fanout("base hint.", Some(&fanout));
         assert!(hint.contains("at least 40 directory symlinks"), "{hint}");
+        assert!(hint.contains("at least 12 of them under `a`"), "{hint}");
     }
 }

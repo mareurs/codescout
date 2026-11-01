@@ -2316,6 +2316,11 @@ struct Point {
         let hint = hint_of(&err);
         assert!(hint.contains("25 directory symlinks"), "got: {hint}");
         assert!(
+            hint.contains("25 directory symlinks, with no single directory holding most of them")
+                && hint.contains("should live outside the workspace root"),
+            "the hint says where the links are and what to do: {hint}"
+        );
+        assert!(
             hint.contains("Retry shortly"),
             "the old advice stays: {hint}"
         );
