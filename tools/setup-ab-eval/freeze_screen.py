@@ -1,12 +1,13 @@
 """Freeze the Live Rust screen: write screen-registration.json, the record the operator's go is bound to.
 
-The screen is the bare arm only, over the nine tasks of multilang-pool-v1.json, two models, two
-reps (36 runs). This script calls no model, reads no token, writes no GO.json (only
+The screen is the bare arm only, over the tasks of the pool file (default multilang-pool-v2.json: eight
+tasks), two models, two reps (32 runs). This script calls no model, reads no token, writes no GO.json (only
 GO.template.json, which the operator turns into GO.json by hand) and starts no container: it
 reads files, runs `git`, `<claude> --version` and `docker image inspect` (through
 tasks._inspect_image, injectable). Stdlib only.
 
-    freeze_screen.py pool    write multilang-pool-v1.json from the dataset and the saved controls
+    freeze_screen.py pool    write the pool file from the dataset and the saved controls
+    freeze_screen.py verify-pool  re-derive the pool file's entries from the real controls
     freeze_screen.py plan    write the screen plan (JSON [[task, model, arm, rep], ...])
     freeze_screen.py freeze  write the registration, GO.template.json (never GO.json)
     freeze_screen.py check   re-hash the tool files, pool, plan, bundles, images and frozen trees
@@ -34,21 +35,28 @@ import run
 import tasks
 
 REGISTRATION = "screen-registration.json"
-POOL = "multilang-pool-v1.json"
+POOL_V1 = "multilang-pool-v1.json"  # the registered history, never edited
+POOL = "multilang-pool-v2.json"
 STAGE3_REGISTRATION = "stage3-registration.json"
 GO_TEMPLATE = "GO.template.json"
 PLAN_NAME = "screen-plan.json"
-POOL_NAME = "setup-ab live rust v1"
+POOL_NAME = "setup-ab live rust v2"
+AMENDS = "setup ab live rust v1"
 GATE = "relaxed (spec 2026-11-01)"
 REGISTERED = "2026-11-01"
 SEED = 20261101
 MODELS = run.MODELS
 REPS = 2
-# cap 50: run k is admitted iff the first k-1 runs cost <= cap - reserve - per_call = $40, so 36 runs
-# at an average <= $1.11 all start (at $1.0 each: all 36; at $1.2 each: the batch stops after 34)
+# cap 50: run k is admitted iff the first k-1 runs cost <= cap - reserve - per_call = $40, so all 32
+# runs of pool v2 start iff the first 31 average <= $1.29 (at $1.0 each all 32; at $1.4 not all)
 BUDGET = {"cap_usd": 50.0, "per_call_usd": 5.0, "reserve_usd": 5.0}
-# F2P / kept P2P / dropped P2P of the nine saved controls (task 1 report); a pool file that
-# disagrees is not written.
+# F2P / kept P2P / dropped P2P of the nine saved controls (task 1 report): a sanity table for the
+# `pool` command only (a pool file that disagrees is not written); freeze reads the pool file's own
+# ids and counts and re-verifies them against the real controls.
+DROPPED = [{"id": "pola-rs__polars-28484",
+            "reason": "its build and sweep pass, but the empty and the gold grade were both OOM-killed at "
+                      "the frozen 8 GB limit (0 of 1555 tests ran; gold grade 1595 s; image 85.9 GB); "
+                      "decided before any model run"}]
 SANITY = {
     "rust-lang__rust-analyzer-22789": (1, 8119, 0),
     "pola-rs__polars-28484": (1, 1554, 0),
@@ -60,7 +68,6 @@ SANITY = {
     "h4ckf0r0day__obscura-447": (3, 272, 71),
     "h4ckf0r0day__obscura-390": (4, 235, 71),
 }
-POOL_IDS = tuple(SANITY)
 _TASK_KEYS = {"id", "repo", "control_sha256", "expected_count", "dropped_count"}
 
 
@@ -74,25 +81,55 @@ def sha256_file(path) -> str:
 
 # --- pool file --------------------------------------------------------------------------------
 
-def make_pool(records, controls_dir, ids=POOL_IDS) -> dict:
-    """The pool file body from dataset records ({id: record}) and `<controls_dir>/<id>/control.json`.
-    expected_count = FAIL_TO_PASS + kept PASS_TO_PASS and dropped_count come from
-    multilang_tasks.relaxed_expected, the rule the grader uses."""
+def make_pool(records, controls_dir, ids, *, name=POOL_NAME, amends=None, dropped=None) -> dict:
+    """The pool file body for `ids` from dataset records ({id: record}) and
+    `<controls_dir>/<id>/control.json`. expected_count = FAIL_TO_PASS + kept PASS_TO_PASS and
+    dropped_count come from multilang_tasks.relaxed_expected, the rule the grader uses. An id the
+    dataset or the controls do not have is Refused."""
     entries = []
     for tid in ids:
+        if tid not in records:
+            raise Refused(f"{tid}: not in the dataset records")
         record = records[tid]
         cj = Path(controls_dir) / tid / "control.json"
         try:
             exp = mt.relaxed_expected(record, cj)
+            csha = sha256_file(cj)
         except (mt.LiveRefused, OSError, ValueError, KeyError) as e:
             raise Refused(f"{tid}: {type(e).__name__}: {e}")
         repo = record["repo"]
         if not tid.startswith(repo.replace("/", "__") + "-"):
             raise Refused(f"{tid}: record repo {repo!r} does not match the id's owner prefix")
-        entries.append({"id": tid, "repo": repo, "control_sha256": sha256_file(cj),
+        entries.append({"id": tid, "repo": repo, "control_sha256": csha,
                         "expected_count": exp["fail_to_pass"] + exp["pass_to_pass_kept"],
                         "dropped_count": exp["pass_to_pass_dropped"]})
-    return {"pool": POOL_NAME, "registered": REGISTERED, "gate": GATE, "tasks": entries}
+    body = {"pool": name, "registered": REGISTERED, "gate": GATE}
+    if amends is not None:
+        body["amends"] = amends
+    if dropped is not None:
+        body["dropped"] = dropped
+    body["tasks"] = entries
+    return body
+
+
+def verify_pool(pool, records, controls_dir) -> list:
+    """Reasons the pool file's entries are not what the real controls give ([] = ok): each id is
+    re-derived with make_pool (dataset record, control.json sha256, relaxed_expected counts)."""
+    out = []
+    try:
+        check_pool(pool)
+    except Refused as e:
+        return [str(e)]
+    for t in pool["tasks"]:
+        try:
+            real = make_pool(records, controls_dir, [t["id"]])["tasks"][0]
+        except Refused as e:
+            out.append(str(e))
+            continue
+        if real != t:
+            out.append(f"{t['id']}: the pool file says {t}, the real control gives {real}")
+    return out
+
 
 
 def sanity_mismatches(pool) -> list:
@@ -106,17 +143,24 @@ def sanity_mismatches(pool) -> list:
 
 
 def check_pool(pool) -> dict:
-    """The pool, or Refused when it is not the registered nine tasks in the registered shape."""
-    if not isinstance(pool, dict) or not isinstance(pool.get("tasks"), list):
+    """The pool, or Refused when it is not a pool file in the registered shape. The id set and the
+    counts are the file's own; task_entry re-verifies each entry against its real control."""
+    if not isinstance(pool, dict) or not isinstance(pool.get("tasks"), list) or not pool["tasks"]:
         raise Refused("pool file: no tasks list")
-    ids = [t.get("id") for t in pool["tasks"] if isinstance(t, dict)]
-    if ids != list(POOL_IDS):
-        raise Refused(f"pool file holds {ids}, the registered pool is {list(POOL_IDS)}")
     for t in pool["tasks"]:
-        if set(t) != _TASK_KEYS:
-            raise Refused(f"pool entry {t.get('id')}: keys {sorted(t)}, want {sorted(_TASK_KEYS)}")
+        if not isinstance(t, dict) or set(t) != _TASK_KEYS:
+            raise Refused(f"pool entry {t.get('id') if isinstance(t, dict) else t!r}: keys "
+                          f"{sorted(t) if isinstance(t, dict) else t!r}, want {sorted(_TASK_KEYS)}")
+    ids = [t["id"] for t in pool["tasks"]]
+    if len(set(ids)) != len(ids):
+        raise Refused(f"pool file lists a task twice: {ids}")
     if pool.get("gate") != GATE:
         raise Refused(f"pool gate {pool.get('gate')!r}, the registered gate is {GATE!r}")
+    for d in pool.get("dropped") or []:
+        if not isinstance(d, dict) or not d.get("id") or not d.get("reason"):
+            raise Refused(f"pool 'dropped' entry {d!r} needs an id and a reason")
+        if d["id"] in ids:
+            raise Refused(f"{d['id']} is both in the pool and dropped from it")
     return pool
 
 
@@ -131,7 +175,7 @@ def screen_plan(pool, models=MODELS, reps=REPS, seed=SEED) -> list:
 
 def plan_problems(plan, pool) -> list:
     """Reasons a plan is not the screen: a task outside the pool, a non-bare arm, or a shape other
-    than every pool task x both models x reps 0..REPS-1."""
+    than every pool task x both models x reps 0..REPS-1 (32 runs for 8 tasks)."""
     ids = {t["id"] for t in pool["tasks"]}
     out = []
     outside = sorted({s.task_id for s in plan} - ids)
@@ -145,7 +189,7 @@ def plan_problems(plan, pool) -> list:
         want = sorted((t, m, "bare", r) for t in ids for m in MODELS for r in range(REPS))
         if sorted(tuple(s) for s in plan) != want:
             out.append(f"the plan is not the screen's {len(want)} runs (every pool task x "
-                       f"{list(MODELS)} x {REPS} reps, bare)")
+                       f"{list(MODELS)} x {REPS} reps, bare); it has {len(plan)}")
     return out
 
 
@@ -461,7 +505,7 @@ def check_screen(*, tool_dir, data, run_data, registration, inspect: Callable = 
 def main(argv=None) -> int:
     here = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("action", choices=["pool", "plan", "freeze", "check"])
+    ap.add_argument("action", choices=["pool", "verify-pool", "plan", "freeze", "check"])
     ap.add_argument("--tool-dir", type=Path, default=here)
     ap.add_argument("--data", type=Path, default=tasks.DATA, help="setup-ab data root")
     ap.add_argument("--run-data", type=Path, default=None, help="default <data>/live-screen")
@@ -476,9 +520,13 @@ def main(argv=None) -> int:
     pool_path = a.pool or a.tool_dir / POOL
     plan_path = a.plan or run_data / PLAN_NAME
     out = a.out or a.tool_dir / REGISTRATION
+    controls = a.data / "live" / "controls-batch"
     try:
         if a.action == "pool":
-            pool = make_pool(mt._records_by_id(a.records), a.data / "live" / "controls-batch")
+            dropped_ids = {d["id"] for d in DROPPED}
+            ids = [i for i in SANITY if i not in dropped_ids]
+            pool = make_pool(mt._records_by_id(a.records), controls, ids, amends=AMENDS,
+                             dropped=DROPPED)
             bad = sanity_mismatches(pool)
             if bad:
                 print("MISMATCH (pool file not written):\n  " + "\n  ".join(bad), file=sys.stderr)
@@ -487,6 +535,10 @@ def main(argv=None) -> int:
                 raise Refused(f"{pool_path} exists; pass --replace")
             pool_path.write_text(json.dumps(pool, indent=2) + "\n")
             print(json.dumps({"pool": str(pool_path), "tasks": len(pool["tasks"])}))
+        elif a.action == "verify-pool":
+            why = verify_pool(json.loads(pool_path.read_text()), mt._records_by_id(a.records), controls)
+            print(json.dumps({"ok": not why, "reasons": why}))
+            return 1 if why else 0
         elif a.action == "plan":
             plan = screen_plan(check_pool(json.loads(pool_path.read_text())), seed=a.seed)
             run_data.mkdir(parents=True, exist_ok=True)

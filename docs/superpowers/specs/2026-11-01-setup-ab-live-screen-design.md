@@ -45,3 +45,12 @@ The control batch ended on 2026-11-01 02:29 (50 tasks, `setup-ab-data/live/contr
 ## Out of scope
 
 cs and full arms for Live tasks; the comparison registration and analysis (`analyze_study` strata assume the 12-task shape); any change to the Stage 3 registration or data.
+
+## Amendment 2026-11-01 (pool v2)
+
+Decided after the build and grade attempts and before any model run; recorded in `tools/setup-ab-eval/multilang-pool-v2.json` (v1 stays in git as the registered history).
+
+- **Pool.** Eight tasks: `h4ckf0r0day__obscura-412`, `-477`, `-414`, `-447`, `-390`, `modelcontextprotocol__rust-sdk-1021`, `gitbutlerapp__gitbutler-14920`, `rust-lang__rust-analyzer-22789`. `pola-rs__polars-28484` is dropped: its build and sweep pass, but the empty and the gold grade were both OOM-killed at the frozen 8 GB grading/arm limit (0 of 1555 tests ran; the gold grade took 1595 s; the image is 85.9 GB). Raising the limit would change the frozen arm resources, so the task leaves the pool. The task entries of v2 are those of v1 (same `control_sha256`, `expected_count`, `dropped_count`), re-verified against the real `control.json` files (`freeze_screen.py verify-pool`).
+- **Runs.** 8 tasks x 2 models x 2 reps = 32 bare runs. The budget is unchanged (cap 50.0, per-call 5.0, reserve 5.0 USD): all 32 runs start iff the first 31 cost on average at most (50 - 10) / 31 = 1.29 USD.
+- **Known limitation, accepted and to be disclosed: `rust-analyzer-22789` and CRLF.** `run.py` captures the agent's patch with universal newlines, and the image keeps `* -text` for three CRLF blobs. An agent edit to `crates/hir-def/src/nameres/tests/imports.rs`, `crates/proc-macro-srv-cli/README.md` or `crates/proc-macro-srv/src/bridge.rs` would grade "patch does not apply", whatever the edit.
+- **Provenance.** The relaxed gate and the pool were registered after seeing the controls (as stated above); this amendment was decided from infrastructure results, not from any agent outcome. Five of the eight tasks are still from one repository (obscura).

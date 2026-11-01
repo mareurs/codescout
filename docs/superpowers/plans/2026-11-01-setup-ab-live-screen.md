@@ -95,6 +95,8 @@
 
 ### Task 4: Prepare the screen (no spend)
 
+> Pool v2 amendment: eight tasks, 32 runs, `multilang-pool-v2.json` (polars-28484 dropped); see the spec amendment. Every `nine` and `36` below reads eight and 32. Before `freeze`, link each runner path `<data>/tasks/<id>` to `<data>/live-tasks/<id>`.
+
 **Files:** none in git beyond evidence notes; operational.
 
 - [ ] **Step 1:** For each of the nine pool tasks, one at a time (disk guard on), run `multilang_tasks.py build`, `prescan`, `arm`; record per task: image pulled or present, build wall time, leak-gate result. Remove the pulled task images the plan pulled only after the run images are built if disk is below 60 GB free; keep `sab-run-*`, `sab-arm-*`.

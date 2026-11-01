@@ -17,7 +17,9 @@ import run
 from test_multilang_tasks import GOOD_BASE, GOOD_GOLD, record, write_control
 
 CLI_VERSION = "2.1.309 (Claude Code)"
-IDS = list(fs.POOL_IDS)
+IDS = list(fs.SANITY)  # the nine v1 ids (fixture pool)
+POLARS = "pola-rs__polars-28484"
+V2_IDS = [i for i in IDS if i != POLARS]
 
 
 def git(repo, *args):
@@ -45,7 +47,8 @@ def sha(path):
 
 
 class Env:
-    def __init__(self, tmp):
+    def __init__(self, tmp, ids=None):
+        self.ids = list(ids or IDS)
         self.tmp = Path(tmp)
         self.tool = self.tmp / "tool"
         self.data = self.tmp / "data"
@@ -76,10 +79,11 @@ class Env:
         controls = self.data / "live" / "controls-batch"
         for tid in IDS:
             write_control(controls / tid, GOOD_BASE, GOOD_GOLD, rid=tid)
-        self.pool = fs.make_pool(self.records, controls)
+        self.pool = fs.make_pool(self.records, controls, self.ids,
+                                 **({} if self.ids == IDS else {"amends": fs.AMENDS, "dropped": fs.DROPPED}))
         self.runner = self.tmp / "runner-tasks"
         self.runner.mkdir()
-        for tid in IDS:
+        for tid in self.ids:
             self.write_bundle(tid)
             os.symlink(self.data / "live-tasks" / tid, self.runner / tid)
         # the git checkout
@@ -187,16 +191,113 @@ class PoolTests(Case):
         bad = dict(GOOD_GOLD, **{"t::f1": "fail"})
         write_control(self.env.data / "live" / "controls-batch" / IDS[0], GOOD_BASE, bad, rid=IDS[0])
         with self.assertRaisesRegex(fs.Refused, "not relaxed ok"):
-            fs.make_pool(self.env.records, self.env.data / "live" / "controls-batch")
+            fs.make_pool(self.env.records, self.env.data / "live" / "controls-batch", IDS)
 
     def test_sanity_mismatch_is_named(self):
         self.assertEqual(len(fs.sanity_mismatches(self.env.pool)), 9)  # the fixture's counts are 3 / 1
         ok = {"tasks": [{"id": IDS[0], "expected_count": 8120, "dropped_count": 0}]}
         self.assertEqual(fs.sanity_mismatches(ok), [])
 
-    def test_the_committed_pool_file_is_the_registered_nine(self):
-        p = Path(__file__).with_name(fs.POOL)
-        fs.check_pool(json.loads(p.read_text()))
+    def test_the_committed_pool_files_are_v1_history_and_the_eight_task_v2(self):
+        v1 = fs.check_pool(json.loads(Path(__file__).with_name(fs.POOL_V1).read_text()))
+        v2 = fs.check_pool(json.loads(Path(__file__).with_name(fs.POOL).read_text()))
+        self.assertEqual([t["id"] for t in v1["tasks"]], IDS)
+        self.assertEqual([t["id"] for t in v2["tasks"]], V2_IDS)
+        self.assertEqual(v2["amends"], "setup ab live rust v1")
+        self.assertEqual([d["id"] for d in v2["dropped"]], [POLARS])
+        by1 = {t["id"]: t for t in v1["tasks"]}
+        self.assertTrue(all(by1[t["id"]] == t for t in v2["tasks"]))
+
+
+class PoolV2Tests(unittest.TestCase):
+    """The pool file's own ids and counts drive the plan and the refusals; each entry is
+    re-verified against its real control."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.env = Env(self.tmp, V2_IDS)
+        self.controls = self.env.data / "live" / "controls-batch"
+
+    def refused(self, text, **over):
+        with self.assertRaises(fs.Refused) as cm:
+            self.env.freeze(**over)
+        self.assertIn(text, str(cm.exception))
+        self.assertFalse(self.env.out.exists())
+        self.assertFalse((self.env.run_data / fs.GO_TEMPLATE).exists())
+
+    def test_the_plan_is_eight_tasks_32_runs_and_the_freeze_accepts_it(self):
+        self.assertEqual([t["id"] for t in self.env.pool["tasks"]], V2_IDS)
+        self.assertEqual(len(self.env.plan), 32)
+        self.assertEqual({s.task_id for s in self.env.plan}, set(V2_IDS))
+        reg = self.env.freeze()
+        self.assertEqual(len(reg["tasks"]), 8)
+        self.assertEqual(self.env.check(), [])
+        loaded = run.load_registration(self.env.out, run.load_plan(self.env.plan_path))
+        self.assertEqual(loaded["reps"], [["bare", 2]])
+
+    def test_polars_is_refused_as_outside_the_pool(self):
+        plan = list(self.env.plan) + [run.RunSpec(POLARS, run.MODELS[0], "bare", 0)]
+        fs.write_plan(plan, self.env.plan_path)
+        self.refused("outside the pool")
+        self.assertIn(POLARS, fs.plan_problems(run.check_plan(plan), self.env.pool)[0])
+
+    def test_plan_problems_names_a_partial_plan_and_the_expected_size(self):
+        why = fs.plan_problems(self.env.plan[:-1], self.env.pool)
+        self.assertEqual(len(why), 1)
+        self.assertIn("32 runs", why[0])
+        self.assertIn("it has 31", why[0])
+        fs.write_plan(self.env.plan[:-1], self.env.plan_path)
+        self.refused("not the screen's 32 runs")
+
+    def test_a_pool_file_that_lies_about_its_counts_or_hash_is_refused(self):
+        pool = json.loads(json.dumps(self.env.pool))
+        pool["tasks"][0]["expected_count"] += 1
+        self.env.pool = pool
+        self.env.write_pool()
+        self.env.commit("lie")
+        self.refused("the pool says")
+        self.assertTrue(any(V2_IDS[0] in w for w in
+                            fs.verify_pool(pool, self.env.records, self.controls)))
+        pool["tasks"][0]["expected_count"] -= 1
+        pool["tasks"][1]["control_sha256"] = "0" * 64
+        self.env.pool = pool
+        self.env.write_pool()
+        self.env.commit("lie2")
+        self.refused("not the pooled one")
+        self.assertTrue(any(V2_IDS[1] in w for w in
+                            fs.verify_pool(pool, self.env.records, self.controls)))
+
+    def test_verify_pool_passes_the_true_file_and_fails_clearly_on_a_missing_id(self):
+        self.assertEqual(fs.verify_pool(self.env.pool, self.env.records, self.controls), [])
+        ghost = json.loads(json.dumps(self.env.pool))
+        ghost["tasks"][0] = dict(ghost["tasks"][0], id="o__ghost-1")
+        why = fs.verify_pool(ghost, self.env.records, self.controls)
+        self.assertTrue(any("o__ghost-1" in w and "not in the dataset" in w for w in why), why)
+        records = dict(self.env.records)
+        records["o__ghost-1"] = record(instance_id="o__ghost-1", repo="o/ghost")
+        why = fs.verify_pool(ghost, records, self.controls)
+        self.assertTrue(any("o__ghost-1" in w and "control.json" in w for w in why), why)
+
+    def test_a_pool_task_without_a_control_or_a_bundle_fails_the_freeze(self):
+        shutil.rmtree(self.controls / V2_IDS[2])
+        self.refused("control.json unreadable")
+        self.assertIn(V2_IDS[2], fs.verify_pool(self.env.pool, self.env.records, self.controls)[0])
+        shutil.copytree(self.env.data / "live" / "controls-batch" / V2_IDS[0], self.controls / V2_IDS[2])
+        write_control(self.controls / V2_IDS[2], GOOD_BASE, GOOD_GOLD, rid=V2_IDS[2])  # restored
+        shutil.rmtree(self.env.data / "live-tasks" / V2_IDS[3])
+        self.refused("does not exist")
+
+    def test_check_pool_shape_rules(self):
+        base = self.env.pool
+        for bad in (dict(base, tasks=[]), dict(base, gate="strict"),
+                    dict(base, tasks=base["tasks"] + [base["tasks"][0]]),
+                    dict(base, dropped=[{"id": V2_IDS[0], "reason": "x"}]),
+                    dict(base, dropped=[{"id": POLARS}])):
+            with self.assertRaises(fs.Refused):
+                fs.check_pool(bad)
+        fs.check_pool(base)
+
 
 
 class FreezeTests(Case):
@@ -342,20 +443,23 @@ class FreezeTests(Case):
         fs.write_plan(plan, self.env.plan_path)
         self.refused("not screen_plan")
 
-    def test_the_budget_is_pinned_and_admits_36_runs_at_one_dollar_not_at_1_2(self):
+    def test_the_budget_is_pinned_and_admits_every_run_of_the_plan_at_one_dollar_not_at_1_4(self):
         self.assertEqual(fs.BUDGET, {"cap_usd": 50.0, "per_call_usd": 5.0, "reserve_usd": 5.0})
         b = run.check_budget(run.Budget(50.0, 0.0, 5.0, 5.0))
 
-        def started(cost):
-            spent, n = 0.0, 0
-            for _ in range(36):
+        def started(cost, n):
+            spent, k = 0.0, 0
+            for _ in range(n):
                 if not run.admit(b, spent):
                     break
-                spent, n = spent + cost, n + 1
-            return n
-        self.assertEqual(started(1.0), 36)
-        self.assertEqual(started(1.2), 34)
-        self.assertEqual(started(0.0), 36)
+                spent, k = spent + cost, k + 1
+            return k
+        for n in (len(self.env.plan), 32, 36):  # the fixture's plan, pool v2, pool v1
+            self.assertEqual(started(1.0, n), n)
+            self.assertEqual(started(0.0, n), n)
+        self.assertEqual(started(1.2, 36), 34)   # v1: (k-1)*1.2 <= 40
+        self.assertEqual(started(1.4, 32), 29)   # v2: (k-1)*1.4 <= 40 -> not all start
+        self.assertEqual(started(40 / 31, 32), 32)  # the v2 break-even, $1.29 per run
 
 
     def test_freeze_refuses_a_cli_that_reports_another_version(self):
