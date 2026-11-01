@@ -1,5 +1,5 @@
 ---
-id: 80fee58db6c3a95d
+id: '80fee58db6c3a95d'
 kind: bug
 status: fixed
 title: 'BUG: a grep result with matches is silent about the hidden-path skip, so a missing .github/ hit reads as absent'
@@ -14,7 +14,6 @@ topic: grep completeness
 closed: 2026-11-01
 opened: 2026-10-31
 severity: medium
-unverified: 'Not yet seen live: the running codescout server predates 21229c864, so a real grep from this repo''s root was not checked for the note after a rebuild and /mcp.'
 ---
 
 # BUG: a grep result with matches is silent about the hidden-path skip, so a missing `.github/` hit reads as absent
@@ -102,7 +101,7 @@ Pass `include_hidden=true` whenever the question is "where is X mentioned at all
 
 ## Resume
 
-Fixed in `21229c864`. Not yet seen on a rebuilt server (see `unverified`).
+Fixed in `21229c864`. Seen live on 2026-11-01 after `./scripts/rb.sh` and `/mcp`: `grep("gate-slot", mode="files")` from the repo root gave 74 matches in 27 files and the line `Hidden paths at the search root were not searched: .buddy/, .cargo/, .claude/, .fastembed_cache/ and 4 more. Pass include_hidden=true to search them.` The same call with `include_hidden=true` gave 84 matches in 32 files, among them `.github/workflows/ci.yml`, and carried no note. The counts differ from the Symptom section because the repository grew after it was written.
 
 ## Fix provenance
 
