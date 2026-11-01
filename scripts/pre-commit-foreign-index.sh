@@ -350,6 +350,69 @@ if ((classify)); then
     exit 0
 fi
 
+# LOST STAGE: a pair YOU staged that another session's git command took out of the shared
+# index, and that never reached HEAD. Nothing about the commit being judged is wrong — it
+# simply lacks a path you staged, and nothing else would say so. The recorder writes the
+# note; this asks scripts/lost-stage.sh again before refusing, because the note can outlive
+# its truth (a pathspec commit can put the blob in HEAD without the recorder seeing it).
+#
+# Not for a PATHSPEC commit: that form commits the working tree, and
+# pre-commit-unreviewed-content.sh already refuses it loudly when the path is unstaged.
+# For commit-mine's private index it DOES run: the shared index is where the pair went missing,
+# and lost_stage_settled reads that one whatever GIT_INDEX_FILE says.
+#
+# REFUSES ONCE. Every note of yours is dropped from the log here: the ones reported, and the
+# ones already settled. So re-running the commit passes. The notes come from a heuristic that
+# can be wrong (see the recorder's WHAT IT DOES NOT CATCH), and a refusal that repeats on
+# every commit until something clears it is what teaches `--no-verify`. One refusal is enough
+# to tell you; the decision is then yours. Chosen by the owner 2026-11-01, over warn-only and
+# refuse-until-cleared, after a review found notes that nothing could clear.
+# docs/issues/2026-09-02-staging-is-not-a-state-you-can-hold.md (8941001da3c21636)
+lost_log="$git_dir/session-lost-stage-log"
+if ! ((pathspec)) && [ -s "$lost_log" ] && . "$_identity_dir/lost-stage.sh" 2>/dev/null; then
+    lost=()
+    lost_keep="$lost_log.$$"
+    : > "$lost_keep" 2>/dev/null || lost_keep=""
+    while IFS= read -r lrow; do
+        IFS=$'\t' read -r lo lb lp la le lc <<< "$lrow"
+        if [ -n "$lp" ] && publish_principal_equal "$lo" "$me"; then
+            lost_stage_settled "$lb" "$lp" || lost+=("$lp"$'\t'"$la"$'\t'"$le"$'\t'"$lc")
+            continue
+        fi
+        [ -n "$lost_keep" ] && printf '%s\n' "$lrow" >> "$lost_keep"
+    done < "$lost_log"
+    if [ -n "$lost_keep" ]; then
+        if [ -s "$lost_keep" ]; then
+            mv -f "$lost_keep" "$lost_log" 2>/dev/null || rm -f "$lost_keep"
+        else
+            rm -f "$lost_keep" "$lost_log"
+        fi
+    fi
+    if ((${#lost[@]})); then
+        {
+            echo "pre-commit: a path you staged was TAKEN OUT OF THE INDEX by another git command,"
+            echo "and never reached HEAD. This commit would land without it."
+            echo
+            for row in "${lost[@]}"; do
+                IFS=$'\t' read -r lp la le lc <<< "$row"
+                printf '    %s\n' "$lp"
+                printf '        by session %s, at %s, with: %s\n' \
+                    "${la:--}" "$(date -d "@$le" '+%F %T' 2>/dev/null || echo "$le")" "${lc:-?}"
+            done
+            echo
+            echo "This refusal is shown ONCE: the note is now dropped, and re-running the commit passes."
+            echo "  Still want it in?  Check \`git diff -- <path>\`. If your change is still in the"
+            echo "  working tree, \`git add -- <path>\` and commit. If the command was a stash or a"
+            echo "  reset that also reverted the file, look in \`git stash list\`."
+            echo "  Meant to leave it out?  Re-run the commit as it was."
+            echo "If the session named is live, tell it: it unstaged a path it did not stage."
+            _tail="$(dirname "$0")/commit-sequence-tail.txt"
+            [ -r "$_tail" ] && { echo; cat "$_tail"; }
+        } >&2
+        exit 1
+    fi
+fi
+
 ((${#theirs[@]})) || exit 0
 
 # ------------------------------------------------------------------------------------

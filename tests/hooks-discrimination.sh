@@ -230,7 +230,10 @@ has "pathspec naming only my own path -> silent" \
     "$(CLAUDE_CODE_SESSION_ID="$A" GIT_INDEX_FILE=".git/next-index-3.lock" \
         bash "$SRC/pre-commit-foreign-index.sh" 2>&1; echo "EXIT=$?")" "EXIT=0"
 
-git reset -q
+# The reset is A's own. An anonymous one now leaves A a LOST-STAGE note for `a.txt`, since a
+# pair A staged left the index without reaching HEAD by a command that was not A's — the
+# refusal § 13 asserts. This case is about an empty index, so the setup must not be that loss.
+CLAUDE_CODE_SESSION_ID="$A" git reset -q
 has "nothing staged -> silent" "$(guard "$A")" "EXIT=0"
 
 echo x > a.txt
@@ -2523,6 +2526,218 @@ git commit -qm base
 git mv docs/issues/2026-09-13-solo.md docs/issues/archive/2026-09-13-solo.md
 orph
 eq "a self-mentioning file is not its own citer" "$(printf '%s' "$OUT" | wc -c)" "0"
+rm -rf "$T"
+
+# ---------------------------------------------------------------------------
+# 13. A PAIR YOU STAGED THAT A PEER TOOK OUT OF THE INDEX
+#
+# docs/issues/2026-09-02-staging-is-not-a-state-you-can-hold.md (8941001da3c21636), the
+# LOSING half: a peer's `git restore --staged` or `git reset` drops your staged pair, and a
+# bare commit or commit-mine then lands without it, silently. The recorder notes an owned
+# pair that leaves the index without reaching HEAD, when the path is no longer staged at all
+# and the git command that removed it is not the owner's; the guard refuses the owner's next
+# index commit.
+#
+# THE TEST IS CONTENT, NOT THE VERB. Measured 2026-11-01: `git commit -- a` fires
+# post-index-change twice with `a` still staged, and `a` leaves the staged set only at the
+# NEXT write (a `git status`). So "did HEAD receive this blob" separates a commit from an
+# unstage; the command line at observation time cannot. 13d is that case.
+LOST_SAYS="TAKEN OUT OF THE INDEX"
+lost_rows() {
+    [ -f .git/session-lost-stage-log ] || { printf '0'; return; }
+    awk -F'\t' -v p="$1" '$3 == p { n++ } END { print n + 0 }' .git/session-lost-stage-log
+}
+lost_repo() {
+    new_repo
+    printf 'a\n' > a.txt
+    printf 'b\n' > b.txt
+    git add -- a.txt b.txt
+    git commit -qm base
+    printf 'a2\n' > a.txt
+    printf 'b2\n' > b.txt
+    CLAUDE_CODE_SESSION_ID="$A" git add -- a.txt b.txt
+}
+
+# 13a. the reproduced loss: B restores A's staged path, and A's next index commit is refused.
+lost_repo
+CLAUDE_CODE_SESSION_ID="$B" git restore --staged b.txt
+eq "a peer's restore --staged writes one note" "$(lost_rows b.txt)" "1"
+# 13b. only the OWNER is refused for it, and a peer's guard run leaves the owner's note. B's
+# commit is refused anyway (a.txt is A's), so the assertion is on the reason, not the exit code.
+hasnt "the peer is not refused for the owner's loss" "$(guard "$B")" "$LOST_SAYS"
+eq "and the peer's guard run keeps the owner's note" "$(lost_rows b.txt)" "1"
+# 13c2. a pathspec commit's temporary index stands it down: that form commits the working
+# tree and is refused loudly by the unreviewed-content hook when the path is unstaged.
+OUT="$(GIT_INDEX_FILE="$T/.git/next-index-999.lock" CLAUDE_CODE_SESSION_ID="$A" \
+    bash "$SRC/pre-commit-foreign-index.sh" 2>&1)"
+hasnt "a pathspec commit is not refused for it" "$OUT" "$LOST_SAYS"
+eq "and does not use the note up" "$(lost_rows b.txt)" "1"
+OUT="$(guard "$A")"
+has "the owner's index commit is refused"   "$OUT" "EXIT=1"
+has "the refusal says what happened"         "$OUT" "$LOST_SAYS"
+has "the refusal names the path"             "$OUT" "b.txt"
+has "the refusal names the session that did it" "$OUT" "$B"
+has "the refusal names the command"          "$OUT" "restore --staged b.txt"
+# 13c. REFUSES ONCE (the owner's choice, 2026-11-01): the refusal drops the note, so the
+# same commit run again passes. A note nothing could clear made every later commit fail.
+eq "the refusal uses the note up" "$(lost_rows b.txt)" "0"
+OUT="$(guard "$A")"
+hasnt "so the second run is not refused for it" "$OUT" "$LOST_SAYS"
+eq "and passes" "$(printf '%s' "$OUT" | tail -n 1)" "EXIT=0"
+rm -rf "$T"
+
+# 13c3. commit-mine's PRIVATE index is still judged against the SHARED one, because that is
+# where the pair went missing.
+lost_repo
+CLAUDE_CODE_SESSION_ID="$B" git restore --staged b.txt
+cp .git/index .git/commit-mine-index.999
+OUT="$(GIT_INDEX_FILE="$T/.git/commit-mine-index.999" CLAUDE_CODE_SESSION_ID="$A" \
+    bash "$SRC/pre-commit-foreign-index.sh" 2>&1)"
+has "commit-mine's private-index commit is refused for it" "$OUT" "$LOST_SAYS"
+rm -rf "$T"
+
+# 13e. healing: the owner stages the pair again. The guard then finds the note settled,
+# refuses nothing, and drops it.
+lost_repo
+CLAUDE_CODE_SESSION_ID="$B" git restore --staged b.txt
+CLAUDE_CODE_SESSION_ID="$A" git add -- b.txt
+OUT="$(guard "$A")"
+hasnt "a re-staged pair is not refused" "$OUT" "$LOST_SAYS"
+eq "and the commit passes" "$(printf '%s' "$OUT" | tail -n 1)" "EXIT=0"
+eq "and the settled note is dropped" "$(lost_rows b.txt)" "0"
+rm -rf "$T"
+
+# 13k. the REVIEW's false refusal (reproduced 2026-11-01): A stages a.txt, edits it again,
+# and commits by pathspec. The index and HEAD then agree on a blob that is not the one A
+# staged, which is what an unstage leaves too. Content cannot tell them apart; the two gates
+# can. k1: the next write is a peer's UNSTAGE, so only the HEAD gate stands between.
+lost_repo
+printf 'c\n' > c.txt
+CLAUDE_CODE_SESSION_ID="$B" git add -- c.txt
+printf 'a3\n' > a.txt
+CLAUDE_CODE_SESSION_ID="$A" git commit -qm x -- a.txt
+CLAUDE_CODE_SESSION_ID="$B" git restore --staged c.txt
+eq "k1: a commit of a later edit, then a peer's unstage: no note" "$(lost_rows a.txt)" "0"
+hasnt "k1: and the owner is not refused" "$(guard "$A")" "$LOST_SAYS"
+rm -rf "$T"
+# k2: the next write is a peer's ADD, which the verb gate keeps from judging anything.
+lost_repo
+printf 'a3\n' > a.txt
+CLAUDE_CODE_SESSION_ID="$A" git commit -qm x -- a.txt
+printf 'c\n' > c.txt
+CLAUDE_CODE_SESSION_ID="$B" git add -- c.txt
+eq "k2: a commit of a later edit, then a peer's add: no note" "$(lost_rows a.txt)" "0"
+hasnt "k2: and the owner is not refused" "$(guard "$A")" "$LOST_SAYS"
+rm -rf "$T"
+
+# 13l. a `named-foreign` row's owner WROTE the file and did not stage it, so its unstage is
+# no loss of theirs. B writes f.txt, A stages it (row: B, named-foreign), A backs off.
+lost_repo
+mkdb "$DB"
+printf 'f\n' > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt","new_string":"x"}'
+add_as "$A" f.txt
+eq "13l: the row is the writer's, by write" "$(route_of f.txt)" "named-foreign"
+CLAUDE_CODE_SESSION_ID="$A" git restore --staged f.txt
+eq "13l: the stager backing off writes no note for the writer" "$(lost_rows f.txt)" "0"
+hasnt "13l: and the writer is not refused" "$(guard "$B")" "$LOST_SAYS"
+rm -rf "$T"
+
+# 13m. the RACE the review named: a peer's write observes the stage log BEFORE the unstager's
+# own hook has replaced it, so it sees A's pair gone with its own command as the actor. Made
+# deterministic by unstaging with hooks off, which leaves the log stale exactly as the race
+# does. The verb gate is what keeps a peer's `git add` from judging anything; the HEAD gate
+# cannot help, because HEAD did not move.
+lost_repo
+git -c core.hooksPath=/dev/null restore --staged b.txt
+printf 'c\n' > c.txt
+CLAUDE_CODE_SESSION_ID="$B" git add -- c.txt
+eq "13m: the recorder ran for the peer's add" "$(owner_of c.txt)" "$B"
+eq "13m: a peer's add over a stale log writes no note" "$(lost_rows b.txt)" "0"
+rm -rf "$T"
+
+# 13f. the owner's OWN unstage is not a loss. The positive twin is 13a.
+lost_repo
+CLAUDE_CODE_SESSION_ID="$A" git restore --staged b.txt
+eq "the owner's own restore writes no note" "$(lost_rows b.txt)" "0"
+hasnt "and refuses nothing" "$(guard "$A")" "$LOST_SAYS"
+rm -rf "$T"
+
+# 13g. `git reset` is not a staging verb to the recorder, so the actor must be resolved for
+# it too: a peer's reset is a loss, the owner's own reset is not.
+lost_repo
+CLAUDE_CODE_SESSION_ID="$B" git reset -q -- b.txt
+eq "a peer's reset writes a note" "$(lost_rows b.txt)" "1"
+CLAUDE_CODE_SESSION_ID="$A" git reset -q -- a.txt
+eq "the owner's own reset writes none" "$(lost_rows a.txt)" "0"
+has "the owner is refused for the peer's reset" "$(guard "$A")" "$LOST_SAYS"
+rm -rf "$T"
+
+# 13h. `git rm --cached` and a peer's `git add -A` over your blob also remove your pair, but
+# each leaves a pair of THEIRS at the path: a staged deletion, or their content. That is not
+# silent, because the foreign-index guard refuses the bare commit and names them, so it gets
+# no note. Measured 2026-11-01: noting it gave a refusal saying the commit "would land
+# without" a path that was in the index, and a note that re-staging could not clear.
+lost_repo
+CLAUDE_CODE_SESSION_ID="$B" git rm -q --cached b.txt
+eq "a peer's rm --cached writes no note" "$(lost_rows b.txt)" "0"
+OUT="$(guard "$A")"
+hasnt "and the refusal is not the lost-stage one" "$OUT" "$LOST_SAYS"
+has "the foreign-index refusal covers it"          "$OUT" "EXIT=1"
+has "and names the peer"                           "$OUT" "$B"
+rm -rf "$T"
+lost_repo
+printf 'b3\n' > b.txt
+CLAUDE_CODE_SESSION_ID="$B" git add -A
+eq "a peer's add -A over your blob writes no note" "$(lost_rows b.txt)" "0"
+OUT="$(guard "$A")"
+hasnt "and the refusal is not the lost-stage one" "$OUT" "$LOST_SAYS"
+# `add -A` names no path, so the recorder stamps the new pair `-`, not B: the refusal lists
+# the path as someone else's without naming who.
+has "the foreign-index refusal covers it"          "$OUT" "EXIT=1"
+has "and lists the path as theirs"                 "$OUT" "theirs:"
+rm -rf "$T"
+
+# 13i. a NEW file: after the unstage neither the index nor HEAD has the path, which is the
+# "both absent" form of "no longer staged".
+lost_repo
+printf 'n\n' > n.txt
+CLAUDE_CODE_SESSION_ID="$A" git add -- n.txt
+CLAUDE_CODE_SESSION_ID="$B" git restore --staged n.txt
+eq "a peer's unstage of a new file writes a note" "$(lost_rows n.txt)" "1"
+has "and the owner is refused for it" "$(guard "$A")" "$LOST_SAYS"
+rm -rf "$T"
+
+# 13j. a STAGED DELETION, both ways. A peer undoing it is a loss; the owner committing it,
+# then a peer's write observing that, is not.
+lost_repo
+CLAUDE_CODE_SESSION_ID="$A" git rm -qf a.txt
+CLAUDE_CODE_SESSION_ID="$B" git restore --staged a.txt
+eq "a peer undoing a staged deletion writes a note" "$(lost_rows a.txt)" "1"
+rm -rf "$T"
+lost_repo
+# `-f` and not `--cached`: a pathspec commit takes the working tree, so the file must be gone
+# from disk for the commit to carry the deletion.
+CLAUDE_CODE_SESSION_ID="$A" git rm -qf a.txt
+CLAUDE_CODE_SESSION_ID="$A" git commit -qm del -- a.txt
+printf 'c\n' > c.txt
+CLAUDE_CODE_SESSION_ID="$B" git add -- c.txt
+eq "the recorder ran after the deletion commit" "$(owner_of c.txt)" "$B"
+eq "a committed deletion writes no note" "$(lost_rows a.txt)" "0"
+rm -rf "$T"
+
+# 13d. a COMMIT is not a loss, however late it is observed. The pathspec commit fires the
+# recorder with the pair still staged; it leaves at the following index write, which is a
+# peer's here, which is exactly what would fool a verb test.
+lost_repo
+CLAUDE_CODE_SESSION_ID="$A" git commit -qm c -- b.txt
+# Not `git status`: it writes the index only when it has stat data to refresh, so it might
+# not fire at all and the case would pass while testing nothing. An add always writes.
+printf 'c\n' > c.txt
+CLAUDE_CODE_SESSION_ID="$B" git add -- c.txt
+eq "the recorder ran after the commit" "$(owner_of c.txt)" "$B"
+eq "a committed pair writes no note" "$(lost_rows b.txt)" "0"
+hasnt "and refuses nothing" "$(guard "$A")" "$LOST_SAYS"
 rm -rf "$T"
 
 echo

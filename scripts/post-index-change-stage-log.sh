@@ -190,8 +190,10 @@ staging_op() {
                 ;;
             -*) continue ;;
             *=*) continue ;;
-            add | rm | mv | restore | apply | update-index | stash) return 0 ;;
-            *) return 1 ;;
+            # `_so_verb` keeps the subcommand for the LOST STAGE check below, which asks
+            # a different question of the same token (did this command unstage?).
+            add | rm | mv | restore | apply | update-index | stash) _so_verb="$_so_tok"; return 0 ;;
+            *) _so_verb="$_so_tok"; return 1 ;;
         esac
     done < <(tr '\0' '\n' < "/proc/$PPID/cmdline" 2>/dev/null)
     return 1
@@ -602,6 +604,7 @@ foreign_writer() {
     printf '%s' "$other"
 }
 
+_so_verb=""
 if staging_op; then
     resolve_me
     claimant="$me"
@@ -695,6 +698,94 @@ while IFS=$'\t' read -r blob path; do
     printf '%s\t%s\t%s\t%s\n' "$owner" "$blob" "$path" "$route" >> "$tmp"
 done < <(git diff --cached --raw --no-renames 2>/dev/null |
     awk -F'\t' '{ split($1, a, " "); print a[4] "\t" $2 }')
+# LOST STAGE: an owned pair that left the index and did not reach HEAD, by a git command
+# that is not its owner's. A peer's `git restore --staged` or `git reset` drops your staged
+# path, and a bare commit or commit-mine then lands without it, silently.
+# This writes the note; pre-commit-foreign-index.sh refuses the owner's next index commit on
+# it, ONCE: the refusal drops the note.
+# docs/issues/2026-09-02-staging-is-not-a-state-you-can-hold.md (8941001da3c21636)
+#
+# Candidates are rows that were STAGED at the previous write (no `retained` marker) and are
+# not staged now, and scripts/lost-stage.sh decides whether one is a loss. Two gates come
+# first, because content alone cannot tell an unstage from a commit seen late. Measured
+# 2026-11-01: `git commit -- a` fires this hook with `a` still staged, and `a` leaves the
+# staged set only at the NEXT write. If the owner edited `a` after staging it, the index and
+# HEAD then agree on a blob that is not the staged one, which is exactly what an unstage
+# leaves. Without the gates a peer's next `git add` wrote a note, and the owner's next commit
+# was refused for a path that was committed (found by an independent review, reproduced).
+#   1. The command is one that can take an entry out of the index (`_so_verb`, from
+#      `staging_op`). An unstage writes the index itself, so it is seen at its own write.
+#      This also keeps the cost off ordinary writes: a `git status` or `git add` runs nothing here.
+#   2. HEAD has not moved since the previous write. A restore or reset never moves it, so a
+#      moved HEAD means a commit (or checkout) came between, and the pair is not judged.
+#
+# Rows with route `named-foreign` are skipped: their owner is the session that WROTE the file,
+# not the one that staged it, so the note would go to a session that staged nothing.
+#
+# IDENTITY IS RESOLVED HERE TOO, not only on the staging path above, and only once a
+# candidate is a loss. `git reset` is not a staging verb to `staging_op`, and without the
+# actor the owner's own reset would read as a peer's.
+#
+# WHAT IT DOES NOT CATCH:
+#   - pairs recorded `-`: a `git add -A`, `-u`, `.`, a directory, `add -p`, `update-index`, or a
+#     path git quotes (non-ASCII). They have no owner to tell.
+#   - an unstage that is the first index write after a commit (gate 2 cannot tell them apart).
+#   - concurrency: two hooks racing on this file's replace can lose a note, or name the wrong
+#     actor. The refusal fires once, so a wrong note costs one refusal, not a stuck session.
+lost_log="$git_dir/session-lost-stage-log"
+lost_head_file="$git_dir/session-stage-head"
+lost_head_now="$(git rev-parse -q --verify HEAD 2>/dev/null)"
+lost_head_prev=""
+[ -r "$lost_head_file" ] && IFS= read -r lost_head_prev < "$lost_head_file"
+case "$_so_verb" in
+    reset | restore | rm | stash | checkout | read-tree | update-index) lost_unstaging=1 ;;
+    *) lost_unstaging=0 ;;
+esac
+if [ "$lost_unstaging" = 1 ] && [ -n "$lost_head_now" ] && [ "$lost_head_now" = "$lost_head_prev" ] &&
+   [ -s "$log" ] && [ -n "$_identity_dir" ] && . "$_identity_dir/lost-stage.sh" 2>/dev/null; then
+    lost_tmp="$lost_log.$$"
+    if : > "$lost_tmp" 2>/dev/null; then
+        lost_resolved=0
+        lost_cmd="$(tr '\0\t\n' '   ' < "/proc/$PPID/cmdline" 2>/dev/null | cut -c1-160)"
+        while IFS=$'\t' read -r lo lb lp; do
+            [ -n "$lp" ] || continue
+            lost_stage_settled "$lb" "$lp" && continue
+            if [ "$lost_resolved" = 0 ]; then
+                resolve_me
+                lost_resolved=1
+            fi
+            publish_principal_equal "$lo" "$me" && continue
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$lo" "$lb" "$lp" "$me" "$(date +%s)" "${lost_cmd% }" >> "$lost_tmp"
+        done < <(awk -F'\t' -v staged_file="$tmp" '
+            FILENAME == staged_file { staged[$2 FS $3] = 1; next }
+            $1 != "-" && $4 != "named-foreign" && $5 != "retained" &&
+                !(($2 FS $3) in staged) { print $1 FS $2 FS $3 }
+        ' "$tmp" "$log")
+        # Earlier notes, kept while still unsettled and not already re-noted above.
+        if [ -s "$lost_log" ]; then
+            while IFS=$'\t' read -r lo lb lp la le lc; do
+                [ -n "$lp" ] || continue
+                lost_stage_settled "$lb" "$lp" && continue
+                awk -F'\t' -v o="$lo" -v b="$lb" -v p="$lp" \
+                    '$1 == o && $2 == b && $3 == p { f = 1 } END { exit !f }' "$lost_tmp" && continue
+                printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$lo" "$lb" "$lp" "$la" "$le" "$lc" >> "$lost_tmp"
+            done < "$lost_log"
+        fi
+        if [ -s "$lost_tmp" ]; then
+            head -n "${LOST_STAGE_MAX_ROWS:-200}" "$lost_tmp" > "$lost_tmp.cap" 2>/dev/null &&
+                mv -f "$lost_tmp.cap" "$lost_tmp"
+            mv -f "$lost_tmp" "$lost_log" 2>/dev/null || rm -f "$lost_tmp"
+        else
+            rm -f "$lost_tmp" "$lost_log"
+        fi
+    fi
+fi
+# HEAD as this write saw it, for gate 2 at the next write.
+if [ -n "$lost_head_now" ] && [ "$lost_head_now" != "$lost_head_prev" ]; then
+    printf '%s\n' "$lost_head_now" > "$lost_head_file.$$" 2>/dev/null &&
+        mv -f "$lost_head_file.$$" "$lost_head_file" 2>/dev/null || rm -f "$lost_head_file.$$"
+fi
 # Carry forward rows whose pair is no longer staged. Ownership is a durable fact about who
 # put a blob into the index; the staged set is not, and emitting only staged pairs
 # conflated the two -- so any operation that transiently emptied the index (`git stash`, a
