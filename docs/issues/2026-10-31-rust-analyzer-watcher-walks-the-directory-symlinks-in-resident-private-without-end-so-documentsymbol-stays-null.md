@@ -135,6 +135,15 @@ Open:
 - The mitigation is local and unversioned. A new experiment can bring the links back. Product options 1 to 3 under Fix are the durable answer, and none is chosen.
 - The bug stays `mitigated`, not `fixed`: no product change and no regression test exist.
 
+
+**Recurred, 2026-11-01 (session `76494b3d-4b99-49c6-9924-4fd3a7cee027`).** The mitigation no longer holds.
+
+- `symbols` and `edit_code` on `src/tools/grep.rs` returned the null error on every attempt for more than 3 minutes after a `/mcp` reconnect.
+- The live rust-analyzer (pid 2435941, cwd the real root, 1.5 GB RSS) had one thread, `notify-rs inoti`, at 98.1% of a core in `top -H`.
+- `find .codescout/resident-private -type l -xtype d` counts 1,876 directory symlinks: 1,806 with an mtime of 2026-10-31 and 70 of 2026-11-01. The longer check above, also 2026-10-31, had found none, so they came later that day.
+- They come from the effort-steering experiment trees. Example: `fixed-checker-transfer-20261101/review/mutant06/matched-workflow-20261031 -> /home/marius/work/claude/codescout/.codescout/resident-private/matched-workflow-20261031` (11:12 today).
+- Not done: I did not delete or move them. They are another session's experiment data. Not checked: whether the experiment scripts that create them live in this repo.
+
 ## References
 
 - `docs/issues/archive/2026-10-23-documentsymbol-null-window-outlasts-the-5s-cold-budget-because-rust-analyzer-scans-the-nested-worktrees.md`: the same family. Nested worktrees stretched the null window. The fix there was the exclusion in `src/lsp/init_options.rs`.
