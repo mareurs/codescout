@@ -280,7 +280,7 @@ impl ReadDoor {
                 // Compared on `real`, the path the inode check ties to the opened file, not on a
                 // fresh `lstat` that a swap could answer differently.
                 let lexical: PathBuf = spelled.components().collect();
-                if real != lexical {
+                if !crate::librarian::windows_spelling::agrees(real, &lexical) {
                     return Some(
                         "it reaches its file through a symbolic link, and no managed root or \
                          repository contains it to judge the link against"
