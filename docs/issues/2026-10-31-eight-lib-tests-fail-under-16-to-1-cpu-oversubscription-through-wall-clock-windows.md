@@ -8,7 +8,7 @@ tags:
 opened: 2026-10-31
 owner: marius
 severity: low
-unverified: 'The migrate fix and the seven attribution test fixes are measured. The mutation check detects a missing env for six of the seven attribution tests, and cannot for the many-dirty-files test, which still turns a missing diagnostic into a green skip. The LSP test: 1 failure in 3 loaded runs before the change, 0 in 28 after, but the before sample is three runs, the cause of the slow request is unknown, and it is not shown that the new timeout branch ever ran. The peer''s sighting of four tests failing once at normal load was not re-checked. Commit 421b0f896 used --no-verify on the user''s approval after a hook flagged output.rs; its checks were run by hand.'
+unverified: 'The migrate fix and the seven attribution test fixes are measured. The mutation check for a missing env detects six of the seven attribution tests. For the many-dirty-files test I measured a different mutant: a 1 ms scan timeout makes the hardened test fail 2 of 2. I did not run the missing-env mutant against it, and the old test was not run against the timeout mutant. The LSP test: 1 failure in 3 loaded runs before the change, 0 in 28 after, but the before sample is three runs, the cause of the slow request is unknown, and it is not shown that the new timeout branch ever ran. The peer''s sighting of four tests failing once at normal load was not re-checked. Commit 421b0f896 used --no-verify on the user''s approval after a hook flagged output.rs; its checks were run by hand.'
 ---
 
 # BUG: eight lib tests fail when the suite runs on cores oversubscribed 16 to 1, each through a wall-clock window or a subprocess deadline
@@ -71,10 +71,14 @@ LSP test: the retry loop treats a request timeout as "not ready yet", like an em
 - Fix SHA (on `experiments`): `56457a853`
 - patch-id: `074c352b69bac3ea6f8155309d52eace357f39ce`
 
+Many-dirty-files test hardened: `a_red_naming_many_dirty_files_carries_a_bounded_wip_authors` skips only when `python3` is absent. With `python3` present, a missing diagnostic at 3 files fails it with `python3 is present but the engine produced no diagnostic at 3 files`. `python3_present` is `pub(crate)` with a `#[cfg(test)]` re-export for `tests.rs`. 3 of 3 quiet runs pass. With a 1 ms scan timeout in `no_history()` it fails 2 of 2 with the new message; that mutation is reverted and absent from the commit. The old test against that mutant was not run. Gate: `./scripts/gate.sh` in a clean worktree at `cf76d04cd` with only this diff, every lane exit 0.
+
+- Fix SHA (on `experiments`): `4bc4b0960`
+- patch-id: `8d5ad2c56ea2e3d8c516bd5f3ae55c3af8ebe6c1`
+
 Not fixed:
 
 - The product limit: the real transcript scan takes 16 to 25 s against a 30 s ceiling.
-- The many-dirty-files test still turns a missing diagnostic into a green skip. The tests in `attribution.rs` check `python3_present` instead. Under a load slow enough to time out even the empty-history engine, it would pass without checking anything.
 
 ## Tests added
 
@@ -97,8 +101,7 @@ Open:
 
 - `lsp::client::tests::workspace_symbols_returns_project_symbols`: tolerant of a timeout since `56457a853`. Open: why one request passes 30 s under load, and proof that the timeout branch runs (the test prints nothing on a retry).
 - The product limit: the red-attribution hint is silently absent whenever the transcript scan exceeds 30 s. Options, none chosen: raise `ATTRIBUTION_TIMEOUT_DEFAULT`, or make the scan cheaper with an index or a cache. The cheaper scan is the larger change.
-- Harden `a_red_naming_many_dirty_files_carries_a_bounded_wip_authors`: check `python3_present` instead of printing a skip.
-- The commit hook named a stale writer for `output.rs` (see Fix). It may deserve its own bug.
+- The commit hook named a stale writer for `output.rs` (see Fix). Filed as `581b05bbe41134f3`.
 
 ## References
 - `docs/issues/2026-10-31-a-timed-out-filter-test-fails-in-the-loaded-gate-and-passes-alone.md`
