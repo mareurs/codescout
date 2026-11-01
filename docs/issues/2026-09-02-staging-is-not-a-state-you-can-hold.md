@@ -1,15 +1,16 @@
 ---
 kind: bug
-status: investigating
+status: fixed
 tags:
 - cluster/shared-resource-carries-no-owner
-closed: null
+closed: 2026-11-01
 opened: 2026-09-02
 owner: marius
 related:
 - docs/issues/archive/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md
 - docs/issues/archive/2026-09-02-cluster-gate-failure-text-prescribes-the-blindness-that-caused-it.md
 severity: medium
+unverified: 'Exercised in throwaway repos only (tests/hooks-discrimination.sh section 13), never seen firing on this checkout on a real peer unstage. Known gaps, documented at the recorder: pairs recorded `-` (add -A, -u, a directory, add -p, update-index, quoted paths) get no note; an unstage that is the first index write after a commit is not judged; two hooks racing on the note file can lose a note or name the wrong actor.'
 ---
 
 # BUG: staging is not a state you can hold — any two-step index operation on a shared checkout has a window another session can take
@@ -374,6 +375,15 @@ For the CAPTURE half only, `scripts/commit-mine.sh` (`d859d04b`) now commits fro
 just the entries the stage log attributes to you, so a peer's staged paths stay out of your commit. It does
 nothing for the losing half: a path a peer unstaged is simply absent from what it commits.
 
+
+4. **DONE 2026-11-01: a detector for the LOSING half**, in `fb536ab0b`. The owner chose "refuse once" over warn-only and refuse-until-cleared.
+   - `scripts/post-index-change-stage-log.sh` writes a note to `$GIT_DIR/session-lost-stage-log` when an owned pair leaves the index without reaching HEAD. Three conditions gate it: the git command is an unstaging one (`reset`, `restore`, `rm`, `stash`, `checkout`, `read-tree`, `update-index`), HEAD has not moved since the previous index write, and the command is not the owner's. Rows with route `named-foreign` are skipped, because their owner wrote the file and did not stage it.
+   - `scripts/lost-stage.sh` holds the one predicate both hooks read: a loss is a path that is no longer staged (its index entry equals HEAD's) whose entry is not the staged blob. A peer's `git add -A` or `git rm --cached` leaves a pair of theirs at the path, which the foreign-index refusal already reports, so it gets no note.
+   - `scripts/pre-commit-foreign-index.sh` refuses the owner's next index commit or `commit-mine.sh` commit once. The refusal names the path, the session and the command, then drops the note, so re-running the commit passes. A pathspec commit is not refused for it, because `pre-commit-unreviewed-content.sh` already refuses that form loudly.
+   - `scripts/commit-sequence-tail.txt` step 5 no longer says that no hook guards `git restore --staged`.
+
+   **The first version was wrong, and an independent review caught it.** It judged by content alone. A session that staged a file, edited it again and committed by pathspec left the index and HEAD agreeing on a blob that was not the staged one, which is what an unstage leaves too. A peer's next `git add` then wrote a note, and the owner's next commit was refused for a path that was committed. I reproduced it before the fix. The verb and HEAD gates fix it, and the verb gate also closes the race where a peer's hook reads the stage log before the unstager's own hook has replaced it.
+
 ## Tests added
 
 None, and a regression test is not obviously available: the defect is a race between processes
@@ -383,6 +393,22 @@ are policy rather than mechanism — recorded as such rather than claimed as cov
 
 Per `CLAUDE.md` § *Observer Blindness*, the mechanism-shaped version would be a wrapper that stages
 and commits in one call, so the unsafe shape is not reachable by following the docs. Not built.
+
+
+**2026-11-01, for the detector (`fb536ab0b`):** `tests/hooks-discrimination.sh` section 13, 422 of 422 green. Red first: against the `HEAD` scripts, the 10 positive cases of the first version failed and every absence passed. Each guarded line has a mutant killed by its own case:
+
+| Mutant | Killed by |
+|---|---|
+| no actor resolution for the loss check | section 1 "nothing staged", 13g (the owner's own reset) |
+| no "committed" line in the predicate | 13d |
+| no "index differs from HEAD" line | 13h |
+| no "deletion committed" line | 13j |
+| no verb gate | 13m (a peer's add over a stale log) |
+| no HEAD gate | 13k k1 (a commit of a later edit, then a peer's unstage) |
+| no `named-foreign` filter | 13l |
+| the guard keeps the reported note | 13c, 13e |
+
+`tests/commit-mine.sh` 85 of 85; gate `PYTHON_LIGHT=0 FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`; `cargo test --test hook_config` 12 of 12 after the tail edit. An unrelated section 5 case ("and it still offers the narrowing remedy") failed in 2 of 6 full runs, both while another copy of the suite ran at the same time; its fixture alone passed 40 of 40 with these scripts and 40 of 40 with the `HEAD` scripts. Filed separately as `333f9ed846f4f778` (`docs/issues/2026-11-01-hooks-discrimination-narrowing-remedy-case-fails-when-two-suite-runs-overlap.md`).
 
 ## Workarounds
 
@@ -428,6 +454,14 @@ bare commit and from `commit-mine` alike. Fix item 2 is done (2026-10-26), inclu
   session removing a pair that another session staged. Nothing is designed yet.
 
 **Re-read 2026-10-31 (group G worktree pass, `experiments` @ `0f8705532`); status unchanged.** The losing-half detector is still undesigned, and nothing in this pass touches the recorder. Its position (post-index-change sees a peer's unstage) is unchanged. Needs an owner decision before any change: a wrong guard here can drop or capture a peer's staged work. Related text change this pass: the unattributed-row refusal now names the scratch-work-tree recipe (`53ed87262cfbdcbf`, `1b53f5f1d`).
+
+
+**2026-11-01: fixed in `fb536ab0b`** (see § Fix item 4 and § Tests added). The detector has not yet fired on a real peer unstage on this checkout; the `unverified` field lists its known gaps.
+
+## Fix provenance
+
+- **SHA:** `fb536ab0b` (`experiments`)
+- **patch-id:** `c0c0af40b781af22960387d85372afda1a87ca66`
 
 ## References
 
