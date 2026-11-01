@@ -2,7 +2,7 @@
 
 Date: 2026-10-31
 Status: draft, not yet approved
-Issue: `docs/issues/2026-10-31-background-command-logs-are-never-reclaimed-when-the-server-ends.md` (bug `45b69c70b723a089`)
+Issue: `docs/issues/archive/2026-10-31-background-command-logs-are-never-reclaimed-when-the-server-ends.md` (bug `670481b9fea0679f`, archived 2026-11-01)
 Size: small change (three server files plus tests; no prompt-surface change)
 
 ## Intent

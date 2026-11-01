@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2021 (rustc 1.97), `serde`/`serde_json`, `tempfile` (tests), `std::thread`, Linux `/proc/*/fd`.
 
-**Spec:** `docs/superpowers/specs/2026-10-31-background-log-reaper-design.md` (commit `1ed1d6333`). Bug: `docs/issues/2026-10-31-background-command-logs-are-never-reclaimed-when-the-server-ends.md` (`45b69c70b723a089`). Read both before any task.
+**Spec:** `docs/superpowers/specs/2026-10-31-background-log-reaper-design.md` (commit `1ed1d6333`). Bug: `docs/issues/archive/2026-10-31-background-command-logs-are-never-reclaimed-when-the-server-ends.md` (`670481b9fea0679f`, archived 2026-11-01). Read both before any task.
 
 ## Global Constraints
 
@@ -52,7 +52,7 @@
 - [ ] **Step 2: Run to see them fail:** `CARGO_BUILD_JOBS=16 scripts/with-slot.sh cargo test --lib -- tools::job_record a_background_job_record_names_its_real_log`. Expected: compile errors for `log_path`/`with_log_path` (that is the failure).
 - [ ] **Step 3: Implement** the field, the builder method, and in `spawn_background_command` build the record as `JobRecord::running(&ref_id, resolved_command, job_pid).with_log_path(&log_path)`. The `log_path` variable already exists (L103).
 - [ ] **Step 4: Run again.** Expected: all listed tests pass, and every other test in `tools::job_record` still passes.
-- [ ] **Step 5: Commit** `src/tools/job_record.rs src/tools/run_command/inner.rs src/tools/run_command/tests.rs`: `feat(run-command): the job record names its log (45b69c70b723a089)`.
+- [ ] **Step 5: Commit** `src/tools/job_record.rs src/tools/run_command/inner.rs src/tools/run_command/tests.rs`: `feat(run-command): the job record names its log (670481b9fea0679f)`.
 
 ### Task 2: Lifetimes and the record-linked sweep
 
@@ -82,7 +82,7 @@
 - [ ] **Step 3: Implement** per the Interfaces block. `sweep_logs` reads each `*.json` record (same filter as `sweep_stale`), decides per the design's section 3: finished record with a `log_path`: unlink the log when the `.delivered` sidecar's mtime is at least `grace` old, or the record file's mtime is at least `max_age` old; never act on `running` records. A file whose metadata cannot be read is skipped. Do not remove the record in `sweep_logs`.
 - [ ] **Step 4: Run again.** Expected: every listed test passes and all earlier `tools::job_record` tests still pass.
 - [ ] **Step 5: Check the cap-class gate:** `CARGO_BUILD_JOBS=16 scripts/with-slot.sh cargo test -p codescout --test result_caps every_cap_constant_is_classified`. Expected: it passes, OR (while bug `6fda4eca9da69652` is unfixed on the base branch) it fails listing ONLY `src/lsp/watch_fanout.rs:20 FANOUT_MAX_ENTRIES`. If it lists `job_record.rs`, a new constant lacks its `cap-class` line.
-- [ ] **Step 6: Commit** `src/tools/job_record.rs src/tools/output_buffer.rs`: `feat(run-command): sweep a finished job's log one hour after delivery or a day after the job ended (45b69c70b723a089)`. (`output_buffer.rs` changes only the `sweep_stale` call site here.)
+- [ ] **Step 6: Commit** `src/tools/job_record.rs src/tools/output_buffer.rs`: `feat(run-command): sweep a finished job's log one hour after delivery or a day after the job ended (670481b9fea0679f)`. (`output_buffer.rs` changes only the `sweep_stale` call site here.)
 
 ### Task 3: The legacy sweep and the open-file helper
 
@@ -99,12 +99,12 @@
 - [ ] **Step 2: Run to see them fail.** Expected: compile errors.
 - [ ] **Step 3: Implement** the three items. Keep `open_file_paths` free of `unsafe`; use `std::fs::read_dir("/proc")`, filter all-digit names, `read_dir(format!("/proc/{pid}/fd"))`, `read_link` each. Non-Linux: a `#[cfg(not(target_os = "linux"))]` version returning `None`.
 - [ ] **Step 4: Run again.** Expected: all listed tests pass.
-- [ ] **Step 5: Commit** `src/platform/mod.rs src/tools/job_record.rs`: `feat(run-command): reclaim the loose background logs that no record names (45b69c70b723a089)`.
+- [ ] **Step 5: Commit** `src/platform/mod.rs src/tools/job_record.rs`: `feat(run-command): reclaim the loose background logs that no record names (670481b9fea0679f)`.
 
 ### Task 4: Wire the housekeeping, prove test isolation, close the bug
 
 **Files:**
-- Modify: `src/tools/output_buffer.rs` (`OutputBuffer` struct near L489, `with_byte_limit` L534-569, `store_background` L1671-1677, tests), `docs/issues/2026-10-31-background-command-logs-are-never-reclaimed-when-the-server-ends.md` (through `doc(action="update")`)
+- Modify: `src/tools/output_buffer.rs` (`OutputBuffer` struct near L489, `with_byte_limit` L534-569, `store_background` L1671-1677, tests), `docs/issues/archive/2026-10-31-background-command-logs-are-never-reclaimed-when-the-server-ends.md` (through `doc(action="update")`)
 
 **Interfaces:**
 - Consumes: `sweep_stale`, `sweep_logs`, `recorded_log_paths`, `sweep_loose_logs`, `open_file_paths`, the constants (Tasks 1-3).
@@ -119,8 +119,8 @@
 - [ ] **Step 3: Implement** the field, constructor default, `with_log_dir`, `run_housekeeping`, and the `call_once` change.
 - [ ] **Step 4: Run the focused tests:** `CARGO_BUILD_JOBS=16 scripts/with-slot.sh cargo test --lib -- tools::job_record tools::output_buffer tools::run_command`. Expected: all pass. (The `run_command` filter covers the background-job tests that call `store_background`.)
 - [ ] **Step 5: Run the cap-class gate** as in Task 2 Step 5, and `CARGO_BUILD_JOBS=16 scripts/with-slot.sh cargo clippy --lib --features local-embed -- -D warnings`. Expected: clippy clean; the cap-class result as described there.
-- [ ] **Step 6: Commit** `src/tools/output_buffer.rs`: `feat(run-command): reap background logs at the first background spawn of each server (45b69c70b723a089)`.
-- [ ] **Step 7: Update the bug record** through `doc(action="update", id="45b69c70b723a089", patch={status: "fixed", ...})` with the fix SHAs (labelled `experiments`) and the patch-ids (`git show <sha> | git patch-id --stable`), the focused test names, and a line saying that the reclaimed amount was NOT measured on this machine (state the expected 448 MiB as an estimate). Do not archive it until the gate has run.
+- [ ] **Step 6: Commit** `src/tools/output_buffer.rs`: `feat(run-command): reap background logs at the first background spawn of each server (670481b9fea0679f)`.
+- [ ] **Step 7: Update the bug record** through `doc(action="update", id="670481b9fea0679f", patch={status: "fixed", ...})` with the fix SHAs (labelled `experiments`) and the patch-ids (`git show <sha> | git patch-id --stable`), the focused test names, and a line saying that the reclaimed amount was NOT measured on this machine (state the expected 448 MiB as an estimate). Do not archive it until the gate has run.
 
 ---
 
