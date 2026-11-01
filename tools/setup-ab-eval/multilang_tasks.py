@@ -201,14 +201,33 @@ def live_dockerfile(source_ref, record, workdir):
             f"&& test ! -e {reports.split()[0]} && test ! -e /testbed/reports\n")
 
 
+F2P_DROP_REASON = "absent at base and not added by the test patch"
+
+
+def _added_lines(patch):
+    return "\n".join(l[1:] for l in patch.splitlines() if l.startswith("+") and not l.startswith("+++"))
+
+
 def relaxed_expected(record, control_json):
-    """{fail_to_pass, pass_to_pass_kept, pass_to_pass_dropped, dropped} from a saved control.
+    """{fail_to_pass, pass_to_pass_kept, pass_to_pass_dropped, dropped, fail_to_pass_dropped}
+    from a saved control.
 
     The control's own logs (base.log, gold.log beside control.json) go through the record's parser.
-    LiveRefused unless: the control is not an error; every FAIL_TO_PASS test is not passing at
-    base and passes at gold; the gold repeat shows no mismatch among the kept tests (the control
-    keeps at most 10 mismatch names: a longer list cannot be checked and is refused). Kept
-    PASS_TO_PASS = those passing at gold; the others are dropped."""
+
+    FAIL_TO_PASS side. A test is KEPT iff (a) the control's base log has it (that run has the test
+    patch applied) or (b) its terminal name (`needle_name`: the last `::`/`$` segment, for a doctest
+    the item path without `(line N)`) occurs, as a whole word, in the added lines of `test_patch`
+    (a test that cannot be in the base log because the test patch does not compile at base). A test
+    that is neither exists only in the gold patch: no fix can produce it by name and the prompt
+    does not name it, so it is dropped for every arm and recorded as
+    `{name, reason: F2P_DROP_REASON}` (rust-sdk-1021: all 9, doctests whose names carry the line
+    numbers the gold patch shifts; obscura-447: 1 of 3). A kept test must not pass at base and
+    must pass at gold. A task with no kept test is refused.
+
+    LiveRefused unless: the control is not an error; the kept tests satisfy that; the gold repeat
+    shows no mismatch among the kept tests (the control keeps at most 10 mismatch names: a longer
+    list cannot be checked and is refused). Kept PASS_TO_PASS = those passing at gold; the others
+    are dropped."""
     control_json = Path(control_json)
     ev = json.loads(control_json.read_text())
     if ev.get("id") != record["instance_id"]:
@@ -217,12 +236,22 @@ def relaxed_expected(record, control_json):
         raise LiveRefused("the control ended in an error; re-run it")
     base = grade.run_parser(record["log_parser"], (control_json.parent / "base.log").read_text())
     gold = grade.run_parser(record["log_parser"], (control_json.parent / "gold.log").read_text())
-    f2p, p2p = tasks._f2p(record["FAIL_TO_PASS"]), tasks._f2p(record["PASS_TO_PASS"])
+    all_f2p, p2p = tasks._f2p(record["FAIL_TO_PASS"]), tasks._f2p(record["PASS_TO_PASS"])
+    added = _added_lines(record["test_patch"])
+
+    def named_by_test_patch(test_id):
+        name = needle_name(test_id)
+        return bool(name) and re.search(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])", added)
+
+    f2p = [n for n in all_f2p if n in base or named_by_test_patch(n)]
+    f2p_dropped = [{"name": n, "reason": F2P_DROP_REASON} for n in all_f2p if n not in f2p]
     kept = [n for n in p2p if gold.get(n) == grade.PASS]
     dropped = [n for n in p2p if gold.get(n) != grade.PASS]
     reasons = []
-    if not f2p:
+    if not all_f2p:
         reasons.append("no FAIL_TO_PASS tests")
+    elif not f2p:
+        reasons.append(f"no FAIL_TO_PASS test is expected: all {len(all_f2p)} are {F2P_DROP_REASON}")
     if any(base.get(n) == grade.PASS for n in f2p):
         reasons.append("a FAIL_TO_PASS test passes at base")
     if any(gold.get(n) != grade.PASS for n in f2p):
@@ -240,7 +269,8 @@ def relaxed_expected(record, control_json):
     if reasons:
         raise LiveRefused(f"{record['instance_id']}: not relaxed ok: " + "; ".join(reasons))
     return {"fail_to_pass": len(f2p), "pass_to_pass_kept": len(kept),
-            "pass_to_pass_dropped": len(dropped), "dropped": dropped}
+            "pass_to_pass_dropped": len(dropped), "dropped": dropped,
+            "fail_to_pass_dropped": f2p_dropped}
 
 
 _DOCTEST_ID = re.compile(r"Doc-tests .*? - (\S+)(?: \(line \d+\))?(?: - \w+)?\Z")
@@ -358,11 +388,14 @@ _GRADE_ERRORS = (control.ControlError, grade.ParserError, RuntimeError, subproce
 
 
 def expected_sets(record, bundle):
-    """(fail_to_pass, pass_to_pass) the grader demands: the record's lists, the bundle's dropped
-    names removed from PASS_TO_PASS. Read from the bundle's stored `expected["dropped"]`, never
-    recomputed from a control."""
-    dropped = set(bundle["expected"]["dropped"])
-    f2p = list(tasks._f2p(record["FAIL_TO_PASS"]))
+    """(fail_to_pass, pass_to_pass) the grader demands: the record's lists with the bundle's
+    `fail_to_pass_dropped` names removed from FAIL_TO_PASS (tests only the gold patch has) and the
+    bundle's `dropped` names removed from PASS_TO_PASS. Read from the bundle, never recomputed from
+    a control; a bundle written before `fail_to_pass_dropped` existed drops no F2P test."""
+    exp = bundle["expected"]
+    f2p_gone = {d["name"] for d in exp.get("fail_to_pass_dropped", [])}
+    dropped = set(exp["dropped"])
+    f2p = [n for n in tasks._f2p(record["FAIL_TO_PASS"]) if n not in f2p_gone]
     p2p = [n for n in tasks._f2p(record["PASS_TO_PASS"]) if n not in dropped]
     return f2p, p2p
 
@@ -377,12 +410,16 @@ def live_grader(record, bundle, image, gdir):
     `error` field, never an exception and never a pass; an empty patch never passes."""
     f2p, p2p = expected_sets(record, bundle)
     exp, all_p2p = bundle["expected"], tasks._f2p(record["PASS_TO_PASS"])
-    if (len(f2p) != exp["fail_to_pass"] or len(p2p) != exp["pass_to_pass_kept"]
-            or not set(exp["dropped"]) <= set(all_p2p)):
+    all_f2p = tasks._f2p(record["FAIL_TO_PASS"])
+    f2p_gone = {d["name"] for d in exp.get("fail_to_pass_dropped", [])}
+    if (not f2p or len(f2p) != exp["fail_to_pass"] or len(p2p) != exp["pass_to_pass_kept"]
+            or not set(exp["dropped"]) <= set(all_p2p) or not f2p_gone <= set(all_f2p)
+            or len(f2p_gone) != len(exp.get("fail_to_pass_dropped", []))):
         raise LiveRefused(f"{record['instance_id']}: the bundle's expected set does not match the "
                           f"record (F2P {len(f2p)} vs {exp['fail_to_pass']}, kept P2P {len(p2p)} vs "
                           f"{exp['pass_to_pass_kept']}, dropped within the record's P2P: "
-                          f"{set(exp['dropped']) <= set(all_p2p)})")
+                          f"{set(exp['dropped']) <= set(all_p2p)}, dropped F2P within the record's F2P: "
+                          f"{f2p_gone <= set(all_f2p)})")
     workdir = bundle["workdir"]
     if workdir != tasks.WORKDIR:
         raise LiveRefused(f"workdir {workdir!r}; the runner works in {tasks.WORKDIR!r} only")
@@ -757,22 +794,85 @@ def prescan_live(bundle_json, manifest, data):
     return out
 
 
+def _effective_expected(exp):
+    """`expected` with the keys a bundle written before F2P dropping may lack, for comparison."""
+    return dict(exp, fail_to_pass_dropped=list(exp.get("fail_to_pass_dropped", [])))
+
+
+def reexpect(bundle_json, record, control_json, write=True):
+    """Recompute the `expected` set of an already built bundle from its saved control (no docker).
+
+    Returns (before, after, status): status `UNCHANGED` (bundle left alone, even if an old bundle
+    lacks the `fail_to_pass_dropped` key), `CHANGED` (bundle.json rewritten atomically when `write`),
+    `NO-BUNDLE` (nothing built: `after` is what the rule gives, for information) or `REFUSED`
+    (after is the reason, the bundle is never rewritten)."""
+    bundle_json = Path(bundle_json)
+    bundle = json.loads(bundle_json.read_text()) if bundle_json.exists() else None
+    before = bundle["expected"] if bundle else None
+    try:
+        after = relaxed_expected(record, control_json)
+    except LiveRefused as e:
+        return before, str(e), "REFUSED"
+    if before is None:
+        return before, after, "NO-BUNDLE"
+    if before is not None and _effective_expected(before) == _effective_expected(after):
+        return before, after, "UNCHANGED"
+    if write and bundle is not None:
+        bundle["expected"] = after
+        tmp = bundle_json.with_name(bundle_json.name + ".tmp")
+        tmp.write_text(json.dumps(bundle, indent=2) + "\n")
+        os.replace(tmp, bundle_json)
+    return before, after, "CHANGED"
+
+
+def _expected_line(exp):
+    if not isinstance(exp, dict):
+        return str(exp)
+    return (f"F2P {exp['fail_to_pass']} kept, "
+            f"{len(exp.get('fail_to_pass_dropped', []))} dropped "
+            f"{[d['name'] for d in exp.get('fail_to_pass_dropped', [])]}; "
+            f"P2P {exp['pass_to_pass_kept']} kept, {exp['pass_to_pass_dropped']} dropped")
+
+
+
 def _records_by_id(path):
     return {r["instance_id"]: r for r in records_mod.load_records(path, records_mod.DATASET_SHA256)}
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("action", choices=["build", "prescan", "arm", "tool-layer"])
+    ap.add_argument("action", choices=["build", "prescan", "arm", "tool-layer", "reexpect"])
     ap.add_argument("ids", nargs="+")
     ap.add_argument("--records", type=Path, default=RECORDS)
     ap.add_argument("--controls", type=Path, default=CONTROLS)
     ap.add_argument("--root", type=Path, default=ROOT)
     ap.add_argument("--manifest", type=Path, default=MANIFEST)
     ap.add_argument("--max-image-gb", type=float, default=control.MAX_IMAGE_GB)
+    ap.add_argument("--dry-run", action="store_true", help="reexpect: never rewrite a bundle")
+    ap.add_argument("--assert-unchanged", action="store_true",
+                    help="reexpect: exit 2 and rewrite nothing if any bundle's expected set changes")
     args = ap.parse_args(argv)
-    by_id = _records_by_id(args.records) if args.action == "build" else {}
+    by_id = _records_by_id(args.records) if args.action in ("build", "reexpect") else {}
     failed = False
+    if args.action == "reexpect":
+        results = {}
+        for task_id in args.ids:
+            control._safe_id(task_id)
+            results[task_id] = reexpect(args.root / task_id / "bundle.json", by_id[task_id],
+                                        args.controls / task_id / "control.json", write=False)
+        changed = [t for t, (_, _, s) in results.items() if s == "CHANGED"]
+        for task_id, (before, after, status) in results.items():
+            print(f"{task_id}: {status}\n  before: {_expected_line(before)}\n  after:  {_expected_line(after)}",
+                  flush=True)
+        if args.assert_unchanged and changed:
+            print(f"ASSERT FAILED: changed {changed}; nothing rewritten", flush=True)
+            return 2
+        if not args.dry_run:
+            for task_id in changed:
+                reexpect(args.root / task_id / "bundle.json", by_id[task_id],
+                         args.controls / task_id / "control.json", write=True)
+                print(f"{task_id}: bundle.json rewritten", flush=True)
+        return 1 if any(s == "REFUSED" for _, _, s in results.values()) else 0
     for task_id in args.ids:
         control._safe_id(task_id)
         d = args.root / task_id

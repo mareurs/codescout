@@ -12,6 +12,9 @@ import tasks
 
 BASE = "a92166897f4b3d5f3910101d9380796fc2ce15bf"
 PARSER = "def parser(log):\n    return dict(l.split('=') for l in log.split())\n"
+# one `name=status` per line, names may hold spaces (doctest ids)
+LINE_PARSER = ("def parser(log):\n    out = {}\n    for l in log.splitlines():\n"
+               "        if '=' in l:\n            k, _, v = l.rpartition('=')\n            out[k] = v\n    return out\n")
 RUN1 = "fn first_fn(a_arg: u32, b_arg: u32) -> u32 { compute_alpha(a_arg, b_arg) + offset_value }"
 RUN2 = "fn second_fn(c_arg: u64, d_arg: u64) -> u64 { compute_omega(c_arg, d_arg) * scale_factor }"
 PATCH = (f"diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1,3 +1,5 @@\n"
@@ -228,7 +231,7 @@ class BuildLiveTests(unittest.TestCase):
             "image": "sab-agent-cs-o__r-1:t1", "record_path": out + "/record.json",
             "workdir": "/testbed",
             "expected": {"fail_to_pass": 1, "pass_to_pass_kept": 2, "pass_to_pass_dropped": 1,
-                         "dropped": ["t::p2"]},
+                         "dropped": ["t::p2"], "fail_to_pass_dropped": []},
             "control_sha256": hashlib.sha256(cj.read_bytes()).hexdigest()})
         self.assertNotIn("template", on_disk)
         self.assertEqual(b.template, "")
@@ -280,6 +283,186 @@ class BuildLiveTests(unittest.TestCase):
         e = mt.relaxed_expected(record(), cj)
         self.assertEqual(e["dropped"], ["t::p1", "t::p2", "t::p3"])
         self.assertEqual((e["pass_to_pass_kept"], e["fail_to_pass"]), (0, 1))
+
+
+class F2PRuleTests(unittest.TestCase):
+    """The F2P side of the relaxed gate: a test only the gold patch has cannot be expected."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+
+    def expected(self, f2p, base, gold, test_patch=TEST_PATCH, **kw):
+        cj = write_control(self.tmp / "c", base, gold, **kw)
+        return mt.relaxed_expected(record(FAIL_TO_PASS=f2p, PASS_TO_PASS=["t::p1"], test_patch=test_patch,
+                                          log_parser=LINE_PARSER), cj)
+
+    def test_447_like_present_tests_are_kept_and_the_gold_only_one_is_dropped_by_name(self):
+        f2p = ["t::k1", "t::k2", "t::gold_only_x"]
+        base = {"t::k1": "fail", "t::k2": "fail", "t::p1": "pass"}
+        gold = {**base, "t::k1": "pass", "t::k2": "pass", "t::gold_only_x": "pass"}
+        e = self.expected(f2p, base, gold)
+        self.assertEqual(e["fail_to_pass"], 2)
+        self.assertEqual(e["fail_to_pass_dropped"], [{"name": "t::gold_only_x", "reason": mt.F2P_DROP_REASON}])
+        self.assertEqual((e["pass_to_pass_kept"], e["dropped"]), (1, []))
+        bundle = {"kind": "live", "workdir": "/testbed", "record_path": "x", "expected": e}
+        rec = record(FAIL_TO_PASS=f2p, PASS_TO_PASS=["t::p1"])
+        self.assertEqual(mt.expected_sets(rec, bundle), (["t::k1", "t::k2"], ["t::p1"]))
+
+    def test_sdk_like_a_task_whose_f2p_are_all_gold_only_is_refused_with_the_reason(self):
+        f2p = ["t::g1", "Doc-tests c::f.rs - m::Item::g2 (line 3535) - compile"]
+        base = {"t::p1": "pass"}
+        gold = {"t::p1": "pass", "t::g1": "pass", f2p[1]: "pass"}
+        with self.assertRaises(mt.LiveRefused) as cm:
+            self.expected(f2p, base, gold)
+        self.assertIn(mt.F2P_DROP_REASON, str(cm.exception))
+        self.assertIn("all 2", str(cm.exception))
+
+    def test_a_test_absent_from_the_base_log_but_named_by_the_test_patch_is_kept(self):
+        # the test patch does not compile at base, so the base log has no such test
+        patch = TEST_PATCH + "+fn named_in_patch() { assert!(thing_under_test()); }\n"
+        base = {"t::p1": "pass"}
+        gold = {"t::p1": "pass", "t::named_in_patch": "pass"}
+        e = self.expected(["t::named_in_patch"], base, gold, patch)
+        self.assertEqual((e["fail_to_pass"], e["fail_to_pass_dropped"]), (1, []))
+        # ... and a kept test must still pass at gold
+        with self.assertRaises(mt.LiveRefused):
+            self.expected(["t::named_in_patch"], base, {"t::p1": "pass"}, patch)
+
+    def test_a_doctest_is_matched_by_its_item_path_not_by_the_shifted_line_number(self):
+        old = "Doc-tests c::f.rs - m::Item::reinit (line 120) - compile"
+        new = "Doc-tests c::f.rs - m::Item::reinit (line 135) - compile"  # the gold patch shifted it
+        base = {"t::p1": "pass", old: "pass"}
+        gold = {"t::p1": "pass", new: "pass"}
+        with self.assertRaises(mt.LiveRefused):  # not named by the test patch: gold-only
+            self.expected([new], base, gold)
+        named = TEST_PATCH + "+    let t = Item::reinit(cfg); // reinit on expiry\n"
+        e = self.expected([new], base, gold, named)
+        self.assertEqual(e["fail_to_pass"], 1)
+
+    def test_a_name_inside_a_longer_identifier_does_not_count(self):
+        patch = TEST_PATCH + "+fn named_in_patch_helper_other() {}\n"
+        with self.assertRaises(mt.LiveRefused):
+            self.expected(["t::named_in_patch"], {"t::p1": "pass"},
+                          {"t::p1": "pass", "t::named_in_patch": "pass"}, patch)
+
+    def test_a_test_in_the_base_log_that_passes_at_base_is_still_refused(self):
+        with self.assertRaises(mt.LiveRefused):
+            self.expected(["t::k1"], {"t::k1": "pass", "t::p1": "pass"}, {"t::k1": "pass", "t::p1": "pass"})
+
+    def test_removed_lines_of_the_test_patch_do_not_name_a_test(self):
+        patch = TEST_PATCH + "-fn named_in_patch() {}\n context named_in_patch\n"
+        with self.assertRaises(mt.LiveRefused):
+            self.expected(["t::named_in_patch"], {"t::p1": "pass"},
+                          {"t::p1": "pass", "t::named_in_patch": "pass"}, patch)
+
+    def test_the_grader_refuses_a_bundle_that_disagrees_with_the_f2p_drops(self):
+        f2p = ["t::k1", "t::k2", "t::gold_only_x"]
+        rec = record(FAIL_TO_PASS=f2p, PASS_TO_PASS=["t::p1"])
+        (self.tmp / "record.json").write_text(json.dumps(rec))
+        good = {"kind": "live", "workdir": "/testbed", "record_path": str(self.tmp / "record.json"),
+                "expected": {"fail_to_pass": 2, "pass_to_pass_kept": 1, "pass_to_pass_dropped": 0,
+                             "dropped": [], "fail_to_pass_dropped": [
+                                 {"name": "t::gold_only_x", "reason": mt.F2P_DROP_REASON}]}}
+        mt.live_grader(rec, good, "img", self.tmp / "g")  # accepted
+        bad = {
+            "count": dict(good, expected=dict(good["expected"], fail_to_pass=3)),
+            "name not in the record": dict(good, expected=dict(good["expected"], fail_to_pass_dropped=[
+                {"name": "t::nope", "reason": "x"}])),
+            "all dropped": dict(good, expected=dict(good["expected"], fail_to_pass=0, fail_to_pass_dropped=[
+                {"name": n, "reason": "x"} for n in f2p])),
+            "duplicate drop": dict(good, expected=dict(good["expected"], fail_to_pass=2, fail_to_pass_dropped=[
+                {"name": "t::gold_only_x", "reason": "x"}] * 2)),
+        }
+        for label, bundle in bad.items():
+            with self.subTest(label), self.assertRaises(mt.LiveRefused):
+                mt.live_grader(rec, bundle, "img", self.tmp / "g")
+
+    def test_an_old_bundle_without_the_key_drops_no_f2p(self):
+        rec = record(FAIL_TO_PASS=["t::a", "t::b"], PASS_TO_PASS=["t::p1"])
+        bundle = {"kind": "live", "workdir": "/testbed", "record_path": "x",
+                  "expected": {"fail_to_pass": 2, "pass_to_pass_kept": 1, "pass_to_pass_dropped": 0,
+                               "dropped": []}}
+        self.assertEqual(mt.expected_sets(rec, bundle), (["t::a", "t::b"], ["t::p1"]))
+        mt.live_grader(rec, bundle, "img", self.tmp / "g")
+
+
+class ReexpectTests(unittest.TestCase):
+    """`reexpect`: recompute expected from the saved control; rewrite a bundle only when it changes."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.f2p = ["t::k1", "t::gold_only_x"]
+        self.rec = record(FAIL_TO_PASS=self.f2p, PASS_TO_PASS=["t::p1"], repo="o/r",
+                          created_at="2026-07-01T00:00:00Z")
+        base = {"t::k1": "fail", "t::p1": "pass"}
+        self.cj = write_control(self.tmp / "c", base, {"t::k1": "pass", "t::p1": "pass", "t::gold_only_x": "pass"})
+        self.bj = self.tmp / "bundle.json"
+
+    def write_bundle(self, expected):
+        self.bj.write_text(json.dumps({"kind": "live", "workdir": "/testbed", "expected": expected}, indent=2) + "\n")
+
+    def old_expected(self):
+        return {"fail_to_pass": 2, "pass_to_pass_kept": 1, "pass_to_pass_dropped": 0, "dropped": []}
+
+    def test_a_changed_set_is_rewritten_atomically_and_reported_before_and_after(self):
+        self.write_bundle(self.old_expected())
+        before, after, status = mt.reexpect(self.bj, self.rec, self.cj)
+        self.assertEqual(status, "CHANGED")
+        self.assertEqual(before["fail_to_pass"], 2)
+        self.assertEqual(after["fail_to_pass"], 1)
+        on_disk = json.loads(self.bj.read_text())
+        self.assertEqual(on_disk["expected"], after)
+        self.assertEqual(on_disk["workdir"], "/testbed")
+        self.assertFalse(list(self.tmp.glob("*.tmp")))
+
+    def test_an_unchanged_set_leaves_the_bundle_byte_for_byte_even_without_the_new_key(self):
+        rec = record(FAIL_TO_PASS=["t::k1"], PASS_TO_PASS=["t::p1"])
+        self.write_bundle({"fail_to_pass": 1, "pass_to_pass_kept": 1, "pass_to_pass_dropped": 0, "dropped": []})
+        raw = self.bj.read_bytes()
+        _, _, status = mt.reexpect(self.bj, rec, self.cj)
+        self.assertEqual(status, "UNCHANGED")
+        self.assertEqual(self.bj.read_bytes(), raw)
+
+    def test_a_refused_task_is_reported_and_its_bundle_is_never_rewritten(self):
+        rec = record(FAIL_TO_PASS=["t::g1"], PASS_TO_PASS=["t::p1"])
+        self.write_bundle(self.old_expected())
+        raw = self.bj.read_bytes()
+        before, reason, status = mt.reexpect(self.bj, rec, self.cj)
+        self.assertEqual(status, "REFUSED")
+        self.assertIn(mt.F2P_DROP_REASON, reason)
+        self.assertEqual(self.bj.read_bytes(), raw)
+
+    def test_dry_run_and_no_bundle_write_nothing(self):
+        self.write_bundle(self.old_expected())
+        raw = self.bj.read_bytes()
+        self.assertEqual(mt.reexpect(self.bj, self.rec, self.cj, write=False)[2], "CHANGED")
+        self.assertEqual(self.bj.read_bytes(), raw)
+        self.assertEqual(mt.reexpect(self.tmp / "none.json", self.rec, self.cj)[2], "NO-BUNDLE")
+
+    def test_the_cli_asserts_unchanged_and_rewrites_nothing_when_one_changes(self):
+        root = self.tmp / "root"
+        (root / "o__r-1").mkdir(parents=True)
+        shutil_copy = __import__("shutil").copy
+        self.write_bundle(self.old_expected())
+        shutil_copy(self.bj, root / "o__r-1" / "bundle.json")
+        controls = self.tmp / "controls" / "o__r-1"
+        controls.mkdir(parents=True)
+        for f in ("control.json", "base.log", "gold.log"):
+            shutil_copy(self.tmp / "c" / f, controls / f)
+        (self.tmp / "ds.jsonl").write_text(json.dumps(self.rec) + "\n")
+        raw = (root / "o__r-1" / "bundle.json").read_bytes()
+        argv = ["reexpect", "o__r-1", "--records", str(self.tmp / "ds.jsonl"), "--controls",
+                str(self.tmp / "controls"), "--root", str(root)]
+        with mock.patch.object(mt.records_mod, "DATASET_SHA256", hashlib.sha256((self.tmp / "ds.jsonl").read_bytes()).hexdigest()):
+            self.assertEqual(mt.main([*argv, "--assert-unchanged"]), 2)
+            self.assertEqual((root / "o__r-1" / "bundle.json").read_bytes(), raw)
+            self.assertEqual(mt.main([*argv, "--dry-run"]), 0)
+            self.assertEqual((root / "o__r-1" / "bundle.json").read_bytes(), raw)
+            self.assertEqual(mt.main(argv), 0)
+        self.assertEqual(json.loads((root / "o__r-1" / "bundle.json").read_text())["expected"]["fail_to_pass"], 1)
+
 
 
 class ArmLiveTests(unittest.TestCase):
