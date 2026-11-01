@@ -773,4 +773,23 @@ Two things the first version of the lint got wrong, both caught by mutation-chec
 
 Gate green (FMT/CLIPPY/LEAN/DEFAULT/PYTHON_LIGHT = 0) on the tree before the last rebase; the rebase pulled in three docs-only commits.
 
-**Not done, and not decided:** the `section` argument on `get_guide`. It adds schema bytes to `tools/list` on every request of every session, which `docs/PROGRESSIVE_DISCOVERABILITY.md` § the tool-surface budget treats as a per-request cost, so it needs an owner decision. The lint shows only 5 section-qualified citations exist; a caller that holds the guide body can read the heading there. Steps 2 to 4 are untouched.
+**Not done, and not decided:** the `section` argument on `get_guide`. It adds schema bytes to `tools/list` on every request of every session, which the tool-surface budget treats as a per-request cost (`src/prompts/README.md`, the `tools/list` entry; gated by `tool_surface_under_budget` and `TOOL_SURFACE_CHAR_BUDGET` in `src/server.rs`; `docs/PROGRESSIVE_DISCOVERABILITY.md` has no such section, so the first version of this line cited the wrong file), so it needs an owner decision. The lint shows only 5 section-qualified citations exist; a caller that holds the guide body can read the heading there. Steps 2 to 4 are untouched.
+
+
+## Decision 2026-11-01 — no `section` argument on `get_guide` now
+
+The operator asked for a choice. The choice is **not to add `section` now**. Plan steps 2 to 4 stay open.
+
+What the choice rests on, read at the bytes this session:
+
+- **Cost is permanent and gated.** `GetGuide::input_schema` (`src/tools/guide.rs:52`) declares one property, `topic`. A second property adds its name, type and description to `tools/list` on every request of every session. `tool_surface_under_budget` fails the build when the total passes `TOOL_SURFACE_CHAR_BUDGET` (57,688 in `src/server.rs`). Raising it is allowed only with a log entry that says what the bytes bought. The headroom was not measured here.
+- **Demand is not shown.** Only 5 section-qualified citations exist, and the lint pins that count. A caller that has the guide body can read the heading there.
+- **Order.** Plan step 4 says to derive citation edges only after step 1 shows whether callers use section addressing. Step 1 cannot show that without the argument. The 2026-08-31 probe puts the larger lever in subagent delivery (step 2).
+
+Reopen when one of these happens:
+
+- A usage query shows sessions calling `get_guide` for a whole topic and then using one section, at a rate the DISTRIBUTION probe can state with its stratification.
+- Citations of the form `get_guide("t") § H` grow well past 5.
+- The measured headroom under `TOOL_SURFACE_CHAR_BUDGET` is larger than the cost of the property, and nothing else claims it.
+
+Nothing was run for this decision and no code changed.

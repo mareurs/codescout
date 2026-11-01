@@ -1,16 +1,17 @@
 ---
 id: '69f9f3cf0c62eea5'
 kind: bug
-status: open
+status: wontfix
 title: 'BUG: a pinned directory that is deleted 0-30 ms into a call is re-created by the call (create_file, memory write, usage.db, write.lock.holder)'
 owners:
 - marius
 tags:
 - cluster/unclassified
+closed: 2026-11-01
 opened: 2026-10-19
 owner: marius
 severity: low
-unverified: 'Reported by an independent review of bdf34bdb4..46329d271 (evidence: scratchpad/rv-pin2/probe*.json, driver/); NOT reproduced by the session that filed this file. The 15-of-60 figure is the reviewer''s.'
+unverified: 'WITHDRAWN 2026-11-01. Was: the reviewer''s 15-of-60 figure, not reproduced here. The wontfix rests on the cost and on the harm, not on the rate; a higher rate would not change it. Reopen on the triggers in § Decision 2026-11-01.'
 ---
 
 # BUG: a pinned directory that is deleted 0-30 ms into a call is re-created by the call
@@ -71,6 +72,27 @@ Reproduce with a loop that deletes the pinned directory at a random 0-30 ms offs
 ## Re-verification 2026-10-30
 
 Checked, no code changed. `util::fs::write_utf8` still calls `create_dir_all(parent)` (`src/util/fs.rs` line 498), so the remaining window the Fix section lists is still there. The window is microseconds between the dispatch pin check and the write; it needs the root-aware directory-creation helper the Fix section names, which is an owner design choice. Verdict: needs design.
+
+
+## Decision 2026-11-01 — wontfix for the paths that still create parents
+
+The operator asked for a choice between `wontfix` and a design. The choice is `wontfix` for the remaining paths. The usage-recorder part stays fixed (`640ef2e79bf54e446ad73d81cca2b8a37499bd36`).
+
+What the choice rests on:
+
+- **Cost.** The fix is a root-aware directory-creation helper threaded through five write paths: `util::fs::write_utf8`, `MemoryStore::from_dir` and `open`, `WriteTransaction::prepare`, `open_lock_file`, and `sqlite_vec_ext::open_conn`. Each path needs its own test, and none of the five has a reproduction to be red against.
+- **Harm.** The window needs a deliberate deletion of the project root while a pinned call runs. The result is a re-created directory with the files that call wrote. A `rm` removes it. No data is lost and no write leaves the project root.
+- **Workaround.** Do not delete a project directory while a pinned call runs against it. The dispatch-time check already refuses a root that is gone before the call.
+
+What the choice does not rest on: the rate. The filing session's call-level probe passed, and the reviewer measured 15 re-creations in 60 attempts. Those two results disagree, and no session has resolved the disagreement.
+
+Reopen when one of these happens:
+
+- A session reproduces the re-creation with a fixed driver, without a deliberate delay or loop that targets the window.
+- A re-created directory causes a loss that `rm` does not repair, for example a stray `.git` or a registered worktree path.
+- Another change adds a sixth path that calls `create_dir_all` on a parent of the project root.
+
+Nothing was run for this decision and no code changed.
 
 ## References
 
