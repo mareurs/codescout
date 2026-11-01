@@ -60,6 +60,8 @@ codescout `experiments` at `60dc3569e`; macOS runner `macos-latest`, `TMPDIR=/va
 
 ## Fix
 
+**CI result (run 41331598643, tip `7b7da56cb`):** macOS failures fell from 268 to 13 on `default` and from 22 to 9 on each lean config. The 13 are the leftovers listed under Resume: 6 `lsp::manager` tests and `bounded_read_tests::a_socket_is_refused_as_not_a_regular_file` (socket path length), 3 `read_door_tests` (non-UTF-8 names), `protected_config_write_tests::the_protected_name_is_matched_ignoring_ascii_case`, `door_layout_table_round6`, and `byte_edge_tests::a_markdown_range_over_a_wide_line_keeps_one_handle`. The 7 `doc`-tool tests are gone.
+
 - CI: the `test` job sets `TMPDIR` to the physical path (`pwd -P`) of `runner.temp` on macOS.
 - `the_temp_dir_is_spelled_without_a_symbolic_link` (`src/librarian/read_door.rs`) fails first when `TMPDIR` is spelled through a link, and names the remedy, instead of 250 tests failing with door messages. On a developer's own macOS machine, export `TMPDIR="$(cd "${TMPDIR:-/tmp}" && pwd -P)"` before running the tests.
 

@@ -1,7 +1,7 @@
 ---
-id: 6e78851b29cdb20b
+id: '6e78851b29cdb20b'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the windows-gnu lane dies at apt-get update because apt on Ubuntu 26.04 ignores a keyring named .key'
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - cluster/repro-env-diverges-from-gate-env
 - ci
 - windows
+closed: 2026-11-01
 opened: 2026-11-01
 severity: high
 unverified: Verified RED and GREEN only up to apt-get update and the pinned candidate in a clean ubuntu:26.04 container. The rest of the lane (the wine install, the Windows build, the tests under wine) has not run on Ubuntu 26.04 and may fail for other reasons.
@@ -48,7 +49,9 @@ That `resolute` has no WineHQ build at the pinned version: refuted, the candidat
 
 ## Fix
 
-The key is saved as `winehq-archive.asc`, and a `sed` rewrites the `Signed-By` line of the downloaded `.sources` file to match. A comment in `.github/workflows/ci.yml` states the reason. Fix SHA is added when the fix is on `experiments`.
+The key is saved as `winehq-archive.asc`, and a `sed` rewrites the `Signed-By` line of the downloaded `.sources` file to match. A comment in `.github/workflows/ci.yml` states the reason.
+
+Fixed by `683c04eae` on `experiments` (patch-id `2cd79c86f3e5062b52bd0206d01ae7fbc61ad3cb`). Verified only up to `apt-get update` and the pinned candidate, in an ubuntu:26.04 container. The runner result after the fix is not yet observed.
 
 ## Tests added
 

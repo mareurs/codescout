@@ -55,6 +55,8 @@ None needed: the compiler names the lines.
 
 ## Fix
 
+**CI result (run 41331598643, tip `7b7da56cb`):** the three Windows test jobs compile and run. They now fail at the test level, as predicted: 299 failures on `default` and 42 on each of `local-embed` and `no-features` (up from 297/40/40 on 2026-10-30). The Windows test failures are tracked in their own bug file.
+
 `#[cfg(unix)]` on `links_in` and on the 13 tests that use it. No production code changed.
 
 Fixed by `38220a91c` on `experiments` (patch-id `8db7eb25e6782f217d777fe50ef18b2f84b587b2`). The full local gate was green on the merged tip `abba2def5` (8807 nextest tests, 0 failed). The Windows CI result is not yet observed.

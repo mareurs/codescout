@@ -1,7 +1,7 @@
 ---
-id: 788740c323324877
+id: '788740c323324877'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a tracked symlink with an absolute target makes audit-doc-refs report a high finding on every clean checkout'
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - cluster/repro-env-diverges-from-gate-env
 - ci
 - docs
+closed: 2026-11-01
 opened: 2026-11-01
 severity: medium
 unverified: Verified RED and GREEN in a clean clone with the symlink broken and a fresh HOME. The tracked symlink itself, which dangles on every clone, is not changed; only the one citation of it is. The runner result after the fix is not yet observed.
@@ -50,7 +51,9 @@ That the 11 extra highs seen locally also fail CI: refuted by the sort order in 
 
 ## Fix
 
-The README now describes the link as the `claude-traces` skill link under `.claude/skills/` and says that its target is an absolute path on the author's machine. Fix SHA is added when the fix is on `experiments`.
+The README now describes the link as the `claude-traces` skill link under `.claude/skills/` and says that its target is an absolute path on the author's machine.
+
+Fixed by `f6ff984a9` on `experiments` (patch-id `0f61ddd87f9d5db46d1b7f01738d8ba2d2f684ec`). The full local gate was green on `9cf788035`. The runner result after the fix is not yet observed.
 
 ## Tests added
 
