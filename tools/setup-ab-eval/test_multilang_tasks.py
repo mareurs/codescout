@@ -69,7 +69,7 @@ class LiveDockerfileTests(unittest.TestCase):
         self.assertIn("useradd --uid 1000 --gid 1000 --create-home", text)
         self.assertIn("groupadd --gid 1000 agent", text)
         self.assertIn("chown -R 1000:1000 /testbed /home/agent", text)
-        self.assertIn("git add . && git commit -qm 'Benchmark base source'", text)
+        self.assertIn("git commit -qm 'Benchmark base source'", text)
         self.assertIn("ENV HOME=/home/agent CARGO_NET_OFFLINE=true\nUSER 1000:1000\nWORKDIR /testbed\n", text)
         last = text.rstrip("\n").splitlines()[-1]
         self.assertTrue(last.startswith("RUN test -z \"$(git status --porcelain)\""))
@@ -183,10 +183,20 @@ class BuildLiveTests(unittest.TestCase):
             Path(out_).mkdir(parents=True)
             (Path(out_) / "record.json").write_text(json.dumps(record_))
             self.assembled = (task_image, workdir)
-            return SimpleNamespace(kept={}), Path(out_) / "prompt.txt", {"id": record_["instance_id"]}
+            return SimpleNamespace(kept={}), Path(out_) / "prompt.txt", {
+                "id": record_["instance_id"], "needles": {"kept": {}, "dropped": {}}}
+
+        self.tooled = []
+
+        def tooled(image, needles):
+            self.tooled.append(image)
+            return (SimpleNamespace(kept={"shingle": 7}),
+                    {"manifest_sha256": "m" * 64, "files": {"./bin/node": "n" * 64},
+                     "dropped": {"shingle": 2}})
 
         with mock.patch.object(tasks, "short_tag", return_value="t1"), \
                 mock.patch.object(mt, "assemble_live", side_effect=assemble), \
+                mock.patch.object(mt, "apply_tool_layer", side_effect=tooled), \
                 mock.patch.object(tasks, "build_agent_image",
                                   side_effect=lambda *a: self.agent_calls.append(a)):
             return mt.build_live(rec or record(), out or self.tmp / "task" / "build", control_json)
@@ -208,6 +218,18 @@ class BuildLiveTests(unittest.TestCase):
         self.assertEqual(b.template, "")
         self.assertEqual(self.assembled, ("sab-task-o__r-1:t1", "/testbed"))
         self.assertEqual(self.agent_calls[0][:2], ("sab-task-o__r-1:t1", "sab-agent-cs-o__r-1:t1"))
+
+    def test_build_live_baselines_against_the_agent_image_and_records_the_tool_layer(self):
+        cj = write_control(self.tmp / "c", GOOD_BASE, GOOD_GOLD)
+        b = self.build(cj)
+        self.assertEqual(self.tooled, ["sab-agent-cs-o__r-1:t1"])
+        self.assertEqual(b.needles.kept, {"shingle": 7})
+        assy = json.loads((self.tmp / "task" / "build" / "assembly.json").read_text())
+        self.assertEqual(assy["needles"]["kept"], {"shingle": 7})
+        self.assertEqual(assy["needles"]["tool_layer_dropped"], {"shingle": 2})
+        self.assertEqual(assy["tool_layer"]["manifest_sha256"], "m" * 64)
+        self.assertEqual(assy["tool_layer"]["files"], {"./bin/node": "n" * 64})
+
 
     def test_build_live_refuses_a_control_that_is_not_relaxed_ok(self):
         cases = {
@@ -437,6 +459,12 @@ class PrescanLiveTests(unittest.TestCase):
         self.data = self.tmp / "t" / "prescan"
         self.data.mkdir()
         self.docker = []
+        self.tool = self.tmp / "tool" / "opt" / "sab"
+        (self.tool / "bin").mkdir(parents=True)
+        (self.tool / "bin" / "node").write_text("unrelated words only")
+        p = mock.patch.object(mt, "tool_layer_tree", return_value=(self.tool, {}, "d"))
+        p.start()
+        self.addCleanup(p.stop)
 
     def prescan(self, report):
         def fake_docker(*args, **kw):
@@ -485,6 +513,227 @@ class PrescanLiveTests(unittest.TestCase):
                 mock.patch.object(mt.pilot, "docker", lambda *a, **k: SimpleNamespace(
                     stdout=json.dumps(self.good()), returncode=0)):
             self.assertFalse(mt.prescan_live(self.bj, {}, self.data)["ok"])
+class RepoRecreateTests(unittest.TestCase):
+    """The shell steps that recreate the one-commit repo, run by bash on a real git repository."""
+
+    # what the recipe did before fix round 2
+    OLD = ["rm -rf .git", "git init -q", "git config user.email a@b.invalid", "git config user.name x",
+           "printf '/target\\n' >> .git/info/exclude", "git add .", "git commit -qm 'Benchmark base source'",
+           'test "$(git rev-parse HEAD^{tree})" = "$TREE"']
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        self.env = {**os.environ, "HOME": str(self.tmp), "GIT_CONFIG_GLOBAL": os.devnull,
+                    "GIT_CONFIG_SYSTEM": os.devnull}
+        old = mock.patch.object(mt, "TRACKED_LIST", str(self.tmp / "tracked.lst"))
+        old.start()
+        self.addCleanup(old.stop)
+
+    def git(self, *args, cwd=None, check=True, binary=False):
+        import subprocess
+        return subprocess.run(["git", *args], cwd=cwd or self.repo, env=self.env, check=check,
+                              capture_output=True, text=not binary)
+
+    def make_repo(self, *, crlf=True, ignored=True):
+        """A base commit that tracks an ignored file and a CRLF blob under a `text` attribute, then
+        a second commit (the 'fix'), with the tree left at the second commit plus stray state."""
+        self.git("init", "-q")
+        self.git("config", "user.email", "a@b.invalid")
+        self.git("config", "user.name", "x")
+        (self.repo / ".gitignore").write_text("*.env\ntarget/\n")
+        (self.repo / "src").mkdir()
+        (self.repo / "src" / "lib.rs").write_text("fn a() {}\n")
+        if ignored:
+            (self.repo / "app.env").write_text("TOKEN=public\n")
+        if crlf:
+            (self.repo / "doc.txt").write_bytes(b"one\r\ntwo\r\n")
+        self.git("add", "-f", ".")
+        self.git("commit", "-qm", "base")
+        if crlf:  # the attribute arrives after the CRLF blob was stored
+            (self.repo / ".gitattributes").write_text("*.txt text\n")
+            self.git("add", ".gitattributes")
+            self.git("commit", "-qm", "attrs")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        (self.repo / "src" / "lib.rs").write_text("fn a() { /* fix */ }\n")
+        self.git("commit", "-qam", "gold fix")
+        (self.repo / "stray.txt").write_text("untracked\n")
+        (self.repo / "target").mkdir()
+        (self.repo / "target" / "keep.o").write_text("object")
+        return self.git("rev-parse", f"{self.base}^{{tree}}").stdout.strip()
+
+    def run_steps(self, steps, cwd=None):
+        import subprocess
+        return subprocess.run(["bash", "-c", "set -eu; " + " && ".join(steps)], cwd=cwd or self.repo,
+                              env=self.env, capture_output=True, text=True)
+
+    def test_tracked_ignored_and_crlf_files_end_with_the_base_tree_hash(self):
+        tree = self.make_repo()
+        r = self.run_steps([*mt.reset_sh(self.base), *mt.recreate_repo_sh(".git")])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD^{tree}").stdout.strip(), tree)
+        self.assertEqual(self.git("rev-list", "--count", "HEAD").stdout.strip(), "1")
+        self.assertEqual(self.git("log", "-1", "--format=%s").stdout.strip(), "Benchmark base source")
+        self.assertEqual(self.git("status", "--porcelain").stdout, "")
+        tracked = self.git("ls-files").stdout.split()
+        self.assertIn("app.env", tracked)
+        self.assertFalse([p for p in tracked if p.startswith("target/") or p == "stray.txt"])
+        self.assertEqual(self.git("cat-file", "blob", "HEAD:doc.txt", binary=True).stdout, b"one\r\ntwo\r\n")
+        self.assertTrue((self.repo / "target" / "keep.o").exists())
+        self.assertFalse((self.tmp / "tracked.lst").exists(), "the list is removed")
+
+    def test_the_old_steps_lose_the_ignored_file_and_normalise_the_crlf_blob(self):
+        for name, kw in (("ignored", dict(crlf=False)), ("crlf", dict(ignored=False))):
+            with self.subTest(name):
+                self.repo = self.tmp / name
+                self.repo.mkdir()
+                tree = self.make_repo(**kw)
+                r = self.run_steps([*mt.reset_sh(self.base), *self.OLD])
+                self.assertNotEqual(r.returncode, 0, "the equality check must fail on the old steps")
+                self.assertNotEqual(self.git("rev-parse", "HEAD^{tree}").stdout.strip(), tree)
+
+    def test_a_repo_with_nothing_special_still_ends_equal(self):
+        tree = self.make_repo(crlf=False, ignored=False)
+        r = self.run_steps([*mt.reset_sh(self.base), *mt.recreate_repo_sh(".git")])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD^{tree}").stdout.strip(), tree)
+
+    def test_a_tree_that_differs_from_the_base_fails_the_equality_check(self):
+        self.make_repo()
+        steps = [*mt.reset_sh(self.base), "echo changed > src/new.rs", *mt.recreate_repo_sh(".git")]
+        self.assertNotEqual(self.run_steps(steps).returncode, 0)
+
+
+class ToolLayerTests(unittest.TestCase):
+    """/opt/sab is the same for every task; a shingle that already occurs in it is no leak evidence."""
+    PHRASE = "if value null typeof value object return value if seen has value return"
+    GOLD = "alpha_one beta_two gamma_three delta_four epsilon_five zeta_six eta_seven theta_eight"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.tool = self.tmp / "opt" / "sab"
+        (self.tool / "bin").mkdir(parents=True)
+        (self.tool / "bin" / "node").write_bytes(
+            b"\0\0if (value === null || typeof value !== 'object') return value; if (seen.has(value)) return;\0")
+
+    def needleset(self, needles):
+        counts = dict.fromkeys(mt.leak_scan.KINDS, 0)
+        for n in needles:
+            counts[mt.leak_scan.kind_of(n)] += 1
+        return mt.leak_scan.NeedleSet(list(needles), counts, {"name": 1, "path": 0, "shingle": 3}, 5, 99)
+
+    def test_a_shingle_found_in_the_tool_layer_is_dropped_and_counted(self):
+        generic = "if value null typeof value object return value"
+        ns, dropped = mt.baseline_tool_layer(self.needleset([generic, self.GOLD, "gold_name_x"]), self.tool)
+        self.assertEqual(ns.needles, [self.GOLD, "gold_name_x"])
+        self.assertEqual(dropped, 1)
+        self.assertEqual(ns.kept, {"name": 1, "path": 0, "shingle": 1})
+        self.assertEqual(ns.dropped, {"name": 1, "path": 0, "shingle": 3}, "the base-tree counts stay")
+        self.assertEqual((ns.baseline_files, ns.baseline_bytes), (5, 99))
+
+    def test_a_name_or_path_needle_found_in_the_tool_layer_is_not_dropped(self):
+        (self.tool / "bin" / "other").write_text("unlucky_test_name appears here crates/x/y.rs")
+        names = ["unlucky_test_name", "crates/x/y.rs"]
+        ns, dropped = mt.baseline_tool_layer(self.needleset([*names, self.GOLD]), self.tool)
+        self.assertEqual(ns.needles, [*names, self.GOLD])
+        self.assertEqual(dropped, 0)
+
+    def test_a_gold_shingle_not_in_the_tool_layer_still_hits_in_the_repo_tree(self):
+        generic = "if value null typeof value object return value"
+        ns, _ = mt.baseline_tool_layer(self.needleset([generic, self.GOLD]), self.tool)
+        repo = self.tmp / "testbed"
+        repo.mkdir()
+        (repo / "clean.rs").write_text("fn ok() { nothing_to_see(); }\n")
+        clean = mt.leak_scan.scan([repo], None, ns)
+        self.assertEqual(clean.hits, [])
+        (repo / "planted.rs").write_text("// " + self.GOLD.replace(" ", "  ") + "\n")
+        hit = mt.leak_scan.scan([repo], None, ns)
+        self.assertEqual([(h.path.name, h.needle) for h in hit.hits], [("planted.rs", self.GOLD)])
+        # and the tool layer itself, as scanned by the prescan, no longer fails the gate
+        self.assertEqual(mt.leak_scan.scan([self.tool], None, ns).hits, [])
+        raw = mt.leak_scan.scan([self.tool], None, self.needleset([generic, self.GOLD]))
+        self.assertEqual([h.needle for h in raw.hits], [generic], "without the baseline it would hit")
+
+    def test_dropping_every_shingle_is_refused(self):
+        with self.assertRaises(ValueError):
+            mt.baseline_tool_layer(self.needleset(["if value null typeof value object return value"]), self.tool)
+
+    def test_no_shingles_means_nothing_to_baseline(self):
+        ns = self.needleset(["only_a_name"])
+        self.assertEqual(mt.baseline_tool_layer(ns, self.tool), (ns, 0))
+
+    def test_tool_layer_tree_exports_once_per_manifest_and_verifies_the_copy(self):
+        cache = self.tmp / "cache"
+        body = b"binary bytes"
+        listing = f"{hashlib.sha256(body).hexdigest()}  ./bin/node\n"
+        exports = []
+
+        def export(image, paths, dest, **kw):
+            exports.append((image, paths))
+            (Path(dest) / "opt" / "sab" / "bin").mkdir(parents=True)
+            (Path(dest) / "opt" / "sab" / "bin" / "node").write_bytes(body)
+
+        with mock.patch.object(mt.pilot, "docker", lambda *a, **k: SimpleNamespace(stdout=listing)), \
+                mock.patch.object(tasks, "export_tree", side_effect=export):
+            root, files, digest = mt.tool_layer_tree("img-a", cache)
+            root2, _, digest2 = mt.tool_layer_tree("img-b", cache)  # another task, same layer
+        self.assertEqual(len(exports), 1)
+        self.assertEqual((root, digest), (root2, digest2))
+        self.assertEqual(files, {"./bin/node": hashlib.sha256(body).hexdigest()})
+        self.assertEqual(digest, hashlib.sha256(listing.encode()).hexdigest())
+
+    def test_tool_layer_tree_refuses_an_export_that_does_not_match_the_manifest(self):
+        def export(image, paths, dest, **kw):
+            (Path(dest) / "opt" / "sab" / "bin").mkdir(parents=True)
+            (Path(dest) / "opt" / "sab" / "bin" / "node").write_bytes(b"other bytes")
+
+        listing = f"{'0' * 64}  ./bin/node\n"
+        with mock.patch.object(mt.pilot, "docker", lambda *a, **k: SimpleNamespace(stdout=listing)), \
+                mock.patch.object(tasks, "export_tree", side_effect=export), \
+                self.assertRaises(RuntimeError):
+            mt.tool_layer_tree("img", self.tmp / "cache")
+
+    def test_record_tool_layer_writes_the_count_and_manifest_into_an_old_assembly_json(self):
+        out = self.tmp / "t" / "build"
+        (out / "baseline-tree" / "testbed").mkdir(parents=True)
+        (out / "baseline-tree" / "testbed" / "a.rs").write_text("nothing here\n")
+        generic = "if value null typeof value object return value if seen has"
+        (out / "record.json").write_text(json.dumps(record(patch=PATCH + f"+{generic}\n")))
+        (out / "assembly.json").write_text(json.dumps({"needles": {"kept": {}, "dropped": {}}}))
+        bj = self.tmp / "t" / "bundle.json"
+        bj.write_text(json.dumps({"kind": "live", "out": str(out), "record_path": str(out / "record.json"),
+                                  "task_image": "sab-task-o__r-1:t1", "image": "sab-agent-cs-o__r-1:t1"}))
+        with mock.patch.object(mt, "tool_layer_tree", return_value=(self.tool, {"./bin/node": "h"}, "d" * 64)):
+            tool = mt.record_tool_layer(bj)
+        assy = json.loads((out / "assembly.json").read_text())
+        self.assertGreater(tool["dropped"]["shingle"], 0)
+        self.assertEqual(assy["needles"]["tool_layer_dropped"], tool["dropped"])
+        self.assertEqual(assy["tool_layer"]["manifest_sha256"], "d" * 64)
+
+
+    def test_load_live_applies_the_tool_layer_to_the_recomputed_needles(self):
+        out = self.tmp / "t" / "build"
+        (out / "baseline-tree" / "testbed").mkdir(parents=True)
+        (out / "baseline-tree" / "testbed" / "a.rs").write_text("nothing here\n")
+        generic = "if value null typeof value object return value if seen has"
+        rec = record(patch=PATCH + f"+{generic}\n", problem_statement="x")
+        (out / "record.json").write_text(json.dumps(rec))
+        bj = self.tmp / "t" / "bundle.json"
+        bj.write_text(json.dumps({"kind": "live", "out": str(out), "record_path": str(out / "record.json"),
+                                  "task_image": "sab-task-o__r-1:t1", "image": "sab-agent-cs-o__r-1:t1",
+                                  "workdir": "/testbed", "expected": {"fail_to_pass": 1, "pass_to_pass_kept": 3,
+                                                                   "pass_to_pass_dropped": 0, "dropped": []}}))
+        with mock.patch.object(mt, "tool_layer_tree", return_value=(self.tool, {}, "d")):
+            b = mt.load_live(bj)
+        self.assertNotIn("if value null typeof value object return value", b.needles.needles)
+        self.assertNotIn("value null typeof value object return value if", b.needles.needles)
+        self.assertTrue([n for n in b.needles.needles if "second_fn" in n])
+
+
+
 class FakeDocker:
     """Just enough docker for `live_grader`: the tests' logs depend on whether the agent's patch
     was applied (gold state) or not (base state)."""

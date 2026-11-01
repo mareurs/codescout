@@ -22,6 +22,7 @@ import hashlib
 import json
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -100,6 +101,36 @@ def _workspace_clean_and_rebuild(record, workdir):
     return " \\\n && ".join(" " + s if i == 0 else s for i, s in enumerate(steps))
 
 
+TRACKED_LIST = "/tmp/sab-tracked.lst"
+# `.git/info/attributes` outranks the tree's .gitattributes: with these unset, `git add` stores
+# the working-copy bytes as they are (no CRLF to LF, no filter), so a blob that is CRLF in the
+# base commit stays CRLF (rust-analyzer: 3 files under `text` whose blobs carry CRLF)
+GIT_ATTRIBUTES = "* -text -ident -filter"
+
+
+def reset_sh(base):
+    """Shell steps: reset the tree to `base`, remove untracked files (not `target/`), remember the
+    base tree hash in `$TREE` and the tracked file list, NUL separated, in TRACKED_LIST (outside
+    the workdir). Must run before the `.git` is removed. Run from the workdir."""
+    return [f"git reset --hard -q {base}", "git clean -fdq -e target",
+            "TREE=$(git rev-parse HEAD^{tree})", f"git ls-files -z > {TRACKED_LIST}"]
+
+
+def recreate_repo_sh(gits):
+    """Shell steps: remove `gits` (the old `.git` paths), start a one-commit repo and prove its tree
+    is byte for byte the base tree in `$TREE`. Tracked files that .gitignore matches are added by
+    the saved list with `-f` (`git add .` alone drops them: gitbutler's `.env.*`, polars' 38
+    files); the attributes above keep every blob as it was. Run from the workdir after `reset_sh`."""
+    return [f"rm -rf {gits}", "git init -q",
+            "git config user.email diagnostic@example.invalid", "git config user.name Diagnostic",
+            "git config core.autocrlf false", "git config core.safecrlf false",
+            "mkdir -p .git/info", "printf '/target\\n' >> .git/info/exclude",
+            f"printf '{GIT_ATTRIBUTES}\\n' > .git/info/attributes",
+            f"git add -f --pathspec-from-file={TRACKED_LIST} --pathspec-file-nul", "git add .",
+            f"git commit -qm '{tasks.FOREIGN_ROOT_SUBJECT}'",
+            'test "$(git rev-parse HEAD^{tree})" = "$TREE"', f"rm -f {TRACKED_LIST}"]
+
+
 def live_dockerfile(source_ref, record, workdir):
     """The task image recipe. One RUN, so the chown of `target/` is one layer: `target/` is kept
     (R12: prebuilt output the agent builds on offline) but its workspace artifacts are rebuilt from
@@ -112,22 +143,12 @@ def live_dockerfile(source_ref, record, workdir):
     wd = shlex.quote(workdir)
     reports = " ".join(shlex.quote(p) for p in dict.fromkeys([f"{workdir}/reports", "/testbed/reports"]))
     gits = " ".join(shlex.quote(p) for p in dict.fromkeys([f"{workdir}/.git", "/testbed/.git"]))
+    steps = ["set -eu", "export CARGO_NET_OFFLINE=true", f"cd {wd}", *reset_sh(base)]
     return (f"FROM {source_ref}\nUSER root\n"
-            "RUN set -eu \\\n"
-            " && export CARGO_NET_OFFLINE=true \\\n"
-            f" && cd {wd} \\\n"
-            f" && git reset --hard -q {base} \\\n"
-            " && git clean -fdq -e target \\\n"
-            " && TREE=$(git rev-parse HEAD^{tree}) \\\n"
+            "RUN " + " \\\n && ".join(steps) + " \\\n"
             f" &&{_workspace_clean_and_rebuild(record, workdir)} \\\n"
-            f" && rm -rf {reports} \\\n"
-            f" && rm -rf {gits} \\\n"
-            " && git init -q \\\n"
-            " && git config user.email diagnostic@example.invalid \\\n"
-            " && git config user.name Diagnostic \\\n"
-            " && printf '/target\\n' >> .git/info/exclude \\\n"
-            f" && git add . && git commit -qm '{tasks.FOREIGN_ROOT_SUBJECT}' \\\n"
-            ' && test "$(git rev-parse HEAD^{tree})" = "$TREE" \\\n'
+            f" && rm -rf {reports} \\\n && "
+            + " \\\n && ".join(recreate_repo_sh(gits)) + " \\\n"
             " && (getent group 1000 >/dev/null || groupadd --gid 1000 agent) \\\n"
             " && (id -u 1000 >/dev/null 2>&1 || useradd --uid 1000 --gid 1000 --create-home "
             "--shell /bin/bash agent) \\\n"
@@ -346,12 +367,83 @@ def agent_image_name(task_image):
     return AGENT_PREFIX + task_image[len(TASK_PREFIX):]
 
 
+TOOL_LAYER = "opt/sab"
+TOOL_CACHE = tasks.DATA / "live-tool-layer"
+
+
+def tool_layer_manifest(image):
+    """{relative path: sha256} of every file under /opt/sab in `image`, and the sha256 of that
+    listing. /opt/sab is the agent-tool layer (`agent-cs.Dockerfile`: codescout, node,
+    rust-analyzer and their libraries), added the same way to every task image."""
+    r = pilot.docker("run", "--rm", "--network", "none", "--entrypoint", "sh", image, "-c",
+                     "cd /opt/sab && find . -type f | sort | xargs sha256sum")
+    files = {}
+    for line in r.stdout.splitlines():
+        digest, _, path = line.partition("  ")
+        if digest and path:
+            files[path] = digest
+    if not files:
+        raise RuntimeError(f"{image}: /opt/sab holds no file")
+    return files, hashlib.sha256(r.stdout.encode()).hexdigest()
+
+
+def tool_layer_tree(image, cache=None):
+    """(root, manifest, manifest sha256): a copy of the image's /opt/sab on the host, cached by the
+    manifest hash (the layer is the same for every task of one build) and verified file by file
+    against the manifest, so what is baselined is exactly what the image holds."""
+    cache = Path(cache or TOOL_CACHE)
+    files, digest = tool_layer_manifest(image)
+    dest = cache / digest[:16]
+    root = dest / TOOL_LAYER
+
+    def intact():
+        return root.is_dir() and all(
+            (root / p).is_file() and hashlib.sha256((root / p).read_bytes()).hexdigest() == h
+            for p, h in files.items())
+
+    if not intact():
+        if dest.exists():
+            shutil.rmtree(dest)
+        cache.mkdir(parents=True, exist_ok=True)
+        tasks.export_tree(image, [TOOL_LAYER], dest)
+        if not intact():
+            raise RuntimeError(f"the export of /opt/sab from {image} does not match its manifest")
+    return root, files, digest
+
+
+def baseline_tool_layer(needles, tool_root):
+    """(NeedleSet, number dropped): `needles` without the SHINGLES that the tool layer's files
+    already contain (a generic JS phrase in the node binary is no evidence of a leak). Name and
+    path needles are never dropped here. ValueError (leak_scan) when that would drop every
+    shingle. The base-tree counts of the NeedleSet are kept."""
+    shingles = [n for n in needles.needles if leak_scan.kind_of(n) == "shingle"]
+    if not shingles:
+        return needles, 0
+    kept = set(leak_scan.baseline_needles(shingles, lambda: tasks.tree_files(tool_root)).needles)
+    new = [n for n in needles.needles if leak_scan.kind_of(n) != "shingle" or n in kept]
+    counts = dict.fromkeys(leak_scan.KINDS, 0)
+    for n in new:
+        counts[leak_scan.kind_of(n)] += 1
+    return needles._replace(needles=new, kept=counts), len(shingles) - len(kept)
+
+
+def apply_tool_layer(image, needles, cache=None):
+    """`baseline_tool_layer` against the real /opt/sab of `image`; returns (needles, info) with
+    info = {manifest_sha256, files, dropped: {shingle: n}} for assembly.json."""
+    root, files, digest = tool_layer_tree(image, cache)
+    new, dropped = baseline_tool_layer(needles, root)
+    return new, {"manifest_sha256": digest, "files": files, "dropped": {"shingle": dropped},
+                 "baseline": "every file of the agent image's /opt/sab (shingles only)"}
+
+
 def build_live(record, out, control_json):
-    """Assemble, build the agent image, write `<out>/../bundle.json`; returns the TaskBundle.
+    """Assemble, build the agent image, baseline the needles against its tool layer, write
+    `<out>/../bundle.json`; returns the TaskBundle.
 
     The control is read first: a control that is not relaxed ok refuses before any docker work.
     bundle.json keys: kind, out, task_image, image (the agent image until `arm` replaces it by
-    the arm image), record_path, workdir, expected, control_sha256; no `template`."""
+    the arm image), record_path, workdir, expected, control_sha256; no `template`.
+    assembly.json gets `needles.tool_layer_dropped` and `tool_layer` (the manifest sha256s)."""
     control_json = Path(control_json)
     expected = relaxed_expected(record, control_json)
     workdir = json.loads(control_json.read_text()).get("workdir")
@@ -364,6 +456,10 @@ def build_live(record, out, control_json):
     needles, prompt, rec = assemble_live(record, out, task_image, workdir)
     image = agent_image_name(task_image)
     tasks.build_agent_image(task_image, image, out / "agent-image-build.log")
+    needles, tool = apply_tool_layer(image, needles)
+    rec["needles"].update(kept=needles.kept, tool_layer_dropped=tool["dropped"])
+    rec["tool_layer"] = tool
+    (out / "assembly.json").write_text(json.dumps(rec, indent=2) + "\n")
     bundle = {"kind": KIND, "out": str(out), "task_image": task_image, "image": image,
               "record_path": str(out / "record.json"), "workdir": workdir, "expected": expected,
               "control_sha256": hashlib.sha256(control_json.read_bytes()).hexdigest()}
@@ -372,19 +468,44 @@ def build_live(record, out, control_json):
                             live_grader(record, bundle, image, out / "grades"), "", bundle)
 
 
+def _base_needles(rec):
+    """The needles of a built bundle after the base-tree baseline only (what `assemble_live` made)."""
+    record = json.loads(Path(rec["record_path"]).read_text())
+    out = Path(rec["out"])
+    return record, leak_scan.baseline_needles(leak_scan.needles_for(leak_record(record)),
+                                              lambda: tasks.tree_files(out / "baseline-tree" / "testbed"))
+
+
 def load_live(bundle_json):
-    """A TaskBundle read back from bundle.json; the needles are recomputed from the record and the
-    saved baseline tree (as `tasks.bundle_for` does for a foreign task)."""
+    """A TaskBundle read back from bundle.json; the needles are recomputed from the record, the
+    saved baseline tree and the agent image's tool layer, as `build_live` made them (as
+    `tasks.bundle_for` does for a foreign task)."""
     bundle_json = Path(bundle_json)
     rec = json.loads(bundle_json.read_text())
     if rec.get("kind") != KIND:
         raise LiveRefused(f"{bundle_json}: kind {rec.get('kind')!r}, not {KIND!r}")
-    record = json.loads(Path(rec["record_path"]).read_text())
+    record, needles = _base_needles(rec)
     out = Path(rec["out"])
-    needles = leak_scan.baseline_needles(leak_scan.needles_for(leak_record(record)),
-                                         lambda: tasks.tree_files(out / "baseline-tree" / "testbed"))
+    root, _, _ = tool_layer_tree(agent_image_name(rec["task_image"]))
+    needles, _ = baseline_tool_layer(needles, root)
     return tasks.TaskBundle(record["instance_id"], rec["image"], out / "prompt.txt", needles,
                             live_grader(record, rec, rec["image"], out / "grades"), "", rec)
+
+
+def record_tool_layer(bundle_json, cache=None):
+    """Write `needles.tool_layer_dropped` and `tool_layer` into the assembly.json of a bundle built
+    before the tool layer was baselined (the needles themselves are recomputed by `load_live`)."""
+    rec = json.loads(Path(bundle_json).read_text())
+    _, needles = _base_needles(rec)
+    needles, tool = apply_tool_layer(agent_image_name(rec["task_image"]), needles, cache)
+    path = Path(rec["out"]) / "assembly.json"
+    assy = json.loads(path.read_text())
+    assy["needles"].update(kept=needles.kept, tool_layer_dropped=tool["dropped"])
+    assy["tool_layer"] = tool
+    path.write_text(json.dumps(assy, indent=2) + "\n")
+    return tool
+
+
 
 
 def arm_live(bundle_json):
@@ -502,7 +623,7 @@ def _records_by_id(path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("action", choices=["build", "prescan", "arm"])
+    ap.add_argument("action", choices=["build", "prescan", "arm", "tool-layer"])
     ap.add_argument("ids", nargs="+")
     ap.add_argument("--records", type=Path, default=RECORDS)
     ap.add_argument("--controls", type=Path, default=CONTROLS)
@@ -526,6 +647,10 @@ def main(argv=None):
         elif args.action == "arm":
             rec = arm_live(d / "bundle.json")
             print(json.dumps({"id": task_id, "arm_image": rec["arm_image"]}), flush=True)
+        elif args.action == "tool-layer":
+            t = record_tool_layer(d / "bundle.json")
+            print(json.dumps({"id": task_id, "tool_layer_dropped": t["dropped"],
+                              "manifest_sha256": t["manifest_sha256"]}), flush=True)
         else:
             r = prescan_live(d / "bundle.json", json.loads(args.manifest.read_text()), d / "prescan")
             print(json.dumps({"id": task_id, "control": r["control"], "hits": len(r.get("hits", [])),
