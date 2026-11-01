@@ -101,8 +101,12 @@ def read_claude_history(path: Path) -> HistoryBatch:
     enqueues = {}
     try:
         with path.open(encoding="utf-8") as stream:
+            # One path, one resolve. It was inside the loop: 1.9 million calls and 13 million
+            # lstat calls, about 95 of 378 profiled seconds, over the real history of this
+            # checkout (bug 20927ccfe293c34e).
+            resolved = path.resolve()
             for line_number, line in enumerate(stream, 1):
-                locator = f"{path.resolve()}:{line_number}"
+                locator = f"{resolved}:{line_number}"
                 try:
                     rec = json.loads(line)
                 except (ValueError, TypeError):

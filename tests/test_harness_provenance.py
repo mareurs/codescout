@@ -306,6 +306,37 @@ def test_the_scan_floor_is_the_oldest_last_commit_minus_a_margin_and_none_when_u
 
 
 
+def test_the_claude_reader_resolves_a_history_path_once_not_once_per_line(tmp_path, monkeypatch):
+    """Bug 20927ccfe293c34e: `read_claude_history` called `path.resolve()` for every line, 1.9 million
+    times and 13 million `lstat` calls over this checkout's real history, about a quarter of the scan."""
+    root = tmp_path / "checkout"
+    root.mkdir()
+    path = tmp_path / "claude" / "me.jsonl"
+    rows = [claude_call(inp={"file_path": str(root / "a.rs")}, call=f"call-{i}", sid="me", cwd=root)
+            for i in range(40)]
+    rows += [claude_result(call=f"call-{i}") for i in range(40)]
+    history(path, rows)
+    with path.open("a") as stream:
+        stream.write("this line is not JSON\n")
+    fp = _script("fp_resolve_once", "file-provenance.py")
+
+    calls = []
+    original = Path.resolve
+
+    def counting(self, *args, **kwargs):
+        calls.append(self)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", counting)
+    batch = fp.read_claude_history(path)
+    assert len(batch.operations) == 40
+    assert len([c for c in calls if c == path]) == 1, (
+        f"{len(calls)} resolve calls for an 81-line file; the path must be resolved once")
+    # The locator of a gap still names the resolved path and the line.
+    assert any(g.source_id == f"{original(path)}:81" for g in batch.gaps), batch.gaps
+
+
+
 def test_duplicate_discovery_copied_original_event_and_gaps(checkout):
     root, env = checkout
     source = add_writes(root, env, "codex", "me", ["own.rs"])
