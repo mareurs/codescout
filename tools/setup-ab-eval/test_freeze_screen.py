@@ -22,6 +22,8 @@ POLARS = "pola-rs__polars-28484"
 GITBUTLER = "gitbutlerapp__gitbutler-14920"
 V2_IDS = [i for i in IDS if i != POLARS]
 V3_IDS = [i for i in V2_IDS if i != GITBUTLER]
+SDK = "modelcontextprotocol__rust-sdk-1021"
+V4_IDS = [i for i in V3_IDS if i != SDK]
 
 
 def git(repo, *args):
@@ -185,7 +187,9 @@ class PoolTests(Case):
     def test_make_pool_takes_counts_and_hash_from_the_control(self):
         t = self.env.pool["tasks"][0]
         cj = self.env.data / "live" / "controls-batch" / t["id"] / "control.json"
-        self.assertEqual(set(t), {"id", "repo", "control_sha256", "expected_count", "dropped_count"})
+        self.assertEqual(set(t), {"id", "repo", "control_sha256", "expected_count", "dropped_count",
+                                  "f2p_dropped_count"})
+        self.assertEqual(t["f2p_dropped_count"], 0)
         self.assertEqual((t["expected_count"], t["dropped_count"]), (3, 1))  # f1 + p1 + p3, p2 dropped
         self.assertEqual(t["control_sha256"], sha(cj))
         self.assertEqual(t["repo"], "rust-lang/rust-analyzer")
@@ -203,32 +207,79 @@ class PoolTests(Case):
         ok = {"tasks": [{"id": IDS[0], "expected_count": 8120, "dropped_count": 0}]}
         self.assertEqual(fs.sanity_mismatches(ok), [])
 
-    def test_the_committed_pool_files_are_v1_v2_history_and_the_seven_task_v3(self):
-        v1 = fs.check_pool(json.loads(Path(__file__).with_name(fs.POOL_V1).read_text()))
-        v2 = fs.check_pool(json.loads(Path(__file__).with_name(fs.POOL_V2).read_text()))
-        v3 = fs.check_pool(json.loads(Path(__file__).with_name(fs.POOL).read_text()))
-        self.assertEqual([t["id"] for t in v3["tasks"]], V3_IDS)
-        self.assertEqual(v3["amends"], v2["pool"])
-        self.assertEqual([d["id"] for d in v3["dropped"]], [POLARS, GITBUTLER])
-        self.assertEqual(v3["dropped"], fs.DROPPED)
-        self.assertEqual(v3["dropped"][:1], v2["dropped"])
-        self.assertEqual(v3["pool"], fs.POOL_NAME)
+    def test_the_committed_pool_files_are_v1_to_v3_history_and_the_six_task_v4(self):
+        load = lambda name: json.loads(Path(__file__).with_name(name).read_text())
+        v1, v2, v3 = (fs.check_pool(load(n), legacy_ok=True) for n in (fs.POOL_V1, fs.POOL_V2, fs.POOL_V3))
+        v4 = fs.check_pool(load(fs.POOL))
         self.assertEqual([t["id"] for t in v1["tasks"]], IDS)
         self.assertEqual([t["id"] for t in v2["tasks"]], V2_IDS)
-        self.assertEqual(v2["amends"], "setup ab live rust v1")
-        self.assertEqual([d["id"] for d in v2["dropped"]], [POLARS])
-        by1 = {t["id"]: t for t in v1["tasks"]}
-        self.assertTrue(all(by1[t["id"]] == t for t in v2["tasks"]))
+        self.assertEqual([t["id"] for t in v3["tasks"]], V3_IDS)
+        self.assertEqual([t["id"] for t in v4["tasks"]], V4_IDS)
+        self.assertEqual(v4["amends"], v3["pool"])
+        self.assertEqual(v4["pool"], fs.POOL_NAME)
+        self.assertEqual([d["id"] for d in v4["dropped"]], [POLARS, GITBUTLER, SDK])
+        self.assertEqual(v4["dropped"], fs.DROPPED)
+        self.assertEqual(v4["dropped"][:2], v3["dropped"])
+        by3 = {t["id"]: t for t in v3["tasks"]}
+        for t in v4["tasks"]:  # only obscura-447 changed, by the F2P presence rule
+            old = {k: v for k, v in by3[t["id"]].items()}
+            if t["id"].endswith("obscura-447"):
+                self.assertEqual((old["expected_count"], t["expected_count"], t["f2p_dropped_count"]),
+                                 (275, 274, 1))
+            else:
+                self.assertEqual({k: v for k, v in t.items() if k != "f2p_dropped_count"}, old)
+                self.assertEqual(t["f2p_dropped_count"], 0)
+
+    def test_make_pool_records_a_dropped_f2p_test_and_keeps_it_out_of_the_count(self):
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, True)
+        gold = dict(GOOD_GOLD, **{"t::gold_only": "pass"})
+        write_control(d / "o__r-1", GOOD_BASE, gold)
+        rec = record(repo="o/r", FAIL_TO_PASS=["t::f1", "t::gold_only"])
+        entry = fs.make_pool({"o__r-1": rec}, d, ["o__r-1"])["tasks"][0]
+        self.assertEqual((entry["expected_count"], entry["dropped_count"], entry["f2p_dropped_count"]),
+                         (3, 1, 1))  # f1 + p1 + p3; p2 dropped; gold_only dropped
+
+    def test_a_pool_that_lies_about_the_dropped_f2p_count_is_refused(self):
+        pool = json.loads(json.dumps(self.env.pool))
+        pool["tasks"][0]["f2p_dropped_count"] = 1
+        self.env.pool = pool
+        self.env.write_pool()
+        self.env.commit("f2p lie")
+        self.refused("F2P dropped")
+
+    def test_freeze_replace_works_when_the_registration_is_already_tracked(self):
+        self.env.freeze()
+        git(self.env.tool, "add", "-f", fs.REGISTRATION)
+        git(self.env.tool, "commit", "-q", "-m", "register")
+        with self.assertRaisesRegex(fs.Refused, "--replace"):
+            self.env.freeze()
+        reg = self.env.freeze(replace=True)
+        self.assertNotIn(fs.REGISTRATION, reg["files"])
+        self.assertEqual(self.env.check(), [])
+
+    def test_polars_gitbutler_and_sdk_are_refused_as_outside_the_pool(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        env = Env(tmp, V4_IDS)  # the six-task pool of v4
+        for tid in (POLARS, GITBUTLER, SDK):
+            plan = list(env.plan) + [run.RunSpec(tid, run.MODELS[0], "bare", 0)]
+            fs.write_plan(plan, env.plan_path)
+            with self.assertRaises(fs.Refused) as cm:
+                env.freeze()
+            self.assertIn("outside the pool", str(cm.exception))
+            self.assertIn(tid, str(cm.exception))
+        self.assertFalse(env.out.exists())
 
 
-class PoolV3Tests(unittest.TestCase):
+class PoolV4Tests(unittest.TestCase):
     """The pool file's own ids and counts drive the plan and the refusals; each entry is
     re-verified against its real control."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.env = Env(self.tmp, V3_IDS)
+        self.env = Env(self.tmp, V4_IDS)
         self.controls = self.env.data / "live" / "controls-batch"
 
     def refused(self, text, **over):
@@ -239,12 +290,12 @@ class PoolV3Tests(unittest.TestCase):
         self.assertFalse((self.env.run_data / fs.GO_TEMPLATE).exists())
         self.assertFalse((self.env.run_data / "GO.json").exists())
 
-    def test_the_plan_is_seven_tasks_28_runs_and_the_freeze_accepts_it(self):
-        self.assertEqual([t["id"] for t in self.env.pool["tasks"]], V3_IDS)
-        self.assertEqual(len(self.env.plan), 28)
-        self.assertEqual({s.task_id for s in self.env.plan}, set(V3_IDS))
+    def test_the_plan_is_six_tasks_24_runs_and_the_freeze_accepts_it(self):
+        self.assertEqual([t["id"] for t in self.env.pool["tasks"]], V4_IDS)
+        self.assertEqual(len(self.env.plan), 24)
+        self.assertEqual({s.task_id for s in self.env.plan}, set(V4_IDS))
         reg = self.env.freeze()
-        self.assertEqual(len(reg["tasks"]), 7)
+        self.assertEqual(len(reg["tasks"]), 6)
         self.assertEqual(self.env.check(), [])
         loaded = run.load_registration(self.env.out, run.load_plan(self.env.plan_path))
         self.assertEqual(loaded["reps"], [["bare", 2]])
@@ -258,10 +309,10 @@ class PoolV3Tests(unittest.TestCase):
     def test_plan_problems_names_a_partial_plan_and_the_expected_size(self):
         why = fs.plan_problems(self.env.plan[:-1], self.env.pool)
         self.assertEqual(len(why), 1)
-        self.assertIn("28 runs", why[0])
-        self.assertIn("it has 27", why[0])
+        self.assertIn("24 runs", why[0])
+        self.assertIn("it has 23", why[0])
         fs.write_plan(self.env.plan[:-1], self.env.plan_path)
-        self.refused("not the screen's 28 runs")
+        self.refused("not the screen's 24 runs")
 
     def test_a_pool_file_that_lies_about_its_counts_or_hash_is_refused(self):
         pool = json.loads(json.dumps(self.env.pool))
@@ -270,7 +321,7 @@ class PoolV3Tests(unittest.TestCase):
         self.env.write_pool()
         self.env.commit("lie")
         self.refused("the pool says")
-        self.assertTrue(any(V3_IDS[0] in w for w in
+        self.assertTrue(any(V4_IDS[0] in w for w in
                             fs.verify_pool(pool, self.env.records, self.controls)))
         pool["tasks"][0]["expected_count"] -= 1
         pool["tasks"][1]["control_sha256"] = "0" * 64
@@ -278,7 +329,7 @@ class PoolV3Tests(unittest.TestCase):
         self.env.write_pool()
         self.env.commit("lie2")
         self.refused("not the pooled one")
-        self.assertTrue(any(V3_IDS[1] in w for w in
+        self.assertTrue(any(V4_IDS[1] in w for w in
                             fs.verify_pool(pool, self.env.records, self.controls)))
 
     def test_verify_pool_passes_the_true_file_and_fails_clearly_on_a_missing_id(self):
@@ -293,26 +344,26 @@ class PoolV3Tests(unittest.TestCase):
         self.assertTrue(any("o__ghost-1" in w and "control.json" in w for w in why), why)
 
     def test_a_pool_task_without_a_control_or_a_bundle_fails_the_freeze(self):
-        shutil.rmtree(self.controls / V3_IDS[2])
+        shutil.rmtree(self.controls / V4_IDS[2])
         self.refused("control.json unreadable")
-        self.assertIn(V3_IDS[2], fs.verify_pool(self.env.pool, self.env.records, self.controls)[0])
-        shutil.copytree(self.env.data / "live" / "controls-batch" / V3_IDS[0], self.controls / V3_IDS[2])
-        write_control(self.controls / V3_IDS[2], GOOD_BASE, GOOD_GOLD, rid=V3_IDS[2])  # restored
-        shutil.rmtree(self.env.data / "live-tasks" / V3_IDS[3])
+        self.assertIn(V4_IDS[2], fs.verify_pool(self.env.pool, self.env.records, self.controls)[0])
+        shutil.copytree(self.env.data / "live" / "controls-batch" / V4_IDS[0], self.controls / V4_IDS[2])
+        write_control(self.controls / V4_IDS[2], GOOD_BASE, GOOD_GOLD, rid=V4_IDS[2])  # restored
+        shutil.rmtree(self.env.data / "live-tasks" / V4_IDS[3])
         self.refused("does not exist")
 
     def test_freeze_refuses_an_older_pool_by_name_or_by_path(self):
-        pool = dict(self.env.pool, pool="setup-ab live rust v2")
+        pool = dict(self.env.pool, pool="setup-ab live rust v3")
         self.env.pool = pool
         self.env.write_pool()
         self.env.commit("older name")
         self.refused("is not the current pool")
-        self.assertIn("setup-ab live rust v2", self._msg())
+        self.assertIn("setup-ab live rust v3", self._msg())
         self.env.pool = dict(pool, pool=fs.POOL_NAME)
-        old = self.env.tool / fs.POOL_V2
+        old = self.env.tool / fs.POOL_V3
         old.write_text(json.dumps(self.env.pool))
         self.env.commit("older path")
-        self.refused(fs.POOL_V2, pool_path=old)
+        self.refused(fs.POOL_V3, pool_path=old)
 
     def _msg(self):
         with self.assertRaises(fs.Refused) as cm:
@@ -328,6 +379,7 @@ class PoolV3Tests(unittest.TestCase):
         msg = str(cm.exception)
         self.assertIn(POLARS, msg)
         self.assertIn(GITBUTLER, msg)
+        self.assertIn(SDK, msg)
         self.assertIn("was dropped from it", msg)
         self.assertFalse(env.out.exists())
         self.assertFalse((env.run_data / fs.GO_TEMPLATE).exists())
@@ -339,11 +391,11 @@ class PoolV3Tests(unittest.TestCase):
                     registration=self.env.out, inspect=self.env.inspect,
                     runner_tasks_root=self.env.runner, run_cli=lambda p: CLI_VERSION)
         self.assertEqual(fs.check_screen(**base), [])
-        why = fs.check_screen(**base, current_pool=("setup-ab live rust v4", "multilang-pool-v4.json"))
+        why = fs.check_screen(**base, current_pool=("setup-ab live rust v5", "multilang-pool-v5.json"))
         self.assertTrue(any("is not the current pool" in w for w in why), why)
-        why = fs.check_screen(**base, dropped=[{"id": V3_IDS[0], "reason": "x"}])
-        self.assertTrue(any(V3_IDS[0] in w and "was dropped from it" in w for w in why), why)
-        why = fs.check_screen(**base, pool_path=self.env.tool / fs.POOL_V1)
+        why = fs.check_screen(**base, dropped=[{"id": V4_IDS[0], "reason": "x"}])
+        self.assertTrue(any(V4_IDS[0] in w and "was dropped from it" in w for w in why), why)
+        why = fs.check_screen(**base, pool_path=self.env.tool / fs.POOL_V3)
         self.assertTrue(any("is not the registered pool" in w for w in why), why)
         self.assertEqual(fs.check_screen(**base, pool_path=self.env.tool / fs.POOL), [])
 
@@ -360,11 +412,58 @@ class PoolV3Tests(unittest.TestCase):
         self.assertEqual(snapshot(), before)
 
 
+    def _strip_dropped_key(self):
+        for tid in V4_IDS:
+            b = self.env.data / "live-tasks" / tid / "bundle.json"
+            rec = json.loads(b.read_text())
+            rec["expected"].pop("fail_to_pass_dropped")
+            b.write_text(json.dumps(rec))
+
+    def test_an_old_shape_bundle_without_fail_to_pass_dropped_passes_when_the_rule_drops_none(self):
+        self._strip_dropped_key()
+        reg = self.env.freeze()
+        self.assertEqual(len(reg["tasks"]), 6)
+        self.assertEqual(self.env.check(), [])
+
+    def test_a_bundle_whose_f2p_drops_differ_from_the_rule_is_refused(self):
+        b = self.env.data / "live-tasks" / V4_IDS[1] / "bundle.json"
+        rec = json.loads(b.read_text())
+        rec["expected"]["fail_to_pass_dropped"] = [{"name": "t::x", "reason": "r"}]
+        b.write_text(json.dumps(rec))
+        self.refused("differs from the control's")
+        # an old-shape bundle is refused when the rule DOES drop an F2P test
+        self._strip_dropped_key()
+        tid = V4_IDS[2]
+        rec_path = self.env.data / "live-tasks" / tid / "build" / "record.json"
+        r = json.loads(rec_path.read_text())
+        r["FAIL_TO_PASS"] = ["t::f1", "t::gold_only"]
+        rec_path.write_text(json.dumps(r))
+        write_control(self.controls / tid, GOOD_BASE, dict(GOOD_GOLD, **{"t::gold_only": "pass"}), rid=tid)
+        with self.assertRaises(fs.Refused) as cm:
+            self.env.freeze()
+        self.assertIn(tid, str(cm.exception))
+
+
+    def test_verify_pool_reports_a_reason_for_an_older_pool_and_does_not_crash(self):
+        legacy = json.loads(json.dumps(self.env.pool))
+        for t in legacy["tasks"]:
+            t.pop("f2p_dropped_count")
+        self.assertEqual(fs.verify_pool(legacy, self.env.records, self.controls), [])  # nothing changed
+        legacy["tasks"][0]["expected_count"] += 1  # an old count the rule now disagrees with
+        why = fs.verify_pool(legacy, self.env.records, self.controls)
+        self.assertEqual(len(why), 1)
+        self.assertIn("predates the F2P presence rule", why[0])
+        self.assertIn(V4_IDS[0], why[0])
+        self.assertTrue(fs.verify_pool(self.env.pool, self.env.records, self.controls) == [])
+        with self.assertRaises(fs.Refused):
+            fs.check_pool(legacy)  # but freeze never accepts an older shape
+
+
     def test_check_pool_shape_rules(self):
         base = self.env.pool
         for bad in (dict(base, tasks=[]), dict(base, gate="strict"),
                     dict(base, tasks=base["tasks"] + [base["tasks"][0]]),
-                    dict(base, dropped=[{"id": V3_IDS[0], "reason": "x"}]),
+                    dict(base, dropped=[{"id": V4_IDS[0], "reason": "x"}]),
                     dict(base, dropped=[{"id": POLARS}])):
             with self.assertRaises(fs.Refused):
                 fs.check_pool(bad)
@@ -526,13 +625,15 @@ class FreezeTests(Case):
                     break
                 spent, k = spent + cost, k + 1
             return k
-        for n in (len(self.env.plan), 28, 32, 36):  # the fixture's plan, pool v3, v2, v1
+        for n in (len(self.env.plan), 24, 28, 32, 36):  # the fixture's plan, pools v4, v3, v2, v1
             self.assertEqual(started(1.0, n), n)
             self.assertEqual(started(0.0, n), n)
         self.assertEqual(started(1.2, 36), 34)   # v1: (k-1)*1.2 <= 40
         self.assertEqual(started(1.4, 32), 29)   # v2: (k-1)*1.4 <= 40 -> not all start
         self.assertEqual(started(1.48, 28), 28)  # the v3 break-even: 27 * 1.48 = 39.96 <= 40
         self.assertLess(started(1.6, 28), 28)    # not all start (stops after about 26)
+        self.assertEqual(started(1.739, 24), 24)  # the v4 break-even: 23 * 1.739 = 39.997 <= 40
+        self.assertLess(started(1.9, 24), 24)
         self.assertEqual(started(40 / 27, 28), 28)
 
 

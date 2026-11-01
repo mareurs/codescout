@@ -1,7 +1,7 @@
 """Freeze the Live Rust screen: write screen-registration.json, the record the operator's go is bound to.
 
-The screen is the bare arm only, over the tasks of the pool file (default multilang-pool-v3.json: seven
-tasks), two models, two reps (28 runs). This script calls no model, reads no token, writes no GO.json (only
+The screen is the bare arm only, over the tasks of the pool file (default multilang-pool-v4.json: six
+tasks), two models, two reps (24 runs). This script calls no model, reads no token, writes no GO.json (only
 GO.template.json, which the operator turns into GO.json by hand) and starts no container: it
 reads files, runs `git`, `<claude> --version` and `docker image inspect` (through
 tasks._inspect_image, injectable). Stdlib only.
@@ -36,22 +36,24 @@ import tasks
 
 REGISTRATION = "screen-registration.json"
 POOL_V1 = "multilang-pool-v1.json"  # the registered history, never edited
-POOL_V2 = "multilang-pool-v2.json"  # superseded by v3, never edited
-POOL = "multilang-pool-v3.json"  # the current pool: the only one freeze and check accept
+POOL_V2 = "multilang-pool-v2.json"  # superseded, never edited
+POOL_V3 = "multilang-pool-v3.json"  # superseded by v4 (F2P presence rule), never edited
+POOL = "multilang-pool-v4.json"  # the current pool: the only one freeze and check accept
 STAGE3_REGISTRATION = "stage3-registration.json"
 GO_TEMPLATE = "GO.template.json"
 PLAN_NAME = "screen-plan.json"
-POOL_NAME = "setup-ab live rust v3"
-AMENDS = "setup-ab live rust v2"
+POOL_NAME = "setup-ab live rust v4"
+AMENDS = "setup-ab live rust v3"
 GATE = "relaxed (spec 2026-11-01)"
 REGISTERED = "2026-11-01"
 SEED = 20261101
 MODELS = run.MODELS
 REPS = 2
-# cap 50: run k is admitted iff the first k-1 runs cost <= cap - reserve - per_call = $40, so all 28
-# runs of pool v3 start iff the first 27 average <= $1.48 (at $1.0 each all 28; at $1.6 not all)
+# cap 50: run k is admitted iff the first k-1 runs cost <= cap - reserve - per_call = $40, so all 24
+# runs of pool v4 start iff the first 23 average <= $1.739 (at $1.0 each all 24; at $1.9 not all)
 BUDGET = {"cap_usd": 50.0, "per_call_usd": 5.0, "reserve_usd": 5.0}
-# F2P / kept P2P / dropped P2P of the nine saved controls (task 1 report): a sanity table for the
+# F2P (after the F2P presence rule: obscura-447 keeps 2 of 3; rust-sdk-1021 is refused by it, its row is
+# the pre-rule history) / kept P2P / dropped P2P of the nine saved controls: a sanity table for the
 # `pool` command only (a pool file that disagrees is not written); freeze reads the pool file's own
 # ids and counts and re-verifies them against the real controls.
 DROPPED = [{"id": "pola-rs__polars-28484",
@@ -67,7 +69,12 @@ DROPPED = [{"id": "pola-rs__polars-28484",
                       "commit fails with 'ssh-keygen should produce a signing key' (cause not isolated); "
                       "the control ran as root, the grade runs as the image user; keeping the task needs a "
                       "second post-hoc rule plus an unexplained failure; decided before any model run; it "
-                      "may return in a later pool version after investigation"}]
+                      "may return in a later pool version after investigation"},
+           {"id": "modelcontextprotocol__rust-sdk-1021",
+            "reason": "all 9 FAIL_TO_PASS tests exist only in the gold patch (7 doctests whose names embed "
+                      "line numbers that the gold patch shifts, 2 unit tests added only by the gold patch); "
+                      "no correct fix can produce them; refused by the F2P presence rule; decided before "
+                      "any model run"}]
 SANITY = {
     "rust-lang__rust-analyzer-22789": (1, 8119, 0),
     "pola-rs__polars-28484": (1, 1554, 0),
@@ -76,10 +83,11 @@ SANITY = {
     "h4ckf0r0day__obscura-412": (1, 247, 71),
     "h4ckf0r0day__obscura-477": (1, 358, 3),
     "h4ckf0r0day__obscura-414": (1, 258, 71),
-    "h4ckf0r0day__obscura-447": (3, 272, 71),
+    "h4ckf0r0day__obscura-447": (2, 272, 71),
     "h4ckf0r0day__obscura-390": (4, 235, 71),
 }
-_TASK_KEYS = {"id", "repo", "control_sha256", "expected_count", "dropped_count"}
+_TASK_KEYS = {"id", "repo", "control_sha256", "expected_count", "dropped_count", "f2p_dropped_count"}
+_LEGACY_KEYS = _TASK_KEYS - {"f2p_dropped_count"}  # pool v1-v3, before the F2P presence rule
 
 
 class Refused(RuntimeError):
@@ -113,7 +121,8 @@ def make_pool(records, controls_dir, ids, *, name=POOL_NAME, amends=None, droppe
             raise Refused(f"{tid}: record repo {repo!r} does not match the id's owner prefix")
         entries.append({"id": tid, "repo": repo, "control_sha256": csha,
                         "expected_count": exp["fail_to_pass"] + exp["pass_to_pass_kept"],
-                        "dropped_count": exp["pass_to_pass_dropped"]})
+                        "dropped_count": exp["pass_to_pass_dropped"],
+                        "f2p_dropped_count": len(exp["fail_to_pass_dropped"])})
     body = {"pool": name, "registered": REGISTERED, "gate": GATE}
     if amends is not None:
         body["amends"] = amends
@@ -128,17 +137,21 @@ def verify_pool(pool, records, controls_dir) -> list:
     re-derived with make_pool (dataset record, control.json sha256, relaxed_expected counts)."""
     out = []
     try:
-        check_pool(pool)
+        check_pool(pool, legacy_ok=True)
     except Refused as e:
         return [str(e)]
     for t in pool["tasks"]:
         try:
             real = make_pool(records, controls_dir, [t["id"]])["tasks"][0]
         except Refused as e:
-            out.append(str(e))
+            out.append(f"{e} (an older pool may list a task the F2P presence rule refuses)")
             continue
+        legacy = "f2p_dropped_count" not in t
+        if legacy:
+            real = {k: v for k, v in real.items() if k != "f2p_dropped_count"}
         if real != t:
-            out.append(f"{t['id']}: the pool file says {t}, the real control gives {real}")
+            out.append(f"{t['id']}: the pool file says {t}, the real control gives {real}"
+                       + (" (this pool predates the F2P presence rule: it is history)" if legacy else ""))
     return out
 
 
@@ -153,13 +166,14 @@ def sanity_mismatches(pool) -> list:
     return out
 
 
-def check_pool(pool) -> dict:
+def check_pool(pool, legacy_ok=False) -> dict:
     """The pool, or Refused when it is not a pool file in the registered shape. The id set and the
     counts are the file's own; task_entry re-verifies each entry against its real control."""
     if not isinstance(pool, dict) or not isinstance(pool.get("tasks"), list) or not pool["tasks"]:
         raise Refused("pool file: no tasks list")
     for t in pool["tasks"]:
-        if not isinstance(t, dict) or set(t) != _TASK_KEYS:
+        if not isinstance(t, dict) or set(t) not in ([_TASK_KEYS, _LEGACY_KEYS] if legacy_ok
+                                                       else [_TASK_KEYS]):
             raise Refused(f"pool entry {t.get('id') if isinstance(t, dict) else t!r}: keys "
                           f"{sorted(t) if isinstance(t, dict) else t!r}, want {sorted(_TASK_KEYS)}")
     ids = [t["id"] for t in pool["tasks"]]
@@ -186,7 +200,7 @@ def screen_plan(pool, models=MODELS, reps=REPS, seed=SEED) -> list:
 
 def plan_problems(plan, pool) -> list:
     """Reasons a plan is not the screen: a task outside the pool, a non-bare arm, or a shape other
-    than every pool task x both models x reps 0..REPS-1 (28 runs for 7 tasks)."""
+    than every pool task x both models x reps 0..REPS-1 (24 runs for 6 tasks)."""
     ids = {t["id"] for t in pool["tasks"]}
     out = []
     outside = sorted({s.task_id for s in plan} - ids)
@@ -258,13 +272,19 @@ def task_entry(data, entry, inspect, runner_root=None) -> dict:
         exp = mt.relaxed_expected(record, cj)  # raises unless the control is relaxed ok
     except (mt.LiveRefused, OSError, ValueError, KeyError) as e:
         raise Refused(f"{tid}: the control is not relaxed ok: {type(e).__name__}: {e}")
-    if bundle.get("expected") != exp:
-        raise Refused(f"{tid}: bundle expected {bundle.get('expected')} differs from the control's {exp}")
-    if (exp["fail_to_pass"] + exp["pass_to_pass_kept"], exp["pass_to_pass_dropped"]) != \
-            (entry["expected_count"], entry["dropped_count"]):
+    have = bundle.get("expected")
+    # a bundle built before F2P dropping lacks `fail_to_pass_dropped`: both sides go through
+    # _effective_expected (missing key = []), so an old-shape bundle passes iff the rule drops no F2P
+    if not isinstance(have, dict) or mt._effective_expected(have) != mt._effective_expected(exp):
+        raise Refused(f"{tid}: bundle expected {have} differs from the control's {exp}")
+    if (exp["fail_to_pass"] + exp["pass_to_pass_kept"], exp["pass_to_pass_dropped"],
+            len(exp["fail_to_pass_dropped"])) != \
+            (entry["expected_count"], entry["dropped_count"], entry["f2p_dropped_count"]):
         raise Refused(f"{tid}: the control gives {exp['fail_to_pass'] + exp['pass_to_pass_kept']} "
-                      f"expected / {exp['pass_to_pass_dropped']} dropped, the pool says "
-                      f"{entry['expected_count']} / {entry['dropped_count']}")
+                      f"expected / {exp['pass_to_pass_dropped']} P2P dropped / "
+                      f"{len(exp['fail_to_pass_dropped'])} F2P dropped, the pool says "
+                      f"{entry['expected_count']} / {entry['dropped_count']} / "
+                      f"{entry['f2p_dropped_count']}")
     try:
         arm = tasks.bundle_run_image(bj, inspect)  # the exec-only check lives there
     except (OSError, RuntimeError) as e:
