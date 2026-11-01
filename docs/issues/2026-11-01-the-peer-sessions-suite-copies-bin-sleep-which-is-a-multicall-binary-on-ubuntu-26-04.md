@@ -51,7 +51,9 @@ None needed: the container reproduced the exact message.
 
 ## Fix
 
-The fixtures are copies of `bash`, which chooses nothing from its name. Each parks without a child process: `read -t 300 <>"$T/hold"` on a FIFO opened read-write waits for its timeout, so the process id the test reads is the id of the copy itself. A comment in `tests/peer-sessions.sh` states why. Fix SHA is added when the fix is on `experiments`.
+The fixtures are copies of `bash`, which chooses nothing from its name. Each parks without a child process: `read -t 300 <>"$T/hold"` on a FIFO opened read-write waits for its timeout, so the process id the test reads is the id of the copy itself. A comment in `tests/peer-sessions.sh` states why. 
+
+Second site, found in CI run 41331598643 (job `Test (ubuntu-latest / no-features)`): `retrieval::index_state::tests::build_id_reads_the_inode_of_a_deleted_binary` copied `/usr/bin/sleep` to `sleepy` and printed `coreutils: unknown program 'sleepy'`. It failed there and passed on the other ubuntu lanes of the same run, same image, because it polls `/proc/<pid>/exe` and passes only if the poll catches the child before it exits. It now copies `/usr/bin/sh` to `parked` and runs `-c 'read parked'` on a piped stdin. Verified in an ubuntu:26.04 container: the old probe exits with rc 1; the new one stays alive, `exe` names the copy, and after unlinking the copy `exe` reads `... (deleted)`. The real test passes locally (19 of 19 in the module). Fix SHA is added when the fix is on `experiments`.
 
 ## Tests added
 

@@ -595,11 +595,19 @@ mod tests {
     fn build_id_reads_the_inode_of_a_deleted_binary() {
         use sha2::{Digest, Sha256};
         let tmp = tempfile::tempdir().unwrap();
-        let copy = tmp.path().join("sleepy");
-        fs::copy("/usr/bin/sleep", &copy).expect("/usr/bin/sleep is the probe binary");
+        let copy = tmp.path().join("parked");
+        // The probe is a copy of the shell, NOT of `sleep`. On Ubuntu 26.04 `/usr/bin/sleep`
+        // is a link to the uutils `coreutils` multicall binary, which chooses its program from
+        // argv[0]: a copy under another name prints "unknown program" and exits at once, and
+        // this test then passed or failed on whether its poll caught the child in that instant
+        // (red on one lane of CI run 41331598643, green on the others, same image).
+        // A shell blocks on `read` from a piped stdin until the test kills it, under any name.
+        // docs/issues/2026-11-01-the-peer-sessions-suite-copies-bin-sleep-which-is-a-multicall-binary-on-ubuntu-26-04.md
+        fs::copy("/usr/bin/sh", &copy).expect("/usr/bin/sh is the probe binary");
         let original = fs::read(&copy).unwrap();
         let mut child = std::process::Command::new(&copy)
-            .arg("30")
+            .args(["-c", "read parked"])
+            .stdin(std::process::Stdio::piped())
             .spawn()
             .expect("spawn the copied probe");
         let proc_exe = std::path::PathBuf::from(format!("/proc/{}/exe", child.id()));
@@ -613,7 +621,7 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while fs::read_link(&proc_exe)
             .ok()
-            .and_then(|p| p.file_name().map(|n| n != "sleepy"))
+            .and_then(|p| p.file_name().map(|n| n != "parked"))
             .unwrap_or(true)
         {
             assert!(
