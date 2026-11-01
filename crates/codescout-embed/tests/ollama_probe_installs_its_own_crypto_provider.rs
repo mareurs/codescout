@@ -56,6 +56,10 @@
 //! CI-covered and locally invisible: use the `--workspace` form when touching this path,
 //! or a green local gate will tell you nothing about it.
 //!
+//! Written for `cargo test`. Since 2026-11-01 the gate's and CI's test lanes are
+//! `cargo nextest run --workspace` and `cargo nextest run --workspace --no-default-features`; the
+//! same `--workspace` and feature reasoning holds for them, and the counts above are `cargo test`'s.
+//!
 //! It also guards a path **no in-tree caller can traverse**. Every construction site in
 //! this repo installs the provider first — `main.rs`, `agent/mod.rs`, `reranker.rs`,
 //! `embedder.rs`, and `build_client` — and `retrieval/transport.rs` cites that invariant

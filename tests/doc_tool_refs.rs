@@ -1689,7 +1689,7 @@ fn a_documented_json_payload_names_real_parameters() {
 // Everything below is `cfg(feature = "librarian")` because it reads the sidecar through the
 // production reader, which is librarian-gated. The markdown guards above stay ungated, so the
 // lean lane keeps them; what the lean lane loses is THIS half, and it loses it silently. Read
-// the default lane (`cargo test --workspace`) before trusting a change here — the same caveat
+// the default lane (`cargo nextest run --workspace`) before trusting a change here — the same caveat
 // `docs/conventions/gate-ordering.md` already states for librarian code generally.
 // ─────────────────────────────────────────────────────────────────────────────
 

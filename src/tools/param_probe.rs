@@ -6,7 +6,7 @@
 //! `action` over a shared schema and is therefore exposed to `IC-15`, but none of them depends on
 //! the librarian feature. Reaching the probe from there would have meant gating a `workspace` test
 //! on `feature = "librarian"`, which makes the guard vanish from the lean lane
-//! (`cargo test --workspace --no-default-features`) for tools that have nothing to do with the
+//! (`cargo nextest run --workspace --no-default-features`) for tools that have nothing to do with the
 //! librarian — a feature-gated test reads as "filtered out", never as a failure. So the probe is
 //! feature-independent and both lanes compile it.
 //!

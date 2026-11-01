@@ -71,7 +71,7 @@
 //!   `update.rs:1182`), so every red that day was in this half. The READER side routed
 //!   both holders correctly; the author side could not fire by construction.
 //!   **Why it is stated here and in the notice rather than fixed:** running the gate's
-//!   `cargo test --workspace` on every source write costs minutes and holds the shared
+//!   `cargo nextest run --workspace` on every source write costs minutes and holds the shared
 //!   build lock, which is the blocking this module exists to avoid. So the bound is
 //!   published rather than closed — and published at BOTH surfaces, because a reader who
 //!   never opens this file still sees the notice

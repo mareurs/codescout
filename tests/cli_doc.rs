@@ -24,6 +24,9 @@ use tempfile::TempDir;
 ///   gesture** — the rename swaps the directory entry, and this link keeps the original
 ///   inode alive and unmodified for the life of the suite.
 ///
+/// Both were measured under `cargo test`. The gate now runs `cargo nextest run`, which builds
+/// through cargo and then runs the test binaries itself; that was not re-measured here.
+///
 /// Without this, the outage is 13 of 15 tests failing on `unrecognized subcommand 'doc'`,
 /// reading as a feature-gating regression in whatever the reader just committed. The one
 /// test that looks like it would catch it — [`the_old_artifact_subcommand_is_gone`] — keeps
@@ -91,9 +94,9 @@ fn pinned_binary() -> &'static std::path::Path {
              build lock before running tests, so a peer's `cargo test --no-default-features` \
              replaced the binary between this lane's build and this pin.\n\
              REPAIR, which you can perform alone and which is also the cheapest discriminator: \
-             re-run `cargo test --test cli_doc`. The window is minutes. If it reds a second \
+             re-run `cargo nextest run --test cli_doc`. The window is minutes. If it reds a second \
              time with this message, the binary on disk really is librarian-less — rebuild it \
-             with `cargo test --workspace`.\n\
+             with `cargo nextest run --workspace`.\n\
              binary stderr: {}",
             String::from_utf8_lossy(&out.stderr).trim()
         );

@@ -230,7 +230,7 @@ echo "  - the three heavy Python suites: install requirements-python-heavy.txt a
 echo "  - server-stack, which cargo rb ships and no lane compiles: read CI job test-server-stack (kept alive by every_declared_feature_has_a_lane_or_a_reason)"
 echo "  - librarian code in LEAN: the librarian is off there, so only DEFAULT runs its tests"
 if [ "$CODESCOUT_SKIP_ONNX_TESTS" = 1 ]; then
-    echo "  - the two local ONNX weight tests, which print 'ok' while skipped: CI's local-embed job runs them"
+    echo "  - the two local ONNX weight tests, which report PASS while skipped: CI's local-embed job runs them"
 fi
 
 if [ "$FMT" -ne 0 ]; then

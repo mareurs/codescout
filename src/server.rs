@@ -4424,7 +4424,7 @@ mod tests {
     /// `doc` is the one entry in the two tables above (and below, in
     /// `EXPECTED_ALIAS_PAIRS`) that is not unconditionally registered: it is added to
     /// `server.tools` only `#[cfg(feature = "librarian")]` (this file, ~L89), so the
-    /// lean gate lane (`cargo test --workspace --no-default-features`) never sees it
+    /// lean gate lane (`cargo nextest run --workspace --no-default-features`) never sees it
     /// at all — `server.tools` simply has no tool named `"doc"`. Both consuming tests
     /// below filter the expected tables through this before comparing against the
     /// live registry, so the lean lane skips exactly the rows it could never satisfy
