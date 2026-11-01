@@ -12424,6 +12424,28 @@ pub(crate) mod test_support {
             ..Default::default()
         }
     }
+    /// A `LibrarianEnv` that names its OWN empty workspace file and catalog inside `dir`.
+    ///
+    /// A literal `LibrarianEnv { db: Some(..), ..Default::default() }` leaves `workspace` at `None`,
+    /// and `None` means "the global `$HOME/.config/librarian/workspace.toml`". A machine that has
+    /// that file (every developer's) builds the librarian runtime and registers `doc`; a CI runner
+    /// does not, `build_tool_context_with` fails, `try_build_runtime_with` swallows the error, and
+    /// the first call to `doc` answers `unknown tool: 'doc'`. Seven tests failed that way on every
+    /// ubuntu CI run, and they passed or failed by the order a file-creating test ran in. An empty
+    /// file is a valid workspace (`WorkspaceConfig` is all `#[serde(default)]`).
+    ///
+    /// Every test that builds a server with the librarian on should take its `LibrarianEnv` from
+    /// here, not write the literal.
+    #[cfg(feature = "librarian")]
+    pub(crate) fn librarian_env(dir: &std::path::Path) -> crate::librarian::LibrarianEnv {
+        let workspace = dir.join("librarian-workspace.toml");
+        std::fs::write(&workspace, "").expect("write the empty librarian workspace file");
+        crate::librarian::LibrarianEnv {
+            workspace: Some(workspace),
+            db: Some(dir.join("librarian.db")),
+            ..Default::default()
+        }
+    }
 
     pub(crate) async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
         make_server_with_project_toml(None).await
@@ -14615,10 +14637,7 @@ mod guide_hint_tests {
         // make this test non-deterministic-by-omission rather than pass.
         let env_for = |session: &str| ServerEnv {
             session_id_explicit: Some(session.to_string()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let build = |session: &'static str| {
@@ -14818,10 +14837,7 @@ mod guide_hint_tests {
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
             servers_dir: Some(servers.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -14888,10 +14904,7 @@ mod guide_hint_tests {
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
             servers_dir: Some(servers.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -14931,10 +14944,7 @@ mod guide_hint_tests {
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
             servers_dir: Some(servers.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15026,10 +15036,7 @@ mod guide_hint_tests {
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
             servers_dir: Some(servers.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15083,10 +15090,7 @@ mod guide_hint_tests {
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
             guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15167,10 +15171,7 @@ mod guide_hint_tests {
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
             guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15256,10 +15257,7 @@ mod guide_hint_tests {
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
             guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15347,10 +15345,7 @@ mod guide_hint_tests {
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15430,10 +15425,7 @@ mod guide_hint_tests {
             // anonymous ledger is never parked, and this test would then prove
             // nothing about the parked path.
             session_id_explicit: Some("conv-A".to_string()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15471,10 +15463,7 @@ mod guide_hint_tests {
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
             guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15522,10 +15511,7 @@ mod guide_hint_tests {
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
             guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15610,10 +15596,7 @@ mod guide_hint_tests {
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
             guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15665,10 +15648,7 @@ mod guide_hint_tests {
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15888,10 +15868,7 @@ mod guide_hint_tests {
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -15986,10 +15963,7 @@ mod guide_hint_tests {
 
         let env = ServerEnv {
             servers_dir: Some(servers.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
@@ -16061,10 +16035,7 @@ mod guide_hint_tests {
         let env = ServerEnv {
             session_id_explicit: Some("conv-A".to_string()),
             servers_dir: Some(servers.path().to_path_buf()),
-            librarian: crate::librarian::LibrarianEnv {
-                db: Some(dir.path().join("librarian.db")),
-                ..Default::default()
-            },
+            librarian: crate::server::test_support::librarian_env(dir.path()),
             ..test_env(dir.path())
         };
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))

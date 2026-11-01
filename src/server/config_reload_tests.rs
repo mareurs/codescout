@@ -991,10 +991,7 @@ async fn the_failed_reload_notice_rides_a_held_destructive_response() {
     std::fs::write(project_toml(&dir), BASE_TOML).unwrap();
     let env = ServerEnv {
         session_id_explicit: Some("conv-R26".to_string()),
-        librarian: crate::librarian::LibrarianEnv {
-            db: Some(dir.path().join("librarian.db")),
-            ..Default::default()
-        },
+        librarian: crate::server::test_support::librarian_env(dir.path()),
         ..super::test_support::test_env(dir.path())
     };
     let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
