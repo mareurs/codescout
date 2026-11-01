@@ -77,7 +77,8 @@ fn repo_root() -> PathBuf {
 ///
 /// `only_cargo_test` restricts the scan to lines that also RUN tests: `cargo test` or
 /// `cargo nextest run` (CI moved its test jobs to nextest on 2026-11-01). `cargo nextest
-/// list` is not a run, so it does not count, exactly like `cargo check`. That
+/// list` is not a run, so it does not count, exactly like `cargo check`; neither does
+/// `cargo test --doc`, which runs doctests only. That
 /// distinction is the whole point of this function taking text rather than reading the
 /// directory: it makes the parser fixture-drivable, so
 /// [`the_workflow_scan_distinguishes_check_from_test`] can prove it discriminates against
@@ -97,7 +98,12 @@ fn repo_root() -> PathBuf {
 fn features_from_text(text: &str, only_cargo_test: bool) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
     for line in text.lines() {
-        if only_cargo_test && !(line.contains("cargo test") || line.contains("cargo nextest run")) {
+        // `cargo test --doc` runs doctests only, never the feature's tests, so it does not count:
+        // a job that has both a nextest step and a doctest step must lose its coverage when the
+        // nextest step is deleted.
+        let runs_tests = (line.contains("cargo test") && !line.contains("--doc"))
+            || line.contains("cargo nextest run");
+        if only_cargo_test && !runs_tests {
             continue;
         }
         let mut rest = line;
@@ -300,6 +306,7 @@ fn the_workflow_scan_distinguishes_check_from_test() {
       - run: cargo test --features a,b --workspace\n\
       - run: cargo nextest run --features via-nextest --workspace\n\
       - run: cargo nextest list --features only-listed\n\
+      - run: cargo test --doc --features only-doc\n\
       - name: mentions only-checked in a step name\n";
 
     let named = features_from_text(FIXTURE, false);
@@ -325,6 +332,13 @@ fn the_workflow_scan_distinguishes_check_from_test() {
          like `cargo check`: {tested:?}"
     );
     assert!(
+        named.contains("only-doc") && !tested.contains("only-doc"),
+        "`cargo test --doc` runs only doctests, not the feature's tests, so it must NOT count \
+         as a lane that runs them: otherwise deleting the `cargo nextest run` line of a job \
+         that also has a doctest step leaves this guard green (final review 2026-11-01): \
+         {tested:?}"
+    );
+    assert!(
         !tested.contains("only-checked"),
         "a `cargo check` lane must NOT count as running tests — this is the whole split: \
          {tested:?}"
@@ -336,6 +350,150 @@ fn the_workflow_scan_distinguishes_check_from_test() {
     assert!(
         !tested.contains("mentions"),
         "a step NAME is not a lane; the scan has widened past --features: {tested:?}"
+    );
+}
+/// The `run:` steps in one workflow's text that run `cargo nextest run` without `--no-fail-fast`.
+///
+/// nextest stops at the first failed TEST by default; the old `cargo test` stopped only after
+/// the failed test BINARY. The gate passes `--no-fail-fast` so every failure is visible
+/// (docs/conventions/gate-ordering.md, "Why the test lanes run nextest"), and CI must too: a
+/// red CI run that shows one failure costs a second run to see the next. Only `run:` steps
+/// are scanned, so a comment that quotes the command does not trip it.
+fn nextest_runs_without_no_fail_fast(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("- run:") && l.contains("cargo nextest run"))
+        .filter(|l| !l.contains("--no-fail-fast"))
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn the_no_fail_fast_scan_flags_only_run_steps_without_the_flag() {
+    const FIXTURE: &str = "\
+      # cargo nextest run --workspace is quoted in a comment and must not count\n\
+      - run: cargo nextest run --workspace --no-fail-fast\n\
+      - run: cargo nextest run --features dashboard --all-targets\n\
+      - run: cargo nextest list --features x\n\
+      - run: cargo test --doc\n";
+    assert_eq!(
+        nextest_runs_without_no_fail_fast(FIXTURE),
+        vec!["- run: cargo nextest run --features dashboard --all-targets".to_string()],
+        "exactly the one run step without the flag"
+    );
+}
+
+#[test]
+fn every_nextest_run_in_ci_keeps_every_failure_visible() {
+    let dir = repo_root().join(".github/workflows");
+    let mut missing = Vec::new();
+    let mut seen = 0usize;
+    for entry in std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("yml") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        seen += text
+            .lines()
+            .filter(|l| l.trim().starts_with("- run:") && l.contains("cargo nextest run"))
+            .count();
+        for line in nextest_runs_without_no_fail_fast(&text) {
+            missing.push(format!("{}: {line}", path.display()));
+        }
+    }
+    assert!(
+        seen > 0,
+        "no `cargo nextest run` step found in any workflow: the scan has stopped matching, and \
+         this guard would pass for a reason that has nothing to do with the flag"
+    );
+    assert!(
+        missing.is_empty(),
+        "these CI steps run nextest without `--no-fail-fast`, so a red run shows only its first \
+         failure and the job stops before its doctest step:\n{}",
+        missing.join("\n")
+    );
+}
+/// The `cargo test … --doc` steps in one workflow's text that are not guarded by
+/// `if: ${{ !cancelled() }}`.
+///
+/// A GitHub Actions step runs only if every earlier step of its job succeeded, so without the
+/// guard a red nextest step would skip the doctest step and hide its failures, the opposite of
+/// what `gate.sh` does (it runs both and combines the exits). The guard must be in the same
+/// step as the `run:` line: the step item starts at a `- ` line and ends at the next one.
+fn doc_steps_without_cancelled_guard(text: &str) -> Vec<String> {
+    let mut guarded = false;
+    let mut out = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line.starts_with("- ") {
+            guarded = false;
+        }
+        if line.contains("!cancelled()") {
+            guarded = true;
+        }
+        let is_run = line.starts_with("run:") || line.starts_with("- run:");
+        if is_run && line.contains("cargo test") && line.contains("--doc") && !guarded {
+            out.push(line.to_string());
+        }
+    }
+    out
+}
+
+#[test]
+fn the_doc_step_scan_flags_only_unguarded_doc_steps() {
+    const FIXTURE: &str = "\
+      - run: cargo nextest run --workspace --no-fail-fast\n\
+      - name: Doctests, guarded\n\
+        if: ${{ !cancelled() }}\n\
+        run: cargo test --workspace --doc\n\
+      - run: cargo test --doc --features unguarded\n\
+      - if: ${{ !cancelled() }}\n\
+        run: cargo test --doc --features guarded-first-line\n\
+      - name: not a doc step\n\
+        run: cargo test --workspace\n";
+    assert_eq!(
+        doc_steps_without_cancelled_guard(FIXTURE),
+        vec!["- run: cargo test --doc --features unguarded".to_string()],
+        "exactly the one doctest step with no guard in its own step"
+    );
+}
+
+#[test]
+fn every_ci_doctest_step_runs_even_when_nextest_is_red() {
+    let dir = repo_root().join(".github/workflows");
+    let mut unguarded = Vec::new();
+    let mut seen = 0usize;
+    for entry in std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("yml") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        seen += text
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.contains("cargo test") && l.contains("--doc") && l.contains("run:"))
+            .count();
+        for line in doc_steps_without_cancelled_guard(&text) {
+            unguarded.push(format!("{}: {line}", path.display()));
+        }
+    }
+    assert!(
+        seen > 0,
+        "no `cargo test --doc` step found in any workflow: the scan has stopped matching, and \
+         this guard would pass for a reason that has nothing to do with the guard"
+    );
+    assert!(
+        unguarded.is_empty(),
+        "these doctest steps have no `if: ${{{{ !cancelled() }}}}`, so a red nextest step before \
+         them in the same job skips them and hides their failures:\n{}",
+        unguarded.join("\n")
     );
 }
 

@@ -500,9 +500,12 @@ jobs:
       # execute, with 0 regressions across all three configs.
       # `cargo nextest run --workspace` has the same default-member rule as `cargo test` above, so it
       # carries --workspace too. nextest does not run doctests; the second step does, with the
-      # same flags, so a doctest failure still reds this job.
-      - run: cargo nextest run --workspace ${{ matrix.config.flags }}
-      - run: cargo test --workspace --doc ${{ matrix.config.flags }}
+      # same flags. `--no-fail-fast` shows every failing test in one run, and `!cancelled()` runs
+      # the doctest step even after a red nextest step, because a step otherwise runs only if every
+      # earlier one passed. Both are pinned by tests/feature_lanes.rs; the job is red if either is.
+      - run: cargo nextest run --workspace --no-fail-fast ${{ matrix.config.flags }}
+      - if: ${{ !cancelled() }}
+        run: cargo test --workspace --doc ${{ matrix.config.flags }}
 
   # The configuration `cargo rb` actually ships.
   #
@@ -545,8 +548,9 @@ jobs:
           touch "${{ runner.temp }}/codescout-ci/workspace.toml"
           echo "LIBRARIAN_WORKSPACE=${{ runner.temp }}/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
       - run: cargo clippy --features server-stack --all-targets -- -D warnings
-      - run: cargo nextest run --features server-stack
-      - run: cargo test --doc --features server-stack
+      - run: cargo nextest run --features server-stack --no-fail-fast
+      - if: ${{ !cancelled() }}
+        run: cargo test --doc --features server-stack
 
   # Build lanes for the opt-in features nothing else builds.
   #
@@ -580,7 +584,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.149
       # `--all-targets` never included doctests, so moving this step to nextest drops nothing.
-      - run: cargo nextest run --features dashboard --all-targets
+      - run: cargo nextest run --features dashboard --all-targets --no-fail-fast
       # `--no-default-features --features local-embed-dynamic`, never the bare
       # `--features local-embed-dynamic`. The two ONNX backends are mutually exclusive
       # (crates/codescout-embed/src/lib.rs `compile_error!`), and `local-embed` joined
