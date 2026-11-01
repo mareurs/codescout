@@ -57,7 +57,7 @@ None beyond reading the scripts.
 
 The test stays conservative. The write stays the peer's when the call has no distinctive line (under 16 characters), when ANY probe line is in the staged blob, and when the path is not in the index (a staged deletion).
 
-The cause was measured, not guessed. The peer's `new_string` was `response["stdout_total"] = json!(cut.shown);` (tool_calls 239423 and 239437). That line is in neither `HEAD` nor `421b0f896`, where line 1461 reads `stdout_shown`. So the write stayed live for its three-day window, and the file-level lookup named the peer. Re-adding the pair could not clear it because `foreign_writer` runs again on every add and answers the same.
+The cause was measured, not guessed. The peer's `new_string` was `response["stdout_total"] = json!(cut.shown);` (tool_calls 239423 and 239437). That line is in neither `HEAD` nor `421b0f896`, where line 1461 reads `stdout_shown`. So the write stayed live for its three-day window, and the file-level lookup named the peer. Re-adding could not clear it because the remedy's reset then add makes the row `retained`, a named add clears a `retained` row, and `foreign_writer` runs again on an unchanged write record. A plain re-add of a pair that stays staged keeps its row and asks nothing.
 
 ## Tests added
 
