@@ -98,6 +98,17 @@ Measured 2026-10-29 on the same replica, binary built from `e34ff991f`, the embe
 - A first run was killed by an `/mcp` reconnect before I read its output. The second run produced this evidence.
 - The log also showed `WARN … [[project]] entry is not a member: its root is not a relative path below the workspace root id=kodi root=.`, for the replica's `kodi` entry with `root = "."`. The `kodi` project still listed, through discovery. I did not check whether the warning is noise for a generated file.
 
+### 8. Replica built from the real add-on repos, 2026-11-01
+
+Measured with `target/release/codescout` (rebuilt 2026-11-01 23:05; `~/.cargo/bin/codescout` is a symlink to it), driven by `codescout start --project <parent>` over stdio. The live Kodi checkout was not touched, because a Kodi session (pid 48775, cwd the Kodi checkout) was running there and a second server would share its `.codescout/`. The replica is a scratchpad parent with the real Kodi `workspace.toml`, the two real add-on repos cloned with `git clone --local --no-hardlinks`, placeholder roots for the other four projects, two added `[[project]]` entries, and `/remote-fixes/` in the parent's `.git/info/exclude`.
+
+- `workspace(list_projects)` returned 7 projects: the parent (id `kodi-replica2`, the directory name, not the declared `kodi`), `xbmc`, `addons`, `libUPnP`, `packaging`, `thecrew-module` and `thecrew-video`.
+- `onboarding(workspace=<script.module.thecrew>)` returned the single-project prompt (`[python] · config created`), not the Kodi workspace prompt. The member has no `workspace.toml`. Its `.codescout/` holds `project.toml`, `memories/`, `private-memories/`, `tmp/`, `usage.db` and the lock files. The parent's `workspace.toml` still has 7 `[[project]]` entries.
+- **New against the first replica:** the real add-on tracks a `.gitignore`. Onboarding appended `.codescout/private-memories/` to it, so `git status` in the add-on shows ` M .gitignore` and `?? .codescout/`. This is the behaviour the record judged acceptable (`src/memory/mod.rs:92`). On the real add-ons it leaves an uncommitted change in a repo with its own remote.
+- `project.toml` got `model = "local:JinaEmbeddingsV2BaseCode"`, the default. The probe set no embedding environment, so this does not show what the live Kodi session would write; the original report (CodeRankEmbed from the environment) was not re-tested.
+
+Not done: index build and search on a member (covered by Evidence 7), and the live Kodi tree. The remaining live step is the owner's: reconnect the Kodi session onto the rebuilt binary, add the two `[[project]]` entries, and repeat `list_projects` and the member onboarding.
+
 ## Hypotheses tried
 1. **Hypothesis:** roots outside the workspace root are rejected. **Test:** first `../kodi-refs/...` roots, then in-tree `remote-fixes/...` roots. **Verdict:** rejected. Both failed the same way.
 2. **Hypothesis:** the server caches the workspace across re-activation. **Test:** `/mcp` reconnect and a full Claude Code restart. **Verdict:** rejected.
@@ -140,7 +151,7 @@ Gate at Part B: format, clippy and Python light pass. Two tests fail, `operator_
 
 Parts A and B are committed on `experiments` (`711b8c3a4`, `0d95ee8bf`) and are on `origin/experiments` (pushed by another session on the user's instruction, verified 2026-10-29 with `git branch -r --contains`). Next:
 1. Done 2026-10-29: per-member git identity holds for a member that is its own repo, and the member without its own `.git` is probed (Evidence 4).
-2. Done 2026-10-29 on a scratchpad replica (Evidence 6 and 7, including an index build and a search on a member). Still open: the live Kodi checkout.
+2. Done 2026-10-29 on a scratchpad replica (Evidence 6 and 7, including an index build and a search on a member), and again 2026-11-01 on a replica built from the real add-on repos and the real Kodi `workspace.toml` (Evidence 8). Still open: the live Kodi checkout, which has a running session.
 3. Re-run the gate once the peer's `OP-2` edit is committed or reverted.
 4. Close or archive only after 1 and 2, with the fix SHAs and their patch-ids.
 
