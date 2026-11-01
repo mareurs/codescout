@@ -618,6 +618,10 @@ pub(crate) fn no_history() -> (tempfile::TempDir, AttributionEnv) {
     (history, env)
 }
 
+/// `tests.rs` of this module's parent needs the same probe for its own engine tests.
+#[cfg(test)]
+pub(crate) use tests::python3_present;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -631,7 +635,7 @@ mod tests {
     /// `docs/issues/archive/2026-10-13-embedded-attribution-helper-ships-two-of-its-six-modules-so-a-red-loses-its-author-silently.md`)
     /// produces exactly that missing diagnostic, so those tests went green while the
     /// feature was dead.
-    fn python3_present() -> bool {
+    pub(crate) fn python3_present() -> bool {
         std::process::Command::new("python3")
             .arg("--version")
             .output()

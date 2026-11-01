@@ -4081,7 +4081,14 @@ async fn a_red_naming_many_dirty_files_carries_a_bounded_wip_authors() {
     };
     let small = run(small_dir.path().to_path_buf(), red_naming(&small_files)).await;
     let Some(small_who) = small["wip_authors"].as_str() else {
-        eprintln!("skipping: no diagnostic at 3 files (python3 absent?)");
+        // Only an absent python3 may skip. With python3 present, a missing diagnostic is
+        // the bug this test exists to catch (a slow scan, or an engine that cannot import
+        // its modules), and a skip would turn it green: see bug `20927ccfe293c34e`.
+        assert!(
+            !super::attribution::python3_present(),
+            "python3 is present but the engine produced no diagnostic at 3 files"
+        );
+        eprintln!("skipping: python3 absent");
         return;
     };
     assert!(
