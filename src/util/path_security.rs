@@ -3431,8 +3431,20 @@ mod tests {
         // Without the ParentDir check this would be allowed.
         let project = tempdir().unwrap();
         // Do NOT create "nonexistent/" — that's the point of this test.
+        //
+        // Windows resolves the `..` lexically, before it looks at the disk, so the path lands where
+        // the OS puts it. Climb out of every allowed root (the project AND the writable temp dir it
+        // sits in) so the write must be refused there too, by location instead of by the `..`.
+        let raw = if cfg!(windows) {
+            format!(
+                "nonexistent/{}var/evil.rs",
+                "../".repeat(project.path().components().count() + 2)
+            )
+        } else {
+            "nonexistent/../../var/evil.rs".to_string()
+        };
         let result = validate_write_path(
-            "nonexistent/../../var/evil.rs",
+            &raw,
             project.path(),
             &default_config(),
             &default_session_roots(),
@@ -3442,10 +3454,17 @@ mod tests {
             "traversal via non-existent dir must be rejected"
         );
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("'..'"),
-            "error should mention '..', got: {msg}"
-        );
+        if cfg!(windows) {
+            assert!(
+                msg.contains("write denied"),
+                "a write outside every root must be denied, got: {msg}"
+            );
+        } else {
+            assert!(
+                msg.contains("'..'"),
+                "error should mention '..', got: {msg}"
+            );
+        }
     }
 
     #[test]
@@ -6243,7 +6262,13 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         // `base/zz` does not exist, so the literal spelling is not an ancestor of the home; with
         // `zz` created it is `base/a`, which contains it.
-        let spelled = base.join("zz/../a");
+        // `Path::join` onto a verbatim base (Windows `canonical_base`) collapses a `..`, so the
+        // product would never see it: spell the path by hand to keep the `..` in the input.
+        let spelled = PathBuf::from(format!(
+            "{0}{1}zz{1}..{1}a",
+            base.display(),
+            std::path::MAIN_SEPARATOR
+        ));
         let result = validate_approve_path_in(spelled.to_str().unwrap(), &base, &[home]);
         assert!(
             result
@@ -6287,7 +6312,12 @@ mod tests {
             target.to_str().unwrap(),
             project.path(),
             &default_config(),
-            &[base.join("zz/../a")],
+            // Spelled by hand: `join` onto a verbatim base would collapse the `..` on Windows.
+            &[PathBuf::from(format!(
+                "{0}{1}zz{1}..{1}a",
+                base.display(),
+                std::path::MAIN_SEPARATOR
+            ))],
             &env,
         );
         assert!(
@@ -6312,7 +6342,12 @@ mod tests {
             target.to_str().unwrap(),
             project.path(),
             &default_config(),
-            &[base.join("zz/../ok")],
+            // Spelled by hand: `join` onto a verbatim base would collapse the `..` on Windows.
+            &[PathBuf::from(format!(
+                "{0}{1}zz{1}..{1}ok",
+                base.display(),
+                std::path::MAIN_SEPARATOR
+            ))],
             &env,
         );
         assert!(
@@ -6389,7 +6424,12 @@ mod tests {
         std::fs::create_dir_all(base.join("work")).unwrap();
         let project = tempdir().unwrap();
         // `<base>/work/..` is `<base>`: the spelling hides how wide the root is.
-        let spelled = base.join("work/..");
+        // Spelled by hand: `join` onto a verbatim base would collapse the `..` on Windows.
+        let spelled = PathBuf::from(format!(
+            "{0}{1}work{1}..",
+            base.display(),
+            std::path::MAIN_SEPARATOR
+        ));
         let target = base.join("elsewhere.txt");
         let decision = classify_write_path_in(
             target.to_str().unwrap(),
@@ -7439,10 +7479,21 @@ EOF"#;
             &default_session_roots(),
             temp.path(),
         );
-        assert!(
-            matches!(decision, WritePathDecision::Denied(_)),
-            "unresolved `..` must be a hard denial, got: {decision:?}"
-        );
+        // Windows resolves a `..` lexically before it looks at the disk, so `nope/..` is not
+        // "unresolved" there: the path lands where the OS puts it, outside the temp root. The
+        // property is the same (nothing is admitted by a prefix match the `..` escapes); the
+        // decision is the approvable `OutsideRoot` rather than the hard denial.
+        if cfg!(windows) {
+            assert!(
+                matches!(decision, WritePathDecision::OutsideRoot { .. }),
+                "a `..` that Windows resolves out of the temp dir must be outside the root, got: {decision:?}"
+            );
+        } else {
+            assert!(
+                matches!(decision, WritePathDecision::Denied(_)),
+                "unresolved `..` must be a hard denial, got: {decision:?}"
+            );
+        }
     }
 
     #[cfg(unix)]
