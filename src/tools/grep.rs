@@ -306,6 +306,10 @@ impl Tool for Grep {
                 if let Some(w) = audit.completeness_warning(&search_path, include_hidden, &globs) {
                     r["completeness_warning"] = json!(w);
                 }
+            } else if let Some(note) =
+                hidden_note::hidden_skip_note(&search_path, include_hidden, &globs)
+            {
+                r["hidden_skipped"] = json!(note);
             }
             return Ok(r);
         }
@@ -664,6 +668,10 @@ impl Tool for Grep {
             if let Some(w) = audit.completeness_warning(&search_path, include_hidden, &globs) {
                 result["completeness_warning"] = json!(w);
             }
+        } else if let Some(note) =
+            hidden_note::hidden_skip_note(&search_path, include_hidden, &globs)
+        {
+            result["hidden_skipped"] = json!(note);
         }
         Ok(result)
     }
@@ -822,6 +830,11 @@ pub(super) fn format_grep(val: &Value) -> String {
     let mut head_extra = overflow_head(val);
     if let Some(w) = warning {
         head_extra.push_str(&format!("warning: {w}\n"));
+    }
+    // Set only on a result with matches (see `grep_hidden_note.rs`): the non-zero half of the
+    // warning above, so it takes the same place below the header for the same reason.
+    if let Some(h) = val.get("hidden_skipped").and_then(|v| v.as_str()) {
+        head_extra.push_str(&format!("{h}\n"));
     }
     for notice in &cut_notices {
         head_extra.push_str(&format!("{notice}\n"));
@@ -3697,3 +3710,10 @@ mod tests {
 #[cfg(test)]
 #[path = "grep_route_path_tests.rs"]
 mod route_path_tests;
+
+#[cfg(test)]
+#[path = "grep_hidden_note_tests.rs"]
+mod hidden_note_tests;
+
+#[path = "grep_hidden_note.rs"]
+mod hidden_note;
