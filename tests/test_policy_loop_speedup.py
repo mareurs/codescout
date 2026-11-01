@@ -3,10 +3,10 @@
 Design: docs/superpowers/specs/2026-11-01-policy-loop-speedup-design.md. The old code is kept here as an
 oracle, so a change to `normalize` or `write_targets` is compared with what they used to return.
 """
+import ast
 import importlib.util
 import inspect
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -165,6 +165,29 @@ def _writers(fp):
                "mcp__codescout__artifact", "mcp__codescout__artifact_augment"})
 
 
+def branch_names(source: str, namespace: dict) -> set:
+    """Every tool name the `name == X` / `name in X` tests in `source` can match: string literals,
+    tuples, lists and sets of them, and a module constant named in the test, looked up in
+    `namespace`. An AST walk, so formatting, quoting and a name with capitals or digits do not
+    matter, which the first regex version of this check got wrong."""
+    found = set()
+    for node in ast.walk(ast.parse(source)):
+        if not (isinstance(node, ast.Compare) and isinstance(node.left, ast.Name)
+                and node.left.id == "name"):
+            continue
+        for op, comparator in zip(node.ops, node.comparators):
+            if not isinstance(op, (ast.Eq, ast.In)):
+                continue
+            if isinstance(comparator, ast.Constant) and isinstance(comparator.value, str):
+                found.add(comparator.value)
+            elif isinstance(comparator, (ast.Tuple, ast.List, ast.Set)):
+                found.update(e.value for e in comparator.elts
+                             if isinstance(e, ast.Constant) and isinstance(e.value, str))
+            elif isinstance(comparator, ast.Name) and comparator.id in namespace:
+                found.update(namespace[comparator.id])
+    return found
+
+
 def test_every_tool_that_writes_still_yields_its_targets(fp, tmp_path, monkeypatch):
     monkeypatch.setattr(fp, "catalog_paths", lambda: {})      # `doc` ids read a database
     for name in sorted(_writers(fp)):
@@ -183,11 +206,39 @@ def test_the_target_tools_set_is_exactly_the_writers(fp):
     assert fp._TARGET_NAMES == frozenset(_writers(fp))
 
 
+def test_branch_names_finds_literals_set_constants_and_mixed_case_names():
+    """The guard behind `_TARGET_NAMES` must see every way a branch can name a tool. The first
+    version of it matched `mcp__[a-z_]+__[a-z_]+` and missed the last two shapes below (review
+    of 88f77aeae)."""
+    source = (
+        "def f(name, inp):\n"
+        "    if name == 'apply_patch':\n"
+        "        pass\n"
+        "    elif name in NEW_WRITE_TOOLS:\n"
+        "        pass\n"
+        "    elif name in ('Bash', 'mcp__claude_ai_Claude_Docs__batch', 'mcp__x__y2'):\n"
+        "        pass\n"
+        "    elif name.endswith('_augment'):\n"
+        "        pass\n"
+    )
+    found = branch_names(source, {"NEW_WRITE_TOOLS": {"x1", "x2"}})
+    assert found == {"apply_patch", "x1", "x2", "Bash", "mcp__claude_ai_Claude_Docs__batch", "mcp__x__y2"}
+
+
 def test_the_set_names_every_tool_the_branches_name(fp):
     """A branch added to `write_targets` for a new tool name, with the set forgotten, would be
     dropped by the early exit with no failure anywhere else."""
-    source = inspect.getsource(fp.write_targets)
-    named = set(re.findall(
-        r'"(mcp__[a-z_]+__[a-z_]+|Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit)"', source))
-    assert named, "the pattern found no tool name in write_targets: the test is blind"
-    assert named <= fp._TARGET_NAMES, sorted(named - fp._TARGET_NAMES)
+    found = branch_names(inspect.getsource(fp.write_targets), vars(fp))
+    assert found, "no branch names found in write_targets: the check is blind"
+    assert found <= fp._TARGET_NAMES, sorted(found - fp._TARGET_NAMES)
+
+
+def test_a_branch_added_without_updating_the_set_is_detected(fp):
+    """The check above must be able to fail: inject a branch that tests a new set constant."""
+    original = inspect.getsource(fp.write_targets)
+    source = original.replace(
+        '    if name == "apply_patch":',
+        '    if name in BRAND_NEW_WRITE_TOOLS:\n        pass\n    elif name == "apply_patch":', 1)
+    assert source != original, "the injection point moved: update this test"
+    namespace = {**vars(fp), "BRAND_NEW_WRITE_TOOLS": {"mcp__new__tool9"}}
+    assert branch_names(source, namespace) - fp._TARGET_NAMES == {"mcp__new__tool9"}
