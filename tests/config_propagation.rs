@@ -105,7 +105,11 @@ fn discover_linked_worktrees(root: &Path) -> Vec<PathBuf> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() {
+            // The entry's OWN type: `DirEntry::file_type` does not follow a symlink, where
+            // `path.is_dir()` did. A directory link back into the tree made this walk endless
+            // (1,876 of them under `.codescout/resident-private/`, measured 2026-11-01), and a
+            // worktree git knows of sits at its real path, which real directories still reach.
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 continue;
             }
             if PRUNED
@@ -426,5 +430,36 @@ fn a_nested_independent_checkout_is_walked_through_not_reported() {
     assert!(
         rel.iter().any(|p| p == "checkout/inner-wt"),
         "the walk continues through it, so that checkout's own worktree IS reported: {rel:?}"
+    );
+}
+
+/// A directory SYMLINK is not followed. `.codescout/resident-private/` came to hold 1,876
+/// directory symlinks pointing back into the same tree, and a walk that followed them never
+/// ended: measured on 2026-11-01, a copy of this walk passed 1.43 million directories in 60 s
+/// against 19,340 without links, and the gate's `cargo test --workspace` sat in the two tests
+/// above for over 30 minutes.
+/// docs/issues/2026-11-01-config-propagation-worktree-walk-follows-directory-symlinks-and-never-ends.md
+///
+/// The fixture is a link back to the root. Followed, it re-enters the root at every level until
+/// the path is too long to open, so the failure is the worktree reported many times over rather
+/// than a hang. A worktree reached only through a link is not lost: git reports its real path,
+/// and the walk reaches that through real directories when it is under the root.
+#[cfg(unix)]
+#[test]
+fn a_directory_symlink_is_not_followed() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("wt")).unwrap();
+    std::fs::write(root.join("wt/.git"), "gitdir: /nowhere\n").unwrap();
+    std::fs::create_dir_all(root.join("a")).unwrap();
+    std::os::unix::fs::symlink("..", root.join("a/up")).unwrap();
+
+    let found = discover_linked_worktrees(root);
+    let rel = rel_slash(root, &found);
+
+    assert_eq!(
+        rel,
+        vec!["wt".to_owned()],
+        "the real worktree once, and nothing reached through `a/up`"
     );
 }
