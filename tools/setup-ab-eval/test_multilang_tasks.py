@@ -524,9 +524,9 @@ class FakeDocker:
         return [a[-1] for a in self.calls if a[0] == "rm"]
 
 
-def live_bundle(tmp, dropped=("t::p2",)):
+def live_bundle(tmp, dropped=("t::p2",), p2p=3):
     return {"kind": "live", "workdir": "/testbed", "record_path": str(Path(tmp) / "record.json"),
-            "expected": {"fail_to_pass": 1, "pass_to_pass_kept": 2,
+            "expected": {"fail_to_pass": 1, "pass_to_pass_kept": p2p - len(dropped),
                          "pass_to_pass_dropped": len(dropped), "dropped": list(dropped)}}
 
 
@@ -613,16 +613,82 @@ class LiveGraderTests(unittest.TestCase):
         self.assertEqual(r["examples"], ["t::p2"])
         # a name the bundle does not drop is demanded even when the log lacks it
         rec = record(PASS_TO_PASS=["t::p1", "t::p2", "t::p3", "t::absent"])
-        r = self.grade(PATCH, rec=rec, fake=FakeDocker())
+        r = self.grade(PATCH, rec=rec, bundle=live_bundle(self.tmp, p2p=4), fake=FakeDocker())
         self.assertFalse(r["pass"])
         self.assertEqual(r["missing"], 1)
-        self.assertEqual(mt.expected_sets(rec, live_bundle(self.tmp, dropped=("t::p2", "t::absent"))),
+        self.assertEqual(mt.expected_sets(rec, live_bundle(self.tmp, dropped=("t::p2", "t::absent"), p2p=4)),
                          (["t::f1"], ["t::p1", "t::p3"]))
 
     def test_live_grader_refuses_another_workdir(self):
         bundle = dict(live_bundle(self.tmp), workdir="/testbed/repo")
         with self.assertRaises(mt.LiveRefused):
             mt.live_grader(record(), bundle, "img", self.tmp)
+    def execs(self, fake):
+        """The recorded exec commands, as short labels in order."""
+        labels = []
+        for a in fake.calls:
+            if a[0] != "exec":
+                continue
+            i = next(n for n, x in enumerate(a) if x.startswith(mt.GRADE_PREFIX))
+            cmd = a[i + 1:]
+            if cmd[:3] == ["git", "apply", "--binary"]:
+                labels.append("agent-patch")
+            elif cmd[:2] == ["git", "apply"]:
+                labels.append("test-patch")
+            elif cmd[0] == "rm" and cmd[-1].endswith("reports"):
+                labels.append("reports-rm")
+            elif cmd[0] == "mkdir" and cmd[-1].endswith("reports"):
+                labels.append("reports-mkdir")
+            elif cmd[0] == "bash" and "head -c" in cmd[-1]:
+                labels.append("print")
+            elif cmd[0] == "bash":
+                labels.append("rebuild-or-test")
+            else:
+                labels.append(cmd[0])
+        return labels
+
+    def test_reports_dir_is_wiped_and_recreated_after_both_patches_and_before_the_rebuild(self):
+        self.grade(PATCH)
+        order = self.execs(self.fake)
+        i = order.index("reports-rm")
+        self.assertEqual(order[i + 1], "reports-mkdir")
+        self.assertLess(order.index("agent-patch"), i)
+        self.assertLess(order.index("test-patch"), i)
+        first_bash = order.index("rebuild-or-test")
+        self.assertLess(i + 1, first_bash)
+
+    def test_a_test_command_that_tees_into_reports_without_mkdir_still_grades(self):
+        class NeedsReports(FakeDocker):
+            def __init__(self):
+                super().__init__()
+                self.reports = False
+                self.broken = False
+
+            def __call__(self, *args, **kw):
+                a = [str(x) for x in args]
+                if a[0] == "exec" and "mkdir" in a and a[-1].endswith("reports"):
+                    self.reports = True
+                if a[0] == "exec" and "bash" in a and "head -c" not in a[-1] and "reports/" in a[-1] \
+                        and not self.reports:
+                    self.broken = True  # `tee reports/x` with no reports/ directory
+                    return SimpleNamespace(returncode=1, stdout="")
+                res = super().__call__(*args, **kw)
+                if self.broken and a[0] == "exec" and "head -c" in a[-1]:
+                    return SimpleNamespace(returncode=0, stdout="")
+                return res
+        rec = record(test_cmds=["cargo test 2>&1 | tee reports/out.txt"])
+        fake = NeedsReports()
+        r = self.grade(PATCH, rec=rec, fake=fake)
+        self.assertFalse(fake.broken)
+        self.assertTrue(r["pass"], r)
+
+    def test_live_grader_refuses_a_bundle_that_disagrees_with_the_record(self):
+        for label, bundle in {
+                "f2p count": dict(live_bundle(self.tmp), expected=dict(live_bundle(self.tmp)["expected"], fail_to_pass=2)),
+                "kept count": live_bundle(self.tmp, p2p=4),
+                "dropped not in record": live_bundle(self.tmp, dropped=("t::p2", "t::nope"), p2p=4)}.items():
+            with self.subTest(label), self.assertRaises(mt.LiveRefused):
+                mt.live_grader(record(), bundle, "img", self.tmp)
 
     def test_live_grader_from_record_reads_the_dataset_record_from_the_bundle(self):
         (self.tmp / "record.json").write_text(json.dumps(record()))

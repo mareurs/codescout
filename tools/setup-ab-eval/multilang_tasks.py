@@ -255,6 +255,13 @@ def live_grader(record, bundle, image, gdir):
     (parser error, timeout, docker error, a patch that does not apply) is `pass: False` with an
     `error` field, never an exception and never a pass; an empty patch never passes."""
     f2p, p2p = expected_sets(record, bundle)
+    exp, all_p2p = bundle["expected"], tasks._f2p(record["PASS_TO_PASS"])
+    if (len(f2p) != exp["fail_to_pass"] or len(p2p) != exp["pass_to_pass_kept"]
+            or not set(exp["dropped"]) <= set(all_p2p)):
+        raise LiveRefused(f"{record['instance_id']}: the bundle's expected set does not match the "
+                          f"record (F2P {len(f2p)} vs {exp['fail_to_pass']}, kept P2P {len(p2p)} vs "
+                          f"{exp['pass_to_pass_kept']}, dropped within the record's P2P: "
+                          f"{set(exp['dropped']) <= set(all_p2p)})")
     workdir = bundle["workdir"]
     if workdir != tasks.WORKDIR:
         raise LiveRefused(f"workdir {workdir!r}; the runner works in {tasks.WORKDIR!r} only")
@@ -285,6 +292,9 @@ def live_grader(record, bundle, image, gdir):
                               timeout=300)
                 control._exec(container, workdir, "git", "apply", "-", data=record["test_patch"],
                               timeout=300)
+                # as the control does before every test run: a record may tee into reports/ without
+                # a mkdir, and anything the agent shipped under reports/ must not reach the parser
+                control._fresh_reports(container, workdir)
                 control.rebuild(container, workdir, record, GRADE_STEP_TIMEOUT, steps=steps, state="grade")
                 log = control.run_tests(container, workdir, record, GRADE_STEP_TIMEOUT, steps=steps,
                                         state="grade")
