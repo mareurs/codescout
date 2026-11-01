@@ -8,7 +8,7 @@ tags:
 opened: 2026-10-31
 owner: marius
 severity: low
-unverified: 'The migrate fix and the seven attribution test fixes are measured. The mutation check for a missing env detects six of the seven attribution tests. For the many-dirty-files test I measured a different mutant: a 1 ms scan timeout makes the hardened test fail 2 of 2. I did not run the missing-env mutant against it, and the old test was not run against the timeout mutant. The LSP test: 1 failure in 3 loaded runs before the change, 0 in 28 after, but the before sample is three runs, the cause of the slow request is unknown, and it is not shown that the new timeout branch ever ran. The peer''s sighting of four tests failing once at normal load was not re-checked. Commit 421b0f896 used --no-verify on the user''s approval after a hook flagged output.rs; its checks were run by hand.'
+unverified: 'The migrate fix and the seven attribution test fixes are measured. The mutation check for a missing env detects six of the seven attribution tests. For the many-dirty-files test I measured a different mutant: a 1 ms scan timeout makes the hardened test fail 2 of 2. I did not run the missing-env mutant against it, and the old test was not run against the timeout mutant. The LSP test: 1 failure in 3 loaded runs before the change, 0 in 28 after, but the before sample is three runs, the cause of the slow request is unknown, and it is not shown that the new timeout branch ever ran. The scan floor rests on the assumption that history files are append-only; it was checked on one machine only, by the last 200 lines of each file. The scan numbers were measured under a loaded shared machine, each engine run once per set. The peer''s sighting of four tests failing once at normal load was not re-checked. Commit 421b0f896 used --no-verify on the user''s approval after a hook flagged output.rs; its checks were run by hand.'
 ---
 
 # BUG: eight lib tests fail when the suite runs on cores oversubscribed 16 to 1, each through a wall-clock window or a subprocess deadline
@@ -38,6 +38,8 @@ Migrate group (3 tests): confirmed. The probe samples the test thread's `/proc/s
 LSP test: reproduced, cause of the slow request not confirmed. Alone it passed 4 of 4 under the load that failed it in the suite. Run with the whole `lsp::client::tests::` module (all rust-analyzer tests in parallel) under 64 busy loops on cores 60 to 63, it failed 1 run in 3: `called Result::unwrap() on an Err value: LSP request timed out after 30s: workspace/symbol`, the run took 51 s against 17 to 20 s for the passing runs. The test retried only on an empty answer, so a timed-out request went through `.unwrap()`. Why one request passes the 30 s ceiling is not known.
 
 Attribution group (4 tests): confirmed, and it is a product limit as well as a test one. The shipped path `wip_author_diagnostic` spawns `python3 -I scripts/attribute-red.py`, which scans every transcript under `$HOME/.claude*` and `$HOME/.codex*` (`discover_claude_histories`, `discover_codex_histories`), with a ceiling of `ATTRIBUTION_TIMEOUT_DEFAULT` = 30 s. Timed alone on a small dirty fixture repo on 2026-10-31, with no load from me but on a machine shared with peers: 16.1 s, 20.7 s, 25.5 s (three runs, exit 0, 470 bytes out each). So a quiet call already uses 54 to 85% of the ceiling; any load pushes the scan past 30 s, the timeout returns `None`, and the test asserts "python3 is present but the engine produced no hint". That also explains the quiet-run failure of `the_same_red_at_exit_zero_still_answers`. The module comment recorded 5.0 s then 7.0 s in six days; it is 16 to 25 s now. The tests scan the real corpus of whoever runs them, so they depend on the size of that machine's history.
+
+Correction, measured 2026-11-01: the 16 to 25 s was my fixture repo, which has no Claude history of its own. On the real checkout the old engine took 168 to 203 s per call on five sets of real dirty paths, so the 30 s ceiling cut it every time and the hint was silent. A profile of the fixture run: 14.5 of 17.3 s in `read_codex_history` over 387 Codex files (1.04 GB, 547,579 `json.loads` calls). Only 251 of those files (840 MB) mention this checkout's path, so a filter on the path would have cut about 20%.
 
 Product effect, not yet measured in use: on this machine the red-attribution hint is silently absent whenever the scan exceeds 30 s. The code treats a timeout as silence by design (`_ => return None`).
 
@@ -76,9 +78,14 @@ Many-dirty-files test hardened: `a_red_naming_many_dirty_files_carries_a_bounded
 - Fix SHA (on `experiments`): `4bc4b0960`
 - patch-id: `8d5ad2c56ea2e3d8c516bd5f3ae55c3af8ebe6c1`
 
+Transcript scan (product limit), partly fixed: `scan_provenance`, `scan_with_evidence` and `scan` take an optional `modified_since`, and history files last written before it are not read. `attribute-red.py` passes the oldest last commit among the hit paths minus 24 h (`scan_floor`). An unreadable mtime keeps the file; a path with no commit, or a time that does not parse, means no cut. The assumption is that history files are append-only: on this machine none of 7656 files had a record in its last 200 lines newer than its mtime plus 2 s (596 had no timestamp there and were not judged). Old engine against new on five sets of real dirty paths in this checkout: outputs byte-identical in all five. Recently committed paths: 186 to 203 s before, 12.4 to 12.8 s after, inside the 30 s ceiling. A path committed earlier: 200 s before, 116 s after. A set with an untracked path: 168 s before, 189 s after. Three tests in `tests/test_harness_provenance.py`; flipping the mtime comparison and dropping a file with an unreadable mtime each fail them. Gate: `./scripts/gate.sh` in a clean worktree at `5411907f8` with only this diff, every lane exit 0.
+
+- Fix SHA (on `experiments`): `14f512875`
+- patch-id: `c9d9fc4e3c6b3fe5d5197f9bede19e00a1fa61b2`
+
 Not fixed:
 
-- The product limit: the real transcript scan takes 16 to 25 s against a 30 s ceiling.
+- The product limit for paths last committed long ago (116 s measured at a 60-day-old commit on the real checkout, against the 30 s ceiling) and for untracked paths (189 s). A new file has no commit time, so its window is unbounded. The hint is still silent there.
 
 ## Tests added
 
@@ -100,7 +107,7 @@ State on 2026-11-01: migrate group fixed, seven attribution tests fixed, the res
 Open:
 
 - `lsp::client::tests::workspace_symbols_returns_project_symbols`: tolerant of a timeout since `56457a853`. Open: why one request passes 30 s under load, and proof that the timeout branch runs (the test prints nothing on a retry).
-- The product limit: the red-attribution hint is silently absent whenever the transcript scan exceeds 30 s. Options, none chosen: raise `ATTRIBUTION_TIMEOUT_DEFAULT`, or make the scan cheaper with an index or a cache. The cheaper scan is the larger change.
+- The product limit, remainder: old-commit and untracked paths still exceed the 30 s ceiling. Not profiled on the real checkout: how much of the 116 s is the Claude project history and how much the Codex files. Options, none chosen: a per-file cache keyed on path, size and mtime in the engine's private directory (sound, no append-only assumption, larger change); a faster Claude-history read; raising `ATTRIBUTION_TIMEOUT_DEFAULT` (does not cut the cost).
 - The commit hook named a stale writer for `output.rs` (see Fix). Filed as `581b05bbe41134f3`.
 
 ## References
