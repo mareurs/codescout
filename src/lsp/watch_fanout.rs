@@ -157,6 +157,7 @@ mod tests {
     use super::*;
 
     /// `n` directory symlinks `l0..l{n}` in `dir`, each to a real directory `dir/target`.
+    #[cfg(unix)]
     fn links_in(dir: &Path, n: usize) {
         let target = dir.join("target");
         std::fs::create_dir_all(&target).unwrap();
@@ -165,6 +166,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn fewer_links_than_the_minimum_report_nothing() {
         let dir = tempfile::tempdir().unwrap();
@@ -172,6 +174,7 @@ mod tests {
         assert_eq!(find(dir.path(), 20, 10_000), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_minimum_of_links_reports_a_count_and_a_relative_example() {
         let dir = tempfile::tempdir().unwrap();
@@ -185,6 +188,7 @@ mod tests {
         assert_eq!(found.cluster_links, 20);
     }
 
+    #[cfg(unix)]
     #[test]
     fn links_to_files_and_dangling_links_are_not_counted() {
         let dir = tempfile::tempdir().unwrap();
@@ -201,6 +205,7 @@ mod tests {
         assert_eq!(find(dir.path(), 1, 10_000), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_link_to_an_ancestor_is_counted_once_and_never_followed() {
         let dir = tempfile::tempdir().unwrap();
@@ -211,6 +216,7 @@ mod tests {
         assert_eq!(found.links, 1, "following the link would count it again");
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_entry_bound_stops_the_scan_and_says_so() {
         let dir = tempfile::tempdir().unwrap();
@@ -228,6 +234,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_scan_that_finishes_inside_the_bound_is_not_truncated() {
         let dir = tempfile::tempdir().unwrap();
@@ -236,6 +243,7 @@ mod tests {
         assert!(!found.truncated);
     }
 
+    #[cfg(unix)]
     #[test]
     fn links_spread_over_many_leaf_directories_are_reported_as_their_common_parent() {
         // The shape of the real tree: one experiment holds mutant copies, each with the same
@@ -255,6 +263,7 @@ mod tests {
         assert_eq!(found.cluster_links, 60);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_few_links_elsewhere_do_not_hide_where_the_links_are() {
         // A bystander directory may be read first, and is never the answer.
@@ -273,6 +282,7 @@ mod tests {
         assert_eq!(found.cluster_links, 30);
     }
 
+    #[cfg(unix)]
     #[test]
     fn exactly_half_the_links_is_not_a_majority() {
         let dir = tempfile::tempdir().unwrap();
@@ -286,6 +296,7 @@ mod tests {
         assert_eq!(found.cluster_links, 20);
     }
 
+    #[cfg(unix)]
     #[test]
     fn links_in_the_root_itself_have_no_cluster_and_the_hint_says_so() {
         let dir = tempfile::tempdir().unwrap();
@@ -299,6 +310,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn links_below_a_directory_with_more_files_than_the_old_bound_are_still_found() {
         // On 2026-11-01 the real tree held 311,890 entries and the first link came at entry 97,906,
@@ -318,6 +330,7 @@ mod tests {
         assert!(!found.truncated);
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_git_directory_is_not_entered() {
         let dir = tempfile::tempdir().unwrap();
@@ -327,6 +340,7 @@ mod tests {
         assert_eq!(find(dir.path(), 1, 10_000), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_gitignored_directory_is_still_scanned() {
         let dir = tempfile::tempdir().unwrap();
