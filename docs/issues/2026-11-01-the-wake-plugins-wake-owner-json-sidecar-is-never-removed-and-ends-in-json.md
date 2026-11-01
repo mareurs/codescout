@@ -12,7 +12,7 @@ topic: background job sidecars
 closed: 2026-11-01
 opened: 2026-11-01
 severity: low
-unverified: The test writes the sidecar by hand with the body intake.mjs writes. No v1 profile exists on this machine, so a real v1-armed job was not run through the sweep.
+unverified: 'The sweep was tested on hand-written sidecars. The 224 real orphans in this machine''s record directory have not been seen removed: the running server predates 4bc4c186a. Check after a rebuild and /mcp: the count of owner sidecars with no record should fall to the young ones.'
 ---
 
 ## Summary
@@ -25,7 +25,9 @@ IC-17 (a shared resource carries no owner). The sidecar is created by the plugin
 
 ## Symptom (Effect)
 
-Read 2026-11-01, not measured on disk. The sweeps in `sweep_stale` and `sweep_logs` list every `*.json` file in the record directory and call `read_record` on it. `read_record` fails to parse the owner sidecar, so the sweeps skip it. This is harmless today. The cost is one leftover file per job that engine v1 armed. No profile on this machine has a `codescout-wake.json`, so the legacy engine runs and the leak does not occur yet.
+Read 2026-11-01, then measured the same day on this machine's record directory (`~/.cache/cc-tmp/codescout-bg`). The sweeps in `sweep_stale` and `sweep_logs` list every `*.json` file in the record directory and call `read_record` on it. `read_record` fails to parse the owner sidecar, so the sweeps skipped it. The cost is one leftover file per armed job.
+
+**Correction (measured 2026-11-01 after the first fix):** the first version of this section said no profile here runs the wake engine, so the leak did not occur yet. That was wrong. The LEGACY engine writes the sidecar too (`{"version":1,"engine":"legacy","target":null}`), for every armed job. The directory held **786** owner sidecars, **224** of them with no record, none older than 2026-10-30. No sidecar had `"engine":"v1"`. The statement was a guess from the absence of `codescout-wake.json`, and I did not look at the directory.
 
 ## Reproduction
 
@@ -61,11 +63,13 @@ Checked first that the sweeps cannot take the sidecar for a record: `read_record
 
 The second limit named earlier, that v1 never writes `.delivered`, is a different defect in another repository. It is filed as bug `1ef81db472b12ad7`.
 
-Not covered: an owner sidecar whose record is already gone (written before this fix) is still left. No profile on this machine runs v1, so none exists here.
+Not covered by the first commit: an owner sidecar whose record was already gone. The second commit, `4bc4c186a`, adds that. `sweep_stale` removes a `.wake-owner.json` file that has no record and is at least `RECORD_MAX_AGE` old, and does not count it as a removed record. A young orphan stays, because it may belong to a record about to be armed. One beside its record stays, because `remove_with_sidecars` takes it with the record.
 
 ## Tests added
 
 `src/tools/job_record.rs` `tests`: `a_record_leaves_no_wake_owner_sidecar_behind_by_either_removal_path`. It seeds two records with an owner sidecar each, and asserts both `remove_if_delivered` and `sweep_stale` remove the sidecar, and that `sweep_stale` counts one record, not two. Red first: it failed at the `remove_if_delivered` assertion. `cargo test --lib tools::job_record` passes 42 of 42.
+
+Second commit `4bc4c186a`: `sweep_stale_removes_an_old_wake_owner_sidecar_whose_record_is_gone_and_only_that`, red first (`an old orphan owner sidecar stayed`). The module then passes 43 of 43. Mutant: dropping the "record is gone" check (`if true`) is killed, failing with `a sidecar beside its record was removed`. Equivalent and not tested: the `continue` after the orphan branch, because the `read_record` that follows returns `None` for an owner sidecar and also continues. Gate for this commit: clean detached worktree at `HEAD`, FMT, CLIPPY, LEAN and DEFAULT exit 0. A doc-comment line ("`legacy` or `v1`") changed after that gate; `rustfmt --check` passes and no code changed.
 
 Gate: run in a clean detached worktree at `HEAD` with only `job_record.rs` copied in: FMT, CLIPPY, LEAN and DEFAULT exit 0. An earlier run in the shared tree failed the lean lane on `feature_lanes`, because a peer's two-file CI change (`ab451c6af`) landed while that gate ran. The test passes alone on the current tree. The cause of that earlier failure is consistent with the file times (both rewritten 16:54:09, my gate started 16:47) but not proven.
 
@@ -75,12 +79,12 @@ Delete `*.wake-owner.json` files older than the record retention by hand.
 
 ## Resume
 
-Fixed in `0d48ddaa6`. Not seen with a real v1 sidecar, because no profile here runs v1 (see `unverified`). The second limit is bug `1ef81db472b12ad7`.
+Fixed in `0d48ddaa6` and `4bc4c186a`. `0d48ddaa6` is already on `origin/experiments` (pushed by the operator on 2026-11-01); `4bc4c186a` is not. The second limit is bug `1ef81db472b12ad7`.
 
 ## Fix provenance
 
-- **SHA:** `0d48ddaa6` (`experiments`)
-- **patch-id:** `eb9ca203eadd3938d669e628297589730ffebd08`
+- **SHA:** `0d48ddaa6` (`experiments`), `4bc4c186a` (`experiments`)
+- **patch-id:** `eb9ca203eadd3938d669e628297589730ffebd08`, `94a697fbd7d65818c507c053cf262659dd434a26`
 
 ## References
 
