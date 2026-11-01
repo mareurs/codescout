@@ -18,6 +18,8 @@
 /.codescout/mutations/
 # Resident-session scratch (run logs, exit files, patches): private to the session that wrote it,
 # never shared. Untracked and unignored it was offered for commit with every `git add -A`.
+# New scratch goes OUTSIDE the repository (scripts/resident-scratch.sh): rust-analyzer's watcher
+# walks and follows links in here. See docs/conventions/resident-scratch-location.md.
 /.codescout/resident-private/
 /.codescout/embeddings.db
 /.codescout/embeddings.db-wal
