@@ -179,6 +179,32 @@ def mutation_notes(root: Path, hits: list[str]) -> list[str]:
     lines.append("      down. This only saves you bisecting for a cause about to revert.")
     return lines
 
+# Slack under the per-path window floor when choosing which history files to read. A history
+# file's mtime is the newest thing in it, so a file last written before the floor cannot hold
+# an in-window record; the margin absorbs clock skew and a commit time taken from another
+# machine's clock. Too small a margin drops a file that matters, too large only reads more.
+SCAN_MARGIN_SECONDS = 24 * 60 * 60
+
+
+def scan_floor(fp, commits: dict) -> float | None:
+    """Epoch seconds before which no history file can matter, or None to read them all.
+
+    `commits` maps each hit path to the time it was last committed (an ISO string, or None
+    when git has no commit for it). `main` drops every record older than its path's last
+    commit, so the oldest of those times bounds what the scan can use. One path with no
+    commit (a new, untracked file) has an unbounded window: read everything, which is the
+    answer this engine gave before the floor existed. A time that does not parse does the
+    same, so the cut can only ever be skipped, never wrongly applied.
+    """
+    if not commits or any(c is None for c in commits.values()):
+        return None
+    from datetime import datetime
+    try:
+        oldest = min(datetime.fromisoformat(fp._key(c)).timestamp() for c in commits.values())
+    except ValueError:
+        return None
+    return oldest - SCAN_MARGIN_SECONDS
+
 def main(argv: list[str]) -> int:
     explain = "--explain" in argv
     explicit: list[str] = []
@@ -221,7 +247,10 @@ def main(argv: list[str]) -> int:
         return 0
 
     # --- stage 3: 7.0 s, and only now. --------------------------------------------
-    owners = fp.scan(root)
+    # The last commit of each hit is read once here: it bounds the scan below (history files
+    # older than the oldest one cannot matter) and is the window floor in the loop further down.
+    commits = {rel: fp.last_commit_time(rel, root) for rel in hits}
+    owners = fp.scan(root, scan_floor(fp, commits))
     native_live, unreadable = fp.live_sessions()
     # `scan()` returns owners as PRINCIPALS — `claude-code:<id>`, `codex:<id>` — since
     # eed25579, so the identity compared against them and the liveness map they are
@@ -246,7 +275,7 @@ def main(argv: list[str]) -> int:
         # ago, and neither to the actual editor. That is the worst possible failure for
         # a tool read at the moment someone is looking for a party to blame, so the
         # floor is derived per path exactly as file-provenance's own main() does.
-        lc = fp.last_commit_time(rel, root)
+        lc = commits[rel]
         floor = fp._key(lc) if lc else None
         records = owners.get(rel, [])
         in_window, undated = [], []

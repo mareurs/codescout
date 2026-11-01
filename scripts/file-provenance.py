@@ -915,10 +915,40 @@ def merge_history_batches(batches: Iterable[HistoryBatch]) -> HistoryBatch:
     return HistoryBatch(operations, gaps)
 
 
-def scan_provenance(root: Path, environ: dict[str, str]) -> ProvenanceScan:
-    """One policy consumes both hosts' normalized history and explicit coverage gaps."""
+def _modified_since(paths: list[Path], floor: float | None) -> list[Path]:
+    """Keep the history files that may hold a record at or after `floor` (epoch seconds).
+
+    A history file is append-only, so no record in it is newer than its mtime. A file last
+    written before `floor` therefore cannot add a record inside a window that starts at
+    `floor`, and reading it is wasted work. `floor=None` keeps everything. A file whose mtime
+    cannot be read is KEPT: the cut may only ever drop a file it has measured. Measured
+    2026-11-01 over 7656 Claude and Codex history files on this machine: none had a record
+    in the last 200 lines newer than its mtime plus 2 s (596 had no timestamp there and were
+    not judged).
+    """
+    if floor is None:
+        return paths
+    kept = []
+    for path in paths:
+        try:
+            if os.path.getmtime(path) < floor:
+                continue
+        except OSError:
+            pass
+        kept.append(path)
+    return kept
+
+
+def scan_provenance(root: Path, environ: dict[str, str], modified_since: float | None = None) -> ProvenanceScan:
+    """One policy consumes both hosts' normalized history and explicit coverage gaps.
+
+    `modified_since` (epoch seconds) skips history files last written before it: see
+    `_modified_since`. Leave it unset for a lifetime answer.
+    """
     claude_files, claude_gaps = discover_claude_histories(root, environ)
     codex_files, codex_gaps = discover_codex_histories(root, environ)
+    claude_files = _modified_since(claude_files, modified_since)
+    codex_files = _modified_since(codex_files, modified_since)
     batch = merge_history_batches([
         HistoryBatch([], claude_gaps + codex_gaps),
         *(read_claude_history(path) for path in claude_files),
@@ -988,17 +1018,17 @@ def relevant_gaps(scan: ProvenanceScan, rel: str, root: Path) -> list[CoverageGa
     return result
 
 
-def scan_with_evidence(root: Path) -> tuple[
+def scan_with_evidence(root: Path, modified_since: float | None = None) -> tuple[
         dict[str, list[tuple[str, str | None]]],
         dict[tuple[str, str, str | None], list[str] | None]]:
     """Compatibility two-value API; use scan_provenance for coverage information."""
-    result = scan_provenance(root, os.environ)
+    result = scan_provenance(root, os.environ, modified_since)
     return result.owners, result.evidence
 
 
-def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
+def scan(root: Path, modified_since: float | None = None) -> dict[str, list[tuple[str, str | None]]]:
     """path (repo-relative) -> [(session id, ISO timestamp or None), ...]. See `scan_with_evidence`."""
-    return scan_with_evidence(root)[0]
+    return scan_with_evidence(root, modified_since)[0]
 
 
 def last_commit_time(path: str, root: Path) -> str | None:

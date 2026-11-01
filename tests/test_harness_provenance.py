@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -243,6 +244,66 @@ def test_explicit_context_and_native_conflict_are_actionable(checkout, tmp_path)
     missing = invoke(root, env, "own.rs")
     assert missing.returncode == 2
     assert "--context" in missing.stderr or "--check" in missing.stderr
+
+
+def _script(name, file):
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_scan_skips_a_history_file_last_written_before_the_floor(checkout, monkeypatch):
+    """Bug 20927ccfe293c34e: the red-attribution scan read every Codex file on the machine (1.04 GB,
+    14.5 of 17.3 s) although `attribute-red.py` drops every record older than the path's last commit."""
+    root, env = checkout
+    old = add_writes(root, env, "claude-code", "old", ["own.rs"])
+    add_writes(root, env, "codex", "new", ["own.rs"])
+    os.utime(old, (1_000_000_000, 1_000_000_000))
+    fp = _script("fp_floor", "file-provenance.py")
+
+    def who(scan):
+        return sorted(w for w, _ in scan.owners.get("own.rs", []))
+
+    assert who(fp.scan_provenance(root, env)) == ["claude-code:old", "codex:new"]
+    assert who(fp.scan_provenance(root, env, modified_since=None)) == ["claude-code:old", "codex:new"]
+    assert who(fp.scan_provenance(root, env, modified_since=time.time() - 3600)) == ["codex:new"]
+    assert who(fp.scan_provenance(root, env, modified_since=time.time() + 3600)) == []
+    # The two compatibility entry points pass the floor through.
+    monkeypatch.setattr(fp.os, "environ", env)
+    assert [w for w, _ in fp.scan(root, time.time() - 3600)["own.rs"]] == ["codex:new"]
+    assert len(fp.scan_with_evidence(root, time.time() - 3600)[0]["own.rs"]) == 1
+
+
+def test_a_history_file_whose_mtime_cannot_be_read_is_kept(checkout, monkeypatch):
+    """The cut may only drop a file it has measured: an unreadable mtime keeps the file."""
+    root, env = checkout
+    old = add_writes(root, env, "claude-code", "old", ["own.rs"])
+    os.utime(old, (1_000_000_000, 1_000_000_000))
+    fp = _script("fp_unreadable_mtime", "file-provenance.py")
+
+    def refuse(path):
+        raise OSError("fixture: no stat")
+
+    monkeypatch.setattr(fp.os.path, "getmtime", refuse)
+    scan = fp.scan_provenance(root, env, modified_since=time.time() - 3600)
+    assert [w for w, _ in scan.owners["own.rs"]] == ["claude-code:old"]
+
+
+def test_the_scan_floor_is_the_oldest_last_commit_minus_a_margin_and_none_when_unbounded():
+    fp = _script("fp_for_floor", "file-provenance.py")
+    ar = _script("attribute_red_floor", "attribute-red.py")
+    day = ar.SCAN_MARGIN_SECONDS
+    assert day == 86400
+    assert ar.scan_floor(fp, {"a.rs": "2026-09-01T00:00:00+00:00"}) == 1788220800.0 - day
+    assert ar.scan_floor(fp, {"a.rs": "2026-09-01T02:00:00+02:00"}) == 1788220800.0 - day
+    assert ar.scan_floor(fp, {"a.rs": "2026-10-01T00:00:00Z", "b.rs": "2026-09-01T00:00:00Z"}) == 1788220800.0 - day
+    # No commit for one path (a new file): its window is unbounded, so read everything.
+    assert ar.scan_floor(fp, {"a.rs": "2026-09-01T00:00:00Z", "b.rs": None}) is None
+    assert ar.scan_floor(fp, {}) is None
+    # A time that does not parse is not guessed at.
+    assert ar.scan_floor(fp, {"a.rs": "not a time"}) is None
+
 
 
 def test_duplicate_discovery_copied_original_event_and_gaps(checkout):
