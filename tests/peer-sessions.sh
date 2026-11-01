@@ -37,7 +37,7 @@
 # Usage:
 #   tests/peer-sessions.sh          # non-zero exit on any failure
 #
-# Runs entirely under $TMPDIR against a copy of /bin/sleep. It never touches this
+# Runs entirely under $TMPDIR against copies of bash. It never touches this
 # checkout, which matters because several sessions share it.
 
 set -uo pipefail
@@ -62,6 +62,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# THE FIXTURE PROCESS MUST NOT BE A MULTICALL BINARY. On Ubuntu 26.04 `/bin/sleep` is a
+# symlink to the uutils `coreutils` multicall binary, which chooses its program from
+# argv[0]. A copy named `prog` therefore exits at once with "unknown program 'prog'", no
+# process is left to read, and every case below read `?` on the CI runner (9 of 22 failed).
+# bash chooses nothing from its name, so a copy runs under any name. It parks without a
+# child: opening a FIFO read-write never blocks, and `read -t` on it waits out the timeout.
+BASH_BIN="$(command -v bash)"
+PARK='read -t 300 <>"$1"'
+mkfifo "$T/hold"
+
 # Extract the two functions under test rather than sourcing the script, which runs its
 # whole report at load. Asserted non-empty below: a sed that silently matched nothing
 # would leave every case erroring identically to a genuine failure, and `command -v` is
@@ -77,8 +87,8 @@ eq "scan_cs_children was extracted from the script" "yes" "$(command -v scan_cs_
 
 echo
 echo "== one process, two states =="
-cp /bin/sleep "$T/prog"
-"$T/prog" 300 &
+cp "$BASH_BIN" "$T/prog"
+"$T/prog" -c "$PARK" _ "$T/hold" &
 PID=$!
 # Give the exec a moment to land without a foreground sleep: poll /proc for the link.
 for _ in $(seq 1 200); do [ -n "$(readlink "/proc/$PID/exe" 2>/dev/null)" ] && break; done
@@ -122,8 +132,8 @@ echo "== one process, stopped and resumed =="
 # that takes the field after the FIRST ')' reads `T` and calls a sleeping process
 # stopped. Rename it to anything without a ')' and the first assertion stops
 # discriminating that parse, while still passing.
-cp /bin/sleep "$T/a) T b"
-"$T/a) T b" 300 &
+cp "$BASH_BIN" "$T/a) T b"
+"$T/a) T b" -c "$PARK" _ "$T/hold" &
 SPID=$!
 for _ in $(seq 1 200); do [ -n "$(readlink "/proc/$SPID/exe" 2>/dev/null)" ] && break; done
 
@@ -162,8 +172,8 @@ echo "== a session with two codescout children =="
 # passes the first assertion. The field case that broke it was a newer server with a
 # lexically SMALLER pid, which only pid wrap produces, and no test can arrange that. The
 # superseded count is what this fixture does guard.
-cp /bin/sleep "$T/codescout"
-( "$T/codescout" 300 & echo $! > "$T/old"; sleep 0.05; "$T/codescout" 300 & echo $! > "$T/new"; wait ) &
+cp "$BASH_BIN" "$T/codescout"
+( "$T/codescout" -c "$PARK" _ "$T/hold" & echo $! > "$T/old"; sleep 0.05; "$T/codescout" -c "$PARK" _ "$T/hold" & echo $! > "$T/new"; wait ) &
 FAKE=$!
 for _ in $(seq 1 500); do
     [ -s "$T/new" ] && [ -n "$(readlink "/proc/$(cat "$T/new")/exe" 2>/dev/null)" ] && break
