@@ -8,7 +8,7 @@ tags:
 opened: 2026-10-31
 owner: marius
 severity: low
-unverified: 'The migrate fix and the seven attribution test fixes are measured. The mutation check for a missing env detects six of the seven attribution tests. For the many-dirty-files test I measured a different mutant: a 1 ms scan timeout makes the hardened test fail 2 of 2. I did not run the missing-env mutant against it, and the old test was not run against the timeout mutant. The LSP test: 1 failure in 3 loaded runs before the change, 0 in 28 after, but the before sample is three runs, the cause of the slow request is unknown, and it is not shown that the new timeout branch ever ran. The scan floor rests on the assumption that history files are append-only; it was checked on one machine only, by the last 200 lines of each file. The scan numbers were measured under a loaded shared machine, each engine run once per set. The peer''s sighting of four tests failing once at normal load was not re-checked. Commit 421b0f896 used --no-verify on the user''s approval after a hook flagged output.rs; its checks were run by hand.'
+unverified: 'The migrate fix and the seven attribution test fixes are measured. The mutation check for a missing env detects six of the seven attribution tests. For the many-dirty-files test I measured a different mutant: a 1 ms scan timeout makes the hardened test fail 2 of 2. I did not run the missing-env mutant against it, and the old test was not run against the timeout mutant. The LSP test: 1 failure in 3 loaded runs before the change, 0 in 28 after, but the before sample is three runs, the cause of the slow request is unknown, and it is not shown that the new timeout branch ever ran. The scan floor rests on the assumption that history files are append-only; it was checked on one machine only, by the last 200 lines of each file. The history cache was shown equal to the uncached reader on this machine''s corpus only, in one frozen run; the 374-gap difference between separate runs was attributed to drift but not traced. The cache and scan numbers were measured on a shared machine under load, each case run once or a few times. The warm engine takes 16 to 23 s against a 30 s ceiling, and the Rust caller was not run end to end. The peer''s sighting of four tests failing once at normal load was not re-checked. Commit 421b0f896 used --no-verify on the user''s approval after a hook flagged output.rs; its checks were run by hand.'
 ---
 
 # BUG: eight lib tests fail when the suite runs on cores oversubscribed 16 to 1, each through a wall-clock window or a subprocess deadline
@@ -83,9 +83,26 @@ Transcript scan (product limit), partly fixed: `scan_provenance`, `scan_with_evi
 - Fix SHA (on `experiments`): `14f512875`
 - patch-id: `c9d9fc4e3c6b3fe5d5197f9bede19e00a1fa61b2`
 
+Transcript scan, second and third changes (2026-11-01).
+
+Hoist: `read_claude_history` called `path.resolve()` for every line, 1.9 million calls and 13 million `lstat` calls, about 95 of 378 profiled seconds over this checkout's real Claude history (1,973 files, 8.09 GB). The path is now resolved once per file. Old and new reader give an equal digest (`47f43dcf5d873064`) over 198 real files (861 MB, 24,722 operations, 6,452 gaps); 23.4 s before, 14.9 s after, one run each. A test counts `Path.resolve` calls and fails with the per-line call put back. Gate: clean worktree at `4b57ff115`, every lane exit 0.
+
+- Fix SHA (on `experiments`): `c72131fc9`
+- patch-id: `028e04ad26781ff808f1d66756c692b92fe626ff`
+
+Per-file cache: `scripts/history_cache.py` stores one pickle per history file and reuses it while the code digest, path, size and mtime_ns match. The file is `stat`ed before it is read. A result with an "unreadable source" gap is never stored. The directory (`$FILE_PROVENANCE_CACHE_DIR`, else `XDG_CACHE_HOME` or `~/.cache`, under `codescout/history-cache`) is used only when it is a real directory owned by the user with no group or other access; entries are opened without following links. Any error falls back to reading the file. Each file is stored as soon as it is read. Embedded as the seventh engine script. 11 tests in `tests/test_history_cache.py`; four mutants each fail one (ignored header, caching unreadable results, no privacy check, following symlinks). Gate: clean worktree at `c72131fc9`, every lane exit 0, Python 1423 passed.
+
+Equivalence on the real corpus, frozen to files untouched for 15 minutes: in one process, warm, uncached, warm, uncached gave one digest (`6ff5fe9bda2f95cc`, 90,917 gaps); a per-file check found all 2,355 files equal between the reader and the cache. An earlier three-run comparison differed by 374 gaps between the cold and warm runs. The per-file check and the later four-run order test show the cache is not the cause; the cause of that drift between separate runs was not pinned (the policy loop reads the live filesystem, and worktrees came and went; not verified).
+
+Speed through the real entry point (`attribute-red.py`, an untracked path so no floor, `timeout 30` as the Rust caller stops it, cold cache): calls 1 to 4 were killed at 30 s with 821, 1,347, 1,829 and 2,074 cache entries; call 5 answered, in 29.2 s. With the cache full: 16.4, 22.9 and 17.7 s, identical 534-byte output, under a machine load of 18 to 32.
+
+- Fix SHA (on `experiments`): `e8b9935c4`
+- patch-id: `eec808468c70c0da134994c569269b18e45cd2a6`
+
 Not fixed:
 
-- The product limit for paths last committed long ago (116 s measured at a 60-day-old commit on the real checkout, against the 30 s ceiling) and for untracked paths (189 s). A new file has no commit time, so its window is unbounded. The hint is still silent there.
+- The warm engine takes 16 to 23 s here, inside the 30 s ceiling by 7 to 14 s. Most of it is the policy loop over about 330,000 operations (`normalize`, `write_targets`, `resolve`; profiled warm, 28.7 s with profiler overhead) and about 5 s of unpickling a 329 MB cache. Under heavier load it can still pass the ceiling, and the hint is then silent. The cold fill takes about 5 calls of 30 s each; the hint is silent until a call finishes.
+- Not measured through the Rust caller: that needs a rebuilt release binary.
 
 ## Tests added
 
@@ -107,7 +124,7 @@ State on 2026-11-01: migrate group fixed, seven attribution tests fixed, the res
 Open:
 
 - `lsp::client::tests::workspace_symbols_returns_project_symbols`: tolerant of a timeout since `56457a853`. Open: why one request passes 30 s under load, and proof that the timeout branch runs (the test prints nothing on a retry).
-- The product limit, remainder: old-commit and untracked paths still exceed the 30 s ceiling. Not profiled on the real checkout: how much of the 116 s is the Claude project history and how much the Codex files. Options, none chosen: a per-file cache keyed on path, size and mtime in the engine's private directory (sound, no append-only assumption, larger change); a faster Claude-history read; raising `ATTRIBUTION_TIMEOUT_DEFAULT` (does not cut the cost).
+- The product limit, remainder: the warm engine is 16 to 23 s against the 30 s ceiling, so the margin is thin under load. Options, none chosen: speed up the policy loop in `scan_provenance` (`normalize` and `write_targets` run for every operation, including reads; changing it changes the engine's decisions, so it needs its own equivalence run); store only write-capable operations (halves the cache, needs proof the policy never reads the rest); raise `ATTRIBUTION_TIMEOUT_DEFAULT`. Also not done: an end-to-end run through the Rust caller on a rebuilt binary.
 - The commit hook named a stale writer for `output.rs` (see Fix). Filed as `581b05bbe41134f3`.
 
 ## References
