@@ -12,7 +12,7 @@ topic: background job sidecars
 closed: 2026-11-01
 opened: 2026-11-01
 severity: low
-unverified: 'The sweep was tested on hand-written sidecars. The 224 real orphans in this machine''s record directory have not been seen removed: the running server predates 4bc4c186a. Check after a rebuild and /mcp: the count of owner sidecars with no record should fall to the young ones.'
+unverified: Neither fix has been seen on real data. The sweep needs an orphan at least 7 days old (first one on 2026-11-06). The first fix needs an eviction of a job from the record directory, which a short job does not cause.
 ---
 
 ## Summary
@@ -80,6 +80,13 @@ Delete `*.wake-owner.json` files older than the record retention by hand.
 ## Resume
 
 Fixed in `0d48ddaa6` and `4bc4c186a`. `0d48ddaa6` is already on `origin/experiments` (pushed by the operator on 2026-11-01); `4bc4c186a` is not. The second limit is bug `1ef81db472b12ad7`.
+
+Live check, 2026-11-01 18:00 to 18:05, on the rebuilt binary (`target/release/codescout` 18:00:37, after `4bc4c186a` at 17:53). Established: the counts did not change (794 sidecars, 225 orphans), and the running server is the new one. NOT established, and why:
+
+- The orphan sweep. `RECORD_MAX_AGE` is 7 days, and no orphan is that old: the oldest sidecar is 2026-10-30 07:31, so the first one is sweepable from 2026-11-06 07:31. An unchanged count is the result a broken sweep also gives.
+- The first fix. Records are removed at eviction (`output_buffer.rs:1794`, when more than `max_pending` jobs exist), not at delivery: a job run on the new binary kept its record, `.delivered` and sidecar. So the fix cannot be seen without enough jobs to cause an eviction.
+
+Check on or after 2026-11-06: the orphan count should fall to the orphans younger than 7 days.
 
 ## Fix provenance
 
