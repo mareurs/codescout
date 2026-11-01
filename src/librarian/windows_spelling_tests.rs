@@ -1,13 +1,14 @@
-//! Windows-only proof that `long_form` expands a real 8.3 short name (`db5303eb3b9c2781`).
-//! The pure comparison is pinned on every platform in `windows_spelling`; only this test
-//! touches the Windows call. On a volume with short names switched off the spelling cannot be
-//! made, so the test says so and returns.
+//! Windows-only proof that the door's comparison sees through the respellings a real runner
+//! produces (`db5303eb3b9c2781`). The pure comparison is pinned on every platform in
+//! `windows_spelling`; only these tests touch the Windows calls. On a volume with short names
+//! switched off the short spelling cannot be made, so that test says so and returns.
 
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::path::{Component, PathBuf};
 
 use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
 
-use super::windows_spelling::{long_form, same_location};
+use super::windows_spelling::{agrees, long_form, same_location};
 
 #[test]
 fn long_form_expands_a_real_short_name_to_the_canonical_spelling() {
@@ -36,4 +37,39 @@ fn long_form_expands_a_real_short_name_to_the_canonical_spelling() {
         &real.to_string_lossy(),
         &long_form(&short).to_string_lossy()
     ));
+}
+
+/// A rooted path with no drive means the CURRENT drive's path. The catalog fixtures of the
+/// librarian write `/test/r/a1.md` that way, and a user can type it. The directory is made
+/// under the working directory so it is on the current drive, whichever drive the temp dir is on.
+#[test]
+fn a_rooted_spelling_without_a_drive_agrees_with_its_canonical_form() {
+    let here = std::env::current_dir().unwrap();
+    let dir = tempfile::tempdir_in(&here).unwrap();
+    let file = dir.path().join("rooted.md");
+    std::fs::write(&file, "x").unwrap();
+    let real = std::fs::canonicalize(&file).unwrap();
+
+    // The same path with its prefix (`\\?\D:`) dropped: `\Users\…\rooted.md`.
+    let rooted: PathBuf = std::iter::once(Component::RootDir.as_os_str().to_owned())
+        .chain(
+            real.components()
+                .filter(|c| matches!(c, Component::Normal(_)))
+                .map(|c| c.as_os_str().to_owned()),
+        )
+        .collect();
+    assert!(
+        rooted.has_root() && rooted.components().next() == Some(Component::RootDir),
+        "fixture: {rooted:?} must be rooted with no drive"
+    );
+    assert_ne!(
+        rooted.as_path(),
+        real.as_path(),
+        "precondition: the spellings differ"
+    );
+    assert!(agrees(&real, &rooted), "{rooted:?} names {real:?}");
+
+    // A different file under the same directory is not the same location.
+    let other = rooted.with_file_name("other.md");
+    assert!(!agrees(&real, &other), "{other:?} is not {real:?}");
 }

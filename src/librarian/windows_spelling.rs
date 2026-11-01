@@ -42,9 +42,14 @@ pub(crate) fn same_location(real: &str, spelled: &str) -> bool {
 /// no link between them. Off Windows that is exact equality, as it always was.
 #[cfg(windows)]
 pub(crate) fn agrees(real: &Path, lexical: &Path) -> bool {
+    // A rooted path with no drive (`\test\x`, or `/test/x` as a Unix-minded caller writes it)
+    // means the CURRENT drive's `\test\x` on Windows; `canonicalize` answers `\\?\D:\test\x`.
+    // `absolute` makes the spelling say the drive too. It follows no link, so a link in the
+    // spelling still leaves the two sides different.
+    let absolute = std::path::absolute(lexical).unwrap_or_else(|_| lexical.to_path_buf());
     same_location(
         &real.to_string_lossy(),
-        &long_form(lexical).to_string_lossy(),
+        &long_form(&absolute).to_string_lossy(),
     )
 }
 

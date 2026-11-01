@@ -3443,7 +3443,7 @@ kind = "memory"
                 "SELECT a.abs_path FROM artifact a JOIN artifact_chunk c ON c.artifact_id = a.id WHERE c.chunk_id = ?1",
                 [chunk_id], |row| row.get(0),
             ).unwrap();
-            assert_eq!(found, path.to_string_lossy());
+            assert_eq!(found, crate::util::fs::to_forward_slash(&path));
         }
     }
     /// **One chunk the embedder always rejects must not block the artifacts after it.**
@@ -3831,7 +3831,9 @@ kind = "memory"
             cat.conn
                 .execute(
                     "UPDATE artifact SET updated_at = 0 WHERE abs_path = ?1",
-                    [root.path().join("absent.md").to_string_lossy().into_owned()],
+                    [crate::util::fs::to_forward_slash(
+                        &root.path().join("absent.md"),
+                    )],
                 )
                 .unwrap();
         }
@@ -4085,8 +4087,8 @@ kind = "memory"
         assert_eq!(
             found,
             [
-                a_path.to_string_lossy().into_owned(),
-                b_path.to_string_lossy().into_owned()
+                crate::util::fs::to_forward_slash(&a_path),
+                crate::util::fs::to_forward_slash(&b_path)
             ]
             .into_iter()
             .collect(),

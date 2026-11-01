@@ -1649,7 +1649,11 @@ mod tests {
         use crate::librarian::catalog::artifact::{upsert, TestArtifactRowBuilder};
         use crate::tools::hint_probe::{envelope_of, follow_hint};
         let tmp = tempfile::TempDir::new().unwrap();
-        let root = tmp.path();
+        // The catalog rows and the active project must spell the root one way, as they do when
+        // both come from the same walk. The project is held canonical (`\\?\C:\…` on Windows),
+        // so the rows are written under the canonical root too.
+        let canonical_root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = canonical_root.as_path();
         let core = core_ctx_for_guard(root).await;
 
         let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
