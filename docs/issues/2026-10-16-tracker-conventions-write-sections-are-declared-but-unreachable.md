@@ -342,6 +342,23 @@ Read at the bytes on `experiments`. Nothing was changed.
 
 The design decision for the owner: amend the grammar and the update result (items 2 and 3), or find another way to know that a call changes status. Measure the three section sizes against the ceiling first. Until then the three waivers stay.
 
+### Measured 2026-11-01: the three sections against the ceiling
+
+Section sizes, in bytes, own body from the heading to the next heading (`env LC_ALL=C awk` over `src/prompts/guides/tracker-conventions.md`; a plain `awk` counts characters and reads 1,562, 1,624 and 357):
+
+| Section | Bytes |
+|---|---|
+| `Settled caveats — STANDING and TRACKED` | 1,578 |
+| `Closing a bug — patch-id and fix provenance` | 1,634 |
+| `Archiving a tracker` | 359 |
+| Total | 3,571 |
+
+The p50 fixture in `a_p50_session_stays_under_the_committed_emission_byte_ceiling` issues `update` with `{"patch": {"status": "active"}}` on a tracker. That is a status-changing update. The ceiling is `CEILING = 12_244`. The test records a margin of 9 B on 2026-10-18 and a derived margin of 128 B on 2026-09-02. I did not re-measure the margin today, because even the largest recorded margin is far below 3,571 B.
+
+So a status predicate that matches any status change would deliver all three sections to that fixture call and fail the ceiling by roughly 3.4 KB. These sizes exclude any `requires:` closure and the block wrapper, so the true figure is not below this.
+
+What the sizes allow: a predicate on the status VALUE keeps the fixture unaffected. `archived` needs only `Archiving a tracker` (359 B). `fixed` or another closing status needs `Settled caveats` and `Closing a bug` (3,212 B). `active` needs none. That design needs the grammar to read the status, and the update result to carry it, as in items 2 and 3 above. Not tested: whether the closing sections fit a real session's budget once per session. The ledger delivers each section once per session, so the cost is one-time.
+
 ## References
 
 - `docs/issues/2026-10-17-p50-emission-budget-fixture-never-archives-a-bug-file-so-the-largest-doc-move-delivery-is-unbudgeted.md`
