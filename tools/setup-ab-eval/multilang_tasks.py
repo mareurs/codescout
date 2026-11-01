@@ -27,6 +27,7 @@ from pathlib import Path
 
 import arms
 import leak_scan
+import live_sweep
 import multilang_control as control
 import multilang_grade as grade
 import multilang_records as records_mod
@@ -50,9 +51,56 @@ class LiveRefused(ValueError):
     """The control or the record does not allow a Live bundle."""
 
 
+def orphan_sweep_sh(workdir):
+    """Shell: delete every `target/*/deps/<stem>.*` (and the extensionless binary) whose dep-info
+    `<stem>.d` lists a workspace source, with the fingerprints that carry the stem's hash. A
+    dep-info line is `<output path>: <sources>`; a workspace source is a relative path
+    (`crates/x/src/lib.rs`) or one under `workdir`, a dependency's is an absolute registry path.
+    (The output path is absolute in every file, so it must not be what decides.) Dependency
+    artifacts stay. Run from the workdir."""
+    wd = workdir.rstrip("/") + "/"
+    return ("for d in target/*/deps; do [ -d \"$d\" ] || continue; "
+            "for f in \"$d\"/*.d; do [ -e \"$f\" ] || continue; "
+            "sed -n '1s/^[^ ]*: //p' \"$f\" | tr ' ' '\\n' "
+            f"| grep -qE {shlex.quote('^([^/]|' + wd.replace('.', '\\.') + ')')} || continue; "
+            "s=$(basename \"$f\" .d); "
+            "rm -rf \"$d/$s\" \"$d/$s\".*; "
+            "rm -rf \"$(dirname \"$d\")\"/.fingerprint/*-\"${s##*-}\"; done; done")
+
+
+def _workspace_clean_and_rebuild(record, workdir):
+    """Shell for the `target/` of the raw image. It was built by a third party from a tree with
+    the gold fix applied, so its workspace artifacts (build scripts, test binaries, incremental
+    caches) hold gold-only text (verified: a gold-only line was in `build-script-build`, in
+    `incremental/*.o` and in the gold test's binary). Third-party dependency artifacts are kept
+    warm; everything built from the workspace is removed and rebuilt from the base tree:
+      1. `cargo clean -p <every workspace package>`, dev and release;
+      2. every `incremental/` dir (only workspace crates are compiled incrementally);
+      3. `orphan_sweep_sh`: the artifacts of a target that no longer exists at base (the gold
+         test), which `cargo clean -p` cannot name;
+      4. the record's rebuild commands, offline."""
+    packages = ("$(cargo metadata --no-deps --offline --format-version 1 "
+                "| grep -o '\"name\":\"[^\"]*\",\"version\":\"' "
+                "| sed 's/\"name\":\"\\([^\"]*\\)\".*/\\1/' | sort -u)")
+    cmds = [c.replace("\r", " ").replace("\n", " ; ") for c in (record.get("rebuild_cmds") or [])
+            if isinstance(c, str) and c.strip()]
+    steps = [
+        f"PK={packages}",
+        '[ -n "$PK" ]',
+        "ARGS=$(for p in $PK; do printf ' -p %s' \"$p\"; done)",
+        "cargo clean --offline $ARGS",
+        "cargo clean --offline --release $ARGS",
+        "rm -rf target/*/incremental",
+        orphan_sweep_sh(workdir),
+        *[f"( {c} )" for c in cmds],
+    ]
+    return " \\\n && ".join(" " + s if i == 0 else s for i, s in enumerate(steps))
+
+
 def live_dockerfile(source_ref, record, workdir):
     """The task image recipe. One RUN, so the chown of `target/` is one layer: `target/` is kept
-    (R12: prebuilt output the agent builds on offline) but is neither tracked nor scanned."""
+    (R12: prebuilt output the agent builds on offline) but its workspace artifacts are rebuilt from
+    the base tree (`_workspace_clean_and_rebuild`); it is neither tracked nor scanned by tree."""
     base = record["base_commit"]
     if not _COMMIT.match(base):
         raise LiveRefused(f"base_commit is not a hex commit id: {base!r}")
@@ -63,9 +111,12 @@ def live_dockerfile(source_ref, record, workdir):
     gits = " ".join(shlex.quote(p) for p in dict.fromkeys([f"{workdir}/.git", "/testbed/.git"]))
     return (f"FROM {source_ref}\nUSER root\n"
             "RUN set -eu \\\n"
+            " && export CARGO_NET_OFFLINE=true \\\n"
             f" && cd {wd} \\\n"
             f" && git reset --hard -q {base} \\\n"
             " && git clean -fdq -e target \\\n"
+            " && TREE=$(git rev-parse HEAD^{tree}) \\\n"
+            f" &&{_workspace_clean_and_rebuild(record, workdir)} \\\n"
             f" && rm -rf {reports} \\\n"
             f" && rm -rf {gits} \\\n"
             " && git init -q \\\n"
@@ -73,6 +124,7 @@ def live_dockerfile(source_ref, record, workdir):
             " && git config user.name Diagnostic \\\n"
             " && printf '/target\\n' >> .git/info/exclude \\\n"
             f" && git add . && git commit -qm '{tasks.FOREIGN_ROOT_SUBJECT}' \\\n"
+            ' && test "$(git rev-parse HEAD^{tree})" = "$TREE" \\\n'
             " && (getent group 1000 >/dev/null || groupadd --gid 1000 agent) \\\n"
             " && (id -u 1000 >/dev/null 2>&1 || useradd --uid 1000 --gid 1000 --create-home "
             "--shell /bin/bash agent) \\\n"
@@ -249,11 +301,89 @@ def arm_live(bundle_json):
     return rec
 
 
+SWEEP_EXCLUDES = ("/proc", "/sys", "/dev", "/usr/local/cargo", "/usr/local/rustup", "/opt/sab", "/sweep")
+SWEEP_TIMEOUT = 4 * 3600
+SWEEP_MIN_LITERAL = 30
+
+
+def gold_literals(record, baseline_root):
+    """The gold-only added lines: every stripped added line of `patch` and `test_patch` with at
+    least SWEEP_MIN_LITERAL characters that no file of the baseline tree contains. Compiled output
+    keeps such a line verbatim, so a byte search finds it where the token scan cannot run."""
+    cands = {}
+    for key in ("patch", "test_patch"):
+        for line in record[key].splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                s = line[1:].strip()
+                if len(s) >= SWEEP_MIN_LITERAL:
+                    cands.setdefault(s, s.encode())
+    for _, data in tasks.tree_files(baseline_root):
+        for s in [s for s, b in cands.items() if b in data]:
+            del cands[s]
+        if not cands:
+            break
+    return list(cands)
+
+
+def run_sweep(image, needles, literals, data):
+    """live_sweep.py inside `image` as its user (uid 1000), network off; the report is saved as
+    `<data>/sweep.json`. Raises when the sweep itself fails (fail closed)."""
+    data = Path(data)
+    data.mkdir(parents=True, exist_ok=True)
+    spec = data / "sweep-input.json"
+    spec.write_text(json.dumps({"needles": list(needles), "literals": list(literals),
+                                "excludes": list(SWEEP_EXCLUDES)}))
+    mounts = []
+    for src, dst in ((tasks.HERE / "live_sweep.py", "/sweep/live_sweep.py"),
+                     (tasks.HERE / "leak_scan.py", "/sweep/leak_scan.py"), (spec, "/sweep/input.json")):
+        mounts += ["-v", f"{src}:{dst}:ro"]
+    r = pilot.docker("run", "--rm", "--network", "none", "--cpus", "4", "--memory", "16g",
+                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges", *mounts,
+                     "--entrypoint", "python3", image, "/sweep/live_sweep.py", "/sweep/input.json", "/",
+                     timeout=SWEEP_TIMEOUT)
+    report = json.loads(r.stdout)
+    (data / "sweep.json").write_text(json.dumps(report, indent=2) + "\n")
+    return report
+
+
+def sweep_reasons(report):
+    """Why a sweep report fails the gate: any needle or literal hit anywhere the agent can read,
+    and any patch, diff, eval script or gold-named file outside the operating system's own dirs."""
+    reasons = []
+    if report["hits"]:
+        reasons.append(f"sweep: {len(report['hits'])} needle/literal hits, first {report['hits'][0]}")
+    stray = [p for p in report["suspicious"] if not p.startswith(live_sweep.SYSTEM_PREFIXES)]
+    if stray:
+        reasons.append(f"sweep: patch/diff/eval-like files outside system dirs: {stray[:5]}")
+    if not report["files"]:
+        reasons.append("sweep: 0 files scanned")
+    return reasons
+
+
 def prescan_live(bundle_json, manifest, data):
-    """tasks.prescan_task on the agent image: the leak gate with its positive control."""
+    """The leak gate on the agent image: tasks.prescan_task (testbed minus target, home, /opt/sab,
+    tmp, git objects, config roots) plus the Live sweep (everything the agent user can read under /
+    on this filesystem, `target/` included, with the gold-only literals). Writes
+    `<data>/prescan.json` with `sweep` and `reasons`; `ok` is True iff `reasons` is empty."""
+    bundle_json = Path(bundle_json)
     b = load_live(bundle_json)
     image = agent_image_name(b.record["task_image"])
-    return tasks.prescan_task(b._replace(image=image), manifest, data, image=image)
+    out = dict(tasks.prescan_task(b._replace(image=image), manifest, data, image=image))
+    reasons = list(out.get("reasons") or [])
+    if out.get("control") != "pass":
+        reasons.append(f"prescan control {out.get('control')}: {out.get('error')}")
+    if out.get("hits"):
+        reasons.append(f"prescan: {len(out['hits'])} needle hits in the agent roots")
+    record = json.loads(Path(b.record["record_path"]).read_text())
+    literals = gold_literals(record, Path(b.record["out"]) / "baseline-tree" / "testbed")
+    report = run_sweep(image, b.needles.needles, literals, data)
+    reasons += sweep_reasons(report)
+    out.update(sweep={k: v for k, v in report.items() if k not in ("hits", "unreadable")}
+               | {"hits": report["hits"], "literals": len(literals),
+                  "unreadable_count": report["unreadable_count"]},
+               reasons=reasons, ok=not reasons)
+    (Path(data) / "prescan.json").write_text(json.dumps(out, indent=2) + "\n")
+    return out
 
 
 def _records_by_id(path):
@@ -271,6 +401,7 @@ def main(argv=None):
     ap.add_argument("--max-image-gb", type=float, default=control.MAX_IMAGE_GB)
     args = ap.parse_args(argv)
     by_id = _records_by_id(args.records) if args.action == "build" else {}
+    failed = False
     for task_id in args.ids:
         control._safe_id(task_id)
         d = args.root / task_id
@@ -287,8 +418,11 @@ def main(argv=None):
             print(json.dumps({"id": task_id, "arm_image": rec["arm_image"]}), flush=True)
         else:
             r = prescan_live(d / "bundle.json", json.loads(args.manifest.read_text()), d / "prescan")
-            print(json.dumps({"id": task_id, "control": r["control"], "hits": len(r.get("hits", []))}),
-                  flush=True)
+            print(json.dumps({"id": task_id, "control": r["control"], "hits": len(r.get("hits", [])),
+                              "sweep_hits": len(r["sweep"]["hits"]), "ok": r["ok"],
+                              "reasons": r["reasons"]}), flush=True)
+            failed = failed or not r["ok"]
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

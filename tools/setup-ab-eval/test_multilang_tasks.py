@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,7 +53,8 @@ class LiveDockerfileTests(unittest.TestCase):
         self.assertIn("git clean -fdq -e target", text)
         for line in text.splitlines():
             if "rm -rf" in line:
-                self.assertNotIn("target", line, "target/ is kept, never removed")
+                self.assertNotIn("rm -rf target ", line + " ", "target/ is kept, never removed whole")
+                self.assertNotIn("/testbed/target", line)
         self.assertIn("printf '/target\\n' >> .git/info/exclude", text)
 
     def test_live_dockerfile_removes_reports_in_both_locations(self):
@@ -266,6 +268,222 @@ class ArmLiveTests(unittest.TestCase):
         self.assertEqual((rec["run_image"], rec["arm_image"], rec["image"]),
                          ("sab-run-o__r-1:t1", "sab-arm-o__r-1:t1", "sab-arm-o__r-1:t1"))
         self.assertNotIn("template", json.loads(bj.read_text()))
+class WorkspaceArtifactTests(unittest.TestCase):
+    """The raw image's target/ was built with the gold fix applied; its workspace artifacts are
+    cleaned and rebuilt from the base tree."""
+
+    def text(self, **kw):
+        return mt.live_dockerfile("src", record(rebuild_cmds=["cargo build --workspace"], **kw), "/testbed")
+
+    def test_workspace_artifacts_are_cleaned_then_rebuilt_after_the_reset_and_before_the_chown(self):
+        t = self.text()
+        order = [t.index(x) for x in ("git reset --hard", "cargo clean --offline $ARGS",
+                                      "cargo clean --offline --release $ARGS", "rm -rf target/*/incremental",
+                                      ".fingerprint", "( cargo build --workspace )", "git init",
+                                      "chown -R")]
+        self.assertEqual(order, sorted(order))
+        self.assertIn("cargo metadata --no-deps --offline", t)
+        self.assertIn("export CARGO_NET_OFFLINE=true", t)
+
+    def test_the_final_tree_must_equal_the_base_commit_tree(self):
+        t = self.text()
+        self.assertIn("TREE=$(git rev-parse HEAD^{tree})", t)
+        self.assertIn('test "$(git rev-parse HEAD^{tree})" = "$TREE"', t)
+        self.assertLess(t.index("TREE=$("), t.index("git init"))
+        self.assertGreater(t.index('= "$TREE"'), t.index("git commit"))
+
+    def test_a_record_without_rebuild_commands_still_cleans(self):
+        t = mt.live_dockerfile("src", record(), "/testbed")
+        self.assertIn("cargo clean --offline $ARGS", t)
+        self.assertNotIn("( cargo", t)
+
+    def test_a_multiline_rebuild_command_stays_on_the_run_line(self):
+        t = mt.live_dockerfile("src", record(rebuild_cmds=["cd x\ncargo build"]), "/testbed")
+        self.assertIn("( cd x ; cargo build )", t)
+
+    def test_orphan_sweep_removes_workspace_artifacts_of_a_vanished_target_and_keeps_dependencies(self):
+        import shutil
+        import subprocess
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        wd = tmp / "testbed"
+        deps = wd / "target" / "debug" / "deps"
+        fp = wd / "target" / "debug" / ".fingerprint"
+        deps.mkdir(parents=True)
+
+        def make(stem, source):
+            # as cargo writes it: the output path is absolute for every artifact
+            (deps / f"{stem}.d").write_text(f"{deps}/{stem}.d: {source}\n{source}:\n")
+            (deps / stem).write_text("GOLD-ONLY" if "crates/" in source else "dep")
+            (deps / f"{stem}.o").write_text("obj")
+            (fp / f"pkg-{stem.rsplit('-', 1)[1]}").mkdir(parents=True)
+
+        make("gold_test-aaaa1111aaaa1111", "crates/c/tests/gold_test.rs crates/c/src/lib.rs")
+        make("abs_ws-cccc3333cccc3333", f"{wd}/crates/c/src/lib.rs")
+        make("libserde-bbbb2222bbbb2222", "/usr/local/cargo/registry/src/serde/lib.rs")
+        subprocess.run(["bash", "-c", mt.orphan_sweep_sh(str(wd))], cwd=wd, check=True)
+        left = sorted(p.name for p in deps.iterdir())
+        self.assertEqual(left, ["libserde-bbbb2222bbbb2222", "libserde-bbbb2222bbbb2222.d",
+                                "libserde-bbbb2222bbbb2222.o"])
+        self.assertEqual([p.name for p in fp.iterdir()], ["pkg-bbbb2222bbbb2222"])
+
+
+class GoldLiteralsTests(unittest.TestCase):
+    def test_only_long_added_lines_missing_from_the_base_tree_are_literals(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        (tmp / "a.rs").write_text(f"x\n{RUN1}\n")
+        got = mt.gold_literals(record(), tmp)
+        self.assertIn(RUN2, got)
+        self.assertNotIn(RUN1, got, "already in the base tree")
+        self.assertTrue(all(len(x) >= mt.SWEEP_MIN_LITERAL for x in got))
+        self.assertTrue(any("test_new_behaviour" in x for x in got), "test_patch lines count too")
+
+
+class SweepTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+
+    def put(self, rel, data):
+        p = self.tmp / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data if isinstance(data, bytes) else data.encode())
+        return p
+
+    def sweep(self, needles=(), literals=(), excludes=(), **kw):
+        import live_sweep
+        return live_sweep.sweep(self.tmp, needles, literals, excludes, **kw)
+
+    def test_the_sweep_reads_target_and_finds_a_literal_in_a_large_binary(self):
+        lit = "// a gold-only comment line that is longer than thirty chars"
+        self.put("testbed/target/debug/build/x/build-script-build", b"\0" * 5000 + lit.encode() + b"\0" * 99)
+        r = self.sweep(literals=[lit], token_max=100)
+        self.assertEqual([(h["path"], h["needle"]) for h in r["hits"]],
+                         [("/testbed/target/debug/build/x/build-script-build", lit)])
+        self.assertEqual((r["literal_only"], r["token_scanned"]), (1, 0))
+
+    def test_a_literal_across_a_window_edge_is_found(self):
+        lit = "0123456789abcdefghij" * 3
+        self.put("testbed/target/x.o", b"z" * 37 + lit.encode() + b"z" * 50)
+        for window in (16, 40, 64, 97):
+            with self.subTest(window=window):
+                self.assertEqual(len(self.sweep(literals=[lit], token_max=1, window=window)["hits"]), 1)
+
+    def test_the_sweep_finds_a_token_needle_in_a_small_target_file(self):
+        self.put("testbed/target/debug/.fingerprint/p/dep-info", "alpha beta gamma delta epsilon zeta eta theta iota")
+        r = self.sweep(needles=["alpha beta gamma delta epsilon zeta eta theta"])
+        self.assertEqual(r["hits"][0]["path"], "/testbed/target/debug/.fingerprint/p/dep-info")
+        self.assertEqual(r["token_scanned"], 1)
+
+    def test_a_path_needle_matches_the_name_of_a_large_file(self):
+        self.put("testbed/target/debug/deps/gold_test_name-abc", b"x" * 500)
+        r = self.sweep(needles=["gold_test_name"], token_max=10)
+        self.assertEqual([h["needle"] for h in r["hits"]], ["gold_test_name"])
+
+    def test_the_excludes_are_skipped_and_recorded_with_whether_they_exist(self):
+        lit = "a literal that is only inside the excluded toolchain dir"
+        self.put("usr/local/cargo/registry/x.rs", lit)
+        self.put("testbed/ok.txt", "clean")
+        r = self.sweep(literals=[lit], excludes=["/usr/local/cargo", "/usr/local/rustup"])
+        self.assertEqual(r["hits"], [])
+        self.assertEqual(r["excluded"], {"/usr/local/cargo": True, "/usr/local/rustup": False})
+        self.assertEqual(r["files"], 1)
+
+    def test_patch_diff_and_eval_files_are_listed_and_system_ones_do_not_fail(self):
+        for rel in ("testbed/fix.patch", "tmp/eval_script.sh", "home/agent/gold.txt", "usr/share/doc/x/a.diff",
+                    "testbed/src/main.rs"):
+            self.put(rel, "x")
+        r = self.sweep()
+        self.assertEqual(sorted(r["suspicious"]), ["/home/agent/gold.txt", "/testbed/fix.patch",
+                                                  "/tmp/eval_script.sh", "/usr/share/doc/x/a.diff"])
+        reasons = mt.sweep_reasons(r)
+        self.assertEqual(len(reasons), 1)
+        self.assertNotIn("/usr/share", reasons[0])
+        self.assertEqual(mt.sweep_reasons({"hits": [], "files": 3, "suspicious": ["/usr/share/doc/x/a.diff"]}), [])
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads everything")
+    def test_unreadable_files_and_dirs_are_counted_not_fatal(self):
+        self.put("testbed/secret/a.txt", "x")
+        self.put("testbed/b.txt", "y")
+        os.chmod(self.tmp / "testbed" / "secret", 0)
+        self.addCleanup(os.chmod, self.tmp / "testbed" / "secret", 0o755)
+        r = self.sweep()
+        self.assertGreaterEqual(r["unreadable_count"], 1)
+        self.assertEqual(r["files"], 1)
+
+    def test_the_gate_never_excludes_the_workdir_or_target(self):
+        for e in mt.SWEEP_EXCLUDES:
+            self.assertFalse(e == "/" or "/testbed".startswith(e + "/") or e.startswith("/testbed")
+                             or e.startswith("/home") or e.startswith("/tmp"), e)
+
+
+class PrescanLiveTests(unittest.TestCase):
+    """prescan_live must run the sweep over the real filesystem, `target/` included, and fail on a hit."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        out = self.tmp / "t" / "build"
+        (out / "baseline-tree" / "testbed").mkdir(parents=True)
+        (out / "baseline-tree" / "testbed" / "a.rs").write_text(f"{RUN1}\n")
+        (out / "record.json").write_text(json.dumps(record()))
+        self.bj = self.tmp / "t" / "bundle.json"
+        self.bj.write_text(json.dumps({"kind": "live", "out": str(out), "record_path": str(out / "record.json"),
+                                       "task_image": "sab-task-o__r-1:t1", "image": "sab-agent-cs-o__r-1:t1"}))
+        self.data = self.tmp / "t" / "prescan"
+        self.data.mkdir()
+        self.docker = []
+
+    def prescan(self, report):
+        def fake_docker(*args, **kw):
+            self.docker.append(args)
+            return SimpleNamespace(stdout=json.dumps(report), returncode=0)
+
+        clean = {"id": "o__r-1", "control": "pass", "hits": [], "reasons": []}
+        with mock.patch.object(tasks, "prescan_task", return_value=clean), \
+                mock.patch.object(mt.pilot, "docker", fake_docker):
+            return mt.prescan_live(self.bj, {}, self.data)
+
+    def good(self, **kw):
+        r = {"files": 10, "hits": [], "suspicious": [], "unreadable_count": 0}
+        r.update(kw)
+        return r
+
+    def test_live_prescan_runs_the_sweep_as_the_image_user_over_root_with_target_not_excluded(self):
+        r = self.prescan(self.good())
+        self.assertTrue(r["ok"])
+        (args,) = self.docker
+        self.assertEqual(args[:3], ("run", "--rm", "--network"))
+        self.assertIn("none", args)
+        self.assertNotIn("-u", args)  # the image user (1000), not root
+        self.assertEqual(args[-3:], ("/sweep/live_sweep.py", "/sweep/input.json", "/"))
+        spec = json.loads((self.data / "sweep-input.json").read_text())
+        self.assertFalse([e for e in spec["excludes"] if "target" in e or e.startswith("/testbed")])
+        self.assertIn(RUN2, spec["literals"])
+        self.assertNotIn(RUN1, spec["literals"])  # already in the base tree
+        self.assertTrue((self.data / "sweep.json").exists())
+        self.assertEqual(json.loads((self.data / "prescan.json").read_text())["ok"], True)
+
+    def test_live_prescan_fails_on_a_sweep_hit_in_target(self):
+        hit = {"path": "/testbed/target/debug/build/x/build-script-build", "needle": RUN2, "offset": 5}
+        r = self.prescan(self.good(hits=[hit]))
+        self.assertFalse(r["ok"])
+        self.assertIn("target/debug/build", " ".join(r["reasons"]))
+        self.assertFalse(json.loads((self.data / "prescan.json").read_text())["ok"])
+
+    def test_live_prescan_fails_on_a_stray_patch_file_and_on_an_empty_sweep(self):
+        self.assertFalse(self.prescan(self.good(suspicious=["/tmp/fix.patch"]))["ok"])
+        self.assertFalse(self.prescan(self.good(files=0))["ok"])
+
+    def test_live_prescan_fails_when_the_base_prescan_failed(self):
+        clean = {"id": "o__r-1", "control": "FAILED", "error": "boom"}
+        with mock.patch.object(tasks, "prescan_task", return_value=clean), \
+                mock.patch.object(mt.pilot, "docker", lambda *a, **k: SimpleNamespace(
+                    stdout=json.dumps(self.good()), returncode=0)):
+            self.assertFalse(mt.prescan_live(self.bj, {}, self.data)["ok"])
+
+
 
 
 if __name__ == "__main__":
