@@ -77,7 +77,7 @@ None.
 Stopped 2026-10-31 by the owner's decision: the large costs are gone and each remaining lever is about 1 s of a 6-7 s run, for a manual command. Not pursued, with the reasons:
 
 - A persistent cache of `extract` output keyed by content hash: rejected. Doctor is a correctness gate, and a stale entry after a regex change would report a clean run that is not clean. It would also need serde on `DocExtract`, `Definition`, `Citation`, `CitationKind` and `EntrySection`, and a new catalog table.
-- An mtime shortcut for the sha256 in `scan_artifact_paths`: unsafe, because mtime on a tracked file measures other sessions' git operations (`fff5758f95e2fda2`).
+- An mtime shortcut for the sha256 in `scan_artifact_paths`: unsafe, because mtime on a tracked file measures other sessions' git operations (`69944dc286bcefef`).
 - Open lever, unmeasured: warm the in-memory extract memo in parallel with `std::thread::scope`, about 1-1.5 s of wall time estimated. It needs a merge step into the thread-local memo and the same admission logic as `DoctorScope::admit`.
 - Open lever, small: skip the two `:`-anchored token regexes for a chunk with no `:`; the output is identical by construction.
 

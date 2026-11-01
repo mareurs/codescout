@@ -1,14 +1,14 @@
 ---
-id: fff5758f95e2fda2
+id: 69944dc286bcefef
 kind: bug
-status: open
+status: fixed
 title: 'BUG: on a tracked-and-dirty file, mtime measures other sessions'' git operations, not its author''s edits'
 owners:
 - marius
 tags:
 - cluster/shared-resource-carries-no-owner
 topic: mtime as a staleness instrument on a shared checkout
-closed: ''
+closed: 2026-11-01
 opened: 2026-09-07
 owner: marius
 related: []
@@ -177,8 +177,7 @@ frontmatter for `entry_dated_stale`. A check that flags a `status: open` file wh
 `last_observed` is old — rather than whose mtime is old — would put the right field on the read
 surface. Deliberately not specified further here; it needs a population count first.
 
-- **SHA (experiments):** N/A — no code change
-- **patch-id:** N/A
+The doctor check proposed above was not built. See § Fix provenance for the buffer fix that closes the record.
 
 ## Tests added
 
@@ -199,6 +198,8 @@ that pins the operating system's behaviour.
 
 ## Resume
 
+Closed 2026-11-01; see § Fix provenance. The text below is the history of that decision.
+
 Decide whether the doctor check in § *Fix* is worth building. Before designing it, count the
 population: how many `status: open` bug files carry `last_observed:` at all
 (`grep -l '^last_observed:' docs/issues/*.md`), since a check over a field almost nothing declares
@@ -209,6 +210,15 @@ stays open as a pointer rather than a task.
 **Count run 2026-10-29** (`grep -l '^last_observed:' docs/issues/*.md`, then filtered on `^status: open`; 27 files in `docs/issues/*.md` carry `status: open`): **6 files declare `last_observed:`, and 0 of them are `status: open`.** Their statuses are 5 zombie and 1 mitigated. The field is a zombie-record convention, not something open bugs carry. A doctor check over `last_observed:` on open bugs would have an empty population and could not fire today. Recommendation: do not build it; keep the finding as a triage rule and leave this file open as a pointer. Re-count if open bugs start declaring the field. (Counted over `docs/issues/*.md` only, not `docs/issues/archive/`.)
 
 **Re-verified 2026-10-31 (group G worktree pass, `experiments` @ `0f8705532`); status unchanged.** Buffer fix `4487a34c2` is an ancestor of HEAD. `grep -l '^last_observed:' docs/issues/*.md` still returns 6 files, matching the 2026-10-29 count, so the doctor check would have no population to fire on. No code change. Stays open as a triage-rule pointer; closing it as a property of git is the owner's call.
+
+## Fix provenance
+
+Closed 2026-11-01. Only the buffer consequence was a code defect. Git's mtime behaviour is a property of git, and the triage rule in § Fix covers it. A re-count on 2026-11-01 found 8 files in `docs/issues/*.md` with `last_observed:` (5 zombie, 1 mitigated, 2 fixed) and 0 with `status: open`, so the proposed doctor check still has an empty population and stays unbuilt.
+
+- **SHA:** `4487a34c2e7a4a919b2d0bd9e92be7f3856f9d34`
+- **patch-id:** `7e1a3a2858f3c27a5b777db567352e50b31b6d44`
+
+Both values were re-read on 2026-11-01: `4487a34c2` is an ancestor of `HEAD`, and `git show 4487a34c2 | git patch-id --stable` printed that patch-id.
 
 ## References
 
