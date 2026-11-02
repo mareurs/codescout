@@ -67,6 +67,8 @@ does not parse disables it the same way.
 
 ## What you lose with `librarian` off
 
+<!-- audit-doc-refs:ignore-refs `tools/list` — the MCP method name, not a path (the repo root has a tools/ directory, so the audit would read it as a missing file) -->
+
 - The two librarian tools disappear from `tools/list`.
 - The librarian instructions block is omitted from the MCP `instructions`
   field, so the LLM gets no hint that artifact tooling exists.

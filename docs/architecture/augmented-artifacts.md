@@ -249,7 +249,7 @@ the augmentation's *stored* template:
 
 So **the stored `render_template` never reaches the file on disk.** The refresh
 path does not consume it: every `render_template` occurrence in
-`tools/refresh.rs` and `tools/update.rs` is a test fixture set to `None`. The
+`src/librarian/tools/refresh.rs` and `src/librarian/tools/update.rs` is a test fixture set to `None`. The
 body is whatever the prompt + LLM produce during `doc(action="gather") →
 doc(update, commit_refresh=true)`, with or without a template.
 
