@@ -222,6 +222,19 @@ Status stays `open` and the frontmatter `unverified:` caveat is kept: it concern
 
 ## Resume
 
+### Payload probe, 2026-11-02 (Tier 2 design input; no code written)
+
+One real `claude -p` run (2.1.316, `haiku`, a temp directory, a `--settings` file that appended every `PostToolUse` payload for `Read|Grep|Glob|Agent|WebFetch|Task` to a file; nothing persistent changed) asked for a `Read`, a `Grep`, a `Glob` and a subagent that reads a file. Four payloads came back.
+
+- **Every payload carries:** `session_id`, `tool_use_id`, `tool_name`, `tool_input`, `tool_response`, `duration_ms`, `cwd`, `transcript_path`, `effort`, `permission_mode`, `prompt_id`, `hook_event_name`.
+- **`agent_id` and `agent_type` appear only on a subagent's own call** (the `Read` of `b.txt`: `agent_id` set, `agent_type` `general-purpose`). The main thread's `Read`, `Grep` and `Agent` calls have neither key. The subagent's payload has the SAME `session_id` as its parent, so a join to `usage.db` on `cc_session_id` covers subagents.
+- **`tool_input` keys:** `Read` `file_path`; `Grep` `path`, `pattern`; `Agent` `description`, `prompt`, `subagent_type`. `Agent`'s response carries `agentId`, `isAsync` and `status`: its payload is the launch, not the end.
+- **`duration_ms` is free,** so a hook-written row can hold per-call latency without any new capture.
+- **`Glob` produced no payload:** a hook blocked it before it ran (the run's own answer says so), so `PostToolUse` never fired. A failed call fires a different event, not tested here. `WebFetch` was not tested.
+- **Coverage of the alternative:** of 194 sessions in `usage.db` since 2026-10-25 only 19 (9.8%) still have a transcript file under the four profiles, 44.1% of the calls. Transcripts alone cannot answer this. `usage.db` has `cc_session_id` on every row and `tool_use_id` on 62.7%.
+
+Not shown: `agent_id` on `Grep`/`WebFetch` from a subagent (only `Read` was seen), interleaving of concurrent appends, and the payload of a failed call.
+
 Tier 1 is in on `experiments` (local, not pushed at the time of writing). Remaining, needs a human decision: Tier 2 (*Open question 1*, the write path, and *Open question 2*, what of the command to store), and whether Tier 2 still has a demand argument now that `permissions.deny` blocks native `Bash` in all three profiles (the `Bash` half is closed by policy; `Read`, `Grep`, `Glob`, `Agent`, `WebFetch` remain unrecorded). Smaller follow-ups: reconcile `.claude/skills/analyze-usage/SKILL.md` ~255 / ~387 with `RECORDER_SCOPE` so there is one wording, and retitle the file to the native-non-shell-tool blind spot (only if the id-rekey cost named in `## Summary` is judged acceptable).
 
 ## Re-verified at HEAD 2026-10-30 (Group F pass) — fix vs marker decision
