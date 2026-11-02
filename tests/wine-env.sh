@@ -126,7 +126,11 @@ eq "env succeeds once the profile is ready" "$code" 0
 # Evaluate the output the way build-windows.sh does, in a clean subshell, and look at the result.
 res="$(unset WINEPREFIX CODESCOUT_BASH WINEPATH; eval "$(cat "$WORK/env.out")"; printf '%s|%s|%s' "$WINEPREFIX" "$CODESCOUT_BASH" "$WINEPATH")"
 has "WINEPREFIX is the profile's prefix" "$res" "$CODESCOUT_WINE_HOME/"
-has "CODESCOUT_BASH is a WINDOWS path (Z:\\, backslashes)" "$res" 'Z:\home'
+# The expected Windows spelling comes from the home the suite chose, never from a literal: a
+# `Z:\home` literal held on the dev machine (mktemp under /home) and failed on the CI runner
+# (mktemp under /tmp), which is the class of a test that passes for the wrong reason.
+want="Z:$(printf '%s' "$CODESCOUT_WINE_HOME" | tr / '\\')\\"
+has "CODESCOUT_BASH is a WINDOWS path (Z:\\, backslashes)" "$(printf '%s' "$res" | cut -d'|' -f2)" "$want"
 has "CODESCOUT_BASH names bash.exe" "$res" 'bin\bash.exe'
 has "WINEPATH carries git's cmd directory" "$res" 'cmd'
 has "WINEPATH carries the python directory" "$res" 'python\tools'
