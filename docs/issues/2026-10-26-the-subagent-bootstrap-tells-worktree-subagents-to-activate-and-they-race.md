@@ -88,7 +88,20 @@ One item stays open. To close it, run a worktree subagent campaign and confirm t
 
 A subagent dispatched on this date in a linked worktree (`.claude/worktrees/agent-a88be249b09c25d52`) received the new bootstrap: "do NOT call workspace(action=\"activate\")" and "pin EVERY codescout call with workspace=<abs worktree>". So the companion hook change is live for that profile; the 2026-10-29 observation of the old text is not reproduced. Cause B reproduced: that worktree was cut from `5a8b14691` (July), while the issue files the brief named exist only on `experiments`; the subagent had to `git reset --hard` its own branch to `experiments`. No code in this repo changed. Still open: a pin that differs only by a symlink in the companion's write guard (companion repo, not touched here), and the base-commit mismatch, which the worktree creator owns.
 
-## References
+## Cause A closed, cause B open (2026-11-02)
+
+**Cause A (the activate race) is fixed in `claude-plugins`.** Both commits verified with `git -C /home/marius/work/claude/claude-plugins show --stat <sha>`, patch-ids from `git show <sha> | git patch-id --stable` in that repo:
+
+| commit | what | patch-id |
+|---|---|---|
+| `claude-plugins:968f7b9cf88a435af984697ca5252bd5d96423b8` | parts 1 and 2: `subagent-guidance.mjs` tells a linked-worktree subagent to pin and not to `activate`; `worktree-write-guard.mjs` passes a write whose `workspace=` pin resolves to the worktree root (4 files, +116 -6) | `d122a6a45c035ecf08eb2e4431713e3bdfbbace8` |
+| `claude-plugins:2dca6faef2040ea58960b58ef64c0f7764828d68` | the symlink pin test, `worktree-write-guard.test.sh` (+9) | `edce26168b0c3f94c5ec3e6b4c9958600fa0e1ab` |
+
+Both are ancestors of `origin/main` (`merge-base --is-ancestor`, 2026-11-02). § Resume calls `2dca6fa` "local, not pushed"; that is no longer true. On 2026-11-02 all four profiles' `installed_plugins.json` record codescout-companion `1.20.27`, each with an `installPath` under its own cache. The installed `subagent-guidance.mjs` and `worktree-write-guard.mjs` in `~/.claude-stef` are byte-identical to `origin/main` (`cmp`). In all four profiles the two files carry 3 `workspace=` lines and 1 `tool_input.workspace` read. The open item in § Resume, a worktree subagent told to `activate`, was not reproduced on 2026-10-30 (§ Re-verification 2026-10-30).
+
+**Cause B (the base mismatch) is still open.** A worktree cut from an old base commit does not hold the paths the parent briefed from `experiments`, so `read_file` misses even with a correct pin. It reproduced on 2026-10-30 (worktree base `5a8b14691`). No hook can enforce it. The worktree creator owns it. The base matches the default branch: on 2026-11-02 `git rev-parse master` and `git rev-parse origin/master` both give `5a8b146917ca9ae72bf75161e39337d2ef34e280`, and `git symbolic-ref refs/remotes/origin/HEAD` gives `refs/remotes/origin/master`, so the agent worktrees were cut from the default branch's commit, not from `experiments`. Which ref the harness actually reads is not verified. The smallest candidate step is `git remote set-head origin experiments` (undo: `git remote set-head origin master`); it needs the user's approval and has not been run.
+
+The status is not changed here. The user decides whether cause A plus open cause B is `fixed` or `mitigated`.
 
 ## References
 
