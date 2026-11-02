@@ -9,7 +9,7 @@ closed: 2026-11-01
 opened: 2026-11-01
 owner: marius
 severity: low
-unverified: The refusal was reproduced in a scratch repo by case 27a, not on the real shared index. The first live check is the next pathspec commit of a file whose peer write was reverted or never landed. The reported cause of the unclearable remedy (re-adding asks the same lookup again) is read from the code, not run against the old guard.
+unverified: 'The refusal was reproduced in a scratch repo (case 27a), not on the real shared index. The first live check is the next pathspec commit of a file whose peer write was reverted or never landed. Checked 2026-11-02: the same suite plus one added case (reset the path, add it again as the stager) run against the scripts from before the fix (07114425e) kept the peer as owner (427 passed, 3 failed: 27a twice and the added case), and against the current scripts named the stager (430 passed, 0 failed). That shows the remedy did not clear the refusal on the old guard. The reason (a named add clears a retained row and foreign_writer asks again on an unchanged write record) is still read from the code, not traced. In that run the added reset executed under the operator''s own session id, so the log held one extra row in both runs; it does not change the owner of the first row.'
 ---
 
 # BUG: the foreign-index guard names a peer as the writer of a file when the staged bytes are not theirs, and its own remedy does not clear the refusal
