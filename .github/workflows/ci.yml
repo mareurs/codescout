@@ -1148,9 +1148,10 @@ jobs:
   # (docs/trackers/bug-fix-session-log.md W-156).
   #
   # Needs bash, flock (util-linux) and sha256sum (coreutils), all on ubuntu-latest. The
-  # script's `need 7z` check is met by the suite's fake `7z`. Measured 2026-11-02 on the dev
-  # machine only: 41 passed, 0 failed. That is not a CI run: read the first CI result
-  # before trusting it.
+  # script's `need 7z` check is met by the suite's fake `7z`. The first CI run (41438665030)
+  # failed one assertion that hard-coded the dev machine's temp path (`Z:\home`); the runner's
+  # temp dir is under /tmp. `TMPDIR=/tmp bash tests/wine-env.sh` reproduces that condition
+  # locally, so run it that way as well as bare.
   wine-env-tests:
     name: wine-env.sh (wine profile script)
     runs-on: ubuntu-latest
