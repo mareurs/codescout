@@ -315,8 +315,7 @@ contains a copy of the call site" are the same string, and nothing distinguishes
    bare `"ok"`, so the caller never learns the arity of what they just did. That is the
    cheap generalisable fix, and it helps every `replace_all` caller, not just this shape.
 
-**Status:** open — (1) and (2) are discipline and cost nothing; (3) is a small tool change
-worth doing because a silent arity is what turned a two-site edit into a three-site one.
+**Status:** mitigated 2026-11-02 — fix idea (3) is done: `edit_file` with `replace_all` now answers `{"status": "ok", "replaced": N}` (`experiments` at `f77ac83c9`, bug `0a2b075281ab6c82`; four tests and the clean-worktree gate). A three-site edit that was meant as two now shows `replaced: 3`. Ideas (1) and (2) stay discipline: the tool still replaces the helper's own copy. Not re-read in a live call: the running server predates the change.
 
 ### U-38 — `edit_file(replace_all=true)` matched 1 of 2 intended sites (different indentation) and reported plain `"ok"`
 
@@ -354,8 +353,7 @@ tool, same missing field.
 **Recurrence:** 1st observed for the indentation shape; 2nd for the "`edit_file` reports no
 match information" family (see U-37).
 
-**Status:** open — the workaround (grep for the marker after mutating) is a habit, not a
-mechanism. A `replaced` count in the response would retire both halves.
+**Status:** fixed-verified 2026-11-02 for the missing count — `edit_file` with `replace_all` now answers `{"status": "ok", "replaced": N}` (`experiments` at `f77ac83c9`, bug `0a2b075281ab6c82`). Test `edit_file_replace_all_reports_one_when_one_site_matched` pins the 1-of-2 shape and was red before the change. The evidence is the unit tests and the clean-worktree gate; a live call on a rebuilt server was not made. The tool still replaces only the exact string, as before.
 
 ### U-40 — A multi-line `old_string` failed as "not found" on text that was verbatim present, and the error cannot tell a bad needle from a bad haystack
 

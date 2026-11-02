@@ -1,16 +1,16 @@
 ---
-id: '200f89eca3eb91e5'
+id: 0a2b075281ab6c82
 kind: bug
-status: open
+status: fixed
 title: 'BUG: `edit_file(replace_all=true)` answers a bare "ok", so a call that replaced a different number of sites than intended looks the same as one that replaced the right number'
 tags:
 - cluster/instrument-omits-the-dimension-that-grows
+closed: 2026-11-02
 opened: 2026-11-02
 owner: marius
 related:
 - docs/issues/archive/2026-09-03-scoped-edit-silently-takes-the-first-of-several-old-string-matches.md
 severity: low
-unverified: 'Reproduced once on a scratch file and read in the code. Not checked: whether a test pins the bare "ok" response, which a fix would have to change, and the batch path was not re-read this session.'
 ---
 
 # BUG: `edit_file(replace_all=true)` answers a bare "ok", so a call that replaced a different number of sites than intended looks the same as one that replaced the right number
@@ -58,11 +58,27 @@ None needed; the cause is in the code that was read.
 
 ## Fix
 
-Not done. Proposal: when `replace_all` is true, return `{"status": "ok", "replaced": N}`. When `replace_all` is false the count is always 1 and the bare response can stay, which keeps the common case short. The same count belongs in the batch path.
+Done on `experiments` at `f77ac83c9`. With `replace_all` the answer is `{"status": "ok", "replaced": N}`. In a batch (`edits[]`) holding at least one `replace_all` edit it is `{"status": "ok", "replaced": [n0, n1, ...]}`, one count per edit. The four fallback matchers (escape-decoded, quotes, CRLF-tolerant, whitespace-normalized) carry the count; the last two rewrite one window whatever `replace_all` says and report 1. Without `replace_all` the count is always 1 and the answer stays a bare `"ok"`. The helper is `with_replaced` in `src/tools/edit_file/mod.rs`; `docs/manual/src/tools/editing.md` documents the answer.
+
+
+## Fix provenance
+
+- **SHA:** `f77ac83c95e660399009a3efb1cd4669c58375af` (`experiments`)
+- **patch-id:** `f9996d0b8f2193f52d2a1055cf7824162111c81a`
 
 ## Tests added
 
-N/A. Nothing is fixed. A fix needs a test that fails first: `replace_all` over three occurrences must report `replaced: 3`.
+In `src/tools/edit_file/tests.rs`. Red before the change, then green:
+
+- `edit_file_replace_all_replaces_all_occurrences`: it had pinned the bare `"ok"`, which answers the open question under `unverified`; it now pins `{"status": "ok", "replaced": 3}`.
+- `edit_file_replace_all_reports_one_when_one_site_matched` (the U-38 shape).
+- `edit_file_batch_reports_the_count_of_each_edit_when_one_uses_replace_all`.
+
+Pin that the short answer stays: `edit_file_without_replace_all_keeps_the_bare_ok` and `edit_file_batch_without_replace_all_keeps_the_bare_ok` (they passed before the change too, so they are guards, not red tests).
+
+`edit_file_replace_all_through_a_fallback_match_reports_the_one_window_it_rewrote` was written after the code and had no red run of its own.
+
+Gate in a clean worktree: FMT, CLIPPY, LEAN and DEFAULT all 0, 8,832 tests. CI has not run on the commit yet.
 
 ## Workarounds
 
@@ -70,7 +86,7 @@ Grep for the old text and the new text after a `replace_all`, as the friction lo
 
 ## Resume
 
-Open. Next step: write the failing test, add `replaced` for `replace_all`, and check the batch path.
+Fixed on `experiments` (`f77ac83c9`), gate green in a clean worktree. Not checked: CI on that commit, and whether the friction entries U-37 and U-38 in `docs/trackers/codescout-usage-frictions.md` should now read fixed (they still say still present).
 
 ## References
 

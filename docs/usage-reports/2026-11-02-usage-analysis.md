@@ -46,7 +46,7 @@ Other LSP failures in the window: java, 21 "LSP server disconnected" (last 2026-
 
 ### 4. `edit_file(replace_all=true)` reports no count
 
-Reproduced on a scratch file: three occurrences replaced, response carries no count. Filed as `docs/issues/2026-11-02-edit-file-replace-all-answers-a-bare-ok-with-no-count-of-the-sites-it-replaced.md` (friction log U-37, U-38).
+Reproduced on a scratch file: three occurrences replaced, response carries no count. Reproduced on a scratch file: three occurrences replaced, response carries no count. Filed as `docs/issues/archive/2026-11-02-edit-file-replace-all-answers-a-bare-ok-with-no-count-of-the-sites-it-replaced.md` (friction log U-37, U-38). Fixed afterwards on `experiments` at `f77ac83c9`: with `replace_all` the answer now carries `replaced`.
 
 ### 5. Writes to the shared catalog from under `/tmp` are refused (11)
 
@@ -99,7 +99,7 @@ The lowest first-retry success is `worktree_activate_required` (77%). This is no
 ### 12. Filed from this audit (nothing fixed)
 
 - `docs/issues/2026-11-02-a-second-client-that-spawns-a-rust-mux-loses-the-lock-race-and-fails-the-start-instead-of-connecting-to-the-winner.md` (id `8e6268a0577ff543`)
-- `docs/issues/2026-11-02-edit-file-replace-all-answers-a-bare-ok-with-no-count-of-the-sites-it-replaced.md` (`200f89eca3eb91e5`)
+- `docs/issues/archive/2026-11-02-edit-file-replace-all-answers-a-bare-ok-with-no-count-of-the-sites-it-replaced.md` (`0a2b075281ab6c82`; fixed at `f77ac83c9`)
 - `docs/issues/2026-11-02-119-non-success-rows-carry-no-err-family-after-the-three-shape-fix.md` (`43e0e0c684c0c038`)
 - `docs/issues/2026-11-02-call-graph-fails-with-a-bare-disk-io-error-and-the-rows-record-no-input.md` (`cd85dbae70c76670`)
 - friction `U-52` in `docs/trackers/codescout-usage-frictions.md`
