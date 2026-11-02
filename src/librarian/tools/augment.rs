@@ -297,6 +297,30 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
     parse_args(args.clone()).map(|_| ())
 }
 
+/// The result of a `merge: true` call. A merge that shrank the declared entry
+/// collection returns an object that names the loss. RFC 7396 replaced the
+/// array wholesale, and the catalog is not in git, so this result is the only
+/// signal the loss produces. Every other merge returns the bare `"ok"`.
+/// bug b9eec23561e3299b; wording shared with `update.rs`'s params report.
+fn merge_result((before, after): (Option<usize>, Option<usize>)) -> Value {
+    match (before, after) {
+        (Some(before), Some(after)) if after < before => json!({
+            "status": "ok",
+            "entries_before": before,
+            "entries_after": after,
+            "entries_removed": before - after,
+            "warning": format!(
+                "params patch replaced the entry collection wholesale: {before} entries -> \
+                 {after} ({} removed). RFC 7396 replaces arrays, it does not merge them. To \
+                 change one row use doc(action=\"update_entry\", entry_id=…, fields=…); \
+                 to add one use append_entry.",
+                before - after
+            ),
+        }),
+        _ => json!("ok"),
+    }
+}
+
 /// `doc(action="augment", id=…, augment={prompt, params, …})` dispatches here via
 /// `artifact.rs`'s `flatten_augment_args`, which lifts the nested `augment` object
 /// and carries `id`/`merge` into it — so this function still reads a flat `Args`.
@@ -373,6 +397,9 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut gate_check_evidence: Option<Value> = None;
 
     if a.merge {
+        // (before, after) length of the declared entry collection, so a wholesale
+        // replace is reported instead of hidden behind a bare "ok".
+        let mut entry_counts: (Option<usize>, Option<usize>) = (None, None);
         // Scope the catalog lock so it's dropped before the async
         // event_create call below (parking_lot MutexGuard is !Send).
         {
@@ -425,6 +452,7 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         Some(s) => Some(serde_json::to_string(s)?),
                         None => existing.params_schema.clone(),
                     };
+                    let entries_before = augmentation::entry_count(&cat, &a.id)?;
                     augmentation::upsert(
                         &cat,
                         &augmentation::AugmentationRow {
@@ -449,6 +477,7 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                             refreshed_at_commit: existing.refreshed_at_commit.clone(),
                         },
                     )?;
+                    entry_counts = (entries_before, augmentation::entry_count(&cat, &a.id)?);
                     // Merge semantics: the upsert above PRESERVED every field this call
                     // did not pass, so only the passed ones were authored here. Anything
                     // else must not be republished over a sidecar that disagrees.
@@ -481,8 +510,9 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
             }
             if !patched_siblings {
-                let found = augmentation::merge_params(&cat, &a.id, &patch)?.found;
-                if !found {
+                let outcome = augmentation::merge_params(&cat, &a.id, &patch)?;
+                entry_counts = (outcome.entries_before, outcome.entries_after);
+                if !outcome.found {
                     return Err(LibrarianRecoverableError::new(format!(
                         "no augmentation for artifact '{}' — call doc(action=\"augment\") first",
                         a.id
@@ -506,7 +536,7 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .await;
         }
 
-        return Ok(json!("ok"));
+        return Ok(merge_result(entry_counts));
     }
 
     create_or_replace_augmentation(ctx, a)
@@ -998,6 +1028,103 @@ mod tests {
         };
         assert_eq!(row.entry_collection.as_deref(), Some("failures"));
     }
+
+    /// Seeds `id` with a three-row `rows` entry collection.
+    async fn seed_three_rows(ctx: &ToolContext, id: &str) {
+        seed_artifact(ctx, id);
+        call(
+            ctx,
+            json!({
+                "id": id,
+                "prompt": "keep rows",
+                "params": {"rows": [{"id": "R-1"}, {"id": "R-2"}, {"id": "R-3"}]},
+                "entry_collection": "rows"
+            }),
+        )
+        .await
+        .unwrap();
+    }
+
+    /// RFC 7396 replaces an array wholesale: `merge: true` with one row deletes the
+    /// other two. The write stays allowed, but the result must say what it removed.
+    /// bug b9eec23561e3299b
+    #[tokio::test]
+    async fn merge_true_that_replaces_the_entry_collection_reports_entries_removed() {
+        let ctx = mk_ctx();
+        seed_three_rows(&ctx, "ec-shrink").await;
+        let result = call(
+            &ctx,
+            json!({"id": "ec-shrink", "merge": true, "params": {"rows": [{"id": "R-1"}]}}),
+        )
+        .await
+        .unwrap();
+        assert!(
+            result["entries_removed"] == json!(2)
+                && result["entries_before"] == json!(3)
+                && result["entries_after"] == json!(1)
+                && result["status"] == json!("ok")
+                && result["warning"]
+                    .as_str()
+                    .is_some_and(|w| w.contains("replaced the entry collection wholesale")),
+            "a merge that shrinks the entry collection must report entries_removed and the warning, not a bare \"ok\". got: {result}"
+        );
+    }
+
+    /// The same wholesale replace, on the branch that also patches a sibling field
+    /// (here `prompt`) through a full upsert instead of `merge_params`.
+    #[tokio::test]
+    async fn sibling_field_merge_that_replaces_the_entry_collection_reports_entries_removed() {
+        let ctx = mk_ctx();
+        seed_three_rows(&ctx, "ec-shrink-sib").await;
+        let result = call(
+            &ctx,
+            json!({
+                "id": "ec-shrink-sib",
+                "merge": true,
+                "prompt": "keep rows, reworded",
+                "params": {"rows": [{"id": "R-1"}]}
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(
+            result["entries_removed"] == json!(2)
+                && result["entries_before"] == json!(3)
+                && result["entries_after"] == json!(1)
+                && result["status"] == json!("ok")
+                && result["warning"]
+                    .as_str()
+                    .is_some_and(|w| w.contains("replaced the entry collection wholesale")),
+            "a merge that shrinks the entry collection must report entries_removed and the warning, not a bare \"ok\". got: {result}"
+        );
+    }
+
+    /// The warning is for a shrink only. A merge that keeps the collection's length
+    /// (3 -> 3) or grows it (3 -> 4) returns exactly the bare `"ok"`, on both merge
+    /// branches (`merge_params`, and the sibling-field upsert that `prompt` selects).
+    #[tokio::test]
+    async fn merge_true_that_keeps_or_grows_the_entry_collection_returns_bare_ok() {
+        let keep = json!({"rows": [{"id": "R-1"}, {"id": "R-2"}, {"id": "R-3", "done": true}]});
+        let grow = json!({"rows": [{"id": "R-1"}, {"id": "R-2"}, {"id": "R-3"}, {"id": "R-4"}]});
+        for (label, patch) in [("keep", keep), ("grow", grow)] {
+            for sibling in [false, true] {
+                let ctx = mk_ctx();
+                let id = format!("ec-{label}-{sibling}");
+                seed_three_rows(&ctx, &id).await;
+                let mut args = json!({"id": id, "merge": true, "params": patch.clone()});
+                if sibling {
+                    args["prompt"] = json!("keep rows, reworded");
+                }
+                let result = call(&ctx, args).await.unwrap();
+                assert_eq!(
+                    result,
+                    json!("ok"),
+                    "{label} (sibling={sibling}): a merge that removes no entries must return the bare \"ok\""
+                );
+            }
+        }
+    }
+
     #[tokio::test]
     async fn params_path_reads_params_from_file() {
         let ctx = mk_ctx();

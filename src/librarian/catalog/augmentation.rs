@@ -198,7 +198,7 @@ pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<P
 /// count, and reporting `0` would read as "the collection was emptied". A
 /// declared-but-absent key counts as `0`: the collection exists conceptually and
 /// holds no rows.
-fn entry_count(cat: &Catalog, artifact_id: &str) -> Result<Option<usize>> {
+pub(crate) fn entry_count(cat: &Catalog, artifact_id: &str) -> Result<Option<usize>> {
     let Some(existing) = get(cat, artifact_id)? else {
         return Ok(None);
     };
