@@ -129,6 +129,17 @@ something small that is not naturally symbol-scoped.
 "ok"
 ```
 
+With `replace_all: true` the answer carries the number of sites replaced, so a call that hit
+three sites when you meant two does not look like a correct one:
+
+```json
+{ "status": "ok", "replaced": 3 }
+```
+
+In a batch (`edits[]`) that holds at least one `replace_all` edit, the answer is
+`{ "status": "ok", "replaced": [3, 1] }`, one count per edit in order. A batch without
+`replace_all` still answers `"ok"`.
+
 If `old_string` is not found, or appears multiple times without `replace_all: true`, the tool returns a recoverable error with the line numbers of all matches.
 
 **Multi-line edits on source files:** When `old_string` spans multiple lines and contains a

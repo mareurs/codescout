@@ -666,6 +666,8 @@ impl Tool for EditFile {
                 .into());
             }
 
+            let mut replaced_counts: Vec<usize> = Vec::with_capacity(edits_arr.len());
+            let mut any_replace_all = false;
             for (i, edit) in edits_arr.iter().enumerate() {
                 let old_s = edit["old_string"].as_str().ok_or_else(|| {
                     super::RecoverableError::new(format!("edit[{i}]: old_string is required"))
@@ -709,8 +711,11 @@ impl Tool for EditFile {
                 }
                 if replace_all_edit {
                     content = content.replace(old_s, new_s);
+                    replaced_counts.push(match_count);
+                    any_replace_all = true;
                 } else {
                     content = content.replacen(old_s, new_s, 1);
+                    replaced_counts.push(1);
                 }
             }
 
@@ -726,6 +731,11 @@ impl Tool for EditFile {
             ctx.agent
                 .mark_file_dirty_for(ctx.workspace_override.as_deref(), resolved)
                 .await;
+            if any_replace_all {
+                // A replace_all edit reports how many sites it replaced, so a caller who
+                // meant two sites can see three (docs/issues/2026-11-02-edit-file-replace-all-…).
+                return Ok(json!({ "status": "ok", "replaced": replaced_counts }));
+            }
             return Ok(json!("ok"));
         }
 
@@ -889,6 +899,22 @@ fn unreadable_edits(given: &Value) -> super::RecoverableError {
     )
 }
 
+/// Adds the number of replaced sites to a success answer when the call used `replace_all`.
+///
+/// A bare "ok" cannot tell a `replace_all` that hit the intended two sites from one that hit
+/// three or one (U-37, U-38). Without `replace_all` the count is always 1, so `replaced` is
+/// `None` and the short answer stays.
+fn with_replaced(answer: Value, replaced: Option<usize>) -> Value {
+    let Some(n) = replaced else { return answer };
+    match answer {
+        Value::Object(mut map) => {
+            map.insert("replaced".to_string(), json!(n));
+            Value::Object(map)
+        }
+        _ => json!({ "status": "ok", "replaced": n }),
+    }
+}
+
 async fn perform_edit(
     path: &str,
     old_string: &str,
@@ -927,11 +953,14 @@ async fn perform_edit(
                 )
                 .into_content();
                 commit_edit(ctx, &resolved, &new_content).await?;
-                return Ok(json!({
-                    "status": "ok",
-                    "applied_via": "escape-decoded match",
-                    "note": "old_string matched after decoding literal newline/tab escapes; verify the result"
-                }));
+                return Ok(with_replaced(
+                    json!({
+                        "status": "ok",
+                        "applied_via": "escape-decoded match",
+                        "note": "old_string matched after decoding literal newline/tab escapes; verify the result"
+                    }),
+                    replace_all.then_some(dcount),
+                ));
             }
         }
         // Second-tier recovery: over-escaped quotes (backslash-quote). A common MCP-client
@@ -956,11 +985,14 @@ async fn perform_edit(
                 )
                 .into_content();
                 commit_edit(ctx, &resolved, &new_content).await?;
-                return Ok(json!({
-                    "status": "ok",
-                    "applied_via": "escape-decoded match (quotes)",
-                    "note": "old_string matched after decoding escaped quotes; verify the result"
-                }));
+                return Ok(with_replaced(
+                    json!({
+                        "status": "ok",
+                        "applied_via": "escape-decoded match (quotes)",
+                        "note": "old_string matched after decoding escaped quotes; verify the result"
+                    }),
+                    replace_all.then_some(dcount),
+                ));
             }
         }
         // CRLF-tolerant match: exact except for a lone trailing `\r` per line. Runs for
@@ -1006,12 +1038,16 @@ async fn perform_edit(
                     cov.update_mtime(&resolved);
                 }
             }
-            return Ok(json!({
-                "status": "ok",
-                "applied_via": "crlf-tolerant match",
-                "lines": format!("{}-{}", w.start_line, w.end_line),
-                "note": "old_string matched after tolerating \\r\\n vs \\n line-ending differences; verify the result"
-            }));
+            return Ok(with_replaced(
+                json!({
+                    "status": "ok",
+                    "applied_via": "crlf-tolerant match",
+                    "lines": format!("{}-{}", w.start_line, w.end_line),
+                    "note": "old_string matched after tolerating \\r\\n vs \\n line-ending differences; verify the result"
+                }),
+                // This path rewrites one window, whatever `replace_all` says.
+                replace_all.then_some(1),
+            ));
         }
         // Indentation-significant languages: a whitespace-normalized match could be
         // re-indented into a different block while still parsing, so the AST gate would
@@ -1069,12 +1105,16 @@ async fn perform_edit(
                         cov.update_mtime(&resolved);
                     }
                 }
-                return Ok(json!({
-                    "status": "ok",
-                    "applied_via": "whitespace-normalized match",
-                    "lines": format!("{}-{}", w.start_line, w.end_line),
-                    "note": "old_string matched after normalizing indentation/line-endings; verify the result"
-                }));
+                return Ok(with_replaced(
+                    json!({
+                        "status": "ok",
+                        "applied_via": "whitespace-normalized match",
+                        "lines": format!("{}-{}", w.start_line, w.end_line),
+                        "note": "old_string matched after normalizing indentation/line-endings; verify the result"
+                    }),
+                    // One window is rewritten, whatever `replace_all` says.
+                    replace_all.then_some(1),
+                ));
             }
             0 => {
                 let msg = not_found_msg(&content, old_string, path);
@@ -1120,8 +1160,13 @@ async fn perform_edit(
         RepairResult::Clean(c) | RepairResult::Introduced(c) => (c, None),
     };
     commit_edit(ctx, &resolved, &new_content).await?;
+    // With `replace_all` the answer carries the number of replaced sites (see `with_replaced`).
+    let replaced = replace_all.then_some(match_count);
     if let Some(note) = repair_note {
-        return Ok(json!({ "status": "ok", "note": note }));
+        return Ok(with_replaced(
+            json!({ "status": "ok", "note": note }),
+            replaced,
+        ));
     }
 
     // Syntax check: warn if the edit introduced parse errors (non-fatal). Python also asks the
@@ -1132,10 +1177,13 @@ async fn perform_edit(
         if crate::ast::has_syntax_errors(&new_content, lang)
             || crate::ast::has_indentation_errors(&new_content, lang)
         {
-            return Ok(json!({
-                "status": "ok",
-                "warning": "syntax error detected after edit — file may be malformed. Use read_file to inspect and fix."
-            }));
+            return Ok(with_replaced(
+                json!({
+                    "status": "ok",
+                    "warning": "syntax error detected after edit — file may be malformed. Use read_file to inspect and fix."
+                }),
+                replaced,
+            ));
         }
     }
 
@@ -1148,7 +1196,7 @@ async fn perform_edit(
         }
     }
 
-    Ok(json!("ok"))
+    Ok(with_replaced(json!("ok"), replaced))
 }
 
 #[cfg(test)]

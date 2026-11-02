@@ -4018,9 +4018,129 @@ async fn edit_file_replace_all_replaces_all_occurrences() {
         .await
         .unwrap();
 
-    assert_eq!(result, json!("ok"));
+    // The count of replaced sites is reported, so a caller who meant two sites sees three
+    // (docs/issues/2026-11-02-edit-file-replace-all-answers-a-bare-ok-…, U-37/U-38).
+    assert_eq!(result, json!({"status": "ok", "replaced": 3}));
     let content = std::fs::read_to_string(&file).unwrap();
     assert_eq!(content, "qux bar qux baz qux\n");
+}
+
+#[tokio::test]
+async fn edit_file_replace_all_reports_one_when_one_site_matched() {
+    // U-38 shape: the caller meant two sites, only one matched. The answer must show 1.
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("test.txt");
+    std::fs::write(&file, "alpha\n    alpha_other\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": file.to_str().unwrap(),
+                "old_string": "alpha\n",
+                "new_string": "omega\n",
+                "replace_all": true
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result, json!({"status": "ok", "replaced": 1}));
+}
+
+#[tokio::test]
+async fn edit_file_without_replace_all_keeps_the_bare_ok() {
+    // The common single-site call stays short: the count is always 1 there.
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("test.txt");
+    std::fs::write(&file, "foo bar\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": file.to_str().unwrap(),
+                "old_string": "foo",
+                "new_string": "qux"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result, json!("ok"));
+}
+
+#[tokio::test]
+async fn edit_file_batch_reports_the_count_of_each_edit_when_one_uses_replace_all() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("test.txt");
+    std::fs::write(&file, "foo foo foo bar\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": file.to_str().unwrap(),
+                "edits": [
+                    {"old_string": "foo", "new_string": "qux", "replace_all": true},
+                    {"old_string": "bar", "new_string": "baz"}
+                ]
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result, json!({"status": "ok", "replaced": [3, 1]}));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "qux qux qux baz\n");
+}
+
+#[tokio::test]
+async fn edit_file_batch_without_replace_all_keeps_the_bare_ok() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("test.txt");
+    std::fs::write(&file, "foo bar\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": file.to_str().unwrap(),
+                "edits": [
+                    {"old_string": "foo", "new_string": "qux"},
+                    {"old_string": "bar", "new_string": "baz"}
+                ]
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result, json!("ok"));
+}
+#[tokio::test]
+async fn edit_file_replace_all_through_a_fallback_match_reports_the_one_window_it_rewrote() {
+    // The fallback matchers (CRLF-tolerant, whitespace-normalized) rewrite one window whatever
+    // `replace_all` says. A caller who meant every site must see 1 here, not a bare answer (U-38).
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("test.txt");
+    std::fs::write(&file, "x\r\ny\r\nmid\r\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": file.to_str().unwrap(),
+                "old_string": "x\ny\n",
+                "new_string": "z\n",
+                "replace_all": true
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    // Which fallback matched (CRLF-tolerant or whitespace-normalized) is not the point here;
+    // both rewrite one window, and the answer must say so.
+    assert!(result["applied_via"].is_string(), "{result}");
+    assert_eq!(result["replaced"], json!(1), "{result}");
 }
 
 #[tokio::test]
