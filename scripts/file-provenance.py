@@ -564,9 +564,11 @@ def normalize(p: str, root: Path, base: Path | None = None) -> str | None:
         if resolved == top:
             return "."
         prefix = top if top.endswith(os.sep) else top + os.sep
-        # Another tree entirely says nothing about here.
-        return resolved[len(prefix):] if resolved.startswith(prefix) else None
-    return os.path.normpath(p)
+        # Another tree entirely says nothing about here. The remainder is the git form, which
+        # is `/` on every platform: `git status` and `git log` print `src/a.rs`, and a caller
+        # compares this result with those, so `src\a.rs` would never match on Windows.
+        return resolved[len(prefix):].replace(os.sep, "/") if resolved.startswith(prefix) else None
+    return os.path.normpath(p).replace(os.sep, "/")
 
 
 def patch_write_targets(patch: str) -> list[str]:
