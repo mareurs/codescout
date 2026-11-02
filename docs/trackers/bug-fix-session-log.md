@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 211
+entry_high_water_F: 212
 entry_high_water_W: 155
 ---
 
@@ -67,6 +67,7 @@ entry_high_water_W: 155
 | F-207 | 2026-11-01 | med | test-design | fixed-verified | **A diagnostic hint passed its tests and did not fire on the one tree it was built for** — a 50,000-entry bound taken from a count of directories met 311,890 entries; found only by reading the live warning. |
 | F-210 | 2026-11-01 | med | process | mitigated | **A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path** — `fmt-mine` named three of my files UNKNOWN after a 19-minute gate; `rustfmt --check` on the diff's files beforehand takes seconds. |
 | F-211 | 2026-11-01 | med | plan-vs-reality | open | **A plan step that read "make update return a list of topics" hid four coupled changes, and the grammar cannot express the call it names** — the loop, the shape grammar, the overlap gate and the byte ceiling all move together; found by scouting before code. |
+| F-212 | 2026-11-02 | med | process | fixed-verified | **Five friction-log entries read open although the code had fixed them, found only by re-verifying every open entry** — U-27, U-30, U-31, U-33, U-35; three more fixed in part. |
 | F-209 | 2026-11-01 | low | claim-vs-state | mitigated | **"Leaving these two directories costs nothing" was said before the directory counts were read** — I counted symlinks, the watcher counts directories; one remaining directory holds 1,808. |
 | F-208 | 2026-11-01 | low | plan-drift | fixed-verified | **A bug record's guessed cause for a remedy that did not clear a refusal pointed at a row state, and the cause was the lookup running again** — `581b05bbe41134f3`: the remedy's reset then add makes the row `retained`, and a named add clears a `retained` row and runs the file-level write lookup again on an unchanged record; fixed in `300cb29ea`. |
 |----|------|---------:|----------|--------|-------|
@@ -17864,6 +17865,20 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Resume:** this is an engine change plus a grammar amendment, not a step. It needs a design decision before code, with the section sizes measured first.
 
 **Valid:** dated 2026-11-01
+
+## F-212 — Five friction-log entries read open although the code had fixed them, and the fixes were only found by re-verifying every open entry
+
+**Valid:** dated 2026-11-02
+
+**Observed:** On 2026-11-02 the 20 entries of `docs/trackers/codescout-usage-frictions.md` that carry `**Status:** open` were checked against current code and git by four read-only verifiers. Five were fixed with no status flip: U-27 (Iron Law 1 reworded, `src/prompts/source.md`), U-30 (the warn hook was deleted in plugin commit `a989d73`), U-31 (grep exempted in `439cd82f6`), U-33 (pipe capture, `2c3badfc6`) and U-35 (`doc(find, filter={rel_path:{eq}})` returns the row). Three more were fixed in part with a narrower remainder (U-28, U-34, U-41). The ledger's own prompt says "a friction fixed silently reads as still-open to the next sweep"; no sweep had checked.
+
+**Cost:** a reader choosing what to work on from the ledger would have picked five finished items. Finding them took four verifier runs of about 60 to 90 s each, and each report is model output that I spot-checked only for the cited commits (seven codescout SHAs and two plugin SHAs exist, with the cited subjects).
+
+**Not established:** U-28's live `read_file` error tags (not queried), U-32's newer buddy source (not found), U-47's `read_only=false` default.
+
+**Status:** fixed-verified 2026-11-02. The five entries were flipped to fixed-verified with their evidence and archived with 26 closed ones (31 in all) into `docs/trackers/archive/codescout-usage-frictions-2026-q2.md`, headings kept. The move broke two qualified citations, `codescout-usage-frictions:U-44` and `:U-36`, because the stem names the live file; both were repointed to `codescout-usage-frictions-2026-q2:` and a second `link_scan(write=true)` reached `edges_missing[0]`, `edges_stale[0]`.
+
+**Rests on:** the four verifier reports of 2026-11-02, plus `git log --no-walk` on the cited SHAs in both repos.
 
 ## Template for new entries
 

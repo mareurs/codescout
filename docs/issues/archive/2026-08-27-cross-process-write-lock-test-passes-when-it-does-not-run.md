@@ -57,7 +57,7 @@ is a reasonable goal served by an unreasonable mechanism.
 ## Why it matters more than a normal flaky-test issue
 
 This is the *only* executable evidence for a guarantee that several other decisions now rest on.
-It was cited on 2026-08-27 to close `codescout-usage-frictions:U-36` — the determination that
+It was cited on 2026-08-27 to close `codescout-usage-frictions-2026-q2:U-36` — the determination that
 BUG-021's concurrency-corruption mode is prevented in code rather than by rule, and therefore that
 the companion plugin's parallel-write hint names a dead mechanism. That determination is sound
 today because the binary existed (built 2026-08-27 20:28, so the test genuinely ran this session),
@@ -104,7 +104,7 @@ Option 2 also fixed the two latent path bugs option 1 would have left in place, 
   ```
 
   So the cross-process flock is now confirmed end-to-end by observation, not by reading the code.
-  That upgrades the evidence behind `codescout-usage-frictions:U-36` — the determination that
+  That upgrades the evidence behind `codescout-usage-frictions-2026-q2:U-36` — the determination that
   BUG-021's concurrency-corruption mode is closed in code — from an inference to a measurement.
 
 Gate: `cargo fmt` clean, `cargo clippy --workspace --all-targets --features local-embed -- -D

@@ -149,7 +149,7 @@ after it.
    **Verdict:** rejected — the only hit is a bug-file citation in a comment. That
    branch's changes are the heredoc/newline split work, not the limiter table.
 4. **Hypothesis:** already filed as U-44.
-   **Test:** read `codescout-usage-frictions:U-44` in full.
+   **Test:** read `codescout-usage-frictions-2026-q2:U-44` in full.
    **Verdict:** rejected — different component (companion `il3-warn-hook.mjs`,
    since deleted) and different mechanism (flat alternation with no limiter check
    at all, vs. a limiter check that misses a spelling). Related, not duplicate.
@@ -245,7 +245,7 @@ R-89. Confirming the refusals are gone at the tool surface needs `cargo rb` then
 - `src/prompts/mod.rs:569` — the surface text stating which flags are limiters;
   it lists the bare forms only, so it is accurate about the code and silent
   about the gap.
-- `codescout-usage-frictions:U-44` — the same self-contradiction class in the
+- `codescout-usage-frictions-2026-q2:U-44` — the same self-contradiction class in the
   companion hook, fixed by deleting the hook.
 - `docs/issues/archive/2026-05-18-il3-overtriggers-bounded-lhs.md` — the original
   bounded/unbounded LHS split that put `git` wholesale on the wrong side.
