@@ -77,9 +77,13 @@ async fn outside_control(operation: &str, worktrees: bool) {
         "{operation} outside roots, worktrees={worktrees}: {result:?}"
     );
     if operation == "approve" {
+        // One location, several spellings on Windows: the approved path comes back
+        // canonical (`\\?\C:\Users\runneradmin\...`) while the fixture's temp dir is the
+        // 8.3 form (`C:\Users\RUNNER~1\...`). Compare them in one spelling.
+        let approved = result.unwrap()["approved"].as_str().unwrap().to_string();
         assert_eq!(
-            result.unwrap()["approved"],
-            target.to_string_lossy().as_ref()
+            codescout::util::long_path::comparable(std::path::Path::new(&approved)),
+            codescout::util::long_path::comparable(&target)
         );
     } else {
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "after");
