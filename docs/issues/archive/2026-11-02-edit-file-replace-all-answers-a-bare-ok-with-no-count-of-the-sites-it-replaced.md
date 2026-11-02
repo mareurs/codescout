@@ -86,7 +86,7 @@ Grep for the old text and the new text after a `replace_all`, as the friction lo
 
 ## Resume
 
-Fixed on `experiments` (`f77ac83c9`), gate green in a clean worktree. Not checked: CI on that commit, and whether the friction entries U-37 and U-38 in `docs/trackers/codescout-usage-frictions.md` should now read fixed (they still say still present).
+Fixed on `experiments` (`f77ac83c9`), gate green in a clean worktree. Live check on a rebuilt server, 2026-11-02: `edit_file(old_string="alpha", new_string="omega", replace_all=true)` on a four-line scratch file with three `alpha` answered `{"status": "ok", "replaced": 3, ...}`, and a call without `replace_all` still answered a bare `"ok"` (wrapped with the path). Not checked: CI on that commit, and the batch form through the live server.
 
 ## References
 

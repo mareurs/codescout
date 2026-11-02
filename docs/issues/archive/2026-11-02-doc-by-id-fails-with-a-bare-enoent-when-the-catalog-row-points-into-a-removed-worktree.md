@@ -13,7 +13,7 @@ closed: 2026-11-02
 opened: 2026-11-02
 owner: marius
 severity: low
-unverified: The call through the server was not repeated on a rebuilt binary, and CI has not been read. The stale rows (13 in this project) are not repaired; their cause is not established.
+unverified: CI has not been read. The stale rows (13 in this project) are not repaired; their cause is not established.
 ---
 
 # BUG: `doc` by id fails with a bare "No such file or directory (os error 2)" when the catalog row points into a worktree that was removed, and the main-checkout copy of the file has another id
@@ -76,7 +76,7 @@ Use the id of the main-checkout row (`5ee9a523ac9a7cde`).
 
 ## Resume
 
-Fixed on `experiments` (`d1b47ab5b`) for the reported effect. The stale rows are not repaired and their cause is not known; see the bug filed for them.
+Fixed on `experiments` (`d1b47ab5b`) for the reported effect. Live check on a rebuilt server, 2026-11-02: `doc(get)` and `doc(update)` by the stale id `3822f951e9d78ddf` now answer with the full path in the text, and `doc(update)` answers `ok: false` with an error and a hint (the recoverable shape; I did not read the `isError` flag). The hint names the `doc(find)` call that finds the live row. The stale rows are not repaired and their cause is not known; see the bug filed for them.
 
 **Count of the stale rows, 2026-11-02** (`~/.local/share/librarian/catalog.db`, read-only; script `os.path.exists` over every `artifact.abs_path`):
 
