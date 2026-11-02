@@ -222,6 +222,16 @@ Status stays `open` and the frontmatter `unverified:` caveat is kept: it concern
 
 ## Resume
 
+### Tier 2 recorder written, 2026-11-02 — local commit, NOT released, NOT installed
+
+The operator chose a hook that appends JSONL, not a `usage.db` writer. `claude-plugins` commit `83de778` (branch `main`, local, not pushed) adds `codescout-companion/hooks/native-call-record.mjs`, its test and a `PostToolUse` entry in `hooks.json` for `Read|Grep|Glob|Agent|WebFetch`, registered `"async": true`. It writes one line per call to `$XDG_STATE_HOME/codescout/native-calls/<YYYY-MM>.jsonl` (default `~/.local/state`), shared by all profiles: `v`, `ts`, `project`, `session_id`, `tool_use_id`, `tool`, `duration_ms`, `profile`, and `agent_id`/`agent_type` only on a subagent's own call, plus `ext`, `subagent_type` or `host`. No path, pattern, prompt or URL path is written. Opt out with `CS_NATIVE_CALL_LOG=off`.
+
+- **Latency, measured** (real `claude -p`, a hook that sleeps 4 s): no hook 6.6 s, synchronous 13.8 s, async 5.9 s. The hook itself costs 43 ms, of which `node` alone is 29 ms (30 runs). A test pins the async registration.
+- **Tests:** 28 cases; 14 mutants, 14 killed, control green. `./tests/run-all.sh` green after the executable bit was set on the test.
+- **Other hooks, measured:** each costs 40 to 48 ms (11 to 19 ms over `node`); `NODE_COMPILE_CACHE` gains under 2 ms; three hooks on one matcher ran in parallel (7.4 s against 8.4 s for one hook, serial would be about 12.8 s; one run each, model noise about 1.5 s). Only `cs-liveness` looks like an async candidate, and it clears a breaker file `pre-tool-guard` reads, so it was left alone.
+
+Not done: `release.sh` (it pushes and needs a clean tree; a peer has an unstaged `docs/trackers/version-bump-checklist.md` there), the install in the four profiles, and a reader that joins the file with `tool_calls` on `session_id = cc_session_id`. Until the plugin is released and a session restarts, the file does not exist. Still not shown: `agent_id` on a subagent's `Grep`/`WebFetch`, and the payload of a failed call.
+
 ### Payload probe, 2026-11-02 (Tier 2 design input; no code written)
 
 One real `claude -p` run (2.1.316, `haiku`, a temp directory, a `--settings` file that appended every `PostToolUse` payload for `Read|Grep|Glob|Agent|WebFetch|Task` to a file; nothing persistent changed) asked for a `Read`, a `Grep`, a `Glob` and a subagent that reads a file. Four payloads came back.
