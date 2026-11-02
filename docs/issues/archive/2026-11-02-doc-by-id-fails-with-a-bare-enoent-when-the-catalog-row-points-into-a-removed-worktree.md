@@ -13,7 +13,7 @@ closed: 2026-11-02
 opened: 2026-11-02
 owner: marius
 severity: low
-unverified: CI has not been read. The stale rows (13 in this project) are not repaired; their cause is not established.
+unverified: The CI run after d1b47ab5b was red on Windows (compile error in this fix's own tests); the repair b3889b9f9 was checked under wine only and is not pushed. The real windows-latest jobs have not run on it. The stale rows (13 in this project) are not repaired; their cause is not established.
 ---
 
 # BUG: `doc` by id fails with a bare "No such file or directory (os error 2)" when the catalog row points into a worktree that was removed, and the main-checkout copy of the file has another id
@@ -65,6 +65,7 @@ Done on `experiments` at `d1b47ab5b`, for the reported effect only (the bare tex
 
 - **SHA:** `d1b47ab5bb521e68024d8d231fafdc5e180f2fc7` (`experiments`)
 - **patch-id:** `62b31fc06dfb898770a4fe2f3f0b6c08cc30c206`
+- **Follow-up:** CI run 41450758460 on `experiments` was red on the three windows-latest test jobs and the windows-gnu clippy lane: the three tests this fix added call `canon`, which was `#[cfg(unix)]`, so they did not compile on Windows (E0425). The local gate runs on Linux only and could not show it. Repaired by `b3889b9f90e5139473ec4c4cc99c832a52760e80` (another session; not pushed when this was written). Checked there: 82 of 82 read_door and missing-file tests on Linux, 15 of 15 read_door tests under wine, the clippy lane's own command exits 0. Not checked: the real windows-latest (MSVC) jobs.
 
 ## Tests added
 
