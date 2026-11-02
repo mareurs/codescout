@@ -105,6 +105,7 @@ The lowest first-retry success is `worktree_activate_required` (77%). This is no
 - friction `U-52` in `docs/trackers/codescout-usage-frictions.md`
 - evidence added to the open bug `35bcf086deeb7cbe` (the null `documentSymbol` window), under its Resume section
 - `docs/issues/2026-11-02-doc-by-id-fails-with-a-bare-enoent-when-the-catalog-row-points-into-a-removed-worktree.md` (`10d788af3e0c82ab`)
+- `docs/issues/2026-11-02-audit-doc-refs-over-the-whole-repo-exits-1-on-11-high-findings-five-cited-artifact-ids-resolve-to-nothing.md` (`9db8908e81bc4b26`): found when the audit was run over the whole repository; the runs on touched files, used for the earlier commits of this report, exit 0
 
 ### 13. Session drill-down (usage database only)
 
