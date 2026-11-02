@@ -528,6 +528,28 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     if msg.starts_with("json_path '[*]' needs an array, found ") {
         return Some("json_path_shape_mismatch");
     }
+    // The 2026-11-02 audit's NULL head (119 of 1,113 non-success rows). These three messages embed
+    // data (a path, a parameter name) that a substring rule further down could claim, so the fixed
+    // prefix decides, here, first. Pinned with hostile data by
+    // `the_shapes_of_the_2026_11_02_null_head_have_a_family`.
+    //
+    // rust-analyzer answered `documentSymbol` with null for the whole retry window (22 rows). The
+    // repair is to wait or to check the language server, which no other LSP family says.
+    if msg.starts_with("the language server answered textDocument/documentSymbol with null") {
+        return Some("lsp_document_symbol_null");
+    }
+    // A write of an artifact rooted under the system temp dir into the shared catalog (11).
+    if msg.starts_with("refusing to write an artifact rooted under the system temp dir") {
+        return Some("artifact_rooted_in_temp");
+    }
+    // A parameter the tool does not have, so the call ran or was refused without it (18, `grep`'s
+    // `output_mode` in every row). Tool-agnostic: the message names the tool and the parameter.
+    if msg.starts_with('\'')
+        && msg.contains("' is not a parameter of ")
+        && msg.contains(" was not applied")
+    {
+        return Some("param_not_applied");
+    }
     // `read_file` serves what `read_markdown` used to and still emits its overflow messages,
     // but the arm below that names them is scoped to the retired tool, so every live row fell
     // out unclassified. Placed HERE for the same reason as the rule above: the section title
@@ -752,6 +774,8 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
         || msg.contains("unknown topic ")
         || msg.contains("invalid at=")
         || msg.contains("is not a bug status")
+        // `edit_file` and `doc(body_edits[])` name the allowed actions in the message (6).
+        || (msg.contains("invalid action \"") && msg.contains("; expected one of:"))
     {
         return Some("unknown_enum_value");
     }
@@ -764,7 +788,11 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     // the read_markdown block above, which keeps its own tool-scoped family:
     // unifying the two would require re-mapping already-classified rows, and the
     // backfill only fills NULLs — there is no re-map path. Deferred, not intended.
-    if msg.contains("invalid line range") || msg.contains("is past end of file") {
+    if msg.contains("invalid line range")
+        || msg.contains("is past end of file")
+        // `doc(get)` with a line outside the body, which starts after the frontmatter (3).
+        || msg.starts_with("start_line/end_line are file lines")
+    {
         return Some("invalid_line_range");
     }
     // Invalid regex (5).
@@ -835,9 +863,10 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     {
         return Some("memory_target_not_found");
     }
-    // Two parameters that cannot both be set (3). Distinct from read_markdown's
+    // Two parameters that cannot both be set (3), and `edit_file`'s batch form against its
+    // heading form (6). Distinct from read_markdown's
     // tool-scoped `read_markdown_param_conflict`, which is claimed far above.
-    if msg.contains("at most one of") {
+    if msg.contains("at most one of") || msg.contains(" is mutually exclusive with ") {
         return Some("mutually_exclusive_params");
     }
     // append_entry's parameter sent to update_entry, or an empty patch (3).
@@ -865,6 +894,13 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
         return Some("cwd_escapes_root");
     }
 
+    // A parameter given the wrong shape, here a filter's `ops` that is not an object (4). The
+    // repair is to reshape the value, which `missing_required_param` and `unknown_enum_value`
+    // do not say.
+    if msg.starts_with("ops must be an object") {
+        return Some("invalid_param_shape");
+    }
+
     // Missing / conditionally-required params (38, the largest family). Kept LAST
     // because its shapes are the broadest: any earlier arm that also matches is
     // by definition the more specific reading.
@@ -872,6 +908,8 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
         || msg.contains("requires '")
         || msg.contains("is required for")
         || msg.ends_with(" required")
+        // `doc(update)` with an empty patch (3).
+        || msg.contains("was given nothing to change")
     {
         return Some("missing_required_param");
     }
@@ -891,6 +929,7 @@ const ERR_FAMILIES: &[&str] = &[
     "ambiguous_name_path",
     "ambiguous_old_string",
     "artifact_not_augmented",
+    "artifact_rooted_in_temp",
     "ast_extent_fail",
     "buffer_ref_expired",
     "cwd_escapes_root",
@@ -909,6 +948,7 @@ const ERR_FAMILIES: &[&str] = &[
     "il4_read_markdown_routing",
     "il5_edit_markdown_routing",
     "invalid_line_range",
+    "invalid_param_shape",
     "invalid_regex",
     "json_path_key_miss",
     "json_path_shape_mismatch",
@@ -917,6 +957,7 @@ const ERR_FAMILIES: &[&str] = &[
     "ledger_not_declared",
     "librarian_managed_artifact",
     "lsp_disconnect",
+    "lsp_document_symbol_null",
     "lsp_index_locked",
     "lsp_not_running",
     "lsp_still_starting",
@@ -924,6 +965,7 @@ const ERR_FAMILIES: &[&str] = &[
     "missing_required_param",
     "mutually_exclusive_params",
     "mux_startup_fail",
+    "param_not_applied",
     "params_schema_violation",
     "path_not_found",
     "read_file_overflow_threshold",
@@ -4162,6 +4204,100 @@ mod tests {
             Some("symbols_pattern_is_regex"),
             "symbols_pattern_is_regex is scoped to the symbols tool"
         );
+    }
+    /// The 2026-11-02 audit's NULL head: 119 of 1,113 non-success rows had no family. These are the
+    /// shapes with three or more rows. Each message embeds data (a path, a parameter name) that an
+    /// earlier substring rule could claim, so the hostile cases below put rule keywords in that data.
+    #[test]
+    fn the_shapes_of_the_2026_11_02_null_head_have_a_family() {
+        let doc_symbol_null = "the language server answered textDocument/documentSymbol with null for \
+                               /home/x/src/a.rs on every attempt for 1007 ms — hint: null means the \
+                               server has not answered, not that the file has no symbols — rust-analyzer \
+                               sends it while it reloads its workspace. Retry shortly.";
+        let cases = [
+            ("edit_code", doc_symbol_null, Some("lsp_document_symbol_null")),
+            (
+                "references",
+                "the language server answered textDocument/documentSymbol with null for \
+                 /home/x/src/agent/mod.rs on every attempt for 40113 ms — hint: null means the \
+                 server has not answered",
+                Some("lsp_document_symbol_null"),
+            ),
+            // Hostile path: keywords of other rules inside the data.
+            (
+                "edit_code",
+                "the language server answered textDocument/documentSymbol with null for \
+                 /p/symbol not found index is locked LSP server disconnected.rs on every attempt for \
+                 1007 ms — hint: null means the server has not answered",
+                Some("lsp_document_symbol_null"),
+            ),
+            (
+                "doc",
+                "refusing to write an artifact rooted under the system temp dir (/tmp) into the \
+                 shared persistent catalog — this is how probe/test runs pollute the catalog — hint: \
+                 Use an isolated catalog (under the temp dir, or in-memory) for tests.",
+                Some("artifact_rooted_in_temp"),
+            ),
+            (
+                "grep",
+                "'output_mode' is not a parameter of grep — 'count' was not applied — hint: grep's \
+                 own spelling is mode=\"files\". Nothing was searched.",
+                Some("param_not_applied"),
+            ),
+            (
+                "grep",
+                "'symbol not found' is not a parameter of grep — 'files' was not applied — hint: x",
+                Some("param_not_applied"),
+            ),
+            (
+                "edit_file",
+                "edits array is mutually exclusive with top-level heading/action — hint: Use either \
+                 edits=[] for batch mode, or heading+action for single edit.",
+                Some("mutually_exclusive_params"),
+            ),
+            (
+                "doc",
+                "ops must be an object — hint: Leaf op shape is `{field: {op: value}}`, e.g. \
+                 `{\"kind\": {\"eq\": \"tracker\"}}`.",
+                Some("invalid_param_shape"),
+            ),
+            (
+                "edit_file",
+                "invalid action \"append\"; expected one of: replace, insert_before, insert_after, \
+                 remove, edit — hint: Use action=\"edit\" with old_string + new_string.",
+                Some("unknown_enum_value"),
+            ),
+            (
+                "doc",
+                "body_edits[0]: invalid action \"insert\"; expected one of: replace, insert_before, \
+                 insert_after, remove, edit — hint: Use action=\"edit\".",
+                Some("unknown_enum_value"),
+            ),
+            (
+                "doc",
+                "doc(action=\"update\") was given nothing to change — hint: Pass patch={...} naming \
+                 at least one of status, title, owners, tags, topic, time_scope, extra, body, \
+                 body_edits, params.",
+                Some("missing_required_param"),
+            ),
+            (
+                "doc",
+                "start_line/end_line are file lines (the numbers grep and preview.headings[].line \
+                 report), but 1 is outside this document's body, which spans lines 17-48 \
+                 (frontmatter_lines: 16).",
+                Some("invalid_line_range"),
+            ),
+            // Not widened past what was measured: a bare message with no shape stays unclassified.
+            ("symbols", "unsupported language", None),
+            ("call_graph", "disk I/O error", None),
+        ];
+        for (tool, msg, want) in cases {
+            assert_eq!(
+                normalize_err_family(tool, msg),
+                want,
+                "tool={tool} msg={msg}"
+            );
+        }
     }
 
     /// The coupling that silently freezes the corpus: `backfill_legacy_rows` skips
