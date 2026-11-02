@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 212
-entry_high_water_W: 155
+entry_high_water_W: 156
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -286,6 +286,7 @@ entry_high_water_W: 155
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 | W-154 | 2026-11-01 | high | **Read the seal's own code before a bulk move that rewrites sealed data.** `closure.py` records `os.readlink`, so link retargeting would have changed every sealed directory. | Retargeting on by default would have rewritten ~7,300 links across sealed directories with no error, found at the next verification. | validated |
 | W-155 | 2026-11-01 | med | **A zero from a text pattern over a serialized column was checked against a sibling count that could not be zero.** `output_json` is JSON inside JSON, so `like '%"wip_authors":%'` saw nothing; red calls read NULL on every day, which exposed the query. | Inferred: a design doc saying no hint was ever recorded, and a hunt for the cause in the engine. Observed: hinted 0 and red NULL over 29,805 rows, then 16 hinted on 2026-10-20 after parsing `$[0].text`. | validated |
+| W-156 | 2026-11-02 | med | **A local wine profile with the lane's own tools (bash, git, a full CPython) found the cause of four Windows failures that a bare prefix had hidden.** `normalize` returned `src\held.rs`, git prints `src/held.rs`. Recipe: `scripts/wine-env.sh`, `scripts/wine-env.manifest`. | Observed: no attributed cause across three CI runs of about 25 minutes each; read in about ten tool calls once python3 existed in wine. Inverse: a hand-made short `TMP` gave 255 false failures, so the limits are part of the entry. | validated |
 |----|------|-------:|---------|----------------|--------|
 | W-153 | 2026-10-31 | med | **A scout of the gate pool's test runner found that only CI runs `tests/gate-slot.sh`, through a hit the default grep hid.** Re-running a negative search with `include_hidden=true` before planning on it. | Inferred: a plan that trusted gate-green for the pool tests and read real `/sys/block/zram*` in CI. Observed: 23 files without `.github/workflows/ci.yml`, 27 with it. | validated |
 | W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
@@ -17879,6 +17880,33 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Status:** fixed-verified 2026-11-02. The five entries were flipped to fixed-verified with their evidence and archived with 26 closed ones (31 in all) into `docs/trackers/archive/codescout-usage-frictions-2026-q2.md`, headings kept. The move broke two qualified citations, `codescout-usage-frictions:U-44` and `:U-36`, because the stem names the live file; both were repointed to `codescout-usage-frictions-2026-q2:` and a second `link_scan(write=true)` reached `edges_missing[0]`, `edges_stale[0]`.
 
 **Rests on:** the four verifier reports of 2026-11-02, plus `git log --no-walk` on the cited SHAs in both repos.
+
+## W-156 — A local wine profile with the lane's own tools found the cause of four Windows failures that a bare prefix had hidden
+
+**Valid:** dated 2026-11-02
+
+**Observed:** 2026-11-02, bug `db5303eb3b9c2781`. The four `run_command::attribution` tests failed on `windows-latest` in CI runs 41344511357 and 41402885985 with "python3 is present but the engine produced no hint". The CI log carried no engine output. On the local wine prefix there was no python3, no bash and no git, so those tests skipped themselves and said nothing. I put PortableGit and a CPython into a separate prefix (recipe below), rebuilt the test's fixture repo by hand, and ran the engine under wine with `--explain`. It printed "the red names no dirty path (1 dirty, 1 named)": a path that was named, and dirty, and did not match. `file-provenance.py::normalize` returned `os.path.normpath(p)`, which is `src\held.rs` on Windows, while `git status` prints `src/held.rs`. Fixed in `907db5eb8`. All four tests passed on `windows-latest` in CI run 41413376172.
+
+**Recipe (the durable part):**
+
+- `scripts/wine-env.sh setup` builds one profile under `${XDG_CACHE_HOME:-~/.cache}/codescout/wine/<wine version>-<manifest hash>/`: a dedicated wine prefix, PortableGit (`bash.exe`, `git.exe`) and CPython from the NuGet `python` package. Each archive comes from the URL pinned in `scripts/wine-env.manifest` and is checked against its SHA256 before it is unpacked. `setup` ends by running `python3.exe`, `git.exe` and `bash.exe` inside the new prefix, and writes its `ready` marker only if all three answer.
+- `scripts/build-windows.sh test` uses the profile by itself when one is ready and the caller set neither `WINEPREFIX` nor `CODESCOUT_BASH`. It prints which of three states it is in: the profile, none, or the caller's own setup.
+- A new wine version or an edited manifest selects a new directory; the old profile stays until someone deletes it.
+- Why the NuGet CPython and not the python.org "embeddable" zip: the embeddable zip ships `python312._pth`, which makes the interpreter ignore `PYTHONPATH`, and two attribution tests fail under it. Under the NuGet package all 28 attribution tests and the 3 `librarian::requirements` hook tests pass. Both sums in the manifest were compared with the publishers' (GitHub's asset digest, NuGet's `packageHash`).
+- Size, measured on a fresh profile: prefix 375 MB, PortableGit 409 MB, Python 41 MB, downloads 72 MB, about 0.9 GB. A prefix grows as tests run in it (one used for a full lib run was 996 MB).
+- Suite: `tests/wine-env.sh`, 40 checks against a fake `wine`, `curl` and `7z`. It is not wired into a CI job yet.
+
+**Limits, measured the same day:** wine does not expand an 8.3 short name such as `RUNNER~1` the way Windows does, and `canonicalize` under wine does not either. A hand-made short `TMP` (`RUNN~1P1`) made 255 lib tests fail for that reason alone, none of them a product fault. The short-name family therefore reproduces only on a real runner. Wine also takes byte-range locks permissively (documented in `scripts/build-windows.sh`). A green run in the profile is closer to the CI wine lane than a bare `~/.wine` is, and it is still not a green `windows-latest`.
+
+**Pattern:** before calling a failure environmental or CI-only, give the local reproduction the tools the failing lane has: a shell, git and an interpreter. A test that skips itself when its tool is missing reports green for exactly the thing it exists to check. Then state what the reproduction still cannot do, or the next person will trust it for the short-name family and lose a day.
+
+**Counterfactual:** the four attribution failures had no attributed cause across three CI runs (the bug file said "Not established"), and each CI cycle costs about 25 minutes. Observed: with python3 in wine the cause was read in about ten tool calls and fixed in one commit. The inverse also happened: the same tooling with a hand-made short `TMP` produced 255 failures from the setup, which is why the limits above are part of the entry.
+
+**Impact:** med. One wrong cause was found and fixed locally instead of by further CI cycles.
+
+**Promote-when:** a second failure is attributed in a profile that a bare prefix could not reproduce. Then promote to `docs/conventions/` as the local Windows loop.
+
+**Status:** validated (one datapoint for the pattern; the recipe itself is exercised by `setup` and by the 31 tests that ran under it).
 
 ## Template for new entries
 

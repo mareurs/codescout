@@ -406,6 +406,19 @@ Recording both is what **replaces** the former cherry-pick-vs-fast-forward decis
 
 Policy: [`docs/trackers/archive-cadence-policy.md`](trackers/archive-cadence-policy.md) — surface 1.
 
+## Language
+
+**Write every tracker in English** — each entry, row, status line and event note under `docs/trackers/` — whatever language the conversation with the user is in.
+
+A tracker is read by other sessions, other people and the librarian's search long after the conversation that produced it. Search matches wording: a Romanian entry does not answer an English query and an English entry does not answer a Romanian one, so a ledger that mixes languages splits its own record in two. (This is the reason, not a measurement; no count of misses was taken.)
+
+What stays as it is:
+
+- Code, identifiers, commands, paths and error text are quoted exactly, in whatever language they are in.
+- A quotation of the user may keep its original language. Mark it as a quotation and give the English reading beside it, so a search on the English wording still finds the entry.
+
+The one-line form of this rule is in `CLAUDE.md` § *Session Intelligence Trackers*, because a session that never opens this file would otherwise answer in the user's language.
+
 ## Archive cadence
 
 Two operations, two destinations. Ratified in [`archive-cadence-policy.md`](trackers/archive-cadence-policy.md) (2026-08-16; surface 3 narrowed 2026-08-17):

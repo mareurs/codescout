@@ -24,7 +24,7 @@ Every bug noticed during work gets its own file in `docs/issues/`, copied from [
 
 ## Session Intelligence Trackers
 
-Every tracker prefix, with its file, append call and promotion path → [`docs/TAXONOMY.md`](docs/TAXONOMY.md). Conventions (entry ids, archiving, params writes) → `get_guide("tracker-conventions")` and `get_guide("librarian")`.
+Every tracker prefix, with its file, append call and promotion path → [`docs/TAXONOMY.md`](docs/TAXONOMY.md). Conventions (entry ids, archiving, params writes) → `get_guide("tracker-conventions")` and `get_guide("librarian")`. Write trackers in English.
 
 ## Git Workflow
 
