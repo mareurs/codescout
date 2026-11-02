@@ -35,27 +35,22 @@
 # and the platform logic, but it is NOT EDR. EDR-only behaviors (GPU-probe skip,
 # run_command child hangs, AV-mediated kills) reproduce only on the VDI.
 #
-# Shell-dependent tests need a Windows bash: codescout runs commands through Git
-# Bash, and without one every `run_command`-touching test dies on "no POSIX shell
-# available" — 8 such failures in `server::guide_hint_tests` alone, which is enough
-# noise to hide a real one behind. Extract PortableGit (a 7z SFX; `7z x` unpacks it
-# on Linux, no installer) and point the resolver at it:
+# Shell-dependent tests need a Windows bash and a few need `git.exe` and python3: codescout
+# runs commands through Git Bash, and without one every `run_command`-touching test dies on
+# "no POSIX shell available" (8 such failures in `server::guide_hint_tests` alone, enough
+# noise to hide a real one behind). `scripts/wine-env.sh setup` builds a dedicated wine
+# profile with PortableGit and CPython from pinned, checksummed downloads, and the `test`
+# mode below uses it automatically once it exists. The recipe lives there and in
+# scripts/wine-env.manifest, not in this comment.
 #
-#   CODESCOUT_BASH='Z:\path\to\PortableGit\bin\bash.exe' scripts/build-windows.sh test --lib
+# History of the numbers, from the manual recipe this replaces: with CODESCOUT_BASH set,
+# `server::guide_hint_tests` went from 9 failures to 1, and the 1 was a genuine Windows
+# defect (`docs/issues/archive/2026-08-26-windows-lanes-still-red-on-four-remaining-causes.md`
+# group A). With git.exe on WINEPATH as well the suite needed 7 skips instead of 32 (4283
+# passed, 0 failed, measured 2026-08-26).
 #
-# The value must be a WINDOWS path — wine maps `/` to `Z:`. With it set, that module
-# went 9 failures -> 1, and the 1 was a genuine Windows defect
-# (`docs/issues/archive/2026-08-26-windows-lanes-still-red-on-four-remaining-causes.md`
-# group A).
-#
-# A few tests shell out to `git` DIRECTLY rather than through Git Bash, so CODESCOUT_BASH
-# never reaches them and they die on "program not found". Put PortableGit's `cmd/` on the
-# WINDOWS path too — a Unix PATH entry does nothing for a wine process:
-#
-#   WINEPATH='Z:\path\to\PortableGit\cmd' CODESCOUT_BASH='...' scripts/build-windows.sh test --lib
-#
-# With both set the suite needs 7 skips instead of 32 — 4283 passed, 0 failed, measured
-# 2026-08-26.
+# To use your own wine setup instead, export WINEPREFIX or CODESCOUT_BASH yourself: the
+# profile is only picked up when you set neither.
 #
 # Note this is still the gnu ABI, and a green wine run is NOT a green `windows-latest`.
 # The sharpest demonstration to date: two `retrieval::index_lock` tests passed here while
@@ -154,6 +149,20 @@ case "$CMD" in
     echo ">>>             — a constant matched to this box, read live from ci.yml, not a live read of CI." >&2
     echo ">>> A green run here is NOT a green wine LANE — nor a green windows-latest." >&2
     echo ">>>   docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md" >&2
+    # The dedicated profile (scripts/wine-env.sh), when one is ready for THIS wine and manifest.
+    # Never over a setup the caller made: WINEPREFIX or CODESCOUT_BASH already set means they
+    # chose their own, and a silent swap would make their result incomparable to their setup.
+    # `env` exits 3 when no profile is ready; that is not an error here, only a missing tool.
+    if [ -z "${WINEPREFIX:-}" ] && [ -z "${CODESCOUT_BASH:-}" ]; then
+      if profile_env="$("$PROJECT_ROOT/scripts/wine-env.sh" env 2>/dev/null)"; then
+        eval "$profile_env"
+        echo ">>> wine profile: $WINEPREFIX (scripts/wine-env.sh)" >&2
+      else
+        echo ">>> wine profile: none — bare ~/.wine, no bash/git/python3. Run scripts/wine-env.sh setup." >&2
+      fi
+    else
+      echo ">>> wine profile: yours (WINEPREFIX/CODESCOUT_BASH already set)" >&2
+    fi
     export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER="wine"
     export WINEDEBUG="${WINEDEBUG:--all}"   # silence wine's GL/pci-id probe noise
     set -x; exec cargo test --target "$TARGET" "${FEATURES[@]}" "${ARGS[@]}" ;;

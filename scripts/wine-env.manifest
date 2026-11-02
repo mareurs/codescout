@@ -1,0 +1,30 @@
+# The tools a local wine profile carries, read by scripts/wine-env.sh.
+#
+# One place for the versions, so a bump touches this file and nothing else. Plain KEY=value
+# lines: the script sources this file, so it must stay free of anything but assignments.
+#
+# Every archive is checked against its SHA256 before it is unpacked. The two sums below were
+# compared with what each publisher states, on 2026-11-02:
+#   PortableGit: the `digest` GitHub shows for the release asset (sha256).
+#   Python:      `packageHash` in the NuGet registration for python 3.12.8 (SHA512, base64);
+#                the SHA256 here is of the same file.
+# A changed sum means the download is not the file this manifest was written for. Do not edit
+# the sum to make it pass: find out why it changed.
+#
+# Changing any line changes the profile's key, so the next `wine-env.sh setup` builds a new
+# profile beside the old one instead of mutating it.
+
+# PortableGit: a 7z self-extracting archive, so `7z x` unpacks it on Linux with no installer.
+# It gives the profile bash.exe (CODESCOUT_BASH) and git.exe (WINEPATH).
+PORTABLEGIT_VERSION=2.55.0.5
+PORTABLEGIT_URL=https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/PortableGit-2.55.0.5-64-bit.7z.exe
+PORTABLEGIT_SHA256=5aa8a20f6e9abb2c755f0e73c91c687701a46b309ad84a0ca6509380fa4ae290
+
+# CPython from the NuGet `python` package: a full layout (DLLs, Lib), unpacked with `7z x`, no
+# installer. NOT the "embeddable" zip from python.org: that one ships `python312._pth`, which
+# makes the interpreter ignore PYTHONPATH and the script's own directory, so two
+# `run_command::attribution` tests fail under it (measured 2026-11-02). Under this package all
+# 28 attribution tests and the 3 `librarian::requirements` hook tests pass.
+PYTHON_VERSION=3.12.8
+PYTHON_URL=https://www.nuget.org/api/v2/package/python/3.12.8
+PYTHON_SHA256=406856be971d957e0bee7a5cefe20a5ec78d70a495e9e33cd0e53d31faec049d
