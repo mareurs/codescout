@@ -1,0 +1,76 @@
+---
+id: '10d788af3e0c82ab'
+kind: bug
+status: open
+title: 'BUG: `doc` by id fails with a bare "No such file or directory (os error 2)" when the catalog row points into a worktree that was removed, and the main-checkout copy of the file has another id'
+owners:
+- marius
+tags:
+- cluster/unclassified
+- worktree-overlay
+- librarian
+opened: 2026-11-02
+owner: marius
+severity: low
+unverified: One failed update and one get. How the row came to point into the removed worktree, and whether other rows do, were not checked.
+---
+
+# BUG: `doc` by id fails with a bare "No such file or directory (os error 2)" when the catalog row points into a worktree that was removed, and the main-checkout copy of the file has another id
+
+## Summary
+
+Catalog row `3822f951e9d78ddf` (kind `bug`, status `open`) has `abs_path` `/home/marius/work/claude/codescout.worktrees/fix-g-20261024/docs/issues/2026-10-24-a-worktree-supersedes-of-a-main-file-the-worktree-lacks-fails-after-forking-shadow-rows.md`. That directory does not exist, and it is not in `git worktree list`. `doc(action="get", id="3822f951e9d78ddf")` returns the row with `body_error: "No such file or directory (os error 2)"`. The same file exists in the main checkout and is cataloged under another id, `5ee9a523ac9a7cde` (status `fixed`).
+
+## Class fit
+
+No class on the roster was walked. `cluster/unclassified` is the sanctioned escape.
+
+## Symptom (Effect)
+
+A caller that holds the old id gets a bare operating-system message. It names no path and no worktree, so the caller cannot tell that the row is stale and that another id exists. On 2026-10-30 20:49, session `f844662c` called `doc(action="update", id="3822f951e9d78ddf", patch={status: "fixed", body_edits: [...]})`. The call ended with outcome `error`, not `recoverable_error`, and the message was only "No such file or directory (os error 2)". It is the only row with that message in the codescout usage database since 2026-10-25.
+
+## Reproduction
+
+Reproduced for `get` on 2026-11-02: `doc(action="get", id="3822f951e9d78ddf", heading="## Summary")`. The `update` failure is from the usage database:
+
+```
+sqlite3 -readonly .codescout/usage.db "SELECT called_at, outcome, error_msg FROM tool_calls WHERE tool_name='doc' AND error_msg LIKE 'No such file or directory%';"
+```
+
+gives one row, 2026-10-30 20:49. `ls` of the worktree directory fails with "No such file or directory".
+
+## Environment
+
+codescout `experiments`, main checkout, catalog on this machine. The row's title and its tags (`worktree-overlay`) are those of a bug about worktree shadow rows.
+
+## Root cause
+
+Unknown. Not checked: how the row came to point into that worktree, why removing the worktree did not delete or re-point the row, whether `doc(find)` lists the stale row next to the main one, and how many other rows point into removed worktrees.
+
+## Evidence
+
+The `get` response and the query above. Row ids and paths are copied from the live response.
+
+## Hypotheses tried
+
+None.
+
+## Fix
+
+Not done.
+
+## Tests added
+
+N/A. Nothing is fixed.
+
+## Workarounds
+
+Use the id of the main-checkout row (`5ee9a523ac9a7cde`).
+
+## Resume
+
+Found in the drill-down of session `f844662c` for the usage audit (`docs/usage-reports/2026-11-02-usage-analysis.md`, finding 14). Only filed; not fixed.
+
+## References
+
+- `docs/issues/2026-10-24-a-worktree-supersedes-of-a-main-file-the-worktree-lacks-fails-after-forking-shadow-rows.md` (the bug whose file the stale row describes)

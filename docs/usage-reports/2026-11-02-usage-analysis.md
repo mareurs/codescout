@@ -104,10 +104,11 @@ The lowest first-retry success is `worktree_activate_required` (77%). This is no
 - `docs/issues/2026-11-02-call-graph-fails-with-a-bare-disk-io-error-and-the-rows-record-no-input.md` (`cd85dbae70c76670`)
 - friction `U-52` in `docs/trackers/codescout-usage-frictions.md`
 - evidence added to the open bug `35bcf086deeb7cbe` (the null `documentSymbol` window), under its Resume section
+- `docs/issues/2026-11-02-doc-by-id-fails-with-a-bare-enoent-when-the-catalog-row-points-into-a-removed-worktree.md` (`10d788af3e0c82ab`)
 
 ### 13. Session drill-down (usage database only)
 
-**Selection.** The database holds 15 sessions with more than 50 calls since 10-25. Four of them have a non-success rate above 10%: `9b43f888` (14 of 53, 26.4%), `d9be3870` (9 of 63), `7c400569` (10 of 72) and `74cfdeb6` (12 of 108). I read the call sequence of `9b43f888` and `74cfdeb6`. For `d9be3870` and `7c400569` I read only the error families. I did not read the two largest sessions, `8edd247a` (1,224 calls, 7.0%) and `f844662c` (575 calls, 7.7%).
+**Selection.** The database holds 15 sessions with more than 50 calls since 10-25. Four of them have a non-success rate above 10%: `9b43f888` (14 of 53, 26.4%), `d9be3870` (9 of 63), `7c400569` (10 of 72) and `74cfdeb6` (12 of 108). I read the call sequence of `9b43f888` and `74cfdeb6`. For `d9be3870` and `7c400569` I read only the error families. I did not read the two largest sessions in finding 13; finding 14 covers them.
 
 **Transcripts.** I searched the project directories of all four profiles for the full ids of `9b43f888` and `74cfdeb6`. The only file that names them is this audit's own session. So the native tool calls, the cost and the stop reasons of both sessions are not available. Only the codescout calls are known.
 
@@ -119,6 +120,22 @@ The lowest first-retry success is `worktree_activate_required` (77%). This is no
 - **Most failing rows have no `err_family`.** 10 of the 14 non-success rows in `9b43f888` and 9 of the 12 in `74cfdeb6` have none. They are the population of bug `43e0e0c684c0c038`. In `9b43f888` the untagged rows also include three `doc` refusals (an undeclared `cluster/` tag, `extra.opened` "yesterday" and `extra.opened` null) and one `grep` notice about `output_mode`.
 - **`d9be3870` (10-27, 11:16 to 11:25):** 6 of its 9 non-success rows are `write_scope_denied` (5) and `shrink_guard_blocked` (1). I did not read why the writes were refused.
 - **`7c400569` (10-31):** 10 non-success rows in 8 tool-and-family pairs, none above 2 rows. It has 7 overflows in 72 calls. I did not read it further.
+
+### 14. Session drill-down: the two largest sessions
+
+Both are in the database only; no transcript was read. Both are dominated by the three Iron-Law gates, which is what finding 1 reports for the whole window.
+
+**`8edd247a`** (1,224 calls, 86 non-success, 7.0%; 10-31 12:34 to 11-01 20:43, working in the `.worktrees/setup-ab-eval` checkout):
+
+- 744 of the calls are `run_command`. The 15 slowest are `sleep` polls of the setup-ab evaluation (up to 1,890 s). That agrees with finding 6.
+- Non-success rows by family: `il3_pipe_to_trimmer` 24, `il2_structural_edit` 19 (the ten most-hit paths, 17 of the 19 rows, are Python files under `tools/setup-ab-eval`), `worktree_activate_required` 16, `il3_shell_on_source` 14, `il1_read_overlaps_symbol` 4.
+- Next-call success after a refusal: `il2` 18 of 19, `il3_pipe_to_trimmer` 23 of 24, `il3_shell_on_source` 12 of 14, `worktree_activate_required` **9 of 16**. The last family is the slowest to recover, as in the 15-database table (finding 9). 12 of its 16 rows fall in the first 65 minutes (12:34 to 13:39); the rest are on 11-01.
+
+**`f844662c`** (575 calls, 44 non-success, 7.7%; 10-30 20:31 to 22:22, in the main checkout):
+
+- Non-success rows by family: `il3_pipe_to_trimmer` 8, `il3_shell_on_source` 8, `edit_file` on a managed document (`librarian_managed_artifact`) 7, `il1_read_overlaps_symbol` 7, `missing_required_param` 4, and 2 `doc` failures.
+- The 7 `librarian_managed_artifact` rows are `edit_file` calls on bug files and on two `docs/conventions/` files, and 5 of the 7 were followed by a successful call.
+- One of the 2 `doc` failures is a hard error, "No such file or directory (os error 2)", from `doc(update)` by an id whose catalog row points into a removed worktree. It is the only row with that message since 10-25. Filed as `docs/issues/2026-11-02-doc-by-id-fails-with-a-bare-enoent-when-the-catalog-row-points-into-a-removed-worktree.md` (`10d788af3e0c82ab`). The other is a recoverable `body_edits` refusal ("old_string not found in section").
 
 ## Blind spots
 
@@ -132,4 +149,4 @@ The lowest first-retry success is `worktree_activate_required` (77%). This is no
 
 ## Not done
 
-Cost and stop-reason analysis from the proxy (`claude-traces`, Langfuse; needs the proxy keys, which I did not read), the two largest sessions of the drill-down (`8edd247a`, `f844662c`) and the native-tool side of every drilled session, the 26 unreadable eval-copy databases, the transcripts of worktree-started sessions, user corrections and git-history measures (wrong implementations, fix-on-fix rate) from the 10-24 report, and the cause of U-52.
+Cost and stop-reason analysis from the proxy (`claude-traces`, Langfuse; needs the proxy keys, which I did not read), the native-tool side of every drilled session (no transcript was found for the two sessions of finding 13, and none was read for those of finding 14), the 26 unreadable eval-copy databases, the transcripts of worktree-started sessions, user corrections and git-history measures (wrong implementations, fix-on-fix rate) from the 10-24 report, and the cause of U-52.
