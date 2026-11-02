@@ -831,6 +831,8 @@ jobs:
       #    it toward the 100-line display budget, so stdout gets 94 of 300 and the next-page
       #    offset lands at 95 instead of the asserted 101. Do NOT relax the assertion to
       #    accommodate this — the exact arithmetic is what the test is for on real Windows.
+      #    Re-measured 2026-11-02 with the wine profile's PortableGit 2.55.0.5 under wine 11.20:
+      #    `bash.exe -c 'echo out; echo err >&2'` still prints the FAST_CWD block before `out`.
       #
       # 6. RESOLVED 2026-09-02 by the wine pin, kept here as the second record of a protocol
       #    that worked. These nine were skipped for HANGS under this lane's wine 9.0 —
@@ -885,7 +887,9 @@ jobs:
       #    d. a_process_that_outlives_its_budget_yields_nothing_promptly spawns the bare
       #       programs `sleep` and `echo`, and `output_within` returns None when a program does
       #       not spawn. Measured on the LOCAL wine 11.20 only (`where echo` and `where sleep`
-      #       both print "File not found"); not measured on this lane's runner. The test
+      #       both print "File not found"; the same with the wine profile, whose WINEPATH holds
+      #       only git's `cmd` and the python directory, not git's `usr\bin`); not measured on
+      #       this lane's runner. The test
       #       passes on windows-latest, where Git's tools are on PATH.
       #
       # Do NOT make any of these self-skip at runtime on a probe (missing bash, missing `py`,
