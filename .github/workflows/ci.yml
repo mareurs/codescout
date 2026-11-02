@@ -766,9 +766,9 @@ jobs:
       # ONNX weights step in the matrix job above. The cache key names this wine and the
       # manifest, so a changed pin or a changed manifest starts from nothing.
       #
-      # UNMEASURED on this runner: how long `setup` takes (the prefix start, the unpack of
-      # PortableGit's 409 MB). Measured on a developer box with the downloads already cached:
-      # 10 s. Read the runner's figure from the first run's step timing.
+      # Cost of `setup` (the prefix start, the unpack of
+      # PortableGit's 409 MB). Measured: 13 s on this runner with a cache MISS (download included,
+      # run 41426083657), 10 s on a developer box with the downloads cached.
       - name: Wine profile key
         id: wine-profile-key
         run: echo "wine=$(wine --version)" >> "$GITHUB_OUTPUT"
@@ -850,7 +850,7 @@ jobs:
       #    moved, not that the test changed.
       #    Evidence and the original diagnosis are in GROUP 6 IN DETAIL below.
       #
-      # 7. Nine tests that fail under this lane's wine and pass on all three windows-latest
+      # 7. Nine tests that failed under this lane's wine and passed on all three windows-latest
       #    lanes (run 41344511357: none of them is in any windows-latest failure list). Four
       #    causes, three read from that run's log and one measured locally (d), none a
       #    codescout defect:
@@ -861,11 +861,11 @@ jobs:
       #       the_commit_hook_and_the_requirements_file_agree_on_the_class_fit_policy,
       #       the_commit_hook_and_the_server_count_a_section_the_same_way,
       #       the_declared_values_agree_with_the_commit_hooks_on_the_live_ledger.
-      #       Since the wine profile (scripts/wine-env.sh) the lane HAS a full CPython, and
-      #       the three pass locally under it (measured 2026-11-02). They are still skipped
-      #       here on purpose: pass 1 changes what the lane installs and nothing else, and
-      #       pass 2 drops these three skips once a run on THIS lane shows them passing.
-      #       The same two-pass shape as group 6 below, for the same reason.
+      #       RESOLVED 2026-11-02 by the wine profile (scripts/wine-env.sh): the lane has a full
+      #       CPython, the three passed locally under it, and pass 1 (run 41426083657, the
+      #       profile installed, the skips kept) left the lane green. Pass 2 lifts these three
+      #       skips. If they fail on this lane, check first that `scripts/wine-env.sh env` still
+      #       puts the python directory on WINEPATH.
       #    b. The Cygwin `FAST_CWD pointer` warning (the cause named in group 5) lands in the
       #       shell's output: native_context_wire_reaches_background_shell compares
       #       "Cygwin WARNING: ...\n\nbackground-root|..." with the bare string, and
@@ -949,7 +949,8 @@ jobs:
       #
       # The skips that remain are not a wine-version question: groups 1, 3, 4 and 5 above are
       # a bisect-proven pre-existing cluster and three documented permanents, and group 7 is
-      # nine emulator artifacts, read from run 41344511357 or measured locally. Group 1 is the
+      # six emulator artifacts that stay skipped (its python3 trio was resolved by the profile),
+      # read from run 41344511357 or measured locally. Group 1 is the
       # only plausible candidate for a future pass — "pre-existing wine failures" was
       # established under 9.0 and has not been re-measured under the pinned wine. That is a PASS 3, on
       # its own, for the same reason this was a pass 2.
@@ -958,7 +959,7 @@ jobs:
       # hang cost more wall-clock before failing the same way.
       # docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md
       - name: Cross-test under wine (lib only)
-        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip the_commit_hook_and_the_ --skip the_declared_values_agree_with_the_commit_hooks --skip native_context_wire_reaches_ --skip read_of_an_over_long_name --skip concurrent_writers_of_one_record --skip publish_records_the_parent_pid --skip a_process_that_outlives_its_budget
+        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip native_context_wire_reaches_ --skip read_of_an_over_long_name --skip concurrent_writers_of_one_record --skip publish_records_the_parent_pid --skip a_process_that_outlives_its_budget
 
   tool-docs-sync:
     name: Tool Docs Sync
