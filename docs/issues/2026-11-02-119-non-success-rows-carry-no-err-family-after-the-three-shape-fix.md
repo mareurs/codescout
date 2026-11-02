@@ -1,16 +1,17 @@
 ---
 id: '43e0e0c684c0c038'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: 119 of 1,113 non-success rows in the codescout usage database (10.7%) carry no err_family, after the 2026-10-27 fix for three other shapes'
 tags:
 - cluster/selector-narrower-than-its-population
+closed: 2026-11-02
 opened: 2026-11-02
 owner: marius
 related:
 - docs/issues/2026-10-26-three-recurring-error-shapes-carry-no-err-family.md
 severity: low
-unverified: The counts come from one database (codescout, 2026-10-25 to 2026-11-02). The root cause was not read in `src/usage/db.rs`, and whether the grep 'not applied' notices should count as errors is undecided.
+unverified: 'How many of the 119 real rows the new classifier covers was not measured: the backfill runs on the next open of each database. CI has not been read. Shapes with fewer than three rows stay unclassified.'
 ---
 
 # BUG: 119 of 1,113 non-success rows in the codescout usage database (10.7%) carry no err_family, after the 2026-10-27 fix for three other shapes
@@ -66,11 +67,17 @@ None.
 
 ## Fix
 
-Not done.
+Done on `experiments` at `423d812b4`, for the shapes with three or more rows. In `normalize_err_family` (`src/usage/db.rs`): four new families, `lsp_document_symbol_null` (22 rows), `artifact_rooted_in_temp` (11), `param_not_applied` (18) and `invalid_param_shape` (4), the first three at the top because their messages embed data; and four extended ones, `unknown_enum_value` (invalid action), `mutually_exclusive_params` (`edit_file` batch against heading form), `invalid_line_range` (`doc(get)` outside the body) and `missing_required_param` (`doc(update)` with nothing to change). `ERR_FAMILIES` lists the four new names in sorted order, so the backfill fingerprint changes and each database re-classifies its NULL rows on its next open. Not done: shapes with fewer than three rows (`disk I/O error`, `unsupported language`, `@bg_*` refs with `.err`, the undeclared `cluster/` tag and the malformed `extra.opened` refusals of `doc`, `LSP request timed out`, and others); the test pins the first two as `None`. Not decided: whether the `grep` "was not applied" notices are errors; they only have a family now.
+
+
+## Fix provenance
+
+- **SHA:** `423d812b45767960e9f21ed9abd78197b1e83e63` (`experiments`)
+- **patch-id:** `a1a6d9a0afbdddbbaf2d388bd977af990d61a2ae`
 
 ## Tests added
 
-N/A. Nothing is fixed.
+`the_shapes_of_the_2026_11_02_null_head_have_a_family` in `src/usage/db.rs`: 14 cases built from the real message prefixes, three with hostile data that holds other rules' keywords (a path and a parameter name), two pinned as `None`. Red before the change (the first case gave `None`), green after. Gate in a clean worktree: FMT, CLIPPY, LEAN and DEFAULT all 0, 8,836 tests; `cargo test --lib usage::` 109 passed. Not measured: how many of the 119 real rows the new classifier covers. The backfill runs on the next open of each database, so that count comes after a rebuild. CI has not been read.
 
 ## Workarounds
 
@@ -78,7 +85,7 @@ Read `error_msg` directly for the NULL rows, as the queries above do.
 
 ## Resume
 
-Open. Decide first whether the `grep` "not applied" notices are errors. Then add families for the remaining shapes, or derive the table from the message sources, as `docs/issues/archive/2026-08-16-backfill-gate-not-derived-from-the-taxonomy.md` did for the backfill gate.
+Fixed on `experiments` (`423d812b4`) for the shapes with three or more rows. Next: after a rebuild and reconnect, count the NULL rows again (`SELECT COUNT(*) FROM tool_calls WHERE called_at >= '2026-10-25' AND outcome != 'success' AND err_family IS NULL`, against 119 before) and archive this file with that figure.
 
 ## References
 
