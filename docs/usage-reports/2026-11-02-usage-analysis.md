@@ -34,9 +34,9 @@
 
 Top non-success messages in the window: shell-on-source refusal on `run_command` (36), `edit_file` definition guard (27 for `fn `, 25 for `def `, 9 more in batch form), worktree-activation block (23 on `create_file`, 13 on `edit_file`, 11 on `doc`), `IL3` pipe refusals (5 in the top 20). These are gate refusals, not tool failures; the 2026-10-24 report found the gates recover in one call about 95% of the time. Recovery was not re-measured here.
 
-### 2. `edit_code` hits a null `documentSymbol` answer 19 times
+### 2. `edit_code` hits a null `documentSymbol` answer 20 times
 
-"the language server answered textDocument/documentSymbol with null" for 19 `edit_code` calls in the codescout database. Investigated in finding 10: every failing build already contains the `1b208ad79` fix, and the paths are in nested worktrees.
+"the language server answered textDocument/documentSymbol with null" for 20 `edit_code` calls (and 2 `references` calls) in the codescout database. Investigated in findings 10 and 13: every failing build already contains the `1b208ad79` fix, and 21 of the 22 failing paths are in the main checkout, not in nested worktrees.
 
 ### 3. Rust mux lock failures: 15 in 8 days, falling
 
@@ -86,7 +86,7 @@ The lowest first-retry success is `worktree_activate_required` (77%). This is no
 
 ### 10. Null `documentSymbol` answers outlive the 2026-10-24 fix
 
-22 `edit_code`/`symbols` rows in the window (2 on 10-29, 15 on 10-31, 5 on 11-01), from five builds, **all of which contain `1b208ad79`** (the fix that keeps re-asking while rust-analyzer reports start-up progress). 13 of them fall in one hour on 10-31 in two sessions. The failing paths are in nested `.worktrees/` checkouts, and the error text already says so. Both known causes have bug files: `docs/issues/archive/2026-10-23-documentsymbol-null-window-outlasts-the-5s-cold-budget-because-rust-analyzer-scans-the-nested-worktrees.md` (fixed) and the open `docs/issues/2026-10-31-rust-analyzer-watcher-walks-the-directory-symlinks-in-resident-private-without-end-so-documentsymbol-stays-null.md`. Nothing new was filed.
+22 rows in the window: 20 `edit_code` and 2 `references` (2 on 10-29, 15 on 10-31, 5 on 11-01), from five builds, **all of which contain `1b208ad79`** (the fix that keeps re-asking while rust-analyzer reports start-up progress). 15 of them are in two sessions on 10-31; finding 13 drills into those. 21 of the 22 failing paths are in the main checkout and one is in a nested `.worktrees/` checkout. An earlier version of this report said the paths were in nested worktrees and that `symbols` rows were included; the drill-down showed both statements were wrong. Both known causes have bug files: `docs/issues/archive/2026-10-23-documentsymbol-null-window-outlasts-the-5s-cold-budget-because-rust-analyzer-scans-the-nested-worktrees.md` (fixed) and the open `docs/issues/2026-10-31-rust-analyzer-watcher-walks-the-directory-symlinks-in-resident-private-without-end-so-documentsymbol-stays-null.md`. No new bug was filed; finding 13 added its evidence to the open bug.
 
 ### 11. Transcripts (204 files: 21 parent sessions, 183 subagent files, deduplicated)
 
@@ -103,6 +103,22 @@ The lowest first-retry success is `worktree_activate_required` (77%). This is no
 - `docs/issues/2026-11-02-119-non-success-rows-carry-no-err-family-after-the-three-shape-fix.md` (`43e0e0c684c0c038`)
 - `docs/issues/2026-11-02-call-graph-fails-with-a-bare-disk-io-error-and-the-rows-record-no-input.md` (`cd85dbae70c76670`)
 - friction `U-52` in `docs/trackers/codescout-usage-frictions.md`
+- evidence added to the open bug `35bcf086deeb7cbe` (the null `documentSymbol` window), under its Resume section
+
+### 13. Session drill-down (usage database only)
+
+**Selection.** The database holds 15 sessions with more than 50 calls since 10-25. Four of them have a non-success rate above 10%: `9b43f888` (14 of 53, 26.4%), `d9be3870` (9 of 63), `7c400569` (10 of 72) and `74cfdeb6` (12 of 108). I read the call sequence of `9b43f888` and `74cfdeb6`. For `d9be3870` and `7c400569` I read only the error families. I did not read the two largest sessions, `8edd247a` (1,224 calls, 7.0%) and `f844662c` (575 calls, 7.7%).
+
+**Transcripts.** I searched the project directories of all four profiles for the full ids of `9b43f888` and `74cfdeb6`. The only file that names them is this audit's own session. So the native tool calls, the cost and the stop reasons of both sessions are not available. Only the codescout calls are known.
+
+**Findings.**
+
+- **Both sessions started at 12:33 on 10-31 and hold 15 of the 22 null `documentSymbol` rows.** In `74cfdeb6`, 9 of 12 non-success rows are `edit_code` inserts on `attribution.rs`, over 11 min 12 s. In `9b43f888`, 6 of 14 are `edit_code` inserts on `create.rs`, over 86 min. Evidence is in the open bug `35bcf086deeb7cbe`.
+- **The error text promises about a minute.** The text says a repo with many nested worktrees can keep the answer null "for about a minute after start-up. Retry shortly." `74cfdeb6` retried 9 times over 11 minutes, with `sleep 90`, `sleep 60`, `sleep 120` and a `pgrep` between the tries. The text does not say what to do when the minute has passed. Filed as evidence in the same bug; no new file.
+- **The failing paths are in the main checkout.** The earlier text of this report, which said they are in nested worktrees, was wrong.
+- **Most failing rows have no `err_family`.** 10 of the 14 non-success rows in `9b43f888` and 9 of the 12 in `74cfdeb6` have none. They are the population of bug `43e0e0c684c0c038`. In `9b43f888` the untagged rows also include three `doc` refusals (an undeclared `cluster/` tag, `extra.opened` "yesterday" and `extra.opened` null) and one `grep` notice about `output_mode`.
+- **`d9be3870` (10-27, 11:16 to 11:25):** 6 of its 9 non-success rows are `write_scope_denied` (5) and `shrink_guard_blocked` (1). I did not read why the writes were refused.
+- **`7c400569` (10-31):** 10 non-success rows in 8 tool-and-family pairs, none above 2 rows. It has 7 overflows in 72 calls. I did not read it further.
 
 ## Blind spots
 
@@ -116,4 +132,4 @@ The lowest first-retry success is `worktree_activate_required` (77%). This is no
 
 ## Not done
 
-Cost and stop-reason analysis from the proxy (`claude-traces`, Langfuse), a drill-down of anomalous sessions, the 26 unreadable eval-copy databases, the transcripts of worktree-started sessions, user corrections and git-history measures (wrong implementations, fix-on-fix rate) from the 10-24 report, and the cause of U-52.
+Cost and stop-reason analysis from the proxy (`claude-traces`, Langfuse; needs the proxy keys, which I did not read), the two largest sessions of the drill-down (`8edd247a`, `f844662c`) and the native-tool side of every drilled session, the 26 unreadable eval-copy databases, the transcripts of worktree-started sessions, user corrections and git-history measures (wrong implementations, fix-on-fix rate) from the 10-24 report, and the cause of U-52.

@@ -163,6 +163,18 @@ Open:
 - They come from the effort-steering experiment trees. Example: `fixed-checker-transfer-20261101/review/mutant06/matched-workflow-20261031 -> /home/marius/work/claude/codescout/.codescout/resident-private/matched-workflow-20261031` (11:12 today).
 - Not done: I did not delete or move them. They are another session's experiment data. Not checked: whether the experiment scripts that create them live in this repo.
 
+**Seen in the usage database, 2026-11-02 (drill-down of the usage audit in `docs/usage-reports/2026-11-02-usage-analysis.md`, finding 13).** Evidence only. Nothing was changed.
+
+- Two sessions that started within the same minute on 2026-10-31 (12:33) hold 15 of the 22 null `documentSymbol` rows recorded between 10-25 and 11-02.
+- Session `74cfdeb6-5d10-4eb1-992f-7337cc5e71ca` got 9 null answers to `edit_code` (action `insert`) on `src/tools/run_command/attribution.rs` between 12:41:47 and 12:52:59. That is 11 min 12 s.
+  - Between the retries it ran `sleep 90`, `sleep 60`, `pgrep -a -f "[r]ust-analyzer"`, `sleep 120` and one `workspace` call.
+  - It made its edits with `edit_file` meanwhile (10 successful calls on the same file).
+- Session `9b43f888-d30f-45b0-90ae-bea19c89d648` got 6 null answers to `edit_code` (action `insert`) on `src/librarian/tools/create.rs` between 12:42:12 and 14:08:37. That is 86 min.
+- 11 of the 15 rows say "on every attempt for 1007 ms" and 4 say about 5030 ms. So the retry window was about 1 s per call, and rust-analyzer still answered null on the next call.
+- The error text in these rows says the null answer "can keep it answering null for about a minute after start-up. Retry shortly." The first session followed that advice for 11 minutes. The text does not match the 15-minute and 86-minute windows recorded here and in the Symptom section.
+- All 15 failing paths are in the main checkout, not in a nested worktree.
+- Not checked: whether directory symlinks existed under `.codescout/resident-private` at 12:41 on 10-31. The transcripts of both sessions are not in any of the four profile directories, so only the usage database shows what they did.
+
 ## References
 
 - `docs/issues/archive/2026-10-23-documentsymbol-null-window-outlasts-the-5s-cold-budget-because-rust-analyzer-scans-the-nested-worktrees.md`: the same family. Nested worktrees stretched the null window. The fix there was the exclusion in `src/lsp/init_options.rs`.
