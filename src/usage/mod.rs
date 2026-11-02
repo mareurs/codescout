@@ -213,7 +213,7 @@ impl UsageRecorder {
         };
         let read_output_ids = extract_read_output_ids(input);
 
-        // Recorded with or without `--debug` (decided 2026-11-02, bug 2108589a1b5fab62): a row
+        // Recorded with or without `--debug` (decided 2026-11-02, bug 20d94ebc7deec094): a row
         // that cannot say what was asked makes every query over `input_json` answer for a
         // fraction of the calls, with no sign of the gap. `output_json` below stays debug-only.
         let input_json = serde_json::to_string(input).ok();
@@ -1480,7 +1480,7 @@ mod content_tests {
     }
 
     /// `input_json` is recorded with or without `--debug` (decided 2026-11-02, bug
-    /// 2108589a1b5fab62): a row that cannot say what was asked makes every query over `input_json`
+    /// 20d94ebc7deec094): a row that cannot say what was asked makes every query over `input_json`
     /// answer for a fraction of the calls. `output_json` stays debug-only: it is the large half.
     #[tokio::test]
     async fn record_content_records_input_in_normal_mode() {

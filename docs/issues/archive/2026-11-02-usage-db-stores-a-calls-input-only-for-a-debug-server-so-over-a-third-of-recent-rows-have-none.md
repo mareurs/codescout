@@ -1,7 +1,7 @@
 ---
-id: '2108589a1b5fab62'
+id: 20d94ebc7deec094
 kind: bug
-status: mitigated
+status: fixed
 title: 'BUG: `usage.db` stores a call''s input and output only for a server started with `--debug`, so 36.7% of the rows since 2026-10-25 have no input, and every query that reads `input_json` silently sees a fraction'
 owners:
 - marius
@@ -12,7 +12,6 @@ closed: 2026-11-02
 opened: 2026-11-02
 owner: marius
 severity: low
-unverified: 'Fixed in code and tests only. No row from a server started without `--debug` on a build with the commit has been seen: the 30 rows seen on the rebuilt server (build `33ccee567`, `codescout_dirty` 1) carry both blobs, so that server runs with `--debug`. The dirty bit is consistent with the rebuild having included the then-uncommitted change; it does not prove it. The 36.7% empty is for the period before the change and stays true of it.'
 ---
 
 # BUG: `usage.db` stores a call's input and output only for a server started with `--debug`, so 36.7% of the rows since 2026-10-25 have no input, and every query that reads `input_json` silently sees a fraction
@@ -77,9 +76,14 @@ Start servers with `--debug`, and report with every `input_json` figure how many
 
 ## Resume
 
-Code changed in `a72175ca5`; not yet shown live. The only rows seen on the rebuilt server (8 rows, build `33ccee567`) carry both blobs, so that server runs with `--debug` and proves nothing. Needed: a row from a server started WITHOUT `--debug` on a build that has the commit, with `input_json` present and `output_json` empty. Query: `select codescout_sha, count(*), sum(length(coalesce(input_json,''))>0), sum(length(coalesce(output_json,''))>0) from tool_calls where called_at >= '<time of the rebuild>' group by 1`. When such a row exists, mark `fixed`. The usage report of 2026-11-02 and the `analyze-usage` skill name the gap for the period before.
+Fixed. Live check, 2026-11-02, installed build `28a1b4b6f` (clean): a server started WITHOUT `--debug` (`codescout start --project <empty temp project>`, one `read_file` call over stdio) wrote a row with `input_json` = `{"path":"a.txt"}` and an empty `output_json`. The usage report of 2026-11-02 and the `analyze-usage` skill name the gap for the period before; rows written before the rebuild stay without an input, and a query over them should print how many lacked one.
 
 ## References
 
 - `docs/issues/2026-11-02-call-graph-fails-with-a-bare-disk-io-error-and-the-rows-record-no-input.md`
 - `src/usage/mod.rs` (`write_content`)
+
+## Fix provenance
+
+- **SHA:** `a72175ca58de5df2bee72444c232a351b90c6b0f` (`experiments`)
+- **patch-id:** `e2a8dc338b94068768c05514990780fed6616ab6`
