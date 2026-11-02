@@ -100,7 +100,7 @@ The lowest first-retry success is `worktree_activate_required` (77%). This is no
 
 - `docs/issues/2026-11-02-a-second-client-that-spawns-a-rust-mux-loses-the-lock-race-and-fails-the-start-instead-of-connecting-to-the-winner.md` (id `8e6268a0577ff543`)
 - `docs/issues/archive/2026-11-02-edit-file-replace-all-answers-a-bare-ok-with-no-count-of-the-sites-it-replaced.md` (`0a2b075281ab6c82`; fixed at `f77ac83c9`)
-- `docs/issues/2026-11-02-119-non-success-rows-carry-no-err-family-after-the-three-shape-fix.md` (`43e0e0c684c0c038`)
+- `docs/issues/archive/2026-11-02-119-non-success-rows-carry-no-err-family-after-the-three-shape-fix.md` (`5da4c4cdf95bf3c4`; fixed at `423d812b4`, measured afterwards: 52 NULL rows of 1,130 instead of 119 of 1,113)
 - `docs/issues/2026-11-02-call-graph-fails-with-a-bare-disk-io-error-and-the-rows-record-no-input.md` (`cd85dbae70c76670`)
 - friction `U-52` in `docs/trackers/codescout-usage-frictions.md`
 - evidence added to the open bug `35bcf086deeb7cbe` (the null `documentSymbol` window), under its Resume section
@@ -119,7 +119,7 @@ The lowest first-retry success is `worktree_activate_required` (77%). This is no
 - **Both sessions started at 12:33 on 10-31 and hold 15 of the 22 null `documentSymbol` rows.** In `74cfdeb6`, 9 of 12 non-success rows are `edit_code` inserts on `attribution.rs`, over 11 min 12 s. In `9b43f888`, 6 of 14 are `edit_code` inserts on `create.rs`, over 86 min. Evidence is in the open bug `35bcf086deeb7cbe`.
 - **The error text promises about a minute.** The text says a repo with many nested worktrees can keep the answer null "for about a minute after start-up. Retry shortly." `74cfdeb6` retried 9 times over 11 minutes, with `sleep 90`, `sleep 60`, `sleep 120` and a `pgrep` between the tries. The text does not say what to do when the minute has passed. Filed as evidence in the same bug; no new file.
 - **The failing paths are in the main checkout.** The earlier text of this report, which said they are in nested worktrees, was wrong.
-- **Most failing rows have no `err_family`.** 10 of the 14 non-success rows in `9b43f888` and 9 of the 12 in `74cfdeb6` have none. They are the population of bug `43e0e0c684c0c038`. In `9b43f888` the untagged rows also include three `doc` refusals (an undeclared `cluster/` tag, `extra.opened` "yesterday" and `extra.opened` null) and one `grep` notice about `output_mode`.
+- **Most failing rows have no `err_family`.** 10 of the 14 non-success rows in `9b43f888` and 9 of the 12 in `74cfdeb6` have none. They are the population of bug `5da4c4cdf95bf3c4`. In `9b43f888` the untagged rows also include three `doc` refusals (an undeclared `cluster/` tag, `extra.opened` "yesterday" and `extra.opened` null) and one `grep` notice about `output_mode`.
 - **`d9be3870` (10-27, 11:16 to 11:25):** 6 of its 9 non-success rows are `write_scope_denied` (5) and `shrink_guard_blocked` (1). I did not read why the writes were refused.
 - **`7c400569` (10-31):** 10 non-success rows in 8 tool-and-family pairs, none above 2 rows. It has 7 overflows in 72 calls. I did not read it further.
 
@@ -149,6 +149,7 @@ Both are in the database only; no transcript was read. Both are dominated by the
 - **Recovery table.** Defined here as the next call of the same session and agent; the earlier report used another key, so the two are not comparable.
 - **Subagent findings** on the friction log are model reports. Only the cited commits were checked to exist; the code claims were not re-run, except where this file says it reproduced or queried something.
 - **Instrument contamination.** The hook-rejection count includes this audit's own text in the transcripts it reads; the table above removes it by hand and says so.
+- **`input_json` is missing from 36.7% of the rows in the window.** A server records a call's input only when it was started with `--debug`, and both forms run on this machine. Every figure here that reads `input_json` (the slow-command lists of findings 6 and 14, the paths of the refused `il2` edits, the per-session sequences of findings 13 and 14) counts only rows that had it, and none of them said so when it was written. Filed as `docs/issues/2026-11-02-usage-db-stores-a-calls-input-only-for-a-debug-server-so-over-a-third-of-recent-rows-have-none.md` (`2108589a1b5fab62`). Counts that use only `tool_name`, `outcome`, `err_family`, `error_msg` and the session columns are not affected.
 
 ## Not done
 

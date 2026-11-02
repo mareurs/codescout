@@ -1,5 +1,5 @@
 ---
-id: '43e0e0c684c0c038'
+id: 5da4c4cdf95bf3c4
 kind: bug
 status: fixed
 title: 'BUG: 119 of 1,113 non-success rows in the codescout usage database (10.7%) carry no err_family, after the 2026-10-27 fix for three other shapes'
@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/2026-10-26-three-recurring-error-shapes-carry-no-err-family.md
 severity: low
-unverified: 'How many of the 119 real rows the new classifier covers was not measured: the backfill runs on the next open of each database. CI has not been read. Shapes with fewer than three rows stay unclassified.'
+unverified: CI has not been read. The 52 remaining NULL rows were not compared row by row with the 119 before; only the counts were. Shapes with fewer than three rows stay unclassified.
 ---
 
 # BUG: 119 of 1,113 non-success rows in the codescout usage database (10.7%) carry no err_family, after the 2026-10-27 fix for three other shapes
@@ -77,7 +77,7 @@ Done on `experiments` at `423d812b4`, for the shapes with three or more rows. In
 
 ## Tests added
 
-`the_shapes_of_the_2026_11_02_null_head_have_a_family` in `src/usage/db.rs`: 14 cases built from the real message prefixes, three with hostile data that holds other rules' keywords (a path and a parameter name), two pinned as `None`. Red before the change (the first case gave `None`), green after. Gate in a clean worktree: FMT, CLIPPY, LEAN and DEFAULT all 0, 8,836 tests; `cargo test --lib usage::` 109 passed. Not measured: how many of the 119 real rows the new classifier covers. The backfill runs on the next open of each database, so that count comes after a rebuild. CI has not been read.
+`the_shapes_of_the_2026_11_02_null_head_have_a_family` in `src/usage/db.rs`: 14 cases built from the real message prefixes, three with hostile data that holds other rules' keywords (a path and a parameter name), two pinned as `None`. Red before the change (the first case gave `None`), green after. Gate in a clean worktree: FMT, CLIPPY, LEAN and DEFAULT all 0, 8,836 tests; `cargo test --lib usage::` 109 passed. Measured on the rebuilt server: 52 NULL of 1,130 non-success rows (see Resume). CI has not been read.
 
 ## Workarounds
 
@@ -85,7 +85,7 @@ Read `error_msg` directly for the NULL rows, as the queries above do.
 
 ## Resume
 
-Fixed on `experiments` (`423d812b4`) for the shapes with three or more rows. Next: after a rebuild and reconnect, count the NULL rows again (`SELECT COUNT(*) FROM tool_calls WHERE called_at >= '2026-10-25' AND outcome != 'success' AND err_family IS NULL`, against 119 before) and archive this file with that figure.
+Fixed on `experiments` (`423d812b4`) and measured after the rebuild and reconnect of 2026-11-02: 52 of the 1,130 non-success rows since 2026-10-25 have no `err_family` (4.6%), against 119 of 1,113 (10.7%) before. The denominator grew by 17 new rows, and the 52 were not compared row by row with the 119. The ones left are the shapes with fewer than three rows, at most 2 rows each: `call_graph` "disk I/O error", `doc` refusals about the undeclared `cluster/` tag and the malformed `extra.opened`, `edit_file` markdown-only parameters, `references` "LSP request timed out", `symbols` "unsupported language", `workspace` "unknown workspace action", `create_file` write failures, and a `doc` filter that is not a filter node. They are the next candidates if the NULL bucket needs to shrink further.
 
 ## References
 
