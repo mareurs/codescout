@@ -14,7 +14,6 @@ tags:
 closed: 2026-11-01
 opened: 2026-11-01
 severity: medium
-unverified: The 7 tests are verified RED (122 passed, 7 failed) and GREEN (129 passed, 0 failed) with an empty home on this machine; the ubuntu CI result after the fix is not yet observed.
 ---
 
 ## Summary
@@ -76,7 +75,7 @@ codescout `experiments` at `60dc3569e`. Local machine has `~/.config/librarian/w
 
 `test_support::librarian_env(dir)` in `src/server.rs` writes an empty workspace file and returns a `LibrarianEnv` with `workspace` and `db` set inside `dir`. All 18 literals now call it.
 
-Fixed by `bef7eb8e1` on `experiments` (patch-id `900da4f7e82f3afa3a60a5efa8245d3a5d8428f6`). With a fresh empty HOME the server tests went from 122 passed / 7 failed to 129 passed / 0 failed. The full local gate was green on the merged tip `abba2def5`. The ubuntu CI result is not yet observed.
+Fixed by `bef7eb8e1` on `experiments` (patch-id `900da4f7e82f3afa3a60a5efa8245d3a5d8428f6`). With a fresh empty HOME the server tests went from 122 passed / 7 failed to 129 passed / 0 failed. The full local gate was green on the merged tip `abba2def5`. Observed: `Test (ubuntu-latest / default)` and `Test (server-stack)` are green in runs 41331598643 and 41413376172. The two Windows `unknown tool: 'doc'` failures had a different cause (a TOML basic string holding a backslash path), fixed by `ef326aec5` under `db5303eb3b9c2781`.
 
 ## Tests added
 

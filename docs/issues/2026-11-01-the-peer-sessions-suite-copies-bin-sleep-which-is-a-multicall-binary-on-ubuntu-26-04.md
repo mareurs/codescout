@@ -13,7 +13,6 @@ tags:
 closed: 2026-11-01
 opened: 2026-11-01
 severity: medium
-unverified: Verified RED and GREEN in a clean ubuntu:26.04 container (7 failures before, 0 after) and GREEN on this machine; the container showed 7 failures where the runner showed 9, so the 2 extra runner failures are not reproduced. The runner result after the fix is not yet observed.
 ---
 
 ## Summary
@@ -56,7 +55,7 @@ The fixtures are copies of `bash`, which chooses nothing from its name. Each par
 
 Second site, found in CI run 41331598643 (job `Test (ubuntu-latest / no-features)`): `retrieval::index_state::tests::build_id_reads_the_inode_of_a_deleted_binary` copied `/usr/bin/sleep` to `sleepy` and printed `coreutils: unknown program 'sleepy'`. It failed there and passed on the other ubuntu lanes of the same run, same image, because it polls `/proc/<pid>/exe` and passes only if the poll catches the child before it exits. It now copies `/usr/bin/sh` to `parked` and runs `-c 'read parked'` on a piped stdin. Verified in an ubuntu:26.04 container: the old probe exits with rc 1; the new one stays alive, `exe` names the copy, and after unlinking the copy `exe` reads `... (deleted)`.
 
-Fixed by `77ac5021c` (patch-id `8497e4be4f5f1527f2fecd9cda19d8acb6139716`, the suite) and `9cf788035` (patch-id `4990c8e413ecddcc53764b6f269e30469b142f06`, the Rust test), both on `experiments`. The full local gate was green on `9cf788035` (lean 5969, default 8807). The runner result after the fix is not yet observed.
+Fixed by `77ac5021c` (patch-id `8497e4be4f5f1527f2fecd9cda19d8acb6139716`, the suite) and `9cf788035` (patch-id `4990c8e413ecddcc53764b6f269e30469b142f06`, the Rust test), both on `experiments`. The full local gate was green on `9cf788035` (lean 5969, default 8807). Runner result: the `Shell suites (hooks, provenance, peer-sessions)` job is green in runs 41344511357, 41402885985 and 41413376172.
 
 ## Tests added
 

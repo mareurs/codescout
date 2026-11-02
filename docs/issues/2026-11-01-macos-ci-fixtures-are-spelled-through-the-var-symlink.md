@@ -14,7 +14,6 @@ tags:
 closed: 2026-11-01
 opened: 2026-11-01
 severity: high
-unverified: The cause is reproduced and the fix verified only on Linux, with TMPDIR at a symlink; the effect on macOS itself is not observed until a CI run contains the fix, and the 20 other lib failures listed under Resume are not addressed.
 ---
 
 ## Summary
@@ -65,11 +64,11 @@ codescout `experiments` at `60dc3569e`; macOS runner `macos-latest`, `TMPDIR=/va
 - CI: the `test` job sets `TMPDIR` to the physical path (`pwd -P`) of `runner.temp` on macOS.
 - `the_temp_dir_is_spelled_without_a_symbolic_link` (`src/librarian/read_door.rs`) fails first when `TMPDIR` is spelled through a link, and names the remedy, instead of 250 tests failing with door messages. On a developer's own macOS machine, export `TMPDIR="$(cd "${TMPDIR:-/tmp}" && pwd -P)"` before running the tests.
 
-Fixed by `abba2def5` on `experiments` (patch-id `d11b674696404efc0d1888e7888e40ddaf33500b`). The full local gate was green on the merged tip `abba2def5`. The effect on a macOS runner is not yet observed; 20 of the 263 macOS lib failures are not explained by the symlink (see Resume).
+Fixed by `abba2def5` on `experiments` (patch-id `d11b674696404efc0d1888e7888e40ddaf33500b`). The full local gate was green on the merged tip `abba2def5`. Observed on macOS: the three `Test (macos-latest / ...)` jobs are green in run 41413376172 (tip `c3339b9f5`). The 13 leftovers named under Resume were fixed by another session in `32b3df112`.
 
 ## Tests added
 
-`the_temp_dir_is_spelled_without_a_symbolic_link`: RED with `TMPDIR` at a symlink, GREEN with a canonical one (both runs local, Linux). The effect on macOS itself is NOT observed yet; see `unverified`.
+`the_temp_dir_is_spelled_without_a_symbolic_link`: RED with `TMPDIR` at a symlink, GREEN with a canonical one (both runs local, Linux). The effect on macOS is observed: all three macOS jobs are green in run 41413376172.
 
 ## Workarounds
 

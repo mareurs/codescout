@@ -12,7 +12,6 @@ tags:
 closed: 2026-11-01
 opened: 2026-11-01
 severity: high
-unverified: Verified RED and GREEN only up to apt-get update and the pinned candidate in a clean ubuntu:26.04 container. The rest of the lane (the wine install, the Windows build, the tests under wine) has not run on Ubuntu 26.04 and may fail for other reasons.
 ---
 
 ## Summary
@@ -51,7 +50,7 @@ That `resolute` has no WineHQ build at the pinned version: refuted, the candidat
 
 The key is saved as `winehq-archive.asc`, and a `sed` rewrites the `Signed-By` line of the downloaded `.sources` file to match. A comment in `.github/workflows/ci.yml` states the reason.
 
-Fixed by `683c04eae` on `experiments` (patch-id `2cd79c86f3e5062b52bd0206d01ae7fbc61ad3cb`). Verified only up to `apt-get update` and the pinned candidate, in an ubuntu:26.04 container. The runner result after the fix is not yet observed.
+Fixed by `683c04eae` on `experiments` (patch-id `2cd79c86f3e5062b52bd0206d01ae7fbc61ad3cb`). Verified only up to `apt-get update` and the pinned candidate, in an ubuntu:26.04 container. Runner result: the `Windows-gnu cross (MinGW + wine)` job got past `apt-get update` and ran the whole lane (wine install, Windows build, tests under wine) in run 41342167539 (it failed at clippy) and run 41344511357 (it failed at tests, for other causes). It is green in run 41413376172.
 
 ## Tests added
 

@@ -12,7 +12,6 @@ tags:
 closed: 2026-11-01
 opened: 2026-11-01
 severity: medium
-unverified: Verified RED and GREEN in a clean clone with the symlink broken and a fresh HOME. The tracked symlink itself, which dangles on every clone, is not changed; only the one citation of it is. The runner result after the fix is not yet observed.
 ---
 
 ## Summary
@@ -53,7 +52,7 @@ That the 11 extra highs seen locally also fail CI: refuted by the sort order in 
 
 The README now describes the link as the `claude-traces` skill link under `.claude/skills/` and says that its target is an absolute path on the author's machine.
 
-Fixed by `f6ff984a9` on `experiments` (patch-id `0f61ddd87f9d5db46d1b7f01738d8ba2d2f684ec`). The full local gate was green on `9cf788035`. The runner result after the fix is not yet observed.
+Fixed by `f6ff984a9` on `experiments` (patch-id `0f61ddd87f9d5db46d1b7f01738d8ba2d2f684ec`). The full local gate was green on `9cf788035`. Runner result: the `Audit Doc Refs` job is green in run 41413376172 (tip `c3339b9f5`). It was red in run 41402885985 for a different cause (the new root `tools/` directory, fixed by `b1f9a7752`), not for this one.
 
 ## Tests added
 
