@@ -749,45 +749,38 @@ jobs:
       # OUTCOME (run 32961510592): 7 of the 8 pass. The 8th is skipped below for a
       # different, measured reason — see the heredoc entry in the skip list.
       #
-      # PortableGit is a 7z SELF-EXTRACTING archive, so `7z x` unpacks it here with no
-      # installer executing. Cache restores BEFORE the download, same convention as the
-      # ONNX weights step in the matrix job above.
-      - name: Cache PortableGit
-        id: portablegit-cache
+      # The lane's tools come from scripts/wine-env.sh and scripts/wine-env.manifest, the same
+      # profile a developer builds locally, so the lane and the local loop cannot drift apart
+      # in what is installed. Until 2026-11-02 this was a second copy of the PortableGit recipe
+      # (the first was a comment in build-windows.sh), and python3 was in neither.
+      #
+      # The profile holds PortableGit (bash.exe, git.exe) and a full CPython, each downloaded
+      # from the manifest's pinned URL and checked against its SHA256 before it is unpacked.
+      # Nothing is exported from here: `build-windows.sh test` finds the profile by itself and
+      # takes WINEPREFIX, CODESCOUT_BASH and WINEPATH (with git.exe's directory on the WINDOWS
+      # path, which a Unix PATH entry does not affect) from `scripts/wine-env.sh env`.
+      #
+      # Only the DOWNLOADS are cached. A wine prefix saved at the end of the job would carry
+      # the previous run's test residue into the next run, and the prefix is cheap to rebuild
+      # next to a download of 72 MB. Cache restores BEFORE the download, same convention as the
+      # ONNX weights step in the matrix job above. The cache key names this wine and the
+      # manifest, so a changed pin or a changed manifest starts from nothing.
+      #
+      # UNMEASURED on this runner: how long `setup` takes (the prefix start, the unpack of
+      # PortableGit's 409 MB). Measured on a developer box with the downloads already cached:
+      # 10 s. Read the runner's figure from the first run's step timing.
+      - name: Wine profile key
+        id: wine-profile-key
+        run: echo "wine=$(wine --version)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the wine profile downloads
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/portable-git
-          key: portable-git-2.55.0.5-64-bit
+          path: ~/.cache/codescout/wine/*/downloads
+          key: wine-profile-downloads-${{ steps.wine-profile-key.outputs.wine }}-${{ hashFiles('scripts/wine-env.manifest') }}
 
-      - name: Seed PortableGit (cache miss)
-        if: steps.portablegit-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          DIR="${{ runner.temp }}/portable-git"
-          mkdir -p "$DIR"
-          URL="https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/PortableGit-2.55.0.5-64-bit.7z.exe"
-          curl -fsSL "$URL" -o "${{ runner.temp }}/PortableGit.7z.exe"
-          7z x -y -o"$DIR" "${{ runner.temp }}/PortableGit.7z.exe" > /dev/null
-
-      # Both values must be WINDOWS paths: wine maps `/` to `Z:`, and `resolve_git_bash`
-      # does a plain `is_file()` probe that a Unix path fails SILENTLY — the symptom is
-      # the same 8 failures, with nothing pointing at the variable.
-      #
-      # CODESCOUT_BASH fixes the SHELL. It does not help the handful of tests that invoke
-      # `git` DIRECTLY rather than through Git Bash — those die on `program not found`
-      # until `git.exe` is on the WINDOWS path, which a Unix PATH entry does not affect.
-      # WINEPATH is that knob. Worth 3 tests, measured 2026-08-26.
-      - name: Point codescout at Git Bash under wine
-        shell: bash
-        run: |
-          set -euo pipefail
-          DIR="${{ runner.temp }}/portable-git"
-          UNIX_PATH="$DIR/bin/bash.exe"
-          test -f "$UNIX_PATH" || { echo "PortableGit missing at $UNIX_PATH" >&2; exit 1; }
-          test -f "$DIR/cmd/git.exe" || { echo "git.exe missing at $DIR/cmd" >&2; exit 1; }
-          echo "CODESCOUT_BASH=Z:${UNIX_PATH//\//\\}" >> "$GITHUB_ENV"
-          echo "WINEPATH=Z:${DIR//\//\\}\\cmd" >> "$GITHUB_ENV"
+      - name: Build the wine profile
+        run: scripts/wine-env.sh setup
       # SKIP LIST — every entry classified below.
       #
       # MEASURED, in two passes, and the second pass is the one that counts.
@@ -817,7 +810,8 @@ jobs:
       #    reindex_backfills_commits_table died on `NotFound: program not found` because they
       #    invoke `git` DIRECTLY rather than through Git Bash, so CODESCOUT_BASH never reached
       #    them. Setting WINEPATH to PortableGit's `cmd/` (above) fixes all three. They are no
-      #    longer skipped. If they regress, check that step's `git.exe` guard first.
+      #    longer skipped. If they regress, check that `scripts/wine-env.sh setup` ran and that
+      #    its `env` output still puts git.exe's directory on WINEPATH.
       #
       # 3. RESOLVED 2026-10-04. The MAP-shape live test read the repo's real CLAUDE.md through
       #    `env!("CARGO_MANIFEST_DIR")`, a hybrid path when cross-compiled. It now generates its
@@ -861,12 +855,17 @@ jobs:
       #    causes, three read from that run's log and one measured locally (d), none a
       #    codescout defect:
       #
-      #    a. python3 is absent under wine (the same class as group 4). The three
+      #    a. python3 WAS absent under wine (the same class as group 4). The three
       #       `librarian::requirements` agreement tests spawn the commit hook's Python and
-      #       panic with `python3 failed to spawn: ... program not found`:
+      #       panicked with `python3 failed to spawn: ... program not found`:
       #       the_commit_hook_and_the_requirements_file_agree_on_the_class_fit_policy,
       #       the_commit_hook_and_the_server_count_a_section_the_same_way,
       #       the_declared_values_agree_with_the_commit_hooks_on_the_live_ledger.
+      #       Since the wine profile (scripts/wine-env.sh) the lane HAS a full CPython, and
+      #       the three pass locally under it (measured 2026-11-02). They are still skipped
+      #       here on purpose: pass 1 changes what the lane installs and nothing else, and
+      #       pass 2 drops these three skips once a run on THIS lane shows them passing.
+      #       The same two-pass shape as group 6 below, for the same reason.
       #    b. The Cygwin `FAST_CWD pointer` warning (the cause named in group 5) lands in the
       #       shell's output: native_context_wire_reaches_background_shell compares
       #       "Cygwin WARNING: ...\n\nbackground-root|..." with the bare string, and
