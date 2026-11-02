@@ -1134,3 +1134,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash tests/attribute-red.sh
+
+  # ITS OWN JOB, appended at the END of the file on purpose (same convention as
+  # `gate-slot-tests` above), so no existing `ci.yml:<line>` citation shifts.
+  #
+  # WHY IT IS WIRED AT ALL. `tests/wine-env.sh` is the regression suite for
+  # `scripts/wine-env.sh`, which builds the wine profile (PortableGit + CPython) that the
+  # `windows-gnu` wine lane and `scripts/build-windows.sh test` both use. The suite drives
+  # the REAL script through a fake `wine`, `curl` and `7z`, with its home under `mktemp -d`,
+  # so it downloads nothing and starts no wine. It checks the checksum refusal, the
+  # idempotence of a second `setup`, and that an edited manifest or another wine version
+  # builds a NEW profile. A suite that no job runs is decoration
+  # (docs/trackers/bug-fix-session-log.md W-156).
+  #
+  # Needs bash, flock (util-linux) and sha256sum (coreutils), all on ubuntu-latest. The
+  # script's `need 7z` check is met by the suite's fake `7z`. Measured 2026-11-02 on the dev
+  # machine only: 41 passed, 0 failed. That is not a CI run: read the first CI result
+  # before trusting it.
+  wine-env-tests:
+    name: wine-env.sh (wine profile script)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/wine-env.sh
