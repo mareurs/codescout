@@ -202,7 +202,7 @@ impl UsageRecorder {
         let project_root_str = project_root.to_string_lossy().to_string();
 
         // Buffer linkage. Both are extracted unconditionally, NOT behind `self.debug`
-        // like `input_json`/`output_json` below — that is the whole reason they are
+        // like `output_json` below — that is the whole reason they are
         // columns rather than something a query derives. With debug off, neither the
         // emitted handle nor the referenced ones survive anywhere else, and the join
         // loses both of its sides.
@@ -213,11 +213,10 @@ impl UsageRecorder {
         };
         let read_output_ids = extract_read_output_ids(input);
 
-        let input_json = if self.debug {
-            serde_json::to_string(input).ok()
-        } else {
-            None
-        };
+        // Recorded with or without `--debug` (decided 2026-11-02, bug 2108589a1b5fab62): a row
+        // that cannot say what was asked makes every query over `input_json` answer for a
+        // fraction of the calls, with no sign of the gap. `output_json` below stays debug-only.
+        let input_json = serde_json::to_string(input).ok();
 
         let output_json = if self.debug {
             match result {
@@ -758,7 +757,9 @@ mod content_tests {
     ///   never surfaced, pure storage.
     /// * A whole command varies by flags, so it groups badly; the executable name groups
     ///   well but discards what was addressed. Neither is *the target*.
-    /// * `input_json` is populated on ~99% of rows, so the command is already recoverable
+    /// * `input_json` has been recorded on every row since 2026-11-02 (before that only for a
+    ///   `--debug` server: about 63% of the rows since 2026-10-25), so the command is already
+    ///   recoverable
     ///   at query time. Storing a derived form buys nothing and makes one column mean two
     ///   things.
     ///
@@ -1478,8 +1479,11 @@ mod content_tests {
         );
     }
 
+    /// `input_json` is recorded with or without `--debug` (decided 2026-11-02, bug
+    /// 2108589a1b5fab62): a row that cannot say what was asked makes every query over `input_json`
+    /// answer for a fraction of the calls. `output_json` stays debug-only: it is the large half.
     #[tokio::test]
-    async fn record_content_no_input_in_normal_mode() {
+    async fn record_content_records_input_in_normal_mode() {
         use serde_json::json;
 
         let dir = tempfile::tempdir().unwrap();
@@ -1504,15 +1508,19 @@ mod content_tests {
             .await;
 
         let conn = crate::usage::db::open_db(dir.path()).unwrap();
-        let (inp, sid, cs): (Option<String>, String, String) = conn
+        let (inp, out, sid, cs): (Option<String>, Option<String>, String, String) = conn
             .query_row(
-                "SELECT input_json, session_id, codescout_sha FROM tool_calls",
+                "SELECT input_json, output_json, session_id, codescout_sha FROM tool_calls",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .unwrap();
 
-        assert!(inp.is_none(), "input_json should be None in normal mode");
+        assert!(
+            inp.as_deref().is_some_and(|s| s.contains("test_symbol")),
+            "input_json is recorded in normal mode, got {inp:?}"
+        );
+        assert!(out.is_none(), "output_json stays debug-only");
         assert_eq!(sid, "test-session", "session_id should always be set");
         assert!(!cs.is_empty(), "codescout_sha should always be set");
     }
@@ -1560,7 +1568,8 @@ mod content_tests {
     /// The wiring from extractor to column, end to end — and the reason these are
     /// columns at all.
     ///
-    /// `debug` is **false** here, so `input_json` and `output_json` are both NULL. If
+    /// `debug` is **false** here, so `output_json` is NULL (`input_json` is recorded either way
+    /// since 2026-11-02). If
     /// the linkage were derived at query time from those blobs instead of recorded,
     /// this row would carry no linkage whatever and the join would have nothing to
     /// stand on. That is the whole argument against the precedent in
@@ -1596,16 +1605,16 @@ mod content_tests {
             .await;
 
         let conn = crate::usage::db::open_db(dir.path()).unwrap();
-        let (inp, emitted, reads): (Option<String>, Option<String>, Option<String>) = conn
+        let (out, emitted, reads): (Option<String>, Option<String>, Option<String>) = conn
             .query_row(
-                "SELECT input_json, emitted_output_id, read_output_ids FROM tool_calls",
+                "SELECT output_json, emitted_output_id, read_output_ids FROM tool_calls",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .unwrap();
         assert!(
-            inp.is_none(),
-            "debug is off — this is the configuration the columns exist for"
+            out.is_none(),
+            "debug is off, so the emitted handle is in no blob: this is the configuration the columns exist for"
         );
         assert_eq!(
             emitted.as_deref(),
@@ -1623,7 +1632,7 @@ mod content_tests {
     /// (via `UsageRecorder::new`'s new final field, standing in for the server's
     /// `_meta` read), and it lands in the column unconditionally — `debug` is off
     /// here on purpose, mirroring `record_content_records_buffer_linkage_with_debug_off`
-    /// above: `input_json` stays NULL while `tool_use_id` is populated, which is the
+    /// above: `output_json` stays NULL while `tool_use_id` is populated, which is the
     /// whole point of a column rather than something a debug-only blob could derive.
     #[tokio::test]
     async fn record_content_records_tool_use_id_with_debug_off() {
@@ -1655,7 +1664,10 @@ mod content_tests {
                 Ok((r.get(0)?, r.get(1)?))
             })
             .unwrap();
-        assert!(inp.is_none(), "debug is off — input_json stays NULL");
+        assert!(
+            inp.is_some(),
+            "input_json is recorded without debug since 2026-11-02"
+        );
         assert_eq!(
             tool_use_id.as_deref(),
             Some("toolu_01X"),
