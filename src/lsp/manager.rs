@@ -180,6 +180,16 @@ pub(super) fn mux_failure_is_index_contention(detail: &str) -> bool {
         || detail.contains("another mux instance holds the lock")
 }
 
+/// True when a spawned mux's stderr says it lost the mux's own ownership lock to another mux:
+/// the one failure after which the caller should wait for that other mux. A RocksDB index lock
+/// or any other failure is not this (a held index is not a mux that will bind our socket).
+#[cfg(unix)]
+pub(super) fn mux_lost_the_lock_race(stderr_tail: &[String]) -> bool {
+    stderr_tail
+        .iter()
+        .any(|line| line.contains("another mux instance holds the lock"))
+}
+
 /// Build a `(message, hint)` describing a mux startup failure from the (possibly
 /// empty) stdout "ready" line and the tail of the mux child's captured stderr.
 /// Pure so the classification is unit-tested; `get_or_start_via_mux` only formats.
@@ -1364,7 +1374,22 @@ impl LspManager {
                                 Err(e) => format!("(stdout read error: {e})"),
                             };
                             let (message, hint) = mux_failure_report(&stdout_line, &tail);
-                            crate::tools::RecoverableError::with_hint(message, hint).into()
+                            let failure: anyhow::Error =
+                                crate::tools::RecoverableError::with_hint(message, hint).into();
+                            if mux_lost_the_lock_race(&tail) && round + 1 < MUX_CONNECT_ROUNDS {
+                                // We saw the lock free and spawned, but a peer's mux took it
+                                // first and ours gave up after its grace (race 3 of
+                                // issues/2026-10-17-mux-connect-path-lock-races). The lock is
+                                // held by a NEW process whose mux is starting: wait for it in
+                                // the next round, like a replacement after a holder's death.
+                                tracing::info!(
+                                    "mux spawn for {language} lost the lock race, waiting for the winner's mux"
+                                );
+                                last_holder_gone = true;
+                                last_err = Some(failure);
+                                continue;
+                            }
+                            failure
                         }
                     });
                 }
@@ -2657,6 +2682,78 @@ mod tests {
             "generic hint expected when no contention signature, got: {hint}"
         );
     }
+    /// Only the mux's own lock failure is a lost race. A held RocksDB index or a failed LSP
+    /// spawn is not a mux that will bind our socket, so it must stay an immediate error.
+    #[cfg(unix)]
+    #[test]
+    fn mux_lost_the_lock_race_names_only_the_muxs_own_lock() {
+        use super::mux_lost_the_lock_race as lost;
+        let line = |s: &str| vec![s.to_string()];
+        assert!(lost(&[
+            "Error: another mux instance holds the lock".to_string(),
+            "Caused by:".to_string(),
+            "    Resource temporarily unavailable (os error 11)".to_string(),
+        ]));
+        assert!(!lost(&line(
+            "org.rocksdb.RocksDBException: While lock file: LOCK: Resource temporarily unavailable"
+        )));
+        assert!(!lost(&line("failed to spawn LSP server: kotlin-lsp")));
+        assert!(!lost(&[]));
+    }
+
+    /// A spawned mux that fails for any other reason ends the call at once: one spawn, the error.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_mux_this_call_spawned_that_fails_for_another_reason_is_not_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
+        let _ = std::fs::remove_file(&sock_path);
+        let _ = std::fs::remove_file(&lock_path);
+        let spawns = dir.path().join("spawns.txt");
+        let fake_mux = dir.path().join("fake-mux-fails.py");
+        std::fs::write(
+            &fake_mux,
+            r#"import sys
+with open(sys.argv[1], "a") as f:
+    f.write("spawn\n")
+sys.stderr.write("Error: failed to spawn LSP server: rust-analyzer\n")
+sys.exit(1)
+"#,
+        )
+        .unwrap();
+        let mgr = LspManager::new();
+        *mgr.mux_binary_for_test.lock().unwrap() = Some((
+            PathBuf::from("python3"),
+            vec![
+                fake_mux.to_string_lossy().into_owned(),
+                spawns.to_string_lossy().into_owned(),
+            ],
+        ));
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(60),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_secs(2)),
+        )
+        .await
+        .expect("bounded");
+        let msg = match result {
+            Ok(_) => panic!("a failing mux must not connect"),
+            Err(e) => format!("{e:#}"),
+        };
+        assert!(msg.contains("failed to spawn LSP server"), "{msg}");
+        assert_eq!(std::fs::read_to_string(&spawns).unwrap().lines().count(), 1);
+    }
+
     #[cfg(unix)]
     #[test]
     fn mux_contention_report_round_trips_through_get_or_start_guard() {
@@ -3378,6 +3475,101 @@ except Exception:
             result.is_ok(),
             "a mux this call spawned and saw ready is connected to even when it answers late: {:?}",
             result.err().map(|e| format!("{e:#}"))
+        );
+    }
+    /// Race (3) of `docs/issues/2026-10-17-mux-connect-path-lock-races.md`, through the real spawn
+    /// branch: this call saw the lock free and spawned a mux, but a peer's mux took the lock first.
+    /// The spawned mux gives up (its stderr names the lock, as `acquire_mux_lock` does after its
+    /// grace) while the peer's mux is still starting and binds its socket a moment later. The call
+    /// must connect to that peer, not fail the start. The script plays both sides: it forks the
+    /// winner (lock taken, socket bound after 0.5 s, init message sent), waits until the winner
+    /// holds the lock, then exits with the loser's stderr. Its first argument is a file it appends
+    /// one line to per spawn. Run as `python3 <script>` (see the test above for why).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_mux_this_call_spawned_that_loses_the_lock_race_connects_to_the_winner() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
+        let _ = std::fs::remove_file(&sock_path);
+        let _ = std::fs::remove_file(&lock_path);
+        let spawns = dir.path().join("spawns.txt");
+        let fake_mux = dir.path().join("fake-mux-loser.py");
+        std::fs::write(
+            &fake_mux,
+            r#"import fcntl, json, os, socket, sys, time
+counter = sys.argv[1]
+sock_path = sys.argv[sys.argv.index("--socket") + 1]
+lock_path = sys.argv[sys.argv.index("--lock") + 1]
+with open(counter, "a") as f:
+    f.write("spawn\n")
+r, w = os.pipe()
+if os.fork() == 0:
+    os.close(r)
+    null = os.open(os.devnull, os.O_RDWR)
+    for fd in (0, 1, 2):
+        os.dup2(null, fd)
+    lock = open(lock_path, "a+")
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    os.write(w, b"x")
+    os.close(w)
+    time.sleep(0.5)
+    s = socket.socket(socket.AF_UNIX)
+    s.bind(sock_path)
+    s.listen(8)
+    s.settimeout(30)
+    c, _ = s.accept()
+    c.settimeout(20)
+    body = json.dumps({"jsonrpc": "2.0", "id": 0, "result": {"capabilities": {}}}).encode()
+    c.sendall(b"Content-Length: %d\r\n\r\n" % len(body) + body)
+    try:
+        c.recv(1)
+    except Exception:
+        pass
+    os._exit(0)
+os.close(w)
+os.read(r, 1)
+sys.stderr.write("Error: another mux instance holds the lock\nCaused by:\n    Resource temporarily unavailable (os error 11)\n")
+sys.exit(1)
+"#,
+        )
+        .unwrap();
+
+        let mgr = LspManager::new();
+        *mgr.mux_binary_for_test.lock().unwrap() = Some((
+            PathBuf::from("python3"),
+            vec![
+                fake_mux.to_string_lossy().into_owned(),
+                spawns.to_string_lossy().into_owned(),
+            ],
+        ));
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(60),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_secs(10)),
+        )
+        .await
+        .expect("bounded");
+        let _ = std::fs::remove_file(&sock_path);
+        assert!(
+            result.is_ok(),
+            "the loser of the spawn race connects to the winner's mux: {:?}",
+            result.err().map(|e| format!("{e:#}"))
+        );
+        let spawned = std::fs::read_to_string(&spawns).unwrap();
+        assert_eq!(
+            spawned.lines().count(),
+            1,
+            "one spawn: the winner's mux is waited for, not raced again"
         );
     }
 
