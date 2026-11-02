@@ -73,6 +73,17 @@ impl ReadError {
     pub(crate) fn into_anyhow(self) -> anyhow::Error {
         match self {
             ReadError::Refused(e) => e,
+            // A row can outlive its file (a removed worktree, a move outside the librarian), and
+            // the caller then holds a stale id: an expected failure, so it stays recoverable and
+            // says how to find the live row. Other OS failures stay hard errors.
+            ReadError::Io(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                LibrarianRecoverableError::with_hint(
+                    e.to_string(),
+                    "the catalog row points at a file that is not on disk. Find the live row with \
+                     doc(action=\"find\", filter={\"rel_path\": {\"contains\": \"<file name>\"}}, \
+                     include_archived=true)",
+                )
+            }
             ReadError::Io(e) => e.into(),
         }
     }
@@ -417,6 +428,17 @@ fn refused(path: &Path, why: &str) -> anyhow::Error {
     )
 }
 
+/// An OS error from `std::fs` names no file ("No such file or directory (os error 2)"). This keeps
+/// the kind, so callers can still branch on `NotFound`, and puts the path in the text.
+fn io_at(path: &Path) -> impl Fn(std::io::Error) -> ReadError + '_ {
+    move |e| {
+        ReadError::Io(std::io::Error::new(
+            e.kind(),
+            format!("{}: {e}", path.display()),
+        ))
+    }
+}
+
 /// Open once, check the opened file, judge the canonical path, tie the two together, read from
 /// the descriptor. `judge` sees the canonical path and decides.
 fn read_verified(
@@ -426,15 +448,15 @@ fn read_verified(
     use std::io::Read;
     // Before opening: opening a FIFO blocks and a device never ends, so a non-regular target is
     // refused without an open. The opened handle is checked again below.
-    let pre = std::fs::metadata(path).map_err(ReadError::Io)?;
+    let pre = std::fs::metadata(path).map_err(io_at(path))?;
     if !pre.is_file() {
         return Err(ReadError::Refused(refused(
             path,
             "it is not a regular file",
         )));
     }
-    let mut file = open_for_read(path).map_err(ReadError::Io)?;
-    let opened = file.metadata().map_err(ReadError::Io)?;
+    let mut file = open_for_read(path).map_err(io_at(path))?;
+    let opened = file.metadata().map_err(io_at(path))?;
     if !opened.is_file() {
         return Err(ReadError::Refused(refused(
             path,
@@ -467,7 +489,7 @@ fn read_verified(
             ),
         ))
     })?;
-    file.read_to_end(&mut buf).map_err(ReadError::Io)?;
+    file.read_to_end(&mut buf).map_err(io_at(path))?;
     Ok(buf)
 }
 
@@ -920,6 +942,67 @@ mod tests {
         assert!(door.refusal(&root.join("dangling.md")).is_some());
         assert!(door.refusal(&root.join("never-existed.md")).is_none());
     }
+    /// A row whose file is gone (a removed worktree, a move outside the librarian) answered the
+    /// bare operating-system text, "No such file or directory (os error 2)": no path, so the
+    /// caller could not tell which row was stale. The error keeps its kind (callers branch on
+    /// `NotFound`) and now names the path.
+    #[test]
+    fn a_missing_file_is_an_io_error_that_names_its_path() {
+        let t = tempfile::tempdir().unwrap();
+        let root = canon(t.path());
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let gone = root.join("worktree-removed").join("bug.md");
+        let door = ReadDoor::new(vec![root.clone()]);
+        match door.text(&gone) {
+            Err(ReadError::Io(e)) => {
+                assert_eq!(e.kind(), std::io::ErrorKind::NotFound);
+                assert!(e.to_string().contains(&gone.display().to_string()), "{e}");
+            }
+            other => panic!("a missing file must be an Io error, got {other:?}"),
+        }
+        let shown = door.text(&gone).unwrap_err().to_string();
+        assert!(shown.contains(&gone.display().to_string()), "{shown}");
+    }
+
+    /// At the tool boundary a missing file is an expected, input-driven failure (the caller holds
+    /// an id whose row is stale), so it is recoverable and says what to do next. It was a hard
+    /// error with the bare OS text.
+    #[test]
+    fn a_missing_file_reaches_the_tool_boundary_as_a_recoverable_error_with_a_way_on() {
+        let t = tempfile::tempdir().unwrap();
+        let root = canon(t.path());
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let gone = root.join("gone.md");
+        let err = ReadDoor::new(vec![root.clone()])
+            .text(&gone)
+            .unwrap_err()
+            .into_anyhow();
+        let rec = err
+            .downcast_ref::<LibrarianRecoverableError>()
+            .unwrap_or_else(|| panic!("must stay recoverable, got {err:#}"));
+        assert!(rec.message.contains(&gone.display().to_string()), "{rec}");
+        let hint = rec.hint.as_deref().expect("a hint says what to do next");
+        assert!(
+            hint.contains("rel_path"),
+            "the hint names the way on: {hint}"
+        );
+    }
+
+    /// Other OS failures are not turned into a recoverable error: they stay what they were.
+    #[test]
+    fn an_invalid_utf8_file_stays_a_hard_io_error() {
+        let t = tempfile::tempdir().unwrap();
+        let root = canon(t.path());
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let bad = root.join("bad.md");
+        std::fs::write(&bad, [0xff, 0xfe, 0xfd]).unwrap();
+        let err = ReadDoor::new(vec![root.clone()])
+            .text(&bad)
+            .unwrap_err()
+            .into_anyhow();
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_none());
+    }
+
     /// The precondition ~250 other tests silently assume: the temp dir is spelled WITHOUT a symbolic
     /// link. `tempfile::tempdir()` lives under `std::env::temp_dir()`, which is `$TMPDIR`. On macOS
     /// that is `/var/folders/…/T`, and `/var` is a link to `/private/var`, so every fixture is spelled
