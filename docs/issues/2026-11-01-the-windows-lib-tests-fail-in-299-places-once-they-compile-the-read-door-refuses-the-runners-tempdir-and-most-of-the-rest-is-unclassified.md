@@ -93,7 +93,7 @@ The `Audit Doc Refs` job went red in the same run for an unrelated cause (the ne
 
 ## Tests added
 
-- Pure: `src/librarian/windows_spelling.rs` (7 tests on the comparison), `src/util/long_path.rs` (one Linux test), and the fake-expander test for the missing-tail case in `c3339b9f5`.
+- Pure: `src/librarian/windows_spelling.rs` (7 tests on the comparison) and `src/util/long_path.rs` (six Linux tests: one on the key off Windows, and five added in `c3339b9f5` that drive the ancestor walk with a fake expander: a path that exists, a missing leaf, several missing components, no ancestor that expands, and a `..` component).
 - Windows only: `src/librarian/windows_spelling_tests.rs` (a real short name expands; a drive-less rooted spelling agrees; a missing file under a short-spelled directory agrees).
 - No test was added for `file-provenance.py::normalize`: on Linux the old and new behaviour are identical, so a Linux test cannot tell them apart. The discriminators are the four `attribution` tests on Windows.
 
