@@ -3289,7 +3289,13 @@ async fn a_value_read_of_a_real_files_handle_names_the_files_route() {
             .captures(&hint)
             .unwrap_or_else(|| panic!("{nav}: the hint names no route: {hint}"));
         let routed_path = crate::tools::route_path_tests_util::unquote_route_path(&c[1]);
-        assert_eq!(routed_path, file, "{nav}: the route names another path");
+        // The hint names the file in its canonical spelling, the fixture holds the 8.3 short
+        // form on Windows: one location, compared in one spelling.
+        assert_eq!(
+            crate::util::long_path::comparable(std::path::Path::new(&routed_path)),
+            crate::util::long_path::comparable(std::path::Path::new(file)),
+            "{nav}: the route names another path"
+        );
         assert_eq!(&c[2], nav);
         let k: String = serde_json::from_str(&c[3]).unwrap();
         let v = ReadFile
@@ -3340,10 +3346,15 @@ async fn a_handle_refusal_quotes_a_key_of_exactly_the_clip_whole() {
         .expect_err("refused")
         .to_string();
     let lit = serde_json::to_string(&jp).unwrap();
+    // The refusal names the file in its canonical spelling; the fixture is the 8.3 short form
+    // on Windows. Quote the canonical one.
+    let canonical_file = crate::util::long_path::comparable(std::path::Path::new(file))
+        .display()
+        .to_string();
     assert!(
         err.contains(&format!(
             "read_file({}, json_path={lit})",
-            crate::util::text::json_quote(file)
+            crate::util::text::json_quote(&canonical_file)
         )),
         "{err:.400}"
     );

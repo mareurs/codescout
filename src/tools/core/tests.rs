@@ -1226,6 +1226,10 @@ async fn worktree_read_notice_activate_remedy_names_the_main_repo_not_a_worktree
     std::fs::create_dir_all(&root).unwrap();
     // BESIDE `root`, never under it — see the write-guard test above.
     let wt = seed_linked_worktree(&root, "feat");
+    // `git worktree list` prints the path in the spelling it was created with, which on Windows
+    // can be the 8.3 short form, while the canonical form is long (and verbatim). On macOS it is
+    // the other way round (`/var` is listed as `/private/var`). Either one names the worktree.
+    let wt_as_created = wt.display().to_string();
     let ctx = rooted_ctx(&root).await;
     let root = std::fs::canonicalize(&root).unwrap();
     let wt = std::fs::canonicalize(&wt).unwrap();
@@ -1236,9 +1240,9 @@ async fn worktree_read_notice_activate_remedy_names_the_main_repo_not_a_worktree
 
     // The list is the disclosure half and must survive: a caller who genuinely wants
     // the worktree needs it named somewhere. Guards the "fix" of deleting the list.
-    // `git worktree list` prints the plain form, while `wt` here is canonical (verbatim on Windows).
     assert!(
-        notice.contains(&crate::util::fs::strip_verbatim(&wt).display().to_string()),
+        notice.contains(&crate::util::fs::strip_verbatim(&wt).display().to_string())
+            || notice.contains(&wt_as_created),
         "the worktree list is the disclosure and must stay in the notice; got: {notice}"
     );
     // The argument is a JSON string literal, read back the way the caller's parser reads it: the

@@ -3868,9 +3868,13 @@ async fn a_linked_worktree_reads_the_main_checkouts_memories_and_writes_only_its
         json!(crate::util::fs::to_forward_slash(&main_memories)),
         "a topic from the main checkout must say where it came from: {inherited:?}"
     );
+    // One directory, two spellings on Windows: `write_target` is the canonical long form, the
+    // worktree fixture is the 8.3 short form. Compare them in one spelling.
     assert_eq!(
-        inherited["write_target"],
-        json!(crate::util::fs::to_forward_slash(&wt_memories)),
+        crate::util::long_path::comparable(std::path::Path::new(
+            inherited["write_target"].as_str().unwrap()
+        )),
+        crate::util::long_path::comparable(&wt_memories),
         "{inherited:?}"
     );
     assert_eq!(
