@@ -1,0 +1,52 @@
+{
+  "rule": "setup-ab task selection",
+  "version": 1,
+  "registered": "2026-10-28, before any candidate outcome (pass, cost, duration, grade) was read",
+  "spec": "docs/superpowers/specs/2026-10-27-codescout-setup-ab-design.md section 2: tasks are drawn by a rule on task metadata only (repository, files touched by the gold patch, gold-patch line count), never on an earlier outcome",
+  "reads": {
+    "repo": "the repository; decides the source (private or foreign) and the per-repo cap",
+    "gold_files": "the list of files the gold patch touches; only its length is used",
+    "gold_added_lines": "the number of added lines in the gold patch",
+    "id": "identity only: the development-task exclusion and the draw key below"
+  },
+  "never_reads": "any other field, outcome fields included (pass, cost, duration, turns, grade, earlier arm results); select() projects each candidate to the four fields above before anything else",
+  "sources": {
+    "private": {
+      "repos": ["codescout"],
+      "population": "every S5 task directory tasks/cs-p*/ of claude-plugins effort-steering/spikes/s5 (commit 223b56a)",
+      "gold_patch": "git diff --no-renames <parent> <fix> in the source repository, without the hidden test files (hidden.files, hidden.extra: they are the grader's tests, as SWE-bench keeps test_patch apart from patch) and without docs/** (issue files, trackers and plans that codescout fix commits carry as bookkeeping)",
+      "count": 6,
+      "max_per_repo": null
+    },
+    "foreign": {
+      "repos": ["astral-sh/ruff", "burntsushi/ripgrep", "nushell/nushell", "sharkdp/bat", "tokio-rs/axum", "tokio-rs/tokio", "uutils/coreutils"],
+      "population": "the Rust records of SWE-bench/SWE-bench_Multilingual at revision 846e647b9f33c0b51b739d005d13d85493c9af09, data/test-00000-of-00001.parquet sha256 92abca7cb527b41a9f66d03a26ce441ff7319e3a49f985998fd56be4bb9b08b2 (Codex external-source.json); the repos listed here are every Rust repository of that file",
+      "gold_patch": "the record's `patch` field (SWE-bench keeps the tests in `test_patch`)",
+      "count": 6,
+      "max_per_repo": 1
+    }
+  },
+  "exclude_ids": [
+    "burntsushi__ripgrep-2576",
+    "tokio-rs__axum-734",
+    "tokio-rs__axum-1119",
+    "burntsushi__ripgrep-2209",
+    "tokio-rs__tokio-6551",
+    "astral-sh__ruff-15443",
+    "astral-sh__ruff-15309"
+  ],
+  "exclude_reason": "the seven Codex development tasks (spec section 2): plumbing and calibration only, never scored",
+  "eligible": {
+    "gold_files": {"min": 1, "max": 8},
+    "gold_added_lines": {"min": 5, "max": 400},
+    "why": "min 5 lines: the leakage gate needs at least one 8-token shingle of added code, which a 1-4 line patch often cannot give; max 400 lines and 8 files: a task must be solvable inside the per-call budget the arms share"
+  },
+  "draw": {
+    "key": "sha256(salt + ':' + id) as lowercase hex, ascending",
+    "salt": "setup-ab-20261027",
+    "tie_break": "equal keys (not expected from sha256) are ordered by id, byte order",
+    "repo_cap": "walk the draw order of a source and skip a candidate whose repo already has max_per_repo selected tasks; stop at count"
+  },
+  "order": "the result interleaves the sources by rank: private 1, foreign 1, private 2, foreign 2, ...; a source that runs out leaves the rest to the other. Stage 2 registers a prefix of this order",
+  "replacement": "a selected task that fails a Stage-0 instrument gate (it cannot be built, the leakage gate reads a hit, or the grader control does not fail at the base and pass with the gold patch) is replaced by the next candidate of its source's draw order that the repo cap admits. The failure and the replacement are recorded. An instrument gate is never a model outcome."
+}

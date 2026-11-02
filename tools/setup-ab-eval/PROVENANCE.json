@@ -1,0 +1,52 @@
+{
+  "source_repo": "/home/marius/.codex/worktrees/3940/codescout",
+  "source_commit": "19dccd9bc11f7b0c58fdb64c0d35b0c90034cef1",
+  "files": {
+    "pilot.py": "61d5020fbc4de8791431d367106dac1246afe37bd462ca3100ef6a54afe63c38",
+    "baseline.py": "3a1311976af2d9eb8bde99f0219958f2f297919d39c4517ae3a03e3729440db1",
+    "test_pilot.py": "9a0d22a9f35c631583ad0366c2a8b352474f4fa56e90d11c93c9b69bd2984c92",
+    "test_baseline.py": "4679afd5e3ca43dcba3dcb20d01e93bb8a73abb3ca9884eefb65cc52c046d52e",
+    "test_grader_boundary.py": "50c2739e04e7d5dc72c1dbe1d954652353fd14615473c0250cffc9daa909fe74",
+    "evidence.py": "fa4ce2e1aa77fb4bd3ffae5fb643325a1c8c89fe2ad76b9c38577f4139cedda4",
+    "pilot-protocol.md": "57dec0d780ed5307150e19f8adee917dd4555f6ca103f96d79737833ca137801",
+    "agent.Dockerfile": "189455188ab17062926d44dff28b099e59e94ce8342a363f3b063135cd0bb24c"
+  },
+  "added_dependencies": [
+    "evidence.py: imported by pilot.py and baseline.py (nonnegative)",
+    "pilot-protocol.md and agent.Dockerfile: read by pilot.run_pilot (HERE / name); 10 test_baseline tests fail without them",
+    "all copied unmodified; not in the original five-file brief"
+  ],
+  "adapted": {
+    "agent-cs.Dockerfile": {
+      "status": "adapted (not a verbatim copy; test_provenance checks only `files`)",
+      "source_repo": "/home/marius/work/claude/claude-plugins",
+      "source_commit": "223b56abecae8d8d086f0b3c3a77f3bf57b5f88e",
+      "source_path": "effort-steering/spikes/s5/images/codescout.Dockerfile",
+      "source_sha256": "f8046b6a5f06ea51c4e51e4318fa49f5125b52734883f1b4718142e812cb65cd",
+      "changes": "see the Provenance block in agent-cs.Dockerfile's header (kept / changed / dropped)"
+    }
+  },
+  "vendored": {
+    "source_repo": "/home/marius/work/claude/claude-plugins",
+    "source_commit": "223b56abecae8d8d086f0b3c3a77f3bf57b5f88e",
+    "why": "Task 8 (ruling R7): the runner calls these copies through node, never the live effort-toggle-b worktree (pilot.transcript_usage) or a live checkout, so a peer edit cannot change token accounting, plan-limit detection or the proxy config mid-study. Byte-identical `git show <commit>:<source_path>`; the copies keep the source layout so usage.mjs's `../s4-rows.mjs` import resolves to the copy. The same bytes were also in effort-toggle-b d04595fd7 (sha256 compared 2026-10-28).",
+    "files": {
+      "vendor/claude-plugins/effort-steering/spikes/plan-limit.mjs": {
+        "source_path": "effort-steering/spikes/plan-limit.mjs",
+        "sha256": "e9d0ba90c0a269f29c5dc3baf3897d238124087b40feb1f6c92eae28ffe95c4f"
+      },
+      "vendor/claude-plugins/effort-steering/spikes/s4-rows.mjs": {
+        "source_path": "effort-steering/spikes/s4-rows.mjs",
+        "sha256": "800938d75f5e20b93eabdfba68ed244b99e9f213f1a19f290603c7ba9b9a56a9"
+      },
+      "vendor/claude-plugins/effort-steering/spikes/s5/usage.mjs": {
+        "source_path": "effort-steering/spikes/s5/usage.mjs",
+        "sha256": "4d1e0b76bb61762bbbfe077a7d7d3c4d95a4be45f2c57d9490a8d47c8e2d5534"
+      },
+      "vendor/claude-plugins/effort-steering/spikes/s5/images/tinyproxy.conf.tmpl": {
+        "source_path": "effort-steering/spikes/s5/images/tinyproxy.conf.tmpl",
+        "sha256": "f44e1a4ddeb5efa887c456e661034a602605faa15aea767671f431bf3e7ebd8c"
+      }
+    }
+  }
+}

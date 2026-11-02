@@ -1,0 +1,1300 @@
+{
+  "stage": 2,
+  "head": "0b7a946beae6b7583798c5af68d03bc87d4527ee",
+  "files": {
+    "PROVENANCE.json": "17eff19c2502b39886fb680a867fccebf8483ae18488929450935715bbb53340",
+    "agent-cs.Dockerfile": "a5891963c784217eb53f601f0aaaeb60c28dfb52babeb6513fb0f5cb886b74da",
+    "agent.Dockerfile": "189455188ab17062926d44dff28b099e59e94ce8342a363f3b063135cd0bb24c",
+    "analyze.py": "562a9285f98a493c0a89683119c92cc93375804683fc1358272cf4455da26295",
+    "analyze_study.py": "12d1474440d72ab3fe948e3954728025c22891f43916cced51df314727649e94",
+    "arms.py": "206b95c4a228c10cb2550777605f20071bd06685c5350fb7189143613e9db822",
+    "baseline.py": "3a1311976af2d9eb8bde99f0219958f2f297919d39c4517ae3a03e3729440db1",
+    "capture_stub.py": "57b7b37927ca920868c63b12947f9b2894623729c9f985ef10adb7e02c231a75",
+    "evidence.py": "fa4ce2e1aa77fb4bd3ffae5fb643325a1c8c89fe2ad76b9c38577f4139cedda4",
+    "fixtures/bare_valid.jsonl": "cd0366947eca59b12868a2beea658511564d8219db2c465238a661344ad6d2fa",
+    "fixtures/cs_valid.jsonl": "728be9973c41fb7a62479d2cd393bfec804518781a4fbbd93116ff68f450e3a5",
+    "fixtures/full_valid.jsonl": "e5936c940961742ffdc8df3fd4b352a4a44e2b096b7893e31172c420836bfc6d",
+    "freeze_setup.py": "def4faaa169a195db4722175e14af6c9ad4f3734110a20413371e98ad5d1a8c1",
+    "freeze_stage1.py": "8484af5187fe7e28ff0a0264cd8f80eaa8f6b20cb4bced0cc459e0e0bf8c3ff8",
+    "freeze_stage2.py": "2abff6be4e98f0c9caa5595bbd0a1823293c228117265c111020da5574d7deff",
+    "frozen.py": "503bee1ef1b7a4727a4c7493b5603162341637405c3e6a31c6123c68550f8e89",
+    "integrity.py": "1fae826276e6c9cfccb8bdc0c3330689c556f518374fe6324a013be67b13a3cb",
+    "leak_scan.py": "896e23869fab19668c8d7a61b92cdbd84afb7fb0bb248c2c8564bca2a0716f14",
+    "live_control.py": "459115f89658a486c399ee13cdf31bd886c099dda3ef90dff68eae48c805a5b4",
+    "mcp_probe.py": "5265138b67c7510c9a02c9cc6f7036b4785d15579dc1821ffab71c37c161ed07",
+    "pilot-protocol.md": "57dec0d780ed5307150e19f8adee917dd4555f6ca103f96d79737833ca137801",
+    "pilot.py": "61d5020fbc4de8791431d367106dac1246afe37bd462ca3100ef6a54afe63c38",
+    "registration.py": "53afe5c969a5c8231a7a030b269e208e098a7589e1359c7fe15a113989671236",
+    "run.py": "8064d30c8e03d0c0f204d7bfb77f677c319fb89d018e1388a6a48a421609e3e1",
+    "select_tasks.py": "f0379cede595b871d962cd8945329b1c66102882f51b9f804700cb9ccedd4439",
+    "selection-rule.json": "6f0205bc6036495c0e0153a5a873754e31306f1b4df33cc146435f0d6fcd52c3",
+    "smoke.py": "5245d350aa722e69a383f095ab87375505c8e7d3cb62b6c04fb78bc766eda411",
+    "stack.py": "b6450629229fe81c5add15def405424b7cf49a4bd16d5839f31091efd18921b7",
+    "stage1-registration.json": "58200b3e7c0e8b626b1861987968a66b2d6ae1efd93d2c1b60897a7520c39f3b",
+    "stage3.py": "aa58042884047e94e91ed334b80d09bd6974c8ac69e37d3da251ce5fdd6d77ee",
+    "task4-live-control.json": "52821f57d48e134823615d031a8c42daf90207497e3200dc0115c05984390e71",
+    "task4-rulings-control.json": "a5e8af417ce7d5df46a939ed749de69871b10781e6e0a2b593c912fe8b53ae29",
+    "tasks.py": "ef5366307e7f7addff5e37fc8a009d9afd92ea3cf63481e990c932f75734d88e",
+    "test_analyze.py": "0319e113606240928bbd291ee7d88161dc194f6c54818322591383ab11ab0c31",
+    "test_analyze_study.py": "55c72668efbaf6fde8aaedb6c472204046d531af5a415f9b2445545378b6e6ba",
+    "test_arms.py": "bc66ac5f7fa3fa7806fc06cf521e9ff38ef5a2c6283f161c3e04e35be4c85aca",
+    "test_baseline.py": "4679afd5e3ca43dcba3dcb20d01e93bb8a73abb3ca9884eefb65cc52c046d52e",
+    "test_freeze_setup.py": "30b5c3da74e3d83ecb643b9b69618285cd361c531997eaaa483eeac65344054e",
+    "test_freeze_stage1.py": "374a20d4bc0bb6b6407b2c28da461ad8066204763f25054750be67ee6e21d6f1",
+    "test_freeze_stage2.py": "5512bb6b86e43f4e2926661c00db2d4708815f6ec7ce7382e7dffee87b457c98",
+    "test_frozen.py": "40df751e2a0a7297b513b81fffa7584fe1d123cf8ee1778616e5ba80e9af1efd",
+    "test_grader_boundary.py": "50c2739e04e7d5dc72c1dbe1d954652353fd14615473c0250cffc9daa909fe74",
+    "test_integrity.py": "24c9fa0ce9ee2016c291dbd18a4b83d8d20afd9c834d890e870b06061cdada66",
+    "test_leak_scan.py": "a21ec0334d336f117f26c50e3149021b60cb393192f998b592f3db24488512bd",
+    "test_pilot.py": "9a0d22a9f35c631583ad0366c2a8b352474f4fa56e90d11c93c9b69bd2984c92",
+    "test_provenance.py": "a0faa189973f34cb10a27a5c3a7fdacaa4327d5c9db988a9d845d56d38eaa7c1",
+    "test_run.py": "0c7f50e1a95d8b54796c281df0e6e363c90888de0b1452549bbaff7773d4be88",
+    "test_smoke.py": "499cd01d4f56030e61a569731ca8fb2f4c613efb5f90faea503a028c3652cc6a",
+    "test_stack.py": "938c8da8c1743cf016bed6183e8ffc4a449ca3627721d985edcf11a5a2c86101",
+    "test_stage3.py": "30319121454ce59ab24b7cee622ec2ca9a1b509eb9da111410a4ab4b6f98c4af",
+    "test_tasks.py": "8bd2e33e476ceb5c36c2c11a059234a8572ca993342a6ff3ab008431f78fceae",
+    "vendor/claude-plugins/effort-steering/spikes/plan-limit.mjs": "e9d0ba90c0a269f29c5dc3baf3897d238124087b40feb1f6c92eae28ffe95c4f",
+    "vendor/claude-plugins/effort-steering/spikes/s4-rows.mjs": "800938d75f5e20b93eabdfba68ed244b99e9f213f1a19f290603c7ba9b9a56a9",
+    "vendor/claude-plugins/effort-steering/spikes/s5/images/tinyproxy.conf.tmpl": "f44e1a4ddeb5efa887c456e661034a602605faa15aea767671f431bf3e7ebd8c",
+    "vendor/claude-plugins/effort-steering/spikes/s5/usage.mjs": "4d1e0b76bb61762bbbfe077a7d7d3c4d95a4be45f2c57d9490a8d47c8e2d5534"
+  },
+  "stage1_registration_sha256": "58200b3e7c0e8b626b1861987968a66b2d6ae1efd93d2c1b60897a7520c39f3b",
+  "stage1_journal": {
+    "runs": 12,
+    "spend_usd": 4.700854
+  },
+  "aborted_pilot_1": {
+    "archive": "/home/marius/work/claude/setup-ab-data/study/aborted-pilot-1",
+    "files": {
+      "rows.jsonl": "282d8b534277bcc9ce7b0895689cf2beb2dde6f2b319715c4086412abcffdf52",
+      "batch.jsonl": "74fccf32c567e3ea86da04e9c3cf06dc6b0b18e7a9df313eed6e4860ceb64654"
+    },
+    "tree_sha256": "7538b1c3fd53a71c5fd3bc71608d58c50cb00913aa55a71474b102731270c5b1",
+    "runs_listing": [
+      "cs-p07.claude-sonnet-5-5.cs.0",
+      "cs-p07.claude-sonnet-5-5.full.0",
+      "cs-p08.claude-opus-5-5.bare.0",
+      "cs-p08.claude-opus-5-5.bare.1",
+      "cs-p08.claude-opus-5-5.cs.0",
+      "cs-p08.claude-opus-5-5.full.0",
+      "cs-p08.claude-sonnet-5-5.bare.0",
+      "cs-p08.claude-sonnet-5-5.bare.1",
+      "cs-p08.claude-sonnet-5-5.cs.0",
+      "cs-p08.claude-sonnet-5-5.full.0"
+    ],
+    "run_ids": [
+      "cs-p07.claude-sonnet-5-5.cs.0",
+      "cs-p07.claude-sonnet-5-5.full.0",
+      "cs-p08.claude-opus-5-5.bare.0",
+      "cs-p08.claude-opus-5-5.bare.1",
+      "cs-p08.claude-opus-5-5.cs.0",
+      "cs-p08.claude-opus-5-5.full.0",
+      "cs-p08.claude-sonnet-5-5.bare.0",
+      "cs-p08.claude-sonnet-5-5.bare.1",
+      "cs-p08.claude-sonnet-5-5.cs.0",
+      "cs-p08.claude-sonnet-5-5.full.0"
+    ],
+    "run_count": 10,
+    "registration_sha256": "433451495de3bc852db7c0d94aeddbc36e036734701597f5b3ad38f0565d2043",
+    "plan_sha256": "b47744e63924101bdcbf402cf7976a20e02d499e6e966d7c7407587c29dcbd42",
+    "reason": "timeout (RUN_TIMEOUT_S 1800) -> missing cost stop stop-48-82024115",
+    "stop_id": "stop-48-82024115",
+    "disposition": "the 10 runIds listed here are re-run under this registration; this attempt is archived and never analysed",
+    "pilot_spend_usd": 13.218307,
+    "carried_spend_usd": 13.218307
+  },
+  "carried_spend_usd": 13.218307,
+  "manifest_path": "/home/marius/work/claude/setup-ab-data/study/setup-manifest.json",
+  "manifest_sha256": "b6ad964e3c56a4e9df6f32de3eacd2eae362e6db4eadf9fd6eee2a532fb1d2a6",
+  "selection_rule_sha256": "6f0205bc6036495c0e0153a5a873754e31306f1b4df33cc146435f0d6fcd52c3",
+  "selection_sha256": "caad4c46ab5daf141a817fa804160c2aaed8ac8360fc550d69caf17e6077c540",
+  "selected": [
+    "cs-p08",
+    "tokio-rs__axum-691",
+    "cs-p04",
+    "uutils__coreutils-6575",
+    "cs-p07",
+    "nushell__nushell-13831",
+    "cs-p15",
+    "astral-sh__ruff-15626",
+    "cs-p19",
+    "sharkdp__bat-1892",
+    "cs-p01",
+    "tokio-rs__tokio-6603"
+  ],
+  "registered_tasks": {
+    "cs-p08": "private",
+    "tokio-rs__axum-691": "foreign",
+    "cs-p04": "private",
+    "uutils__coreutils-6575": "foreign",
+    "cs-p07": "private",
+    "nushell__nushell-13831": "foreign",
+    "cs-p15": "private",
+    "astral-sh__ruff-15626": "foreign",
+    "cs-p19": "private",
+    "sharkdp__bat-1892": "foreign",
+    "cs-p01": "private",
+    "tokio-rs__tokio-6603": "foreign"
+  },
+  "registered_min": 10,
+  "stratum_min": {
+    "foreign": 5,
+    "private": 5
+  },
+  "rules": {
+    "stratum_min": "a stratum of k of the n registered tasks needs ceil(REGISTERED_MIN * k / n) valid tasks per model: 5 of 6",
+    "tolerance": "a headline needs both strata to decide, so the real tolerance is 1 invalid task per stratum",
+    "arm_integrity": "an instrument failure at the study level is any run with a contamination reason, or, per model and arm, more TASKS with at least one invalid-arm run carrying a construction reason (missing init record or marker tool, missing companion hook evidence, a denied tool present, missing Skill/Task or superpowers/buddy skills for full, MCP tools in bare) than registered tasks minus REGISTERED_MIN; a task counts once however many of its runs failed; zero codescout calls in a cs/full run is a result (a secondary metric), not an instrument failure",
+    "admission": "an admission stop (the $200 cap) in the extension: the rows are analysed as is, and the stop is disclosed; the cap is not raised"
+  },
+  "bootstrap_seed": 20261033,
+  "split": {
+    "rule": "pilot = for kind in (foreign, private): random.Random(split_seed).sample(sorted ids of that kind, 3) with one rng across both kinds; extension = the other 6; metadata only (id, kind), never outcomes; the extension runs unconditionally",
+    "seed": 20261030,
+    "pilot": [
+      "cs-p08",
+      "cs-p07",
+      "nushell__nushell-13831",
+      "sharkdp__bat-1892",
+      "cs-p01",
+      "tokio-rs__tokio-6603"
+    ],
+    "extension": [
+      "tokio-rs__axum-691",
+      "cs-p04",
+      "uutils__coreutils-6575",
+      "cs-p15",
+      "astral-sh__ruff-15626",
+      "cs-p19"
+    ]
+  },
+  "draw_seed": 20261030,
+  "plans": {
+    "pilot": {
+      "tasks": [
+        "cs-p08",
+        "cs-p07",
+        "nushell__nushell-13831",
+        "sharkdp__bat-1892",
+        "cs-p01",
+        "tokio-rs__tokio-6603"
+      ],
+      "seed": 20261031,
+      "models": [
+        "claude-sonnet-5-5",
+        "claude-opus-5-5"
+      ],
+      "reps": [
+        [
+          "bare",
+          2
+        ],
+        [
+          "cs",
+          1
+        ],
+        [
+          "full",
+          1
+        ]
+      ],
+      "order": [
+        [
+          "cs-p08",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "cs-p08",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p08",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p08",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "cs-p08",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p08",
+          "claude-opus-5-5",
+          "full",
+          0
+        ],
+        [
+          "cs-p08",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ],
+        [
+          "cs-p08",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p07",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "cs-p07",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "cs-p07",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p07",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p07",
+          "claude-opus-5-5",
+          "full",
+          0
+        ],
+        [
+          "cs-p07",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p07",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ],
+        [
+          "cs-p07",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "nushell__nushell-13831",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "nushell__nushell-13831",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "nushell__nushell-13831",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "nushell__nushell-13831",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "nushell__nushell-13831",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "nushell__nushell-13831",
+          "claude-opus-5-5",
+          "full",
+          0
+        ],
+        [
+          "nushell__nushell-13831",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "nushell__nushell-13831",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ],
+        [
+          "sharkdp__bat-1892",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "sharkdp__bat-1892",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "sharkdp__bat-1892",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "sharkdp__bat-1892",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "sharkdp__bat-1892",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "sharkdp__bat-1892",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ],
+        [
+          "sharkdp__bat-1892",
+          "claude-opus-5-5",
+          "full",
+          0
+        ],
+        [
+          "sharkdp__bat-1892",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p01",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "cs-p01",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "cs-p01",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p01",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p01",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ],
+        [
+          "cs-p01",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p01",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p01",
+          "claude-opus-5-5",
+          "full",
+          0
+        ],
+        [
+          "tokio-rs__tokio-6603",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "tokio-rs__tokio-6603",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "tokio-rs__tokio-6603",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "tokio-rs__tokio-6603",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "tokio-rs__tokio-6603",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "tokio-rs__tokio-6603",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ],
+        [
+          "tokio-rs__tokio-6603",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "tokio-rs__tokio-6603",
+          "claude-opus-5-5",
+          "full",
+          0
+        ]
+      ],
+      "plan_sha256": "b47744e63924101bdcbf402cf7976a20e02d499e6e966d7c7407587c29dcbd42",
+      "budget": {
+        "cap_usd": 200.0,
+        "spent_usd": 13.218307,
+        "per_call_usd": 5.0,
+        "reserve_usd": 5.0
+      }
+    },
+    "extension": {
+      "tasks": [
+        "tokio-rs__axum-691",
+        "cs-p04",
+        "uutils__coreutils-6575",
+        "cs-p15",
+        "astral-sh__ruff-15626",
+        "cs-p19"
+      ],
+      "seed": 20261032,
+      "models": [
+        "claude-sonnet-5-5",
+        "claude-opus-5-5"
+      ],
+      "reps": [
+        [
+          "bare",
+          2
+        ],
+        [
+          "cs",
+          1
+        ],
+        [
+          "full",
+          1
+        ]
+      ],
+      "order": [
+        [
+          "tokio-rs__axum-691",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "tokio-rs__axum-691",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "tokio-rs__axum-691",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "tokio-rs__axum-691",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "tokio-rs__axum-691",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ],
+        [
+          "tokio-rs__axum-691",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "tokio-rs__axum-691",
+          "claude-opus-5-5",
+          "full",
+          0
+        ],
+        [
+          "tokio-rs__axum-691",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p04",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p04",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p04",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "cs-p04",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "cs-p04",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p04",
+          "claude-opus-5-5",
+          "full",
+          0
+        ],
+        [
+          "cs-p04",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ],
+        [
+          "cs-p04",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "uutils__coreutils-6575",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "uutils__coreutils-6575",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "uutils__coreutils-6575",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "uutils__coreutils-6575",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "uutils__coreutils-6575",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "uutils__coreutils-6575",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ],
+        [
+          "uutils__coreutils-6575",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "uutils__coreutils-6575",
+          "claude-opus-5-5",
+          "full",
+          0
+        ],
+        [
+          "cs-p15",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p15",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p15",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "cs-p15",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "cs-p15",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p15",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ],
+        [
+          "cs-p15",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p15",
+          "claude-opus-5-5",
+          "full",
+          0
+        ],
+        [
+          "astral-sh__ruff-15626",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "astral-sh__ruff-15626",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "astral-sh__ruff-15626",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "astral-sh__ruff-15626",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "astral-sh__ruff-15626",
+          "claude-opus-5-5",
+          "full",
+          0
+        ],
+        [
+          "astral-sh__ruff-15626",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ],
+        [
+          "astral-sh__ruff-15626",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "astral-sh__ruff-15626",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p19",
+          "claude-sonnet-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p19",
+          "claude-sonnet-5-5",
+          "cs",
+          0
+        ],
+        [
+          "cs-p19",
+          "claude-sonnet-5-5",
+          "full",
+          0
+        ],
+        [
+          "cs-p19",
+          "claude-sonnet-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p19",
+          "claude-opus-5-5",
+          "bare",
+          1
+        ],
+        [
+          "cs-p19",
+          "claude-opus-5-5",
+          "bare",
+          0
+        ],
+        [
+          "cs-p19",
+          "claude-opus-5-5",
+          "full",
+          0
+        ],
+        [
+          "cs-p19",
+          "claude-opus-5-5",
+          "cs",
+          0
+        ]
+      ],
+      "plan_sha256": "5fd253b9150b3d7957f63d2ffa3bdc4e8ac7d536aa744906cf4a2a12c735312d",
+      "budget": {
+        "cap_usd": 200.0,
+        "spent_usd": 13.218307,
+        "per_call_usd": 5.0,
+        "reserve_usd": 5.0
+      }
+    }
+  },
+  "tasks": [
+    {
+      "task_id": "cs-p08",
+      "kind": "private",
+      "run_image": {
+        "tag": "sab-run-cs-p08:f9b0fc9f8",
+        "id": "sha256:c96a287e4ed97dc6bce80e527da9866f50cedf4333b4bb51f8b32fd5b1315732"
+      },
+      "arm_image": {
+        "tag": "sab-arm-cs-p08:f9b0fc9f8",
+        "id": "sha256:00a8d36cdb9b05de1f32e7c8d22202744ae736a823f61580b02253a59f3e68a4"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-cs-p08",
+      "bundle_sha256": "f048b76599eb5026fab73c25838b6966245ec1797d3afae6e93b01f3b0dc77ed",
+      "controls_sha256": "a9ccf860539349046600eee6a21c28f130212a605286634e28363d7c3fca35d3",
+      "template_dump_sha256": "0388ed601fde36ca1cefb12602dd3d552e35d50ba7c837e7e30e3746b2a40f40",
+      "prompt_sha256": "eace663ddf8b6d91de94e78c45fbcf15ee6a0894e1967021b2cfd16cebab178f",
+      "prescan_sha256": "9cf8a2ab992ccc7d271c2a64d35c7bde90c4a8f23bb6749003fdd8f2378bc703",
+      "template_volume": {
+        "sha256": "134be841d9ec0513a89949732ac0fbf6064d8706919a6fe55b02c008da28e145",
+        "files": 579,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    },
+    {
+      "task_id": "tokio-rs__axum-691",
+      "kind": "foreign",
+      "run_image": {
+        "tag": "sab-run-tokio-rs__axum-691:f9b0fc9f8",
+        "id": "sha256:d1a2b27731aac707a08b30b8140bf67df61d801ac692e97203352f055412c967"
+      },
+      "arm_image": {
+        "tag": "sab-arm-tokio-rs__axum-691:f9b0fc9f8",
+        "id": "sha256:3057b7c9b0966859507a65d7822c64121711add6f7074d05a3738054e065e682"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-tokio-rs__axum-691",
+      "bundle_sha256": "f85c2aafd8aad90c61ebf47a0ec0cf8c18c7bdab467fd37a9360a7502525d5d5",
+      "controls_sha256": "2e4ab3bd2d3992d4d3c16fb7cbb27276a78edf776d411be4f1dfae35abe35f23",
+      "template_dump_sha256": "1c8b9229cc2833efa433d2d429c36acec69a3d16278f1e826f475f40caf54395",
+      "prompt_sha256": "343daa94542f3b909d5dd5eba18b1862813cac55d0448b36917a17020fe7c010",
+      "template_volume": {
+        "sha256": "d1c7d93ac171cf6ed0a00d3e7cd53be533e344e64a77fad093f769045fd01132",
+        "files": 509,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    },
+    {
+      "task_id": "cs-p04",
+      "kind": "private",
+      "run_image": {
+        "tag": "sab-run-cs-p04:f9b0fc9f8",
+        "id": "sha256:7c0639d1e82260cf45aefdcd2bac4efe95a63fdcf1dcdd91362ecac6a654b59d"
+      },
+      "arm_image": {
+        "tag": "sab-arm-cs-p04:f9b0fc9f8",
+        "id": "sha256:36dc81621bde344b03b9db19df1505ede4c49f6291d97b0f03b4cbb97fcf02ed"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-cs-p04",
+      "bundle_sha256": "3f2f84918081e8f7b925a247b3b8242391fffe830f43deb6aace5bce51fe918d",
+      "controls_sha256": "daa0cfbf0c9d2d1828e6c9e43a112dce6901830b5b5c6d5f12b95d86158e472a",
+      "template_dump_sha256": "59a5ddaf5a1df7610ebe62d512c34100d70ea3e6c5f60ab4b6c2557645f58565",
+      "prompt_sha256": "7262955ac8c21fbbe187c965c9865a67bdf1bd0c3c2ca64419e871cb7c97f95e",
+      "prescan_sha256": "0345b61e3bbf1730c9e5dc311e70fac2fa2f48cf5fb866e9c9818898cea70c19",
+      "template_volume": {
+        "sha256": "3c166fcffd81c2550a3c3ad9b81dbebe3eed6e8c0dddc931a67cbff49448dc92",
+        "files": 580,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    },
+    {
+      "task_id": "uutils__coreutils-6575",
+      "kind": "foreign",
+      "run_image": {
+        "tag": "sab-run-uutils__coreutils-6575:f9b0fc9f8",
+        "id": "sha256:256b688e1a41f64fb36aa908db393621327e317dcbf3c2be44a1a84916045e09"
+      },
+      "arm_image": {
+        "tag": "sab-arm-uutils__coreutils-6575:f9b0fc9f8",
+        "id": "sha256:41f14141c8ab5502930227d2d7195019fc5b5c49b2e7cd174254f7c53579c3f6"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-uutils__coreutils-6575",
+      "bundle_sha256": "2977ed4b1a47f82dc91c5bac4fbd686cd1264dbaccf265a2f71fdadf97b41553",
+      "controls_sha256": "0d4131a9df5b10df0031d28e73f9ec0a15300900fd0d9bb1fdea8bec6cf7caa7",
+      "template_dump_sha256": "4ee7829ba203186e9e60adc712a51bf5bb406c2d195c4ff66b5da6600372208c",
+      "prompt_sha256": "3f77c353c8cc6b74bb943acbf996eb40ca1cbf88fcba2736bbeb6393adb426ac",
+      "template_volume": {
+        "sha256": "014eed069303e33500b2c657cfa6e758f4f40a7ce896fde1669234f31df3e027",
+        "files": 511,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    },
+    {
+      "task_id": "cs-p07",
+      "kind": "private",
+      "run_image": {
+        "tag": "sab-run-cs-p07:f9b0fc9f8",
+        "id": "sha256:9af2c69992d032d2dd3c27af08f641e5b06b87548f55282218d0f9731e55b67d"
+      },
+      "arm_image": {
+        "tag": "sab-arm-cs-p07:f9b0fc9f8",
+        "id": "sha256:d3fec4aa5466af63261e0f26a55176875fb2b73121e3c4ded43df2cf2149d5c3"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-cs-p07",
+      "bundle_sha256": "a95067c2117a2677d3827f0110d5321f4398fa5c1985add3ce0a14a3224ea76c",
+      "controls_sha256": "fff35c4d9243e9eb4ccca227cd922c9ddae2e0d280c87ee06a9c7ae9b196cb7e",
+      "template_dump_sha256": "31f70fa7e65d9984b1e2497833fc2098f98645d88f9f110589c63bd5d3907a0c",
+      "prompt_sha256": "9669818c39583c8d85e9bfd503390779dbc8a002cc6dfd9f99d475660c77f188",
+      "prescan_sha256": "0fd1ce75ffe83bd51e9d59a3a4661fa1fab2fb3f87a0478885544c8d4d77ff82",
+      "template_volume": {
+        "sha256": "445df3ee3ac0c07e1591b86b76247b5352ced7a84328fb407c6cc4c1e3b0f2c9",
+        "files": 580,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    },
+    {
+      "task_id": "nushell__nushell-13831",
+      "kind": "foreign",
+      "run_image": {
+        "tag": "sab-run-nushell__nushell-13831:f9b0fc9f8",
+        "id": "sha256:bca777f96f73e420954f3e5a71805fc51e4f7211e757ac18e00de5ea3d6da319"
+      },
+      "arm_image": {
+        "tag": "sab-arm-nushell__nushell-13831:f9b0fc9f8",
+        "id": "sha256:7b08aa7bfd3c10257476752e8764df3c2348e96a5cf18ec204f2fabf24ba0d01"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-nushell__nushell-13831",
+      "bundle_sha256": "52f17a324e6e316ec195f8b80db5cdf8f8117b1fe00c05e18161c7cb40312f64",
+      "controls_sha256": "f9915d87a7c5bf18fc72d3c3eebda12919cc554ee4a19a124b34156072c27f2f",
+      "template_dump_sha256": "e75f7c97fdce83ccd53c696d537727dcb2e40883f4e04f23efe4393d3ad1e2fd",
+      "prompt_sha256": "cd4f8440815213a45572290cec1a4c9c6480ff716da90a6fee059943c3402e8a",
+      "template_volume": {
+        "sha256": "a4835436d8bd260807bd06e95633c717b28514d20b61c0037f30702b2ab2964b",
+        "files": 574,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    },
+    {
+      "task_id": "cs-p15",
+      "kind": "private",
+      "run_image": {
+        "tag": "sab-run-cs-p15:f9b0fc9f8",
+        "id": "sha256:212492ec1a276bb0a76e5745d814e9e95f66474d70510de6798b8220151daa92"
+      },
+      "arm_image": {
+        "tag": "sab-arm-cs-p15:f9b0fc9f8",
+        "id": "sha256:a3d27caa72e7aa2ba2754f27fc71ae1b956ac24fe8524712dbaead0d8fbd25ac"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-cs-p15",
+      "bundle_sha256": "3086b1e70414b4a9e18928bde0e8255e2ad58f5f4ef89ce1281ce39e9f7fbe6f",
+      "controls_sha256": "fc4a40f351fd07ef893922b7b23353c4300eeee46bd0ce2443aab02e0fa9ebfb",
+      "template_dump_sha256": "61be19387f32b78a42e3d05a46ed47f5b33f82d914832f08ae6c47e35e532eb1",
+      "prompt_sha256": "79e5000cd6fc087871254e9a769d838ab38678575397adbac437410f148be0a8",
+      "prescan_sha256": "47b8c3b2242aa9125e470bd1343abe50bde30d3f328d26db75baf0c9278ef0a3",
+      "template_volume": {
+        "sha256": "da80a99f25b7b433e69152a616e80fe348c7d4596a8e5cd0808137e369db4705",
+        "files": 574,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    },
+    {
+      "task_id": "astral-sh__ruff-15626",
+      "kind": "foreign",
+      "run_image": {
+        "tag": "sab-run-astral-sh__ruff-15626:f9b0fc9f8",
+        "id": "sha256:00fa5ae8a856a6559c31e7ca23cfb6b857afcaf72774831e9afc076d2720a467"
+      },
+      "arm_image": {
+        "tag": "sab-arm-astral-sh__ruff-15626:f9b0fc9f8",
+        "id": "sha256:e6a4885e0f4ad7148a1bc9908933622494eb28a5d5d73598e094bbfafd1adad9"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-astral-sh__ruff-15626",
+      "bundle_sha256": "7e0953f964870a13a419de648b339248a635d82f3f0e71baa351571b86726df0",
+      "controls_sha256": "682c00c8365b2ffca1800e2cc74268d96f7705d8dae8a6b6652b68035807957a",
+      "template_dump_sha256": "59e9ac1341a92ed62951394f9c1d487a959fc774611ab4c62261f389945a230c",
+      "prompt_sha256": "9b4306022190f76ed7f3aecea737c8110e22829d2a9b2662f7c00ed18fb3b2a6",
+      "template_volume": {
+        "sha256": "e2de06af52da34702146aed8e2981f246bfe8276f93d8135a3db10d994599aec",
+        "files": 544,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    },
+    {
+      "task_id": "cs-p19",
+      "kind": "private",
+      "run_image": {
+        "tag": "sab-run-cs-p19:f9b0fc9f8",
+        "id": "sha256:15d4720517e07da404c43af0eb8b9d1939aa32b9f03f79b629e12187c266766c"
+      },
+      "arm_image": {
+        "tag": "sab-arm-cs-p19:f9b0fc9f8",
+        "id": "sha256:2f0012974d38dc251aa7bf4868b74d4f5b2694b43d27d552aa24e7255a41aaad"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-cs-p19",
+      "bundle_sha256": "2630fa98e9db245dbdf3e219a136846ef699678fd0b14259ffa76bf13f348ae0",
+      "controls_sha256": "933bfbbc2895000a8bb167d046112fd8facb2d7a1a5cecd9db89033b8d327f05",
+      "template_dump_sha256": "49387371ff866df06a8bbc552f8423e758c65b721a57bf50815fe73623117a44",
+      "prompt_sha256": "6df91d6bc720d718f2f15987291f39570c82c8c649c063aa825ba91360d9cecb",
+      "prescan_sha256": "8f29fb0bbc2e9d3935e442bb804f1866420b0dc1b4c24b8941ea09dce93be234",
+      "template_volume": {
+        "sha256": "b0ba43f4369ee50972e2bdfbd5fca2de4e7c6a5a65a336eb877ca9f880307c70",
+        "files": 578,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    },
+    {
+      "task_id": "sharkdp__bat-1892",
+      "kind": "foreign",
+      "run_image": {
+        "tag": "sab-run-sharkdp__bat-1892:f9b0fc9f8",
+        "id": "sha256:04874dabd17625fd9b8e48ad9439809ecc900b9423e9755ca725c05c4f0a71be"
+      },
+      "arm_image": {
+        "tag": "sab-arm-sharkdp__bat-1892:f9b0fc9f8",
+        "id": "sha256:7862c2964dec9094cb20616b58f74e66eff22e688fda68f3c30a53b46004f941"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-sharkdp__bat-1892",
+      "bundle_sha256": "0878fbd542822306364a5569f25e4ade5b1d76edb09e9d0b5a7b8d8ecbe989ed",
+      "controls_sha256": "0c5364ad9377d89e3072e278a0e1ba476c69bc01d91c8033753307786947fab5",
+      "template_dump_sha256": "a46785afed3d2e09acf4e902ee8b3a18f255f39ea349ee68e4900e62f9f91195",
+      "prompt_sha256": "5ffac8660ee65f39895fa4a50990950e5a4ea42c33388582856819510bf05423",
+      "template_volume": {
+        "sha256": "409bfb49a135525f71b5048e9c9547893b9a10a6cd67aa5febc97ee47c1410f8",
+        "files": 509,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    },
+    {
+      "task_id": "cs-p01",
+      "kind": "private",
+      "run_image": {
+        "tag": "sab-run-cs-p01:f9b0fc9f8",
+        "id": "sha256:820224b19d99b39564ea8f05701358291ec1bac862cf8570c637c04de96e6208"
+      },
+      "arm_image": {
+        "tag": "sab-arm-cs-p01:f9b0fc9f8",
+        "id": "sha256:ecf9058110d3c607218279808cd684a049d24e6cc8d129448a957444c49b6a78"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-cs-p01",
+      "bundle_sha256": "31de332d836f9f320fff3df4cfcb350c0d7c667257c4c7af2e2d589f30768cc8",
+      "controls_sha256": "3ec0468da18070e4d9f402a4901e14ff9aafd057df2e8f63212248f6c2ecc701",
+      "template_dump_sha256": "b43d97f9804801921f8c7a49b8a0d4480ba7637ea3385cdaa58116c3df2b57a5",
+      "prompt_sha256": "6f07e72e4ea45442bbae5a0c9aa4906fd8e7a1c4f9cd55727b08d18ea4fa268c",
+      "prescan_sha256": "9ade1eb281cc5c70ccee57c276fad8da5517d432d4233af29bf0aaacf9088b6f",
+      "template_volume": {
+        "sha256": "3d938d32c0650b726bc14977bbbf6ef1a535d4fafb6d2656b878867df9f6766d",
+        "files": 549,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    },
+    {
+      "task_id": "tokio-rs__tokio-6603",
+      "kind": "foreign",
+      "run_image": {
+        "tag": "sab-run-tokio-rs__tokio-6603:f9b0fc9f8",
+        "id": "sha256:d5871da5b48e9bd21340ea4c81a5a178e5b09f012abe2658b16f57b7c6ec2e15"
+      },
+      "arm_image": {
+        "tag": "sab-arm-tokio-rs__tokio-6603:f9b0fc9f8",
+        "id": "sha256:6fd397bee85e6fd1553613051c74938672bdffd51065d612b5775fe107ea76c9"
+      },
+      "arm_binary_sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "template": "sab-tpl-tokio-rs__tokio-6603",
+      "bundle_sha256": "b9891d1336bdc18e43b0fb0331d972813008b7a59c63da2a97164abcb906ff70",
+      "controls_sha256": "1c6548d3f40b5f4aa42ca567ab5bec37e851b47985ee2eca231c514ce32100ad",
+      "template_dump_sha256": "e994da2200be4ce5d036daa5371de65296fcefbd0ef4952b402cf285c591b60e",
+      "prompt_sha256": "3fe167d350a139401242d9e225be1d6320aad987bcf8edb7b3abee8321ee227d",
+      "template_volume": {
+        "sha256": "de4123a1378a895cf77626d34272098d5e15b22403d326599009bc2a020c0dae",
+        "files": 511,
+        "probe_image_id": "sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d"
+      }
+    }
+  ],
+  "grader_inputs": {
+    "s5_dir": "/home/marius/work/claude/claude-plugins/effort-steering/spikes/s5",
+    "grade_mjs": {
+      "/home/marius/work/claude/claude-plugins/effort-steering/core/decide.mjs": "8e2905f6b000aef19ae3692a6505c9953a58de56c263bafbf3c4cb8555c08101",
+      "/home/marius/work/claude/claude-plugins/effort-steering/core/features.mjs": "b3de5b10f1ad47c7a9d75bdb25c6c162dd4cc55851d2a6ab7c773541b222ff3d",
+      "/home/marius/work/claude/claude-plugins/effort-steering/spikes/s5/build-task.mjs": "41e95b2eca272c4b3452f8a4a68661c2d302f77afe916072f1db39266318a8b1",
+      "/home/marius/work/claude/claude-plugins/effort-steering/spikes/s5/docker.mjs": "3abc6d24b00da320b7224721003f40997ef1c8616f8841be62e5e11cc9e5bca4",
+      "/home/marius/work/claude/claude-plugins/effort-steering/spikes/s5/git.mjs": "0649d66a143185e8fc22b440a4f6222d97474bc41132e40cc071a7bdf045b539",
+      "/home/marius/work/claude/claude-plugins/effort-steering/spikes/s5/grade.mjs": "19bcbe22d74dbd0e41b812dca9a7dcf3c605a5c3f5060d3e17b67b3653f090a3",
+      "/home/marius/work/claude/claude-plugins/effort-steering/spikes/s5/hook-copy.mjs": "5ce4042a2f14a170d6da257996d80cfef6dbf680f4791a85384c30fa2ce38ec1",
+      "/home/marius/work/claude/claude-plugins/effort-steering/spikes/s5/task-def.mjs": "19fb89f3bb13868f5bf1deffa5da31d2b02cbd5fb178e5d615a7322730dcad65"
+    },
+    "tasks": {
+      "cs-p08": {
+        "hidden_tree": "fa8971e2a8eaf8a2f56d512c4ba9f8e7dd5e715ac17b2132d2c24944a587815d",
+        "manifest_json": "2a8bd5ff6800ca1954318c17e7335727e2f389b444429d7038b7dad55aa0c81f"
+      },
+      "tokio-rs__axum-691": {
+        "record_json": "1dae0c849cb37a14c563a06704926a5fac20dcd5a05d277856424e24546a460c"
+      },
+      "cs-p04": {
+        "hidden_tree": "db4732eef13dc16b68de07c78a68a81fa29dc04c52351a66c5c5989f04a433d1",
+        "manifest_json": "e991b20db76e2deec93a87b6887f3c24610b78c6501f6cd85f29ec2f7dfc4a94"
+      },
+      "uutils__coreutils-6575": {
+        "record_json": "5b5cb438d3c3386f3084148797697baae3a7559bdb1722aa70787c1522a0d21e"
+      },
+      "cs-p07": {
+        "hidden_tree": "5ffec72a868f54d30cf7d67f1d8e8597d1ca1525ccd5e29722cbec506e2df385",
+        "manifest_json": "54c085f8c07388907fa11d0c5c9333bc1a41abb48126e3d09d3d5469b3690fc4"
+      },
+      "nushell__nushell-13831": {
+        "record_json": "ff9f6307890464e696fe4e7393b291ea57bdb66b50410f2505ad651b8c7a76ff"
+      },
+      "cs-p15": {
+        "hidden_tree": "0511b6a63392d2a31079e757ad40ce041ad33ccffcc478a00ea1b6078154bc52",
+        "manifest_json": "24489607f1e4ac306895bf644a3b448a486c7825cc5b84deb030eb6369661d5b"
+      },
+      "astral-sh__ruff-15626": {
+        "record_json": "2ad7bd4aa5691924100b4bf22c1ce83578e48fd5f4107c96ca4bf913a2fa3279"
+      },
+      "cs-p19": {
+        "hidden_tree": "4ec3b988cc9e0bbbec5792e6cab3debe7999b99cf7da44c17458cd5847fd4ef5",
+        "manifest_json": "162710e46deddf7e676c1def99f7a32466c880cc3ccaac0717253025d8b7d8d1"
+      },
+      "sharkdp__bat-1892": {
+        "record_json": "040498605c5563785b86b69634112fc6e9f83fa3f3c7257f3d2f741a112369bd"
+      },
+      "cs-p01": {
+        "hidden_tree": "d405a1845f4b7f446eac83bd5a0e3a681c1886eb6a3e6c40d1326328e82fdcd2",
+        "manifest_json": "21c7a03f18faf84b1030dde9bfc2f036ebce634caf95944a681d3b8239e7427b"
+      },
+      "tokio-rs__tokio-6603": {
+        "record_json": "c4efc3f4badda6493e3a5134c69873b47ce4a20c2fd7f61694780543964b9141"
+      }
+    }
+  },
+  "instrument_gate": {
+    "rule": "instrument failures (analyze_study.instrument_failures): every `tasks.py verify` reason of a registered task, every private prescan reason, and per model and arm ARM_INTEGRITY_RULE",
+    "verify_reasons": {
+      "cs-p08": [],
+      "tokio-rs__axum-691": [],
+      "cs-p04": [],
+      "uutils__coreutils-6575": [],
+      "cs-p07": [],
+      "nushell__nushell-13831": [],
+      "cs-p15": [],
+      "astral-sh__ruff-15626": [],
+      "cs-p19": [],
+      "sharkdp__bat-1892": [],
+      "cs-p01": [],
+      "tokio-rs__tokio-6603": []
+    },
+    "prescan_reasons": {}
+  },
+  "frozen": {
+    "root": "/home/marius/work/claude/setup-ab-data/study/frozen",
+    "trees": {
+      "config/CLAUDE.md": "8169f556933e023d785bfa471a75fa9476ac47d2d83c11221890b70f5e0c4dbc",
+      "config/settings.json": "eb5c872152547ccf899ef12e8a32bc41d7122152362be5f7a47140e6d3d4a5be",
+      "plugins/buddy": "af4000998bee6a576caafca0454a74368092df486ee435a004c4a396d475811d",
+      "plugins/claude-md-management": "6d43ca074fd0e612ed1cd687d277179b41c65dccf431259fe3168068cce6ebf2",
+      "plugins/codescout-companion": "60bfbdb8dfc622c4c562c33d994f7e49fc29741a128601721eac745c3ea2bcd6",
+      "plugins/document-skills": "cefaf722e27a1a478db340b19741a3e7500a559002e1290ed1d45cb33b1921fc",
+      "plugins/frontend-design": "f928633f832bee327417664feb256c3ded13bb4dcbf5c3d6251a7c24bc3542ef",
+      "plugins/legible": "dabbe59d719a719ed015e9ada6551cd53f17042a192419affd2994141ea07dfb",
+      "plugins/superpowers": "40ea480f0811835af08f7312bd58af176d036a67139323c0b0123334ffa809b0"
+    },
+    "excluded_files": [
+      "plugins/buddy/.codescout",
+      "plugins/buddy/tests/prompt-hamsa-eval/.env"
+    ],
+    "secret_scan": {
+      "files_scanned": 1090,
+      "hits": 0,
+      "patterns": [
+        "anthropic-key",
+        "aws-access-key",
+        "bearer-header",
+        "github-token",
+        "google-api-key",
+        "json-password",
+        "name-equals-secret",
+        "pem-private-key",
+        "slack-token"
+      ]
+    },
+    "frozen_json_sha256": "e86931916754d4822e95001790aa1aa122f9695b4683d3cf75d4e9a23d3bc259"
+  },
+  "decision_rule": {
+    "registered_min": 10,
+    "stratum_min_rule": "a stratum of k of the n registered tasks needs ceil(REGISTERED_MIN * k / n) valid tasks per model: 5 of 6",
+    "tolerance": "a headline needs both strata to decide, so the real tolerance is 1 invalid task per stratum",
+    "floor_f": "F = GM over the valid tasks i of max(bare0_i, bare1_i) / min(bare0_i, bare1_i) = exp(mean_i |ln(bare0_i / bare1_i)|), the two bare reps' costs; operator decision 2026-10-29: the larger reading (analyze.floor_f)",
+    "resamples": 10000,
+    "interval": "90% percentile paired bootstrap over whole tasks, bounds rounded outward (analyze.interval90)",
+    "bootstrap_seed": 20261033,
+    "comparisons": {
+      "cs - bare": "codescout",
+      "full - bare": "the setup"
+    },
+    "comparison_note": "per model; full - bare is 'the setup', never 'codescout'",
+    "order": "invalid instrument > fewer valid tasks (inconclusive) > non-inferiority fails (worse) > cost step against F (analyze.rule)",
+    "non_inferiority": "treatment passes >= bare passes - 1 (bare passes a task when the mean of its two reps is >= 0.5)",
+    "arm_integrity": "an instrument failure at the study level is any run with a contamination reason, or, per model and arm, more TASKS with at least one invalid-arm run carrying a construction reason (missing init record or marker tool, missing companion hook evidence, a denied tool present, missing Skill/Task or superpowers/buddy skills for full, MCP tools in bare) than registered tasks minus REGISTERED_MIN; a task counts once however many of its runs failed; zero codescout calls in a cs/full run is a result (a secondary metric), not an instrument failure",
+    "instrument": "instrument failures (analyze_study.instrument_failures): every `tasks.py verify` reason of a registered task, every private prescan reason, and per model and arm ARM_INTEGRITY_RULE",
+    "zero_codescout_calls": "a result, reported as zero_codescout_runs; never invalid",
+    "admission": "an admission stop (the $200 cap) in the extension: the rows are analysed as is, and the stop is disclosed; the cap is not raised",
+    "re_runs": "no re-runs: a runId with any journal row is never run again; a main row outside STAGE3_REPS is a re-run and is refused by analyze.check_row; the one registered exception: the 10 runIds of the archived pilot attempt 1 (aborted_pilot_1, operator decision 2026-10-30, no grade read) left the journal and are re-run from scratch under this registration; that attempt is never analysed",
+    "headline": "no single pooled headline: the foreign and private strata are decided separately and a headline claim needs both to agree (analyze_study.headline)",
+    "agent_resources": [
+      "--cpus",
+      "4",
+      "--memory",
+      "24g",
+      "--memory-swap",
+      "24g"
+    ],
+    "per_call_usd": 5.0,
+    "run_timeout_s": 3600,
+    "planned_reps": [
+      [
+        "bare",
+        2
+      ],
+      [
+        "cs",
+        1
+      ],
+      [
+        "full",
+        1
+      ]
+    ],
+    "models": [
+      "claude-sonnet-5-5",
+      "claude-opus-5-5"
+    ]
+  },
+  "run_data": "/home/marius/work/claude/setup-ab-data/study",
+  "tasks_root": "/home/marius/work/claude/setup-ab-data/tasks",
+  "claude_cli_version": "2.1.309 (Claude Code)",
+  "claude_cli_sha256": "4d704a8aecbe038affa3000f498ae17c1b4f753add8facb8764120affc99b658",
+  "codescout": {
+    "host_binary": {
+      "source": "setup-manifest.json (the operator's daily binary; NOT the one in the arm image)",
+      "sha256": "1e4ac1f5b3bcaf962a479e5fcb4167388f7988b53222359a64810d7699318c4c",
+      "version_json": {
+        "version": "0.15.0",
+        "git_sha": "f9b0fc9f8",
+        "git_sha_full": "f9b0fc9f867a0b6f5b6bb0d0b436fb303e1c5248",
+        "git_dirty": false
+      }
+    },
+    "arm_image_binary": {
+      "source": "tools/setup-ab-eval/task4-live-control.json",
+      "source_sha256": "52821f57d48e134823615d031a8c42daf90207497e3200dc0115c05984390e71",
+      "sha256": "06c8167b707913b08bc8403e04a4cbb9f80c83c0f63a9d76eeef3eda15f3c3c7",
+      "version_json": {
+        "version": "0.15.0",
+        "git_sha": "f9b0fc9",
+        "git_sha_full": "f9b0fc9f867a0b6f5b6bb0d0b436fb303e1c5248",
+        "git_dirty": false
+      }
+    }
+  },
+  "python_version": "3.14.8",
+  "python_executable": "/usr/bin/python3.14",
+  "node_version": "v26.12.1",
+  "registration_sha256": "b75ec48492a9743def87fbf57d327d6f0a221fe5b91635fd2b8ab537f020be49"
+}

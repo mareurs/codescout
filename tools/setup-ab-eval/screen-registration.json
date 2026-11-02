@@ -1,0 +1,240 @@
+{
+  "stage": "screen",
+  "head": "c039145b03df2af5e4b69504815440dca42dc3b2",
+  "files": {
+    "PROVENANCE.json": "17eff19c2502b39886fb680a867fccebf8483ae18488929450935715bbb53340",
+    "agent-cs.Dockerfile": "a5891963c784217eb53f601f0aaaeb60c28dfb52babeb6513fb0f5cb886b74da",
+    "agent.Dockerfile": "189455188ab17062926d44dff28b099e59e94ce8342a363f3b063135cd0bb24c",
+    "analyze.py": "562a9285f98a493c0a89683119c92cc93375804683fc1358272cf4455da26295",
+    "analyze_study.py": "12d1474440d72ab3fe948e3954728025c22891f43916cced51df314727649e94",
+    "arms.py": "206b95c4a228c10cb2550777605f20071bd06685c5350fb7189143613e9db822",
+    "baseline.py": "3a1311976af2d9eb8bde99f0219958f2f297919d39c4517ae3a03e3729440db1",
+    "capture_stub.py": "57b7b37927ca920868c63b12947f9b2894623729c9f985ef10adb7e02c231a75",
+    "evidence.py": "fa4ce2e1aa77fb4bd3ffae5fb643325a1c8c89fe2ad76b9c38577f4139cedda4",
+    "fixtures/bare_valid.jsonl": "cd0366947eca59b12868a2beea658511564d8219db2c465238a661344ad6d2fa",
+    "fixtures/cs_valid.jsonl": "728be9973c41fb7a62479d2cd393bfec804518781a4fbbd93116ff68f450e3a5",
+    "fixtures/full_valid.jsonl": "e5936c940961742ffdc8df3fd4b352a4a44e2b096b7893e31172c420836bfc6d",
+    "fixtures/multilang/obscura-426-gold.log": "f7287da30ff503203bcce044eedf84508e94c497211893dd4e2a22e2d184f3d0",
+    "fixtures/multilang/obscura-426.json": "168f8a3d51a409b05ab352a29ab8d0ecc6e0fbf6cb833b2ae79888248e6a1b4c",
+    "fixtures/multilang/records-mini.jsonl": "5a18ee5f053565f1857b2a5c966db00f809f46c01bf2dc83ac555199730fea40",
+    "freeze_screen.py": "754ef0e9d55b95ac8829773e5a7e9fb706b7ab697b0d35110345790143859599",
+    "freeze_setup.py": "def4faaa169a195db4722175e14af6c9ad4f3734110a20413371e98ad5d1a8c1",
+    "freeze_stage1.py": "8484af5187fe7e28ff0a0264cd8f80eaa8f6b20cb4bced0cc459e0e0bf8c3ff8",
+    "freeze_stage2.py": "2abff6be4e98f0c9caa5595bbd0a1823293c228117265c111020da5574d7deff",
+    "frozen.py": "503bee1ef1b7a4727a4c7493b5603162341637405c3e6a31c6123c68550f8e89",
+    "integrity.py": "1fae826276e6c9cfccb8bdc0c3330689c556f518374fe6324a013be67b13a3cb",
+    "leak_scan.py": "896e23869fab19668c8d7a61b92cdbd84afb7fb0bb248c2c8564bca2a0716f14",
+    "live_control.py": "459115f89658a486c399ee13cdf31bd886c099dda3ef90dff68eae48c805a5b4",
+    "live_sweep.py": "50cd244136b970e909ec75c0086aea401081434d7da53f5bb8482899cbb81140",
+    "mcp_probe.py": "5265138b67c7510c9a02c9cc6f7036b4785d15579dc1821ffab71c37c161ed07",
+    "multilang-pool-v1.json": "f292f09b69fd3aa81a0ef9d4bbc87d8f33b849640d7db17d4646b894bd347a18",
+    "multilang-pool-v2.json": "2bf50c8075d873bd0cde1ff5a0246ac3f8b436841dda23b541a1996983410ef2",
+    "multilang-pool-v3.json": "06045c454635bfb7d849c5faec539f2b31e04776960d21dc6265192d6ae55ba8",
+    "multilang-pool-v4.json": "cad2a914ae0cba1d571d3b99cd2287f03869566d5a5c7bfe5ecbe03f535ec617",
+    "multilang-selection-rule.json": "d48bc6f8ec910f60e268fef6dbf232458109eef9dafa7ef17c77b0289d70d82b",
+    "multilang_control.py": "2678d7d76e2506cbc72cac449a886827ccf0d039a8aae98f6a59dff1cbbede53",
+    "multilang_grade.py": "3ed7d3822a596140bc062b1518c399ff67f4b9984a4109819ac290c5f6d484bb",
+    "multilang_records.py": "714e4d266840887fdf795fb80db4f0fa3f949724f4deaa4ae7321b9f4ce4bb27",
+    "multilang_tasks.py": "856d6d835ec1297d713e68d6c20bd5583c2adcdad33b5b33e436b487a51b3b6a",
+    "pilot-protocol.md": "57dec0d780ed5307150e19f8adee917dd4555f6ca103f96d79737833ca137801",
+    "pilot.py": "61d5020fbc4de8791431d367106dac1246afe37bd462ca3100ef6a54afe63c38",
+    "registration.py": "53afe5c969a5c8231a7a030b269e208e098a7589e1359c7fe15a113989671236",
+    "run.py": "d722cfe8703a5514a5b9a75c1d1d05c4011157af92954a7031ac0a7352c231eb",
+    "select_tasks.py": "f0379cede595b871d962cd8945329b1c66102882f51b9f804700cb9ccedd4439",
+    "selection-rule.json": "6f0205bc6036495c0e0153a5a873754e31306f1b4df33cc146435f0d6fcd52c3",
+    "smoke.py": "5245d350aa722e69a383f095ab87375505c8e7d3cb62b6c04fb78bc766eda411",
+    "stack.py": "b6450629229fe81c5add15def405424b7cf49a4bd16d5839f31091efd18921b7",
+    "stage1-registration.json": "58200b3e7c0e8b626b1861987968a66b2d6ae1efd93d2c1b60897a7520c39f3b",
+    "stage3-registration.json": "b44b0132172e40dcb03122a2cbb0c84f781ce3fe8a7d456dfc660a15eb0c8410",
+    "stage3.py": "aa58042884047e94e91ed334b80d09bd6974c8ac69e37d3da251ce5fdd6d77ee",
+    "task4-live-control.json": "52821f57d48e134823615d031a8c42daf90207497e3200dc0115c05984390e71",
+    "task4-rulings-control.json": "a5e8af417ce7d5df46a939ed749de69871b10781e6e0a2b593c912fe8b53ae29",
+    "tasks.py": "363c8896c84f94ab291114944001f9b04d31bc2ceaf814c48649599a671ff10c",
+    "test_analyze.py": "0319e113606240928bbd291ee7d88161dc194f6c54818322591383ab11ab0c31",
+    "test_analyze_study.py": "55c72668efbaf6fde8aaedb6c472204046d531af5a415f9b2445545378b6e6ba",
+    "test_arms.py": "bc66ac5f7fa3fa7806fc06cf521e9ff38ef5a2c6283f161c3e04e35be4c85aca",
+    "test_baseline.py": "4679afd5e3ca43dcba3dcb20d01e93bb8a73abb3ca9884eefb65cc52c046d52e",
+    "test_freeze_screen.py": "303333ac5df008e9b402b865c31c4fc8b7725081ba08555ee81016b9f2d8373a",
+    "test_freeze_setup.py": "30b5c3da74e3d83ecb643b9b69618285cd361c531997eaaa483eeac65344054e",
+    "test_freeze_stage1.py": "374a20d4bc0bb6b6407b2c28da461ad8066204763f25054750be67ee6e21d6f1",
+    "test_freeze_stage2.py": "5512bb6b86e43f4e2926661c00db2d4708815f6ec7ce7382e7dffee87b457c98",
+    "test_frozen.py": "40df751e2a0a7297b513b81fffa7584fe1d123cf8ee1778616e5ba80e9af1efd",
+    "test_grader_boundary.py": "50c2739e04e7d5dc72c1dbe1d954652353fd14615473c0250cffc9daa909fe74",
+    "test_integrity.py": "24c9fa0ce9ee2016c291dbd18a4b83d8d20afd9c834d890e870b06061cdada66",
+    "test_leak_scan.py": "a21ec0334d336f117f26c50e3149021b60cb393192f998b592f3db24488512bd",
+    "test_multilang_control.py": "7b45af6044b3b77ff69aeb71842849e22260ba28c70a809e80ed632a250e6e1a",
+    "test_multilang_grade.py": "53fe3606dbca7c634dbda0a8ff521bc03f91ee8654dbc05a3ac8651a788ed2e6",
+    "test_multilang_records.py": "d84c114ba6c5ca2a435de0482f56d71245b785de93fd7012dc41572ee606c7e2",
+    "test_multilang_tasks.py": "b6d83b408d0b925335db9715640b05eef7b8212f5b993a0bd227af2d84d0a074",
+    "test_pilot.py": "9a0d22a9f35c631583ad0366c2a8b352474f4fa56e90d11c93c9b69bd2984c92",
+    "test_provenance.py": "a0faa189973f34cb10a27a5c3a7fdacaa4327d5c9db988a9d845d56d38eaa7c1",
+    "test_run.py": "bf021a084a13261e80479739bb538012b93a9c36feac23c635f5b0ee9d0b9f6f",
+    "test_smoke.py": "499cd01d4f56030e61a569731ca8fb2f4c613efb5f90faea503a028c3652cc6a",
+    "test_stack.py": "938c8da8c1743cf016bed6183e8ffc4a449ca3627721d985edcf11a5a2c86101",
+    "test_stage3.py": "30319121454ce59ab24b7cee622ec2ca9a1b509eb9da111410a4ab4b6f98c4af",
+    "test_tasks.py": "cef129b69e370a8a1b46310b1a856d7b1556de749f5f4c082c91e7c786d167cb",
+    "vendor/claude-plugins/effort-steering/spikes/plan-limit.mjs": "e9d0ba90c0a269f29c5dc3baf3897d238124087b40feb1f6c92eae28ffe95c4f",
+    "vendor/claude-plugins/effort-steering/spikes/s4-rows.mjs": "800938d75f5e20b93eabdfba68ed244b99e9f213f1a19f290603c7ba9b9a56a9",
+    "vendor/claude-plugins/effort-steering/spikes/s5/images/tinyproxy.conf.tmpl": "f44e1a4ddeb5efa887c456e661034a602605faa15aea767671f431bf3e7ebd8c",
+    "vendor/claude-plugins/effort-steering/spikes/s5/usage.mjs": "4d1e0b76bb61762bbbfe077a7d7d3c4d95a4be45f2c57d9490a8d47c8e2d5534"
+  },
+  "pool_sha256": "cad2a914ae0cba1d571d3b99cd2287f03869566d5a5c7bfe5ecbe03f535ec617",
+  "pool_path": "multilang-pool-v4.json",
+  "tasks": [
+    {
+      "task_id": "rust-lang__rust-analyzer-22789",
+      "kind": "live",
+      "run_image": {
+        "tag": "sab-run-rust-lang__rust-analyzer-22789:f9b0fc9f8",
+        "id": "sha256:4b2077db48b632d2e17f4c96b0b0c3f6a8a3dbf7aa6836162ee2648b4f0c8b93"
+      },
+      "arm_image": {
+        "tag": "sab-arm-rust-lang__rust-analyzer-22789:f9b0fc9f8",
+        "id": "sha256:5c75870b19d8404f9e9727b90b57c9c3ff11c8c88ac2320e27bccc5543596f0e"
+      },
+      "bundle_sha256": "f4785f1fb896f9cd90d1f824f3e22e062b292c4ac439968f5bc4d497b078b0a1",
+      "prompt_sha256": "9ea0db0fa5874cf6d69bdaf156d7c1ea6a62be5ea2ee8cd3d8fee65501f9719f",
+      "record_sha256": "4b649b4ae207075ae5b62389f4f3ee73079c2f4b5cd295e0b2af90f0d8b614ce",
+      "control_logs_sha256": {
+        "base.log": "581be08b952e82ceb1f31b782b8f8b5252a932d90a11c48200603fb2641821a3",
+        "gold.log": "1bf13c220984d6c5196f9937b99b1e0f804dbbfb7df11d9092dcb20dca096bb2"
+      }
+    },
+    {
+      "task_id": "h4ckf0r0day__obscura-412",
+      "kind": "live",
+      "run_image": {
+        "tag": "sab-run-h4ckf0r0day__obscura-412:f9b0fc9f8",
+        "id": "sha256:2ccd43c522d592acf9b4b34a20062cb9aed3bfd5b79d97b2b2afa27d774d98db"
+      },
+      "arm_image": {
+        "tag": "sab-arm-h4ckf0r0day__obscura-412:f9b0fc9f8",
+        "id": "sha256:201bbc4d50bbbf737f4cf2fe960260daa3249d0772ccfed8ccc70996bda67a05"
+      },
+      "bundle_sha256": "e36a80ce57b0e9370712d08304051c91ac5a772bcc51eadf02a4388a6793bcbc",
+      "prompt_sha256": "54ebd196514c5560554e9bbf97fa9dfd75c745c5276b2159ae5a99119022f67c",
+      "record_sha256": "79a4faab4e9343b8b86da84f637980a782a8bb6f186ada4cb0abda07411e4369",
+      "control_logs_sha256": {
+        "base.log": "b2ca3d971c87dc6de8ce206b44346862efdd676bfa9727a16680a2e2e1687fec",
+        "gold.log": "fcfe29e1ec957a9268cf8954fb7618f6671e67e5a3679396e72d862b787970e5"
+      }
+    },
+    {
+      "task_id": "h4ckf0r0day__obscura-477",
+      "kind": "live",
+      "run_image": {
+        "tag": "sab-run-h4ckf0r0day__obscura-477:f9b0fc9f8",
+        "id": "sha256:ca26ba0c5cc10d5c9fab0132c804423d42dd6057a20fe4a8a5da5c5f6855ce0e"
+      },
+      "arm_image": {
+        "tag": "sab-arm-h4ckf0r0day__obscura-477:f9b0fc9f8",
+        "id": "sha256:c427d75bbc6a58565710bc997e31e9bf3f7db66afb4d14a16435cbeeb6c2ad62"
+      },
+      "bundle_sha256": "f9ec6059eb1c424791f718c795e03f71864828d4be58647344893e6d55b445ff",
+      "prompt_sha256": "813976af1829e9c52c3eb1f2a3a15f33242db7fcfba903e1ea4ecd0257e9928c",
+      "record_sha256": "fcb504633e1a12be334f022d5d94327a47472cb520742fcbf3205f0ad3a5752a",
+      "control_logs_sha256": {
+        "base.log": "7d7c8bc9320f04da86b77001fd678b18ab7b649c8390c15433be23b05840107a",
+        "gold.log": "0206a111ab8c4615d89ad009ae92298b55117fb0439937a8b231f376c74623e5"
+      }
+    },
+    {
+      "task_id": "h4ckf0r0day__obscura-414",
+      "kind": "live",
+      "run_image": {
+        "tag": "sab-run-h4ckf0r0day__obscura-414:f9b0fc9f8",
+        "id": "sha256:7479c4cd98afd69ca65f59e9e48ab61b815f370cf59c7fb2d7b38484c5c45dda"
+      },
+      "arm_image": {
+        "tag": "sab-arm-h4ckf0r0day__obscura-414:f9b0fc9f8",
+        "id": "sha256:a4e7bbfc2d91a34423a94bbbb516f88db5452885f7eaba9be0abf8abc4af6be2"
+      },
+      "bundle_sha256": "3d6b47b205d355acdbd73ab3a7e12ad9f766174e01b6375f8a80b2488def6dd5",
+      "prompt_sha256": "bb2e8ecb0766298ae3304cbff2395360f4dcab825cbce798a621d560da4af0b5",
+      "record_sha256": "28613fb1f1b78b8e6cc5345e7e13b5b750acea4b6e724f34dde906ba9a73facf",
+      "control_logs_sha256": {
+        "base.log": "43283bf5e71775378d9c55823a1646201341a6213c6b12fb8894f3e80167d0db",
+        "gold.log": "d6e52f828255719cf3941ac6d6d137a6469a82f494b13bfb9cbd52726d4a0468"
+      }
+    },
+    {
+      "task_id": "h4ckf0r0day__obscura-447",
+      "kind": "live",
+      "run_image": {
+        "tag": "sab-run-h4ckf0r0day__obscura-447:f9b0fc9f8",
+        "id": "sha256:570721ef8602ec53ffef59a81c8c91bbdfcf551630623f8e2b5f412e99ff83ed"
+      },
+      "arm_image": {
+        "tag": "sab-arm-h4ckf0r0day__obscura-447:f9b0fc9f8",
+        "id": "sha256:0afa663b98c9b262777999e65fdd4096267d95beff0d99791592b91c98bc8932"
+      },
+      "bundle_sha256": "e91bf5e4a0c24bbc0a1e7d617db32fc44305d35d322df5763744eb08affb3cdc",
+      "prompt_sha256": "36f9ec9711c88bf75bd0f5e0bc5bb284638321f33ea48d34afb4fbb2bafcac9f",
+      "record_sha256": "615fd6d236972c86764e0a5b51d185d01959da138c78b0d388c44f944af2c244",
+      "control_logs_sha256": {
+        "base.log": "2d7527da133c5031b2933e3cfb6427290e4528a1040f57e8b4a91d3616c70c34",
+        "gold.log": "410efc5c194cbbc2ed152ef13fd27b4b8272cca103e3ee57225122061a8ab7c3"
+      }
+    },
+    {
+      "task_id": "h4ckf0r0day__obscura-390",
+      "kind": "live",
+      "run_image": {
+        "tag": "sab-run-h4ckf0r0day__obscura-390:f9b0fc9f8",
+        "id": "sha256:a1a6be636cd9ef0cff037d55668d44fe3739cd6e19186b2ede803ebd3f87f468"
+      },
+      "arm_image": {
+        "tag": "sab-arm-h4ckf0r0day__obscura-390:f9b0fc9f8",
+        "id": "sha256:513edd55263cc05a84480fc0ed501b40acb94e0d286178b216bf324d48b5c6cf"
+      },
+      "bundle_sha256": "b3f1a01ed8aed13e7f4b5c574d7a8ee6a9f632aaef003f45f201a8a668fce6a6",
+      "prompt_sha256": "1d868ccfa0b1743af6444764246eba2839e78ed7293d81957f97faada7f4745a",
+      "record_sha256": "a68e178fb069405c22fbc55ca3c745307ebe00e39bccb0aa9eb9a921e99b56d7",
+      "control_logs_sha256": {
+        "base.log": "82a1f79f8d9638dd785f22ab0cc3fa537ec567a14e2618f7c135bd7581c37459",
+        "gold.log": "e24e5d63947fe1692542409dc422ac6b43237bb1bc0737a02a93db0d915e9810"
+      }
+    }
+  ],
+  "seed": 20261101,
+  "plan_path": "/home/marius/work/claude/setup-ab-data/live-screen/screen-plan.json",
+  "plan_sha256": "bdf4c33ec80d4092ee43fe8028c12208f5082830a9b1c81ac507be3473651350",
+  "budget": {
+    "cap_usd": 50.0,
+    "per_call_usd": 5.0,
+    "reserve_usd": 5.0
+  },
+  "models": [
+    "claude-sonnet-5-5",
+    "claude-opus-5-5"
+  ],
+  "reps": [
+    [
+      "bare",
+      2
+    ]
+  ],
+  "data": "/home/marius/work/claude/setup-ab-data",
+  "run_data": "/home/marius/work/claude/setup-ab-data/live-screen",
+  "runner_tasks_root": "/home/marius/work/claude/setup-ab-data/tasks",
+  "manifest_sha256": "b6ad964e3c56a4e9df6f32de3eacd2eae362e6db4eadf9fd6eee2a532fb1d2a6",
+  "claude_cli_version": "2.1.309 (Claude Code)",
+  "claude_cli_sha256": "4d704a8aecbe038affa3000f498ae17c1b4f753add8facb8764120affc99b658",
+  "frozen": {
+    "root": "/home/marius/work/claude/setup-ab-data/study/frozen",
+    "trees": {
+      "config/CLAUDE.md": "8169f556933e023d785bfa471a75fa9476ac47d2d83c11221890b70f5e0c4dbc",
+      "config/settings.json": "eb5c872152547ccf899ef12e8a32bc41d7122152362be5f7a47140e6d3d4a5be",
+      "plugins/buddy": "af4000998bee6a576caafca0454a74368092df486ee435a004c4a396d475811d",
+      "plugins/claude-md-management": "6d43ca074fd0e612ed1cd687d277179b41c65dccf431259fe3168068cce6ebf2",
+      "plugins/codescout-companion": "60bfbdb8dfc622c4c562c33d994f7e49fc29741a128601721eac745c3ea2bcd6",
+      "plugins/document-skills": "cefaf722e27a1a478db340b19741a3e7500a559002e1290ed1d45cb33b1921fc",
+      "plugins/frontend-design": "f928633f832bee327417664feb256c3ded13bb4dcbf5c3d6251a7c24bc3542ef",
+      "plugins/legible": "dabbe59d719a719ed015e9ada6551cd53f17042a192419affd2994141ea07dfb",
+      "plugins/superpowers": "40ea480f0811835af08f7312bd58af176d036a67139323c0b0123334ffa809b0"
+    }
+  },
+  "frozen_source_sha256": "b44b0132172e40dcb03122a2cbb0c84f781ce3fe8a7d456dfc660a15eb0c8410",
+  "python_version": "3.14.8",
+  "registration_sha256": "466a57feea7b01c1c0c70d1e2027569b0bb4b248d2509e32ab0b2134265afce0"
+}
