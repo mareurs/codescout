@@ -12,7 +12,7 @@ tags:
 opened: 2026-11-02
 owner: marius
 severity: low
-unverified: One failed update and one get. How the row came to point into the removed worktree, and whether other rows do, were not checked.
+unverified: One failed update and one get. How the row came to point into the removed worktree was not established. The count of stale rows (13 in this project's removed worktrees) is in Resume; the ten without a main twin were not traced.
 ---
 
 # BUG: `doc` by id fails with a bare "No such file or directory (os error 2)" when the catalog row points into a worktree that was removed, and the main-checkout copy of the file has another id
@@ -70,6 +70,14 @@ Use the id of the main-checkout row (`5ee9a523ac9a7cde`).
 ## Resume
 
 Found in the drill-down of session `f844662c` for the usage audit (`docs/usage-reports/2026-11-02-usage-analysis.md`, finding 14). Only filed; not fixed.
+
+**Count of the stale rows, 2026-11-02** (`~/.local/share/librarian/catalog.db`, read-only; script `os.path.exists` over every `artifact.abs_path`):
+
+- 51 of 6,790 rows point at a file that does not exist. All 51 have `missing_since` set, so the catalog already knows.
+- 13 of the 51 are under `/home/marius/work/claude/codescout.worktrees/` (12 in `integration-fixes-20261024`, 1 in `fix-g-20261024`). All 13 carry `missing_since` 2026-10-24 13:15:51. Their statuses: 10 `fixed`, 2 `open`, 1 `mitigated`.
+- 3 of the 13 have a row for the same file in the main checkout, found by swapping the worktree prefix: `3822f951e9d78ddf` (open) and `5ee9a523ac9a7cde` (fixed); `717298048575f667` (mitigated) and `fe747d6bdfe6ea5c` (mitigated); `9c90e767b8ae886b` (open) and `13cffc336e09af35` (wontfix). So two stale rows still say `open` for bugs that the main rows say are `fixed` and `wontfix`. The other 10 have no row at the swapped path; I did not look for a renamed or archived file.
+- The other 38 are outside this project (for example `whitelabel-crawler` 22).
+- `doc(find, filter={rel_path: contains …})` returns only the main row for `9c90e767b8ae886b`'s file, and `librarian(doctor)` for this project reports 0 violations with a path under `codescout.worktrees`. So the stale rows are reachable by id only, which is how the 10-30 call reached one.
 
 ## References
 
