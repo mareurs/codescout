@@ -390,8 +390,13 @@ def render(rep: dict) -> str:
     for k in ("main_vs_subagent", "subagent_type", "subagent_description_kind", "by_tool", "read_extensions"):
         out.append(f"  {k}: {o[k]}")
     c = rep["concentration"]
-    out.append(f"  concentration: {c['transcripts']} transcripts, median {c['median_per_transcript']}, top 5 {c['top5_share']:.0%}, top 20 {c['top20_share']:.0%}; "
-               f"{c['in_transcripts_with_no_codescout_call']} in transcripts with no codescout call ({c['note']})")
+    out.append(f"  concentration: {c['transcripts']} transcripts, median {c['median_per_transcript']}, top 5 {c['top5_share']:.0%}, top 20 {c['top20_share']:.0%}")
+    no_cs = c["in_transcripts_with_no_codescout_call"]
+    not_above = c["in_transcripts_with_codescout_calls_not_above_native_source_reads"]
+    more = o["total"] - no_cs - not_above - c["in_transcripts_without_a_summary"]
+    out.append(f"  of the {o['total']} calls: {no_cs} in transcripts with no codescout call, {not_above} in transcripts with codescout calls "
+               f"not above the native source reads, {more} in transcripts with more codescout calls than native source reads "
+               f"({c['note']})")
     out.append("\nper week (codescout read-ish calls vs native Read/Grep/Glob):")
     for w, v in rep["weekly"].items():
         cr = v["codescout_read_ish"]

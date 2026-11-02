@@ -204,6 +204,23 @@ class NativeUsageProbe(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("no transcripts found", r.stderr)
 
+    def test_the_text_report_states_all_three_codescout_in_transcript_counts(self):
+        # The corrected figure (see PROBES.md) is a split in three: a reader of the TEXT report must see all of it, not
+        # only the "no codescout call" share. Three transcripts, three different sizes, so a swapped pair cannot pass.
+        cs = lambda n, tag: [tool_use(f"toolu_{tag}{i}", "mcp__codescout__symbols", {}, "2026-10-01T10:00:00.000Z", MAIN) for i in range(n)]
+        self.write("sess_a.jsonl", self.read("toolu_a1", MAIN + "/a.rs"))                                           # 1 read, 0 codescout
+        self.write("sess_b.jsonl", self.read("toolu_b1", MAIN + "/b.rs") + self.read("toolu_b2", MAIN + "/b2.rs")
+                   + cs(1, "b"))                                                                                    # 2 reads, 1 codescout
+        self.write("sess_c.jsonl", self.read("toolu_c1", MAIN + "/c.rs") + cs(3, "c"))                              # 1 read, 3 codescout
+        r = subprocess.run([sys.executable, str(PROBE), "--profiles", str(self.profile), "--main-checkout", MAIN, "--jobs", "1"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("of the 4 calls", r.stdout)
+        self.assertIn("1 in transcripts with no codescout call", r.stdout)
+        self.assertIn("2 in transcripts with codescout calls not above the native source reads", r.stdout)
+        self.assertIn("1 in transcripts with more codescout calls than native source reads", r.stdout)
+
+
     def test_the_text_report_runs(self):
         self.write("sess1.jsonl", self.read("toolu_1", MAIN + "/src/lib.rs"))
         r = subprocess.run([sys.executable, str(PROBE), "--profiles", str(self.profile), "--main-checkout", MAIN, "--jobs", "1"],
