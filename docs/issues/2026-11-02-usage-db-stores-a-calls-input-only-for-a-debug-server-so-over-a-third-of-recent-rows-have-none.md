@@ -1,17 +1,18 @@
 ---
 id: '2108589a1b5fab62'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: `usage.db` stores a call''s input and output only for a server started with `--debug`, so 36.7% of the rows since 2026-10-25 have no input, and every query that reads `input_json` silently sees a fraction'
 owners:
 - marius
 tags:
 - cluster/unclassified
 - usage
+closed: 2026-11-02
 opened: 2026-11-02
 owner: marius
 severity: low
-unverified: Counts are from the codescout database only. Why input and output are debug-only was not found written anywhere; the likely reasons are a reading. The skill's query F was read, not re-run without the gap.
+unverified: 'Fixed in code and tests only. No row from a server started without `--debug` on a build with the commit has been seen: the 30 rows seen on the rebuilt server (build `33ccee567`, `codescout_dirty` 1) carry both blobs, so that server runs with `--debug`. The dirty bit is consistent with the rebuild having included the then-uncommitted change; it does not prove it. The 36.7% empty is for the period before the change and stays true of it.'
 ---
 
 # BUG: `usage.db` stores a call's input and output only for a server started with `--debug`, so 36.7% of the rows since 2026-10-25 have no input, and every query that reads `input_json` silently sees a fraction
@@ -61,11 +62,14 @@ None.
 
 ## Fix
 
-Not done, and not mine to choose: it decides what the usage database stores. Options, none chosen: record `input_json` always (cost: size, and shell commands in the database); record a bounded, redacted form (`tool`-specific keys such as `path`, `symbol`, `action`, `command`'s first word); or keep it debug-only and make every consumer say how many rows lacked it. Whatever is chosen, a query that reads `input_json` should print the count of rows that had none.
+Decided by the operator on 2026-11-02: record `input_json` always. Commit `a72175ca5` on `experiments`: `write_content` (`src/usage/mod.rs`) stores `serde_json::to_string(input)` on every call. `output_json` stays debug-only, because it is the large half. Cost, measured on the rows since 2026-10-25 that have an input: 539 bytes on average, 59 KB at most, 11 MB over 20,809 rows. Rows written before the change stay without an input; a query over `input_json` should still print how many rows had none for any period before the rebuild.
 
 ## Tests added
 
-N/A. Nothing is fixed.
+- `record_content_records_input_in_normal_mode` (renamed from `record_content_no_input_in_normal_mode`): red before, `input_json` was `None`; it also pins `output_json` as `None` without debug.
+- `record_content_records_tool_use_id_with_debug_off`: red before, it asserted a NULL input.
+- `record_content_records_buffer_linkage_with_debug_off` guarded "debug is off" through `input_json`; it now guards it through `output_json`, the blob that held the emitted handle.
+- Gate in a clean worktree: all 0, 8841 tests.
 
 ## Workarounds
 
@@ -73,7 +77,7 @@ Start servers with `--debug`, and report with every `input_json` figure how many
 
 ## Resume
 
-Open; needs a product decision. The usage report of 2026-11-02 names this as a blind spot, because several of its figures read `input_json`.
+Code changed in `a72175ca5`; not yet shown live. The only rows seen on the rebuilt server (8 rows, build `33ccee567`) carry both blobs, so that server runs with `--debug` and proves nothing. Needed: a row from a server started WITHOUT `--debug` on a build that has the commit, with `input_json` present and `output_json` empty. Query: `select codescout_sha, count(*), sum(length(coalesce(input_json,''))>0), sum(length(coalesce(output_json,''))>0) from tool_calls where called_at >= '<time of the rebuild>' group by 1`. When such a row exists, mark `fixed`. The usage report of 2026-11-02 and the `analyze-usage` skill name the gap for the period before.
 
 ## References
 

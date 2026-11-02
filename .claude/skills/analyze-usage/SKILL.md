@@ -122,6 +122,11 @@ ORDER BY SUM(CASE WHEN latency_ms >= 10000 THEN 1 ELSE 0 END) DESC;
 ```
 
 **F. Slow run_command calls** (>10s)
+
+> Reads `input_json`. A row written by a server that was started without `--debug` before
+> commit `a72175ca5` (2026-11-02) has none, and this query drops it silently: 36.7% of the
+> rows since 2026-10-25 had no input. Print the count with the list:
+> `SELECT COUNT(*) FROM tool_calls WHERE tool_name='run_command' AND latency_ms > 10000 AND length(coalesce(input_json,''))=0;`
 ```sql
 SELECT latency_ms, json_extract(input_json,'$.command') as command
 FROM tool_calls WHERE tool_name='run_command' AND latency_ms > 10000
