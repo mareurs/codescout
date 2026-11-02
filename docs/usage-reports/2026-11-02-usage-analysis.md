@@ -1,8 +1,8 @@
 # Usage Analysis — 2026-11-02 (codescout project database, 2026-10-25 → 2026-11-02)
 
-**Scope:** one database, `/home/marius/work/claude/codescout/.codescout/usage.db`, rows with `called_at >= '2026-10-25'` (first row 2026-10-26, last 2026-11-02 09:38 UTC). The `analyze-usage` skill finds about 150 databases under `~/work`; the other ones were not read. usage.db keeps 30 days.
+**Scope:** two parts. Findings 1 to 7 read one database, `/home/marius/work/claude/codescout/.codescout/usage.db`, rows with `called_at >= '2026-10-25'` (first row 2026-10-26, last 2026-11-02 09:38 UTC). Findings 8 and 9 read every database with 20 or more calls in the same window (15 of them). Finding 11 reads this project's Claude Code transcripts from the four profiles. usage.db keeps 30 days.
 **Compared with:** `2026-10-24-usage-analysis.md`, which covered 21 days and 40 projects. The two are not like for like; read the comparison as direction only.
-**Instruments:** `usage.db` queries (calls, errors, latency, `lsp_events`) and four read-only subagent verifications of the friction log against the code. No transcripts, no cost data.
+**Instruments:** `usage.db` queries (calls, errors, latency, `lsp_events`), a read-only scan of transcripts and subagent files, and four read-only subagent verifications of the friction log against the code. No cost data.
 
 ## Headline numbers
 
@@ -36,7 +36,7 @@ Top non-success messages in the window: shell-on-source refusal on `run_command`
 
 ### 2. `edit_code` hits a null `documentSymbol` answer 19 times
 
-"the language server answered textDocument/documentSymbol with null" for 19 `edit_code` calls. Not investigated here. A related fix (`1b208ad79`, keep re-asking while rust-analyzer reports start-up progress) is in history, so whether these are before or after it was not checked.
+"the language server answered textDocument/documentSymbol with null" for 19 `edit_code` calls in the codescout database. Investigated in finding 10: every failing build already contains the `1b208ad79` fix, and the paths are in nested worktrees.
 
 ### 3. Rust mux lock failures: 15 in 8 days, falling
 
@@ -60,14 +60,60 @@ The 12 longest `run_command` rows (all over 1,780 s, up to 1,890 s) are `sleep` 
 
 See `docs/trackers/bug-fix-session-log.md` F-212. 31 entries were archived on 2026-11-02 (commit `26f1b10ff`); 17 stay live: 6 fixed in part, each with its remaining half in the Status line (U-29, U-34, U-40, U-41, U-46, U-47); U-28 flipped to fixed-verified and left live for the next quarterly pass; the other 10 are unchanged (U-12, U-13, U-18, U-32, U-37, U-38, U-48, U-49, U-50, U-51).
 
+### 8. The other databases show the same shape
+
+15 databases have 20 or more calls since 2026-10-25: 69,460 calls, 3.52% non-success (the codescout database is 31,744 of them). The top families across them: `il3_pipe_to_trimmer` 444 (11 databases), `il3_shell_on_source` 334 (11), `il1_read_overlaps_symbol` 254 (13), `il2_structural_edit` 205 (9), `librarian_managed_artifact` on `read_file` 93 (8). 26 further databases were skipped because SQLite could not open them read-only; the ones named in the error were eval-run copies (`es-stage0/critic-a/runs/...`), not real usage. The databases with fewer than 20 calls were not counted.
+
+### 9. Recovery by error family (15 databases)
+
+Share of errors whose next call in the same session and agent succeeds, and share with no success in the next 25 calls:
+
+| Family | Errors | Next call succeeds | No success in 25 calls |
+|---|---:|---:|---:|
+| `il3_pipe_to_trimmer` | 440 | 95.9% | 0.0% |
+| `il2_structural_edit` | 205 | 91.7% | 0.0% |
+| `edit_stale_match` | 80 | 92.5% | 0.0% |
+| `il3_shell_on_source` | 334 | 89.5% | 0.0% |
+| `path_not_found` | 118 | 86.4% | 2.5% |
+| `missing_required_param` | 107 | 85.0% | 0.0% |
+| (no family) | 256 | 82.4% | 0.0% |
+| `il1_read_overlaps_symbol` | 253 | 81.8% | 0.0% |
+| `librarian_managed_artifact` | 155 | 81.3% | 0.0% |
+| `memory_target_not_found` | 43 | 79.1% | 0.0% |
+| `worktree_activate_required` | 87 | 77.0% | 0.0% |
+
+The lowest first-retry success is `worktree_activate_required` (77%). This is not like for like with the 2026-10-24 table, which reported 31.6% of `memory_target_not_found` unrecovered in 25 calls; this run gives 0.0% on 43 errors with a different session key and window, so the two should not be set side by side. Errors that were the last call of a session are excluded here.
+
+### 10. Null `documentSymbol` answers outlive the 2026-10-24 fix
+
+22 `edit_code`/`symbols` rows in the window (2 on 10-29, 15 on 10-31, 5 on 11-01), from five builds, **all of which contain `1b208ad79`** (the fix that keeps re-asking while rust-analyzer reports start-up progress). 13 of them fall in one hour on 10-31 in two sessions. The failing paths are in nested `.worktrees/` checkouts, and the error text already says so. Both known causes have bug files: `docs/issues/archive/2026-10-23-documentsymbol-null-window-outlasts-the-5s-cold-budget-because-rust-analyzer-scans-the-nested-worktrees.md` (fixed) and the open `docs/issues/2026-10-31-rust-analyzer-watcher-walks-the-directory-symlinks-in-resident-private-without-end-so-documentsymbol-stays-null.md`. Nothing new was filed.
+
+### 11. Transcripts (204 files: 21 parent sessions, 183 subagent files, deduplicated)
+
+- **Parents:** 16,988 tool calls, 94.3% codescout, 5.7% native (mostly `Agent` 248, `SendMessage` 172, `Read` 122, `ToolSearch` 122, `Skill` 92). Native `Read` of source: 23 calls (0.14 per 100).
+- **Subagents:** 8,626 calls, 83.1% codescout, 16.9% native. Native `Read` of source: 299 (3.47 per 100); the 10-24 report had 0.45. The reads are spread over many agents, mostly ranged, and mostly in two worktrees. Cause not established. Filed as friction `U-52`.
+- **Stop reasons:** `tool_use` 46,122, `end_turn` 2,231, `stop_sequence` 7. No `max_tokens` stop in the window.
+- **Hook-output rejections** ("missing required field hookEventName"): at most 1 genuine one since 10-25, against 211 in the 10-24 report, and `emitSkillHint` in the companion's `lib.mjs` now carries a comment about the field. Four more hits dated 2026-11-02 are the text of this audit's own scripts, quoted back into the transcripts the scan reads: an instrument writing into what it measures.
+- **Tool-result errors** in transcripts count only hard errors (24 or so), because recoverable refusals come back as normal results. The transcript error rate is therefore not comparable with the database's 3.5%.
+
+### 12. Filed from this audit (nothing fixed)
+
+- `docs/issues/2026-11-02-a-second-client-that-spawns-a-rust-mux-loses-the-lock-race-and-fails-the-start-instead-of-connecting-to-the-winner.md` (id `8e6268a0577ff543`)
+- `docs/issues/2026-11-02-edit-file-replace-all-answers-a-bare-ok-with-no-count-of-the-sites-it-replaced.md` (`200f89eca3eb91e5`)
+- `docs/issues/2026-11-02-119-non-success-rows-carry-no-err-family-after-the-three-shape-fix.md` (`43e0e0c684c0c038`)
+- `docs/issues/2026-11-02-call-graph-fails-with-a-bare-disk-io-error-and-the-rows-record-no-input.md` (`cd85dbae70c76670`)
+- friction `U-52` in `docs/trackers/codescout-usage-frictions.md`
+
 ## Blind spots
 
-- **One database.** A friction that shows only in another project's database is not here.
+- **Databases.** Findings 1 to 7 use one database. Findings 8 and 9 use the 15 with 20 or more calls and skip 26 that SQLite could not open read-only.
 - **Retention.** 30 days; the window is 8.
-- **`usage.db` records only codescout MCP calls.** Native harness tools are not recorded, so a zero means "not recorded", never "none happened".
-- **No recovery analysis.** The next-call-succeeds rate by error family was not recomputed.
+- **`usage.db` records only codescout MCP calls.** Native harness tools are not recorded, so a zero means "not recorded", never "none happened". The transcript scan covers native tools, for this project's directory only: sessions started from a worktree path have their own project directory and were not read.
+- **Transcript errors.** Recoverable refusals return as normal results, so transcripts show about 24 hard errors against thousands of refusals in the database.
+- **Recovery table.** Defined here as the next call of the same session and agent; the earlier report used another key, so the two are not comparable.
 - **Subagent findings** on the friction log are model reports. Only the cited commits were checked to exist; the code claims were not re-run, except where this file says it reproduced or queried something.
+- **Instrument contamination.** The hook-rejection count includes this audit's own text in the transcripts it reads; the table above removes it by hand and says so.
 
 ## Not done
 
-Transcript analysis, cost and stop reasons (`claude-traces`), the other 150 databases, per-session drill-down, a recovery table by error family, and a check of the 19 null `documentSymbol` answers against the build date of `1b208ad79`.
+Cost and stop-reason analysis from the proxy (`claude-traces`, Langfuse), a drill-down of anomalous sessions, the 26 unreadable eval-copy databases, the transcripts of worktree-started sessions, user corrections and git-history measures (wrong implementations, fix-on-fix rate) from the 10-24 report, and the cause of U-52.

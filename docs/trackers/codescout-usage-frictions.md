@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 51
+entry_high_water_U: 52
 entry_prefix: U
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-frictions.yaml
 ---
@@ -718,6 +718,22 @@ anchoring commit
 
 **Rests on:** the default window remaining commit-relative, stated at
 `scripts/file-provenance.py:325`, which is the whole mechanism.
+
+### U-52 — Subagents natively `Read` source files 3.47 times per 100 calls, against 0.14 for parent sessions, mostly ranged reads in two worktrees
+
+**Valid:** dated 2026-11-02
+
+**Observed:** 2026-11-02, scanning 204 transcript files (21 parent sessions, 183 subagent files, deduplicated by name and size) of this project since 2026-10-25 across the four profiles. Subagents made 8,626 tool calls, 16.9% of them native tools, and 299 native `Read` calls on source files, 3.47 per 100 calls. The parent sessions made 16,988 calls with 23 such reads, 0.14 per 100. The 2026-10-24 usage report measured 0.45 per 100 for subagents.
+
+**What the reads were.** In a second pass that counted every record type (445 reads, so the absolute number is not settled): 66% were Python files in the `setup-ab-eval` worktree, 20% Rust files in the `bg-log-reaper` worktree, 87% were ranged reads (`offset` or `limit`). The 5 subagents with the most reads carry 76 of them, so the reads are spread, not concentrated. 79 subagents natively read a file under `.worktrees/`; their codescout calls were 1,194 of 2,099 with a `workspace=` argument (57%).
+
+**Not established:** why. One reading is that agents working in a worktree read natively because codescout reads resolve against the main checkout unless pinned; the data does not show it, since an agent with 281 codescout calls and no `workspace=` argument made only 14 native reads. The two window sizes and project sets differ from the 10-24 report, so the change from 0.45 to 3.47 is direction only.
+
+**Cost:** each native `Read` of source skips `symbols` and its outline, and returns file text into the agent's context.
+
+**Status:** open. No hookify rule proposed: the cause is not known, and a rule would block reads that may be the only way to see worktree files.
+
+**Rests on:** `sweep-transcripts.py` and `sub-read-what.py` run on 2026-11-02 (scripts kept in the session job directory, not in the repo).
 
 ## Template for new entries
 
