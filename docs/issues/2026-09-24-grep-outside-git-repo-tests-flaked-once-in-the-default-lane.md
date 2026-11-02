@@ -1,12 +1,14 @@
 ---
 id: '3c5fa35d9d2754a7'
 kind: bug
-status: investigating
+status: zombie
 title: 'BUG: three tools::grep "outside a git repo" tests failed once in the gate''s default lane and passed on re-run'
 tags:
 - cluster/unclassified
+last_observed: 2026-09-24
 opened: 2026-09-24
 owner: marius
+reopen_trigger: 'Any of a_gitignore_outside_a_git_repo_is_not_applied, include_hidden_suppresses_the_warning_even_on_a_zero or widening_outside_a_git_repo_stays_bare fails again in tools::grep; triage per § Zombie 2026-11-02 (named ancestor = environment fault; bare left: 0 right: 1 = premise held, check CWD-changing tests).'
 severity: low
 ---
 
@@ -86,6 +88,14 @@ Grep over `*.sh`, `*.py`, `*.mjs` and `*.js` for `git init`, `jj init` and a quo
 
 The rest use `git -C <dir>`, `cwd=<dir>` or a path argument. No site initialises `~`, `~/.cache`, `~/.cache/cc-tmp` or `/tmp`. This does not name the creator of the 2026-09-24 `.git`: it was not found, and the unread matches stay unread. No code changed. Left open until a recurrence gives a `TMPDIR` and an ancestor listing.
 
+## Zombie 2026-11-02 — reopen trigger
+
+Status is now `zombie`: not observed since 2026-09-24 (`last_observed`), root cause unconfirmed. This record counts 140 targeted runs without recurrence (20 on 2026-10-08, 40 on 2026-10-16, 80 on 2026-10-30), plus the full lean and default lanes noted above. Re-read at HEAD on 2026-11-02: `tempdir_with_no_git_above` (`src/tools/grep.rs:1638`) panics and names the ancestor and the tempdir when `WalkAudit::nearest_vcs_marker_dir` (`src/tools/grep.rs:1445`) finds a `.git` or `.jj` above the tempdir. The three named tests use it (`:2744`, `:2922`, `:3564`). A recurrence will therefore say which case it is.
+
+**Reopen when** any of the three tests (`a_gitignore_outside_a_git_repo_is_not_applied`, `include_hidden_suppresses_the_warning_even_on_a_zero`, `widening_outside_a_git_repo_stays_bare`) fails again. Then follow § Resume:
+- If the panic names an ancestor, it is an environment fault. Find out what created that `.git` or `.jj`, and when. Record `TMPDIR` for the gate run and `ls -a` of every ancestor of it, `.ignore` included.
+- If the old `left: 0 right: 1` appears instead, the no-marker premise held and the cause is something else. Check whether a CWD-changing test ran at that moment. A `--test-threads=1` re-run that passes would point at parallelism.
+
 ## Symptom (Effect)
 
 Gate run 2026-09-24 22:25:50 local, `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=101`, `5812 passed; 3 failed`:
@@ -135,7 +145,7 @@ The gate log above, plus the re-run (3 passed, 0 failed). The lean lane of the s
 
 ## Fix
 
-Not started for the flake: the root cause is unknown, so the status stays `open`. Commit `1e67e8a3` only makes the next occurrence self-diagnosing; the second pass (2026-10-16) widened that diagnosis and the completeness warning's gate to `.jj` (`WalkAudit::nearest_vcs_marker_dir` in `src/tools/grep.rs`).
+Not started for the flake: the root cause is unknown, so the status is `zombie` (since 2026-11-02; see § Zombie 2026-11-02), not `fixed`. Commit `1e67e8a3` only makes the next occurrence self-diagnosing; the second pass (2026-10-16) widened that diagnosis and the completeness warning's gate to `.jj` (`WalkAudit::nearest_vcs_marker_dir` in `src/tools/grep.rs`).
 
 ## Tests added
 
