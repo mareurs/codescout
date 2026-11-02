@@ -13,6 +13,26 @@ use crate::tools::symbol::call_graph::traversal::{EdgeWithDepth, OneHopResolver,
 use crate::tools::symbol::scan_budget::{is_compiled_twin, scan_walk, ScanBudget, ScanCoverage};
 use crate::tools::{OutputForm, Tool, ToolContext};
 
+/// A SQLite failure such as "disk I/O error" names neither the store nor the step. This puts both
+/// in the message and keeps the cause, so the caller can tell which file failed (bug
+/// `cd85dbae70c76670`).
+fn cache_error(step: &str, root: &std::path::Path, e: rusqlite::Error) -> anyhow::Error {
+    anyhow::anyhow!(
+        "call_graph: {step} the call-edge cache at {} failed: {e}",
+        root.join(".codescout/call_edges.db").display()
+    )
+}
+
+/// Opens the call-edge cache on a blocking thread: `open_db` does filesystem I/O (mkdir, the
+/// SQLite open, PRAGMA and DDL migrations) that must not run on the async executor.
+async fn open_cache(root: PathBuf) -> anyhow::Result<rusqlite::Connection> {
+    let for_error = root.clone();
+    tokio::task::spawn_blocking(move || crate::tools::symbol::call_edges::cache::open_db(&root))
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {e}"))?
+        .map_err(|e| cache_error("opening", &for_error, e))
+}
+
 /// Cache-checking one-hop resolver.
 ///
 /// Checks the SQLite edge cache before calling LSP/ts. On a miss, calls
@@ -373,7 +393,8 @@ impl OneHopResolver for CachedResolver {
             match direction {
                 Direction::Callers => cache.lookup_callers(symbol),
                 Direction::Callees => cache.lookup_callees(symbol),
-            }?
+            }
+            .map_err(|e| cache_error("reading", &self.root, e))?
         };
         if !cached.is_empty() {
             return Ok(cached);
@@ -421,7 +442,9 @@ impl OneHopResolver for CachedResolver {
         {
             let conn = self.conn.lock().unwrap();
             let cache = EdgeCache::new(&conn, &self.project_id);
-            cache.upsert(&edges)?;
+            cache
+                .upsert(&edges)
+                .map_err(|e| cache_error("writing to", &self.root, e))?;
         }
         Ok(edges)
     }
@@ -600,17 +623,8 @@ impl Tool for CallGraph {
             .call_edges_project_id_for(ctx.workspace_override.as_deref())
             .await;
 
-        // Open the DB on a blocking thread — open_db does filesystem I/O
-        // (mkdir, sqlite open, PRAGMA/DDL migrations) that must not run on the
-        // async executor.
-        let conn = {
-            let root = root.clone();
-            tokio::task::spawn_blocking(move || {
-                crate::tools::symbol::call_edges::cache::open_db(&root)
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {e}"))??
-        };
+        // Open the DB on a blocking thread (see `open_cache`).
+        let conn = open_cache(root.clone()).await?;
         let conn = Arc::new(Mutex::new(conn));
 
         let cap = if detail_full { 500 } else { 200 };
@@ -817,6 +831,37 @@ mod tests {
             "expected 'invalid direction' in: {msg}"
         );
         assert!(msg.contains("sideways"), "expected bad value in: {msg}");
+    }
+    /// A SQLite failure such as "disk I/O error" names neither the store nor the step. Three rows in
+    /// the usage database carried exactly that text and nothing else (bug
+    /// `cd85dbae70c76670`), so a caller could not tell which file failed or whether to retry.
+    #[test]
+    fn a_cache_error_names_the_store_and_the_step() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // No schema: the lookup fails the way a broken store does.
+        let e = crate::tools::symbol::call_edges::cache::EdgeCache::new(&conn, "p")
+            .lookup_callers("f")
+            .unwrap_err();
+        let shown = cache_error("reading", std::path::Path::new("/proj"), e).to_string();
+        assert!(shown.contains("/proj/.codescout/call_edges.db"), "{shown}");
+        assert!(shown.contains("reading the call-edge cache"), "{shown}");
+        assert!(
+            shown.contains("no such table"),
+            "the cause is kept: {shown}"
+        );
+    }
+
+    /// Opening the store is where `mkdir`, the SQLite open and the DDL all happen, so a failure
+    /// there must say it was the open and which path.
+    #[tokio::test]
+    async fn opening_the_cache_in_a_broken_project_names_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        // `.codescout` is a regular file, so the cache directory cannot be created.
+        std::fs::write(dir.path().join(".codescout"), "not a directory").unwrap();
+        let err = open_cache(dir.path().to_path_buf()).await.unwrap_err();
+        let shown = err.to_string();
+        assert!(shown.contains("opening the call-edge cache"), "{shown}");
+        assert!(shown.contains("call_edges.db"), "{shown}");
     }
 
     /// ≤30 edges → `auto_promoted=true`, full edge list rendered without `detail_level=full`.
