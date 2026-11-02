@@ -207,7 +207,7 @@ The three `s1-r1` checkpoints are Stage 2's arm B.
   - A terminal failure now stops pending batches in completion order; before, it went unseen behind a slower earlier batch.
   - An exclusive reservation refuses a relaunch; before, a second invocation re-ran every call and overwrote the first run's evidence.
   - It changes no prompt, item, retry budget or admission rule. It makes the registered "a second failure stops Step 1" and "one run" hold in the code.
-- **The Claude labeller's channel, checked 2026-09-26** (`phase1b/channel-check/`; bug `1fb2cb7b4614e8b5`). Syncing was made impossible in a control directory, with the model, prompt and flags fixed. The labeller's input read 412 tokens in both directories, so the 8 claude.ai skills synced into `judge-config-main` are registered but not in its context. About 390 tokens beyond the prompt, common to both, are not attributed.
+- **The Claude labeller's channel, checked 2026-09-26** (`phase1b/channel-check/`; bug `ed9cfbc46f8d9a9e`). Syncing was made impossible in a control directory, with the model, prompt and flags fixed. The labeller's input read 412 tokens in both directories, so the 8 claude.ai skills synced into `judge-config-main` are registered but not in its context. About 390 tokens beyond the prompt, common to both, are not attributed.
 
 **What Stage 2 tests.** Stage 1 changes optimisation only, and Stage 1's registered prediction 5 expects its learned runs to keep firing on other rules' text. Stage 2 adds the training change this draft was built around, audited cross-rule negatives, and asks two questions:
 1. Do the negatives stop that firing without costing own-rule detection?
