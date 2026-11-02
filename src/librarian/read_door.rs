@@ -563,7 +563,8 @@ pub(crate) fn same_file(_opened: &std::fs::Metadata, _real: &Path) -> anyhow::Re
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
+    // Not `#[cfg(unix)]`: the missing-file and invalid-UTF-8 tests below run on every platform and
+    // call it. A unix-only helper broke the Windows lib-test build (CI run 41450758460).
     fn canon(p: &Path) -> PathBuf {
         std::fs::canonicalize(p).unwrap()
     }
