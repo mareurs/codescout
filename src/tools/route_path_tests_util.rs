@@ -3,7 +3,7 @@
 //! A route is text an agent pastes back, so its path is a quoted literal and a backslash is
 //! written `\\`. On Unix a path has none, so a test could compare the captured text with the
 //! path directly. On Windows it could not: `C:\Users\x` is `C:\\Users\\x` in the route
-//! (`db5303eb3b9c2781`). A test that parses a route unquotes the capture with this.
+//! (`32d5b6837da926fc`). A test that parses a route unquotes the capture with this.
 
 /// `captured` (the text between the quotes of a route's path) with its escapes resolved.
 /// A capture that is not a valid JSON string body is returned as it came.

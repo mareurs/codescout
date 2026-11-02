@@ -58,7 +58,7 @@ None needed: the compiler names the lines.
 
 `#[cfg(unix)]` on `links_in` and on the 13 tests that use it. No production code changed.
 
-Fixed by `38220a91c` on `experiments` (patch-id `8db7eb25e6782f217d777fe50ef18b2f84b587b2`). The full local gate was green on the merged tip `abba2def5` (8807 nextest tests, 0 failed). Windows CI: the three `Test (windows-latest / ...)` jobs compile and run in run 41413376172 (all green on tip `c3339b9f5`). The 297/40/40 test failures this fix uncovered are tracked and fixed in `db5303eb3b9c2781`.
+Fixed by `38220a91c` on `experiments` (patch-id `8db7eb25e6782f217d777fe50ef18b2f84b587b2`). The full local gate was green on the merged tip `abba2def5` (8807 nextest tests, 0 failed). Windows CI: the three `Test (windows-latest / ...)` jobs compile and run in run 41413376172 (all green on tip `c3339b9f5`). The 297/40/40 test failures this fix uncovered are tracked and fixed in `32d5b6837da926fc`.
 
 ## Tests added
 

@@ -1,4 +1,4 @@
-//! The long-name form of a Windows path (`db5303eb3b9c2781`).
+//! The long-name form of a Windows path (`32d5b6837da926fc`).
 //!
 //! The runner's temp dir is spelled `C:\Users\RUNNER~1\…`, an 8.3 short name, while
 //! `std::fs::canonicalize` answers the long names (`C:\Users\runneradmin\…`). A comparison of

@@ -4,7 +4,7 @@
 //! the on-disk letter case and long names. A caller's spelling can be `c:/users/RUNNER~1/…`.
 //! The door's no-root arm refuses any spelling whose canonical form differs from it, which is
 //! right for a link and wrong for these respellings of the same file
-//! (`db5303eb3b9c2781`).
+//! (`32d5b6837da926fc`).
 //!
 //! [`same_location`] is the pure comparison and runs on every platform, so Linux tests can pin
 //! it. [`long_form`] (in `util::long_path`) is the one Windows call that expands 8.3 short

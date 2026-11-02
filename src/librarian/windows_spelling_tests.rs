@@ -1,5 +1,5 @@
 //! Windows-only proof that the door's comparison sees through the respellings a real runner
-//! produces (`db5303eb3b9c2781`). The pure comparison is pinned on every platform in
+//! produces (`32d5b6837da926fc`). The pure comparison is pinned on every platform in
 //! `windows_spelling`; only these tests touch the Windows calls. On a volume with short names
 //! switched off the short spelling cannot be made, so that test says so and returns.
 

@@ -1,5 +1,5 @@
 ---
-id: db5303eb3b9c2781
+id: 32d5b6837da926fc
 kind: bug
 status: fixed
 title: 'BUG: the Windows lib tests fail in 299 places once they compile; the read door refuses the runner temp dir, and most of the rest is not yet classified'
@@ -90,6 +90,13 @@ Commits on `experiments` (patch-ids from `git show <sha> | git patch-id --stable
 | `c3339b9f5` | `c878fdcc95b0` | `long_form` expands the existing ancestors of a missing path (another session) |
 
 The `Audit Doc Refs` job went red in the same run for an unrelated cause (the new root `tools/` directory made `tools/list` and two citations resolve as missing files); it is fixed by `b1f9a7752` (patch-id `8b5ce03ba899`) and is not part of this bug.
+
+## Fix provenance
+
+- **SHA:** `907db5eb8b4540cfd6e7f096d6c4c05e76c70767` (`experiments`)
+- **patch-id:** `271f48ee0bad43d29ae477ce7e05908d1c47c9d7`
+
+This is the last fix of mine in the table above. The other eleven commits are in that table with their own patch-ids. CI run 41413376172 (tip `c3339b9f5`) was green on every job.
 
 ## Tests added
 

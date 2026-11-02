@@ -175,7 +175,7 @@ windows-sys = { version = "0.61", features = [
     # in a full-system snapshot and reads th32ParentProcessID off it.
     "Win32_System_Diagnostics_ToolHelp",
     # GetLongPathNameW: the read door expands 8.3 short names (`RUNNER~1`) before it
-    # compares a spelling with its canonical form (`db5303eb3b9c2781`).
+    # compares a spelling with its canonical form (`32d5b6837da926fc`).
     "Win32_Storage_FileSystem",
 ] }
 

@@ -13,7 +13,7 @@
 # the default ~/.wine is shared by every session and carries whatever each one left in it, the
 # PortableGit recipe lived twice (a comment in build-windows.sh, YAML in ci.yml), and nothing
 # provided python3. That is the class `cluster/repro-env-diverges-from-gate-env`; the Windows
-# lib-test bug db5303eb3b9c2781 paid for it. With bash, git and a full CPython in wine, the four
+# lib-test bug 32d5b6837da926fc paid for it. With bash, git and a full CPython in wine, the four
 # `attribution` failures reproduced locally and their cause (a `\` where git prints `/`) was
 # found in minutes.
 #
