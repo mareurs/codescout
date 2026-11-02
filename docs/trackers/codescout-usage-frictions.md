@@ -156,7 +156,7 @@ reflex faster? Not blocking; capture as candidate, not priority.
 
 **Severity:** med — observability blind spot plus recurring retry-cost; no data loss.
 
-**Status:** open. No hookify rule proposed — the fix is observability (`err_family` tagging), not a deny/warn gate.
+**Status:** fixed-verified 2026-11-02 — `read_markdown` was folded into `read_file`, and `normalize_err_family` (`src/usage/db.rs`) tags its errors (`c76937ee3`). In `usage.db` since 2026-10-25, 279 of 286 non-success `read_file` rows carry a family (`path_not_found` 50, `heading_not_found` 5); the other 7 are untagged and were not examined. Earlier status: open. No hookify rule proposed — the fix is observability (`err_family` tagging), not a deny/warn gate.
 
 ### U-29 — Guards that reject AFTER accepting the payload cost a full re-transmission (×3 in one session)
 
@@ -203,7 +203,7 @@ track how much whole-file writing a session does rather than being uniform.
 every large rewrite and the cost is highest exactly when the content is most
 expensive to have composed.
 
-**Status:** open. No hookify rule proposed — a hook cannot see the payload cost;
+**Status:** open, partly fixed (checked 2026-11-02 by reading the code, not run). The outside-root write case is fixed: `resolve_write_or_capture` (`src/tools/core/write_ack.rs`) stores the full input as `pending_ack`, and the retry `create_file(path="@ack_*")` re-sends no content (`0452cf600`). The `file already exists` refusal in `src/tools/create_file.rs` still returns before anything is buffered, so that case still costs a full re-send. No hookify rule proposed — a hook cannot see the payload cost;
 the fix belongs in the tool's rejection path.
 
 ---
@@ -262,7 +262,7 @@ description read "the EXISTING symbol to insert relative to". A one-line hint on
 `missing 'symbol'` error ("for action=insert, `symbol` is the anchor") would have cost
 zero round-trips. Kin U-26 (action grammar learned via sequential errors).
 
-**Status:** open.
+**Status:** open, mostly fixed (checked 2026-11-02: schema and refusal read, tool not called). `anchor` is gone from the `edit_code` input schema, and the `missing 'symbol'` refusal now carries a hint with an example. Still open: the `symbol` description says only "Symbol name-path" and never says that for `insert` it is the EXISTING anchor, so the misread is still possible.
 
 ---
 ### U-37 — `edit_file(replace_all=true)` right after an insert rewrote the line inside the helper being introduced, making it call itself
@@ -423,10 +423,8 @@ the file `CLAUDE.md` requires reading before adding or modifying any tool.
 
 **Re-checked 2026-10-01 — the `no_close` half is narrower than this status says, and not closed.** `diagnose_scoped_miss` (`src/tools/markdown/edit_markdown.rs`) now gives each cause its own tier and wording: `visible_drift` (a `want`/`have` diff headed *did it change since you read it?*), `whitespace_invisible`, `no_similar_match` (*nothing scored above 0.5 similarity*), `old_string_empty`, `old_string_too_large`, `old_string_longer_than_section`, and the two section caps. Of these, `visible_drift` and `no_similar_match` were observed in a live session the same day. So "a malformed needle and a moved haystack in identical words" is no longer true, and `no_close` is now spelled `no_similar_match`. What is still absent is the case this entry was bitten by: nothing detects literal two-character `\n` sequences in `old_string` (a search of that file for backslash or escaped-newline handling finds none), so that needle lands in `no_similar_match`, whose hint still says to verify the heading or re-read the section. `scoped_miss_tier` remains undocumented to the caller.
 
-**Status:** open — the heading half is fixed; the `no_close` half, which is the primary
-friction above, is not. `edit_markdown` still reports a malformed needle and a moved
-haystack in identical words, and `scoped_miss_tier` remains the undocumented field that
-separates them.
+**Status:** open — the heading half is fixed. The `no_close` half, which is the primary
+friction above, is partly fixed (checked 2026-11-02 by reading the code, not run): `diagnose_scoped_miss` (`src/tools/markdown/edit_markdown.rs`) now gives separate tiers (`old_string_empty`, `old_string_too_large`, `section_too_many_lines`, `old_string_longer_than_section`, `no_similar_match`, `whitespace_invisible`, `visible_drift`), and tests in `src/tools/markdown/tests.rs` pin some of them. Still open: nothing detects an `old_string` that carries a literal backslash-n, which was the actual cause here, so such a needle gets the generic wording that blames the haystack, and `scoped_miss_tier` remains undocumented to the model.
 ### U-41 — `snapshot_stale` asserts the row "still shows the PREVIOUS field values" without knowing which fields the row renders
 
 **Observed:** 2026-08-17, updating `BL-37`'s `next` field in the open-issue work queue via
@@ -471,7 +469,7 @@ is load-bearing in its true case. This is friction with the wording of a correct
 check. Same reasoning that kept U-40 out of `docs/issues/` once the probe showed the tool
 had behaved correctly.
 
-**Status:** open — friction recorded, no fix shipped.
+**Status:** open, wording fixed (checked 2026-11-02 by reading the code, not run) — `snapshot_stale_note` (`src/librarian/catalog/augmentation.rs`) now says "this check reads IDS ONLY ... UNVERIFIED" and points to declaring `snapshot_anchor` (`e9995df34`, 2026-09-14). Still open: passing `changed_fields` through, so the note stops firing when no changed field is rendered.
 
 ---
 ### U-48 — I tripped IL3 three times in the session whose subject matter was IL3

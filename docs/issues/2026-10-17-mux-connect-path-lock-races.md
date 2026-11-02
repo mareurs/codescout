@@ -4,14 +4,14 @@ status: fixed
 title: 'BUG: two lock races in the mux connect path: a wait ended by a freed lock can report wedged without waiting, and the lock probe can make a starting mux exit'
 tags:
 - cluster/unclassified
-opened: 2026-10-17
 closed: 2026-10-18
+opened: 2026-10-17
 owner: marius
 related:
 - docs/issues/2026-10-17-symbols-name-lookup-on-kotlin-lsp-says-0-matches-for-a-symbol-that-exists.md
 - docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md
 severity: low
-unverified: 'Fix is on branch fix/mux-connect-2026-10-18, not yet on experiments. Race (1) the way the issue describes it (a third process landing between the early stop and round 1 of ONE call) was reproduced only through a test-only seam; the natural two-client stress shows the same wrong answer and the fix removes it, but is not the same interleaving. Race (3), two clients both spawning a mux, is read from the code and not reproduced or fixed.'
+unverified: TRACKED 8e6268a0577ff543 — race (3), still open, with 15 matching failed rust starts in usage.db between 2026-10-28 and 2026-11-01. Races (1) and (2) are fixed on experiments (`dd961fe5f`, `e9817239c`; this field said on 2026-10-18 that the fix sat on an unmerged branch). Race (1) as the issue describes it was reproduced only through a test-only seam.
 ---
 
 # BUG: two lock races in the mux connect path: a wait ended by a freed lock can report wedged without waiting, and the lock probe can make a starting mux exit
@@ -80,7 +80,7 @@ Open, not started:
 
 Mutation probes after the second review (one per changed site, exact bytes of a copy of the tree, restored; all killed): the terminal error always changed-hands (the over-correction) [1, `rounds_that_run_out_with_the_last_holder_alive_still_name_it`]; always the holder error [2]; branches swapped [3]; changed-hands error replaced [1]; holder error replaced [1]; the replacement gate of the wedge record removed [2, incl. `a_replacement_that_never_binds_costs_a_second_full_wait_on_the_next_call`]; nothing ever recorded [3]; the `MuxInitTimeout` payload a constant 500 ms [1, `connect_with_init_timeout_uses_the_callers_bound`; it had survived before]; the seam's leading arguments dropped [1, `a_mux_this_call_spawned_...`].
 
-1. Race (3), read from the code and not reproduced: two clients both find the lock free, both spawn a mux, one mux wins the lock and the other exits (`another mux instance holds the lock`, now after the 1 s grace); the loser's call returns the spawn failure instead of connecting to the winner's mux.
+1. Race (3), read from the code and not reproduced: two clients both find the lock free, both spawn a mux, one mux wins the lock and the other exits (`another mux instance holds the lock`, now after the 1 s grace); the loser's call returns the spawn failure instead of connecting to the winner's mux. Tracked in `docs/issues/2026-11-02-a-second-client-that-spawns-a-rust-mux-loses-the-lock-race-and-fails-the-start-instead-of-connecting-to-the-winner.md`: `usage.db` shows 15 such failed rust starts from 2026-10-28 to 2026-11-01, each 1,028 to 1,144 ms, with the cause not established.
 2. `acquire_mux_lock` creates the lock file with `File::create`, which truncates it BEFORE the flock is tried, so a second mux start erases a live mux's PID line (OS behaviour measured with python, Rust path read; filed as `docs/issues/2026-10-18-mux-lock-file-truncated-before-its-flock-is-tried.md`).
 
 ## References
