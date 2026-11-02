@@ -1,7 +1,7 @@
 ---
-id: '10d788af3e0c82ab'
+id: c7777ef798c5361f
 kind: bug
-status: open
+status: fixed
 title: 'BUG: `doc` by id fails with a bare "No such file or directory (os error 2)" when the catalog row points into a worktree that was removed, and the main-checkout copy of the file has another id'
 owners:
 - marius
@@ -9,10 +9,11 @@ tags:
 - cluster/unclassified
 - worktree-overlay
 - librarian
+closed: 2026-11-02
 opened: 2026-11-02
 owner: marius
 severity: low
-unverified: One failed update and one get. How the row came to point into the removed worktree was not established. The count of stale rows (13 in this project's removed worktrees) is in Resume; the ten without a main twin were not traced.
+unverified: The call through the server was not repeated on a rebuilt binary, and CI has not been read. The stale rows (13 in this project) are not repaired; their cause is not established.
 ---
 
 # BUG: `doc` by id fails with a bare "No such file or directory (os error 2)" when the catalog row points into a worktree that was removed, and the main-checkout copy of the file has another id
@@ -57,11 +58,17 @@ None.
 
 ## Fix
 
-Not done.
+Done on `experiments` at `d1b47ab5b`, for the reported effect only (the bare text and the hard error). In `src/librarian/read_door.rs`: `io_at` puts the path into the OS errors of `read_verified` and keeps the kind; `ReadError::into_anyhow` turns `NotFound` into a `LibrarianRecoverableError` whose hint says how to find the live row (`doc(find)` with a `rel_path` filter and `include_archived`). Other OS errors stay hard. Not done: the 13 stale rows stay in the catalog, and why a removed worktree leaves its rows is not addressed here. That is filed apart.
+
+
+## Fix provenance
+
+- **SHA:** `d1b47ab5bb521e68024d8d231fafdc5e180f2fc7` (`experiments`)
+- **patch-id:** `62b31fc06dfb898770a4fe2f3f0b6c08cc30c206`
 
 ## Tests added
 
-N/A. Nothing is fixed.
+In `src/librarian/read_door.rs`. Red before the change, then green: `a_missing_file_is_an_io_error_that_names_its_path` and `a_missing_file_reaches_the_tool_boundary_as_a_recoverable_error_with_a_way_on` (it failed with the bare "No such file or directory (os error 2)"). A guard that passed before too: `an_invalid_utf8_file_stays_a_hard_io_error`. Gate in a clean worktree: FMT, CLIPPY, LEAN and DEFAULT all 0, 8,835 tests; `cargo test --lib librarian::` 2,532 passed. Not tested end to end: a `doc(get)` or `doc(update)` call on a row with a missing file through the server; the unit tests cover the door and the conversion at the tool boundary. CI has not been read.
 
 ## Workarounds
 
@@ -69,7 +76,7 @@ Use the id of the main-checkout row (`5ee9a523ac9a7cde`).
 
 ## Resume
 
-Found in the drill-down of session `f844662c` for the usage audit (`docs/usage-reports/2026-11-02-usage-analysis.md`, finding 14). Only filed; not fixed.
+Fixed on `experiments` (`d1b47ab5b`) for the reported effect. The stale rows are not repaired and their cause is not known; see the bug filed for them.
 
 **Count of the stale rows, 2026-11-02** (`~/.local/share/librarian/catalog.db`, read-only; script `os.path.exists` over every `artifact.abs_path`):
 

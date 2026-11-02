@@ -104,7 +104,8 @@ The lowest first-retry success is `worktree_activate_required` (77%). This is no
 - `docs/issues/2026-11-02-call-graph-fails-with-a-bare-disk-io-error-and-the-rows-record-no-input.md` (`cd85dbae70c76670`)
 - friction `U-52` in `docs/trackers/codescout-usage-frictions.md`
 - evidence added to the open bug `35bcf086deeb7cbe` (the null `documentSymbol` window), under its Resume section
-- `docs/issues/2026-11-02-doc-by-id-fails-with-a-bare-enoent-when-the-catalog-row-points-into-a-removed-worktree.md` (`10d788af3e0c82ab`)
+- `docs/issues/archive/2026-11-02-doc-by-id-fails-with-a-bare-enoent-when-the-catalog-row-points-into-a-removed-worktree.md` (`c7777ef798c5361f`; fixed at `d1b47ab5b`)
+- `docs/issues/2026-11-02-the-catalog-keeps-the-rows-of-a-removed-worktree-two-still-open-for-bugs-main-calls-fixed-and-wontfix.md` (`bad49b228663df9a`): the stale rows themselves, filed while fixing the error message
 - `docs/issues/2026-11-02-audit-doc-refs-over-the-whole-repo-exits-1-on-11-high-findings-five-cited-artifact-ids-resolve-to-nothing.md` (`9db8908e81bc4b26`): found when the audit was run over the whole repository; the runs on touched files, used for the earlier commits of this report, exit 0
 
 ### 13. Session drill-down (usage database only)
@@ -136,7 +137,7 @@ Both are in the database only; no transcript was read. Both are dominated by the
 
 - Non-success rows by family: `il3_pipe_to_trimmer` 8, `il3_shell_on_source` 8, `edit_file` on a managed document (`librarian_managed_artifact`) 7, `il1_read_overlaps_symbol` 7, `missing_required_param` 4, and 2 `doc` failures.
 - The 7 `librarian_managed_artifact` rows are `edit_file` calls on bug files and on two `docs/conventions/` files, and 5 of the 7 were followed by a successful call.
-- One of the 2 `doc` failures is a hard error, "No such file or directory (os error 2)", from `doc(update)` by an id whose catalog row points into a removed worktree. It is the only row with that message since 10-25. Filed as `docs/issues/2026-11-02-doc-by-id-fails-with-a-bare-enoent-when-the-catalog-row-points-into-a-removed-worktree.md` (`10d788af3e0c82ab`). The other is a recoverable `body_edits` refusal ("old_string not found in section").
+- One of the 2 `doc` failures is a hard error, "No such file or directory (os error 2)", from `doc(update)` by an id whose catalog row points into a removed worktree. It is the only row with that message since 10-25. Filed as `docs/issues/archive/2026-11-02-doc-by-id-fails-with-a-bare-enoent-when-the-catalog-row-points-into-a-removed-worktree.md` (`c7777ef798c5361f`), fixed afterwards at `d1b47ab5b`: the error now names the path and is recoverable. The other is a recoverable `body_edits` refusal ("old_string not found in section").
 - The catalog behind that error: 51 of 6,790 rows point at a missing file, all with `missing_since` set, and 13 are in this project's removed worktrees (all marked missing at 2026-10-24 13:15:51; two of them still say `open` while the main-checkout row says `fixed` or `wontfix`). `doc(find)` and `librarian(doctor)` do not show them, so only a remembered id reaches one. The counts are in the bug file's Resume.
 
 ## Blind spots
