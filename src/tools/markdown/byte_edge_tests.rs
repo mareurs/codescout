@@ -506,9 +506,12 @@ async fn md_read_through(
 async fn a_markdown_range_over_a_wide_line_keeps_one_handle() {
     let ctx = ctx().await;
     let dir = tempfile::tempdir().unwrap();
-    // About 1,210 B of path, so `next` is far wider than a fixed reserve allowed for.
+    // About 1,210 B of path, so `next` is far wider than a fixed reserve allowed for. macOS caps a
+    // whole path at 1,024 B (`PATH_MAX`): `create_dir_all` failed `ENAMETOOLONG` there (CI run
+    // 41344511357). Four components keep it near 800 B plus the temp directory.
+    let depth = if cfg!(target_os = "macos") { 4 } else { 6 };
     let mut deep = dir.path().to_path_buf();
-    for i in 0..6 {
+    for i in 0..depth {
         deep.push(format!("{i}{}", "d".repeat(199)));
     }
     std::fs::create_dir_all(&deep).unwrap();

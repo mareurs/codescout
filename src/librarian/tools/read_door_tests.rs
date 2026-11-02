@@ -215,8 +215,14 @@ const GREP_LEAF: (&str, &str) = (
     "the grep walk never follows a leaf link, so this spelling is never grepped",
 );
 
+/// Whether the temp directory's filesystem accepts a name that is not valid UTF-8. APFS does not:
+/// `mkdir` and `symlink` fail `EILSEQ` ("Illegal byte sequence"), so a test that must create such
+/// a name has nothing to observe on macOS (CI run 41344511357, macos-latest). The layout and the
+/// tests that need one are left out there and say so, instead of passing without creating it.
+pub(super) const FS_KEEPS_NON_UTF8_NAMES: bool = cfg!(not(target_os = "macos"));
+
 pub(super) fn layouts() -> Vec<Layout> {
-    vec![
+    let mut all = vec![
         Layout {
             name: "R1 plain file in the project",
             verdict: Verdict::Admit,
@@ -429,7 +435,11 @@ pub(super) fn layouts() -> Vec<Layout> {
                 }
             },
         },
-    ]
+    ];
+    if !FS_KEEPS_NON_UTF8_NAMES {
+        all.retain(|l| !l.name.starts_with("R15 "));
+    }
+    all
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1634,6 +1644,10 @@ async fn known_gap_a_removed_outward_link_row_leaves_its_text_in_the_trail() {
 /// row's, its cascaded citation included (round 3, R3-10). Before that reindex the row is in the
 /// accepted window (round 3: a lossy path is not refused at read time, R3-6).
 #[tokio::test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "APFS refuses a non-UTF-8 directory name (EILSEQ); see FS_KEEPS_NON_UTF8_NAMES"
+)]
 async fn a_non_utf8_path_row_is_withheld_and_removed_without_copying_its_text() {
     use std::os::unix::ffi::OsStrExt;
     let tmp = tempfile::tempdir().unwrap();
@@ -2258,6 +2272,10 @@ async fn a_worktree_fork_of_a_pre_fix_row_after_one_reindex_copies_nothing_of_it
 /// R3-6: an ORDINARY repository file whose directory name is not valid UTF-8 (no link anywhere)
 /// is found, and its title returned. Round 2 refused every such stored path at read time.
 #[tokio::test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "APFS refuses a non-UTF-8 directory name (EILSEQ); see FS_KEEPS_NON_UTF8_NAMES"
+)]
 async fn an_ordinary_file_below_a_non_utf8_name_is_found_and_kept() {
     use std::os::unix::ffi::OsStrExt;
     let tmp = tempfile::tempdir().unwrap();

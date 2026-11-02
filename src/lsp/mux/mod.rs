@@ -65,7 +65,10 @@ fn mux_dir() -> Result<PathBuf, crate::socket_discovery::RuntimeDirError> {
 }
 
 #[cfg(test)]
-const TEST_MUX_PREFIX: &str = "codescout-test-mux-";
+// Short on purpose: a macOS `sockaddr_un` holds 103 bytes, and the CI runner's temp directory plus
+// `codescout-501/`, this directory and `codescout-rust-mux-<16 hex>.sock` made 104 (run
+// 41344511357: six `lsp::manager` tests failed with "path must be shorter than SUN_LEN").
+const TEST_MUX_PREFIX: &str = "cs-tmux-";
 
 /// Remove scratch dirs whose owning test process has exited.
 ///

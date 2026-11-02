@@ -2619,18 +2619,21 @@ mod door_table {
             &n.join("l/x.md"),
         );
 
-        // ---- X8: roots that are not UTF-8 compare as bytes.
-        let ff = w.join(std::ffi::OsStr::from_bytes(b"n\xff"));
-        let fe = w.join(std::ffi::OsStr::from_bytes(b"n\xfe"));
-        git(&ff);
-        git(&fe);
-        file(&fe.join("x.md"));
-        t.row(
-            "X8 roots [n\\xff, n\\xfe], row in n\\xfe: not contained by the OTHER root",
-            true,
-            &[ff.clone(), fe.clone()],
-            &fe.join("x.md"),
-        );
+        // ---- X8: roots that are not UTF-8 compare as bytes. Not on APFS, which refuses to create
+        // such a root (see `FS_KEEPS_NON_UTF8_NAMES`).
+        if crate::librarian::tools::read_door_tests::FS_KEEPS_NON_UTF8_NAMES {
+            let ff = w.join(std::ffi::OsStr::from_bytes(b"n\xff"));
+            let fe = w.join(std::ffi::OsStr::from_bytes(b"n\xfe"));
+            git(&ff);
+            git(&fe);
+            file(&fe.join("x.md"));
+            t.row(
+                "X8 roots [n\\xff, n\\xfe], row in n\\xfe: not contained by the OTHER root",
+                true,
+                &[ff.clone(), fe.clone()],
+                &fe.join("x.md"),
+            );
+        }
 
         // ---- Y1: a foreign anchor reached through a link.
         let yt = tempfile::tempdir().unwrap();

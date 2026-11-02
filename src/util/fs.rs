@@ -117,8 +117,10 @@ impl std::error::Error for BoundedReadError {
 /// `O_NONBLOCK | O_NOCTTY` (the second so that opening a terminal device cannot make it this
 /// process's controlling terminal). **The open itself still happens before the refusal**, so a
 /// device is opened (never read) before `fstat` turns it away; its driver's open side effects,
-/// if any, are not prevented here. A socket cannot be opened at all: `open(2)` fails `ENXIO`, which
-/// is reported as the same [`BoundedReadError::NotRegular`]. The length is then bounded twice: the
+/// if any, are not prevented here. A socket cannot be opened at all: `open(2)` fails `ENXIO` on
+/// Linux, and a failed open whose path names a socket is reported the same way whatever the errno
+/// (the macOS CI run 41344511357 did not give `NotRegular` from the `ENXIO` test alone). It is
+/// [`BoundedReadError::NotRegular`]. The length is then bounded twice: the
 /// reported length first (refuse without reading), and the read itself ([`read_bounded`]),
 /// because a length is something the file reports about itself.
 ///
@@ -144,7 +146,11 @@ fn open_regular(path: &Path, max_bytes: u64) -> Result<std::fs::File, BoundedRea
     let file = match options.open(path) {
         Ok(file) => file,
         #[cfg(unix)]
-        Err(e) if e.raw_os_error() == Some(libc::ENXIO) => {
+        Err(e)
+            if e.raw_os_error() == Some(libc::ENXIO)
+                || std::fs::metadata(path)
+                    .is_ok_and(|m| std::os::unix::fs::FileTypeExt::is_socket(&m.file_type())) =>
+        {
             return Err(BoundedReadError::NotRegular);
         }
         Err(e) => return Err(BoundedReadError::Io(e)),
