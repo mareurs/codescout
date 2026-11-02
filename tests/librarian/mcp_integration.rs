@@ -81,7 +81,7 @@ fn mcp_subprocess_integration() {
 
     // Workspace config: one root, one catch-all rule for .md files.
     let ws_toml = format!(
-        "[[roots]]\nname = \"repo_a\"\npath = \"{}\"\n\n[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n",
+        "[[roots]]\nname = \"repo_a\"\npath = '{}'\n\n[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n",
         fixture_dir.display()
     );
     std::fs::write(&ws_path, &ws_toml).unwrap();

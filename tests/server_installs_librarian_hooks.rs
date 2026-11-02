@@ -77,7 +77,10 @@ impl Server {
         std::fs::write(
             &ws,
             format!(
-                "[[roots]]\nname = \"r\"\npath = \"{}\"\n",
+                // A TOML literal string (single quotes): a Windows path holds backslashes,
+                // which a basic string reads as escapes, so the file would not parse and the
+                // server would start without the librarian (`unknown tool: 'doc'`).
+                "[[roots]]\nname = \"r\"\npath = '{}'\n",
                 project.display()
             ),
         )
