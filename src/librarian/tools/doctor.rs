@@ -7500,6 +7500,79 @@ pub(crate) fn declares_fix_pair(content: &str) -> bool {
         || declares_no_fix_commit(content)
 }
 
+/// Which half of the recoverable fix pair a `fixed`/`mitigated` bug still owes. `Nothing` means it
+/// declares no anchor at all; `PatchId` means it declares a SHA but no patch-id (the half that
+/// survives a rebase). Shared by [`refuse_unanchored_archive`] and [`closing_advisory`], so the
+/// guard, the advisory and the doctor checks cannot disagree on what "anchored" means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FixAnchorGap {
+    Nothing,
+    PatchId,
+}
+
+/// `None` iff the content declares the recoverable pair ([`declares_fix_pair`]).
+pub(crate) fn fix_anchor_gap(content: &str) -> Option<FixAnchorGap> {
+    if declares_fix_pair(content) {
+        None
+    } else if declares_fix_anchor(content) {
+        Some(FixAnchorGap::PatchId)
+    } else {
+        Some(FixAnchorGap::Nothing)
+    }
+}
+
+/// The `###` heading of `tracker-conventions` that explains the fix anchor. A test pins it to a
+/// real heading, so a rename cannot leave [`closing_advisory`] pointing at nothing.
+pub(crate) const CLOSING_SECTION: &str = "Closing a bug — patch-id and fix provenance";
+
+/// What to add so the record declares the pair. The archive-only clauses ("archive in the same
+/// call", "Then archive.") are NOT here: [`refuse_unanchored_archive`] appends them.
+fn fix_anchor_remedy(gap: FixAnchorGap) -> &'static str {
+    match gap {
+        FixAnchorGap::Nothing => {
+            "Add a `## Fix provenance` section with two bullets, `- **SHA:** `<sha>` (`experiments`)` \
+             and `- **patch-id:** `<id>`` from `git show <sha> | git patch-id --stable`, via \
+             doc(action=\"update\", patch={body_edits: [...]}). If nothing was committed, declare \
+             `no_fix_commit: \"<reason>\"` via patch.extra instead."
+        }
+        FixAnchorGap::PatchId => {
+            "Add the patch-id as its own bullet under the SHA, `- **patch-id:** `<id>``, with the \
+             id from `git show <sha> | git patch-id --stable` (docs/RELEASE.md § Citing a fix), \
+             via doc(action=\"update\", patch={body_edits: [...]}). Both labels must be line-start \
+             bullets outside any fence: a patch-id written on the SAME line as the SHA is not \
+             parsed. If nothing was committed, declare `no_fix_commit: \"<reason>\"` via \
+             patch.extra instead."
+        }
+    }
+}
+
+/// The advisory `doc(action="update")` returns when THIS call sets a bug to `fixed` or
+/// `mitigated` and `content` (the file as it will be written) lacks the recoverable pair.
+///
+/// It informs and never refuses: the operator chose "learn the rule and decide" over a refusal on
+/// 2026-11-03. Measured that day: 95 of 165 `fixed`/`mitigated` closings since 2026-10-17 carried
+/// no anchor, and every archived bug carried one because the archive guard refuses the rest.
+/// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+pub(crate) fn closing_advisory(kind: &str, new_status: &str, content: &str) -> Option<String> {
+    if kind != "bug" || !matches!(new_status, "fixed" | "mitigated") {
+        return None;
+    }
+    let gap = fix_anchor_gap(content)?;
+    let headline = match gap {
+        FixAnchorGap::Nothing => format!(
+            "This `{new_status}` bug declares no fix anchor. Archiving it will be refused until it does."
+        ),
+        FixAnchorGap::PatchId => format!(
+            "This `{new_status}` bug declares a fix SHA but no patch-id, and a SHA alone orphans on \
+             the next rebase. Archiving it will be refused until it does."
+        ),
+    };
+    Some(format!(
+        "{headline} {} See get_guide(\"tracker-conventions\") § {CLOSING_SECTION}.",
+        fix_anchor_remedy(gap)
+    ))
+}
+
 /// Whether any component of `path` is `archive`. A component, not a substring, so a directory
 /// such as `archived-notes/` does not count.
 pub(crate) fn in_archive_dir(path: &Path) -> bool {
@@ -7545,13 +7618,10 @@ pub(crate) fn refuse_unanchored_archive(
                  after every ship); archiving it would take it out of \
                  `fix_anchor_missing_patch_id`, the only check that asks for the patch-id"
             ),
-            "Add the patch-id as its own bullet under the SHA, `- **patch-id:** `<id>``, with the \
-             id from `git show <sha> | git patch-id --stable` (docs/RELEASE.md § Citing a fix), \
-             via doc(action=\"update\", patch={body_edits: [...]}); one update may add it and \
-             archive in the same call. Both labels must be line-start bullets outside any fence: \
-             a patch-id written on the SAME line as the SHA is not parsed. If nothing was \
-             committed, declare `no_fix_commit: \"<reason>\"` via patch.extra instead. Then \
-             archive.",
+            format!(
+                "{} One update may add it and archive in the same call. Then archive.",
+                fix_anchor_remedy(FixAnchorGap::PatchId)
+            ),
         ));
     }
     Err(LibrarianRecoverableError::with_hint(
@@ -7560,11 +7630,10 @@ pub(crate) fn refuse_unanchored_archive(
              archiving it would take it out of `terminal_status_without_fix_anchor`, the only \
              check that asks for one"
         ),
-        "Add a `## Fix provenance` section with two bullets, `- **SHA:** `<sha>` (`experiments`)` \
-         and `- **patch-id:** `<id>`` from `git show <sha> | git patch-id --stable`, via \
-         doc(action=\"update\", patch={body_edits: [...]}); one update may add it and archive in \
-         the same call. If nothing was committed, declare `no_fix_commit: \"<reason>\"` via \
-         patch.extra instead. Then archive.",
+        format!(
+            "{} One update may add it and archive in the same call. Then archive.",
+            fix_anchor_remedy(FixAnchorGap::Nothing)
+        ),
     ))
 }
 
@@ -24634,6 +24703,58 @@ body
             json!(1),
             "call() must reach scan_claim_liveness; an unregistered check is silent: {out:#?}"
         );
+    }
+
+    #[test]
+    fn closing_advisory_names_what_is_missing_and_the_section() {
+        let none = closing_advisory("bug", "fixed", "## Summary\n\nFixed.\n").expect("fires");
+        assert!(none.contains("no fix anchor"), "{none}");
+        assert!(
+            none.contains("## Fix provenance") && none.contains("no_fix_commit"),
+            "{none}"
+        );
+        assert!(
+            none.contains(CLOSING_SECTION) && none.contains("tracker-conventions"),
+            "{none}"
+        );
+        assert!(none.contains("Archiving it will be refused"), "{none}");
+
+        let sha_only = "## Fix provenance\n\n- **SHA:** `5a72304c` (`experiments`)\n";
+        let pid = closing_advisory("bug", "mitigated", sha_only).expect("fires");
+        assert!(
+            pid.contains("no patch-id") && pid.contains("orphans"),
+            "{pid}"
+        );
+        assert!(
+            !pid.contains("no fix anchor"),
+            "SHA-only must not be told it has nothing: {pid}"
+        );
+
+        // A patch-id on the SAME line as the SHA is not parsed, so the record is SHA-only.
+        let same_line = "## Fix provenance\n\n- **SHA:** `5a72304c` **patch-id:** `e9f8df63b911`\n";
+        assert_eq!(fix_anchor_gap(same_line), Some(FixAnchorGap::PatchId));
+    }
+
+    #[test]
+    fn closing_advisory_is_silent_when_anchored_or_out_of_scope() {
+        let pair = "## Fix provenance\n\n- **SHA:** `5a72304c` (`experiments`)\n- **patch-id:** `e9f8df63b911`\n";
+        assert_eq!(fix_anchor_gap(pair), None);
+        assert!(closing_advisory("bug", "fixed", pair).is_none());
+        let nfc = "---\nkind: bug\nstatus: fixed\nno_fix_commit: doc note only\n---\n\nBody.\n";
+        assert!(closing_advisory("bug", "fixed", nfc).is_none());
+        for status in ["wontfix", "active", "open", "archived"] {
+            assert!(
+                closing_advisory("bug", status, "Body.\n").is_none(),
+                "{status}"
+            );
+        }
+        assert!(closing_advisory("tracker", "fixed", "Body.\n").is_none());
+    }
+
+    #[test]
+    fn closing_section_is_a_real_heading_of_tracker_conventions() {
+        let guide = include_str!("../../prompts/guides/tracker-conventions.md");
+        assert!(guide.contains(&format!("\n### {CLOSING_SECTION}\n")));
     }
 }
 /// The doctor reads `.codescout/cc_session_id` out of every unregistered `.worktrees/` entry, and
