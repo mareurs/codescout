@@ -143,5 +143,20 @@ Open:
 - The commit hook named a stale writer for `output.rs` (see Fix). Filed as `581b05bbe41134f3`.
 - Why no red run has carried a hint since 2026-10-20: unknown. Candidates: a timeout (the engine without the cache decoded everything in about 240 s, and the cache shipped on 2026-11-01; I did not check which engine each earlier binary embedded), or reds that name no dirty file. The new columns will separate them.
 
+## Remaining items, 2026-11-03
+
+State on 2026-11-03: the three items left open under Resume were triaged. None is fixed. Status stays `open`.
+
+1. **The 30 s attribution ceiling: the higher `ATTRIBUTION_TIMEOUT_DEFAULT` was examined and not taken.** Three reasons, each read at the bytes:
+   - It removes none of the failures this record describes. Every test that asserts a hint now runs the engine over `no_history()` (`attribution.rs` tests and the two `Some(&env)` callers in `tests.rs`, lines 9923 to 9994; `a_red_naming_many_dirty_files_carries_a_bounded_wip_authors` at 4054). The default reaches no hint-asserting test, so a higher one changes no test result.
+   - The record's own data shows no timeout. Third read of `usage.db`, 2026-11-03 (query under Resume): 2026-11-01 `hinted` 6 (longest 7,669 ms), `silent` 103 (5,389 ms); 2026-11-02 `hinted` 10 (8,942 ms), `silent` 85 (509 ms); 2026-11-03 `silent` 1 (182 ms). That is 205 rows and no `timed_out`, `tooling_failure` or `spawn_failed` row. The longest call took 8.9 s, 30% of the ceiling. One machine, one project, three days.
+   - The scan blocks the red's response. `inner.rs:870` awaits `handle_successful_output_with`, which awaits the engine (`output.rs:1627` to `1633`) before the response is built. So the ceiling is the longest delay that a slow scan can add to a red. A higher ceiling makes the user wait longer for that red; it does not make the scan faster. Under the 16 to 1 load this record studies, a CPU-bound 13 s warm scan scales to about 16 x 13 = 210 s. That number is arithmetic from the load ratio, not a measurement. No ceiling a red response can afford covers it.
+
+   If a fix is needed, the option I would pick is approach 2: store each operation's targets in the cache entry. The phase timers (Not fixed, above) give 5.81 s of the 12.8 to 13.1 s warm `scan_provenance` to shell-command `write_targets`, and approach 2 removes that work. The saving is estimated, not measured. Costs: the cache digest must cover `file-provenance.py`, so every edit to that file invalidates every entry (2,355 files here). A cold refill was measured at four calls killed at 30 s before the fifth answered. Doc-tool targets stay dynamic. Equivalence must be proved again on the real corpus.
+
+   **Reopen trigger:** a `usage.db` row with `attribution_outcome = 'timed_out'`, or a `hinted` row above 15,000 ms (half the ceiling).
+2. **`lsp::client::tests::workspace_symbols_returns_project_symbols` on Windows CI** (CI run 41438665030, 2026-11-02): the cause is unknown, and it cannot be fixed now. The test failed one time on `windows-latest` with every request answered empty for 61.39 s, and passed when the job was rerun on the same commit. No log shows what rust-analyzer was doing. **Reopen trigger:** any new failure of this test after 2026-11-02, on any runner. At that point, capture rust-analyzer's own log and its `$/progress` notifications in the failing run before you change the retry budget.
+3. **`usage.db` attribution distribution:** the third read is under item 1. Three days on one machine is not yet a distribution. **Reopen trigger:** read the query again on or after 2026-11-10, or sooner if item 1's trigger fires. Also on that read, check whether hints continue to appear, because the gap from 2026-10-21 to 2026-11-01 has no hint and no known cause.
+
 ## References
 - `docs/issues/2026-10-31-a-timed-out-filter-test-fails-in-the-loaded-gate-and-passes-alone.md`
