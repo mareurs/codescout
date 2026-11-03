@@ -264,7 +264,8 @@ impl Check {
     pub fn is_informational(self) -> bool {
         matches!(
             self,
-            Check::ClaimHeldByLiveSession
+            Check::ActiveWorktreeRegistrationRootMissing
+                | Check::ClaimHeldByLiveSession
                 | Check::ClaimUnresolvableHere
                 | Check::OpenBugUnderLiveEdit
                 | Check::RetiredObjectStillPresent
@@ -400,6 +401,7 @@ impl Check {
 declare_checks! {
     AbsPathMustBeAbsolute => "abs_path_must_be_absolute",
     AbsPathOutsideManagedRoots => "abs_path_outside_managed_roots",
+    ActiveWorktreeRegistrationRootMissing => "active_worktree_registration_root_missing",
     AdsColonInAbsPath => "ads_colon_in_abs_path",
     ArchivedFixShaUnresolvable => "archived_fix_sha_unresolvable",
     AugmentationDeclarationUnparseable => "augmentation_declaration_unparseable",
@@ -965,6 +967,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     all_violations.extend(declared_root_violations);
     all_violations.extend(unregistered_worktree_violations);
+    all_violations.extend(scan_active_registrations_with_missing_root(ctx, &cat.conn)?);
     all_violations.extend(retired_vector_violations);
     // Roots that belong to a workspace this machine knows about but is not
     // managing this session — the discriminator that lets the outside-roots check
@@ -3499,6 +3502,59 @@ fn scan_unregistered_worktree_dirs(ctx: &ToolContext) -> (Vec<Violation>, Value)
         "unregistered": out.len(),
     });
     (out, health)
+}
+/// `active_worktree_registration_root_missing`: an ACTIVE `worktree_registration` of this
+/// project whose worktree root no longer exists on disk.
+///
+/// **Why it needs its own check.** `derive_dead_roots` reads `artifact` rows only, and the
+/// `prune_missing` guard refuses a dead root an ACTIVE registration covers, on purpose: pruning
+/// would delete the catalog's only record of that worktree's unmerged history. Nothing merges or
+/// abandons a registration when `git worktree remove` deletes the directory, so the registration
+/// stays active and its shadow rows stay in the catalog — measured 2026-11-03 as 13 rows in two
+/// registrations (bug `bad49b228663df9a`). No report named them until a person queried by hand.
+///
+/// **Informational, with no `fix=`.** The remedy is a catalog operation on a machine-local
+/// database (`merge_worktree`, or `abandon=true` to discard), not an edit to this repo, and the
+/// choice between the two is the owner's: merging keeps the history, abandoning deletes it.
+///
+/// Scoped to registrations whose `main_root` is the active project's main checkout, so a shared
+/// catalog does not report another project's worktrees. Project grain like
+/// [`scan_unregistered_worktree_dirs`]: `id: None`, a named `EXEMPT` entry in
+/// `every_declared_check_is_scope_gated_or_a_named_exemption`.
+fn scan_active_registrations_with_missing_root(
+    ctx: &ToolContext,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return Ok(Vec::new());
+    };
+    let main = cp.main_root.as_deref().unwrap_or(cp.git_root.as_path());
+    let main = crate::util::fs::RepoPath::from_path(main).into_string();
+    let mut stmt = conn.prepare(
+        "SELECT worktree_root FROM worktree_registration \
+         WHERE status = 'active' AND main_root = ?1 ORDER BY worktree_root",
+    )?;
+    let roots: Vec<String> = stmt
+        .query_map(rusqlite::params![main], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(roots
+        .into_iter()
+        .filter(|root| !Path::new(root).exists())
+        .map(|root| {
+            let remedy = merge_worktree_remedy(&root, "this check");
+            Violation::new(
+                Check::ActiveWorktreeRegistrationRootMissing.as_str(),
+                None,
+                root.clone(),
+                format!(
+                    "informational: the worktree `{root}` is registered as ACTIVE, but its \
+                     directory is gone, so its shadow rows are still in the catalog and nothing \
+                     will merge them. The choice is the owner's: merging keeps the worktree's \
+                     history, abandoning deletes it. {remedy}"
+                ),
+            )
+        })
+        .collect())
 }
 
 /// 2026-09-09 whole-branch review round 2, C3 (Critical): this scan used to take
@@ -16724,6 +16780,11 @@ mod tests {
             // foreign-repo row for a scope gate to refuse. Same structural reason as
             // DeclaredRootMissing: there is no other project's tree for it to have read.
             Check::UnregisteredWorktreeDir.as_str(),
+            // scan_active_registrations_with_missing_root reads only registrations whose
+            // `main_root` is the ACTIVE project's own main checkout and emits id: None with
+            // the registered worktree root it just read — never a catalogued artifact's
+            // abs_path, so there is no foreign-repo row for a scope gate to refuse.
+            Check::ActiveWorktreeRegistrationRootMissing.as_str(),
             // scan_retired_vector_collections asks the artifact store which collections its
             // retired naming scheme left behind and emits id: None with a `qdrant:<name>` path
             // it just read off the daemon — never a catalogued artifact's abs_path, so there
@@ -16832,9 +16893,15 @@ mod tests {
              collection on the shared backend, so there is no artifact for relevance to be a \
              property OF"
         );
+        assert!(
+            !Check::ActiveWorktreeRegistrationRootMissing.admits_relevance_exemption(),
+            "ActiveWorktreeRegistrationRootMissing must stay excluded — it emits id: None for a \
+             registration it read itself, so there is no artifact for relevance to be a \
+             property OF"
+        );
         assert_eq!(
             Check::ALL.len() - allow_listed,
-            5,
+            6,
             "Check::ALL grew or shrank without a matching, deliberate update to \
              admits_relevance_exemption's matches! arms — a new check defaults to \
              EXCLUDED (the safe polarity), but that exclusion must be a choice this \
@@ -20024,6 +20091,57 @@ mod tests {
             .iter()
             .filter(|v| v["check"] == check)
             .collect()
+    }
+    /// Registers `worktree_root` as `status` under `main_root` in `ctx`'s own catalog.
+    fn register_worktree(ctx: &ToolContext, worktree_root: &str, main_root: &str, status: &str) {
+        let cat = ctx.catalog.lock();
+        worktree::upsert_active(&cat, worktree_root, main_root, None, 1).unwrap();
+        if status != "active" {
+            worktree::set_status(&cat, worktree_root, status, 2).unwrap();
+        }
+    }
+
+    /// Only an ACTIVE registration of THIS project whose root is gone from disk fires.
+    ///
+    /// Three controls: a live root (a check that fires on every active row fails it), a
+    /// `merged` registration with a gone root (a check that ignores `status` fails it), and an
+    /// active one under another project's main checkout (a check that ignores scope fails it).
+    /// Driven through `call`, the real entry, so the wiring is under test too
+    /// (bug `bad49b228663df9a`: 13 shadow rows outlived their removed worktrees).
+    #[tokio::test]
+    async fn only_an_active_registration_with_a_gone_root_of_this_project_fires() {
+        let (_tmp, root) = repo_with_registered_worktree();
+        let rp = |p: std::path::PathBuf| crate::util::fs::RepoPath::from_path(&p).into_string();
+        let main = rp(root.clone());
+        let live = rp(root.join(".worktrees/registered"));
+        let gone = rp(root.join(".worktrees/gone"));
+        let gone_merged = rp(root.join(".worktrees/gone-merged"));
+        let gone_foreign = "/nonexistent-other-project/.worktrees/gone";
+
+        let ctx = declared_ctx(root.clone(), root.clone());
+        register_worktree(&ctx, &live, &main, "active");
+        register_worktree(&ctx, &gone, &main, "active");
+        register_worktree(&ctx, &gone_merged, &main, "merged");
+        register_worktree(&ctx, gone_foreign, "/nonexistent-other-project", "active");
+
+        let out = call(&ctx, json!({})).await.unwrap();
+        let fired = violations_named(&out, "active_worktree_registration_root_missing");
+        assert_eq!(
+            fired.len(),
+            1,
+            "exactly the one gone active root fires: {fired:#?}"
+        );
+        assert_eq!(fired[0]["path"].as_str().unwrap(), gone);
+        let detail = fired[0]["detail"].as_str().unwrap();
+        assert!(detail.starts_with("informational:"), "{detail}");
+        assert!(
+            detail.contains("merge_worktree") && detail.contains("abandon=true"),
+            "the row names both remedies: {detail}"
+        );
+        assert_eq!(
+            out["summary"]["by_check"]["active_worktree_registration_root_missing"], 1,
+            "{out}"
+        );
     }
 
     /// Two declarations that resolve and one that does not.
