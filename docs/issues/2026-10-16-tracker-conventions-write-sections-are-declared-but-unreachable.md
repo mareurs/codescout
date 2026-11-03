@@ -359,6 +359,19 @@ So a status predicate that matches any status change would deliver all three sec
 
 What the sizes allow: a predicate on the status VALUE keeps the fixture unaffected. `archived` needs only `Archiving a tracker` (359 B). `fixed` or another closing status needs `Settled caveats` and `Closing a bug` (3,212 B). `active` needs none. That design needs the grammar to read the status, and the update result to carry it, as in items 2 and 3 above. Not tested: whether the closing sections fit a real session's budget once per session. The ledger delivers each section once per session, so the cost is one-time.
 
+
+### Decision 2026-11-03: step 1 stays pull-only; step 2 stays open; step 3 stays waived
+
+The operator asked which option to take. The choice is to leave the three status-closing sections (`Settled caveats`, `Closing a bug`, `Archiving a tracker`) reachable only by `get_guide("tracker-conventions")`. The three `SECTION_WAIVERS` rows stay.
+
+- **Why.** The cost is measured: a predicate on any status change adds about 3.4 KB to the p50 fixture call and breaks the ceiling. A predicate on the status value avoids that, but it needs four coupled changes (emission loop, `Shape` grammar, update result field, overlap gate) on the path that carries the anti-wipe guard. The benefit is not measured: nobody has counted how often a closing is written without the guide, and the ledger delivers each section once per session.
+- **Step 3** (`One entry format`, `Compaction and archival`) stays waived. It depended on step 1.
+- **Step 2** (`check~<name>` for `doctor`) is NOT decided here. It is a separate grammar amendment. The bug stays `investigating` for it.
+- **Reopen trigger for step 1.** A bug closing is found written wrong (no patch-id, no `## Fix provenance`, or an unarchived terminal bug) in a session that never fetched the guide. Or someone measures that agents skip the guide before a closing.
+- **Not tested.** Whether the closing sections fit a real session budget once per session. The ceiling margin was not re-measured on this date.
+
+ADR fields: confidence medium; alternatives rejected are the any-status predicate (breaks the ceiling) and the value predicate (costly, benefit unmeasured).
+
 ## References
 
 - `docs/issues/2026-10-17-p50-emission-budget-fixture-never-archives-a-bug-file-so-the-largest-doc-move-delivery-is-unbudgeted.md`
