@@ -1,11 +1,13 @@
 ---
 id: '9ca234d453d61233'
 kind: bug
-status: open
+status: fixed
 title: A reproduction-first test is red by design for hours, and unlike an armed mutation the defect behind it is real
 tags:
 - cluster/transient-shared-state-lies-to-readers
 topic: shared-checkout reproduction-first testing
+closed: 2026-11-02
+unverified: One use only. The record's Resume asks for a few uses before the convention is proposed anywhere durable.
 ---
 
 ## Summary
@@ -108,6 +110,16 @@ Proposed and withdrawn in the same exchange. Two objections, the first decisive:
 2. If the fix is abandoned the ignored test rots silently as **false coverage** — the very
    failure this repo annotates inert fixtures to prevent.
 
+### First use, 2026-11-02
+
+The first reproduction-first tests to carry the marker were the two red tests written for bug `b9eec23561e3299b`: `merge_true_that_replaces_the_entry_collection_reports_entries_removed` and `sibling_field_merge_that_replaces_the_entry_collection_reports_entries_removed` in `src/librarian/tools/augment.rs`. Red run, `scripts/with-slot.sh cargo test --lib -- librarian::tools::augment::tests::merge_true_`: exit 101, 3 passed, 2 failed. Both panics, at `augment.rs:1031` and `:1061`, read:
+
+```
+REPRODUCTION for b9eec23561e3299b — expected RED until the fix lands. Expected failure: the result is the bare "ok" with no entries_removed. got: "ok"
+```
+
+The panic text was reported by worker-a. The controller verified the marker in the source, in both assertion messages, before the fix. The fix commit `72d1242a1` removed the marker, as `docs/conventions/testing-discipline.md` prescribes. Its two tests now assert `a merge that shrinks the entry collection must report entries_removed and the warning` (`augment.rs:1069`, `:1098` at that commit), and `git grep` over that commit's tree finds `expected RED until the fix lands` / `REPRODUCTION for b9eec` only in three docs (this record, `docs/conventions/testing-discipline.md`, `docs/trackers/issue-clusters/IC-12-transient-shared-state-lies-to-readers.md`), in no source file. The marker lived only in the working tree for the red window, which is the convention working as designed. Because no commit carries it, the red run's output is the only evidence of the use.
+
 ## Tests added
 
 None, and deliberately: this is an authoring convention, not a code path. A guard would have
@@ -132,6 +144,11 @@ not evidence a convention holds.
 ## Applied 2026-10-30 (Group F pass)
 
 Re-checked at HEAD: a repo-wide grep for `expected RED until the fix lands` still finds nothing outside this file; `update_entry.rs:450` and `mv.rs:1092` still carry `REPRODUCTION for` only in `///` doc comments. The convention is now written into `docs/conventions/testing-discipline.md` (last bullet of the laws list: marker text, the load-bearing wrong-reason clause, the `#[ignore]` rejection, remove the marker in the fix commit). `CLAUDE.md` was not touched (byte budget). No code path: an authoring convention, so no test. Status stays `open` until a reproduction test actually carries the marker; the next reproduction-first test written in this repo is the first use. This pass's own reproduction test lives in a private worktree, not a shared checkout, so it did not exercise the marker either.
+
+## Fix provenance
+
+- **SHA:** `72d1242a1a9eba63ff92653a98f2c5097529e32d` (on `experiments`, not pushed). This is the fix whose reproduction tests first carried the marker; it is bug `b9eec23561e3299b`'s fix, not a code change to this record's subject, which is an authoring convention. A SHA is positional and does not survive a rebase of `experiments`.
+- **patch-id:** `1f4d5d3d1230a5c28994863b8c8f3554bded9d36`, from `git show 72d1242a1 | git patch-id --stable`. It survives a rebase and a cherry-pick.
 
 ## References
 
