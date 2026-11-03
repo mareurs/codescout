@@ -387,6 +387,28 @@ Sizes (`env LC_ALL=C awk`, own body to next heading): `Entry ids — when two ho
 
 So step 2 needs the grammar change (items 1 and 2), the multi-topic or reordered emission of step 1 (item 3), and a routing fix for `doctor` (item 4). Step 1 was decided against on 2026-11-03, so step 2 is blocked on the same loop change. Recommendation: leave step 2 pull-only too, with the same reopen trigger. Not tested: how often a real `doctor` report overflows.
 
+
+### Measured 2026-11-03: do closings follow the rule, and does seeing the section matter?
+
+The decision above said the benefit was unmeasured. This measures it. Scripts and raw rows are in the session scratchpad, not committed.
+
+**Rule timeline (`git log -S`):** `terminal_status_without_fix_anchor` in `doctor` 375225cc8 (2026-08-19); fix-provenance grammar in the guide d83601ef3 (2026-09-14); archive guard refuses an unanchored `fixed`/`mitigated` 049737103 (2026-09-28); SHA without patch-id no longer counts 00fe85d69 (2026-10-05).
+
+**Corpus (`librarian(action="doctor")` on this project, 2026-11-03):** `terminal_status_without_fix_anchor` 108, all in live `docs/issues/`, all closed on or after 2026-09-28. `terminal_status_with_caveat` 116. `cited_prefix_with_no_definer` 6. `entry_defined_twice` 0. `fix_anchor_missing_patch_id` 0. The report was 260 KB, so it overflowed and the call delivered `librarian` sections, not `tracker-conventions`: a live confirmation of item 3 above.
+
+**Denominator (frontmatter `closed:` on or after 2026-10-17):** 165 `fixed`/`mitigated` records. 95 of them (58%) are unanchored now. All 45 archived ones carry an anchor, because the guard refuses the rest. Of the 102 live `fixed`, 85 (83%) are unanchored.
+
+**Transcripts (Claude Code, four profiles, 581 files modified since 2026-10-17):** 241 closing calls (`doc update` to `fixed`/`mitigated`), 35 errored, 121 distinct ids closed without error. Outcome = whether the id is in today's `terminal_status_without_fix_anchor` set.
+
+| Seen before the closing, in the same transcript | Closings | Unanchored now |
+|---|---|---|
+| any `tracker-conventions` text (mostly auto-injected, other sections) | 104 | 41 (39%) |
+| none | 17 | 5 (29%) |
+| the `Closing a bug — patch-id and fix provenance` section text | 18 | 3 (17%) |
+| not that section | 103 | 43 (42%) |
+
+Reading: auto-injection already reaches most closing sessions (101 of 121), but with other sections; only 18 saw the closing section. Sessions that saw it left fewer records unanchored. This is a correlation on n=18, and those sessions partly self-selected (16 closings followed an explicit `get_guide` fetch), so it does not prove that delivering the section would cut the rate. Not counted: closings by Codex, by `edit_file` on frontmatter, and 36 calls whose result was not found in the same file. A compaction inside one transcript is not reset, so "seen" may include text the session no longer held.
+
 ## References
 
 - `docs/issues/2026-10-17-p50-emission-budget-fixture-never-archives-a-bug-file-so-the-largest-doc-move-delivery-is-unbudgeted.md`
