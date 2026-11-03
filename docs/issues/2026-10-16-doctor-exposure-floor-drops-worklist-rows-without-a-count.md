@@ -59,8 +59,10 @@ Nothing outstanding. Not archived on purpose; archive when the fix is on the shi
 
 ## Fix provenance
 
-- **SHA:** `426feb369598cd6efc563f9c31a3b9618cc4f125` (branch `worktree-agent-a4845d73e6020762a`; one commit that also fixes `2026-10-16-doctor-recently-touched-walk-returns-a-bare-set-at-its-cap.md`), patch-id `ab2ff3ec97ecf247f9fa4368d716ae92b4044981` (`git show 426feb36 | git patch-id --stable`)
-- **SHA:** `b232271cefaa2a30a602717eeda2cfe529d05c93` (same branch; review fixes: scope split, dedup, hint gating), patch-id `79f2a4ea13ddd63e8222cba2e92c7c5ef1fbc407` (`git show b232271c | git patch-id --stable`)
+- **SHA:** `426feb369598cd6efc563f9c31a3b9618cc4f125` (`experiments`; authored on branch `worktree-agent-a4845d73e6020762a`; one commit that also fixes `2026-10-16-doctor-recently-touched-walk-returns-a-bare-set-at-its-cap.md`)
+- **patch-id:** `ab2ff3ec97ecf247f9fa4368d716ae92b4044981` (`git show 426feb36 | git patch-id --stable`, re-run 2026-11-03)
+- **SHA:** `b232271cefaa2a30a602717eeda2cfe529d05c93` (`experiments`, same origin branch; review fixes: scope split, dedup, hint gating)
+- **patch-id:** `79f2a4ea13ddd63e8222cba2e92c7c5ef1fbc407` (`git show b232271c | git patch-id --stable`, re-run 2026-11-03)
 
 ## References
 

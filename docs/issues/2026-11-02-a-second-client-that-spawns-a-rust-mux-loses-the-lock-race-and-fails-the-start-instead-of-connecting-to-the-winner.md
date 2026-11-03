@@ -84,6 +84,13 @@ Retry the call. The later starts in the same window succeeded, which is why the 
 
 Mitigated by `45a5085ab`. After the next release, re-count `lsp_events` failures with "another mux instance holds the lock" (query in Evidence). If none appear for a few days of normal use, mark the bug `fixed`; if they continue, the winner is not binding its socket within the wait, and the next step is the mux's own stderr for those timestamps.
 
+## Fix provenance
+
+- **SHA:** `45a5085abe20efb67a2b9ad989934f0fea97a42d` (`experiments`; the mitigation itself, adding `mux_lost_the_lock_race` to `src/lsp/manager.rs`, the only file it touches; `git log -S mux_lost_the_lock_race -- src/lsp/manager.rs` names no other commit)
+- **patch-id:** `6d2fbbb4680360fbcb9f1183d6ebcee7dd1392ad` (`git show 45a5085ab | git patch-id --stable`, 2026-11-03)
+
+This commit is a mitigation, not a fix: the root cause, two clients that both see the lock free and both spawn a mux, is not addressed. The losing call now waits for the winner's mux instead of failing, so the status stays `mitigated`.
+
 ## References
 
 - `docs/issues/2026-10-17-mux-connect-path-lock-races.md` (races 1 and 2 fixed; race 3 open there)
