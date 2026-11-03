@@ -191,10 +191,10 @@ reviewed state.
   `augment` (unlike `update`) reports no `entries_removed`. So one sentence now opens
   § *Declaring an augmentation*: "merge=false resets every field you omit, and under merge=true a
   params array replaces the WHOLE collection ... use append_entry / update_entry"; the section is 2.25 KB
-  (cap 2.5 KB). Pinned by the end-to-end test on the FIRST augment (deleting it reds). **Follow-up, not
-  done:** surface `entries_removed` plus a `warning` in `augment`'s result, as `update` does
-  (`update.rs:895-899`); `augment.rs:448` keeps only `.found` from `merge_params` and drops the
-  before/after counts.
+  (cap 2.5 KB). Pinned by the end-to-end test on the FIRST augment (deleting it reds). **Follow-up, done
+  2026-11-02:** `augment` with `merge=true` now returns `entries_before`, `entries_after`,
+  `entries_removed` and a `warning` when a write shrinks the entry collection, as `update` does, in
+  `72d1242a1a9eba63ff92653a98f2c5097529e32d` (patch-id `1f4d5d3d1230a5c28994863b8c8f3554bded9d36`).
 - **A `link` names the row whose file it wrote**: the source for a plain edge, the destination (as the
   caller passed it) for `supersedes`. From a worktree session `link::call` writes the MAIN
   checkout's destination file; that is filed separately
