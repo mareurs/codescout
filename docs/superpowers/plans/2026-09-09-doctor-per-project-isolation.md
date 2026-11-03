@@ -1216,7 +1216,7 @@ EOF
 
 **Read this before implementing it.** The rule — *a foreign finding surfaces iff a local artifact cites it* — is **inert on today's catalog**, and measured so:
 
-- 6 of the 15 foreign findings checked have **zero** inbound `cites` edges (`690f130645515497`, `8d93149691eb85fe`, `72843ff4a157b6aa`, `acfaaf4269d8d3fb`, `626ce2d3fa74dd7c`, `fb7592ff7c344255`). Every edge found is outbound and intra-repo.
+- <!-- audit-doc-refs:ignore-refs `626ce2d3fa74dd7c` `fb7592ff7c344255` — historical ids of foreign findings in the 2026-09-09 catalog, kept as recorded; neither resolves in this machine's catalog (checked 2026-11-02) --> 6 of the 15 foreign findings checked have **zero** inbound `cites` edges (`690f130645515497`, `8d93149691eb85fe`, `72843ff4a157b6aa`, `acfaaf4269d8d3fb`, `626ce2d3fa74dd7c`, `fb7592ff7c344255`). Every edge found is outbound and intra-repo.
 - Structurally: `link_scan` builds both `DefinitionIndex` and `Corpus` from `rows`, which come from `cat_find::find(filter: scoped_filter)` (`link_scan/mod.rs:352-400`), and its default scope is `Project` (`:315`). So the automatic derivation path **cannot** write a local→foreign edge.
 - The explicit path can: `append_entry(cites=[…])` resolves refs corpus-wide. So the edge is *representable but unpopulated*.
 
