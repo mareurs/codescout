@@ -1,7 +1,7 @@
 ---
 id: e421be689a23ae2a
 kind: bug
-status: open
+status: mitigated
 title: A peer session's commit captured this session's in-flight working-tree changes, filing them under an unrelated message
 tags:
 - cluster/shared-resource-carries-no-owner
@@ -10,6 +10,7 @@ tags:
 - git
 - provenance
 - multi-session
+closed: 2026-11-03
 opened: 2026-08-31
 owner: marius
 related:
@@ -1826,3 +1827,22 @@ per-hunk provenance the working tree does not carry — `issue-clusters:IC-10`. 
 is also still firing: instance 14 was 2026-09-14.
 
 **Re-verified 2026-10-31 (group G worktree pass, `experiments` @ `0f8705532`); status unchanged.** The 2026-09-25 split still describes the file: same-file, intra-path capture needs per-hunk provenance (`issue-clusters:IC-10`) and is an owner decision. No guard changed here; a wrong change to the commit and staging guards can corrupt a peer's work. Only the refusal text for the unattributed-hunk route changed, under `53ed87262cfbdcbf` (`1b53f5f1d`).
+
+## Decision 2026-11-03
+
+**Decision (made by the main session on the operator's behalf):** status `mitigated`. Same-file capture stays future work under `issue-clusters:IC-10`.
+
+**Facts re-checked 2026-11-03:** the 2026-09-25 summary at the head of this file states index capture closed for `scripts/commit-mine.sh` users (Instances 7, 9, 12, 17, 18) and same-file capture still live. That statement is in the head summary, not in § Resume. § Resume (2026-09-16 and 2026-10-31) says the same-file axis needs per-hunk provenance the working tree does not carry (`issue-clusters:IC-10`). `scripts/commit-mine.sh` builds a private index (`GIT_INDEX_FILE="$priv" git read-tree HEAD`, L159) and commits from it (L175). `d859d04b` and `074b749e` resolve, and both are ancestors of `experiments` HEAD.
+
+**Reason:** a workaround is in place for the routes most captures take: `commit-mine.sh`, the foreign-index refusal, the `git commit -a` fix (archived bug, `93bc8c59`) and the `git add -A` stamping. The root cause, which is that a working tree does not record who wrote each hunk, is not addressed. That is what `mitigated` means.
+
+**Cost if wrong:** `mitigated` takes this record out of the `status=open` triage query while same-file capture still happens (instance 14 was 2026-09-14). A session can then commit a peer's hunk with `rc=0` and find no open record saying that this can happen.
+
+**Reopen trigger:** a new capture instance on a route the mitigation claims to close (index capture through `commit-mine.sh`, or a bare commit that passes foreign-index), or a decision to build per-hunk provenance (`IC-10`).
+
+## Fix provenance
+
+- **SHA:** `d859d04bcf97c443913ea78ba6636c3913f0b0c0` (`experiments`), `scripts/commit-mine.sh`
+- **patch-id:** `4b8dc425cc40fc65c42e148f5d5029d11eb5c4b8`
+- **SHA:** `074b749e6c3f3759e7f3ac06723ff70ac6a1e105` (`experiments`), the read-side twin: the commit stage no longer stashes
+- **patch-id:** `4c3958557408b19cdf60354a5f8288167e4342e4`

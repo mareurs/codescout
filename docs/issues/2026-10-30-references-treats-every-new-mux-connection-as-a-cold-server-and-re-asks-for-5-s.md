@@ -1,12 +1,13 @@
 ---
 id: '810ca8288c04661b'
 kind: bug
-status: investigating
+status: wontfix
 title: references treats every new mux socket connection as a cold server and re-asks an empty answer for 5 s
 owners:
 - marius
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
+closed: 2026-11-03
 opened: 2026-10-30
 severity: medium
 unverified: The 5 s empty-answer re-ask did NOT reproduce on a warm mux (an empty references answer took 0.95-1.6 s, first call 1.6 s). Whether it fires on a cold mux, which is where the logged 12-20 s first calls come from, is not established.
@@ -77,6 +78,24 @@ Re-verified 2026-10-30 (no code changed): `references` passes `includeDeclaratio
 No code changed. The one measurement the Resume section lists, counting `textDocument/references` re-ask runs that end at 5 s against 1 s per client age, cannot be made from the logs on this machine now. `.codescout/debug.log` and its three rotated files (`.1`, `.2`, `.3`) all start on 2026-10-31 at 14:51 or later, so the 2026-10-30 span quoted under Symptom is gone. I grepped `debug.log` for `no locations at all` and `debug.log.2` for re-ask text; `debug.log.1` and `.3` (41 KB each) were not searched. The one match in `debug.log` is a tool response and the three in `debug.log.2` are tool output that quotes bug records, so no `references` re-ask run was found.
 
 What is left: a fresh capture on a cold mux, which needs a `post_compact` flush or a mux restart, a `references` call on a symbol with no callers, and `debug.log` kept for that run. The fix still needs the mux to tell a socket client whether the server is cold. That is a new mux message and an owner design choice. The rust-analyzer watcher bug `35bcf086deeb7cbe` made `documentSymbol` answer null for as long as the process ran on 2026-10-31. It is a separate cause of long first calls and may account for part of the logged 12 to 20 s.
+
+## Decision 2026-11-03
+
+**Decision (made by the main session on the operator's behalf):** no code change until a warm-mux stall is measured. Status `wontfix`.
+
+**Facts re-checked 2026-11-03 at the bytes:**
+- `src/lsp/client.rs` `LspClient::in_cold_start_window` (L865-869) anchors at `init_completed_at`, else at `started_at`. A mux socket client never runs `initialize`, so each new socket client starts its own 5-minute window.
+- `LspClient::not_answered_budget` (L1386-1393) returns 5 s inside that window and 1 s outside it.
+- The 5 s cost on a warm mux was never reproduced (§ Hypotheses tried 1: empty answers took 0.95-1.6 s).
+- Shortening the window to 1 s for socket clients is unsafe. The mux forwards a server notification such as `$/progress` only to the clients connected at that moment (`src/lsp/mux/process.rs` L211-212 and L629-630, `broadcast_to_clients`); only `client/registerCapability` has a replay cache for late clients. So a client that connects during a cold start never sees the progress `begin`, and it cannot tell a cold server from a warm one.
+
+**Reason:** the only measured cost on a warm mux is 0.4-2.6 s of first-call overhead, not the 5 s re-ask. The safe fix needs a design that does not exist yet.
+
+**Cost if wrong:** each `references` call that answers `[]` (an unresolved position) on a new socket client to a warm server costs up to 4 s more than needed, for 5 minutes after each connect.
+
+**Reopen trigger:** a measured references stall of 1 s or more on a warm mux (`debug.log` kept for the run, showing a re-ask run that ends at 5 s on a client whose server was already warm).
+
+**The design a fix would need:** a mux message that reports the server's cold/warm state (or replays the open progress tokens) to a socket client when it connects. The client then takes its cold window from the server and not from its own construction time, and waits past 1 s only while `progress.busy`.
 
 ## References
 
