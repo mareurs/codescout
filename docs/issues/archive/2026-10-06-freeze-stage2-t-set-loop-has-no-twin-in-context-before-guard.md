@@ -1,5 +1,5 @@
 ---
-id: b9dcc12ccc143cc7
+id: ad508d5af450cf72
 kind: bug
 status: fixed
 title: 'BUG: the T-set loop in freeze_stage2.py has no twin-in-context_before guard, and the record that deferred it is wrong about which rows are in T'

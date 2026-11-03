@@ -1,5 +1,5 @@
 ---
-id: 39c6b3b95f6b9b82
+id: 57c2f7282386d052
 kind: bug
 status: wontfix
 title: 'BUG: the deep-agent observation window is declared in CLAUDE.md and nothing executes it — zero prospective samples in its first two days'

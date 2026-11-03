@@ -1,5 +1,5 @@
 ---
-id: '90157cd66c15921c'
+id: d925a53aff1cdb0e
 kind: bug
 status: fixed
 title: 'BUG: a project with no [ignored_paths] section gets no default ignore patterns in the code index'

@@ -1,5 +1,5 @@
 ---
-id: bc4fee088b7236c2
+id: b6b305c9969e7723
 kind: bug
 status: fixed
 title: 'BUG: `--debug` writes `<cwd>/.codescout/debug.log` relative to the server''s working directory'

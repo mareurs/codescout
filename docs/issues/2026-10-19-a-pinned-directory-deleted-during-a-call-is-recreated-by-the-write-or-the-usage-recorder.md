@@ -1,5 +1,5 @@
 ---
-id: '69f9f3cf0c62eea5'
+id: 13cffc336e09af35
 kind: bug
 status: wontfix
 title: 'BUG: a pinned directory that is deleted 0-30 ms into a call is re-created by the call (create_file, memory write, usage.db, write.lock.holder)'

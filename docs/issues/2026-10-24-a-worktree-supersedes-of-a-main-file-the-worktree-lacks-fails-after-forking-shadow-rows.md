@@ -1,5 +1,5 @@
 ---
-id: '3822f951e9d78ddf'
+id: 5ee9a523ac9a7cde
 kind: bug
 status: fixed
 title: 'BUG: a supersedes link from a worktree session to a main file the worktree does not hold fails after forking shadow rows, and the error hint blames a deleted file'

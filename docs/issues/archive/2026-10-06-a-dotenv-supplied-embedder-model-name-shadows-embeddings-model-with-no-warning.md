@@ -1,5 +1,5 @@
 ---
-id: '95c954f2a7bd3f2d'
+id: bb65fea61672b57a
 kind: bug
 status: fixed
 title: 'BUG: a dotenv-supplied CODESCOUT_EMBEDDER_MODEL_NAME silently outranks [embeddings].model, and the shadowing warning does not cover it'

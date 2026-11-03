@@ -1,5 +1,5 @@
 ---
-id: '2df804b3435e2300'
+id: 0f7d084c250a6c2b
 kind: bug
 status: fixed
 title: 'BUG: the worktree write guard keys on the doc action name, so it refuses dry-run previews and malformed calls that could never write'

@@ -1,5 +1,5 @@
 ---
-id: aa1110786cd2a8a4
+id: 45e434e5e1112ca0
 kind: bug
 status: fixed
 title: RESULT_CAP conflates truncating ceilings with suppressing floors, and two structurally identical rows got opposite dispositions

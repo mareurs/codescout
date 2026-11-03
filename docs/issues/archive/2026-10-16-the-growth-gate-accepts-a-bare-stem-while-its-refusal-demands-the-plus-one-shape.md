@@ -1,5 +1,5 @@
 ---
-id: bb2cec400c3f8020
+id: 9c3d149bffe2bf5b
 kind: bug
 status: fixed
 title: 'BUG: the growth gate accepts a bare stem and a trailing space while its refusal text says it demands `+1: <slug>` and a derivation'

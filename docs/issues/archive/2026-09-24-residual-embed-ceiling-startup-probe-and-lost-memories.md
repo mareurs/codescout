@@ -1,5 +1,5 @@
 ---
-id: '9e6043f4db849185'
+id: 103c8ff8f9b46828
 kind: bug
 status: fixed
 title: 'RESIDUAL: Implement the startup probe of the effective per-request embed ceiling, and re-write the 8 detected lost memories'

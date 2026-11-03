@@ -1,5 +1,5 @@
 ---
-id: f9608c9978ad8e69
+id: 22dcc4460d13f67b
 kind: bug
 status: fixed
 title: 'BUG: the write-path ADR says every unpinned write already carries wrote_to; only repos with linked worktrees do'

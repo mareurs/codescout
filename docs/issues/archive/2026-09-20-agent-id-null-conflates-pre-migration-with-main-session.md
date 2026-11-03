@@ -1,5 +1,5 @@
 ---
-id: 35fae90eda3d068b
+id: 46260d66a62aecf1
 kind: bug
 status: fixed
 title: 'BUG: agent_id NULL means both "pre-migration" and "main session", and the test comment names the distinction the column cannot express'

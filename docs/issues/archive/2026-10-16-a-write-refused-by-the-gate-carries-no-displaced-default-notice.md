@@ -1,5 +1,5 @@
 ---
-id: ebf872db2c2df46e
+id: e9807c2805f476eb
 kind: bug
 status: fixed
 title: A write refused by the access gate carries no displaced-default notice, so the harmed party's first signal is still the misleading refusal

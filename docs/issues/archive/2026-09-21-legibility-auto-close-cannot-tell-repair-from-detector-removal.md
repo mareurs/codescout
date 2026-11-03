@@ -1,5 +1,5 @@
 ---
-id: '2d08ac68f42a7c3c'
+id: 95dc967c407310a8
 kind: bug
 status: fixed
 title: legibility_scan's auto-close cannot distinguish a repaired defect from a removed detector

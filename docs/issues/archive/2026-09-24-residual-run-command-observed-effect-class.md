@@ -1,5 +1,5 @@
 ---
-id: '4d23f609590dea62'
+id: abc3ab41d3eb9566
 kind: bug
 status: fixed
 title: 'RESIDUAL: record run_command''s observed effect class alongside the declared one'

@@ -1,5 +1,5 @@
 ---
-id: '3b4fce62b0289f20'
+id: c567a19136f0273e
 kind: bug
 status: fixed
 title: 'RESIDUAL: Take option 2 (document unpinned-concurrent activation as unsupported) and/or option 3 (code guard against a subagent activate displacing the home default, blocked on per-caller identity)'

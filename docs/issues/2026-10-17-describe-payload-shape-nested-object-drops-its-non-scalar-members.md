@@ -1,5 +1,5 @@
 ---
-id: c66b40d7c32404b1
+id: 67663118acc2b839
 kind: bug
 status: fixed
 title: describe_payload_shape's one-level descent names nothing for a nested object's arrays, objects and nulls

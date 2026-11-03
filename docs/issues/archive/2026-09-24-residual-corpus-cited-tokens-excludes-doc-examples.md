@@ -1,5 +1,5 @@
 ---
-id: '2cc00cdc9dac8462'
+id: 44b59f8a4dd9f1db
 kind: bug
 status: fixed
 title: 'RESIDUAL: Exclude doc-example citation syntax from corpus_cited_tokens (or add a recurring re-measure of its exposure)'

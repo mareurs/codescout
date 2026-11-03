@@ -1,5 +1,5 @@
 ---
-id: '5697348ca3d72700'
+id: 5a11e659b85feb89
 kind: bug
 status: fixed
 title: 'BUG: tests/mcp-smoke-kotlin.sh targets a project layout that no longer exists, so it cannot run'

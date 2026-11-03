@@ -1,5 +1,5 @@
 ---
-id: '5a25de31ae4a8af3'
+id: b24b656b0715b866
 kind: bug
 status: fixed
 title: A coauthor's publish hold is invisible to the push scan

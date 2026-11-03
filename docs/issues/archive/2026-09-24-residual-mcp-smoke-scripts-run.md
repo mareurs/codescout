@@ -1,5 +1,5 @@
 ---
-id: '7f97ee751bf72bc4'
+id: dc848011996c55d4
 kind: bug
 status: fixed
 title: 'RESIDUAL: Run the MCP smoke scripts once (their get_symbols_overview call was already removed in 9406f3c4)'

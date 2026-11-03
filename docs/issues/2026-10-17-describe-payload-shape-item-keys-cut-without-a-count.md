@@ -1,5 +1,5 @@
 ---
-id: ad9522895036c10c
+id: 60f220c574d456bb
 kind: bug
 status: fixed
 title: describe_payload_shape cuts an array's `item keys:` line at 24 keys and prints no count

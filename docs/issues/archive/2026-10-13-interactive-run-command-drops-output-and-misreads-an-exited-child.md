@@ -1,5 +1,5 @@
 ---
-id: '098fca009ecbdd78'
+id: 95d2a42253a3b9c3
 kind: bug
 status: fixed
 title: 'BUG: interactive run_command drops a finished command''s output, or elicits for a child that already exited'
