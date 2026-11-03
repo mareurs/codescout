@@ -1,11 +1,11 @@
 ---
 id: '61f699816f5ee2fd'
 kind: bug
-status: open
+status: mitigated
 title: The judge's audit-mode context counts text-less tool rows toward its 12-turn cap, so it shows no tool evidence
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
-closed: ''
+closed: 2026-11-03
 opened: 2026-09-29
 owner: marius
 related: []
@@ -86,6 +86,23 @@ there rather than patching R117 alone.
 ## Re-verified at HEAD 2026-10-30 (Group F pass)
 
 Checked at the bytes, not from this file: `scripts/measure/judge.py` `_session_part` (L435-475) skips `if not text:` rows before the `CONTEXT_MAX_TURNS` check, so option B is in the code, and `tests/test_measure_judge.py:285` `test_text_less_rows_do_not_spend_the_turn_cap` exists. The residual defect (no tool call or tool result ever reaches the judge, so operator example D stays hidden) is real and is exactly what option C addresses. It is not fixable inside `_session_part` without choosing the packet rule, which `docs/superpowers/specs/2026-10-24-intervention-judge-design.md` assigns to a new module, and the operator recorded on 2026-10-16 and 2026-10-24 that this stays open until that spec lands. No code changed in this pass; a second patch to `_session_part` would pre-empt a decision the operator made. Verdict: needs owner decision (retire the old audit/correction modes, or accept option B as final and close as `mitigated`).
+
+## Decision 2026-11-03
+
+**Decision (made by the main session on the operator's behalf):** accept option B as the mitigation and set the status to `mitigated`. No code changes.
+
+**Fact re-checked 2026-11-03 at the bytes:** `scripts/measure/judge.py` `_session_part` (L435-496) runs `if not text: continue` before the `CONTEXT_MAX_TURNS` check, so a text-less row uses no slot. The change is `767ac29a4`, an ancestor of `experiments` HEAD (`git merge-base --is-ancestor`).
+
+**Reason:** option B stops the cap being spent on empty rows and restores the narration. The remaining defect (no tool call or tool result reaches the judge) is the root cause, and it is not addressed here. The real fix is the later spec that retires the old audit and correction modes, which the 2026-10-24 design (`docs/superpowers/specs/2026-10-24-intervention-judge-design.md`) already routes to a new module. Nothing in production calls `_session_part` (§ Fix, 2026-10-24).
+
+**Cost if wrong:** an audit-mode judge run over the corpus would still miss tool evidence such as operator example D, and `mitigated` hides this record from the `status=open` triage query.
+
+**Reopen trigger:** audit or correction mode is run on a corpus (any caller passes an events DB to `build_input` outside tests) before that spec retires them.
+
+## Fix provenance
+
+- **SHA:** `767ac29a40e5229e37484d10e3353ea7e9580711` (`experiments`)
+- **patch-id:** `e20b95a62178259dca19977930968b28cad076ff`
 
 ## References
 
