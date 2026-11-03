@@ -246,6 +246,21 @@ and by the second `append_entry` in the end-to-end test. `augment`'s § *Augment
 the merge-versus-replace semantics; the `doc` tool description states `merge=false` replaces wholesale
 inline, which is why this was judged acceptable and `update` was not.
 
+
+### 2026-11-03: step 1's closing knowledge now arrives as an advisory (approach B), and a correction to the section sizes
+
+Design: `docs/superpowers/specs/2026-11-03-closing-advisory-design.md`. Plan: `docs/superpowers/plans/2026-11-03-closing-advisory.md`.
+
+- **What shipped.** `doc(action="update")` returns `fix_anchor_advisory` when THIS call sets a bug to `fixed` or `mitigated` and the file as written lacks the recoverable pair. It informs and never refuses. It shares its remedy text and its classification (`FixAnchorGap`) with the archive guard. Commits `c10f45d7c` (doctor.rs) and `0d894dcea` (update.rs and one guide paragraph).
+- **Verified.** The new tests failed first (11 compile errors in task 1; 4 of 6 failing in task 2), then 150 passed in the `update` and `mv` modules plus both ceiling tests, 135 in `prompts`/`guide_index`, and `./scripts/gate.sh` exited 0 (FMT, CLIPPY, LEAN, DEFAULT all 0). An Opus whole-branch review found no Critical or Important issue.
+- **Measured size.** 476 B for a bug with no anchor, 660 B for SHA without patch-id. The spec said about 300 B; the shared remedy text accounts for the difference.
+- **Not verified.** A live `doc` call through the MCP wrapper; whether agents change behaviour (that is the re-measure below).
+- **Deferred minors from the review** (not fixed, by design): the SHA-only headline ends "until it does" with no clear antecedent (`doctor.rs` near `closing_advisory`); the `FixAnchorGap` doc comment says the guard calls `fix_anchor_gap`, but the guard re-derives the same classification inline; a bug already under `docs/issues/archive/` that is set to `fixed` with no anchor gets an advisory that says archiving will be refused, while `doctor` skips archive paths.
+- **Re-measure.** Two weeks after release, re-run the transcript scan. The share of closings without an anchor, 42% when the closing section was not seen, should fall. If it does not, approach C (a result-field predicate plus multi-topic emission) is the next step.
+- **Status stays `investigating`:** step 2 (`check~<name>` for `doctor`) is open and blocked on the same emission loop.
+
+**Correction to the 2026-11-01 measurement above.** The size of `Closing a bug — patch-id and fix provenance` was given as 1,634 B and the three sections as 3,571 B. Those figures cut the section at a fenced example line `## Fix provenance` that looks like a heading but sits inside a fenced block. Re-measured 2026-11-03 with fences respected (`env LC_ALL=C awk`): `Settled caveats` 1,533 B, `Closing a bug` 5,931 B (this includes the 2-line paragraph added today, so about 5.6 KB before it), `Archiving a tracker` 335 B. The real total was about 7.5 KB, not 3.6 KB. The decision not to ship the sections by status value holds, and is stronger. The lines in the 2026-11-01 section stay as the record of what was measured then.
+
 ## Tests added
 
 For the `move` half (2026-10-17), red before the fix, green after:
