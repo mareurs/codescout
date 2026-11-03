@@ -482,8 +482,8 @@ fn merge_one(
 /// all of it is correct (no base entries to accidentally duplicate).
 ///
 /// Returns `Ok(Some(main_id))` on success (or on a dry-run preview of
-/// success), `Ok(None)` on a `reseat_collision` (pushed to `conflicts`, row
-/// left untouched) or a vanished-row race.
+/// success), `Ok(None)` on a `reseat_collision` or a `reseat_target_missing` (pushed
+/// to `conflicts`, row left untouched) or a vanished-row race.
 fn reseat_one(
     cat: &mut Catalog,
     shadow_id: &str,
@@ -507,6 +507,20 @@ fn reseat_one(
             "shadow": shadow_id,
             "main_path": RepoPath::from(main_path.as_path()).into_string(),
             "into_id": id_m,
+        }));
+        return Ok(None);
+    }
+
+    // A row reseated onto a path with no file there is a `missing_file` defect: the file lives
+    // only in the removed worktree, or on a branch that has not reached the main checkout. Leave
+    // the row where it is and say so, in the dry run too, so the cost is visible before `merge`
+    // is chosen over `abandon`. Bug 93a467ab0eb9bbf4: 78 rows were reseated this way.
+    if !main_path.exists() {
+        conflicts.push(json!({
+            "kind": "reseat_target_missing",
+            "shadow": shadow_id,
+            "main_path": RepoPath::from(main_path.as_path()).into_string(),
+            "hint": "no file exists at the main-checkout path; merge the branch that holds it, or abandon this worktree to drop the row",
         }));
         return Ok(None);
     }
@@ -744,39 +758,70 @@ mod tests {
         assert_eq!(conflicts[0]["worktree"], "wt-edit");
     }
 
+    /// A worktree session on REAL directories: `<tmp>/repo` is the main checkout and
+    /// `<tmp>/repo/.worktrees/feat` the worktree. The fictional `/repo` that `wt_ctx` uses
+    /// cannot say whether a reseat target exists on disk, which these tests are about.
+    fn real_wt_ctx() -> (
+        tempfile::TempDir,
+        crate::librarian::tools::ToolContext,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    ) {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("repo");
+        let wt = main.join(".worktrees").join("feat");
+        std::fs::create_dir_all(wt.join("docs")).unwrap();
+        std::fs::create_dir_all(main.join("docs")).unwrap();
+        let ctx = crate::librarian::tools::TestToolContextBuilder::new(
+            Catalog::open_in_memory().unwrap(),
+        )
+        .with_current_project(std::sync::Arc::new(
+            crate::librarian::current_project::CurrentProject {
+                abs_path: wt.clone(),
+                git_root: wt.clone(),
+                main_root: Some(main.clone()),
+                umbrella: None,
+            },
+        ))
+        .build();
+        (tmp, ctx, main, wt)
+    }
+
+    /// Registers the worktree and seeds a lineage-less row at `<wt>/docs/<name>`; returns its id.
+    fn seed_worktree_born(
+        ctx: &crate::librarian::tools::ToolContext,
+        wt: &std::path::Path,
+        name: &str,
+    ) -> String {
+        let path = wt.join("docs").join(name);
+        let id = crate::librarian::ids::artifact_id_from_abs(&path);
+        let c = ctx.catalog.lock();
+        artifact::upsert(
+            &c,
+            &artifact::TestArtifactRowBuilder::new(&id)
+                .with_abs_path(path)
+                .build(),
+        )
+        .unwrap();
+        crate::librarian::tools::worktree::ensure_registration(
+            &c,
+            ctx.current_project.as_deref().unwrap(),
+        )
+        .unwrap();
+        id
+    }
+
     #[tokio::test]
     async fn new_worktree_artifact_reseats_to_main_path() {
-        let ctx = wt_ctx(Catalog::open_in_memory().unwrap());
-        {
-            let c = ctx.catalog.lock();
-            seed_main_tracker(&c);
-        }
-        // artifact born in the worktree (no lineage edge)
-        let wt_born = {
-            let c = ctx.catalog.lock();
-            let id = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
-                "/repo/.worktrees/feat/docs/new.md",
-            ));
-            artifact::upsert(
-                &c,
-                &artifact::TestArtifactRowBuilder::new(&id)
-                    .with_abs_path("/repo/.worktrees/feat/docs/new.md")
-                    .build(),
-            )
-            .unwrap();
-            crate::librarian::tools::worktree::ensure_registration(
-                &c,
-                ctx.current_project.as_deref().unwrap(),
-            )
-            .unwrap();
-            id
-        };
-        let out = call(&ctx, serde_json::json!({"root": "/repo/.worktrees/feat"}))
+        let (_tmp, ctx, main, wt) = real_wt_ctx();
+        // The file reached the main checkout (the worktree branch was merged).
+        std::fs::write(main.join("docs/new.md"), "# new\n").unwrap();
+        let wt_born = seed_worktree_born(&ctx, &wt, "new.md");
+        let out = call(&ctx, serde_json::json!({"root": wt.to_str().unwrap()}))
             .await
             .unwrap();
         let c = ctx.catalog.lock();
-        let main_new =
-            crate::librarian::ids::artifact_id_from_abs(std::path::Path::new("/repo/docs/new.md"));
+        let main_new = crate::librarian::ids::artifact_id_from_abs(&main.join("docs/new.md"));
         assert!(
             artifact::get(&c, &main_new).unwrap().is_some(),
             "reseated at main path"
@@ -786,6 +831,44 @@ mod tests {
             "worktree row gone"
         );
         assert!(out["reseated"].as_array().unwrap().len() == 1);
+    }
+
+    /// Bug 93a467ab0eb9bbf4: three merges reseated 78 rows onto main-checkout paths where no file
+    /// exists, and `doctor` reported 78 new `missing_file` defects. A row whose main path has no file
+    /// must stay where it is, reported as a conflict, in the dry run and in the real run alike.
+    #[tokio::test]
+    async fn a_worktree_born_row_whose_main_path_has_no_file_is_left_untouched() {
+        let (_tmp, ctx, main, wt) = real_wt_ctx();
+        // The worktree has the file; the main checkout does not (it lives on an unmerged branch).
+        std::fs::write(wt.join("docs/side.md"), "# side\n").unwrap();
+        let wt_born = seed_worktree_born(&ctx, &wt, "side.md");
+        let main_side = crate::librarian::ids::artifact_id_from_abs(&main.join("docs/side.md"));
+
+        for dry_run in [true, false] {
+            let out = call(
+                &ctx,
+                serde_json::json!({"root": wt.to_str().unwrap(), "dry_run": dry_run}),
+            )
+            .await
+            .unwrap();
+            let conflicts = out["conflicts"].as_array().unwrap();
+            assert_eq!(conflicts.len(), 1, "dry_run={dry_run}: {out}");
+            assert_eq!(conflicts[0]["kind"], "reseat_target_missing");
+            assert_eq!(conflicts[0]["shadow"], wt_born);
+            assert!(
+                out["reseated"].as_array().unwrap().is_empty(),
+                "dry_run={dry_run}: a missing target is not a successful reseat: {out}"
+            );
+            let c = ctx.catalog.lock();
+            assert!(
+                artifact::get(&c, &wt_born).unwrap().is_some(),
+                "dry_run={dry_run}: the worktree row stays"
+            );
+            assert!(
+                artifact::get(&c, &main_side).unwrap().is_none(),
+                "dry_run={dry_run}: no row is written at a path with no file"
+            );
+        }
     }
 
     #[tokio::test]
