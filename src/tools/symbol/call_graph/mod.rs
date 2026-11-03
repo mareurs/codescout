@@ -15,11 +15,13 @@ use crate::tools::{OutputForm, Tool, ToolContext};
 
 /// A SQLite failure such as "disk I/O error" names neither the store nor the step. This puts both
 /// in the message and keeps the cause, so the caller can tell which file failed (bug
-/// `cd85dbae70c76670`).
+/// `cd85dbae70c76670`). The path is joined one segment at a time so that every separator is the
+/// platform's own; a joined `".codescout/call_edges.db"` kept its `/` on Windows (bug
+/// `1ca433a98628cd17`).
 fn cache_error(step: &str, root: &std::path::Path, e: rusqlite::Error) -> anyhow::Error {
     anyhow::anyhow!(
         "call_graph: {step} the call-edge cache at {} failed: {e}",
-        root.join(".codescout/call_edges.db").display()
+        root.join(".codescout").join("call_edges.db").display()
     )
 }
 
@@ -835,6 +837,9 @@ mod tests {
     /// A SQLite failure such as "disk I/O error" names neither the store nor the step. Three rows in
     /// the usage database carried exactly that text and nothing else (bug
     /// `cd85dbae70c76670`), so a caller could not tell which file failed or whether to retry.
+    ///
+    /// The store is named with the platform's own separator throughout. On Windows the message
+    /// once read `/proj\.codescout/call_edges.db` (bug `1ca433a98628cd17`).
     #[test]
     fn a_cache_error_names_the_store_and_the_step() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -843,7 +848,11 @@ mod tests {
             .lookup_callers("f")
             .unwrap_err();
         let shown = cache_error("reading", std::path::Path::new("/proj"), e).to_string();
-        assert!(shown.contains("/proj/.codescout/call_edges.db"), "{shown}");
+        let store = format!(
+            "/proj{s}.codescout{s}call_edges.db",
+            s = std::path::MAIN_SEPARATOR
+        );
+        assert!(shown.contains(&store), "expected {store} in: {shown}");
         assert!(shown.contains("reading the call-edge cache"), "{shown}");
         assert!(
             shown.contains("no such table"),
