@@ -45,6 +45,21 @@ The worktree was removed automatically when the subagent ended unchanged (`git w
 
 The tool description of `EnterWorktree` in this session says its setting `worktree.baseRef` defaults to `fresh`, which "branches from origin/<default-branch>", and that `head` "branches from your current local HEAD". No profile sets `worktree` in its `settings.json` or `settings.local.json`, and neither does this project's `.claude/`. Not checked: whether `Agent(isolation: "worktree")` reads the same setting.
 
+
+### Applied and measured 2026-11-03
+
+The operator approved `git remote set-head origin experiments`; it was run. `git symbolic-ref refs/remotes/origin/HEAD` then gave `refs/remotes/origin/experiments`. A second `Agent(isolation: "worktree")` probe, dispatched from this checkout, got:
+
+- `git rev-parse HEAD`: `71d9995f1bd67e891d2b68b4618380a0f74a0f1a`, which is the tip of `origin/experiments` (`git rev-parse --short origin/experiments` gave `71d9995f1`).
+- `git merge-base --is-ancestor 5a8b14691 HEAD`: true (the old base is an ancestor of the new one).
+- `git merge-base --is-ancestor 8a2e2ef0b HEAD`: false. `8a2e2ef0b` is a local commit that is not pushed.
+
+The base moved from `5a8b14691` (`master`, 2026-07-05) to the tip of `origin/experiments`, so the harness reads `origin/HEAD` to pick an agent worktree's base. This settles the hypothesis that the first probe could not tell apart.
+
+**What is still wrong:** the base is the REMOTE tip, not the local branch. A subagent does not see any commit that is not pushed. On 2026-11-03 that was 34 commits (`git rev-list --count origin/experiments..experiments`). So a worktree subagent still misses files that exist only in unpushed commits. Pushing `experiments` closes the gap at the moment of the push, and it reopens with the next local commit. `worktree.baseRef: head` is the setting that would follow the local branch; it is not tried.
+
+Undo: `git remote set-head origin master`.
+
 ## Environment
 
 codescout main checkout `/home/marius/work/claude/codescout`, branch `experiments`. Claude Code agent worktrees under `.claude/worktrees/agent-*`.
@@ -68,7 +83,7 @@ Not established. The candidate mechanism: the harness cuts an agent worktree fro
 
 ## Fix
 
-Not applied. The smallest candidate step is `git remote set-head origin experiments` (undo: `git remote set-head origin master`). It changes shared repository state that every session and tool reading `origin/HEAD` sees, so it needs the operator's approval. **It has NOT been run.** After it runs, check the fix with the step in § Reproduction. If the base is still `5a8b14691`, the harness reads something other than `origin/HEAD`, and this hypothesis is wrong.
+Applied 2026-11-03: `git remote set-head origin experiments` (undo: `git remote set-head origin master`). See "Applied and measured" under § Reproduction. The base is now the tip of `origin/experiments`; unpushed commits are still not seen by a worktree subagent. It changes shared repository state that every session and tool reading `origin/HEAD` sees, so it needs the operator's approval. **It has NOT been run.** After it runs, check the fix with the step in § Reproduction. If the base is still `5a8b14691`, the harness reads something other than `origin/HEAD`, and this hypothesis is wrong.
 
 A hook cannot fix the brief itself. The companion bootstrap already tells a worktree subagent to check that its paths exist in the worktree (bug `2f6b6a8bcc9150c7` § Fix, part 3).
 
