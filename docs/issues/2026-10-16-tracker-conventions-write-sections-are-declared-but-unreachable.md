@@ -372,6 +372,21 @@ The operator asked which option to take. The choice is to leave the three status
 
 ADR fields: confidence medium; alternatives rejected are the any-status predicate (breaks the ceiling) and the value predicate (costly, benefit unmeasured).
 
+
+### Scout of step 2, 2026-11-03: `check~<name>` is not one change, and the delivery path has two further gaps
+
+Read at the bytes on `experiments`. Nothing was changed. Not run: a real `doctor` call, so the overflow rate below is unmeasured.
+
+1. **Grammar change.** `Shape` has three fields (`tool`, `action`, `path_contains`), and the grammar accepts only `path~` (`parse_shape`, `src/prompts/guide_index.rs:115`). A `check~` predicate needs a fourth field, a parse branch, a matcher in `src/util/librarian_response.rs` that reads `violations[].check`, and a change to `ambiguous_across_topics` (`guide_index.rs:722`), which counts only `path_contains` as a narrowing.
+2. **A second gate.** `tracker-conventions` must declare path-qualified shapes only (a test near `guide_index.rs:1443` asserts `shape.path_contains.is_some()`). A `check~`-only shape would fail it, so that gate needs amending too.
+3. **The single-topic loop again.** `emit_guide_sections` (`src/engines/emitters.rs:75`) returns at the first candidate that ships blocks, and the first candidate is the adapter's topic. For a `doctor` result that is `tracker-conventions` only when a violation `path` names `docs/issues/` or `docs/trackers/` (`LibrarianAdapter::relevant_guide_topic`, `src/librarian/adapter.rs:528`). Otherwise it is `librarian`, which ships its own `doctor repairs` section and returns before `topic_declaring` is tried. `progressive-disclosure` wins first when the result overflows.
+4. **One of the two violation paths is not a tracker path.** `entry_defined_twice` carries the artifact's path. `cited_prefix_with_no_definer` carries `files[0]`, the first citing file (`src/librarian/tools/doctor.rs:6173`), which may be any document. So for that check the topic is chosen wrongly even with the new predicate.
+5. **The remedy is already in the row.** The `detail` of `cited_prefix_with_no_definer` names the fix inline (define the namespace, declare `entry_prefix`, or declare `external_prefix`). That lowers the benefit of delivering the section.
+
+Sizes (`env LC_ALL=C awk`, own body to next heading): `Entry ids — when two hosts allocate anyway` 1,290 B; `Entry headings — a prefix with no definer, or owned outside markdown` 2,065 B. The figure `about 6.5 KB` in the `TRACKER_LIBRARIAN_SHAPES_UNSERVED` comment (`src/prompts/mod.rs:708`) does not match the first number. The `requires:` closure was not measured.
+
+So step 2 needs the grammar change (items 1 and 2), the multi-topic or reordered emission of step 1 (item 3), and a routing fix for `doctor` (item 4). Step 1 was decided against on 2026-11-03, so step 2 is blocked on the same loop change. Recommendation: leave step 2 pull-only too, with the same reopen trigger. Not tested: how often a real `doctor` report overflows.
+
 ## References
 
 - `docs/issues/2026-10-17-p50-emission-budget-fixture-never-archives-a-bug-file-so-the-largest-doc-move-delivery-is-unbudgeted.md`
