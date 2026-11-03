@@ -1,4 +1,10 @@
-# Effort steering — stopped public-oracle phase CLOSED, 2026-11-03
+# Effort steering — runtime inventory gate CLOSED, 2026-11-03
+
+Latest: read research/effort-steering/runtime-capability-20261103 and V report2c55cfdd03b83198. Actual CLI Bash absence/forced rejection/source Read verified by3local controls, independent raw audit,5post-fix actual mutation kills and full5lane gate0. Publication d6ab694a25f203b97e0ae84917f0ed09f6f7810d; completion3b3156b8a. Q=/home/marius/.cache/codescout-resident/codescout/runtime-capability-20261103 SEALED, SHA32726dcda53dc6e213cc3de67e4ccc48f7da983603c8dc1db25c6ae0b80e7248,396regular/0links; canonical python3 -B Q/close.py verify, no writers except repeat-verification.log. Next implement bounded container-Cargo MCP/usable long-call feedback offline using Q/next-gate-brief.md; those are NOT implemented/proved. Both broader worker bugs remain open; general low/xhigh promotion HOLD. No new paid run; cumulative25.340899699999999810/40, remaining14.659100300000000190. Mock usage excluded; native/review/CPU/invoices unmeasured. No push/merge; retain V/native ledgers/all seals.
+
+## Previous stopped-phase state — historical recovery retained
+
+> Its next-step sentence is superseded by the runtime inventory result above. All costs, original evidence and retention instructions below remain applicable.
 
 Read research/effort-steering/public-oracle-transfer-20261103 and V=/home/marius/.codex/worktrees/615e/codescout docs/research/2026-11-03-public-oracle-transfer.md (catalog4e668d6fa37faf69), current hub ae571a0abfaf9e7f. Retain branch research/fixed-acceptance-population-20261101/native ledgers; no push/merge. RootSID01a15ca9-f939-7603-acb5-01c6b02f68e2.
 
