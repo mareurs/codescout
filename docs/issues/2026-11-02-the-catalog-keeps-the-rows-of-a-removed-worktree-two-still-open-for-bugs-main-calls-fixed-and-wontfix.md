@@ -1,7 +1,7 @@
 ---
 id: bad49b228663df9a
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: the catalog keeps the rows of a removed worktree (13 in this project), two of them still `open` for bugs the main checkout calls `fixed` and `wontfix`, and neither `doc(find)` nor `doctor` shows them'
 owners:
 - marius
@@ -9,10 +9,11 @@ tags:
 - cluster/unclassified
 - worktree-overlay
 - librarian
+closed: 2026-11-03
 opened: 2026-11-02
 owner: marius
 severity: low
-unverified: Counts are from one read of one catalog on one machine. The cause is not established, and the ten rows without a main twin were not traced.
+unverified: 'Only the symptom is repaired: the 13 stale rows are gone (query: 0). The cause is not addressed: nothing merges or abandons an overlay registration when its worktree is removed, and doctor has no report-mode check for a registration whose root is gone. A new worktree removal may recreate the state.'
 ---
 
 # BUG: the catalog keeps the rows of a removed worktree (13 in this project), two of them still `open` for bugs the main checkout calls `fixed` and `wontfix`, and neither `doc(find)` nor `doctor` shows them
@@ -76,6 +77,21 @@ Not done. Options, none chosen: `librarian(doctor, fix=prune_missing)` drops the
 **Read in the code 2026-11-03, so step 3's expectation rests on the source, not only on the tool description:** `src/librarian/tools/merge_worktree.rs`. The `abandon` branch runs `DELETE FROM artifact WHERE <under root>` and then sets the registration to `abandoned` (lines 86-91). The merge path calls `merge_one` per shadow, and `merge_one` ends with `DELETE FROM artifact WHERE id=?1` for the shadow inside its transaction (line 468), then the registration becomes `merged` (line 146). So both calls remove the rows this bug counts. Not run against this catalog.
 
 Still not explained: why the overlay registrations stayed active after the worktrees were removed. A worktree removal that does not merge or abandon its registration would leave this state every time.
+
+
+### Applied 2026-11-03
+
+The operator approved both calls. Before: the reproduction query returned 13 rows (`3822f951e9d78ddf` and `9c90e767b8ae886b` `open`). Run in this order:
+
+1. `librarian(merge_worktree, root=…/integration-fixes-20261024)`: `merged` 12 shadows, `registration: merged`, `remap: {}`, `suspicious: []`. It reported the same 11 status conflicts as the dry run, and in each `main` and `worktree` agree.
+2. `librarian(merge_worktree, root=…/fix-g-20261024, abandon=true)`: `abandoned: 1`, `registration: abandoned`.
+3. The reproduction query now returns **0** rows (`select count(*) …` gave `0`).
+
+The main rows were not changed: `13cffc336e09af35` is still `wontfix`, `5ee9a523ac9a7cde` still `fixed`, `fc6a842d5e3dd66b` still `fixed`, `fe747d6bdfe6ea5c` still `mitigated` (read from `~/.local/share/librarian/catalog.db`).
+
+Related, same day: `repair_frontmatter_id` (commit `1d5d2e246`) rewrote the `id:` of two of the files named above to their main-checkout ids, `13cffc336e09af35` and `5ee9a523ac9a7cde`.
+
+**Not done:** why the overlay registrations stayed `active` after the worktrees were removed. A worktree removal that neither merges nor abandons its registration leaves this state each time, so a new removal may recreate it. `doctor` still shows no finding for such a registration, because `derive_dead_roots` runs only inside `fix=prune_missing`. Status is `mitigated` for that reason.
 
 ## Tests added
 
