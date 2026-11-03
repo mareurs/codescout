@@ -1,3 +1,17 @@
+# Effort steering — current closed state, 2026-11-03
+
+Read docs/trackers/effort-steering-current.md catalogae571a0abfaf9e7f in retained V=/home/marius/.codex/worktrees/615e/codescout. Latest result docs/research/2026-11-02-finite-cohort-results.md catalogadf7fc6b1e7b3067. Detailed recovery: research/effort-steering/finite-cohort-20261102. RootSID01a15ca9-f939-7603-acb5-01c6b02f68e2; no merge/push.
+
+Finite pilot CLOSED:6valid fixed Sonnet5.5sessions, no retry/replacement/unknowncharge. All three arms1/2 endpoints: Tokio89full/85required+3private pass; Uoriginal64/65 raw-filename-output fail despiteprivatechecksum/status1/1pass. BothS actuallyapplyassertionnegativecontrols, butUSexpectswrongU+FFFD filename; GNUbytecapturepreservesFF. A failing mutant doesnotestablishoraclecorrectness. HOLDstructuredbundle. MeanclientL0.0830851,S0.11657665,X0.21693635: S46.3%less thanX and40.3%MORE thanL, no endpointgain. Generalmechanismgoalopen.
+
+Phaseclient0.83319620000000003; cumulative25.103041399999999840/40; remaining14.896958600000000160. Native/review/CPU/invoicesunmeasured. No modeljob or nextpaidphase. Neverreplayoldslots. Next: publicnative-representationreferencecheck+ONEboundedlowrepair, independentholdout/fullcosts; knownUrepair mustbeSEPARATE EXPOSEDdiagnostic, notfreshtransferorrescuedpilot.
+
+F=/home/marius/.cache/codescout-research/codescout/finite-cohort-20261102 SEALED SHAdc05a954c9e944166e230cf4bb03bece3a252405606ee43e4d532195cc59bfc3,806regular/0physicallinks. 16314controlsourcefiles/420literal-linktargets preservedinverifiedarchivebeforegeneratedsourcecleanup. All67recordedadaptercontainersgone; no broadprune. Publicationb4956d5f9bb8c3d9eeb5ab58dc176f4786fc637f patch-id73d6b6a992092fdce2cd4ab3bfe0ac446f8d1c0a binds7historicalfiles; laterplancompletionmetadata doesnotalterpublication. NeverLSPinseal; onlyrepeat-verification.logmutable. Read-only: python3 -B F/close.py verify, replaceFwithliteralpath. PreserveV/nativeledger anddependencies namedinF/freeze.json, priorTclose/Shelper/3940pilot/CLI/S5readers; keepOLDNoriginalpath.
+
+Bothfreshfullprojectgates0 PYTHON_LIGHT/FMT/CLIPPY/LEAN/DEFAULT; declaredheavy/server-stack/ONNXlimitsremain. Focused9+12+8pass. Finalfullgatewall31181s, notkilled, no causaldiagnosis. Strongreview4ImportantfixedRED/GREEN;4reappliedsurvivingcall-sitemutantsallkilled0errors/exactrestores; nodeferredseparateMinor. Earlierclosedentrybelow is historical, superseded forcurrentbudget/gate/state.
+
+## Historical closed state retained verbatim
+
 # Effort steering — current entry point (2026-11-02)
 
 Start at docs/trackers/effort-steering-current.md, catalog ae571a0abfaf9e7f, in retained V=/home/marius/.codex/worktrees/615e/codescout. Branch research/fixed-acceptance-population-20261101; local commits only, no merge/push. Historical reports/seals retain original verdicts and budgets. Closures bind dated Git snapshots, not future mutable hub bytes.
