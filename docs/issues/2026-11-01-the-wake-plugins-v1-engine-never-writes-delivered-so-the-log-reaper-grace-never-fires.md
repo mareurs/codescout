@@ -1,13 +1,14 @@
 ---
 id: '1ef81db472b12ad7'
 kind: bug
-status: open
+status: wontfix
 title: 'BUG: the wake plugin''s v1 engine never writes the .delivered marker, so the log reaper''s one-hour grace never fires for a v1-armed job and its log lives 24 hours'
 tags:
 - cluster/unclassified
 - run_command
 - background-job
 - wake-plugin
+closed: 2026-11-03
 opened: 2026-11-01
 severity: low
 ---
@@ -81,6 +82,20 @@ None needed for correctness: the 24-hour bound still reclaims the log.
 ## Resume
 
 Decide who owns the marker, and whether "delivered" for the log reaper may mean "emitted". Status stays `open` by the owner's decision on 2026-11-01, so this can be checked later. Check when a profile starts using v1: look for `codescout-wake.json` in the four profile roots, then compare the age of a finished v1 job's log with the one-hour grace. Split from bug `eaf02545987b4bc5`, whose sidecar leak is fixed in `0d48ddaa6`.
+
+## Decision 2026-11-03
+
+**Decision (made by the main session on the operator's behalf):** accept the 24-hour log lifetime for jobs armed by the v1 engine (option 2 in § Fix). No change to the live hook or to `claude-plugins`. Status `wontfix`.
+
+**Facts re-checked 2026-11-03, read-only in `/home/marius/work/claude/claude-plugins` (HEAD `892ecb4`):**
+- `grep '\.delivered'` over `codescout-companion` gives one write in non-test code: `hooks/wake-on-job-end.mjs:108`, in `claimDelivery`, which creates the file with `writeFileSync` and the `wx` flag. The other non-test hits read the marker: `hooks/wake-on-job-end.mjs:233` (`rearmTarget`) and `background-wake/intake.mjs:14` (`selectEngine`). Nothing under `background-wake/` writes it, and `background-wake/adapters/claude-code.test.mjs:41` asserts that it is absent.
+- The hook looks for the v1 config at `<profileRoot>/codescout-wake.json`, where `profileRoot` is `CLAUDE_CONFIG_DIR` or `~/.claude` (`hooks/wake-on-job-end.mjs:252-254`). None of `~/.claude`, `~/.claude-sdd`, `~/.claude-kat` and `~/.claude-stef` has a `codescout-wake.json` (`ls` of `~/.claude*/codescout-wake.json`, and `find -maxdepth 3 -name 'codescout-wake*'` under the four roots, both empty).
+
+**Reason:** no profile runs v1, so no log lives longer than intended today. The 24-hour `LOG_MAX_AGE` still reclaims every log, so the cost is disk space and not correctness. Option 1 (write `.delivered` at `emitted-unconfirmed`) is a cross-repo change to a test that asserts the opposite on purpose, and nothing needs it yet.
+
+**Cost if wrong:** after a profile enables v1, each finished job's log stays up to 23 hours longer than the one-hour grace intends.
+
+**Reopen trigger:** any profile enables the `codescout-wake.json` v1 engine (a `codescout-wake.json` appears in one of the four profile roots, or a v1 job's log is seen on disk more than 1 hour after its record ended).
 
 ## References
 
