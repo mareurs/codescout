@@ -1,12 +1,15 @@
 ---
 id: '2f6b6a8bcc9150c7'
 kind: bug
-status: open
+status: fixed
 title: the subagent bootstrap tells every worktree subagent to activate, so parallel subagents race on the shared active-project slot
 tags:
 - cluster/doc-contradicted-by-code
+closed: 2026-11-03
 opened: 2026-10-26
 owner: marius
+related:
+- docs/issues/2026-11-03-agent-worktrees-are-cut-from-origin-head-not-experiments.md
 severity: medium
 ---
 
@@ -70,6 +73,8 @@ The same string compare is still in `worktree-write-guard.mjs`. From a main-chec
 
 None. A test in the companion repo would assert the injected text for a worktree cwd names `workspace=` and does not instruct `activate`.
 
+**Added 2026-11-03:** the tests above are in the fix commits, in `claude-plugins`. `968f7b9` adds 35 lines to `codescout-companion/hooks/worktree-write-guard.test.sh` and changes 27 lines in `tests/test-subagent-guidance.sh`. `2dca6fa` adds the two symlink-pin cases (`pin-symlink-to-self`, `pin-symlink-to-sibling`) to `worktree-write-guard.test.sh` (§ Resume). The "None" above was written before those commits existed.
+
 ## Workarounds
 
 Brief each subagent explicitly to pin `workspace="<abs worktree>"` on every call.
@@ -102,6 +107,27 @@ Both are ancestors of `origin/main` (`merge-base --is-ancestor`, 2026-11-02). §
 **Cause B (the base mismatch) is still open.** A worktree cut from an old base commit does not hold the paths the parent briefed from `experiments`, so `read_file` misses even with a correct pin. It reproduced on 2026-10-30 (worktree base `5a8b14691`). No hook can enforce it. The worktree creator owns it. The base matches the default branch: on 2026-11-02 `git rev-parse master` and `git rev-parse origin/master` both give `5a8b146917ca9ae72bf75161e39337d2ef34e280`, and `git symbolic-ref refs/remotes/origin/HEAD` gives `refs/remotes/origin/master`, so the agent worktrees were cut from the default branch's commit, not from `experiments`. Which ref the harness actually reads is not verified. The smallest candidate step is `git remote set-head origin experiments` (undo: `git remote set-head origin master`); it needs the user's approval and has not been run.
 
 The status is not changed here. The user decides whether cause A plus open cause B is `fixed` or `mitigated`.
+
+## Decision 2026-11-03
+
+**Decision (made by the main session on the operator's behalf):** cause A is fixed, so this record is set to `fixed`. Cause B is filed as its own bug, `892d22784432cf8b` (`docs/issues/2026-11-03-agent-worktrees-are-cut-from-origin-head-not-experiments.md`), which stays `open`.
+
+**Facts re-checked 2026-11-03:** in `/home/marius/work/claude/claude-plugins`, `git show <sha> | git patch-id --stable` gives `d122a6a45c035ecf08eb2e4431713e3bdfbbace8` for `968f7b9` and `edce26168b0c3f94c5ec3e6b4c9958600fa0e1ab` for `2dca6fa`, the values in the table above. Both are ancestors of `origin/main` (`merge-base --is-ancestor`). In this repository `git symbolic-ref refs/remotes/origin/HEAD` gives `refs/remotes/origin/master`, and `origin/master` and `master` are both `5a8b14691`.
+
+**Reason:** this record's title and its cause A describe the activate race, and the race is fixed and shipped. Cause B has a different owner (the worktree creator, not the hook) and a different candidate fix. If it stayed in this file, a record whose own subject is closed would be kept open.
+
+**Cost if wrong:** if the bootstrap still tells a worktree subagent to `activate` on some profile (the unexplained 2026-10-29 observation), parallel subagents race again, and no open record reports it.
+
+**Reopen trigger:** a subagent whose cwd is a linked worktree receives the `activate` bootstrap text, or a write whose `workspace=` pin resolves to its own worktree root is denied by `worktree-write-guard.mjs`.
+
+**Not run:** the candidate fix for cause B, `git remote set-head origin experiments`, needs the operator. See bug `892d22784432cf8b`.
+
+## Fix provenance
+
+- **SHA:** `claude-plugins:968f7b9cf88a435af984697ca5252bd5d96423b8` (`origin/main`)
+- **patch-id:** `d122a6a45c035ecf08eb2e4431713e3bdfbbace8`
+- **SHA:** `claude-plugins:2dca6faef2040ea58960b58ef64c0f7764828d68` (`origin/main`)
+- **patch-id:** `edce26168b0c3f94c5ec3e6b4c9958600fa0e1ab`
 
 ## References
 
