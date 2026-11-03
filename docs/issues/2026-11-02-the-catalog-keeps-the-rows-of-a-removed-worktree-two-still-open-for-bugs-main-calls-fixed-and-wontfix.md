@@ -59,6 +59,22 @@ None.
 
 Not done. Options, none chosen: `librarian(doctor, fix=prune_missing)` drops the rows under a dead root; `fix=reseat_worktree` reseats rows with no collision to their main path. Both write to the shared catalog, so each starts as a dry run and needs a decision.
 
+### Dry runs, 2026-11-03
+
+**Neither doctor fix reaches these 13 rows.** Both worktrees still have an ACTIVE overlay registration, and the librarian guide § Worktree overlay calls `reseat_worktree` the legacy fallback for rows with no active registration.
+
+- `librarian(doctor, fix=prune_missing)` in batch mode listed 9 dead roots. It marks `integration-fixes-20261024` (12 rows) and `fix-g-20261024` (1 row) `would_skip: "active worktree registration"`. The only rows it would delete belong to other projects: `whitelabel-crawler` (22 artifact rows, 97 commit rows) and `eduplanner-mobile/docs/trackers` (1 row). So `prune_missing` does not fix this bug, and its batch mode would delete rows in projects this bug does not name.
+- `librarian(merge_worktree, root=…/integration-fixes-20261024, dry_run=true)` would merge 12 shadows into their main twins. It reports 11 status conflicts, and in every one `main` and `worktree` agree (`fixed` or `mitigated`, base `open`). `9c90e767b8ae886b` maps to `13cffc336e09af35` with no conflict listed, so its `open` is the fork-time base, not a worktree change. The merge is delta-only, so it should not reopen the main row. Nothing is remapped and nothing is suspicious.
+- `librarian(merge_worktree, root=…/fix-g-20261024, dry_run=true)` merges nothing. It reports a `reseat_collision`: shadow `3822f951e9d78ddf` against main `5ee9a523ac9a7cde`. So this root needs `abandon=true`, which drops the shadow and marks the registration abandoned.
+
+**Proposed fix (needs the operator, because it writes the shared catalog and cannot be undone through git):**
+
+1. `librarian(action="merge_worktree", root="/home/marius/work/claude/codescout.worktrees/integration-fixes-20261024")`
+2. `librarian(action="merge_worktree", root="/home/marius/work/claude/codescout.worktrees/fix-g-20261024", abandon=true)`
+3. Re-run the reproduction query: expect 0 rows.
+
+Still not explained: why the overlay registrations stayed active after the worktrees were removed. A worktree removal that does not merge or abandon its registration would leave this state every time.
+
 ## Tests added
 
 N/A. Nothing is fixed.
