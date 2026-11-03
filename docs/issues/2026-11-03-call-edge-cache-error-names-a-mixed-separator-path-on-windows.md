@@ -11,7 +11,7 @@ closed: 2026-11-03
 opened: 2026-11-03
 owner: marius
 severity: low
-unverified: 'Verified under wine 11.20 (x86_64-pc-windows-gnu) only. Not yet seen green on a windows-latest MSVC runner: the fix is not pushed.'
+unverified: 'CLEARED 2026-11-03. Was: verified under wine 11.20 (x86_64-pc-windows-gnu) only, and not seen green on a windows-latest MSVC runner because the fix was not pushed. CI run 41592188045 on origin/experiments at 3eda66bcb: all 33 jobs succeeded, including Test (windows-latest / default), Test (windows-latest / no-features), Test (windows-latest / local-embed) and Windows-gnu cross (MinGW + wine).'
 ---
 
 # BUG: on Windows the call-edge cache error names the store as `<root>\.codescout/call_edges.db`, so `a_cache_error_names_the_store_and_the_step` fails on three Windows CI lanes

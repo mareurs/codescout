@@ -13,7 +13,7 @@ closed: 2026-11-02
 opened: 2026-11-02
 owner: marius
 severity: low
-unverified: The CI run after d1b47ab5b was red on Windows (compile error in this fix's own tests); the repair b3889b9f9 was checked under wine only and is not pushed. The real windows-latest jobs have not run on it. The stale rows (13 in this project) are not repaired; their cause is not established.
+unverified: 'TRACKED bad49b228663df9a. The 13 stale rows of this project are not repaired, and their cause is not established; that work is bug bad49b228663df9a. The Windows half of the earlier caveat is settled 2026-11-03: it said the repair b3889b9f9 was checked under wine only and had not run on windows-latest. CI run 41592188045 on origin/experiments at 3eda66bcb passed all 33 jobs, including the three Test (windows-latest) jobs and Windows-gnu cross.'
 ---
 
 # BUG: `doc` by id fails with a bare "No such file or directory (os error 2)" when the catalog row points into a worktree that was removed, and the main-checkout copy of the file has another id
