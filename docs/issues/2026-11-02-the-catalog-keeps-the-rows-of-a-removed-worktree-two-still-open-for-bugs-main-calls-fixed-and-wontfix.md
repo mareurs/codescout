@@ -13,7 +13,7 @@ closed: 2026-11-03
 opened: 2026-11-02
 owner: marius
 severity: low
-unverified: 'Only the symptom is repaired: the 13 stale rows are gone (query: 0). The cause is not addressed: nothing merges or abandons an overlay registration when its worktree is removed, and doctor has no report-mode check for a registration whose root is gone. A new worktree removal may recreate the state.'
+unverified: 'The 13 stale rows are gone (query: 0), and doctor now REPORTS the cause''s precondition (check active_worktree_registration_root_missing, commit aaee481e1). Not addressed: nothing merges or abandons an overlay registration when its worktree is removed, so a new removal may recreate the state until someone reads the report. Not yet run against the live catalog: the MCP server still ran the old binary when the check was committed.'
 ---
 
 # BUG: the catalog keeps the rows of a removed worktree (13 in this project), two of them still `open` for bugs the main checkout calls `fixed` and `wontfix`, and neither `doc(find)` nor `doctor` shows them
@@ -95,7 +95,9 @@ Related, same day: `repair_frontmatter_id` (commit `1d5d2e246`) rewrote the `id:
 
 ## Tests added
 
-N/A. Nothing is fixed.
+No test covers the cause: nothing merges a registration when its worktree is removed. One test covers the detection:
+
+**Detection, added 2026-11-03 (commit `aaee481e1`).** `doctor` has a new informational check, `active_worktree_registration_root_missing`. It lists each ACTIVE `worktree_registration` of this project whose root is gone from disk, and names both remedies (`merge_worktree`, or `abandon=true`). Test: `only_an_active_registration_with_a_gone_root_of_this_project_fires`. It was red with 0 rows before the check existed. Controls: a live root, a `merged` registration, and another project's registration. None of them fires. The check reports only; it has no `fix=`, because merging keeps history and abandoning deletes it.
 
 ## Workarounds
 
