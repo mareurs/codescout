@@ -1,7 +1,7 @@
 ---
 id: '93a467ab0eb9bbf4'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: merge_worktree reseats a worktree-born row onto a main-checkout path where no file exists, so each reseated row becomes a missing_file defect'
 owners:
 - marius
@@ -9,11 +9,13 @@ tags:
 - cluster/unclassified
 - worktree-overlay
 - librarian
+closed: 2026-11-03
 opened: 2026-11-03
 owner: marius
 related:
 - bad49b228663df9a
 severity: medium
+unverified: 'The code fix and its regression test pass the gate, but the live MCP server has not been rebuilt with it, and the 78 rows reseated before the fix still point at missing files (missing_file 78 in doctor): this fix stops new cases, it does not repair those. merge_one (the shadow-row path) was not checked for the same gap.'
 ---
 
 # BUG: merge_worktree reseats a worktree-born row onto a main-checkout path where no file exists, so each reseated row becomes a missing_file defect
@@ -60,14 +62,16 @@ None yet.
 
 ## Fix
 
-Open. Candidate directions, none chosen:
+`reseat_one` now tests `main_path.exists()` after the collision check and before the dry-run return. When no file exists it pushes a `reseat_target_missing` conflict (with `shadow`, `main_path` and a hint), leaves the row untouched and returns `Ok(None)`. The dry run reports the same conflict, so the operator sees the cost before choosing `merge` or `abandon`.
 
-- In `reseat_one`, when `main_path` does not exist, report the row under a new `reseat_target_missing` conflict and leave it untouched, as `reseat_collision` does.
-- Keep the reseat but report the missing targets in the dry run, so the operator sees the cost before choosing `merge` or `abandon`.
+## Fix provenance
+
+- **SHA:** `e3d6412baa0a26bf543ab815101457e40fb78993` (`experiments`)
+- **patch-id:** `87babf5ee3d2a30f4d31a2051912f8a6e22ab92b`
 
 ## Tests added
 
-N/A. Nothing is fixed.
+`a_worktree_born_row_whose_main_path_has_no_file_is_left_untouched` (`src/librarian/tools/merge_worktree.rs`). It was red before the fix: the dry run listed the row under `reseated` with no conflict. It runs the dry run and the real run, and checks that the worktree row stays and no row is written at the main path. `new_worktree_artifact_reseats_to_main_path` now uses real files (`real_wt_ctx`), so it still proves that a reseat happens when the file exists. Gate: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
 
 ## Workarounds
 
