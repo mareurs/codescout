@@ -244,6 +244,8 @@ instructions, not open debt** — the SHA in each was correct when written. Do n
 them. Measured 2026-08-19: 10 of 63 had nonetheless lost their SHA to a rebase, which is
 why the patch-id now rides alongside.)
 
+When `doc(action="update")` sets a bug to `fixed` or `mitigated` and the file as written has no recoverable pair, the response carries `fix_anchor_advisory` naming what is missing. The write still happens; the advisory informs, and archiving stays refused until the pair or `no_fix_commit:` is present.
+
 ### Archiving a bug or tracker — through the catalog, never git mv
 <!-- serves: doc.move(path~docs/issues/), doc.move(path~docs/trackers/) -->
 

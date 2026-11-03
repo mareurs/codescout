@@ -814,6 +814,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         super::doctor::refuse_unanchored_archive(&row.kind, &row.status, &new_content, "update")?;
     }
 
+    // A call that CLOSES a bug without leaving the recoverable fix pair is told so in the
+    // response. It informs and never refuses: the write below always happens. Same predicate as
+    // the archive guard above (`doctor::fix_anchor_gap`), checked against the file as written.
+    // docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+    let fix_anchor_advisory = patch
+        .status
+        .as_deref()
+        .and_then(|s| super::doctor::closing_advisory(&row.kind, s, &new_content));
+
     // Validate the params patch against the stored schema BEFORE writing the
     // file or upserting the row. merge_params (below) re-validates and persists;
     // pre-checking here keeps the update atomic — a schema violation must abort
@@ -939,6 +948,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     };
 
     let mut out = json!({"id": a.id, "updated": true});
+    if let Some(t) = fix_anchor_advisory {
+        out["fix_anchor_advisory"] = json!(t);
+    }
     if let Some(c) = committed {
         out["committed"] = json!(c);
     }
@@ -4183,6 +4195,124 @@ text
         .expect("the guard reads the file AS IT WILL BE WRITTEN, not as it was");
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_eq!(row.status, "archived");
+    }
+
+    #[tokio::test]
+    async fn closing_an_unanchored_bug_returns_the_advisory_and_still_writes() {
+        for status in ["fixed", "mitigated"] {
+            let tmp = TempDir::new().unwrap();
+            let ctx = mk_ctx(tmp.path().to_path_buf());
+            let id = mk_bug(&ctx, "bug", "open", "## Summary\n\nNo pointer.\n").await;
+            let v = call(
+                &ctx,
+                serde_json::json!({"id": id, "patch": {"status": status}}),
+            )
+            .await
+            .unwrap();
+            assert_eq!(v["updated"], serde_json::json!(true));
+            let adv = v["fix_anchor_advisory"].as_str().expect("advisory present");
+            assert!(
+                adv.contains("no fix anchor") && adv.contains("tracker-conventions"),
+                "{adv}"
+            );
+            let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+            assert_eq!(row.status, status, "the write must still happen");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_top_level_status_spelling_also_gets_the_advisory() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_bug(&ctx, "bug", "open", "## Summary\n\nNo pointer.\n").await;
+        let v = call(&ctx, serde_json::json!({"id": id, "status": "fixed"}))
+            .await
+            .unwrap();
+        assert!(v["fix_anchor_advisory"].is_string(), "{v}");
+    }
+
+    #[tokio::test]
+    async fn closing_and_adding_provenance_in_one_call_is_silent() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_bug(&ctx, "bug", "open", "## Summary\n\nFixed.\n").await;
+        let v = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {
+                "status": "fixed",
+                "body_edits": [{"heading": "## Summary", "action": "insert_after", "content": FIX_PROVENANCE}]
+            }}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(v["updated"], serde_json::json!(true));
+        assert!(v.get("fix_anchor_advisory").is_none(), "{v}");
+    }
+
+    #[tokio::test]
+    async fn an_empty_no_fix_commit_still_gets_the_advisory_and_a_real_one_does_not() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_bug(&ctx, "bug", "open", "## Summary\n\nDoc note.\n").await;
+        let empty = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"status": "fixed", "extra": {"no_fix_commit": ""}}}),
+        )
+        .await
+        .unwrap();
+        assert!(empty["fix_anchor_advisory"].is_string(), "{empty}");
+
+        let real = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {
+                "status": "fixed",
+                "extra": {"no_fix_commit": "mitigation was a doc note; nothing was committed"}
+            }}),
+        )
+        .await
+        .unwrap();
+        assert!(real.get("fix_anchor_advisory").is_none(), "{real}");
+    }
+
+    #[tokio::test]
+    async fn re_setting_fixed_on_an_unanchored_fixed_bug_fires_again() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_bug(&ctx, "bug", "fixed", "## Summary\n\nNo pointer.\n").await;
+        let v = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"status": "fixed"}}),
+        )
+        .await
+        .unwrap();
+        assert!(v["fix_anchor_advisory"].is_string(), "{v}");
+    }
+
+    #[tokio::test]
+    async fn updates_that_do_not_close_a_bug_are_silent() {
+        // `mk_bug` writes every record to one fixed path, so each case gets its own root.
+        let cases: [(&str, &str, serde_json::Value); 4] = [
+            ("bug", "fixed", serde_json::json!({"title": "renamed"})),
+            ("bug", "open", serde_json::json!({"status": "wontfix"})),
+            (
+                "bug",
+                "open",
+                serde_json::json!({"status": "investigating"}),
+            ),
+            ("tracker", "active", serde_json::json!({"status": "fixed"})),
+        ];
+        for (kind, start, patch) in cases {
+            let tmp = TempDir::new().unwrap();
+            let ctx = mk_ctx(tmp.path().to_path_buf());
+            let id = mk_bug(&ctx, kind, start, "## Summary\n\nNo pointer.\n").await;
+            let v = call(&ctx, serde_json::json!({"id": id, "patch": patch}))
+                .await
+                .unwrap();
+            assert!(
+                v.get("fix_anchor_advisory").is_none(),
+                "{kind} {start} {patch}: {v}"
+            );
+        }
     }
 
     /// Regression for
