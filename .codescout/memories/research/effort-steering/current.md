@@ -1,3 +1,13 @@
+# Effort steering — public-oracle pilot RUNNING, 2026-11-03
+
+Current work in retained V=/home/marius/.codex/worktrees/615e/codescout, branch research/fixed-acceptance-population-20261101. Report docs/research/2026-11-03-public-oracle-transfer.md catalog4e668d6fa37faf69. Read research/effort-steering/public-oracle-transfer-20261103 for recovery. Task1 committed109bbc1ae (design5a49d2a4e), inputs frozen, N original/custom controls calibrated and independently reparsed; R unsupported remains in original denominator, so original GO impossible. Conditional N-L/N-X comparison RUNNING via driver.py campaign in private P=/home/marius/.cache/codescout-resident/codescout/public-oracle-transfer-20261103. Background record /tmp/codescout-bg/1745637-bb3fcc89-bg_00000189.json; do not restart a started/incomplete slot or replace it.
+
+Prior client25.231075399999999820/40, remaining14.768924600000000180 before this phase; phase9.60, percall0.80+reserve0.40. Actual new charges are not settled at this memory snapshot; read receipts/audit, never assume zero from the preflight. Eligible order N-L,N-X, each initial plus at most one fresh same-effort exact-parent repair triggered ONLY by fixed public failure. Hidden/original never trigger. Protocol/source/infra/unknown charge stops further payment. No R model slots, retries, replacement tasks/cases or escalation. No general promotion or statistical parity claim. Native/review/CPU/invoices unmeasured.
+
+Task1: Nu source-built wrapper restores bundle prerequisite before test/check. Original base0/1,gold1/1; custom base1/9,gold9/9; R custombase3/6,gold3/6 and originalbasefail/goldpass.37focusedtests GREEN; strongreview10mutants4kill6survive fixed with actual consumers; latest11actualmutantsallassertionkilled0errors/exactrestores. Fullprojectgate837s0 all5lanes with stated exclusions. Preserve P(unsealed), V/nativeledger, images/CLI/helpers/oldseals. Never LSP in P or actors. Only owned generated control source copies archived after GNUfind+sha256sum/GNUtarcompare,45069regular entries48literal links preserved. No push/merge. Historical entries below are superseded for active phase/state, not erased.
+
+## Historical current entries retained verbatim — prior closed phase
+
 # Effort steering — current closed state, 2026-11-03 (byte reference repair)
 
 Latest: report docs/research/2026-11-03-byte-reference-repair.md catalog70c3e752b24e843d in V=/home/marius/.codex/worktrees/615e/codescout. Read research/effort-steering/byte-reference-repair-20261103 for exact recovery. RootSID01a15ca9-f939-7603-acb5-01c6b02f68e2. Local commits only; preserve branch/worktree/native ledgers, no merge/push.
