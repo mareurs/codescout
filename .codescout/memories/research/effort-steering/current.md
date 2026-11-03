@@ -1,3 +1,15 @@
+# Effort steering — current closed state, 2026-11-03 (byte reference repair)
+
+Latest: report docs/research/2026-11-03-byte-reference-repair.md catalog70c3e752b24e843d in V=/home/marius/.codex/worktrees/615e/codescout. Read research/effort-steering/byte-reference-repair-20261103 for exact recovery. RootSID01a15ca9-f939-7603-acb5-01c6b02f68e2. Local commits only; preserve branch/worktree/native ledgers, no merge/push.
+
+One public native-byte GNU mismatch plus ONE low repair succeeds on the known U-L artifact: original65/65, prior private1/1, public+six actor-hidden byte cases7/7. Full model path initial+repair0.23240219999999999 versus recorded single xhigh0.2708099,14.18% cheaper; CLI338170 versus144782ms, slower. This is EXPOSED and xhigh lacks equal extra repair/reference access. Earlier six-slot pilot remains unchanged; general mechanism/promotion remains open/HOLD.
+
+Latest phase0.12803399999999998. Cumulative25.231075399999999820/40; remaining14.768924600000000180. No unknown charge/retry/replacement, no model job or next paid phase registered. Native/review/CPU/invoices unmeasured. Next: NEW prospective tasks, public-oracle/case-selection bounds, equal reference/repair access, independent acceptance and full costs. Do not replay exposed U as fresh transfer.
+
+R=/home/marius/.cache/codescout-resident/codescout/byte-reference-repair-20261103 SEALED SHA6ed6ce32e28d06c53dd7abedc74add35c06be8e74bd1b7b7c668ba6dbfd1fee1;131 physical regular files/0 symlinks. Publication899109bd65ad950f8e3a5b727fdde02d5d3148e9 patch-id8d9a7a459835555ab202cd83b25c7bee309b85d4. Canonical python3 -B R/close.py verify, replace R with literal path. Only repeat-verification.log mutable. Never LSP in sealed roots/live actors. Keep dependencies in R/freeze.json and all prior roots, V, old3940 pilot, pinned CLI, T/S helpers and OLDN original compat path. Eight phase-recorded adapter containers absent; new actor retained. Prior F closure unchanged. Full gate fresh0 (783s) with declared coverage limits; new12+existing20+budget9 focused tests pass. Actual reviewer5 mutants2kill3survive; original3 survivors reapplied all killed/restored; no separate Minor. Full details/rulings in report.
+
+## Historical current entries retained verbatim — superseded for budget and latest state
+
 # Effort steering — current closed state, 2026-11-03
 
 Read docs/trackers/effort-steering-current.md catalogae571a0abfaf9e7f in retained V=/home/marius/.codex/worktrees/615e/codescout. Latest result docs/research/2026-11-02-finite-cohort-results.md catalogadf7fc6b1e7b3067. Detailed recovery: research/effort-steering/finite-cohort-20261102. RootSID01a15ca9-f939-7603-acb5-01c6b02f68e2; no merge/push.
