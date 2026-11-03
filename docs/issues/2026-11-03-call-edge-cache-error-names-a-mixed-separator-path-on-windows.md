@@ -1,15 +1,17 @@
 ---
 id: '1ca433a98628cd17'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: on Windows the call-edge cache error names the store as `<root>\.codescout/call_edges.db`, so `a_cache_error_names_the_store_and_the_step` fails on three Windows CI lanes'
 tags:
 - cluster/unclassified
 - windows
 - call_graph
+closed: 2026-11-03
 opened: 2026-11-03
 owner: marius
 severity: low
+unverified: 'Verified under wine 11.20 (x86_64-pc-windows-gnu) only. Not yet seen green on a windows-latest MSVC runner: the fix is not pushed.'
 ---
 
 # BUG: on Windows the call-edge cache error names the store as `<root>\.codescout/call_edges.db`, so `a_cache_error_names_the_store_and_the_step` fails on three Windows CI lanes
@@ -53,11 +55,20 @@ None needed: the panic text shows the mixed separator directly.
 
 ## Fix
 
-Not done yet.
+`cache_error` now joins the path one segment at a time: `root.join(".codescout").join("call_edges.db")`. Every separator in the message is then the platform's own.
+
+## Fix provenance
+
+- **SHA:** `6b4bfded88c0459c31c1553b750bb325bba4a301` (`experiments`, not pushed)
+- **patch-id:** `4ca59027d31c0dfb03fd45aaae7a8045d9824e75`
 
 ## Tests added
 
-None yet.
+`a_cache_error_names_the_store_and_the_step` now asserts the store path built from `std::path::MAIN_SEPARATOR`, so it is right on every platform.
+
+- **Red** under wine with the old `cache_error`: `expected /proj\.codescout\call_edges.db in: call_graph: reading the call-edge cache at /proj\.codescout/call_edges.db failed: no such table: call_edges`.
+- **Green** under wine after the fix, and on Linux. `./scripts/gate.sh` green: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, 5993 + 8844 tests passed.
+- On Linux the new assertion passes with both the old and the new code, so only a Windows run can catch a regression.
 
 ## Workarounds
 

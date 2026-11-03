@@ -73,6 +73,8 @@ Not done. Options, none chosen: `librarian(doctor, fix=prune_missing)` drops the
 2. `librarian(action="merge_worktree", root="/home/marius/work/claude/codescout.worktrees/fix-g-20261024", abandon=true)`
 3. Re-run the reproduction query: expect 0 rows.
 
+**Read in the code 2026-11-03, so step 3's expectation rests on the source, not only on the tool description:** `src/librarian/tools/merge_worktree.rs`. The `abandon` branch runs `DELETE FROM artifact WHERE <under root>` and then sets the registration to `abandoned` (lines 86-91). The merge path calls `merge_one` per shadow, and `merge_one` ends with `DELETE FROM artifact WHERE id=?1` for the shadow inside its transaction (line 468), then the registration becomes `merged` (line 146). So both calls remove the rows this bug counts. Not run against this catalog.
+
 Still not explained: why the overlay registrations stayed active after the worktrees were removed. A worktree removal that does not merge or abandon its registration would leave this state every time.
 
 ## Tests added
