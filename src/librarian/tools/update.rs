@@ -590,6 +590,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let original = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx))
         .text_for_write(&full)
         .map_err(crate::librarian::read_door::ReadError::into_anyhow)?;
+    // A file with no frontmatter block (a zero-byte leftover of a failed create) would be
+    // re-serialized from a default frontmatter: an empty block while the row keeps the id and
+    // kind, so doctor's id check flags it and `doc(get)` disagrees with the file. Seed the block
+    // with the identity the catalog row already holds; the patch applies on top of it.
+    let original = if crate::librarian::frontmatter::parse(&original)?.0.is_none() {
+        let seed = crate::librarian::frontmatter::Frontmatter {
+            id: Some(row.id.clone()),
+            kind: Some(row.kind.clone()),
+            ..Default::default()
+        };
+        crate::librarian::frontmatter::write(&seed, &original)
+    } else {
+        original
+    };
     // A bug that becomes `fixed`, `mitigated` or `wontfix` must carry the day it closed:
     // `tests/issue_frontmatter.rs` refuses `status: fixed` without `closed: YYYY-MM-DD`, and the
     // bug template asks for it on all three. The server knows the date, so it writes it rather
@@ -2907,6 +2921,42 @@ text
         .await
         .unwrap_err();
         assert!(err.to_string().contains("unknown id"));
+    }
+
+    #[tokio::test]
+    async fn updating_a_file_that_lost_its_frontmatter_restores_the_catalog_identity() {
+        // The shape a failed `create` used to leave: a catalog row and a zero-byte
+        // file. A write that re-serialized a default frontmatter put an empty block
+        // there while the row kept the id and kind (BUG 2026-10-29).
+        for patch in [
+            serde_json::json!({"body": "restored body"}),
+            serde_json::json!({"status": "active"}),
+        ] {
+            let tmp = TempDir::new().unwrap();
+            let ctx = mk_ctx(tmp.path().to_path_buf());
+            let v = crate::librarian::tools::create::call(
+                &ctx,
+                serde_json::json!({
+                    "repo": "r", "rel_path": "lost.md",
+                    "kind": "spec", "title": "Lost", "body": "old body"
+                }),
+            )
+            .await
+            .unwrap();
+            let id = v["id"].as_str().unwrap().to_string();
+            let path = tmp.path().join("lost.md");
+            std::fs::write(&path, "").unwrap();
+
+            call(&ctx, serde_json::json!({"id": id, "patch": patch}))
+                .await
+                .unwrap();
+
+            let content = std::fs::read_to_string(&path).unwrap();
+            let (fm, _) = crate::librarian::frontmatter::parse(&content).unwrap();
+            let fm = fm.unwrap_or_else(|| panic!("no frontmatter for {patch}:\n{content}"));
+            assert_eq!(fm.id.as_deref(), Some(id.as_str()), "{patch}:\n{content}");
+            assert_eq!(fm.kind.as_deref(), Some("spec"), "{patch}:\n{content}");
+        }
     }
 
     #[tokio::test]
