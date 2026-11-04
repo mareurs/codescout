@@ -13215,6 +13215,59 @@ mod guide_hint_tests {
             COLD_CEILING as i64 - total as i64
         );
     }
+    /// Prices `librarian.doctor`, the largest per-shape draw in the corpus (CIW-13).
+    ///
+    /// Neither `declared_sections_are_within_the_size_cap` (per section) nor
+    /// `a_p50_session_stays_under_the_committed_emission_byte_ceiling` (six `doc.*` shapes)
+    /// sees it: `doctor` draws § *Reference* (2,486 B, 14 B under its cap) AND § *doctor
+    /// repairs* (2,338 B), 4,824 B of section bytes, 1.99x the largest `doc.*` shape. This
+    /// fixture calls `librarian(action="doctor")` on a warm ledger and counts every block
+    /// after the primary, the fixture root normalised as in the sibling fixtures.
+    ///
+    /// `DOCTOR_CEILING` is DERIVED, not chosen: the measured total plus the 128 B margin the
+    /// sibling ceilings use. Raising it is a spec amendment, not a fix: compress the section
+    /// that grew.
+    #[tokio::test]
+    async fn librarian_doctor_stays_under_its_committed_emission_byte_ceiling() {
+        const DOCTOR_CEILING: usize = 5_735;
+        const ROOT_TOKEN: &str = "<ROOT>";
+        let (dir, server) = make_server().await;
+        let mut roots = vec![
+            dir.path().to_string_lossy().into_owned(),
+            to_forward_slash(dir.path()),
+        ];
+        if let Ok(c) = std::fs::canonicalize(dir.path()) {
+            roots.push(c.to_string_lossy().into_owned());
+            roots.push(to_forward_slash(&c));
+        }
+        roots.sort_by_key(|r| std::cmp::Reverse(r.len()));
+        roots.dedup();
+        let out =
+            call_tool_checked(&server, "librarian", json!({"action": "doctor"}), "doctor").await;
+        let blocks = guide_blocks(&out);
+        // The discriminator: both sections must really have been delivered, or the total
+        // prices some other shape.
+        assert!(
+            blocks.iter().any(|b| b.contains("doctor repairs")),
+            "doctor must draw its repairs section, or this fixture prices another shape"
+        );
+        assert!(
+            blocks
+                .iter()
+                .any(|b| b.contains("librarian(action=...) — Reference")),
+            "doctor must draw the Reference section"
+        );
+        let total: usize = blocks
+            .iter()
+            .map(|b| strip_fixture_roots(b, &roots, ROOT_TOKEN).0.len())
+            .sum();
+        assert!(
+            total <= DOCTOR_CEILING,
+            "librarian.doctor emitted {total} B after the primary (ceiling {DOCTOR_CEILING} B, \
+             margin {} B). Raising DOCTOR_CEILING is a spec amendment, not a fix.",
+            DOCTOR_CEILING as i64 - total as i64
+        );
+    }
 
     /// Once per session, not once per call — the opener is subject to the same
     /// ledger dedup as every other topic.
