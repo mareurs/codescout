@@ -18,6 +18,11 @@ class Operation:
     atomic: bool
     is_child: bool
     raw_input: str | None
+    # The write targets that are a pure function of this call (`static_targets`), filled by the
+    # reader wrapper so the history cache stores them (bug 20927ccfe293c34e, CIW-10). None means
+    # "not computed": the scan derives them itself, so an entry written without them still reads
+    # right. The doc tool's catalog-id targets are never stored here: they follow a live catalog.
+    targets: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

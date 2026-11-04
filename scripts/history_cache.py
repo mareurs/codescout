@@ -50,7 +50,7 @@ PICKLE_PROTOCOL = 4
 
 # The modules whose bytes decide what a reader returns. A change to any of them is a new key.
 _CODE_FILES = ("history_cache.py", "claude_history.py", "codex_history.py",
-               "provenance_records.py", "session_context.py")
+               "provenance_records.py", "session_context.py", "write_targets.py")
 
 PRUNE_AFTER_SECONDS = 60 * 24 * 60 * 60
 PRUNE_EVERY_SECONDS = 24 * 60 * 60

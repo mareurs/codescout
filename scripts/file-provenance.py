@@ -98,7 +98,7 @@ from history_cache import cache_dir as history_cache_dir, caching as caching_rea
 from write_targets import (
     ARTIFACT_WRITE_ACTIONS, BASH_WRITE_PATTERNS, CS_WRITE_TOOLS, NATIVE_WRITE_TOOLS, PY_ASSIGN,
     PY_WRITE_LITERAL, PY_WRITE_VAR, RELOCATORS, _Q, _TARGET_NAMES, _operands,
-    patch_write_targets, python_write_targets, relocation_targets, static_targets,
+    patch_write_targets, python_write_targets, relocation_targets, static_targets, with_targets,
 )
 
 # Calls whose result says nothing about whether the write landed. A shell command that exits
@@ -764,10 +764,12 @@ def scan_provenance(root: Path, environ: dict[str, str], modified_since: float |
     codex_files = _modified_since(codex_files, modified_since)
     # Each file's decoded history is stored once and reused while the file is unchanged: see
     # `history_cache`. The cache is keyed on this call's `environ`, so a test that hands in its
-    # own HOME gets its own cache.
+    # own HOME gets its own cache. The reader stores each operation's `static_targets` with it
+    # (`with_targets`), so a warm scan does not re-derive them; the doc tool's catalog-id
+    # targets are not stored, and `catalog_targets` reads them live below.
     cache = history_cache_dir(environ)
-    read_claude = caching_reader(read_claude_history, cache)
-    read_codex = caching_reader(read_codex_history, cache)
+    read_claude = caching_reader(lambda p: with_targets(read_claude_history(p)), cache)
+    read_codex = caching_reader(lambda p: with_targets(read_codex_history(p)), cache)
     batch = merge_history_batches([
         HistoryBatch([], claude_gaps + codex_gaps),
         *(read_claude(path) for path in claude_files),
@@ -797,8 +799,9 @@ def scan_provenance(root: Path, environ: dict[str, str], modified_since: float |
         relative_cs = op.name.startswith("mcp__codescout__")
         pin = op.input.get("workspace")
         pinned = isinstance(pin, str) and Path(pin).is_absolute()
-        targets = [] if op.atomic and op.outcome == "no-write-refused" else list(
-            write_targets(op.name, op.input, root))
+        targets = [] if op.atomic and op.outcome == "no-write-refused" else (
+            list(op.targets if op.targets is not None else static_targets(op.name, op.input))
+            + list(catalog_targets(op.name, op.input)))
         capable = (op.name in CS_WRITE_TOOLS or op.name in NATIVE_WRITE_TOOLS
                    or op.name == "apply_patch"
                    or op.name in ("mcp__codescout__doc",

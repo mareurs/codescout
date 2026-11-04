@@ -9,8 +9,11 @@ Every name here is re-exported by file-provenance.py, because tests read them th
 """
 from __future__ import annotations
 
+import dataclasses
 import re
 from typing import Iterator
+
+from provenance_records import HistoryBatch
 
 # Tool calls whose input names a write TARGET. Read tools are deliberately absent:
 # including one would make every reader an author.
@@ -254,3 +257,15 @@ def static_targets(name: str, inp: object) -> Iterator[str]:
                     yield m.group(1)
             yield from relocation_targets(cmd)
             yield from python_write_targets(cmd)
+
+
+def with_targets(batch: HistoryBatch) -> HistoryBatch:
+    """`batch` with each operation's `static_targets` stored on it, for the history cache.
+
+    Gaps are untouched. A non-dict `input` (a malformed transcript line) stores `()`, which is
+    what `static_targets` yields for it. The doc tool's catalog-id targets are NOT stored: they
+    are read live at scan time (`catalog_targets` in file-provenance.py).
+    """
+    return dataclasses.replace(batch, operations=[
+        dataclasses.replace(op, targets=tuple(static_targets(op.name, op.input)))
+        for op in batch.operations])
