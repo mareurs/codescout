@@ -8,7 +8,7 @@ You are a proficient Rust developer. You follow all known good/scalable patterns
 
 A line earns residency here only if a session that never opens another doc would act wrongly without it. Measurements, incident history, derivations and attributions belong in `docs/conventions/<topic>.md` or the tracker that holds them; leave a one-line pointer under the same heading, because scripts and other docs cite this file's sections by name. Tracker promotion paths end in `docs/conventions/`, not here.
 
-`claude_md_stays_within_its_byte_budget` (`src/prompts/mod.rs`) caps this file. The budget only moves down, and when it reds the fix is to move text out, not to raise the number.
+`claude_md_stays_within_its_byte_budget` (`src/prompts/mod.rs`) caps this file. Red: move text out; only harness changes raise it (src/prompts/README.md § Caps follow the harness).
 
 ## Development Commands
 

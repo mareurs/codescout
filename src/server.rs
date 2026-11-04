@@ -5377,9 +5377,10 @@ mod tests {
     /// a byte comparison over-counted an em-dash-dense surface and stayed green while
     /// shipping truncated.
     ///
-    /// **Do not raise this number. Find the bytes.** When a tool needs a new parameter,
+    /// **Do not raise this number to pass a red. Find the bytes.** When a tool needs a new parameter,
     /// pay for it — trim a param description that duplicates `get_guide`, or drop prose
-    /// the schema does not need. Lower it whenever a trim frees room.
+    /// the schema does not need. Lower it whenever a trim frees room. A raise needs a harness
+    /// reason, recorded in the raising commit (`src/prompts/README.md` § *Caps follow the harness*).
     ///
     /// Spec: `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`.
     /// Measured 2026-08-18 by `tool_surface_report_lengths` against this harness:
@@ -6059,7 +6060,8 @@ mod tests {
              `cargo test --lib tool_surface_report_lengths -- --nocapture` for the \
              per-tool map. If the addition is genuinely owed, raising the budget IS \
              allowed: set it to the exact measured total and add an entry to \
-             `TOOL_SURFACE_CHAR_BUDGET`'s log saying what the bytes bought. See \
+             `TOOL_SURFACE_CHAR_BUDGET`'s log saying what the bytes bought and the harness \
+             reason (src/prompts/README.md § Caps follow the harness). See \
              docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md.",
             rows.len(),
             TOOL_SURFACE_CHAR_BUDGET,

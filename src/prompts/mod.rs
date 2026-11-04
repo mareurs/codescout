@@ -2424,6 +2424,8 @@ mod tests {
     /// **The budget is a decision, not a measurement of today.** `F-12` of the same log records the
     /// failure mode: a budget re-set to each new total is a ratchet that never brakes. So this number
     /// is lowered in the commit that moves text out, and is never raised to make a red go away. It
+    /// rises only for a harness reason recorded in the raising commit (`src/prompts/README.md`
+    /// § *Caps follow the harness*). It
     /// is the measured size at the commit that last lowered it, rounded up to 100 B.
     ///
     /// The decision lives in [`claude_md_budget_verdict`] so the boundary and the refusal text are
@@ -2438,8 +2440,9 @@ mod tests {
     ///
     /// The refusal names the next action a session adding text can actually perform — move the
     /// text out, or pay for it with equal bytes in the same commit — because the party who meets
-    /// this red is exactly the one holding the new text. Raising the budget is named as the
-    /// move NOT to make.
+    /// this red is exactly the one holding the new text. Raising the budget to make the red pass is
+    /// named as the move NOT to make; a raise needs a harness reason (README § *Caps follow the
+    /// harness*).
     fn claude_md_budget_verdict(path: &std::path::Path, budget: usize) -> Result<(), String> {
         let len = std::fs::metadata(path)
             .map_err(|e| format!("cannot stat {}: {e}", path.display()))?
@@ -2460,7 +2463,8 @@ mod tests {
          and leave a one-line pointer under the same heading (CLAUDE.md § What belongs in this \
          file). If the rule truly must be resident, remove at least as many bytes from this \
          file in the same commit. Do not raise CLAUDE_MD_BYTE_BUDGET to make this pass: it \
-         only moves down.",
+         rises only for a harness change, recorded in the raising commit \
+         (src/prompts/README.md § Caps follow the harness).",
             over = len - budget
         ))
     }
@@ -3590,7 +3594,8 @@ mod redesign_invariants {
     /// green throughout and the surface shipped truncated the whole time.
     ///
     /// If you need to add content, author a `get_guide(topic)` entry and reference it
-    /// from the slice — do not raise this number.
+    /// from the slice — do not raise this number to fit it. It rises only for a harness
+    /// change (README § *Caps follow the harness*), and never past the client's cut.
     ///
     /// **THIS IS NOT THE TIGHTEST BOUND, AND PASSING IT PROVES LITTLE.** The binding
     /// constraint is `the_tier_split_leaves_real_headroom_in_the_persistent_channel`,
@@ -3617,7 +3622,8 @@ mod redesign_invariants {
         assert!(
             chars <= STATIC_SLICE_CHAR_BUDGET,
             "static server instructions are {chars} chars ({} bytes); budget is {}. \
-             Cut content or move it to get_guide — do not raise the budget. \
+             Cut content or move it to get_guide — do not raise the budget to pass this; \
+             it rises only for a harness change (src/prompts/README.md § Caps follow the harness). \
              NOTE the unit: the client cuts at {} CHARACTERS, not bytes.",
             rendered.len(),
             STATIC_SLICE_CHAR_BUDGET,

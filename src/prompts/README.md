@@ -50,9 +50,30 @@ Read this when touching `source.md` (the single source for the `server_instructi
    Only document params that change behavior in non-obvious ways.
 6. **Prompt caching matters.** Keep section order stable between releases so the static prefix benefits from automatic caching. Don't reorganize for cosmetic reasons.
 7. **You are the consumer.** When writing or reviewing prompt changes, think as the agent who will read this mid-task. Ask: "Would this have helped me find the right tool chain naturally?" Test by simulating a realistic task and checking whether the prompt guided you to the right flow. Usage data (`usage.db`) is the ground truth — if a tool has near-zero calls despite being useful, the prompt isn't surfacing it.
-8. **1900-CHARACTER hard cap on the static slice.** The `server_instructions` slice is delivered as the MCP `initialize.instructions` field, which Claude Code silently truncates at **2048 characters** — measured 2026-08-16 by locating a live session's own cut point inside the rendered slice (byte 2092 / char 2048, mid-token). The cap is enforced by `prompts::redesign_invariants::source_md_under_cap` with `STATIC_SLICE_CHAR_BUDGET = 1900`; the remainder funds the dynamic `## Project Status` block, and `build_server_instructions` now *guarantees* the total fits by trimming that block at a line boundary with an explicit note rather than letting the client cut the Iron Laws.
+8. **1900-CHARACTER cap on the static slice.** The `server_instructions` slice is delivered as the MCP `initialize.instructions` field, which Claude Code silently truncates at **2048 characters** — measured 2026-08-16 by locating a live session's own cut point inside the rendered slice (byte 2092 / char 2048, mid-token). The cap is enforced by `prompts::redesign_invariants::source_md_under_cap` with `STATIC_SLICE_CHAR_BUDGET = 1900`; the remainder funds the dynamic `## Project Status` block, and `build_server_instructions` now *guarantees* the total fits by trimming that block at a line boundary with an explicit note rather than letting the client cut the Iron Laws.
 
-   **Two things about the old rule were wrong, and both stayed green for months.** The cap was `2200` — *above* the 2048 cliff it existed to protect. And it was compared against `String::len()`, which counts **bytes**: this surface is dense with em-dashes and arrows, so the same slice measured 2127 bytes and 2081 chars. Count characters, not bytes, and never raise the number. (BL-9, `docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md`.) When the test fails, do NOT raise the cap — author a `get_guide(topic)` entry, reference it from the slice, **and give the topic a trigger** (a tool's `relevant_guide_topic()`) or record it in `prompts::PULL_ONLY_GUIDE_TOPICS` with the reason it is pull-only. This instruction used to stop at "author the entry", and that one missing step is why 7 of 10 topics — 47,343 of 75,441 bytes, 63% of the guide corpus — fired for nothing: a guide nothing triggers is not filed, it is removed from the agent's view. `server::tests::every_guide_topic_is_triggered_xor_declared_pull_only` now fails the build rather than letting the omission pass, so the choice is forced but not made for you. Note the budget tension before reaching for a trigger: `librarian` alone is 19.9 KB and already auto-injects on a routine `artifact` call. (Don't put a literal "EDITOR NOTE" HTML comment containing the surface/end marker strings into `source.md` itself; the extractor at `src/prompts/source.rs::extract_surface` does a substring `find` and will match the comment first, breaking the slice — F-5 in `docs/trackers/archive/prompt-guide-refactor-session-log.md`.)
+   **Two things about the old rule were wrong, and both stayed green for months.** The cap was `2200` — *above* the 2048 cliff it existed to protect. And it was compared against `String::len()`, which counts **bytes**: this surface is dense with em-dashes and arrows, so the same slice measured 2127 bytes and 2081 chars. Count characters, not bytes, and never raise the number past the client's measured cut (§ *Caps follow the harness*). (BL-9, `docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md`.) When the test fails with no harness change behind it, do NOT raise the cap — author a `get_guide(topic)` entry, reference it from the slice, **and give the topic a trigger** (a tool's `relevant_guide_topic()`) or record it in `prompts::PULL_ONLY_GUIDE_TOPICS` with the reason it is pull-only. This instruction used to stop at "author the entry", and that one missing step is why 7 of 10 topics — 47,343 of 75,441 bytes, 63% of the guide corpus — fired for nothing: a guide nothing triggers is not filed, it is removed from the agent's view. `server::tests::every_guide_topic_is_triggered_xor_declared_pull_only` now fails the build rather than letting the omission pass, so the choice is forced but not made for you. Note the budget tension before reaching for a trigger: `librarian` alone is 19.9 KB and already auto-injects on a routine `artifact` call. (Don't put a literal "EDITOR NOTE" HTML comment containing the surface/end marker strings into `source.md` itself; the extractor at `src/prompts/source.rs::extract_surface` does a substring `find` and will match the comment first, breaking the slice — F-5 in `docs/trackers/archive/prompt-guide-refactor-session-log.md`.)
+
+## Caps follow the harness — when one may rise
+
+**No prompt cap in this repo is a hard cap.** Each one is calibrated to what a harness needs or tolerates, and when that changes, the cap follows. Operator ruling, 2026-11-04. This section is the one home of that rule; every "do not raise" elsewhere means *do not raise it to make a red pass* and points here.
+
+| cap | calibrated to |
+|---|---|
+| `STATIC_SLICE_CHAR_BUDGET` (`src/prompts/mod.rs`) | Claude Code's 2048-character cut of `initialize.instructions` (rule 8) |
+| `TOOL_SURFACE_CHAR_BUDGET` (`src/server.rs`) | the per-request cache-read cost of `tools/list` |
+| `CEILING` (`src/server.rs`) | the bytes a p50 session receives after its primary calls |
+| `MAX_DECLARED_SECTION_BYTES` (`src/prompts/guide_index.rs`) | the size of one auto-injected guide section |
+| `CLAUDE_MD_BYTE_BUDGET` (`src/prompts/mod.rs`) | the resident context every session pays on every turn |
+
+**A cap may rise when both conditions hold:**
+
+1. **A harness reason exists, and the commit names it.** Examples: the client's cut point moved, re-measured at a live session's own cut as BL-9 did; a rule must stay resident because no trigger reaches the act it governs (`operator-rules` OP-3 is that case); a harness reads the surface with a different limit.
+2. **The commit that raises it records the old value, the new value, and the measurement behind the new value.** Without that record, a raise cannot be told apart from the ratchet the cap exists to stop (`prompt-surface-compaction-session-log:F-12`).
+
+**Still forbidden: raising a cap only to make a red test pass.** Content pressure alone is not a harness reason. With no harness change behind it, answer a red as before: move text out, make the edit net-neutral, or move content into a triggered `get_guide` topic (rule 8). A raised cap also stays below any external limit it protects, so the static slice never passes the client's measured cut.
+
+After a raise, the ratchet resumes from the new value: lower the cap whenever a trim frees room.
 
 ## The tool-surface budget
 
@@ -60,7 +81,7 @@ Read this when touching `source.md` (the single source for the `server_instructi
 
 `tools/list` is the one prompt surface with a **per-request** cost. Measured 2026-08-18 across four Claude Code sessions and three models, **100.0% of input reads are cache hits**, so this block is re-read at cache-read rates for the life of a session — about 5% of a long session's cached prefix, 10% of a short one's.
 
-**Budget: `TOOL_SURFACE_CHAR_BUDGET` in `src/server.rs`**, enforced by `server::tests::tool_surface_under_budget`, with `tool_surface_report_lengths` as the per-tool map (`cargo test --lib tool_surface_report_lengths -- --nocapture`). Same instruction as rule 8 above: **do not raise it — find the bytes.** Ratchet it *down* whenever a trim frees room. It has already been paid down once: declaring `anchor_heading` cost +808 and was funded by compressing the injected `workspace` description.
+**Budget: `TOOL_SURFACE_CHAR_BUDGET` in `src/server.rs`**, enforced by `server::tests::tool_surface_under_budget`, with `tool_surface_report_lengths` as the per-tool map (`cargo test --lib tool_surface_report_lengths -- --nocapture`). Same instruction as rule 8 above: **do not raise it to pass a red — find the bytes.** A raise needs a harness reason (§ *Caps follow the harness*). Ratchet it *down* whenever a trim frees room. It has already been paid down once: declaring `anchor_heading` cost +808 and was funded by compressing the injected `workspace` description.
 
 Two things about it are load-bearing.
 
@@ -75,7 +96,7 @@ Full derivation, the rejected alternatives, and the open routing experiment: `do
 <!-- audit-doc-refs:ignore-refs `tools/list` — the MCP method name, not a path (the repo root has a tools/ directory, so the audit would read it as a missing file) -->
 
 Three byte budgets govern these surfaces; § *The tool-surface budget* above documents one. All
-three are held near the measured total by the same *ratchet down, never raise* policy, so the
+three are held near the measured total by the same *ratchet down; raise only for a harness reason* policy (§ *Caps follow the harness*), so the
 slack is small and **you cannot see two of the three before you spend them** — which is the
 operative reason to budget a net-neutral edit, not a claim that the margin is zero.
 
@@ -153,7 +174,7 @@ Practical consequence: **never claim a `server_instructions`/`onboarding_prompt`
 
 The `server_instructions` slice is under a hard **1900-character cap** (rule 8, enforced by `prompts::redesign_invariants::source_md_under_cap`), sitting below the measured 2048-char client limit. Two ways it bites:
 
-- **Run `cargo test --lib prompt` before any prompt-surface edit is ready to commit.** If `source_md_under_cap` fails, do NOT raise the cap or bless the snapshot to match — move content to a `get_guide(topic)` and leave a pointer in the slice — then finish the move by wiring the topic's trigger or declaring it pull-only, per rule 8. Moving content into an untriggered guide deletes it from the agent's view while looking like filing.
+- **Run `cargo test --lib prompt` before any prompt-surface edit is ready to commit.** If `source_md_under_cap` fails, do NOT raise the cap to pass it (a raise needs a harness reason, § *Caps follow the harness*) or bless the snapshot to match — move content to a `get_guide(topic)` and leave a pointer in the slice — then finish the move by wiring the topic's trigger or declaring it pull-only, per rule 8. Moving content into an untriggered guide deletes it from the agent's view while looking like filing.
 - **On a shared branch, re-measure the slice on *current* HEAD.** A concurrent commit can grow the slice under you. `git log --oneline -1` first, then re-check the byte count before trusting any earlier measurement or running `UPDATE_PROMPT_SNAPSHOTS=1` — otherwise you bless the over-cap state into the fixture and ship a truncated slice. Datapoints: F-4 (2026-05-28) and F-8/W-5 (2026-05-31) in `docs/trackers/archive/prompt-guide-refactor-session-log.md`.
 
 ## Measure before shipping — the subtract-and-measure protocol
