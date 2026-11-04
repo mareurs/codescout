@@ -1,5 +1,5 @@
 ---
-id: 98379dd228578791
+id: '98379dd228578791'
 kind: bug
 status: fixed
 title: Long TMPDIR prevents mux-manager tests from binding their Unix sockets
@@ -12,7 +12,7 @@ tags:
 closed: 2026-11-04
 opened: 2026-10-28
 severity: medium
-unverified: 'Fixed for the family the record reports: seven lsp::manager tests (the six named plus a_mux_this_call_spawned_that_loses_the_lock_race_connects_to_the_winner) failed with XDG_RUNTIME_DIR unset and a 41-byte TMPDIR, and pass after the fix. A second family is NOT fixed: more than ten lsp::manager tests bind TMPDIR/.tmpXXXXXX/mux.sock through tempfile::tempdir(), and they fail once TMPDIR is about 87 bytes or longer (measured at 90 bytes, XDG_RUNTIME_DIR set). Linux only: the macOS and Windows paths were not run. The production fallback, a long TMPDIR with XDG_RUNTIME_DIR unset, was not changed and may fail to bind a mux socket; that was not tested.'
+unverified: 'Fixed for the family the record reports: seven lsp::manager tests (the six named plus a_mux_this_call_spawned_that_loses_the_lock_race_connects_to_the_winner) failed with XDG_RUNTIME_DIR unset and a 41-byte TMPDIR, and pass after the fix. Not fixed: (1) more than ten lsp::manager tests bind TMPDIR/.tmpXXXXXX/mux.sock through tempfile::tempdir() and fail once TMPDIR is about 87 bytes or longer (measured at 90 bytes, XDG_RUNTIME_DIR set); (2) PRODUCTION: with XDG_RUNTIME_DIR unset the real mux cannot bind from a TMPDIR of 52 bytes (rust), measured on Linux; shorter limits for longer language names, see Production exposure. macOS thresholds are computed, not measured; the typical macOS TMPDIR length is recalled. Windows: lint only, no test run.'
 ---
 
 # BUG: long TMPDIR prevents mux-manager tests from binding their Unix sockets
@@ -81,6 +81,42 @@ The reported family is fixed. Open: the `tempfile::tempdir()` family (see `unver
 - **patch-id:** `409fa1e6c8ef5bd02e2d3137d6d2e90efbca028e`
 
 Gate on the fix tree: `./scripts/gate.sh` exited 0 (FMT 0, CLIPPY 0, LEAN 0, DEFAULT 0; 5996 and 8858 tests passed). The first gate run failed `result_caps every_cap_constant_is_classified` on two new constants; they were classified `NOT_A_CAP` and the second run was green.
+
+## Production exposure (measured and computed 2026-11-04)
+
+The fix above is `cfg(test)`. Production has no length check: `mux_dir()` is `per_user_mux_dir()` unchanged, so with `XDG_RUNTIME_DIR` unset the socket path is `<TMPDIR>/codescout-<uid>/codescout-<language>-mux-<16 hex>.sock`.
+
+**Measured (Linux, uid 1000).** The real binary `target/release/codescout mux` (built after the fix; the fix does not change it), a stand-in LSP server that answers `initialize` (the mux binds its socket only after that handshake, `src/lsp/mux/process.rs` step 4), `XDG_RUNTIME_DIR` unset, the `rust` socket name:
+
+| TMPDIR bytes | socket bytes | result |
+|---|---|---|
+| 26, 41, 50, 51 | 82 to 107 | bound |
+| 52, 53, 60, 80 | 108 to 136 | `failed to bind socket` (from `process.rs:281`) |
+
+The failure is a visible error, not a silent one, but it names no limit and suggests no remedy. The first probe, with `sleep` as the server, showed no socket at any length: it measured the handshake, not the bind. The probe scripts are not committed (they were in the session scratchpad).
+
+**Pinned per language.** The test `the_longest_tmpdir_that_binds_a_production_socket_is_pinned_per_language` (`src/lsp/mux/mod.rs`, commit `ccbd3379f`) derives the longest `TMPDIR`, in bytes without a trailing slash, from the real file name. A mutation of the file name (`.sock` to `.sck`) made it fail, and it was restored.
+
+| Language | macOS, uid 501, 103 bytes (computed) | Linux, uid 1000, 107 bytes |
+|---|---|---|
+| `c` | 51 | 54 |
+| `go` | 50 | 53 |
+| `tsx`, `jsx`, `cpp`, `css` | 49 | 52 |
+| `rust`, `java`, `ruby`, `html`, `scss`, `less`, `bash` | 48 | 51 |
+| `python`, `kotlin`, `csharp` | 46 | 49 |
+| `typescript`, `javascript` | 42 | 45 |
+
+Only the Linux `rust` row (51 binds, 52 fails) was run. Every other cell is arithmetic on the same layout.
+
+**macOS exposure, not measured.** No Mac was available. If the per-user temp dir there has the shape `/var/folders/xx/<30 characters>/T` (about 48 bytes; recalled, not read from a Mac) and `XDG_RUNTIME_DIR` is unset, then `python`, `kotlin`, `csharp`, `typescript` and `javascript` cannot bind a mux socket. `std::env::temp_dir()` on macOS usually ends in a slash, which may move each threshold by one byte.
+
+**Windows.** The mux and the socket tests are `cfg(unix)`, so the limit does not apply. `scripts/build-windows.sh clippy --all-targets -- -D warnings` (target `x86_64-pc-windows-gnu`) exited 0 on the fix; the tests were not run under wine.
+
+**Options for production, not decided.**
+1. A deterministic fallback in `per_user_runtime_dir()`: when the joined path would exceed the limit, use `/tmp/codescout-<uid>` with the same ownership checks. Processes with the same environment reach the same path. It covers macOS, and it changes a security-relevant module.
+2. A clear error only: when `bind` fails on length, say so and suggest `XDG_RUNTIME_DIR`. It repairs nothing.
+
+The operator should decide after someone measures `TMPDIR` on a real Mac.
 
 ## References
 
