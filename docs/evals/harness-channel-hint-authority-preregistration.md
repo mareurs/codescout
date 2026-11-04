@@ -274,7 +274,7 @@ The P gate as registered: `rate(P) − rate(F)` = 1.0 − 0.5 = 0.5 ≥ 0.4, **p
 The direction is the one the channel hypothesis predicts (P > A0 > F), but the informative n is 3, 4 and 5. It supports no claim on its own.
 
 **Other facts from the audit.**
-- The spontaneous lookup rate here (18/30 = 0.6) is far above the usage.db census (0.09, AM-1). The population differs: these prompts name the signature change explicitly, and every run starts from codescout's own `CLAUDE.md` and server instructions.
+- The spontaneous lookup rate here (18/30 = 0.6) is far above the usage.db census (0.09, AM-1). The population differs: these prompts name the signature change explicitly, and every run starts from codescout's server instructions. (Corrected in AM-9: the project `CLAUDE.md` was NOT loaded in any run, because `--setting-sources local` skips it on 2.1.309.)
 - Four lookups returned `warning: LSP returned no locations at all` (rust-analyzer still loading) and three returned `ambiguous name_path` errors (`cross_root_cites_edges`). The metric counts the CALL, as registered, not its success.
 - Cost per run $0.038–$0.200, mean $0.083.
 
@@ -302,3 +302,35 @@ The direction is the one the channel hypothesis predicts (P > A0 > F), but the i
 - **Honest limit of these thresholds.** With about 10 informative runs per arm (Stage 1's spontaneous rate was 0.6), one arm's rate has a standard error near 0.15. A 0.2 gap is a decision heuristic set before the data, not a significance claim; the report gives the intervals so a reader can see the overlap.
 
 **Secondary, reported.** `caller_check_before_stop` per arm; the `pre_hint_lookup` rate per arm (it cannot depend on the hint, so a large spread across arms would flag a problem; A3's `CLAUDE.md` line is the one arm-specific text visible before the first batch); cost.
+
+### AM-9 — 2026-11-04, Stage 2 result, and A3 never delivered its declaration ($19.381 spent in total)
+
+**Run.** 175 runs, sequential, $14.238, 148 min (block 1 of 7 ran before the AM-8 commit as an instrument check). Valid 175/175. Rows: `stage2.jsonl` (copied to `docs/evals/data/2026-11-04-harness-channel-hints/`), analysis `analyze_stage2.py`.
+
+| arm | valid | pre-hint lookup | informative | late lookup | late_rate | 90% Wilson |
+|---|---|---|---|---|---|---|
+| F | 25 | 16 | 9 | 0 | 0.00 | [0.00, 0.23] |
+| A0 (hint in the MCP result) | 25 | 19 | 6 | 0 | 0.00 | [0.00, 0.31] |
+| A1 (hint as hook context) | 25 | 15 | 10 | 3 | 0.30 | [0.13, 0.56] |
+| A2 (A1 + declaration in the first codescout result) | 25 | 16 | 9 | 8 | 0.89 | [0.62, 0.97] |
+| A3 (A1 + declaration in `CLAUDE.md`) | 25 | 19 | 6 | 1 | 0.17 | [0.04, 0.50] |
+| P (mandatory directive as hook context) | 25 | 17 | 8 | 8 | 1.00 | [0.75, 1.00] |
+| L (`[harness]` + hint in the result) | 25 | 17 | 8 | 3 | 0.38 | [0.16, 0.65] |
+
+`caller_check_before_stop` 25/25 in every arm. Mean cost per run $0.078–$0.084.
+
+**Decision rules as registered.** 1. P gate: P − F = +1.00, PASS. 2. Q1 (A1 − A0): undecided, A0 has 6 informative runs. 3a. A3 − A1: undecided, A3 has 6. 3b. A2 − A1 = +0.59 → "the in-band claim helps", the OPPOSITE of the registered prediction (A2 ≤ A1). 4. L − A0: undecided.
+
+**A3 is void: its declaration never reached the model.** Checked after the result, because A3's low rate needed an explanation before any reading:
+- No transcript of any arm contains the declaration except A2 (25/25); A3 0/25.
+- Direct probe on 2.1.309, `claude-haiku-5-5`, a fresh dir whose `CLAUDE.md` holds a token: with `--setting-sources local` the model answered `NONE` (twice); without the flag it answered `CLAUDE_MD_TOKEN_5X`. **`--setting-sources local` does not load the project `CLAUDE.md`.** The runner copied that flag from setup-ab's `cs` arm without checking what it loads.
+- So A3 ran as a second A1 sample, and the user-channel half of Q2 is UNTESTED. The A1 and A3 rows can be read together only as A1: 4 late lookups in 16 informative runs (0.25), an observation, not a registered result.
+- It also means no run in any stage saw codescout's `CLAUDE.md`. That is constant across arms.
+
+**The A2 result, checked by reading transcripts.** In the three A2 runs read (`hce-03` r1, `hce-05` r1, `hce-08` r1) the sequence is: activation (whose result carries the declaration), a grep or symbols naming the target, the `[cs-hint]` hook context keyed to that call, then `references` on the target in the very next batch. The pre-hint rate (16/25) matches the other arms, so randomisation does not explain the gap. A1 [0.13, 0.56] and A2 [0.62, 0.97] do not overlap at 90%; the informative n are 10 and 9.
+
+**What the data support, stated with their limits.**
+- A mandatory directive on the hook carrier moves the late lookup from 0/9 (F) to 8/8 (P). The hook channel reaches and moves the model.
+- A plain advisory hint: hook carrier 3/10, MCP-result carrier 0/6, labelled MCP-result carrier 3/8. Q1 is undecided by the registered rule; the descriptive order does not separate hook from label.
+- A one-time declaration that `[cs-hint]` messages are user-endorsed, placed in the first codescout TOOL RESULT, raised compliance with later hook hints from 3/10 to 8/9. This contradicts the 2026-07-03 prior for this setting, and it is the security-relevant finding: text in a tool result changed how the model weighted a different channel's messages.
+- Whether the same declaration in the user's own channel does as much is unknown: A3 never delivered it.
