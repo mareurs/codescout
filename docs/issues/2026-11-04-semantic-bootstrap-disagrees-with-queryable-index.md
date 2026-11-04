@@ -10,7 +10,7 @@ closed: 2026-11-04
 opened: 2026-11-04
 owner: marius
 severity: medium
-unverified: 'Real sqlite-vec caveat discharged by four actual native cells on 2026-11-04. Remaining: the tested binary self-reports clean c98859b5e (Git history contains a8ee4db68), but that metadata and ancestry do not prove the build''s source tree; no shared live server restart/deployment was verified.'
+unverified: Controlled root rebuild from e6f07e9a6 is now observed with unchanged source manifests and identical tested ELF hash 8f567f170b07de559b0dfc89e0250d41bd80f9e52c0e650b1b77a795f1454dea. Existing dependency/compiler caches were reused, not an independent hermetic rebuild. Live reload was accepted but this active turn still answers from old PID1745637; verify the next active turn before declaring deployment complete.
 ---
 
 # BUG: Native bootstrap disagrees with a queryable semantic index
@@ -84,12 +84,26 @@ For the old calibration image, ONLY the private copied ELF interpreter/RPATH wer
 
 The prior real-store caveat is discharged for this hash-pinned package. No claim of source-build reproducibility, deployment to an existing shared server, all backends/cold-start timing, full task admission or low/xhigh quality follows. No product source change or repeated full gate was performed by this verifier; the implementer's gate/test report remains separately attributed.
 
+## Controlled build and live reload — 2026-11-04
+
+Evidence archive: [native build provenance](../research/data/2026-11-04-native-build-provenance.tar.gz), SHA7b9cc96c195aa38f1f6ae3598a09df83a59cb67a738fbe9adebac271f0ce12ad,5889757bytes/72verifiedentries. Contains source snapshot, manifests, gate/build/forced-root logs, actual native responses and reload receipts; excludes ELF/model/database/profile payloads.
+
+Ran `./scripts/gate.sh --check`: Python-light, formatter, clippy, lean/default nextest and doctest lanes all exit 0. Nextest summaries: 6012/6012 lean and 8876/8876 default, with 48/62 skips respectively. The gate does not exercise every server-stack configuration.
+
+Pinned HEAD `e6f07e9a6337079d25ab6db7b62f46286047f2e5` includes fix `a8ee4db68`. Inventoried all 527 tracked files in the recorded build scopes before/after; scopes clean, HEAD stable, and archived source entries independently match their hashes. The first `rb.sh --locked --offline -v` returned `Fresh`; it did not establish a compilation. Then invalidated only `build.rs` mtime, observed both root library and binary rustc invocations, and checked source bytes/HEAD unchanged again. Rebuilt raw ELF SHA `8f567f170b07de559b0dfc89e0250d41bd80f9e52c0e650b1b77a795f1454dea`, 65680152 bytes, byte-identical to the first artifact. Rust/cargo 1.97.1; feature set includes server-stack and default local-embed. This is controlled root rebuild evidence with existing compiler/dependency caches, not an independent hermetic dependency rebuild or a claim of general bit reproducibility.
+
+The hash-identical tested private copy, adapted only for guest interpreter/RPATH, SHA `cdc53728d28a659b5a697048e6e5b719149693df2cf57cb8554ee0751ebf51bb`, passed all four actual sqlite-vec cells: empty +/- zero-byte marker gives Not built and zero results; populated +/- marker gives Built and three capped results. All sixteen source/config instances match; all four exact owned names independently absent. The initial cleanup verifier capitalization false negative is separately recorded and corrected as issue `3e9647481c8c7d1b`.
+
+Actual Codex app-server API `config/mcpServer/reload` accepted `{}` for the running harness. A fresh workspace call during this active turn still reports PID1745637, old dirty `0eb6190ec`, deleted executable, build_id439eb06e. Therefore live deployment is PENDING the next active-turn refresh; no process was killed and no separate probe was mislabeled as the live server. The endpoint has no per-thread selector and queues refresh for loaded threads; no profile/config files were changed. See [official app-server documentation](https://learn.chatgpt.com/docs/app-server).
+
+Receipts and source snapshot: `/home/marius/.cache/codescout-resident/codescout/native-build-provenance-20261104`. No new model/onboarding calls or paid worker admission.
+
 ## Workarounds
 Read actual status, verify and query results; do not schedule a paid comparison from the banner or blindly rebuild from it.
 
 ## Resume
 
-Four native real-store cells now pass on the identified copied binary. Retain source/build and live-server deployment limits separately. Before using a new binary in a paid campaign, freeze and qualify that exact package/common worker configuration; keep coverage checks and the remaining authority/task/oracle gates separate. Do not repeat onboarding or index building to repair the old legacy marker predicate.
+Controlled root rebuild and four real-store cells are verified for raw hash8f567f170b07de559b0dfc89e0250d41bd80f9e52c0e650b1b77a795f1454dea. Reload is accepted but not yet applied in this active turn. At the next active turn, query the actual workspace server and independently hash `/proc/<reported pid>/exe`; require the verified hash, expected source SHA and exe_deleted=false before declaring live deployment. Before paid work, still freeze/qualify the exact common worker package, coverage, authority and task/oracle boundaries. Do not repeat onboarding/index building.
 
 ## References
 

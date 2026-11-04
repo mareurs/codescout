@@ -380,6 +380,12 @@ is the cheap one that makes every future instance self-diagnosing.
 
 Not fixed yet. No SHA, no patch-id.
 
+## Rediscovery on an old live server — 2026-11-04
+
+During controlled-build/reload verification, writes of the complete `research/effort-steering/current` and `native-env-admission-20261104` memories persisted with status ok but returned `semantic anchor creation failed: embed status failed: http://127.0.0.1:48081/v1/embeddings — HTTP 500 ... input is too large to process. increase the physical batch size`. The smaller standalone `native-build-provenance-20261104` memory returned ok without that warning. The answering server was OLD PID1745637, dirty0eb6190ec, deleted executable, build_id439eb06e; the queued reload had not applied in this active turn. The topic files remain present; vector/anchor coverage was not measured and no loss count is claimed.
+
+This is an observed large-input warning on an old runtime, related to this record and the tracked effective-ceiling residue9e6043f4db849185. It is not a verified recurrence on the current rebuilt product, nor proof that the old context-limit root cause equals this physical-batch failure. Do not silently treat memory status ok as semantic-anchor success. Follow up only on the actual updated live server if this symptom matters to the next workflow; no repeat onboarding, broad reindex or provider call was started.
+
 ## Tests added
 
 None yet. Required before this can be called fixed:
