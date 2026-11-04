@@ -3008,7 +3008,7 @@ class ControlFreshTest(unittest.TestCase):
         self.assertEqual(self.calls, [])
         self.assertIs(got["verdict"]["error"], True)
 
-    def test_a_stale_cidfile_is_removed_before_the_run_and_never_trusted(self):
+    def test_a_fixed_name_control_cid_in_the_evidence_dir_is_never_read(self):
         self.evidence.mkdir()
         (self.evidence / "control.cid").write_text(CID)  # another run's ID, in the shared evidence dir
 
@@ -3045,6 +3045,7 @@ class ControlFreshTest(unittest.TestCase):
         record = dict(CTL_RECORD, FAIL_TO_PASS=["x"], PASS_TO_PASS=["y"])
         got = self.control(record=record)
         self.assertEqual(got["f2p"], [T_A])
+
     def test_commands_and_instance_id_are_validated_before_docker(self):
         bad = [dict(CTL_RECORD, print_cmds=None), dict(CTL_RECORD, test_cmds="cargo test"),
                dict(CTL_RECORD, test_cmds=[]), dict(CTL_RECORD, print_cmds=[]), dict(CTL_RECORD, test_cmds=["a", 5]),
@@ -3162,7 +3163,12 @@ class ControlFreshTest(unittest.TestCase):
             self.control(fake)
         ev = json.loads((self.evidence / "control-evidence.json").read_text())
         self.assertIs(ev["container_removed"], False)
+        # the gate passed, but the run was cut short: the evidence must say so, not read as a clean pass
+        self.assertIs(ev["interrupted"], True)
         self.assertIs(ev["verdict"]["ok"], True)
+
+    def test_a_run_that_was_not_interrupted_carries_no_interrupted_marker(self):
+        self.assertNotIn("interrupted", self.control())
 
     def test_the_evidence_dir_is_created_and_the_steps_and_truncation_are_recorded(self):
         deep = self.tmp / "a" / "b"

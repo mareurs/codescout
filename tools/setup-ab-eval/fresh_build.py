@@ -1334,6 +1334,8 @@ def control_fresh(record, *, container, evidence_dir, memory=CONTROL_MEMORY, tim
         if cid_dir is not None:
             shutil.rmtree(cid_dir, ignore_errors=True)
         ev.update(build.remove())  # never raises an Exception
+        if build.interrupt is not None:  # an interrupt during the removal: a passing gate is not a clean run
+            ev["interrupted"] = True
         if any(step.get("truncated") for step in steps):
             ev["log_truncated"] = True
         ev["wall_seconds"] = round(time.monotonic() - started, 1)
