@@ -3215,6 +3215,7 @@ O_UPSTREAM = "a1" * 20
 O_TREE = "b2" * 20
 O_SYN = "d4" * 20
 O_IMAGE_ID = "sha256:" + "c3" * 32
+O_GATED_ID = "sha256:" + "e5" * 32  # the id of the built image the gate ran on
 O_BASE_IMAGE = "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22855"
 O_TEMPLATE_ID = "rust-lang__rust-analyzer-22855"
 O_TAG = "sab-fresh-rust-lang__rust-analyzer-23096:b1"
@@ -3238,7 +3239,7 @@ def o_fetched(**over):
 
 def o_control_evidence(**over):
     ev = {"id": O_ID, "image": O_TAG, "container": "sab-fresh-ctl-" + O_ID, "memory": "8g", "base_commit": O_SYN,
-          "workdir": "/testbed", "f2p": list(O_TESTS), "p2p": list(O_P2P),
+          "workdir": "/testbed", "image_id": O_GATED_ID, "f2p": list(O_TESTS), "p2p": list(O_P2P),
           "steps": [{"name": "base:rebuild", "returncode": 0, "tail": ""}],
           "base": {"fail": 3, "pass": 2}, "gold": {"pass": 5}, "gold_repeat": {"pass": 5},
           "verdict": {"ok": True, "reasons": []}, "wall_seconds": 12.5, "laps_seconds": {}}
@@ -3253,7 +3254,8 @@ class HostRun:
         self.src = str(src)
         self.calls = []  # (argv tuple, env, timeout)
         self.fail = {}   # label -> (exit code, stderr bytes)
-        self.out = {"inspect": (O_IMAGE_ID + "\n").encode(), "archive": O_TAR, "tree": (O_TREE + "\n").encode()}
+        self.out = {"inspect": (O_IMAGE_ID + "\n").encode(), "archive": O_TAR, "tree": (O_TREE + "\n").encode(),
+                    "tag": (O_GATED_ID + "\n").encode()}
 
     def __call__(self, argv, **kw):
         if kw.get("capture_output") is not True:
@@ -3265,6 +3267,8 @@ class HostRun:
         self.calls.append((argv, kw.get("env"), kw.get("timeout")))
         if argv == ("docker", "image", "inspect", "--format", "{{.Id}}", O_BASE_IMAGE):
             label = "inspect"
+        elif argv == ("docker", "image", "inspect", "--format", "{{.Id}}", O_TAG):
+            label = "tag"  # the built image, on a resume
         elif argv == ("git", "-C", self.src, "archive", "--format=tar", O_UPSTREAM):
             label = "archive"
         elif argv == ("git", "-C", self.src, "rev-parse", O_UPSTREAM + "^{tree}"):
@@ -3277,8 +3281,8 @@ class HostRun:
         return subprocess.CompletedProcess(list(argv), 0, self.out[label], b"")
 
     def labels(self):
-        return [{"docker": "inspect", "archive": "archive", "rev-parse": "tree"}[a[0] if a[0] == "docker" else a[3]]
-                for a, _, _ in self.calls]
+        return [("tag" if a[-1] == O_TAG else "inspect") if a[0] == "docker" else {"archive": "archive",
+                "rev-parse": "tree"}[a[3]] for a, _, _ in self.calls]
 
 
 class OrchestrationTest(unittest.TestCase):
@@ -3298,7 +3302,7 @@ class OrchestrationTest(unittest.TestCase):
         self.fetch_raises = self.build_raises = None
         self.fetched = o_fetched()
         self.build_result = {"image": O_TAG, "base_commit": O_SYN, "base_image_id": O_IMAGE_ID,
-                             "tree_tar_sha256": "0" * 64, "image_id": "sha256:" + "e5" * 32, "size_bytes": 1,
+                             "tree_tar_sha256": "0" * 64, "image_id": O_GATED_ID, "size_bytes": 1,
                              "laps_seconds": {}, "compiling_lines": 5, "container_removed": True}
         self.control_ev = o_control_evidence()
         self.stderr = io.StringIO()
@@ -3372,8 +3376,9 @@ class OrchestrationTest(unittest.TestCase):
         (self.data / "controls" / O_ID / "control.json").write_text("{}")
 
     def forget_pending(self):
-        """As if the awaiting run before had never happened: the next run has to build again."""
+        """As if the run before had never happened: the next run has to build again."""
         (self.ev / "pending.json").unlink(missing_ok=True)
+        (self.ev / "gate-failed.json").unlink(missing_ok=True)
 
     def leftovers(self):
         return sorted(str(p.relative_to(self.data)) for p in self.data.rglob("*.tmp"))
@@ -3408,11 +3413,12 @@ class OrchestrationTest(unittest.TestCase):
 
     def test_a_second_run_while_the_lock_exists_refuses_and_leaves_the_lock(self):
         self.data.mkdir()
-        (self.data / ".lock").write_text("pid 1\n")
+        (self.data / ".lock").write_text("pid 1, started 20261104T100000000000Z\n")
         got = self.go()
         self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "lock"))
         self.assertIn(".lock", got["error"])
-        self.assertEqual((self.data / ".lock").read_text(), "pid 1\n")  # not ours: not removed
+        self.assertIn("pid 1, started 20261104T100000000000Z", got["error"])  # so the operator can check liveness
+        self.assertEqual((self.data / ".lock").read_text(), "pid 1, started 20261104T100000000000Z\n")  # not ours
         self.assertEqual((self.host.calls, self.fetch_calls, self.build_calls), ([], [], []))
         self.assertFalse((self.data / "evidence").exists())
 
@@ -3454,6 +3460,7 @@ class OrchestrationTest(unittest.TestCase):
     def test_two_runs_use_different_per_run_evidence_directories(self):
         self.control_ev = o_control_evidence(verdict={"ok": False, "reasons": ["x"]})
         self.go()
+        self.forget_pending()
         self.go()
         dirs = [c["evidence_dir"] for c in self.build_calls]
         self.assertEqual(len(set(dirs)), 2)
@@ -3467,6 +3474,7 @@ class OrchestrationTest(unittest.TestCase):
         self.control_ev = o_control_evidence(verdict={"ok": False, "reasons": ["x"]})
         with mock.patch.object(fb, "_stamp", return_value="T"):
             self.go()
+            self.forget_pending()
             self.go()
         dirs = [c["evidence_dir"] for c in self.build_calls]
         self.assertEqual(len(set(dirs)), 2)
@@ -3654,6 +3662,7 @@ class OrchestrationTest(unittest.TestCase):
         for verdict in ({"ok": False, "reasons": ["tests differ between two gold runs"]},
                         {"ok": False, "error": True, "reasons": ["control error: x"]}, {"reasons": []}):
             with self.subTest(verdict=verdict):
+                self.forget_pending()
                 self.control_ev = o_control_evidence(verdict=verdict)
                 got = self.with_verdicts()
                 self.assertEqual((got["status"], got["exit_code"]), ("gate-failed", 2))
@@ -3867,6 +3876,191 @@ class OrchestrationTest(unittest.TestCase):
         self.keep(*O_TESTS)
         self.with_verdicts()
         self.assertEqual([r["instance_id"] for r in self.records()], ["old", O_ID])
+
+    def test_a_failed_write_of_the_pid_does_not_leave_the_lock(self):
+        with mock.patch.object(os, "write", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.go()
+        self.assertFalse((self.data / ".lock").exists())
+        self.assertEqual(self.go()["status"], "awaiting-spec-verdicts")  # and the next run is not locked out
+
+    # --- a resume is bound to what the gate validated ---
+
+    def awaiting(self):
+        self.assertEqual(self.go()["status"], "awaiting-spec-verdicts")
+        self.keep(*O_TESTS)
+
+    def edit_pending(self, change):
+        path = self.ev / "pending.json"
+        pending = json.loads(path.read_text())
+        change(pending)
+        path.write_text(json.dumps(pending))
+
+    def assert_resume_refused(self, got, builds, *needles):
+        self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "resume"))
+        for needle in needles:
+            self.assertIn(needle, got["error"])
+        self.assertEqual((len(self.build_calls), len(self.control_calls)), (builds, builds))  # nothing rebuilt
+        self.assertIsNone(self.records())
+        self.assertFalse((self.data / "controls" / O_ID / "control.json").exists())
+        self.assertFalse((self.ev / "cache-key.txt").exists())
+        self.assertTrue((self.ev / "pending.json").is_file())
+
+    def digest_of(self, **fields):
+        template = {"test_cmds": TEMPLATE["test_cmds"], "rebuild_cmds": TEMPLATE["rebuild_cmds"],
+                    "print_cmds": TEMPLATE["print_cmds"], "log_parser": TEMPLATE["log_parser"]}
+        template.update(fields)
+        return hashlib.sha256(json.dumps(template, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    def test_the_pending_state_records_the_digest_of_the_template_it_was_gated_with(self):
+        self.awaiting()
+        pending = json.loads((self.ev / "pending.json").read_text())
+        self.assertEqual(pending["template_digest"], self.digest_of())
+
+    def test_a_resume_with_a_changed_template_is_refused_naming_both_digests(self):
+        for over in (dict(test_cmds=["cargo test --other"]), dict(rebuild_cmds=["cargo check"]),
+                     dict(print_cmds=["cat other.log"]), dict(log_parser="def parser(log):\n    return {'x': 'pass'}\n")):
+            with self.subTest(over=sorted(over)):
+                self.forget_pending()
+                self.write_template()
+                self.awaiting()
+                builds = len(self.build_calls)
+                self.write_template(**over)
+                got = self.with_verdicts()
+                self.assert_resume_refused(got, builds, self.digest_of(), self.digest_of(**over))
+
+    def test_a_resume_with_another_template_id_and_the_same_commands_is_accepted(self):
+        self.awaiting()
+        self.write_template(instance_id="rust-lang__rust-analyzer-99")
+        got = self.with_verdicts(template_id="rust-lang__rust-analyzer-99")
+        self.assertEqual((got["status"], got["resumed"]), ("built", True))
+        self.assertEqual(len(self.build_calls), 1)
+        self.forget_pending()
+        (self.ev / "cache-key.txt").unlink()
+        self.write_template()
+        self.awaiting()
+        self.write_template(test_cmds=repr(TEMPLATE["test_cmds"]), print_cmds=repr(TEMPLATE["print_cmds"]))
+        self.assertEqual(self.with_verdicts()["status"], "built")  # the same list as a literal string: same digest
+
+    def test_a_resume_inspects_the_built_tag_once_and_it_must_be_the_gated_image(self):
+        self.awaiting()
+        before = len(self.host.calls)
+        self.with_verdicts()
+        self.assertEqual(self.host.labels()[before:], ["inspect", "tag"])
+        self.assertEqual(self.host.calls[-1][0], ("docker", "image", "inspect", "--format", "{{.Id}}", O_TAG))
+
+    def test_a_retagged_or_removed_image_is_refused_on_resume(self):
+        self.awaiting()
+        self.host.out["tag"] = ("sha256:" + "9" * 64 + "\n").encode()
+        self.assert_resume_refused(self.with_verdicts(), 1, O_TAG)
+        self.host.out["tag"] = (O_GATED_ID + "\n").encode()
+        for how in ({"tag": (1, b"Error: No such image")}, ):
+            self.host.fail = how
+            self.assert_resume_refused(self.with_verdicts(), 1, O_TAG)
+        self.host.fail = {}
+        for out in (b"", b"not an id\n"):
+            self.host.out["tag"] = out
+            self.assert_resume_refused(self.with_verdicts(), 1, O_TAG)
+
+    def test_a_pending_state_that_does_not_hang_together_is_refused_on_resume(self):
+        def both(image):
+            def change(p):
+                p["image"] = image
+                p["control"]["image"] = image
+            return change
+        changes = {
+            "base_commit malformed": lambda p: p.update(base_commit="abc"),
+            "base_commit malformed in the gate too": lambda p: (p.update(base_commit="abc"),
+                                                               p["control"].update(base_commit="abc")),
+            "base_commit upper case": lambda p: p.update(base_commit=O_SYN.upper()),
+            "base_commit not a string": lambda p: p.update(base_commit=5),
+            "base_commit differs from the gate's": lambda p: p.update(base_commit="9" * 40),
+            "image differs from the gate's": lambda p: p.update(image="other:b1"),
+            "image not a string": lambda p: p.update(image=None),
+            "image not a reference": both("-v /:/x img"),
+            "no image_id in the gate": lambda p: p["control"].pop("image_id"),
+            "bad image_id in the gate": lambda p: p["control"].update(image_id="sha256:abc"),
+            "no template digest (an older pending)": lambda p: p.pop("template_digest"),
+        }
+        for name, change in changes.items():
+            with self.subTest(name):
+                self.forget_pending()
+                self.awaiting()
+                builds = len(self.build_calls)
+                self.edit_pending(change)
+                self.assert_resume_refused(self.with_verdicts(), builds, *(("image_id",) if "image_id" in name else ()))
+
+    def test_a_resume_works_in_the_earlier_run_directory_and_makes_no_new_one(self):
+        self.awaiting()
+        first = Path(self.build_calls[0]["evidence_dir"])
+        got = self.go()  # again, still without verdicts
+        self.assertEqual((got["status"], got["evidence"]), ("awaiting-spec-verdicts", str(first)))
+        self.keep()
+        got = self.with_verdicts()
+        self.assertEqual((got["status"], got["evidence"]), ("unusable", str(first)))
+        self.assertEqual(sorted(p.name for p in self.ev.glob("run-*")), [first.name])  # no empty run-* left over
+
+    def test_a_run_dir_name_in_pending_that_is_not_a_run_dir_of_this_task_is_not_followed(self):
+        for name in ("../other", "run-../../other", "", None, 5, "run-missing"):
+            with self.subTest(run_dir=name):
+                self.forget_pending()
+                self.awaiting()
+                (self.ev.parent / "other").mkdir(exist_ok=True)
+                self.edit_pending(lambda p: p.update(run_dir=name))
+                self.keep()
+                got = self.with_verdicts()
+                self.assertEqual(got["status"], "unusable")
+                self.assertEqual(Path(got["evidence"]).parent, self.ev)  # a run directory of this task
+                self.assertRegex(Path(got["evidence"]).name, r"^run-")
+                self.assertNotEqual(Path(got["evidence"]).resolve(), (self.ev.parent / "other").resolve())
+
+    def test_a_refused_resume_keeps_its_own_run_directory_with_the_refusal(self):
+        self.awaiting()
+        first = Path(self.build_calls[0]["evidence_dir"])
+        self.host.out["tag"] = ("sha256:" + "9" * 64 + "\n").encode()
+        got = self.with_verdicts()
+        self.assertEqual(got["status"], "refused")
+        self.assertTrue((Path(got["evidence"]) / "refusal.json").is_file())
+
+    # --- a failed gate is not retried by deleting the image ---
+
+    def test_a_failed_gate_writes_a_marker_and_a_later_run_refuses_until_it_is_deleted(self):
+        self.control_ev = o_control_evidence(verdict={"ok": False, "reasons": ["tests differ between two gold runs"]})
+        got = self.go()
+        self.assertEqual(got["status"], "gate-failed")
+        marker = json.loads((self.ev / "gate-failed.json").read_text())
+        self.assertEqual(marker["cache_key"], self.cache_key())
+        self.assertEqual(marker["verdict"], {"ok": False, "reasons": ["tests differ between two gold runs"]})
+        self.assertEqual(marker["run_dir"], Path(got["evidence"]).name)
+        calls = (len(self.host.calls), len(self.fetch_calls), len(self.build_calls))
+        self.control_ev = o_control_evidence()  # even if a retry would now pass
+        again = self.go()
+        self.assertEqual((again["status"], again["exit_code"], again["stage"]), ("refused", 2, "gate-failed"))
+        self.assertIn("gate failed", again["error"])
+        self.assertIn("gate-failed.json", again["error"])
+        self.assertIn("delete", again["error"])
+        self.assertEqual((len(self.build_calls), len(self.control_calls)), (1, 1))  # no build, no second gate
+        self.assertEqual(self.host.labels(), ["inspect", "archive", "tree", "inspect"])  # no tarball again
+        (self.ev / "gate-failed.json").unlink()
+        self.assertEqual(self.go()["status"], "awaiting-spec-verdicts")  # a deliberate retry
+
+    def test_a_passing_gate_writes_no_gate_failed_marker(self):
+        self.go()
+        self.assertFalse((self.ev / "gate-failed.json").exists())
+
+    # --- the verdict keys that are not F2P tests are audited ---
+
+    def test_verdict_keys_that_are_not_f2p_tests_are_recorded_as_ignored(self):
+        self.write_verdicts(dict({t: "specified" for t in O_TESTS}, **{"stale::b": "unspecified", "stale::a": "specified"}))
+        self.with_verdicts()
+        applied = json.loads((self.ev / "spec-verdicts-applied.json").read_text())
+        self.assertEqual(applied["ignored"], ["stale::a", "stale::b"])
+        self.keep(*O_TESTS)
+        self.forget_pending()
+        (self.ev / "cache-key.txt").unlink()
+        (self.data / "records.jsonl").unlink()
+        self.with_verdicts()
+        self.assertEqual(json.loads((self.ev / "spec-verdicts-applied.json").read_text())["ignored"], [])
 
     # --- the template is data ---
 

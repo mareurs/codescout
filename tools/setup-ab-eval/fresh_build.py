@@ -65,7 +65,9 @@ and the `spec_key` and F2P tests to judge; the second run reuses the image and g
         --template-id rust-lang__rust-analyzer-22855 --data DIR [--spec-verdicts spec-verdicts.json] [--dry-run]
 
 Exit codes: 0 done (or cached), 2 refused or gate failed, 3 awaiting spec verdicts, 4 unusable (no F2P test
-kept). One JSON object per stage goes to stderr, the result to stdout. `DIR` gets `records.jsonl`,
+kept). The work directory in the image is fixed (`/testbed`, `build_image`'s default) and is not a CLI
+option, so a base image with another workdir cannot be used. One JSON object per stage goes to stderr, the
+result to stdout. `DIR` gets `records.jsonl`,
 `controls/<id>/control.json` and `evidence/<id>/`.
 
 `spec-verdicts.json` (the F2P rule: a test is kept only if the issue states the behaviour it asserts; an F2P
@@ -1381,6 +1383,7 @@ STAGES = ("fetch", "cache-check", "tarball", "build", "control", "spec-verdicts"
 EXIT_OK, EXIT_REFUSED, EXIT_AWAITING, EXIT_UNUSABLE = 0, 2, 3, 4
 _HOST_TIMEOUT = 120
 _ARCHIVE_TIMEOUT = 1800
+_RUN_DIR = re.compile(r"run-[A-Za-z0-9-]+")
 _CONTROL_JSON_KEYS = ("id", "image", "workdir", "steps", "base", "gold", "gold_repeat", "verdict", "wall_seconds")
 _SECRET_ENV = ("GITHUB_TOKEN", "GH_TOKEN")
 _MIN_SECRET = 8  # a shorter value would mangle ordinary text when scrubbed
@@ -1457,8 +1460,9 @@ def _new_run_dir(ev_dir):
 def _take_lock(data):
     """The path of `<data>/.lock` created by this call, or None when the file already exists.
 
-    Created with `O_EXCL`: a second run on the same data directory finds the file and refuses. A lock
-    that a killed run left behind is not removed here; the refusal names it.
+    Created with `O_EXCL`: a second run on the same data directory finds the file and refuses. It holds
+    this process's pid and start time; a failed write removes the file again, so no run is locked out by
+    a lock nobody holds. A lock that a killed run left behind is not removed here; the refusal quotes it.
     """
     data.mkdir(parents=True, exist_ok=True)
     lock = data / ".lock"
@@ -1466,16 +1470,35 @@ def _take_lock(data):
         fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
     except FileExistsError:
         return None
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write("pid %d, started %s\n" % (os.getpid(), _stamp()))
+    try:
+        try:
+            os.write(fd, ("pid %d, started %s\n" % (os.getpid(), _stamp())).encode("ascii"))
+        finally:
+            os.close(fd)
+    except BaseException:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+        raise
     return lock
+
+
+def _lock_holder(lock):
+    """What the lock file says (its pid and start time), for the refusal message."""
+    try:
+        text = Path(lock).read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return "unreadable"
+    return text[:200] or "empty"
 
 
 def _template_list(key, value):
     """The command list of a template field: a list of strings, or a string that holds the literal of one.
 
-    The string is read with `ast.literal_eval`: the template is data and nothing in it is ever executed,
-    so `['a', str(1)]` is refused.
+    The string is read with `ast.literal_eval`: the template's command strings are data and are never
+    executed here, so `['a', str(1)]` is refused. (`log_parser` is another matter: it is Python source that
+    `multilang_grade.run_parser` runs in its own `python3 -I` subprocess; it is copied, not evaluated here.)
     """
     if isinstance(value, str):
         text = value.strip()
@@ -1565,8 +1588,57 @@ def _host(run, argv, env, timeout):
         raise BuildError(str(exc)) from exc
 
 
+def _template_digest(template):
+    """sha256 hex of the template fields that decide the grading, JSON with sorted keys and no spaces.
+
+    The F2P/P2P sets come from the commands and the parser the gate ran with; the record carries the
+    ones of the template at the time it is written. A resume checks the two agree.
+    """
+    fields = {key: template[key] for key in (*TEMPLATE_LIST_KEYS, "log_parser")}
+    text = json.dumps(fields, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    return hashlib.sha256(text.encode("ascii")).hexdigest()
+
+
+def _verify_resume(pending, digest, run, env):
+    """`_Refused` unless the pending state still describes what the gate validated.
+
+    Refusal is the only safe outcome: a rebuild would hit "tag exists". Checked: the template digest the
+    gate ran with equals the current one; `base_commit` is a full SHA and the gate's; `image` is a
+    reference and the gate's; and `docker image inspect` of that tag gives the image id the gate ran on
+    (a retagged or removed image is refused).
+    """
+    gated_digest = pending.get("template_digest")
+    if gated_digest != digest:
+        raise _Refused("the template differs from the one the gate ran with (commands or log_parser changed): "
+                       "gated with digest %s, now %s; the pending state cannot be resumed with other grading "
+                       "commands" % (gated_digest, digest))
+    control_ev = pending["control"]
+    base_commit, image = pending.get("base_commit"), pending.get("image")
+    if not isinstance(base_commit, str) or _SHA40.fullmatch(base_commit) is None:
+        raise _Refused("pending base_commit is not a full commit SHA: %r" % (base_commit,))
+    if control_ev.get("base_commit") != base_commit:
+        raise _Refused("pending base_commit %s is not the one the gate ran on (%r)"
+                       % (base_commit, control_ev.get("base_commit")))
+    if not isinstance(image, str) or _BASE_IMAGE.fullmatch(image) is None:
+        raise _Refused("pending image is not an image reference: %r" % (image,))
+    if control_ev.get("image") != image:
+        raise _Refused("pending image %s is not the one the gate ran on (%r)" % (image, control_ev.get("image")))
+    gated_id = control_ev.get("image_id")
+    if not isinstance(gated_id, str) or _IMAGE_ID.fullmatch(gated_id) is None:
+        raise _Refused("the gate evidence has no valid image_id: %r" % (gated_id,))
+    out = _host(run, ["docker", "image", "inspect", "--format", "{{.Id}}", image], env, _HOST_TIMEOUT)
+    ids = out.decode("utf-8", errors="replace").split()
+    if not ids or ids[-1] != gated_id:
+        raise _Refused("image %s is %s now, not %s as when the gate ran: it was retagged or replaced"
+                       % (image, ids[-1] if ids else "absent", gated_id))
+
+
 def _load_pending(path, key, skey):
-    """The saved `pending.json` when it is for this cache key and spec key with a passing gate, else None."""
+    """The saved `pending.json` when it is for this cache key and spec key with a passing gate, else None.
+
+    Only a file that cannot be read, or is of another task state, is None; whether it still describes
+    the image and the grading commands is `_verify_resume`'s question and a refusal when not.
+    """
     try:
         pending = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -1575,8 +1647,6 @@ def _load_pending(path, key, skey):
         return None
     control_ev = pending.get("control")
     if not isinstance(control_ev, dict) or not _gate_ok(control_ev):
-        return None
-    if not isinstance(pending.get("image"), str) or not isinstance(pending.get("base_commit"), str):
         return None
     return pending
 
@@ -1666,9 +1736,14 @@ def run_build(*, repo, pr, issue_numbers, base_image, template_path, template_id
     and the logs of `build` and `control`; `upstream/<id>/src` (the clone `fetch` keeps).
 
     A run that finds `pending.json` for the same cache key and spec key skips tarball, build and control,
-    and goes on with the verdicts. The builder never deletes an image, so a task whose image exists but
-    has no pending state is refused by `build` ("tag exists"). The template is data: its command
-    strings are read with `ast.literal_eval`. No credential is printed or written; host programs run
+    and goes on with the verdicts, in the run directory of the run that built the image; it first checks
+    that the template's grading fields (commands and `log_parser`, as a digest), the image tag (its id)
+    and the base commit are the ones the gate ran with, and refuses when not. A gate that failed leaves
+    `gate-failed.json`: a later run refuses, since retrying until a gate passes biases the selection;
+    delete that file and the image by hand to retry on purpose. The builder never deletes an image, so a task whose image exists but
+    has no pending state is refused by `build` ("tag exists"). The template's command
+    strings are data, read with `ast.literal_eval`; its `log_parser` is copied as it is (Python source that
+    `multilang_grade.run_parser` later runs in its own sandboxed subprocess). No credential is printed or written; host programs run
     with `GITHUB_TOKEN` removed.
     """
     ident = _check_arguments(repo, pr, issue_numbers, base_image, template_id)
@@ -1678,8 +1753,9 @@ def run_build(*, repo, pr, issue_numbers, base_image, template_path, template_id
     data = Path(data)
     lock = _take_lock(data)
     if lock is None:
-        return _refused(None, "lock", "%s exists: another run holds this data directory; if no run is active "
-                        "(a killed run leaves it), remove that file" % (data / ".lock"))
+        return _refused(None, "lock", "%s exists (%s): another run holds this data directory; check that process "
+                        "is gone (a killed run leaves the file), then remove it" % (data / ".lock",
+                                                                                   _lock_holder(data / ".lock")))
     try:
         ev_dir = data / "evidence" / instance_id
         run_dir = _new_run_dir(ev_dir)
@@ -1699,6 +1775,7 @@ def _run_locked(*, repo, pr, issue_numbers, base_image, template_path, template_
     stage = "template"
     try:
         template = _load_template(template_path, template_id)
+        template_digest = _template_digest(template)
 
         stage = "fetch"
         dest = data / "upstream" / instance_id
@@ -1733,6 +1810,14 @@ def _run_locked(*, repo, pr, issue_numbers, base_image, template_path, template_
         if hit:
             return {"status": "cached", "exit_code": EXIT_OK, "id": instance_id, "cache_key": key}
 
+        # a failed gate is not retried by deleting the image until one passes: that would bias the selection
+        marker = ev_dir / "gate-failed.json"
+        if marker.exists():
+            stage = "gate-failed"
+            raise _Refused("the gate failed in an earlier run of this task (see %s); retrying is a deliberate "
+                           "act: delete that file AND the image %s by hand, then run again"
+                           % (marker, image_tag(repo, pr)))
+
         # what a reader of the verdicts needs, and what a refusal below must not lose
         _atomic_text(ev_dir / "patch.diff", patch)
         _atomic_text(ev_dir / "test_patch.diff", test_patch)
@@ -1740,8 +1825,19 @@ def _run_locked(*, repo, pr, issue_numbers, base_image, template_path, template_
 
         pending = _load_pending(ev_dir / "pending.json", key, skey)
         if pending is not None:
+            stage = "resume"
+            _verify_resume(pending, template_digest, run, env)
             image, base_commit, evidence = pending["image"], pending["base_commit"], pending["control"]
-            _stage("resume", pending=str(ev_dir / "pending.json"), image=image)
+            # work in the run directory of the run that built it; the one made for this call is unused
+            earlier = ev_dir / str(pending.get("run_dir"))
+            if _RUN_DIR.fullmatch(earlier.name) and earlier.is_dir() and earlier != run_dir:
+                try:
+                    run_dir.rmdir()
+                except OSError:
+                    pass
+                else:
+                    run_dir = earlier
+            _stage("resume", pending=str(ev_dir / "pending.json"), image=image, run_dir=str(run_dir))
         else:
             stage = "tarball"
             src = dest / "src"
@@ -1780,13 +1876,16 @@ def _run_locked(*, repo, pr, issue_numbers, base_image, template_path, template_
             _stage("control", ok=ok, f2p=len(evidence.get("f2p") or []), p2p=len(evidence.get("p2p") or []),
                    reasons=reasons)
             if not ok:
+                _atomic_json(ev_dir / "gate-failed.json", {
+                    "instance_id": instance_id, "cache_key": key, "verdict": verdict, "reasons": reasons,
+                    "run_dir": run_dir.name, "image": image})
                 return {"status": "gate-failed", "exit_code": EXIT_REFUSED, "id": instance_id,
                         "reasons": reasons, "evidence": str(run_dir)}
             _atomic_json(ev_dir / "pending.json", {
                 "instance_id": instance_id, "cache_key": key, "spec_key": skey, "image": image,
                 "base_commit": base_commit, "upstream_base": upstream_base, "base_image_id": base_image_id,
                 "created_at": fetched["created_at"], "f2p": evidence["f2p"], "p2p": evidence["p2p"],
-                "run_dir": run_dir.name, "control": evidence})
+                "template_digest": template_digest, "run_dir": run_dir.name, "control": evidence})
 
         f2p, p2p = evidence["f2p"], evidence["p2p"]
         stage = "spec-verdicts"
@@ -1802,7 +1901,8 @@ def _run_locked(*, repo, pr, issue_numbers, base_image, template_path, template_
             raise _Refused(str(exc.args[0])) from exc
         _atomic_json(ev_dir / "spec-verdicts-applied.json", {
             "spec_key": skey, "reader": entry["reader"], "note": entry.get("note"), "kept": kept,
-            "dropped": dropped, "tests": {t: entry["tests"][t] for t in f2p}})
+            "dropped": dropped, "tests": {t: entry["tests"][t] for t in f2p},
+            "ignored": sorted(t for t in entry["tests"] if t not in f2p)})
         _stage("spec-verdicts", kept=len(kept), dropped=len(dropped), reader=entry["reader"])
         if not kept:
             return {"status": "unusable", "exit_code": EXIT_UNUSABLE, "id": instance_id, "spec_key": skey,
