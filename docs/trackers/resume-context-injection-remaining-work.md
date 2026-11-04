@@ -11,7 +11,7 @@ tags:
 - operator-rules
 - engines
 topic: context-injection
-entry_high_water_CIW: 20
+entry_high_water_CIW: 21
 entry_prefix: CIW
 snapshot_anchor: '| ID | Owner | Size | Status | Title |'
 ---
@@ -51,7 +51,8 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 | CIW-17 | any | S | open | A-46's "median run < 5 s" health rule misfires on short control prompts |
 | CIW-18 | any | M–L | open | Principal identity: the edges the ADR left unmeasured |
 | CIW-19 | any | S | done | Guide-ledger residuals S-01, S-02 and S-04 |
-| CIW-20 | any | M | open | Classify the 55% repeat deliveries by re-arm cause |
+| CIW-20 | any | M | done | Classify the 55% repeat deliveries by re-arm cause |
+| CIW-21 | any | M | open | Record the re-arm cause where the ledger re-arms |
 
 ## CIW-1 — System 1: label pilot-2 and give the k=11 ruling
 
@@ -280,7 +281,7 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 ## CIW-20 — Classify the 55% repeat deliveries by re-arm cause
 
-**Status:** open
+**Status:** done (classified as far as `usage.db` allows; the residual needs CIW-21)
 **Valid:** dated 2026-11-04
 
 **Owner:** any. **Source:** CIW-19 S-02 measurement (this ledger).
@@ -288,6 +289,29 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 **Observed.** In `.codescout/usage.db` (2026-10-06 to 2026-11-04), 2,887 of 5,212 ledger-key deliveries (55%) repeat a key already delivered to the same `cc_session_id`, and 51.6% of delivered bytes go to such repeats. The ledger re-arms by design on compaction, `/clear`, a project switch and the anonymous-tier idle TTL, so the number is an upper bound on waste, not a measurement of it.
 
 **Next:** for each repeat, find the re-arm cause (a `SessionStart` source of `compact` or `clear`, a project switch, an idle gap over the TTL, or none of these). Only the "none of these" share is a ledger that failed to remember. `project-activation-bootstrap` alone repeats 770 times, so start there.
+
+**Result 2026-11-04.** Same window (2026-10-06 to 2026-11-04), `deliveries_json`, rows with a `cc_session_id`. 2,916 repeat deliveries, 10,329,561 B (the count differs from CIW-19's 2,887 because this pass drops rows without a `cc_session_id`). Each repeat is assigned the FIRST cause that applies between the key's previous delivery and this one:
+
+| cause | repeats | share | bytes | share |
+|---|---|---|---|---|
+| subagent re-arm (the delivering call has an `agent_id`) | 355 | 12.2% | 1,715,521 | 16.6% |
+| compaction (a `workspace(post_compact=true)` call in between) | 1,028 | 35.3% | 3,504,873 | 33.9% |
+| project switch (a `workspace(action="activate")` call in between) | 181 | 6.2% | 550,092 | 5.3% |
+| a gap of 2 h or more between calls | 430 | 14.7% | 1,292,239 | 12.5% |
+| **none of these (main thread)** | **922** | **31.6%** | **3,266,836** | **31.6%** |
+
+So at most **3.27 MB in 30 days (about 109 KB a day, about 0.82 M tokens at 4 B per token) can be a ledger that failed to remember**, and that is an upper bound. Why: (1) `SessionStart:compact` can re-arm through a request file with no `workspace(post_compact)` call, and `usage.db` records only the tool call, so some of the 922 are compactions. (2) The 2 h gap is a PROXY, not a cause: the identified tier has no idle TTL (`idle_ttl` is anonymous-tier only), so a long gap marks a resume or a compaction, not a proven re-arm. (3) The subagent row is by design: the companion's `SubagentStart` hook writes re-arm requests (`src/tools/guide_rearm.rs`) so that a fresh subagent gets guides it never saw. Of the 922, `project-activation-bootstrap` is 230, `progressive-disclosure` 113, `symbol-navigation` 111. For scale, the programme opened against a measured ~900 K tokens of re-injection waste; the upper bound here is the same order of size, so this does not show a regression or its absence. The residual cannot be classified from `usage.db`: no re-arm event is recorded. That gap is CIW-21.
+
+## CIW-21 — Record the re-arm cause where the ledger re-arms
+
+**Status:** open
+**Valid:** dated 2026-11-04
+
+**Owner:** any. **Source:** CIW-20 result (this ledger).
+
+**Observed.** `deliveries_json` records what each call delivered but not why a key that was already in the ledger was delivered again. Re-arms happen in at least five places (compaction through the `SessionStart:compact` request file or `workspace(post_compact)`, `/clear`, a project switch, a subagent dispatch or resume through `guide_rearm`, and the anonymous-tier idle TTL), and none writes an event. CIW-20 had to infer causes from neighbouring tool calls, and 922 repeats (31.6% of repeat bytes) stayed unexplained.
+
+**Next:** record the re-arm cause where the ledger re-arms, so a repeat delivery can be tied to it. Smallest shape to try: a `rearm` field next to `ledger_keys` in the delivery record, or one row per re-arm in `usage.db`. The ledger is in memory and shared per process, so decide first whether the cause rides the next delivery or is written when the re-arm happens. Add a test that each re-arm path records its cause.
 
 ## Template for new entries
 
