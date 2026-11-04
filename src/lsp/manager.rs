@@ -2873,6 +2873,18 @@ sys.exit(1)
         );
     }
 
+    /// A temp dir whose `mux.sock` fits in `sun_path` whatever `TMPDIR` is. `tempfile::tempdir()`
+    /// roots under `TMPDIR`, and a socket bound there stops fitting once `TMPDIR` is about 87 bytes
+    /// long (docs/issues/2026-10-28-long-tmpdir-breaks-mux-manager-socket-fixtures.md).
+    #[cfg(unix)]
+    fn short_sock_dir() -> tempfile::TempDir {
+        let base = crate::socket_discovery::short_per_user_runtime_dir().unwrap();
+        tempfile::Builder::new()
+            .prefix("t")
+            .tempdir_in(base)
+            .unwrap()
+    }
+
     /// Defect #1 actionable error: when a live process holds the flock but the
     /// socket is unreachable, the error names the wedged-mux situation and routes
     /// the human to the holder — not a bare `ECONNREFUSED`.
@@ -3028,7 +3040,7 @@ sys.exit(1)
     #[tokio::test]
     async fn connect_to_mux_waits_for_a_peer_mux_that_binds_its_socket_late() {
         use tokio::io::AsyncWriteExt;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = short_sock_dir();
         let lock_path = dir.path().join("mux.lock");
         let sock_path = dir.path().join("mux.sock");
         let _owner = super::claim_mux_lock(&lock_path)
@@ -3070,7 +3082,7 @@ sys.exit(1)
     #[cfg(unix)]
     #[tokio::test]
     async fn connect_to_mux_gives_up_on_a_socket_that_never_sends_its_init_message() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = short_sock_dir();
         let sock_path = dir.path().join("mux.sock");
         let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
         tokio::spawn(async move {
@@ -3150,7 +3162,7 @@ sys.exit(1)
     #[cfg(unix)]
     #[tokio::test]
     async fn a_silent_socket_ends_the_connect_when_the_window_ends() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = short_sock_dir();
         let sock_path = dir.path().join("mux.sock");
         let (accepted, _closed) = silent_mux(&sock_path);
 
@@ -3193,7 +3205,7 @@ sys.exit(1)
     #[cfg(unix)]
     #[tokio::test]
     async fn a_silent_socket_that_appears_late_still_ends_the_connect_with_the_window() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = short_sock_dir();
         let sock_path = dir.path().join("mux.sock");
         let late = sock_path.clone();
         let peer = tokio::spawn(async move {
@@ -3243,7 +3255,7 @@ sys.exit(1)
     #[tokio::test]
     async fn a_window_of_zero_still_lets_a_live_mux_send_its_init_message() {
         use tokio::io::AsyncWriteExt;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = short_sock_dir();
         let sock_path = dir.path().join("mux.sock");
         let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
         let peer = tokio::spawn(async move {
@@ -3275,7 +3287,7 @@ sys.exit(1)
     #[cfg(unix)]
     #[tokio::test]
     async fn an_attempts_init_bound_is_what_is_left_of_the_window_and_never_below_the_floor() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = short_sock_dir();
         let sock_path = dir.path().join("mux.sock");
         let (_accepted, _closed) = silent_mux(&sock_path);
         let applied = |failure: MuxConnectFailure| {
@@ -3378,7 +3390,7 @@ sys.exit(1)
     #[tokio::test]
     async fn a_mux_we_just_spawned_gets_the_full_init_bound_not_the_connect_window() {
         use tokio::io::AsyncWriteExt;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = short_sock_dir();
         let sock_path = dir.path().join("mux.sock");
         let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
         let peer = tokio::spawn(async move {
@@ -3579,7 +3591,7 @@ sys.exit(1)
     #[cfg(unix)]
     #[tokio::test]
     async fn an_attempt_that_gets_no_init_message_closes_its_connection_and_leaves_no_task() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = short_sock_dir();
         let sock_path = dir.path().join("mux.sock");
         let (accepted, mut closed) = silent_mux(&sock_path);
         // Let the peer's accept loop start, then count the tasks alive with only it running.
