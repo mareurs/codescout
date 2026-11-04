@@ -1708,6 +1708,187 @@ Body Mu.
         assert_eq!(checked, 0);
         assert!(dangling.is_empty());
     }
+    /// Every bare `§ heading` citation in `body` — one naming a section of the SAME guide, with no
+    /// `get_guide(...)` in front of it — as the cited heading text.
+    ///
+    /// The grammar, fitted to the corpus on 2026-11-04:
+    /// - A `§` preceded (ignoring spaces) by `)` or a backtick is not bare: `get_guide("t")` § H is
+    ///   [`citations`]' form, and `` `CLAUDE.md` `` § H names a file. So does a preceding word ending
+    ///   in `.md` or written in capitals (`CLAUDE.md § H`, `README § H`).
+    /// - An `*emphasised*` heading runs to the closing `*`, and may wrap onto the next line
+    ///   (`librarian.md` cites `§ *doc — Event` / `Log*`).
+    /// - A plain heading runs to the first `,` `:` `;` `(` `)`, ` — `, `. ` or next `§`; a trailing
+    ///   `.` and a trailing ` below` / ` above` are dropped. A heading containing one of those must
+    ///   be cited emphasised.
+    /// - Lines inside a fenced block are skipped, as in [`citations`], and so are lines indented
+    ///   four or more spaces — an indented code block: `tracker-conventions.md` quotes a `## Resume`
+    ///   banner that way, and its `§ *Integration*` names a section of the quoted tracker, not of
+    ///   the guide. The cost is the same as for fences: a real citation placed there is unchecked.
+    fn bare_citations(body: &str) -> Vec<String> {
+        let mut prose: Vec<&str> = Vec::new();
+        let mut in_fence = false;
+        for line in body.lines() {
+            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+                in_fence = !in_fence;
+                continue;
+            }
+            if in_fence || line.starts_with("    ") || line.starts_with('\t') {
+                continue;
+            }
+            prose.push(line);
+        }
+        let names_a_document = |word: &str| {
+            word.ends_with(".md")
+                || (word.chars().count() >= 2
+                    && word.chars().any(|c| c.is_ascii_uppercase())
+                    && word.chars().all(|c| {
+                        c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_' || c == '-'
+                    }))
+        };
+        let mut found = Vec::new();
+        for (i, line) in prose.iter().enumerate() {
+            for (at, _) in line.match_indices('§') {
+                let before = line[..at].trim_end();
+                if before.ends_with(')') || before.ends_with('`') {
+                    continue;
+                }
+                if before
+                    .split_whitespace()
+                    .last()
+                    .is_some_and(names_a_document)
+                {
+                    continue;
+                }
+                let after = line[at + '§'.len_utf8()..].trim_start();
+                let heading = match after.strip_prefix('*') {
+                    Some(emphasised) => match emphasised.find('*') {
+                        Some(end) => emphasised[..end].to_string(),
+                        None => {
+                            let next = prose.get(i + 1).map(|l| l.trim_start()).unwrap_or("");
+                            let tail = next.split('*').next().unwrap_or("");
+                            format!("{} {}", emphasised.trim_end(), tail)
+                        }
+                    },
+                    None => {
+                        let mut end = after.len();
+                        for stop in [",", ":", ";", "(", ")", " — ", ". ", "§"] {
+                            if let Some(p) = after.find(stop) {
+                                end = end.min(p);
+                            }
+                        }
+                        let plain = after[..end].trim().trim_end_matches('.');
+                        plain
+                            .strip_suffix(" below")
+                            .or_else(|| plain.strip_suffix(" above"))
+                            .unwrap_or(plain)
+                            .to_string()
+                    }
+                };
+                found.push(heading.trim().to_string());
+            }
+        }
+        found
+    }
+
+    /// `(bare citations checked, one message per bare citation naming no heading of its own guide)`.
+    fn check_bare_citations(corpus: &[(&'static str, &'static str)]) -> (usize, Vec<String>) {
+        let mut checked = 0;
+        let mut dangling = Vec::new();
+        for (from, body) in corpus {
+            let headings: Vec<String> = split_sections(body)
+                .1
+                .into_iter()
+                .map(|s| s.heading)
+                .collect();
+            for heading in bare_citations(body) {
+                checked += 1;
+                if !heading_resolves(&heading, &headings) {
+                    dangling.push(format!(
+                        "{from} cites § {heading}, which is not a heading of `{from}`"
+                    ));
+                }
+            }
+        }
+        (checked, dangling)
+    }
+
+    #[test]
+    fn every_bare_section_citation_in_a_guide_resolves_to_a_heading_of_that_guide() {
+        // The intra-guide twin of the `get_guide("t") § H` lint above. A bare `§ H` is followed by
+        // reading the guide already in hand, so a renamed heading leaves it pointing at nothing —
+        // `tracker-conventions.md`'s "see § Status vocabulary" did exactly that until it was fixed
+        // by hand on 2026-11-04.
+        let corpus: Vec<(&'static str, &'static str)> = crate::prompts::GUIDE_TOPICS
+            .iter()
+            .map(|t| (*t, crate::prompts::topic_body(t).unwrap()))
+            .collect();
+        let (checked, dangling) = check_bare_citations(&corpus);
+        assert!(
+            checked >= 5,
+            "the bare-citation scan checked {checked}; the guides held 5 when this test was written \
+         (librarian ×2, tracker-conventions ×1, workspace-state ×2). A drop means the scanner lost \
+         a form, or citations were removed on purpose: lower this floor only for the second reason."
+        );
+        assert!(
+            dangling.is_empty(),
+            "dangling bare § citations:\n{}",
+            dangling.join("\n")
+        );
+    }
+
+    #[test]
+    fn a_bare_citation_of_a_missing_heading_is_reported() {
+        let corpus = [(
+            "t",
+            "## Bug frontmatter and status vocabulary\nx\n## Other\nsee § Status vocabulary. Also \
+         see § *Bug frontmatter*.\n",
+        )];
+        let (checked, dangling) = check_bare_citations(&corpus);
+        assert_eq!(checked, 2, "{dangling:?}");
+        assert_eq!(dangling.len(), 1, "{dangling:?}");
+        assert!(dangling[0].contains("Status vocabulary"), "{dangling:?}");
+    }
+
+    #[test]
+    fn a_plain_bare_heading_ends_at_its_terminator() {
+        // The five shapes the real corpus uses, each against its own heading.
+        let body = "## Per-session state reset\nx\n## Worktree overlay\ny\n\
+                ## Bug frontmatter and status vocabulary\nz\n\
+                the predicate in § Per-session state reset: same-project keeps it\n\
+                depends on § Per-session state reset — don't assume it\n\
+                See § Worktree overlay below.\n\
+                (see § Bug frontmatter and status vocabulary). Filter\n\
+                ends the line § Worktree overlay\n";
+        assert_eq!(
+            bare_citations(body),
+            vec![
+                "Per-session state reset",
+                "Per-session state reset",
+                "Worktree overlay",
+                "Bug frontmatter and status vocabulary",
+                "Worktree overlay",
+            ]
+        );
+        assert!(check_bare_citations(&[("t", body)]).1.is_empty());
+    }
+
+    #[test]
+    fn an_emphasised_bare_heading_may_wrap_onto_the_next_line() {
+        let body = "## doc — Event Log\nx\n## Other\n**read it.** (After the fact, § *doc — Event\nLog*.) To add\n";
+        assert_eq!(bare_citations(body), vec!["doc — Event Log"]);
+        assert!(check_bare_citations(&[("t", body)]).1.is_empty());
+    }
+
+    #[test]
+    fn citations_of_other_documents_and_of_code_are_not_bare() {
+        let body = "## Real\nx\n\
+                the four commands in `CLAUDE.md` § *Development Commands*\n\
+                see CLAUDE.md § Git Workflow and README § Install\n\
+                `get_guide(\"t\")` § *Real* and get_guide(\"t\") § Real\n\
+                ```\nsee § Fictional\n```\n\
+                \x20   > historical record. Read § *Integration* for the current state.\n";
+        assert_eq!(bare_citations(body), Vec::<String>::new());
+    }
 
     #[test]
     fn librarian_declares_the_six_highest_volume_artifact_shapes() {

@@ -239,6 +239,26 @@ pub static ENGINES: &[EngineDecl] = &[
 pub fn owners_of(key: &str) -> Vec<&'static EngineDecl> {
     ENGINES.iter().filter(|e| (e.owns_key)(key)).collect()
 }
+/// Gate 1, post half: every `Tool` impl whose `call_content` override never reaches
+/// [`coordinator::run_post`], each with the reason it is allowed to.
+///
+/// The pre phase is total by construction (one production dispatch, which no tool
+/// can override); the post phase runs inside the trait's default `call_content`, so
+/// an override silently opts its tool out of every engine — no guide block, no
+/// operator rule, no session opener, no ledger stamp. Being on this list is a
+/// written-down waiver, on `PULL_ONLY_GUIDE_TOPICS`' convention, not an assumed
+/// one. `tests::every_call_content_override_reaches_run_post_or_is_declared`
+/// enumerates the overrides by parsing `src/` and fails on an override missing
+/// from this list and on an entry that no longer bypasses.
+pub const POST_PHASE_BYPASSES: &[(&str, &str)] = &[(
+    "Onboarding",
+    "Recorded as found 2026-09-02, not ruled deliberate. `Onboarding::call_content` builds \
+     its own blocks (writes the onboarding prompt under `.codescout/tmp/` and returns a \
+     compact instruction block, or the already-onboarded message), attaches the config-reload \
+     notice itself, and never calls `run_post`; so an `onboarding` call gets no session opener, \
+     no guide block, no operator rule and no ledger stamp. Closing it means routing that \
+     override through `run_post`; until then this entry is the record that it is open.",
+)];
 
 #[cfg(test)]
 mod tests {
@@ -400,5 +420,274 @@ mod tests {
             !(e.owns_key)(SESSION_OPENING_GUIDE),
             "an Unmanaged engine must own no key, or it would shadow a real owner"
         );
+    }
+    // ---- Gate 5: the family table has one home -------------------------------
+
+    /// The spec that holds the engine table, relative to `docs/superpowers/specs/`.
+    const FAMILY_TABLE_HOME: &str = "2026-09-02-retrieval-engine-coordination-design.md";
+
+    /// Whether `text` carries the engine family table: a Markdown table row whose
+    /// first three cells are `Engine`, `Retrieval key`, `Corpus`. Keyed on the
+    /// header's leading cells rather than the whole row, so the dated
+    /// `Status (verified …)` column can be re-verified without blinding the check.
+    fn carries_the_family_table(text: &str) -> bool {
+        text.lines().any(|line| {
+            let Some(row) = line.trim().strip_prefix('|') else {
+                return false;
+            };
+            let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+            cells.len() >= 3
+                && cells[0] == "Engine"
+                && cells[1] == "Retrieval key"
+                && cells[2] == "Corpus"
+        })
+    }
+
+    /// Every `*.md` under `dir` other than `home` (a path relative to `dir`) that
+    /// carries the table, as sorted relative paths.
+    fn family_table_copies(dir: &std::path::Path, home: &str) -> Vec<String> {
+        let mut copies: Vec<String> = walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .map(|e| e.into_path())
+            .filter(|p| p.extension().is_some_and(|x| x == "md"))
+            .filter_map(|p| {
+                let rel = p
+                    .strip_prefix(dir)
+                    .ok()?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let text = std::fs::read_to_string(&p).ok()?;
+                (rel != home && carries_the_family_table(&text)).then_some(rel)
+            })
+            .collect();
+        copies.sort();
+        copies
+    }
+
+    /// Gate 5. The table moved here from the operator-rules spec on 2026-09-02
+    /// because a second copy had already gone stale (§ *Problem 1*); that spec now
+    /// cites this gate as what keeps the move from being undone.
+    ///
+    /// The home must still match the fingerprint, or a re-worded header would
+    /// leave the copy check passing on a corpus where it can see nothing.
+    #[test]
+    fn the_engine_family_table_lives_only_in_the_coordination_spec() {
+        let specs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/superpowers/specs");
+        let home = std::fs::read_to_string(specs.join(FAMILY_TABLE_HOME))
+            .unwrap_or_else(|e| panic!("cannot read the table's home {FAMILY_TABLE_HOME}: {e}"));
+        assert!(
+            carries_the_family_table(&home),
+            "{FAMILY_TABLE_HOME} no longer carries a row starting `| Engine | Retrieval key | \
+         Corpus |`; update the fingerprint with the header, or this gate sees no copy anywhere"
+        );
+        let copies = family_table_copies(&specs, FAMILY_TABLE_HOME);
+        assert!(
+            copies.is_empty(),
+            "the engine family table is canonical in {FAMILY_TABLE_HOME} § The family; these \
+         specs carry a copy that will go stale: {copies:?}. Replace each with a pointer."
+        );
+    }
+
+    /// The copy check must be able to say yes: a pasted table (re-spaced, with a
+    /// different status column) is found, the home is not reported, and an
+    /// unrelated table that merely has an `Engine` column is not mistaken for it.
+    #[test]
+    fn a_pasted_copy_of_the_family_table_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = "| Engine | Retrieval key | Corpus | Status (verified 2026-09-02) | On the shared surface? |\n|---|---|---|---|---|\n| 1. codescout guiding | call shape | compiled-in guides | shipped | yes |\n";
+        std::fs::write(dir.path().join("home.md"), home).unwrap();
+        std::fs::write(
+            dir.path().join("pasted.md"),
+            "# Other spec\n\n|Engine|Retrieval key|Corpus|Status (verified 2026-10-01)|\n|-|-|-|-|\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("unrelated.md"),
+            "| Engine | Corpus |\n|---|---|\n| x | y |\n\nThe Engine, Retrieval key and Corpus columns live elsewhere.\n",
+        )
+        .unwrap();
+        assert_eq!(
+            family_table_copies(dir.path(), "home.md"),
+            vec!["pasted.md".to_string()]
+        );
+    }
+
+    // ---- Gate 1, post half: no undeclared bypass of run_post -----------------
+
+    /// One `call_content` body: the type whose `impl Tool` holds it (`None` for the
+    /// trait's own default) and whether it calls `run_post`.
+    #[derive(Debug)]
+    struct CallContentSite {
+        owner: Option<String>,
+        file: String,
+        reaches_run_post: bool,
+    }
+
+    /// Every `call_content` with a body in `src` that sits in an `impl Tool for T`
+    /// or in `trait Tool` itself, found by parsing rather than by text match, so an
+    /// `fn call_content(` split across lines or a `run_post(` inside a comment
+    /// cannot fool it: only a call expression whose callee ends in `run_post` counts.
+    fn call_content_sites(file: &str, src: &str) -> Vec<CallContentSite> {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .expect("rust grammar");
+        let Some(tree) = parser.parse(src, None) else {
+            return Vec::new();
+        };
+        let bytes = src.as_bytes();
+        let text = |n: tree_sitter::Node| n.utf8_text(bytes).unwrap_or("").to_string();
+        let last_segment = |s: String| s.rsplit("::").next().unwrap_or("").to_string();
+        let calls_run_post = |body: tree_sitter::Node| {
+            let mut stack = vec![body];
+            while let Some(n) = stack.pop() {
+                if n.kind() == "call_expression"
+                    && n.child_by_field_name("function")
+                        .is_some_and(|f| last_segment(text(f)) == "run_post")
+                {
+                    return true;
+                }
+                let mut c = n.walk();
+                stack.extend(n.children(&mut c));
+            }
+            false
+        };
+        let mut out = Vec::new();
+        let mut stack = vec![tree.root_node()];
+        while let Some(node) = stack.pop() {
+            let owner: Option<Option<String>> = match node.kind() {
+                "impl_item" => node
+                    .child_by_field_name("trait")
+                    .filter(|t| last_segment(text(*t)) == "Tool")
+                    .and_then(|_| node.child_by_field_name("type"))
+                    .map(|t| Some(text(t))),
+                "trait_item" => node
+                    .child_by_field_name("name")
+                    .filter(|n| text(*n) == "Tool")
+                    .map(|_| None),
+                _ => None,
+            };
+            if let (Some(owner), Some(body)) = (owner, node.child_by_field_name("body")) {
+                let mut c = body.walk();
+                for item in body.named_children(&mut c) {
+                    if item.kind() != "function_item"
+                        || !item
+                            .child_by_field_name("name")
+                            .is_some_and(|n| text(n) == "call_content")
+                    {
+                        continue;
+                    }
+                    if let Some(fn_body) = item.child_by_field_name("body") {
+                        out.push(CallContentSite {
+                            owner: owner.clone(),
+                            file: file.to_string(),
+                            reaches_run_post: calls_run_post(fn_body),
+                        });
+                    }
+                }
+            }
+            let mut c = node.walk();
+            stack.extend(node.children(&mut c));
+        }
+        out
+    }
+
+    /// One message per override that bypasses `run_post` undeclared, per declared
+    /// entry that no longer bypasses, and per entry whose reason is a placeholder.
+    fn post_phase_violations(sites: &[CallContentSite], declared: &[(&str, &str)]) -> Vec<String> {
+        let mut problems = Vec::new();
+        for site in sites {
+            let Some(owner) = &site.owner else { continue };
+            if !site.reaches_run_post && !declared.iter().any(|(t, _)| t == owner) {
+                problems.push(format!(
+                    "{}: `impl Tool for {owner}` overrides call_content and never calls run_post, so \
+                 no engine emits on its calls. Route it through run_post, or add it to \
+                 POST_PHASE_BYPASSES with the reason.",
+                    site.file
+                ));
+            }
+        }
+        for (ty, reason) in declared {
+            if !sites
+                .iter()
+                .any(|s| s.owner.as_deref() == Some(*ty) && !s.reaches_run_post)
+            {
+                problems.push(format!(
+                    "POST_PHASE_BYPASSES lists `{ty}`, which no longer overrides call_content \
+                 without run_post; remove the entry"
+                ));
+            }
+            if reason.len() <= 40 {
+                problems.push(format!(
+                    "POST_PHASE_BYPASSES entry `{ty}` must say why it bypasses: {reason:?}"
+                ));
+            }
+        }
+        problems
+    }
+
+    /// Gate 1, post half, over the real tree. The trait default must be seen and
+    /// must reach `run_post` — that is the proof the scanner sees the call at all.
+    #[test]
+    fn every_call_content_override_reaches_run_post_or_is_declared() {
+        let root = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let mut sites = Vec::new();
+        for entry in walkdir::WalkDir::new(&root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let Ok(src) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            if !src.contains("call_content") {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            sites.extend(call_content_sites(&rel, &src));
+        }
+        let defaults: Vec<&CallContentSite> = sites.iter().filter(|s| s.owner.is_none()).collect();
+        assert!(
+            defaults.len() == 1 && defaults[0].reaches_run_post,
+            "expected exactly one `trait Tool` default call_content, calling run_post; found {defaults:?}"
+        );
+        let problems = post_phase_violations(&sites, POST_PHASE_BYPASSES);
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    #[test]
+    fn an_undeclared_override_that_skips_run_post_is_reported() {
+        // A comment naming `run_post(` is not a call, so this still bypasses.
+        let src = "impl Tool for Foo {\n    async fn call_content(&self) -> u8 {\n        // run_post(&ctx, &mut l) is skipped here\n        self.call()\n    }\n}\n";
+        let sites = call_content_sites("foo.rs", src);
+        assert_eq!(sites.len(), 1, "{sites:?}");
+        let problems = post_phase_violations(&sites, &[]);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("Foo"), "{problems:?}");
+    }
+
+    #[test]
+    fn an_override_that_calls_run_post_needs_no_declaration() {
+        let src = "impl crate::tools::Tool for Bar {\n    async fn call_content(&self) -> u8 {\n        let e = crate::engines::coordinator::run_post(&p, &mut l);\n        e\n    }\n}\nimpl Other for Baz {\n    fn call_content(&self) {}\n}\n";
+        let sites = call_content_sites("bar.rs", src);
+        assert_eq!(sites.len(), 1, "only the `Tool` impl counts: {sites:?}");
+        assert!(sites[0].reaches_run_post);
+        assert!(post_phase_violations(&sites, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_declared_bypass_that_no_longer_bypasses_is_reported() {
+        let reason = "a reason long enough to pass the placeholder check, honestly";
+        let problems = post_phase_violations(&[], &[("Gone", reason)]);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("Gone"), "{problems:?}");
     }
 }

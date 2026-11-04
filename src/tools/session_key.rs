@@ -146,6 +146,11 @@ pub fn tool_use_id_from_meta(
 
 /// The argument key a companion hook stamps this call's principal into.
 ///
+/// **Cross-repo twin:** `codescout-companion/hooks/principal-stamp.mjs` in the
+/// claude-plugins repo writes this exact string (`const KEY`). Nothing builds the
+/// two repos together, so a rename on either side must change both;
+/// `the_principal_key_is_the_literal_the_companion_hook_stamps` pins this side.
+///
 /// **The vendor namespacing is structural, not decorative.** `.` and `/` cannot
 /// occur in a Rust identifier, so this key can never collide with a real field
 /// on any tool's input struct — which is the escape hatch
@@ -500,6 +505,21 @@ mod tests {
         assert!(
             PRINCIPAL_ARG_KEY.starts_with("dev.codescout.mcp/"),
             "vendor prefix is what keeps this disjoint from another sender's key"
+        );
+    }
+    /// The full wire literal, not only its prefix. The companion's
+    /// `codescout-companion/hooks/principal-stamp.mjs` (claude-plugins repo,
+    /// `const KEY = 'dev.codescout.mcp/agentId'`) stamps this
+    /// key onto every call's arguments, and [`PRINCIPAL_ARG_KEY`] is the read side of
+    /// that one key. No build checks the two repos against each other, so a rename on
+    /// EITHER side must change both; this test is what reds when only this side moves
+    /// (the prefix check above stays green under `…/agentID` or `…/principal`).
+    #[test]
+    fn the_principal_key_is_the_literal_the_companion_hook_stamps() {
+        assert_eq!(
+            PRINCIPAL_ARG_KEY, "dev.codescout.mcp/agentId",
+            "changing this key changes the wire contract with principal-stamp.mjs; \
+         change the hook in the same release or every subagent call loses its principal"
         );
     }
 

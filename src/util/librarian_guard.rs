@@ -80,17 +80,22 @@ type OracleSlot = std::sync::RwLock<Option<std::sync::Arc<dyn AugmentedArtifactO
 /// only other global mutable state, which chose those semantics deliberately.
 ///
 /// The value is per-**server**, not per-process, and the difference is observable:
-/// `CodeScoutServer::from_parts_with_env` has three test-helper callers
-/// (`src/server.rs:1686`, `:3713`, `:4084`), each building a server with its own
-/// catalog many times per test binary. A first-writer-wins `OnceLock` pinned
-/// whichever ran first and silently discarded every later install, so a safety
-/// guard's behaviour depended on test ordering. Production is unaffected either
-/// way — one server, built at `src/server.rs:1510` (stdio) or `:1571` (HTTP, which
-/// builds once and clones per session). F-51 in `docs/trackers/bug-fix-session-log.md`.
+/// one test binary builds many servers, each with its own catalog. Every caller of
+/// `CodeScoutServer::from_parts_with_env` outside its two production wrappers
+/// (`CodeScoutServer::new_with_env` and `CodeScoutServer::from_parts`) is test code —
+/// `server.rs`'s `tests`, `test_support` and `guide_hint_tests` modules and
+/// `server/config_reload_tests.rs`; `references` counted 33 such call sites on
+/// 2026-11-04. A first-writer-wins `OnceLock` pinned whichever ran first and silently
+/// discarded every later install, so a safety guard's behaviour depended on test
+/// ordering. Production is unaffected either way — one server per process: `run`'s
+/// stdio and HTTP arms each call `CodeScoutServer::from_parts` once (HTTP then clones
+/// it per session), and peer-serve's `peer::server::build_server_for_with_env` calls
+/// `CodeScoutServer::new_with_env` once. F-51 in `docs/trackers/bug-fix-session-log.md`.
 static ORACLE: OracleSlot = std::sync::RwLock::new(None);
 
-/// Install the process-wide oracle. Called once, when the librarian runtime is
-/// built; later calls are ignored. Left unset (tests, `--no-default-features`)
+/// Install the process-wide oracle. Called when the librarian runtime is built; a
+/// later call replaces the earlier oracle (last-writer-wins, see `ORACLE`). Left
+/// unset (tests, `--no-default-features`)
 /// the guard degrades to its frontmatter check rather than failing open loudly.
 pub fn install_augmented_oracle(oracle: std::sync::Arc<dyn AugmentedArtifactOracle>) {
     install_into(&ORACLE, oracle);
@@ -117,7 +122,7 @@ fn oracle() -> Option<std::sync::Arc<dyn AugmentedArtifactOracle>> {
 }
 
 /// The testable core: same decision, with the oracle passed explicitly so a test
-/// never has to install into the process-wide `OnceLock`.
+/// never has to install into the process-wide `ORACLE` slot.
 fn guard_with_oracle(
     path: &str,
     text: &str,

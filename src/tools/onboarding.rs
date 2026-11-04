@@ -505,6 +505,11 @@ impl Tool for Onboarding {
     /// `onboarding` builds its own response blocks, so it never reaches the dispatcher's
     /// notice injection: the failed-reload notice is attached here, on the success blocks and
     /// on an error, like on every other response.
+    ///
+    /// For the same reason it never reaches the engines' post phase
+    /// (`engines::coordinator::run_post`). That bypass is declared, with its reason, in
+    /// [`crate::engines::POST_PHASE_BYPASSES`]; routing this through `run_post` must remove
+    /// the entry, or `every_call_content_override_reaches_run_post_or_is_declared` reds.
     async fn call_content(
         &self,
         input: Value,
