@@ -993,7 +993,8 @@ pub fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String 
 
 /// The declaration header of a symbol's source text: everything from the first
 /// line that is not blank, a comment or an attribute/decorator, up to and
-/// including the first line that opens a body (`{`) or ends in `:` or `;`.
+/// including the first line that opens a body (`{`) or ends in `:` or `;`
+/// (a trailing `//` or ` #` comment is ignored for that test).
 /// Whitespace runs collapse to one space. `None` when no header line exists.
 fn declaration_header(text: &str) -> Option<String> {
     let mut header = String::new();
@@ -1008,7 +1009,8 @@ fn declaration_header(text: &str) -> Option<String> {
             }
             header.push_str(word);
         }
-        let t = line.trim();
+        let code = line.find("//").into_iter().chain(line.find(" #")).min();
+        let t = code.map_or(line, |i| &line[..i]).trim();
         if line.contains('{') || t.ends_with(':') || t.ends_with(';') {
             break;
         }
@@ -1081,6 +1083,27 @@ mod tests {
         assert_eq!(declaration_changed("fn a() {}", ""), None);
         assert_eq!(declaration_changed("// only a comment", "fn a() {}"), None);
         assert_eq!(declaration_changed("fn a() {}", "// only a comment"), None);
+    }
+
+    #[test]
+    fn declaration_changed_ignores_a_body_edit_under_a_python_header_with_a_trailing_comment() {
+        let old = "def f(a):  # note\n    pass";
+        assert_eq!(
+            declaration_changed(old, "def f(a):  # note\n    return 1"),
+            Some(false)
+        );
+        assert_eq!(
+            declaration_changed(old, "def f(a, b):  # note\n    pass"),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn declaration_changed_reads_crlf_text_like_lf_text() {
+        assert_eq!(
+            declaration_changed("fn a() -> u8 {\r\n    1\r\n}", "fn a() -> u8 {\n    3\n}"),
+            Some(false)
+        );
     }
 
     fn sym(name_path: &str) -> SymbolInfo {
