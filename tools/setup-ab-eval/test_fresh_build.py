@@ -1069,5 +1069,597 @@ class FetchPrTest(unittest.TestCase):
         self.assertTrue(issubclass(fb.FetchError, RuntimeError))
 
 
+BASE_IMAGE = "swebench/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-23000:latest"
+UPSTREAM_BASE = "3d5fe04754f1" + "0" * 28
+SYN_SHA = "05278f431f7a71add03f39f081af38f03ac64baf"
+CONTAINER = "sab-fresh-build-rust-lang__rust-analyzer-23096"
+TAG = "sab-fresh-rust-lang__rust-analyzer-23096:b%s" % fb.BUILDER_VERSION
+IMAGE_ID = "sha256:" + "a" * 64
+WARM_OK = (
+    "   Compiling stdx v0.0.0 (/testbed/crates/stdx)\n"
+    "   Compiling parser v0.0.0 (/testbed/crates/parser)\n"
+    "    Finished `test` profile [unoptimized + debuginfo] target(s) in 94.00s\n"
+)
+HAPPY_LABELS = [
+    "run", "clear-tracked", "clear-dirs", "copy", "extract", "touch", "metadata", "warm-build", "git-add",
+    "git-commit", "rev-parse", "docker-commit", "inspect", "rm",
+]
+
+
+def done(args, rc=0, out=""):
+    """What pilot.docker returns with check=False: stderr is merged into stdout, text mode."""
+    return subprocess.CompletedProcess(list(args), rc, out, None)
+
+
+def label(args):
+    """Name the build stage a docker argv (without the leading `docker`) belongs to."""
+    text = " ".join(args)
+    if args[0] == "run":
+        return "run"
+    if args[0] == "cp":
+        return "copy"
+    if args[0] == "commit":
+        return "docker-commit"
+    if args[:2] == ("image", "inspect"):
+        return "inspect"
+    if args[0] == "rmi":
+        return "rmi"
+    if args[:3] == ("rm", "-f", "-v"):
+        return "rm"
+    if "git ls-files -z | xargs -0 rm -f" in text:
+        return "clear-tracked"
+    if "-empty" in text:
+        return "clear-dirs"
+    if "tar -xf" in text:
+        return "extract"
+    if "touch" in text:
+        return "touch"
+    if "cargo metadata" in text:
+        return "metadata"
+    if "cargo test" in text:
+        return "warm-build"
+    if "rev-parse" in text:
+        return "rev-parse"
+    if " commit " in text:
+        return "git-commit"
+    if "git add -A" in text:
+        return "git-add"
+    return "?"
+
+
+class FakeDocker:
+    """Stands in for pilot.docker: records every call (argv without the leading `docker`, and its
+    keyword arguments) and answers by rule. A rule is `(label_or_predicate, response)`; a response
+    is a CompletedProcess, an `(exit_code, stdout)` tuple or an exception to raise. The first
+    matching rule wins; anything else succeeds with a plausible stdout."""
+
+    def __init__(self, *rules):
+        self.rules = list(rules)
+        self.calls = []
+
+    def __call__(self, *args, **kw):
+        args = tuple(str(a) for a in args)
+        self.calls.append((args, kw))
+        for match, resp in self.rules:
+            if (match(args) if callable(match) else match == label(args)):
+                if isinstance(resp, BaseException):
+                    raise resp
+                if isinstance(resp, tuple):
+                    return done(args, *resp)
+                return resp
+        return done(args, 0, self.default(args))
+
+    @staticmethod
+    def default(args):
+        name = label(args)
+        if name == "rev-parse":
+            return SYN_SHA + "\n"
+        if name == "inspect":
+            return IMAGE_ID + " 4294967296\n"
+        if name == "warm-build":
+            return WARM_OK
+        return ""
+
+    def labels(self):
+        return [label(args) for args, _ in self.calls]
+
+    def args_of(self, name):
+        found = [args for args, _ in self.calls if label(args) == name]
+        assert len(found) == 1, (name, found)
+        return found[0]
+
+
+class ImageTagTest(unittest.TestCase):
+    def test_tag_shape(self):
+        self.assertEqual(fb.image_tag(REPO, PR), TAG)
+        self.assertEqual(fb.image_tag("Foo/Bar.rs", 7), "sab-fresh-foo__bar.rs-7:b%s" % fb.BUILDER_VERSION)
+
+    def test_tag_is_a_valid_docker_reference(self):
+        name = fb.image_tag("Some-Org/My_Repo", 12).split(":")[0]
+        self.assertRegex(name, r"[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*\Z")
+
+    def test_unsafe_repo_or_pr_is_refused(self):
+        for bad in ("rust-analyzer", "a/b/c", "", "/x", "x/", "a b/c", "a/b;rm", "a/..", "a/b.", "a/_b", "a/b$(x)",
+                    "é/x", None, 5):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                fb.image_tag(bad, PR)
+        for bad in (0, -1, True, "23096", 1.5, None):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                fb.image_tag(REPO, bad)
+
+    def test_build_error_is_a_runtime_error(self):
+        self.assertTrue(issubclass(fb.BuildError, RuntimeError))
+
+
+class StorageFreeTest(unittest.TestCase):
+    def test_smallest_free_space_of_the_readable_roots(self):
+        usage = {"/a": 300e9, "/b": 120e9}
+
+        def fake_usage(path):
+            if path not in usage:
+                raise FileNotFoundError(path)
+            return mock.Mock(free=usage[path])
+        with mock.patch.object(fb.shutil, "disk_usage", fake_usage):
+            self.assertEqual(fb.data_root_free_gb(["/a", "/missing", "/b"]), 120.0)
+
+    def test_no_readable_root_is_a_refusal_not_a_guess(self):
+        with mock.patch.object(fb.shutil, "disk_usage", side_effect=FileNotFoundError):
+            with self.assertRaises(fb.BuildError):
+                fb.data_root_free_gb(["/x", "/y"])
+
+    def test_default_roots_come_from_the_daemon_config_or_var_lib(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "daemon.json"
+            cfg.write_text(json.dumps({"data-root": "/mnt/big"}))
+            self.assertEqual(fb._storage_roots(cfg), ["/mnt/big", "/var/lib/containerd"])
+            cfg.write_text("not json")
+            self.assertEqual(fb._storage_roots(cfg), ["/var/lib/docker", "/var/lib/containerd"])
+            self.assertEqual(fb._storage_roots(Path(tmp) / "absent.json"), ["/var/lib/docker", "/var/lib/containerd"])
+
+
+class BuildImageTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.tar = self.tmp / "tree.tar"
+        self.tar.write_bytes(b"tar bytes")
+        self.evidence = self.tmp / "evidence"
+
+    def build(self, docker, free=lambda: 500.0, **kw):
+        args = dict(base_image=BASE_IMAGE, repo=REPO, pr=PR, upstream_base=UPSTREAM_BASE, tree_tar=self.tar,
+                    evidence_dir=self.evidence, docker=docker, free_gb=free)
+        args.update(kw)
+        return fb.build_image(**args)
+
+    def evidence_json(self):
+        return json.loads((self.evidence / "build-evidence.json").read_text())
+
+    def fails(self, fake, pattern=r".", committed=False, **kw):
+        """Run a build that must raise BuildError; check the invariants every failure shares.
+
+        `committed=True` is for the one failure that happens inside `docker commit` itself.
+        """
+        with self.assertRaisesRegex(fb.BuildError, pattern) as cm:
+            self.build(fake, **kw)
+        labels = fake.labels()
+        if not committed:
+            self.assertNotIn("docker-commit", labels)
+        self.assertEqual(labels[-1], "rm")
+        self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CONTAINER))
+        ev = self.evidence_json()
+        self.assertEqual(ev["outcome"], "error")
+        self.assertTrue(ev["container_removed"])
+        return cm.exception
+
+    # --- the happy path ---
+
+    def test_happy_path_runs_the_stages_in_order(self):
+        fake = FakeDocker()
+        got = self.build(fake)
+        self.assertEqual(fake.labels(), HAPPY_LABELS)
+        self.assertEqual(got["image"], TAG)
+        self.assertEqual(got["base_commit"], SYN_SHA)
+        self.assertEqual(got["image_id"], IMAGE_ID)
+        self.assertEqual(got["size_bytes"], 4294967296)
+        self.assertEqual(got["compiling_lines"], 2)
+        self.assertTrue(got["container_removed"])
+        self.assertEqual(set(got["laps_seconds"]), {
+            "run", "clear", "extract", "metadata", "warm_build", "git_commit", "image_commit"})
+        for secs in got["laps_seconds"].values():
+            self.assertGreaterEqual(secs, 0)
+        self.assertEqual(set(got), {"image", "base_commit", "image_id", "size_bytes", "laps_seconds",
+                                    "compiling_lines", "container_removed"})
+
+    def test_container_is_started_with_network_and_the_pilot_limits(self):
+        fake = FakeDocker()
+        self.build(fake)
+        self.assertEqual(fake.args_of("run"), (
+            "run", "-d", "--name", CONTAINER, "--cpus", "4", "--memory", "24g", BASE_IMAGE, "sleep", "infinity"))
+
+    def test_offline_override_is_on_the_warm_build_exec_only(self):
+        fake = FakeDocker()
+        self.build(fake)
+        with_flag = [label(args) for args, _ in fake.calls if "CARGO_NET_OFFLINE=false" in args]
+        self.assertEqual(with_flag, ["warm-build"])
+        warm = fake.args_of("warm-build")
+        i = warm.index("-e")
+        self.assertEqual(warm[i:i + 2], ("-e", "CARGO_NET_OFFLINE=false"))
+        self.assertLess(i, warm.index(CONTAINER))  # an exec option, before the container name
+        self.assertEqual(warm[warm.index(CONTAINER) + 1:], ("cargo", "test", "--no-run"))
+        # the committed image keeps the baked offline setting: nothing alters its config
+        for name in ("run", "docker-commit"):
+            args = fake.args_of(name)
+            self.assertNotIn("-e", args)
+            self.assertNotIn("--env", args)
+            self.assertNotIn("--change", args)
+            self.assertFalse([a for a in args if "CARGO_NET_OFFLINE" in a])
+
+    def test_commit_goes_to_the_study_tag_and_the_container_is_removed_last(self):
+        fake = FakeDocker()
+        self.build(fake)
+        self.assertEqual(fake.args_of("docker-commit"), ("commit", CONTAINER, TAG))
+        self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CONTAINER))
+        self.assertEqual(fake.labels()[-1], "rm")
+
+    def test_every_exec_runs_in_the_workdir_and_the_workdir_is_a_parameter(self):
+        for workdir in ("/testbed", "/work/repo"):
+            with self.subTest(workdir=workdir):
+                fake = FakeDocker()
+                self.build(fake, workdir=workdir)
+                execs = [args for args, _ in fake.calls if args[0] == "exec"]
+                self.assertEqual(len(execs), 9)
+                for args in execs:
+                    i = args.index("-w")
+                    self.assertEqual(args[i + 1], workdir)
+                    self.assertEqual(args[i + 2], CONTAINER)
+
+    # --- the tree swap ---
+
+    def test_tracked_files_are_deleted_by_one_pipefail_bash_command(self):
+        fake = FakeDocker()
+        self.build(fake)
+        args = fake.args_of("clear-tracked")
+        i = args.index(CONTAINER)
+        self.assertEqual(args[i + 1:], ("bash", "-o", "pipefail", "-c", "git ls-files -z | xargs -0 rm -f"))
+
+    def test_empty_directories_are_deleted_except_target_and_git(self):
+        fake = FakeDocker()
+        self.build(fake)
+        args = fake.args_of("clear-dirs")
+        i = args.index(CONTAINER)
+        self.assertEqual(args[i + 1:i + 4], ("bash", "-o", "pipefail"))
+        script = args[-1]
+        for part in ("find .", "-mindepth 1", "-depth", "-type d", "-empty", "-delete", "while"):
+            self.assertIn(part, script)
+        for guarded in ("./target", "./target/*", "./.git", "./.git/*"):
+            self.assertIn("-not -path '%s'" % guarded, script)
+
+    def test_the_empty_directory_script_removes_nested_empties_and_spares_target_and_git(self):
+        # the real shell text, run on a scratch tree: the one place it is verified
+        fake = FakeDocker()
+        self.build(fake)
+        script = fake.args_of("clear-dirs")[-1]
+        r = self.tmp / "tree"
+        for d in ("crates/gone/src/tests", "crates/keep/src", "target/debug/deps", ".git/objects/pack", "empty"):
+            (r / d).mkdir(parents=True)
+        (r / "crates/keep/src/lib.rs").write_text("x")
+        (r / "target/debug/deps/empty_dir").mkdir()
+        proc = subprocess.run(["bash", "-o", "pipefail", "-c", script], cwd=r, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertFalse((r / "crates/gone").exists())
+        self.assertFalse((r / "empty").exists())
+        self.assertTrue((r / "crates/keep/src/lib.rs").exists())
+        self.assertTrue((r / "target/debug/deps/empty_dir").is_dir())
+        self.assertTrue((r / ".git/objects/pack").is_dir())
+
+    def test_tree_is_copied_in_extracted_over_the_workdir_and_the_tarball_is_removed(self):
+        fake = FakeDocker()
+        self.build(fake)
+        self.assertEqual(fake.args_of("copy"), ("cp", str(self.tar), CONTAINER + ":/tmp/sab-tree.tar"))
+        script = fake.args_of("extract")[-1]
+        self.assertIn("tar -xf /tmp/sab-tree.tar", script)
+        self.assertIn("rm -f /tmp/sab-tree.tar", script)  # else it would be baked into the image
+
+    def test_extracted_files_are_touched_after_extraction_and_before_the_build(self):
+        fake = FakeDocker()
+        self.build(fake)
+        labels = fake.labels()
+        self.assertEqual(labels.index("extract") + 1, labels.index("touch"))
+        self.assertLess(labels.index("touch"), labels.index("metadata"))
+        self.assertLess(labels.index("touch"), labels.index("warm-build"))
+
+    def test_the_touch_script_leaves_target_alone_and_refreshes_every_other_file(self):
+        fake = FakeDocker()
+        self.build(fake)
+        script = fake.args_of("touch")[-1]
+        r = self.tmp / "tree"
+        (r / "target").mkdir(parents=True)
+        (r / "src").mkdir()
+        old = 1_000_000_000
+        for f in (r / "Cargo.toml", r / "src/lib.rs", r / "target/artifact"):
+            f.write_text("x")
+            os.utime(f, (old, old))
+        (r / "src/link").symlink_to("missing-target")  # a dangling symlink must not fail the step
+        proc = subprocess.run(["bash", "-o", "pipefail", "-c", script], cwd=r, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertGreater((r / "Cargo.toml").stat().st_mtime, old + 1000)
+        self.assertGreater((r / "src/lib.rs").stat().st_mtime, old + 1000)
+        self.assertEqual((r / "target/artifact").stat().st_mtime, old)
+
+    def test_no_command_deletes_recursively_cleans_git_or_drops_the_network(self):
+        fake = FakeDocker()
+        self.build(fake)
+        for args, _ in fake.calls:
+            text = " ".join(args)
+            for banned in ("rm -rf", "rm -fr", "clean -f", "--network"):
+                self.assertNotIn(banned, text)
+
+    # --- cargo metadata ---
+
+    def test_cargo_metadata_must_succeed_before_the_build(self):
+        fake = FakeDocker(("metadata", (101, "error: failed to load manifest for workspace member")))
+        err = self.fails(fake, "cargo metadata")
+        self.assertIn("failed to load manifest", str(err))
+        self.assertNotIn("warm-build", fake.labels())
+
+    def test_cargo_metadata_fails_over_to_the_network_when_offline_fails(self):
+        seen = []
+
+        def first_metadata(args):
+            if label(args) != "metadata":
+                return False
+            seen.append(args)
+            return len(seen) == 1
+        fake = FakeDocker((first_metadata, (101, "no matching package in offline mode")))
+        self.build(fake)
+        self.assertEqual(fake.labels().count("metadata"), 2)
+        self.assertNotIn("CARGO_NET_OFFLINE=false", seen[0])
+        self.assertIn("CARGO_NET_OFFLINE=false", seen[1])
+        self.assertEqual(fake.labels()[-1], "rm")
+
+    # --- the warm build ---
+
+    def test_warm_build_log_is_kept_in_the_evidence_dir_byte_for_byte(self):
+        out = "   Compiling a v1\r\n   Compiling b v1\né line\n"
+        fake = FakeDocker(("warm-build", (0, out)))
+        got = self.build(fake)
+        self.assertEqual((self.evidence / "build.log").read_bytes(), out.encode("utf-8"))
+        self.assertEqual(got["compiling_lines"], 2)
+
+    def test_nonzero_warm_build_exit_raises_with_the_log_tail_even_when_it_compiled(self):
+        # Compiling lines present and a failing exit code: only the exit code can reject this run
+        out = "".join("   Compiling c%d v1\n" % i for i in range(3)) + "error: could not compile `hir-ty`\n"
+        fake = FakeDocker(("warm-build", (101, out)))
+        err = self.fails(fake, r"warm build.*101")
+        self.assertIn("could not compile `hir-ty`", str(err))
+        self.assertEqual((self.evidence / "build.log").read_text(), out)
+        self.assertNotIn("git-add", fake.labels())
+
+    def test_exit_code_is_not_inferred_from_a_clean_looking_log(self):
+        # the pilot reported a failed 0-second build as exit=0: a log with Compiling and Finished
+        # lines but exit 1 is still a failure
+        fake = FakeDocker(("warm-build", (1, WARM_OK)))
+        self.fails(fake, r"warm build.*exit 1")
+
+    def test_zero_compiling_lines_means_stale_binaries_and_raises(self):
+        fake = FakeDocker(("warm-build", (0, "    Finished `test` profile target(s) in 0.30s\n")))
+        self.fails(fake, "stale")
+        self.assertNotIn("git-add", fake.labels())
+
+    def test_empty_warm_build_output_is_stale_too(self):
+        self.fails(FakeDocker(("warm-build", (0, ""))), "stale")
+
+    def test_only_compiling_lines_count(self):
+        out = "  Compiling-ish text\nwarning: Compiling x\n   Fresh serde v1\n    Finished `test` profile\n"
+        self.fails(FakeDocker(("warm-build", (0, out))), "stale")
+
+    # --- later stages ---
+
+    def test_git_commit_is_synthetic_with_a_fixed_identity_and_message(self):
+        fake = FakeDocker()
+        self.build(fake)
+        add = fake.args_of("git-add")
+        self.assertEqual(add[add.index(CONTAINER) + 1:], ("git", "add", "-A"))
+        args = fake.args_of("git-commit")
+        tail = args[args.index(CONTAINER) + 1:]
+        self.assertEqual(tail[:6], ("git", "-c", "user.name=sab", "-c", "user.email=sab@invalid", "commit"))
+        msg = "synthetic base: %s %s (parent of PR %d merge)" % (REPO, UPSTREAM_BASE[:12], PR)
+        self.assertEqual(tail[tail.index("-m") + 1], msg)
+
+    def test_base_commit_is_the_sha_the_container_reports(self):
+        fake = FakeDocker(("rev-parse", (0, "%s\n" % ("ab" * 20))))
+        self.assertEqual(self.build(fake)["base_commit"], "ab" * 20)
+
+    def test_a_malformed_rev_parse_answer_raises(self):
+        fake = FakeDocker(("rev-parse", (0, "fatal: not a git repository\n")))
+        self.fails(fake, "rev-parse")
+
+    def test_docker_commit_failure_raises_and_leaves_no_tag_behind(self):
+        fake = FakeDocker(("docker-commit", (1, "no space left on device")))
+        self.fails(fake, "no space left", committed=True)
+        self.assertNotIn("inspect", fake.labels())
+        self.assertNotIn("rmi", fake.labels())
+
+    def test_docker_commit_with_no_answer_drops_a_tag_the_daemon_may_have_made(self):
+        fake = FakeDocker(("docker-commit", subprocess.TimeoutExpired(cmd=["docker"], timeout=3600)))
+        self.fails(fake, "timed out", committed=True)
+        self.assertEqual(fake.args_of("rmi"), ("rmi", TAG))
+        self.assertLess(fake.labels().index("rmi"), fake.labels().index("rm"))
+
+    def test_image_inspect_failure_after_commit_removes_the_tag_it_just_created(self):
+        fake = FakeDocker(("inspect", (1, "no such image")))
+        self.fails(fake, "inspect", committed=True)
+        self.assertEqual(fake.args_of("rmi"), ("rmi", TAG))
+
+    def test_malformed_inspect_output_raises_and_removes_the_new_tag(self):
+        fake = FakeDocker(("inspect", (0, "garbage\n")))
+        self.fails(fake, "inspect", committed=True)
+        self.assertEqual(fake.args_of("rmi"), ("rmi", TAG))
+
+    # --- every step's own exit code decides ---
+
+    def test_every_step_with_a_nonzero_exit_raises_stops_the_build_and_removes_the_container(self):
+        steps = ["run", "clear-tracked", "clear-dirs", "copy", "extract", "touch", "metadata", "warm-build",
+                 "git-add", "git-commit", "rev-parse", "docker-commit"]
+        for name in steps:
+            with self.subTest(step=name):
+                fake = FakeDocker((name, (7, "step failed here")))
+                err = self.fails(fake, "exit 7", committed=name == "docker-commit")
+                self.assertIn("step failed here", str(err))
+                self.assertEqual(fake.labels()[-2], name)  # nothing ran after the failed step but the removal
+
+    def test_a_step_timeout_is_a_build_error_and_the_container_is_removed(self):
+        for name in ("run", "extract", "warm-build", "docker-commit"):
+            with self.subTest(step=name):
+                fake = FakeDocker((name, subprocess.TimeoutExpired(cmd=["docker"], timeout=5)))
+                self.fails(fake, "timed out", committed=name == "docker-commit")
+
+    def test_a_missing_docker_binary_is_a_build_error(self):
+        self.fails(FakeDocker(("run", FileNotFoundError("docker"))), "docker")
+
+    def test_an_interrupt_still_removes_the_container(self):
+        fake = FakeDocker(("warm-build", KeyboardInterrupt()))
+        with self.assertRaises(KeyboardInterrupt):
+            self.build(fake)
+        self.assertEqual(fake.labels()[-1], "rm")
+        self.assertNotIn("docker-commit", fake.labels())
+        self.assertEqual(self.evidence_json()["outcome"], "error")
+
+    def test_exit_codes_are_read_from_the_completed_process_not_a_shell(self):
+        fake = FakeDocker()
+        self.build(fake)
+        for args, kw in fake.calls:
+            self.assertIs(kw.get("check"), False, args)  # read here, never raised by the docker wrapper
+            self.assertIn("timeout", kw)
+            joined = " ".join(args)
+            self.assertNotIn("| tee", joined)
+            self.assertNotIn("exit 0", joined)
+
+    # --- disk ---
+
+    def test_low_disk_refuses_before_any_docker_call(self):
+        fake = FakeDocker()
+        with self.assertRaisesRegex(fb.BuildError, "free"):
+            self.build(fake, free=lambda: fb.MIN_FREE_GB - 0.01)
+        self.assertEqual(fake.calls, [])
+
+    def test_unreadable_or_nan_free_space_refuses(self):
+        for bad in (float("nan"), None, "100", True):
+            fake = FakeDocker()
+            with self.assertRaises(fb.BuildError, msg=repr(bad)):
+                self.build(fake, free=lambda bad=bad: bad)
+            self.assertEqual(fake.calls, [])
+
+    def test_exactly_the_minimum_is_enough(self):
+        fake = FakeDocker()
+        self.build(fake, free=lambda: float(fb.MIN_FREE_GB))
+        self.assertEqual(fake.labels(), HAPPY_LABELS)
+
+    def test_free_space_is_asked_once_and_before_the_first_docker_call(self):
+        order = []
+        fake = FakeDocker()
+
+        def spy(*a, **k):
+            order.append("docker")
+            return fake(*a, **k)
+        self.build(spy, free=lambda: order.append("free") or 500.0)
+        self.assertEqual(order[0], "free")
+        self.assertEqual(order.count("free"), 1)
+
+    # --- argument checks, all before docker ---
+
+    def test_bad_arguments_are_refused_before_any_docker_call(self):
+        cases = [
+            dict(workdir="/"), dict(workdir=""), dict(workdir="testbed"), dict(workdir="/a/../b"),
+            dict(workdir="/a b"), dict(workdir="/a;b"), dict(workdir="/a'b"),
+            dict(upstream_base="main"), dict(upstream_base="3d5fe04"), dict(upstream_base=UPSTREAM_BASE + "z"),
+            dict(base_image=""), dict(base_image="-x"), dict(base_image="a b"), dict(repo="nope"), dict(pr=0),
+        ]
+        for over in cases:
+            with self.subTest(**over):
+                fake = FakeDocker()
+                with self.assertRaises((ValueError, fb.BuildError)):
+                    self.build(fake, **over)
+                self.assertEqual(fake.calls, [])
+
+    def test_a_missing_tree_tarball_is_refused_before_any_docker_call(self):
+        fake = FakeDocker()
+        with self.assertRaisesRegex(fb.BuildError, "tree"):
+            self.build(fake, tree_tar=self.tmp / "absent.tar")
+        self.assertEqual(fake.calls, [])
+
+    # --- evidence and removal ---
+
+    def test_evidence_of_a_good_build(self):
+        fake = FakeDocker()
+        got = self.build(fake)
+        ev = self.evidence_json()
+        self.assertEqual(ev["outcome"], "ok")
+        self.assertIsNone(ev["error"])
+        self.assertEqual(ev["image"], TAG)
+        self.assertEqual(ev["container"], CONTAINER)
+        self.assertEqual(ev["base_image"], BASE_IMAGE)
+        self.assertEqual(ev["upstream_base"], UPSTREAM_BASE)
+        self.assertEqual(ev["builder_version"], fb.BUILDER_VERSION)
+        self.assertEqual(ev["base_commit"], SYN_SHA)
+        self.assertEqual(ev["image_id"], IMAGE_ID)
+        self.assertEqual(ev["compiling_lines"], 2)
+        self.assertTrue(ev["container_removed"])
+        self.assertEqual(ev["laps_seconds"], got["laps_seconds"])
+        self.assertEqual([s["name"] for s in ev["steps"]], [n for n in HAPPY_LABELS if n != "rm"])
+        self.assertTrue(all(s["returncode"] == 0 for s in ev["steps"]))
+
+    def test_evidence_of_a_failed_build_names_the_error_and_the_failed_step(self):
+        fake = FakeDocker(("warm-build", (101, "error: boom\n")))
+        self.fails(fake, "boom")
+        ev = self.evidence_json()
+        self.assertIn("BuildError", ev["error"])
+        self.assertIn("boom", ev["error"])
+        last = ev["steps"][-1]
+        self.assertEqual((last["name"], last["returncode"]), ("warm-build", 101))
+        self.assertNotIn("image_id", ev)
+
+    def test_failed_removal_after_a_good_build_is_recorded_and_not_raised(self):
+        fake = FakeDocker(("rm", (1, "Error response from daemon: removal of container is already in progress")))
+        got = self.build(fake)
+        self.assertFalse(got["container_removed"])
+        ev = self.evidence_json()
+        self.assertEqual(ev["outcome"], "ok")
+        self.assertFalse(ev["container_removed"])
+        self.assertIn("already in progress", ev["removal_error"])
+
+    def test_failed_removal_never_replaces_the_original_error(self):
+        for rm in ((1, "cannot remove: device busy"), subprocess.TimeoutExpired(cmd=["docker"], timeout=300),
+                   FileNotFoundError("docker")):
+            with self.subTest(rm=repr(rm)):
+                fake = FakeDocker(("warm-build", (101, "error: the real cause\n")), ("rm", rm))
+                with self.assertRaisesRegex(fb.BuildError, "the real cause"):
+                    self.build(fake)
+                self.assertNotIn("docker-commit", fake.labels())
+                ev = self.evidence_json()
+                self.assertEqual(ev["outcome"], "error")
+                self.assertIn("the real cause", ev["error"])
+                self.assertFalse(ev["container_removed"])
+                self.assertTrue(ev["removal_error"])
+
+    def test_evidence_dir_is_created_when_missing(self):
+        deep = self.tmp / "a" / "b"
+        self.build(FakeDocker(), evidence_dir=deep)
+        self.assertTrue((deep / "build.log").is_file())
+        self.assertTrue((deep / "build-evidence.json").is_file())
+
+    def test_only_study_objects_are_named_and_nothing_else_is_deleted(self):
+        fake = FakeDocker()
+        self.build(fake)
+        for args, _ in fake.calls:
+            for a in args:
+                self.assertNotRegex(a, r"codescout-|pbr27-|rae-")
+            self.assertNotIn("volume", args)
+            self.assertNotIn("prune", args)
+            self.assertNotEqual(args[0], "rmi")
+        self.assertEqual([args for args, _ in fake.calls if args[0] == "rm"], [("rm", "-f", "-v", CONTAINER)])
+
+
 if __name__ == "__main__":
     unittest.main()

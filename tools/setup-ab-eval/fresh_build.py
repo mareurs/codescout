@@ -19,10 +19,21 @@ Upstream fetch (the one part that runs programs, through an injected `run`):
     fetch_pr(repo, pr, issue_numbers, dest, ...)         merge commit, base, diff and issue text of a PR
     FetchError                                           a refused or failed fetch
 
+Image build (runs docker, through an injected `docker`):
+
+    image_tag(repo, pr)                                  the study image tag of a PR
+    build_image(base_image=, repo=, pr=, ...)            task image -> upstream tree swapped in, built, committed
+    BuildError                                           a refused or failed build; no image tag is left
+    data_root_free_gb()                                  free GB of the docker storage, the default disk guard
+
 The helpers above import the standard library only and never touch docker, git, `gh`, the network,
 the filesystem or the environment, so their tests run anywhere. `fetch_pr` reads the environment and
 runs `gh` and `git` (with `GITHUB_TOKEN` removed) through `run=`, which a test replaces; it does not
-touch docker. A diff is treated as text with `\\n` boundaries only: it is split on the position of
+touch docker. `build_image` runs `docker` through `docker=` (default `pilot.docker`, the one other
+module this file imports), which a test replaces, and reads the exit code of every step from the
+returned `CompletedProcess` and nowhere else.
+
+A diff is treated as text with `\\n` boundaries only: it is split on the position of
 each `diff --git ` line start and never through `str.splitlines`, so a CRLF blob, a lone `\\r` or a
 Unicode line separator inside a hunk survives unchanged. `split_diff` regroups the blocks (source
 first, then test), so `patch + test_patch != diff` for a diff that interleaves them; each block's
@@ -37,8 +48,12 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
+import time
 from pathlib import Path
+
+import pilot
 
 BUILDER_VERSION = "1"
 MIN_FREE_GB = 60
@@ -250,7 +265,8 @@ class FetchError(RuntimeError):
 
 _STDERR_TAIL = 300
 _DATE = re.compile(r"\d{4}-\d\d-\d\d")
-_STAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")  # ASCII digits only: `\d` takes Arabic-Indic ones
+# ASCII digits only: `\d` would take Arabic-Indic ones
+_STAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 _SHA = re.compile(r"[0-9a-f]{40}([0-9a-f]{24})?")
 DIFF_ACCEPT = "Accept: application/vnd.github.v3.diff"
 
@@ -475,3 +491,295 @@ def fetch_pr(repo, pr, issue_numbers, dest, *, run=subprocess.run, cutoff=CUTOFF
         "pr_files": pr_files,
         "issue_created_at": min(created),
     }
+
+
+class BuildError(RuntimeError):
+    """The image build was refused (disk, arguments) or a step failed. No image tag is left behind."""
+
+
+_DOCKER_NAME = re.compile(r"[A-Za-z0-9]+(?:(?:[._]|__|-+)[A-Za-z0-9]+)*")
+_BASE_IMAGE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/@-]*")
+_WORKDIR = re.compile(r"/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*")
+_TREE_TAR = "/tmp/sab-tree.tar"  # inside the container; removed by the extract step, never committed
+_LOG_TAIL = 1500
+_EVIDENCE_TAIL = 500
+_COMPILING = re.compile(r"^[ \t]*Compiling ", re.MULTILINE)
+
+# Both scripts run with `bash -o pipefail -c` in the work directory. The first deletes, until none is
+# left, every empty directory except the top-level `target` and `.git` (a crate directory kept only
+# as empty `src/` or `tests/` breaks the `crates/*` workspace glob). The second sets every file's
+# mtime to now except under `target/` and `.git`: `git archive` gives old mtimes, older than the
+# warm `target/`, and cargo would reuse stale test binaries.
+_EMPTY_DIRS = (
+    "while :; do "
+    "found=$(find . -mindepth 1 -depth -type d -empty -not -path './target' -not -path './target/*' "
+    "-not -path './.git' -not -path './.git/*' -print -delete) || exit 1; "
+    "[ -n \"$found\" ] || break; done"
+)
+_TOUCH = r"find . \( -path ./target -o -path ./.git \) -prune -o \( -type f -o -type l \) -exec touch -h {} +"
+_STEP_NAMES = {
+    "run": "docker run", "clear-tracked": "delete tracked files", "clear-dirs": "delete empty directories",
+    "copy": "docker cp", "extract": "extract tree", "touch": "touch files", "metadata": "cargo metadata",
+    "metadata-network": "cargo metadata (network)", "warm-build": "warm build", "git-add": "git add",
+    "git-commit": "git commit", "rev-parse": "git rev-parse", "docker-commit": "docker commit",
+    "inspect": "docker image inspect", "rmi": "docker rmi",
+}
+
+
+def _fresh_id(repo, pr):
+    """`<owner>__<repo>-<pr>`, lowercase: the id both the container name and the image tag are built from.
+
+    `ValueError` unless `repo` is `owner/name` and the id is a valid docker name.
+    """
+    if isinstance(pr, bool) or not isinstance(pr, int) or pr <= 0:
+        raise ValueError("pr must be a positive integer, got %r" % (pr,))
+    if not isinstance(repo, str) or repo.count("/") != 1:
+        raise ValueError("repo must be 'owner/name', got %r" % (repo,))
+    owner, name = repo.split("/")
+    ident = ("%s__%s-%d" % (owner, name, pr)).lower()
+    if not all(_DOCKER_NAME.fullmatch(part) for part in (owner, name, ident)):
+        raise ValueError("repo %r cannot be part of a docker name" % (repo,))
+    return ident
+
+
+def image_tag(repo, pr):
+    """`sab-fresh-<owner>__<repo>-<pr>:b<BUILDER_VERSION>`, the study image of one PR."""
+    return "sab-fresh-%s:b%s" % (_fresh_id(repo, pr), BUILDER_VERSION)
+
+
+def _storage_roots(config=Path("/etc/docker/daemon.json")):
+    """Where docker keeps its data: the daemon's `data-root` (or `/var/lib/docker`) and the containerd store."""
+    try:
+        root = json.loads(Path(config).read_text(encoding="utf-8")).get("data-root")
+    except (OSError, ValueError, AttributeError):
+        root = None
+    return [root if isinstance(root, str) and root else "/var/lib/docker", "/var/lib/containerd"]
+
+
+def data_root_free_gb(roots=None):
+    """The smallest free space, in GB (1e9 bytes), over the docker storage roots that can be read.
+
+    `BuildError` when none can be read: the disk guard fails closed rather than guessing. Reads the
+    file system only; it runs no docker command.
+    """
+    free = []
+    for root in _storage_roots() if roots is None else roots:
+        try:
+            free.append(shutil.disk_usage(root).free / 1e9)
+        except OSError:
+            continue
+    if not free:
+        raise BuildError("cannot read the free space of the docker storage; refusing to build")
+    return min(free)
+
+
+def _text(proc):
+    out = proc.stdout
+    if out is None:
+        return ""
+    return out.decode("utf-8", errors="replace") if isinstance(out, bytes) else str(out)
+
+
+class _Build:
+    """The docker calls of one image build and their record. Every exit code comes from the
+    `CompletedProcess` of the docker call itself (`check=False`), never from a wrapper."""
+
+    def __init__(self, docker, container, workdir):
+        self.docker = docker
+        self.container = container
+        self.workdir = workdir
+        self.steps = []
+        self.call_raised = False  # the latest call died without an answer (timeout, no docker binary)
+
+    def run(self, step, *args, timeout):
+        """One docker call. `BuildError` when it times out or cannot start; a failing exit code is returned."""
+        name = _STEP_NAMES[step]
+        start = time.monotonic()
+        self.call_raised = False
+        problem = None
+        try:
+            proc = self.docker(*args, check=False, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            problem, cause = "%s timed out after %ss" % (name, timeout), exc
+        except (OSError, ValueError, RuntimeError) as exc:
+            problem, cause = "%s: cannot run docker: %s" % (name, exc), exc
+        seconds = round(time.monotonic() - start, 1)
+        if problem is not None:
+            self.call_raised = True
+            self.steps.append({"name": step, "returncode": None, "seconds": seconds, "error": problem})
+            raise BuildError(problem) from cause
+        self.steps.append({"name": step, "returncode": proc.returncode, "seconds": seconds,
+                           "tail": _text(proc)[-_EVIDENCE_TAIL:]})
+        return proc
+
+    def must(self, step, *args, timeout):
+        """`run`, and `BuildError` carrying the output tail unless the exit code is 0."""
+        proc = self.run(step, *args, timeout=timeout)
+        if proc.returncode != 0:
+            raise BuildError("%s failed (exit %s): %s" % (_STEP_NAMES[step], proc.returncode,
+                                                          _text(proc).rstrip()[-_LOG_TAIL:]))
+        return proc
+
+    def exec(self, step, *cmd, env=(), check=True, timeout=1800):
+        """`docker exec` of `cmd` in the work directory; `env` entries are `-e` options of this exec only."""
+        args = ["exec"]
+        for entry in env:
+            args += ["-e", entry]
+        args += ["-w", self.workdir, self.container, *cmd]
+        return (self.must if check else self.run)(step, *args, timeout=timeout)
+
+    def bash(self, step, script, timeout=1800):
+        return self.exec(step, "bash", "-o", "pipefail", "-c", script, timeout=timeout)
+
+    def drop_tag(self, tag):
+        """Best-effort `docker rmi <tag>` of the tag this build just made; never raises."""
+        try:
+            self.run("rmi", "rmi", tag, timeout=600)
+        except BuildError:
+            pass
+
+    def remove(self):
+        """`docker rm -f -v` of the container. Never raises: the outcome is returned for the evidence."""
+        try:
+            proc = self.docker("rm", "-f", "-v", self.container, check=False, timeout=600)
+        except Exception as exc:  # a failed removal must not replace the error that got us here
+            return {"container_removed": False, "removal_error": "%s: %s" % (type(exc).__name__, exc)}
+        out = _text(proc).rstrip()
+        if proc.returncode == 0 or "No such container" in out:
+            return {"container_removed": True, "removal_error": None}
+        return {"container_removed": False, "removal_error": "exit %s: %s" % (proc.returncode, out[-_LOG_TAIL:])}
+
+
+def _write_evidence(evidence_dir, ev):
+    (evidence_dir / "build-evidence.json").write_text(
+        json.dumps(ev, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+
+
+def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, docker=pilot.docker,
+                free_gb=data_root_free_gb, workdir="/testbed"):
+    """Build the study image of one PR: the upstream tree swapped into a task image, warm-built, committed.
+
+    `base_image` is a task image whose `workdir` repo has no remote and one synthetic commit;
+    `tree_tar` is the `git archive` of `upstream_base`. Steps, each exit code read from the docker
+    call itself: refuse under `MIN_FREE_GB` free (`free_gb()`, before any docker call); `docker run`
+    a container `sab-fresh-build-<id>` with network; delete the tracked files and the empty or
+    absent directories (not `target`, not `.git`); copy in and extract the tree and touch its
+    files; `cargo metadata` must succeed (offline first, then with the network); warm
+    `cargo test --no-run` with `-e CARGO_NET_OFFLINE=false` on that exec only, whose log must hold
+    at least one `Compiling` line (none means stale binaries); `git add -A` and a synthetic commit;
+    `docker commit` to `image_tag(repo, pr)`. The container is removed in a `finally`; no tag is
+    created before every check passed.
+
+    Writes `build.log` (the warm build's output, byte for byte) and `build-evidence.json` to
+    `evidence_dir`, also on failure. Returns `image`, `base_commit` (the synthetic commit's SHA),
+    `image_id`, `size_bytes`, `laps_seconds`, `compiling_lines` and `container_removed` (a failed
+    removal is recorded, never raised). `ValueError` for a bad argument, `BuildError` for a refused
+    or failed build; both before or without leaving an image tag.
+    """
+    ident = _fresh_id(repo, pr)
+    tag = image_tag(repo, pr)
+    container = "sab-fresh-build-" + ident
+    if not isinstance(base_image, str) or _BASE_IMAGE.fullmatch(base_image) is None:
+        raise ValueError("base_image is not an image reference: %r" % (base_image,))
+    if not isinstance(upstream_base, str) or _SHA.fullmatch(upstream_base) is None:
+        raise ValueError("upstream_base is not a full commit SHA: %r" % (upstream_base,))
+    if not isinstance(workdir, str) or _WORKDIR.fullmatch(workdir) is None or {".", ".."} & set(workdir.split("/")):
+        raise ValueError("workdir must be a plain absolute path below /, got %r" % (workdir,))
+    tree_tar, evidence_dir = Path(tree_tar), Path(evidence_dir)
+    if not tree_tar.is_file():
+        raise BuildError("tree tarball %s is not a file" % tree_tar)
+    free = free_gb()
+    if isinstance(free, bool) or not isinstance(free, (int, float)) or not free >= MIN_FREE_GB:
+        raise BuildError("%s GB free on the docker storage, at least %d GB needed" % (free, MIN_FREE_GB))
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+
+    build = _Build(docker, container, workdir)
+    ev = {
+        "builder_version": BUILDER_VERSION, "repo": repo, "pr": pr, "upstream_base": upstream_base,
+        "base_image": base_image, "image": tag, "container": container, "workdir": workdir,
+        "outcome": "error", "error": None, "steps": build.steps,
+    }
+    laps = ev["laps_seconds"] = {}
+    mark = [time.monotonic()]
+
+    def lap(key):
+        now = time.monotonic()
+        laps[key] = round(now - mark[0], 1)
+        mark[0] = now
+
+    failed = False
+    try:
+        build.must("run", "run", "-d", "--name", container, "--cpus", "4", "--memory", "24g", base_image,
+                   "sleep", "infinity", timeout=600)
+        lap("run")
+
+        build.bash("clear-tracked", "git ls-files -z | xargs -0 rm -f", timeout=600)
+        build.bash("clear-dirs", _EMPTY_DIRS, timeout=600)
+        lap("clear")
+
+        build.must("copy", "cp", str(tree_tar), "%s:%s" % (container, _TREE_TAR), timeout=1800)
+        build.bash("extract", "tar -xf %s -C . && rm -f %s" % (_TREE_TAR, _TREE_TAR))
+        build.bash("touch", _TOUCH)
+        lap("extract")
+
+        meta = ("cargo", "metadata", "--format-version", "1")
+        if build.exec("metadata", *meta, check=False, timeout=1200).returncode != 0:
+            build.exec("metadata-network", *meta, env=("CARGO_NET_OFFLINE=false",), timeout=1200)
+        lap("metadata")
+
+        warm = build.exec("warm-build", "cargo", "test", "--no-run", env=("CARGO_NET_OFFLINE=false",),
+                          check=False, timeout=7200)
+        log = _text(warm)
+        with open(evidence_dir / "build.log", "w", encoding="utf-8", errors="replace", newline="") as f:
+            f.write(log)
+        if warm.returncode != 0:
+            raise BuildError("warm build failed (exit %s): %s" % (warm.returncode, log.rstrip()[-_LOG_TAIL:]))
+        compiling = len(_COMPILING.findall(log))
+        if compiling < 1:
+            raise BuildError("warm build printed no Compiling line: the test binaries are stale "
+                             "(archive mtimes are older than target/)")
+        lap("warm_build")
+
+        message = "synthetic base: %s %s (parent of PR %d merge)" % (repo, upstream_base[:12], pr)
+        build.exec("git-add", "git", "add", "-A", timeout=3600)
+        build.exec("git-commit", "git", "-c", "user.name=sab", "-c", "user.email=sab@invalid", "commit", "-q",
+                   "-m", message, timeout=3600)
+        base_commit = _text(build.exec("rev-parse", "git", "rev-parse", "HEAD", timeout=120)).strip()
+        if _SHA.fullmatch(base_commit) is None:
+            raise BuildError("git rev-parse HEAD gave no commit SHA: %r" % base_commit[-_LOG_TAIL:])
+        lap("git_commit")
+
+        try:
+            build.must("docker-commit", "commit", container, tag, timeout=3600)
+        except BuildError:
+            if build.call_raised:  # no answer: the daemon may still have made the tag
+                build.drop_tag(tag)
+            raise
+        try:
+            proc = build.run("inspect", "image", "inspect", "--format", "{{.Id}} {{.Size}}", tag, timeout=120)
+            fields = _text(proc).split()
+            if proc.returncode != 0 or len(fields) != 2 or not fields[0].startswith("sha256:") \
+                    or not fields[1].isdigit():
+                raise BuildError("docker image inspect of %s failed (exit %s): %s"
+                                 % (tag, proc.returncode, _text(proc).rstrip()[-_LOG_TAIL:]))
+        except BaseException:
+            build.drop_tag(tag)  # the tag exists only because of the commit just above
+            raise
+        lap("image_commit")
+
+        ev.update(outcome="ok", base_commit=base_commit, image_id=fields[0], size_bytes=int(fields[1]),
+                  compiling_lines=compiling)
+    except BaseException as exc:
+        failed = True
+        ev["error"] = "%s: %s" % (type(exc).__name__, exc)
+        raise
+    finally:
+        ev.update(build.remove())
+        try:
+            _write_evidence(evidence_dir, ev)
+        except OSError:
+            if not failed:
+                raise
+    return {"image": tag, "base_commit": ev["base_commit"], "image_id": ev["image_id"],
+            "size_bytes": ev["size_bytes"], "laps_seconds": laps, "compiling_lines": ev["compiling_lines"],
+            "container_removed": ev["container_removed"]}
