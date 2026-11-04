@@ -1,17 +1,18 @@
 ---
 id: '892d22784432cf8b'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: agent worktrees are cut from the default branch (origin/HEAD = origin/master, 2026-07-05), not from experiments, so a subagent''s read_file misses the files its parent briefed'
 tags:
 - cluster/unclassified
-closed: ''
+closed: 2026-11-04
+no_fix_commit: 'The fix is two configuration changes outside every repository: worktree.baseRef set to head in the settings.json of ~/.claude, ~/.claude-sdd, ~/.claude-kat and ~/.claude-stef, and git remote set-head origin experiments in this checkout''s .git/config.'
 opened: 2026-11-03
 owner: marius
 related:
 - docs/issues/2026-10-26-the-subagent-bootstrap-tells-worktree-subagents-to-activate-and-they-race.md
 severity: medium
-unverified: Only one probe ran, in one session, on Linux. The subagent report is the subagent's own output; the main session re-derived the HEAD match with git. Whether sessions that started before the edit pick it up was not tested. The three profiles other than .claude-stef were edited after the probe and not probed.
+unverified: Two probes ran, on Linux, in sessions of profiles .claude-stef and .claude; both subagent reports are the subagents' own output, and the main session re-derived the HEAD match with git for the first. Profiles .claude-sdd and .claude-kat were edited and not probed. The fix is a settings change outside every repository, so it has no SHA or patch-id.
 ---
 
 # BUG: agent worktrees are cut from the default branch (origin/HEAD = origin/master, 2026-07-05), not from experiments, so a subagent's read_file misses the files its parent briefed
@@ -68,6 +69,8 @@ Probe: one read-only `Agent(isolation: "worktree")` subagent, dispatched from th
 
 Undo: delete the `worktree` key from the four files.
 
+**Second probe, same day, from a session that started before the setting was written.** Session `48d211eb-3bd8-4247-975b-631a73b1a87a` began on 2026-11-03. Before the dispatch, `git rev-parse HEAD` gave `02609bd88c4a811c5a13d238fdae04d800773bd4`, `git rev-parse origin/experiments` gave `537eb2cdf8aef36ea46961521b1230b278024fed`, and `git rev-list --count origin/experiments..HEAD` gave 8. One read-only `Agent(isolation: "worktree")` subagent (model haiku) reported `HEAD` `02609bd88c4a811c5a13d238fdae04d800773bd4`, equal to the local `HEAD` and not to `origin/experiments`. The subagent's report is its own output. The worktree was removed on its own after the subagent ended unchanged, so its `HEAD` could not be read again from the main session. The 40-character value matches the one noted before the dispatch. This closes the open point in § Resume: a session that loaded its settings before the edit still uses `baseRef: head`.
+
 ## Environment
 
 codescout main checkout `/home/marius/work/claude/codescout`, branch `experiments`. Claude Code agent worktrees under `.claude/worktrees/agent-*`.
@@ -109,7 +112,7 @@ Brief worktree subagents only with paths that exist at the worktree's base commi
 
 ## Resume
 
-Both fixes are applied and measured (see "baseRef=head applied and measured 2026-11-04" under Reproduction). Remaining: a worktree subagent started from a session that loaded the setting before it was written might still use the old base; check once after a restart. Nothing else is open on this record; move it to `fixed` with provenance after that check, citing the settings change (not a commit: the settings files are outside every repository).
+Both fixes are applied and measured, and the check for a session that loaded its settings earlier is done (§ Reproduction, "Second probe"). Nothing is open. The fix is a settings change in four files that are outside every repository, so there is no commit to cite. Not tested: Windows or macOS, and the profiles `.claude-sdd` and `.claude-kat` have no probe of their own.
 
 ## References
 
