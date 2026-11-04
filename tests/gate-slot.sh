@@ -1265,8 +1265,8 @@ eq "W0 no 'RAM tier' text" "$(w_count w0 'RAM tier')" "0"
 eq "W0 no 'tier RAM' line" "$(w_count w0 'tier RAM')" "0"
 eq "W0 the disk lease is the one used" "$(seen_all w0)" "$POOL/slot-0"
 eq "W0 the gate.sh: lines are the pre-tier ones, in order" \
-    "$(grep '^gate\.sh:' "$WORK/out-w0" | sed -E 's/^(gate\.sh: (CARGO_TARGET_DIR=|leased for THIS run only|tree size|pool total|green here does not cover:)).*/\1/')" \
-    "$(printf '%s\n' 'gate.sh: CARGO_TARGET_DIR=' 'gate.sh: leased for THIS run only' 'gate.sh: tree size' 'gate.sh: pool total' 'gate.sh: green here does not cover:')"
+    "$(grep '^gate\.sh:' "$WORK/out-w0" | sed -E 's/^(gate\.sh: (CARGO_TARGET_DIR=|leased for THIS run only|Python light lane output|tree size|pool total|PYTHON ran beside|green here does not cover:)).*/\1/')" \
+    "$(printf '%s\n' 'gate.sh: CARGO_TARGET_DIR=' 'gate.sh: leased for THIS run only' 'gate.sh: Python light lane output' 'gate.sh: tree size' 'gate.sh: pool total' 'gate.sh: PYTHON ran beside' 'gate.sh: green here does not cover:')"
 ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM_W"; rm -rf "$POOL"
 
 run_gate w1 sid-w1 "${W_OK[@]}"; rc=$?

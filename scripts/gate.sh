@@ -85,8 +85,18 @@ if [ -n "$EXCLUSIVE" ]; then
     }
 fi
 
+# The light Python lane (started below) runs in the background beside the Rust lanes. An exit before
+# it is joined must not leave it behind, so the EXIT trap stops it: `pkill -P` takes its children by
+# parent pid, never by a pattern that could match a peer's process.
+PY_PID=""
+PY_DIR=""
+gate_stop_python() {
+    if [ -n "$PY_PID" ]; then pkill -P "$PY_PID" 2>/dev/null; kill "$PY_PID" 2>/dev/null; fi
+    if [ -n "$PY_DIR" ]; then rm -rf -- "$PY_DIR"; fi
+    return 0
+}
 CONTEXT_SNAPSHOT=""
-trap 'rm -f -- "${CONTEXT_SNAPSHOT:-}"' EXIT
+trap 'rm -f -- "${CONTEXT_SNAPSHOT:-}"; gate_stop_python' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 CONTEXT_BLOCKED=0
@@ -163,13 +173,22 @@ echo
 # the tokenizer files and unset this.
 export CODESCOUT_SKIP_ONNX_TESTS="${CODESCOUT_SKIP_ONNX_TESTS:-1}"
 
-# Run Python first so the default Cargo lane still finishes last, even if Python fails.
+# The light Python lane needs neither the leased target dir nor a built binary (tests/test_python_runner.py
+# pins that by making the fixture lane wait for a Cargo lane), so it runs in the background beside the
+# Rust lanes and is joined after the default lane. The default Cargo lane therefore still finishes last
+# among the Cargo lanes, and a red Python lane still lets every Cargo lane run. Its output is held in a
+# file and printed whole once it is joined, so it cannot interleave with a Cargo lane's.
 GATE_T0=$SECONDS
 # Wall seconds per lane, printed in the summary below: the gate's duration was recorded
 # nowhere (bug e1515917e4215c93), and duration is the dimension that grows with the tests.
-python3 ./scripts/python-tests.py --lane light
-PYTHON_LIGHT=$?
-T_PYTHON=$((SECONDS - GATE_T0)); T_PREV=$SECONDS
+PY_DIR=$(mktemp -d "${TMPDIR:-/tmp}/codescout-gate-python.XXXXXX") || exit 2
+(
+    PY_START=$SECONDS
+    python3 ./scripts/python-tests.py --lane light >"$PY_DIR/out" 2>&1
+    echo "$? $((SECONDS - PY_START))" >"$PY_DIR/done"
+) &
+PY_PID=$!
+T_PREV=$SECONDS
 
 # `;` throughout, never `&&` — see the heredoc above. The default lane does two jobs,
 # reporting AND rebuilding, and only the first should ever be short-circuited.
@@ -204,6 +223,16 @@ cargo test --workspace --doc
 DEFAULT_DOC=$?
 [ "$DEFAULT" -ne 0 ] || DEFAULT=$DEFAULT_DOC
 T_DEFAULT=$((SECONDS - T_PREV))
+# Join the Python lane: the verdict needs its exit code. A lane that left no result is red, not green.
+wait "$PY_PID" 2>/dev/null
+PY_PID=""
+echo
+echo "gate.sh: Python light lane output (it ran beside the Rust lanes):"
+cat "$PY_DIR/out" 2>/dev/null
+if ! read -r PYTHON_LIGHT T_PYTHON <"$PY_DIR/done" 2>/dev/null; then
+    PYTHON_LIGHT=1; T_PYTHON=0
+    echo "gate.sh: the Python light lane left no result; counting it red" >&2
+fi
 T_TOTAL=$((SECONDS - GATE_T0))
 
 echo
@@ -216,6 +245,7 @@ fi
 # The RAM figures are how the revisit trigger (a ratio worse than 1/2.2) becomes visible.
 if [ "${GATE_TIER:-}" = ram ]; then ram_tier_report; fi
 echo "GATE SECONDS -> TOTAL=$T_TOTAL PYTHON=$T_PYTHON FMT=$T_FMT CLIPPY=$T_CLIPPY LEAN=$T_LEAN DEFAULT=$T_DEFAULT"
+echo "gate.sh: PYTHON ran beside the Rust lanes, so TOTAL is not the sum of the lane times"
 echo "PYTHON LIGHT EXIT -> PYTHON_LIGHT=$PYTHON_LIGHT"
 echo "GATE EXITS -> FMT=$FMT CLIPPY=$CLIPPY LEAN=$LEAN DEFAULT=$DEFAULT FMT_STATE=$FMT_STATE"
 # A red lane in a RAM slot may be the tier, not the code. The gate does not read lane output, so this
