@@ -594,6 +594,38 @@ fn resolve_callees_via_ts(
 
     Ok(edges)
 }
+/// Count the call nodes in `src` whose callee identifier equals `name`.
+///
+/// Only real call nodes count: a name used as an argument, inside a string
+/// literal or in a comment is not a call. Returns `None` when the language has
+/// no call kinds or the parse fails, so "cannot classify" is never `Some(0)`.
+pub(crate) fn count_calls_named(src: &str, language_id: &str, name: &str) -> Option<usize> {
+    let kinds = call_kinds_for(language_id);
+    if kinds.is_empty() {
+        return None;
+    }
+    let tree = parse_ts_tree(src, language_id)?;
+
+    // Iterative pre-order walk: recursion depth would follow the input's nesting.
+    let mut count = 0;
+    let mut cursor = tree.walk();
+    loop {
+        let node = cursor.node();
+        if kinds.contains(&node.kind())
+            && callee_identifier(node, src, language_id).as_deref() == Some(name)
+        {
+            count += 1;
+        }
+        if cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return Some(count);
+            }
+        }
+    }
+}
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -1224,5 +1256,30 @@ mod tests {
         let uri: lsp_types::Uri = "file:///tmp/hello.rs".parse().unwrap();
         let path = lsp_uri_to_path(&uri).unwrap();
         assert_eq!(path, PathBuf::from("/tmp/hello.rs"));
+    }
+    // ── count_calls_named ────────────────────────────────────────────────────
+
+    #[test]
+    fn count_calls_named_counts_function_and_method_calls_in_rust() {
+        let src = "fn main() { a(1); x.a(2); b(a); let s = \"a(3)\"; /* a(4) */ }";
+        assert_eq!(count_calls_named(src, "rust", "a"), Some(2));
+    }
+
+    #[test]
+    fn count_calls_named_counts_calls_in_python() {
+        let src = "a(1)\nobj.a(2)\nprint(a)\n";
+        assert_eq!(count_calls_named(src, "python", "a"), Some(2));
+    }
+
+    #[test]
+    fn count_calls_named_counts_calls_in_typescript() {
+        let src = "a(1); obj.a(2); foo(a);";
+        assert_eq!(count_calls_named(src, "typescript", "a"), Some(2));
+    }
+
+    #[test]
+    fn count_calls_named_is_none_for_a_language_without_call_kinds() {
+        let src = "package main\nfunc main() { a(1) }\n";
+        assert_eq!(count_calls_named(src, "go", "a"), None);
     }
 }
