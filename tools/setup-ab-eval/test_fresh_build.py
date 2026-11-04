@@ -71,9 +71,39 @@ EXTRA_KEYS = {"upstream_base_commit", "dropped_f2p", "spec_rule", "builder_versi
 
 class ConstantsTest(unittest.TestCase):
     def test_values(self):
-        self.assertEqual(fb.BUILDER_VERSION, "1")
         self.assertEqual(fb.MIN_FREE_GB, 60)
         self.assertEqual(fb.CUTOFF, "2026-07-01")
+
+
+class TestToolchainTest(unittest.TestCase):
+    """`_test_toolchain`: the one rustup toolchain the template's `test_cmds` run under."""
+
+    def template(self, **over):
+        return dict(TEMPLATE, **over)
+
+    def test_test_toolchain_single(self):
+        self.assertEqual(fb._test_toolchain(self.template(test_cmds=["cd /testbed ; cargo +stable test"])), "stable")
+        # the same toolchain named twice, over several commands, is still one
+        self.assertEqual(fb._test_toolchain(self.template(
+            test_cmds=["cargo +stable test -p a", "cd x && cargo +stable test -p b"])), "stable")
+
+    def test_test_toolchain_none(self):
+        self.assertIsNone(fb._test_toolchain(self.template(test_cmds=["cargo test"])))
+
+    def test_test_toolchain_two_refused(self):
+        with self.assertRaises(ValueError) as caught:
+            fb._test_toolchain(self.template(test_cmds=["cargo +stable test", "cargo +nightly test"]))
+        self.assertIn("stable", str(caught.exception))
+        self.assertIn("nightly", str(caught.exception))
+
+    def test_test_toolchain_ignores_rebuild_and_print(self):
+        template = self.template(test_cmds=["cargo test"], rebuild_cmds=["cargo +stable check"],
+                                 print_cmds=["rustc +nightly -V"])
+        self.assertIsNone(fb._test_toolchain(template))
+
+    def test_builder_version_is_2(self):
+        # 2: the warm build runs the test command's toolchain, so a "1" image is not a "2" image
+        self.assertEqual(fb.BUILDER_VERSION, "2")
 
 
 class IsTestPathTest(unittest.TestCase):
@@ -447,7 +477,7 @@ class CacheKeyTest(unittest.TestCase):
         self.assertNotEqual(base, fb.cache_key("r2", "u", "img"))
         self.assertNotEqual(base, fb.cache_key("r", "u2", "img"))
         self.assertNotEqual(base, fb.cache_key("r", "u", "img2"))
-        self.assertNotEqual(base, fb.cache_key("r", "u", "img", version="2"))
+        self.assertNotEqual(base, fb.cache_key("r", "u", "img", version="1"))
 
 
 class SurrogateEscapeTest(unittest.TestCase):
@@ -1204,7 +1234,7 @@ def label(args):
         return "toolchain"
     if "cargo metadata" in text:
         return "metadata"
-    if "cargo test" in text:
+    if "test --no-run" in text:
         return "warm-build"
     if "--pathspec-from-file" in text:
         return "git-add-force"
@@ -1510,6 +1540,36 @@ class BuildImageTest(unittest.TestCase):
             self.assertNotIn("-e", args)
             self.assertNotIn("--env", args)
             self.assertFalse([a for a in args if "CARGO_NET_OFFLINE" in a])
+    def test_warm_build_argv_uses_toolchain(self):
+        fake = FakeDocker()
+        self.build(fake, warm_toolchain="stable")
+        warm = fake.args_of("warm-build")
+        self.assertEqual(warm[warm.index(CID) + 1:], ("cargo", "+stable", "test", "--no-run"))
+        # the offline override is still on that exec alone
+        self.assertEqual([label(args) for args, _ in fake.calls if "CARGO_NET_OFFLINE=false" in args], ["warm-build"])
+        self.assertEqual(warm[warm.index("-e"):warm.index("-e") + 2], ("-e", "CARGO_NET_OFFLINE=false"))
+        fake = FakeDocker()
+        self.build(fake, warm_toolchain=None)
+        warm = fake.args_of("warm-build")
+        self.assertEqual(warm[warm.index(CID) + 1:], ("cargo", "test", "--no-run"))
+
+    def test_warm_toolchain_validated(self):
+        for bad in ("stable; rm -rf /", "+stable", "", "st able", "-x", "$(x)", 5):
+            fake = FakeDocker()
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                self.build(fake, warm_toolchain=bad)
+            self.assertEqual(fake.calls, [])
+
+    def test_evidence_records_warm_toolchain(self):
+        self.build(FakeDocker(), warm_toolchain="stable")
+        self.assertEqual(self.evidence_json()["warm_toolchain"], "stable")
+        self.build(FakeDocker(), warm_toolchain=None, evidence_dir=self.tmp / "other")
+        self.assertIn("warm_toolchain", json.loads((self.tmp / "other" / "build-evidence.json").read_text()))
+        self.assertIsNone(json.loads((self.tmp / "other" / "build-evidence.json").read_text())["warm_toolchain"])
+        # a failed build records it too: it is part of what the warm build was asked to do
+        self.fails(FakeDocker(("warm-build", (101, "error: boom\n"))), "boom", warm_toolchain="stable")
+        self.assertEqual(self.evidence_json()["warm_toolchain"], "stable")
+
 
     def test_commit_restores_the_cmd_and_goes_to_the_study_tag_by_container_id(self):
         fake = FakeDocker()
@@ -3336,7 +3396,7 @@ O_IMAGE_ID = "sha256:" + "c3" * 32
 O_GATED_ID = "sha256:" + "e5" * 32  # the id of the built image the gate ran on
 O_BASE_IMAGE = "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22855"
 O_TEMPLATE_ID = "rust-lang__rust-analyzer-22855"
-O_TAG = "sab-fresh-rust-lang__rust-analyzer-23096:b1"
+O_TAG = "sab-fresh-rust-lang__rust-analyzer-23096:b%s" % fb.BUILDER_VERSION
 O_TESTS = ["crate::tests::a", "crate::tests::b", "crate::tests::c"]
 O_P2P = ["crate::tests::p1", "crate::tests::p2"]
 O_PS = "Issue title\r\nbody with CRLF\r\n"
@@ -3649,7 +3709,7 @@ class OrchestrationTest(unittest.TestCase):
                 key = {"repo": fb.cache_key("other/repo", O_UPSTREAM, O_IMAGE_ID),
                        "base": fb.cache_key(O_REPO, "9" * 40, O_IMAGE_ID),
                        "image": fb.cache_key(O_REPO, O_UPSTREAM, "sha256:" + "0" * 64),
-                       "version": fb.cache_key(O_REPO, O_UPSTREAM, O_IMAGE_ID, version="2")}[what]
+                       "version": fb.cache_key(O_REPO, O_UPSTREAM, O_IMAGE_ID, version="1")}[what]
                 (self.ev / "cache-key.txt").write_text(key)
                 self.go()
                 self.assertEqual(len(self.build_calls), 1)
@@ -4286,10 +4346,28 @@ class OrchestrationTest(unittest.TestCase):
         self.go()
         self.assertEqual(self.build_calls[0]["toolchains"], [])
         self.forget_pending()
-        self.write_template(test_cmds=["cd /testbed/repo && cargo +stable test --no-fail-fast",
-                                       "rustc +nightly-2026-01-01 -V"], rebuild_cmds=["cargo +stable check"])
+        self.write_template(test_cmds=["cd /testbed/repo && cargo +stable test --no-fail-fast"],
+                            rebuild_cmds=["cargo +stable check"], print_cmds=["rustc +nightly-2026-01-01 -V"])
         self.go()
         self.assertEqual(self.build_calls[1]["toolchains"], ["nightly-2026-01-01", "stable"])
+    def test_run_build_passes_template_toolchain(self):
+        self.write_template(test_cmds=["cd /testbed/repo && cargo +stable test --no-fail-fast"])
+        self.go()
+        self.assertEqual(self.build_calls[0]["warm_toolchain"], "stable")
+        self.forget_pending()
+        self.write_template(test_cmds=["cd /testbed/repo && cargo test"], rebuild_cmds=["cargo +stable check"])
+        self.go()
+        self.assertIsNone(self.build_calls[1]["warm_toolchain"])
+
+    def test_run_build_refuses_a_template_with_two_test_toolchains_before_any_work(self):
+        self.write_template(test_cmds=["cargo +stable test", "cargo +nightly test"])
+        got = self.go()
+        self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "template"))
+        self.assertIn("stable", got["error"])
+        self.assertIn("nightly", got["error"])
+        self.assertEqual((self.fetch_calls, self.build_calls, self.control_calls), ([], [], []))
+        self.assertEqual(self.host.calls, [])  # no docker, no git
+
 
     # --- a failed gate is not retried by deleting the image ---
 

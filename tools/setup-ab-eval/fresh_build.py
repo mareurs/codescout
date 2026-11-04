@@ -100,7 +100,7 @@ import multilang_control as mc
 import multilang_grade as grade
 import pilot
 
-BUILDER_VERSION = "1"
+BUILDER_VERSION = "2"  # 2: the warm build runs under the toolchain the template's test command names
 MIN_FREE_GB = 60
 CUTOFF = "2026-07-01"
 
@@ -944,7 +944,7 @@ def _write_evidence(evidence_dir, ev, name=_EVIDENCE_FILE):
 
 
 def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, docker=pilot.docker,
-                free_gb=data_root_free_gb, workdir="/testbed", expected_tree=None, toolchains=()):
+                free_gb=data_root_free_gb, workdir="/testbed", expected_tree=None, toolchains=(), warm_toolchain=None):
     """Build the study image of one PR: the upstream tree swapped into a task image, warm-built, committed.
 
     `base_image` is a task image whose `workdir` repo has no remote and one synthetic commit;
@@ -956,7 +956,7 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
     the tracked files, copy in and extract the tree; list the files that remain and delete every
     one that is not in the tarball (a leftover untracked or ignored file, a file of an old
     directory), then the empty directories (not `target`, not `.git`); touch the files;
-    `cargo metadata` must succeed (offline first, then with the network); warm `cargo test
+    `cargo metadata` must succeed (offline first, then with the network); warm `cargo [+<warm_toolchain>] test
     --no-run` with `-e CARGO_NET_OFFLINE=false` on that exec only, whose log must hold at least one
     `Compiling` line (none means stale binaries); `git add -A`, then `git add -f` of every tarball
     path (the new `.gitignore` would drop tracked files that it matches), a synthetic commit, and a
@@ -985,6 +985,11 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
     `cargo metadata`, one step records `cargo -V` and `rustc -V` for the default toolchain and each named
     one into the evidence (`toolchains`, `toolchain_versions`). Evidence only: a failure there refuses nothing.
 
+    `warm_toolchain` (a plain rustup name, or `None`): the toolchain of the template's test command
+    (`_test_toolchain`). The warm build runs `cargo +<warm_toolchain> test --no-run`, so the `target/` it
+    leaves is the one the test command reuses; `None` runs `cargo test --no-run`, which takes the toolchain
+    the image's rustup directory override names. The evidence records it as `warm_toolchain`.
+
     Writes `build.log` (the warm build's output as `docker exec` returned it: `pilot.command` decodes
     text mode, so it is not byte-exact for a non-UTF-8 or carriage-return stream) and
     `build-evidence.json` to `evidence_dir`, also on failure, except that a "tag exists" refusal (at the
@@ -1010,6 +1015,10 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
         raise ValueError("toolchains must be plain rustup toolchain names (stable, nightly-2026-01-01), got %r"
                          % (toolchains,))
     toolchains = list(toolchains)
+    if warm_toolchain is not None and (not isinstance(warm_toolchain, str)
+                                       or _TOOLCHAIN.fullmatch(warm_toolchain) is None):
+        raise ValueError("warm_toolchain must be a plain rustup toolchain name (stable, nightly-2026-01-01) or "
+                         "None, got %r" % (warm_toolchain,))
     tree_tar, evidence_dir = Path(tree_tar), Path(evidence_dir)
     if not tree_tar.is_file():
         raise BuildError("tree tarball %s is not a file" % tree_tar)
@@ -1025,7 +1034,7 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
     ev = {
         "builder_version": BUILDER_VERSION, "repo": repo, "pr": pr, "upstream_base": upstream_base,
         "base_image": base_image, "image": tag, "container": container, "workdir": workdir,
-        "tree_tar_sha256": tar_sha, "tree_files": len(expected),
+        "tree_tar_sha256": tar_sha, "tree_files": len(expected), "warm_toolchain": warm_toolchain,
         "outcome": "error", "error": None, "steps": build.steps,
     }
     laps = ev["laps_seconds"] = {}
@@ -1086,7 +1095,8 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
             versions = "not recorded: %s" % exc
         ev["toolchains"], ev["toolchain_versions"] = names, versions
 
-        warm = build.exec("warm-build", "cargo", "test", "--no-run", env=("CARGO_NET_OFFLINE=false",),
+        warm_cargo = ("cargo",) if warm_toolchain is None else ("cargo", "+" + warm_toolchain)
+        warm = build.exec("warm-build", *warm_cargo, "test", "--no-run", env=("CARGO_NET_OFFLINE=false",),
                           check=False, timeout=7200)
         log = _text(warm)
         with open(evidence_dir / "build.log", "w", encoding="utf-8", errors="replace", newline="") as f:
@@ -1647,6 +1657,20 @@ def _template_toolchains(template):
     return sorted({name for key in TEMPLATE_LIST_KEYS for cmd in template[key] for name in _TOOLCHAIN_USE.findall(cmd)})
 
 
+def _test_toolchain(template):
+    """The one rustup toolchain the template's `test_cmds` run under (`cargo +stable test`), `None` if none.
+
+    The warm build must leave the `target/` that command reuses, so it runs under the same toolchain; the
+    commands of `rebuild_cmds` and `print_cmds` do not decide it. Two or more names are a `ValueError`
+    naming them: no single warm build serves both.
+    """
+    names = sorted({name for cmd in template["test_cmds"] for name in _TOOLCHAIN_USE.findall(cmd)})
+    if len(names) > 1:
+        raise ValueError("the template's test_cmds name more than one rustup toolchain (%s): the warm build "
+                         "cannot match them all" % ", ".join(names))
+    return names[0] if names else None
+
+
 def _template_digest(template):
     """sha256 hex of the template fields that decide the grading, JSON with sorted keys and no spaces.
 
@@ -1942,6 +1966,7 @@ def _run_locked(*, repo, pr, issue_numbers, base_image, template_path, template_
     try:
         template = _load_template(template_path, template_id)
         template_digest = _template_digest(template)
+        warm_toolchain = _test_toolchain(template)  # two toolchains refuse here, before any network
 
         stage = "fetch"
         dest = data / "upstream" / instance_id
@@ -2036,7 +2061,7 @@ def _run_locked(*, repo, pr, issue_numbers, base_image, template_path, template_
             stage = "build"
             built = build(base_image=base_image, repo=repo, pr=pr, upstream_base=upstream_base,
                           tree_tar=tree_tar, evidence_dir=run_dir, expected_tree=tree,
-                          toolchains=_template_toolchains(template))
+                          toolchains=_template_toolchains(template), warm_toolchain=warm_toolchain)
             if built["base_image_id"] != base_image_id:
                 raise _Refused("the base image changed during the build: %s, then %s (the image %s was built "
                                "from the second)" % (base_image_id, built["base_image_id"], built["image"]))
