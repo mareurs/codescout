@@ -201,7 +201,9 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 **Observed.** § Reference ≈2,486 B (naive byte count, not the production parser); § doctor repairs grew to ≈2,338 B, so `librarian.doctor` draws ≈4,824 B. GG-11 lists three remedies, none adjudicated. Raising the cap is allowed only for a harness reason (`src/prompts/README.md` § Caps follow the harness).
 
-**Next:** re-measure with the production parser, then pick a remedy.
+**Next:** pick a remedy (the re-measure below is done).
+
+**Re-measured 2026-11-04 with the production selector** (`GuideIndex::match_sections`, so the `requires` closure is included; a throwaway probe, removed afterwards, `git status` clean). § *Reference* is **2,486 B against `MAX_DECLARED_SECTION_BYTES = 2500`: margin 14 B**, and the naive count above equals the production count. All eight `librarian.*` shapes draw it. `librarian.doctor` draws **4,824 B** (2,486 + 2,338 for § *doctor repairs*); the other seven draw 2,486 B. The six `doc.*` shapes draw 2,215 (`create`, `get`), 2,123 (`update`), 1,328 (`append_entry`), **2,429 (`find`)** and 2,042 (`move`). So `librarian.doctor` is 1.99× the largest `doc.*` shape, and GG-11's "largest doc.* shape is `doc.update` at 2,123 B" is stale: `doc.find` (§ *Filter Syntax*, 2,429 B) is now the largest. Section bytes only; block wrappers add more. The remedy is still open and is the operator's call.
 
 ## CIW-14 — GG-8: re-run the section-use probe against its pre-registered predictions
 
