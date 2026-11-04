@@ -1,3 +1,7 @@
+---
+status: done
+done_evidence: '2026-11-04 audit (context-injection-session-log:F-19): call_content wired through run_post at a8d2e0d97; one-budget CEILING 12_244 pinned by a_p50_session_stays_under_the_committed_emission_byte_ceiling (21258b4ba, 2eb631051). Known coverage gaps (session opener masked by warm_ledger; craft-skills unmanaged) stay open in the spec.'
+---
 # Layer 2a, Plan 3 — Wiring and One Budget Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

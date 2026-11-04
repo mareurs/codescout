@@ -1,3 +1,7 @@
+---
+status: done
+done_evidence: '2026-11-04 audit (context-injection-session-log:F-19): Tasks 1-10 shipped — guide_index.rs split_sections/parse_declarations/match_sections, prefix-aware re_arm (6d4062b7a), gates (94396e00b), p50 ceiling test. Phase 2 also shipped (GG-1, d34c398e8); Phase 3 (GG-2, 8 topics) is open.'
+---
 # get_guide Section Grain — Phase 1 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

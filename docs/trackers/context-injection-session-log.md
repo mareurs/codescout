@@ -34,19 +34,19 @@ author to make.
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-1 | 2026-09-14 | low | plan-prose | open | TAXONOMY's `entry_prefix` tradeoff: one horn is false, the other is not a benefit |
+| F-1 | 2026-09-14 | low | plan-prose | mitigated | TAXONOMY's `entry_prefix` tradeoff: one horn is false, the other is not a benefit |
 | F-2 | 2026-09-14 | high | plan-prose | fixed-verified | A code comment's scope qualifier was narrower than its phrasing, and it killed a viable design for two turns |
 | F-3 | 2026-09-14 | high | architectural | fixed-verified | Adopting a principal moves starvation to the parent's return leg, so the ledger map must precede the hook |
 | F-4 | 2026-09-14 | high | release-pipeline | superseded | The hook deploys instantly and the server does not, so shipping it now breaks every unreconnected session |
-| F-5 | 2026-09-14 | high | plan-prose | open | The deny_unknown_fields hazard does not exist at the tool surface — 42 occurrences read as 42 gates |
-| F-6 | 2026-09-14 | high | architectural | open | The end-to-end win was the shipped guide_rearm path, not this feature — Arm A was confounded |
+| F-5 | 2026-09-14 | high | plan-prose | fixed-verified | The deny_unknown_fields hazard does not exist at the tool surface — 42 occurrences read as 42 gates |
+| F-6 | 2026-09-14 | high | architectural | mitigated | The end-to-end win was the shipped guide_rearm path, not this feature — Arm A was confounded |
 | F-7 | 2026-09-14 | high | tooling | mitigated | A mutation that never applied is indistinguishable from a surviving mutant |
 | F-8 | 2026-09-14 | med | tooling | mitigated | A positive control validates the instrument, never the query |
 | F-9 | 2026-09-14 | med | plan-prose | mitigated | The fix plan's own workaround is wrong for most ledgers — an anchor is not a constant |
 | F-10 | 2026-09-14 | high | tooling | fixed-verified | The schema is hand-written too, so "prefer the schema" rests on a false premise — and I shipped its stale claim to four surfaces |
-| F-11 | 2026-09-14 | med | tooling | open | A control whose subject was relabelled in transit — `2>&1` made my stderr evidence stdout |
-| F-12 | 2026-09-14 | med | self-friction | open | Third today: the falsifier was in my own § E1, three sections below the claim it refutes |
-| F-13 | 2026-09-24 | high | architectural | open | The "shared server" hypothesis was wrong — resolves F-6's open question, surfaces two unfiled ledger-restore gaps |
+| F-11 | 2026-09-14 | med | tooling | fixed-verified | A control whose subject was relabelled in transit — `2>&1` made my stderr evidence stdout |
+| F-12 | 2026-09-14 | med | self-friction | mitigated | Third today: the falsifier was in my own § E1, three sections below the claim it refutes |
+| F-13 | 2026-09-24 | high | architectural | fixed-verified | The "shared server" hypothesis was wrong — resolves F-6's open question, surfaces two unfiled ledger-restore gaps |
 | F-14 | 2026-09-26 | med | architectural | mitigated | Said only the Stop hook sees chat prose; UserPromptSubmit already carries transcript_path and a sibling plugin tail-reads it |
 | F-15 | 2026-09-26 | med | architectural | mitigated | The engine key-disjointness gate computes over build-time corpora, so a session-authored corpus would be invisible to it |
 | F-16 | 2026-09-26 | med | plan-prose | mitigated | The spec's per-block delivery shape is not attributable at the coordinator — keys are per engine, not per block |
@@ -288,7 +288,7 @@ log's to make.
 The cost is a wrong decision: an author weighing horn 1 declines to declare, leaving a
 ledger unguarded, to avoid a definer cost that declining does not avoid.
 
-**Status:** open — TAXONOMY's text is unchanged; only this file's own decision is settled.
+**Status:** mitigated (2026-11-04) — the cheap repair landed: `docs/TAXONOMY.md`'s warning now states the live term (the write guard) and says why both old horns were not the tradeoff, after re-reading `DefinitionIndex::build` (declarations still fill only `known_prefixes`/`declared_by`, never `active_definers`). The mechanism it is owed — a check keyed on the `entry_prefix` declaration at write time — is still unbuilt. Was: open — TAXONOMY's text is unchanged; only this file's own decision is settled.
 
 **Valid:** dated 2026-09-14
 
@@ -677,7 +677,7 @@ number and not the unit, and the number was doing load-bearing work in an ADR.
 ADR, two code comments and a tracker entry, and it would have been quoted forward by
 every reader of any of them. F-4's hazard is materially smaller than filed.
 
-**Status:** open — F-4 and the ADR still carry the overstated form; corrected in code
+**Status:** fixed-verified (2026-11-04) — the ADR's strip-point bullet now carries the corrected form ("**Corrected 2026-09-14** — this bullet originally read …", `docs/adrs/2026-09-14-a-subagent-is-a-principal.md:153`) and F-4 is `superseded` by this entry. Re-checked during the `F-19` audit. Was: open — F-4 and the ADR still carry the overstated form; corrected in code
 only so far.
 
 **Valid:** dated 2026-09-14
@@ -1311,7 +1311,7 @@ re-derived here** — recorded as a report, which is the distinction this ledger
 **Severity:** med — no wrong artifact shipped; the bug file's verdict survived and only its stated
 reason and its fix recommendation were wrong. Both live in a file another session now holds.
 
-**Status:** open — the correction belongs in that bug file, which is `status: taken` by
+**Status:** fixed-verified (2026-11-04) — the holder of that bug file made the correction: `docs/issues/archive/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md` § *Reproduction* (the relabelled `2>&1` premise, ~L103) and its corrections list (~L196-202, citing this entry), and the file is archived. Re-checked during the `F-19` audit. Was: open — the correction belongs in that bug file, which is `status: taken` by
 `9403d62d`. Left to them by design rather than patched around, since editing a record another
 session is actively fixing is the capture this corpus keeps paying for.
 
@@ -1460,7 +1460,7 @@ Item 2 directly answers F-6's own flagged open question: *"A live question I hav
 
 **Severity:** high — the wrong hypothesis, unchecked, would have been handed to the user as root cause of an actionable report; the two surfaced mechanisms are unfiled defects in load-bearing principal/ledger infrastructure that every subagent-dispatching session exercises.
 
-**Status:** open — mechanisms 2 and 3 are not yet filed as `docs/issues/` bug files; this entry is the session-log record, not the bug-tracker record. User has been asked how to proceed.
+**Status:** fixed-verified (2026-11-04) — both mechanisms were filed and fixed on 2026-09-24: mechanism 3 as `bebe1b228d668b40` (rekey never consults the target principal's on-disk ledger; `GuideLedger::adopt`) and mechanism 2 as `5201164f55ec16ff` (a re-arm request consumed by whichever principal calls next), both `status: fixed` and archived. Re-checked during the `F-19` audit. Was: open — mechanisms 2 and 3 are not yet filed as `docs/issues/` bug files; this entry is the session-log record, not the bug-tracker record. User has been asked how to proceed.
 
 **Valid:** dated 2026-09-24
 

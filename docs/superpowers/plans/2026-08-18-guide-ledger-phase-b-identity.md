@@ -1,3 +1,7 @@
+---
+status: done
+done_evidence: '2026-11-04 audit (context-injection-session-log:F-19): session_key.rs + rendezvous.rs chain, session_change_rearms_everything (4097e5a01), CODESCOUT_GUIDE_TTL_SECS, companion session-start.mjs'
+---
 # Guide Ledger Phase B — Session Identity Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

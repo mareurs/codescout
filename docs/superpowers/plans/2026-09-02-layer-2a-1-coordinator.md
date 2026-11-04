@@ -1,3 +1,7 @@
+---
+status: done
+done_evidence: '2026-11-04 audit (context-injection-session-log:F-19): coordinator.rs PostCtx/Emission/Emitted/run_post_in/run_post shipped at e701ec59c, b22185b15'
+---
 # Layer 2a, Plan 1 — The Coordinator Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

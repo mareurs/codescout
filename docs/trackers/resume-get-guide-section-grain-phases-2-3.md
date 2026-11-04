@@ -58,7 +58,7 @@ their surviving home.
 
 ## GG-1 — Phase 2: `tracker-conventions` cannot declare until two sections decompose
 
-**Status:** open — the next piece of work in this stream
+**Status:** done 2026-10-16 — `d34c398e8` ("tracker-conventions declares serves: sections for the shapes that route to it") with follow-ups `5b896cddc`, `40e2a621e`, `b96a56eac`, `141da124b`: 30 `serves:` declarations, 8 sections waived in `SECTION_WAIVERS` (`src/prompts/mod.rs`). Section-grain deliveries of `tracker-conventions` are live. Status reconciled 2026-11-04 in the `context-injection-session-log:F-19` audit. Was: open — the next piece of work in this stream
 **Valid:** dated 2026-08-27
 
 `tracker-conventions` is the highest-traffic undeclared topic and it is blocked
@@ -411,7 +411,7 @@ done.
 
 **Valid:** dated 2026-09-01
 
-**Status:** open — a dependency added to this queue from outside it
+**Status:** done — the dependency is discharged: GG-3 (step 0) landed at `d0065423`, and the retrieval spec's steps 1 and 2a followed on 2026-09-02 (`src/engines/mod.rs` registry, `src/engines/coordinator.rs` `run_post`, wired at `a8d2e0d97`). The spec's later steps (2b, 3, 2c, 4) are that spec's own open work, not this queue's. Reconciled 2026-11-04 in the `context-injection-session-log:F-19` audit. Was: open — a dependency added to this queue from outside it
 
 Recorded 2026-09-02, after the operator asked for the engine family to be
 operable: a coordinator, a management system and a preview system over a

@@ -1,3 +1,7 @@
+---
+status: done
+done_evidence: '2026-11-04 audit (context-injection-session-log:F-19): rendezvous_active (cb6e884ee), re_arm(PROJECT_SCOPED) at config/mod.rs + server.rs, split tests (241c6cd22), workspace-state guide updated'
+---
 # Guide Ledger Phase C — Re-arm and Opener Predicates Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

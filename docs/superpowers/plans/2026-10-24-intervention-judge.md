@@ -1,12 +1,13 @@
 ---
 id: '7b10a8b9437155dc'
 kind: plan
-status: draft
+status: done
 title: Intervention Judge Implementation Plan
 tags:
 - system1
 - measurement
 - judge
+done_evidence: '2026-11-04 audit (context-injection-session-log:F-19): Tasks 1-3 shipped at 8df90f1b9 (scripts/measure/intervention_judge.py, intervention_prompt.md, 41 tests). Never run, by design (running it is a non-goal of the spec); its gate spec waits on held-out labels from the labelled-sample main draw.'
 ---
 
 # Intervention Judge Implementation Plan

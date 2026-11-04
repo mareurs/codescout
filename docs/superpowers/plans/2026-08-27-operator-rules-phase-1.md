@@ -1,12 +1,13 @@
 ---
 kind: plan
-status: active
+status: done
 title: Operator Rules Engine — Phase 1 Implementation Plan
 tags:
-  - operator-rules
-  - prompt-surface
-  - engine-5
-  - phase-1
+- operator-rules
+- prompt-surface
+- engine-5
+- phase-1
+done_evidence: '2026-11-04 audit (context-injection-session-log:F-19): Tasks 1-8 shipped (754fd6cad .. 371bd7f59); gates 1,2,3,6 pinned by tests; operator-rules check reports all 4 profiles current'
 ---
 
 # Operator Rules Engine — Phase 1 Implementation Plan

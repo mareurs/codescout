@@ -147,6 +147,16 @@ parent, not "the parent".**
 3. `agent_type == "fork"` is policy-aliased to the session parent, since a fork inherits
    the parent's context window.
 
+   > **Amended 2026-11-04 — not built this way.** The shipped mechanism reaches the same goal
+   > (a fork is not re-served what it inherited) by a different route. `principal-stamp.mjs`
+   > never reads `agent_type`, so a fork is stamped and served as **its own** principal. The
+   > companion's `SubagentStart` hook (`agent-guide-snapshot.mjs`, `isFork`) writes a request
+   > naming the parent's topics, and the server **seeds** the fork's empty ledger with them
+   > (`seed_inherited`, `be0597564`, 2026-10-16; bug `975ebfd99fc8b060`, fixed). The fork
+   > therefore holds the parent's marks at its start and its own marks afterwards; it is not
+   > aliased to the parent's ledger, and nothing it does writes the parent's file. Found in the
+   > `context-injection-session-log:F-19` audit.
+
 Three parts of that are forced rather than chosen:
 
 - **The strip point.** `call_tool_inner` is the one site that sees every call, and
@@ -205,6 +215,10 @@ activation flipped process-wide by a child.
 ### Deliberately out of scope
 
 - **Nested subagents** (an agent spawning an agent) — not measured.
+
+  > **Amended 2026-11-04 — partly addressed.** Companion `3b94e5f` (2026-10-16) skips the fork
+  > seed above when the dispatcher may itself be a subagent, so a nested fork is not seeded
+  > from the wrong ledger. Nested dispatch as a whole is still unmeasured.
 - **Whether `agent_id` survives a subagent's own compaction or resume** — not measured.
 - **Non-Claude clients** — hooks are Claude Code's; other clients keep session grain.
 - **Engine 4 / `craft-skills`.** Briefing a fresh principal with what the parent holds is a

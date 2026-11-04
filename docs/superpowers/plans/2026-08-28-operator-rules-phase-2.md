@@ -1,7 +1,7 @@
 ---
 id: '6cb828a80c543bd3'
 kind: plan
-status: draft
+status: done
 title: Operator Rules Engine — Phase 2 Implementation Plan (triggered-rule routing)
 owners:
 - marius
@@ -12,6 +12,7 @@ tags:
 - phase-2
 - selector
 topic: operator rules engine
+done_evidence: '2026-11-04 audit (context-injection-session-log:F-19): Tasks 1-5 shipped (284675131, 9b3854984, 1bdf94bd3, 038abab27/a6b4fc357, f110de122 -> cb6aed697). Task 6 (remove OP-2/OP-3 resident text) was BLOCKED then superseded: OP-2 retired at dd4737085; OP-3''s resident copy must stay (its trigger never sees the violation). prompt-hamsa-audit-log:A-44 (2026-11-04) found no measurable dilution of OP-1 by today''s resident text, so Task 6''s measured motive (A-34) no longer holds on today''s model.'
 ---
 
 # Operator Rules Engine — Phase 2 Implementation Plan

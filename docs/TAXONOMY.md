@@ -82,8 +82,15 @@ the count next to the command that produces it.)*
 > block sequence (`grep -lE '^entry_prefix:$' docs/trackers/*.md` → 12, plus
 > `grep -lE '^entry_prefix: \["F", "W"\]'` → 3; re-derived 2026-09-14). That is a real, unresolved
 > contradiction between this document and the corpus — not a typo here. Decide it
-> deliberately before adding more: declaring F/W makes them dangling-checked but gives one
-> token many definers; leaving them undeclared keeps ambiguity.
+> deliberately before adding more. **Corrected 2026-11-04 (`context-injection-session-log:F-1`,
+> re-checked against `DefinitionIndex::build` in `src/librarian/tools/link_scan/resolve.rs`):**
+> this line used to say declaring F/W "makes them dangling-checked but gives one token many
+> definers; leaving them undeclared keeps ambiguity". Neither half is the real tradeoff.
+> Declaring adds **no** definers — `active_definers` is filled only from `## F-N — <title>`
+> sections — and declining removes no ambiguity, which comes from many logs each defining
+> `F-1`. What declaring does change: it makes the file a server-managed ledger (ids come from
+> `append_entry`, and direct `edit_file` writes are refused) and adds a declarer to the
+> `prefix_conflicts` report. The live term is that write guard, and it argues for declaring.
 >
 > **This warning said "One session log" until 2026-09-13, and thirteen more were added while it
 > said so** — including one that same day, by a session that had not read this line. That is the

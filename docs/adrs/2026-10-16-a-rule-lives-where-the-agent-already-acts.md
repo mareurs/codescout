@@ -31,6 +31,10 @@ observations, each dated 2026-10-16, each with its derivation.
 1. **Prose with no trigger is not followed.** `docs/adrs/2026-09-14-state-the-property-not-the-snapshot.md`
    measured 0 uptake of a prose mandate across 77 dated claims, at `9045c56a`. The `CLAUDE.md`
    byte budget also only moves down, so prose cannot grow to compensate.
+   *(Amended 2026-11-04: an operator ruling made every prompt cap, this budget included, able
+   to rise for a recorded harness reason — `src/prompts/README.md` § Caps follow the harness.
+   It still never rises to make a red pass, so the argument here holds: prose cannot grow to
+   compensate.)*
 2. **A rule stated only in a commit-time refusal drifts.** The refusal for the ledger's
    `**Members:**` field says the entry has one shape. A replay over the 443 gate-firing events (a class gained a member) in the commits since
    2026-09-03 found at least four shapes in use, and a strict

@@ -62,6 +62,18 @@ should trigger each never enters this process. Neither is reachable by any amoun
 agent-agnosticism grounds, a rejection worth re-opening now that the alternative is measurably
 nothing. That is a design decision with an operator call in it, not routing work.
 
+> **Note 2026-11-04 — this paragraph predates the CAP-10 settlement.** CAP-10's Open decision 1
+> was settled on 2026-09-02: inference from the tool sequence, with the hook option kept
+> rejected because it is *not needed*, not on agent-agnosticism grounds. Its reopen condition
+> is "when a rule that matters is provably harness-only". By the table above, OP-3 is exactly
+> that, so the reopen question is live and is the operator's call. Found in the
+> `context-injection-session-log:F-19` audit.
+>
+> **Measured 2026-11-04 (`prompt-hamsa-audit-log:A-44`):** today's resident profile — the
+> Memory, Review Escalation and Long Tasks sections plus the OP-1+OP-6 block — does not dilute
+> OP-1 by ≥2 runs on today's model (s9 3/10, s8 4/10, s2 3/10, bare 0/10). The A-34 loss that
+> motivated moving OP-2/OP-3 out of the profile does not reproduce.
+
 ## OP-1 — Always verify before asserting
 
 **Imperative:** Do not hypothesise but ALWAYS VERIFY. Do not go over code or issues found quickly and assume, but ALWAYS VERIFY!

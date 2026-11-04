@@ -1,7 +1,7 @@
 ---
 id: '1b770cb6462acde6'
 kind: tracker
-status: active
+status: archived
 title: Deep-agent workflow observations and session coverage
 tags:
 - deep-agent
@@ -20,7 +20,7 @@ entry_high_water_DCS: 15
 
 # Deep-agent workflow observations and session coverage
 
-**Status: collecting, 18 September–2 October 2026 (UTC).** First review: 25 September. Stop routine capture at 00:00 UTC on 2 October unless extended by the user. Companion: [context timing observations](deep-agent-context-observations.md). Design: [codescout deep agent](local-semantic-evaluator-design.md). Starting evidence: [baseline measurement](../research/2026-09-18-deep-agent-observation-baseline.md).
+**Status: CLOSED 2026-11-04.** The planned day-7 and day-14 reviews were never held; the retrospective review is § *Review at day 7 and day 14* below. Was: collecting, 18 September–2 October 2026 (UTC). First review: 25 September. Stop routine capture at 00:00 UTC on 2 October unless extended by the user. Companion: [context timing observations](deep-agent-context-observations.md). Design: [codescout deep agent](local-semantic-evaluator-design.md). Starting evidence: [baseline measurement](../research/2026-09-18-deep-agent-observation-baseline.md).
 
 ## Question and scope
 
@@ -80,6 +80,24 @@ For a session receipt use the same call with `id_prefix="DCS"`, a title identify
 ## Review at day 7 and day 14
 
 Use the frozen baseline query and declared UTC bounds for new usage aggregates; report schema/build/workload changes and retention limits. Then enumerate actual DWF/DCX episodes and DCS receipts by record type, sampling mode, capture mode and missingness. Adjudicate routine and enriched cases separately against their recorded checks. Inspect ordinary completions, unnecessary intervention, failed checks, effective recovery, and incomplete outcomes. Group linked records before any evaluation split. Identify a concrete workflow with usable initial evidence and a completion check; if those are absent, improve capture or extend deliberately. Do not start training or implementation merely because two weeks elapsed.
+
+### Retrospective day-14 review, held 2026-11-04 — closing record
+
+Closed 2026-11-04; found owed in the `context-injection-session-log:F-19` audit. 15 DWF (1 seed, 8 routine of which about 3 prospective — DWF-7, DWF-9 and DWF-8's fix phase — and 6 enrichment) and 15 DCS receipts, from 10 of about 43 top-level codescout sessions with transcripts in the window. The last entry is 2026-10-01. Collection overhead was estimated at 5–25 minutes per session and measured once (about 20 of 385 calls, DCS-9).
+
+**The frozen-query comparison cannot be re-run:** `usage.db` keeps 30 days and its oldest row is now 2026-10-05. Descriptive aggregates from the baseline script, for the record only (no treatment existed, and the workload is not comparable — 10 schema columns added, and only 67% of post-period rows come from the home project root):
+
+| | Baseline 09-04→09-18 | Window 09-18→10-02 | Post 10-20→11-03 |
+|---|---|---|---|
+| MCP calls | 26,052 | gone | 43,808 |
+| Non-success | 5.82% | — | 3.41% |
+| Overflow | 7.39% | — | 5.97% |
+| Latency p50 / p95 / p99 (ms) | 20 / 15,085 / 100,033 | — | 30 / 9,505 / 124,152 |
+| Repeated-error-family pairs | 0.262% | — | 0.255% |
+
+**Findings.** Every non-seed episode except DWF-2 ended good or mixed against a named check, and three later lost ground: DWF-13 (a fresh review found 5 Important findings, one a false pass), DWF-14 (wrapper scripts exit 0 after a failed child, so the recorded statuses could not establish success), DWF-11 (two follow-up claims wrong). **The recurring risk is completion checks that say more than they establish.** The delegable workflows found are mostly deterministic scripts — bug-Fix triage, fork replay, corpus replay, a post-mutation survivor check, a GPU-card probe, an N-run launch-and-verify, a PR drift check — which matches the design's Rung 1 (a deterministic pre-call engine with no model). DWF-10 adds a cross-model pair review.
+
+**Left as found:** DWF-2 has no outcome, and the status lines of DWF-3, 7, 8, 13 still say `pending-outcome` although their outcome paragraphs exist. No workflow experiment is selected; reopen only with an instrumented capture (`57c2f7282386d052`'s re-open trigger). Review by a read-only agent for sessionId `732f1c09-df3f-48d4-be63-d9326860edda`; outcome labels taken from the ledger text, not re-adjudicated.
 
 ## Index
 

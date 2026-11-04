@@ -1,3 +1,7 @@
+---
+status: done
+done_evidence: '2026-11-04 audit (context-injection-session-log:F-19): Tasks 1-4 shipped at 498b84bc4, 8cbbdb2d6; attribution_outcome rows accumulating in usage.db'
+---
 # Record the red-attribution outcome in `usage.db` Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

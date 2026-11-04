@@ -1,7 +1,7 @@
 ---
 id: '0cc578bbc332d699'
 kind: tracker
-status: active
+status: archived
 title: Deep-agent context timing observations
 tags:
 - deep-agent
@@ -18,7 +18,7 @@ snapshot_anchor: '| ID | Date UTC | Sampling | Capture key | Observation |'
 
 # Deep-agent context timing observations
 
-**Status: collecting, 18 September–2 October 2026 (UTC).** First review: 25 September. Stop routine capture at 00:00 UTC on 2 October unless the user extends it. This ledger collects evidence before implementing the [codescout deep agent](local-semantic-evaluator-design.md). Its companion is [workflow observations and session coverage](deep-agent-workflow-observations.md). Baseline and instrument limits: [measurement report](../research/2026-09-18-deep-agent-observation-baseline.md).
+**Status: CLOSED 2026-11-04.** The planned day-7 and day-14 reviews were never held; the retrospective review is § *Review at day 7 and day 14* below. Was: collecting, 18 September–2 October 2026 (UTC). First review: 25 September. Stop routine capture at 00:00 UTC on 2 October unless the user extends it. This ledger collects evidence before implementing the [codescout deep agent](local-semantic-evaluator-design.md). Its companion is [workflow observations and session coverage](deep-agent-workflow-observations.md). Baseline and instrument limits: [measurement report](../research/2026-09-18-deep-agent-observation-baseline.md).
 
 ## Question and scope
 
@@ -76,6 +76,14 @@ doc(action="append_entry", id="0cc578bbc332d699", id_prefix="DCX",
 ## Review at day 7 and day 14
 
 Group by canonical incident, session/task and source lineage. First report coverage receipts, routine vs enrichment vs historical counts, prospective vs retrospective capture, missing pre-action evidence, unknown identity/outcomes, and collection overhead. Then summarize observed useful/harmful/no-change patterns with evidence; do not pool enriched cases into a prevalence rate. Keep delivery timing separate from task outcomes. Ask whether context was available early enough and whether any actual decision changed. Decide whether to extend capture, narrow a trigger, or select a workflow experiment; the calendar alone does not make data training-ready.
+
+### Retrospective review, held 2026-11-04 — closing record
+
+Closed 2026-11-04 without the planned day-7/day-14 reviews; this is the retrospective review, found owed in the `context-injection-session-log:F-19` audit. 5 entries: 1 seed (DCX-1), 3 routine of which 2 prospective (DCX-2, DCX-3) and 1 retrospective (DCX-5), 1 enrichment (DCX-4). About 43 top-level codescout sessions have transcripts inside the window (13 in `~/.claude`, 19 in `~/.claude-sdd`, 16 in `~/.claude-kat`, after removing cross-profile copies) and 10 left receipts, so participation is unknown, not zero.
+
+**Findings.** No late delivery was observed: every delivery whose timing was recorded arrived in time. The harms were context reaching the wrong recipient or none — DCX-2, auto-delivery absent for 2 of 4 delegates (bug `c161cc27`); DCX-5, a peer warning routed by session name to the wrong process — and a delegate overstating its evidence (DCX-4: the one VERIFIED claim the logs could test did not hold). Explicit brief content worked, including an explicit guide fetch (DCX-3, which closed DCX-2's delivery gap).
+
+**No aggregate comparison is possible.** `usage.db` keeps 30 days (`src/usage/db.rs` `DELETE FROM tool_calls WHERE called_at < datetime('now', '-30 days')`); its oldest row is now 2026-10-05, so the window's rows are gone. The capture failed for the reason `57c2f7282386d052` records: the protocol had no call site. Any new window needs an instrument first (that bug's re-open trigger). Owner of this review: sessionId `732f1c09-df3f-48d4-be63-d9326860edda` via a read-only review agent; per-entry outcome labels were taken from the ledger text, not re-adjudicated against transcripts.
 
 ## Index
 
