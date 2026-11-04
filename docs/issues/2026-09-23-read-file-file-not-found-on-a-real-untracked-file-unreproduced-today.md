@@ -39,6 +39,10 @@ Live server identified by `workspace(status)`: build `a2871af0`, dirty build, `e
 
 The original incident was in `claude-plugins`; today's probe did not recreate that workspace's original session state. No root cause is established. Status was already `zombie` and stays there, with `last_observed` unchanged at 2026-09-23. A successful fresh read is evidence of non-reproduction, not a verified fix. Probe files were removed after verifying their exact expected content.
 
+### Re-checked 2026-11-04 — remains zombie on build 165a2182
+
+Live server identified by `workspace(status)`: `git_sha` `2edcacaa3`, `git_dirty` false, `exe_deleted` false, `build_id` `165a218282086eb39fff7796f94e3b8574dbac970802ddab2468c58be85c7774`. Created `TEMP-zombie-recheck-8cb2.md` and `TEMP-zombie-recheck-8cb2.txt` at the root of this repository. `git status --porcelain` showed both as `??`, and `git check-ignore -v` returned exit 1 with no output. `read_file` returned the exact content of both. Both files were removed and `git status --porcelain` confirmed they were gone. This is the third non-reproduction. It does not recreate the `claude-plugins` workspace of the original report, and it does not test the untried mechanism above (a subagent reassigning `default_workspace_root` during the call). Status stays `zombie`.
+
 ## Symptom (Effect)
 
 Original report (relayed, not independently witnessed by this session):
