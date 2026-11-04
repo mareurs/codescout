@@ -6,6 +6,7 @@ import re
 import subprocess
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 from unittest import mock
 
@@ -229,7 +230,7 @@ class QuotedPathTest(unittest.TestCase):
         "index 111..222 100644\n"
         "--- a/src/a.rs\n"
         "+++ b/src/a.rs\n"
-        "@@ -1,4 +1,4 @@\n"
+        "@@ -1,3 +1,3 @@\n"
         '+rename to "x"\n'
         '-rename to "x"\n'
         ' rename to "x"\n'
@@ -261,6 +262,101 @@ class QuotedPathTest(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             fb.diff_files(SRC_A + self.QUOTED_RENAME)
         self.assertIn("quoted by git", str(cm.exception))
+
+
+CL_A = (
+    "diff --git a/src/a.rs b/src/a.rs\n"
+    "index 1..2 100644\n"
+    "--- a/src/a.rs\n"
+    "+++ b/src/a.rs\n"
+    "@@ -1,4 +1,5 @@\n"
+    " ctx\n"
+    "--- removed dashes\n"
+    "+new\r\n"
+    "+new\r\n"
+    "+++ added plus\n"
+    " more\n"
+    "\\ No newline at end of file\n"
+)
+
+
+class ChangedLinesTest(unittest.TestCase):
+    def test_counts_signed_lines_per_file(self):
+        got = fb.changed_lines(CL_A + SRC_B)
+        self.assertEqual(set(got), {"src/a.rs", "src/b.rs"})
+        self.assertEqual(got["src/a.rs"], Counter({"--- removed dashes": 1, "+new\r": 2, "+++ added plus": 1}))
+        self.assertEqual(got["src/b.rs"], Counter({"-x": 1, "+y": 1}))
+
+    def test_file_header_lines_are_not_changes_but_content_lines_that_look_like_them_are(self):
+        got = fb.changed_lines(CL_A)["src/a.rs"]
+        self.assertNotIn("--- a/src/a.rs", got)
+        self.assertNotIn("+++ b/src/a.rs", got)
+        self.assertIn("--- removed dashes", got)
+        self.assertIn("+++ added plus", got)
+
+    def test_context_hunk_headers_and_no_newline_marker_are_ignored(self):
+        got = fb.changed_lines(CL_A)["src/a.rs"]
+        for line in (" ctx", " more", "@@ -1,4 +1,5 @@", "\\ No newline at end of file"):
+            self.assertNotIn(line, got)
+
+    def test_cr_is_part_of_the_key(self):
+        self.assertIn("+new\r", fb.changed_lines(CL_A)["src/a.rs"])
+        self.assertNotIn("+new", fb.changed_lines(CL_A)["src/a.rs"])
+
+    def test_blocks_without_hunks_are_present_with_no_lines(self):
+        got = fb.changed_lines(MODE_ONLY + BINARY + RENAME)
+        self.assertEqual(got, {"tests/run.sh": Counter(), "src/img.png": Counter(), "tests/new name.rs": Counter()})
+
+    def test_empty_diff(self):
+        self.assertEqual(fb.changed_lines(""), {})
+
+    def test_hunk_content_never_starts_a_new_block(self):
+        got = fb.changed_lines(SRC_A + "+diff --git a/x b/tests/y.rs\n")
+        self.assertEqual(set(got), {"src/a.rs"})
+        self.assertEqual(got["src/a.rs"]["+diff --git a/x b/tests/y.rs"], 1)
+
+    def test_garbage_and_quoted_paths_raise(self):
+        with self.assertRaises(ValueError):
+            fb.changed_lines("junk\n")
+        with self.assertRaises(ValueError):
+            fb.changed_lines(SRC_A + QuotedPathTest.QUOTED_HEADER)
+
+
+class SameChangeTest(unittest.TestCase):
+    def test_context_hunk_headers_and_file_order_are_ignored(self):
+        other = (
+            SRC_B.replace("@@ -1 +1 @@", "@@ -10,3 +10,3 @@").replace("-x\n", " around\n-x\n")
+            + SRC_A.replace("index 111..222", "index 999..888")
+        )
+        self.assertTrue(fb.same_change(SRC_A + SRC_B, other))
+
+    def test_identical(self):
+        self.assertTrue(fb.same_change(SRC_A + TEST_T, SRC_A + TEST_T))
+        self.assertTrue(fb.same_change("", ""))
+
+    def test_partial_patch_with_the_same_files_is_not_the_same_change(self):
+        self.assertNotEqual(PARTIAL_DIFF, FETCH_DIFF)
+        full = FETCH_DIFF.decode("utf-8", errors="surrogateescape")
+        partial = PARTIAL_DIFF.decode("utf-8", errors="surrogateescape")
+        self.assertEqual(fb.diff_files(full), fb.diff_files(partial))
+        self.assertFalse(fb.same_change(full, partial))
+        self.assertFalse(fb.same_change(partial, full))
+
+    def test_fewer_lines_in_one_file(self):
+        self.assertFalse(fb.same_change(SRC_A, SRC_A.replace("-old\n", "")))
+
+    def test_multiplicity_sign_and_cr_matter(self):
+        self.assertFalse(fb.same_change(SRC_A, SRC_A + "+new\n"))
+        self.assertFalse(fb.same_change(SRC_A, SRC_A.replace("+new\n", "-new\n")))
+        self.assertFalse(fb.same_change(SRC_A, SRC_A.replace("+new\n", "+new\r\n")))
+
+    def test_same_lines_in_another_file_or_a_different_file_set(self):
+        self.assertFalse(fb.same_change(SRC_A, SRC_A.replace("src/a.rs", "src/z.rs")))
+        self.assertFalse(fb.same_change(SRC_A, SRC_A + SRC_B))
+
+    def test_quoted_path_raises(self):
+        with self.assertRaises(ValueError):
+            fb.same_change(SRC_A, SRC_A + QuotedPathTest.QUOTED_HEADER)
 
 
 class PickBaseTest(unittest.TestCase):
@@ -427,18 +523,41 @@ SECRET = "ghp_sekret_value_must_never_travel"
 # Bytes as git emits them: a CRLF content line and a byte that is not UTF-8.
 FETCH_DIFF = SRC_A.encode().replace(b"+new\n", b"+new\r\n+caf\xff\n") + TEST_T.encode()
 FETCH_FILES = ["src/a.rs", "crates/x/src/tests/simple.rs"]
+BASE_N = "b" * 40
+ACCEPT_DIFF = "Accept: application/vnd.github.v3.diff"
+# Same files as FETCH_DIFF, other changed lines: what a rebase merge's last commit alone would give.
+PARTIAL_DIFF = FETCH_DIFF.replace(b"+b\n", b"+c\n")
+# A rename as GitHub and `git diff --find-renames` show it, and as `git diff --no-renames` shows it.
+RENAME_PR_DIFF = (
+    b"diff --git a/src/old.rs b/src/new.rs\nsimilarity index 66%\nrename from src/old.rs\n"
+    b"rename to src/new.rs\nindex 111..222 100644\n--- a/src/old.rs\n+++ b/src/new.rs\n"
+    b"@@ -1,2 +1,2 @@\n-x\n+y\n z\n"
+)
+RENAME_GIT_DIFF = (
+    b"diff --git a/src/old.rs b/src/old.rs\ndeleted file mode 100644\nindex 111..000\n"
+    b"--- a/src/old.rs\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-x\n-z\n"
+    b"diff --git a/src/new.rs b/src/new.rs\nnew file mode 100644\nindex 000..222\n"
+    b"--- /dev/null\n+++ b/src/new.rs\n@@ -0,0 +1,2 @@\n+y\n+z\n"
+)
+PAIR_DIFF = (
+    b"diff --git a/src/gone.rs b/src/gone.rs\ndeleted file mode 100644\nindex 111..000\n"
+    b"--- a/src/gone.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-g\n"
+    b"diff --git a/src/added.rs b/src/added.rs\nnew file mode 100644\nindex 000..222\n"
+    b"--- /dev/null\n+++ b/src/added.rs\n@@ -0,0 +1 @@\n+a\n"
+)
 
 
 class FakeRun:
     """Stands in for subprocess.run. Answers by argv and records every call with the env it got.
 
     A key is the argv with the leading `gh api` or `git` stripped. A response is the stdout bytes
-    (exit 0) or an `(exit_code, stdout, stderr)` tuple.
+    (exit 0), an `(exit_code, stdout, stderr)` tuple, or an exception to raise.
     """
 
     def __init__(self, responses):
         self.responses = dict(responses)
         self.calls = []  # (argv tuple, env dict)
+        self.timeouts = []
 
     @staticmethod
     def key(argv):
@@ -457,10 +576,13 @@ class FakeRun:
             if bad in kw:
                 raise AssertionError("run() must not set %s" % bad)
         self.calls.append((tuple(argv), kw.get("env")))
+        self.timeouts.append(kw.get("timeout"))
         key = self.key(argv)
         if key not in self.responses:
             raise AssertionError("unexpected call: %r" % (key,))
         resp = self.responses[key]
+        if isinstance(resp, BaseException):
+            raise resp
         if isinstance(resp, tuple):
             code, out, err = resp
         else:
@@ -481,10 +603,12 @@ class FetchPrTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.dest = Path(tmp.name)
         self.src = self.dest / "src"
+        self.api = "repos/%s" % REPO
+        self.pull_path = "%s/pulls/%d" % (self.api, PR)
 
     def pull(self, **over):
         pull = {
-            "merged_at": "2026-07-10T12:00:00Z", "merge_commit_sha": MERGE,
+            "merged_at": "2026-07-10T12:00:00Z", "merge_commit_sha": MERGE, "commits": 1,
             "created_at": "2026-07-02T10:00:00Z", "title": "Fix the thing",
         }
         pull.update(over)
@@ -496,22 +620,33 @@ class FetchPrTest(unittest.TestCase):
             23001: {"title": "Issue two", "body": "Body two", "created_at": "2026-07-01T09:00:00Z"},
         }
 
+    def diff_key(self, base, renames=False):
+        return ("-c", "core.quotePath=false", "-C", str(self.src), "diff", "--no-textconv", "--no-ext-diff",
+                "--no-color", "--find-renames" if renames else "--no-renames", "--src-prefix=a/",
+                "--dst-prefix=b/", "-U3", "--binary", base, MERGE)
+
+    def rev_key(self, n):
+        return ("-C", str(self.src), "rev-parse", "%s~%d" % (MERGE, n))
+
     def responses(self, *, pull=None, parents=(PARENT1, PARENT2), files=None, issues=None,
-                  diff=FETCH_DIFF, clone=b"", fetch=b""):
+                  diff=FETCH_DIFF, pr_diff=None, extra=None, clone=b"", fetch=b""):
         pull = self.pull() if pull is None else pull
         files = FETCH_FILES if files is None else files
         issues = self.issues() if issues is None else issues
-        api = "repos/%s" % REPO
         out = {
-            ("%s/pulls/%d" % (api, PR),): _j(pull),
-            ("%s/commits/%s" % (api, MERGE),): _j({"sha": MERGE, "parents": [{"sha": p} for p in parents]}),
-            ("%s/pulls/%d/files" % (api, PR), "--paginate"): _j([{"filename": f} for f in files]),
+            (self.pull_path,): _j(pull),
+            ("%s/commits/%s" % (self.api, MERGE),): _j({"sha": MERGE, "parents": [{"sha": p} for p in parents]}),
+            ("%s/files" % self.pull_path, "--paginate"): _j(
+                [f if isinstance(f, dict) else {"filename": f} for f in files]),
+            (self.pull_path, "-H", ACCEPT_DIFF): FETCH_DIFF if pr_diff is None else pr_diff,
             ("clone", "--filter=blob:none", "--no-checkout", "https://github.com/" + REPO, str(self.src)): clone,
             ("-C", str(self.src), "fetch", "origin", MERGE): fetch,
-            ("-c", "core.quotePath=false", "-C", str(self.src), "diff", "--binary", parents[0], MERGE): diff,
         }
+        if parents:
+            out[self.diff_key(parents[0])] = diff
         for n, issue in issues.items():
-            out[("%s/issues/%d" % (api, n),)] = _j(issue)
+            out[("%s/issues/%d" % (self.api, n),)] = _j(issue)
+        out.update(extra or {})
         return out
 
     def fetch(self, fake, issue_numbers=(23000, 23001), **kw):
@@ -524,6 +659,7 @@ class FetchPrTest(unittest.TestCase):
         self.assertEqual(got["merge_sha"], MERGE)
         self.assertEqual(got["parents"], [PARENT1, PARENT2])
         self.assertEqual(got["upstream_base"], PARENT1)
+        self.assertEqual(got["base_strategy"], "first-parent")
         self.assertEqual(got["created_at"], "2026-07-02T10:00:00Z")
         self.assertEqual(got["merged_at"], "2026-07-10T12:00:00Z")
         self.assertEqual(got["title"], "Fix the thing")
@@ -534,7 +670,7 @@ class FetchPrTest(unittest.TestCase):
         self.assertEqual(got["pr_files"], FETCH_FILES)
         self.assertEqual(got["issue_created_at"], "2026-07-01T09:00:00Z")
         self.assertEqual(set(got), {
-            "merge_sha", "parents", "upstream_base", "created_at", "merged_at", "title",
+            "merge_sha", "parents", "upstream_base", "base_strategy", "created_at", "merged_at", "title",
             "problem_statement", "diff", "pr_files", "issue_created_at",
         })
 
@@ -548,48 +684,98 @@ class FetchPrTest(unittest.TestCase):
         self.assertEqual(diff_argv[-2:], (PARENT1, MERGE))
         self.assertNotIn(PARENT2, diff_argv)
 
+    def test_every_git_diff_is_hardened_against_config(self):
+        resp = self.responses(
+            pull=self.pull(commits=3), parents=(PARENT1,), diff=PARTIAL_DIFF,
+            extra={self.rev_key(3): BASE_N.encode(), self.diff_key(BASE_N): FETCH_DIFF},
+        )
+        fake = FakeRun(resp)
+        self.fetch(fake)
+        diffs = [a for a, _ in fake.calls if "diff" in a and a[0] == "git"]
+        self.assertEqual(len(diffs), 2)
+        for argv in diffs:
+            for flag in ("core.quotePath=false", "--no-textconv", "--no-ext-diff", "--no-color",
+                         "--no-renames", "--src-prefix=a/", "--dst-prefix=b/", "-U3", "--binary"):
+                self.assertIn(flag, argv)
+            self.assertNotIn("--find-renames", argv)
+
     def test_calls_in_the_specified_order(self):
         fake = FakeRun(self.responses())
         self.fetch(fake)
-        api = "repos/%s" % REPO
         self.assertEqual(fake.keys(), [
-            ("%s/pulls/%d" % (api, PR),),
-            ("%s/commits/%s" % (api, MERGE),),
-            ("%s/pulls/%d/files" % (api, PR), "--paginate"),
-            ("%s/issues/23000" % api,),
-            ("%s/issues/23001" % api,),
+            (self.pull_path,),
+            ("%s/commits/%s" % (self.api, MERGE),),
+            ("%s/files" % self.pull_path, "--paginate"),
+            ("%s/issues/23000" % self.api,),
+            ("%s/issues/23001" % self.api,),
+            (self.pull_path, "-H", ACCEPT_DIFF),
             ("clone", "--filter=blob:none", "--no-checkout", "https://github.com/" + REPO, str(self.src)),
-            ("-c", "core.quotePath=false", "-C", str(self.src), "diff", "--binary", PARENT1, MERGE),
+            self.diff_key(PARENT1),
         ])
-        self.assertEqual(fake.calls[0][0][:2], ("gh", "api"))
-        self.assertEqual(fake.calls[-1][0][0], "git")
+        self.assertEqual(
+            [argv[:2] if argv[0] == "gh" else argv[:1] for argv, _ in fake.calls],
+            [("gh", "api")] * 6 + [("git",)] * 2,
+        )
 
     def test_existing_clone_is_fetched_not_cloned(self):
         (self.src / ".git").mkdir(parents=True)
         fake = FakeRun(self.responses())
         self.fetch(fake)
         keys = fake.keys()
-        self.assertIn(("-C", str(self.src), "fetch", "origin", MERGE), keys)
+        fetch_key = ("-C", str(self.src), "fetch", "origin", MERGE)
+        self.assertIn(fetch_key, keys)
         self.assertFalse([k for k in keys if k[:1] == ("clone",)])
-        self.assertLess(keys.index(("-C", str(self.src), "fetch", "origin", MERGE)), len(keys) - 1)
+        self.assertEqual(keys.index(fetch_key), len(keys) - 2)
+
+    def test_failing_fetch_of_an_existing_clone_raises(self):
+        (self.src / ".git").mkdir(parents=True)
+        resp = self.responses(fetch=(128, b"", b"fatal: could not read from remote"))
+        fake = FakeRun(resp)
+        with self.assertRaisesRegex(fb.FetchError, "could not read from remote"):
+            self.fetch(fake)
+        self.assertNotIn(self.diff_key(PARENT1), fake.keys())
+
+    def test_failing_clone_raises(self):
+        resp = self.responses(clone=(128, b"", b"fatal: repository not found"))
+        with self.assertRaisesRegex(fb.FetchError, "repository not found"):
+            self.fetch(FakeRun(resp))
 
     def test_single_parent_squash_merge(self):
         fake = FakeRun(self.responses(parents=(PARENT1,)))
-        self.assertEqual(self.fetch(fake)["upstream_base"], PARENT1)
+        got = self.fetch(fake)
+        self.assertEqual(got["upstream_base"], PARENT1)
+        self.assertEqual(got["base_strategy"], "first-parent")
 
     def test_paginated_files_are_concatenated_pages(self):
+        a, b = b'[{"filename": "src/a.rs"}]', b'[{"filename": "crates/x/src/tests/simple.rs"}]'
+        key = ("%s/files" % self.pull_path, "--paginate")
+        for name, body in (
+            ("newline", a + b"\n" + b),
+            ("back to back", a + b),
+            ("empty page between", a + b"\n[]\n" + b),
+            ("empty page last", a + b + b"[]"),
+            ("pretty printed", a.replace(b"{", b"{\n  ") + b"\n" + b),
+        ):
+            resp = self.responses()
+            resp[key] = body
+            got = self.fetch(FakeRun(resp))
+            self.assertEqual(got["pr_files"], FETCH_FILES, name)
+
+    def test_paginated_page_that_is_not_an_array_raises(self):
         resp = self.responses()
-        api = "repos/%s" % REPO
-        resp[("%s/pulls/%d/files" % (api, PR), "--paginate")] = (
-            _j([{"filename": "src/a.rs"}]) + b"\n" + _j([{"filename": "crates/x/src/tests/simple.rs"}])
-        )
-        got = self.fetch(FakeRun(resp))
-        self.assertEqual(got["pr_files"], FETCH_FILES)
+        resp[("%s/files" % self.pull_path, "--paginate")] = b'{"message": "Not Found"}'
+        with self.assertRaisesRegex(fb.FetchError, "array"):
+            self.fetch(FakeRun(resp))
 
     def test_null_issue_body_is_empty(self):
         issues = {23000: {"title": "T", "body": None, "created_at": "2026-07-05T00:00:00Z"}}
         got = self.fetch(FakeRun(self.responses(issues=issues)), issue_numbers=[23000])
         self.assertEqual(got["problem_statement"], "T\n")
+
+    def test_issue_without_title_raises(self):
+        issues = {23000: {"body": "b", "created_at": "2026-07-05T00:00:00Z"}}
+        with self.assertRaisesRegex(fb.FetchError, "title"):
+            self.fetch(FakeRun(self.responses(issues=issues)), issue_numbers=[23000])
 
     def test_not_merged_refused_before_anything_else(self):
         fake = FakeRun(self.responses(pull=self.pull(merged_at=None, merge_commit_sha=MERGE)))
@@ -611,6 +797,23 @@ class FetchPrTest(unittest.TestCase):
         fake = FakeRun(self.responses())
         with self.assertRaisesRegex(fb.FetchError, "cutoff"):
             self.fetch(fake, cutoff="2026-08-01")
+
+    def test_timestamp_must_be_the_full_utc_form(self):
+        for bad in ("2026-07-10", "2026-07-10T12:00:00Zjunk", "2026-07-10T12:00:00", "2026-07-10 12:00:00Z",
+                    "2026-07-10T12:00:00+00:00", "junk2026-07-10T12:00:00Z", "", 20260710):
+            with self.assertRaisesRegex(fb.FetchError, "ISO-8601", msg=repr(bad)):
+                self.fetch(FakeRun(self.responses(pull=self.pull(merged_at=bad))))
+        issues = self.issues()
+        issues[23000]["created_at"] = "2026-07-05"
+        with self.assertRaisesRegex(fb.FetchError, "ISO-8601"):
+            self.fetch(FakeRun(self.responses(issues=issues)))
+
+    def test_cutoff_must_be_a_date(self):
+        for bad in ("2026-7-1", "2026-07-01T00:00:00Z", "20260701", "2026-13-01", "2026-02-30", "", None, 20260701):
+            fake = FakeRun(self.responses())
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                self.fetch(fake, cutoff=bad)
+            self.assertEqual(fake.calls, [])
 
     def test_issue_created_before_cutoff_refused_before_any_git(self):
         issues = self.issues()
@@ -652,6 +855,121 @@ class FetchPrTest(unittest.TestCase):
         with self.assertRaises(fb.FetchError):
             self.fetch(FakeRun(self.responses(diff=b"fatal-ish text\n")))
 
+    def test_same_files_but_other_changed_lines_is_refused_naming_the_file(self):
+        # The file-set guard alone passes this: it is a partial gold patch.
+        with self.assertRaises(fb.FetchError) as cm:
+            self.fetch(FakeRun(self.responses(diff=PARTIAL_DIFF)))
+        msg = str(cm.exception)
+        self.assertIn("crates/x/src/tests/simple.rs", msg)
+        self.assertNotIn("'src/a.rs'", msg)
+        self.assertIn(PARENT1, msg)
+
+    def test_rebase_merge_falls_back_to_merge_minus_commits(self):
+        resp = self.responses(
+            pull=self.pull(commits=3), parents=(PARENT1,), diff=PARTIAL_DIFF,
+            extra={self.rev_key(3): BASE_N.encode() + b"\n", self.diff_key(BASE_N): FETCH_DIFF},
+        )
+        fake = FakeRun(resp)
+        got = self.fetch(fake)
+        self.assertEqual(got["base_strategy"], "rebase-n")
+        self.assertEqual(got["upstream_base"], BASE_N)
+        self.assertEqual(got["parents"], [PARENT1])
+        self.assertEqual(got["diff"].encode("utf-8", errors="surrogateescape"), FETCH_DIFF)
+        self.assertEqual(fake.keys()[-3:], [self.diff_key(PARENT1), self.rev_key(3), self.diff_key(BASE_N)])
+
+    def test_rebase_merge_whose_last_commit_touches_fewer_files(self):
+        resp = self.responses(
+            pull=self.pull(commits=2), parents=(PARENT1,), diff=SRC_A.encode(),
+            extra={self.rev_key(2): BASE_N.encode(), self.diff_key(BASE_N): FETCH_DIFF},
+        )
+        got = self.fetch(FakeRun(resp))
+        self.assertEqual((got["base_strategy"], got["upstream_base"]), ("rebase-n", BASE_N))
+
+    def test_first_candidate_that_matches_wins_without_rev_parse(self):
+        fake = FakeRun(self.responses(pull=self.pull(commits=5), parents=(PARENT1,)))
+        got = self.fetch(fake)
+        self.assertEqual((got["base_strategy"], got["upstream_base"]), ("first-parent", PARENT1))
+        self.assertFalse([k for k in fake.keys() if "rev-parse" in k])
+
+    def test_no_candidate_matches_names_both_and_the_differing_files(self):
+        resp = self.responses(
+            pull=self.pull(commits=3), parents=(PARENT1,), diff=PARTIAL_DIFF,
+            extra={self.rev_key(3): BASE_N.encode(), self.diff_key(BASE_N): PARTIAL_DIFF},
+        )
+        with self.assertRaises(fb.FetchError) as cm:
+            self.fetch(FakeRun(resp))
+        msg = str(cm.exception)
+        for part in (PARENT1, BASE_N, "first-parent", "rebase-n", "crates/x/src/tests/simple.rs"):
+            self.assertIn(part, msg)
+        self.assertNotIn("'src/a.rs'", msg)
+
+    def test_merge_commit_with_two_parents_never_tries_rebase_n(self):
+        fake = FakeRun(self.responses(pull=self.pull(commits=3), diff=PARTIAL_DIFF))
+        with self.assertRaises(fb.FetchError) as cm:
+            self.fetch(fake)
+        self.assertFalse([k for k in fake.keys() if "rev-parse" in k])
+        self.assertNotIn("rebase-n", str(cm.exception))
+
+    def test_single_commit_pr_never_tries_rebase_n(self):
+        fake = FakeRun(self.responses(pull=self.pull(commits=1), parents=(PARENT1,), diff=PARTIAL_DIFF))
+        with self.assertRaises(fb.FetchError):
+            self.fetch(fake)
+        self.assertFalse([k for k in fake.keys() if "rev-parse" in k])
+
+    def test_rebase_candidate_needs_the_commits_field(self):
+        pull = self.pull()
+        del pull["commits"]
+        with self.assertRaisesRegex(fb.FetchError, "commits"):
+            self.fetch(FakeRun(self.responses(pull=pull, parents=(PARENT1,), diff=PARTIAL_DIFF)))
+
+    def test_rev_parse_that_is_not_a_sha_raises(self):
+        resp = self.responses(pull=self.pull(commits=3), parents=(PARENT1,), diff=PARTIAL_DIFF,
+                              extra={self.rev_key(3): b"not a sha\n"})
+        with self.assertRaisesRegex(fb.FetchError, "rev-parse"):
+            self.fetch(FakeRun(resp))
+
+    def test_failing_rev_parse_raises(self):
+        resp = self.responses(pull=self.pull(commits=3), parents=(PARENT1,), diff=PARTIAL_DIFF,
+                              extra={self.rev_key(3): (128, b"", b"fatal: ambiguous argument")})
+        with self.assertRaisesRegex(fb.FetchError, "ambiguous argument"):
+            self.fetch(FakeRun(resp))
+
+    def test_rename_is_checked_against_the_union_of_old_and_new_path(self):
+        files = [{"filename": "src/new.rs", "previous_filename": "src/old.rs", "status": "renamed"}]
+        resp = self.responses(files=files, diff=RENAME_GIT_DIFF, pr_diff=RENAME_PR_DIFF,
+                              extra={self.diff_key(PARENT1, renames=True): RENAME_PR_DIFF})
+        fake = FakeRun(resp)
+        got = self.fetch(fake)
+        self.assertEqual(got["pr_files"], ["src/new.rs"])
+        self.assertEqual(got["diff"].encode("utf-8", errors="surrogateescape"), RENAME_GIT_DIFF)
+        self.assertEqual(fake.keys()[-2:], [self.diff_key(PARENT1), self.diff_key(PARENT1, renames=True)])
+
+    def test_rename_whose_content_changed_is_refused(self):
+        files = [{"filename": "src/new.rs", "previous_filename": "src/old.rs"}]
+        other = RENAME_PR_DIFF.replace(b"+y\n", b"+Y\n")
+        resp = self.responses(files=files, diff=RENAME_GIT_DIFF, pr_diff=RENAME_PR_DIFF,
+                              extra={self.diff_key(PARENT1, renames=True): other})
+        with self.assertRaisesRegex(fb.FetchError, "src/new.rs"):
+            self.fetch(FakeRun(resp))
+
+    def test_rename_not_reported_by_github_is_refused(self):
+        resp = self.responses(files=["src/new.rs"], diff=RENAME_GIT_DIFF, pr_diff=RENAME_PR_DIFF)
+        with self.assertRaises(fb.FetchError) as cm:
+            self.fetch(FakeRun(resp))
+        self.assertIn("only in diff: %r" % ["src/old.rs"], str(cm.exception))
+
+    def test_delete_plus_add_pair_is_accepted_without_a_rename_diff(self):
+        files = [{"filename": "src/gone.rs", "status": "removed"}, {"filename": "src/added.rs", "status": "added"}]
+        fake = FakeRun(self.responses(files=files, diff=PAIR_DIFF, pr_diff=PAIR_DIFF))
+        got = self.fetch(fake)
+        self.assertEqual(got["pr_files"], ["src/gone.rs", "src/added.rs"])
+        self.assertEqual([k for k in fake.keys() if "--find-renames" in k], [])
+
+    def test_delete_without_its_pr_entry_is_refused(self):
+        with self.assertRaises(fb.FetchError) as cm:
+            self.fetch(FakeRun(self.responses(files=["src/added.rs"], diff=PAIR_DIFF, pr_diff=PAIR_DIFF)))
+        self.assertIn("src/gone.rs", str(cm.exception))
+
     def test_github_token_is_removed_from_every_env(self):
         fake = FakeRun(self.responses())
         with mock.patch.dict(os.environ, {"GITHUB_TOKEN": SECRET, "KEEP_ME": "1"}):
@@ -675,8 +993,7 @@ class FetchPrTest(unittest.TestCase):
 
     def test_failed_command_carries_only_the_last_300_chars_of_stderr(self):
         resp = self.responses()
-        api = "repos/%s" % REPO
-        resp[("%s/commits/%s" % (api, MERGE),)] = (1, b"", b"x" * 500 + b"THE-TAIL")
+        resp[("%s/commits/%s" % (self.api, MERGE),)] = (1, b"", b"x" * 500 + b"THE-TAIL")
         with self.assertRaises(fb.FetchError) as cm:
             self.fetch(FakeRun(resp))
         msg = str(cm.exception)
@@ -685,16 +1002,13 @@ class FetchPrTest(unittest.TestCase):
         self.assertNotIn("x" * 293, msg)
 
     def test_failed_git_diff_raises(self):
-        resp = self.responses()
-        resp[("-c", "core.quotePath=false", "-C", str(self.src), "diff", "--binary", PARENT1, MERGE)] = (
-            128, b"", b"fatal: bad object",
-        )
+        resp = self.responses(diff=(128, b"", b"fatal: bad object"))
         with self.assertRaisesRegex(fb.FetchError, "bad object"):
             self.fetch(FakeRun(resp))
 
     def test_reply_that_is_not_json_raises(self):
         resp = self.responses()
-        resp[("repos/%s/pulls/%d" % (REPO, PR),)] = b"<html>rate limited</html>"
+        resp[(self.pull_path,)] = b"<html>rate limited</html>"
         with self.assertRaises(fb.FetchError):
             self.fetch(FakeRun(resp))
 
@@ -704,11 +1018,46 @@ class FetchPrTest(unittest.TestCase):
         with self.assertRaisesRegex(fb.FetchError, "merge_commit_sha"):
             self.fetch(FakeRun(self.responses(pull=pull)))
 
+    def test_zero_parents_is_a_fetch_error(self):
+        with self.assertRaisesRegex(fb.FetchError, "no parents"):
+            self.fetch(FakeRun(self.responses(parents=())))
+
     def test_missing_program_is_a_fetch_error(self):
         def run(argv, **kw):
             raise FileNotFoundError(2, "No such file or directory", argv[0])
         with self.assertRaisesRegex(fb.FetchError, "gh"):
             fb.fetch_pr(REPO, PR, [23000], self.dest, run=run)
+
+    def test_every_call_gets_the_timeout_default_and_override(self):
+        fake = FakeRun(self.responses())
+        self.fetch(fake)
+        self.assertEqual(set(fake.timeouts), {600})
+        self.assertEqual(len(fake.timeouts), len(fake.calls))
+        fake = FakeRun(self.responses())
+        self.fetch(fake, timeout=7)
+        self.assertEqual(set(fake.timeouts), {7})
+
+    def test_timeout_is_a_fetch_error_naming_the_argv_but_not_the_env(self):
+        argv_key = (self.pull_path,)
+        expired = subprocess.TimeoutExpired(cmd=["gh", "api", self.pull_path], timeout=600,
+                                            output=b"partial", stderr=b"partial err")
+        resp = self.responses()
+        resp[argv_key] = expired
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": SECRET}):
+            with self.assertRaises(fb.FetchError) as cm:
+                self.fetch(FakeRun(resp))
+        msg = str(cm.exception)
+        self.assertIn("timed out", msg)
+        self.assertIn("gh api " + self.pull_path, msg)
+        self.assertNotIn(SECRET, msg)
+
+    def test_timeout_of_a_git_command_is_a_fetch_error(self):
+        resp = self.responses()
+        resp[("clone", "--filter=blob:none", "--no-checkout", "https://github.com/" + REPO, str(self.src))] = (
+            subprocess.TimeoutExpired(cmd=["git", "clone"], timeout=1)
+        )
+        with self.assertRaisesRegex(fb.FetchError, "timed out"):
+            self.fetch(FakeRun(resp))
 
     def test_fetch_error_is_a_runtime_error(self):
         self.assertTrue(issubclass(fb.FetchError, RuntimeError))
