@@ -246,3 +246,36 @@ The prompt gives the old and the required signature, the commit subject as the r
 **Descriptive only, from the void pass (not a measurement):** under P, one of ten agents tried to call a tool its list did not offer, because the directive named it. The other nine used the name grep they had already run.
 
 **Rerun.** Stage 1 reruns unchanged (same tasks, order, arms, model, stop rule of $20 counted from the rerun's start), on the fixed instrument, after a new operator go.
+
+### AM-7 — 2026-11-04, Stage 1 rerun: the registered result, and the confound the audit found ($5.143 spent in total)
+
+**Run.** 30 runs on the fixed instrument, sequential, $2.502, 26 min 35 s. Rows: `docs/evals/data/2026-11-04-harness-channel-hints/stage1-rerun.jsonl` (sha256 `2158805c…`). Audit script: `audit_stage1.py`. Valid 30/30; `lookup_available` 30/30; `arrival_ok` 30/30.
+
+**Registered metric (`refs_before_stop`, valid runs, n = 10 per arm).**
+
+| arm | references/call_graph before the stop | any caller check |
+|---|---|---|
+| P | 10/10 | 10/10 |
+| A0 | 7/10 | 10/10 |
+| F | 5/10 | 10/10 |
+
+The P gate as registered: `rate(P) − rate(F)` = 1.0 − 0.5 = 0.5 ≥ 0.4, **passes**.
+
+**The confound, found by the audit before any interpretation.** In every run the trigger is in the agent's FIRST batch (batch 0). In 18 of 30 runs that first batch already held a `references` call on the target, sent in parallel with the triggering grep, before any hint could arrive. Those 18 calls are spontaneous in every arm and cannot be the hint's effect. The registered metric counts them, so in every arm it mixes spontaneous lookups with any effect of the hint, and the gate's 0.5 gap cannot be read as the channel's effect alone.
+
+**Exploratory split, defined AFTER seeing the data, not a registered result.** Runs whose first batch had no lookup on the target, and whether a lookup came in a later batch (after the hint could arrive):
+
+| arm | spontaneous lookup in batch 0 | runs without one | of those, lookup after the trigger |
+|---|---|---|---|
+| P | 7 | 3 | 3/3 |
+| A0 | 6 | 4 | 1/4 |
+| F | 5 | 5 | 0/5 |
+
+The direction is the one the channel hypothesis predicts (P > A0 > F), but the informative n is 3, 4 and 5. It supports no claim on its own.
+
+**Other facts from the audit.**
+- The spontaneous lookup rate here (18/30 = 0.6) is far above the usage.db census (0.09, AM-1). The population differs: these prompts name the signature change explicitly, and every run starts from codescout's own `CLAUDE.md` and server instructions.
+- Four lookups returned `warning: LSP returned no locations at all` (rust-analyzer still loading) and three returned `ambiguous name_path` errors (`cross_root_cites_edges`). The metric counts the CALL, as registered, not its success.
+- Cost per run $0.038–$0.200, mean $0.083.
+
+**Consequence for Stage 2.** The registered rule would now run A1, A2, A3 (and L). With a 0.6 spontaneous rate, about 4 of every 10 runs per arm carry information, too few to separate arms. Stage 2 waits for an operator decision on the trigger point.
