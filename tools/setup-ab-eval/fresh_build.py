@@ -31,6 +31,13 @@ Derive and strict gate (runs docker through `docker=` and the study's `multilang
     control_fresh(record, container=, evidence_dir=)     F2P/P2P derived from base+test vs gold+test, then the
                                                          strict gate (8g, a gold repeat, a tolerant 2nd repeat)
 
+Orchestration (runs nothing itself but `docker image inspect`, `git archive` and `git rev-parse` through `run=`):
+
+    run_build(repo=, pr=, issue_numbers=, base_image=, template_path=, template_id=, data=, ...)
+                                                         fetch, cache check, tarball, build, control, spec
+                                                         verdicts, record; returns {status, exit_code, ...}
+    main(argv)                                           the `build` command line; its exit code is the result's
+
 The helpers above import the standard library only and never touch docker, git, `gh`, the network,
 the filesystem or the environment, so their tests run anywhere. `fetch_pr` reads the environment and
 runs `gh` and `git` (with `GITHUB_TOKEN` removed) through `run=`, which a test replaces; it does not
@@ -48,7 +55,28 @@ first, then test), so `patch + test_patch != diff` for a diff that interleaves t
 bytes and the order within each half are kept. A quoted path in a header raises `ValueError`: the
 caller asks git for `-c core.quotePath=false`. Text is hashed with `surrogateescape`, and `fetch_pr`
 decodes git output the same way, so non-UTF-8 bytes stay byte-faithful. Stdlib only.
+
+Usage. A rust-analyzer PR, first without verdicts (this builds, runs the strict gate and stops with exit 3
+and the `spec_key` and F2P tests to judge; the second run reuses the image and goes on):
+
+    python3 fresh_build.py build --repo rust-lang/rust-analyzer --pr 23096 --issues 23090 \\
+        --base-image starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22855 \\
+        --template-record /home/marius/work/claude/setup-ab-data/live/multilang-rust.jsonl \\
+        --template-id rust-lang__rust-analyzer-22855 --data DIR [--spec-verdicts spec-verdicts.json] [--dry-run]
+
+Exit codes: 0 done (or cached), 2 refused or gate failed, 3 awaiting spec verdicts, 4 unusable (no F2P test
+kept). One JSON object per stage goes to stderr, the result to stdout. `DIR` gets `records.jsonl`,
+`controls/<id>/control.json` and `evidence/<id>/`.
+
+`spec-verdicts.json` (the F2P rule: a test is kept only if the issue states the behaviour it asserts; an F2P
+test without a verdict is an error, never a keep). Keyed by the `spec_key` the exit-3 run printed; test names
+embed the compiled-binary hash, so they belong to the image of that run:
+
+    {"<spec_key>": {"tests": {"<test name>": "specified" | "unspecified"},
+                    "reader": "<who or what decided>", "note": "<free text, optional>"}}
 """
+import argparse
+import ast
 import collections
 import copy
 import datetime
@@ -57,7 +85,9 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -1343,3 +1373,510 @@ def control_fresh(record, *, container, evidence_dir, memory=CONTROL_MEMORY, tim
         if build.interrupt is not None:
             raise build.interrupt
     return ev
+
+
+# --- orchestration: run_build and the command line ---
+
+STAGES = ("fetch", "cache-check", "tarball", "build", "control", "spec-verdicts", "record")
+EXIT_OK, EXIT_REFUSED, EXIT_AWAITING, EXIT_UNUSABLE = 0, 2, 3, 4
+_HOST_TIMEOUT = 120
+_ARCHIVE_TIMEOUT = 1800
+_CONTROL_JSON_KEYS = ("id", "image", "workdir", "steps", "base", "gold", "gold_repeat", "verdict", "wall_seconds")
+_SECRET_ENV = ("GITHUB_TOKEN", "GH_TOKEN")
+_MIN_SECRET = 8  # a shorter value would mangle ordinary text when scrubbed
+
+
+class _Refused(RuntimeError):
+    """A refusal of `run_build` that is neither a fetch nor a build error (a verdict file, a record conflict)."""
+
+
+def _scrub(text):
+    """`text` with the value of a token in the environment replaced: no credential in a log or an evidence file."""
+    for name in _SECRET_ENV:
+        secret = os.environ.get(name)
+        if secret and len(secret) >= _MIN_SECRET:
+            text = text.replace(secret, "***")
+    return text
+
+
+def _stage(stage, **fields):
+    """One JSON object on stderr."""
+    line = json.dumps({"stage": stage, **fields}, default=str, allow_nan=False)
+    print(_scrub(line), file=sys.stderr, flush=True)
+
+
+def _atomic_write(path, data):
+    """`data` (bytes) as the whole of `path`: a temporary file in the same directory, flushed, then renamed.
+
+    The reader sees the old file or the new one, never half of either; a failed write leaves the old file
+    and no temporary file.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix="." + path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_json(path, obj):
+    _atomic_write(path, (json.dumps(obj, indent=2, allow_nan=False, default=str) + "\n").encode("utf-8"))
+
+
+def _atomic_text(path, text):
+    _atomic_write(path, text.encode("utf-8", errors="surrogateescape"))
+
+
+def _stamp():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def _new_run_dir(ev_dir):
+    """A new `<ev_dir>/run-<timestamp>` directory, never one that exists: runs do not share logs or cidfiles."""
+    ev_dir.mkdir(parents=True, exist_ok=True)
+    for attempt in range(1000):
+        run_dir = ev_dir / ("run-%s%s" % (_stamp(), "" if attempt == 0 else "-%d" % attempt))
+        try:
+            run_dir.mkdir()
+        except FileExistsError:
+            continue
+        return run_dir
+    raise OSError("cannot make a new run directory under %s" % ev_dir)
+
+
+def _take_lock(data):
+    """The path of `<data>/.lock` created by this call, or None when the file already exists.
+
+    Created with `O_EXCL`: a second run on the same data directory finds the file and refuses. A lock
+    that a killed run left behind is not removed here; the refusal names it.
+    """
+    data.mkdir(parents=True, exist_ok=True)
+    lock = data / ".lock"
+    try:
+        fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        return None
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("pid %d, started %s\n" % (os.getpid(), _stamp()))
+    return lock
+
+
+def _template_list(key, value):
+    """The command list of a template field: a list of strings, or a string that holds the literal of one.
+
+    The string is read with `ast.literal_eval`: the template is data and nothing in it is ever executed,
+    so `['a', str(1)]` is refused.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if not text.startswith("["):
+            raise ValueError("template %s is a string that is not a list literal: %r" % (key, value[:80]))
+        try:
+            value = ast.literal_eval(text)
+        except (ValueError, SyntaxError, MemoryError, RecursionError) as exc:
+            raise ValueError("template %s is not a literal list of strings: %s" % (key, exc)) from exc
+    if not isinstance(value, list) or not all(isinstance(cmd, str) for cmd in value):
+        raise ValueError("template %s must be a list of strings, got %r" % (key, value))
+    return value
+
+
+def _load_template(path, template_id):
+    """`{test_cmds, rebuild_cmds, print_cmds, log_parser}` of the one record `template_id` in a JSONL file.
+
+    `ValueError` for a file that cannot be read or parsed, an id that is absent or appears twice, a
+    command field that is not a list of strings (or a string holding one literal), an empty `test_cmds`
+    or `print_cmds`, or a `log_parser` that is not a non-empty string. Checked before any network use.
+    """
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError("cannot read the template file %s: %s" % (path, exc)) from exc
+    found = []
+    for number, line in enumerate(text.split("\n"), 1):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError as exc:
+            raise ValueError("template file %s line %d is not JSON: %s" % (path, number, exc)) from exc
+        if isinstance(rec, dict) and rec.get("instance_id") == template_id:
+            found.append(rec)
+    if len(found) != 1:
+        raise ValueError("template file %s has %d records with instance_id %r, need exactly one"
+                         % (path, len(found), template_id))
+    rec = found[0]
+    out = {}
+    for key in TEMPLATE_LIST_KEYS:
+        if key not in rec:
+            raise ValueError("template record %r has no %s" % (template_id, key))
+        out[key] = _template_list(key, rec[key])
+    for key in ("test_cmds", "print_cmds"):
+        if not out[key]:
+            raise ValueError("template %s is empty" % key)
+    parser = rec.get("log_parser")
+    if not isinstance(parser, str) or not parser.strip():
+        raise ValueError("template log_parser must be a non-empty string")
+    out["log_parser"] = parser
+    return out
+
+
+def _spec_entry(path, key):
+    """The entry of the spec-verdicts file at `path` for `key` (None when the file has none), validated.
+
+    The file is `{"<spec_key>": {"tests": {"<test name>": "specified" | "unspecified"}, "reader":
+    "<who or what decided>", "note": "<free text>"}}`; `note` is optional. `ValueError` for a file that
+    cannot be read, is not such an object, or has a malformed entry for `key`.
+    """
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError("cannot read the spec verdicts %s: %s" % (path, exc)) from exc
+    if not isinstance(raw, dict):
+        raise ValueError("spec verdicts %s must be a JSON object keyed by spec_key" % path)
+    if key not in raw:
+        return None
+    entry = raw[key]
+    if not isinstance(entry, dict):
+        raise ValueError("the spec verdicts entry for %s must be an object" % key)
+    if not isinstance(entry.get("tests"), dict):
+        raise ValueError("the spec verdicts entry for %s needs a 'tests' object" % key)
+    if not isinstance(entry.get("reader"), str) or not entry["reader"].strip():
+        raise ValueError("the spec verdicts entry for %s needs a non-empty 'reader': who or what decided" % key)
+    if "note" in entry and not isinstance(entry["note"], str):
+        raise ValueError("the spec verdicts entry for %s: 'note' must be a string" % key)
+    return entry
+
+
+def _host(run, argv, env, timeout):
+    """Stdout bytes of a host program; `BuildError` when it fails (`fetch_pr`'s `_call`, re-typed)."""
+    try:
+        return _call(run, argv, env, timeout)
+    except FetchError as exc:
+        raise BuildError(str(exc)) from exc
+
+
+def _load_pending(path, key, skey):
+    """The saved `pending.json` when it is for this cache key and spec key with a passing gate, else None."""
+    try:
+        pending = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(pending, dict) or pending.get("cache_key") != key or pending.get("spec_key") != skey:
+        return None
+    control_ev = pending.get("control")
+    if not isinstance(control_ev, dict) or not _gate_ok(control_ev):
+        return None
+    if not isinstance(pending.get("image"), str) or not isinstance(pending.get("base_commit"), str):
+        return None
+    return pending
+
+
+def _gate_ok(evidence):
+    verdict = evidence.get("verdict")
+    return (isinstance(verdict, dict) and verdict.get("ok") is True
+            and isinstance(evidence.get("f2p"), list) and isinstance(evidence.get("p2p"), list))
+
+
+def _record_slot(path, record):
+    """`(existing bytes, "append" | "present")` for `record` in the JSONL file `path`.
+
+    `_Refused` when the file already holds a different record with the same `instance_id`: it is never
+    replaced here. A line that is not JSON is left alone.
+    """
+    try:
+        existing = Path(path).read_bytes()
+    except FileNotFoundError:
+        return b"", "append"
+    for line in existing.split(b"\n"):
+        try:
+            old = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(old, dict) and old.get("instance_id") == record["instance_id"]:
+            if old == record:
+                return existing, "present"
+            raise _Refused("%s already holds a different record for %s; remove it on purpose to replace it"
+                           % (path, record["instance_id"]))
+    return existing, "append"
+
+
+def _refused(run_dir, stage, error, **fields):
+    message = _scrub(error)
+    _stage("refused", failed_stage=stage, error=message)
+    if run_dir is not None:
+        try:
+            _atomic_json(run_dir / "refusal.json", {"stage": stage, "error": message})
+        except OSError:
+            pass
+    out = {"status": "refused", "exit_code": EXIT_REFUSED, "stage": stage, "error": message,
+           "evidence": None if run_dir is None else str(run_dir)}
+    out.update(fields)
+    return out
+
+
+def _check_arguments(repo, pr, issue_numbers, base_image, template_id):
+    """The study id of the task; `ValueError` for any argument a caller got wrong, before anything runs."""
+    ident = _fresh_id(repo, pr)
+    if not isinstance(issue_numbers, (list, tuple)) or not issue_numbers or not all(
+            isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in issue_numbers):
+        raise ValueError("issue_numbers must be a non-empty list of positive integers, got %r" % (issue_numbers,))
+    if not isinstance(base_image, str) or _BASE_IMAGE.fullmatch(base_image) is None:
+        raise ValueError("base_image is not an image reference: %r" % (base_image,))
+    if not isinstance(template_id, str) or not template_id:
+        raise ValueError("template_id must be a non-empty string, got %r" % (template_id,))
+    return ident
+
+
+def run_build(*, repo, pr, issue_numbers, base_image, template_path, template_id, data,
+              spec_verdicts_path=None, dry_run=False, run=subprocess.run, fetch=fetch_pr, build=build_image,
+              control=control_fresh):
+    """Turn one merged upstream PR into a record, an image and a `control.json`, or say why not.
+
+    Stages, in order: `fetch` (cheap, and it yields the real upstream base); `cache-check` (the key is
+    `cache_key(repo, upstream_base, base image id)`; the image id is read with `docker image inspect`
+    through `run`); `tarball` (`git archive` of the upstream base, and its `^{tree}` SHA, which `build`
+    must reproduce: `expected_tree`); `build`; `control` (the strict gate); `spec-verdicts`; `record`.
+    Returns a dict with `status` and `exit_code`:
+
+        dry-run                 0   the planned `stages`; nothing external is called, nothing is written
+        cached                  0   the key matches and `controls/<id>/control.json` exists
+        built                   0   the record is in `<data>/records.jsonl`
+        refused                 2   a refusal (lock, template, fetch, build, verdicts...): `stage`, `error`
+        gate-failed             2   the strict gate is not ok: `reasons`; no record
+        awaiting-spec-verdicts  3   gate ok, no verdicts for this `spec_key` yet; `f2p` lists the tests
+        unusable                4   the verdicts keep no F2P test; nothing is appended
+
+    `ValueError` for an argument a caller got wrong. `FetchError`, `BuildError` and any other refusal
+    are results (exit 2), with `<run dir>/refusal.json`; an unexpected exception propagates, after the
+    lock is released. Layout under `data`: `.lock` (held for the run, created exclusively); `records.jsonl`
+    (one line per task, appended atomically); `controls/<id>/control.json`; `evidence/<id>/` with
+    `patch.diff`, `test_patch.diff`, `problem_statement.txt`, `pending.json` (the gate passed; what the
+    verdict step needs, so the second run does not rebuild), `spec-verdicts-applied.json`, `cache-key.txt`
+    (the last write: a key means the record is in) and one `run-<timestamp>/` per run holding the tarball
+    and the logs of `build` and `control`; `upstream/<id>/src` (the clone `fetch` keeps).
+
+    A run that finds `pending.json` for the same cache key and spec key skips tarball, build and control,
+    and goes on with the verdicts. The builder never deletes an image, so a task whose image exists but
+    has no pending state is refused by `build` ("tag exists"). The template is data: its command
+    strings are read with `ast.literal_eval`. No credential is printed or written; host programs run
+    with `GITHUB_TOKEN` removed.
+    """
+    ident = _check_arguments(repo, pr, issue_numbers, base_image, template_id)
+    if dry_run:
+        return {"status": "dry-run", "exit_code": EXIT_OK, "stages": list(STAGES)}
+    instance_id = "%s-%s" % (repo.replace("/", "__"), pr)
+    data = Path(data)
+    lock = _take_lock(data)
+    if lock is None:
+        return _refused(None, "lock", "%s exists: another run holds this data directory; if no run is active "
+                        "(a killed run leaves it), remove that file" % (data / ".lock"))
+    try:
+        ev_dir = data / "evidence" / instance_id
+        run_dir = _new_run_dir(ev_dir)
+        return _run_locked(repo=repo, pr=pr, issue_numbers=list(issue_numbers), base_image=base_image,
+                           template_path=template_path, template_id=template_id, data=data,
+                           spec_verdicts_path=spec_verdicts_path, run=run, fetch=fetch, build=build,
+                           control=control, ident=ident, instance_id=instance_id, ev_dir=ev_dir, run_dir=run_dir)
+    finally:
+        try:
+            lock.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _run_locked(*, repo, pr, issue_numbers, base_image, template_path, template_id, data, spec_verdicts_path,
+                run, fetch, build, control, ident, instance_id, ev_dir, run_dir):
+    stage = "template"
+    try:
+        template = _load_template(template_path, template_id)
+
+        stage = "fetch"
+        dest = data / "upstream" / instance_id
+        dest.mkdir(parents=True, exist_ok=True)
+        fetched = fetch(repo, pr, issue_numbers, dest, run=run)
+        upstream_base = fetched["upstream_base"]
+        patch, test_patch = split_diff(fetched["diff"])
+        problem_statement = fetched["problem_statement"]
+        skey = spec_key(problem_statement, test_patch, patch)
+        _stage("fetch", upstream_base=upstream_base, base_strategy=fetched.get("base_strategy"),
+               merge_sha=fetched.get("merge_sha"), spec_key=skey)
+        if _SHA.fullmatch(upstream_base) is None:
+            raise BuildError("fetch gave an upstream base that is not a full commit SHA: %r" % (upstream_base,))
+
+        stage = "cache-check"
+        env = dict(os.environ)
+        env.pop("GITHUB_TOKEN", None)
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        out = _host(run, ["docker", "image", "inspect", "--format", "{{.Id}}", base_image], env, _HOST_TIMEOUT)
+        ids = out.decode("utf-8", errors="replace").split()
+        if not ids or _IMAGE_ID.fullmatch(ids[-1]) is None:
+            raise BuildError("docker image inspect %s gave no image ID: %r" % (base_image, ids[-1:] or ""))
+        base_image_id = ids[-1]
+        key = cache_key(repo, upstream_base, base_image_id)
+        control_json = data / "controls" / instance_id / "control.json"
+        try:
+            stored = (ev_dir / "cache-key.txt").read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            stored = None
+        hit = stored == key and control_json.is_file()
+        _stage("cache-check", cache_key=key, base_image_id=base_image_id, hit=hit)
+        if hit:
+            return {"status": "cached", "exit_code": EXIT_OK, "id": instance_id, "cache_key": key}
+
+        # what a reader of the verdicts needs, and what a refusal below must not lose
+        _atomic_text(ev_dir / "patch.diff", patch)
+        _atomic_text(ev_dir / "test_patch.diff", test_patch)
+        _atomic_text(ev_dir / "problem_statement.txt", problem_statement)
+
+        pending = _load_pending(ev_dir / "pending.json", key, skey)
+        if pending is not None:
+            image, base_commit, evidence = pending["image"], pending["base_commit"], pending["control"]
+            _stage("resume", pending=str(ev_dir / "pending.json"), image=image)
+        else:
+            stage = "tarball"
+            src = dest / "src"
+            tar = _host(run, ["git", "-C", str(src), "archive", "--format=tar", upstream_base], env,
+                        _ARCHIVE_TIMEOUT)
+            if not tar:
+                raise BuildError("git archive %s printed nothing" % upstream_base)
+            tree_tar = run_dir / "upstream.tar"
+            tree_tar.write_bytes(tar)
+            out = _host(run, ["git", "-C", str(src), "rev-parse", upstream_base + "^{tree}"], env, _HOST_TIMEOUT)
+            tree = out.decode("ascii", errors="replace").strip()
+            if _SHA40.fullmatch(tree) is None:
+                raise BuildError("git rev-parse %s^{tree} did not print a tree SHA: %r" % (upstream_base, tree[:80]))
+            _stage("tarball", bytes=len(tar), expected_tree=tree, tree_tar=str(tree_tar))
+
+            stage = "build"
+            built = build(base_image=base_image, repo=repo, pr=pr, upstream_base=upstream_base,
+                          tree_tar=tree_tar, evidence_dir=run_dir, expected_tree=tree)
+            if built["base_image_id"] != base_image_id:
+                raise _Refused("the base image changed during the build: %s, then %s (the image %s was built "
+                               "from the second)" % (base_image_id, built["base_image_id"], built["image"]))
+            image, base_commit = built["image"], built["base_commit"]
+            _stage("build", image=image, base_commit=base_commit, laps_seconds=built.get("laps_seconds"),
+                   compiling_lines=built.get("compiling_lines"))
+
+            stage = "control"
+            stub = {"instance_id": instance_id, "docker_image": image, "base_commit": base_commit,
+                    "patch": patch, "test_patch": test_patch, "test_cmds": template["test_cmds"],
+                    "rebuild_cmds": template["rebuild_cmds"], "print_cmds": template["print_cmds"],
+                    "log_parser": template["log_parser"]}
+            evidence = control(stub, container=CONTROL_PREFIX + ident, evidence_dir=run_dir)
+            verdict = evidence.get("verdict")
+            reasons = verdict.get("reasons") if isinstance(verdict, dict) else None
+            reasons = reasons if isinstance(reasons, list) else []
+            ok = _gate_ok(evidence)
+            _stage("control", ok=ok, f2p=len(evidence.get("f2p") or []), p2p=len(evidence.get("p2p") or []),
+                   reasons=reasons)
+            if not ok:
+                return {"status": "gate-failed", "exit_code": EXIT_REFUSED, "id": instance_id,
+                        "reasons": reasons, "evidence": str(run_dir)}
+            _atomic_json(ev_dir / "pending.json", {
+                "instance_id": instance_id, "cache_key": key, "spec_key": skey, "image": image,
+                "base_commit": base_commit, "upstream_base": upstream_base, "base_image_id": base_image_id,
+                "created_at": fetched["created_at"], "f2p": evidence["f2p"], "p2p": evidence["p2p"],
+                "run_dir": run_dir.name, "control": evidence})
+
+        f2p, p2p = evidence["f2p"], evidence["p2p"]
+        stage = "spec-verdicts"
+        entry = None if spec_verdicts_path is None else _spec_entry(spec_verdicts_path, skey)
+        if entry is None:
+            _stage("spec-verdicts", awaiting=True, spec_key=skey, f2p=len(f2p))
+            return {"status": "awaiting-spec-verdicts", "exit_code": EXIT_AWAITING, "id": instance_id,
+                    "spec_key": skey, "f2p": f2p, "pending": str(ev_dir / "pending.json"),
+                    "evidence": str(run_dir)}
+        try:
+            kept, dropped = apply_spec_verdicts(f2p, entry["tests"])
+        except KeyError as exc:  # an F2P test without a verdict: never a silent keep
+            raise _Refused(str(exc.args[0])) from exc
+        _atomic_json(ev_dir / "spec-verdicts-applied.json", {
+            "spec_key": skey, "reader": entry["reader"], "note": entry.get("note"), "kept": kept,
+            "dropped": dropped, "tests": {t: entry["tests"][t] for t in f2p}})
+        _stage("spec-verdicts", kept=len(kept), dropped=len(dropped), reader=entry["reader"])
+        if not kept:
+            return {"status": "unusable", "exit_code": EXIT_UNUSABLE, "id": instance_id, "spec_key": skey,
+                    "dropped_f2p": dropped, "evidence": str(run_dir)}
+
+        stage = "record"
+        record = build_record(repo=repo, pr=pr, issue_numbers=issue_numbers, created_at=fetched["created_at"],
+                              problem_statement=problem_statement, base_commit=base_commit,
+                              upstream_base_commit=upstream_base, patch=patch, test_patch=test_patch, f2p=kept,
+                              p2p=p2p, dropped_f2p=dropped, template=template, docker_image=image)
+        records_path = data / "records.jsonl"
+        existing, action = _record_slot(records_path, record)
+        # control.json, then the record, then the key: the key is the mark that all of it is in
+        _atomic_json(control_json, {name: evidence[name] for name in _CONTROL_JSON_KEYS})
+        if action == "append":
+            sep = b"" if not existing or existing.endswith(b"\n") else b"\n"
+            line = json.dumps(record, allow_nan=False).encode("utf-8") + b"\n"
+            _atomic_write(records_path, existing + sep + line)
+        _atomic_text(ev_dir / "cache-key.txt", key + "\n")
+        _stage("record", records=str(records_path), action=action, f2p=len(kept), dropped_f2p=len(dropped))
+        return {"status": "built", "exit_code": EXIT_OK, "id": instance_id, "image": image,
+                "record": str(records_path), "control": str(control_json), "f2p": kept, "dropped_f2p": dropped,
+                "p2p_count": len(p2p), "resumed": pending is not None}
+    except (FetchError, BuildError, ValueError, _Refused) as exc:
+        return _refused(run_dir, stage, str(exc) or type(exc).__name__)
+
+
+def main(argv=None):
+    """The command line: `fresh_build.py build ...` (see the module docstring). Exit code: see `run_build`."""
+    ap = argparse.ArgumentParser(prog="fresh_build.py", description=__doc__.split("\n")[0])
+    sub = ap.add_subparsers(dest="command", required=True)
+    b = sub.add_parser("build", help="build the record, image and control of one merged upstream PR")
+    b.add_argument("--repo", required=True, help="owner/name")
+    b.add_argument("--pr", required=True, type=int)
+    b.add_argument("--issues", required=True, type=_issue_list, help="comma-separated issue numbers")
+    b.add_argument("--base-image", required=True, help="a task image of the same repository")
+    b.add_argument("--template-record", required=True, type=Path,
+                   help="a records JSONL file; the commands and the parser of one record are reused")
+    b.add_argument("--template-id", required=True, help="instance_id of that record")
+    b.add_argument("--data", required=True, type=Path, help="data directory (records.jsonl, controls/, evidence/)")
+    b.add_argument("--spec-verdicts", type=Path, default=None, help="spec-verdicts.json (see the docstring)")
+    b.add_argument("--dry-run", action="store_true", help="print the planned stages and exit")
+    args = ap.parse_args(argv)
+    try:
+        result = run_build(repo=args.repo, pr=args.pr, issue_numbers=args.issues, base_image=args.base_image,
+                           template_path=args.template_record, template_id=args.template_id, data=args.data,
+                           spec_verdicts_path=args.spec_verdicts, dry_run=args.dry_run)
+    except ValueError as exc:
+        _stage("refused", failed_stage="arguments", error=str(exc))
+        return EXIT_REFUSED
+    print(json.dumps(result, indent=2, default=str, allow_nan=False))
+    return result["exit_code"]
+
+
+def _issue_list(text):
+    try:
+        numbers = [int(part) for part in text.split(",")]
+    except ValueError:
+        raise argparse.ArgumentTypeError("not a comma-separated list of issue numbers: %r" % text) from None
+    if not numbers or any(n <= 0 for n in numbers):
+        raise argparse.ArgumentTypeError("issue numbers must be positive: %r" % text)
+    return numbers
+
+
+def _raise_interrupt(signum, frame):
+    """SIGTERM and SIGHUP unwind like Ctrl-C, so every `finally` (container, image tag, lock) still runs."""
+    raise KeyboardInterrupt("signal %d" % signum)
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _raise_interrupt)
+    signal.signal(signal.SIGHUP, _raise_interrupt)
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("interrupted", file=sys.stderr)
+        sys.exit(130)

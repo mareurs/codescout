@@ -1,4 +1,6 @@
-"""Tests for fresh_build: the pure helpers and the upstream fetch. No docker, real git, gh or network."""
+"""Tests for fresh_build: the pure helpers, the upstream fetch, the build, the gate and the orchestration. No docker, real git, gh or network."""
+import contextlib
+import copy
 import hashlib
 import io
 import json
@@ -3202,6 +3204,815 @@ class ControlFreshTest(unittest.TestCase):
             self.assertNotIn("prune", args)
             self.assertNotEqual(args[0], "rmi")
             self.assertNotIn(args[:2], (("image", "rm"), ("image", "prune")))
+
+
+# --- Task 5: run_build and main ---
+
+O_REPO = "rust-lang/rust-analyzer"
+O_PR = 23096
+O_ID = "rust-lang__rust-analyzer-23096"
+O_UPSTREAM = "a1" * 20
+O_TREE = "b2" * 20
+O_SYN = "d4" * 20
+O_IMAGE_ID = "sha256:" + "c3" * 32
+O_BASE_IMAGE = "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22855"
+O_TEMPLATE_ID = "rust-lang__rust-analyzer-22855"
+O_TAG = "sab-fresh-rust-lang__rust-analyzer-23096:b1"
+O_TESTS = ["crate::tests::a", "crate::tests::b", "crate::tests::c"]
+O_P2P = ["crate::tests::p1", "crate::tests::p2"]
+O_PS = "Issue title\r\nbody with CRLF\r\n"
+O_TEST_PATCH = TEST_T.replace("+b\n", "+b\r\n")  # a CRLF line: it must reach every file byte for byte
+O_DIFF = SRC_A + O_TEST_PATCH
+O_TAR = b"TAR\x00BYTES\r\n\xff"
+O_TOKEN = "ghp_SECRETSECRETSECRET"
+O_STAGES = ["fetch", "cache-check", "tarball", "build", "control", "spec-verdicts", "record"]
+
+
+def o_fetched(**over):
+    out = {"merge_sha": "e5" * 20, "parents": ["f6" * 20], "upstream_base": O_UPSTREAM, "base_strategy": "first-parent",
+           "created_at": "2026-08-10T10:00:00Z", "merged_at": "2026-08-11T10:00:00Z", "title": "Fix",
+           "problem_statement": O_PS, "diff": O_DIFF, "pr_files": ["src/a.rs"], "issue_created_at": "2026-08-09T08:01:33Z"}
+    out.update(over)
+    return out
+
+
+def o_control_evidence(**over):
+    ev = {"id": O_ID, "image": O_TAG, "container": "sab-fresh-ctl-" + O_ID, "memory": "8g", "base_commit": O_SYN,
+          "workdir": "/testbed", "f2p": list(O_TESTS), "p2p": list(O_P2P),
+          "steps": [{"name": "base:rebuild", "returncode": 0, "tail": ""}],
+          "base": {"fail": 3, "pass": 2}, "gold": {"pass": 5}, "gold_repeat": {"pass": 5},
+          "verdict": {"ok": True, "reasons": []}, "wall_seconds": 12.5, "laps_seconds": {}}
+    ev.update(over)
+    return ev
+
+
+class HostRun:
+    """`run` for the host programs `run_build` calls itself: `docker image inspect`, `git archive`, `git rev-parse`."""
+
+    def __init__(self, src):
+        self.src = str(src)
+        self.calls = []  # (argv tuple, env, timeout)
+        self.fail = {}   # label -> (exit code, stderr bytes)
+        self.out = {"inspect": (O_IMAGE_ID + "\n").encode(), "archive": O_TAR, "tree": (O_TREE + "\n").encode()}
+
+    def __call__(self, argv, **kw):
+        if kw.get("capture_output") is not True:
+            raise AssertionError("run() must capture bytes: %r" % kw)
+        for bad in ("text", "universal_newlines", "encoding", "errors"):
+            if bad in kw:
+                raise AssertionError("run() must not set %s" % bad)
+        argv = tuple(argv)
+        self.calls.append((argv, kw.get("env"), kw.get("timeout")))
+        if argv == ("docker", "image", "inspect", "--format", "{{.Id}}", O_BASE_IMAGE):
+            label = "inspect"
+        elif argv == ("git", "-C", self.src, "archive", "--format=tar", O_UPSTREAM):
+            label = "archive"
+        elif argv == ("git", "-C", self.src, "rev-parse", O_UPSTREAM + "^{tree}"):
+            label = "tree"
+        else:
+            raise AssertionError("unexpected host call: %r" % (argv,))
+        if label in self.fail:
+            code, err = self.fail[label]
+            return subprocess.CompletedProcess(list(argv), code, b"", err)
+        return subprocess.CompletedProcess(list(argv), 0, self.out[label], b"")
+
+    def labels(self):
+        return [{"docker": "inspect", "archive": "archive", "rev-parse": "tree"}[a[0] if a[0] == "docker" else a[3]]
+                for a, _, _ in self.calls]
+
+
+class OrchestrationTest(unittest.TestCase):
+    """`run_build` with `run`, `fetch`, `build` and `control` replaced by fakes: no docker, git, gh or network."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.data = self.tmp / "data"
+        self.ev = self.data / "evidence" / O_ID
+        self.template = self.tmp / "template.jsonl"
+        self.verdicts = self.tmp / "spec-verdicts.json"
+        self.write_template()
+        self.host = HostRun(self.data / "upstream" / O_ID / "src")
+        self.fetch_calls, self.build_calls, self.control_calls = [], [], []
+        self.fetch_raises = self.build_raises = None
+        self.fetched = o_fetched()
+        self.build_result = {"image": O_TAG, "base_commit": O_SYN, "base_image_id": O_IMAGE_ID,
+                             "tree_tar_sha256": "0" * 64, "image_id": "sha256:" + "e5" * 32, "size_bytes": 1,
+                             "laps_seconds": {}, "compiling_lines": 5, "container_removed": True}
+        self.control_ev = o_control_evidence()
+        self.stderr = io.StringIO()
+        env = mock.patch.dict(os.environ, {"GITHUB_TOKEN": O_TOKEN})
+        env.start()
+        self.addCleanup(env.stop)
+
+    # --- the fakes ---
+
+    def fake_fetch(self, repo, pr, issue_numbers, dest, *, run=None, **kw):
+        self.fetch_calls.append({"repo": repo, "pr": pr, "issue_numbers": issue_numbers, "dest": dest, "run": run})
+        if self.fetch_raises is not None:
+            raise self.fetch_raises
+        return dict(self.fetched)
+
+    def fake_build(self, **kw):
+        tar = Path(kw["tree_tar"])
+        self.build_calls.append(dict(kw, tar_bytes=tar.read_bytes() if tar.is_file() else None))
+        if self.build_raises is not None:
+            raise self.build_raises
+        return dict(self.build_result)
+
+    def fake_control(self, record, **kw):
+        self.control_calls.append((copy.deepcopy(record), kw))
+        return copy.deepcopy(self.control_ev)
+
+    # --- helpers ---
+
+    def write_template(self, **over):
+        rec = {"instance_id": O_TEMPLATE_ID, "repo": O_REPO, "log_parser": TEMPLATE["log_parser"],
+               "test_cmds": list(TEMPLATE["test_cmds"]), "rebuild_cmds": list(TEMPLATE["rebuild_cmds"]),
+               "print_cmds": list(TEMPLATE["print_cmds"])}
+        rec.update(over)
+        other = {"instance_id": "other__repo-1", "test_cmds": ["x"]}
+        self.template.write_text(json.dumps(other) + "\n\n" + json.dumps(rec) + "\n", encoding="utf-8")
+
+    def go(self, **over):
+        args = dict(repo=O_REPO, pr=O_PR, issue_numbers=[23090], base_image=O_BASE_IMAGE,
+                    template_path=self.template, template_id=O_TEMPLATE_ID, data=self.data,
+                    spec_verdicts_path=None, dry_run=False, run=self.host, fetch=self.fake_fetch,
+                    build=self.fake_build, control=self.fake_control)
+        args.update(over)
+        with contextlib.redirect_stderr(self.stderr):
+            return fb.run_build(**args)
+
+    def skey(self):
+        return fb.spec_key(O_PS, O_TEST_PATCH, SRC_A)
+
+    def write_verdicts(self, tests, *, key=None, **entry):
+        entry = dict({"tests": tests, "reader": "reader-1", "note": "n"}, **entry)
+        self.verdicts.write_text(json.dumps({key or self.skey(): entry}), encoding="utf-8")
+
+    def keep(self, *kept):
+        """A verdict file that keeps `kept` and drops every other test of `O_TESTS`."""
+        self.write_verdicts({t: "specified" if t in kept else "unspecified" for t in O_TESTS})
+
+    def with_verdicts(self, **over):
+        return self.go(spec_verdicts_path=self.verdicts, **over)
+
+    def records(self):
+        path = self.data / "records.jsonl"
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else None
+
+    def cache_key(self):
+        return fb.cache_key(O_REPO, O_UPSTREAM, O_IMAGE_ID)
+
+    def make_cached(self):
+        self.ev.mkdir(parents=True)
+        (self.ev / "cache-key.txt").write_text(self.cache_key())
+        (self.data / "controls" / O_ID).mkdir(parents=True)
+        (self.data / "controls" / O_ID / "control.json").write_text("{}")
+
+    def forget_pending(self):
+        """As if the awaiting run before had never happened: the next run has to build again."""
+        (self.ev / "pending.json").unlink(missing_ok=True)
+
+    def leftovers(self):
+        return sorted(str(p.relative_to(self.data)) for p in self.data.rglob("*.tmp"))
+
+    # --- dry run ---
+
+    def test_a_dry_run_names_the_stages_and_calls_nothing(self):
+        got = self.go(dry_run=True)
+        self.assertEqual((got["status"], got["exit_code"]), ("dry-run", 0))
+        self.assertEqual(got["stages"], O_STAGES)
+        self.assertEqual((self.host.calls, self.fetch_calls, self.build_calls, self.control_calls), ([], [], [], []))
+        self.assertFalse(self.data.exists())  # no lock, no directory
+
+    def test_a_dry_run_does_not_need_the_template_or_the_verdicts(self):
+        self.template.unlink()
+        self.assertEqual(self.go(dry_run=True)["status"], "dry-run")
+
+    def test_arguments_are_validated_before_anything_runs(self):
+        bad = [dict(repo="nope"), dict(repo="a/b/c"), dict(pr=0), dict(pr="5"), dict(pr=True), dict(issue_numbers=[]),
+               dict(issue_numbers=[0]), dict(issue_numbers=["1"]), dict(issue_numbers=[True]),
+               dict(base_image="-v /:/x"), dict(base_image=""), dict(base_image="bad image"),
+               dict(template_id=""), dict(template_id=None)]
+        for over in bad:
+            for dry in (False, True):
+                with self.subTest(over=over, dry_run=dry):
+                    with self.assertRaises(ValueError):
+                        self.go(dry_run=dry, **over)
+        self.assertEqual((self.host.calls, self.fetch_calls, self.build_calls), ([], [], []))
+        self.assertFalse(self.data.exists())
+
+    # --- the lock and the per-run evidence directory ---
+
+    def test_a_second_run_while_the_lock_exists_refuses_and_leaves_the_lock(self):
+        self.data.mkdir()
+        (self.data / ".lock").write_text("pid 1\n")
+        got = self.go()
+        self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "lock"))
+        self.assertIn(".lock", got["error"])
+        self.assertEqual((self.data / ".lock").read_text(), "pid 1\n")  # not ours: not removed
+        self.assertEqual((self.host.calls, self.fetch_calls, self.build_calls), ([], [], []))
+        self.assertFalse((self.data / "evidence").exists())
+
+    def test_the_lock_is_held_while_the_run_works_and_released_after_every_outcome(self):
+        seen = []
+
+        def build(**kw):
+            seen.append((self.data / ".lock").exists())
+            return self.fake_build(**kw)
+        self.go(build=build)
+        self.assertEqual(seen, [True])
+        self.assertFalse((self.data / ".lock").exists())
+        self.forget_pending()
+        self.build_raises = fb.BuildError("boom")
+        self.go()
+        self.assertFalse((self.data / ".lock").exists())
+        self.build_raises = RuntimeError("a bug")
+        with self.assertRaises(RuntimeError):
+            self.go()
+        self.assertFalse((self.data / ".lock").exists())
+        self.build_raises = KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            self.go()
+        self.assertFalse((self.data / ".lock").exists())
+
+    def test_the_lock_is_taken_exclusively(self):
+        taken = []
+        real_open = os.open
+
+        def spy(path, flags, *a, **k):
+            if Path(path).name == ".lock":
+                taken.append(flags)
+            return real_open(path, flags, *a, **k)
+        with mock.patch.object(os, "open", spy):
+            self.go()
+        self.assertEqual(len(taken), 1)
+        self.assertTrue(taken[0] & os.O_EXCL and taken[0] & os.O_CREAT)
+
+    def test_two_runs_use_different_per_run_evidence_directories(self):
+        self.control_ev = o_control_evidence(verdict={"ok": False, "reasons": ["x"]})
+        self.go()
+        self.go()
+        dirs = [c["evidence_dir"] for c in self.build_calls]
+        self.assertEqual(len(set(dirs)), 2)
+        for d in dirs:
+            self.assertEqual(Path(d).parent, self.ev)
+            self.assertRegex(Path(d).name, r"^run-")
+            self.assertTrue(Path(d).is_dir())
+        self.assertEqual([kw["evidence_dir"] for _, kw in self.control_calls], dirs)  # build and control share one
+
+    def test_a_clock_that_repeats_still_gives_each_run_its_own_directory(self):
+        self.control_ev = o_control_evidence(verdict={"ok": False, "reasons": ["x"]})
+        with mock.patch.object(fb, "_stamp", return_value="T"):
+            self.go()
+            self.go()
+        dirs = [c["evidence_dir"] for c in self.build_calls]
+        self.assertEqual(len(set(dirs)), 2)
+
+    def test_cache_key_and_pending_live_one_level_above_the_run_directory(self):
+        self.go()  # no verdicts: pending
+        run_dir = Path(self.build_calls[0]["evidence_dir"])
+        self.assertTrue((self.ev / "pending.json").is_file())
+        self.assertFalse((run_dir / "pending.json").exists())
+        self.assertFalse((run_dir / "cache-key.txt").exists())
+
+    # --- fetch and the cache ---
+
+    def test_fetch_gets_the_arguments_a_clone_directory_and_the_credential_free_run(self):
+        self.go()
+        self.assertEqual(len(self.fetch_calls), 1)
+        call = self.fetch_calls[0]
+        self.assertEqual((call["repo"], call["pr"], call["issue_numbers"]), (O_REPO, O_PR, [23090]))
+        self.assertEqual(call["dest"], self.data / "upstream" / O_ID)
+        self.assertIs(call["run"], self.host)
+
+    def test_a_cached_key_skips_the_tarball_the_build_and_the_control(self):
+        self.make_cached()
+        got = self.go()
+        self.assertEqual((got["status"], got["exit_code"]), ("cached", 0))
+        self.assertEqual(len(self.fetch_calls), 1)  # the fetch is what yields the upstream base
+        self.assertEqual(self.host.labels(), ["inspect"])
+        self.assertEqual((self.build_calls, self.control_calls), ([], []))
+        self.assertIsNone(self.records())
+
+    def test_the_cache_key_needs_the_matching_key_and_a_control_json(self):
+        self.make_cached()
+        (self.data / "controls" / O_ID / "control.json").unlink()
+        self.go()
+        self.assertEqual(len(self.build_calls), 1)  # a key without a control.json is not a hit
+        (self.data / "controls" / O_ID / "control.json").write_text("{}")
+        for what in ("repo", "base", "image", "version"):
+            with self.subTest(changed=what):
+                self.build_calls.clear()
+                self.forget_pending()
+                self.host.out["inspect"] = (O_IMAGE_ID + "\n").encode()
+                key = {"repo": fb.cache_key("other/repo", O_UPSTREAM, O_IMAGE_ID),
+                       "base": fb.cache_key(O_REPO, "9" * 40, O_IMAGE_ID),
+                       "image": fb.cache_key(O_REPO, O_UPSTREAM, "sha256:" + "0" * 64),
+                       "version": fb.cache_key(O_REPO, O_UPSTREAM, O_IMAGE_ID, version="2")}[what]
+                (self.ev / "cache-key.txt").write_text(key)
+                self.go()
+                self.assertEqual(len(self.build_calls), 1)
+
+    def test_a_cache_key_without_the_key_file_is_a_miss(self):
+        self.make_cached()
+        (self.ev / "cache-key.txt").unlink()
+        self.go()
+        self.assertEqual(len(self.build_calls), 1)
+
+    def test_the_cache_key_uses_the_inspected_image_id(self):
+        self.make_cached()
+        self.host.out["inspect"] = ("sha256:" + "9" * 64 + "\n").encode()
+        self.go()
+        self.assertEqual(len(self.build_calls), 1)
+
+    def test_a_trailing_newline_in_the_key_file_still_hits(self):
+        self.make_cached()
+        (self.ev / "cache-key.txt").write_text(self.cache_key() + "\n")
+        self.assertEqual(self.go()["status"], "cached")
+
+    def test_the_image_inspect_failing_or_giving_no_id_is_a_refusal(self):
+        for how in ({"inspect": (1, b"Error: No such image")}, ):
+            with self.subTest(how=how):
+                self.host.fail = how
+                got = self.go()
+                self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "cache-check"))
+                self.assertEqual(self.build_calls, [])
+        self.host.fail = {}
+        for out in (b"", b"not an id\n", b"sha256:abc\n"):
+            with self.subTest(out=out):
+                self.host.out["inspect"] = out
+                got = self.go()
+                self.assertEqual((got["status"], got["stage"]), ("refused", "cache-check"))
+                self.assertEqual(self.build_calls, [])
+
+    # --- the tarball and the tree proof ---
+
+    def test_the_tarball_and_the_tree_proof_are_issued_in_order_and_the_proof_reaches_build(self):
+        self.go()
+        self.assertEqual(self.host.labels(), ["inspect", "archive", "tree"])
+        self.assertEqual(len(self.build_calls), 1)
+        call = self.build_calls[0]
+        self.assertEqual(call["expected_tree"], O_TREE)
+        self.assertEqual(call["tar_bytes"], O_TAR)  # the bytes of `git archive`, untranslated
+        self.assertEqual(call["upstream_base"], O_UPSTREAM)
+        self.assertEqual((call["base_image"], call["repo"], call["pr"]), (O_BASE_IMAGE, O_REPO, O_PR))
+        self.assertEqual(Path(call["tree_tar"]).parent, Path(call["evidence_dir"]))
+
+    def test_the_host_programs_run_without_the_token(self):
+        self.go()
+        self.assertTrue(self.host.calls)
+        for argv, env, timeout in self.host.calls:
+            self.assertNotIn("GITHUB_TOKEN", env)
+            self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+            self.assertIsInstance(timeout, int)
+            self.assertNotIn(O_TOKEN, " ".join(argv))
+        self.assertEqual(os.environ["GITHUB_TOKEN"], O_TOKEN)  # the process environment itself is untouched
+
+    def test_a_failing_archive_or_tree_proof_is_a_refusal_and_nothing_is_built(self):
+        for label in ("archive", "tree"):
+            with self.subTest(label=label):
+                self.host.fail = {label: (128, b"fatal: not a tree")}
+                got = self.go()
+                self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "tarball"))
+                self.assertEqual(self.build_calls, [])
+                self.assertIsNone(self.records())
+        self.host.fail = {}
+        for out in (b"", b"garbage\n", (O_TREE.upper() + "\n").encode(), (O_TREE[:39] + "\n").encode()):
+            with self.subTest(tree=out):
+                self.host.out["tree"] = out
+                got = self.go()
+                self.assertEqual((got["status"], got["stage"]), ("refused", "tarball"))
+                self.assertEqual(self.build_calls, [])
+
+    def test_a_tree_mismatch_reported_by_build_is_a_refusal_with_evidence(self):
+        self.build_raises = fb.BuildError("synthetic tree %s differs from expected tree %s" % ("1" * 40, O_TREE))
+        got = self.go()
+        self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "build"))
+        self.assertIn(O_TREE, got["error"])
+        refusal = json.loads((Path(got["evidence"]) / "refusal.json").read_text())
+        self.assertEqual((refusal["stage"], refusal["error"]), ("build", got["error"]))
+        self.assertEqual(self.control_calls, [])
+        self.assertIsNone(self.records())
+
+    # --- build and control ---
+
+    def test_a_build_error_is_a_refusal_not_a_crash_and_records_jsonl_is_untouched(self):
+        self.data.mkdir()
+        (self.data / "records.jsonl").write_text('{"instance_id": "old"}\n')
+        self.build_raises = fb.BuildError("tag exists")
+        got = self.go()
+        self.assertEqual((got["status"], got["exit_code"]), ("refused", 2))
+        self.assertEqual((self.data / "records.jsonl").read_bytes(), b'{"instance_id": "old"}\n')
+        self.assertEqual(self.control_calls, [])
+        self.assertFalse((self.ev / "cache-key.txt").exists())
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_bug_in_build_propagates_and_records_jsonl_is_never_half_written(self):
+        self.data.mkdir()
+        (self.data / "records.jsonl").write_text('{"instance_id": "old"}\n')
+        self.build_raises = RuntimeError("a bug")
+        with self.assertRaises(RuntimeError):
+            self.go()
+        self.assertEqual((self.data / "records.jsonl").read_bytes(), b'{"instance_id": "old"}\n')
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_fetch_error_is_a_refusal(self):
+        self.fetch_raises = fb.FetchError("PR is not merged")
+        got = self.go()
+        self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "fetch"))
+        self.assertIn("not merged", got["error"])
+        self.assertEqual(self.host.calls, [])
+
+    def test_the_control_gets_the_built_image_the_synthetic_commit_the_patches_and_the_template(self):
+        self.go()
+        record, kw = self.control_calls[0]
+        self.assertEqual(record["docker_image"], O_TAG)
+        self.assertEqual(record["base_commit"], O_SYN)
+        self.assertEqual((record["patch"], record["test_patch"]), (SRC_A, O_TEST_PATCH))
+        self.assertEqual(record["instance_id"], O_ID)
+        self.assertEqual(record["test_cmds"], TEMPLATE["test_cmds"])
+        self.assertEqual(record["rebuild_cmds"], TEMPLATE["rebuild_cmds"])
+        self.assertEqual(record["print_cmds"], TEMPLATE["print_cmds"])
+        self.assertEqual(record["log_parser"], TEMPLATE["log_parser"])
+        self.assertEqual(kw["container"], "sab-fresh-ctl-" + O_ID)
+        self.assertEqual(Path(kw["evidence_dir"]), Path(self.build_calls[0]["evidence_dir"]))
+
+    def test_a_base_image_that_changed_during_the_build_is_refused(self):
+        self.build_result["base_image_id"] = "sha256:" + "7" * 64
+        got = self.go()
+        self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "build"))
+        self.assertEqual(self.control_calls, [])
+        self.assertIsNone(self.records())
+
+    # --- the gate ---
+
+    def test_a_failed_gate_gives_exit_2_and_writes_no_record_control_or_key(self):
+        self.keep(*O_TESTS)
+        for verdict in ({"ok": False, "reasons": ["tests differ between two gold runs"]},
+                        {"ok": False, "error": True, "reasons": ["control error: x"]}, {"reasons": []}):
+            with self.subTest(verdict=verdict):
+                self.control_ev = o_control_evidence(verdict=verdict)
+                got = self.with_verdicts()
+                self.assertEqual((got["status"], got["exit_code"]), ("gate-failed", 2))
+                self.assertEqual(got["reasons"], verdict.get("reasons"))
+                self.assertIsNone(self.records())
+                self.assertFalse((self.data / "controls" / O_ID / "control.json").exists())
+                self.assertFalse((self.ev / "cache-key.txt").exists())
+                self.assertFalse((self.ev / "pending.json").exists())
+
+    # --- the specification verdicts ---
+
+    def test_without_a_verdict_file_the_run_stops_awaiting_and_writes_no_record(self):
+        got = self.go()
+        self.assertEqual((got["status"], got["exit_code"]), ("awaiting-spec-verdicts", 3))
+        self.assertEqual((got["spec_key"], got["f2p"]), (self.skey(), O_TESTS))
+        self.assertIsNone(self.records())
+        self.assertFalse((self.data / "controls" / O_ID / "control.json").exists())
+        self.assertFalse((self.ev / "cache-key.txt").exists())
+        pending = json.loads((self.ev / "pending.json").read_text())
+        self.assertEqual((pending["spec_key"], pending["f2p"], pending["p2p"]), (self.skey(), O_TESTS, O_P2P))
+        self.assertEqual(pending["cache_key"], self.cache_key())
+        # the evidence a reader needs, byte for byte
+        self.assertEqual((self.ev / "patch.diff").read_bytes(), SRC_A.encode())
+        self.assertEqual((self.ev / "test_patch.diff").read_bytes(), O_TEST_PATCH.encode())
+        self.assertEqual((self.ev / "problem_statement.txt").read_bytes(), O_PS.encode())
+        self.assertIn(b"\r\n", (self.ev / "test_patch.diff").read_bytes())
+
+    def test_a_verdict_file_without_an_entry_for_this_spec_key_still_awaits(self):
+        self.write_verdicts({t: "specified" for t in O_TESTS}, key="0" * 64)
+        got = self.with_verdicts()
+        self.assertEqual((got["status"], got["exit_code"]), ("awaiting-spec-verdicts", 3))
+        self.assertIsNone(self.records())
+
+    def test_verdicts_that_drop_every_f2p_make_the_task_unusable(self):
+        self.keep()
+        got = self.with_verdicts()
+        self.assertEqual((got["status"], got["exit_code"]), ("unusable", 4))
+        self.assertEqual(got["dropped_f2p"], O_TESTS)
+        self.assertIsNone(self.records())
+        self.assertFalse((self.data / "controls" / O_ID / "control.json").exists())
+        self.assertFalse((self.ev / "cache-key.txt").exists())
+        applied = json.loads((self.ev / "spec-verdicts-applied.json").read_text())
+        self.assertEqual((applied["kept"], applied["dropped"], applied["reader"]), ([], O_TESTS, "reader-1"))
+
+    def test_verdicts_that_keep_two_of_three_append_one_record(self):
+        self.data.mkdir()
+        (self.data / "records.jsonl").write_bytes(b'{"instance_id": "old"}\n')
+        self.keep(O_TESTS[0], O_TESTS[2])
+        got = self.with_verdicts()
+        self.assertEqual((got["status"], got["exit_code"]), ("built", 0))
+        records = self.records()
+        self.assertEqual([r["instance_id"] for r in records], ["old", O_ID])  # appended, nothing else touched
+        rec = records[1]
+        self.assertEqual(rec["FAIL_TO_PASS"], [O_TESTS[0], O_TESTS[2]])
+        self.assertEqual(rec["dropped_f2p"], [O_TESTS[1]])
+        self.assertEqual(rec["PASS_TO_PASS"], O_P2P)
+        self.assertEqual(set(rec), RECORD_KEYS | EXTRA_KEYS)
+        self.assertEqual((rec["docker_image"], rec["base_commit"], rec["upstream_base_commit"]),
+                         (O_TAG, O_SYN, O_UPSTREAM))
+        self.assertEqual((rec["patch"], rec["test_patch"], rec["problem_statement"]), (SRC_A, O_TEST_PATCH, O_PS))
+        self.assertEqual((rec["repo"], rec["pull_number"], rec["issue_numbers"]), (O_REPO, "23096", ["23090"]))
+        self.assertEqual(rec["created_at"], self.fetched["created_at"])
+        self.assertEqual(rec["test_cmds"], TEMPLATE["test_cmds"])
+        self.assertTrue((self.data / "records.jsonl").read_bytes().endswith(b"\n"))
+        self.assertEqual((self.ev / "cache-key.txt").read_text().strip(), self.cache_key())
+        self.assertEqual(self.leftovers(), [])
+
+    def test_control_json_has_the_keys_the_study_loaders_read(self):
+        self.keep(*O_TESTS)
+        self.with_verdicts()
+        control = json.loads((self.data / "controls" / O_ID / "control.json").read_text())
+        self.assertEqual(set(control), {"id", "image", "workdir", "steps", "base", "gold", "gold_repeat", "verdict",
+                                        "wall_seconds"})
+        self.assertEqual((control["id"], control["image"], control["workdir"]), (O_ID, O_TAG, "/testbed"))
+        self.assertEqual(control["verdict"], {"ok": True, "reasons": []})
+        self.assertEqual(control["wall_seconds"], 12.5)
+
+    def test_a_missing_verdict_for_an_f2p_test_is_an_error_never_a_silent_keep(self):
+        self.write_verdicts({O_TESTS[0]: "specified", O_TESTS[1]: "specified"})  # c has no verdict
+        got = self.with_verdicts()
+        self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "spec-verdicts"))
+        self.assertIn(O_TESTS[2], got["error"])
+        self.assertIsNone(self.records())
+        self.assertFalse((self.data / "controls" / O_ID / "control.json").exists())
+        self.assertFalse((self.ev / "cache-key.txt").exists())
+
+    def test_a_bad_verdict_value_or_a_malformed_entry_or_file_is_a_refusal(self):
+        good = {t: "specified" for t in O_TESTS}
+        entries = [
+            {"tests": dict(good, **{O_TESTS[0]: "maybe"}), "reader": "r"},
+            {"tests": good},                        # no reader
+            {"tests": good, "reader": ""},
+            {"tests": good, "reader": 5},
+            {"tests": good, "reader": "r", "note": 5},
+            {"tests": list(good), "reader": "r"},   # not a mapping
+            {"reader": "r"},
+            "specified",
+            [],
+        ]
+        for entry in entries:
+            with self.subTest(entry=entry):
+                self.verdicts.write_text(json.dumps({self.skey(): entry}))
+                got = self.with_verdicts()
+                self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "spec-verdicts"))
+                self.assertIsNone(self.records())
+        for text in ("not json", "[]", '"x"'):
+            with self.subTest(text=text):
+                self.verdicts.write_text(text)
+                self.assertEqual(self.with_verdicts()["status"], "refused")
+        self.verdicts.unlink()
+        self.assertEqual(self.with_verdicts()["status"], "refused")  # a named file that is not there is an error
+        self.assertIsNone(self.records())
+
+    def test_extra_verdicts_for_tests_that_are_not_f2p_are_ignored(self):
+        self.write_verdicts(dict({t: "specified" for t in O_TESTS}, **{"stale::test": "unspecified"}))
+        got = self.with_verdicts()
+        self.assertEqual(got["status"], "built")
+        self.assertEqual(self.records()[0]["FAIL_TO_PASS"], O_TESTS)
+        self.assertEqual(self.records()[0]["dropped_f2p"], [])
+
+    # --- the second run of the two-step flow, and idempotence ---
+
+    def test_a_run_with_the_verdicts_after_an_awaiting_run_does_not_rebuild(self):
+        self.assertEqual(self.go()["status"], "awaiting-spec-verdicts")
+        self.keep(O_TESTS[0], O_TESTS[1])
+        got = self.with_verdicts()
+        self.assertEqual((got["status"], got["exit_code"]), ("built", 0))
+        self.assertEqual((len(self.build_calls), len(self.control_calls)), (1, 1))  # the image is reused
+        self.assertEqual(self.host.labels().count("archive"), 1)
+        self.assertEqual(self.records()[0]["FAIL_TO_PASS"], O_TESTS[:2])
+        self.assertEqual(self.go()["status"], "cached")  # and then it is cached
+        self.assertEqual(len(self.build_calls), 1)
+
+    def test_a_pending_state_of_another_spec_is_not_reused(self):
+        self.go()
+        self.fetched = o_fetched(problem_statement=O_PS + "more")
+        self.go()
+        self.assertEqual(len(self.build_calls), 2)
+
+    def test_a_pending_state_of_another_cache_key_is_not_reused(self):
+        self.go()
+        self.host.out["inspect"] = ("sha256:" + "9" * 64 + "\n").encode()
+        self.go()
+        self.assertEqual(len(self.build_calls), 2)
+
+    def test_a_pending_file_that_cannot_be_read_is_ignored(self):
+        self.go()
+        (self.ev / "pending.json").write_text("{not json")
+        self.go()
+        self.assertEqual(len(self.build_calls), 2)
+
+    def test_the_record_is_written_after_control_json_and_before_the_cache_key(self):
+        order = []
+        real = os.replace
+
+        def spy(src, dst, *a, **k):
+            order.append(Path(dst).name)
+            return real(src, dst, *a, **k)
+        self.keep(*O_TESTS)
+        with mock.patch.object(os, "replace", spy):
+            self.with_verdicts()
+        done = [n for n in order if n in ("control.json", "records.jsonl", "cache-key.txt")]
+        self.assertEqual(done, ["control.json", "records.jsonl", "cache-key.txt"])
+
+    def fail_replace_of(self, name):
+        real = os.replace
+
+        def replace(src, dst, *a, **k):
+            if Path(dst).name == name:
+                raise OSError("disk full")
+            return real(src, dst, *a, **k)
+        return mock.patch.object(os, "replace", replace)
+
+    def test_a_failed_write_of_records_jsonl_leaves_it_whole_and_writes_no_cache_key(self):
+        self.data.mkdir()
+        (self.data / "records.jsonl").write_bytes(b'{"instance_id": "old"}\n')
+        self.keep(*O_TESTS)
+        with self.fail_replace_of("records.jsonl"):
+            with self.assertRaises(OSError):
+                self.with_verdicts()
+        self.assertEqual((self.data / "records.jsonl").read_bytes(), b'{"instance_id": "old"}\n')
+        self.assertFalse((self.ev / "cache-key.txt").exists())  # the key is the last write, never before the record
+        self.assertEqual(self.leftovers(), [])
+        self.assertFalse((self.data / ".lock").exists())
+
+    def test_a_crash_after_the_record_does_not_duplicate_it_on_the_next_run(self):
+        self.keep(*O_TESTS)
+        with self.fail_replace_of("cache-key.txt"):
+            with self.assertRaises(OSError):
+                self.with_verdicts()
+        self.assertEqual(len(self.records()), 1)
+        got = self.with_verdicts()
+        self.assertEqual(got["status"], "built")
+        self.assertEqual(len(self.records()), 1)  # the same record is not appended twice
+        self.assertEqual((self.ev / "cache-key.txt").read_text().strip(), self.cache_key())
+        self.assertEqual(len(self.build_calls), 1)
+
+    def test_a_different_record_for_the_same_id_is_refused_not_replaced(self):
+        self.data.mkdir()
+        old = json.dumps({"instance_id": O_ID, "FAIL_TO_PASS": ["other"]})
+        (self.data / "records.jsonl").write_text(old + "\n")
+        self.keep(*O_TESTS)
+        got = self.with_verdicts()
+        self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "record"))
+        self.assertEqual((self.data / "records.jsonl").read_text(), old + "\n")
+        self.assertFalse((self.ev / "cache-key.txt").exists())
+
+    def test_an_existing_file_without_a_final_newline_gets_one_before_the_record(self):
+        self.data.mkdir()
+        (self.data / "records.jsonl").write_text('{"instance_id": "old"}')
+        self.keep(*O_TESTS)
+        self.with_verdicts()
+        self.assertEqual([r["instance_id"] for r in self.records()], ["old", O_ID])
+
+    # --- the template is data ---
+
+    def test_a_template_whose_commands_are_list_like_strings_is_parsed(self):
+        self.write_template(test_cmds="['cd /testbed/repo && cargo test', 'echo done']",
+                            rebuild_cmds=' ["cargo check -q"] ', print_cmds="['cat log']")
+        self.go()
+        record, _ = self.control_calls[0]
+        self.assertEqual(record["test_cmds"], ["cd /testbed/repo && cargo test", "echo done"])
+        self.assertEqual(record["rebuild_cmds"], ["cargo check -q"])
+        self.assertEqual(record["print_cmds"], ["cat log"])
+        self.write_template(rebuild_cmds="[]")  # no rebuild command is fine
+        self.forget_pending()
+        self.go()
+        self.assertEqual(self.control_calls[1][0]["rebuild_cmds"], [])
+
+    def test_a_template_that_is_not_a_literal_is_refused_and_never_executed(self):
+        probe = "FB_EVAL_PROBE"
+        os.environ.pop(probe, None)
+        self.addCleanup(os.environ.pop, probe, None)
+        bad = ["['a', str(1)]",                                           # a call: valid under eval, not a literal
+               "[__import__('os').environ.setdefault(%r, '1')]" % probe,  # one that would leave a trace
+               "cargo test", "[1, 2]", "['a', None]", "{'a': 'b'}", "['unterminated", "[", "('a',)", "5"]
+        for text in bad:
+            for key in ("test_cmds", "rebuild_cmds", "print_cmds"):
+                with self.subTest(text=text, key=key):
+                    self.write_template(**{key: text})
+                    self.fetch_calls.clear()
+                    got = self.go()
+                    self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "template"))
+                    self.assertEqual(self.fetch_calls, [])  # refused before any network
+        self.assertNotIn(probe, os.environ)
+        self.assertEqual(self.build_calls, [])
+
+    def test_a_template_with_empty_or_missing_commands_or_a_bad_parser_is_refused(self):
+        for over in (dict(test_cmds=[]), dict(print_cmds=[]), dict(test_cmds=["a", 5]), dict(log_parser=""),
+                     dict(log_parser=["x"]), dict(rebuild_cmds=None), dict(test_cmds="[]")):
+            with self.subTest(over=over):
+                self.write_template(**over)
+                got = self.go()
+                self.assertEqual((got["status"], got["stage"]), ("refused", "template"))
+        rec = json.loads(self.template.read_text().splitlines()[-1])
+        del rec["print_cmds"]
+        self.template.write_text(json.dumps(rec) + "\n")
+        self.assertEqual(self.go()["status"], "refused")
+        self.assertEqual((self.fetch_calls, self.build_calls), ([], []))
+
+    def test_a_template_id_that_is_missing_or_ambiguous_or_a_file_that_cannot_be_read_is_refused(self):
+        self.assertEqual(self.go(template_id="no__such-1")["stage"], "template")
+        line = self.template.read_text().splitlines()[-1]
+        self.template.write_text(line + "\n" + line + "\n")
+        self.assertEqual(self.go()["stage"], "template")
+        self.template.write_text("not json\n")
+        self.assertEqual(self.go()["stage"], "template")
+        self.template.unlink()
+        self.assertEqual(self.go()["stage"], "template")
+        self.assertEqual((self.fetch_calls, self.build_calls), ([], []))
+
+    # --- the stage log and credentials ---
+
+    def test_one_json_object_per_stage_goes_to_stderr_and_no_credential(self):
+        self.keep(*O_TESTS)
+        self.with_verdicts()
+        lines = self.stderr.getvalue().splitlines()
+        objects = [json.loads(line) for line in lines]
+        self.assertEqual([o["stage"] for o in objects], O_STAGES)
+        self.assertNotIn(O_TOKEN, self.stderr.getvalue())
+
+    def test_a_token_in_an_error_message_never_reaches_stderr_the_result_or_the_evidence(self):
+        self.fetch_raises = fb.FetchError("gh api failed: bad credentials %s" % O_TOKEN)
+        got = self.go()
+        self.assertEqual(got["status"], "refused")
+        blob = self.stderr.getvalue() + json.dumps(got)
+        for path in self.data.rglob("*"):
+            if path.is_file():
+                blob += path.read_text(errors="replace")
+        self.assertNotIn(O_TOKEN, blob)
+        self.assertIn("bad credentials", blob)
+
+    def test_the_refusals_write_their_stage_to_stderr(self):
+        self.build_raises = fb.BuildError("nope")
+        self.go()
+        objects = [json.loads(line) for line in self.stderr.getvalue().splitlines()]
+        self.assertEqual(objects[-1]["stage"], "refused")
+        self.assertEqual(objects[-1]["failed_stage"], "build")
+
+
+class MainTest(unittest.TestCase):
+    ARGV = ["build", "--repo", O_REPO, "--pr", "23096", "--issues", "23090,23091", "--base-image", O_BASE_IMAGE,
+            "--template-record", "/t/rec.jsonl", "--template-id", O_TEMPLATE_ID, "--data", "/d"]
+
+    def run_main(self, argv, result=None):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(fb, "run_build", return_value=result or {"status": "built", "exit_code": 0}) as rb, \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = fb.main(argv)
+        return code, out.getvalue(), err.getvalue(), rb
+
+    def test_the_arguments_reach_run_build(self):
+        code, out, _, rb = self.run_main(self.ARGV)
+        self.assertEqual(code, 0)
+        kw = rb.call_args.kwargs
+        self.assertEqual((kw["repo"], kw["pr"], kw["issue_numbers"]), (O_REPO, 23096, [23090, 23091]))
+        self.assertEqual((kw["base_image"], kw["template_id"]), (O_BASE_IMAGE, O_TEMPLATE_ID))
+        self.assertEqual((kw["template_path"], kw["data"]), (Path("/t/rec.jsonl"), Path("/d")))
+        self.assertIsNone(kw["spec_verdicts_path"])
+        self.assertIs(kw["dry_run"], False)
+        self.assertEqual(json.loads(out), {"status": "built", "exit_code": 0})
+
+    def test_the_optional_arguments(self):
+        _, _, _, rb = self.run_main(self.ARGV + ["--spec-verdicts", "/v.json", "--dry-run"])
+        self.assertEqual(rb.call_args.kwargs["spec_verdicts_path"], Path("/v.json"))
+        self.assertIs(rb.call_args.kwargs["dry_run"], True)
+
+    def test_the_exit_code_is_the_one_run_build_decided(self):
+        for status, code in (("refused", 2), ("awaiting-spec-verdicts", 3), ("unusable", 4), ("cached", 0)):
+            with self.subTest(status=status):
+                got, out, _, _ = self.run_main(self.ARGV, {"status": status, "exit_code": code})
+                self.assertEqual(got, code)
+                self.assertEqual(json.loads(out)["status"], status)
+
+    def test_a_bad_argument_value_is_exit_2_with_a_message_and_no_traceback(self):
+        with mock.patch.object(fb, "run_build", side_effect=ValueError("pr must be a positive integer")) as rb, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(fb.main(self.ARGV), 2)
+        self.assertIn("pr must be a positive integer", err.getvalue())
+
+    def test_missing_or_malformed_arguments_are_a_usage_error(self):
+        for argv in ([], ["build"], ["nope"], self.ARGV[:-2], self.ARGV + ["--bogus"],
+                     [a if a != "23090,23091" else "x,y" for a in self.ARGV],
+                     [a if a != "23096" else "abc" for a in self.ARGV]):
+            with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as cm:
+                    fb.main(argv)
+                self.assertEqual(cm.exception.code, 2)
+
+    def test_a_dry_run_through_main_prints_the_stages_and_touches_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / "data"
+            argv = [a if a != "/d" else str(data) for a in self.ARGV] + ["--dry-run"]
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = fb.main(argv)
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(out.getvalue())["stages"], O_STAGES)
+            self.assertFalse(data.exists())
 
 
 if __name__ == "__main__":
