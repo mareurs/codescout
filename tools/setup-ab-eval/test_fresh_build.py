@@ -501,7 +501,7 @@ class BuildRecordTest(unittest.TestCase):
         self.assertEqual(rec["patch"], SRC_A)
         self.assertEqual(rec["test_patch"], TEST_T)
         self.assertEqual(
-            rec["commit_url"], "https://github.com/rust-lang/rust-analyzer/tree/" + "b" * 40
+            rec["commit_url"], "https://github.com/rust-lang/rust-analyzer/tree/" + "u" * 40  # upstream, not synthetic
         )
         self.assertEqual(rec["commit_urls"], [])
 
@@ -521,7 +521,7 @@ class BuildRecordTest(unittest.TestCase):
 
 REPO = "rust-lang/rust-analyzer"
 PR = 23096
-MERGE = "m" * 40
+MERGE = "5" * 40
 PARENT1 = "1" * 40
 PARENT2 = "2" * 40
 SECRET = "ghp_sekret_value_must_never_travel"
@@ -797,6 +797,32 @@ class FetchPrTest(unittest.TestCase):
         with self.assertRaisesRegex(fb.FetchError, "cutoff"):
             self.fetch(fake)
         self.assertEqual(len(fake.calls), 1)
+
+    def test_a_pr_created_before_the_cutoff_is_refused_even_when_merged_after_it(self):
+        fake = FakeRun(self.responses(pull=self.pull(created_at="2026-06-30T23:59:59Z")))
+        with self.assertRaisesRegex(fb.FetchError, "created_at.*cutoff"):
+            self.fetch(fake)
+        self.assertEqual(len(fake.calls), 1)  # before any commit, issue or git call
+        fake = FakeRun(self.responses(pull=self.pull(created_at="2026-07-01T00:00:00Z")))
+        self.assertEqual(self.fetch(fake)["created_at"], "2026-07-01T00:00:00Z")  # the cutoff day passes
+        for bad in ("2026-07-02", "junk", None):
+            with self.assertRaisesRegex(fb.FetchError, "ISO-8601", msg=repr(bad)):
+                self.fetch(FakeRun(self.responses(pull=self.pull(created_at=bad))))
+
+    def test_the_merge_and_parent_shas_from_the_api_must_be_full_hex_before_any_git(self):
+        for bad in ("zzzz", "-x", "", "A" * 40, MERGE[:39], MERGE + "0", "--upload-pack=x", 5):
+            fake = FakeRun(self.responses(pull=self.pull(merge_commit_sha=bad)))
+            with self.assertRaisesRegex(fb.FetchError, "merge_commit_sha", msg=repr(bad)):
+                self.fetch(fake)
+            self.assertEqual(len(fake.calls), 1)
+        for bad in ("zzzz", "-x", "", "A" * 40, PARENT1[:39]):
+            fake = FakeRun(self.responses(parents=(bad, PARENT2)))
+            with self.assertRaisesRegex(fb.FetchError, "parent", msg=repr(bad)):
+                self.fetch(fake)
+            self.assertFalse([a for a, _ in fake.calls if a[0] == "git"])
+        fake = FakeRun(self.responses(parents=(PARENT1, "-x")))  # the second parent too
+        with self.assertRaisesRegex(fb.FetchError, "parent"):
+            self.fetch(fake)
 
     def test_merged_on_the_cutoff_day_is_accepted(self):
         fake = FakeRun(self.responses(pull=self.pull(merged_at="2026-07-01T00:00:00Z")))
@@ -1101,7 +1127,7 @@ WARM_OK = (
 )
 HAPPY_LABELS = [
     "tag-check", "base-id", "run", "clear-tracked", "copy", "extract", "list-files", "clear-dirs", "touch",
-    "metadata", "warm-build", "git-attributes", "git-add", "git-add-force", "git-commit", "ls-files",
+    "metadata", "toolchain", "warm-build", "git-attributes", "git-add", "git-add-force", "git-commit", "ls-files",
     "rev-parse", "tag-check", "docker-commit",  # the second tag-check is the re-inspect before the commit
     "inspect", "rm",
 ]
@@ -1174,6 +1200,8 @@ def label(args):
         return "extract"
     if "touch" in text:
         return "touch"
+    if "rustc $t -V" in text:
+        return "toolchain"
     if "cargo metadata" in text:
         return "metadata"
     if "cargo test" in text:
@@ -1418,6 +1446,44 @@ class BuildImageTest(unittest.TestCase):
         self.assertEqual(set(got), {"image", "base_commit", "base_image_id", "tree_tar_sha256", "image_id",
                                     "size_bytes", "laps_seconds", "compiling_lines", "container_removed"})
 
+    # --- the toolchain is recorded, never a reason to refuse ---
+
+    def test_the_cargo_and_rustc_versions_are_recorded_for_the_default_and_the_named_toolchains(self):
+        fake = FakeDocker(("toolchain", (0, "== default\ncargo 1.90.0\nrustc 1.90.0\n== +stable\ncargo 1.92.0\n")))
+        self.build(fake, toolchains=("stable",))
+        script = fake.args_of("toolchain")[-1]
+        self.assertIn("cargo $t -V", script)
+        self.assertIn("rustc $t -V", script)
+        self.assertIn("+stable", script)
+        self.assertLess(HAPPY_LABELS.index("metadata"), HAPPY_LABELS.index("toolchain"))
+        self.assertLess(HAPPY_LABELS.index("toolchain"), HAPPY_LABELS.index("warm-build"))
+        ev = self.evidence_json()
+        self.assertEqual(ev["toolchains"], ["", "+stable"])
+        self.assertIn("cargo 1.92.0", ev["toolchain_versions"])
+
+    def test_without_named_toolchains_only_the_default_is_asked_for(self):
+        fake = FakeDocker()
+        self.build(fake)
+        self.assertNotIn("+", fake.args_of("toolchain")[-1].replace("pipefail", ""))
+        self.assertEqual(self.evidence_json()["toolchains"], [""])
+
+    def test_a_failing_or_timed_out_toolchain_step_does_not_refuse_the_build(self):
+        fake = FakeDocker(("toolchain", (127, "bash: cargo: command not found")))
+        self.build(fake)
+        self.assertEqual(self.evidence_json()["outcome"], "ok")
+        fake = FakeDocker(("toolchain", subprocess.TimeoutExpired("docker", 120)))
+        self.build(fake)
+        ev = self.evidence_json()
+        self.assertEqual(ev["outcome"], "ok")
+        self.assertIn("timed out", ev["toolchain_versions"])
+
+    def test_a_toolchain_name_that_is_not_a_plain_name_is_refused_before_docker(self):
+        for bad in ("st able", "a;b", "$(x)", "", "-x", 5, "+stable"):
+            fake = FakeDocker()
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                self.build(fake, toolchains=(bad,))
+            self.assertEqual(fake.calls, [])
+
     def test_container_is_started_with_network_and_the_pilot_limits(self):
         fake = FakeDocker()
         self.build(fake)
@@ -1460,7 +1526,7 @@ class BuildImageTest(unittest.TestCase):
                 fake = FakeDocker()
                 self.build(fake, workdir=workdir)
                 execs = [args for args, _ in fake.calls if args[0] == "exec"]
-                self.assertEqual(len(execs), 13)
+                self.assertEqual(len(execs), 14)  # the toolchain step is one of them
                 for args in execs:
                     i = args.index("-w")
                     self.assertEqual(args[i + 1], workdir)
@@ -3186,6 +3252,58 @@ class ControlFreshTest(unittest.TestCase):
         with mock.patch.object(fb.mc, "run_tests", truncating):
             self.assertIs(self.control()["log_truncated"], True)
 
+    # --- a gate that cannot show a regression check is not ok ---
+
+    def assert_not_ok(self, got, *reasons):
+        self.assertIs(got["verdict"]["ok"], False)
+        for reason in reasons:
+            self.assertIn(reason, got["verdict"]["reasons"])
+        self.assertNotIn("error", got)  # a verdict, not a failed run
+        self.assertEqual(json.loads((self.evidence / "control-evidence.json").read_text())["verdict"], got["verdict"])
+
+    def test_a_base_state_that_parsed_no_tests_is_not_ok_and_counts_the_absent_f2p(self):
+        # the test patch does not compile at base: the base log holds no test, every gold pass looks "absent"
+        self.statuses["base"] = {}
+        got = self.control()
+        self.assert_not_ok(got, "base_parsed_no_tests", "p2p_empty")
+        self.assertEqual((got["f2p"], got["p2p"]), (sorted([T_A, T_B, T_C]), []))
+        self.assertEqual(got["f2p_absent_at_base"], 3)
+
+    def test_an_empty_p2p_is_not_ok_whatever_else_passes(self):
+        self.statuses["base"] = {T_A: "fail", T_B: "fail"}
+        self.statuses["gold"] = self.statuses["gold-repeat"] = {T_A: "pass", T_B: "pass"}
+        got = self.control()
+        self.assert_not_ok(got, "p2p_empty")
+        self.assertNotIn("base_parsed_no_tests", got["verdict"]["reasons"])
+        self.assertEqual((got["f2p"], got["p2p"], got["f2p_absent_at_base"]), ([T_A, T_B], [], 0))
+
+    def test_a_task_with_a_base_log_and_a_p2p_is_ok_and_f2p_absent_at_base_is_counted(self):
+        got = self.control()
+        self.assertIs(got["verdict"]["ok"], True)
+        self.assertEqual(got["f2p_absent_at_base"], 0)  # a fails at base, it is not absent
+        # one F2P test absent (not failing) at base, but the base state compiled and P2P is not empty
+        self.statuses["base"] = {T_B: "pass", T_C: "pass"}
+        got = self.control()
+        self.assertEqual((got["f2p"], got["p2p"], got["f2p_absent_at_base"]), ([T_A], [T_B, T_C], 1))
+        self.assertIs(got["verdict"]["ok"], True)
+
+    def test_the_new_reasons_keep_the_tolerant_repeat_out_of_it(self):
+        self.statuses["base"] = {}
+        self.lose(T_B)  # a lost line: the tolerant run would normally accept it
+        got = self.control()
+        self.assert_not_ok(got, "base_parsed_no_tests")
+        self.assertNotIn("tolerant_repeat", got)
+
+    def test_a_truncated_log_is_not_ok(self):
+        def truncating(container, workdir, record, timeout=3600, *, steps=None, state="base"):
+            steps.append({"name": state + ":print[0]", "returncode": 0, "tail": "", "truncated": True})
+            return "{" + '"state": "%s", "statuses": %s}' % (state, json.dumps(self.statuses[state]))
+        with mock.patch.object(fb.mc, "run_tests", truncating):
+            got = self.control()
+        self.assertIs(got["log_truncated"], True)
+        self.assert_not_ok(got, "log_truncated")
+        self.assertEqual(got["f2p"], [T_A])  # still derived, and recorded
+
     def test_the_result_names_what_it_ran_on(self):
         got = self.control()
         self.assertEqual(got["image"], CTL_IMAGE)
@@ -3239,10 +3357,11 @@ def o_fetched(**over):
 
 def o_control_evidence(**over):
     ev = {"id": O_ID, "image": O_TAG, "container": "sab-fresh-ctl-" + O_ID, "memory": "8g", "base_commit": O_SYN,
-          "workdir": "/testbed", "image_id": O_GATED_ID, "f2p": list(O_TESTS), "p2p": list(O_P2P),
+          "workdir": "/testbed", "image_id": O_GATED_ID, "f2p_absent_at_base": 1, "f2p": list(O_TESTS), "p2p": list(O_P2P),
           "steps": [{"name": "base:rebuild", "returncode": 0, "tail": ""}],
           "base": {"fail": 3, "pass": 2}, "gold": {"pass": 5}, "gold_repeat": {"pass": 5},
-          "verdict": {"ok": True, "reasons": []}, "wall_seconds": 12.5, "laps_seconds": {}}
+          "verdict": {"ok": True, "reasons": [], "gold_repeat_mismatch": {"count": 0, "names": []}},
+          "wall_seconds": 12.5, "laps_seconds": {}}
     ev.update(over)
     return ev
 
@@ -3300,6 +3419,8 @@ class OrchestrationTest(unittest.TestCase):
         self.host = HostRun(self.data / "upstream" / O_ID / "src")
         self.fetch_calls, self.build_calls, self.control_calls = [], [], []
         self.fetch_raises = self.build_raises = None
+        self.built = set()      # tags the fake build made: a second build of one is refused like the real one
+        self.write_logs = True
         self.fetched = o_fetched()
         self.build_result = {"image": O_TAG, "base_commit": O_SYN, "base_image_id": O_IMAGE_ID,
                              "tree_tar_sha256": "0" * 64, "image_id": O_GATED_ID, "size_bytes": 1,
@@ -3323,10 +3444,17 @@ class OrchestrationTest(unittest.TestCase):
         self.build_calls.append(dict(kw, tar_bytes=tar.read_bytes() if tar.is_file() else None))
         if self.build_raises is not None:
             raise self.build_raises
+        tag = fb.image_tag(kw["repo"], kw["pr"])
+        if tag in self.built:
+            raise fb.BuildError("tag exists: image %s is already there before this build" % tag)
+        self.built.add(tag)
         return dict(self.build_result)
 
     def fake_control(self, record, **kw):
         self.control_calls.append((copy.deepcopy(record), kw))
+        if self.write_logs:  # what the real control leaves in its evidence directory, CRLF and all
+            for name in ("base.log", "gold.log", "gold-repeat.log"):
+                (Path(kw["evidence_dir"]) / name).write_bytes(("%s of %s\r\n" % (name, len(self.control_calls))).encode())
         return copy.deepcopy(self.control_ev)
 
     # --- helpers ---
@@ -3373,12 +3501,14 @@ class OrchestrationTest(unittest.TestCase):
         self.ev.mkdir(parents=True)
         (self.ev / "cache-key.txt").write_text(self.cache_key())
         (self.data / "controls" / O_ID).mkdir(parents=True)
-        (self.data / "controls" / O_ID / "control.json").write_text("{}")
+        (self.data / "controls" / O_ID / "control.json").write_text(
+            json.dumps({"id": O_ID, "image": O_TAG, "image_id": O_GATED_ID}))
 
     def forget_pending(self):
         """As if the run before had never happened: the next run has to build again."""
         (self.ev / "pending.json").unlink(missing_ok=True)
         (self.ev / "gate-failed.json").unlink(missing_ok=True)
+        self.built.clear()  # and its image is gone
 
     def leftovers(self):
         return sorted(str(p.relative_to(self.data)) for p in self.data.rglob("*.tmp"))
@@ -3501,7 +3631,7 @@ class OrchestrationTest(unittest.TestCase):
         got = self.go()
         self.assertEqual((got["status"], got["exit_code"]), ("cached", 0))
         self.assertEqual(len(self.fetch_calls), 1)  # the fetch is what yields the upstream base
-        self.assertEqual(self.host.labels(), ["inspect"])
+        self.assertEqual(self.host.labels(), ["inspect", "tag"])  # the base image id, then the gated image's
         self.assertEqual((self.build_calls, self.control_calls), ([], []))
         self.assertIsNone(self.records())
 
@@ -3510,7 +3640,7 @@ class OrchestrationTest(unittest.TestCase):
         (self.data / "controls" / O_ID / "control.json").unlink()
         self.go()
         self.assertEqual(len(self.build_calls), 1)  # a key without a control.json is not a hit
-        (self.data / "controls" / O_ID / "control.json").write_text("{}")
+        (self.data / "controls" / O_ID / "control.json").write_text(json.dumps({"image": O_TAG, "image_id": O_GATED_ID}))
         for what in ("repo", "base", "image", "version"):
             with self.subTest(changed=what):
                 self.build_calls.clear()
@@ -3600,7 +3730,8 @@ class OrchestrationTest(unittest.TestCase):
         got = self.go()
         self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "build"))
         self.assertIn(O_TREE, got["error"])
-        refusal = json.loads((Path(got["evidence"]) / "refusal.json").read_text())
+        (refusal_file,) = sorted(Path(got["evidence"]).glob("refusal-*.json"))
+        refusal = json.loads(refusal_file.read_text())
         self.assertEqual((refusal["stage"], refusal["error"]), ("build", got["error"]))
         self.assertEqual(self.control_calls, [])
         self.assertIsNone(self.records())
@@ -3734,10 +3865,14 @@ class OrchestrationTest(unittest.TestCase):
         self.keep(*O_TESTS)
         self.with_verdicts()
         control = json.loads((self.data / "controls" / O_ID / "control.json").read_text())
-        self.assertEqual(set(control), {"id", "image", "workdir", "steps", "base", "gold", "gold_repeat", "verdict",
-                                        "wall_seconds"})
+        self.assertEqual(set(control), {"id", "image", "image_id", "workdir", "steps", "base", "gold", "gold_repeat",
+                                        "verdict", "wall_seconds", "gold_repeat_mismatch",
+                                        "tolerated_repeat_mismatch"})
         self.assertEqual((control["id"], control["image"], control["workdir"]), (O_ID, O_TAG, "/testbed"))
-        self.assertEqual(control["verdict"], {"ok": True, "reasons": []})
+        self.assertEqual(control["image_id"], O_GATED_ID)
+        self.assertEqual((control["gold_repeat_mismatch"], control["tolerated_repeat_mismatch"]),
+                         ({"count": 0, "names": []}, []))
+        self.assertEqual(control["verdict"], o_control_evidence()["verdict"])
         self.assertEqual(control["wall_seconds"], 12.5)
 
     def test_a_missing_verdict_for_an_f2p_test_is_an_error_never_a_silent_keep(self):
@@ -3796,23 +3931,43 @@ class OrchestrationTest(unittest.TestCase):
         self.assertEqual(self.go()["status"], "cached")  # and then it is cached
         self.assertEqual(len(self.build_calls), 1)
 
-    def test_a_pending_state_of_another_spec_is_not_reused(self):
+    def assert_stale_pending(self, got, *needles):
+        self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "resume"))
+        for needle in needles:
+            self.assertIn(needle, got["error"])
+        self.assertEqual((len(self.build_calls), len(self.control_calls)), (1, 1))  # not rebuilt: the image exists
+        # the evidence files still describe the run the pending state belongs to
+        self.assertEqual((self.ev / "problem_statement.txt").read_bytes(), O_PS.encode())
+        self.assertEqual((self.ev / "patch.diff").read_bytes(), SRC_A.encode())
+        self.assertTrue((self.ev / "pending.json").is_file())
+
+    def test_a_pending_state_of_another_spec_is_refused_up_front_naming_it(self):
         self.go()
         self.fetched = o_fetched(problem_statement=O_PS + "more")
-        self.go()
-        self.assertEqual(len(self.build_calls), 2)
+        got = self.go()
+        self.assert_stale_pending(got, "problem statement", "patches")
+        self.assertNotIn("tag exists", got["error"])  # the reason is the input, not the image
 
-    def test_a_pending_state_of_another_cache_key_is_not_reused(self):
+    def test_a_pending_state_of_another_upstream_base_or_base_image_is_refused_up_front_naming_it(self):
         self.go()
+        self.fetched = o_fetched(upstream_base="9" * 40)
+        self.assert_stale_pending(self.go(), "upstream base", "9" * 40)
+        self.fetched = o_fetched()
         self.host.out["inspect"] = ("sha256:" + "9" * 64 + "\n").encode()
+        self.assert_stale_pending(self.go(), "base image", "sha256:" + "9" * 64)
+
+    def test_a_pending_state_of_another_cache_key_is_refused_up_front(self):
         self.go()
-        self.assertEqual(len(self.build_calls), 2)
+        self.edit_pending(lambda p: p.update(cache_key="0" * 64))
+        self.assert_stale_pending(self.go(), "cache key")
 
     def test_a_pending_file_that_cannot_be_read_is_ignored(self):
         self.go()
         (self.ev / "pending.json").write_text("{not json")
-        self.go()
-        self.assertEqual(len(self.build_calls), 2)
+        got = self.go()
+        self.assertEqual(len(self.build_calls), 2)  # a build was attempted: the fake refuses it as the real one does
+        self.assertEqual((got["status"], got["stage"]), ("refused", "build"))
+        self.assertIn("tag exists", got["error"])
 
     def test_the_record_is_written_after_control_json_and_before_the_cache_key(self):
         order = []
@@ -4001,18 +4156,55 @@ class OrchestrationTest(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.ev.glob("run-*")), [first.name])  # no empty run-* left over
 
     def test_a_run_dir_name_in_pending_that_is_not_a_run_dir_of_this_task_is_not_followed(self):
-        for name in ("../other", "run-../../other", "", None, 5, "run-missing"):
+        (self.ev.parent / "Y" / "run-abc").mkdir(parents=True, exist_ok=True)
+        (self.ev.parent / "other").mkdir(exist_ok=True)
+        names = ["../other", "run-../../other", "", None, 5, "run-missing", "../Y/run-abc", "run-abc/", "run-a b",
+                 str(self.ev.parent / "Y" / "run-abc"), "run-link", "run-link-inside"]
+        for name in names:
             with self.subTest(run_dir=name):
                 self.forget_pending()
                 self.awaiting()
-                (self.ev.parent / "other").mkdir(exist_ok=True)
+                first = Path(self.build_calls[-1]["evidence_dir"])
+                (self.ev / "run-link").unlink(missing_ok=True)
+                (self.ev / "run-link-inside").unlink(missing_ok=True)
+                (self.ev / "run-link").symlink_to(self.ev.parent / "other")  # a link out of the task's directory
+                (self.ev / "run-link-inside").symlink_to(first)  # a link to the very run directory: still a link
                 self.edit_pending(lambda p: p.update(run_dir=name))
                 self.keep()
                 got = self.with_verdicts()
                 self.assertEqual(got["status"], "unusable")
                 self.assertEqual(Path(got["evidence"]).parent, self.ev)  # a run directory of this task
                 self.assertRegex(Path(got["evidence"]).name, r"^run-")
+                self.assertFalse(Path(got["evidence"]).is_symlink())
+                self.assertNotIn(Path(got["evidence"]).name, ("run-link", "run-link-inside", "run-abc"))
                 self.assertNotEqual(Path(got["evidence"]).resolve(), (self.ev.parent / "other").resolve())
+
+    def test_only_the_exact_name_of_the_real_run_directory_is_followed(self):
+        self.awaiting()
+        first = Path(self.build_calls[0]["evidence_dir"])
+        for name in (first.name + "/", "./" + first.name, first.name + "/.", first.name + "\n", " " + first.name):
+            with self.subTest(run_dir=name):
+                self.edit_pending(lambda p: p.update(run_dir=name))
+                self.keep()
+                got = self.with_verdicts()
+                self.assertEqual(got["status"], "unusable")
+                self.assertNotEqual(got["evidence"], str(first))  # this run's own directory, not the earlier one
+        self.edit_pending(lambda p: p.update(run_dir=first.name))
+        self.assertEqual(self.with_verdicts()["evidence"], str(first))  # the exact name is
+
+    def test_every_refusal_is_kept_in_a_file_of_its_own(self):
+        self.awaiting()
+        first = Path(self.build_calls[0]["evidence_dir"])
+        with mock.patch.object(fb, "_stamp", return_value="T"):  # a clock that does not move
+            for missing in (O_TESTS[2], O_TESTS[1]):
+                self.write_verdicts({t: "specified" for t in O_TESTS if t != missing})
+                got = self.with_verdicts()
+                self.assertEqual((got["status"], got["stage"]), ("refused", "spec-verdicts"))
+        files = sorted(first.glob("refusal*.json"))
+        self.assertEqual([f.name for f in files], ["refusal-T-1.json", "refusal-T.json"])
+        errors = [json.loads(f.read_text())["error"] for f in files]
+        self.assertTrue(O_TESTS[1] in errors[0] and O_TESTS[2] in errors[1], errors)  # neither overwrote the other
+        self.assertFalse((first / "refusal.json").exists())
 
     def test_a_refused_resume_keeps_its_own_run_directory_with_the_refusal(self):
         self.awaiting()
@@ -4020,7 +4212,84 @@ class OrchestrationTest(unittest.TestCase):
         self.host.out["tag"] = ("sha256:" + "9" * 64 + "\n").encode()
         got = self.with_verdicts()
         self.assertEqual(got["status"], "refused")
-        self.assertTrue((Path(got["evidence"]) / "refusal.json").is_file())
+        self.assertEqual(len(list(Path(got["evidence"]).glob("refusal-*.json"))), 1)
+
+    def test_f2p_absent_at_base_is_carried_in_the_stage_line_pending_and_the_exit_3_result(self):
+        got = self.go()
+        self.assertEqual(got["f2p_absent_at_base"], 1)
+        self.assertEqual(json.loads((self.ev / "pending.json").read_text())["f2p_absent_at_base"], 1)
+        stages = [json.loads(line) for line in self.stderr.getvalue().splitlines()]
+        (line,) = [o for o in stages if o["stage"] == "control"]
+        self.assertEqual(line["f2p_absent_at_base"], 1)
+
+    # --- control.json beside its logs, in the shape the study loaders read ---
+
+    def test_the_logs_are_copied_beside_control_json_byte_for_byte(self):
+        self.keep(*O_TESTS)
+        self.with_verdicts()
+        control_dir = self.data / "controls" / O_ID
+        run_dir = Path(self.build_calls[0]["evidence_dir"])
+        for name in ("base.log", "gold.log", "gold-repeat.log"):
+            self.assertEqual((control_dir / name).read_bytes(), (run_dir / name).read_bytes())
+            self.assertIn(b"\r\n", (control_dir / name).read_bytes())
+        self.assertFalse((control_dir / "gold-repeat-2.log").exists())  # only the logs that exist
+
+    def test_a_resume_copies_the_logs_of_the_run_that_made_them(self):
+        self.awaiting()
+        run_dir = Path(self.build_calls[0]["evidence_dir"])
+        (run_dir / "gold-repeat-2.log").write_bytes(b"second repeat\r\n")
+        self.with_verdicts()
+        control_dir = self.data / "controls" / O_ID
+        self.assertEqual((control_dir / "base.log").read_bytes(), (run_dir / "base.log").read_bytes())
+        self.assertEqual((control_dir / "gold-repeat-2.log").read_bytes(), b"second repeat\r\n")
+
+    def test_missing_base_or_gold_log_is_a_refusal_with_nothing_written(self):
+        self.write_logs = False
+        self.keep(*O_TESTS)
+        got = self.with_verdicts()
+        self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "record"))
+        self.assertIn("base.log", got["error"])
+        self.assertIsNone(self.records())
+        self.assertFalse((self.ev / "cache-key.txt").exists())
+        self.assertFalse((self.data / "controls" / O_ID / "control.json").exists())
+
+    # --- a cache hit checks that the image is still the gated one ---
+
+    def test_a_cache_hit_is_refused_when_the_image_is_gone_or_changed_or_the_control_cannot_say(self):
+        self.make_cached()
+        control_json = self.data / "controls" / O_ID / "control.json"
+        self.host.fail = {"tag": (1, b"Error: No such image: " + O_TAG.encode())}
+        got = self.go()
+        self.assertEqual((got["status"], got["exit_code"], got["stage"]), ("refused", 2, "cache-check"))
+        self.assertIn(O_TAG, got["error"])
+        self.assertIn("is gone", got["error"])
+        self.assertIn("does not rebuild", got["error"])
+        self.host.fail = {}
+        self.host.out["tag"] = ("sha256:" + "9" * 64 + "\n").encode()
+        got = self.go()
+        self.assertEqual((got["status"], got["stage"]), ("refused", "cache-check"))
+        self.assertIn(O_GATED_ID, got["error"])
+        self.assertIn("sha256:" + "9" * 64, got["error"])
+        self.host.out["tag"] = (O_GATED_ID + "\n").encode()
+        for text in ("{}", json.dumps({"image": O_TAG}), json.dumps({"image_id": O_GATED_ID}), "not json", "[]",
+                     json.dumps({"image": "-v x", "image_id": O_GATED_ID})):
+            control_json.write_text(text)
+            got = self.go()
+            self.assertEqual((got["status"], got["stage"]), ("refused", "cache-check"), text)
+        self.assertEqual((self.build_calls, self.control_calls), ([], []))  # never a silent rebuild
+        control_json.write_text(json.dumps({"id": O_ID, "image": O_TAG, "image_id": O_GATED_ID}))
+        self.assertEqual(self.go()["status"], "cached")
+
+    # --- the toolchain is evidence ---
+
+    def test_the_toolchains_the_template_names_reach_the_build(self):
+        self.go()
+        self.assertEqual(self.build_calls[0]["toolchains"], [])
+        self.forget_pending()
+        self.write_template(test_cmds=["cd /testbed/repo && cargo +stable test --no-fail-fast",
+                                       "rustc +nightly-2026-01-01 -V"], rebuild_cmds=["cargo +stable check"])
+        self.go()
+        self.assertEqual(self.build_calls[1]["toolchains"], ["nightly-2026-01-01", "stable"])
 
     # --- a failed gate is not retried by deleting the image ---
 
@@ -4042,7 +4311,8 @@ class OrchestrationTest(unittest.TestCase):
         self.assertEqual((len(self.build_calls), len(self.control_calls)), (1, 1))  # no build, no second gate
         self.assertEqual(self.host.labels(), ["inspect", "archive", "tree", "inspect"])  # no tarball again
         (self.ev / "gate-failed.json").unlink()
-        self.assertEqual(self.go()["status"], "awaiting-spec-verdicts")  # a deliberate retry
+        self.built.clear()  # the image deleted by hand too: the other half of a deliberate retry
+        self.assertEqual(self.go()["status"], "awaiting-spec-verdicts")
 
     def test_a_passing_gate_writes_no_gate_failed_marker(self):
         self.go()
@@ -4146,6 +4416,85 @@ class OrchestrationTest(unittest.TestCase):
         objects = [json.loads(line) for line in self.stderr.getvalue().splitlines()]
         self.assertEqual(objects[-1]["stage"], "refused")
         self.assertEqual(objects[-1]["failed_stage"], "build")
+
+
+class ControlDirLoaderTest(unittest.TestCase):
+    """The control directory the builder writes, read back through the study's own loader
+    (`multilang_tasks.relaxed_expected`, a read-only import): its logs beside control.json, its top-level
+    `gold_repeat_mismatch`, and the tolerated names kept apart from the mismatches that count."""
+
+    PARSER = ("def parser(log):\n    out = {}\n    for line in log.splitlines():\n"
+              "        name, sep, status = line.partition(' = ')\n        if sep:\n            out[name] = status\n"
+              "    return out\n")
+
+    @classmethod
+    def setUpClass(cls):
+        import multilang_tasks
+        if not multilang_tasks.grade.network_isolation_available():
+            raise unittest.SkipTest("the log parser sandbox needs `unshare -rn`")
+        cls.mt = multilang_tasks
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.run_dir = self.tmp / "run-1"
+        self.run_dir.mkdir()
+        (self.run_dir / "base.log").write_bytes(b"t::a = fail\r\nt::b = pass\nt::c = pass\n")
+        (self.run_dir / "gold.log").write_bytes(b"t::a = pass\nt::b = pass\nt::c = pass\n")
+        (self.run_dir / "gold-repeat.log").write_bytes(b"t::a = pass\nt::b = pass\nt::c = pass\n")
+        self.control_dir = self.tmp / "controls" / O_ID
+        self.record = {"instance_id": O_ID, "log_parser": self.PARSER, "FAIL_TO_PASS": ["t::a"],
+                       "PASS_TO_PASS": ["t::b", "t::c"], "test_patch": ""}
+
+    def evidence(self, verdict):
+        return o_control_evidence(f2p=["t::a"], p2p=["t::b", "t::c"], verdict=verdict)
+
+    def plain(self):
+        return {"ok": True, "reasons": [], "gold_repeat_mismatch": {"count": 0, "names": []}}
+
+    def tolerated(self):
+        # what `control_fresh` leaves for a task whose lost line came back in the second repeat
+        return {"ok": True, "reasons": [], "gold_repeat_mismatch": {"count": 1, "names": ["t::b"]},
+                "tolerated_repeat_mismatch": ["t::b"], "strict_repeat_mismatch_count": 1}
+
+    def test_a_plain_task_is_read_back_by_the_loader(self):
+        fb._write_control_dir(self.control_dir, self.run_dir, self.evidence(self.plain()))
+        got = self.mt.relaxed_expected(self.record, self.control_dir / "control.json")
+        self.assertEqual((got["fail_to_pass"], got["pass_to_pass_kept"]), (1, 2))
+        self.assertEqual((self.control_dir / "base.log").read_bytes(), (self.run_dir / "base.log").read_bytes())
+
+    def test_a_task_that_passed_the_tolerant_repeat_is_read_back_too(self):
+        fb._write_control_dir(self.control_dir, self.run_dir, self.evidence(self.tolerated()))
+        control = json.loads((self.control_dir / "control.json").read_text())
+        self.assertEqual(control["gold_repeat_mismatch"], {"count": 0, "names": []})  # only what still counts
+        self.assertEqual(control["tolerated_repeat_mismatch"], ["t::b"])
+        self.assertEqual(control["verdict"], self.tolerated())  # the gate's own verdict stays whole
+        got = self.mt.relaxed_expected(self.record, self.control_dir / "control.json")
+        self.assertEqual((got["fail_to_pass"], got["pass_to_pass_kept"]), (1, 2))
+
+    def test_the_loader_does_refuse_the_verdicts_mismatch_lifted_as_it_is(self):
+        # the reason for the split above: with the tolerated name at the top level the loader says no
+        fb._write_control_dir(self.control_dir, self.run_dir, self.evidence(self.tolerated()))
+        control = json.loads((self.control_dir / "control.json").read_text())
+        control["gold_repeat_mismatch"] = self.tolerated()["gold_repeat_mismatch"]
+        (self.control_dir / "control.json").write_text(json.dumps(control))
+        with self.assertRaisesRegex(self.mt.LiveRefused, "differ between two gold runs"):
+            self.mt.relaxed_expected(self.record, self.control_dir / "control.json")
+
+    def test_mismatches_that_are_not_tolerated_stay_in_the_top_level_key(self):
+        verdict = dict(self.tolerated(), gold_repeat_mismatch={"count": 2, "names": ["t::b", "t::c"]})
+        fb._write_control_dir(self.control_dir, self.run_dir, self.evidence(verdict))
+        control = json.loads((self.control_dir / "control.json").read_text())
+        self.assertEqual(control["gold_repeat_mismatch"], {"count": 1, "names": ["t::c"]})
+
+    def test_a_verdict_without_gold_repeat_information_or_a_missing_log_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "gold_repeat_mismatch"):
+            fb._write_control_dir(self.control_dir, self.run_dir, self.evidence({"ok": True, "reasons": []}))
+        (self.run_dir / "gold.log").unlink()
+        with self.assertRaisesRegex(ValueError, "gold.log"):
+            fb._write_control_dir(self.control_dir, self.run_dir, self.evidence(self.plain()))
+        self.assertFalse((self.control_dir / "control.json").exists())  # the marker is written last
 
 
 class MainTest(unittest.TestCase):
