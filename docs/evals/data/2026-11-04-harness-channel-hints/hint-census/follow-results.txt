@@ -1,0 +1,11 @@
+('buffer', 'followed') 254
+('buffer', 'n') 1085
+('callers/hinted', 'loose') 64
+('callers/hinted', 'n') 943
+('callers/hinted', 'strict') 1
+('callers/unhinted', 'loose') 55
+('callers/unhinted', 'n') 1554
+('callers/unhinted', 'strict') 0
+('job', 'followed') 932
+('job', 'has_later_calls') 1748
+('job', 'n') 1752

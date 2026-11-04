@@ -1,0 +1,731 @@
+{
+ "calls": 94682,
+ "unparsed_output_json": 0,
+ "per_tool": {
+  "create_file": {
+   "calls": 3033,
+   "hint": 109,
+   "_guide_hint": 11,
+   "guide_block": 11
+  },
+  "run_command": {
+   "calls": 42772,
+   "hint": 2354,
+   "_guide_hint": 758,
+   "guide_block": 758
+  },
+  "grep": {
+   "calls": 8451,
+   "hint": 452,
+   "_guide_hint": 73,
+   "guide_block": 115
+  },
+  "read_file": {
+   "calls": 15713,
+   "hint": 7,
+   "_guide_hint": 1,
+   "guide_block": 119
+  },
+  "symbols": {
+   "calls": 6998,
+   "hint": 411,
+   "_guide_hint": 122,
+   "guide_block": 516
+  },
+  "workspace": {
+   "calls": 654,
+   "hint": 377,
+   "_guide_hint": 388,
+   "guide_block": 388
+  },
+  "edit_file": {
+   "calls": 7822,
+   "hint": 232,
+   "_guide_hint": 10,
+   "guide_block": 10
+  },
+  "get_guide": {
+   "calls": 398,
+   "_guide_hint": 61,
+   "guide_block": 61
+  },
+  "doc": {
+   "calls": 3887,
+   "_guide_hint": 650,
+   "hint": 147,
+   "guide_block": 604
+  },
+  "edit_code": {
+   "calls": 3364,
+   "hint": 945,
+   "_guide_hint": 1,
+   "guide_block": 1
+  },
+  "librarian": {
+   "calls": 297,
+   "hint": 102,
+   "_guide_hint": 50,
+   "guide_block": 50
+  },
+  "memory": {
+   "calls": 827,
+   "hint": 61,
+   "_guide_hint": 2,
+   "guide_block": 2
+  },
+  "tree": {
+   "calls": 129,
+   "guide_block": 0
+  },
+  "references": {
+   "calls": 172,
+   "guide_block": 9
+  },
+  "approve_write": {
+   "calls": 40,
+   "guide_block": 0
+  },
+  "semantic_search": {
+   "calls": 13,
+   "hint": 5,
+   "guide_block": 0
+  },
+  "call_graph": {
+   "calls": 91,
+   "guide_block": 0
+  },
+  "index": {
+   "calls": 18,
+   "hint": 5,
+   "guide_block": 0
+  },
+  "symbol_at": {
+   "calls": 3,
+   "guide_block": 0
+  }
+ },
+ "guide_topics": [
+  [
+   "project-activation-bootstrap",
+   983
+  ],
+  [
+   "librarian",
+   657
+  ],
+  [
+   "tracker-conventions",
+   597
+  ],
+  [
+   "progressive-disclosure",
+   532
+  ],
+  [
+   "symbol-navigation",
+   464
+  ],
+  [
+   "workspace-state",
+   52
+  ]
+ ],
+ "errors": [
+  [
+   "run_command",
+   "success",
+   41492,
+   0
+  ],
+  [
+   "read_file",
+   "success",
+   14934,
+   0
+  ],
+  [
+   "grep",
+   "success",
+   8405,
+   0
+  ],
+  [
+   "edit_file",
+   "success",
+   7237,
+   0
+  ],
+  [
+   "symbols",
+   "success",
+   6959,
+   0
+  ],
+  [
+   "doc",
+   "success",
+   3626,
+   0
+  ],
+  [
+   "edit_code",
+   "success",
+   3164,
+   0
+  ],
+  [
+   "create_file",
+   "success",
+   2946,
+   0
+  ],
+  [
+   "run_command",
+   "recoverable_error",
+   1279,
+   564
+  ],
+  [
+   "read_file",
+   "recoverable_error",
+   777,
+   777
+  ],
+  [
+   "memory",
+   "success",
+   777,
+   0
+  ],
+  [
+   "workspace",
+   "success",
+   651,
+   0
+  ],
+  [
+   "edit_file",
+   "recoverable_error",
+   583,
+   580
+  ],
+  [
+   "get_guide",
+   "success",
+   397,
+   0
+  ],
+  [
+   "librarian",
+   "success",
+   284,
+   0
+  ],
+  [
+   "doc",
+   "recoverable_error",
+   249,
+   220
+  ],
+  [
+   "edit_code",
+   "recoverable_error",
+   196,
+   196
+  ],
+  [
+   "references",
+   "success",
+   161,
+   0
+  ],
+  [
+   "tree",
+   "success",
+   129,
+   0
+  ],
+  [
+   "call_graph",
+   "success",
+   88,
+   0
+  ],
+  [
+   "create_file",
+   "recoverable_error",
+   84,
+   79
+  ],
+  [
+   "memory",
+   "recoverable_error",
+   50,
+   50
+  ],
+  [
+   "grep",
+   "recoverable_error",
+   46,
+   46
+  ],
+  [
+   "approve_write",
+   "success",
+   39,
+   0
+  ],
+  [
+   "symbols",
+   "recoverable_error",
+   37,
+   37
+  ],
+  [
+   "index",
+   "success",
+   18,
+   0
+  ],
+  [
+   "semantic_search",
+   "success",
+   13,
+   0
+  ],
+  [
+   "librarian",
+   "recoverable_error",
+   12,
+   10
+  ],
+  [
+   "doc",
+   "error",
+   12,
+   0
+  ],
+  [
+   "references",
+   "recoverable_error",
+   10,
+   10
+  ],
+  [
+   "edit_code",
+   "error",
+   4,
+   0
+  ],
+  [
+   "create_file",
+   "error",
+   3,
+   0
+  ],
+  [
+   "symbol_at",
+   "success",
+   3,
+   0
+  ],
+  [
+   "call_graph",
+   "error",
+   3,
+   0
+  ],
+  [
+   "workspace",
+   "recoverable_error",
+   3,
+   3
+  ],
+  [
+   "edit_file",
+   "error",
+   2,
+   0
+  ],
+  [
+   "symbols",
+   "error",
+   2,
+   0
+  ],
+  [
+   "read_file",
+   "error",
+   2,
+   0
+  ],
+  [
+   "librarian",
+   "error",
+   1,
+   0
+  ],
+  [
+   "approve_write",
+   "recoverable_error",
+   1,
+   1
+  ],
+  [
+   "get_guide",
+   "recoverable_error",
+   1,
+   1
+  ],
+  [
+   "run_command",
+   "error",
+   1,
+   0
+  ],
+  [
+   "references",
+   "error",
+   1,
+   0
+  ]
+ ],
+ "templates": {
+  "hint": [
+   [
+    "Started; outcome not yet observed. Read output with run_command(\"X\") — that response carries this job's state.",
+    1738,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "read_file(\"X\", json_path=\"X\") to extract a specific field, or read_file(\"X\", start_line=N, end_line=M) to browse sections",
+    1084,
+    [
+     "doc",
+     "edit_code",
+     "grep",
+     "librarian",
+     "read_file",
+     "run_command",
+     "symbols"
+    ]
+   ],
+   [
+    "verify callers: references(symbol=\"X\", path=\"X\")",
+    902,
+    [
+     "edit_code"
+    ]
+   ],
+   [
+    "run_command(\"X\") to execute",
+    387,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "Returned to home project. CWD: /home/marius/work/claude/codescout. Run workspace(action='X') to check memory staleness.",
+    196,
+    [
+     "workspace"
+    ]
+   ],
+   [
+    "LSP position caches cleared. Clients restart on the next navigation call (symbol_at, references), which pays the language-server start unless another ",
+    114,
+    [
+     "workspace"
+    ]
+   ],
+   [
+    "Command exceeded Ns. If it launches background processes (e.g. with &), use run_in_background: true — shell & leaves background processes holding the ",
+    74,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "use \"X\" — start_line/end_line to browse the full content",
+    61,
+    [
+     "memory"
+    ]
+   ],
+   [
+    "Output cut to fit the response budget (N/N lines). This output is not a slice of @REF, and the rest of it is stored nowhere. Next page: append `X` to ",
+    50,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "Browsing agent-HEX (read-only). CWD: /home/marius/work/claude/codescout/.claude/worktrees/agent-HEX — remember to workspace(action='X', path=\"X\") when",
+    47,
+    [
+     "workspace"
+    ]
+   ],
+   [
+    "verify callers: references(symbol=\"X\", path=\"PATH\")",
+    35,
+    [
+     "edit_code"
+    ]
+   ],
+   [
+    "Rewrite live-tree citations for any remapped entry ids (see remap).",
+    26,
+    [
+     "librarian"
+    ]
+   ],
+   [
+    "create_file(path=\"X\") to write it and approve /home/marius/.claude-stef/jobs/HEX/tmp for this session",
+    21,
+    [
+     "create_file"
+    ]
+   ],
+   [
+    "Output capped at N lines (stdout N/N). Next page: sed -n 'X' @REF. Or grep 'X' @REF for targeted search.",
+    18,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "Switched project (read-write). CWD: /home/marius/work/claude/codescout/.claude/worktrees/agent-HEX — remember to workspace(action='X', path=\"X\") when ",
+    16,
+    [
+     "workspace"
+    ]
+   ],
+   [
+    "N unread sections in this file: ## Tests added, ## Fix provenance, ## Resume",
+    15,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "N unread sections in this file: ## Fix provenance",
+    13,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "Output capped at N lines (N/N lines). This output is not a slice of @REF, and the rest of it is stored nowhere. Next page: append `X` to this query. E",
+    13,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "Looks like a test suite command (long-running by nature). Two options: (N) re-run with run_in_background: true — returns immediately, output streams t",
+    13,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "create_file(path=\"X\") to write it and approve /home/marius/work/claude/claude-plugins/effort-steering/spikes/sN/tasks/cs-pN for this session",
+    13,
+    [
+     "create_file"
+    ]
+   ],
+   [
+    "Output cut to fit the response budget (stdout N/N). Next page: sed -n 'X' @REF. Or grep 'X' @REF for targeted search.",
+    11,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "N unread sections in this file: ## Partial fix (N-N-N)",
+    9,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "re-run with confirm=true to rewrite these frontmatter ids. Only files under `X` are touched; pass root=<other repo> to sweep another.",
+    9,
+    [
+     "librarian"
+    ]
+   ],
+   [
+    "N unread sections in this file: ## Review round N (Opus review of `X`): removal paths, lossy paths, stored-field printers, the gate, ## Review round N",
+    7,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "The producer was killed at the timeout. The result above is the filter run on the partial capture (or `X` / `X` says why there is none); `X` holds tha",
+    7,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "Output capped at N lines (stdout N/N). Next page: sed -n 'X' @ref. Or grep 'X' @ref for targeted search.",
+    6,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "N unread sections in this file: ## Tests added, ## Fix provenance",
+    6,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "Output cut to fit the response budget (N/N lines). Or grep 'X' @REF for targeted search. The first line is wider than the response budget and is shown",
+    6,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "N unread sections in this file: ## Partial fix (N-N-N), ## Resume",
+    5,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "No index for worktree project `X`. A worktree'X's vectors are not served for changed files. Run index(action=\"X\") here to index them — it only embeds ",
+    5,
+    [
+     "semantic_search"
+    ]
+   ],
+   [
+    "N unread sections in this file: ## Review round N (Opus review of `X`): removal paths, lossy paths, stored-field printers, the gate",
+    5,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "edit_file(path=\"X\") to write it and approve /home/marius/work/claude/claude-plugins/codescout-companion/hooks for this session",
+    5,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "N unread sections in this file: ## Fix provenance, ## Resume",
+    4,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "edit_file(path=\"X\") to write it and approve /home/marius/work/claude/claude-plugins-effort-steering-sN/effort-steering/spikes/sN for this session",
+    4,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "Output cut to fit the response budget (N/N lines). This output is not a slice of @REF, and the rest of it is stored nowhere. To read it, narrow the qu",
+    4,
+    [
+     "run_command"
+    ]
+   ],
+   [
+    "N unread sections in this file: ### Measured N-N-N — a `X` above the tempdir reproduces the exact failure",
+    4,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "N unread sections in this file: ## Resolution",
+    4,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "N unread sections in this file: ### Stress, ancestor watch and a `X` gap, N-N-N (second pass) — still no recurrence",
+    4,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "N unread sections in this file: ## Status (N-N-N)",
+    4,
+    [
+     "edit_file"
+    ]
+   ],
+   [
+    "N unread sections in this file: ## Probe: what else each deny value removes (N-N-N)",
+    4,
+    [
+     "edit_file"
+    ]
+   ]
+  ],
+  "_guide_hint": [
+   [
+    "First call this session for topic 'X'. Full guide auto-injected as a separate content block below; do not re-call get_guide(\"X\").",
+    1473,
+    [
+     "create_file",
+     "doc",
+     "edit_code",
+     "edit_file",
+     "get_guide",
+     "grep",
+     "librarian",
+     "memory",
+     "read_file",
+     "run_command",
+     "symbols",
+     "workspace"
+    ]
+   ],
+   [
+    "Section(s) of 'X' auto-injected below, selected for this call. Other sections may arrive on later calls; `X` returns the full topic.",
+    584,
+    [
+     "doc",
+     "librarian"
+    ]
+   ],
+   [
+    "Guide 'X' is too large to auto-inject and was NOT delivered. Call `X` to read it.",
+    67,
+    [
+     "doc"
+    ]
+   ],
+   [
+    "No section of 'X' declares this call shape; its preamble is below. Call `X` for the full topic.",
+    3,
+    [
+     "librarian"
+    ]
+   ]
+  ],
+  "next": []
+ },
+ "distinct_templates": {
+  "hint": 222,
+  "_guide_hint": 4,
+  "next": 0
+ }
+}
