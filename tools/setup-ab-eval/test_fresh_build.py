@@ -621,8 +621,9 @@ class FetchPrTest(unittest.TestCase):
         }
 
     def diff_key(self, base, renames=False):
-        return ("-c", "core.quotePath=false", "-C", str(self.src), "diff", "--no-textconv", "--no-ext-diff",
-                "--no-color", "--find-renames" if renames else "--no-renames", "--src-prefix=a/",
+        return ("-c", "core.quotePath=false", "-c", "diff.suppressBlankEmpty=false", "-C", str(self.src), "diff",
+                "--no-textconv", "--no-ext-diff", "--no-color", "--diff-algorithm=myers", "--submodule=short",
+                "--find-renames" if renames else "--no-renames", "--src-prefix=a/",
                 "--dst-prefix=b/", "-U3", "--binary", base, MERGE)
 
     def rev_key(self, n):
@@ -694,10 +695,13 @@ class FetchPrTest(unittest.TestCase):
         diffs = [a for a, _ in fake.calls if "diff" in a and a[0] == "git"]
         self.assertEqual(len(diffs), 2)
         for argv in diffs:
-            for flag in ("core.quotePath=false", "--no-textconv", "--no-ext-diff", "--no-color",
-                         "--no-renames", "--src-prefix=a/", "--dst-prefix=b/", "-U3", "--binary"):
+            for flag in ("core.quotePath=false", "diff.suppressBlankEmpty=false", "--no-textconv", "--no-ext-diff",
+                         "--no-color", "--diff-algorithm=myers", "--submodule=short", "--no-renames",
+                         "--src-prefix=a/", "--dst-prefix=b/", "-U3", "--binary"):
                 self.assertIn(flag, argv)
             self.assertNotIn("--find-renames", argv)
+            # each -c takes effect only before the subcommand
+            self.assertLess(argv.index("diff.suppressBlankEmpty=false"), argv.index("diff"))
 
     def test_calls_in_the_specified_order(self):
         fake = FakeRun(self.responses())
@@ -799,8 +803,10 @@ class FetchPrTest(unittest.TestCase):
             self.fetch(fake, cutoff="2026-08-01")
 
     def test_timestamp_must_be_the_full_utc_form(self):
+        # the last one is Arabic-Indic digits: str.isdigit and \d accept them, an ASCII-only timestamp does not
         for bad in ("2026-07-10", "2026-07-10T12:00:00Zjunk", "2026-07-10T12:00:00", "2026-07-10 12:00:00Z",
-                    "2026-07-10T12:00:00+00:00", "junk2026-07-10T12:00:00Z", "", 20260710):
+                    "2026-07-10T12:00:00+00:00", "junk2026-07-10T12:00:00Z", "", 20260710,
+                    "٢٠٢٦-07-10T12:00:00Z"):
             with self.assertRaisesRegex(fb.FetchError, "ISO-8601", msg=repr(bad)):
                 self.fetch(FakeRun(self.responses(pull=self.pull(merged_at=bad))))
         issues = self.issues()

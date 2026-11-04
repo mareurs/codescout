@@ -250,7 +250,7 @@ class FetchError(RuntimeError):
 
 _STDERR_TAIL = 300
 _DATE = re.compile(r"\d{4}-\d\d-\d\d")
-_STAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
+_STAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")  # ASCII digits only: `\d` takes Arabic-Indic ones
 _SHA = re.compile(r"[0-9a-f]{40}([0-9a-f]{24})?")
 DIFF_ACCEPT = "Accept: application/vnd.github.v3.diff"
 
@@ -321,13 +321,20 @@ def _check_cutoff(cutoff):
 
 
 def _git_diff(run, env, timeout, src, base, merge_sha, renames):
-    """`git diff base merge_sha` as text (surrogateescape), immune to the user's git config.
+    """`git diff base merge_sha` as text (surrogateescape), with the diff-shaping options pinned.
+
+    Pinned on the command line: path quoting, textconv and external diff drivers, colour, the diff
+    algorithm, blank context lines (`diff.suppressBlankEmpty`), submodule display, the a/ and b/
+    prefixes, three context lines, binary patches and the rename mode below. Nothing else is
+    neutralised: git configuration these flags do not name, and `.gitattributes` in the clone, can
+    still change the output.
 
     `renames=False` (the stored patch) lists a rename as a delete plus an add; `renames=True` lets
     git pair them as GitHub does, for comparing with the PR's own diff.
     """
-    raw = _call(run, ["git", "-c", "core.quotePath=false", "-C", str(src), "diff", "--no-textconv",
-                      "--no-ext-diff", "--no-color", "--find-renames" if renames else "--no-renames",
+    raw = _call(run, ["git", "-c", "core.quotePath=false", "-c", "diff.suppressBlankEmpty=false", "-C", str(src),
+                      "diff", "--no-textconv", "--no-ext-diff", "--no-color", "--diff-algorithm=myers",
+                      "--submodule=short", "--find-renames" if renames else "--no-renames",
                       "--src-prefix=a/", "--dst-prefix=b/", "-U3", "--binary", base, merge_sha], env, timeout)
     return raw.decode("utf-8", errors="surrogateescape")
 
