@@ -2435,6 +2435,541 @@ class BuildImageTest(unittest.TestCase):
             self.assertNotIn("prune", args)
             self.assertNotEqual(args[0], "rmi")
         self.assertEqual([args for args, _ in fake.calls if args[0] == "rm"], [("rm", "-f", "-v", CID)])
+CTL = "sab-fresh-ctl-rust-lang__rust-analyzer-23096"
+CTL_IMAGE = "sab-fresh-rust-lang__rust-analyzer-23096:b%s" % fb.BUILDER_VERSION
+CTL_BASE = "05278f431f7a71add03f39f081af38f03ac64baf"
+CTL_TEST_PATCH = "diff --git a/crates/x/tests/t.rs b/crates/x/tests/t.rs\n+test\r\n"
+CTL_GOLD_PATCH = "diff --git a/crates/x/src/lib.rs b/crates/x/src/lib.rs\n+fix\n"
+CTL_RECORD = {
+    "docker_image": CTL_IMAGE, "base_commit": CTL_BASE, "patch": CTL_GOLD_PATCH, "test_patch": CTL_TEST_PATCH,
+    "test_cmds": ["cargo test --no-fail-fast 2>&1 | tee reports/t.log"], "rebuild_cmds": ["cargo test --no-run"],
+    "print_cmds": ["cat reports/t.log"], "log_parser": "def parser(log):\n    return {}\n",
+}
+HASH = "target/debug/deps/hir_ty-0123456789abcdef::tests::"  # test names embed the binary hash
+T_A, T_B, T_C, T_D, T_E = (HASH + n for n in "abcde")
+# a: fails at base and passes with gold (F2P); b, c: pass both (P2P); d: fails both; e: passes at base only
+BASE_STATUS = {T_A: "fail", T_B: "pass", T_C: "pass", T_D: "fail", T_E: "pass"}
+GOLD_STATUS = {T_A: "pass", T_B: "pass", T_C: "pass", T_D: "fail", T_E: "fail"}
+MISMATCH = "tests differ between two gold runs"
+
+
+class ControlFreshTest(unittest.TestCase):
+    """`control_fresh` with the `multilang_control` helpers and `run_parser` replaced by fakes that
+    record their calls; the real `control_verdict` decides. No docker, no real parser."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.evidence = self.tmp / "evidence"
+        self.calls = []        # (helper, detail...) in call order
+        self.containers = []   # the container every helper was given
+        self.raises = {}       # call index -> exception raised by that helper call
+        self.timeouts = []
+        self.statuses = {"base": BASE_STATUS, "gold": GOLD_STATUS, "gold-repeat": GOLD_STATUS,
+                         "gold-repeat-2": GOLD_STATUS}
+        self.parse_calls = 0
+        self.parse_raises = {}  # parse call index -> exception
+        for name, impl in (("detect_workdir", self.f_detect), ("reset_to_base", self.f_reset),
+                           ("_apply", self.f_apply), ("rebuild", self.f_rebuild), ("run_tests", self.f_run_tests),
+                           ("_fresh_reports", self.f_reports)):
+            patcher = mock.patch.object(fb.mc, name, impl)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(fb.grade, "run_parser", self.f_parse)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    # --- the fakes ---
+
+    def hit(self, container, *detail):
+        index = len(self.calls)
+        self.calls.append(detail)
+        self.containers.append(container)
+        if index in self.raises:
+            raise self.raises[index]
+
+    def f_detect(self, container):
+        self.hit(container, "detect_workdir")
+        return "/testbed"
+
+    def f_reset(self, container, workdir, base_commit):
+        self.assertEqual(workdir, "/testbed")
+        self.hit(container, "reset", base_commit)
+        return {"dirty_before": []}
+
+    def f_apply(self, container, workdir, patch):
+        self.hit(container, "apply", {CTL_TEST_PATCH: "test", CTL_GOLD_PATCH: "gold"}.get(patch, "?"))
+
+    def f_reports(self, container, workdir):
+        self.hit(container, "fresh_reports")
+
+    def f_rebuild(self, container, workdir, record, timeout=3600, *, steps=None, state="base"):
+        self.hit(container, "rebuild", state)
+        self.timeouts.append(timeout)
+        steps.append({"name": state + ":rebuild", "returncode": 0, "tail": ""})
+
+    def f_run_tests(self, container, workdir, record, timeout=3600, *, steps=None, state="base"):
+        self.hit(container, "run_tests", state)
+        self.timeouts.append(timeout)
+        steps.append({"name": state + ":test[0]", "returncode": 0, "tail": ""})
+        # a log with CRLF and a lone CR in it: it must reach the evidence file byte for byte
+        return "noise\r\nlone\rcr\r\n" + json.dumps({"state": state, "statuses": self.statuses[state]}) + "\r\n"
+
+    def f_parse(self, parser_src, log, *args, **kw):
+        self.assertEqual(parser_src, CTL_RECORD["log_parser"])
+        index = self.parse_calls
+        self.parse_calls += 1
+        if index in self.parse_raises:
+            raise self.parse_raises[index]
+        return json.loads(log[log.index("{"):])["statuses"]
+
+    # --- helpers of the tests ---
+
+    def control(self, docker=None, **kw):
+        args = dict(container=CTL, evidence_dir=self.evidence, docker=docker or FakeDocker())
+        args.update(kw)
+        record = args.pop("record", CTL_RECORD)
+        return fb.control_fresh(record, **args)
+
+
+    HAPPY_CALLS = [
+        ("detect_workdir",), ("reset", CTL_BASE), ("apply", "test"), ("rebuild", "base"), ("run_tests", "base"),
+        ("reset", CTL_BASE), ("apply", "test"), ("apply", "gold"), ("rebuild", "gold"), ("run_tests", "gold"),
+        ("fresh_reports",), ("run_tests", "gold-repeat"),
+    ]
+
+    def flaky(self, *tests, repeat2=None):
+        """The first gold repeat has `tests` failing; the second one has the statuses of `repeat2` for them."""
+        repeat = dict(GOLD_STATUS)
+        repeat.update({t: "fail" for t in tests})
+        self.statuses["gold-repeat"] = repeat
+        second = dict(GOLD_STATUS)
+        second.update(repeat2 or {})
+        self.statuses["gold-repeat-2"] = second
+
+    # --- the derivation and the verdict ---
+
+    def test_happy_path_derives_the_sets_and_the_gate_is_ok(self):
+        fake = FakeDocker()
+        got = self.control(fake)
+        self.assertEqual(got["f2p"], [T_A])
+        self.assertEqual(got["p2p"], sorted([T_B, T_C]))  # e passes at base only: in neither set
+        self.assertEqual(got["verdict"]["ok"], True)
+        self.assertEqual(got["verdict"]["reasons"], [])
+        self.assertEqual(got["verdict"]["expected"], 3)
+        self.assertNotIn("error", got)
+        self.assertEqual(got["base"], {"fail": 2, "pass": 3})
+        self.assertEqual(got["gold"], {"pass": 3, "fail": 2})
+        self.assertEqual(got["gold_repeat"], {"pass": 3, "fail": 2})
+        self.assertEqual(got["base_status_of_f2p"], {T_A: "fail"})
+        self.assertTrue(got["container_removed"])
+        self.assertEqual(got["container_id"], CID)
+        self.assertEqual(set(got["laps_seconds"]), {"start_and_apply_test", "base_rebuild", "base_tests",
+                                                    "gold_rebuild", "gold_tests", "gold_repeat_tests"})
+        self.assertIsInstance(got["wall_seconds"], float)
+        json.dumps(got, allow_nan=False)  # it goes into control.json as it is
+
+    def test_the_states_run_in_order_each_from_a_reset_to_base(self):
+        self.control()
+        self.assertEqual(self.calls, self.HAPPY_CALLS)
+        self.assertEqual(set(self.containers), {CID})  # every helper addresses the container by its ID
+        self.assertEqual(self.timeouts, [5400] * 5)
+
+    def test_the_timeout_is_passed_to_every_rebuild_and_test_step(self):
+        self.control(timeout=77)
+        self.assertEqual(self.timeouts, [77] * 5)
+
+    def test_the_verdict_is_computed_from_the_derived_sets_and_the_gold_repeat(self):
+        seen = []
+
+        def verdict(base, gold, f2p, p2p, gold_repeat=None):
+            seen.append((base, gold, f2p, p2p, gold_repeat))
+            return {"ok": True, "reasons": []}
+        with mock.patch.object(fb.grade, "control_verdict", verdict):
+            got = self.control()
+        self.assertEqual(seen, [(BASE_STATUS, GOLD_STATUS, [T_A], sorted([T_B, T_C]), GOLD_STATUS)])
+        self.assertIs(got["verdict"]["ok"], True)
+
+    def test_the_logs_are_written_byte_for_byte(self):
+        got = self.control()
+        for name, state in (("base.log", "base"), ("gold.log", "gold"), ("gold-repeat.log", "gold-repeat")):
+            data = (self.evidence / name).read_bytes()
+            self.assertTrue(data.startswith(b"noise\r\nlone\rcr\r\n{"), name)
+            self.assertTrue(data.endswith(b"}\r\n"), name)
+            self.assertIn(state.encode(), data)
+        self.assertFalse((self.evidence / "gold-repeat-2.log").exists())
+        self.assertEqual(got["verdict"]["ok"], True)
+
+    def test_an_empty_fail_to_pass_set_is_not_ok(self):
+        self.statuses["base"] = GOLD_STATUS  # nothing changes between the states
+        got = self.control()
+        self.assertEqual(got["f2p"], [])
+        self.assertIs(got["verdict"]["ok"], False)
+        self.assertEqual(got["verdict"]["reasons"][0], "no fail-to-pass test")
+        self.assertNotIn("error", got["verdict"])  # a real rejection, not an infrastructure error
+
+    def test_an_empty_fail_to_pass_set_is_refused_whatever_control_verdict_says(self):
+        self.statuses["base"] = GOLD_STATUS
+        with mock.patch.object(fb.grade, "control_verdict", lambda *a, **k: {"ok": True, "reasons": []}):
+            got = self.control()
+        self.assertIs(got["verdict"]["ok"], False)
+        self.assertEqual(got["verdict"]["reasons"], ["no fail-to-pass test"])
+
+    # --- the tolerant repeat ---
+
+    def test_one_mismatch_resolved_by_the_second_repeat_is_ok_and_recorded(self):
+        self.flaky(T_B)
+        got = self.control()
+        self.assertEqual(self.calls[-2:], [("fresh_reports",), ("run_tests", "gold-repeat-2")])
+        self.assertEqual(self.timeouts, [5400] * 6)
+        self.assertIs(got["verdict"]["ok"], True)
+        self.assertEqual(got["verdict"]["reasons"], [])
+        self.assertEqual(got["verdict"]["tolerated_repeat_mismatch"], [T_B])
+        tol = got["tolerant_repeat"]
+        self.assertEqual(tol["tests"], {T_B: {"gold": "pass", "gold_repeat": "fail", "gold_repeat_2": "pass"}})
+        self.assertEqual(tol["accepted"], [T_B])
+        self.assertEqual(tol["gold_repeat_2"], {"pass": 3, "fail": 2})
+        self.assertEqual(got["verdict_strict"]["reasons"], [MISMATCH])  # what the strict rule said
+        self.assertIs(got["verdict_strict"]["ok"], False)
+        self.assertIn("gold_repeat_2_tests", got["laps_seconds"])
+        self.assertTrue((self.evidence / "gold-repeat-2.log").is_file())
+
+    def test_a_mismatch_in_the_fail_to_pass_set_is_tolerated_the_same_way(self):
+        self.flaky(T_A)
+        self.assertIs(self.control()["verdict"]["ok"], True)
+
+    def test_three_mismatches_all_resolved_are_ok(self):
+        self.flaky(T_A, T_B, T_C)
+        got = self.control()
+        self.assertIs(got["verdict"]["ok"], True)
+        self.assertEqual(got["verdict"]["tolerated_repeat_mismatch"], sorted([T_A, T_B, T_C]))
+
+    def test_a_mismatch_that_persists_is_not_ok(self):
+        self.flaky(T_B, repeat2={T_B: "fail"})
+        got = self.control()
+        self.assertEqual(self.calls[-1], ("run_tests", "gold-repeat-2"))
+        self.assertIs(got["verdict"]["ok"], False)
+        self.assertEqual(got["verdict"]["reasons"], [MISMATCH])
+        self.assertNotIn("tolerated_repeat_mismatch", got["verdict"])
+        self.assertEqual(got["tolerant_repeat"]["accepted"], [])
+        self.assertEqual(got["tolerant_repeat"]["tests"][T_B]["gold_repeat_2"], "fail")
+        self.assertTrue((self.evidence / "gold-repeat-2.log").is_file())
+
+    def test_a_second_repeat_that_does_not_say_pass_is_not_accepted(self):
+        for status in ("fail", "skip", "unknown", None):  # None: the test is absent from the second repeat
+            with self.subTest(status=status):
+                self.calls.clear()
+                self.flaky(T_B)
+                if status is None:
+                    del self.statuses["gold-repeat-2"][T_B]
+                else:
+                    self.statuses["gold-repeat-2"][T_B] = status
+                got = self.control()
+                self.assertIs(got["verdict"]["ok"], False)
+                self.assertEqual(got["verdict"]["reasons"], [MISMATCH])
+
+    def test_one_unresolved_mismatch_among_three_fails_them_all(self):
+        self.flaky(T_A, T_B, T_C, repeat2={T_C: "fail"})
+        got = self.control()
+        self.assertIs(got["verdict"]["ok"], False)
+        self.assertEqual(got["tolerant_repeat"]["accepted"], sorted([T_A, T_B]))
+        self.assertNotIn("tolerated_repeat_mismatch", got["verdict"])
+
+    def test_four_mismatches_skip_the_tolerant_run_and_fail(self):
+        self.statuses["base"] = dict(BASE_STATUS, **{T_D: "pass"})
+        self.statuses["gold"] = dict(GOLD_STATUS, **{T_D: "pass"})
+        self.statuses["gold-repeat"] = dict(self.statuses["gold"], **{T_A: "fail", T_B: "fail", T_C: "fail", T_D: "fail"})
+        got = self.control()
+        self.assertNotIn(("run_tests", "gold-repeat-2"), self.calls)
+        self.assertEqual(self.calls[-1], ("run_tests", "gold-repeat"))
+        self.assertIs(got["verdict"]["ok"], False)
+        self.assertEqual(got["verdict"]["reasons"], [MISMATCH])
+        self.assertNotIn("tolerant_repeat", got)
+        self.assertFalse((self.evidence / "gold-repeat-2.log").exists())
+
+    def test_a_mismatch_beside_another_reason_is_not_tolerated(self):
+        self.statuses["base"] = GOLD_STATUS  # no fail-to-pass test
+        self.flaky(T_B)
+        got = self.control()
+        self.assertNotIn(("run_tests", "gold-repeat-2"), self.calls)
+        self.assertIs(got["verdict"]["ok"], False)
+        self.assertEqual(got["verdict"]["reasons"][0], "no fail-to-pass test")
+        self.assertIn(MISMATCH, got["verdict"]["reasons"])
+
+        self.calls.clear()
+        self.statuses["base"] = BASE_STATUS
+        verdict = {"ok": False, "reasons": [MISMATCH, "something else"], "gold_repeat_mismatch": {"count": 1}}
+        with mock.patch.object(fb.grade, "control_verdict", lambda *a, **k: dict(verdict)):
+            got = self.control()
+        self.assertNotIn(("run_tests", "gold-repeat-2"), self.calls)
+        self.assertEqual(got["verdict"]["reasons"], [MISMATCH, "something else"])
+
+    def test_a_mismatching_test_must_pass_in_gold_too(self):
+        # an expected test that does not pass in gold cannot come from derive_sets; the rule is checked anyway
+        self.flaky(T_D, repeat2={T_D: "pass"})
+        self.statuses["gold-repeat"][T_D] = "pass"  # d: fail in gold, pass in both repeats
+        with mock.patch.object(fb, "derive_sets", lambda base, gold: ([T_A], [T_B, T_C, T_D])), \
+                mock.patch.object(fb.grade, "control_verdict",
+                                  lambda *a, **k: {"ok": False, "reasons": [MISMATCH],
+                                                   "gold_repeat_mismatch": {"count": 1, "names": [T_D]}}):
+            got = self.control()
+        self.assertIs(got["verdict"]["ok"], False)
+        self.assertEqual(got["tolerant_repeat"]["accepted"], [])
+
+    def test_a_verdict_whose_mismatch_count_disagrees_with_the_statuses_is_not_tolerated(self):
+        self.flaky(T_B)
+        lie = {"ok": False, "reasons": [MISMATCH], "gold_repeat_mismatch": {"count": 2, "names": [T_B, T_C]}}
+        with mock.patch.object(fb.grade, "control_verdict", lambda *a, **k: dict(lie)):
+            got = self.control()
+        self.assertNotIn(("run_tests", "gold-repeat-2"), self.calls)
+        self.assertIs(got["verdict"]["ok"], False)
+
+    def test_a_failing_second_repeat_is_an_error_verdict_that_keeps_the_strict_one(self):
+        self.flaky(T_B)
+        self.raises[len(self.HAPPY_CALLS) + 1] = fb.mc.ControlError("boom in the second repeat")
+        got = self.control()
+        self.assertEqual(got["verdict"]["error"], True)
+        self.assertIs(got["verdict"]["ok"], False)
+        self.assertEqual(got["verdict_strict"]["reasons"], [MISMATCH])
+        self.assertTrue(got["container_removed"])
+
+    # --- a step error is a verdict, not an exception, and the container is removed ---
+
+    def assert_error_verdict(self, got, fake, text=None):
+        self.assertEqual(set(got["verdict"]), {"ok", "error", "reasons"})
+        self.assertIs(got["verdict"]["ok"], False)
+        self.assertIs(got["verdict"]["error"], True)
+        self.assertEqual(len(got["verdict"]["reasons"]), 1)
+        self.assertTrue(got["verdict"]["reasons"][0].startswith("control error: "), got["verdict"])
+        if text is not None:
+            self.assertIn(text, got["verdict"]["reasons"][0])
+        self.assertIn("error", got)
+        self.assertIsNone(got["f2p"])
+        self.assertIsNone(got["p2p"])
+        self.assertEqual(fake.labels(), ["run", "rm"])
+        self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
+        self.assertTrue(got["container_removed"])
+
+    def test_a_control_error_in_any_state_yields_an_error_verdict_and_removes_the_container(self):
+        for index in range(len(self.HAPPY_CALLS)):
+            with self.subTest(call=self.HAPPY_CALLS[index], index=index):
+                self.calls.clear()
+                self.raises = {index: fb.mc.ControlError("step %d failed" % index)}
+                fake = FakeDocker()
+                got = self.control(fake)
+                self.assert_error_verdict(got, fake, "step %d failed" % index)
+                self.assertEqual(len(self.calls), index + 1)  # nothing ran after the failed step
+
+    def test_other_step_failures_are_error_verdicts_too(self):
+        for exc in (subprocess.TimeoutExpired(cmd=["docker"], timeout=5), RuntimeError("docker exec failed"),
+                    ValueError("bad bytes"), UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"),
+                    OSError("disk full")):
+            with self.subTest(exc=type(exc).__name__):
+                self.calls.clear()
+                self.raises = {4: exc}
+                fake = FakeDocker()
+                self.assert_error_verdict(self.control(fake), fake)
+
+    def test_a_parser_error_in_any_state_is_an_error_verdict(self):
+        for index in range(3):
+            with self.subTest(parse=index):
+                self.calls.clear()
+                self.parse_calls = 0
+                self.parse_raises = {index: fb.grade.ParserError("log parser timed out")}
+                fake = FakeDocker()
+                self.assert_error_verdict(self.control(fake), fake, "log parser timed out")
+
+    def test_the_error_names_the_exception_type_and_keeps_its_tail(self):
+        self.raises = {0: fb.mc.ControlError("x" * 1000 + "THE-END")}
+        got = self.control()
+        self.assertTrue(got["error"].startswith("ControlError: "))
+        self.assertTrue(got["error"].endswith("THE-END"))
+        self.assertLessEqual(len(got["verdict"]["reasons"][0]), 400)
+
+    def test_an_interrupt_removes_the_container_and_propagates(self):
+        self.raises = {4: KeyboardInterrupt()}
+        fake = FakeDocker()
+        with self.assertRaises(KeyboardInterrupt):
+            self.control(fake)
+        self.assertEqual(fake.labels(), ["run", "rm"])
+        self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
+
+    def test_a_failed_removal_is_recorded_and_never_replaces_the_verdict(self):
+        for rm in ((1, "Error response from daemon: removal of container is already in progress"),
+                   subprocess.TimeoutExpired(cmd=["docker"], timeout=600), FileNotFoundError("docker")):
+            with self.subTest(rm=repr(rm)):
+                got = self.control(FakeDocker(("rm", rm)))
+                self.assertIs(got["verdict"]["ok"], True)
+                self.assertIs(got["container_removed"], False)
+                self.assertTrue(got["removal_error"])
+        self.calls.clear()
+        self.raises = {4: fb.mc.ControlError("the real cause")}
+        got = self.control(FakeDocker(("rm", (1, "device busy"))))
+        self.assertIn("the real cause", got["verdict"]["reasons"][0])
+        self.assertIs(got["container_removed"], False)
+
+    # --- the container: its flags, its name and who owns it ---
+
+    def test_the_container_is_started_with_the_frozen_gate_flags_and_8g(self):
+        fake = FakeDocker()
+        self.control(fake)
+        self.assertEqual(fake.args_of("run"), (
+            "run", "-d", "--name", CTL, "--cidfile", str(self.evidence.resolve() / "control.cid"),
+            "--network", "none", "--cpus", "4", "--memory", "8g", "--memory-swap", "8g", "--pids-limit", "4096",
+            "--security-opt", "no-new-privileges", CTL_IMAGE, "sleep", "infinity"))
+        self.assertEqual(fake.labels(), ["run", "rm"])
+        self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
+
+    def test_the_memory_default_is_8g_and_a_parameter(self):
+        self.assertEqual(fb.CONTROL_MEMORY, "8g")
+        fake = FakeDocker()
+        self.control(fake, memory="12g")
+        run = fake.args_of("run")
+        self.assertEqual(run[run.index("--memory") + 1], "12g")
+        self.assertEqual(run[run.index("--memory-swap") + 1], "12g")
+
+    def test_a_bad_memory_value_raises_before_docker(self):
+        for bad in ("8", "8gb", "", "0g", "-1g", "8 g", None, 8, "8g --privileged", "g"):
+            with self.subTest(bad=bad):
+                fake = FakeDocker()
+                with self.assertRaises(ValueError):
+                    self.control(fake, memory=bad)
+                self.assertEqual(fake.calls, [])
+
+    def test_the_run_and_the_removal_use_the_injected_docker_with_a_timeout_and_no_check(self):
+        fake = FakeDocker()
+        self.control(fake)
+        for args, kw in fake.calls:
+            self.assertIs(kw.get("check"), False, args)
+            self.assertIn("timeout", kw)
+
+    def test_a_container_name_without_the_prefix_raises_before_any_docker_call(self):
+        for bad in ("sab-ml-ctl-x", "sab-fresh-build-x", "codescout-x", "pbr27-x", "", "x", "sab-fresh-ctl-",
+                    "sab-fresh-ctl-a b", "sab-fresh-ctl-a;rm", "sab-fresh-ctl-x\n", None, 5):
+            with self.subTest(bad=bad):
+                fake = FakeDocker()
+                with self.assertRaises(ValueError):
+                    self.control(fake, container=bad)
+                self.assertEqual(fake.calls, [])
+                self.assertEqual(self.calls, [])
+                self.assertFalse(self.evidence.exists())
+
+    def test_nothing_is_removed_before_the_run_and_nothing_is_started_by_name_twice(self):
+        fake = FakeDocker()
+        self.control(fake)
+        self.assertEqual([args[0] for args, _ in fake.calls], ["run", "rm"])  # no pre-emptive `rm` of the name
+
+    def test_a_run_that_fails_cleanly_removes_nothing_and_runs_no_step(self):
+        conflict = (125, 'docker: Error response from daemon: Conflict. The container name "/%s" is already in '
+                         'use by container "%s".' % (CTL, "f" * 64))
+        fake = FakeDocker(("run", conflict))
+        got = self.control(fake)
+        self.assertEqual(fake.labels(), ["run"])  # a sibling's container of this name is not ours to remove
+        self.assertEqual(self.calls, [])
+        self.assertEqual(set(got["verdict"]), {"ok", "error", "reasons"})
+        self.assertIs(got["verdict"]["error"], True)
+        self.assertIn("docker run failed (exit 125)", got["verdict"]["reasons"][0])
+        self.assertIsNone(got["container_id"])
+        self.assertIsNone(got["container_removed"])
+        self.assertIn("nothing was removed", got["removal_note"])
+
+    def test_a_run_with_no_answer_removes_by_name_and_says_so(self):
+        for resp in (subprocess.TimeoutExpired(cmd=["docker"], timeout=600), FileNotFoundError("docker"),
+                     (0, "some warning, no id\n")):
+            with self.subTest(resp=repr(resp)):
+                fake = FakeDocker(("run", resp))
+                got = self.control(fake)
+                self.assertEqual(fake.labels(), ["run", "rm"])
+                self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CTL))
+                self.assertIs(got["container_removed_by_name"], True)
+                self.assertIs(got["verdict"]["error"], True)
+                self.assertEqual(self.calls, [])
+
+    def test_a_run_that_created_the_container_but_failed_to_start_is_removed_by_the_cidfile_id(self):
+        def respond(args, kw):
+            Path(args[args.index("--cidfile") + 1]).write_text(CID)
+            return done(args, 125, "docker: Error response from daemon: OCI runtime create failed")
+        fake = FakeDocker(("run", respond))
+        got = self.control(fake)
+        self.assertEqual(fake.labels(), ["run", "rm"])
+        self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
+        self.assertIs(got["container_removed"], True)
+        self.assertIs(got["container_removed_by_name"], False)
+        self.assertEqual(self.calls, [])
+        self.assertIs(got["verdict"]["error"], True)
+
+    def test_a_stale_cidfile_is_removed_before_the_run_and_never_trusted(self):
+        self.evidence.mkdir()
+        (self.evidence / "control.cid").write_text("f" * 64)
+
+        def respond(args, kw):
+            self.assertFalse(Path(args[args.index("--cidfile") + 1]).exists())
+            return done(args, 125, "name in use")
+        fake = FakeDocker(("run", respond))
+        self.control(fake)
+        self.assertEqual(fake.labels(), ["run"])
+
+    def test_a_good_run_is_addressed_by_the_id_it_printed_not_the_name(self):
+        other = "cd34" * 16
+        fake = FakeDocker(("run", (0, "WARNING: no swap limit support\n%s\n" % other)))
+        got = self.control(fake)
+        self.assertEqual(set(self.containers), {other})
+        self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", other))
+        self.assertEqual(got["container_id"], other)
+
+    # --- the record and the evidence directory ---
+
+    def test_a_record_missing_a_key_or_with_a_bad_value_raises_before_docker(self):
+        bad = [dict((k, v) for k, v in CTL_RECORD.items() if k != key) for key in CTL_RECORD]
+        bad += [dict(CTL_RECORD, base_commit="abc"), dict(CTL_RECORD, base_commit=CTL_BASE.upper()),
+                dict(CTL_RECORD, docker_image="bad image"), dict(CTL_RECORD, docker_image=""),
+                dict(CTL_RECORD, docker_image="-v /:/x img"), dict(CTL_RECORD, test_patch=5), None]
+        for record in bad:
+            with self.subTest(keys=sorted(record or ())):
+                fake = FakeDocker()
+                with self.assertRaises(ValueError):
+                    self.control(fake, record=record)
+                self.assertEqual(fake.calls, [])
+
+    def test_a_record_that_carries_f2p_and_p2p_does_not_use_them(self):
+        record = dict(CTL_RECORD, FAIL_TO_PASS=["x"], PASS_TO_PASS=["y"])
+        got = self.control(record=record)
+        self.assertEqual(got["f2p"], [T_A])
+
+    def test_the_evidence_dir_is_created_and_the_steps_and_truncation_are_recorded(self):
+        deep = self.tmp / "a" / "b"
+        got = self.control(evidence_dir=deep)
+        self.assertTrue((deep / "base.log").is_file())
+        self.assertEqual([s["name"] for s in got["steps"]], [
+            "base:rebuild", "base:test[0]", "gold:rebuild", "gold:test[0]", "gold-repeat:test[0]"])
+        self.assertNotIn("log_truncated", got)
+
+        def truncating(container, workdir, record, timeout=3600, *, steps=None, state="base"):
+            steps.append({"name": state + ":print[0]", "returncode": 0, "tail": "", "truncated": True})
+            return "{" + '"state": "%s", "statuses": %s}' % (state, json.dumps(self.statuses[state]))
+        with mock.patch.object(fb.mc, "run_tests", truncating):
+            self.assertIs(self.control()["log_truncated"], True)
+
+    def test_the_result_names_what_it_ran_on(self):
+        got = self.control()
+        self.assertEqual(got["image"], CTL_IMAGE)
+        self.assertEqual(got["container"], CTL)
+        self.assertEqual(got["base_commit"], CTL_BASE)
+        self.assertEqual(got["memory"], "8g")
+        self.assertEqual(got["workdir"], "/testbed")
+
+    def test_only_study_objects_are_named_and_nothing_else_is_deleted(self):
+        fake = FakeDocker()
+        self.control(fake)
+        for args, _ in fake.calls:
+            for a in args:
+                self.assertNotRegex(a, r"codescout-|pbr27-|rae-")
+            self.assertNotIn("volume", args)
+            self.assertNotIn("prune", args)
+            self.assertNotIn(args[0], ("rmi", "image"))
+
+
 
 
 

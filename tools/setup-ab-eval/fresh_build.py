@@ -26,12 +26,20 @@ Image build (runs docker, through an injected `docker`):
     BuildError                                           a refused or failed build; no image tag is left
     data_root_free_gb()                                  free GB of the docker storage, the default disk guard
 
+Derive and strict gate (runs docker through `docker=` and the study's `multilang_control` helpers):
+
+    control_fresh(record, container=, evidence_dir=)     F2P/P2P derived from base+test vs gold+test, then the
+                                                         strict gate (8g, a gold repeat, a tolerant 2nd repeat)
+
 The helpers above import the standard library only and never touch docker, git, `gh`, the network,
 the filesystem or the environment, so their tests run anywhere. `fetch_pr` reads the environment and
 runs `gh` and `git` (with `GITHUB_TOKEN` removed) through `run=`, which a test replaces; it does not
-touch docker. `build_image` runs `docker` through `docker=` (default `pilot.docker`, the one other
-module this file imports), which a test replaces, and reads the exit code of every step from the
-returned `CompletedProcess` and nowhere else.
+touch docker. `build_image` runs `docker` through `docker=` (default `pilot.docker`, imported here
+with `multilang_control` and `multilang_grade`), which a test replaces, and reads the exit code of every
+step from the returned `CompletedProcess` and nowhere else. `control_fresh` starts and removes its
+container through `docker=`; the state steps are `multilang_control`'s helpers (which use `pilot.docker`
+themselves, read-only imports of a frozen module) and `multilang_grade.run_parser` /
+`control_verdict`; a test replaces those module attributes.
 
 A diff is treated as text with `\\n` boundaries only: it is split on the position of
 each `diff --git ` line start and never through `str.splitlines`, so a CRLF blob, a lone `\\r` or a
@@ -54,6 +62,8 @@ import tarfile
 import time
 from pathlib import Path
 
+import multilang_control as mc
+import multilang_grade as grade
 import pilot
 
 BUILDER_VERSION = "1"
@@ -503,7 +513,7 @@ _BASE_IMAGE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/@-]*")
 _WORKDIR = re.compile(r"/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*")
 _TREE_TAR = "/tmp/sab-tree.tar"  # inside the container; removed by the extract step, never committed
 _CONTAINER_ID = re.compile(r"^[0-9a-f]{64}$", re.MULTILINE)
-_TREE_SHA = re.compile(r"[0-9a-f]{40}")
+_SHA40 = re.compile(r"[0-9a-f]{40}")  # a full SHA-1 object name: a tree, or the synthetic commit
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 _LISTED = 10  # differing paths named in an error
 _LOG_TAIL = 1500
@@ -943,7 +953,7 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
         raise ValueError("upstream_base is not a full commit SHA: %r" % (upstream_base,))
     if not isinstance(workdir, str) or _WORKDIR.fullmatch(workdir) is None or {".", ".."} & set(workdir.split("/")):
         raise ValueError("workdir must be a plain absolute path below /, got %r" % (workdir,))
-    if expected_tree is not None and (not isinstance(expected_tree, str) or _TREE_SHA.fullmatch(expected_tree) is None):
+    if expected_tree is not None and (not isinstance(expected_tree, str) or _SHA40.fullmatch(expected_tree) is None):
         raise ValueError("expected_tree is not a full lowercase 40-hex tree SHA: %r" % (expected_tree,))
     tree_tar, evidence_dir = Path(tree_tar), Path(evidence_dir)
     if not tree_tar.is_file():
@@ -1043,7 +1053,7 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
         if expected_tree is not None:
             ev["expected_tree"] = expected_tree
             tree = _text(build.exec("tree-rev-parse", "git", "rev-parse", "HEAD^{tree}", timeout=120)).strip()
-            if _TREE_SHA.fullmatch(tree) is None:
+            if _SHA40.fullmatch(tree) is None:
                 raise BuildError("git rev-parse HEAD^{tree} gave no tree SHA: %r" % tree[-_LOG_TAIL:])
             ev["synthetic_tree"] = tree
             if tree != expected_tree:
@@ -1087,3 +1097,167 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
             "tree_tar_sha256": tar_sha, "image_id": ev["image_id"], "size_bytes": ev["size_bytes"],
             "laps_seconds": laps, "compiling_lines": ev["compiling_lines"],
             "container_removed": ev["container_removed"]}
+CONTROL_PREFIX = "sab-fresh-ctl-"
+CONTROL_MEMORY = "8g"  # the frozen grader's limit: a gate passed at 24 GB proved nothing (the pilot saw it fail at 24 GB only)
+TOLERATED_MISMATCHES = 3
+_MEMORY = re.compile(r"[1-9][0-9]*[kmg]")
+_RECORD_KEYS = ("docker_image", "base_commit", "patch", "test_patch", "test_cmds", "rebuild_cmds", "print_cmds",
+                "log_parser")
+_NO_F2P = "no fail-to-pass test"
+_REPEAT_MISMATCH = "tests differ between two gold runs"
+# what a failing step raises: ControlError, ParserError and BuildError are RuntimeError/ValueError;
+# ValueError also covers odd bytes in docker output (UnicodeDecodeError), OSError a log that cannot be written
+_STEP_ERRORS = (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired)
+
+
+def _write_log(evidence_dir, name, text):
+    """`text` as it is: UTF-8, and no newline translation (a CRLF or a lone CR in a log stays)."""
+    with open(evidence_dir / name, "w", encoding="utf-8", errors="replace", newline="") as f:
+        f.write(text)
+
+
+def control_fresh(record, *, container, evidence_dir, memory=CONTROL_MEMORY, timeout=5400, docker=pilot.docker):
+    """Derive FAIL_TO_PASS / PASS_TO_PASS of a fresh task and run the strict gate, offline, in one container.
+
+    `record` carries `docker_image`, `base_commit` (the synthetic commit), `patch`, `test_patch`,
+    `test_cmds`, `rebuild_cmds`, `print_cmds` and `log_parser`; any F2P/P2P it carries is not used.
+    `container` must start with `sab-fresh-ctl-`. `ValueError` for a bad argument, before any docker call.
+
+    The container (`--network none --cpus 4 --memory <memory> --memory-swap <memory> --pids-limit 4096
+    --security-opt no-new-privileges`, `memory` 8g: the frozen grader's limit) is started from
+    `docker_image` and walks three states, each from `reset_to_base`, like `multilang_control.control`:
+    base + test patch, gold + test patch, then the same gold state again (`_fresh_reports`, tests only).
+    `derive_sets(base, gold)` gives F2P and P2P (test names embed the binary hash, so they belong to
+    this image); `grade.control_verdict(base, gold, f2p, p2p, gold_repeat=repeat)` is the verdict. An
+    empty F2P set is not ok, with the reason `no fail-to-pass test`.
+
+    Tolerant repeat: when the only reason is `tests differ between two gold runs`, at most
+    `TOLERATED_MISMATCHES` tests differ, and the verdict agrees with that count, the gold tests run a
+    second time. A differing test is accepted only if it is `pass` in gold and in that run; all must
+    be, else the strict verdict stands. Any other reason is never tolerated. What was accepted, and
+    the strict verdict it replaced, are in the evidence (`tolerant_repeat`, `verdict_strict`).
+
+    Never raises for a step failure: a `ControlError`, a `ParserError`, a docker failure or timeout
+    becomes `verdict = {"ok": False, "error": True, "reasons": ["control error: ..."]}` and `error`;
+    `f2p` and `p2p` are None when the failure came before they were derived. A `KeyboardInterrupt` is
+    re-raised after the container is removed.
+
+    The container is removed in a `finally`, by the ID `docker run -d` printed: a `docker run` that
+    answered with a failure removes nothing (the name may belong to another run), unless its
+    `--cidfile` (`<evidence_dir>/control.cid`) holds an ID, and one that gave no answer removes by
+    name (see `_Build`). Nothing is removed before the run; no image is ever deleted.
+
+    Logs go to `evidence_dir` (`base.log`, `gold.log`, `gold-repeat.log`, `gold-repeat-2.log`), byte for
+    byte. Returns the evidence: `f2p`, `p2p`, `verdict`, `base`/`gold`/`gold_repeat` status counters,
+    `steps`, `laps_seconds`, `wall_seconds`, `container_id`, `container_removed` (None when nothing
+    was created, False with `removal_error` when the removal failed), `error` when a step raised.
+    """
+    if not isinstance(container, str) or not container.startswith(CONTROL_PREFIX) \
+            or _DOCKER_NAME.fullmatch(container) is None:
+        raise ValueError("container name must be a docker name starting with %r: %r" % (CONTROL_PREFIX, container))
+    if not isinstance(memory, str) or _MEMORY.fullmatch(memory) is None:
+        raise ValueError("memory must look like 8g, got %r" % (memory,))
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+        raise ValueError("timeout must be a positive integer, got %r" % (timeout,))
+    if not isinstance(record, dict):
+        raise ValueError("record must be a dict, got %s" % type(record).__name__)
+    missing = [key for key in _RECORD_KEYS if key not in record]
+    if missing:
+        raise ValueError("record lacks %s" % ", ".join(missing))
+    image, base_commit = record["docker_image"], record["base_commit"]
+    if not isinstance(image, str) or _BASE_IMAGE.fullmatch(image) is None:
+        raise ValueError("docker_image is not an image reference: %r" % (image,))
+    if not isinstance(base_commit, str) or _SHA40.fullmatch(base_commit) is None:
+        raise ValueError("base_commit is not a full commit SHA: %r" % (base_commit,))
+    for key in ("patch", "test_patch", "log_parser"):
+        if not isinstance(record[key], str):
+            raise ValueError("record[%r] must be a string" % key)
+    evidence_dir = Path(evidence_dir)
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+
+    started = mark = time.monotonic()
+    build = _Build(docker, container, None)
+    ev = {"id": record.get("instance_id"), "image": image, "container": container, "memory": memory,
+          "base_commit": base_commit, "f2p": None, "p2p": None, "steps": []}
+    steps = ev["steps"]
+    laps = ev["laps_seconds"] = {}
+
+    def lap(key):
+        nonlocal mark
+        now = time.monotonic()
+        laps[key] = round(now - mark, 1)
+        mark = now
+
+    def state_run(cid, workdir, state):
+        """The tests of one state: the log is written before it is parsed, so a parser failure keeps it."""
+        log = mc.run_tests(cid, workdir, record, timeout, steps=steps, state=state)
+        _write_log(evidence_dir, state + ".log", log)
+        return grade.run_parser(record["log_parser"], log)
+
+    try:
+        build.start("run", "-d", "--name", container, "--cidfile", str(evidence_dir.resolve() / "control.cid"),
+                    "--network", "none", "--cpus", "4", "--memory", memory, "--memory-swap", memory,
+                    "--pids-limit", "4096", "--security-opt", "no-new-privileges", image, "sleep", "infinity",
+                    timeout=600, cidfile=evidence_dir.resolve() / "control.cid")
+        cid = build.cid
+        workdir = ev["workdir"] = mc.detect_workdir(cid)
+        ev["dirty_before_base"] = mc.reset_to_base(cid, workdir, base_commit)["dirty_before"]
+        mc._apply(cid, workdir, record["test_patch"])
+        lap("start_and_apply_test")
+        mc.rebuild(cid, workdir, record, timeout, steps=steps, state="base")
+        lap("base_rebuild")
+        base = state_run(cid, workdir, "base")
+        ev["base"] = dict(collections.Counter(base.values()))
+        lap("base_tests")
+
+        # the gold state starts from a fresh base tree, not from what the base run left behind
+        ev["dirty_before_gold"] = mc.reset_to_base(cid, workdir, base_commit)["dirty_before"]
+        mc._apply(cid, workdir, record["test_patch"])
+        mc._apply(cid, workdir, record["patch"])
+        mc.rebuild(cid, workdir, record, timeout, steps=steps, state="gold")
+        lap("gold_rebuild")
+        gold = state_run(cid, workdir, "gold")
+        ev["gold"] = dict(collections.Counter(gold.values()))
+        lap("gold_tests")
+
+        # the same tests again, warm, in the same tree: a flaky expected test shows up as a mismatch
+        mc._fresh_reports(cid, workdir)
+        repeat = state_run(cid, workdir, "gold-repeat")
+        ev["gold_repeat"] = dict(collections.Counter(repeat.values()))
+        lap("gold_repeat_tests")
+
+        f2p, p2p = derive_sets(base, gold)
+        ev["f2p"], ev["p2p"] = f2p, p2p
+        ev["base_status_of_f2p"] = {n: base.get(n, "absent") for n in f2p}
+        verdict = dict(grade.control_verdict(base, gold, f2p, p2p, gold_repeat=repeat))
+        if not f2p:  # no test to separate the arms, whatever else the verdict says
+            verdict["ok"] = False
+            verdict["reasons"] = [_NO_F2P] + [r for r in verdict.get("reasons", []) if r != "no fail-to-pass tests"]
+        ev["verdict"] = verdict
+
+        mismatch = sorted(n for n in set(f2p) | set(p2p) if gold.get(n) != repeat.get(n))
+        reported = (verdict.get("gold_repeat_mismatch") or {}).get("count")
+        if verdict.get("reasons") == [_REPEAT_MISMATCH] and 0 < len(mismatch) <= TOLERATED_MISMATCHES \
+                and reported == len(mismatch):
+            ev["verdict_strict"] = verdict  # recorded before the run: an error in it must not lose it
+            mc._fresh_reports(cid, workdir)
+            repeat2 = state_run(cid, workdir, "gold-repeat-2")
+            lap("gold_repeat_2_tests")
+            accepted = [n for n in mismatch if gold.get(n) == grade.PASS and repeat2.get(n) == grade.PASS]
+            ev["tolerant_repeat"] = {
+                "tests": {n: {"gold": gold.get(n), "gold_repeat": repeat.get(n), "gold_repeat_2": repeat2.get(n)}
+                          for n in mismatch},
+                "accepted": accepted, "gold_repeat_2": dict(collections.Counter(repeat2.values()))}
+            if len(accepted) == len(mismatch):
+                ev["verdict"] = dict(verdict, ok=True, reasons=[], tolerated_repeat_mismatch=accepted)
+    except _STEP_ERRORS as exc:
+        ev["error"] = "%s: %s" % (type(exc).__name__, str(exc)[-400:])
+        ev["verdict"] = {"ok": False, "error": True, "reasons": ["control error: %s" % str(exc)[-300:]]}
+    finally:
+        ev.update(build.remove())  # never raises an Exception
+        if build.interrupt is not None:
+            raise build.interrupt
+    if any(step.get("truncated") for step in steps):
+        ev["log_truncated"] = True
+    ev["wall_seconds"] = round(time.monotonic() - started, 1)
+    return ev
