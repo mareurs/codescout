@@ -1009,8 +1009,13 @@ fn declaration_header(text: &str) -> Option<String> {
             }
             header.push_str(word);
         }
-        let code = line.find("//").into_iter().chain(line.find(" #")).min();
-        let t = code.map_or(line, |i| &line[..i]).trim();
+        let cut = line.find("//").into_iter().chain(line.find(" #")).min();
+        // Cut only where the marker is outside a string: an odd quote count
+        // before it means "unsure", and the whole line is tested instead.
+        let code = cut
+            .map(|i| &line[..i])
+            .filter(|p| p.matches('"').count() % 2 == 0 && p.matches('\'').count() % 2 == 0);
+        let t = code.unwrap_or(line).trim();
         if line.contains('{') || t.ends_with(':') || t.ends_with(';') {
             break;
         }
@@ -1102,6 +1107,45 @@ mod tests {
     fn declaration_changed_reads_crlf_text_like_lf_text() {
         assert_eq!(
             declaration_changed("fn a() -> u8 {\r\n    1\r\n}", "fn a() -> u8 {\n    3\n}"),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn declaration_changed_does_not_cut_a_header_line_at_a_url_in_a_string() {
+        let old = "def f(\n    url=\"http://x\",\n    a=1,\n):\n    pass";
+        assert_eq!(
+            declaration_changed(old, "def f(\n    url=\"http://x\",\n    a=2,\n):\n    pass"),
+            Some(true)
+        );
+        assert_eq!(
+            declaration_changed(
+                old,
+                "def f(\n    url=\"http://x\",\n    a=1,\n):\n    return 1"
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn declaration_changed_does_not_cut_a_header_line_at_a_hash_in_a_string() {
+        assert_eq!(
+            declaration_changed(
+                "def f(sep=\" #\"):\n    pass",
+                "def f(sep=\" #\"):\n    return 1"
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn declaration_changed_ignores_a_body_edit_under_a_bodyless_rust_header_with_a_trailing_comment(
+    ) {
+        assert_eq!(
+            declaration_changed(
+                "fn a();  // one\nfn b() {}",
+                "fn a();  // one\nfn b() { 1 }"
+            ),
             Some(false)
         );
     }
