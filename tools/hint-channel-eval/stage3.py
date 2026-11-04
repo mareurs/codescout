@@ -22,7 +22,7 @@ import run as runner  # noqa: E402
 import score  # noqa: E402
 
 ARMS = ["A1", "A2", "A3", "W1", "W2", "W3"]
-STOP_USD = 20.0
+STOP_USD = 27.0  # AM-10: raised from 20 by the operator after block 1 measured ~$0.17 per run
 DECOYS = runner.REPO / "docs/evals/data/2026-11-04-harness-channel-hints/decoys.json"
 ENV = {"HCE_SETTING_SOURCES": "project,local", "HCE_DECOYS": str(DECOYS)}
 
