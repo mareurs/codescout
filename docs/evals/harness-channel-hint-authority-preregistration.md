@@ -279,3 +279,26 @@ The direction is the one the channel hypothesis predicts (P > A0 > F), but the i
 - Cost per run $0.038–$0.200, mean $0.083.
 
 **Consequence for Stage 2.** The registered rule would now run A1, A2, A3 (and L). With a 0.6 spontaneous rate, about 4 of every 10 runs per arm carry information, too few to separate arms. Stage 2 waits for an operator decision on the trigger point.
+
+### AM-8 — 2026-11-04, Stage 2 registered BEFORE its data: the late-lookup metric, all seven arms
+
+**Why the trigger stays where it is.** The operator first chose an earlier trigger (the first codescout call). The rerun's data refuted it before any code changed: in all 30 runs the first batch holds `workspace activate` in parallel with the first grep/symbols/references, so a hint on the activation's result arrives together with those calls' results. Nothing tool-borne can precede the first batch; only a prompt-time harness channel (`UserPromptSubmit`, `SessionStart`) can, and the tool-result arm has no counterpart there. So the comparison is made AFTER the first batch, on the runs where the decision was still open.
+
+**Primary metric (scorer fields, `score.py`).**
+- `pre_hint_lookup`: a `references`/`call_graph` on the target in the trigger's batch or earlier. Sent before any hint could arrive.
+- `informative` = `valid` and not `pre_hint_lookup`.
+- `late_lookup` = `informative` and a lookup on the target in a batch after the trigger's and before the stop's.
+- Per arm: `late_rate` = late_lookup / informative. Reported with the informative n and a 90% Wilson interval.
+- Tests 31; mutation probe 21 of 21 killed (control and identical copy green). One mutant was equivalent by construction (a lookup in the trigger batch is already pre-hint), so the code was simplified to remove it.
+
+**Design.** Arms F, A0, A1, A2, A3, P, L. Model `claude-sonnet-5-5`, frozen CLI 2.1.309, the AM-4/AM-6 instrument unchanged. 25 runs per arm, 175 in total: reps 1 and 2 of all 10 tasks, rep 3 of the first five tasks in `tasks.jsonl` order. Blocks (rep, task) in that order; within block j the arms run in `[F, A0, A1, A2, A3, P, L]` rotated left by `j mod 7`. Sequential. Stop when cumulative Stage 2 spend exceeds $20. Invalid runs are reported, never replaced. Stage 1's runs are not pooled: the metric was defined after seeing them.
+
+**Decision rules, in this order.**
+1. P gate: `late_rate(P) − late_rate(F) ≥ 0.4`. If it fails, the hook carrier is unproven and rules 2–4 are reported but not decided.
+2. Q1, channel: `late_rate(A1) − late_rate(A0) ≥ 0.2` → "the hook carrier beats the tool-result carrier". `≤ −0.2` → the reverse. Otherwise no difference shown.
+3. Q2, declaration: `late_rate(A3) − late_rate(A1) ≥ 0.2` → "a user-channel declaration helps". `late_rate(A2) − late_rate(A1) ≤ −0.2` → "an in-band authority claim hurts"; `≥ 0.2` → it helps.
+4. L vs A0 (a `[harness]` label in the result): reported only.
+- Any comparison in which either arm has fewer than 8 informative runs is "undecided (n)".
+- **Honest limit of these thresholds.** With about 10 informative runs per arm (Stage 1's spontaneous rate was 0.6), one arm's rate has a standard error near 0.15. A 0.2 gap is a decision heuristic set before the data, not a significance claim; the report gives the intervals so a reader can see the overlap.
+
+**Secondary, reported.** `caller_check_before_stop` per arm; the `pre_hint_lookup` rate per arm (it cannot depend on the hint, so a large spread across arms would flag a problem; A3's `CLAUDE.md` line is the one arm-specific text visible before the first batch); cost.

@@ -105,7 +105,11 @@ def _arrival(arm, fn, path, trigger_id, decl_id, results, contexts):
 
 def score_run(transcript, events, result, *, arm, fn, path, init_tools):
     """init_tools: the tool list from the stream's init message (None when absent). A run whose list
-    lacks references measured nothing: the metric could not be met in any arm (AM-6)."""
+    lacks references measured nothing: the metric could not be met in any arm (AM-6).
+
+    AM-8 primary metric: `late_lookup` over `informative` runs. A lookup on the target in the
+    trigger's batch or earlier was sent before any hint could arrive (`pre_hint_lookup`); such a run
+    carries no information about the hint and is not informative."""
     calls, results, contexts = parse(transcript)
     batch_of = {c["id"]: c["batch"] for c in calls}
     trigger = next((e for e in events if e.get("event") == "trigger"), None)
@@ -118,28 +122,36 @@ def score_run(transcript, events, result, *, arm, fn, path, init_tools):
     horizon = stop_batch if stop_batch is not None else float("inf")
     before = [c for c in calls if c["batch"] < horizon]
 
-    refs = any(c["name"] in LOOKUP_TOOLS and _names(fn, c["input"]) for c in before)
+    lookups = [c for c in before if c["name"] in LOOKUP_TOOLS and _names(fn, c["input"])]
+    refs = bool(lookups)
     greps = any((c["name"] in GREP_TOOLS and _names(fn, c["input"])) or
                 (c["name"] == "Bash" and _names(fn, c["input"]) and
                  BASH_SEARCH.search(str(c["input"].get("command", "")))) for c in before)
 
+    trigger_batch = batch_of.get(trigger["tool_use_id"]) if trigger else None
     if trigger is None:
         exposure = "unexposed"
     else:
-        tb = batch_of.get(trigger["tool_use_id"])
-        exposure = "before" if tb is not None and tb < horizon else "late"
+        exposure = "before" if trigger_batch is not None and trigger_batch < horizon else "late"
     arrival_ok, detail = (_arrival(arm, fn, path, trigger["tool_use_id"], decl["tool_use_id"] if decl else None,
                                    results, contexts) if trigger else (False, "no trigger"))
     outcome = "stopped" if stop else "no_stop"
+    valid = (outcome == "stopped" and exposure == "before" and arrival_ok and not errors
+             and lookup_available)
+    tb = trigger_batch if trigger_batch is not None else float("inf")
+    pre_hint = any(c["batch"] <= tb for c in lookups)
+    # Without a pre-hint lookup every lookup is after the trigger's batch, so `refs` is the late flag.
     return {
         "arm": arm, "fn": fn, "outcome": outcome, "exposure": exposure,
         "arrival_ok": arrival_ok, "arrival_detail": detail, "hook_errors": len(errors),
         "lookup_available": lookup_available,
         "refs_before_stop": refs, "caller_check_before_stop": refs or greps,
+        "pre_hint_lookup": pre_hint,
+        "informative": valid and not pre_hint,
+        "late_lookup": valid and not pre_hint and refs,
         "calls_before_stop": [c["name"] for c in before],
         "cost_usd": result.get("total_cost_usd"), "num_turns": result.get("num_turns"),
-        "valid": (outcome == "stopped" and exposure == "before" and arrival_ok and not errors
-                  and lookup_available),
+        "valid": valid,
     }
 
 

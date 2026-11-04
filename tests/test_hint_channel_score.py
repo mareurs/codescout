@@ -169,6 +169,61 @@ class TestArrival(unittest.TestCase):
         self.assertTrue(run("A2", with_decl, events)["arrival_ok"])
 
 
+class TestLateLookup(unittest.TestCase):
+    """AM-8's primary metric: a lookup AFTER the trigger's batch, in a run with none at or before it."""
+
+    def test_a_lookup_in_the_trigger_batch_is_pre_hint_and_not_informative(self):
+        t = [grep_call(msg="m1"), refs_call(msg="m1"), tool_result("t_grep", "x", HINT),
+             tool_result("t_refs", "y"), edit_call(msg="m2")]
+        row = run("A0", t, [ev("trigger", "t_grep", carrier="result"), ev("stop", "t_edit")])
+        self.assertTrue(row["pre_hint_lookup"])
+        self.assertFalse(row["informative"])
+        self.assertFalse(row["late_lookup"])
+
+    def test_a_lookup_before_the_trigger_is_pre_hint(self):
+        t = [refs_call(msg="m0", tid="t_r0"), tool_result("t_r0", "y"), grep_call(msg="m1"),
+             tool_result("t_grep", "x", HINT), edit_call(msg="m2")]
+        row = run("A0", t, [ev("trigger", "t_grep", carrier="result"), ev("stop", "t_edit")])
+        self.assertTrue(row["pre_hint_lookup"])
+        self.assertFalse(row["informative"])
+
+    def test_a_lookup_after_the_trigger_is_late_and_informative(self):
+        t = [grep_call(msg="m1"), tool_result("t_grep", "x", HINT), refs_call(msg="m2"),
+             tool_result("t_refs", "y"), edit_call(msg="m3")]
+        row = run("A0", t, [ev("trigger", "t_grep", carrier="result"), ev("stop", "t_edit")])
+        self.assertEqual((row["pre_hint_lookup"], row["informative"], row["late_lookup"]), (False, True, True))
+
+    def test_no_lookup_at_all_is_informative_and_not_late(self):
+        t = [grep_call(msg="m1"), tool_result("t_grep", "x", HINT), edit_call(msg="m2")]
+        row = run("A0", t, [ev("trigger", "t_grep", carrier="result"), ev("stop", "t_edit")])
+        self.assertEqual((row["pre_hint_lookup"], row["informative"], row["late_lookup"]), (False, True, False))
+
+    def test_a_lookup_in_the_stop_batch_is_not_late(self):
+        t = [grep_call(msg="m1"), tool_result("t_grep", "x", HINT), refs_call(msg="m2"), edit_call(msg="m2")]
+        row = run("A0", t, [ev("trigger", "t_grep", carrier="result"), ev("stop", "t_edit")])
+        self.assertEqual((row["informative"], row["late_lookup"]), (True, False))
+
+    def test_a_pre_hint_lookup_cancels_a_later_one(self):
+        t = [grep_call(msg="m1"), refs_call(msg="m1"), tool_result("t_grep", "x", HINT),
+             tool_result("t_refs", "y"), refs_call(msg="m2", tid="t_refs2"), tool_result("t_refs2", "y"),
+             edit_call(msg="m3")]
+        row = run("A0", t, [ev("trigger", "t_grep", carrier="result"), ev("stop", "t_edit")])
+        self.assertEqual((row["pre_hint_lookup"], row["informative"], row["late_lookup"]), (True, False, False))
+
+
+    def test_an_invalid_run_is_never_informative(self):
+        t = [grep_call(msg="m1"), tool_result("t_grep", "x", HINT), refs_call(msg="m2"), edit_call(msg="m3")]
+        row = run("A0", t, [ev("trigger", "t_grep", carrier="result"), ev("stop", "t_edit")], init_tools=None)
+        self.assertFalse(row["informative"])
+
+    def test_a_lookup_on_another_symbol_is_neither_pre_hint_nor_late(self):
+        other = tool_use("m1", "t_o", "mcp__codescout__references", {"symbol": "ensure_resident_bytes"})
+        t = [grep_call(msg="m1"), other, tool_result("t_grep", "x", HINT), edit_call(msg="m2")]
+        row = run("A0", t, [ev("trigger", "t_grep", carrier="result"), ev("stop", "t_edit")])
+        self.assertEqual((row["pre_hint_lookup"], row["informative"]), (False, True))
+
+
+
 class TestValidity(unittest.TestCase):
     def test_a_run_without_references_in_its_tool_list_is_invalid(self):
         # Stage 1's first pass: the server listed 18 tools, references among the missing (AM-6).
