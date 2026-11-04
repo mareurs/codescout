@@ -42,7 +42,7 @@
 **Interfaces:**
 - Produces (all module level in `fresh_build.py`):
   - `BUILDER_VERSION = "1"`, `MIN_FREE_GB = 60`, `CUTOFF = "2026-07-01"`
-  - `TEST_PATH_RE` (compiled): `(^|/)(tests?|testdata|fixtures)/|_tests?\.rs$|(^|/)tests?\.rs$`
+  - `TEST_PATH_RE` (compiled, `re.IGNORECASE`): `(^|/)[^/]*(test|e2e)[^/]*(/|$)`
   - `is_test_path(path: str) -> bool`
   - `diff_files(diff: str) -> list[str]` (the b-side path of every `diff --git a/X b/Y` block, in order)
   - `split_diff(diff: str) -> tuple[str, str]` = `(patch, test_patch)`; blocks split before each line starting `diff --git `; byte-faithful; raises `ValueError` if non-empty text does not start with `diff --git `
