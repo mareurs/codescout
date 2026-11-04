@@ -594,6 +594,13 @@ fn resolve_callees_via_ts(
 
     Ok(edges)
 }
+
+/// Whether `count_calls_named` can classify calls for `language_id` at all. `false`
+/// means every `None` from it is structural, not a parse failure on one file.
+pub(crate) fn classifies_calls(language_id: &str) -> bool {
+    !call_kinds_for(language_id).is_empty()
+}
+
 /// Count the call nodes in `src` whose callee identifier equals `name`.
 ///
 /// Only real call nodes count: a name used as an argument, inside a string
@@ -1281,5 +1288,12 @@ mod tests {
     fn count_calls_named_is_none_for_a_language_without_call_kinds() {
         let src = "package main\nfunc main() { a(1) }\n";
         assert_eq!(count_calls_named(src, "go", "a"), None);
+    }
+
+    #[test]
+    fn classifies_calls_is_true_only_for_a_language_with_call_kinds() {
+        assert!(classifies_calls("rust"));
+        assert!(classifies_calls("python"));
+        assert!(!classifies_calls("go"));
     }
 }

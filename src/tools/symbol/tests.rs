@@ -11508,3 +11508,58 @@ async fn check_callers_cannot_tell_when_no_header_can_be_read() {
     let got = check_callers(&ctx, &edited, "rust", "a", "", "").await;
     assert_eq!(got, CallersCheck::CannotTell);
 }
+
+#[tokio::test]
+async fn check_callers_cannot_tell_for_an_unclassified_language_with_no_candidates() {
+    use super::callers_check::{check_callers, CallersCheck};
+    let old = "func a() int { return 1 }";
+    let new = "func a(x int) int { return x }";
+    assert_eq!(
+        crate::symbol::edit::declaration_changed(old, new),
+        Some(true)
+    );
+    // The only .go file is the edited one, so no candidate is ever read: the verdict
+    // must come from the language check, not from the candidate loop.
+    let (_dir, ctx, edited) =
+        callers_project(&[("src/lib.go", "func a(x int) int { return x }\n")]).await;
+    let got = check_callers(&ctx, &edited, "go", "a", old, new).await;
+    assert_eq!(got, CallersCheck::CannotTell);
+}
+
+#[tokio::test]
+async fn check_callers_cannot_tell_for_typescript_when_no_call_is_found() {
+    use super::callers_check::{check_callers, CallersCheck};
+    let old = "function a(): number { return 1 }";
+    let new = "function a(x: number): number { return x }";
+    assert_eq!(
+        crate::symbol::edit::declaration_changed(old, new),
+        Some(true)
+    );
+    // `.tsx`/`.mts` callers are outside the `*.ts` glob, so "no call found" is not a
+    // definite no for TypeScript.
+    let (_dir, ctx, edited) = callers_project(&[
+        ("src/a.ts", "function a(x: number): number { return x }\n"),
+        ("src/b.ts", "function g(f: unknown) {}\ng(a);\n"),
+    ])
+    .await;
+    let got = check_callers(&ctx, &edited, "typescript", "a", old, new).await;
+    assert_eq!(got, CallersCheck::CannotTell);
+}
+
+#[tokio::test]
+async fn check_callers_python_with_no_call_is_no_outside_calls() {
+    use super::callers_check::{check_callers, CallersCheck};
+    let old = "def a():\n    return 1";
+    let new = "def a(x):\n    return x";
+    assert_eq!(
+        crate::symbol::edit::declaration_changed(old, new),
+        Some(true)
+    );
+    let (_dir, ctx, edited) = callers_project(&[
+        ("src/a.py", "def a(x):\n    return x\n"),
+        ("src/b.py", "from a import a\nf = a\n"),
+    ])
+    .await;
+    let got = check_callers(&ctx, &edited, "python", "a", old, new).await;
+    assert_eq!(got, CallersCheck::NoOutsideCalls);
+}
