@@ -604,7 +604,9 @@ pub(crate) fn classifies_calls(language_id: &str) -> bool {
 /// Count the call nodes in `src` whose callee identifier equals `name`.
 ///
 /// Only real call nodes count: a name used as an argument, inside a string
-/// literal or in a comment is not a call. Returns `None` when the language has
+/// literal or in a comment is not a call, and Rust macro invocations (`warn!(..)`)
+/// are skipped on purpose, so a function named like a macro is not "called".
+/// Returns `None` when the language has
 /// no call kinds or the parse fails, so "cannot classify" is never `Some(0)`.
 pub(crate) fn count_calls_named(src: &str, language_id: &str, name: &str) -> Option<usize> {
     let kinds = call_kinds_for(language_id);
@@ -619,6 +621,7 @@ pub(crate) fn count_calls_named(src: &str, language_id: &str, name: &str) -> Opt
     loop {
         let node = cursor.node();
         if kinds.contains(&node.kind())
+            && node.kind() != "macro_invocation"
             && callee_identifier(node, src, language_id).as_deref() == Some(name)
         {
             count += 1;
@@ -1264,12 +1267,25 @@ mod tests {
         let path = lsp_uri_to_path(&uri).unwrap();
         assert_eq!(path, PathBuf::from("/tmp/hello.rs"));
     }
+
     // ── count_calls_named ────────────────────────────────────────────────────
 
     #[test]
     fn count_calls_named_counts_function_and_method_calls_in_rust() {
         let src = "fn main() { a(1); x.a(2); b(a); let s = \"a(3)\"; /* a(4) */ }";
         assert_eq!(count_calls_named(src, "rust", "a"), Some(2));
+    }
+
+    #[test]
+    fn count_calls_named_ignores_rust_macro_invocations() {
+        assert_eq!(
+            count_calls_named("fn m(){ tracing::warn!(\"x\"); }", "rust", "warn"),
+            Some(0)
+        );
+        assert_eq!(
+            count_calls_named("fn m(){ warn(1); a!(2); }", "rust", "warn"),
+            Some(1)
+        );
     }
 
     #[test]

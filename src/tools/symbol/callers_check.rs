@@ -2,9 +2,11 @@
 //! were checked: a changed declaration plus a call to the name in another file.
 //!
 //! The check is syntactic (a name match found by `grep`, classified as a call by the
-//! tree-sitter call kinds), never resolved by a language server, and it under-counts
-//! (Rust turbofish calls, calls inside macro arguments). So a clean result is "no call
-//! seen", never "no callers exist", and only a *found* call is worth asserting.
+//! tree-sitter call kinds), never resolved by a language server. It under-counts:
+//! Rust turbofish calls (`f::<T>(..)`) and calls inside macro arguments are not seen,
+//! and macro invocations (`warn!(..)`) are ignored by design. So a clean result is
+//! "no call seen", never "no callers exist", and only a *found* call is worth
+//! asserting.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
