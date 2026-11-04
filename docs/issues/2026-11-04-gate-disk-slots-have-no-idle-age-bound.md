@@ -1,16 +1,16 @@
 ---
 id: e7442516ad9fa057
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: the gate''s disk slots have no idle-age bound - a free slot keeps its tree for as long as it stays under the size ceiling, and a tree with no lock is never touched'
 owners:
 - marius
 tags:
 - cluster/unclassified
-claimed_at: 2026-11-04
-claimed_by: 48d211eb-3bd8-4247-975b-631a73b1a87a
+closed: 2026-11-04
 opened: 2026-11-04
 severity: med
+unverified: 'The idle rule has run only against the fake pools of tests/gate-slot.sh case J2. The green gate leased a RAM slot, so slot_tend did not run on the real disk pool, and no real idle slot has been removed yet. The 3-day default is the author''s ruling, not the operator''s. Still not covered: a tree with no lock file (the ra-wt-fix-hints case) needs an explicit operator sweep, and the ceiling is still checked only at lease start.'
 ---
 
 # BUG: the gate's disk slots have no idle-age bound
@@ -51,19 +51,24 @@ Branch `experiments`, `scripts/slot-pool.sh` as of this date, pool `~/.cache/cod
 2. **Hypothesis:** this pool caused the 97G-per-10-minute write bursts that another session read from atop. **Verdict:** not tested. Writes were not measured here. That analysis is unverified and also names a Docker container of the setup-ab evaluation, which is a separate case.
 
 ## Fix
-Not applied. Proposal, to be settled before code:
-1. In `slot_tend`, under the slot's own lock, empty a free disk slot whose `.codescout-lessee` stamp is older than a new `CODESCOUT_SLOT_IDLE_DAYS`. The default is an operator choice; 3 days would have removed `slot-1`. The stamp is written when a lease starts, so a run longer than the limit looks old after it releases. For days that is acceptable.
-2. Trees with no lock stay out of `slot_tend`, because the lock is the only proof of idleness. They need a separate, explicit operator sweep, not an automatic one.
-Test first, in `tests/gate-slot.sh`, as a new case beside G-J.
+
+Applied in `7938836ec` (`scripts/slot-pool.sh`, `scripts/gate.sh`). `slot_tend` now also removes a free slot whose `.codescout-lessee` stamp is older than `CODESCOUT_SLOT_IDLE_DAYS` (default 3, `0` turns the rule off, a non-number exits 2). The lock decides, and the stamp is read again under the lock, because a lease that finished in between has restamped the slot. A slot with no stamp has an unknown age and is kept. Ruling: the 3-day default and `0` = off are the author's choice; with 3 days, the 22G `slot-1` of 2026-11-04 would have gone. Not done: trees with no lock (second item of the proposal), which stay an explicit operator sweep.
+
+## Fix provenance
+
+- **SHA:** `7938836ecb4aaf396d8ec5526abe2c783037c305` (`experiments`)
+- **patch-id:** `f23b7d8217d680c8e617f47842a8a32746797ffd`
 
 ## Tests added
-N/A - nothing changed in code yet. The fix must add the case above and watch it fail first.
+
+Case J2 in `tests/gate-slot.sh` (tags `j2a` to `j2e`): a free slot idle past the limit is removed and the removal is reported once; a fresh stamp, a missing stamp, a held slot and the run's own slot are kept; `IDLE_DAYS=0` turns the rule off; with no setting the limit is 3 days; a bad value exits 2 and runs no lane. Seen red before the change for the stated reason (5 of 5 assertions that need the rule failed, 469 others passed), then 474 passed, 0 failed. `tests/mutation-probe.sh`: 92 passed. `./scripts/gate.sh`: all lanes exit 0.
 
 ## Workarounds
 Done 2026-11-04 with the operator's approval: `slot-1` removed under its lock (`flock -n slot-1.lock rm -rf slot-1`), `ra-wt-fix-hints` removed after finding no process with that directory as cwd. The RAM tier was raised from 2 to 4 slots in `~/.config/codescout/gate-pool.env` (backup in the session scratchpad), so more runs avoid the disk pool.
 
 ## Resume
-Settle the idle default, write the failing case in `tests/gate-slot.sh`, implement in `slot_tend`, then run `./scripts/gate.sh`.
+
+Done. If the operator wants a different default, change `SLOT_IDLE_DAYS_DEFAULT` in `scripts/slot-pool.sh` and check the stamp ages in J2 (`-10 days` goes, `-2 days` stays). The no-lock sweep and in-run growth remain open and are not tracked here.
 
 ## References
 - `scripts/slot-pool.sh` (`slot_tend`, header comment)
