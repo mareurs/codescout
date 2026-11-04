@@ -1,16 +1,16 @@
 ---
 id: '5faa9c6e3fd2a6f9'
 kind: bug
-status: taken
+status: fixed
 title: Native bootstrap says semantic index is not built while status is queryable
 tags:
 - cluster/unclassified
 - effort-steering
-claimed_at: 2026-11-04
-claimed_by: 48d211eb-3bd8-4247-975b-631a73b1a87a
+closed: 2026-11-04
 opened: 2026-11-04
 owner: marius
 severity: medium
+unverified: 'Not run against a real sqlite-vec store: the two tests seed the index-status cache. The running server binary was not rebuilt after this commit, so a live bootstrap block still comes from the old code.'
 ---
 
 # BUG: Native bootstrap disagrees with a queryable semantic index
@@ -43,9 +43,16 @@ The observed Git-baseline/no-op-index control did not remove the contradiction. 
 
 ## Fix
 
-Applied 2026-11-04, not yet committed when this was written. `Agent::project_status` no longer tests whether the legacy `.codescout/embeddings/project.db` exists. It calls `crate::tools::config::check_has_index_cached` (now `pub(crate)`), the bounded and cached `project_has_chunks` probe that `activate` already uses. The bootstrap block and `index(action="status")` therefore read the same store.
+Applied 2026-11-04 in commit `a8ee4db68`. `Agent::project_status` no longer tests whether the legacy `.codescout/embeddings/project.db` exists. It calls `crate::tools::config::check_has_index_cached` (now `pub(crate)`), the bounded and cached `project_has_chunks` probe that `activate` already uses. The bootstrap block and `index(action="status")` therefore read the same store.
 
 Not changed: the coverage verdict stays separate (the four whitespace-only files, `cc61bf08099dac2d`). The first probe per session waits at most `FIRST_PROBE_TIMEOUT` (2 s). On a timeout it reports "Not built" and does not cache that answer, as `activate` already does.
+
+## Fix provenance
+
+- **SHA:** `a8ee4db68d55bd26f0007f98ef1584b3934b1112` (`experiments`)
+- **patch-id:** `872fd87c7b8d9f328863f0a8b0b8af1467abeb72`
+
+The commit was local when written, not pushed. `./scripts/gate.sh` was green on the tree before the commit: FMT, CLIPPY, LEAN and DEFAULT exited 0, and 8876 tests passed.
 
 ## Tests added
 
