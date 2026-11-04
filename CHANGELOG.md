@@ -235,6 +235,8 @@ All notable changes to codescout are documented here.
 
 ### Changed
 
+- **`edit_code replace` returns an `advice` field when a changed declaration has a by-name call in another file, and no longer carries an unconditional `hint`; the `rename` hint names the new symbol.** A body-only replace now returns neither.
+
 - **`codescout backfill-chunks` reports its scope as `scope.abs_path_root`, not
   `scope.abs_path_like`, and the value is a plain path.** The scoped run now selects rows at or
   under the project root by exact comparison instead of `abs_path LIKE '<root>%'`, which had no

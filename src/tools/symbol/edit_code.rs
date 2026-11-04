@@ -1368,20 +1368,6 @@ impl EditCode {
             &lines,
         )?;
 
-        // Runs on the pre-write file: the edited file is excluded from the candidates, so
-        // the order against the write does not matter, and a rolled-back or refused edit
-        // simply discards the answer. `lang` is the LSP languageId; the check keys on the
-        // AST vocabulary (they differ for React files: `typescriptreact` is `tsx`).
-        let callers = check_callers(
-            ctx,
-            &full_path,
-            crate::lsp::servers::ast_language_for_lsp_id(&lang),
-            &sym.name,
-            &lines[start..end].join("\n"),
-            &effective_body,
-        )
-        .await;
-
         let pre_ast = crate::ast::extract_symbols(&full_path).ok();
         let pre_count = pre_ast
             .as_ref()
@@ -1423,6 +1409,21 @@ impl EditCode {
             )
             .into());
         }
+
+        // Runs on the pre-write file: the edited file is excluded from the candidates, so
+        // the order against the write does not matter. It sits after the shrink guard so
+        // a refused edit never spends the check's budget. `lang` is the LSP languageId;
+        // the check keys on the AST vocabulary (they differ for React files:
+        // `typescriptreact` is `tsx`).
+        let callers = check_callers(
+            ctx,
+            &full_path,
+            crate::lsp::servers::ast_language_for_lsp_id(&lang),
+            &sym.name,
+            &lines[start..end].join("\n"),
+            &effective_body,
+        )
+        .await;
 
         let mut new_lines = Vec::new();
         new_lines.extend_from_slice(&lines[..start]);
