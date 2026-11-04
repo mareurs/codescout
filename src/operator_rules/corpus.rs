@@ -56,4 +56,38 @@ mod tests {
             fresh.iter().map(|r| &r.id).collect::<Vec<_>>()
         );
     }
+
+    /// OP-4's imperative names every profile `compile` writes to, and no other.
+    ///
+    /// The ledger is prose and `PROFILE_DIRS` is code, so adding a profile touched one
+    /// and not the other: `dd4737085` added `.claude-stef` to `PROFILE_DIRS` while
+    /// OP-4 kept telling every routed config write to update "all three profiles",
+    /// i.e. to skip the fourth (`context-injection-session-log:F-19`). This pins the
+    /// two lists together in both directions.
+    #[test]
+    fn op_4_names_exactly_the_profiles_compile_writes_to() {
+        use super::super::profiles::PROFILE_DIRS;
+        let op4 = OPERATOR_RULES
+            .iter()
+            .find(|r| r.id == "OP-4")
+            .expect("OP-4 is missing from the shipped ledger");
+        for dir in PROFILE_DIRS {
+            let needle = format!("`~/{dir}`");
+            assert!(
+                op4.imperative.contains(&needle),
+                "OP-4's imperative omits {needle}, which PROFILE_DIRS compiles into — a routed \
+             config write would be told to skip it: {:?}",
+                op4.imperative
+            );
+        }
+        let named = op4.imperative.matches("`~/.claude").count();
+        assert_eq!(
+            named,
+            PROFILE_DIRS.len(),
+            "OP-4 names {named} profile dirs but PROFILE_DIRS has {} — one list gained an entry \
+         the other did not: {:?}",
+            PROFILE_DIRS.len(),
+            op4.imperative
+        );
+    }
 }

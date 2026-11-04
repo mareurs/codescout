@@ -3161,7 +3161,7 @@ async fn a_real_edit_file_write_under_dot_claude_delivers_op_4() {
     // would otherwise ship green. Same reasoning as
     // `a_triggered_operator_rule_is_delivered_once_per_session`.
     assert!(
-        text.contains("all three profiles"),
+        text.contains("all four profiles"),
         "the OP-4 block arrived without its imperative — marker present, rule text absent: \
          {text}"
     );

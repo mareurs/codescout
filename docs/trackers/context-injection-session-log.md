@@ -8,7 +8,7 @@ tags:
 - subagents
 - session-log
 topic: context-injection
-entry_high_water_F: 18
+entry_high_water_F: 19
 entry_high_water_W: 6
 entry_prefix:
 - F
@@ -52,6 +52,7 @@ author to make.
 | F-16 | 2026-09-26 | med | plan-prose | mitigated | The spec's per-block delivery shape is not attributable at the coordinator — keys are per engine, not per block |
 | F-17 | 2026-09-26 | high | architectural | fixed-verified | The live check found `tool_use_id` NULL on every row: rmcp puts `_meta` in RequestContext.meta, and the test built params in-process |
 | F-18 | 2026-09-28 | med | context-rendering | mitigated | A harness-rendered CLAUDE.md strips HTML comments, so the controller read "no markers" and designed a ruling around it |
+| F-19 | 2026-11-04 | med | plan-prose | open | Plan statuses, this log's Index and GG-N all lag the code — unbuilt steps are indistinguishable from shipped ones |
 
 ## Wins Index
 
@@ -1617,6 +1618,22 @@ True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` o
 **Cost:** One ruling (R79's markerless branch) was designed for a case that does not exist on this machine. It is kept for robustness, but real data never exercises it. A related mistake in the same hour: the controller's hand-rolled awk summary placed a `###` sub-section under the wrong `##` entry, and a reviewer's independent fence-aware parser corrected it. Neither error shipped, because both were caught by a party that read the bytes.
 
 **Lesson:** The copy of an instruction file shown in context is a RENDERING, not the file. Comments, markers, and anything else the harness strips are invisible there. Before a claim about an instruction file's structure becomes a ruling, a test fixture or a doc, check it against the bytes (`grep -c` on the path, or `sha256sum` across copies). This is the context-injection instance of reconnaissance's "read the actual shape, not docs".
+
+## F-19 — Plan statuses, this log's Index and GG-N all lag the code — unbuilt steps are indistinguishable from shipped ones
+
+**Valid:** dated 2026-11-04
+
+**Observed:** A five-stream audit of the context-injection plan family (operator rules, retrieval-engine coordination, guide ledger + section grain, subagent-principal ADR, System 1 measurement) found that no status surface in the family reports what the code holds:
+- Every Layer 2a plan, both operator-rules plans and the section-grain plan read `draft` (Phase 1 operator-rules reads `active`), yet their tasks shipped; the operator-rules plans show 0 of 41 and 0 of 38 boxes ticked.
+- This log's own Index marks F-5, F-6, F-11, F-12 and F-13 `open`; their bodies, the ADR and archived bugs `bebe1b228d668b40` / `5201164f55ec16ff` show the work done. Only F-1 is really open.
+- `resume-get-guide-section-grain-phases-2-3` marks GG-1 and GG-9 open; `d34c398e8` shipped Phase 2 and the coordinator exists.
+- The two deep-agent observation trackers still say "collecting" a month after their window closed with no review held.
+
+**Cost:** a reader who trusts any of these fields either re-plans shipped work or misses that 2b/2c/3/4 of the retrieval spec, Phase 3 arms of the operator spec and section-grain Phase 3 were never built *and never declined*. The audit needed a file:line / test / SHA per item to tell the two apart.
+
+**Live defect surfaced alongside:** `OP-4`'s compiled-in imperative still says "all three profiles — `~/.claude`, `~/.claude-sdd`, `~/.claude-kat`" while `PROFILE_DIRS` has four; `emit_operator_rules` delivers that text on routed config writes.
+
+**Fix idea:** reconcile statuses in one hygiene pass; for the unbuilt-and-undeclined steps, record an explicit decision (build / park with trigger / decline) so the gap stops being invisible.
 
 ## Template for new entries
 

@@ -1040,7 +1040,7 @@ doc(action="find", kind="bug",
 ```
 
 A `zombie` hit in that query is a "has this recurred?" check, not a task to pick up —
-most zombie records have no available work by design (see § Status vocabulary). Filter
+most zombie records have no available work by design (see § Bug frontmatter and status vocabulary). Filter
 it back out explicitly (`{"status": {"in": ["open", "taken", "investigating"]}}`) when you
 specifically want only the actionable three.
 

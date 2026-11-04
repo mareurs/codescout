@@ -124,30 +124,32 @@ The source cites one validation, 2026-07-07 (EDU-Planner backend-kotlin, SI-29 S
 
 Transcribed, not rewritten. The prohibition is asymmetric and the source says so explicitly: **reading** the built-in store is fine, **writing** durable facts to it is not. The imperative is scoped to the write for that reason, and the selector follows it.
 
-The mechanism is per-profile isolation, which is why this is an operator rule and not a project one. Built-in memory lives under `<config-dir>/projects/.../memory/`, and this machine runs three config dirs — `~/.claude`, `~/.claude-sdd`, `~/.claude-kat`. Anything written to one profile's store is invisible to the other two, so a fact recorded there is lost to two thirds of this operator's sessions. The failure is silent in the worst direction: the write succeeds, so nothing signals that the fact did not travel.
+The mechanism is per-profile isolation, which is why this is an operator rule and not a project one. Built-in memory lives under `<config-dir>/projects/.../memory/`, and this machine runs four config dirs — `~/.claude`, `~/.claude-sdd`, `~/.claude-kat`, `~/.claude-stef`. Anything written to one profile's store is invisible to the other three, so a fact recorded there is lost to three quarters of this operator's sessions. The failure is silent in the worst direction: the write succeeds, so nothing signals that the fact did not travel.
 
 The two durable surfaces the source names: **codescout memory** (`memory()`) for project-exploration notes and system-prompt facts tied to a codebase, and **codescout trackers** (librarian artifacts) for structured ongoing state — sessions, decisions, bugs, friction logs.
 
-`**Covers:** durable-fact-written-to-per-profile-store` names the failure mode rather than the tool, so Gate 3(a) compares it against future rules on the same axis. The failure is not "used the wrong API"; it is "wrote something meant to outlive the session into a store two thirds of the sessions cannot read".
+`**Covers:** durable-fact-written-to-per-profile-store` names the failure mode rather than the tool, so Gate 3(a) compares it against future rules on the same axis. The failure is not "used the wrong API"; it is "wrote something meant to outlive the session into a store three quarters of the sessions cannot read".
 
-## OP-4 — Config changes apply to all three Claude Code profiles
+## OP-4 — Config changes apply to every Claude Code profile
 
-**Imperative:** Apply every Claude Code config change to all three profiles — `~/.claude`, `~/.claude-sdd`, `~/.claude-kat`.
+**Imperative:** Apply every Claude Code config change to all four profiles — `~/.claude`, `~/.claude-sdd`, `~/.claude-kat`, `~/.claude-stef`.
 **Binding:** triggered
 **Shape:** imperative
 **Covers:** partial-profile-config-update
 **Serves:** edit_file(path~/.claude), create_file(path~/.claude)
 **Evidence:** unmeasured
-**Rests on:** `~/.claude/CLAUDE.md` § *Three Claude Code Instances*
+**Rests on:** `~/.claude/CLAUDE.md` § *Four Claude Code Instances*
 **Status:** active
 
-**Valid:** conditional — this machine stops running three profiles, or the profiles gain a shared config layer
+**Valid:** conditional — this machine stops running more than one profile, or the profiles gain a shared config layer
 
-Transcribed, not rewritten. Scope as the source states it: plugins, `settings.json`, `installed_plugins.json` — config that is per-profile by construction. The three profiles share plugin **source** repos but have separate caches, settings, and install records, so a change applied to one is simply absent from the other two.
+> **Updated 2026-11-04 — three became four.** `dd4737085` (2026-10-31) added `.claude-stef` to `PROFILE_DIRS`, but this imperative kept saying "all three", so `emit_operator_rules` told every routed config write to skip the fourth profile for four days (`context-injection-session-log:F-19`). The imperative now names all four, and `operator_rules::corpus::tests::op_4_names_exactly_the_profiles_compile_writes_to` pins it to `PROFILE_DIRS` in both directions. The 2026-08-27 measurement below is dated and stays as written.
+
+Transcribed, not rewritten. Scope as the source states it: plugins, `settings.json`, `installed_plugins.json` — config that is per-profile by construction. The profiles share plugin **source** repos but have separate caches, settings, and install records, so a change applied to one is simply absent from the others.
 
 **The verification half, transcribed:** each profile must use its **own** `cache/` directory. When updating install records, verify that `installPath` starts with the same profile root as the file containing it. The source records the case that motivates this — 2026-05-16, `~/.claude-kat/installed_plugins.json` was found with a cross-profile `installPath` pointing at `~/.claude`'s cache, attributed to past config drift.
 
-That case is why the imperative is "apply to all three" and not "remember there are three": the drift already happened once, and the wrong state was well-formed JSON that no tool objected to.
+That case is why the imperative is "apply to all four" and not "remember there are four": the drift already happened once, and the wrong state was well-formed JSON that no tool objected to.
 
 This rule's own subject matter makes it the most self-demonstrating entry in the ledger, and the compiler is the mechanism that discharges it for one specific file. Measured 2026-08-27 before any compile had run: `~/.claude/CLAUDE.md` is 4639 bytes (md5 `b583ffaa`) while `~/.claude-sdd/CLAUDE.md` and `~/.claude-kat/CLAUDE.md` are both 4640 (`d52fc86c`) — two in step, one drifted, with nothing having reported it. `operator-rules check` is the check that did not exist; this entry is the rule it enforces.
 
