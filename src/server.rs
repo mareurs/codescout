@@ -13114,6 +13114,107 @@ mod guide_hint_tests {
             "the later blocks must carry the opener's verification imperative"
         );
     }
+    /// The cold twin of `a_p50_session_stays_under_the_committed_emission_byte_ceiling` (CIW-12).
+    ///
+    /// The warm fixture marks the session opener as delivered before every call, so it can
+    /// never see the opener's bytes. A real session's first call draws the bootstrap guide on
+    /// top of the call's own section, and this test prices that: the same six `doc` shapes,
+    /// no `warm_ledger`, the fixture root normalised the same way.
+    ///
+    /// `COLD_CEILING` is DERIVED, not chosen: 15,543 B measured on 2026-11-04 (create 3,552,
+    /// get 2,733, update 2,685, append_entry 1,634, find 2,649, move 2,290), plus the 128 B
+    /// margin the warm ceiling uses. It is 3,299 B above the warm ceiling. Raising it is a
+    /// spec amendment, not a fix: when it fires, compress the guide that grew.
+    #[tokio::test]
+    async fn a_cold_p50_session_stays_under_the_committed_cold_emission_byte_ceiling() {
+        const COLD_CEILING: usize = 15_671;
+        const ROOT_TOKEN: &str = "<ROOT>";
+        let (dir, server) = make_server().await;
+        let mut roots = vec![
+            dir.path().to_string_lossy().into_owned(),
+            to_forward_slash(dir.path()),
+        ];
+        if let Ok(c) = std::fs::canonicalize(dir.path()) {
+            roots.push(c.to_string_lossy().into_owned());
+            roots.push(to_forward_slash(&c));
+        }
+        roots.sort_by_key(|r| std::cmp::Reverse(r.len()));
+        roots.dedup();
+        let mut total = 0usize;
+        let mut first_call_blocks: Vec<String> = Vec::new();
+        let mut shapes: Vec<(&str, Value)> = vec![(
+            "create",
+            json!({"action": "create", "rel_path": "docs/specs/p50-fixture.md", "kind": "tracker",
+                   "title": "p50 ceiling fixture", "body": "fixture body",
+                   "extra": {"entry_prefix": "T"}}),
+        )];
+        let mut id = String::new();
+        while !shapes.is_empty() {
+            let (label, input) = shapes.remove(0);
+            let result = server
+                .call_tool_by_name("doc", input)
+                .await
+                .expect("dispatch ok");
+            // Guide injection runs only on a call's success path, so a failed call would
+            // report 0 B, which looks exactly like legitimate dedup. Check both shapes.
+            assert!(
+                result.is_error.is_none_or(|e| !e),
+                "{label} call must succeed for its bytes to count: {:?}",
+                result.content
+            );
+            let primary = result.content[0].as_text().expect("primary is text");
+            if let Ok(body) = serde_json::from_str::<Value>(&primary.text) {
+                assert_ne!(body.get("ok"), Some(&Value::Bool(false)), "{label}: {body}");
+                if label == "create" {
+                    id = body["id"]
+                        .as_str()
+                        .expect("create returns an id")
+                        .to_string();
+                    shapes.extend([
+                        ("get", json!({"action": "get", "id": id})),
+                        (
+                            "update",
+                            json!({"action": "update", "id": id, "patch": {"status": "active"}}),
+                        ),
+                        (
+                            "append_entry",
+                            json!({"action": "append_entry", "id": id, "id_prefix": "T"}),
+                        ),
+                        ("find", json!({"action": "find"})),
+                        (
+                            "move",
+                            json!({"action": "move", "id": id,
+                                        "new_rel_path": "docs/specs/p50-fixture-moved.md"}),
+                        ),
+                    ]);
+                }
+            }
+            let blocks = guide_blocks(&result.content);
+            for b in &blocks {
+                let (s, _) = strip_fixture_roots(b, &roots, ROOT_TOKEN);
+                total += s.len();
+            }
+            if label == "create" {
+                first_call_blocks = blocks;
+            }
+        }
+        assert!(!id.is_empty(), "the create call must thread its id through");
+        // The discriminator: this test is cold only if the opener really rode the first call.
+        assert!(
+            first_call_blocks
+                .iter()
+                .any(|b| b.contains("ALWAYS VERIFY")),
+            "the first call of a cold session must carry the session opener, or this \
+             fixture is warm and measures nothing the warm ceiling does not"
+        );
+        assert!(
+            total <= COLD_CEILING,
+            "a cold p50 session emitted {total} B after the primary (cold ceiling \
+             {COLD_CEILING} B, margin {} B). Raising COLD_CEILING is a spec amendment, not \
+             a fix: compress the guide section or the opener that grew.",
+            COLD_CEILING as i64 - total as i64
+        );
+    }
 
     /// Once per session, not once per call — the opener is subject to the same
     /// ledger dedup as every other topic.

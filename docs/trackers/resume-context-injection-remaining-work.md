@@ -43,7 +43,7 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 | CIW-9 | operator | S | open | Push the local commits in three repos |
 | CIW-10 | any | M | done | Attribution scan: store each operation's write targets in the cache entry (approach 2) |
 | CIW-11 | any | S–M | done | Route `Onboarding::call_content` through `run_post` |
-| CIW-12 | any | S–M | open | Emission ceiling coverage: the session opener and a real p50 session |
+| CIW-12 | any | S–M | done | Emission ceiling coverage: the session opener and a real p50 session |
 | CIW-13 | any | S | open | GG-11: `librarian` § Reference sits 14 B under its 2,500 B cap |
 | CIW-14 | any | S | open | GG-8: re-run the section-use probe against its pre-registered predictions |
 | CIW-15 | any | M | open | A write-time check on an `entry_prefix` declaration (F-1's owed mechanism) |
@@ -179,7 +179,7 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 ## CIW-12 — Emission ceiling coverage: the session opener and a real p50 session
 
-**Status:** open
+**Status:** done (cold ceiling added; real-transcript probe not run)
 **Valid:** dated 2026-11-04
 
 **Owner:** any. **Source:** `src/server.rs` `a_p50_session_stays_under_the_committed_emission_byte_ceiling` (`CEILING = 12_244`) and its comment (≈L17926–17934).
@@ -189,6 +189,8 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 **Next:** a fixture variant without `warm_ledger`; one probe run of p50 bytes on real transcripts.
 
 **Partial result 2026-11-04 (cold fixture measured; real transcripts not run).** A throwaway probe ran the fixture's six `doc` shapes with NO `warm_ledger`, fixture root normalised as the fixture does, and was removed afterwards (`git diff` on `src/server.rs` empty). Bytes after the primary block: `create` 3,552 (3 blocks), `get` 2,733, `update` 2,685, `append_entry` 1,634, `find` 2,649, `move` 2,290. **Cold total 15,543 B against `CEILING = 12_244`: 3,299 B (27%) over.** The comment's "roughly 15,351 B" was a conservation model, not a measurement; the measurement is 192 B higher. So the ceiling holds only because the fixture hides the opener: a real session's first call draws the bootstrap guide on top. Decision for the operator, not made here: raising `CEILING` is a spec amendment by its own comment. Options are (a) keep the warm ceiling as the section-grain guard and add a second, cold ceiling at about 15,543 B plus margin, or (b) leave it recorded. The permanent cold fixture variant is NOT added: it needs that ceiling value.
+
+**Resolved 2026-11-04 (operator chose option (a)).** Added `guide_hint_tests::a_cold_p50_session_stays_under_the_committed_cold_emission_byte_ceiling` with `COLD_CEILING = 15_671` (15,543 B measured + the 128 B margin the warm ceiling uses; the margin is my ruling). It runs the same six `doc` shapes with no `warm_ledger` and asserts the first call carries the opener (`ALWAYS VERIFY`), so it cannot silently turn warm. Two mutants killed: ceiling lowered to 15,000 reds with `emitted 15543 B ... margin -543 B`; a `warm_ledger` call reds on the opener assertion. Gate: default 8,879 passed, lean 6,012 passed. **Not done:** the one probe run of p50 bytes over real transcripts; the cold ceiling prices the fixture's six shapes, not a measured real session.
 
 ## CIW-13 — GG-11: `librarian` § Reference sits 14 B under its 2,500 B cap
 
