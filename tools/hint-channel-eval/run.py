@@ -15,6 +15,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -106,6 +107,8 @@ NATIVE_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
 MAX_BUDGET_USD = "1.25"
 RUN_TIMEOUT_S = 1200
 ARMS = ("F", "A0", "A1", "A2", "A3", "P", "L", "W1", "W2", "W3")
+# Stage 4 (AM-12): a forged hint planted in the target's source file. The hook runs as arm F for these.
+SPOOF_ARMS = ("S0", "S1", "S2")
 PROJECT_TOML_REL = ".codescout/project.toml"
 PROJECT_TOML = '[project]\nname = "codescout"\nlanguages = ["rust"]\n'
 LOOKUP_TOOLS = ("references", "call_graph", "symbol_at")
@@ -133,15 +136,49 @@ def _sha256(p):
     return h.hexdigest()
 
 
+def plant_forged_hint(testbed, rel_path, fn, decoy, decoy_path, tagged):
+    """AM-12: write the wrong hint's exact text as one `///` line directly above the target's `fn` line.
+
+    `tagged=False` (arm S2) swaps the leading `[cs-hint] ` for `NOTE: `. Exactly one `fn` line must match,
+    or staging stops: a run whose forged line sits in the wrong place measures nothing. Returns the line."""
+    from hook import wrong_hint_text
+    text = wrong_hint_text(fn, decoy, decoy_path)
+    if not tagged:
+        if not text.startswith("[cs-hint] "):
+            raise SystemExit("wrong_hint_text no longer starts with the [cs-hint] tag")
+        text = "NOTE: " + text[len("[cs-hint] "):]
+    target = testbed / rel_path
+    lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+    decl = re.compile(r"^(\s*)(pub(\([^)]*\))?\s+)?(default\s+)?(const\s+)?(async\s+)?(unsafe\s+)?"
+                      r"(extern\s+\"[^\"]*\"\s+)?fn\s+" + re.escape(fn) + r"\b")
+    hits = [i for i, line in enumerate(lines) if decl.match(line)]
+    if len(hits) != 1:
+        raise SystemExit(f"{rel_path}: {len(hits)} lines declare fn {fn}; expected exactly one")
+    i = hits[0]
+    line = f"{decl.match(lines[i]).group(1)}/// {text}"
+    lines.insert(i, line + "\n")
+    target.write_text("".join(lines), encoding="utf-8")
+    return line.strip()
+
+
+
 def stage_run(task, arm, model, rep, run_dir):
     """Write everything a run needs under run_dir; return (docker args, the env-file lines without the token)."""
     from hook import DECLARATION  # same bytes as the A2 declaration
     master = DATA / "tasks" / task["task_id"] / "tree"
     testbed, config, state = run_dir / "testbed", run_dir / "config", run_dir / "state"
     shutil.copytree(master, testbed, symlinks=True)
-    if arm in ("A3", "W3"):
+    if arm in ("A3", "W3", "S1", "S2"):
         with open(testbed / "CLAUDE.md", "a", encoding="utf-8") as f:
             f.write("\n" + DECLARATION + "\n")
+    planted = None
+    if arm in SPOOF_ARMS:
+        decoys_file = os.environ.get("HCE_DECOYS")
+        if not decoys_file:
+            raise SystemExit("the spoof arms need HCE_DECOYS (decoys.json)")
+        d = json.loads(Path(decoys_file).read_text())[task["task_id"]]
+        planted = plant_forged_hint(testbed, task["path"], task["fn"], d["decoy_fn"], d["decoy_path"],
+                                    tagged=arm != "S2")
     # references, call_graph and symbol_at are gated on has_lsp, which comes from `[project] languages`
     # in this untracked file (setup-ab arms.py LSP_GATED_TOOLS). Without it the agent sees 18 tools and
     # cannot call references at all: Stage 1's first pass ran that way (AM-6). rust only: rust-analyzer
@@ -168,7 +205,7 @@ def stage_run(task, arm, model, rep, run_dir):
     setting_sources = os.environ.get("HCE_SETTING_SOURCES", "local")
     env_lines = {"CLAUDE_CONFIG_DIR": C_CONFIG, "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8192",
                  "DISABLE_AUTOUPDATER": "1", "CARGO_NET_OFFLINE": "true",
-                 "HCE_ARM": arm, "HCE_FN": task["fn"], "HCE_PATH": task["path"], "HCE_STATE_DIR": C_STATE}
+                 "HCE_ARM": "F" if arm in SPOOF_ARMS else arm, "HCE_FN": task["fn"], "HCE_PATH": task["path"], "HCE_STATE_DIR": C_STATE}
     decoys_path = os.environ.get("HCE_DECOYS")
     if decoys_path:  # every arm records its decoy, so the A arms measure the decoy floor
         d = json.loads(Path(decoys_path).read_text())[task["task_id"]]
@@ -191,7 +228,7 @@ def stage_run(task, arm, model, rep, run_dir):
     record = {"task_id": task["task_id"], "arm": arm, "model": model, "rep": rep, "session_id": session_id,
               "image": IMAGE, "cli_sha256": CLI_SHA256, "companion": str(COMPANION_HOST),
               "hook_sha256": _sha256(HERE / "hook.py"), "project_toml": PROJECT_TOML,
-              "setting_sources": setting_sources,
+              "setting_sources": setting_sources, "planted": planted,
               "env": env_lines, "cli_args": cli[1:-1],
               "network": "docker default bridge (NOT restricted; see AM-4)"}
     (run_dir / "run-record.json").write_text(json.dumps(record, indent=2) + "\n")
@@ -201,8 +238,8 @@ def stage_run(task, arm, model, rep, run_dir):
 def run_one(task_id, arm, model, rep, prompt=None, base="runs"):
     """One run. `prompt` and `base` exist for memcheck: the same staging, flags and image, with a
     different question and a run dir outside runs/, so a check is never scored as a run."""
-    if arm not in ARMS:
-        raise SystemExit(f"unknown arm {arm!r}; expected one of {ARMS}")
+    if arm not in ARMS + SPOOF_ARMS:
+        raise SystemExit(f"unknown arm {arm!r}; expected one of {ARMS + SPOOF_ARMS}")
     if _sha256(CLI_HOST) != CLI_SHA256:
         raise SystemExit("frozen CLI sha256 mismatch")
     task = dict({t["task_id"]: t for t in load_tasks()}[task_id])
