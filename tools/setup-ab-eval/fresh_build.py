@@ -50,6 +50,7 @@ import os
 import re
 import shutil
 import subprocess
+import tarfile
 import time
 from pathlib import Path
 
@@ -501,6 +502,9 @@ _DOCKER_NAME = re.compile(r"[A-Za-z0-9]+(?:(?:[._]|__|-+)[A-Za-z0-9]+)*")
 _BASE_IMAGE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/@-]*")
 _WORKDIR = re.compile(r"/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*")
 _TREE_TAR = "/tmp/sab-tree.tar"  # inside the container; removed by the extract step, never committed
+_CONTAINER_ID = re.compile(r"^[0-9a-f]{64}$", re.MULTILINE)
+_IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
+_LISTED = 10  # differing paths named in an error
 _LOG_TAIL = 1500
 _EVIDENCE_TAIL = 500
 _COMPILING = re.compile(r"^[ \t]*Compiling ", re.MULTILINE)
@@ -521,8 +525,11 @@ _STEP_NAMES = {
     "run": "docker run", "clear-tracked": "delete tracked files", "clear-dirs": "delete empty directories",
     "copy": "docker cp", "extract": "extract tree", "touch": "touch files", "metadata": "cargo metadata",
     "metadata-network": "cargo metadata (network)", "warm-build": "warm build", "git-add": "git add",
-    "git-commit": "git commit", "rev-parse": "git rev-parse", "docker-commit": "docker commit",
-    "inspect": "docker image inspect", "rmi": "docker rmi",
+    "git-add-force": "git add -f", "git-commit": "git commit", "ls-files": "git ls-files",
+    "rev-parse": "git rev-parse", "docker-commit": "docker commit",
+    "inspect": "docker image inspect", "rmi": "docker rmi", "tag-check": "docker image inspect (tag)",
+    "base-id": "docker image inspect (base image)", "list-files": "list files",
+    "delete-extras": "delete leftover files",
 }
 
 
@@ -580,74 +587,168 @@ def _text(proc):
     return out.decode("utf-8", errors="replace") if isinstance(out, bytes) else str(out)
 
 
+def _tree_files(tree_tar):
+    """`(paths, sha256)` of the tree tarball: the relative path of every file and symlink in it
+    (directories are not listed) and the hex SHA-256 of the archive. `BuildError` for an archive
+    that cannot be read, holds no file, or names an unsafe or non-UTF-8 path."""
+    digest, paths = hashlib.sha256(), set()
+    try:
+        with open(tree_tar, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        with tarfile.open(tree_tar, "r:*") as tar:
+            for member in tar:
+                if not (member.isreg() or member.issym() or member.islnk()):
+                    continue
+                name = member.name
+                while name.startswith("./"):
+                    name = name[2:]
+                parts = name.split("/")
+                if name.startswith("/") or {"", ".", ".."} & set(parts) or "\0" in name:
+                    raise BuildError("tree tarball %s holds an unsafe path: %r" % (tree_tar, member.name))
+                try:
+                    name.encode("utf-8")
+                except UnicodeEncodeError:
+                    raise BuildError("tree tarball %s holds a path that is not UTF-8: %r" % (tree_tar, name)) from None
+                paths.add(name)
+    except (OSError, tarfile.TarError) as exc:
+        raise BuildError("cannot read tree tarball %s: %s" % (tree_tar, exc)) from exc
+    if not paths:
+        raise BuildError("tree tarball %s holds no file" % tree_tar)
+    return paths, digest.hexdigest()
+
+
+def _nul_list(paths, prefix=""):
+    return "".join("%s%s\0" % (prefix, p) for p in sorted(paths))
+
+
+def _from_nul(text, prefix, what):
+    """The paths of a NUL-separated listing, each starting with `prefix` (removed). `BuildError` otherwise."""
+    out = set()
+    for entry in text.split("\0"):
+        if not entry:
+            continue
+        if not entry.startswith(prefix):
+            raise BuildError("%s printed something that is not a path: %r" % (what, entry[:200]))
+        out.add(entry[len(prefix):])
+    return out
+
+
+def _named(paths):
+    shown = sorted(paths)[:_LISTED]
+    return ", ".join(shown) + (" (+%d more)" % (len(paths) - len(shown)) if len(paths) > len(shown) else "")
+
+
 class _Build:
     """The docker calls of one image build and their record. Every exit code comes from the
-    `CompletedProcess` of the docker call itself (`check=False`), never from a wrapper."""
+    `CompletedProcess` of the docker call itself (`check=False`), never from a wrapper.
 
-    def __init__(self, docker, container, workdir):
+    The container is addressed by the ID `docker run -d` printed. `name` is used only when `docker
+    run` gave no answer at all (timeout, no docker binary): then the container may exist, and it is
+    removed by name. A `docker run` that answered with a non-zero exit created nothing of ours (the
+    usual cause is a name held by another build), so nothing is removed."""
+
+    def __init__(self, docker, name, workdir):
         self.docker = docker
-        self.container = container
+        self.name = name
         self.workdir = workdir
+        self.cid = None
+        self.unanswered = False  # `docker run` gave no answer: a container of this name may be ours
+        self.note = None
+        self.interrupt = None  # a KeyboardInterrupt/SystemExit met while removing: re-raised after the evidence
         self.steps = []
-        self.call_raised = False  # the latest call died without an answer (timeout, no docker binary)
 
-    def run(self, step, *args, timeout):
+    def run(self, step, *args, timeout, data=None):
         """One docker call. `BuildError` when it times out or cannot start; a failing exit code is returned."""
-        name = _STEP_NAMES[step]
+        label = _STEP_NAMES[step]
         start = time.monotonic()
-        self.call_raised = False
         problem = None
+        extra = {} if data is None else {"data": data}
         try:
-            proc = self.docker(*args, check=False, timeout=timeout)
+            proc = self.docker(*args, check=False, timeout=timeout, **extra)
         except subprocess.TimeoutExpired as exc:
-            problem, cause = "%s timed out after %ss" % (name, timeout), exc
+            problem, cause = "%s timed out after %ss" % (label, timeout), exc
         except (OSError, ValueError, RuntimeError) as exc:
-            problem, cause = "%s: cannot run docker: %s" % (name, exc), exc
+            problem, cause = "%s: cannot run docker: %s" % (label, exc), exc
         seconds = round(time.monotonic() - start, 1)
         if problem is not None:
-            self.call_raised = True
             self.steps.append({"name": step, "returncode": None, "seconds": seconds, "error": problem})
             raise BuildError(problem) from cause
         self.steps.append({"name": step, "returncode": proc.returncode, "seconds": seconds,
                            "tail": _text(proc)[-_EVIDENCE_TAIL:]})
         return proc
 
-    def must(self, step, *args, timeout):
+    def must(self, step, *args, timeout, data=None):
         """`run`, and `BuildError` carrying the output tail unless the exit code is 0."""
-        proc = self.run(step, *args, timeout=timeout)
+        proc = self.run(step, *args, timeout=timeout, data=data)
         if proc.returncode != 0:
             raise BuildError("%s failed (exit %s): %s" % (_STEP_NAMES[step], proc.returncode,
                                                           _text(proc).rstrip()[-_LOG_TAIL:]))
         return proc
 
-    def exec(self, step, *cmd, env=(), check=True, timeout=1800):
-        """`docker exec` of `cmd` in the work directory; `env` entries are `-e` options of this exec only."""
+    def start(self, *args, timeout):
+        """`docker run -d`; remembers the container ID. See the class docstring for what is removed after a failure."""
+        try:
+            proc = self.run("run", *args, timeout=timeout)
+        except BaseException:  # no answer (timeout, no binary, interrupt): a container of this name may be ours
+            self.unanswered = True
+            raise
+        if proc.returncode != 0:
+            self.note = ("docker run exited %s: it created no container of this build, so nothing was removed"
+                         % proc.returncode)
+            raise BuildError("docker run failed (exit %s): %s" % (proc.returncode, _text(proc).rstrip()[-_LOG_TAIL:]))
+        ids = _CONTAINER_ID.findall(_text(proc))
+        if not ids:
+            self.unanswered = True
+            raise BuildError("docker run printed no container ID: %r" % _text(proc)[-_LOG_TAIL:])
+        self.cid = ids[-1]
+
+    def exec(self, step, *cmd, env=(), data=None, check=True, timeout=1800):
+        """`docker exec` of `cmd` in the work directory; `env` entries are `-e` options of this exec
+        only; `data` (text) is the standard input."""
         args = ["exec"]
+        if data is not None:
+            args.append("-i")
         for entry in env:
             args += ["-e", entry]
-        args += ["-w", self.workdir, self.container, *cmd]
-        return (self.must if check else self.run)(step, *args, timeout=timeout)
+        args += ["-w", self.workdir, self.cid, *cmd]
+        return (self.must if check else self.run)(step, *args, timeout=timeout, data=data)
 
     def bash(self, step, script, timeout=1800):
         return self.exec(step, "bash", "-o", "pipefail", "-c", script, timeout=timeout)
 
     def drop_tag(self, tag):
-        """Best-effort `docker rmi <tag>` of the tag this build just made; never raises."""
+        """Best-effort `docker rmi <tag>`, for a tag this build attempted to create; never raises."""
         try:
             self.run("rmi", "rmi", tag, timeout=600)
         except BuildError:
             pass
 
     def remove(self):
-        """`docker rm -f -v` of the container. Never raises: the outcome is returned for the evidence."""
+        """`docker rm -f -v` of the container, by ID (by name only after a `docker run` with no answer).
+        Never raises: the outcome is returned for the evidence. An interrupt met here is kept in
+        `self.interrupt` for the caller to re-raise once the evidence is written."""
+        if self.cid is not None:
+            target, by_name = self.cid, False
+        elif self.unanswered:
+            target, by_name = self.name, True
+        else:
+            return {"container_id": None, "container_removed": None, "container_removed_by_name": False,
+                    "removal_error": None, "removal_note": self.note or "no container was created by this build"}
+        rec = {"container_id": self.cid, "container_removed_by_name": by_name, "removal_note": self.note}
         try:
-            proc = self.docker("rm", "-f", "-v", self.container, check=False, timeout=600)
-        except Exception as exc:  # a failed removal must not replace the error that got us here
-            return {"container_removed": False, "removal_error": "%s: %s" % (type(exc).__name__, exc)}
+            proc = self.docker("rm", "-f", "-v", target, check=False, timeout=600)
+        except BaseException as exc:  # a failed removal must not replace the error that got us here
+            if not isinstance(exc, Exception):
+                self.interrupt = exc
+            rec.update(container_removed=False, removal_error="%s: %s" % (type(exc).__name__, exc))
+            return rec
         out = _text(proc).rstrip()
         if proc.returncode == 0 or "No such container" in out:
-            return {"container_removed": True, "removal_error": None}
-        return {"container_removed": False, "removal_error": "exit %s: %s" % (proc.returncode, out[-_LOG_TAIL:])}
+            rec.update(container_removed=True, removal_error=None)
+        else:
+            rec.update(container_removed=False, removal_error="exit %s: %s" % (proc.returncode, out[-_LOG_TAIL:]))
+        return rec
 
 
 def _write_evidence(evidence_dir, ev):
@@ -661,20 +762,32 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
 
     `base_image` is a task image whose `workdir` repo has no remote and one synthetic commit;
     `tree_tar` is the `git archive` of `upstream_base`. Steps, each exit code read from the docker
-    call itself: refuse under `MIN_FREE_GB` free (`free_gb()`, before any docker call); `docker run`
-    a container `sab-fresh-build-<id>` with network; delete the tracked files and the empty or
-    absent directories (not `target`, not `.git`); copy in and extract the tree and touch its
-    files; `cargo metadata` must succeed (offline first, then with the network); warm
-    `cargo test --no-run` with `-e CARGO_NET_OFFLINE=false` on that exec only, whose log must hold
-    at least one `Compiling` line (none means stale binaries); `git add -A` and a synthetic commit;
-    `docker commit` to `image_tag(repo, pr)`. The container is removed in a `finally`; no tag is
-    created before every check passed.
+    call itself: refuse under `MIN_FREE_GB` free (`free_gb()`, before any docker call) and an
+    unreadable tarball; refuse when the image tag already exists (the cache belongs to the caller;
+    this build never overwrites or deletes an image it did not make); read the base image's ID;
+    `docker run` a container `sab-fresh-build-<id>` with network, kept by the ID it prints; delete
+    the tracked files, copy in and extract the tree; list the files that remain and delete every
+    one that is not in the tarball (a leftover untracked or ignored file, a file of an old
+    directory), then the empty directories (not `target`, not `.git`); touch the files;
+    `cargo metadata` must succeed (offline first, then with the network); warm `cargo test
+    --no-run` with `-e CARGO_NET_OFFLINE=false` on that exec only, whose log must hold at least one
+    `Compiling` line (none means stale binaries); `git add -A`, then `git add -f` of every tarball
+    path (the new `.gitignore` would drop tracked files that it matches), a synthetic commit, and a
+    check that `git ls-files` equals the tarball's file list; `docker commit` (restoring
+    `CMD ["/bin/bash"]`) to `image_tag(repo, pr)`.
 
-    Writes `build.log` (the warm build's output, byte for byte) and `build-evidence.json` to
-    `evidence_dir`, also on failure. Returns `image`, `base_commit` (the synthetic commit's SHA),
-    `image_id`, `size_bytes`, `laps_seconds`, `compiling_lines` and `container_removed` (a failed
-    removal is recorded, never raised). `ValueError` for a bad argument, `BuildError` for a refused
-    or failed build; both before or without leaving an image tag.
+    The container is removed in a `finally`, by ID. A `docker run` that answered with a failure
+    removes nothing (the name may belong to another build); one that gave no answer removes by
+    name, and the evidence says so. The tag is dropped (`docker rmi`) on any failure from the
+    `docker commit` attempt on, `KeyboardInterrupt` included, and never otherwise.
+
+    Writes `build.log` (the warm build's output as `docker exec` returned it: `pilot.command` decodes
+    text mode, so it is not byte-exact for a non-UTF-8 or carriage-return stream) and
+    `build-evidence.json` to `evidence_dir`, also on failure. Returns `image`, `base_commit` (the
+    synthetic commit's SHA), `base_image_id`, `tree_tar_sha256`, `image_id`, `size_bytes`,
+    `laps_seconds`, `compiling_lines` and `container_removed` (a failed removal is recorded, never
+    raised over the original error). `ValueError` for a bad argument, `BuildError` for a refused or
+    failed build.
     """
     ident = _fresh_id(repo, pr)
     tag = image_tag(repo, pr)
@@ -691,12 +804,15 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
     free = free_gb()
     if isinstance(free, bool) or not isinstance(free, (int, float)) or not free >= MIN_FREE_GB:
         raise BuildError("%s GB free on the docker storage, at least %d GB needed" % (free, MIN_FREE_GB))
+    tree_tar = tree_tar.resolve()
+    expected, tar_sha = _tree_files(tree_tar)
     evidence_dir.mkdir(parents=True, exist_ok=True)
 
     build = _Build(docker, container, workdir)
     ev = {
         "builder_version": BUILDER_VERSION, "repo": repo, "pr": pr, "upstream_base": upstream_base,
         "base_image": base_image, "image": tag, "container": container, "workdir": workdir,
+        "tree_tar_sha256": tar_sha, "tree_files": len(expected),
         "outcome": "error", "error": None, "steps": build.steps,
     }
     laps = ev["laps_seconds"] = {}
@@ -708,17 +824,39 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
         mark[0] = now
 
     failed = False
+    commit_attempted = False
     try:
-        build.must("run", "run", "-d", "--name", container, "--cpus", "4", "--memory", "24g", base_image,
-                   "sleep", "infinity", timeout=600)
+        proc = build.run("tag-check", "image", "inspect", "--format", "{{.Id}}", tag, timeout=120)
+        if proc.returncode == 0:
+            raise BuildError("tag exists: image %s is already there; this build never overwrites or deletes "
+                             "an image it did not make (the cache check belongs to the caller)" % tag)
+        if proc.returncode != 1 or "no such image" not in _text(proc).lower():
+            raise BuildError("docker image inspect %s failed (exit %s): %s"
+                             % (tag, proc.returncode, _text(proc).rstrip()[-_LOG_TAIL:]))
+        proc = build.must("base-id", "image", "inspect", "--format", "{{.Id}}", base_image, timeout=120)
+        ids = _text(proc).split()
+        if not ids or _IMAGE_ID.fullmatch(ids[-1]) is None:
+            raise BuildError("base image %s: docker image inspect gave no image ID: %r"
+                             % (base_image, _text(proc)[-_LOG_TAIL:]))
+        ev["base_image_id"] = ids[-1]
+
+        build.start("run", "-d", "--name", container, "--cpus", "4", "--memory", "24g", base_image,
+                    "sleep", "infinity", timeout=600)
+        ev["container_id"] = build.cid
         lap("run")
 
         build.bash("clear-tracked", "git ls-files -z | xargs -0 rm -f", timeout=600)
-        build.bash("clear-dirs", _EMPTY_DIRS, timeout=600)
-        lap("clear")
-
-        build.must("copy", "cp", str(tree_tar), "%s:%s" % (container, _TREE_TAR), timeout=1800)
+        build.must("copy", "cp", str(tree_tar), "%s:%s" % (build.cid, _TREE_TAR), timeout=1800)
         build.bash("extract", "tar -xf %s -C . && rm -f %s" % (_TREE_TAR, _TREE_TAR))
+        # what is left besides the new tree: untracked or ignored files of the old tree, and the
+        # files of directories the new tree does not have. `target/` and `.git` are not looked at.
+        listing = build.exec("list-files", "find", ".", "-path", "./target", "-prune", "-o", "-path", "./.git",
+                             "-prune", "-o", "(", "-type", "f", "-o", "-type", "l", ")", "-print0", timeout=600)
+        extras = _from_nul(_text(listing), "./", "find") - expected
+        ev["leftover_files_deleted"] = len(extras)
+        if extras:
+            build.exec("delete-extras", "xargs", "-0", "rm", "-f", data=_nul_list(extras, "./"), timeout=600)
+        build.bash("clear-dirs", _EMPTY_DIRS, timeout=600)
         build.bash("touch", _TOUCH)
         lap("extract")
 
@@ -742,29 +880,32 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
 
         message = "synthetic base: %s %s (parent of PR %d merge)" % (repo, upstream_base[:12], pr)
         build.exec("git-add", "git", "add", "-A", timeout=3600)
+        # `git add -A` leaves out a tracked file the new .gitignore matches: add every path of the tree
+        build.exec("git-add-force", "git", "add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul",
+                   env=("GIT_LITERAL_PATHSPECS=1",), data=_nul_list(expected), timeout=3600)
         build.exec("git-commit", "git", "-c", "user.name=sab", "-c", "user.email=sab@invalid", "commit", "-q",
                    "-m", message, timeout=3600)
+        committed = _from_nul(_text(build.exec("ls-files", "git", "ls-files", "-z", timeout=600)), "", "git ls-files")
+        if committed != expected:
+            parts = []
+            if expected - committed:
+                parts.append("missing from the commit: " + _named(expected - committed))
+            if committed - expected:
+                parts.append("not in the upstream tree: " + _named(committed - expected))
+            raise BuildError("the synthetic commit is not the upstream tree (%s)" % "; ".join(parts))
         base_commit = _text(build.exec("rev-parse", "git", "rev-parse", "HEAD", timeout=120)).strip()
         if _SHA.fullmatch(base_commit) is None:
             raise BuildError("git rev-parse HEAD gave no commit SHA: %r" % base_commit[-_LOG_TAIL:])
         lap("git_commit")
 
-        try:
-            build.must("docker-commit", "commit", container, tag, timeout=3600)
-        except BuildError:
-            if build.call_raised:  # no answer: the daemon may still have made the tag
-                build.drop_tag(tag)
-            raise
-        try:
-            proc = build.run("inspect", "image", "inspect", "--format", "{{.Id}} {{.Size}}", tag, timeout=120)
-            fields = _text(proc).split()
-            if proc.returncode != 0 or len(fields) != 2 or not fields[0].startswith("sha256:") \
-                    or not fields[1].isdigit():
-                raise BuildError("docker image inspect of %s failed (exit %s): %s"
-                                 % (tag, proc.returncode, _text(proc).rstrip()[-_LOG_TAIL:]))
-        except BaseException:
-            build.drop_tag(tag)  # the tag exists only because of the commit just above
-            raise
+        commit_attempted = True
+        build.must("docker-commit", "commit", "--change", 'CMD ["/bin/bash"]', build.cid, tag, timeout=3600)
+        proc = build.run("inspect", "image", "inspect", "--format", "{{.Id}} {{.Size}}", tag, timeout=120)
+        fields = _text(proc).split()
+        if proc.returncode != 0 or len(fields) != 2 or _IMAGE_ID.fullmatch(fields[0]) is None \
+                or not fields[1].isdigit():
+            raise BuildError("docker image inspect of %s failed (exit %s): %s"
+                             % (tag, proc.returncode, _text(proc).rstrip()[-_LOG_TAIL:]))
         lap("image_commit")
 
         ev.update(outcome="ok", base_commit=base_commit, image_id=fields[0], size_bytes=int(fields[1]),
@@ -772,14 +913,22 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
     except BaseException as exc:
         failed = True
         ev["error"] = "%s: %s" % (type(exc).__name__, exc)
+        if commit_attempted:
+            build.drop_tag(tag)  # from the commit attempt on only: the tag exists because of this build
         raise
     finally:
         ev.update(build.remove())
+        evidence_error = None
         try:
             _write_evidence(evidence_dir, ev)
-        except OSError:
-            if not failed:
-                raise
-    return {"image": tag, "base_commit": ev["base_commit"], "image_id": ev["image_id"],
-            "size_bytes": ev["size_bytes"], "laps_seconds": laps, "compiling_lines": ev["compiling_lines"],
+        except OSError as exc:
+            evidence_error = exc
+        if build.interrupt is not None:
+            raise build.interrupt
+        if evidence_error is not None and not failed:
+            build.drop_tag(tag)
+            raise BuildError("cannot write the build evidence: %s" % evidence_error) from evidence_error
+    return {"image": tag, "base_commit": ev["base_commit"], "base_image_id": ev["base_image_id"],
+            "tree_tar_sha256": tar_sha, "image_id": ev["image_id"], "size_bytes": ev["size_bytes"],
+            "laps_seconds": laps, "compiling_lines": ev["compiling_lines"],
             "container_removed": ev["container_removed"]}
