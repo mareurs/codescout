@@ -42,18 +42,56 @@ once the rules are held equal), `cs − bare` (tools alone). No claim about code
 
 ## Onboarding artifacts
 
-1. Generated once per task, at the task's base commit, inside the study network, never from the
-   issue text or the test patch. Frozen and hashed; every rep and both models reuse the same bytes,
-   like the index.
-2. Produced by running `onboarding()` and then an LLM subagent that follows the returned
-   instructions. Model, effort and cost cap: D2. Cost is unknown until one dry run measures it.
-3. Leak gate (extends parent §3 gate 2): the existing n-gram scan (`leak_scan.py`) runs over every
-   generated memory and `system-prompt.md`, with the hidden-test names and gold-patch added lines as
-   needles and a planted-needle positive control. Count must be 0. A non-zero count regenerates the
-   artifact once; a second failure drops the task.
-4. Visibility: the artifacts exist only in the treated arm(s), delivered by a per-arm mount or a
-   separate run image. A gate must show, with a positive control, that `bare` cannot read them.
-   Today every arm shares one image, which is why this cannot be a simple "stop deleting".
+Operator rule (2026-11-04): a project is never onboarded more than once, and no other LLM call is
+repeated where its result can be cached. The unit of onboarding is the REPOSITORY, not the task.
+
+1. **One onboarding per repository**, at the OLDEST base commit among that repository's pooled
+   tasks. No task's fix exists at that commit, so the artifact cannot contain an answer. Later tasks
+   get memories that are somewhat stale, as in daily use; this is disclosed, not corrected. The
+   artifact is frozen and reused by every task of the repository, both models and every repetition,
+   in the treated arm(s) only. Onboarding count = repositories in the pool, so the pool should hold
+   several tasks per repository (cost amortises per task) but at least 4 repositories (see Risks).
+2. **Generation.** `onboarding()` then an LLM subagent that follows the returned instructions (the
+   subagent writes everything except the `onboarding` and `language-patterns` memories). One
+   generator model for every repository, whichever model is under test (D2); the same-model
+   advantage this may give one tested model is disclosed. Run inside the study network, from the
+   repository tree only, never from issue text or a test patch.
+3. **Never regenerated.** Failure handling, in order: (a) an interrupted generation RESUMES, skipping
+   the topics already written; (b) a leak hit is fixed by deterministic redaction of the offending
+   lines, recorded in the manifest; (c) if redaction leaves the artifact unusable, the repository's
+   tasks are dropped. No path runs the generator a second time for the same repository.
+4. **Cache.** Key = `(repo, oldest base commit, codescout version and ONBOARDING_VERSION, generator
+   model, prompt hash)`. Store: `setup-ab-data/onboarding-cache/<repo>@<sha>/` (not in git) with a
+   manifest of file hashes, generation cost and the leak-scan result. A matching key means no LLM
+   call. The registration records the manifest hash; the runner refuses an artifact that does not
+   match it.
+5. **Leak gate** (extends parent §3 gate 2). The n-gram scan (`leak_scan.py`) runs over every
+   generated memory and `system-prompt.md` with the needles (hidden-test names, gold-patch added
+   lines) of ALL tasks of the repository, with a planted-needle positive control. Needles are first
+   baselined against the repository tree at the oldest base commit, so code that already existed
+   does not trigger the gate. Count must be 0 after redaction.
+6. **Visibility.** The artifacts exist only in the treated arm(s), delivered by a per-arm mount or a
+   separate run image. A gate shows, with a positive control, that `bare` cannot read them. Today
+   every arm shares one image, which is why this is not a simple "stop deleting".
+7. **Cost.** Unknown until one dry run on the smallest pooled repository, under an operator-approved
+   cap, measures it. Total onboarding spend = repositories x measured cost. No generation starts
+   without an explicit go.
+
+## Reuse of other LLM calls
+
+- **`bare` runs** are executed once per (task, model, repetition) and are the baseline of every
+  comparison (`daily − bare`, `rules − bare`, `cs − bare`). They are never repeated per pair.
+- **Under-specification verdict** (does the issue state what the test asserts; lexical overlap fails
+  this, memory `research/harder-task-benchmarks-20261104`): one cheap LLM read per task, cached on the
+  hash of `(issue, test patch, gold patch)`, plus a manual read of a sample.
+- **Pre-screen** (bare arm, to find tasks the plain agent sometimes fails): cheap model only, 2
+  repetitions, capped. Its runs are NOT measurement data: selecting tasks on bare failure and then
+  measuring on the same runs would bias the bare arm downward. Measurement uses fresh repetitions.
+- **Index and Qdrant template**: not an LLM cost; already one per task image. Tasks of one
+  repository may share a base index and re-index incrementally, if the runner supports it.
+- **Prompt cache**: runs of the same task and arm share an identical prefix (tools, CLAUDE.md, memory
+  index). Scheduling them back to back may raise cache reads. Not measured; the screen's `rows.jsonl`
+  holds the cache fields needed to check it before relying on it.
 
 ## Rules content
 
@@ -81,6 +119,12 @@ once the rules are held equal), `cs − bare` (tools alone). No claim about code
   must be re-derived from a dry run, not carried over from the screen.
 - **Selection.** Tasks come from the validated fresh pool (memory `research/harder-task-benchmarks-20261104`),
   each read against its test for under-specification (the lexical overlap check does not detect it).
+- **Shared artifact effect.** One onboarding per repository makes artifact quality a repository-level
+  effect that repetitions cannot average out. Analyse and report per repository (clustered), pool at
+  least 4 repositories, and disclose that the number of independent artifacts equals the number of
+  repositories.
+- **Staleness.** Tasks newer than the oldest base commit see memories that predate their code. Record
+  each task's commit distance from the artifact's commit and report it; do not refresh the memories.
 
 ## Carried fixes
 
@@ -91,7 +135,8 @@ registration freeze for this study is where `run.py` may change.
 ## Open decisions (operator)
 
 - **D1** Arms: `bare`, `daily`, plus `rules`? plus `cs`? Each arm multiplies cost.
-- **D2** Onboarding generator: model, effort, per-task cost cap. Spend needs an explicit go.
+- **D2** Onboarding generator: ONE model for every repository, its effort, and a per-repository cost cap;
+  the dry run on the smallest repository measures the real cost first. Spend needs an explicit go.
 - **D3** Which rules go in the operator-rules block, and the generic wording of the mutation rule.
 - **D4** For foreign repositories, a project-level CLAUDE.md: none (default here), or one generated
   per task by the onboarding step?
