@@ -12,6 +12,10 @@ topic: effort-steering
 
 # Worker context verification
 
+## Readiness follow-up — 2026-11-04
+
+**LATEST readiness result:** after the peer's product correction a8ee4db68, all four actual sqlite-vec cells pass on a hash-pinned copy of the rebuilt release binary. Bootstrap now follows real empty/populated store state independently of the zero-byte legacy marker. Canonical issue5faa9c6e3fd2a6f9 contains full results, binary identities and [new evidence](data/2026-11-04-native-readiness-recheck.tar.gz). Real-store caveat discharged for the tested package; reproducible build-source linkage and shared-server deployment are not proved. This supersedes the readiness-open statements in the historical context checkpoint below. No model/onboarding call or new product source edit; whole-worker/task/quality admission remains false.
+
 ## Result and scope
 
 Actual pinned Claude-client serialization and native MCP transport are verified on two fresh common-source clones, with effort fields low and xhigh. Both carry the visible global rules, complete project CLAUDE.md, complete Recon body, explicitly read Codescout guidance and root architecture memory. This is a transport result, not model adherence, quality parity or full paid-worker admission.

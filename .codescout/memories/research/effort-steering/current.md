@@ -2,6 +2,16 @@
 
 M=/home/marius/work/claude/codescout (experiments). V=/home/marius/.codex/worktrees/615e/codescout, branch research/fixed-acceptance-population-20261101. Root SID 01a15ca9-f939-7603-acb5-01c6b02f68e2. Autonomous work, exact-path local commits and total40USD remain authorized. Token path ~/.config/s5/token-claude-stef remains approved; do not read/display it unless a future authorized paid run actually requires it. No push/merge authorization and no active diagnostic/model job at this checkpoint.
 
+## Native readiness follow-up — 2026-11-04
+
+LATEST: peer correction a8ee4db68 is now verified with all FOUR actual sqlite-vec cells on a hash-pinned stable release copy; no seeded answer cache or new index/model/author. Empty stores show Not built (with/without zero-byte legacy marker), populated stores show Built (with/without marker); actual queries0/0/3/3 capped. The two formerly incorrect cells are corrected. Exactly4owned generated names independently absent. No shared release file/server changed.
+
+Raw copied ELF SHA0b9bcb54e633224d4b04073f96e045aefa38469c6043edbae00818fa60205ef6 (65680152bytes), mtime2026-11-04T15:13:29.326570Z. It self-reports version0.15.0, clean c98859b5e27229b8d230a18600bf9191a6f8a3b0; Git ancestry confirms a8ee4db68 is included, not reproducible build-source proof. Only the private copy's ELF interpreter/RPATH was adapted; packaged SHAc4bf914175758c41c7f13a77712b2cf43feddb9916fcb5db1a8510b967e2e332, actual reader build_id independently matches. Shared/live-server deployment was not verified.
+
+Canonical MAIN issue5faa9c6e3fd2a6f9 and reportc7aa0fa96d0484fd now contain results and remaining caveats. Evidence docs/research/data/2026-11-04-native-readiness-recheck.tar.gz SHA3b2e57109e7957cd4ef921828dc5df3dedca7c165307bc4748cc29ed168390ac,38042bytes/72verifiedentries. Private root ~/.cache/codescout-resident/codescout/native-readiness-recheck-20261104 retained. Original old-binary mismatch evidence unchanged. This supersedes readiness-open/correct-it-next statements below only for the tested package; earlier common experimental package58c33... remains old and must not be silently replaced or described as repaired.
+
+No model, token read, paid campaign, product code edit, repeated gate or new review by this verifier. Budget unchanged29.221154299999999834/40, remainder10.778845700000000166. Next qualify/freeze the exact intended package and current common capability wording, then actual worker authority/task checks/real oracle isolation and fresh quality cases. Do not re-onboard. Peer gate/cached unit-test evidence is separately attributed in the issue, not claimed as our fresh run.
+
 ## Operator steering and whole picture
 
 NEW explicit operator rule: when an issue is found, write it IMMEDIATELY to docs/issues in MAIN checkout, not only V. This continuation did so; seven main files and the standalone report/evidence are committed. Main is canonical for these findings. Do not recreate them in a worktree or infer peer ownership by cwd/name.

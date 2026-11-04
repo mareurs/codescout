@@ -10,7 +10,7 @@ closed: 2026-11-04
 opened: 2026-11-04
 owner: marius
 severity: medium
-unverified: 'Not run against a real sqlite-vec store: the two tests seed the index-status cache. The running server binary was not rebuilt after this commit, so a live bootstrap block still comes from the old code.'
+unverified: 'Real sqlite-vec caveat discharged by four actual native cells on 2026-11-04. Remaining: the tested binary self-reports clean c98859b5e (Git history contains a8ee4db68), but that metadata and ancestry do not prove the build''s source tree; no shared live server restart/deployment was verified.'
 ---
 
 # BUG: Native bootstrap disagrees with a queryable semantic index
@@ -32,7 +32,7 @@ Private pinned Codescout binary58c33c3064c3e08b19ff26a2b84d96f447746a09ca1547ad4
 
 ## Root cause
 
-Agent::project_status checks only .codescout/embeddings/project.db existence (legacy path), and prompt rendering maps that boolean to Built/Not built. Actual IndexStatus uses RetrievalClient::from_env and project_index_stats for the selected backend. Current V and the binary's recorded base commit have the same legacy-path check; actual four-state controls establish this behavior independently on the dirty pinned package. Neither Git synchronization nor another full index repairs the bootstrap predicate. No product change yet.
+Agent::project_status checks only .codescout/embeddings/project.db existence (legacy path), and prompt rendering maps that boolean to Built/Not built. Actual IndexStatus uses RetrievalClient::from_env and project_index_stats for the selected backend. Current V and the binary's recorded base commit have the same legacy-path check; actual four-state controls establish this behavior independently on the dirty pinned package. Neither Git synchronization nor another full index repairs the bootstrap predicate. This describes the original defect; the product correction is recorded below.
 
 ## Evidence
 
@@ -63,11 +63,33 @@ Two product tests in `src/tools/config/tests.rs`, written before the fix and see
 
 They seed the store's answer through the shared `index_status_put` cache, which is the value `check_has_index_cached` returns. They do not build a real sqlite-vec store. The two cells with matching store and marker were not added: the old code passed them already. The native four-state controls above remain the check on a real store.
 
+## Native binary recheck — 2026-11-04
+
+Independent follow-up ran the actual four native cells on a stable private copy of target/release/codescout, without seeding the answer cache, rebuilding the tiny source index, invoking a provider model or changing the shared release file.
+
+| Selected sqlite-vec store | Zero-byte legacy project.db | Actual indexed / queryable | Bootstrap | Returned query results |
+|---|---|---|---|---|
+| Empty | absent | false / unspecified | Not built | 0 |
+| Empty | present | false / unspecified | Not built | 0 |
+| Populated | absent | true / true | Built | 3, capped |
+| Populated | present | true / true | Built | 3, capped |
+
+All four cells agree. The two discriminating cells changed from the preserved old-binary result: populated/no marker now says Built; empty/marker now says Not built. Each cell uses a fresh native process and fresh source/config clone with the same local Jina/sqlite-vec setup. Source/config byte populations were independently checked, and all four exact owned container names inspect absent after cleanup. This is actual backend behavior, not a seeded-cache unit test or a quality trial.
+
+Binary identity: original stable copied bytes SHA2560b9bcb54e633224d4b04073f96e045aefa38469c6043edbae00818fa60205ef6,65680152bytes, original mtime2026-11-04T15:13:29.326570Z. The version command reports0.15.0, clean commitc98859b5e27229b8d230a18600bf9191a6f8a3b0. Git ancestry independently confirms that commit contains a8ee4db68d55bd26f0007f98ef1584b3934b1112. This metadata is not a reproducible source-to-binary proof.
+
+For the old calibration image, ONLY the private copied ELF interpreter/RPATH were adapted using the previously qualified package procedure; packaged SHA256c4bf914175758c41c7f13a77712b2cf43feddb9916fcb5db1a8510b967e2e332. Runtime index status independently identifies this reading build id and c98859b5e/clean while retaining the original index writer's provenance. The shared release binary/runtime/server was not modified or restarted.
+
+[Complete native recheck evidence](../research/data/2026-11-04-native-readiness-recheck.tar.gz): SHA2563b2e57109e7957cd4ef921828dc5df3dedca7c165307bc4748cc29ed168390ac,38042bytes,72archive entries. Every file hash/link target was verified by rereading the archive. Includes full native responses/wire/launch/stderr/cleanup, exact tiny source/config inputs, original comparator result, private diagnostic/helper, independent checks and binary identity. Heavy ELF/model/DB payloads remain privately retained. Root: /home/marius/.cache/codescout-resident/codescout/native-readiness-recheck-20261104.
+
+The prior real-store caveat is discharged for this hash-pinned package. No claim of source-build reproducibility, deployment to an existing shared server, all backends/cold-start timing, full task admission or low/xhigh quality follows. No product source change or repeated full gate was performed by this verifier; the implementer's gate/test report remains separately attributed.
+
 ## Workarounds
 Read actual status, verify and query results; do not schedule a paid comparison from the banner or blindly rebuild from it.
 
 ## Resume
-Trace both readiness producers and reproduce populated/empty backend controls before applying a product correction. Preserve existing reusable cache and source-only onboarding.
+
+Four native real-store cells now pass on the identified copied binary. Retain source/build and live-server deployment limits separately. Before using a new binary in a paid campaign, freeze and qualify that exact package/common worker configuration; keep coverage checks and the remaining authority/task/oracle gates separate. Do not repeat onboarding or index building to repair the old legacy marker predicate.
 
 ## References
 
