@@ -62,7 +62,7 @@ N/A — the probe answered the question directly.
 
 ## Fix
 
-Not applied. The hint channel eval's runner must load the project `CLAUDE.md` in every arm before A3 can be rerun, which changes what all arms see; that is an operator decision recorded in the eval's next amendment. Adding `project` to the sources may also load the tree's tracked `.claude/` settings and hooks, which must be checked first. setup-ab needs its own decision.
+Applied to the hint channel eval only, in Stage 3 (AM-10): `HCE_SETTING_SOURCES=project,local`, with `memcheck` showing the model quotes a `CLAUDE.md` token. Not applied to setup-ab, which has been merged into `experiments`. The hint channel eval's runner must load the project `CLAUDE.md` in every arm before A3 can be rerun, which changes what all arms see; that is an operator decision recorded in the eval's next amendment. Adding `project` to the sources may also load the tree's tracked `.claude/` settings and hooks, which must be checked first. setup-ab needs its own decision.
 
 ## Tests added
 
@@ -74,7 +74,7 @@ Deliver per-task context through the prompt or a hook instead of `CLAUDE.md` whi
 
 ## Resume
 
-1. Decide the source set for the hint channel eval's rerun (`project,local`?) and check what the tree's `.claude/` would then load.
+1. Done for the hint channel eval: Stage 3 ran with `project,local` (AM-10). The task trees hold no `.claude/` settings and no `.mcp.json`; the only tracked `.claude/` file is `skills/analyze-usage/SKILL.md`, and the `claude-traces` symlink is skipped at export. Whether that skill reaches the model under `project` was not checked; the runs allow only native tools, with no `Skill`.
 2. Done for one task (cs-p01, Sonnet 5.5, three arms): the task `CLAUDE.md` was not loaded. Decide whether setup-ab adds `project` to its sources, and whether earlier setup-ab results must carry a caveat. The task `CLAUDE.md` only holds the build and test commands, so the effect may be small, but it is not measured.
 
 ## References
