@@ -167,6 +167,8 @@ class SplitDiffTest(unittest.TestCase):
             fb.split_diff("not a diff\n" + SRC_A)
         with self.assertRaises(ValueError):
             fb.split_diff("\n" + SRC_A)
+
+
 MODE_ONLY = "diff --git a/tests/run.sh b/tests/run.sh\nold mode 100644\nnew mode 100755\n"
 BINARY = (
     "diff --git a/src/img.png b/src/img.png\n"
@@ -218,6 +220,17 @@ class QuotedPathTest(unittest.TestCase):
         "copy from src/a.rs\n"
         'copy to "src/t\\303\\251.rs"\n'
     )
+    HUNK_QUOTES = (
+        "diff --git a/src/a.rs b/src/a.rs\n"
+        "index 111..222 100644\n"
+        "--- a/src/a.rs\n"
+        "+++ b/src/a.rs\n"
+        "@@ -1,4 +1,4 @@\n"
+        '+rename to "x"\n'
+        '-rename to "x"\n'
+        ' rename to "x"\n'
+        ' "b/\n'
+    )
 
     def test_quoted_path_raises_in_both_entry_points(self):
         for diff in (self.QUOTED_HEADER, self.QUOTED_B_ONLY, self.QUOTED_RENAME, self.QUOTED_COPY):
@@ -227,10 +240,23 @@ class QuotedPathTest(unittest.TestCase):
                 fb.split_diff(SRC_A + diff)
 
     def test_quote_in_hunk_content_is_not_a_quoted_path(self):
-        src = SRC_A.replace("+new\n", '+rename to "x"\n')
-        self.assertEqual(fb.diff_files(src), ["src/a.rs"])
+        diff = self.HUNK_QUOTES + TEST_T
+        self.assertEqual(fb.diff_files(diff), ["src/a.rs", "crates/x/src/tests/simple.rs"])
+        self.assertEqual(fb.split_diff(diff), (self.HUNK_QUOTES, TEST_T))
+        self.assertEqual(fb.diff_files(self.HUNK_QUOTES), ["src/a.rs"])
 
-
+    def test_error_says_git_quoted_the_path_and_the_builder_refuses_it(self):
+        with self.assertRaises(ValueError) as cm:
+            fb.diff_files(SRC_A + self.QUOTED_HEADER)
+        msg = str(cm.exception)
+        self.assertIn("quoted by git", msg)
+        self.assertIn("refuses", msg)
+        # core.quotePath=false helps non-ASCII names only; it must not be offered as the cure.
+        self.assertIn("non-ASCII", msg)
+        self.assertNotIn("use -c core.quotePath=false", msg)
+        with self.assertRaises(ValueError) as cm:
+            fb.diff_files(SRC_A + self.QUOTED_RENAME)
+        self.assertIn("quoted by git", str(cm.exception))
 
 
 class PickBaseTest(unittest.TestCase):
@@ -317,6 +343,8 @@ class CacheKeyTest(unittest.TestCase):
         self.assertNotEqual(base, fb.cache_key("r", "u2", "img"))
         self.assertNotEqual(base, fb.cache_key("r", "u", "img2"))
         self.assertNotEqual(base, fb.cache_key("r", "u", "img", version="2"))
+
+
 class SurrogateEscapeTest(unittest.TestCase):
     """Text decoded from git with errors='surrogateescape' must still hash."""
 
@@ -330,8 +358,6 @@ class SurrogateEscapeTest(unittest.TestCase):
         a = fb.cache_key("r", "\udcff", "img")
         self.assertEqual(len(a), 64)
         self.assertNotEqual(a, fb.cache_key("r", "\udcfe", "img"))
-
-
 
 
 class BuildRecordTest(unittest.TestCase):

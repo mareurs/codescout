@@ -55,12 +55,20 @@ def _blocks(diff):
     return [b for b in _BLOCK_START.split(diff) if b]
 
 
+def _quoted(where):
+    return ValueError(
+        "path quoted by git in the diff header; the builder refuses it "
+        "(git quotes a path with a double quote, backslash, tab or newline whatever the settings; "
+        "for non-ASCII names run git with -c core.quotePath=false): %r" % where
+    )
+
+
 def _b_path(block):
     """The b-side path of one block: its `rename to` line when present, else the header's b-side."""
     head, _, rest = block.partition("\n")
     head = head.rstrip("\r")[len(_HEADER):]
     if head.startswith('"') or ' "b/' in head:
-        raise ValueError("quoted path in diff header (use -c core.quotePath=false): %r" % head)
+        raise _quoted(head)
     renamed = None
     for line in rest.split("\n"):
         if line.startswith("@@"):
@@ -69,7 +77,7 @@ def _b_path(block):
             if line.startswith(prefix):
                 target = line[len(prefix):].rstrip("\r")
                 if target.startswith('"'):
-                    raise ValueError("quoted path in diff header (use -c core.quotePath=false): %r" % target)
+                    raise _quoted(target)
                 if prefix == "rename to ":
                     renamed = target
     if renamed is not None:
