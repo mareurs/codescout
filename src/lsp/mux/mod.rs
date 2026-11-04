@@ -306,4 +306,90 @@ mod tests {
             + ".sock".len();
         assert_eq!(longest, TEST_SOCKET_BYTES_MAX);
     }
+
+    /// Longest `TMPDIR`, in bytes, under which a PRODUCTION socket still binds when
+    /// `XDG_RUNTIME_DIR` is unset: `<TMPDIR>/codescout-<uid>/<socket file name>`. `TMPDIR` is
+    /// counted without a trailing slash. The file name comes from the real
+    /// `socket_path_for_workspace`, so a change to its format changes the answer.
+    fn longest_tmpdir_that_binds(language: &str, uid_digits: usize, limit: usize) -> usize {
+        let file = socket_path_for_workspace(language, Path::new("/w"))
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .len();
+        let dir = "codescout-".len() + uid_digits;
+        // TMPDIR + "/" + dir + "/" + file must not exceed the limit.
+        limit - (1 + dir + 1 + file)
+    }
+
+    /// Characterization, not a requirement: production has no length check, so every language
+    /// has a `TMPDIR` length above which its mux cannot bind (bug 98379dd228578791).
+    ///
+    /// - Linux, uid 1000, 107 bytes. Measured 2026-11-04 with the real `codescout mux` and
+    ///   `XDG_RUNTIME_DIR` unset: for `rust` a 51-byte `TMPDIR` bound and a 52-byte one failed
+    ///   with `failed to bind socket`, which is the first row of this table.
+    /// - macOS, uid 501, 103 bytes. Computed, not measured: no Mac was available. The per-user
+    ///   temp dir there is typically `/var/folders/xx/<30 characters>/T`, about 48 bytes, which
+    ///   would leave `python`, `kotlin`, `csharp`, `typescript` and `javascript` over the limit.
+    ///   That shape is recalled, not read from a Mac.
+    ///
+    /// If this fails after a change to the socket path layout, re-derive the table and decide
+    /// whether the new thresholds are acceptable; do not just edit the numbers.
+    #[test]
+    fn the_longest_tmpdir_that_binds_a_production_socket_is_pinned_per_language() {
+        const LANGUAGES: [&str; 18] = [
+            "rust",
+            "python",
+            "typescript",
+            "javascript",
+            "tsx",
+            "jsx",
+            "go",
+            "java",
+            "kotlin",
+            "c",
+            "cpp",
+            "csharp",
+            "ruby",
+            "html",
+            "css",
+            "scss",
+            "less",
+            "bash",
+        ];
+        let table: Vec<(&str, usize, usize)> = LANGUAGES
+            .iter()
+            .map(|l| {
+                (
+                    *l,
+                    longest_tmpdir_that_binds(l, 3, 103),
+                    longest_tmpdir_that_binds(l, 4, 107),
+                )
+            })
+            .collect();
+        assert_eq!(
+            table,
+            vec![
+                // (language, macOS uid 501 / 103 bytes, Linux uid 1000 / 107 bytes)
+                ("rust", 48, 51),
+                ("python", 46, 49),
+                ("typescript", 42, 45),
+                ("javascript", 42, 45),
+                ("tsx", 49, 52),
+                ("jsx", 49, 52),
+                ("go", 50, 53),
+                ("java", 48, 51),
+                ("kotlin", 46, 49),
+                ("c", 51, 54),
+                ("cpp", 49, 52),
+                ("csharp", 46, 49),
+                ("ruby", 48, 51),
+                ("html", 48, 51),
+                ("css", 49, 52),
+                ("scss", 48, 51),
+                ("less", 48, 51),
+                ("bash", 48, 51),
+            ]
+        );
+    }
 }
