@@ -308,3 +308,18 @@ def test_static_targets_are_normalized_before_catalog_targets(fp, checkout, monk
     monkeypatch.setattr(fp, "normalize", spy)
     fp.scan_provenance(root, env)
     assert seen == [static, catalog]
+
+
+def test_a_warm_scan_uses_the_stored_targets_and_does_not_recompute_them(fp, warmed, monkeypatch):
+    root, env, _cache = warmed
+    fp.scan_provenance(root, env)                      # cold: fills the cache
+    recomputed, real = [], fp.static_targets
+
+    def spy(name, inp):
+        recomputed.append(name)
+        return real(name, inp)
+
+    monkeypatch.setattr(fp, "static_targets", spy)
+    warm = fp.scan_provenance(root, env)
+    assert warm.owners, "the fixture must produce owners, or the check is empty"
+    assert recomputed == [], "a warm scan re-derived targets that the cache holds"
