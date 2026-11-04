@@ -1,7 +1,7 @@
 ---
 id: '98379dd228578791'
 kind: bug
-status: fixed
+status: mitigated
 title: Long TMPDIR prevents mux-manager tests from binding their Unix sockets
 owners:
 - marius
