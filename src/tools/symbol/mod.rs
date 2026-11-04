@@ -2,6 +2,7 @@
 
 pub mod call_edges;
 mod call_graph;
+mod callers_check;
 
 mod display;
 mod edit_code;

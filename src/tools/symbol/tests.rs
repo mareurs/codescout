@@ -11357,3 +11357,154 @@ async fn edit_code_reads_the_string_false_the_way_other_tools_do() {
     let content = std::fs::read_to_string(&file).unwrap();
     assert!(has_line(&content, "fn helper() {}"), "{content}");
 }
+
+// ── check_callers ────────────────────────────────────────────────────────────
+
+/// A tempdir project holding `rel -> text` files, and a context rooted in it. The
+/// root is canonical, so the returned `PathBuf` of the first file compares equal to
+/// what `check_callers` canonicalises.
+async fn callers_project(files: &[(&str, &str)]) -> (tempfile::TempDir, ToolContext, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    for (rel, text) in files {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, text).unwrap();
+    }
+    let edited = root.join(files[0].0);
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    (dir, test_ctx_with_agent(agent), edited)
+}
+
+const A_OLD: &str = "fn a() -> u8 { 1 }";
+const A_NEW_SIGNATURE: &str = "fn a(x: u8) -> u8 { x }";
+
+#[tokio::test]
+async fn check_callers_finds_a_call_in_another_file() {
+    use super::callers_check::{check_callers, CallersCheck};
+    let (_dir, ctx, edited) = callers_project(&[
+        ("src/lib.rs", "fn a(x: u8) -> u8 { x }\n"),
+        ("src/other.rs", "fn b() -> u8 {\n    crate::a(1)\n}\n"),
+    ])
+    .await;
+    let got = check_callers(&ctx, &edited, "rust", "a", A_OLD, A_NEW_SIGNATURE).await;
+    assert_eq!(
+        got,
+        CallersCheck::OutsideCalls {
+            file: "src/other.rs".to_string()
+        }
+    );
+}
+
+#[tokio::test]
+async fn check_callers_ignores_a_mention_that_is_not_a_call() {
+    use super::callers_check::{check_callers, CallersCheck};
+    let (_dir, ctx, edited) = callers_project(&[
+        ("src/lib.rs", "fn a(x: u8) -> u8 { x }\n"),
+        (
+            "src/other.rs",
+            "fn b() {\n    let f = a;\n    let s = \"a(1)\";\n    // a(2)\n}\n",
+        ),
+    ])
+    .await;
+    let got = check_callers(&ctx, &edited, "rust", "a", A_OLD, A_NEW_SIGNATURE).await;
+    assert_eq!(got, CallersCheck::NoOutsideCalls);
+}
+
+#[tokio::test]
+async fn check_callers_ignores_a_call_in_the_edited_file() {
+    use super::callers_check::{check_callers, CallersCheck};
+    let (_dir, ctx, edited) = callers_project(&[(
+        "src/lib.rs",
+        "fn a(x: u8) -> u8 {\n    if x == 0 { 0 } else { a(x - 1) }\n}\n",
+    )])
+    .await;
+    let got = check_callers(&ctx, &edited, "rust", "a", A_OLD, A_NEW_SIGNATURE).await;
+    assert_eq!(got, CallersCheck::NoOutsideCalls);
+}
+
+#[tokio::test]
+async fn check_callers_is_unchanged_for_a_body_only_edit() {
+    use super::callers_check::{check_callers, CallersCheck};
+    let (_dir, ctx, edited) = callers_project(&[
+        ("src/lib.rs", "fn a() -> u8 {\n    2\n}\n"),
+        ("src/other.rs", "fn b() -> u8 {\n    crate::a()\n}\n"),
+    ])
+    .await;
+    let got = check_callers(
+        &ctx,
+        &edited,
+        "rust",
+        "a",
+        "fn a() -> u8 {\n    1\n}",
+        "fn a() -> u8 {\n    2\n}",
+    )
+    .await;
+    assert_eq!(
+        got,
+        CallersCheck::Unchanged,
+        "a call exists elsewhere, so only the header comparison can say Unchanged"
+    );
+}
+
+#[tokio::test]
+async fn check_callers_cannot_tell_for_a_language_without_call_classification() {
+    use super::callers_check::{check_callers, CallersCheck};
+    let old = "func a() int { return 1 }";
+    let new = "func a(x int) int { return x }";
+    assert_eq!(
+        crate::symbol::edit::declaration_changed(old, new),
+        Some(true),
+        "precondition: the header comparison passes, so the verdict comes from the call scan"
+    );
+    let (_dir, ctx, edited) = callers_project(&[
+        ("src/lib.go", "func a(x int) int { return x }\n"),
+        ("src/other.go", "func b() int {\n\treturn a(1)\n}\n"),
+    ])
+    .await;
+    let got = check_callers(&ctx, &edited, "go", "a", old, new).await;
+    assert_eq!(got, CallersCheck::CannotTell);
+}
+
+#[tokio::test]
+async fn check_callers_cannot_tell_when_candidates_exceed_the_cap() {
+    use super::callers_check::{check_callers, CallersCheck, MAX_CANDIDATE_FILES};
+    // Each file mentions `a` without calling it. At the cap every candidate is
+    // inspected, so the answer is definite; one more and the scan is cut short.
+    for (n_files, want) in [
+        (MAX_CANDIDATE_FILES, CallersCheck::NoOutsideCalls),
+        (MAX_CANDIDATE_FILES + 1, CallersCheck::CannotTell),
+    ] {
+        let mut files = vec![(
+            "src/lib.rs".to_string(),
+            "fn a(x: u8) -> u8 { x }\n".to_string(),
+        )];
+        for i in 0..n_files {
+            files.push((
+                format!("src/m{i}.rs"),
+                "fn z() { let f = a; }\n".to_string(),
+            ));
+        }
+        let refs: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(p, t)| (p.as_str(), t.as_str()))
+            .collect();
+        let (_dir, ctx, edited) = callers_project(&refs).await;
+        let got = check_callers(&ctx, &edited, "rust", "a", A_OLD, A_NEW_SIGNATURE).await;
+        assert_eq!(got, want, "{n_files} candidate files");
+    }
+}
+
+#[tokio::test]
+async fn check_callers_cannot_tell_when_no_header_can_be_read() {
+    use super::callers_check::{check_callers, CallersCheck};
+    let (_dir, ctx, edited) = callers_project(&[
+        ("src/lib.rs", "fn a(x: u8) -> u8 { x }\n"),
+        ("src/other.rs", "fn b() -> u8 {\n    crate::a(1)\n}\n"),
+    ])
+    .await;
+    assert_eq!(crate::symbol::edit::declaration_changed("", ""), None);
+    let got = check_callers(&ctx, &edited, "rust", "a", "", "").await;
+    assert_eq!(got, CallersCheck::CannotTell);
+}
