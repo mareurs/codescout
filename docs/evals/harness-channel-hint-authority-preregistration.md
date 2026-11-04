@@ -170,3 +170,24 @@ Spot-checked by reading old and new signatures: `bound_summary` (adds `budget: u
 - One repository, written by the same operator and agents; the model sees codescout's own `CLAUDE.md` and `server_instructions`, which already state the `references` rule.
 - Commits are after the model's June 2026 cutoff, so memorisation of the fix is unlikely but not ruled out for patterns.
 - The channel probe in AM-1 ran with the operator's plugins loaded (`codescout-companion 1.20.28` among them), not in an isolated config dir. Its result (output replaced, context delivered) does not depend on them, but the eval runs must use the isolated `setup-ab` image.
+
+### AM-3 — 2026-11-04, the arm hook and the task set ($0.011 spent in total)
+
+**Hook input, measured.** On CLI 2.1.309 a `PostToolUse` hook for an MCP tool receives `tool_response` as a LIST of content blocks (`[{"type":"text","text":"ORIGINAL_OUTPUT_7Q"}]`), with keys `cwd, duration_ms, effort, hook_event_name, mcp_server, permission_mode, prompt_id, session_id, tool_input, tool_name, tool_response, tool_use_id, transcript_path`. `updatedToolOutput` given as a content-block list also replaced the result (model answered `REPLACED_OUTPUT_K4`; original 0 times in the stream; $0.0045). Both the string and the list form now pass, n=1 each.
+
+**The arm hook.** `tools/hint-channel-eval/hook.py`, tests `tests/test_hint_channel_hook.py` (21 tests, 30 subtests).
+
+- Acts only on `mcp__codescout__*`. Trigger: the first codescout call whose input or result names the target fn as a whole identifier. Fires once per run (atomic `O_EXCL` marker, because parallel calls run hooks concurrently).
+- On the trigger, every arm re-emits the result through `updatedToolOutput`; the arms differ only in what is added and where: F nothing; A0 the hint as an extra result block; L `[harness] ` + hint as an extra result block; A1/A2/A3 the hint as `additionalContext`; P a mandatory directive as `additionalContext`.
+- **Deviation from § Arms, recorded here:** A2's declaration goes into the FIRST codescout result of the run, not specifically the `activate_project` result. Reason: an agent may not call activate, and then A2 would never deliver. In the companion setup the first codescout call is usually the activation. The event log names the tool that carried it.
+- `events.jsonl` in the run's state dir records `trigger` (with `carrier` = none/result/context and `tool_use_id`), `declaration` and `error`. It is the arrival check's first source; the transcript is the second.
+- Never fails a session: garbage input, an unknown arm or a missing state dir print `{}` and exit 0.
+- Mutation probe (mutants written outside the checkout, loaded through `HCE_HOOK_UNDER_TEST`): control green; 10 of 10 killed (A0 hint also in context, fire-once removed, declaration in every arm, word boundary dropped, result not re-emitted, non-codescout tools hooked, P uses the plain hint, L drops its label, main lets errors escape, floor gets context). The suite run against an identical copy through the same variable is green, so a kill is the mutation's.
+
+**The task set.** `make_tasks.py`, rule fixed before the draw: one task per commit (the fn whose commit edited callers in the most files; ties → alphabetically first), pool sorted by sha, `random.Random(20261104).sample(pool, 10)`. Pool 17 commits. Drawn: `unexported_count`, `prefix_conflicts`, `cross_root_cites_edges`, `append_preferences_section`, `ensure_resident`, `read_capture`, `build_chunks`, `store_background`, `note_activation`, `in_one_commit`. Output `tasks.jsonl`, sha256 `b4c6d3df…`.
+
+The prompt gives the old and the required signature, the commit subject as the reason, and "keep the workspace compiling". It never mentions callers or tools, because that text would be a hint in every arm, the floor included.
+
+**Open for the instrument (not built):**
+- The image needs the codescout source at each task's parent, a fixed codescout MCP binary, rust-analyzer, and the dependency registry offline, because `references` needs a loaded workspace.
+- A run can end right after the first signature-changing edit of the target (a hook returning `continue: false`), since the metric is decided by then. That bounds cost and removes the need to compile. `stopReason` exists in the 2.1.309 hook schema; the stop itself is NOT yet verified live.
