@@ -230,3 +230,19 @@ The prompt gives the old and the required signature, the commit subject as the r
 - Mutation probe: control and identical copy green; 16 of 16 mutants killed.
 
 **Stage 1, fixed now.** Arms P, F, A0; one run per task per arm (n = 10 per arm, paired by task). Order: tasks in `tasks.jsonl` order; within task i (0-based) the arms rotate as `[P, F, A0]` shifted left by `i mod 3`, so no arm always runs first. Runs are sequential. Stop rule: halt if cumulative Stage 1 spend exceeds $20 (about 3× the pilot's $0.229 per run times 30 runs). An invalid run is not replaced in Stage 1; it is reported. Decision after Stage 1, per the registered rule: the P gate is `rate(P) − rate(F) ≥ 0.4` on `refs_before_stop` over valid runs; if it fails, the other arms are not run and the result is recorded as "the channel did not move compliance even for a mandatory directive".
+
+### AM-6 — 2026-11-04, Stage 1's first pass is VOID: `references` was not offered ($2.641 spent in total)
+
+**What happened.** Stage 1 ran all 30 runs (sequential, $2.397, 15 min 41 s). The scorer of AM-5 marked 30/30 valid with `refs_before_stop` P 1/10, F 0/10, A0 0/10 and `caller_check_before_stop` 30/30. Reading the one P run that did call `references` (`hce-03-cross_root_cites_edges`) showed its result: `<tool_use_error>Error: No such tool available: mcp__codescout__references</tool_use_error>`.
+
+**Cause, verified.** Every run's init message lists 18 codescout tools; `references`, `call_graph` and `symbol_at` are missing. They are gated on `has_lsp`, which comes from `[project] languages` in `.codescout/project.toml` (setup-ab `arms.py` § `LSP_GATED_TOOLS`). That file is untracked in this repository, so `git archive` did not carry it into the task trees. The pilot (AM-5) had the same 18-tool list. The primary metric could not be met in any arm, so **Stage 1's first pass and the pilot measure nothing about the hypothesis.** The scorer called them valid because it never checked that the measured tool existed: an instrument defect, the class `eval-design` § *A null control inherits the blind spot of its predicate space* describes.
+
+**Fix.**
+- `run.py stage_run` writes `.codescout/project.toml` = `[project] name = "codescout" languages = ["rust"]` and commits it into the task base (`git add -f`), as setup-ab committed its project config. Rust only: rust-analyzer is the one language server in the image.
+- `smoke` now speaks MCP to `codescout start` in the container: activate, `tools/list`, then a real `references` call on the target. On `hce-05-ensure_resident`: 21 tools, `references`/`call_graph`/`symbol_at` PRESENT, `references` answered in 25.2 s with "9 references in 4 files" (rust-analyzer loads the workspace offline).
+- `score.py` takes the init tool list; `lookup_available` = `mcp__codescout__references` is in it; a run without it, or without an init message, is invalid. Tests 23 (2 new); mutation probe 17 of 17 killed, control and identical copy green.
+- Re-scored with the fixed scorer, the first pass is 0/30 valid, 0/30 `lookup_available`. Its rows are kept as `hce-data/stage1-void-18tools.jsonl` and `stage1-void-rescored.jsonl`, never pooled with the rerun.
+
+**Descriptive only, from the void pass (not a measurement):** under P, one of ten agents tried to call a tool its list did not offer, because the directive named it. The other nine used the name grep they had already run.
+
+**Rerun.** Stage 1 reruns unchanged (same tasks, order, arms, model, stop rule of $20 counted from the rerun's start), on the fixed instrument, after a new operator go.

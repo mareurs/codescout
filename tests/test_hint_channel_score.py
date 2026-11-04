@@ -61,9 +61,12 @@ def edit_call(msg="m3", tid="t_edit"):
     return tool_use(msg, tid, "mcp__codescout__edit_code", {"symbol": f"Agent/{FN}", "action": "replace"})
 
 
-def run(arm, transcript, events, result=None):
+INIT_TOOLS = ["mcp__codescout__grep", "mcp__codescout__references", "mcp__codescout__call_graph"]
+
+
+def run(arm, transcript, events, result=None, init_tools=INIT_TOOLS):
     return score.score_run(transcript, events, result or {"total_cost_usd": 0.2, "num_turns": 5},
-                           arm=arm, fn=FN, path=PATH)
+                           arm=arm, fn=FN, path=PATH, init_tools=init_tools)
 
 
 class TestPrimaryMetric(unittest.TestCase):
@@ -167,6 +170,21 @@ class TestArrival(unittest.TestCase):
 
 
 class TestValidity(unittest.TestCase):
+    def test_a_run_without_references_in_its_tool_list_is_invalid(self):
+        # Stage 1's first pass: the server listed 18 tools, references among the missing (AM-6).
+        t = [grep_call(), tool_result("t_grep", "x", HINT), edit_call(msg="m2")]
+        events = [ev("trigger", "t_grep", carrier="result"), ev("stop", "t_edit")]
+        row = run("A0", t, events, init_tools=["mcp__codescout__grep", "mcp__codescout__call_graph"])
+        self.assertFalse(row["lookup_available"])
+        self.assertFalse(row["valid"])
+        self.assertTrue(run("A0", t, events)["lookup_available"])
+
+    def test_an_unknown_tool_list_is_invalid(self):
+        t = [grep_call(), tool_result("t_grep", "x", HINT), edit_call(msg="m2")]
+        row = run("A0", t, [ev("trigger", "t_grep", carrier="result"), ev("stop", "t_edit")], init_tools=None)
+        self.assertFalse(row["valid"])
+
+
     def test_no_trigger_is_unexposed_and_invalid(self):
         row = run("A1", [edit_call(msg="m1")], [ev("stop", "t_edit")])
         self.assertEqual(row["exposure"], "unexposed")

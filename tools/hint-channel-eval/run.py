@@ -106,6 +106,9 @@ NATIVE_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
 MAX_BUDGET_USD = "1.25"
 RUN_TIMEOUT_S = 1200
 ARMS = ("F", "A0", "A1", "A2", "A3", "P", "L")
+PROJECT_TOML_REL = ".codescout/project.toml"
+PROJECT_TOML = '[project]\nname = "codescout"\nlanguages = ["rust"]\n'
+LOOKUP_TOOLS = ("references", "call_graph", "symbol_at")
 
 
 def read_token():
@@ -139,9 +142,16 @@ def stage_run(task, arm, model, rep, run_dir):
     if arm == "A3":
         with open(testbed / "CLAUDE.md", "a", encoding="utf-8") as f:
             f.write("\n" + DECLARATION + "\n")
+    # references, call_graph and symbol_at are gated on has_lsp, which comes from `[project] languages`
+    # in this untracked file (setup-ab arms.py LSP_GATED_TOOLS). Without it the agent sees 18 tools and
+    # cannot call references at all: Stage 1's first pass ran that way (AM-6). rust only: rust-analyzer
+    # is the one language server in the image. Committed into the base, as setup-ab did.
+    (testbed / ".codescout").mkdir(exist_ok=True)
+    (testbed / PROJECT_TOML_REL).write_text(PROJECT_TOML)
     git = ["git", "-C", str(testbed), "-c", "user.name=Task", "-c", "user.email=task@example.invalid"]
     sh(*git, "init", "-q")
     sh(*git, "add", "-A")
+    sh(*git, "add", "-f", PROJECT_TOML_REL)
     sh(*git, "commit", "-qm", f"task {task['task_id']}")
     config.mkdir()
     state.mkdir()
@@ -173,7 +183,8 @@ def stage_run(task, arm, model, rep, run_dir):
     docker += ["--entrypoint", C_CLI, IMAGE, *cli[1:]]
     record = {"task_id": task["task_id"], "arm": arm, "model": model, "rep": rep, "session_id": session_id,
               "image": IMAGE, "cli_sha256": CLI_SHA256, "companion": str(COMPANION_HOST),
-              "hook_sha256": _sha256(HERE / "hook.py"), "env": env_lines, "cli_args": cli[1:-1],
+              "hook_sha256": _sha256(HERE / "hook.py"), "project_toml": PROJECT_TOML,
+              "env": env_lines, "cli_args": cli[1:-1],
               "network": "docker default bridge (NOT restricted; see AM-4)"}
     (run_dir / "run-record.json").write_text(json.dumps(record, indent=2) + "\n")
     return docker, env_lines
@@ -222,19 +233,59 @@ printf '%s' '{"tool_name":"mcp__codescout__symbols","tool_input":{"name":"'"$HCE
 cat /opt/hce-state/events.jsonl
 cd /testbed && timeout 300 cargo metadata --offline --format-version 1 >/dev/null && echo "cargo metadata: OK" || echo "cargo metadata: FAILED"
 git -C /testbed log --oneline | head -1
+git -C /testbed ls-files .codescout/project.toml
+timeout 900 python3 -I /opt/hce-state/mcp_probe.py
 """
+
+MCP_PROBE = r'''
+import json, os, subprocess, sys, time
+p = subprocess.Popen(["codescout", "start"], cwd="/testbed", stdin=subprocess.PIPE,
+                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+def send(m):
+    p.stdin.write(json.dumps(m) + "\n"); p.stdin.flush()
+def recv(mid):
+    while True:
+        line = p.stdout.readline()
+        if not line:
+            raise SystemExit(f"server closed before id {mid}")
+        m = json.loads(line)
+        if m.get("id") == mid:
+            return m
+def call(mid, name, args):
+    t0 = time.time()
+    send({"jsonrpc": "2.0", "id": mid, "method": "tools/call", "params": {"name": name, "arguments": args}})
+    r = recv(mid)
+    text = " ".join(c.get("text", "") for c in r.get("result", {}).get("content", []))
+    return round(time.time() - t0, 1), r.get("result", {}).get("isError"), text
+send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18",
+      "capabilities": {}, "clientInfo": {"name": "hce-smoke", "version": "0"}}})
+recv(1)
+send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+print("activate:", call(2, "workspace", {"action": "activate", "path": "/testbed"})[:2])
+send({"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}})
+names = sorted(t["name"] for t in recv(3)["result"]["tools"])
+print(f"tools ({len(names)}):", names)
+for want in ("references", "call_graph", "symbol_at"):
+    print(f"  {want}: {'PRESENT' if want in names else 'MISSING'}")
+if "references" in names:
+    secs, err, text = call(4, "references", {"symbol": os.environ["HCE_FN"], "path": os.environ["HCE_PATH"]})
+    print(f"references: {secs}s isError={err}: {text[:500]}")
+p.terminate()
+'''
 
 
 def smoke(task_id, arm):
-    """No model call: stage a real run, then check the container's tools, the hook and offline cargo."""
+    """No model call: stage a real run, then check the container's tools, the hook, offline cargo,
+    and over MCP that references is listed and answers on the target."""
     task = {t["task_id"]: t for t in load_tasks()}[task_id]
     run_dir = DATA / "smoke" / f"{task_id}-{arm}-{time.strftime('%Y%m%dT%H%M%S')}"
     run_dir.mkdir(parents=True)
     docker, env_lines = stage_run(task, arm, "none", 0, run_dir)
     (run_dir / "env").write_text("".join(f"{k}={v}\n" for k, v in env_lines.items()))
+    (run_dir / "state" / "mcp_probe.py").write_text(MCP_PROBE)
     cut = docker.index("--entrypoint")
     cmd = docker[:cut] + ["--entrypoint", "sh", IMAGE, "-c", SMOKE_SCRIPT]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
     print(r.stdout + r.stderr)
     return r.returncode
 

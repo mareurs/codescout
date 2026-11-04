@@ -103,13 +103,16 @@ def _arrival(arm, fn, path, trigger_id, decl_id, results, contexts):
     return ok, detail
 
 
-def score_run(transcript, events, result, *, arm, fn, path):
+def score_run(transcript, events, result, *, arm, fn, path, init_tools):
+    """init_tools: the tool list from the stream's init message (None when absent). A run whose list
+    lacks references measured nothing: the metric could not be met in any arm (AM-6)."""
     calls, results, contexts = parse(transcript)
     batch_of = {c["id"]: c["batch"] for c in calls}
     trigger = next((e for e in events if e.get("event") == "trigger"), None)
     stop = next((e for e in events if e.get("event") == "stop"), None)
     decl = next((e for e in events if e.get("event") == "declaration"), None)
     errors = [e for e in events if e.get("event") == "error"]
+    lookup_available = init_tools is not None and "mcp__codescout__references" in init_tools
 
     stop_batch = batch_of.get(stop["tool_use_id"]) if stop else None
     horizon = stop_batch if stop_batch is not None else float("inf")
@@ -131,10 +134,12 @@ def score_run(transcript, events, result, *, arm, fn, path):
     return {
         "arm": arm, "fn": fn, "outcome": outcome, "exposure": exposure,
         "arrival_ok": arrival_ok, "arrival_detail": detail, "hook_errors": len(errors),
+        "lookup_available": lookup_available,
         "refs_before_stop": refs, "caller_check_before_stop": refs or greps,
         "calls_before_stop": [c["name"] for c in before],
         "cost_usd": result.get("total_cost_usd"), "num_turns": result.get("num_turns"),
-        "valid": outcome == "stopped" and exposure == "before" and arrival_ok and not errors,
+        "valid": (outcome == "stopped" and exposure == "before" and arrival_ok and not errors
+                  and lookup_available),
     }
 
 
@@ -147,7 +152,7 @@ def score_dir(run_dir):
     transcript = [json.loads(l) for l in transcripts[0].read_text().splitlines() if l.strip()]
     ev_path = run_dir / "state" / "events.jsonl"
     events = [json.loads(l) for l in ev_path.read_text().splitlines()] if ev_path.exists() else []
-    result = {}
+    result, init_tools = {}, None
     for line in (run_dir / "stream.jsonl").read_text().splitlines():
         try:
             obj = json.loads(line)
@@ -155,8 +160,11 @@ def score_dir(run_dir):
             continue
         if obj.get("type") == "result":
             result = obj
+        elif obj.get("type") == "system" and obj.get("subtype") == "init" and init_tools is None:
+            init_tools = obj.get("tools")
     env = rec["env"]
-    row = score_run(transcript, events, result, arm=rec["arm"], fn=env["HCE_FN"], path=env["HCE_PATH"])
+    row = score_run(transcript, events, result, arm=rec["arm"], fn=env["HCE_FN"], path=env["HCE_PATH"],
+                    init_tools=init_tools)
     return {"run_dir": str(run_dir), "task_id": rec["task_id"], "model": rec["model"], "rep": rec["rep"], **row}
 
 
