@@ -41,7 +41,7 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 | CIW-7 | operator | M | open | Operator-rules ledger scope (per machine or per user) and the CM-10 per-host check |
 | CIW-8 | operator | S | open | Superpowers marketplace skew across the four profiles blocks `release.sh` |
 | CIW-9 | operator | S | open | Push the local commits in three repos |
-| CIW-10 | any | M | in-progress | Attribution scan: store each operation's write targets in the cache entry (approach 2) |
+| CIW-10 | any | M | done | Attribution scan: store each operation's write targets in the cache entry (approach 2) |
 | CIW-11 | any | S–M | open | Route `Onboarding::call_content` through `run_post` |
 | CIW-12 | any | S–M | open | Emission ceiling coverage: the session opener and a real p50 session |
 | CIW-13 | any | S | open | GG-11: `librarian` § Reference sits 14 B under its 2,500 B cap |
@@ -153,14 +153,14 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 ## CIW-10 — Attribution scan: store each operation's write targets in the cache entry (approach 2)
 
-**Status:** in-progress — design conversation started 2026-11-04
+**Status:** done — 2026-11-04, commits `c754e00b3` and `d8f3512c8`
 **Valid:** dated 2026-11-04
 
 **Owner:** any (operator chose this option on 2026-11-04). **Source:** bug `20927ccfe293c34e` § Remaining items (reopen trigger fired: a real red took 19,917 ms against a 15,000 ms trigger); `docs/superpowers/specs/2026-11-01-policy-loop-speedup-design.md` § Approaches (approach 2, deferred).
 
 **Observed.** A warm `scan_provenance` takes about 13 s, of which 5.81 s is `write_targets` (phase timers, estimated not measured). Approach 2's recorded costs: the cache digest must cover `file-provenance.py`, so an edit to that file invalidates every entry (2,355 files here); a cold refill was measured at four calls killed at 30 s before the fifth answered; doc-tool targets stay dynamic; equivalence must be re-proved on the real corpus.
 
-**Next:** finish the design (brainstorming), get it approved, then a plan.
+**Result (measured, 2026-11-04).** Four equal digests over the real corpus (old, new, old, new, one process); lifetime scan 121.5 s warm before, 8.9 s warm after; `attribute-red.py` warm median 1.66 s before, 0.95 s after (42.8%). Gate green (6,010 lean, 8,874 default). Records: bug `20927ccfe293c34e` § Remaining items. **Left open:** the first scan after deploy misses every entry (the cache key changed) and a cold refill is about 120 s here, over the 30 s ceiling, so the first red after a deploy may show no hint; the `timed_out` reopen trigger stands.
 
 ## CIW-11 — Route `Onboarding::call_content` through `run_post`
 
