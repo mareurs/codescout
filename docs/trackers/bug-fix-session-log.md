@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 212
-entry_high_water_W: 156
+entry_high_water_W: 157
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -287,6 +287,7 @@ entry_high_water_W: 156
 | W-154 | 2026-11-01 | high | **Read the seal's own code before a bulk move that rewrites sealed data.** `closure.py` records `os.readlink`, so link retargeting would have changed every sealed directory. | Retargeting on by default would have rewritten ~7,300 links across sealed directories with no error, found at the next verification. | validated |
 | W-155 | 2026-11-01 | med | **A zero from a text pattern over a serialized column was checked against a sibling count that could not be zero.** `output_json` is JSON inside JSON, so `like '%"wip_authors":%'` saw nothing; red calls read NULL on every day, which exposed the query. | Inferred: a design doc saying no hint was ever recorded, and a hunt for the cause in the engine. Observed: hinted 0 and red NULL over 29,805 rows, then 16 hinted on 2026-10-20 after parsing `$[0].text`. | validated |
 | W-156 | 2026-11-02 | med | **A local wine profile with the lane's own tools (bash, git, a full CPython) found the cause of four Windows failures that a bare prefix had hidden.** `normalize` returned `src\held.rs`, git prints `src/held.rs`. Recipe: `scripts/wine-env.sh`, `scripts/wine-env.manifest`. | Observed: no attributed cause across three CI runs of about 25 minutes each; read in about ten tool calls once python3 existed in wine. Inverse: a hand-made short `TMP` gave 255 false failures, so the limits are part of the entry. | validated |
+| W-157 | 2026-11-04 | med | **A pre-plan scout of tests that `include_str!` a script found one asserting on the file's TEXT.** Moving `CS_WRITE_TOOLS` out of `file-provenance.py` would red `provenance_probes_reference_only_real_tool_names`. | Inferred: a misleading "instrument is blind" red at gate time after implementation. Observed: the test's `surfaces` list names `scripts/file-provenance.py` only. | validated |
 |----|------|-------:|---------|----------------|--------|
 | W-153 | 2026-10-31 | med | **A scout of the gate pool's test runner found that only CI runs `tests/gate-slot.sh`, through a hit the default grep hid.** Re-running a negative search with `include_hidden=true` before planning on it. | Inferred: a plan that trusted gate-green for the pool tests and read real `/sys/block/zram*` in CI. Observed: 23 files without `.github/workflows/ci.yml`, 27 with it. | validated |
 | W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
@@ -17908,6 +17909,18 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Promote-when:** a second failure is attributed in a profile that a bare prefix could not reproduce. Then promote to `docs/conventions/` as the local Windows loop.
 
 **Status:** validated (one datapoint for the pattern; the recipe itself is exercised by `setup` and by the 31 tests that ran under it).
+
+## W-157 — A pre-plan scout found a test that asserts on a script's text, which the approved move would have broken
+
+**Valid:** dated 2026-11-04
+
+**Pattern:** before planning a move of code between files, grep every test that `include_str!`s the source file and read what it asserts about the file's TEXT, not only about its behaviour.
+
+**What happened:** the approved design for bug `20927ccfe293c34e` (`docs/superpowers/specs/2026-11-04-attribution-write-targets-in-cache-design.md`, CIW-10) moves the write-tool name sets (`CS_WRITE_TOOLS` and others) out of `scripts/file-provenance.py` into a new `scripts/write_targets.py`. Scouting before the plan found `provenance_probes_reference_only_real_tool_names` (`src/server.rs`), which `include_str!`s `scripts/file-provenance.py` alone and requires it to contain `mcp__codescout__{create_file,doc,edit_code,edit_file,run_command}`. A second gate over `*_TOOLS` constants scans every `scripts/*.py`, so that one survives the move; the surface-list test does not.
+
+**Counterfactual:** the move as designed would have removed `create_file`, `edit_code` and `edit_file` from `file-provenance.py`'s text, and the gate would have reported the instrument as blind to three write tools while it was not — a red with a misleading message, found only at gate time after the implementation. The plan now adds `write_targets.py` to that test's surfaces and checks the union.
+
+**Status:** validated
 
 ## Template for new entries
 
