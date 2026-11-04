@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/2026-10-26-the-subagent-bootstrap-tells-worktree-subagents-to-activate-and-they-race.md
 severity: medium
-unverified: Which ref the harness reads to choose an agent worktree's base is not verified. The match to origin/HEAD is by commit equality (the 2026-10-30 worktree base equals master and origin/master), not by reading the harness. The candidate fix has not been run.
+unverified: 'Whether Agent(isolation: worktree) reads worktree.baseRef is not checked, and baseRef=head has not been tried. A worktree subagent still misses unpushed commits (2 on 2026-11-04). The 2026-11-03 probe shows the base follows origin/HEAD; the harness code was not read.'
 ---
 
 # BUG: agent worktrees are cut from the default branch (origin/HEAD = origin/master, 2026-07-05), not from experiments, so a subagent's read_file misses the files its parent briefed
@@ -83,12 +83,13 @@ Not established. The candidate mechanism: the harness cuts an agent worktree fro
 
 ## Fix
 
-Applied 2026-11-03: `git remote set-head origin experiments` (undo: `git remote set-head origin master`). See "Applied and measured" under § Reproduction. The base is now the tip of `origin/experiments`; unpushed commits are still not seen by a worktree subagent. It changes shared repository state that every session and tool reading `origin/HEAD` sees, so it needs the operator's approval. **It has NOT been run.** After it runs, check the fix with the step in § Reproduction. If the base is still `5a8b14691`, the harness reads something other than `origin/HEAD`, and this hypothesis is wrong.
+Applied 2026-11-03 with the operator's approval: `git remote set-head origin experiments` (undo: `git remote set-head origin master`). Re-checked 2026-11-04: `git symbolic-ref refs/remotes/origin/HEAD` gives `refs/remotes/origin/experiments`. The probe in "Applied and measured" under Reproduction showed the base moved to the tip of `origin/experiments`, so the harness reads `origin/HEAD`.
 
-A hook cannot fix the brief itself. The companion bootstrap already tells a worktree subagent to check that its paths exist in the worktree (bug `2f6b6a8bcc9150c7` § Fix, part 3).
+What is still wrong: the base is the REMOTE tip, not the local branch, so a worktree subagent does not see unpushed commits. On 2026-11-04 `git rev-list --count origin/experiments..experiments` gives 2.
 
+Second candidate, not tried: set `worktree.baseRef` to `head`. That is a config change in all four profiles, and its effect on `Agent(isolation: "worktree")` is not checked. It needs the operator's approval.
 
-Second candidate, found 2026-11-03: set `worktree.baseRef` to `head`. That is a config change, so it would go to all four profiles. It is the documented control for `EnterWorktree`; its effect on `Agent(isolation: "worktree")` is not checked. No script in this repository reads `origin/HEAD`, and no file in `claude-plugins` does either (searched 2026-11-03, hidden paths included), so `set-head` breaks nothing tracked in those two repositories.
+A hook cannot fix the brief itself. The companion bootstrap already tells a worktree subagent to check that its paths exist in the worktree (bug `2f6b6a8bcc9150c7` Fix, part 3). `set-head` breaks nothing tracked in this repository or in `claude-plugins` (searched 2026-11-03).
 
 ## Tests added
 
@@ -100,7 +101,7 @@ Brief worktree subagents only with paths that exist at the worktree's base commi
 
 ## Resume
 
-Ask the operator whether to run `git remote set-head origin experiments`. If approved, run it, dispatch one worktree subagent, and compare its `HEAD` with `experiments` (§ Reproduction). Record the result here.
+The `set-head` fix is applied and measured. The open question is whether to try `worktree.baseRef: head`. Ask the operator first: it edits settings in four profiles, and the check dispatches one worktree subagent. Until then, push `experiments` before dispatching a worktree subagent whose brief names new files, or use the workaround above.
 
 ## References
 
