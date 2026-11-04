@@ -12,7 +12,7 @@ opened: 2026-11-04
 related:
 - cffe594cbf26fd72
 severity: medium
-unverified: Not checked inside a setup-ab run; the CLI source was not read; tested on 2.1.309 only.
+unverified: The CLI source was not read; tested on 2.1.309 only. setup-ab checked on one task (cs-p01), one model, three arms; see Symptom.
 ---
 
 ## Summary
@@ -27,7 +27,7 @@ This is `declared-not-wired`: a `CLAUDE.md` placed in the workspace declares con
 
 - Hint channel eval (`docs/evals/harness-channel-hint-authority-preregistration.md`, id `cffe594cbf26fd72`), arm A3: the user-endorsement declaration appended to the task's `CLAUDE.md` never reached the model. 0 of 25 A3 transcripts contain it. A3 ran as a second sample of A1, and the user-channel half of that eval's Q2 is untested (AM-9).
 - No run of that eval saw codescout's own `CLAUDE.md`.
-- setup-ab (`tools/setup-ab-eval/arms.py`): `SETTING_SOURCES = "local"` for the bare and cs arms and `FULL_SETTING_SOURCES = "user,local"` for full. Neither includes `project`. If the CLI behaves the same inside those runs, the task `CLAUDE.md` that S5 writes into each private task tree was not loaded in any arm. **Not verified inside a setup-ab run**; the effect on setup-ab's results is unknown.
+- setup-ab (`tools/setup-ab-eval/arms.py`): `SETTING_SOURCES = "local"` for the bare and cs arms and `FULL_SETTING_SOURCES = "user,local"` for full. Neither includes `project`. Checked on 2026-11-04 in the stored study runs `cs-p01.claude-sonnet-5-5.{bare,cs,full}.0` under `setup-ab-data/study/runs/`: the task `CLAUDE.md` was not loaded in any of the three arms (see Evidence). The effect on setup-ab's results is not assessed. Only one task, one model and one run per arm were checked.
 
 ## Reproduction
 
@@ -51,6 +51,11 @@ The CLI decides which memory files to load from the setting sources. `local` alo
 - The probe outputs above.
 - `grep 'endorsed by the user'` over the hint channel eval's transcripts: A2 25/25 (the declaration is in a tool result there), A3 0/25, every other arm 0.
 
+- setup-ab check, 2026-11-04. `/testbed/CLAUDE.md` exists in the task image `sab-arm-cs-p01:f9b0fc9f8` (`docker run --rm --network none --entrypoint cat <image> /testbed/CLAUDE.md` prints `# Working in this repository` with the build and test commands).
+- `grep -rl 'Working in this repository'` over `config/projects` of `cs-p01.claude-sonnet-5-5.bare.0`, `.cs.0` and `.full.0`: 0 files in each arm.
+- Positive control for the same method: `grep -rl 'Four Claude Code Instances'` (a phrase from the frozen user `CLAUDE.md`) finds 1 file in the `full` arm, which uses `--setting-sources user,local`, and 0 files in `bare` and `cs`. So the transcript does record a loaded `CLAUDE.md`, and the task `CLAUDE.md` is absent even in `full`.
+- Limit: a transcript grep shows what the model received, not why. The cause is inferred from the earlier probe.
+
 ## Hypotheses tried
 
 N/A — the probe answered the question directly.
@@ -70,7 +75,7 @@ Deliver per-task context through the prompt or a hook instead of `CLAUDE.md` whi
 ## Resume
 
 1. Decide the source set for the hint channel eval's rerun (`project,local`?) and check what the tree's `.claude/` would then load.
-2. Check one setup-ab private-task transcript for the task `CLAUDE.md` before drawing any conclusion about setup-ab.
+2. Done for one task (cs-p01, Sonnet 5.5, three arms): the task `CLAUDE.md` was not loaded. Decide whether setup-ab adds `project` to its sources, and whether earlier setup-ab results must carry a caveat. The task `CLAUDE.md` only holds the build and test commands, so the effect may be small, but it is not measured.
 
 ## References
 
