@@ -991,11 +991,97 @@ pub fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String 
     lines.join("\n")
 }
 
+/// The declaration header of a symbol's source text: everything from the first
+/// line that is not blank, a comment or an attribute/decorator, up to and
+/// including the first line that opens a body (`{`) or ends in `:` or `;`.
+/// Whitespace runs collapse to one space. `None` when no header line exists.
+fn declaration_header(text: &str) -> Option<String> {
+    let mut header = String::new();
+    let lines = text.lines().skip_while(|line| {
+        let t = line.trim();
+        t.is_empty() || ["//", "/*", "*", "#", "@"].iter().any(|p| t.starts_with(p))
+    });
+    for line in lines {
+        for word in line.split_whitespace() {
+            if !header.is_empty() {
+                header.push(' ');
+            }
+            header.push_str(word);
+        }
+        let t = line.trim();
+        if line.contains('{') || t.ends_with(':') || t.ends_with(';') {
+            break;
+        }
+    }
+    (!header.is_empty()).then_some(header)
+}
+
+/// Whether a replaced symbol's declaration header differs between `old` and
+/// `new`. `None` when a header cannot be read from either text.
+pub fn declaration_changed(old: &str, new: &str) -> Option<bool> {
+    Some(declaration_header(old)? != declaration_header(new)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lsp::SymbolKind;
     use std::collections::HashSet;
+
+    #[test]
+    fn declaration_changed_is_false_for_a_body_only_edit() {
+        let old = "fn a() -> u8 {\n    1\n}";
+        let new = "fn a() -> u8 {\n    3\n}";
+        assert_eq!(declaration_changed(old, new), Some(false));
+    }
+
+    #[test]
+    fn declaration_changed_is_true_when_a_parameter_is_added() {
+        let old = "fn a() -> u8 {\n    1\n}";
+        let new = "fn a(x: u8) -> u8 {\n    1\n}";
+        assert_eq!(declaration_changed(old, new), Some(true));
+    }
+
+    #[test]
+    fn declaration_changed_is_true_when_visibility_changes() {
+        assert_eq!(
+            declaration_changed("fn a() {}", "pub fn a() {}"),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn declaration_changed_ignores_line_breaks_and_runs_of_spaces_in_the_header() {
+        assert_eq!(
+            declaration_changed("fn a(x: u8) -> u8 {", "fn  a(x: u8)\n    -> u8 {"),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn declaration_changed_skips_attributes_doc_comments_and_decorators() {
+        assert_eq!(
+            declaration_changed("/// doc\n#[inline]\nfn a() {}", "fn a() {}"),
+            Some(false)
+        );
+        let old = "@d\ndef f(a):\n    pass";
+        assert_eq!(
+            declaration_changed(old, "def f(a):\n    return 1"),
+            Some(false)
+        );
+        assert_eq!(
+            declaration_changed(old, "def f(a, b):\n    pass"),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn declaration_changed_is_none_without_a_header() {
+        assert_eq!(declaration_changed("", "fn a() {}"), None);
+        assert_eq!(declaration_changed("fn a() {}", ""), None);
+        assert_eq!(declaration_changed("// only a comment", "fn a() {}"), None);
+        assert_eq!(declaration_changed("fn a() {}", "// only a comment"), None);
+    }
 
     fn sym(name_path: &str) -> SymbolInfo {
         SymbolInfo {
