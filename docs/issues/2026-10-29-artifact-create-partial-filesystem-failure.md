@@ -1,5 +1,5 @@
 ---
-id: 22ae2baefdfdd73a
+id: '22ae2baefdfdd73a'
 kind: bug
 status: mitigated
 title: Failed artifact creation left a catalog row and an empty file
@@ -12,7 +12,7 @@ tags:
 closed: 2026-11-04
 opened: 2026-10-29
 severity: medium
-unverified: A real disk-full or quota failure was not induced; the failure was injected with a read-only parent directory, which reproduces the leftover catalog row but not the empty file. The empty-file case is covered by a hand-built fixture. The second symptom (doc update on the empty file writing empty frontmatter) is not investigated and not fixed. Linux only; the injection test needs a non-root user and unix mode bits.
+unverified: A real disk-full or quota failure was not induced; the failure was injected with a read-only parent directory, which reproduces the leftover catalog row but not the empty file. The empty-file case is covered by a hand-built fixture. Linux only; the injection test needs a non-root user and unix mode bits.
 ---
 
 # BUG: Failed artifact creation left a catalog row and an empty file
@@ -45,7 +45,7 @@ The file existed after the failed create; the next create refused path exists. T
 
 Applied 2026-11-04 in `src/librarian/tools/create.rs`. When `create_dir_all` or `fs::write` fails, `call` now runs `undo_failed_create`: it deletes the catalog row (the augmentation, events and links go with it, `ON DELETE CASCADE`) and removes the file at the path, then returns the write's own error with the context "could not write <path>; the catalog row was taken back". Removing the file is safe because `call` refuses an existing path before it writes anything. The parent directory it may have created is left in place.
 
-Not addressed: the second symptom in this record, a body-only `doc(update)` on the empty file writing an empty frontmatter block while the catalog kept the old id and kind. That is a different path (`update`), and it was not investigated.
+Second symptom, fixed in `5e211b0d9` (`experiments`, patch-id `caca9c27d379090075924082bf4ababa3c987ea7`): `doc(update)` read the file, found no frontmatter block, and re-serialized a default `Frontmatter` (`unwrap_or_default()` in the `patch.body` branch and in `rewrite_frontmatter_normalizing`). That wrote `---\n---` with no `id` or `kind` while the catalog row kept both. `update::call` now seeds the missing block with the row's `id` and `kind` before any branch runs, so the patch applies on top of it. Test: `updating_a_file_that_lost_its_frontmatter_restores_the_catalog_identity` (a body patch and a status patch on a zero-byte file). It failed before the change with the empty block `---\n---` and `id` None, and it passes after. The other 114 tests under `librarian::tools::update` still pass. Only `id` and `kind` are seeded: `status`, `title`, `owners` and `tags` stay in the catalog row and are not rebuilt in the file.
 
 ## Tests added
 
@@ -58,7 +58,7 @@ The read-only directory makes `open` fail, so it reproduces the row left behind 
 
 ## Resume
 
-Open: the `doc(update)` empty-frontmatter symptom (see Fix). Reproduce it first with an empty file and a catalog row in an isolated catalog; do not guess from this record.
+Open: a real disk-full or quota failure was not induced (see `unverified`). Nothing else is outstanding in this record.
 
 ## Fix provenance
 
