@@ -191,3 +191,22 @@ The prompt gives the old and the required signature, the commit subject as the r
 **Open for the instrument (not built):**
 - The image needs the codescout source at each task's parent, a fixed codescout MCP binary, rust-analyzer, and the dependency registry offline, because `references` needs a loaded workspace.
 - A run can end right after the first signature-changing edit of the target (a hook returning `continue: false`), since the metric is decided by then. That bounds cost and removes the need to compile. `stopReason` exists in the 2.1.309 hook schema; the stop itself is NOT yet verified live.
+
+### AM-4 — 2026-11-04, the instrument ($0.015 spent in total)
+
+**Metric anchor, changed before any run.** A run now ENDS at the first edit whose input names the target fn (`mcp__codescout__edit_code`, `edit_file`, `create_file`, native `Edit`, `Write`, `MultiEdit`, `NotebookEdit`): the hook logs `stop` and returns `continue: false`. The primary metric becomes: a `references` or `call_graph` call on the target **before that stop event**. This point comes at or before the first signature-changing edit, so the metric is at least as strict as registered. An agent that edits a caller first is stopped there and scored on what it did before. Live check on 2.1.309 (stub MCP, prompt asking for two calls): the session ended after 1 call, $0.004.
+
+**A server hint that does not contaminate the metric.** codescout's `edit_code` response already carries `verify callers: references(symbol=..., path=...)`. It arrives AFTER the edit, and the run stops at that edit, so it cannot reach the pre-edit decision.
+
+**Runner.** `tools/hint-channel-eval/run.py` (stdlib only), data under `/home/marius/work/claude/hce-data/` (outside git):
+
+- `prepare`: the 10 parent trees by `git archive` (tracked symlinks to absolute or outside paths are skipped and recorded: `.claude/skills/claude-traces`), and a cargo home seeded from S5's (copied) then `cargo fetch --locked` for every parent. Result: 10 trees, 10 fetches exit 0.
+- `smoke` (no model call) and `run`: each run copies its tree, makes it a one-commit git repo (`task <id>`), and for A3 appends `DECLARATION` to `CLAUDE.md` before that commit. Image `sab-agent-cs-cs-p16:f9b0fc9f8` (setup-ab's agent image: codescout `f9b0fc9f8`, rust-analyzer 1.97.1, node, python3) with the tree mounted over `/testbed` and the cargo home over `/cargo`. CLI = the frozen 2.1.309 (sha checked before every run); companion = frozen 1.20.21; flags mirror setup-ab's `cs` arm (`--setting-sources local`, `--strict-mcp-config`, `--dangerously-skip-permissions`, `--tools Bash,Read,Write,Edit,Glob,Grep`, `--max-budget-usd 1.25`) except `--output-format stream-json --verbose`. The hook is registered for every PostToolUse (`matcher: "*"`). 4 CPUs, 24 GB, no swap; 20-minute timeout. The token comes from `HCE_TOKEN_FILE` (mode 0600) through an env file deleted after the run.
+- Smoke on `hce-05-ensure_resident`, arm A3: CLI 2.1.309, codescout 0.15.0, rust-analyzer 1.97.1, Python 3.13.5; the hook in the container returned the hint as `additionalContext` and logged `trigger` with `carrier: context`; `cargo metadata --offline` OK; the declaration is the last line of the committed `CLAUDE.md`.
+
+**Known limits added here.**
+- Network is docker's default bridge, NOT the allowlisting proxy setup-ab used. The agent could reach the internet. Equal across arms.
+- No semantic index is built and no embedder is configured, so `semantic_search` fails the same way in every arm.
+- The tree includes the parent's tracked `CLAUDE.md`, `.codescout/` memories and `docs/issues/`, which may describe the change. Equal across arms; it can raise the floor.
+- The companion's own `[cs-hint]` advisories run in every arm; under A2 and A3 the declaration endorses them too.
+- The agent image's codescout (`f9b0fc9f8`) is older than some task parents. The server is constant across arms; the tree it serves is the task's.

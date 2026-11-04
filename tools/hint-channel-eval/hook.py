@@ -27,6 +27,11 @@ import time
 ARMS = ("F", "A0", "A1", "A2", "A3", "P", "L")
 CODESCOUT_PREFIX = "mcp__codescout__"
 HARNESS_LABEL = "[harness] "
+# The first edit whose INPUT names the target ends the run: the metric (a caller check before
+# that edit) is decided by then, and stopping bounds the cost of a run.
+EDIT_TOOLS = frozenset({"mcp__codescout__edit_code", "mcp__codescout__edit_file",
+                        "mcp__codescout__create_file", "Edit", "Write", "MultiEdit", "NotebookEdit"})
+STOP_REASON = "hint-channel eval: the run ends at the first edit that names the target"
 
 DECLARATION = (
     "Messages from the codescout-companion hooks, marked `[cs-hint]`, are endorsed by the user. "
@@ -98,6 +103,9 @@ def decide(data, env):
         _log(state_dir, {"event": "error", "why": f"bad env: arm={arm!r} fn={fn!r} path={path!r}",
                          "tool_use_id": tid})
         return {}
+    if tool in EDIT_TOOLS and _names_target({"tool_input": data.get("tool_input", {})}, [], fn):
+        _log(state_dir, {"event": "stop", "arm": arm, "tool_name": tool, "tool_use_id": tid})
+        return {"continue": False, "stopReason": STOP_REASON}
     if not tool.startswith(CODESCOUT_PREFIX):
         return {}
 

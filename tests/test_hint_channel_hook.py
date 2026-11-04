@@ -183,6 +183,41 @@ class TestDeclaration(HookCase):
         self.assertTrue(self.hook.hint_text("f", "p").startswith("[cs-hint]"))
 
 
+class TestStopAtFirstEdit(HookCase):
+    def edit(self, tool, tool_input, tid="toolu_e"):
+        return {"hook_event_name": "PostToolUse", "tool_name": tool, "tool_input": tool_input,
+                "tool_response": [{"type": "text", "text": "ok"}], "tool_use_id": tid}
+
+    def test_an_edit_that_names_the_target_stops_the_run_in_every_arm(self):
+        cases = [("mcp__codescout__edit_code", {"symbol": "bound_summary", "action": "replace"}),
+                 ("mcp__codescout__edit_file", {"path": "src/x.rs", "old_string": "bound_summary(v)"}),
+                 ("Edit", {"file_path": "/testbed/src/x.rs", "old_string": "fn bound_summary("}),
+                 ("Write", {"file_path": "/testbed/src/x.rs", "content": "bound_summary"})]
+        for arm in self.hook.ARMS:
+            for tool, inp in cases:
+                with self.subTest(arm=arm, tool=tool):
+                    with tempfile.TemporaryDirectory() as d:
+                        out = self.hook.decide(self.edit(tool, inp), self.env(arm, HCE_STATE_DIR=d))
+                        self.assertIs(out.get("continue"), False)
+                        self.assertNotIn("hookSpecificOutput", out)
+                        ev = [json.loads(l) for l in (pathlib.Path(d) / "events.jsonl").read_text().splitlines()]
+                        self.assertEqual((ev[-1]["event"], ev[-1]["tool_name"]), ("stop", tool))
+
+    def test_an_edit_that_does_not_name_the_target_does_not_stop(self):
+        out = self.run_hook("A1", self.edit("mcp__codescout__edit_code", {"symbol": "other_fn"}))
+        self.assertEqual(out, {})
+
+    def test_a_read_that_names_the_target_does_not_stop(self):
+        out = self.run_hook("A1", self.trigger())
+        self.assertNotIn("continue", out)
+
+    def test_an_edit_before_any_trigger_still_stops_and_no_hint_is_sent(self):
+        out = self.run_hook("A1", self.edit("Edit", {"old_string": "bound_summary"}))
+        self.assertEqual(out, {"continue": False, "stopReason": self.hook.STOP_REASON})
+        self.assertEqual([e["event"] for e in self.events()], ["stop"])
+
+
+
 class TestNeverBreaksASession(HookCase):
     def run_main(self, stdin, env):
         full = dict(os.environ)
