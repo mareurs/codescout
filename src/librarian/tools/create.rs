@@ -322,6 +322,22 @@ pub(super) fn is_iso_date(v: &Value) -> bool {
         .is_some_and(|s| s.len() == 10 && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok())
 }
 
+/// Undo a `create` whose disk write failed. The catalog row is written first (BUG-058), so a
+/// failed write leaves a row for a file that is missing or, after a full disk or a quota error,
+/// empty or partial: `fs::write` truncates before it writes. Removing the row also removes its
+/// augmentation, events and links (`ON DELETE CASCADE`), of which a row this call just made has
+/// none beyond the augmentation. Best effort: the error the caller returns is the write's own.
+fn undo_failed_create(cat: &crate::librarian::catalog::Catalog, id: &str, full: &std::path::Path) {
+    if let Err(e) = crate::librarian::catalog::artifact::delete(cat, id) {
+        tracing::warn!(id, error = %e, "could not take back the catalog row of a failed create");
+    }
+    if let Err(e) = std::fs::remove_file(full) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(path = %full.display(), error = %e, "could not remove the file a failed create left");
+        }
+    }
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut a = parse_args(args)?;
 
@@ -531,10 +547,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // and a refusal that had already made the directory left it behind, empty. The symlink guards
     // stay ahead of everything because they judge the path, not the directory.
     // docs/issues/archive/2026-10-31-a-refused-doc-create-leaves-the-empty-parent-directory-it-already-made.md
-    if let Some(parent) = full.parent() {
-        std::fs::create_dir_all(parent)?;
+    // A failed write takes the catalog row back (`undo_failed_create`): the row was written above,
+    // so without this a full disk or a quota error leaves a row for a missing or empty file, and
+    // the next create of the path is refused as "path exists".
+    // docs/issues/2026-10-29-artifact-create-partial-filesystem-failure.md
+    let written = (|| -> std::io::Result<()> {
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&full, &content)
+    })();
+    if let Err(e) = written {
+        undo_failed_create(&ctx.catalog.lock(), &id, &full);
+        return Err(anyhow::Error::from(e).context(format!(
+            "could not write {}; the catalog row was taken back",
+            full.display()
+        )));
     }
-    std::fs::write(&full, &content)?;
 
     // A worktree-born artifact has no main-checkout twin to fork — just make
     // sure the worktree session itself is durably registered.
@@ -1250,6 +1279,88 @@ mod tests {
             "no orphan file must remain after failed upsert: {}",
             target.display()
         );
+    }
+
+    /// A parent directory the process cannot write into makes the disk write fail AFTER the catalog
+    /// row exists (the row is written first, BUG-058). The failure must take the row back: a row
+    /// whose file is missing, or empty after a full disk, is the state of bug d7a454028d809985 /
+    /// 22ae2baefdfdd73a.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_disk_write_leaves_neither_a_catalog_row_nor_an_augmentation() {
+        use std::os::unix::fs::PermissionsExt;
+        if crate::util::private_dir::effective_uid() == 0 {
+            return; // root ignores the mode bits, so the write cannot be made to fail this way
+        }
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let docs = tmp.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::set_permissions(&docs, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let result = call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/ro.md",
+                "kind": "tracker", "title": "X", "body": "hi",
+                "augment": { "prompt": "p", "params": {} }
+            }),
+        )
+        .await;
+
+        // Restore the mode before any assertion can panic, so TempDir can clean up.
+        std::fs::set_permissions(&docs, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err(), "the disk write must fail: {result:?}");
+        let count = |table: &str| -> i64 {
+            ctx.catalog
+                .lock()
+                .conn
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(count("artifact"), 0, "the catalog row must be taken back");
+        assert_eq!(
+            count("artifact_augmentation"),
+            0,
+            "the augmentation row must go with it"
+        );
+        assert!(!docs.join("ro.md").exists());
+    }
+
+    /// The file a failed `fs::write` leaves is empty or partial, because `write` truncates before it
+    /// writes. `undo_failed_create` removes it together with the row.
+    #[test]
+    fn undoing_a_failed_create_removes_the_row_and_the_partial_file() {
+        use crate::librarian::catalog::{artifact, Catalog};
+        let tmp = TempDir::new().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let full = tmp.path().join("half.md");
+        std::fs::write(&full, "").unwrap(); // what a full disk leaves behind
+        let row = artifact::ArtifactRow {
+            id: "partial-1".into(),
+            abs_path: full.clone(),
+            kind: "doc".into(),
+            status: "draft".into(),
+            title: Some("X".into()),
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: Some("generated".into()),
+            created_at: 1,
+            updated_at: 1,
+            file_mtime: 1,
+            file_sha256: String::new(),
+            confidence: 1.0,
+        };
+        artifact::upsert(&cat, &row).unwrap();
+
+        undo_failed_create(&cat, "partial-1", &full);
+
+        assert!(artifact::get(&cat, "partial-1").unwrap().is_none());
+        assert!(!full.exists(), "the empty file must be removed");
+        // Undoing twice, or when nothing was written, must not fail or panic.
+        undo_failed_create(&cat, "partial-1", &full);
     }
 
     #[tokio::test]
