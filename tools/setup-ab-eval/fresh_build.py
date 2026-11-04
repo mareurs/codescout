@@ -529,8 +529,15 @@ _STEP_NAMES = {
     "rev-parse": "git rev-parse", "docker-commit": "docker commit",
     "inspect": "docker image inspect", "rmi": "docker rmi", "tag-check": "docker image inspect (tag)",
     "base-id": "docker image inspect (base image)", "list-files": "list files",
-    "delete-extras": "delete leftover files",
+    "delete-extras": "delete leftover files", "git-attributes": "write .git/info/attributes",
 }
+# Pinned on every `git add` and `git commit`, so the base image's git configuration cannot rewrite bytes:
+# no CRLF conversion, a real file mode, no system attributes file. `.git/info/attributes` outranks the
+# tree's own .gitattributes (`text`/`eol`/filters would still convert on `git add`), so it is written
+# first with the attributes that make git store the working-copy bytes as they are.
+_GIT_PINNED = ("-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "-c", "core.fileMode=true")
+_GIT_ENV = ("GIT_ATTR_NOSYSTEM=1",)
+_INFO_ATTRIBUTES = "mkdir -p .git/info && printf '* -text -ident -filter\\n' > .git/info/attributes"
 
 
 def _fresh_id(repo, pr):
@@ -587,11 +594,20 @@ def _text(proc):
     return out.decode("utf-8", errors="replace") if isinstance(out, bytes) else str(out)
 
 
+def _git_blob_id(data):
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
 def _tree_files(tree_tar):
-    """`(paths, sha256)` of the tree tarball: the relative path of every file and symlink in it
-    (directories are not listed) and the hex SHA-256 of the archive. `BuildError` for an archive
-    that cannot be read, holds no file, or names an unsafe or non-UTF-8 path."""
-    digest, paths = hashlib.sha256(), set()
+    """`(entries, sha256)` of the tree tarball: `{path: (git mode, git blob id)}` for every file and
+    symlink in it (directories are not listed), and the hex SHA-256 of the archive.
+
+    The mode is `100755` when any execute bit is set, `100644` otherwise, `120000` for a symlink
+    (whose blob is its target text). The blob id is git's SHA-1 of `blob <size>\\0<bytes>`, of the
+    bytes as archived: it is what `git add` must store. A hard link has the entry of its target.
+    `BuildError` for an archive that cannot be read, holds no file, names an unsafe or non-UTF-8
+    path, or has a hard link whose target is not in it."""
+    digest, entries, links = hashlib.sha256(), {}, {}
     try:
         with open(tree_tar, "rb") as f:
             for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -600,22 +616,87 @@ def _tree_files(tree_tar):
             for member in tar:
                 if not (member.isreg() or member.issym() or member.islnk()):
                     continue
-                name = member.name
-                while name.startswith("./"):
-                    name = name[2:]
-                parts = name.split("/")
-                if name.startswith("/") or {"", ".", ".."} & set(parts) or "\0" in name:
-                    raise BuildError("tree tarball %s holds an unsafe path: %r" % (tree_tar, member.name))
-                try:
-                    name.encode("utf-8")
-                except UnicodeEncodeError:
-                    raise BuildError("tree tarball %s holds a path that is not UTF-8: %r" % (tree_tar, name)) from None
-                paths.add(name)
+                name = _tar_path(member.name, tree_tar)
+                if member.islnk():
+                    links[name] = _tar_path(member.linkname, tree_tar)
+                elif member.issym():
+                    try:
+                        target = member.linkname.encode("utf-8")
+                    except UnicodeEncodeError:
+                        raise BuildError("tree tarball %s: symlink %s has a target that is not UTF-8"
+                                         % (tree_tar, name)) from None
+                    entries[name] = ("120000", _git_blob_id(target))
+                else:
+                    mode = "100755" if member.mode & 0o111 else "100644"
+                    entries[name] = (mode, _git_blob_id(tar.extractfile(member).read()))
     except (OSError, tarfile.TarError) as exc:
         raise BuildError("cannot read tree tarball %s: %s" % (tree_tar, exc)) from exc
-    if not paths:
+    for name, target in links.items():
+        if target not in entries:
+            raise BuildError("tree tarball %s: hard link %s points at %s, which is not a file of the archive"
+                             % (tree_tar, name, target))
+        entries[name] = entries[target]
+    if not entries:
         raise BuildError("tree tarball %s holds no file" % tree_tar)
-    return paths, digest.hexdigest()
+    return entries, digest.hexdigest()
+
+
+def _tar_path(name, tree_tar):
+    """`name` without a leading `./`; `BuildError` for an unsafe or non-UTF-8 path."""
+    clean = name
+    while clean.startswith("./"):
+        clean = clean[2:]
+    if clean.startswith("/") or {"", ".", ".."} & set(clean.split("/")) or "\0" in clean:
+        raise BuildError("tree tarball %s holds an unsafe path: %r" % (tree_tar, name))
+    try:
+        clean.encode("utf-8")
+    except UnicodeEncodeError:
+        raise BuildError("tree tarball %s holds a path that is not UTF-8: %r" % (tree_tar, clean)) from None
+    return clean
+
+
+_INDEX_ENTRY = re.compile(r"([0-7]{6}) ([0-9a-f]{40}|[0-9a-f]{64}) ([0-3])\t(.+)", re.DOTALL)
+
+
+def _index_entries(text):
+    """`{path: (mode, blob id)}` of `git ls-files -s -z` output. `BuildError` for an entry that is not
+    `<mode> <blob> <stage>\\t<path>` or is not at stage 0 (an unmerged path)."""
+    found = {}
+    for raw in text.split("\0"):
+        if not raw:
+            continue
+        m = _INDEX_ENTRY.fullmatch(raw)
+        if m is None:
+            raise BuildError("git ls-files printed something that is not an index entry: %r" % raw[:200])
+        if m.group(3) != "0":
+            raise BuildError("git ls-files lists %s at stage %s (unmerged)" % (m.group(4), m.group(3)))
+        found[m.group(4)] = (m.group(1), m.group(2))
+    return found
+
+
+def _tree_mismatch(expected, committed):
+    """What differs between the tarball's `{path: (mode, blob)}` and the committed index, as text; '' when equal."""
+    parts = []
+    missing, extra = set(expected) - set(committed), set(committed) - set(expected)
+    changed = {p for p in set(expected) & set(committed) if expected[p] != committed[p]}
+    if missing:
+        parts.append("missing from the commit: " + _named(missing))
+    if extra:
+        parts.append("not in the upstream tree: " + _named(extra))
+    if changed:
+        shown = sorted(changed)[:_LISTED]
+        notes = []
+        for path in shown:
+            (want_mode, want_blob), (mode, blob) = expected[path], committed[path]
+            what = []
+            if want_mode != mode:
+                what.append("mode %s -> %s" % (want_mode, mode))
+            if want_blob != blob:
+                what.append("blob %s -> %s" % (want_blob[:12], blob[:12]))
+            notes.append("%s (%s)" % (path, ", ".join(what)))
+        more = " (+%d more)" % (len(changed) - len(shown)) if len(changed) > len(shown) else ""
+        parts.append("differs: " + ", ".join(notes) + more)
+    return "; ".join(parts)
 
 
 def _nul_list(paths, prefix=""):
@@ -773,7 +854,11 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
     --no-run` with `-e CARGO_NET_OFFLINE=false` on that exec only, whose log must hold at least one
     `Compiling` line (none means stale binaries); `git add -A`, then `git add -f` of every tarball
     path (the new `.gitignore` would drop tracked files that it matches), a synthetic commit, and a
-    check that `git ls-files` equals the tarball's file list; `docker commit` (restoring
+    check that `git ls-files -s` equals the tarball's `{path: (mode, blob id)}`: the blob id is git's own
+    hash of the archived bytes, so a rewritten line ending, filter or file mode is an error, not a silent
+    difference. Every `git add` and `git commit` pins `core.autocrlf=false`, `core.safecrlf=false`,
+    `core.fileMode=true` and `GIT_ATTR_NOSYSTEM=1`, after `.git/info/attributes` is set to
+    `* -text -ident -filter` (it outranks the tree's `.gitattributes`); `docker commit` (restoring
     `CMD ["/bin/bash"]`) to `image_tag(repo, pr)`.
 
     The container is removed in a `finally`, by ID. A `docker run` that answered with a failure
@@ -852,7 +937,7 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
         # files of directories the new tree does not have. `target/` and `.git` are not looked at.
         listing = build.exec("list-files", "find", ".", "-path", "./target", "-prune", "-o", "-path", "./.git",
                              "-prune", "-o", "(", "-type", "f", "-o", "-type", "l", ")", "-print0", timeout=600)
-        extras = _from_nul(_text(listing), "./", "find") - expected
+        extras = _from_nul(_text(listing), "./", "find") - set(expected)
         ev["leftover_files_deleted"] = len(extras)
         if extras:
             build.exec("delete-extras", "xargs", "-0", "rm", "-f", data=_nul_list(extras, "./"), timeout=600)
@@ -879,20 +964,19 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
         lap("warm_build")
 
         message = "synthetic base: %s %s (parent of PR %d merge)" % (repo, upstream_base[:12], pr)
-        build.exec("git-add", "git", "add", "-A", timeout=3600)
+        git = ("git", *_GIT_PINNED)
+        build.bash("git-attributes", _INFO_ATTRIBUTES, timeout=600)
+        build.exec("git-add", *git, "add", "-A", env=_GIT_ENV, timeout=3600)
         # `git add -A` leaves out a tracked file the new .gitignore matches: add every path of the tree
-        build.exec("git-add-force", "git", "add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul",
-                   env=("GIT_LITERAL_PATHSPECS=1",), data=_nul_list(expected), timeout=3600)
-        build.exec("git-commit", "git", "-c", "user.name=sab", "-c", "user.email=sab@invalid", "commit", "-q",
-                   "-m", message, timeout=3600)
-        committed = _from_nul(_text(build.exec("ls-files", "git", "ls-files", "-z", timeout=600)), "", "git ls-files")
-        if committed != expected:
-            parts = []
-            if expected - committed:
-                parts.append("missing from the commit: " + _named(expected - committed))
-            if committed - expected:
-                parts.append("not in the upstream tree: " + _named(committed - expected))
-            raise BuildError("the synthetic commit is not the upstream tree (%s)" % "; ".join(parts))
+        build.exec("git-add-force", *git, "add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul",
+                   env=_GIT_ENV + ("GIT_LITERAL_PATHSPECS=1",), data=_nul_list(expected), timeout=3600)
+        build.exec("git-commit", *git, "-c", "user.name=sab", "-c", "user.email=sab@invalid", "commit", "-q",
+                   "-m", message, env=_GIT_ENV, timeout=3600)
+        # content, not only names: every blob id and mode of the commit must be the tarball's
+        committed = _index_entries(_text(build.exec("ls-files", "git", "ls-files", "-s", "-z", timeout=600)))
+        mismatch = _tree_mismatch(expected, committed)
+        if mismatch:
+            raise BuildError("the synthetic commit is not the upstream tree (%s)" % mismatch)
         base_commit = _text(build.exec("rev-parse", "git", "rev-parse", "HEAD", timeout=120)).strip()
         if _SHA.fullmatch(base_commit) is None:
             raise BuildError("git rev-parse HEAD gave no commit SHA: %r" % base_commit[-_LOG_TAIL:])

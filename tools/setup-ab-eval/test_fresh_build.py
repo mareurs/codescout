@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -1085,6 +1086,7 @@ TREE = {  # the upstream tree: path -> bytes, or ("symlink", target)
     "crates/keep/src/lib.rs": b"pub fn keep() {}\n",
     ".gitignore": b"/target\n.env.*\n",
     ".env.example": b"A=1\n",  # tracked, and matched by the .gitignore above
+    "scripts/run.sh": ("exec", b"#!/bin/sh\necho run\n"),  # mode 100755
     "link": ("symlink", "Cargo.toml"),
 }
 TREE_FILES = sorted(TREE)
@@ -1095,10 +1097,40 @@ WARM_OK = (
 )
 HAPPY_LABELS = [
     "tag-check", "base-id", "run", "clear-tracked", "copy", "extract", "list-files", "clear-dirs", "touch",
-    "metadata", "warm-build", "git-add", "git-add-force", "git-commit", "ls-files", "rev-parse", "docker-commit",
+    "metadata", "warm-build", "git-attributes", "git-add", "git-add-force", "git-commit", "ls-files",
+    "rev-parse", "docker-commit",
     "inspect", "rm",
 ]
 
+
+def blob_id(data):
+    """The git blob id of `data`, computed here (not by the code under test)."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def tree_entry(content):
+    """`(git mode, blob id)` of a TREE value: bytes, ("exec", bytes) or ("symlink", target)."""
+    if isinstance(content, tuple) and content[0] == "symlink":
+        return "120000", blob_id(content[1].encode())
+    if isinstance(content, tuple):
+        return "100755", blob_id(content[1])
+    return "100644", blob_id(content)
+
+
+TREE_ENTRIES = {path: tree_entry(content) for path, content in TREE.items()}  # path -> (mode, blob id)
+
+
+def ls_s(entries):
+    """`git ls-files -s -z` output for `{path: (mode, blob)}`."""
+    return "".join("%s %s 0\t%s\0" % (mode, blob, path) for path, (mode, blob) in sorted(entries.items()))
+
+PINNED = ("-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "-c", "core.fileMode=true")
+
+
+def exec_env(args):
+    """The `-e` values of a `docker exec` argv (without the leading `docker`)."""
+    options = args[:args.index(CID)]
+    return [options[i + 1] for i, option in enumerate(options) if option == "-e"]
 
 def done(args, rc=0, out=""):
     """What pilot.docker returns with check=False: stderr is merged into stdout, text mode."""
@@ -1146,7 +1178,9 @@ def label(args):
         return "rev-parse"
     if " commit " in text:
         return "git-commit"
-    if "git add -A" in text:
+    if "info/attributes" in text:
+        return "git-attributes"
+    if " add -A" in text:
         return "git-add"
     return "?"
 
@@ -1187,7 +1221,7 @@ class FakeDocker:
         if name == "list-files":
             return 0, "".join("./%s\0" % p for p in self.files)
         if name == "ls-files":
-            return 0, "".join("%s\0" % p for p in self.files)
+            return 0, ls_s({p: TREE_ENTRIES.get(p, ("100644", blob_id(b""))) for p in self.files})
         if name == "rev-parse":
             return 0, SYN_SHA + "\n"
         if name == "inspect":
@@ -1211,30 +1245,44 @@ class FakeDocker:
 
 
 def write_tar(path, tree=TREE):
-    """A `git archive`-shaped tarball of `tree`: a directory member, files, a symlink."""
+    """A `git archive`-shaped tarball of `tree`: a directory member, files (mode 0644, or 0755 for
+    `("exec", data)`), symlinks (`("symlink", target)`) and hard links (`("hardlink", target_path)`)."""
     with tarfile.open(path, "w") as tar:
         info = tarfile.TarInfo("crates")
         info.type = tarfile.DIRTYPE
         tar.addfile(info)
         for name, content in sorted(tree.items()):
             info = tarfile.TarInfo(name)
-            if isinstance(content, tuple):
-                info.type, info.linkname = tarfile.SYMTYPE, content[1]
+            if isinstance(content, tuple) and content[0] in ("symlink", "hardlink"):
+                info.type = tarfile.SYMTYPE if content[0] == "symlink" else tarfile.LNKTYPE
+                info.linkname = content[1]
                 tar.addfile(info)
             else:
-                info.size = len(content)
-                tar.addfile(info, io.BytesIO(content))
+                data = content[1] if isinstance(content, tuple) else content
+                info.size = len(data)
+                info.mode = 0o755 if isinstance(content, tuple) else 0o644
+                tar.addfile(info, io.BytesIO(data))
     return path
 
 
-def local_shell(root):
-    """A FakeDocker response that runs the exec'd command for real, in `root`, with the call's stdin."""
+def local_shell(root, env=None):
+    """A FakeDocker response that runs the exec'd command for real, in `root`, with the call's stdin
+    and its `-e` options (on top of `env`, when given)."""
     def run(args, kw):
-        proc = subprocess.run(list(args[args.index(CID) + 1:]), cwd=root, input=kw.get("data"),
+        i = args.index(CID)
+        options = args[:i]
+        run_env = dict(os.environ if env is None else env)
+        for j, option in enumerate(options):
+            if option == "-e":
+                key, value = options[j + 1].split("=", 1)
+                run_env[key] = value
+        proc = subprocess.run(list(args[i + 1:]), cwd=root, input=kw.get("data"), env=run_env,
                               stdin=None if kw.get("data") is not None else subprocess.DEVNULL,
                               capture_output=True, text=True)
         return done(args, proc.returncode, proc.stdout + proc.stderr)
     return run
+
+
 
 
 class ImageTagTest(unittest.TestCase):
@@ -1392,7 +1440,7 @@ class BuildImageTest(unittest.TestCase):
                 fake = FakeDocker()
                 self.build(fake, workdir=workdir)
                 execs = [args for args, _ in fake.calls if args[0] == "exec"]
-                self.assertEqual(len(execs), 12)
+                self.assertEqual(len(execs), 13)
                 for args in execs:
                     i = args.index("-w")
                     self.assertEqual(args[i + 1], workdir)
@@ -1461,7 +1509,8 @@ class BuildImageTest(unittest.TestCase):
 
     def test_the_tag_is_dropped_only_from_the_commit_attempt_on(self):
         steps = ["tag-check", "base-id", "run", "clear-tracked", "copy", "extract", "list-files", "clear-dirs",
-                 "touch", "metadata", "warm-build", "git-add", "git-add-force", "git-commit", "ls-files",
+                 "touch", "metadata", "warm-build", "git-attributes", "git-add", "git-add-force", "git-commit",
+                 "ls-files",
                  "rev-parse"]
         for name in steps:
             with self.subTest(step=name):
@@ -1580,10 +1629,11 @@ class BuildImageTest(unittest.TestCase):
                   "empty", "target/debug/emptydir"):
             (r / d).mkdir(parents=True)
         for name, content in TREE.items():
-            if isinstance(content, tuple):
+            (r / name).parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(content, tuple) and content[0] == "symlink":
                 (r / name).symlink_to(content[1])
             else:
-                (r / name).write_bytes(content)
+                (r / name).write_bytes(content[1] if isinstance(content, tuple) else content)
         leftovers = ["crates/keep/test-output.log", "crates/keep/src/stale.rs", "old/dir/x.txt", "old/dir/sub/y",
                      "crates/gone/src/old.rs", "has space\nand newline", "-dash", ".env.local"]
         for name in leftovers:
@@ -1730,47 +1780,73 @@ class BuildImageTest(unittest.TestCase):
         fake = FakeDocker()
         self.build(fake)
         labels = fake.labels()
+        self.assertEqual(labels.index("git-attributes") + 1, labels.index("git-add"))
         self.assertEqual(labels.index("git-add") + 1, labels.index("git-add-force"))
         self.assertEqual(labels.index("git-add-force") + 1, labels.index("git-commit"))
         add = fake.args_of("git-add")
-        self.assertEqual(add[add.index(CID) + 1:], ("git", "add", "-A"))
+        self.assertEqual(add[add.index(CID) + 1:], ("git", *PINNED, "add", "-A"))
         force, kw = fake.args_of("git-add-force"), fake.kw_of("git-add-force")
-        self.assertEqual(force[force.index(CID) + 1:], ("git", "add", "-f", "--pathspec-from-file=-",
+        self.assertEqual(force[force.index(CID) + 1:], ("git", *PINNED, "add", "-f", "--pathspec-from-file=-",
                                                         "--pathspec-file-nul"))
         self.assertEqual(force[:2], ("exec", "-i"))  # the path list is the standard input
-        self.assertEqual(force[force.index("-e"):force.index("-e") + 2], ("-e", "GIT_LITERAL_PATHSPECS=1"))
+        self.assertIn("GIT_LITERAL_PATHSPECS=1", exec_env(force))
         self.assertEqual(kw["data"], "".join("%s\0" % p for p in TREE_FILES))
         self.assertIn(".env.example\0", kw["data"])  # tracked upstream, matched by the new .gitignore
         self.assertIn("link\0", kw["data"])  # a symlink is a file of the tree; the directory member is not
         self.assertNotIn("crates\0", kw["data"])
+
+    def test_every_git_add_and_commit_pins_the_config_that_could_rewrite_bytes(self):
+        fake = FakeDocker()
+        self.build(fake)
+        seen = [args for args, _ in fake.calls if label(args) in ("git-add", "git-add-force", "git-commit")]
+        self.assertEqual(len(seen), 3)
+        for args in seen:
+            tail = args[args.index(CID) + 1:]
+            self.assertEqual(tail[:1 + len(PINNED)], ("git", *PINNED), args)
+            self.assertIn("GIT_ATTR_NOSYSTEM=1", exec_env(args), args)
+
+    def test_the_info_attributes_file_outranks_the_trees_gitattributes_before_any_add(self):
+        fake = FakeDocker()
+        self.build(fake)
+        args = fake.args_of("git-attributes")
+        i = args.index(CID)
+        self.assertEqual(args[i + 1:i + 4], ("bash", "-o", "pipefail"))
+        script = args[-1]
+        self.assertIn("mkdir -p .git/info", script)
+        self.assertIn("'* -text -ident -filter\\n'", script)
+        self.assertIn("> .git/info/attributes", script)
+        labels = fake.labels()
+        self.assertLess(labels.index("git-attributes"), labels.index("git-add"))
 
     def test_git_commit_is_synthetic_with_a_fixed_identity_and_message(self):
         fake = FakeDocker()
         self.build(fake)
         args = fake.args_of("git-commit")
         tail = args[args.index(CID) + 1:]
-        self.assertEqual(tail[:6], ("git", "-c", "user.name=sab", "-c", "user.email=sab@invalid", "commit"))
+        self.assertEqual(tail[:1 + len(PINNED) + 5], (
+            "git", *PINNED, "-c", "user.name=sab", "-c", "user.email=sab@invalid", "commit"))
         msg = "synthetic base: %s %s (parent of PR %d merge)" % (REPO, UPSTREAM_BASE[:12], PR)
         self.assertEqual(tail[tail.index("-m") + 1], msg)
 
-    def test_the_committed_file_list_is_compared_with_the_tree_after_the_commit(self):
+    def test_the_committed_index_is_compared_with_the_tree_after_the_commit(self):
         fake = FakeDocker()
         self.build(fake)
         labels = fake.labels()
         self.assertEqual(labels.index("git-commit") + 1, labels.index("ls-files"))
         args = fake.args_of("ls-files")
-        self.assertEqual(args[args.index(CID) + 1:], ("git", "ls-files", "-z"))
+        self.assertEqual(args[args.index(CID) + 1:], ("git", "ls-files", "-s", "-z"))
 
     def test_a_file_missing_from_the_commit_raises_naming_it(self):
-        listing = "".join("%s\0" % p for p in TREE_FILES if p != ".env.example")
-        err = self.fails(FakeDocker(("ls-files", (0, listing))), "not the upstream tree")
+        entries = {p: e for p, e in TREE_ENTRIES.items() if p != ".env.example"}
+        err = self.fails(FakeDocker(("ls-files", (0, ls_s(entries)))), "not the upstream tree")
         self.assertIn("missing from the commit: .env.example", str(err))
         self.assertNotIn("not in the upstream tree", str(err))
+        self.assertNotIn("differs", str(err))
 
     def test_a_file_that_is_not_in_the_tree_raises_naming_at_most_ten(self):
         extra = ["extra%02d" % i for i in range(12)]
-        listing = "".join("%s\0" % p for p in TREE_FILES + extra)
-        err = self.fails(FakeDocker(("ls-files", (0, listing))), "not in the upstream tree")
+        entries = dict(TREE_ENTRIES, **{p: ("100644", blob_id(b"x")) for p in extra})
+        err = self.fails(FakeDocker(("ls-files", (0, ls_s(entries)))), "not in the upstream tree")
         msg = str(err)
         for name in extra[:10]:
             self.assertIn(name, msg)
@@ -1779,8 +1855,45 @@ class BuildImageTest(unittest.TestCase):
         self.assertIn("(+2 more)", msg)
         self.assertNotIn("missing from the commit", msg)
 
+    def test_a_committed_blob_that_differs_fails_naming_the_path_and_both_ids(self):
+        crlf = blob_id(b"[workspace]\r\nmembers = [\"crates/*\"]\r\n")
+        entries = dict(TREE_ENTRIES, **{"Cargo.toml": ("100644", crlf)})
+        err = self.fails(FakeDocker(("ls-files", (0, ls_s(entries)))), "not the upstream tree")
+        msg = str(err)
+        self.assertIn("differs: Cargo.toml", msg)
+        self.assertIn(TREE_ENTRIES["Cargo.toml"][1][:12], msg)
+        self.assertIn(crlf[:12], msg)
+        self.assertNotIn("mode", msg)  # only the blob differs
+        self.assertNotIn("missing from the commit", msg)
+
+    def test_a_committed_mode_that_differs_fails_naming_the_path_and_both_modes(self):
+        for path, mode in (("scripts/run.sh", "100644"), ("Cargo.toml", "100755"), ("link", "100644")):
+            with self.subTest(path=path):
+                entries = dict(TREE_ENTRIES, **{path: (mode, TREE_ENTRIES[path][1])})
+                err = self.fails(FakeDocker(("ls-files", (0, ls_s(entries)))), "not the upstream tree")
+                msg = str(err)
+                self.assertIn("differs: " + path, msg)
+                self.assertIn("mode %s -> %s" % (TREE_ENTRIES[path][0], mode), msg)
+                self.assertNotIn("blob", msg)  # only the mode differs
+
+    def test_at_most_ten_differing_paths_are_named(self):
+        entries = {"f%02d" % i: ("100644", blob_id(b"x")) for i in range(12)}
+        tar = write_tar(self.tmp / "many.tar", {p: b"y" for p in entries})
+        fake = FakeDocker(("ls-files", (0, ls_s(entries))), files=sorted(entries))
+        err = self.fails(fake, "not the upstream tree", tree_tar=tar)
+        msg = str(err)
+        self.assertIn("differs: f00", msg)
+        self.assertIn("f09", msg)
+        self.assertNotIn("f10", msg)
+        self.assertIn("(+2 more)", msg)
+
+    def test_an_unmerged_or_malformed_index_entry_raises(self):
+        for bad in ("100644 %s 2\tCargo.toml\0" % ("a" * 40), "garbage\0", "100644 abc 0 Cargo.toml\0"):
+            with self.subTest(bad=bad):
+                self.fails(FakeDocker(("ls-files", (0, bad))), "git ls-files")
+
     def test_a_mismatch_stops_before_rev_parse_and_the_commit(self):
-        fake = FakeDocker(("ls-files", (0, "other\0")))
+        fake = FakeDocker(("ls-files", (0, ls_s({"other": ("100644", blob_id(b""))}))))
         self.fails(fake, "not the upstream tree")
         self.assertNotIn("rev-parse", fake.labels())
 
@@ -1798,7 +1911,8 @@ class BuildImageTest(unittest.TestCase):
         steps = {
             "tag-check": None, "base-id": None, "run": None, "clear-tracked": "id", "copy": "id", "extract": "id",
             "list-files": "id", "clear-dirs": "id", "touch": "id", "metadata": "id", "warm-build": "id",
-            "git-add": "id", "git-add-force": "id", "git-commit": "id", "ls-files": "id", "rev-parse": "id",
+            "git-attributes": "id", "git-add": "id", "git-add-force": "id", "git-commit": "id", "ls-files": "id",
+            "rev-parse": "id",
             "docker-commit": "id",
         }
         for name, removal in steps.items():
@@ -1902,12 +2016,89 @@ class BuildImageTest(unittest.TestCase):
                     self.build(fake, tree_tar=tar)
                 self.assertEqual(fake.calls, [])
 
-    def test_the_tarball_listing_is_files_and_symlinks_without_directories_or_dot_slash(self):
+    def test_the_tarball_listing_is_files_and_symlinks_with_git_mode_and_blob_id(self):
         tar = self.tmp / "dotslash.tar"
-        write_tar(tar, {"./a/b.rs": b"x", "c": ("symlink", "a/b.rs")})
-        paths, sha = fb._tree_files(tar)
-        self.assertEqual(paths, {"a/b.rs", "c"})
+        write_tar(tar, {"./a/b.rs": b"x\r\n", "c": ("symlink", "a/b.rs"), "run": ("exec", b"#!/bin/sh\n"),
+                        "hl": ("hardlink", "a/b.rs")})
+        entries, sha = fb._tree_files(tar)
+        self.assertEqual(entries, {
+            "a/b.rs": ("100644", blob_id(b"x\r\n")),  # CRLF kept: the id is of the bytes
+            "c": ("120000", blob_id(b"a/b.rs")),  # a symlink's blob is its target text
+            "run": ("100755", blob_id(b"#!/bin/sh\n")),
+            "hl": ("100644", blob_id(b"x\r\n")),  # a hard link has the content of its target
+        })
         self.assertEqual(sha, hashlib.sha256(tar.read_bytes()).hexdigest())
+
+    def test_a_hard_link_to_a_path_that_is_not_in_the_tarball_is_refused(self):
+        tar = write_tar(self.tmp / "dangling.tar", {"hl": ("hardlink", "nowhere")})
+        with self.assertRaisesRegex(fb.BuildError, "hard link"):
+            fb._tree_files(tar)
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_real_git_global_autocrlf_and_an_eol_attribute_rewrite_bytes_unless_pinned(self):
+        # the one place real git runs, on scratch repositories under the test's temp dir, with a
+        # global core.autocrlf=true: the hazard is real, and the pinned sequence defeats it
+        tree = {"crlf.txt": b"a\r\nb\r\n", "lf.txt": b"x\n", "run.sh": ("exec", b"#!/bin/sh\n")}
+        with_attrs = dict(tree, **{".gitattributes": b"*.txt text eol=crlf\n"})
+        cfg = self.tmp / "hazard.gitconfig"
+        cfg.write_text("[core]\n\tautocrlf = true\n")
+        env = {"PATH": os.environ["PATH"], "HOME": str(self.tmp), "GIT_CONFIG_GLOBAL": str(cfg),
+               "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C"}
+
+        def git(root, *args):
+            return subprocess.run(["git", *args], cwd=root, env=env, check=True, capture_output=True,
+                                  text=True).stdout
+
+        def repo(name, files):
+            root = self.tmp / name
+            root.mkdir()
+            git(root, "init", "-q")
+            for path, content in files.items():
+                (root / path).write_bytes(content[1] if isinstance(content, tuple) else content)
+                if isinstance(content, tuple):
+                    (root / path).chmod(0o755)
+            return root
+
+        def index(root):
+            found = {}
+            for entry in git(root, "ls-files", "-s", "-z").split("\0"):
+                if entry:
+                    meta, path = entry.split("\t", 1)
+                    found[path] = tuple(meta.split(" ")[:2])
+            return found
+
+        want = {p: tree_entry(c) for p, c in tree.items()}
+        want_attrs = {p: tree_entry(c) for p, c in with_attrs.items()}
+
+        # 1. the hazard is real: a plain `git add -A` stores CRLF text as LF
+        a = repo("plain-attrs", with_attrs)
+        git(a, "add", "-A")
+        self.assertNotEqual(index(a)["crlf.txt"][1], want["crlf.txt"][1])
+        self.assertEqual(index(a)["crlf.txt"][1], blob_id(b"a\nb\n"))
+        b = repo("plain", tree)
+        git(b, "add", "-A")
+        self.assertNotEqual(index(b)["crlf.txt"][1], want["crlf.txt"][1])  # global autocrlf alone is enough
+
+        # 2. the pinned flags alone defeat the global setting: the very argv build_image runs
+        fake = FakeDocker()
+        self.build(fake)
+        c = repo("pinned", tree)
+        done_ = local_shell(c, env)(fake.args_of("git-add"), fake.kw_of("git-add"))
+        self.assertEqual(done_.returncode, 0, done_.stdout)
+        self.assertEqual(index(c), want)
+
+        # 3. the whole sequence, with an eol attribute in the tree too: build_image's own compare
+        # reads real `git ls-files -s -z` of the synthetic commit and passes
+        tar = write_tar(self.tmp / "with-attrs.tar", with_attrs)
+        d = repo("full", with_attrs)
+        shell = local_shell(d, env)
+        fake = FakeDocker(("git-attributes", shell), ("git-add", shell), ("git-add-force", shell),
+                          ("git-commit", shell), ("ls-files", shell), ("rev-parse", shell),
+                          files=sorted(with_attrs))
+        got = self.build(fake, tree_tar=tar)
+        self.assertRegex(got["base_commit"], r"^[0-9a-f]{40}$")
+        self.assertEqual(index(d), want_attrs)
+
 
     # --- evidence and removal ---
 
