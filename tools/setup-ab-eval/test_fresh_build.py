@@ -1,8 +1,13 @@
 """Tests for fresh_build's pure helpers. No docker, git, gh or network."""
 import hashlib
+import json
+import os
+import re
 import unittest
 
 import fresh_build as fb
+
+DATASET = "/home/marius/work/claude/setup-ab-data/live/multilang-rust.jsonl"
 
 SRC_A = (
     "diff --git a/src/a.rs b/src/a.rs\n"
@@ -70,13 +75,39 @@ class IsTestPathTest(unittest.TestCase):
             "src/lib_test.rs",
             "src/tests.rs",
             "testdata/a.json",
-            "a/fixtures/b.txt",
+            "crates/parser/test_data/generated/runner.rs",
+            "crates/hir-def/src/macro_expansion_tests/mod.rs",
+            "crates/ide-db/src/test_data/x.txt",
+            "docs/security/matrix-e2ee-guide.md",
+            "rust/src/core/context_kernel/envelope_e2e.rs",
+            "src/Tests/Upper.rs",
         ):
             self.assertTrue(fb.is_test_path(p), p)
 
     def test_source_paths(self):
-        for p in ("src/lib.rs", "crates/ide/src/contest/mod.rs", "src/attests.rs"):
+        for p in ("src/lib.rs", "src/main.rs", "crates/hir-def/src/lib.rs", "docs/guide.md"):
             self.assertFalse(fb.is_test_path(p), p)
+
+
+@unittest.skipUnless(os.path.exists(DATASET), "dataset file not present")
+class DatasetSplitAgreementTest(unittest.TestCase):
+    """is_test_path reproduces the dataset's own patch / test_patch partition, file by file."""
+
+    HEADER = re.compile(r"^diff --git a/.* b/(.*)$", re.MULTILINE)
+
+    def test_every_file_of_every_record(self):
+        files = 0
+        with open(DATASET, encoding="utf-8") as fh:
+            for line in fh:
+                rec = json.loads(line)
+                for field, want in (("patch", False), ("test_patch", True)):
+                    for path in self.HEADER.findall(rec[field]):
+                        files += 1
+                        self.assertEqual(
+                            fb.is_test_path(path.rstrip("\r")), want,
+                            "%s %s: %s" % (rec["instance_id"], field, path),
+                        )
+        self.assertGreater(files, 0)
 
 
 class DiffFilesTest(unittest.TestCase):
@@ -136,6 +167,70 @@ class SplitDiffTest(unittest.TestCase):
             fb.split_diff("not a diff\n" + SRC_A)
         with self.assertRaises(ValueError):
             fb.split_diff("\n" + SRC_A)
+MODE_ONLY = "diff --git a/tests/run.sh b/tests/run.sh\nold mode 100644\nnew mode 100755\n"
+BINARY = (
+    "diff --git a/src/img.png b/src/img.png\n"
+    "index 111..222 100644\n"
+    "Binary files a/src/img.png and b/src/img.png differ\n"
+)
+COPY = (
+    "diff --git a/src/a.rs b/tests/c.rs\n"
+    "similarity index 100%\n"
+    "copy from src/a.rs\n"
+    "copy to tests/c.rs\n"
+)
+
+
+class BlockShapesTest(unittest.TestCase):
+    def test_mode_only_block(self):
+        self.assertEqual(fb.diff_files(MODE_ONLY), ["tests/run.sh"])
+        self.assertEqual(fb.split_diff(SRC_A + MODE_ONLY), (SRC_A, MODE_ONLY))
+
+    def test_binary_block(self):
+        self.assertEqual(fb.diff_files(BINARY), ["src/img.png"])
+        self.assertEqual(fb.split_diff(BINARY + TEST_T), (BINARY, TEST_T))
+
+    def test_copy_block_classified_by_b_side(self):
+        self.assertEqual(fb.diff_files(COPY), ["tests/c.rs"])
+        self.assertEqual(fb.split_diff(SRC_A + COPY), (SRC_A, COPY))
+
+    def test_interleaved_diff_is_regrouped(self):
+        diff = TEST_T + SRC_A + MODE_ONLY + SRC_B
+        patch, test_patch = fb.split_diff(diff)
+        self.assertEqual(patch, SRC_A + SRC_B)
+        self.assertEqual(test_patch, TEST_T + MODE_ONLY)
+        self.assertNotEqual(patch + test_patch, diff)
+        self.assertEqual(sorted((patch + test_patch).split("diff --git ")), sorted(diff.split("diff --git ")))
+
+
+class QuotedPathTest(unittest.TestCase):
+    QUOTED_HEADER = 'diff --git "a/src/t\\303\\251.rs" "b/src/t\\303\\251.rs"\n--- a/x\n'
+    QUOTED_B_ONLY = 'diff --git a/src/x.rs "b/src/t\\303\\251.rs"\n'
+    QUOTED_RENAME = (
+        "diff --git a/src/a.rs b/src/b.rs\n"
+        "similarity index 100%\n"
+        "rename from src/a.rs\n"
+        'rename to "src/t\\303\\251.rs"\n'
+    )
+    QUOTED_COPY = (
+        "diff --git a/src/a.rs b/src/b.rs\n"
+        "similarity index 100%\n"
+        "copy from src/a.rs\n"
+        'copy to "src/t\\303\\251.rs"\n'
+    )
+
+    def test_quoted_path_raises_in_both_entry_points(self):
+        for diff in (self.QUOTED_HEADER, self.QUOTED_B_ONLY, self.QUOTED_RENAME, self.QUOTED_COPY):
+            with self.assertRaises(ValueError, msg=diff):
+                fb.diff_files(SRC_A + diff)
+            with self.assertRaises(ValueError, msg=diff):
+                fb.split_diff(SRC_A + diff)
+
+    def test_quote_in_hunk_content_is_not_a_quoted_path(self):
+        src = SRC_A.replace("+new\n", '+rename to "x"\n')
+        self.assertEqual(fb.diff_files(src), ["src/a.rs"])
+
+
 
 
 class PickBaseTest(unittest.TestCase):
@@ -197,10 +292,11 @@ class ApplySpecVerdictsTest(unittest.TestCase):
 
     def test_missing_verdict_names_every_test(self):
         with self.assertRaises(KeyError) as cm:
-            fb.apply_spec_verdicts(["a", "b", "c"], {"b": "specified"})
+            fb.apply_spec_verdicts(["t_a", "t_b", "t_c"], {"t_b": "specified"})
         msg = str(cm.exception)
-        self.assertIn("a", msg)
-        self.assertIn("c", msg)
+        self.assertIn("t_a", msg)
+        self.assertIn("t_c", msg)
+        self.assertNotIn("t_b", msg)
 
     def test_bad_value_raises(self):
         with self.assertRaises(ValueError):
@@ -221,6 +317,21 @@ class CacheKeyTest(unittest.TestCase):
         self.assertNotEqual(base, fb.cache_key("r", "u2", "img"))
         self.assertNotEqual(base, fb.cache_key("r", "u", "img2"))
         self.assertNotEqual(base, fb.cache_key("r", "u", "img", version="2"))
+class SurrogateEscapeTest(unittest.TestCase):
+    """Text decoded from git with errors='surrogateescape' must still hash."""
+
+    def test_spec_key_hashes_the_original_bytes(self):
+        raw = b"caf\xff"
+        text = raw.decode("utf-8", errors="surrogateescape")
+        self.assertEqual(text, "caf\udcff")
+        self.assertEqual(fb.spec_key(text, "t", "p"), hashlib.sha256(raw + b"\0t\0p").hexdigest())
+
+    def test_cache_key_accepts_lone_surrogate(self):
+        a = fb.cache_key("r", "\udcff", "img")
+        self.assertEqual(len(a), 64)
+        self.assertNotEqual(a, fb.cache_key("r", "\udcfe", "img"))
+
+
 
 
 class BuildRecordTest(unittest.TestCase):

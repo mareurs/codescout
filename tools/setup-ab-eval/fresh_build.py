@@ -14,7 +14,11 @@ Everything here is a function of its arguments. It imports the standard library 
 touches docker, git, `gh`, the network, the filesystem or the environment, so its tests run
 anywhere. A diff is treated as text with `\\n` boundaries only: it is split on the position of
 each `diff --git ` line start and never through `str.splitlines`, so a CRLF blob, a lone `\\r` or a
-Unicode line separator inside a hunk survives `patch + test_patch` unchanged. Stdlib only.
+Unicode line separator inside a hunk survives unchanged. `split_diff` regroups the blocks (source
+first, then test), so `patch + test_patch != diff` for a diff that interleaves them; each block's
+bytes and the order within each half are kept. A quoted path in a header raises `ValueError`: the
+caller asks git for `-c core.quotePath=false`. Text is hashed with `surrogateescape`, matching a
+caller that decodes git output that way. Stdlib only.
 """
 import copy
 import hashlib
@@ -24,7 +28,10 @@ BUILDER_VERSION = "1"
 MIN_FREE_GB = 60
 CUTOFF = "2026-07-01"
 
-TEST_PATH_RE = re.compile(r"(^|/)(tests?|testdata|fixtures)/|_tests?\.rs$|(^|/)tests?\.rs$")
+# Any path component (directory or file name) containing "test" or "e2e". This is the rule the
+# SWE-bench-Live MultiLang split follows: it reproduces the dataset's patch/test_patch partition
+# on all 1,259 files of the 171 saved Rust records.
+TEST_PATH_RE = re.compile(r"(^|/)[^/]*(test|e2e)[^/]*(/|$)", re.IGNORECASE)
 
 SPEC_RULE = "f2p kept only if the issue states the asserted behaviour"
 VERDICTS = ("specified", "unspecified")
@@ -35,7 +42,7 @@ _HEADER = "diff --git "
 
 
 def is_test_path(path):
-    """True when `path` names a test file: a tests/test/testdata/fixtures directory, `*_test(s).rs` or `test(s).rs`."""
+    """True when any component of `path` contains "test" or "e2e" (case-insensitive), as in the dataset's split."""
     return TEST_PATH_RE.search(path) is not None
 
 
@@ -52,11 +59,21 @@ def _b_path(block):
     """The b-side path of one block: its `rename to` line when present, else the header's b-side."""
     head, _, rest = block.partition("\n")
     head = head.rstrip("\r")[len(_HEADER):]
+    if head.startswith('"') or ' "b/' in head:
+        raise ValueError("quoted path in diff header (use -c core.quotePath=false): %r" % head)
+    renamed = None
     for line in rest.split("\n"):
         if line.startswith("@@"):
             break
-        if line.startswith("rename to "):
-            return line[len("rename to "):].rstrip("\r")
+        for prefix in ("rename to ", "copy to "):
+            if line.startswith(prefix):
+                target = line[len(prefix):].rstrip("\r")
+                if target.startswith('"'):
+                    raise ValueError("quoted path in diff header (use -c core.quotePath=false): %r" % target)
+                if prefix == "rename to ":
+                    renamed = target
+    if renamed is not None:
+        return renamed
     # Without a rename both sides are the same path: "a/P b/P" is 2*len(P) + 5 long.
     length = (len(head) - 5) // 2
     if length > 0:
@@ -77,8 +94,10 @@ def diff_files(diff):
 def split_diff(diff):
     """`(patch, test_patch)`: the blocks of `diff` whose b-side path is not / is a test path.
 
-    Blocks keep their order and their bytes. `ValueError` when non-empty text does not start with
-    `diff --git `.
+    Blocks keep their bytes and, within each half, their order. `ValueError` when non-empty text
+    does not start with `diff --git `, or when a header carries a quoted path.
+    Blocks are regrouped, source first and then test: `patch + test_patch` equals `diff` only when
+    no source block follows a test block.
     """
     patch, test_patch = [], []
     for block in _blocks(diff):
@@ -105,7 +124,8 @@ def derive_sets(base, gold):
 
 
 def _digest(*parts):
-    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+    # surrogateescape: git output is decoded the same way to stay byte-faithful.
+    return hashlib.sha256("\0".join(parts).encode("utf-8", errors="surrogateescape")).hexdigest()
 
 
 def spec_key(problem_statement, test_patch, patch):
