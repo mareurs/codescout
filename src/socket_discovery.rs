@@ -31,6 +31,25 @@ pub fn per_user_runtime_dir() -> Result<PathBuf, RuntimeDirError> {
         Ok(std::env::temp_dir())
     }
 }
+
+/// [`per_user_runtime_dir`]'s fallback, rooted at `/tmp` whatever `TMPDIR` and `XDG_RUNTIME_DIR`
+/// say, for a test whose socket path would not otherwise fit in `sun_path`. Same ownership
+/// checks as the real directory, since both come from [`runtime_dir_from`].
+///
+/// Test builds only: production keeps the real runtime dir, because a socket there must be
+/// found by every process of this user, and `/tmp/codescout-<uid>` is not where they look.
+#[cfg(all(test, unix))]
+pub(crate) fn short_per_user_runtime_dir() -> Result<PathBuf, RuntimeDirError> {
+    // SAFETY: getuid is always safe; returns the real UID.
+    let name_uid = unsafe { libc::getuid() };
+    runtime_dir_from(
+        None,
+        Path::new("/tmp"),
+        name_uid,
+        crate::util::private_dir::effective_uid(),
+    )
+}
+
 /// Why the per-user runtime directory cannot be trusted.
 ///
 /// A refusal, not a fallback: the peer, mux and index-lock sockets live in this directory and

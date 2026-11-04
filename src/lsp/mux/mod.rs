@@ -33,6 +33,10 @@ pub use crate::socket_discovery::workspace_hash;
 /// `0o700` protection still applies — a predictable path in world-writable `/tmp`
 /// lets a local user pre-create it and hold the flock.
 ///
+/// When that per-user dir is too long for a socket path to bind below it (`TMPDIR` is long and
+/// `XDG_RUNTIME_DIR` is unset), the scratch dir nests in the same private dir rooted at `/tmp`
+/// instead: see `test_mux_base` and bug 98379dd228578791.
+///
 /// Relocation alone only *contained* the leak: the shared directory stopped being
 /// polluted (which was the harm — 203 files buried the one real lock during a live
 /// diagnostic), but each run still left a dir holding 17 files. Hence the sweep,
@@ -48,7 +52,7 @@ fn mux_dir() -> Result<PathBuf, crate::socket_discovery::RuntimeDirError> {
         if let Some(dir) = DIR.get() {
             return Ok(dir.clone());
         }
-        let base = per_user_mux_dir()?;
+        let base = test_mux_base()?;
         Ok(DIR
             .get_or_init(|| {
                 sweep_dead_test_mux_dirs(&base);
@@ -69,6 +73,50 @@ fn mux_dir() -> Result<PathBuf, crate::socket_discovery::RuntimeDirError> {
 // `codescout-501/`, this directory and `codescout-rust-mux-<16 hex>.sock` made 104 (run
 // 41344511357: six `lsp::manager` tests failed with "path must be shorter than SUN_LEN").
 const TEST_MUX_PREFIX: &str = "cs-tmux-";
+
+/// Bytes a socket path may hold. macOS `sockaddr_un` is the smaller platform limit (103 bytes
+/// plus the NUL), so it is the one a test must respect.
+// cap-class: NOT_A_CAP — a byte limit on a test fixture's socket path; production code never reads it and no tool result depends on it
+#[cfg(test)]
+const TEST_SOCKET_BYTES_MAX: usize = 103;
+
+/// The longest per-user dir under which every socket path a test builds still binds. The rest
+/// of the path is `/` + [`TEST_MUX_PREFIX`] + a pid of up to 10 digits + `/` +
+/// `codescout-<language>-mux-<16 hex>.sock`, with `typescript` as the longest language.
+///
+/// Measured 2026-11-04 (bug 98379dd228578791): with `XDG_RUNTIME_DIR` unset and a 41-byte
+/// `TMPDIR`, the fallback `<TMPDIR>/codescout-<uid>` made seven `lsp::manager` tests fail with
+/// "path must be shorter than SUN_LEN". The same failure hit a macOS runner (CI run
+/// 41344511357); the prefix was shortened then, which moved the threshold and did not remove it.
+// cap-class: NOT_A_CAP — a byte budget for a test fixture's directory; it picks which directory a test builds in and never shapes a tool result
+#[cfg(test)]
+const TEST_MUX_BASE_MAX: usize = TEST_SOCKET_BYTES_MAX
+    - (1 + TEST_MUX_PREFIX.len()
+        + 10
+        + 1
+        + "codescout-".len()
+        + 10
+        + "-mux-".len()
+        + 16
+        + ".sock".len());
+
+/// Whether `base` leaves room for the longest test socket path.
+#[cfg(test)]
+fn test_mux_base_fits(base: &Path) -> bool {
+    base.as_os_str().len() <= TEST_MUX_BASE_MAX
+}
+
+/// The directory a test build nests its per-process scratch dir in: the per-user runtime dir
+/// when a socket path below it fits, else the same private dir rooted at `/tmp`.
+#[cfg(test)]
+fn test_mux_base() -> Result<PathBuf, crate::socket_discovery::RuntimeDirError> {
+    let per_user = per_user_mux_dir()?;
+    #[cfg(unix)]
+    if !test_mux_base_fits(&per_user) {
+        return crate::socket_discovery::short_per_user_runtime_dir();
+    }
+    Ok(per_user)
+}
 
 /// Remove scratch dirs whose owning test process has exited.
 ///
@@ -198,11 +246,13 @@ mod tests {
         );
 
         // Holds in both builds: production returns the dir itself, test builds a
-        // child of it. Fails if the seam is ever re-sited to bare temp_dir().
+        // child of it. Fails if the seam is ever re-sited to bare temp_dir(). A test
+        // build whose per-user dir is too long for a socket path uses the same private
+        // dir rooted at /tmp, so the base is `test_mux_base()`, not `per_user_mux_dir()`.
         let parent = sock.parent().expect("socket path has a parent");
         assert!(
-            parent.starts_with(per_user_mux_dir().unwrap()),
-            "mux dir must stay inside the per-user runtime dir, got {}",
+            parent.starts_with(test_mux_base().unwrap()),
+            "mux dir must stay inside a private per-user runtime dir, got {}",
             parent.display()
         );
     }
@@ -222,5 +272,38 @@ mod tests {
             per_user_mux_dir().unwrap(),
             "test builds must not write mux files into the shared per-user dir"
         );
+    }
+
+    /// A per-user dir that leaves room for the longest test socket path is used as it is.
+    #[test]
+    fn a_per_user_dir_with_room_for_the_longest_test_socket_path_is_kept() {
+        assert!(test_mux_base_fits(Path::new("/run/user/1000")));
+        let at_the_limit = PathBuf::from(format!("/{}", "a".repeat(TEST_MUX_BASE_MAX - 1)));
+        assert_eq!(at_the_limit.as_os_str().len(), TEST_MUX_BASE_MAX);
+        assert!(test_mux_base_fits(&at_the_limit));
+    }
+
+    /// One byte over the budget and the test scratch dir must move to a short root, because
+    /// the bind would fail with "path must be shorter than SUN_LEN" (bug 98379dd228578791).
+    #[test]
+    fn a_per_user_dir_one_byte_over_the_budget_is_not_used() {
+        let over = PathBuf::from(format!("/{}", "a".repeat(TEST_MUX_BASE_MAX)));
+        assert_eq!(over.as_os_str().len(), TEST_MUX_BASE_MAX + 1);
+        assert!(!test_mux_base_fits(&over));
+    }
+
+    /// The budget is derived from the longest path a test builds, so a path at the budget
+    /// still binds. A pid has at most 10 digits and `typescript` is the longest language.
+    #[test]
+    fn the_budget_keeps_the_longest_test_socket_path_within_the_bind_limit() {
+        let longest = TEST_MUX_BASE_MAX
+            + "/".len()
+            + TEST_MUX_PREFIX.len()
+            + u32::MAX.to_string().len()
+            + "/".len()
+            + "codescout-typescript-mux-".len()
+            + workspace_hash(Path::new("/w")).len()
+            + ".sock".len();
+        assert_eq!(longest, TEST_SOCKET_BYTES_MAX);
     }
 }
