@@ -11,7 +11,7 @@ tags:
 - operator-rules
 - engines
 topic: context-injection
-entry_high_water_CIW: 19
+entry_high_water_CIW: 20
 entry_prefix: CIW
 snapshot_anchor: '| ID | Owner | Size | Status | Title |'
 ---
@@ -50,7 +50,8 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 | CIW-16 | any | S | open | Eval runner: re-link the credential cell every round |
 | CIW-17 | any | S | open | A-46's "median run < 5 s" health rule misfires on short control prompts |
 | CIW-18 | any | M–L | open | Principal identity: the edges the ADR left unmeasured |
-| CIW-19 | any | S | open | Guide-ledger residuals S-01, S-02 and S-04 |
+| CIW-19 | any | S | done | Guide-ledger residuals S-01, S-02 and S-04 |
+| CIW-20 | any | M | open | Classify the 55% repeat deliveries by re-arm cause |
 
 ## CIW-1 — System 1: label pilot-2 and give the k=11 ruling
 
@@ -264,7 +265,7 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 ## CIW-19 — Guide-ledger residuals S-01, S-02 and S-04
 
-**Status:** open
+**Status:** done (S-02's before/after premise cannot be met; the current level is recorded, and the classification question moved to CIW-20)
 **Valid:** dated 2026-11-04
 
 **Owner:** any. **Source:** `docs/trackers/2026-08-18-guide-ledger-residuals.md`.
@@ -274,6 +275,19 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 **Next:** take the two measurements; decide whether S-04 needs code.
 
 **Partial result 2026-11-04 (S-01 measured, S-04 evidence in; S-02 still open).** `$XDG_STATE_HOME/codescout/guide_hints/` held 2,355 files, all `.json`, 0 other, 419,248 bytes (about 178 B per file). 1,851 were older than 7 days and 113 were newer than 1 day. The oldest was 35 days old (2026-09-30), which matches `GC_MAX_IDLE_DAYS = 35`, so the GC is deleting on schedule. Steady state is `starts/day × 35`, so 2,355 files means about 67 ledger-creating starts per day here, against the spec's estimate of 30. Reading and parsing every file once takes 67.7 ms in Python (an upper bound for the Rust reader). That is the cost S-01 worried about, and it stays in the tens of milliseconds at 2.2× the estimated population. S-04: 0 `.tmp` files are live, so there is no evidence that `gc`'s `.json`-only filter strands anything; no code is warranted by this measurement. S-02 (Phase A against `usage.db`) still needs a re-injection measurement over `usage.db`.
+
+**S-02 measured 2026-11-04.** The premise ("Phase A changed only where the ledger lives, so the expected delta is near zero") cannot be tested: `tool_calls` in `.codescout/usage.db` starts at **2026-10-06**, seven weeks after Phase A (2026-08-18), so no pre-Phase-A baseline exists in it. What it does give is the level today, read from `deliveries_json` (what the engines delivered, not text that merely quotes a guide): 91,635 rows carry the column, 4,007 are non-empty, over 584 distinct `cc_session_id`s. Of 5,212 ledger-key deliveries, **2,887 (55%) repeat a key already delivered to the same `cc_session_id`**. By bytes, **10,256,761 of 19,887,478 delivered bytes (51.6%)** went to repeat keys (block bytes split evenly across the keys of one delivery, so this is approximate). The most repeated keys: `project-activation-bootstrap` 770, `progressive-disclosure` 330, `symbol-navigation` 291, `librarian#Artifact Model` 123. **This is not a waste figure.** The ledger re-arms by design on compaction, `/clear`, a project switch and the anonymous-tier idle TTL, and this measurement does not separate those from a ledger that failed to remember. A first query over `output_json` (marker text) gave a different, inflated count, because tool results that quote guide text carry the same marker; do not use it. The classification is CIW-20.
+
+## CIW-20 — Classify the 55% repeat deliveries by re-arm cause
+
+**Status:** open
+**Valid:** dated 2026-11-04
+
+**Owner:** any. **Source:** CIW-19 S-02 measurement (this ledger).
+
+**Observed.** In `.codescout/usage.db` (2026-10-06 to 2026-11-04), 2,887 of 5,212 ledger-key deliveries (55%) repeat a key already delivered to the same `cc_session_id`, and 51.6% of delivered bytes go to such repeats. The ledger re-arms by design on compaction, `/clear`, a project switch and the anonymous-tier idle TTL, so the number is an upper bound on waste, not a measurement of it.
+
+**Next:** for each repeat, find the re-arm cause (a `SessionStart` source of `compact` or `clear`, a project switch, an idle gap over the TTL, or none of these). Only the "none of these" share is a ledger that failed to remember. `project-activation-bootstrap` alone repeats 770 times, so start there.
 
 ## Template for new entries
 
