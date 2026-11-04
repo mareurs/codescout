@@ -2108,18 +2108,12 @@ impl Agent {
             languages,
             memory_store,
             alt_memories_dir,
-            db_path,
             prompt_file,
             default_prompt,
         ) = {
             let inner = self.inner.read().await;
             let project = inner.active_project()?;
             let prompt_file = project.root.join(".codescout").join("system-prompt.md");
-            // Inline path — replaces embed::index::project_db_path during L-01
-            // step 8a. The legacy sqlite db at this location indicates the user
-            // has not yet migrated to the retrieval stack; activate_project
-            // surfaces a separate `legacy_semantic_index` hint when present.
-            let db_path = project.root.join(".codescout/embeddings/project.db");
             // The project's OTHER memory layout, when one exists.
             //
             // A sub-project has two, and `project.memory` is whichever the activation
@@ -2153,34 +2147,39 @@ impl Agent {
                 project.config.project.languages.clone(),
                 project.memory.clone(),
                 alt_memories_dir,
-                db_path,
                 prompt_file,
                 project.config.project.system_prompt.clone(),
             ))
         }?; // lock dropped here
 
         // Phase 2: blocking filesystem reads off the executor
-        let (memories, has_index, system_prompt, worktree) =
-            tokio::task::spawn_blocking(move || {
-                let mut memories = memory_store.list().unwrap_or_default();
-                if let Some(alt) = alt_memories_dir {
-                    // `from_dir_readonly`, not `from_dir`: this is a status read and
-                    // must not materialise the directory it inspects.
-                    memories.extend(
-                        crate::memory::MemoryStore::from_dir_readonly(alt)
-                            .list()
-                            .unwrap_or_default(),
-                    );
-                    memories.sort();
-                    memories.dedup();
-                }
-                let has_index = db_path.exists();
-                let system_prompt = read_system_prompt_file(&prompt_file, default_prompt);
-                let worktree = crate::prompts::detect_worktree_info(&project_root);
-                (memories, has_index, system_prompt, worktree)
-            })
-            .await
-            .ok()?;
+        let probe_root = project_root.clone();
+        let (memories, system_prompt, worktree) = tokio::task::spawn_blocking(move || {
+            let mut memories = memory_store.list().unwrap_or_default();
+            if let Some(alt) = alt_memories_dir {
+                // `from_dir_readonly`, not `from_dir`: this is a status read and
+                // must not materialise the directory it inspects.
+                memories.extend(
+                    crate::memory::MemoryStore::from_dir_readonly(alt)
+                        .list()
+                        .unwrap_or_default(),
+                );
+                memories.sort();
+                memories.dedup();
+            }
+            let system_prompt = read_system_prompt_file(&prompt_file, default_prompt);
+            let worktree = crate::prompts::detect_worktree_info(&project_root);
+            (memories, system_prompt, worktree)
+        })
+        .await
+        .ok()?;
+
+        // The same bounded, cached probe `activate` uses, so the bootstrap block and
+        // `index(action="status")` read one store. This used to be
+        // `.codescout/embeddings/project.db`.exists(), a legacy file the retrieval
+        // stack neither writes nor reads.
+        // docs/issues/2026-11-04-semantic-bootstrap-disagrees-with-queryable-index.md
+        let has_index = crate::tools::config::check_has_index_cached(&name, &probe_root).await;
 
         // Phase 3: workspace summary (acquires its own read-lock)
         let workspace = self.workspace_summary().await;

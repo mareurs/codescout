@@ -1,11 +1,13 @@
 ---
 id: '5faa9c6e3fd2a6f9'
 kind: bug
-status: open
+status: taken
 title: Native bootstrap says semantic index is not built while status is queryable
 tags:
 - cluster/unclassified
 - effort-steering
+claimed_at: 2026-11-04
+claimed_by: 48d211eb-3bd8-4247-975b-631a73b1a87a
 opened: 2026-11-04
 owner: marius
 severity: medium
@@ -40,11 +42,19 @@ Four actual native controls in worker-context-verification-20261104/readiness-re
 The observed Git-baseline/no-op-index control did not remove the contradiction. No blanket stale-state cause is inferred.
 
 ## Fix
-Open. Both surfaces must describe the actual selected backend/store consistently; retain coverage limits separately.
+
+Applied 2026-11-04, not yet committed when this was written. `Agent::project_status` no longer tests whether the legacy `.codescout/embeddings/project.db` exists. It calls `crate::tools::config::check_has_index_cached` (now `pub(crate)`), the bounded and cached `project_has_chunks` probe that `activate` already uses. The bootstrap block and `index(action="status")` therefore read the same store.
+
+Not changed: the coverage verdict stays separate (the four whitespace-only files, `cc61bf08099dac2d`). The first probe per session waits at most `FIRST_PROBE_TIMEOUT` (2 s). On a timeout it reports "Not built" and does not cache that answer, as `activate` already does.
 
 ## Tests added
 
-Actual four-state model-free native characterization; all four expected cross-predicate observations hold and exact containers are absent. No product regression test or correction yet.
+Two product tests in `src/tools/config/tests.rs`, written before the fix and seen to fail for the stated reason (`has_index` wrong at the assertion):
+
+- `bootstrap_reports_a_populated_store_as_built_without_the_legacy_file` (false negative cell).
+- `bootstrap_reports_an_empty_store_as_not_built_despite_a_legacy_file` (false positive cell).
+
+They seed the store's answer through the shared `index_status_put` cache, which is the value `check_has_index_cached` returns. They do not build a real sqlite-vec store. The two cells with matching store and marker were not added: the old code passed them already. The native four-state controls above remain the check on a real store.
 
 ## Workarounds
 Read actual status, verify and query results; do not schedule a paid comparison from the banner or blindly rebuild from it.

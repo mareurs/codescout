@@ -306,6 +306,50 @@ async fn project_status_returns_all_sections() {
         "missing libraries section"
     );
 }
+/// The bootstrap block and `index(action="status")` must read the SAME store.
+/// `Agent::project_status` used to ask whether the legacy
+/// `.codescout/embeddings/project.db` file existed, so a populated retrieval store
+/// with no such file read "Not built" while `index(status)` said queryable.
+/// docs/issues/2026-11-04-semantic-bootstrap-disagrees-with-queryable-index.md
+async fn bootstrap_has_index_with(name: &str, store_has_chunks: bool, legacy_marker: bool) -> bool {
+    let dir = tempdir().unwrap();
+    let config_dir = dir.path().join(".codescout");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("project.toml"),
+        format!("[project]\nname = \"{name}\"\n"),
+    )
+    .unwrap();
+    if legacy_marker {
+        let legacy = config_dir.join("embeddings");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("project.db"), b"").unwrap();
+    }
+    // The store's answer, in the cache `build_activation_response` also reads.
+    super::index_status_put(name, store_has_chunks);
+    let agent = Agent::new(None).await.unwrap();
+    agent
+        .activate(dir.path().to_path_buf(), None)
+        .await
+        .unwrap();
+    agent.project_status().await.unwrap().has_index
+}
+
+#[tokio::test]
+async fn bootstrap_reports_a_populated_store_as_built_without_the_legacy_file() {
+    assert!(
+        bootstrap_has_index_with("bootstrap-populated-no-marker", true, false).await,
+        "a populated store with no legacy project.db must read as Built"
+    );
+}
+
+#[tokio::test]
+async fn bootstrap_reports_an_empty_store_as_not_built_despite_a_legacy_file() {
+    assert!(
+        !bootstrap_has_index_with("bootstrap-empty-with-marker", false, true).await,
+        "an empty store must read as Not built even when a zero-byte legacy project.db exists"
+    );
+}
 
 /// `workspace(action="status")` reads `.codescout/workspace.toml`, which is repository content
 /// and can be a link to a FIFO. It used to `exists()` and then `read_to_string` it: no answer.

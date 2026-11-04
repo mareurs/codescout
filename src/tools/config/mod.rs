@@ -922,7 +922,10 @@ fn refresh_end(project_id: &str) {
 /// task; first-per-session probe is bounded by `FIRST_PROBE_TIMEOUT`
 /// (timeout => `false`, corrected by the background refresh on the next
 /// activation).
-async fn check_has_index_cached(project_id: &str, project_root: &std::path::Path) -> bool {
+pub(crate) async fn check_has_index_cached(
+    project_id: &str,
+    project_root: &std::path::Path,
+) -> bool {
     if let Some(cached) = index_status_get(project_id) {
         if refresh_begin(project_id) {
             let pid = project_id.to_string();
