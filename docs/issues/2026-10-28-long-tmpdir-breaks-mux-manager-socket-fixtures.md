@@ -12,7 +12,7 @@ tags:
 closed: 2026-11-04
 opened: 2026-10-28
 severity: medium
-unverified: 'Fixed for the family the record reports: seven lsp::manager tests (the six named plus a_mux_this_call_spawned_that_loses_the_lock_race_connects_to_the_winner) failed with XDG_RUNTIME_DIR unset and a 41-byte TMPDIR, and pass after the fix. Not fixed: (1) more than ten lsp::manager tests bind TMPDIR/.tmpXXXXXX/mux.sock through tempfile::tempdir() and fail once TMPDIR is about 87 bytes or longer (measured at 90 bytes, XDG_RUNTIME_DIR set); (2) PRODUCTION: with XDG_RUNTIME_DIR unset the real mux cannot bind from a TMPDIR of 52 bytes (rust), measured on Linux; shorter limits for longer language names, see Production exposure. macOS thresholds are computed, not measured; the typical macOS TMPDIR length is recalled. Windows: lint only, no test run.'
+unverified: 'Fixed for the family the record reports: seven lsp::manager tests (the six named plus a_mux_this_call_spawned_that_loses_the_lock_race_connects_to_the_winner) failed with XDG_RUNTIME_DIR unset and a 41-byte TMPDIR, and pass after the fix. The tempfile::tempdir() family: eight tests failed at an 88-byte TMPDIR and pass after 3f480c0d9; a longer TMPDIR than 88 bytes was not tried. Not fixed: (1) PRODUCTION: with XDG_RUNTIME_DIR unset the real mux cannot bind from a TMPDIR of 52 bytes (rust), measured on Linux; shorter limits for longer language names, see Production exposure. (2) macOS thresholds are computed, not measured; the typical macOS TMPDIR length is recalled. Windows: lint only, no test run.'
 ---
 
 # BUG: long TMPDIR prevents mux-manager tests from binding their Unix sockets
@@ -73,7 +73,11 @@ Use a short writable temporary root without repository markers above it. TMPDIR=
 
 ## Resume
 
-The reported family is fixed. Open: the `tempfile::tempdir()` family (see `unverified`). A fix would give those tests a short socket directory, for example a helper in `manager.rs` tests that builds the temp dir under the same `/tmp` base. Not done: nothing reports a failure at the TMPDIR lengths seen on this machine (26 bytes) or in the gate.
+The reported family is fixed. The `tempfile::tempdir()` family is fixed for the tests that fail at a 88-byte TMPDIR, in `3f480c0d9` (`experiments`, patch-id `98a48111186cb7b240938e8da4def18776b13182`): eight `lsp::manager` tests now build their socket directory with `short_sock_dir()`, a helper that roots it under the same `/tmp/codescout-<uid>` base as `short_per_user_runtime_dir()`.
+
+Measured on Linux with `XDG_RUNTIME_DIR` as set in this session and an 88-byte TMPDIR: before the change `cargo test --lib lsp::manager` gave 69 passed, 8 failed, 5 ignored; after it, 77 passed, 0 failed, 5 ignored. The eight were `connect_to_mux_waits_for_a_peer_mux_that_binds_its_socket_late`, `connect_to_mux_gives_up_on_a_socket_that_never_sends_its_init_message`, `a_silent_socket_ends_the_connect_when_the_window_ends`, `a_silent_socket_that_appears_late_still_ends_the_connect_with_the_window`, `a_window_of_zero_still_lets_a_live_mux_send_its_init_message`, `an_attempts_init_bound_is_what_is_left_of_the_window_and_never_below_the_floor`, `a_mux_we_just_spawned_gets_the_full_init_bound_not_the_connect_window` and `an_attempt_that_gets_no_init_message_closes_its_connection_and_leaves_no_task`.
+
+Not done: two other `lsp::manager` tests join `mux.sock` under a `tempdir()` and did not fail at 88 bytes; they were not changed and a longer TMPDIR was not tried. The production exposure and the macOS thresholds below are unchanged.
 
 ## Fix provenance
 
