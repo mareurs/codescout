@@ -224,6 +224,90 @@ class TestLateLookup(unittest.TestCase):
 
 
 
+DECOY, DECOY_PATH = "store_background", "src/tools/output_buffer.rs"
+WRONG = hook.wrong_hint_text(FN, DECOY, DECOY_PATH)
+
+
+def decoy_call(msg, tid="t_decoy"):
+    return tool_use(msg, tid, "mcp__codescout__references", {"symbol": DECOY, "path": DECOY_PATH})
+
+
+def wrun(arm, transcript, events):
+    return score.score_run(transcript, events, {"total_cost_usd": 0.1, "num_turns": 4}, arm=arm, fn=FN,
+                           path=PATH, init_tools=INIT_TOOLS, decoy=DECOY, decoy_path=DECOY_PATH)
+
+
+class TestWrongHintScoring(unittest.TestCase):
+    EV = [{"event": "trigger", "tool_use_id": "t_grep", "carrier": "context"},
+          {"event": "stop", "tool_use_id": "t_edit"}]
+
+    def test_W_arrival_needs_the_wrong_hint_keyed_to_the_trigger(self):
+        t = [grep_call(), tool_result("t_grep", "x"), context("t_grep", WRONG), edit_call(msg="m2")]
+        self.assertTrue(wrun("W1", t, self.EV)["arrival_ok"])
+        t[2] = context("t_grep", HINT)
+        self.assertFalse(wrun("W1", t, self.EV)["arrival_ok"])
+
+    def test_W_arrival_fails_if_the_right_hint_also_appears(self):
+        t = [grep_call(), tool_result("t_grep", "x", HINT), context("t_grep", WRONG), edit_call(msg="m2")]
+        self.assertFalse(wrun("W1", t, self.EV)["arrival_ok"])
+
+    def test_W_arrival_fails_if_the_wrong_hint_also_leaks_into_a_result(self):
+        t = [grep_call(), tool_result("t_grep", "x", WRONG), context("t_grep", WRONG), edit_call(msg="m2")]
+        self.assertFalse(wrun("W1", t, self.EV)["arrival_ok"])
+
+    def test_a_lookup_on_the_target_is_not_a_decoy_lookup(self):
+        t = [grep_call(), tool_result("t_grep", "x"), context("t_grep", WRONG), refs_call(msg="m2"),
+             tool_result("t_refs", "y"), edit_call(msg="m3")]
+        row = wrun("W1", t, self.EV)
+        self.assertEqual((row["decoy_late_lookup"], row["late_lookup"]), (False, True))
+
+
+    def test_W2_also_needs_the_declaration(self):
+        act = tool_use("m0", "t_act", "mcp__codescout__workspace", {"action": "activate"})
+        base = [grep_call(), tool_result("t_grep", "x"), context("t_grep", WRONG), edit_call(msg="m2")]
+        ev = [{"event": "declaration", "tool_use_id": "t_act"}] + self.EV
+        self.assertFalse(wrun("W2", [act, tool_result("t_act", "ok")] + base, ev)["arrival_ok"])
+        self.assertTrue(wrun("W2", [act, tool_result("t_act", "ok", hook.DECLARATION)] + base, ev)["arrival_ok"])
+
+    def test_a_decoy_lookup_after_the_trigger_is_counted(self):
+        t = [grep_call(), tool_result("t_grep", "x"), context("t_grep", WRONG), decoy_call("m2"),
+             tool_result("t_decoy", "y"), edit_call(msg="m3")]
+        row = wrun("W1", t, self.EV)
+        self.assertEqual((row["decoy_late_lookup"], row["decoy_pre_hint"]), (True, False))
+
+    def test_a_decoy_lookup_in_the_trigger_batch_is_pre_hint_not_late(self):
+        t = [grep_call(), decoy_call("m1"), tool_result("t_grep", "x"), context("t_grep", WRONG),
+             edit_call(msg="m2")]
+        row = wrun("W1", t, self.EV)
+        self.assertEqual((row["decoy_late_lookup"], row["decoy_pre_hint"]), (False, True))
+
+    def test_a_decoy_lookup_in_the_stop_batch_is_not_late(self):
+        t = [grep_call(), tool_result("t_grep", "x"), context("t_grep", WRONG), decoy_call("m2"),
+             edit_call(msg="m2")]
+        self.assertFalse(wrun("W1", t, self.EV)["decoy_late_lookup"])
+
+    def test_the_decoy_is_measured_in_A_arms_too_as_the_floor(self):
+        t = [grep_call(), tool_result("t_grep", "x"), context("t_grep", HINT), decoy_call("m2"),
+             tool_result("t_decoy", "y"), edit_call(msg="m3")]
+        row = wrun("A1", t, self.EV)
+        self.assertTrue(row["arrival_ok"])
+        self.assertTrue(row["decoy_late_lookup"])
+
+    def test_without_a_decoy_the_decoy_fields_are_null(self):
+        t = [grep_call(), tool_result("t_grep", "x", HINT), edit_call(msg="m2")]
+        row = run("A0", t, [{"event": "trigger", "tool_use_id": "t_grep", "carrier": "result"},
+                            {"event": "stop", "tool_use_id": "t_edit"}])
+        self.assertIsNone(row["decoy_late_lookup"])
+
+    def test_an_invalid_run_never_counts_a_decoy_lookup(self):
+        t = [grep_call(), tool_result("t_grep", "x"), context("t_grep", HINT), decoy_call("m2"),
+             tool_result("t_decoy", "y"), edit_call(msg="m3")]
+        row = score.score_run(t, self.EV, {}, arm="A1", fn=FN, path=PATH, init_tools=None,
+                              decoy=DECOY, decoy_path=DECOY_PATH)
+        self.assertFalse(row["decoy_late_lookup"])
+
+
+
 class TestValidity(unittest.TestCase):
     def test_a_run_without_references_in_its_tool_list_is_invalid(self):
         # Stage 1's first pass: the server listed 18 tools, references among the missing (AM-6).

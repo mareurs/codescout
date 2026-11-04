@@ -76,40 +76,55 @@ def parse(transcript):
     return calls, results, contexts
 
 
-def _arrival(arm, fn, path, trigger_id, decl_id, results, contexts):
+def _arrival(arm, fn, path, trigger_id, decl_id, results, contexts, decoy=None, decoy_path=None):
     hint = hook.hint_text(fn, path)
-    expected = {"P": hook.directive_text(fn, path), "L": hook.HARNESS_LABEL + hint}.get(arm, hint)
     in_results = any(hint in t for ts in results.values() for t in ts)
     in_contexts = any(hint in t for ts in contexts.values() for t in ts)
-    if arm == "F":
+    if arm in hook.WRONG_HINT_ARMS:
+        if not (decoy and decoy_path):
+            return False, "W arm scored without a decoy"
+        wrong = hook.wrong_hint_text(fn, decoy, decoy_path)
+        keyed = any(wrong in t for t in contexts.get(trigger_id, []))
+        leaked = any(wrong in t for ts in results.values() for t in ts)
+        ok = keyed and not leaked and not in_results and not in_contexts
+        detail = ("wrong hint in the trigger's hook context only" if ok else
+                  "wrong hint not keyed to the trigger" if not keyed else
+                  "wrong hint in a tool result" if leaked else "the right hint also appeared")
+    elif arm == "F":
         ok = not in_results and not in_contexts
         detail = "hint absent everywhere" if ok else "hint found in the floor arm"
     elif arm in CONTEXT_ARMS:
+        expected = hook.directive_text(fn, path) if arm == "P" else hint
         keyed = any(expected in t for t in contexts.get(trigger_id, []))
         ok = keyed and not in_results
         detail = ("in the trigger's hook context only" if ok else
                   "not in a hook context keyed to the trigger" if not keyed else "hint also in a tool result")
-        if ok and arm == "A2":
-            declared = decl_id is not None and any(hook.DECLARATION in t for t in results.get(decl_id, []))
-            ok = declared
-            detail = "hint in context; declaration in its result" if ok else "declaration missing from its result"
     elif arm in RESULT_ARMS:
+        expected = hook.HARNESS_LABEL + hint if arm == "L" else hint
         keyed = any(expected in t for t in results.get(trigger_id, []))
         ok = keyed and not in_contexts
         detail = ("in the trigger's result only" if ok else
                   "not in the trigger's result" if not keyed else "hint also in a hook context")
     else:
-        ok, detail = False, f"unknown arm {arm!r}"
+        return False, f"unknown arm {arm!r}"
+    if ok and arm in hook.DECLARING_ARMS:
+        declared = decl_id is not None and any(hook.DECLARATION in t for t in results.get(decl_id, []))
+        ok = declared
+        detail = f"{detail}; declaration in its result" if ok else "declaration missing from its result"
     return ok, detail
 
 
-def score_run(transcript, events, result, *, arm, fn, path, init_tools):
+def score_run(transcript, events, result, *, arm, fn, path, init_tools, decoy=None, decoy_path=None):
     """init_tools: the tool list from the stream's init message (None when absent). A run whose list
     lacks references measured nothing: the metric could not be met in any arm (AM-6).
 
     AM-8 primary metric: `late_lookup` over `informative` runs. A lookup on the target in the
     trigger's batch or earlier was sent before any hint could arrive (`pre_hint_lookup`); such a run
-    carries no information about the hint and is not informative."""
+    carries no information about the hint and is not informative.
+
+    Stage 3 (AM-10): with a decoy, `decoy_late_lookup` is a lookup on the decoy after the trigger's
+    batch and before the stop's, in a valid run; `decoy_pre_hint` one at or before the trigger's
+    batch. Both are None when no decoy was given."""
     calls, results, contexts = parse(transcript)
     batch_of = {c["id"]: c["batch"] for c in calls}
     trigger = next((e for e in events if e.get("event") == "trigger"), None)
@@ -134,13 +149,18 @@ def score_run(transcript, events, result, *, arm, fn, path, init_tools):
     else:
         exposure = "before" if trigger_batch is not None and trigger_batch < horizon else "late"
     arrival_ok, detail = (_arrival(arm, fn, path, trigger["tool_use_id"], decl["tool_use_id"] if decl else None,
-                                   results, contexts) if trigger else (False, "no trigger"))
+                                   results, contexts, decoy, decoy_path) if trigger else (False, "no trigger"))
     outcome = "stopped" if stop else "no_stop"
     valid = (outcome == "stopped" and exposure == "before" and arrival_ok and not errors
              and lookup_available)
     tb = trigger_batch if trigger_batch is not None else float("inf")
     pre_hint = any(c["batch"] <= tb for c in lookups)
     # Without a pre-hint lookup every lookup is after the trigger's batch, so `refs` is the late flag.
+    decoy_pre = decoy_late = None
+    if decoy:
+        decoy_lookups = [c for c in before if c["name"] in LOOKUP_TOOLS and _names(decoy, c["input"])]
+        decoy_pre = any(c["batch"] <= tb for c in decoy_lookups)
+        decoy_late = valid and any(c["batch"] > tb for c in decoy_lookups)
     return {
         "arm": arm, "fn": fn, "outcome": outcome, "exposure": exposure,
         "arrival_ok": arrival_ok, "arrival_detail": detail, "hook_errors": len(errors),
@@ -149,6 +169,7 @@ def score_run(transcript, events, result, *, arm, fn, path, init_tools):
         "pre_hint_lookup": pre_hint,
         "informative": valid and not pre_hint,
         "late_lookup": valid and not pre_hint and refs,
+        "decoy": decoy, "decoy_pre_hint": decoy_pre, "decoy_late_lookup": decoy_late,
         "calls_before_stop": [c["name"] for c in before],
         "cost_usd": result.get("total_cost_usd"), "num_turns": result.get("num_turns"),
         "valid": valid,
@@ -176,8 +197,10 @@ def score_dir(run_dir):
             init_tools = obj.get("tools")
     env = rec["env"]
     row = score_run(transcript, events, result, arm=rec["arm"], fn=env["HCE_FN"], path=env["HCE_PATH"],
-                    init_tools=init_tools)
-    return {"run_dir": str(run_dir), "task_id": rec["task_id"], "model": rec["model"], "rep": rec["rep"], **row}
+                    init_tools=init_tools, decoy=env.get("HCE_DECOY_FN") or None,
+                    decoy_path=env.get("HCE_DECOY_PATH") or None)
+    return {"run_dir": str(run_dir), "task_id": rec["task_id"], "model": rec["model"], "rep": rec["rep"],
+            "setting_sources": rec.get("setting_sources", "local"), **row}
 
 
 if __name__ == "__main__":

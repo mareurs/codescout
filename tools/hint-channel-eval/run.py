@@ -105,7 +105,7 @@ C_COMPANION, C_HOOK, C_STATE = "/opt/plugins/codescout-companion", "/opt/hce/hoo
 NATIVE_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
 MAX_BUDGET_USD = "1.25"
 RUN_TIMEOUT_S = 1200
-ARMS = ("F", "A0", "A1", "A2", "A3", "P", "L")
+ARMS = ("F", "A0", "A1", "A2", "A3", "P", "L", "W1", "W2", "W3")
 PROJECT_TOML_REL = ".codescout/project.toml"
 PROJECT_TOML = '[project]\nname = "codescout"\nlanguages = ["rust"]\n'
 LOOKUP_TOOLS = ("references", "call_graph", "symbol_at")
@@ -139,7 +139,7 @@ def stage_run(task, arm, model, rep, run_dir):
     master = DATA / "tasks" / task["task_id"] / "tree"
     testbed, config, state = run_dir / "testbed", run_dir / "config", run_dir / "state"
     shutil.copytree(master, testbed, symlinks=True)
-    if arm == "A3":
+    if arm in ("A3", "W3"):
         with open(testbed / "CLAUDE.md", "a", encoding="utf-8") as f:
             f.write("\n" + DECLARATION + "\n")
     # references, call_graph and symbol_at are gated on has_lsp, which comes from `[project] languages`
@@ -163,14 +163,21 @@ def stage_run(task, arm, model, rep, run_dir):
         {"type": "command", "command": f"python3 -I {C_HOOK}"}]}]}}
     (run_dir / "settings.json").write_text(json.dumps(settings, indent=2) + "\n")
     session_id = str(uuid.uuid4())
+    # Stage 3 (AM-10) runs with "project,local": "local" alone does not load the project CLAUDE.md
+    # (bug b8c35dc28bd3e8dd). Stages 1 and 2 ran with the default, kept so they stay reproducible.
+    setting_sources = os.environ.get("HCE_SETTING_SOURCES", "local")
     env_lines = {"CLAUDE_CONFIG_DIR": C_CONFIG, "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8192",
                  "DISABLE_AUTOUPDATER": "1", "CARGO_NET_OFFLINE": "true",
                  "HCE_ARM": arm, "HCE_FN": task["fn"], "HCE_PATH": task["path"], "HCE_STATE_DIR": C_STATE}
+    decoys_path = os.environ.get("HCE_DECOYS")
+    if decoys_path:  # every arm records its decoy, so the A arms measure the decoy floor
+        d = json.loads(Path(decoys_path).read_text())[task["task_id"]]
+        env_lines.update({"HCE_DECOY_FN": d["decoy_fn"], "HCE_DECOY_PATH": d["decoy_path"]})
     mounts = [(testbed, "/testbed", "rw"), (CARGO_HOME, "/cargo", "rw"), (CLI_HOST, C_CLI, "ro"),
               (config, C_CONFIG, "rw"), (run_dir / "settings.json", C_SETTINGS, "ro"),
               (run_dir / "mcp.json", C_MCP, "ro"), (COMPANION_HOST, C_COMPANION, "ro"),
               (HERE / "hook.py", C_HOOK, "ro"), (state, C_STATE, "rw")]
-    cli = [C_CLI, "-p", "--model", model, "--session-id", session_id, "--setting-sources", "local",
+    cli = [C_CLI, "-p", "--model", model, "--session-id", session_id, "--setting-sources", setting_sources,
            "--settings", C_SETTINGS, "--strict-mcp-config", "--dangerously-skip-permissions",
            "--tools", NATIVE_TOOLS, "--output-format", "stream-json", "--verbose",
            "--max-budget-usd", MAX_BUDGET_USD, "--mcp-config", C_MCP, "--plugin-dir", C_COMPANION,
@@ -184,20 +191,25 @@ def stage_run(task, arm, model, rep, run_dir):
     record = {"task_id": task["task_id"], "arm": arm, "model": model, "rep": rep, "session_id": session_id,
               "image": IMAGE, "cli_sha256": CLI_SHA256, "companion": str(COMPANION_HOST),
               "hook_sha256": _sha256(HERE / "hook.py"), "project_toml": PROJECT_TOML,
+              "setting_sources": setting_sources,
               "env": env_lines, "cli_args": cli[1:-1],
               "network": "docker default bridge (NOT restricted; see AM-4)"}
     (run_dir / "run-record.json").write_text(json.dumps(record, indent=2) + "\n")
     return docker, env_lines
 
 
-def run_one(task_id, arm, model, rep):
+def run_one(task_id, arm, model, rep, prompt=None, base="runs"):
+    """One run. `prompt` and `base` exist for memcheck: the same staging, flags and image, with a
+    different question and a run dir outside runs/, so a check is never scored as a run."""
     if arm not in ARMS:
         raise SystemExit(f"unknown arm {arm!r}; expected one of {ARMS}")
     if _sha256(CLI_HOST) != CLI_SHA256:
         raise SystemExit("frozen CLI sha256 mismatch")
-    task = {t["task_id"]: t for t in load_tasks()}[task_id]
+    task = dict({t["task_id"]: t for t in load_tasks()}[task_id])
+    if prompt is not None:
+        task["prompt"] = prompt
     token = read_token()
-    run_dir = DATA / "runs" / arm / f"{task_id}-r{rep}-{time.strftime('%Y%m%dT%H%M%S')}"
+    run_dir = DATA / base / arm / f"{task_id}-r{rep}-{time.strftime('%Y%m%dT%H%M%S')}"
     run_dir.mkdir(parents=True)
     docker, env_lines = stage_run(task, arm, model, rep, run_dir)
     env_path = run_dir / "env"
@@ -219,6 +231,17 @@ def run_one(task_id, arm, model, rep):
     (run_dir / "outcome.json").write_text(json.dumps(outcome, indent=2) + "\n")
     print(json.dumps({"run_dir": str(run_dir), **outcome}))
     return 0 if exit_code == 0 else 1
+
+
+MEMCHECK_PROMPT = ("Without using any tool, quote verbatim the sentence from this project's CLAUDE.md "
+                   "instructions that mentions `[cs-hint]`. If your instructions contain no such sentence, "
+                   "reply with the single word NONE.")
+
+
+def memcheck(task_id, arm, model):
+    """Live check that the CLAUDE.md declaration reaches the model on the real run path."""
+    rc = run_one(task_id, arm, model, 0, prompt=MEMCHECK_PROMPT, base="memcheck")
+    return rc
 
 
 
@@ -298,6 +321,8 @@ def main(argv):
         return smoke(argv[2], argv[3])
     if len(argv) == 6 and argv[1] == "run":
         return run_one(argv[2], argv[3], argv[4], int(argv[5]))
+    if len(argv) == 5 and argv[1] == "memcheck":
+        return memcheck(argv[2], argv[3], argv[4])
     print(__doc__)
     return 2
 

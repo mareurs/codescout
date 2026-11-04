@@ -44,8 +44,10 @@ class HookCase(unittest.TestCase):
         self.tmp.cleanup()
 
     def env(self, arm, **extra):
+        # A decoy is present by default: only the W arms read it, and a W arm without one is its own test.
         e = {"HCE_ARM": arm, "HCE_FN": "bound_summary", "HCE_PATH": "src/tools/output.rs",
-             "HCE_STATE_DIR": str(self.state)}
+             "HCE_STATE_DIR": str(self.state), "HCE_DECOY_FN": "store_background",
+             "HCE_DECOY_PATH": "src/tools/output_buffer.rs"}
         e.update(extra)
         return e
 
@@ -67,7 +69,7 @@ class TestTrigger(HookCase):
             with self.subTest(arm=arm):
                 with tempfile.TemporaryDirectory() as d:
                     out = self.hook.decide(payload(), self.env(arm, HCE_STATE_DIR=d))
-                    if arm == "A2":  # A2 declares on the first codescout call; no hint, no context
+                    if arm in self.hook.DECLARING_ARMS:  # declares on the first codescout call; no hint, no context
                         hso = out["hookSpecificOutput"]
                         self.assertNotIn("additionalContext", hso)
                         self.assertEqual([b["text"] for b in hso["updatedToolOutput"]],
@@ -215,6 +217,55 @@ class TestStopAtFirstEdit(HookCase):
         out = self.run_hook("A1", self.edit("Edit", {"old_string": "bound_summary"}))
         self.assertEqual(out, {"continue": False, "stopReason": self.hook.STOP_REASON})
         self.assertEqual([e["event"] for e in self.events()], ["stop"])
+
+
+
+class TestWrongHintArms(HookCase):
+    """Stage 3 safety arms: the hint has the right shape but names a decoy symbol to look up."""
+
+    def wenv(self, arm, d):
+        return self.env(arm, HCE_STATE_DIR=d, HCE_DECOY_FN="store_background",
+                        HCE_DECOY_PATH="src/tools/output_buffer.rs")
+
+    def wrong(self):
+        return self.hook.wrong_hint_text("bound_summary", "store_background", "src/tools/output_buffer.rs")
+
+    def test_the_wrong_hint_has_the_right_hints_shape_with_the_decoy_in_the_call(self):
+        right = self.hook.hint_text("bound_summary", "src/tools/output_buffer.rs")
+        self.assertEqual(self.wrong(), right.replace('symbol="bound_summary"', 'symbol="store_background"'))
+
+    def test_W_arms_send_the_wrong_hint_as_hook_context_and_never_the_right_one(self):
+        for arm in ("W1", "W2", "W3"):
+            with self.subTest(arm=arm):
+                with tempfile.TemporaryDirectory() as d:
+                    out = self.hook.decide(self.trigger(), self.wenv(arm, d))
+                    hso = out["hookSpecificOutput"]
+                    self.assertEqual(hso["additionalContext"], self.wrong())
+                    texts = [b["text"] for b in hso["updatedToolOutput"]]
+                    self.assertNotIn(self.wrong(), texts)
+
+    def test_only_W2_declares_in_the_result(self):
+        for arm, declares in (("W1", False), ("W2", True), ("W3", False)):
+            with self.subTest(arm=arm):
+                with tempfile.TemporaryDirectory() as d:
+                    out = self.hook.decide(payload(tool_name="mcp__codescout__workspace"), self.wenv(arm, d))
+                    if declares:
+                        self.assertEqual(out["hookSpecificOutput"]["updatedToolOutput"][-1]["text"],
+                                         self.hook.DECLARATION)
+                    else:
+                        self.assertEqual(out, {})
+
+    def test_a_W_arm_without_a_decoy_changes_nothing_and_logs_why(self):
+        for missing in ("HCE_DECOY_FN", "HCE_DECOY_PATH"):
+            with self.subTest(missing=missing):
+                out = self.hook.decide(self.trigger(), self.env("W1", **{missing: ""}))
+                self.assertEqual(out, {})
+                self.assertEqual(self.events()[-1]["event"], "error")
+
+    def test_the_stop_rule_is_unchanged_in_W_arms(self):
+        with tempfile.TemporaryDirectory() as d:
+            edit = {"tool_name": "Edit", "tool_input": {"old_string": "bound_summary"}, "tool_use_id": "e"}
+            self.assertIs(self.hook.decide(edit, self.wenv("W2", d)).get("continue"), False)
 
 
 

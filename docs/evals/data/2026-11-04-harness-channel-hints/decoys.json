@@ -1,0 +1,52 @@
+{
+  "hce-01-unexported_count": {
+    "decoy_fn": "store_background",
+    "decoy_path": "src/tools/output_buffer.rs",
+    "offset": 7
+  },
+  "hce-02-prefix_conflicts": {
+    "decoy_fn": "build_chunks",
+    "decoy_path": "src/librarian/catalog/chunk.rs",
+    "offset": 5
+  },
+  "hce-03-cross_root_cites_edges": {
+    "decoy_fn": "store_background",
+    "decoy_path": "src/tools/output_buffer.rs",
+    "offset": 5
+  },
+  "hce-04-append_preferences_section": {
+    "decoy_fn": "note_activation",
+    "decoy_path": "src/agent/mod.rs",
+    "offset": 5
+  },
+  "hce-05-ensure_resident": {
+    "decoy_fn": "unexported_count",
+    "decoy_path": "src/librarian/catalog/audit/shard.rs",
+    "offset": 6
+  },
+  "hce-06-read_capture": {
+    "decoy_fn": "unexported_count",
+    "decoy_path": "src/librarian/catalog/audit/shard.rs",
+    "offset": 5
+  },
+  "hce-07-build_chunks": {
+    "decoy_fn": "prefix_conflicts",
+    "decoy_path": "src/librarian/tools/link_scan/resolve.rs",
+    "offset": 5
+  },
+  "hce-08-store_background": {
+    "decoy_fn": "cross_root_cites_edges",
+    "decoy_path": "src/librarian/tools/doctor/scope.rs",
+    "offset": 5
+  },
+  "hce-09-note_activation": {
+    "decoy_fn": "append_preferences_section",
+    "decoy_path": "src/prompts/builders.rs",
+    "offset": 5
+  },
+  "hce-10-in_one_commit": {
+    "decoy_fn": "ensure_resident",
+    "decoy_path": "src/agent/mod.rs",
+    "offset": 5
+  }
+}
