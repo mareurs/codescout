@@ -1126,6 +1126,7 @@ def ls_s(entries):
     """`git ls-files -s -z` output for `{path: (mode, blob)}`."""
     return "".join("%s %s 0\t%s\0" % (mode, blob, path) for path, (mode, blob) in sorted(entries.items()))
 
+
 PINNED = ("-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "-c", "core.fileMode=true")
 
 
@@ -1133,6 +1134,7 @@ def exec_env(args):
     """The `-e` values of a `docker exec` argv (without the leading `docker`)."""
     options = args[:args.index(CID)]
     return [options[i + 1] for i, option in enumerate(options) if option == "-e"]
+
 
 def done(args, rc=0, out=""):
     """What pilot.docker returns with check=False: stderr is merged into stdout, text mode."""
@@ -1151,6 +1153,8 @@ def label(args):
     if args[:2] == ("image", "inspect"):
         if "{{.Size}}" in text:
             return "inspect"
+        if args[-1] == CTL_IMAGE:
+            return "gate-image-id"
         return "base-id" if args[-1] == BASE_IMAGE else "tag-check"
     if args[0] == "rmi":
         return "rmi"
@@ -1222,6 +1226,8 @@ class FakeDocker:
             return 1, "Error response from daemon: No such image: %s\n" % TAG
         if name == "base-id":
             return 0, BASE_ID + "\n"
+        if name == "gate-image-id":
+            return 0, GATE_ID + "\n"
         if name == "list-files":
             return 0, "".join("./%s\0" % p for p in self.files)
         if name == "ls-files":
@@ -1289,8 +1295,6 @@ def local_shell(root, env=None):
                               capture_output=True, text=True)
         return done(args, proc.returncode, proc.stdout + proc.stderr)
     return run
-
-
 
 
 class ImageTagTest(unittest.TestCase):
@@ -1415,8 +1419,11 @@ class BuildImageTest(unittest.TestCase):
     def test_container_is_started_with_network_and_the_pilot_limits(self):
         fake = FakeDocker()
         self.build(fake)
-        self.assertEqual(fake.args_of("run"), (
-            "run", "-d", "--name", CONTAINER, "--cidfile", str(self.evidence.resolve() / "container.cid"),
+        run = fake.args_of("run")
+        cidfile = Path(run[run.index("--cidfile") + 1])
+        self.assertEqual((cidfile.parent.parent, cidfile.name), (self.evidence.resolve(), "run.cid"))
+        self.assertEqual(run[:4] + run[6:], (
+            "run", "-d", "--name", CONTAINER,
             "--cpus", "4", "--memory", "24g", BASE_ID, "sleep", "infinity"))
 
     def test_offline_override_is_on_the_warm_build_exec_only(self):
@@ -1540,14 +1547,34 @@ class BuildImageTest(unittest.TestCase):
             return done(args, rc, out)
         return respond
 
-    def test_the_cidfile_is_in_the_evidence_dir_and_a_stale_one_is_removed_first(self):
+    def test_the_cidfile_is_fresh_per_call_so_runs_sharing_an_evidence_dir_never_read_each_others(self):
+        paths = []
+        for _ in range(2):
+            fake = FakeDocker(("run", self.cidfile_run(0, CID + "\n", written=CID)))
+            self.build(fake)
+            run = fake.args_of("run")
+            paths.append(Path(run[run.index("--cidfile") + 1]))
+            self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
+        self.assertNotEqual(paths[0], paths[1])
+        for path in paths:
+            self.assertEqual((path.parent.parent, path.name), (self.evidence.resolve(), "run.cid"))
+            self.assertFalse(path.parent.exists(), "the per-call directory is cleaned up")
+
+    def test_the_per_call_cidfile_directory_is_cleaned_up_after_a_failure_too(self):
+        seen = []
+
+        def respond(args, kw):
+            seen.append(Path(args[args.index("--cidfile") + 1]))
+            return done(args, 125, "name in use")
+        self.fails(FakeDocker(("run", respond)), "docker run failed", removal=None)
+        self.assertFalse(seen[0].parent.exists())
+        self.assertEqual(sorted(p.name for p in self.evidence.iterdir()), ["build-evidence.json"])
+
+    def test_a_cidfile_of_a_fixed_name_in_the_evidence_dir_is_never_read(self):
         self.evidence.mkdir()
-        (self.evidence / "container.cid").write_text("f" * 64)  # left by a killed run
-        fake = FakeDocker(("run", self.cidfile_run(0, CID + "\n", written=CID)))
-        self.build(fake)
-        run = fake.args_of("run")
-        self.assertEqual(run[run.index("--cidfile") + 1], str(self.evidence.resolve() / "container.cid"))
-        self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
+        (self.evidence / "container.cid").write_text(CID)  # another run's ID
+        fake = FakeDocker(("run", (125, "name in use")))
+        self.fails(fake, "docker run failed", removal=None)
 
     def test_a_run_that_failed_after_creating_the_container_removes_it_by_the_cidfile_id(self):
         oci = "docker: Error response from daemon: OCI runtime create failed: unable to start container process"
@@ -1744,7 +1771,6 @@ class BuildImageTest(unittest.TestCase):
                     err = self.fails(fake, "tree", tree_tar=tar, expected_tree=upstream_tree)
                     self.assertIn(upstream_tree, str(err))
                     self.assertIn(git(d, "rev-parse", "HEAD^{tree}").strip(), str(err))
-
 
     def test_the_tag_is_dropped_only_from_the_commit_attempt_on(self):
         steps = ["tag-check", "base-id", "run", "clear-tracked", "copy", "extract", "list-files", "clear-dirs",
@@ -2338,7 +2364,6 @@ class BuildImageTest(unittest.TestCase):
         self.assertRegex(got["base_commit"], r"^[0-9a-f]{40}$")
         self.assertEqual(index(d), want_attrs)
 
-
     # --- evidence and removal ---
 
     def test_evidence_of_a_good_build(self):
@@ -2435,12 +2460,16 @@ class BuildImageTest(unittest.TestCase):
             self.assertNotIn("prune", args)
             self.assertNotEqual(args[0], "rmi")
         self.assertEqual([args for args, _ in fake.calls if args[0] == "rm"], [("rm", "-f", "-v", CID)])
+
+
 CTL = "sab-fresh-ctl-rust-lang__rust-analyzer-23096"
-CTL_IMAGE = "sab-fresh-rust-lang__rust-analyzer-23096:b%s" % fb.BUILDER_VERSION
+CTL_IMAGE = "sab-fresh-rust-lang__rust-analyzer-23096:b%s-gate" % fb.BUILDER_VERSION
+GATE_ID = "sha256:" + "c" * 64  # what `docker image inspect` says about CTL_IMAGE
 CTL_BASE = "05278f431f7a71add03f39f081af38f03ac64baf"
 CTL_TEST_PATCH = "diff --git a/crates/x/tests/t.rs b/crates/x/tests/t.rs\n+test\r\n"
 CTL_GOLD_PATCH = "diff --git a/crates/x/src/lib.rs b/crates/x/src/lib.rs\n+fix\n"
 CTL_RECORD = {
+    "instance_id": "rust-lang__rust-analyzer-23096",
     "docker_image": CTL_IMAGE, "base_commit": CTL_BASE, "patch": CTL_GOLD_PATCH, "test_patch": CTL_TEST_PATCH,
     "test_cmds": ["cargo test --no-fail-fast 2>&1 | tee reports/t.log"], "rebuild_cmds": ["cargo test --no-run"],
     "print_cmds": ["cat reports/t.log"], "log_parser": "def parser(log):\n    return {}\n",
@@ -2451,6 +2480,7 @@ T_A, T_B, T_C, T_D, T_E = (HASH + n for n in "abcde")
 BASE_STATUS = {T_A: "fail", T_B: "pass", T_C: "pass", T_D: "fail", T_E: "pass"}
 GOLD_STATUS = {T_A: "pass", T_B: "pass", T_C: "pass", T_D: "fail", T_E: "fail"}
 MISMATCH = "tests differ between two gold runs"
+DOCKER_OK = ["gate-image-id", "run", "rm"]  # the docker calls of a gate that ran
 
 
 class ControlFreshTest(unittest.TestCase):
@@ -2470,15 +2500,25 @@ class ControlFreshTest(unittest.TestCase):
                          "gold-repeat-2": GOLD_STATUS}
         self.parse_calls = 0
         self.parse_raises = {}  # parse call index -> exception
+        # isolation: nothing may reach the real docker. `pilot` is one module object, so this covers
+        # `fresh_build.pilot.docker` and the one `multilang_control` calls; the check is in a cleanup,
+        # because the code under test turns an exception raised in a step into a verdict
+        self.real_docker_calls = []
+        self.addCleanup(lambda: self.assertEqual(self.real_docker_calls, [], "the real docker was called"))
+        self.start_patch(mock.patch.object(fb.pilot, "docker", side_effect=self.no_real_docker))
         for name, impl in (("detect_workdir", self.f_detect), ("reset_to_base", self.f_reset),
                            ("_apply", self.f_apply), ("rebuild", self.f_rebuild), ("run_tests", self.f_run_tests),
                            ("_fresh_reports", self.f_reports)):
-            patcher = mock.patch.object(fb.mc, name, impl)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        patcher = mock.patch.object(fb.grade, "run_parser", self.f_parse)
+            self.start_patch(mock.patch.object(fb.mc, name, autospec=True, side_effect=impl))
+        self.start_patch(mock.patch.object(fb.grade, "run_parser", autospec=True, side_effect=self.f_parse))
+
+    def start_patch(self, patcher):
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def no_real_docker(self, *args, **kw):
+        self.real_docker_calls.append(args)
+        raise AssertionError("the real docker was called: %r" % (args,))
 
     # --- the fakes ---
 
@@ -2532,20 +2572,31 @@ class ControlFreshTest(unittest.TestCase):
         record = args.pop("record", CTL_RECORD)
         return fb.control_fresh(record, **args)
 
-
     HAPPY_CALLS = [
         ("detect_workdir",), ("reset", CTL_BASE), ("apply", "test"), ("rebuild", "base"), ("run_tests", "base"),
         ("reset", CTL_BASE), ("apply", "test"), ("apply", "gold"), ("rebuild", "gold"), ("run_tests", "gold"),
         ("fresh_reports",), ("run_tests", "gold-repeat"),
     ]
 
-    def flaky(self, *tests, repeat2=None):
-        """The first gold repeat has `tests` failing; the second one has the statuses of `repeat2` for them."""
-        repeat = dict(GOLD_STATUS)
-        repeat.update({t: "fail" for t in tests})
-        self.statuses["gold-repeat"] = repeat
+    def flaky(self, *tests, status="fail", repeat2=None):
+        """The first gold repeat says `status` (a real flake) for `tests`; the second one says `repeat2`'s
+        statuses for them (default pass). A `repeat2` status of None means absent."""
+        self.statuses["gold-repeat"] = dict(GOLD_STATUS, **{t: status for t in tests})
+        self.second_repeat(repeat2)
+
+    def lose(self, *tests, repeat2=None):
+        """The first gold repeat has NO status for `tests` (the parser lost their lines, as in the pilot);
+        the second one says `repeat2`'s statuses for them (default pass). None means absent."""
+        self.statuses["gold-repeat"] = {t: s for t, s in GOLD_STATUS.items() if t not in tests}
+        self.second_repeat(repeat2)
+
+    def second_repeat(self, repeat2):
         second = dict(GOLD_STATUS)
-        second.update(repeat2 or {})
+        for test, status in (repeat2 or {}).items():
+            if status is None:
+                del second[test]
+            else:
+                second[test] = status
         self.statuses["gold-repeat-2"] = second
 
     # --- the derivation and the verdict ---
@@ -2619,15 +2670,17 @@ class ControlFreshTest(unittest.TestCase):
     # --- the tolerant repeat ---
 
     def test_one_mismatch_resolved_by_the_second_repeat_is_ok_and_recorded(self):
-        self.flaky(T_B)
+        self.lose(T_B)  # absent from the first repeat, as in the pilot
         got = self.control()
         self.assertEqual(self.calls[-2:], [("fresh_reports",), ("run_tests", "gold-repeat-2")])
         self.assertEqual(self.timeouts, [5400] * 6)
         self.assertIs(got["verdict"]["ok"], True)
         self.assertEqual(got["verdict"]["reasons"], [])
         self.assertEqual(got["verdict"]["tolerated_repeat_mismatch"], [T_B])
+        self.assertEqual(got["verdict"]["strict_repeat_mismatch_count"], 1)  # beside the original count
+        self.assertEqual(got["verdict"]["gold_repeat_mismatch"]["count"], 1)
         tol = got["tolerant_repeat"]
-        self.assertEqual(tol["tests"], {T_B: {"gold": "pass", "gold_repeat": "fail", "gold_repeat_2": "pass"}})
+        self.assertEqual(tol["tests"], {T_B: {"gold": "pass", "gold_repeat": "absent", "gold_repeat_2": "pass"}})
         self.assertEqual(tol["accepted"], [T_B])
         self.assertEqual(tol["gold_repeat_2"], {"pass": 3, "fail": 2})
         self.assertEqual(got["verdict_strict"]["reasons"], [MISMATCH])  # what the strict rule said
@@ -2636,50 +2689,77 @@ class ControlFreshTest(unittest.TestCase):
         self.assertTrue((self.evidence / "gold-repeat-2.log").is_file())
 
     def test_a_mismatch_in_the_fail_to_pass_set_is_tolerated_the_same_way(self):
-        self.flaky(T_A)
-        self.assertIs(self.control()["verdict"]["ok"], True)
+        self.lose(T_A)
+        got = self.control()
+        self.assertIs(got["verdict"]["ok"], True)
+        self.assertEqual(got["tolerant_repeat"]["tests"][T_A]["gold_repeat"], "absent")
 
     def test_three_mismatches_all_resolved_are_ok(self):
-        self.flaky(T_A, T_B, T_C)
+        self.lose(T_A, T_B, T_C)
         got = self.control()
         self.assertIs(got["verdict"]["ok"], True)
         self.assertEqual(got["verdict"]["tolerated_repeat_mismatch"], sorted([T_A, T_B, T_C]))
+        self.assertEqual(got["verdict"]["strict_repeat_mismatch_count"], 3)
 
     def test_a_mismatch_that_persists_is_not_ok(self):
-        self.flaky(T_B, repeat2={T_B: "fail"})
+        self.lose(T_B, repeat2={T_B: "fail"})
         got = self.control()
         self.assertEqual(self.calls[-1], ("run_tests", "gold-repeat-2"))
         self.assertIs(got["verdict"]["ok"], False)
         self.assertEqual(got["verdict"]["reasons"], [MISMATCH])
         self.assertNotIn("tolerated_repeat_mismatch", got["verdict"])
+        self.assertNotIn("strict_repeat_mismatch_count", got["verdict"])
         self.assertEqual(got["tolerant_repeat"]["accepted"], [])
         self.assertEqual(got["tolerant_repeat"]["tests"][T_B]["gold_repeat_2"], "fail")
         self.assertTrue((self.evidence / "gold-repeat-2.log").is_file())
 
     def test_a_second_repeat_that_does_not_say_pass_is_not_accepted(self):
-        for status in ("fail", "skip", "unknown", None):  # None: the test is absent from the second repeat
+        for status in ("fail", "skip", "unknown", None):  # None: the test is absent from the second repeat too
             with self.subTest(status=status):
                 self.calls.clear()
-                self.flaky(T_B)
-                if status is None:
-                    del self.statuses["gold-repeat-2"][T_B]
-                else:
-                    self.statuses["gold-repeat-2"][T_B] = status
+                self.lose(T_B, repeat2={T_B: status})
                 got = self.control()
+                self.assertEqual(self.calls[-1], ("run_tests", "gold-repeat-2"))
                 self.assertIs(got["verdict"]["ok"], False)
                 self.assertEqual(got["verdict"]["reasons"], [MISMATCH])
 
     def test_one_unresolved_mismatch_among_three_fails_them_all(self):
-        self.flaky(T_A, T_B, T_C, repeat2={T_C: "fail"})
+        self.lose(T_A, T_B, T_C, repeat2={T_C: "fail"})
         got = self.control()
         self.assertIs(got["verdict"]["ok"], False)
         self.assertEqual(got["tolerant_repeat"]["accepted"], sorted([T_A, T_B]))
         self.assertNotIn("tolerated_repeat_mismatch", got["verdict"])
 
+    def test_a_real_flake_that_failed_in_the_first_repeat_is_never_accepted(self):
+        # fail then pass is noise the arms would be graded on, not the parser losing a line: the task is
+        # rejected, for an F2P and a P2P test alike, and whatever other status the first repeat gave
+        for test in (T_A, T_B):
+            for status in ("fail", "skip", "unknown"):
+                with self.subTest(test=test, first_repeat=status):
+                    self.calls.clear()
+                    self.flaky(test, status=status)  # the second repeat would say pass
+                    got = self.control()
+                    self.assertNotIn(("run_tests", "gold-repeat-2"), self.calls)  # nothing to tolerate: no extra run
+                    self.assertIs(got["verdict"]["ok"], False)
+                    self.assertEqual(got["verdict"]["reasons"], [MISMATCH])
+                    self.assertNotIn("tolerant_repeat", got)
+                    self.assertNotIn("tolerated_repeat_mismatch", got["verdict"])
+
+    def test_one_flake_among_lost_lines_rejects_the_task(self):
+        self.statuses["gold-repeat"] = {t: s for t, s in GOLD_STATUS.items() if t != T_B}
+        self.statuses["gold-repeat"][T_C] = "fail"  # b was lost (fine), c really failed
+        self.second_repeat(None)
+        got = self.control()
+        self.assertNotIn(("run_tests", "gold-repeat-2"), self.calls)
+        self.assertIs(got["verdict"]["ok"], False)
+        self.assertEqual(got["verdict"]["reasons"], [MISMATCH])
+
     def test_four_mismatches_skip_the_tolerant_run_and_fail(self):
         self.statuses["base"] = dict(BASE_STATUS, **{T_D: "pass"})
         self.statuses["gold"] = dict(GOLD_STATUS, **{T_D: "pass"})
-        self.statuses["gold-repeat"] = dict(self.statuses["gold"], **{T_A: "fail", T_B: "fail", T_C: "fail", T_D: "fail"})
+        # four tests lost from the first repeat: each would be acceptable, but there are too many
+        self.statuses["gold-repeat"] = {t: s for t, s in self.statuses["gold"].items()
+                                        if t not in (T_A, T_B, T_C, T_D)}
         got = self.control()
         self.assertNotIn(("run_tests", "gold-repeat-2"), self.calls)
         self.assertEqual(self.calls[-1], ("run_tests", "gold-repeat"))
@@ -2690,7 +2770,7 @@ class ControlFreshTest(unittest.TestCase):
 
     def test_a_mismatch_beside_another_reason_is_not_tolerated(self):
         self.statuses["base"] = GOLD_STATUS  # no fail-to-pass test
-        self.flaky(T_B)
+        self.lose(T_B)
         got = self.control()
         self.assertNotIn(("run_tests", "gold-repeat-2"), self.calls)
         self.assertIs(got["verdict"]["ok"], False)
@@ -2707,8 +2787,7 @@ class ControlFreshTest(unittest.TestCase):
 
     def test_a_mismatching_test_must_pass_in_gold_too(self):
         # an expected test that does not pass in gold cannot come from derive_sets; the rule is checked anyway
-        self.flaky(T_D, repeat2={T_D: "pass"})
-        self.statuses["gold-repeat"][T_D] = "pass"  # d: fail in gold, pass in both repeats
+        self.lose(T_D, repeat2={T_D: "pass"})  # d: fail in gold, absent then pass in the repeats
         with mock.patch.object(fb, "derive_sets", lambda base, gold: ([T_A], [T_B, T_C, T_D])), \
                 mock.patch.object(fb.grade, "control_verdict",
                                   lambda *a, **k: {"ok": False, "reasons": [MISMATCH],
@@ -2718,7 +2797,7 @@ class ControlFreshTest(unittest.TestCase):
         self.assertEqual(got["tolerant_repeat"]["accepted"], [])
 
     def test_a_verdict_whose_mismatch_count_disagrees_with_the_statuses_is_not_tolerated(self):
-        self.flaky(T_B)
+        self.lose(T_B)
         lie = {"ok": False, "reasons": [MISMATCH], "gold_repeat_mismatch": {"count": 2, "names": [T_B, T_C]}}
         with mock.patch.object(fb.grade, "control_verdict", lambda *a, **k: dict(lie)):
             got = self.control()
@@ -2726,7 +2805,7 @@ class ControlFreshTest(unittest.TestCase):
         self.assertIs(got["verdict"]["ok"], False)
 
     def test_a_failing_second_repeat_is_an_error_verdict_that_keeps_the_strict_one(self):
-        self.flaky(T_B)
+        self.lose(T_B)
         self.raises[len(self.HAPPY_CALLS) + 1] = fb.mc.ControlError("boom in the second repeat")
         got = self.control()
         self.assertEqual(got["verdict"]["error"], True)
@@ -2747,7 +2826,7 @@ class ControlFreshTest(unittest.TestCase):
         self.assertIn("error", got)
         self.assertIsNone(got["f2p"])
         self.assertIsNone(got["p2p"])
-        self.assertEqual(fake.labels(), ["run", "rm"])
+        self.assertEqual(fake.labels(), DOCKER_OK)
         self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
         self.assertTrue(got["container_removed"])
 
@@ -2792,7 +2871,7 @@ class ControlFreshTest(unittest.TestCase):
         fake = FakeDocker()
         with self.assertRaises(KeyboardInterrupt):
             self.control(fake)
-        self.assertEqual(fake.labels(), ["run", "rm"])
+        self.assertEqual(fake.labels(), DOCKER_OK)
         self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
 
     def test_a_failed_removal_is_recorded_and_never_replaces_the_verdict(self):
@@ -2811,15 +2890,45 @@ class ControlFreshTest(unittest.TestCase):
 
     # --- the container: its flags, its name and who owns it ---
 
-    def test_the_container_is_started_with_the_frozen_gate_flags_and_8g(self):
+    def test_the_container_is_started_with_the_frozen_gate_flags_and_8g_from_the_image_id(self):
         fake = FakeDocker()
-        self.control(fake)
-        self.assertEqual(fake.args_of("run"), (
-            "run", "-d", "--name", CTL, "--cidfile", str(self.evidence.resolve() / "control.cid"),
+        got = self.control(fake)
+        run = fake.args_of("run")
+        self.assertEqual(run[4], "--cidfile")
+        cidfile = Path(run[5])
+        self.assertEqual((cidfile.parent.parent, cidfile.name), (self.evidence.resolve(), "run.cid"))
+        self.assertEqual(run[:4] + run[6:], (
+            "run", "-d", "--name", CTL,
             "--network", "none", "--cpus", "4", "--memory", "8g", "--memory-swap", "8g", "--pids-limit", "4096",
-            "--security-opt", "no-new-privileges", CTL_IMAGE, "sleep", "infinity"))
-        self.assertEqual(fake.labels(), ["run", "rm"])
+            "--security-opt", "no-new-privileges", GATE_ID, "sleep", "infinity"))
+        self.assertEqual(fake.all_args_of("gate-image-id"), [("image", "inspect", "--format", "{{.Id}}", CTL_IMAGE)])
+        self.assertEqual(fake.labels(), DOCKER_OK)
         self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
+        self.assertEqual((got["image"], got["image_id"]), (CTL_IMAGE, GATE_ID))  # reference and ID are both recorded
+
+    def test_a_gate_image_that_cannot_be_inspected_is_an_error_verdict_and_nothing_starts(self):
+        for resp in ((1, "Error: No such image"), (0, "garbage\n"), (0, ""), (0, "sha256:abc\n"),
+                     subprocess.TimeoutExpired(cmd=["docker"], timeout=120), FileNotFoundError("docker")):
+            with self.subTest(resp=repr(resp)):
+                fake = FakeDocker(("gate-image-id", resp))
+                got = self.control(fake)
+                self.assertEqual(fake.labels(), ["gate-image-id"])  # no container was created: nothing to remove
+                self.assertEqual(set(got["verdict"]), {"ok", "error", "reasons"})
+                self.assertIs(got["verdict"]["error"], True)
+                self.assertEqual(self.calls, [])
+                self.assertIsNone(got["container_removed"])
+
+    def test_two_runs_sharing_an_evidence_dir_use_different_cidfiles_and_clean_up(self):
+        paths = []
+        for _ in range(2):
+            fake = FakeDocker()
+            self.control(fake)
+            run = fake.args_of("run")
+            paths.append(Path(run[run.index("--cidfile") + 1]))
+        self.assertNotEqual(paths[0], paths[1])
+        for path in paths:
+            self.assertEqual((path.parent.parent, path.name), (self.evidence.resolve(), "run.cid"))
+            self.assertFalse(path.parent.exists(), "the per-call directory is cleaned up")
 
     def test_the_memory_default_is_8g_and_a_parameter(self):
         self.assertEqual(fb.CONTROL_MEMORY, "8g")
@@ -2858,14 +2967,14 @@ class ControlFreshTest(unittest.TestCase):
     def test_nothing_is_removed_before_the_run_and_nothing_is_started_by_name_twice(self):
         fake = FakeDocker()
         self.control(fake)
-        self.assertEqual([args[0] for args, _ in fake.calls], ["run", "rm"])  # no pre-emptive `rm` of the name
+        self.assertEqual([args[0] for args, _ in fake.calls], ["image", "run", "rm"])  # no pre-emptive `rm` of the name
 
     def test_a_run_that_fails_cleanly_removes_nothing_and_runs_no_step(self):
         conflict = (125, 'docker: Error response from daemon: Conflict. The container name "/%s" is already in '
                          'use by container "%s".' % (CTL, "f" * 64))
         fake = FakeDocker(("run", conflict))
         got = self.control(fake)
-        self.assertEqual(fake.labels(), ["run"])  # a sibling's container of this name is not ours to remove
+        self.assertEqual(fake.labels(), ["gate-image-id", "run"])  # a sibling's container of this name is not ours to remove
         self.assertEqual(self.calls, [])
         self.assertEqual(set(got["verdict"]), {"ok", "error", "reasons"})
         self.assertIs(got["verdict"]["error"], True)
@@ -2880,7 +2989,7 @@ class ControlFreshTest(unittest.TestCase):
             with self.subTest(resp=repr(resp)):
                 fake = FakeDocker(("run", resp))
                 got = self.control(fake)
-                self.assertEqual(fake.labels(), ["run", "rm"])
+                self.assertEqual(fake.labels(), DOCKER_OK)
                 self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CTL))
                 self.assertIs(got["container_removed_by_name"], True)
                 self.assertIs(got["verdict"]["error"], True)
@@ -2892,7 +3001,7 @@ class ControlFreshTest(unittest.TestCase):
             return done(args, 125, "docker: Error response from daemon: OCI runtime create failed")
         fake = FakeDocker(("run", respond))
         got = self.control(fake)
-        self.assertEqual(fake.labels(), ["run", "rm"])
+        self.assertEqual(fake.labels(), DOCKER_OK)
         self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
         self.assertIs(got["container_removed"], True)
         self.assertIs(got["container_removed_by_name"], False)
@@ -2901,14 +3010,14 @@ class ControlFreshTest(unittest.TestCase):
 
     def test_a_stale_cidfile_is_removed_before_the_run_and_never_trusted(self):
         self.evidence.mkdir()
-        (self.evidence / "control.cid").write_text("f" * 64)
+        (self.evidence / "control.cid").write_text(CID)  # another run's ID, in the shared evidence dir
 
         def respond(args, kw):
             self.assertFalse(Path(args[args.index("--cidfile") + 1]).exists())
             return done(args, 125, "name in use")
         fake = FakeDocker(("run", respond))
         self.control(fake)
-        self.assertEqual(fake.labels(), ["run"])
+        self.assertEqual(fake.labels(), ["gate-image-id", "run"])  # nothing of ours exists, so nothing is removed
 
     def test_a_good_run_is_addressed_by_the_id_it_printed_not_the_name(self):
         other = "cd34" * 16
@@ -2936,6 +3045,124 @@ class ControlFreshTest(unittest.TestCase):
         record = dict(CTL_RECORD, FAIL_TO_PASS=["x"], PASS_TO_PASS=["y"])
         got = self.control(record=record)
         self.assertEqual(got["f2p"], [T_A])
+    def test_commands_and_instance_id_are_validated_before_docker(self):
+        bad = [dict(CTL_RECORD, print_cmds=None), dict(CTL_RECORD, test_cmds="cargo test"),
+               dict(CTL_RECORD, test_cmds=[]), dict(CTL_RECORD, print_cmds=[]), dict(CTL_RECORD, test_cmds=["a", 5]),
+               dict(CTL_RECORD, print_cmds=("cat x",)), dict(CTL_RECORD, rebuild_cmds="cargo build"),
+               dict(CTL_RECORD, rebuild_cmds=[None]), dict(CTL_RECORD, rebuild_cmds=None),
+               dict(CTL_RECORD, instance_id=""), dict(CTL_RECORD, instance_id=None), dict(CTL_RECORD, instance_id=5)]
+        for record in bad:
+            with self.subTest(record={k: v for k, v in record.items() if k in ("test_cmds", "print_cmds",
+                                                                              "rebuild_cmds", "instance_id")}):
+                fake = FakeDocker()
+                with self.assertRaises(ValueError):
+                    self.control(fake, record=record)
+                self.assertEqual(fake.calls, [])
+                self.assertEqual(self.calls, [])
+        got = self.control(record=dict(CTL_RECORD, rebuild_cmds=[]))  # no rebuild command is fine
+        self.assertIs(got["verdict"]["ok"], True)
+
+    # --- an internal error is a verdict too, and the evidence is written on every path ---
+
+    def assert_internal_verdict(self, got, fake, exc):
+        verdict = got["verdict"]
+        self.assertEqual(set(verdict), {"ok", "error", "internal", "reasons"})
+        self.assertIs(verdict["ok"], False)
+        self.assertIs(verdict["error"], True)
+        self.assertIs(verdict["internal"], True)
+        self.assertEqual(len(verdict["reasons"]), 1)
+        self.assertTrue(verdict["reasons"][0].startswith("internal error: %s: " % type(exc).__name__), verdict)
+        self.assertLessEqual(len(verdict["reasons"][0]), 400)
+        lines = got["internal_error_traceback"].splitlines()
+        self.assertLessEqual(len(lines), 20)
+        self.assertEqual(lines[-1].split(":")[0], type(exc).__name__)  # the traceback ends with the exception
+        self.assertTrue(got["error"].startswith(type(exc).__name__ + ": "))
+        self.assertEqual(fake.labels(), DOCKER_OK)
+        self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
+        self.assertTrue(got["container_removed"])
+        self.assertEqual(json.loads((self.evidence / "control-evidence.json").read_text()), got)
+
+    def test_a_key_or_type_error_in_a_helper_is_an_internal_verdict_not_an_exception(self):
+        for exc in (KeyError("print_cmds"), TypeError("'NoneType' object is not iterable"), AttributeError("x"),
+                    IndexError("i"), ZeroDivisionError("z")):
+            for index in (0, 4, 9, 11):
+                with self.subTest(exc=type(exc).__name__, index=index):
+                    self.calls.clear()
+                    self.raises = {index: exc}
+                    fake = FakeDocker()
+                    got = self.control(fake)
+                    self.assert_internal_verdict(got, fake, exc)
+                    self.assertEqual(len(self.calls), index + 1)
+
+    def test_a_key_or_type_error_after_the_states_ran_is_an_internal_verdict_too(self):
+        for exc in (KeyError("t"), TypeError("bad")):
+            with self.subTest(where="derive_sets", exc=type(exc).__name__):
+                fake = FakeDocker()
+                with mock.patch.object(fb, "derive_sets", side_effect=exc):
+                    got = self.control(fake)
+                self.assert_internal_verdict(got, fake, exc)
+            with self.subTest(where="control_verdict", exc=type(exc).__name__):
+                fake = FakeDocker()
+                with mock.patch.object(fb.grade, "control_verdict", side_effect=exc):
+                    got = self.control(fake)
+                self.assert_internal_verdict(got, fake, exc)
+
+    def test_the_parser_raising_a_key_error_is_an_internal_verdict(self):
+        self.parse_raises = {1: KeyError("statuses")}
+        fake = FakeDocker()
+        self.assert_internal_verdict(self.control(fake), fake, KeyError("statuses"))
+
+    def test_the_traceback_tail_is_the_last_20_lines(self):
+        def deep(n):
+            if n:
+                return deep(n - 1)
+            raise KeyError("deep")
+        with mock.patch.object(fb.mc, "detect_workdir", side_effect=lambda c: deep(30)):
+            got = self.control()
+        lines = got["internal_error_traceback"].splitlines()
+        self.assertEqual(len(lines), 20)
+        self.assertEqual(lines[-1], "KeyError: 'deep'")
+
+    def test_a_specific_step_error_is_not_marked_internal(self):
+        self.raises = {4: fb.mc.ControlError("a step failed")}
+        got = self.control()
+        self.assertNotIn("internal", got["verdict"])
+        self.assertNotIn("internal_error_traceback", got)
+
+    def test_the_evidence_is_written_on_a_good_run_and_a_write_failure_does_not_raise(self):
+        got = self.control()
+        self.assertEqual(json.loads((self.evidence / "control-evidence.json").read_text()), got)
+        self.assertTrue(got["verdict"]["ok"])
+        (self.evidence / "control-evidence.json").unlink()
+        (self.evidence / "control-evidence.json").mkdir()  # a directory: the write fails
+        got = self.control()
+        self.assertTrue(got["verdict"]["ok"])
+        self.assertIn("control-evidence.json", got["evidence_write_error"])
+
+    def test_an_interrupt_mid_run_removes_the_container_writes_the_evidence_then_reraises(self):
+        for exc in (KeyboardInterrupt(), SystemExit(2)):
+            with self.subTest(exc=type(exc).__name__):
+                self.calls.clear()
+                self.raises = {5: exc}  # the second reset_to_base: the base state is done
+                fake = FakeDocker()
+                with self.assertRaises(type(exc)):
+                    self.control(fake)
+                self.assertEqual(fake.labels(), DOCKER_OK)
+                self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
+                ev = json.loads((self.evidence / "control-evidence.json").read_text())
+                self.assertEqual(ev["verdict"], {"ok": False, "error": True, "interrupted": True,
+                                                 "reasons": ["interrupted: " + type(exc).__name__]})
+                self.assertIs(ev["container_removed"], True)
+                self.assertEqual(ev["base"], {"fail": 2, "pass": 3})  # what was done is kept
+                self.assertTrue((self.evidence / "base.log").is_file())
+
+    def test_an_interrupt_while_removing_still_writes_the_evidence_and_is_reraised(self):
+        fake = FakeDocker(("rm", KeyboardInterrupt()))
+        with self.assertRaises(KeyboardInterrupt):
+            self.control(fake)
+        ev = json.loads((self.evidence / "control-evidence.json").read_text())
+        self.assertIs(ev["container_removed"], False)
+        self.assertIs(ev["verdict"]["ok"], True)
 
     def test_the_evidence_dir_is_created_and_the_steps_and_truncation_are_recorded(self):
         deep = self.tmp / "a" / "b"
@@ -2967,11 +3194,8 @@ class ControlFreshTest(unittest.TestCase):
                 self.assertNotRegex(a, r"codescout-|pbr27-|rae-")
             self.assertNotIn("volume", args)
             self.assertNotIn("prune", args)
-            self.assertNotIn(args[0], ("rmi", "image"))
-
-
-
-
+            self.assertNotEqual(args[0], "rmi")
+            self.assertNotIn(args[:2], (("image", "rm"), ("image", "prune")))
 
 
 if __name__ == "__main__":

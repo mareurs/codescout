@@ -59,7 +59,9 @@ import re
 import shutil
 import subprocess
 import tarfile
+import tempfile
 import time
+import traceback
 from pathlib import Path
 
 import multilang_control as mc
@@ -542,6 +544,7 @@ _STEP_NAMES = {
     "rev-parse": "git rev-parse", "docker-commit": "docker commit",
     "inspect": "docker image inspect", "rmi": "docker rmi", "tag-check": "docker image inspect (tag)",
     "tag-recheck": "docker image inspect (tag, before the commit)", "tree-rev-parse": "git rev-parse HEAD^{tree}",
+    "gate-image-id": "docker image inspect (gate image)",
     "base-id": "docker image inspect (base image)", "list-files": "list files",
     "delete-extras": "delete leftover files", "git-attributes": "write .git/info/attributes",
 }
@@ -746,6 +749,15 @@ def _cidfile_id(path):
     return text if re.fullmatch(r"[0-9a-f]{64}", text) else None
 
 
+def _cid_dir(evidence_dir):
+    """A new directory inside `evidence_dir` (absolute, unique) for the `--cidfile` of ONE `docker run`.
+    A fixed file name in a directory several runs share would let one run read another's container ID
+    and remove that container. The caller removes the directory afterwards."""
+    try:
+        return Path(tempfile.mkdtemp(prefix=".cid-", dir=Path(evidence_dir).resolve()))
+    except OSError as exc:
+        raise BuildError("cannot create a cidfile directory in %s: %s" % (evidence_dir, exc)) from exc
+
 
 class _Build:
     """The docker calls of one image build and their record. Every exit code comes from the
@@ -798,14 +810,9 @@ class _Build:
     def start(self, *args, timeout, cidfile=None):
         """`docker run -d`; remembers the container ID. See the class docstring for what is removed after a failure.
 
-        With `cidfile` (the path `args` pass as `--cidfile`): a stale file is removed first, because
-        docker refuses to start when it exists; and a `docker run` that exits non-zero but left a
-        64-hex ID in it DID create a container (it was created, then failed to start): that ID is ours."""
-        if cidfile is not None:
-            try:
-                Path(cidfile).unlink(missing_ok=True)
-            except OSError as exc:
-                raise BuildError("cannot remove the stale cidfile %s: %s" % (cidfile, exc)) from exc
+        With `cidfile` (the path `args` pass as `--cidfile`, in a fresh directory made for this call, see
+        `_cid_dir`): a `docker run` that exits non-zero but left a 64-hex ID in it DID create a container
+        (it was created, then failed to start): that ID is ours."""
         try:
             proc = self.run("run", *args, timeout=timeout)
         except BaseException:  # no answer (timeout, no binary, interrupt): a container of this name may be ours
@@ -891,7 +898,6 @@ def _require_tag_absent(build, step, tag, when):
                          % (tag, proc.returncode, _text(proc).rstrip()[-_LOG_TAIL:]))
 
 
-
 def _write_evidence(evidence_dir, ev, name=_EVIDENCE_FILE):
     (evidence_dir / name).write_text(json.dumps(ev, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
@@ -966,7 +972,7 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
     evidence_dir.mkdir(parents=True, exist_ok=True)
 
     build = _Build(docker, container, workdir)
-    cidfile = evidence_dir.resolve() / "container.cid"
+    cid_dir = None  # a directory of its own for this call's `--cidfile`, removed in the `finally`
     ev = {
         "builder_version": BUILDER_VERSION, "repo": repo, "pr": pr, "upstream_base": upstream_base,
         "base_image": base_image, "image": tag, "container": container, "workdir": workdir,
@@ -993,6 +999,8 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
                              % (base_image, _text(proc)[-_LOG_TAIL:]))
         ev["base_image_id"] = ids[-1]
 
+        cid_dir = _cid_dir(evidence_dir)
+        cidfile = cid_dir / "run.cid"
         build.start("run", "-d", "--name", container, "--cidfile", str(cidfile), "--cpus", "4", "--memory", "24g",
                     ev["base_image_id"], "sleep", "infinity", timeout=600, cidfile=cidfile)
         ev["container_id"] = build.cid
@@ -1082,6 +1090,8 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
             build.drop_tag(tag)  # from the commit attempt on only: the tag exists because of this build
         raise
     finally:
+        if cid_dir is not None:
+            shutil.rmtree(cid_dir, ignore_errors=True)
         ev.update(build.remove())
         evidence_error = None
         try:
@@ -1097,12 +1107,18 @@ def build_image(*, base_image, repo, pr, upstream_base, tree_tar, evidence_dir, 
             "tree_tar_sha256": tar_sha, "image_id": ev["image_id"], "size_bytes": ev["size_bytes"],
             "laps_seconds": laps, "compiling_lines": ev["compiling_lines"],
             "container_removed": ev["container_removed"]}
+
+
 CONTROL_PREFIX = "sab-fresh-ctl-"
-CONTROL_MEMORY = "8g"  # the frozen grader's limit: a gate passed at 24 GB proved nothing (the pilot saw it fail at 24 GB only)
+# The gate runs at the grader's frozen limit. In the pilot it FAILED at 24 GB only because two tests'
+# `--nocapture` output interleaved and the parser lost one test's line although the test passed; at 8 GB
+# the same gate passed. A gate passed at another memory limit proves nothing about the grader's.
+CONTROL_MEMORY = "8g"
 TOLERATED_MISMATCHES = 3
 _MEMORY = re.compile(r"[1-9][0-9]*[kmg]")
-_RECORD_KEYS = ("docker_image", "base_commit", "patch", "test_patch", "test_cmds", "rebuild_cmds", "print_cmds",
-                "log_parser")
+_RECORD_KEYS = ("instance_id", "docker_image", "base_commit", "patch", "test_patch", "test_cmds", "rebuild_cmds",
+                "print_cmds", "log_parser")
+_CONTROL_EVIDENCE = "control-evidence.json"  # written on every path, an interrupt included
 _NO_F2P = "no fail-to-pass test"
 _REPEAT_MISMATCH = "tests differ between two gold runs"
 # what a failing step raises: ControlError, ParserError and BuildError are RuntimeError/ValueError;
@@ -1116,54 +1132,16 @@ def _write_log(evidence_dir, name, text):
         f.write(text)
 
 
-def control_fresh(record, *, container, evidence_dir, memory=CONTROL_MEMORY, timeout=5400, docker=pilot.docker):
-    """Derive FAIL_TO_PASS / PASS_TO_PASS of a fresh task and run the strict gate, offline, in one container.
-
-    `record` carries `docker_image`, `base_commit` (the synthetic commit), `patch`, `test_patch`,
-    `test_cmds`, `rebuild_cmds`, `print_cmds` and `log_parser`; any F2P/P2P it carries is not used.
-    `container` must start with `sab-fresh-ctl-`. `ValueError` for a bad argument, before any docker call.
-
-    The container (`--network none --cpus 4 --memory <memory> --memory-swap <memory> --pids-limit 4096
-    --security-opt no-new-privileges`, `memory` 8g: the frozen grader's limit) is started from
-    `docker_image` and walks three states, each from `reset_to_base`, like `multilang_control.control`:
-    base + test patch, gold + test patch, then the same gold state again (`_fresh_reports`, tests only).
-    `derive_sets(base, gold)` gives F2P and P2P (test names embed the binary hash, so they belong to
-    this image); `grade.control_verdict(base, gold, f2p, p2p, gold_repeat=repeat)` is the verdict. An
-    empty F2P set is not ok, with the reason `no fail-to-pass test`.
-
-    Tolerant repeat: when the only reason is `tests differ between two gold runs`, at most
-    `TOLERATED_MISMATCHES` tests differ, and the verdict agrees with that count, the gold tests run a
-    second time. A differing test is accepted only if it is `pass` in gold and in that run; all must
-    be, else the strict verdict stands. Any other reason is never tolerated. What was accepted, and
-    the strict verdict it replaced, are in the evidence (`tolerant_repeat`, `verdict_strict`).
-
-    Never raises for a step failure: a `ControlError`, a `ParserError`, a docker failure or timeout
-    becomes `verdict = {"ok": False, "error": True, "reasons": ["control error: ..."]}` and `error`;
-    `f2p` and `p2p` are None when the failure came before they were derived. A `KeyboardInterrupt` is
-    re-raised after the container is removed.
-
-    The container is removed in a `finally`, by the ID `docker run -d` printed: a `docker run` that
-    answered with a failure removes nothing (the name may belong to another run), unless its
-    `--cidfile` (`<evidence_dir>/control.cid`) holds an ID, and one that gave no answer removes by
-    name (see `_Build`). Nothing is removed before the run; no image is ever deleted.
-
-    Logs go to `evidence_dir` (`base.log`, `gold.log`, `gold-repeat.log`, `gold-repeat-2.log`), byte for
-    byte. Returns the evidence: `f2p`, `p2p`, `verdict`, `base`/`gold`/`gold_repeat` status counters,
-    `steps`, `laps_seconds`, `wall_seconds`, `container_id`, `container_removed` (None when nothing
-    was created, False with `removal_error` when the removal failed), `error` when a step raised.
-    """
-    if not isinstance(container, str) or not container.startswith(CONTROL_PREFIX) \
-            or _DOCKER_NAME.fullmatch(container) is None:
-        raise ValueError("container name must be a docker name starting with %r: %r" % (CONTROL_PREFIX, container))
-    if not isinstance(memory, str) or _MEMORY.fullmatch(memory) is None:
-        raise ValueError("memory must look like 8g, got %r" % (memory,))
-    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
-        raise ValueError("timeout must be a positive integer, got %r" % (timeout,))
+def _check_record(record):
+    """`ValueError` unless `record` has what `control_fresh` reads, in the shape it reads it: a caller bug,
+    caught before docker rather than as a `KeyError` or `TypeError` in the middle of a run."""
     if not isinstance(record, dict):
         raise ValueError("record must be a dict, got %s" % type(record).__name__)
     missing = [key for key in _RECORD_KEYS if key not in record]
     if missing:
         raise ValueError("record lacks %s" % ", ".join(missing))
+    if not isinstance(record["instance_id"], str) or not record["instance_id"]:
+        raise ValueError("instance_id must be a non-empty string, got %r" % (record["instance_id"],))
     image, base_commit = record["docker_image"], record["base_commit"]
     if not isinstance(image, str) or _BASE_IMAGE.fullmatch(image) is None:
         raise ValueError("docker_image is not an image reference: %r" % (image,))
@@ -1172,12 +1150,90 @@ def control_fresh(record, *, container, evidence_dir, memory=CONTROL_MEMORY, tim
     for key in ("patch", "test_patch", "log_parser"):
         if not isinstance(record[key], str):
             raise ValueError("record[%r] must be a string" % key)
+    for key, needed in (("test_cmds", True), ("print_cmds", True), ("rebuild_cmds", False)):
+        cmds = record[key]
+        if not isinstance(cmds, list) or not all(isinstance(cmd, str) for cmd in cmds) or (needed and not cmds):
+            raise ValueError("record[%r] must be a list of strings%s, got %r"
+                             % (key, " (not empty)" if needed else "", cmds))
+
+
+def _write_control_evidence(evidence_dir, ev):
+    """`ev` as `control-evidence.json`; a failed write is recorded in `ev`, never raised."""
+    try:
+        (evidence_dir / _CONTROL_EVIDENCE).write_text(
+            json.dumps(ev, indent=2, allow_nan=False, default=str) + "\n", encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        ev["evidence_write_error"] = "%s: %s" % (type(exc).__name__, exc)
+
+
+def control_fresh(record, *, container, evidence_dir, memory=CONTROL_MEMORY, timeout=5400, docker=pilot.docker):
+    """Derive FAIL_TO_PASS / PASS_TO_PASS of a fresh task and run the strict gate, offline, in one container.
+
+    `record` carries `instance_id`, `docker_image`, `base_commit` (the synthetic commit), `patch`,
+    `test_patch`, `test_cmds`, `rebuild_cmds`, `print_cmds` (lists of strings; `test_cmds` and
+    `print_cmds` not empty) and `log_parser`; any F2P/P2P it carries is not used. `container` must start
+    with `sab-fresh-ctl-`. `ValueError` for a bad argument, before any docker call: a caller bug.
+
+    The gate image is inspected first (`docker image inspect --format {{.Id}}`; the ID is recorded as
+    `image_id`), then the container (`--network none --cpus 4 --memory <memory> --memory-swap <memory>
+    --pids-limit 4096 --security-opt no-new-privileges`, `memory` 8g: the frozen grader's limit) is
+    started from that ID, not from the mutable reference. It walks three states, each from
+    `reset_to_base`, like `multilang_control.control`: base + test patch, gold + test patch, then the
+    same gold state again (`_fresh_reports`, tests only). `derive_sets(base, gold)` gives F2P and P2P
+    (test names embed the binary hash, so they belong to this image);
+    `grade.control_verdict(base, gold, f2p, p2p, gold_repeat=repeat)` is the verdict. An empty F2P set
+    is not ok, with the reason `no fail-to-pass test`.
+
+    Tolerant repeat, for the one failure the pilot saw (a parser losing a test's line to interleaved
+    `--nocapture` output): when the only reason is `tests differ between two gold runs`, at most
+    `TOLERATED_MISMATCHES` tests differ, the verdict agrees with that count, and EVERY differing test
+    is ABSENT (no status at all) from the first repeat, the gold tests run a second time. A differing
+    test is accepted only if it is `pass` in gold and in that run; all must be, else the strict
+    verdict stands. A test that has a status in the first repeat (`fail`, `skip`, anything) is a real
+    flake: no second run, the task is rejected, because accepting it would put noise into the arms'
+    grades. Any other reason is never tolerated. When it is applied, `verdict.ok` is True with no
+    reasons, `verdict.tolerated_repeat_mismatch` names the tests and `verdict.strict_repeat_mismatch_count`
+    keeps the original count (`gold_repeat_mismatch.count` stays too, so `count > 0` with `ok` is
+    not a contradiction); `tolerant_repeat` holds the three statuses of each differing test and
+    `verdict_strict` the verdict it replaced.
+
+    Never raises for a failure of the run. A `ControlError`, a `ParserError`, a docker failure or
+    timeout becomes `verdict = {"ok": False, "error": True, "reasons": ["control error: ..."]}`; any
+    other `Exception` (a bug: `KeyError`, `TypeError`, ...) becomes `{"ok": False, "error": True,
+    "internal": True, "reasons": ["internal error: <Type>: <message>"]}` with the last 20 lines of the
+    traceback in `internal_error_traceback`; both set `error`. `f2p` and `p2p` are None when the failure
+    came before they were derived. A `BaseException` (`KeyboardInterrupt`, `SystemExit`) is re-raised,
+    after the container is removed and the evidence is written (`verdict.interrupted`).
+
+    The container is removed in a `finally`, by the ID `docker run -d` printed: a `docker run` that
+    answered with a failure removes nothing (the name may belong to another run), unless its
+    `--cidfile` holds an ID, and one that gave no answer removes by name (see `_Build`). The cidfile
+    lives in a directory made for this call and removed after it, so runs sharing `evidence_dir` never
+    read each other's ID. Nothing is removed before the run; no image is ever deleted.
+
+    Logs go to `evidence_dir` (`base.log`, `gold.log`, `gold-repeat.log`, `gold-repeat-2.log`), byte for
+    byte, and the returned evidence to `control-evidence.json` on every path (a failed write is
+    recorded as `evidence_write_error`, never raised). Returns the evidence: `f2p`, `p2p`, `verdict`,
+    `base`/`gold`/`gold_repeat` status counters, `steps`, `laps_seconds`, `wall_seconds`, `image_id`,
+    `container_id`, `container_removed` (None when nothing was created, False with `removal_error` when
+    the removal failed), `error` when the run failed.
+    """
+    if not isinstance(container, str) or not container.startswith(CONTROL_PREFIX) \
+            or _DOCKER_NAME.fullmatch(container) is None:
+        raise ValueError("container name must be a docker name starting with %r: %r" % (CONTROL_PREFIX, container))
+    if not isinstance(memory, str) or _MEMORY.fullmatch(memory) is None:
+        raise ValueError("memory must look like 8g, got %r" % (memory,))
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+        raise ValueError("timeout must be a positive integer, got %r" % (timeout,))
+    _check_record(record)
+    image, base_commit = record["docker_image"], record["base_commit"]
     evidence_dir = Path(evidence_dir)
     evidence_dir.mkdir(parents=True, exist_ok=True)
 
     started = mark = time.monotonic()
     build = _Build(docker, container, None)
-    ev = {"id": record.get("instance_id"), "image": image, "container": container, "memory": memory,
+    cid_dir = None  # a directory of its own for this call's `--cidfile`, removed in the `finally`
+    ev = {"id": record["instance_id"], "image": image, "container": container, "memory": memory,
           "base_commit": base_commit, "f2p": None, "p2p": None, "steps": []}
     steps = ev["steps"]
     laps = ev["laps_seconds"] = {}
@@ -1195,10 +1251,18 @@ def control_fresh(record, *, container, evidence_dir, memory=CONTROL_MEMORY, tim
         return grade.run_parser(record["log_parser"], log)
 
     try:
-        build.start("run", "-d", "--name", container, "--cidfile", str(evidence_dir.resolve() / "control.cid"),
+        proc = build.must("gate-image-id", "image", "inspect", "--format", "{{.Id}}", image, timeout=120)
+        ids = _text(proc).split()
+        if not ids or _IMAGE_ID.fullmatch(ids[-1]) is None:
+            raise BuildError("gate image %s: docker image inspect gave no image ID: %r"
+                             % (image, _text(proc)[-_LOG_TAIL:]))
+        ev["image_id"] = ids[-1]
+        cid_dir = _cid_dir(evidence_dir)
+        cidfile = cid_dir / "run.cid"
+        build.start("run", "-d", "--name", container, "--cidfile", str(cidfile),
                     "--network", "none", "--cpus", "4", "--memory", memory, "--memory-swap", memory,
-                    "--pids-limit", "4096", "--security-opt", "no-new-privileges", image, "sleep", "infinity",
-                    timeout=600, cidfile=evidence_dir.resolve() / "control.cid")
+                    "--pids-limit", "4096", "--security-opt", "no-new-privileges", ev["image_id"], "sleep",
+                    "infinity", timeout=600, cidfile=cidfile)
         cid = build.cid
         workdir = ev["workdir"] = mc.detect_workdir(cid)
         ev["dirty_before_base"] = mc.reset_to_base(cid, workdir, base_commit)["dirty_before"]
@@ -1237,27 +1301,43 @@ def control_fresh(record, *, container, evidence_dir, memory=CONTROL_MEMORY, tim
 
         mismatch = sorted(n for n in set(f2p) | set(p2p) if gold.get(n) != repeat.get(n))
         reported = (verdict.get("gold_repeat_mismatch") or {}).get("count")
+        # only a test the parser LOST (no status in the first repeat) may be tolerated; one that has a
+        # status there is a real flake and rejects the task without a second run
         if verdict.get("reasons") == [_REPEAT_MISMATCH] and 0 < len(mismatch) <= TOLERATED_MISMATCHES \
-                and reported == len(mismatch):
+                and reported == len(mismatch) and all(n not in repeat for n in mismatch):
             ev["verdict_strict"] = verdict  # recorded before the run: an error in it must not lose it
             mc._fresh_reports(cid, workdir)
             repeat2 = state_run(cid, workdir, "gold-repeat-2")
             lap("gold_repeat_2_tests")
             accepted = [n for n in mismatch if gold.get(n) == grade.PASS and repeat2.get(n) == grade.PASS]
             ev["tolerant_repeat"] = {
-                "tests": {n: {"gold": gold.get(n), "gold_repeat": repeat.get(n), "gold_repeat_2": repeat2.get(n)}
-                          for n in mismatch},
+                "tests": {n: {"gold": gold.get(n, "absent"), "gold_repeat": repeat.get(n, "absent"),
+                              "gold_repeat_2": repeat2.get(n, "absent")} for n in mismatch},
                 "accepted": accepted, "gold_repeat_2": dict(collections.Counter(repeat2.values()))}
             if len(accepted) == len(mismatch):
-                ev["verdict"] = dict(verdict, ok=True, reasons=[], tolerated_repeat_mismatch=accepted)
+                ev["verdict"] = dict(verdict, ok=True, reasons=[], tolerated_repeat_mismatch=accepted,
+                                     strict_repeat_mismatch_count=reported)
     except _STEP_ERRORS as exc:
         ev["error"] = "%s: %s" % (type(exc).__name__, str(exc)[-400:])
         ev["verdict"] = {"ok": False, "error": True, "reasons": ["control error: %s" % str(exc)[-300:]]}
+    except Exception as exc:  # a bug, not a step failure: still a verdict, with the traceback tail
+        ev["error"] = "%s: %s" % (type(exc).__name__, str(exc)[-400:])
+        ev["internal_error_traceback"] = "\n".join(traceback.format_exc().splitlines()[-20:])
+        ev["verdict"] = {"ok": False, "error": True, "internal": True,
+                         "reasons": ["internal error: %s: %s" % (type(exc).__name__, str(exc)[-300:])]}
+    except BaseException as exc:  # KeyboardInterrupt, SystemExit: cleaned up and recorded, then re-raised
+        ev["error"] = "%s: %s" % (type(exc).__name__, str(exc)[-400:])
+        ev["verdict"] = {"ok": False, "error": True, "interrupted": True,
+                         "reasons": ["interrupted: %s" % type(exc).__name__]}
+        raise
     finally:
+        if cid_dir is not None:
+            shutil.rmtree(cid_dir, ignore_errors=True)
         ev.update(build.remove())  # never raises an Exception
+        if any(step.get("truncated") for step in steps):
+            ev["log_truncated"] = True
+        ev["wall_seconds"] = round(time.monotonic() - started, 1)
+        _write_control_evidence(evidence_dir, ev)
         if build.interrupt is not None:
             raise build.interrupt
-    if any(step.get("truncated") for step in steps):
-        ev["log_truncated"] = True
-    ev["wall_seconds"] = round(time.monotonic() - started, 1)
     return ev
