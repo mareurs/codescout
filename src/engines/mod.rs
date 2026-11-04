@@ -250,15 +250,7 @@ pub fn owners_of(key: &str) -> Vec<&'static EngineDecl> {
 /// one. `tests::every_call_content_override_reaches_run_post_or_is_declared`
 /// enumerates the overrides by parsing `src/` and fails on an override missing
 /// from this list and on an entry that no longer bypasses.
-pub const POST_PHASE_BYPASSES: &[(&str, &str)] = &[(
-    "Onboarding",
-    "Recorded as found 2026-09-02, not ruled deliberate. `Onboarding::call_content` builds \
-     its own blocks (writes the onboarding prompt under `.codescout/tmp/` and returns a \
-     compact instruction block, or the already-onboarded message), attaches the config-reload \
-     notice itself, and never calls `run_post`; so an `onboarding` call gets no session opener, \
-     no guide block, no operator rule and no ledger stamp. Closing it means routing that \
-     override through `run_post`; until then this entry is the record that it is open.",
-)];
+pub const POST_PHASE_BYPASSES: &[(&str, &str)] = &[];
 
 #[cfg(test)]
 mod tests {

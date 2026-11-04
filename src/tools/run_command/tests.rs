@@ -403,6 +403,21 @@ async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
         },
     )
 }
+/// `Onboarding::call_content` with the session opener already delivered.
+///
+/// `onboarding` reaches the engines' post phase (CIW-11), so a session's first call to it
+/// carries the opener as a block after its own answer. The tests that call this assert
+/// onboarding's OWN blocks; the opener riding after them is pinned by
+/// `server::guide_hint_tests::a_session_that_opens_with_onboarding_gets_the_opener`.
+async fn onboarding_own_blocks(
+    input: Value,
+    ctx: &ToolContext,
+) -> anyhow::Result<Vec<rmcp::model::Content>> {
+    ctx.guide_hints_emitted
+        .lock()
+        .insert(crate::prompts::SESSION_OPENING_GUIDE.to_string());
+    Onboarding.call_content(input, ctx).await
+}
 
 /// Like project_ctx() but uses the given directory as the project root.
 /// Caller is responsible for keeping the tempdir alive.
@@ -671,7 +686,7 @@ async fn onboarding_call_content_delivers_message_when_already_done() {
     simulate_subagent_prompt_write(dir.path());
 
     // Second call (no force) — call_content must deliver the message, not "[?]"
-    let content = Onboarding.call_content(json!({}), &ctx).await.unwrap();
+    let content = onboarding_own_blocks(json!({}), &ctx).await.unwrap();
     assert_eq!(content.len(), 1);
     let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
     assert!(
@@ -691,8 +706,7 @@ async fn onboarding_call_content_delivers_message_when_already_done() {
 #[tokio::test]
 async fn onboarding_call_content_writes_prompt_file() {
     let (_dir, ctx) = project_ctx().await;
-    let content = Onboarding
-        .call_content(json!({ "force": true }), &ctx)
+    let content = onboarding_own_blocks(json!({ "force": true }), &ctx)
         .await
         .unwrap();
 
@@ -742,8 +756,7 @@ async fn onboarding_call_content_writes_prompt_file() {
 #[tokio::test]
 async fn onboarding_call_content_writes_markdown_file() {
     let (_dir, ctx) = project_ctx().await;
-    let content = Onboarding
-        .call_content(json!({ "force": true }), &ctx)
+    let content = onboarding_own_blocks(json!({ "force": true }), &ctx)
         .await
         .unwrap();
 
@@ -814,8 +827,7 @@ async fn onboarding_call_content_force_delivers_instructions() {
     let (_dir, ctx) = project_ctx().await;
 
     // force=true must always deliver the full instructions, never "[?]"
-    let content = Onboarding
-        .call_content(json!({ "force": true }), &ctx)
+    let content = onboarding_own_blocks(json!({ "force": true }), &ctx)
         .await
         .unwrap();
     assert_eq!(
@@ -857,8 +869,7 @@ async fn onboarding_call_content_force_delivers_instructions() {
 async fn onboarding_call_content_returns_two_blocks() {
     // Test name kept for history; new contract is 1 structured JSON block.
     let (_dir, ctx) = project_ctx().await;
-    let content = Onboarding
-        .call_content(json!({ "force": true }), &ctx)
+    let content = onboarding_own_blocks(json!({ "force": true }), &ctx)
         .await
         .unwrap();
 
@@ -1025,7 +1036,7 @@ async fn onboarding_call_content_returns_two_blocks_for_version_refresh() {
         .unwrap();
     ctx.agent.reload_config_if_project_toml(&config_path).await;
 
-    let content = Onboarding.call_content(json!({}), &ctx).await.unwrap();
+    let content = onboarding_own_blocks(json!({}), &ctx).await.unwrap();
 
     assert_eq!(
         content.len(),
@@ -8834,7 +8845,7 @@ async fn single_project_onboarding_unchanged() {
 #[tokio::test]
 async fn single_project_call_content_has_no_project_prompts() {
     let (_dir, ctx) = project_ctx().await;
-    let content = Onboarding.call_content(json!({}), &ctx).await.unwrap();
+    let content = onboarding_own_blocks(json!({}), &ctx).await.unwrap();
     assert_eq!(content.len(), 1);
     let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
     let parsed: serde_json::Value = serde_json::from_str(text).expect("must be JSON");
@@ -8855,7 +8866,7 @@ async fn onboarding_call_content_includes_workspace_info() {
     setup_workspace_dirs(root);
 
     let ctx = project_ctx_at(root).await;
-    let content = Onboarding.call_content(json!({}), &ctx).await.unwrap();
+    let content = onboarding_own_blocks(json!({}), &ctx).await.unwrap();
     assert_eq!(
         content.len(),
         1,
@@ -8922,8 +8933,7 @@ async fn onboarding_call_content_workspace_writes_per_project_files() {
     setup_workspace_dirs(root);
 
     let ctx = project_ctx_at(root).await;
-    let content = Onboarding
-        .call_content(json!({ "force": true }), &ctx)
+    let content = onboarding_own_blocks(json!({ "force": true }), &ctx)
         .await
         .unwrap();
 
@@ -9069,8 +9079,7 @@ async fn workspace_onboarding_full_flow() {
     assert!(prompt.contains("memory(project_id="));
 
     // call_content delivers 1 structured JSON block with prompt_path
-    let content = Onboarding
-        .call_content(json!({ "force": true }), &ctx)
+    let content = onboarding_own_blocks(json!({ "force": true }), &ctx)
         .await
         .unwrap();
     assert_eq!(

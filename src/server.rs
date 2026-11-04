@@ -13091,6 +13091,30 @@ mod guide_hint_tests {
         );
     }
 
+    /// `onboarding` overrides `call_content`, so it once skipped the engines' post phase: a
+    /// session whose first call was `onboarding` got no orientation guide (CIW-11). The guide
+    /// must ride a block after the tool's own answer, as it does for every other tool.
+    #[tokio::test]
+    async fn a_session_that_opens_with_onboarding_gets_the_opener() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "onboarding");
+        let result = tool.call_content(json!({}), &ctx).await.unwrap();
+        let texts: Vec<&str> = result
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .collect();
+        assert!(
+            texts.len() >= 2,
+            "the opener must ride a block after onboarding's own answer, got {} block(s)",
+            texts.len()
+        );
+        assert!(
+            texts[1..].iter().any(|t| t.contains("ALWAYS VERIFY")),
+            "the later blocks must carry the opener's verification imperative"
+        );
+    }
+
     /// Once per session, not once per call — the opener is subject to the same
     /// ledger dedup as every other topic.
     #[tokio::test]

@@ -506,17 +506,24 @@ impl Tool for Onboarding {
     /// notice injection: the failed-reload notice is attached here, on the success blocks and
     /// on an error, like on every other response.
     ///
-    /// For the same reason it never reaches the engines' post phase
-    /// (`engines::coordinator::run_post`). That bypass is declared, with its reason, in
-    /// [`crate::engines::POST_PHASE_BYPASSES`]; routing this through `run_post` must remove
-    /// the entry, or `every_call_content_override_reaches_run_post_or_is_declared` reds.
+    /// It reaches the engines' post phase (`engines::coordinator::run_post`) on its success
+    /// path, below. The call sits in this body, not in a helper, because
+    /// `every_call_content_override_reaches_run_post_or_is_declared` looks for it here (CIW-11).
+    ///
+    /// The emission's `_guide_hint` is dropped: it is a field written into a primary JSON
+    /// block, and `onboarding` builds its blocks as text. The blocks the engines append carry
+    /// the guide content itself. `overflowing` is `false` because `onboarding` answers with a
+    /// short instruction block and a path, never an oversized envelope, so the
+    /// progressive-disclosure hint would not apply.
     async fn call_content(
         &self,
         input: Value,
         ctx: &ToolContext,
     ) -> anyhow::Result<Vec<rmcp::model::Content>> {
+        // Captured BEFORE `self.call` consumes `input`, as in the trait's default.
+        let selector = self.selector_key(&input);
         let notice = super::core::types::config_load_notice(ctx).await;
-        let result: anyhow::Result<Vec<rmcp::model::Content>> = async {
+        let result: anyhow::Result<(Vec<rmcp::model::Content>, Value)> = async {
             let val = self.call(input, ctx).await?;
 
             // If there's a subagent prompt, write it to a temp markdown file and return
@@ -647,28 +654,43 @@ impl Tool for Onboarding {
                     })
                 };
 
-                return Ok(vec![rmcp::model::Content::text(
-                    serde_json::to_string_pretty(&response)
-                        .unwrap_or_else(|_| format!("{{\"prompt_path\":\"{rel_path}\"}}")),
-                )]);
+                return Ok((
+                    vec![rmcp::model::Content::text(
+                        serde_json::to_string_pretty(&response)
+                            .unwrap_or_else(|_| format!("{{\"prompt_path\":\"{rel_path}\"}}")),
+                    )],
+                    val,
+                ));
             }
 
             // Single-block fast path: already-onboarded status.
             if val["onboarded"].as_bool().unwrap_or(false) {
                 let msg = val["message"].as_str().unwrap_or("Already onboarded.");
-                return Ok(vec![rmcp::model::Content::text(msg.to_string())]);
+                return Ok((vec![rmcp::model::Content::text(msg.to_string())], val));
             }
 
             // Fallback
             let compact = format_onboarding(&val);
-            Ok(vec![rmcp::model::Content::text(compact)])
+            Ok((vec![rmcp::model::Content::text(compact)], val))
         }
         .await;
         match result {
-            Ok(mut out) => {
+            Ok((mut out, val)) => {
                 if let Some(n) = &notice {
                     super::core::types::attach_workspace_notice_to_content(&mut out, n);
                 }
+                let mut emitted = ctx.guide_hints_emitted.lock();
+                let post = crate::engines::coordinator::PostCtx {
+                    selector: selector.as_deref(),
+                    value: &val,
+                    content_topic: self.relevant_guide_topic(&val),
+                    overflowing: false,
+                };
+                let crate::engines::coordinator::Emission {
+                    blocks, deliveries, ..
+                } = crate::engines::coordinator::run_post(&post, &mut emitted);
+                crate::usage::deliveries::record(deliveries);
+                out.extend(blocks);
                 Ok(out)
             }
             Err(e) => Err(super::core::types::attach_workspace_notice_to_error(
