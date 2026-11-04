@@ -265,6 +265,8 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 **Next:** take the two measurements; decide whether S-04 needs code.
 
+**Partial result 2026-11-04 (S-01 measured, S-04 evidence in; S-02 still open).** `$XDG_STATE_HOME/codescout/guide_hints/` held 2,355 files, all `.json`, 0 other, 419,248 bytes (about 178 B per file). 1,851 were older than 7 days and 113 were newer than 1 day. The oldest was 35 days old (2026-09-30), which matches `GC_MAX_IDLE_DAYS = 35`, so the GC is deleting on schedule. Steady state is `starts/day × 35`, so 2,355 files means about 67 ledger-creating starts per day here, against the spec's estimate of 30. Reading and parsing every file once takes 67.7 ms in Python (an upper bound for the Rust reader). That is the cost S-01 worried about, and it stays in the tens of milliseconds at 2.2× the estimated population. S-04: 0 `.tmp` files are live, so there is no evidence that `gc`'s `.json`-only filter strands anything; no code is warranted by this measurement. S-02 (Phase A against `usage.db`) still needs a re-injection measurement over `usage.db`.
+
 ## Template for new entries
 
 ```
