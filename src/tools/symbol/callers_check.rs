@@ -20,10 +20,12 @@ use crate::tools::{Tool, ToolContext};
 
 /// Wall-clock budget for the whole grep and file-read loop; past it the answer is
 /// `CannotTell`, so an edit never waits on a slow tree.
+// cap-class: NOT_A_CAP — a deadline on a check, not a bound on a result; running over it yields `CannotTell`, which `advice_for` renders as explicit unverified advice, so nothing partial is presented as complete
 pub(super) const CALLERS_CHECK_BUDGET: Duration = Duration::from_millis(500);
 
 /// Most candidate files read per check. More than this and a scan that found no call
 /// is `CannotTell`, because the files left unread might hold one.
+// cap-class: NOT_A_CAP — bounds how many files the check reads, not what it returns; past it with no call found the verdict is `CannotTell`, rendered by `advice_for` as unverified advice, so no partial scan is presented as complete
 pub(super) const MAX_CANDIDATE_FILES: usize = 25;
 
 /// What the check established about a replaced symbol.
