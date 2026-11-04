@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/2026-10-26-the-subagent-bootstrap-tells-worktree-subagents-to-activate-and-they-race.md
 severity: medium
-unverified: 'Whether Agent(isolation: worktree) reads worktree.baseRef is not checked, and baseRef=head has not been tried. A worktree subagent still misses unpushed commits (2 on 2026-11-04). The 2026-11-03 probe shows the base follows origin/HEAD; the harness code was not read.'
+unverified: Only one probe ran, in one session, on Linux. The subagent report is the subagent's own output; the main session re-derived the HEAD match with git. Whether sessions that started before the edit pick it up was not tested. The three profiles other than .claude-stef were edited after the probe and not probed.
 ---
 
 # BUG: agent worktrees are cut from the default branch (origin/HEAD = origin/master, 2026-07-05), not from experiments, so a subagent's read_file misses the files its parent briefed
@@ -60,6 +60,14 @@ The base moved from `5a8b14691` (`master`, 2026-07-05) to the tip of `origin/exp
 
 Undo: `git remote set-head origin master`.
 
+### baseRef=head applied and measured 2026-11-04
+
+With the operator's approval, `"worktree": {"baseRef": "head"}` was added to `settings.json` in `~/.claude-stef`, `~/.claude`, `~/.claude-sdd` and `~/.claude-kat` (operator rule OP-4: all profiles). The key and its values (`fresh` | `head`) come from the Claude Code changelog, which says the setting covers agent-isolation worktrees. All four files parse as JSON afterwards.
+
+Probe: one read-only `Agent(isolation: "worktree")` subagent, dispatched from this session on `experiments` after the `.claude-stef` edit. Its worktree `HEAD` was `10f156d705c8875745c263f2e8f77c48f302dc70`. In the main session, `git merge-base --is-ancestor 10f156d70 HEAD` is true and `git rev-parse --short HEAD` is `10f156d70`, so the base is the local `HEAD`. The tip of `origin/experiments` was `537eb2cdf` and the worktree was 4 commits ahead of it. The subagent also confirmed `e165d1016`, an unpushed commit, is an ancestor of its `HEAD`. This session's own settings were edited mid-session and the probe still used the new value, so no restart was needed in this case.
+
+Undo: delete the `worktree` key from the four files.
+
 ## Environment
 
 codescout main checkout `/home/marius/work/claude/codescout`, branch `experiments`. Claude Code agent worktrees under `.claude/worktrees/agent-*`.
@@ -101,7 +109,7 @@ Brief worktree subagents only with paths that exist at the worktree's base commi
 
 ## Resume
 
-The `set-head` fix is applied and measured. The open question is whether to try `worktree.baseRef: head`. Ask the operator first: it edits settings in four profiles, and the check dispatches one worktree subagent. Until then, push `experiments` before dispatching a worktree subagent whose brief names new files, or use the workaround above.
+Both fixes are applied and measured (see "baseRef=head applied and measured 2026-11-04" under Reproduction). Remaining: a worktree subagent started from a session that loaded the setting before it was written might still use the old base; check once after a restart. Nothing else is open on this record; move it to `fixed` with provenance after that check, citing the settings change (not a commit: the settings files are outside every repository).
 
 ## References
 
