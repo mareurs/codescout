@@ -115,7 +115,7 @@ use crate::util::private_dir::DirRefusal;
 /// `the_materialized_set_is_closed_under_its_own_local_imports` derives the required set
 /// from the imports of what is actually written, so a module added to the engine without
 /// being added here reds a test instead of a user's red.
-const EMBEDDED_SCRIPTS: [(&str, &str); 7] = [
+const EMBEDDED_SCRIPTS: [(&str, &str); 8] = [
     (
         "attribute-red.py",
         include_str!(concat!(
@@ -163,6 +163,13 @@ const EMBEDDED_SCRIPTS: [(&str, &str); 7] = [
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/scripts/history_cache.py"
+        )),
+    ),
+    (
+        "write_targets.py",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/write_targets.py"
         )),
     ),
 ];

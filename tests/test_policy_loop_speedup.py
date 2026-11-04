@@ -226,16 +226,18 @@ def test_branch_names_finds_literals_set_constants_and_mixed_case_names():
 
 
 def test_the_set_names_every_tool_the_branches_name(fp):
-    """A branch added to `write_targets` for a new tool name, with the set forgotten, would be
-    dropped by the early exit with no failure anywhere else."""
-    found = branch_names(inspect.getsource(fp.write_targets), vars(fp))
-    assert found, "no branch names found in write_targets: the check is blind"
+    """A branch added to `static_targets` or `catalog_targets` for a new tool name, with the set
+    forgotten, would be dropped by the early exit with no failure anywhere else. The branches
+    moved out of `write_targets` with CIW-10: it is now only the two parts joined."""
+    found = (branch_names(inspect.getsource(fp.static_targets), vars(fp))
+             | branch_names(inspect.getsource(fp.catalog_targets), vars(fp)))
+    assert found, "no branch names found in the target functions: the check is blind"
     assert found <= fp._TARGET_NAMES, sorted(found - fp._TARGET_NAMES)
 
 
 def test_a_branch_added_without_updating_the_set_is_detected(fp):
     """The check above must be able to fail: inject a branch that tests a new set constant."""
-    original = inspect.getsource(fp.write_targets)
+    original = inspect.getsource(fp.static_targets)
     source = original.replace(
         '    if name == "apply_patch":',
         '    if name in BRAND_NEW_WRITE_TOOLS:\n        pass\n    elif name == "apply_patch":', 1)

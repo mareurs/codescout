@@ -6559,12 +6559,19 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/scripts/file-provenance.py"
         ));
+        const WRITE_TARGETS_PY: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/write_targets.py"
+        ));
         const PROBE_SH: &str = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/file-provenance.sh"
         ));
+        // `write_targets.py` holds the write-tool names since CIW-10 moved the pure extraction
+        // out of `file-provenance.py`, so the positive check below reads the UNION of the two.
         let surfaces: &[(&str, &str)] = &[
             ("scripts/file-provenance.py", PROBE_PY),
+            ("scripts/write_targets.py", WRITE_TARGETS_PY),
             ("tests/file-provenance.sh", PROBE_SH),
         ];
 
@@ -6599,9 +6606,12 @@ mod tests {
         let mut problems = Vec::<String>::new();
 
         for tool in write_capable {
-            if !PROBE_PY.contains(&format!("mcp__codescout__{tool}")) {
+            if !PROBE_PY.contains(&format!("mcp__codescout__{tool}"))
+                && !WRITE_TARGETS_PY.contains(&format!("mcp__codescout__{tool}"))
+            {
                 problems.push(format!(
-                    "scripts/file-provenance.py never names `mcp__codescout__{tool}`, a \
+                    "scripts/file-provenance.py and scripts/write_targets.py never name \
+                     `mcp__codescout__{tool}`, a \
                      write-capable tool — so every write through it is invisible to the \
                      instrument built to attribute writes. This is the shape of the \
                      2026-09-02 doc() regression, which returned UNKNOWN rather than an \
