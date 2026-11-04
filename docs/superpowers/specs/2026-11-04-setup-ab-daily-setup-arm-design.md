@@ -32,9 +32,9 @@ study.
 | Arm | Configuration | Answers |
 |---|---|---|
 | `bare` | As today: native tools, empty config, no rules, no memories. | baseline |
-| `rules` (candidate, see D1) | `bare` plus the same rules text as the treated arm, native tools only. | the rules' own effect |
+| `rules` | `bare` plus the same rules text as the treated arm, native tools only. | the rules' own effect |
 | `daily` | The full daily setup: all 21 codescout tools, companion hooks, `Skill` and `Agent`, the other frozen plugins, the frozen user-level `CLAUDE.md` plus the operator rules block (D3), and the task's onboarding artifacts (memories, system prompt). Replaces `full`. | the whole setup |
-| `cs` (optional ablation, see D1) | Tools and hooks only, as today. | tools without instructions |
+| `cs` (not built unless needed, D1) | Tools and hooks only, as today. | tools without instructions |
 
 Differences to report: `daily − bare` (bundle), `daily − rules` (what the tools and onboarding add
 once the rules are held equal), `cs − bare` (tools alone). No claim about codescout may rest on
@@ -95,15 +95,39 @@ repeated where its result can be cached. The unit of onboarding is the REPOSITOR
 
 ## Rules content
 
-- Keep the frozen `~/.claude/CLAUDE.md` as it is.
-- Add an operator-rules block (D3). Candidates found, none yet decided: the mutation-testing and
-  testing-discipline text of the codescout `CLAUDE.md`; OP-2 (review escalation); OP-3 (durable
-  facts to codescout memory). The mutation text names `./scripts/mutation-probe.sh` and
-  `docs/PROBES.md`, which do not exist in a foreign repository, so it needs a generic wording (for
-  Rust, `cargo-mutants` or a manual "mutate the fix, confirm the test fails" step). A rule that asks
-  for extra test runs changes cost and turns; that is part of the setup being measured, which is why
-  `rules` exists.
-- The `rules` and `daily` arms receive byte-identical rules text.
+Two layers (D3):
+
+1. **R-block**: a tool-neutral rules text, byte-identical in `rules` and `daily`. In `daily` it is
+   appended to the frozen user-level `CLAUDE.md`; in `rules` it is the whole CLAUDE.md.
+2. **Frozen `~/.claude/CLAUDE.md`** of profile `/home/marius/.claude`, in `daily` only. It names
+   codescout memory, skills and Opus reviews, which `bare` and `rules` do not have, so it belongs to
+   the setup under test, not to the rules under test.
+
+So `rules − bare` is the R-block alone, and `daily − rules` is tools, hooks, skills, plugins,
+onboarding and the frozen CLAUDE.md together.
+
+**R-block draft** (controller wording, distilled from `docs/conventions/testing-discipline.md`; the
+operator validates or rewrites it before registration):
+
+```
+Testing discipline. A green test run proves only what the tests can detect.
+1. Before you trust a new test, run it on the code without your fix and confirm it fails for the
+   reason you expect.
+2. For each assertion ask which change it cannot detect. An absence check (is_empty, !exists) passes
+   when the mechanism is dead; an existence check passes when the result is too wide. Break the code
+   in the other direction too.
+3. When you finish, break your fix on purpose (revert or invert the changed line) and confirm a test
+   fails. If none fails, the tests do not guard the fix; add or change one.
+4. Where several guards or bounds can refuse the same input, write each case with an input that every
+   other guard admits, and repeat step 3 for every guard you add or change.
+Always verify claims by reading the code or running the command; do not assume.
+```
+
+Left out, with reasons: OP-2 (routes subagent reviews; a task has none), OP-3 and OP-4 (memory and
+config rules; the frozen CLAUDE.md already carries the memory rule), and the codescout-specific
+`./scripts/mutation-probe.sh` and `docs/PROBES.md`, which do not exist in a foreign repository. Steps
+1 to 4 ask for extra test runs, so the R-block raises turns and cost. That is part of what `rules`
+measures, and the reason `rules` exists.
 
 ## Risks to test, not assume
 
@@ -132,17 +156,43 @@ repeated where its result can be cached. The unit of onboarding is the REPOSITOR
 `docs/issues/2026-11-03-setup-ab-run-row-numturns-reads-only-the-last-result-record.md`); the
 registration freeze for this study is where `run.py` may change.
 
-## Open decisions (operator)
+## Decisions (controller's choices, pending operator validation)
 
-- **D1** Arms: `bare`, `daily`, plus `rules`? plus `cs`? Each arm multiplies cost.
-- **D2** Onboarding generator: ONE model for every repository, its effort, and a per-repository cost cap;
-  the dry run on the smallest repository measures the real cost first. Spend needs an explicit go.
-- **D3** Which rules go in the operator-rules block, and the generic wording of the mutation rule.
-- **D4** For foreign repositories, a project-level CLAUDE.md: none (default here), or one generated
-  per task by the onboarding step?
-- **D5** Whether the other frozen plugins (superpowers, buddy, legible, document-skills,
-  frontend-design, claude-md-management) stay in `daily`, as they were in `full`.
-- **D6** Opus 5.5 training cutoff (parent §9.2, still unverified) against the fresh pool's dates.
+Chosen by the controller on 2026-11-04 on the operator's delegation ("alege tu pt d1-d6 si raporteaza
+pt validare"). Each stays open until the operator validates it. None authorises spend.
+
+- **D1 Arms: `bare`, `rules`, `daily`.** No `cs` ablation for now; add it only if `daily − rules`
+  shows an effect worth splitting into tools and instructions. Reason: without `rules` an effect of
+  `daily` cannot be told apart from the effect of the rules; `cs` adds a fourth arm of cost for a
+  question not yet asked. Cost of this choice: a claim about tools alone (`cs − bare`) is not
+  available.
+- **D2 Onboarding generator: Sonnet 5.5, CLI default effort, one model for every repository.**
+  Per-repository cap proposed at USD 5 (`--max-budget-usd`), so at most about USD 20 for 4
+  repositories. The cap is a placeholder, not a measurement: a dry run on the smallest pooled
+  repository measures the real cost first, and spending it needs the operator's explicit go. List
+  prices read 2026-11-04 (https://platform.claude.com/docs/en/models/overview): Sonnet 5.5 USD 2 in /
+  10 out per MTok, Opus 5.5 USD 4 / 20, cache reads at 5% of the input price for both. Reason for
+  Sonnet: half the price of Opus; disclosed cost: a possible same-model advantage for the Sonnet runs.
+- **D3 Rules: the two-layer design in "Rules content" (R-block in `rules` and `daily`, frozen
+  CLAUDE.md in `daily` only).** The R-block wording is the controller's draft; the operator rewrites
+  or approves it. The mutation-testing rule is in it as steps 2 to 4, in generic form.
+- **D4 No project-level CLAUDE.md for foreign repositories.** The repository's own CLAUDE.md, if it
+  has one, is identical in every arm (parent §3 gate 4). Reason: inventing one per task adds an LLM
+  call and an uncontrolled artifact; the onboarding artifacts already carry the project knowledge.
+- **D5 The other frozen plugins stay in `daily`** (superpowers, buddy, legible, document-skills,
+  frontend-design, claude-md-management), as in `full` (operator decision 2026-10-29: the setup of
+  daily use). `chrome-devtools-mcp` stays excluded because it declares an MCP server. Cost: some
+  plugins (legible changes the output style; document-skills and frontend-design add skill text) do
+  not help a Rust task, so `daily` pays for context it does not use; that is what the daily setup
+  does.
+- **D6 Training cutoffs: RESOLVED.** Opus 5.5 and Sonnet 5.5 both list "Reliable knowledge cutoff:
+  Jun 2026" and "Training data cutoff: Jun 2026" (https://platform.claude.com/docs/en/models/overview,
+  read 2026-11-04). The pool therefore takes only tasks whose issue AND pull request date from
+  2026-07-01 or later, and records both dates per task. Parent §9.2 is closed by this.
+
+**Still needs the operator:** validation of D1 to D5, the R-block wording, the dry-run cost approval
+(D2), and the pool itself (which repositories; the validated fresh candidates in memory
+`research/harder-task-benchmarks-20261104` need a build-and-control stage first).
 
 ## Not changed
 
