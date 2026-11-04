@@ -42,7 +42,7 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 | CIW-8 | operator | S | open | Superpowers marketplace skew across the four profiles blocks `release.sh` |
 | CIW-9 | operator | S | open | Push the local commits in three repos |
 | CIW-10 | any | M | done | Attribution scan: store each operation's write targets in the cache entry (approach 2) |
-| CIW-11 | any | S–M | open | Route `Onboarding::call_content` through `run_post` |
+| CIW-11 | any | S–M | done | Route `Onboarding::call_content` through `run_post` |
 | CIW-12 | any | S–M | open | Emission ceiling coverage: the session opener and a real p50 session |
 | CIW-13 | any | S | open | GG-11: `librarian` § Reference sits 14 B under its 2,500 B cap |
 | CIW-14 | any | S | open | GG-8: re-run the section-use probe against its pre-registered predictions |
@@ -164,7 +164,7 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 ## CIW-11 — Route `Onboarding::call_content` through `run_post`
 
-**Status:** open
+**Status:** done
 **Valid:** dated 2026-11-04
 
 **Owner:** any. **Source:** `src/engines/mod.rs` `POST_PHASE_BYPASSES` (added `4516d674c`).
@@ -172,6 +172,10 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 **Observed.** `Onboarding` overrides `call_content` and never calls `run_post`, so an `onboarding` call gets no session opener, guide block, operator rule or ledger stamp. It is now declared, "recorded as found, not ruled deliberate".
 
 **Next:** route it through `run_post` and remove the entry; `every_call_content_override_reaches_run_post_or_is_declared` then fails on a stale entry, which is the check that it worked.
+
+**Result (2026-11-04, `c8e0fa428`).** `Onboarding::call_content` now calls `run_post` in its own body on the success path (the gate test reads the body, so a helper does not satisfy it). `POST_PHASE_BYPASSES` is `&[]`. New test `server::guide_hint_tests::a_session_that_opens_with_onboarding_gets_the_opener` failed first (1 block) and now passes. Ten existing `run_command/tests.rs` tests asserted exactly one block from `onboarding`, so they had encoded the bypass; they now call `onboarding_own_blocks`, which marks the opener as delivered and keeps asserting onboarding's own blocks. Gate: lean 6,012 passed, default 8,878 passed.
+
+**Left as a ruling, not measured:** the emission's `_guide_hint` is dropped, because `onboarding` builds text blocks and the hint is a field in a primary JSON block. `overflowing` is `false`. If onboarding ever returns an oversized envelope, revisit both.
 
 ## CIW-12 — Emission ceiling coverage: the session opener and a real p50 session
 
