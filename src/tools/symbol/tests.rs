@@ -9236,7 +9236,7 @@ async fn symbols_overview_force_mode_symbols_bypasses_threshold() {
 }
 
 #[tokio::test]
-async fn edit_code_replace_appends_caller_hint() {
+async fn edit_code_replace_carries_callers_advice_under_a_real_language_server() {
     if !std::process::Command::new("rust-analyzer")
         .arg("--version")
         .output()
@@ -9260,6 +9260,11 @@ async fn edit_code_replace_appends_caller_hint() {
         "pub fn greet(name: &str) -> String {\n    format!(\"Hello, {}!\", name)\n}\n",
     )
     .unwrap();
+    std::fs::write(
+        dir.path().join("src/other.rs"),
+        "pub fn call() -> String {\n    crate::greet(\"x\")\n}\n",
+    )
+    .unwrap();
 
     let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
     let ctx = test_ctx_with_agent(agent);
@@ -9276,7 +9281,7 @@ async fn edit_code_replace_appends_caller_hint() {
                     "symbol": "greet",
                     "path": "src/lib.rs",
                     "action": "replace",
-                    "body": "pub fn greet(name: &str) -> String {\n    format!(\"Hi, {}!\", name)\n}\n"
+                    "body": "pub fn greet(name: &str, punct: &str) -> String {\n    format!(\"Hi, {}{}\", name, punct)\n}\n"
                 }),
                 &ctx,
             )
@@ -9300,9 +9305,13 @@ async fn edit_code_replace_appends_caller_hint() {
         }
     };
 
-    let hint = result["hint"]
+    // The signature changed and `src/other.rs` calls `greet`: the callers text is the
+    // verified `advice`, and the old unconditional `hint` is gone.
+    assert!(result.get("hint").is_none(), "{result}");
+    assert_eq!(result["advice"]["verified"], json!(true), "{result}");
+    let hint = result["advice"]["text"]
         .as_str()
-        .expect("replace result must contain 'hint' field");
+        .expect("replace result must contain 'advice.text'");
     assert!(
         hint.contains("references("),
         "hint should mention references: {hint}"
@@ -9314,6 +9323,10 @@ async fn edit_code_replace_appends_caller_hint() {
     assert!(
         hint.contains("src/lib.rs"),
         "hint should include file path: {hint}"
+    );
+    assert!(
+        hint.contains("src/other.rs"),
+        "advice should name the calling file: {hint}"
     );
 }
 
@@ -11562,4 +11575,216 @@ async fn check_callers_python_with_no_call_is_no_outside_calls() {
     .await;
     let got = check_callers(&ctx, &edited, "python", "a", old, new).await;
     assert_eq!(got, CallersCheck::NoOutsideCalls);
+}
+
+/// A tempdir project holding `rel -> text` files and a mock language server that knows
+/// one symbol, `a`, in the FIRST file: lines `0..=end_line`, name at `start_col`.
+async fn replace_project(
+    files: &[(&str, &str)],
+    end_line: u32,
+    start_col: u32,
+) -> (tempfile::TempDir, ToolContext) {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    for (rel, text) in files {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, text).unwrap();
+    }
+    let file = root.join(files[0].0);
+    let target = SymbolInfo {
+        name: "a".to_string(),
+        name_path: "a".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 0,
+        end_line,
+        start_col,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let lsp = MockLspProvider::with_client(MockLspClient::new().with_symbols(&file, vec![target]));
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+    (dir, ctx)
+}
+
+async fn replace_a(ctx: &ToolContext, path: &str, body: &str) -> Value {
+    EditCode
+        .call(
+            json!({ "action": "replace", "symbol": "a", "path": path, "body": body }),
+            ctx,
+        )
+        .await
+        .expect("the edit itself is allowed")
+}
+
+#[tokio::test]
+async fn edit_code_replace_with_a_changed_signature_and_an_outside_call_carries_verified_advice() {
+    let (_dir, ctx) = replace_project(
+        &[
+            ("src/lib.rs", "fn a() -> u8 {\n    1\n}\n"),
+            ("src/other.rs", "fn g() -> u8 {\n    a()\n}\n"),
+        ],
+        2,
+        3,
+    )
+    .await;
+    let out = replace_a(&ctx, "src/lib.rs", "fn a(x: u8) -> u8 {\n    x\n}").await;
+    assert_eq!(out["advice"]["verified"], json!(true), "{out}");
+    let text = out["advice"]["text"].as_str().expect("advice text");
+    assert!(
+        text.contains("verify callers: references(symbol=\"a\""),
+        "{text}"
+    );
+    assert!(text.contains("src/other.rs"), "{text}");
+    assert!(
+        out.get("hint").is_none(),
+        "the old unconditional hint is gone: {out}"
+    );
+}
+
+#[tokio::test]
+async fn edit_code_replace_of_a_python_signature_with_an_outside_call_carries_verified_advice() {
+    // Pins that `do_replace` hands the check a language string it classifies ("python").
+    let (_dir, ctx) = replace_project(
+        &[
+            ("src/lib.py", "def a():\n    return 1\n"),
+            ("src/other.py", "from lib import a\nb = a(1)\n"),
+        ],
+        1,
+        4,
+    )
+    .await;
+    let out = replace_a(&ctx, "src/lib.py", "def a(x):\n    return x").await;
+    assert_eq!(out["advice"]["verified"], json!(true), "{out}");
+    assert!(
+        out["advice"]["text"]
+            .as_str()
+            .is_some_and(|t| t.contains("src/other.py")),
+        "{out}"
+    );
+}
+
+#[tokio::test]
+async fn edit_code_replace_of_a_body_only_edit_carries_no_advice_and_no_hint() {
+    let (_dir, ctx) = replace_project(
+        &[
+            ("src/lib.rs", "fn a() -> u8 {\n    1\n}\n"),
+            ("src/other.rs", "fn g() -> u8 {\n    a()\n}\n"),
+        ],
+        2,
+        3,
+    )
+    .await;
+    let out = replace_a(&ctx, "src/lib.rs", "fn a() -> u8 {\n    2\n}").await;
+    assert!(out.get("advice").is_none(), "{out}");
+    assert!(out.get("hint").is_none(), "{out}");
+}
+
+#[tokio::test]
+async fn edit_code_replace_with_a_changed_signature_and_no_outside_call_carries_no_advice() {
+    let (_dir, ctx) = replace_project(
+        &[
+            ("src/lib.rs", "fn a() -> u8 {\n    1\n}\n"),
+            ("src/other.rs", "fn g() -> u8 {\n    7\n}\n"),
+        ],
+        2,
+        3,
+    )
+    .await;
+    let out = replace_a(&ctx, "src/lib.rs", "fn a(x: u8) -> u8 {\n    x\n}").await;
+    assert!(out.get("advice").is_none(), "{out}");
+    assert!(out.get("hint").is_none(), "{out}");
+}
+
+#[tokio::test]
+async fn edit_code_replace_that_cannot_tell_carries_unverified_advice() {
+    // 26 files mention `a` without calling it: past the candidate cap, "no call found"
+    // is not an answer.
+    let others: Vec<(String, String)> = (0..26)
+        .map(|i| {
+            (
+                format!("src/m{i}.rs"),
+                format!("fn f{i}() {{\n    let f = a;\n}}\n"),
+            )
+        })
+        .collect();
+    let mut files: Vec<(&str, &str)> = vec![("src/lib.rs", "fn a() -> u8 {\n    1\n}\n")];
+    files.extend(others.iter().map(|(p, t)| (p.as_str(), t.as_str())));
+    let (_dir, ctx) = replace_project(&files, 2, 3).await;
+    let out = replace_a(&ctx, "src/lib.rs", "fn a(x: u8) -> u8 {\n    x\n}").await;
+    assert_eq!(out["advice"]["verified"], json!(false), "{out}");
+    assert_eq!(
+        out["advice"]["text"],
+        json!(super::edit_code::verify_callers_hint("a", "src/lib.rs")),
+        "{out}"
+    );
+    assert!(out.get("hint").is_none(), "{out}");
+}
+
+#[test]
+fn attach_advice_keeps_an_existing_safety_warning() {
+    let warning = "The edit was written but NOT verified against dropped symbols. \
+                   Re-read the file with symbols(path) to confirm it is intact.";
+    let mut response = json!({ "status": "ok", "hint": warning });
+    super::edit_code::attach_advice(
+        &mut response,
+        Some(json!({ "text": "verify callers: ...", "verified": false })),
+    );
+    assert_eq!(response["hint"], json!(warning));
+    assert_eq!(response["advice"]["verified"], json!(false));
+
+    let mut bare = json!({ "status": "ok" });
+    super::edit_code::attach_advice(&mut bare, None);
+    assert!(bare.get("advice").is_none() && bare.get("hint").is_none());
+}
+
+#[test]
+fn renamed_name_path_replaces_the_last_segment() {
+    use super::edit_code::renamed_name_path;
+    assert_eq!(renamed_name_path("Agent/old", "new"), "Agent/new");
+    assert_eq!(renamed_name_path("a/b/c", "d"), "a/b/d");
+    assert_eq!(renamed_name_path("a", "b"), "b");
+}
+
+#[test]
+fn rename_hint_reads_back_to_the_new_symbol_and_the_path() {
+    use super::edit_code::{renamed_name_path, verify_callers_hint};
+    use crate::util::text::json_string_after;
+    let hint = verify_callers_hint(&renamed_name_path("Agent/old", "new"), "src/x.rs");
+    let (symbol, rest) = json_string_after(&hint, "references(symbol=");
+    assert_eq!(symbol, "Agent/new", "{hint}");
+    let (path, rest) = json_string_after(rest, ", path=");
+    assert_eq!(path, "src/x.rs", "{hint}");
+    assert_eq!(rest, ")", "{hint}");
+}
+
+#[test]
+fn format_compact_shows_the_advice_text_after_the_hint() {
+    let out = json!({
+        "status": "ok",
+        "replaced_lines": "1-3",
+        "hint": "HINT-LINE",
+        "advice": { "text": "ADVICE-LINE", "verified": true },
+    });
+    let compact = EditCode.format_compact(&out).unwrap();
+    let hint_at = compact.find("HINT-LINE").expect("hint rendered");
+    let advice_at = compact.find("ADVICE-LINE").expect("advice rendered");
+    assert!(hint_at < advice_at, "{compact}");
 }

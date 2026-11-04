@@ -11,6 +11,7 @@ use crate::util::text::{
     convert_indent_unit, file_indent, indent_unit_conflict, reindent_to, UnitConflict,
 };
 
+use super::callers_check::{advice_for, check_callers};
 use super::display::{
     format_insert_code, format_remove_symbol, format_rename_symbol, format_replace_symbol,
 };
@@ -227,6 +228,10 @@ impl Tool for EditCode {
             s.push('\n');
             s.push_str(h);
         }
+        if let (Some(s), Some(a)) = (base.as_mut(), result["advice"]["text"].as_str()) {
+            s.push('\n');
+            s.push_str(a);
+        }
         base
     }
 
@@ -272,7 +277,11 @@ impl Tool for EditCode {
                     return Err(RecoverableError::new("action 'rename' requires 'new_name'").into());
                 };
                 let mut result = self.do_rename(ctx, name_path, rel_path, new_name).await?;
-                result["hint"] = json!(verify_callers_hint(name_path, rel_path));
+                // The symbol now answers to `new_name`; the old name path finds nothing.
+                result["hint"] = json!(verify_callers_hint(
+                    &renamed_name_path(name_path, new_name),
+                    rel_path
+                ));
                 Ok(result)
             }
             "remove" => self.do_remove(ctx, name_path, rel_path, at_line).await,
@@ -315,20 +324,19 @@ impl Tool for EditCode {
                     }
                 };
                 let reindent = reindent_param(&input)?;
-                let mut result = self
-                    .do_replace(
-                        ctx,
-                        name_path,
-                        rel_path,
-                        body,
-                        attributes.as_deref(),
-                        at_line,
-                        reindent,
-                        crate::tools::parse_bool_param(&input["force"]),
-                    )
-                    .await?;
-                result["hint"] = json!(verify_callers_hint(name_path, rel_path));
-                Ok(result)
+                // The callers text for `replace` is `advice`, set by `do_replace` only when
+                // it is warranted; `hint` is left to the unverified-edit warning.
+                self.do_replace(
+                    ctx,
+                    name_path,
+                    rel_path,
+                    body,
+                    attributes.as_deref(),
+                    at_line,
+                    reindent,
+                    crate::tools::parse_bool_param(&input["force"]),
+                )
+                .await
             }
             "insert" => {
                 let Some(body) = body_param(&input) else {
@@ -360,6 +368,23 @@ pub(super) fn verify_callers_hint(name_path: &str, rel_path: &str) -> String {
         crate::util::text::json_quote(name_path),
         crate::util::text::json_quote(rel_path)
     )
+}
+
+/// Set `response["advice"]` when there is advice. Never touches `hint`: a `replace` that already
+/// carries a safety warning there (the edit was written but not verified) keeps it.
+pub(super) fn attach_advice(response: &mut Value, advice: Option<Value>) {
+    if let Some(advice) = advice {
+        response["advice"] = advice;
+    }
+}
+
+/// The name path `name_path` has after a rename to `new_name`: its last `/` segment replaced.
+/// `"Agent/old"`, `"new"` gives `"Agent/new"`; a path with no `/` is just `new_name`.
+pub(super) fn renamed_name_path(name_path: &str, new_name: &str) -> String {
+    match name_path.rfind('/') {
+        Some(at) => format!("{}{new_name}", &name_path[..=at]),
+        None => new_name.to_string(),
+    }
 }
 
 /// Rollback message for a `replace` whose re-parse lost sibling symbols.
@@ -1343,6 +1368,20 @@ impl EditCode {
             &lines,
         )?;
 
+        // Runs on the pre-write file: the edited file is excluded from the candidates, so
+        // the order against the write does not matter, and a rolled-back or refused edit
+        // simply discards the answer. `lang` is the LSP languageId; the check keys on the
+        // AST vocabulary (they differ for React files: `typescriptreact` is `tsx`).
+        let callers = check_callers(
+            ctx,
+            &full_path,
+            crate::lsp::servers::ast_language_for_lsp_id(&lang),
+            &sym.name,
+            &lines[start..end].join("\n"),
+            &effective_body,
+        )
+        .await;
+
         let pre_ast = crate::ast::extract_symbols(&full_path).ok();
         let pre_count = pre_ast
             .as_ref()
@@ -1525,6 +1564,10 @@ impl EditCode {
                 response["also_defined"] = json!(added);
             }
         }
+        attach_advice(
+            &mut response,
+            advice_for(&callers, &sym.name, name_path, rel_path),
+        );
         Ok(response)
     }
 

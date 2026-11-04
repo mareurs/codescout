@@ -139,20 +139,29 @@ mod unix_only {
         (dir, ctx, rel)
     }
 
-    fn assert_hint_names(hint: &str, rel: &str, what: &str) {
-        let (symbol, rest) = json_string_after(hint, "references(symbol=");
-        assert_eq!(symbol, "f", "{what}: {hint}");
+    /// `hint` opens with a `references(...)` call that reads back to `symbol` and `rel`. Advice text
+    /// may continue after the call (` | ...` names the file a call was found in).
+    fn assert_hint_names(hint: &str, symbol: &str, rel: &str, what: &str) {
+        let (got_symbol, rest) = json_string_after(hint, "references(symbol=");
+        assert_eq!(got_symbol, symbol, "{what}: {hint}");
         let (path, rest) = json_string_after(rest, ", path=");
         assert_eq!(path, rel, "{what}: {hint}");
-        assert_eq!(rest, ")", "{what}: {hint}");
+        assert!(rest == ")" || rest.starts_with(") | "), "{what}: {hint}");
     }
 
-    /// A `replace` and a `rename` of a symbol in a file with an awkward name each end with a hint
-    /// whose `references(...)` call reads back to that file. They build the hint at two sites.
+    /// A `replace` and a `rename` of a symbol in a file with an awkward name each end with text whose
+    /// `references(...)` call reads back to that file: the `advice` of a replace that changed the
+    /// signature of a symbol called from another file, the `hint` of a rename (which names the NEW
+    /// symbol). They build the text at two sites.
     #[tokio::test]
     async fn the_hint_of_a_replace_and_of_a_rename_reads_back_to_the_file() {
         for name in NAMES {
-            let (_dir, ctx, rel) = ctx_with_function_in(name).await;
+            let (dir, ctx, rel) = ctx_with_function_in(name).await;
+            std::fs::write(
+                dir.path().join("src/caller.rs"),
+                "fn c() -> i32 {\n    f()\n}\n",
+            )
+            .unwrap();
 
             let replaced = EditCode
                 .call(
@@ -160,16 +169,25 @@ mod unix_only {
                         "action": "replace",
                         "symbol": "f",
                         "path": rel,
-                        "body": "pub fn f() -> i32 {\n    2\n}",
+                        "body": "pub fn f(x: i32) -> i32 {\n    x\n}",
                     }),
                     &ctx,
                 )
                 .await
                 .unwrap_or_else(|e| panic!("replace in {name:?}: {e}"));
-            let hint = replaced["hint"]
+            let advice = replaced["advice"]["text"]
                 .as_str()
-                .unwrap_or_else(|| panic!("replace in {name:?} gave no hint: {replaced}"));
-            assert_hint_names(hint, &rel, &format!("replace in {name:?}"));
+                .unwrap_or_else(|| panic!("replace in {name:?} gave no advice: {replaced}"));
+            // `Grep` lists a file whose name holds a `\` with that `\` turned into `/`, so the
+            // check cannot tell the edited file from a candidate; reading that path fails, which
+            // is `CannotTell` (an unverified advice with the same text) unless the ranking, which
+            // ties here, happened to reach `caller.rs` first. Either answer is sound; only a
+            // name without a `\` pins the verified one.
+            if !name.contains('\\') {
+                assert_eq!(replaced["advice"]["verified"], json!(true), "{replaced}");
+            }
+            assert!(replaced.get("hint").is_none(), "{replaced}");
+            assert_hint_names(advice, "f", &rel, &format!("replace in {name:?}"));
 
             let renamed = EditCode
                 .call(
@@ -186,9 +204,10 @@ mod unix_only {
             let hint = renamed["hint"]
                 .as_str()
                 .unwrap_or_else(|| panic!("rename in {name:?} gave no hint: {renamed}"));
-            assert_hint_names(hint, &rel, &format!("rename in {name:?}"));
+            assert_hint_names(hint, "g", &rel, &format!("rename in {name:?}"));
         }
     }
+
     /// A directory-overview hint offers `symbols(path=<dir>/**/*)` to scan the whole tree, in both
     /// of the modes that print it (31-80 files with subdirectories, and more than 80). The call
     /// reads back to the directory the caller named, whatever its name holds. The tool is run for
