@@ -24,8 +24,8 @@ Spec: `docs/superpowers/specs/2026-08-27-operator-rules-engine-design.md`.
 |---|---|---|---|---|
 | OP-1 | always | unverified-assertion | measured: conclude-last/b2 0% -> 100% (n=35) | active |
 | OP-2 | triggered | underpowered-subagent-dispatch | unmeasured | **retired** |
-| OP-3 | triggered | durable-fact-written-to-per-profile-store | unmeasured | active |
-| OP-4 | triggered | partial-profile-config-update | unmeasured | active |
+| OP-3 | triggered | durable-fact-written-to-per-profile-store | measured: oprules/op3 0% -> 100% (n=20) | active |
+| OP-4 | triggered | partial-profile-config-update | measured: oprules/op4 0% -> 100% (n=20) | active |
 | OP-5 | always | unverified-assertion | measured: a3 13.3% alone; stacked it cuts OP-1 7/10 → 2/10 | **retired** |
 | OP-6 | always | architecture-answered-without-the-specialist | unmeasured | active |
 
@@ -128,7 +128,7 @@ The source cites one validation, 2026-07-07 (EDU-Planner backend-kotlin, SI-29 S
 **Shape:** imperative
 **Covers:** durable-fact-written-to-per-profile-store
 **Serves:** memory.write
-**Evidence:** unmeasured
+**Evidence:** measured: oprules/op3 0% -> 100% (n=20)
 **Rests on:** `~/.claude/CLAUDE.md` § Iron Rules → *Memory — Use Codescout, Not Claude Code Memory*
 **Status:** active
 
@@ -142,6 +142,8 @@ The two durable surfaces the source names: **codescout memory** (`memory()`) for
 
 `**Covers:** durable-fact-written-to-per-profile-store` names the failure mode rather than the tool, so Gate 3(a) compares it against future rules on the same axis. The failure is not "used the wrong API"; it is "wrote something meant to outlive the session into a store three quarters of the sessions cannot read".
 
+**Measured 2026-11-04 (`prompt-hamsa-audit-log:A-46`).** In a plugin-free `claude -p` harness, asked to "remember this for next time": with no rule the agent writes built-in memory 20/20; with this imperative, or with the profile's resident Memory section verbatim, 0/20. The evidence line counts compliance (0% → 100%). **Side effect:** with no codescout tool available, the agent then stores the fact nowhere — it ignores a planted `docs/trackers/` file and hands the note back. The routed copy (on `memory.write`) was not measured; this is the wording only.
+
 ## OP-4 — Config changes apply to every Claude Code profile
 
 **Imperative:** Apply every Claude Code config change to all four profiles — `~/.claude`, `~/.claude-sdd`, `~/.claude-kat`, `~/.claude-stef`.
@@ -149,7 +151,7 @@ The two durable surfaces the source names: **codescout memory** (`memory()`) for
 **Shape:** imperative
 **Covers:** partial-profile-config-update
 **Serves:** edit_file(path~/.claude), create_file(path~/.claude)
-**Evidence:** unmeasured
+**Evidence:** measured: oprules/op4 0% -> 100% (n=20)
 **Rests on:** `~/.claude/CLAUDE.md` § *Four Claude Code Instances*
 **Status:** active
 
@@ -166,6 +168,8 @@ That case is why the imperative is "apply to all four" and not "remember there a
 This rule's own subject matter makes it the most self-demonstrating entry in the ledger, and the compiler is the mechanism that discharges it for one specific file. Measured 2026-08-27 before any compile had run: `~/.claude/CLAUDE.md` is 4639 bytes (md5 `b583ffaa`) while `~/.claude-sdd/CLAUDE.md` and `~/.claude-kat/CLAUDE.md` are both 4640 (`d52fc86c`) — two in step, one drifted, with nothing having reported it. `operator-rules check` is the check that did not exist; this entry is the rule it enforces.
 
 **Note for Phase 2 — this selector is the one most likely to need work.** `path~` reads the **result**, and `names_path_containing` scans `abs_path` / `rel_path` / `items[]` / `violations[]`, shapes that a librarian response carries and an `edit_file` response may not. Recorded here as the spec projects it (§ 4); whether it matches a real `edit_file` call is a Phase 2 question, and a selector that silently never fires is exactly the failure `parse_shape`'s strict `is_ident` check exists to prevent elsewhere.
+
+**Measured 2026-11-04 (`prompt-hamsa-audit-log:A-46`).** Four fake profiles planted in the work dir, the imperative verbatim with `~/` → `./home/`, a config edit naming only one profile: all four edited 0/20 without the rule, 20/20 with it. Without the rule, 5 runs also tried to read the REAL `~/.claude/settings.json` (all denied by the harness fence). The wording works; the routed delivery after a codescout `edit_file` was not measured.
 
 ## OP-5 — Conclude Last — Never Narrate Mid-Evaluation (retired, superseded by OP-1)
 
@@ -286,6 +290,8 @@ rule of the form *"invoke the right specialist"* across all twelve would be one 
 covering twelve failure modes, which is not a rule but a preamble, and would foreclose Gate 3(a)
 for each of them individually. If another specialist earns residency it gets its own `OP-N` and
 its own non-overlap argument.
+
+**Measured 2026-11-04, evidence left `unmeasured` on purpose (`prompt-hamsa-audit-log:A-46`).** With the skill installed as the ONLY skill and unprefixed, architecture prompts invoke it 38/40 with no rule, 38/40 with OP-1 alone, 40/40 with OP-1+OP-6; control prompts 0/30 in every arm. So in that harness OP-6 is redundant. Production has ~60 skills and the `buddy:` prefix, which this harness does not reproduce, so the measurement cannot decide OP-6's production value. A-44 found it does not dilute OP-1.
 
 ## Template for new entries
 

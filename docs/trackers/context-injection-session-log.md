@@ -52,7 +52,7 @@ author to make.
 | F-16 | 2026-09-26 | med | plan-prose | mitigated | The spec's per-block delivery shape is not attributable at the coordinator — keys are per engine, not per block |
 | F-17 | 2026-09-26 | high | architectural | fixed-verified | The live check found `tool_use_id` NULL on every row: rmcp puts `_meta` in RequestContext.meta, and the test built params in-process |
 | F-18 | 2026-09-28 | med | context-rendering | mitigated | A harness-rendered CLAUDE.md strips HTML comments, so the controller read "no markers" and designed a ruling around it |
-| F-19 | 2026-11-04 | med | plan-prose | open | Plan statuses, this log's Index and GG-N all lag the code — unbuilt steps are indistinguishable from shipped ones |
+| F-19 | 2026-11-04 | med | plan-prose | mitigated | Plan statuses, this log's Index and GG-N all lag the code — unbuilt steps are indistinguishable from shipped ones |
 
 ## Wins Index
 
@@ -1634,6 +1634,8 @@ True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` o
 **Live defect surfaced alongside:** `OP-4`'s compiled-in imperative still says "all three profiles — `~/.claude`, `~/.claude-sdd`, `~/.claude-kat`" while `PROFILE_DIRS` has four; `emit_operator_rules` delivers that text on routed config writes.
 
 **Fix idea:** reconcile statuses in one hygiene pass; for the unbuilt-and-undeclined steps, record an explicit decision (build / park with trigger / decline) so the gap stops being invisible.
+
+**Status:** mitigated (2026-11-04, same session) — the hygiene pass landed in `3addb3e7d` (F-1/5/6/11/12/13, GG-1/9, ten plans, two ADRs, both deep-agent trackers closed with their review), the OP-4 defect in `a80c8eaec`, and the never-built gates 1 (post half) and 5 in `4516d674c`. The unmeasured rules were measured (`prompt-hamsa-audit-log:A-44`, `:A-45`, `:A-46`). Still open, and the operator's call rather than work: build or decline retrieval steps 2b/3/2c/4 and section-grain Phase 3, so they stop reading as pending.
 
 ## Template for new entries
 
