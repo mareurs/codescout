@@ -1,4 +1,6 @@
-"""Pure helpers of the fresh-task builder: turn one merged upstream PR into a SWE-bench-Live-shaped record.
+"""The fresh-task builder: turn one merged upstream PR into a SWE-bench-Live-shaped record.
+
+Pure helpers (functions of their arguments):
 
     is_test_path(path)                                   True for a test file by path alone
     diff_files(diff)                                     the b-side path of every file block, in order
@@ -10,19 +12,29 @@
     cache_key(repo, upstream_base, base_image_id, ...)   cache key of a built image
     build_record(...)                                    the task record, schema of `multilang-rust.jsonl`
 
-Everything here is a function of its arguments. It imports the standard library only and never
-touches docker, git, `gh`, the network, the filesystem or the environment, so its tests run
-anywhere. A diff is treated as text with `\\n` boundaries only: it is split on the position of
+Upstream fetch (the one part that runs programs, through an injected `run`):
+
+    fetch_pr(repo, pr, issue_numbers, dest, ...)         merge commit, base, diff and issue text of a PR
+    FetchError                                           a refused or failed fetch
+
+The helpers above import the standard library only and never touch docker, git, `gh`, the network,
+the filesystem or the environment, so their tests run anywhere. `fetch_pr` reads the environment and
+runs `gh` and `git` (with `GITHUB_TOKEN` removed) through `run=`, which a test replaces; it does not
+touch docker. A diff is treated as text with `\\n` boundaries only: it is split on the position of
 each `diff --git ` line start and never through `str.splitlines`, so a CRLF blob, a lone `\\r` or a
 Unicode line separator inside a hunk survives unchanged. `split_diff` regroups the blocks (source
 first, then test), so `patch + test_patch != diff` for a diff that interleaves them; each block's
 bytes and the order within each half are kept. A quoted path in a header raises `ValueError`: the
-caller asks git for `-c core.quotePath=false`. Text is hashed with `surrogateescape`, matching a
-caller that decodes git output that way. Stdlib only.
+caller asks git for `-c core.quotePath=false`. Text is hashed with `surrogateescape`, and `fetch_pr`
+decodes git output the same way, so non-UTF-8 bytes stay byte-faithful. Stdlib only.
 """
 import copy
 import hashlib
+import json
+import os
 import re
+import subprocess
+from pathlib import Path
 
 BUILDER_VERSION = "1"
 MIN_FREE_GB = 60
@@ -198,4 +210,157 @@ def build_record(*, repo, pr, issue_numbers, created_at, problem_statement, base
         "dropped_f2p": list(dropped_f2p),
         "spec_rule": SPEC_RULE,
         "builder_version": BUILDER_VERSION,
+    }
+
+
+class FetchError(RuntimeError):
+    """The upstream fetch was refused (unmerged PR, before the cutoff, file mismatch) or a command failed."""
+
+
+_STDERR_TAIL = 300
+_DATE = re.compile(r"\d{4}-\d\d-\d\d")
+
+
+def _call(run, argv, env):
+    """Run `argv` capturing bytes; `FetchError` with the last 300 characters of stderr on a failure."""
+    try:
+        proc = run(argv, capture_output=True, env=env)
+    except OSError as exc:
+        raise FetchError("cannot run %s: %s" % (argv[0], exc)) from exc
+    if proc.returncode != 0:
+        tail = proc.stderr.decode("utf-8", errors="replace").rstrip()[-_STDERR_TAIL:]
+        raise FetchError("%s failed (exit %s): %s" % (" ".join(argv), proc.returncode, tail))
+    return proc.stdout
+
+
+def _json(stdout, what):
+    try:
+        return json.loads(stdout)
+    except ValueError as exc:
+        raise FetchError("%s: reply is not JSON: %s" % (what, exc)) from exc
+
+
+def _json_pages(stdout, what):
+    """The items of `gh api --paginate` output: one JSON array per page, concatenated."""
+    try:
+        text = stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise FetchError("%s: reply is not UTF-8: %s" % (what, exc)) from exc
+    decoder, pos, items = json.JSONDecoder(), 0, []
+    while True:
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+        if pos >= len(text):
+            return items
+        try:
+            page, pos = decoder.raw_decode(text, pos)
+        except ValueError as exc:
+            raise FetchError("%s: reply is not JSON: %s" % (what, exc)) from exc
+        if not isinstance(page, list):
+            raise FetchError("%s: a page is not a JSON array" % what)
+        items.extend(page)
+
+
+def _field(obj, key, what):
+    if not isinstance(obj, dict) or key not in obj:
+        raise FetchError("%s has no %r field" % (what, key))
+    return obj[key]
+
+
+def _not_before(stamp, cutoff, what):
+    """`FetchError` unless `stamp` (an ISO-8601 time from the API) is on or after the `cutoff` date."""
+    if not isinstance(stamp, str) or _DATE.match(stamp) is None:
+        raise FetchError("%s is not an ISO-8601 time: %r" % (what, stamp))
+    if stamp < cutoff:
+        raise FetchError("%s %s is before the cutoff %s" % (what, stamp, cutoff))
+
+
+def fetch_pr(repo, pr, issue_numbers, dest, *, run=subprocess.run, cutoff=CUTOFF):
+    """Everything upstream of one merged PR: its merge commit, base, diff and issue text.
+
+    Calls `gh api` for the PR, its merge commit, its changed files (all pages) and each issue, then
+    clones `repo` into `<dest>/src` (or fetches the merge commit when `<dest>/src/.git` exists) and
+    diffs the base against the merge commit. Returns `merge_sha`, `parents`, `upstream_base` (the
+    FIRST parent), `created_at` (the PR's), `merged_at`, `title`, `problem_statement` (each issue's
+    title, a newline and its body, issues joined by a blank line), `diff` (decoded with
+    `surrogateescape`, byte-faithful), `pr_files` and `issue_created_at` (the earliest issue's).
+
+    `FetchError` when: no issue number is given; the PR is not merged; it was merged, or an issue
+    created, before `cutoff` (a date; the same day passes); a command fails (its message carries the
+    last 300 characters of stderr only); a reply is not the expected JSON; the diff names a quoted
+    path; or the set of files in the diff differs from the PR's changed files (the message names
+    both differences). `gh` and `git` run with `GITHUB_TOKEN` removed; no argv carries a credential.
+    """
+    if not issue_numbers:
+        raise FetchError("no issue numbers given: there would be no problem statement")
+    env = dict(os.environ)
+    env.pop("GITHUB_TOKEN", None)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    api = "repos/%s" % repo
+
+    def gh(*args):
+        return _call(run, ["gh", "api", *args], env)
+
+    pull_path = "%s/pulls/%s" % (api, pr)
+    pull = _json(gh(pull_path), pull_path)
+    merged_at = _field(pull, "merged_at", pull_path)
+    if merged_at is None:
+        raise FetchError("PR %s#%s is not merged" % (repo, pr))
+    _not_before(merged_at, cutoff, "PR %s#%s merged_at" % (repo, pr))
+    merge_sha = _field(pull, "merge_commit_sha", pull_path)
+    if not isinstance(merge_sha, str) or not merge_sha:
+        raise FetchError("PR %s#%s has no merge_commit_sha" % (repo, pr))
+
+    commit_path = "%s/commits/%s" % (api, merge_sha)
+    commit = _json(gh(commit_path), commit_path)
+    parents = [_field(p, "sha", commit_path + " parent") for p in _field(commit, "parents", commit_path)]
+    try:
+        base = pick_base(parents)
+    except ValueError as exc:
+        raise FetchError("merge commit %s: %s" % (merge_sha, exc)) from exc
+
+    files_path = "%s/files" % pull_path
+    pr_files = [_field(f, "filename", files_path) for f in _json_pages(gh(files_path, "--paginate"), files_path)]
+
+    statements, created = [], []
+    for n in issue_numbers:
+        issue_path = "%s/issues/%s" % (api, n)
+        issue = _json(gh(issue_path), issue_path)
+        issue_created = _field(issue, "created_at", issue_path)
+        _not_before(issue_created, cutoff, "issue %s#%s created_at" % (repo, n))
+        statements.append("%s\n%s" % (_field(issue, "title", issue_path), _field(issue, "body", issue_path) or ""))
+        created.append(issue_created)
+
+    src = Path(dest) / "src"
+    if (src / ".git").exists():
+        _call(run, ["git", "-C", str(src), "fetch", "origin", merge_sha], env)
+    else:
+        _call(run, ["git", "clone", "--filter=blob:none", "--no-checkout",
+                    "https://github.com/%s" % repo, str(src)], env)
+    raw = _call(run, ["git", "-c", "core.quotePath=false", "-C", str(src), "diff", "--binary",
+                      base, merge_sha], env)
+    diff = raw.decode("utf-8", errors="surrogateescape")
+
+    try:
+        diff_paths = set(diff_files(diff))
+    except ValueError as exc:
+        raise FetchError("cannot read the diff %s..%s: %s" % (base, merge_sha, exc)) from exc
+    only_diff = sorted(diff_paths - set(pr_files))
+    only_pr = sorted(set(pr_files) - diff_paths)
+    if only_diff or only_pr:
+        raise FetchError(
+            "diff %s..%s does not match the files of PR %s#%s: only in diff: %r; only in PR: %r"
+            % (base, merge_sha, repo, pr, only_diff, only_pr)
+        )
+    return {
+        "merge_sha": merge_sha,
+        "parents": parents,
+        "upstream_base": base,
+        "created_at": _field(pull, "created_at", pull_path),
+        "merged_at": merged_at,
+        "title": _field(pull, "title", pull_path),
+        "problem_statement": "\n\n".join(statements),
+        "diff": diff,
+        "pr_files": pr_files,
+        "issue_created_at": min(created),
     }

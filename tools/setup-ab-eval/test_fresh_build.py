@@ -1,9 +1,13 @@
-"""Tests for fresh_build's pure helpers. No docker, git, gh or network."""
+"""Tests for fresh_build: the pure helpers and the upstream fetch. No docker, real git, gh or network."""
 import hashlib
 import json
 import os
 import re
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import fresh_build as fb
 
@@ -412,6 +416,302 @@ class BuildRecordTest(unittest.TestCase):
         bad = dict(TEMPLATE, test_cmds="['cargo test']")
         with self.assertRaises(ValueError):
             self._build(template=bad)
+
+
+REPO = "rust-lang/rust-analyzer"
+PR = 23096
+MERGE = "m" * 40
+PARENT1 = "1" * 40
+PARENT2 = "2" * 40
+SECRET = "ghp_sekret_value_must_never_travel"
+# Bytes as git emits them: a CRLF content line and a byte that is not UTF-8.
+FETCH_DIFF = SRC_A.encode().replace(b"+new\n", b"+new\r\n+caf\xff\n") + TEST_T.encode()
+FETCH_FILES = ["src/a.rs", "crates/x/src/tests/simple.rs"]
+
+
+class FakeRun:
+    """Stands in for subprocess.run. Answers by argv and records every call with the env it got.
+
+    A key is the argv with the leading `gh api` or `git` stripped. A response is the stdout bytes
+    (exit 0) or an `(exit_code, stdout, stderr)` tuple.
+    """
+
+    def __init__(self, responses):
+        self.responses = dict(responses)
+        self.calls = []  # (argv tuple, env dict)
+
+    @staticmethod
+    def key(argv):
+        argv = tuple(argv)
+        if argv[:2] == ("gh", "api"):
+            return argv[2:]
+        if argv[:1] == ("git",):
+            return argv[1:]
+        raise AssertionError("unexpected program: %r" % (argv,))
+
+    def __call__(self, argv, **kw):
+        # Bytes in, bytes out: no text mode, so a CRLF blob cannot be translated.
+        if kw.get("capture_output") is not True:
+            raise AssertionError("run() must capture bytes: %r" % kw)
+        for bad in ("text", "universal_newlines", "encoding", "errors"):
+            if bad in kw:
+                raise AssertionError("run() must not set %s" % bad)
+        self.calls.append((tuple(argv), kw.get("env")))
+        key = self.key(argv)
+        if key not in self.responses:
+            raise AssertionError("unexpected call: %r" % (key,))
+        resp = self.responses[key]
+        if isinstance(resp, tuple):
+            code, out, err = resp
+        else:
+            code, out, err = 0, resp, b""
+        return subprocess.CompletedProcess(list(argv), code, out, err)
+
+    def keys(self):
+        return [self.key(argv) for argv, _ in self.calls]
+
+
+def _j(obj):
+    return json.dumps(obj).encode()
+
+
+class FetchPrTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dest = Path(tmp.name)
+        self.src = self.dest / "src"
+
+    def pull(self, **over):
+        pull = {
+            "merged_at": "2026-07-10T12:00:00Z", "merge_commit_sha": MERGE,
+            "created_at": "2026-07-02T10:00:00Z", "title": "Fix the thing",
+        }
+        pull.update(over)
+        return pull
+
+    def issues(self):
+        return {
+            23000: {"title": "Issue one", "body": "Body one\r\nline 2", "created_at": "2026-07-05T00:00:00Z"},
+            23001: {"title": "Issue two", "body": "Body two", "created_at": "2026-07-01T09:00:00Z"},
+        }
+
+    def responses(self, *, pull=None, parents=(PARENT1, PARENT2), files=None, issues=None,
+                  diff=FETCH_DIFF, clone=b"", fetch=b""):
+        pull = self.pull() if pull is None else pull
+        files = FETCH_FILES if files is None else files
+        issues = self.issues() if issues is None else issues
+        api = "repos/%s" % REPO
+        out = {
+            ("%s/pulls/%d" % (api, PR),): _j(pull),
+            ("%s/commits/%s" % (api, MERGE),): _j({"sha": MERGE, "parents": [{"sha": p} for p in parents]}),
+            ("%s/pulls/%d/files" % (api, PR), "--paginate"): _j([{"filename": f} for f in files]),
+            ("clone", "--filter=blob:none", "--no-checkout", "https://github.com/" + REPO, str(self.src)): clone,
+            ("-C", str(self.src), "fetch", "origin", MERGE): fetch,
+            ("-c", "core.quotePath=false", "-C", str(self.src), "diff", "--binary", parents[0], MERGE): diff,
+        }
+        for n, issue in issues.items():
+            out[("%s/issues/%d" % (api, n),)] = _j(issue)
+        return out
+
+    def fetch(self, fake, issue_numbers=(23000, 23001), **kw):
+        return fb.fetch_pr(REPO, PR, list(issue_numbers), self.dest, run=fake, **kw)
+
+    def test_happy_path(self):
+        fake = FakeRun(self.responses())
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": SECRET}):
+            got = self.fetch(fake)
+        self.assertEqual(got["merge_sha"], MERGE)
+        self.assertEqual(got["parents"], [PARENT1, PARENT2])
+        self.assertEqual(got["upstream_base"], PARENT1)
+        self.assertEqual(got["created_at"], "2026-07-02T10:00:00Z")
+        self.assertEqual(got["merged_at"], "2026-07-10T12:00:00Z")
+        self.assertEqual(got["title"], "Fix the thing")
+        self.assertEqual(
+            got["problem_statement"],
+            "Issue one\nBody one\r\nline 2\n\nIssue two\nBody two",
+        )
+        self.assertEqual(got["pr_files"], FETCH_FILES)
+        self.assertEqual(got["issue_created_at"], "2026-07-01T09:00:00Z")
+        self.assertEqual(set(got), {
+            "merge_sha", "parents", "upstream_base", "created_at", "merged_at", "title",
+            "problem_statement", "diff", "pr_files", "issue_created_at",
+        })
+
+    def test_diff_is_byte_faithful_and_base_is_first_parent(self):
+        fake = FakeRun(self.responses())
+        got = self.fetch(fake)
+        self.assertEqual(got["diff"].encode("utf-8", errors="surrogateescape"), FETCH_DIFF)
+        self.assertIn("+new\r\n", got["diff"])
+        self.assertIn("caf\udcff", got["diff"])
+        diff_argv = fake.calls[-1][0]
+        self.assertEqual(diff_argv[-2:], (PARENT1, MERGE))
+        self.assertNotIn(PARENT2, diff_argv)
+
+    def test_calls_in_the_specified_order(self):
+        fake = FakeRun(self.responses())
+        self.fetch(fake)
+        api = "repos/%s" % REPO
+        self.assertEqual(fake.keys(), [
+            ("%s/pulls/%d" % (api, PR),),
+            ("%s/commits/%s" % (api, MERGE),),
+            ("%s/pulls/%d/files" % (api, PR), "--paginate"),
+            ("%s/issues/23000" % api,),
+            ("%s/issues/23001" % api,),
+            ("clone", "--filter=blob:none", "--no-checkout", "https://github.com/" + REPO, str(self.src)),
+            ("-c", "core.quotePath=false", "-C", str(self.src), "diff", "--binary", PARENT1, MERGE),
+        ])
+        self.assertEqual(fake.calls[0][0][:2], ("gh", "api"))
+        self.assertEqual(fake.calls[-1][0][0], "git")
+
+    def test_existing_clone_is_fetched_not_cloned(self):
+        (self.src / ".git").mkdir(parents=True)
+        fake = FakeRun(self.responses())
+        self.fetch(fake)
+        keys = fake.keys()
+        self.assertIn(("-C", str(self.src), "fetch", "origin", MERGE), keys)
+        self.assertFalse([k for k in keys if k[:1] == ("clone",)])
+        self.assertLess(keys.index(("-C", str(self.src), "fetch", "origin", MERGE)), len(keys) - 1)
+
+    def test_single_parent_squash_merge(self):
+        fake = FakeRun(self.responses(parents=(PARENT1,)))
+        self.assertEqual(self.fetch(fake)["upstream_base"], PARENT1)
+
+    def test_paginated_files_are_concatenated_pages(self):
+        resp = self.responses()
+        api = "repos/%s" % REPO
+        resp[("%s/pulls/%d/files" % (api, PR), "--paginate")] = (
+            _j([{"filename": "src/a.rs"}]) + b"\n" + _j([{"filename": "crates/x/src/tests/simple.rs"}])
+        )
+        got = self.fetch(FakeRun(resp))
+        self.assertEqual(got["pr_files"], FETCH_FILES)
+
+    def test_null_issue_body_is_empty(self):
+        issues = {23000: {"title": "T", "body": None, "created_at": "2026-07-05T00:00:00Z"}}
+        got = self.fetch(FakeRun(self.responses(issues=issues)), issue_numbers=[23000])
+        self.assertEqual(got["problem_statement"], "T\n")
+
+    def test_not_merged_refused_before_anything_else(self):
+        fake = FakeRun(self.responses(pull=self.pull(merged_at=None, merge_commit_sha=MERGE)))
+        with self.assertRaisesRegex(fb.FetchError, "not merged"):
+            self.fetch(fake)
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_merged_before_cutoff_refused(self):
+        fake = FakeRun(self.responses(pull=self.pull(merged_at="2026-06-30T23:59:59Z")))
+        with self.assertRaisesRegex(fb.FetchError, "cutoff"):
+            self.fetch(fake)
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_merged_on_the_cutoff_day_is_accepted(self):
+        fake = FakeRun(self.responses(pull=self.pull(merged_at="2026-07-01T00:00:00Z")))
+        self.assertEqual(self.fetch(fake)["merged_at"], "2026-07-01T00:00:00Z")
+
+    def test_cutoff_parameter_is_honoured(self):
+        fake = FakeRun(self.responses())
+        with self.assertRaisesRegex(fb.FetchError, "cutoff"):
+            self.fetch(fake, cutoff="2026-08-01")
+
+    def test_issue_created_before_cutoff_refused_before_any_git(self):
+        issues = self.issues()
+        issues[23001]["created_at"] = "2026-06-30T23:59:59Z"
+        fake = FakeRun(self.responses(issues=issues))
+        with self.assertRaisesRegex(fb.FetchError, "23001.*cutoff"):
+            self.fetch(fake)
+        self.assertFalse([a for a, _ in fake.calls if a[0] == "git"])
+
+    def test_no_issue_numbers_refused(self):
+        fake = FakeRun(self.responses())
+        with self.assertRaisesRegex(fb.FetchError, "issue"):
+            self.fetch(fake, issue_numbers=[])
+        self.assertEqual(fake.calls, [])
+
+    def test_diff_files_differ_from_pr_files_names_the_difference(self):
+        for files, only_diff, only_pr in (
+            (["src/a.rs", "src/extra.rs", "crates/x/src/tests/simple.rs"], [], ["src/extra.rs"]),
+            (["src/a.rs"], ["crates/x/src/tests/simple.rs"], []),
+        ):
+            with self.assertRaises(fb.FetchError, msg=files) as cm:
+                self.fetch(FakeRun(self.responses(files=files)))
+            msg = str(cm.exception)
+            for path in only_diff + only_pr:
+                self.assertIn(path, msg)
+            self.assertIn("only in diff: %r" % only_diff, msg)
+            self.assertIn("only in PR: %r" % only_pr, msg)
+
+    def test_same_files_in_another_order_is_accepted(self):
+        got = self.fetch(FakeRun(self.responses(files=list(reversed(FETCH_FILES)))))
+        self.assertEqual(got["pr_files"], list(reversed(FETCH_FILES)))
+
+    def test_quoted_path_in_the_diff_is_a_fetch_error(self):
+        diff = FETCH_DIFF + b'diff --git "a/src/t\\303\\251.rs" "b/src/t\\303\\251.rs"\n'
+        with self.assertRaisesRegex(fb.FetchError, "quoted by git"):
+            self.fetch(FakeRun(self.responses(diff=diff)))
+
+    def test_garbage_diff_is_a_fetch_error(self):
+        with self.assertRaises(fb.FetchError):
+            self.fetch(FakeRun(self.responses(diff=b"fatal-ish text\n")))
+
+    def test_github_token_is_removed_from_every_env(self):
+        fake = FakeRun(self.responses())
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": SECRET, "KEEP_ME": "1"}):
+            self.fetch(fake)
+            self.assertEqual(os.environ["GITHUB_TOKEN"], SECRET)
+        self.assertGreater(len(fake.calls), 5)
+        for argv, env in fake.calls:
+            self.assertIsNotNone(env, argv)
+            self.assertNotIn("GITHUB_TOKEN", env, argv)
+            self.assertNotIn(SECRET, env.values(), argv)
+            self.assertEqual(env.get("KEEP_ME"), "1")
+
+    def test_no_argv_mentions_a_token_or_the_secret(self):
+        fake = FakeRun(self.responses())
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": SECRET}):
+            self.fetch(fake)
+        for argv, _ in fake.calls:
+            for part in argv:
+                self.assertNotIn("token", part.lower(), argv)
+                self.assertNotIn(SECRET, part, argv)
+
+    def test_failed_command_carries_only_the_last_300_chars_of_stderr(self):
+        resp = self.responses()
+        api = "repos/%s" % REPO
+        resp[("%s/commits/%s" % (api, MERGE),)] = (1, b"", b"x" * 500 + b"THE-TAIL")
+        with self.assertRaises(fb.FetchError) as cm:
+            self.fetch(FakeRun(resp))
+        msg = str(cm.exception)
+        self.assertIn("THE-TAIL", msg)
+        self.assertIn("x" * 292 + "THE-TAIL", msg)
+        self.assertNotIn("x" * 293, msg)
+
+    def test_failed_git_diff_raises(self):
+        resp = self.responses()
+        resp[("-c", "core.quotePath=false", "-C", str(self.src), "diff", "--binary", PARENT1, MERGE)] = (
+            128, b"", b"fatal: bad object",
+        )
+        with self.assertRaisesRegex(fb.FetchError, "bad object"):
+            self.fetch(FakeRun(resp))
+
+    def test_reply_that_is_not_json_raises(self):
+        resp = self.responses()
+        resp[("repos/%s/pulls/%d" % (REPO, PR),)] = b"<html>rate limited</html>"
+        with self.assertRaises(fb.FetchError):
+            self.fetch(FakeRun(resp))
+
+    def test_missing_merge_commit_sha_raises(self):
+        pull = self.pull()
+        del pull["merge_commit_sha"]
+        with self.assertRaisesRegex(fb.FetchError, "merge_commit_sha"):
+            self.fetch(FakeRun(self.responses(pull=pull)))
+
+    def test_missing_program_is_a_fetch_error(self):
+        def run(argv, **kw):
+            raise FileNotFoundError(2, "No such file or directory", argv[0])
+        with self.assertRaisesRegex(fb.FetchError, "gh"):
+            fb.fetch_pr(REPO, PR, [23000], self.dest, run=run)
+
+    def test_fetch_error_is_a_runtime_error(self):
+        self.assertTrue(issubclass(fb.FetchError, RuntimeError))
 
 
 if __name__ == "__main__":
