@@ -3631,28 +3631,50 @@ mod tests {
         );
     }
 
+    /// A real directory that is neither inside nor above the temp dir the write validator will
+    /// use, so a link to it must be refused whatever `TMPDIR` the launcher chose. A fixed
+    /// `/var/tmp` stops being "outside" when the launcher sets `TMPDIR=/var/tmp` (bug
+    /// 78b8d700fddbd59e).
+    #[cfg(unix)]
+    fn a_real_dir_outside_the_temp_root() -> std::path::PathBuf {
+        let temp = crate::platform::temp_dir();
+        let temp = std::fs::canonicalize(&temp).unwrap_or(temp);
+        ["/var/tmp", "/usr", "/opt"]
+            .iter()
+            .filter_map(|c| std::fs::canonicalize(c).ok())
+            .find(|c| !temp.starts_with(c) && !c.starts_with(&temp))
+            .unwrap_or_else(|| {
+                panic!(
+                    "none of /var/tmp, /usr or /opt lies outside the temp dir {}",
+                    temp.display()
+                )
+            })
+    }
+
     #[test]
     #[serial_test::serial]
     fn symlink_write_escape_caught() {
         #[cfg(unix)]
         let project = tempdir().unwrap();
 
-        // Create symlink inside the project pointing to /var/tmp — a real
-        // directory that is outside both the project root and /tmp, so the
-        // path-security check should still block the write.
+        // Create symlink inside the project pointing to a real directory outside both the
+        // project root and the temp dir the validator uses (chosen at run time, because
+        // the launcher's TMPDIR may itself be /var/tmp), so the path-security check
+        // should still block the write.
         #[cfg(unix)]
         let link = project.path().join("sneaky");
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink("/var/tmp", &link).unwrap();
+            let outside = a_real_dir_outside_the_temp_root();
+            std::os::unix::fs::symlink(&outside, &link).unwrap();
             let result = validate_write_path(
                 "sneaky/escaped.txt",
                 project.path(),
                 &default_config(),
                 &default_session_roots(),
             );
-            // After canonicalization the symlink resolves to /var/tmp/escaped.txt
-            // which is outside both the project root and /tmp.
+            // After canonicalization the symlink resolves to `<outside>/escaped.txt`,
+            // which is outside both the project root and the temp dir.
             assert!(result.is_err());
         }
     }
