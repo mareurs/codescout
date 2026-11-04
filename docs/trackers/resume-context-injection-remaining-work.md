@@ -188,6 +188,8 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 **Next:** a fixture variant without `warm_ledger`; one probe run of p50 bytes on real transcripts.
 
+**Partial result 2026-11-04 (cold fixture measured; real transcripts not run).** A throwaway probe ran the fixture's six `doc` shapes with NO `warm_ledger`, fixture root normalised as the fixture does, and was removed afterwards (`git diff` on `src/server.rs` empty). Bytes after the primary block: `create` 3,552 (3 blocks), `get` 2,733, `update` 2,685, `append_entry` 1,634, `find` 2,649, `move` 2,290. **Cold total 15,543 B against `CEILING = 12_244`: 3,299 B (27%) over.** The comment's "roughly 15,351 B" was a conservation model, not a measurement; the measurement is 192 B higher. So the ceiling holds only because the fixture hides the opener: a real session's first call draws the bootstrap guide on top. Decision for the operator, not made here: raising `CEILING` is a spec amendment by its own comment. Options are (a) keep the warm ceiling as the section-grain guard and add a second, cold ceiling at about 15,543 B plus margin, or (b) leave it recorded. The permanent cold fixture variant is NOT added: it needs that ceiling value.
+
 ## CIW-13 — GG-11: `librarian` § Reference sits 14 B under its 2,500 B cap
 
 **Status:** open
