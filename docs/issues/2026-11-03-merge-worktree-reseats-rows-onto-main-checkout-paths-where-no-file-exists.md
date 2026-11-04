@@ -15,7 +15,7 @@ owner: marius
 related:
 - bad49b228663df9a
 severity: medium
-unverified: 'The code fix and its regression test pass the gate, but the live MCP server has not been rebuilt with it, and the 78 rows reseated before the fix still point at missing files (missing_file 78 in doctor): this fix stops new cases, it does not repair those. merge_one (the shadow-row path) was not checked for the same gap.'
+unverified: 'The code fix and its regression test pass the gate, and the live MCP server now runs the fixed binary (strings present in target/release/codescout, built 2026-11-04). No live run reached the new branch: a dry run on the only remaining active registration (615e) was refused earlier because its branch research/fixed-acceptance-population-20261101 has diverged from experiments. The 78 rows reseated before the fix still point at missing files (missing_file 78 in doctor): this fix stops new cases, it does not repair those. merge_one was read and has no reseat step, so it cannot create a row at a new path.'
 ---
 
 # BUG: merge_worktree reseats a worktree-born row onto a main-checkout path where no file exists, so each reseated row becomes a missing_file defect
@@ -72,6 +72,8 @@ None yet.
 ## Tests added
 
 `a_worktree_born_row_whose_main_path_has_no_file_is_left_untouched` (`src/librarian/tools/merge_worktree.rs`). It was red before the fix: the dry run listed the row under `reseated` with no conflict. It runs the dry run and the real run, and checks that the worktree row stays and no row is written at the main path. `new_worktree_artifact_reseats_to_main_path` now uses real files (`real_wt_ctx`), so it still proves that a reseat happens when the file exists. Gate: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
+
+Live check, 2026-11-04: not done. `merge_worktree` with `dry_run=true` on `615e` returned `has diverged from ... HEAD`, before `reseat_one` ran. The unit test is the only evidence that the new branch works.
 
 ## Workarounds
 
