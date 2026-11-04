@@ -28,6 +28,11 @@
 # trusts a fingerprint by mtime and a checkout older than the slot's last build is handed
 # the other checkout's compiled crate (bug 2026-10-16, E0432 on a module the source declares).
 #
+# A fifth bound is by time: `slot_tend` removes a FREE slot whose `.codescout-lessee` stamp is older
+# than CODESCOUT_SLOT_IDLE_DAYS (default 3, 0 = off), because a slot that stays under the ceiling
+# and below KEEP otherwise keeps its tree for ever once its lessee is gone (bug e7442516ad9fa057).
+# A slot with no stamp has an unknown age and is kept; the RAM tier has its own idle rule.
+#
 # THE LOCK IS THE ONLY PROOF A TREE IS IDLE, which is why the pruning lives here and not
 # in a cron job or a warning. `flock -n` succeeding is the one observation that no leased
 # run is inside a slot, so every removal happens under that lock. A tree with no lock
@@ -44,6 +49,12 @@
 # of ordinary use, and below the 104G a long-lived tree reached. Three kept slots then cap
 # the gate pool near 144G.
 SLOT_CEILING_MB_DEFAULT=49152
+
+# A free slot whose lessee stamp is older than this many days is removed (bug e7442516ad9fa057:
+# 22G sat idle for three days, because a size ceiling and a count never expire a small,
+# low-numbered slot). 0 turns the rule off. Measured against the stamp, not the tree: a tree is
+# rewritten by every build, the stamp only by a lease.
+SLOT_IDLE_DAYS_DEFAULT=3
 
 # slot_lease <pool> <prefix> <who> [slot] [max] — take the lowest free slot, or exactly <slot>,
 # and hold it on an fd every child inherits. Sets SLOT, SLOT_FD and SLOT_DIR. Returns 2,
@@ -86,21 +97,36 @@ slot_lease() {
     SLOT_DIR="$pool/$prefix$SLOT"
 }
 
+# slot_stamp_older_than <stamp> <days> — true when <stamp> exists and was last written more than <days>
+# days ago. False for 0 days (the rule is off), for a missing stamp (age unknown) and for a bad number.
+slot_stamp_older_than() {
+    case "$2" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$((10#$2))" -gt 0 ] || return 1
+    [ -e "$1" ] || return 1
+    [ -n "$(find "$1" -maxdepth 0 -mmin "+$((10#$2 * 1440))" 2>/dev/null)" ]
+}
+
 # slot_tend <who> <pool> <prefix> <keep-var> <keep-default> <tree> <remove-fn>
 # Call it holding a lease. Empties <tree> when it has outgrown CODESCOUT_SLOT_CEILING_MB,
 # then hands every FREE slot numbered KEEP or higher to <remove-fn>, under that slot's
-# lock. KEEP is read from the variable named <keep-var>. Returns 2, having removed
+# lock. KEEP is read from the variable named <keep-var>. Then removes a FREE slot whose
+# lessee stamp is older than CODESCOUT_SLOT_IDLE_DAYS (default 3, 0 = off). Returns 2, having removed
 # nothing, when either number is not a whole number: a typo such as `48G` would otherwise
 # switch the bound off without a word.
 slot_tend() {
     local who="$1" pool="$2" prefix="$3" keep_var="$4" keep="${!4:-$5}" tree="$6" remove="$7"
     local ceiling="${CODESCOUT_SLOT_CEILING_MB:-$SLOT_CEILING_MB_DEFAULT}" size lock n fd
+    local idle_days="${CODESCOUT_SLOT_IDLE_DAYS:-$SLOT_IDLE_DAYS_DEFAULT}" why stamp
     case "$ceiling" in ''|*[!0-9]*)
         echo "$who: CODESCOUT_SLOT_CEILING_MB must be a whole number of MiB, got '$ceiling'" >&2
         return 2 ;;
     esac
     case "$keep" in ''|*[!0-9]*)
         echo "$who: $keep_var must be a whole number of slots, got '$keep'" >&2
+        return 2 ;;
+    esac
+    case "$idle_days" in ''|*[!0-9]*)
+        echo "$who: CODESCOUT_SLOT_IDLE_DAYS must be a whole number of days (0 turns the rule off), got '$idle_days'" >&2
         return 2 ;;
     esac
 
@@ -112,16 +138,29 @@ slot_tend() {
 
     for lock in "$pool/$prefix"[0-9]*.lock; do
         n="${lock##*/"$prefix"}"; n="${n%.lock}"
-        [ "$n" -ge "$keep" ] 2>/dev/null || continue
         # Lock files outlive their slots, so without this every run would re-report every
         # slot ever reclaimed.
         [ -e "$pool/$prefix$n" ] || continue
+        # A slot is a candidate for one of two causes: it is numbered KEEP or higher, or its
+        # lessee stamp is older than the idle limit. The lock decides the rest.
+        stamp="$pool/$prefix$n/.codescout-lessee"
+        if [ "$n" -ge "$keep" ] 2>/dev/null; then why=keep
+        elif slot_stamp_older_than "$stamp" "$idle_days"; then why=idle
+        else continue
+        fi
         exec {fd}>"$lock" || continue
         # Our own slot fails here too: flock conflicts across open file descriptions,
         # even within one process.
         if flock -n "$fd"; then
-            echo "$who: reclaimed free slot $prefix$n; slots from $keep up are kept only while in use ($keep_var)" >&2
-            "$remove" "$pool/$prefix$n"
+            if [ "$why" = keep ]; then
+                echo "$who: reclaimed free slot $prefix$n; slots from $keep up are kept only while in use ($keep_var)" >&2
+                "$remove" "$pool/$prefix$n"
+            # The stamp is read again under the lock: a lease that finished between the first
+            # read and the lock has restamped the slot, and that slot is not idle.
+            elif slot_stamp_older_than "$stamp" "$idle_days"; then
+                echo "$who: removing idle slot $prefix$n, its lessee stamp is older than $idle_days days (CODESCOUT_SLOT_IDLE_DAYS)" >&2
+                "$remove" "$pool/$prefix$n"
+            fi
         fi
         exec {fd}>&-
     done

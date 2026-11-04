@@ -27,7 +27,9 @@
 # keying on the session id left 323G in 17 trees on 2026-09-24 (bug 1da62c896d649aa6).
 # The lease lives in scripts/slot-pool.sh, which also bounds the pool on every lease:
 # a slot past CODESCOUT_SLOT_CEILING_MB is emptied, and free slots numbered
-# CODESCOUT_GATE_POOL_KEEP or higher are removed (bug 503fa887ab0ec144). Why the lock is
+# CODESCOUT_GATE_POOL_KEEP or higher are removed (bug 503fa887ab0ec144), and a free slot
+# whose lessee stamp is older than CODESCOUT_SLOT_IDLE_DAYS (default 3, 0 = off) is removed
+# (bug e7442516ad9fa057). Why the lock is
 # held without `flock -o`, and why only the lock may authorize a removal, is written
 # there. This script prints the slot's size and the pool's total when it finishes.
 #
