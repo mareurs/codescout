@@ -1,13 +1,15 @@
 ---
-status: open
-opened: 2026-10-17
-closed:
-severity: medium
-owner: marius
-related: [docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md]
+kind: bug
+status: mitigated
 tags:
 - cluster/unclassified
-kind: bug
+closed: 2026-11-04
+opened: 2026-10-17
+owner: marius
+related:
+- docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md
+severity: medium
+unverified: macOS, Windows and case-insensitive filesystems were never run (the tests are cfg(unix)). The check-versus-write race is narrowed by the second looks, not closed. The leaf-link policy (a link whose end is outside the roots is Allowed as the link) was accepted by delegation on 2026-10-27, never confirmed by the operator in so many words.
 ---
 
 # BUG: `classify_write_path` canonicalizes only the immediate parent, so a symlink leaf or a symlinked directory with a missing subdirectory below it is classified as inside the root
@@ -432,6 +434,21 @@ Not run: `edit_code` `rename` (the one writer that writes through a link), `doc(
 ## Re-verification 2026-10-30
 
 On `experiments` at 573825fb7 (branch `worktree-agent-a88be249b09c25d52`), `cargo test --lib util::path_security` passed 365 tests, including `symlink_out_of_the_temp_dir_is_refused_even_below_a_missing_subdirectory`, `symlinked_temp_dir_allows_a_write_below_a_missing_subdirectory`, `a_leaf_link_to_a_deny_listed_file_is_refused_whatever_roots_are_approved` and `a_leaf_link_to_a_file_outside_every_root_is_allowed_as_the_link_and_asks_for_no_approval`. Both shapes (a missing subdirectory below a symlinked directory; a leaf symlink) are covered and legitimate in-root writes still pass. No code changed. The issue stays `open` only for the items already listed above (macOS, Windows, case-insensitive filesystems, check-versus-write race).
+
+## Fix provenance
+
+Status set to mitigated on 2026-11-04. Both shapes are fixed and tested on Linux; the open items are in the `unverified` field.
+
+- **SHA:** `520f95fceb5d976c5e2aa040ccf32a89f5bb61d7` (`experiments`)
+- **patch-id:** `307ad11edcc3215adc0ddac157ce68a50e2b913b`
+
+That commit is the leaf-link policy. Earlier and companion commits, all ancestors of `origin/experiments` (checked 2026-11-04):
+
+- Shape 2 (missing subdirectory below a symlinked directory): `2c71a473a39b257deb78e69d67e3565428fe95bd`, patch-id `0649919bcc089b8e203f5368ad43c61c483dea06`.
+- Shape 1 round 1: `0b0ab92f4f36a37132d168ecc518f5b709a0df13`, patch-id `e3ec71d2788c1429536362fedec0804cd2b923c2`.
+- Characterization tests for the heading grammar and the memory store: `4d70f95941af433496b10563acde43806a4ce04c`, patch-id `e34e96c8f03d7632993e22188d975d9c44ebffa5`.
+
+Verified 2026-11-04 on the current tree: `cargo test --lib edit_code_rename_through_a_leaf_link` gives 2 passed, 0 failed. This closes the earlier 'edit_code rename not run' item: `edit_code_rename_through_a_leaf_link_to_an_outside_file_is_refused_by_the_second_look` and `edit_code_rename_through_a_leaf_link_to_an_in_root_file_writes_the_target`.
 
 ## References
 
