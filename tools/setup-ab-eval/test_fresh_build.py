@@ -1080,6 +1080,8 @@ TAG = "sab-fresh-rust-lang__rust-analyzer-23096:b%s" % fb.BUILDER_VERSION
 IMAGE_ID = "sha256:" + "a" * 64
 BASE_ID = "sha256:" + "b" * 64
 CID = "ab12" * 16  # the container ID `docker run -d` prints
+TREE_SHA = "1f" * 20  # the upstream tree SHA a caller passes as `expected_tree`
+OTHER_TREE = "2e" * 20
 TREE = {  # the upstream tree: path -> bytes, or ("symlink", target)
     "Cargo.toml": b"[workspace]\nmembers = [\"crates/*\"]\n",
     "crates/keep/Cargo.toml": b"[package]\nname = \"keep\"\n",
@@ -1098,7 +1100,7 @@ WARM_OK = (
 HAPPY_LABELS = [
     "tag-check", "base-id", "run", "clear-tracked", "copy", "extract", "list-files", "clear-dirs", "touch",
     "metadata", "warm-build", "git-attributes", "git-add", "git-add-force", "git-commit", "ls-files",
-    "rev-parse", "docker-commit",
+    "rev-parse", "tag-check", "docker-commit",  # the second tag-check is the re-inspect before the commit
     "inspect", "rm",
 ]
 
@@ -1174,6 +1176,8 @@ def label(args):
         return "git-add-force"
     if "ls-files" in text:
         return "ls-files"
+    if "^{tree}" in text:
+        return "tree-rev-parse"
     if "rev-parse" in text:
         return "rev-parse"
     if " commit " in text:
@@ -1224,6 +1228,8 @@ class FakeDocker:
             return 0, ls_s({p: TREE_ENTRIES.get(p, ("100644", blob_id(b""))) for p in self.files})
         if name == "rev-parse":
             return 0, SYN_SHA + "\n"
+        if name == "tree-rev-parse":
+            return 0, TREE_SHA + "\n"
         if name == "inspect":
             return 0, IMAGE_ID + " 4294967296\n"
         if name == "warm-build":
@@ -1237,6 +1243,8 @@ class FakeDocker:
         found = [args for args, _ in self.calls if label(args) == name]
         assert len(found) == 1, (name, found)
         return found[0]
+    def all_args_of(self, name):
+        return [args for args, _ in self.calls if label(args) == name]
 
     def kw_of(self, name):
         found = [kw for args, kw in self.calls if label(args) == name]
@@ -1347,16 +1355,18 @@ class BuildImageTest(unittest.TestCase):
         args.update(kw)
         return fb.build_image(**args)
 
-    def evidence_json(self):
-        return json.loads((self.evidence / "build-evidence.json").read_text())
+    def evidence_json(self, name="build-evidence.json"):
+        return json.loads((self.evidence / name).read_text())
 
-    def fails(self, fake, pattern=r".", *, commit_attempted=False, removal="id", **kw):
+    def fails(self, fake, pattern=r".", *, commit_attempted=False, removal="id", evidence_name="build-evidence.json",
+              **kw):
         """Run a build that must raise BuildError; check the invariants every failure shares.
 
         `commit_attempted`: the failure happened from the `docker commit` attempt on, so the tag is
         dropped with `docker rmi`; otherwise `docker rmi` and `docker commit` must not appear.
         `removal`: "id" (`docker rm -f -v <id>`), "name" (by name: `docker run` gave no answer) or None
         (no container of this build exists: nothing may be removed).
+        `evidence_name`: the file the evidence is written to (a "tag exists" refusal writes the refused one).
         """
         with self.assertRaisesRegex(fb.BuildError, pattern) as cm:
             self.build(fake, **kw)
@@ -1367,7 +1377,7 @@ class BuildImageTest(unittest.TestCase):
         else:
             self.assertNotIn("docker-commit", labels)
             self.assertNotIn("rmi", labels)
-        ev = self.evidence_json()
+        ev = self.evidence_json(evidence_name)
         self.assertEqual(ev["outcome"], "error")
         if removal is None:
             self.assertNotIn("rm", labels)
@@ -1406,7 +1416,8 @@ class BuildImageTest(unittest.TestCase):
         fake = FakeDocker()
         self.build(fake)
         self.assertEqual(fake.args_of("run"), (
-            "run", "-d", "--name", CONTAINER, "--cpus", "4", "--memory", "24g", BASE_IMAGE, "sleep", "infinity"))
+            "run", "-d", "--name", CONTAINER, "--cidfile", str(self.evidence.resolve() / "container.cid"),
+            "--cpus", "4", "--memory", "24g", BASE_ID, "sleep", "infinity"))
 
     def test_offline_override_is_on_the_warm_build_exec_only(self):
         fake = FakeDocker()
@@ -1452,12 +1463,12 @@ class BuildImageTest(unittest.TestCase):
         fake = FakeDocker()
         self.build(fake)
         self.assertEqual(fake.labels()[:3], ["tag-check", "base-id", "run"])
-        self.assertEqual(fake.args_of("tag-check"), ("image", "inspect", "--format", "{{.Id}}", TAG))
+        self.assertEqual(fake.all_args_of("tag-check")[0], ("image", "inspect", "--format", "{{.Id}}", TAG))
         self.assertEqual(fake.args_of("base-id"), ("image", "inspect", "--format", "{{.Id}}", BASE_IMAGE))
 
     def test_an_existing_tag_is_refused_before_anything_is_started_or_deleted(self):
         fake = FakeDocker(("tag-check", (0, IMAGE_ID + "\n")))
-        self.fails(fake, "tag exists", removal=None)
+        self.fails(fake, "tag exists", removal=None, evidence_name="build-evidence.refused.json")
         self.assertEqual(fake.labels(), ["tag-check"])
 
     def test_a_tag_check_that_is_not_a_plain_no_such_image_is_refused(self):
@@ -1506,6 +1517,234 @@ class BuildImageTest(unittest.TestCase):
         fake = FakeDocker(("run", (0, "WARNING: Your kernel does not support swap limit capabilities\n%s\n" % CID)))
         self.build(fake)
         self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
+    # --- the base image ID, not its reference, starts the container ---
+
+    def test_run_uses_the_recorded_base_image_id_not_the_mutable_reference(self):
+        fake = FakeDocker()
+        self.build(fake)
+        run = fake.args_of("run")
+        self.assertEqual(run[-3:], (BASE_ID, "sleep", "infinity"))
+        self.assertNotIn(BASE_IMAGE, run)
+        self.assertEqual(self.evidence_json()["base_image"], BASE_IMAGE)  # the reference is still recorded
+
+    # --- the cidfile: a container that was created but did not start is ours and is removed by ID ---
+
+    def cidfile_run(self, rc, out, written=None):
+        """A `docker run` response that behaves like docker with `--cidfile`: it checks the file is
+        absent (docker refuses to start otherwise) and writes `written` into it, when given."""
+        def respond(args, kw):
+            path = Path(args[args.index("--cidfile") + 1])
+            self.assertFalse(path.exists(), "docker refuses to start when the cidfile exists")
+            if written is not None:
+                path.write_text(written)
+            return done(args, rc, out)
+        return respond
+
+    def test_the_cidfile_is_in_the_evidence_dir_and_a_stale_one_is_removed_first(self):
+        self.evidence.mkdir()
+        (self.evidence / "container.cid").write_text("f" * 64)  # left by a killed run
+        fake = FakeDocker(("run", self.cidfile_run(0, CID + "\n", written=CID)))
+        self.build(fake)
+        run = fake.args_of("run")
+        self.assertEqual(run[run.index("--cidfile") + 1], str(self.evidence.resolve() / "container.cid"))
+        self.assertEqual(fake.args_of("rm"), ("rm", "-f", "-v", CID))
+
+    def test_a_run_that_failed_after_creating_the_container_removes_it_by_the_cidfile_id(self):
+        oci = "docker: Error response from daemon: OCI runtime create failed: unable to start container process"
+        fake = FakeDocker(("run", self.cidfile_run(125, oci, written=CID)))
+        self.fails(fake, r"docker run failed \(exit 125\)", removal="id")
+        ev = self.evidence_json()
+        self.assertEqual(ev["container_id"], CID)
+        self.assertFalse(ev["container_removed_by_name"])
+        self.assertEqual(fake.labels(), ["tag-check", "base-id", "run", "rm"])
+
+    def test_a_cidfile_id_is_what_the_file_holds_even_with_a_trailing_newline(self):
+        fake = FakeDocker(("run", self.cidfile_run(125, "failed to start", written=CID + "\n")))
+        self.fails(fake, "docker run failed", removal="id")
+
+    def test_a_failed_run_without_a_usable_cidfile_removes_nothing(self):
+        conflict = (125, 'Conflict. The container name "/%s" is already in use by container "%s".'
+                         % (CONTAINER, "f" * 64))
+        for written in (None, "", "not an id", CID[:-1], CID + "0", "f" * 64 + " " + "e" * 64):
+            for stale in (False, True):
+                with self.subTest(written=written, stale=stale):
+                    self.evidence.mkdir(exist_ok=True)
+                    cidfile = self.evidence / "container.cid"
+                    if stale:  # a previous run's ID must not be mistaken for this run's
+                        cidfile.write_text("f" * 64)
+                    elif cidfile.exists():
+                        cidfile.unlink()
+                    fake = FakeDocker(("run", self.cidfile_run(*conflict, written=written)))
+                    self.fails(fake, r"docker run failed \(exit 125\)", removal=None)
+                    self.assertIsNone(self.evidence_json()["container_id"])
+
+    def test_a_cidfile_does_not_make_a_failed_run_with_no_answer_remove_by_id(self):
+        fake = FakeDocker(("run", subprocess.TimeoutExpired(cmd=["docker"], timeout=600)))
+        self.fails(fake, "docker run", removal="name")
+
+    # --- the tag may appear during the build: re-inspect right before the commit ---
+
+    def tag_answers(self, *answers):
+        """A `tag-check` rule answering the n-th call with the n-th `(exit_code, stdout)` of `answers`."""
+        seen = []
+
+        def respond(args, kw):
+            seen.append(args)
+            return done(args, *answers[min(len(seen), len(answers)) - 1])
+        return ("tag-check", respond)
+
+    ABSENT = (1, "Error response from daemon: No such image: %s\n" % TAG)
+
+    def test_the_tag_is_inspected_again_immediately_before_the_commit(self):
+        fake = FakeDocker()
+        self.build(fake)
+        labels = fake.labels()
+        self.assertEqual(labels[labels.index("docker-commit") - 1], "tag-check")
+        self.assertEqual(len(fake.all_args_of("tag-check")), 2)
+        self.assertEqual(fake.all_args_of("tag-check")[1], ("image", "inspect", "--format", "{{.Id}}", TAG))
+
+    def test_a_tag_that_appears_during_the_build_is_refused_and_never_dropped(self):
+        fake = FakeDocker(self.tag_answers(self.ABSENT, (0, IMAGE_ID + "\n")))
+        err = self.fails(fake, "tag exists", evidence_name="build-evidence.refused.json")
+        self.assertIn(TAG, str(err))
+        self.assertEqual(fake.labels()[-3:], ["rev-parse", "tag-check", "rm"])  # no commit, and no rmi of a sibling's tag
+        self.assertEqual(len(fake.all_args_of("tag-check")), 2)
+        self.assertIn("tag exists", self.evidence_json("build-evidence.refused.json")["error"])
+
+    def test_a_recheck_that_is_not_a_plain_no_such_image_is_refused_without_dropping_the_tag(self):
+        for resp in ((1, "Cannot connect to the Docker daemon"), (2, "no such image"), (1, "")):
+            with self.subTest(resp=resp):
+                fake = FakeDocker(self.tag_answers(self.ABSENT, resp))
+                self.fails(fake, "docker image inspect")
+                self.assertEqual(fake.labels()[-2:], ["tag-check", "rm"])
+
+    def test_a_recheck_that_times_out_is_refused_without_dropping_the_tag(self):
+        calls = []
+
+        def respond(args, kw):
+            calls.append(args)
+            if len(calls) == 2:
+                raise subprocess.TimeoutExpired(cmd=["docker"], timeout=120)
+            return done(args, *self.ABSENT)
+        fake = FakeDocker(("tag-check", respond))
+        self.fails(fake, "timed out")
+        self.assertEqual(fake.labels()[-2:], ["tag-check", "rm"])
+
+    # --- a "tag exists" refusal never overwrites an existing build-evidence.json ---
+
+    def test_a_tag_exists_refusal_never_overwrites_an_existing_build_evidence(self):
+        self.evidence.mkdir()
+        good = self.evidence / "build-evidence.json"
+        sentinel = '{"outcome": "ok", "image_id": "kept"}\n'
+        for name, rule in (("at the start", ("tag-check", (0, IMAGE_ID + "\n"))),
+                           ("before the commit", self.tag_answers(self.ABSENT, (0, IMAGE_ID + "\n")))):
+            with self.subTest(refused=name):
+                good.write_text(sentinel)
+                (self.evidence / "build-evidence.refused.json").unlink(missing_ok=True)
+                self.fails(FakeDocker(rule), "tag exists", removal=None if name == "at the start" else "id",
+                           evidence_name="build-evidence.refused.json")
+                self.assertEqual(good.read_text(), sentinel)
+
+    def test_other_failures_and_good_builds_write_the_usual_evidence_file(self):
+        self.fails(FakeDocker(("warm-build", (101, "error: boom\n"))), "boom")
+        self.assertFalse((self.evidence / "build-evidence.refused.json").exists())
+        self.build(FakeDocker())
+        self.assertEqual(self.evidence_json()["outcome"], "ok")
+        self.assertFalse((self.evidence / "build-evidence.refused.json").exists())
+
+    # --- expected_tree: the synthetic commit's tree must be the upstream tree ---
+
+    def test_expected_tree_is_compared_to_the_synthetic_commit_before_the_commit(self):
+        fake = FakeDocker()
+        self.build(fake, expected_tree=TREE_SHA)
+        want = list(HAPPY_LABELS)
+        want.insert(want.index("rev-parse") + 1, "tree-rev-parse")
+        self.assertEqual(fake.labels(), want)
+        args = fake.args_of("tree-rev-parse")
+        self.assertEqual(args[args.index(CID) + 1:], ("git", "rev-parse", "HEAD^{tree}"))
+        ev = self.evidence_json()
+        self.assertEqual((ev["expected_tree"], ev["synthetic_tree"]), (TREE_SHA, TREE_SHA))
+
+    def test_without_expected_tree_the_tree_is_not_asked_for(self):
+        fake = FakeDocker()
+        self.build(fake)
+        self.assertNotIn("tree-rev-parse", fake.labels())
+        self.assertNotIn("expected_tree", self.evidence_json())
+
+    def test_a_different_tree_is_refused_naming_both_shas_before_the_commit(self):
+        fake = FakeDocker(("tree-rev-parse", (0, OTHER_TREE + "\n")))
+        err = self.fails(fake, "tree", expected_tree=TREE_SHA)
+        self.assertIn(TREE_SHA, str(err))
+        self.assertIn(OTHER_TREE, str(err))
+        self.assertEqual(fake.labels()[-2:], ["tree-rev-parse", "rm"])
+        self.assertEqual(len(fake.all_args_of("tag-check")), 1)  # refused before the re-inspect and the commit
+        ev = self.evidence_json()
+        self.assertEqual((ev["expected_tree"], ev["synthetic_tree"]), (TREE_SHA, OTHER_TREE))
+        self.assertIn(OTHER_TREE, ev["error"])
+
+    def test_a_tree_answer_that_is_not_a_sha_or_a_failing_command_is_refused(self):
+        for resp in ((0, "fatal: ambiguous argument\n"), (0, ""), (128, "fatal: not a git repository\n"),
+                     (0, TREE_SHA.upper() + "\n"), (0, TREE_SHA[:-1] + "\n")):
+            with self.subTest(resp=resp):
+                fake = FakeDocker(("tree-rev-parse", resp))
+                self.fails(fake, "tree", expected_tree=TREE_SHA)
+
+    def test_expected_tree_must_be_a_full_lowercase_40_hex_sha(self):
+        for bad in ("", "abc", TREE_SHA.upper(), "1f" * 32, TREE_SHA + "\n", TREE_SHA[:-1] + "g", None, 5, b"x" * 40):
+            with self.subTest(bad=bad):
+                fake = FakeDocker()
+                if bad is None:  # None means "not given"
+                    self.build(fake, expected_tree=bad)
+                    continue
+                with self.assertRaises(ValueError):
+                    self.build(fake, expected_tree=bad)
+                self.assertEqual(fake.calls, [])
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_real_git_a_tree_that_differs_from_upstream_by_line_endings_is_refused(self):
+        # `git archive` applies `eol`, so its CRLF bytes pass the per-file check against the archive,
+        # but the tree they make is not the upstream tree: only the tree SHA shows it
+        cfg = self.tmp / "empty.gitconfig"
+        cfg.write_text("")
+        env = {"PATH": os.environ["PATH"], "HOME": str(self.tmp), "GIT_CONFIG_GLOBAL": str(cfg),
+               "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C"}
+
+        def git(root, *args):
+            return subprocess.run(["git", *args], cwd=root, env=env, check=True, capture_output=True,
+                                  text=True).stdout
+
+        def repo(name, files):
+            root = self.tmp / name
+            root.mkdir()
+            git(root, "init", "-q")
+            for path, content in files.items():
+                (root / path).write_bytes(content[1] if isinstance(content, tuple) else content)
+                if isinstance(content, tuple):
+                    (root / path).chmod(0o755)
+            return root
+
+        upstream_files = {"a.txt": b"x\n", "run.sh": ("exec", b"#!/bin/sh\n")}
+        up = repo("upstream", upstream_files)
+        git(up, "add", "-A")
+        upstream_tree = git(up, "write-tree").strip()
+        self.assertRegex(upstream_tree, r"^[0-9a-f]{40}$")
+        archive_files = dict(upstream_files, **{"a.txt": b"x\r\n"})  # what `eol=crlf` makes `git archive` write
+        for name, files in (("same", upstream_files), ("crlf", archive_files)):
+            d = repo(name, files)
+            shell = local_shell(d, env)
+            fake = FakeDocker(("git-attributes", shell), ("git-add", shell), ("git-add-force", shell),
+                              ("git-commit", shell), ("ls-files", shell), ("rev-parse", shell),
+                              ("tree-rev-parse", shell), files=sorted(files))
+            tar = write_tar(self.tmp / (name + ".tar"), files)
+            with self.subTest(archive=name):
+                if name == "same":
+                    self.build(fake, tree_tar=tar, expected_tree=upstream_tree)
+                    self.assertEqual(self.evidence_json()["synthetic_tree"], upstream_tree)
+                else:
+                    err = self.fails(fake, "tree", tree_tar=tar, expected_tree=upstream_tree)
+                    self.assertIn(upstream_tree, str(err))
+                    self.assertIn(git(d, "rev-parse", "HEAD^{tree}").strip(), str(err))
+
 
     def test_the_tag_is_dropped_only_from_the_commit_attempt_on(self):
         steps = ["tag-check", "base-id", "run", "clear-tracked", "copy", "extract", "list-files", "clear-dirs",
@@ -2124,8 +2363,11 @@ class BuildImageTest(unittest.TestCase):
         self.assertEqual(ev["compiling_lines"], 2)
         self.assertTrue(ev["container_removed"])
         self.assertEqual(ev["laps_seconds"], got["laps_seconds"])
-        self.assertEqual([s["name"] for s in ev["steps"]], [n for n in HAPPY_LABELS if n != "rm"])
-        self.assertTrue(all(s["returncode"] == (1 if s["name"] == "tag-check" else 0) for s in ev["steps"]))
+        names = [n for n in HAPPY_LABELS if n != "rm"]
+        names[names.index("tag-check", 1)] = "tag-recheck"  # the re-inspect before `docker commit`
+        self.assertEqual([s["name"] for s in ev["steps"]], names)
+        self.assertTrue(all(s["returncode"] == (1 if s["name"] in ("tag-check", "tag-recheck") else 0)
+                            for s in ev["steps"]))
 
     def test_evidence_of_a_failed_build_names_the_error_and_the_failed_step(self):
         fake = FakeDocker(("warm-build", (101, "error: boom\n")))
