@@ -210,3 +210,23 @@ The prompt gives the old and the required signature, the commit subject as the r
 - The tree includes the parent's tracked `CLAUDE.md`, `.codescout/` memories and `docs/issues/`, which may describe the change. Equal across arms; it can raise the floor.
 - The companion's own `[cs-hint]` advisories run in every arm; under A2 and A3 the declaration endorses them too.
 - The agent image's codescout (`f9b0fc9f8`) is older than some task parents. The server is constant across arms; the tree it serves is the task's.
+
+### AM-5 — 2026-11-04, pilot, scorer and the Stage 1 run order ($0.244 spent in total)
+
+**Operator rulings.** Model pinned: `claude-sonnet-5-5`. Token: `~/.config/s5/token-claude-stef`, approved by the operator for this eval. Approved spend so far: the pilot only; Stage 1 needs a separate go.
+
+**Pilot (1 run, arm P, `hce-05-ensure_resident`, $0.229, 24 s, 12 turns).** Read by hand, then by the scorer; both agree.
+
+- Calls: `workspace activate`, `grep ensure_resident` (the trigger), a second `grep`, two native `Read`, three `read_file`, `symbols include_body`, then `edit_code` on the target together with a `Bash sed` in the same message (one batch). The run stopped after that batch.
+- The directive arrived: the transcript holds an `attachment` of type `hook_additional_context` with `toolUseID` = the trigger's id and the text "You MUST call references(...)". It is in no tool result.
+- Score: `refs_before_stop` false; `caller_check_before_stop` true (the name grep); exposure before; valid.
+- So at n=1 the positive control did not produce a `references` call. The trigger is the first call naming the fn, which is usually a grep whose result already lists the callers. **No design change is made on n=1**; the registered P gate decides.
+
+**Scorer.** `tools/hint-channel-eval/score.py`, tests `tests/test_hint_channel_score.py` (21). Reads the CLI transcript as the primary record and joins `events.jsonl` by `tool_use_id`.
+
+- Calls are grouped by `message.id` into batches; only batches EARLIER than the stop's batch count as before the stop. A lookup sent alongside the edit could not inform it.
+- Arrival per arm: context arms need the expected text in a `hook_additional_context` keyed to the trigger and the hint in no tool result; result arms need it in the trigger's result and in no hook context; F needs the hint absent everywhere; A2 also needs the declaration in its event's result; P needs the directive, L the labelled hint.
+- Valid = stopped, exposure before, arrival ok, no hook `error` event. Invalid runs are reported, not scored.
+- Mutation probe: control and identical copy green; 16 of 16 mutants killed.
+
+**Stage 1, fixed now.** Arms P, F, A0; one run per task per arm (n = 10 per arm, paired by task). Order: tasks in `tasks.jsonl` order; within task i (0-based) the arms rotate as `[P, F, A0]` shifted left by `i mod 3`, so no arm always runs first. Runs are sequential. Stop rule: halt if cumulative Stage 1 spend exceeds $20 (about 3× the pilot's $0.229 per run times 30 runs). An invalid run is not replaced in Stage 1; it is reported. Decision after Stage 1, per the registered rule: the P gate is `rate(P) − rate(F) ≥ 0.4` on `refs_before_stop` over valid runs; if it fails, the other arms are not run and the result is recorded as "the channel did not move compliance even for a mandatory directive".
