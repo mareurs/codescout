@@ -993,18 +993,25 @@ pub fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String 
 
 /// The declaration header of a symbol's source text: from the first line that
 /// is not blank, a comment or an attribute/decorator, up to the point where the
-/// body starts (see [`header_end`]). Trailing comments are left out (a `//` or
-/// ` #` marker counts only when the text before it has an even number of `"`
-/// and of `'`) and whitespace runs collapse to one space. `None` when no header
-/// can be read: no header line, or no header end (see [`header_end`]) before the
-/// text ends.
+/// body starts (see [`header_end`]). A decorator or attribute is skipped through
+/// its closing bracket, so a multi-line `@d(\n    a=1,\n)` or `#[derive(\n ..\n)]`
+/// is skipped whole; one whose bracket never closes leaves no header (`None`).
+/// Trailing comments are left out (a `//` or ` #` marker counts only when the text
+/// before it has an even number of `"` and of `'`) and whitespace runs collapse to
+/// one space. `None` when no header can be read: no header line, or no header end
+/// (see [`header_end`]) before the text ends.
 fn declaration_header(text: &str) -> Option<String> {
     let mut header = String::new();
     let mut scan = HeaderScan::default();
-    let mut pythonic = false;
+    let mut lead = Lead::Other;
+    let mut open = 0;
     let lines = text.lines().skip_while(|line| {
         let t = line.trim();
-        t.is_empty() || ["//", "/*", "*", "#", "@"].iter().any(|p| t.starts_with(p))
+        if open > 0 || ["@", "#[", "#!["].iter().any(|p| t.starts_with(p)) {
+            open = depth_after(open, t);
+            return true;
+        }
+        t.is_empty() || ["//", "/*", "*", "#"].iter().any(|p| t.starts_with(p))
     });
     for (n, line) in lines.enumerate() {
         let cut = line.find("//").into_iter().chain(line.find(" #")).min();
@@ -1014,12 +1021,13 @@ fn declaration_header(text: &str) -> Option<String> {
         let code = code.unwrap_or(line);
         if n == 0 {
             let mut words = code.split_whitespace();
-            pythonic = matches!(
-                (words.next(), words.next()),
-                (Some("def" | "class"), _) | (Some("async"), Some("def"))
-            );
+            lead = match (words.next(), words.next()) {
+                (Some("def"), _) | (Some("async"), Some("def")) => Lead::Def,
+                (Some("class"), _) => Lead::Class,
+                _ => Lead::Other,
+            };
         }
-        let end = match header_end(code, &mut scan, pythonic) {
+        let end = match header_end(code, &mut scan, lead) {
             HeaderEnd::Unreadable => return None,
             HeaderEnd::At(end) => Some(end),
             HeaderEnd::Open => None,
@@ -1035,6 +1043,32 @@ fn declaration_header(text: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// The open `(`/`[` count after `text`, starting from `depth`, ignoring brackets
+/// inside `"` strings (single quotes are not tracked).
+fn depth_after(mut depth: usize, text: &str) -> usize {
+    let mut in_str = false;
+    for c in text.chars() {
+        match c {
+            '"' => in_str = !in_str,
+            '(' | '[' if !in_str => depth += 1,
+            ')' | ']' if !in_str => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    depth
+}
+
+/// How the first header line starts, which decides whether a top-level `:` can end it.
+#[derive(Clone, Copy, PartialEq)]
+enum Lead {
+    /// Anything but the two below: only a `{` ends the header.
+    Other,
+    /// `def` or `async def`.
+    Def,
+    /// `class`.
+    Class,
 }
 
 /// What [`header_end`] found on one header line.
@@ -1089,20 +1123,27 @@ impl HeaderScan {
 }
 
 /// Where in `code` (one comment-free header line) the declaration header ends and
-/// the body begins. `pythonic`: the header starts with `def`, `class` or `async def`.
+/// the body begins. `lead`: how the header starts (`def`/`async def`, `class`, other).
 ///
 /// The header ends only at a top-level `{` that [`HeaderScan::brace_ends_header`]
 /// accepts (a `{` outside strings and brackets, and, once a `=>` or standalone `=`
-/// was read, only one that directly follows it), or, for a `pythonic` header, at a
-/// top-level `:` with no ` = ` after it on the line. For a `pythonic` header, a
-/// top-level `:` followed by ` = ` on the line, and a line that ends at top level
-/// without a `:`, are [`HeaderEnd::Unreadable`]: a Python `def`/`class` header can
-/// only stay open through an open bracket, so the text is a one-liner whose body
-/// holds an assignment, or not Python (Ruby `def total`). A rejected `{` is
-/// [`HeaderEnd::Unreadable`] too, because the text before it is a body expression.
-/// Every other shape (a line ending in `;`, a `=>` or ` = ` expression body, a brace
-/// body inside call arguments) has no header end: the caller must not guess one.
-fn header_end(code: &str, st: &mut HeaderScan, pythonic: bool) -> HeaderEnd {
+/// was read, only one that directly follows it), or, for a `def`/`class` header, at
+/// a top-level `:` with no ` = ` after it on the line. For a `def`/`class` header:
+/// - a top-level `:` followed by ` = ` on the line is [`HeaderEnd::Unreadable`]
+///   (a one-liner whose body holds an assignment);
+/// - for `class` only, a top-level `:` that is not the last thing on the line is
+///   [`HeaderEnd::Unreadable`] too (Kotlin `class A : B {`, `class A<T : Any>(..) {`,
+///   Python `class A: x = 1`): only `class A:` or a multi-line `class A(\n ..\n):`
+///   ends at its colon;
+/// - a line that ends at top level without a `:` is [`HeaderEnd::Unreadable`]: a
+///   Python header stays open only through an open bracket (a backslash
+///   continuation, or a Ruby `def total`, ends up here, which is the safe answer).
+///
+/// A rejected `{` is [`HeaderEnd::Unreadable`] too, because the text before it is a
+/// body expression. Every other shape (a line ending in `;`, a `=>` or ` = `
+/// expression body, a brace body inside call arguments) has no header end: the
+/// caller must not guess one.
+fn header_end(code: &str, st: &mut HeaderScan, lead: Lead) -> HeaderEnd {
     let mut in_str = false;
     let mut after_arrow = false;
     for (i, c) in code.char_indices() {
@@ -1138,8 +1179,9 @@ fn header_end(code: &str, st: &mut HeaderScan, pythonic: bool) -> HeaderEnd {
                     token = Token::Assign;
                 }
             }
-            ':' if pythonic => {
-                return if code[i..].contains(" = ") {
+            ':' if lead != Lead::Other => {
+                let last_on_line = code[i + 1..].trim().is_empty();
+                return if code[i..].contains(" = ") || (lead == Lead::Class && !last_on_line) {
                     HeaderEnd::Unreadable
                 } else {
                     HeaderEnd::At(i + 1)
@@ -1151,7 +1193,7 @@ fn header_end(code: &str, st: &mut HeaderScan, pythonic: bool) -> HeaderEnd {
             st.prev = token;
         }
     }
-    if pythonic && st.depth == 0 {
+    if lead != Lead::Other && st.depth == 0 {
         HeaderEnd::Unreadable
     } else {
         HeaderEnd::Open
@@ -1171,23 +1213,34 @@ fn header_end(code: &str, st: &mut HeaderScan, pythonic: bool) -> HeaderEnd {
 /// - `Some(false)`: both headers were read and are equal after whitespace and
 ///   trailing comments are ignored, so only the body changed. The text of a
 ///   Python `class` body is not read, so a method renamed inside a class is a
-///   body-only edit.
+///   body-only edit. A decorator or attribute before the header is skipped
+///   through its closing bracket, also when it spans lines.
 /// - `None`: no header end was read on one side. That is the case for a text
-///   with no header line, a bodyless `fn f();`, a `=>` or ` = ` expression body,
-///   a brace body inside call arguments, a Python `def`/`class` one-liner whose
-///   body holds ` = ` (`def f(a): x = {}`), a Ruby `def` (no colon), a `{` after
-///   a `=>` or `=` that does not directly follow the one `=>` (or, with no
-///   `=>`, the one standalone `=`) of the header (`x ? {a: 1} : ..`, `when (x) {`,
-///   `run {`, `function(x) {`, `(a) => (b) => {`, `o !== {`), and a Scala
-///   `def f(x: Int): Int = ..`. The caller must not claim either way.
+///   with no header line (or a decorator whose bracket never closes), a bodyless
+///   `fn f();`, a `=>` or ` = ` expression body, a brace body inside call
+///   arguments, a Python `def`/`class` one-liner whose body holds ` = `
+///   (`def f(a): x = {}`), a `class` with a colon that is not last on its line
+///   (Kotlin `class A : B {`, `class A<T : Any>(x: T) {`, Python `class A: x = 1`),
+///   a `{` after a `=>` or `=` that does not directly follow the one `=>` (or,
+///   with no `=>`, the one standalone `=`) of the header (`x ? {a: 1} : ..`,
+///   `when (x) {`, `run {`, `function(x) {`, `(a) => (b) => {`, `o !== {`), a
+///   `def`/`class` line that ends at top level without a colon (a backslash
+///   continuation), and a Scala `def f(x: Int): Int = ..`. The caller must not
+///   claim either way.
 ///
-/// Known limits: an assignment written without
-/// spaces (`x= cond ? {`) is not seen as one, so the `{` ends the header; a
-/// Rust associated-type binding (`Iterator<Item = u8>`) counts as an assignment,
-/// so such a signature gives `None`; single-quoted strings are not tracked, so a
-/// bracket inside `'...'` can leak into the bracket depth; a Kotlin
-/// `class A : B {` is read only up to the colon, so a change to its supertypes
-/// is not seen.
+/// Ruby is not a classified language: `def foo a: 1\n  {a: a}\nend` reads as
+/// `Some(false)` and `def foo; x = {a: 1}; end` as header `def foo; x = {`, so
+/// results for Ruby text are not trusted (it cannot reach `verified: true`).
+///
+/// Known limits, none of them fixed:
+/// - an assignment written without spaces, or with a space only on its left
+///   (`x= cond ? {`, `const x =c ? {`), is not seen as one, so the `{` ends the
+///   header and a body-only edit before it reads as a header change (`Some(true)`);
+/// - single-quoted strings are not tracked, so a bracket inside `'...'` leaks into
+///   the bracket depth and can give a false `Some(true)` in Python
+///   (`def f(a='('):\n    for x in g(')'):`, `x` -> `y`);
+/// - a Rust associated-type binding (`Iterator<Item = u8>`) counts as an
+///   assignment, so such a signature gives `None`.
 pub fn declaration_changed(old: &str, new: &str) -> Option<bool> {
     Some(declaration_header(old)? != declaration_header(new)?)
 }
@@ -1552,6 +1605,76 @@ mod tests {
         ] {
             assert_eq!(declaration_changed(old, new), None, "{old} -> {new}");
         }
+    }
+    #[test]
+    fn declaration_changed_skips_a_multi_line_decorator_through_its_closing_bracket() {
+        for (old, new) in [
+            (
+                "@pytest.mark.parametrize(\n    \"a\", [1, 2],\n)\ndef test_x(a):\n    x()\n    assert {a} == {a}",
+                "@pytest.mark.parametrize(\n    \"a\", [1, 2],\n)\ndef test_x(a):\n    y()\n    assert {a} == {a}",
+            ),
+            (
+                "@app.route(\n    \"/x\",\n    methods=[\"GET\"],\n)\ndef view(self):\n    self.cache = {}",
+                "@app.route(\n    \"/x\",\n    methods=[\"GET\"],\n)\ndef view(self):\n    self.items = {}",
+            ),
+            (
+                "@dataclass(\n    frozen=True,\n)\nclass P:\n    def to_dict(self):\n        return {1: 2}",
+                "@dataclass(\n    frozen=True,\n)\nclass P:\n    def as_dict(self):\n        return {1: 2}",
+            ),
+            (
+                "@d(\n    a=1,\n    b=2,\n)\ndef f(x):\n    y = {}",
+                "@d(\n    a=1,\n    b=2,\n)\ndef f(x):\n    z = {}",
+            ),
+            (
+                "@d(\n    1,\n)\ndef f(self):\n    return {}",
+                "@d(\n    1,\n)\ndef f(self):\n    log()\n    return {}",
+            ),
+            // A multi-line Rust attribute is skipped the same way.
+            (
+                "#[derive(\n    Debug,\n)]\nfn a() -> u8 {\n    1\n}",
+                "#[derive(\n    Debug,\n)]\nfn a() -> u8 {\n    2\n}",
+            ),
+        ] {
+            assert_eq!(declaration_changed(old, new), Some(false), "{old}");
+        }
+        // The header after the decorator is still compared.
+        assert_eq!(
+            declaration_changed(
+                "@d(\n    1,\n)\ndef f(self):\n    return {}",
+                "@d(\n    1,\n)\ndef f(self, x):\n    return {}"
+            ),
+            Some(true)
+        );
+        // A decorator whose bracket never closes leaves no header.
+        assert_eq!(
+            declaration_changed("@d(\n    1,\ndef f(self):\n    return {}", "def f(self):"),
+            None
+        );
+    }
+
+    #[test]
+    fn declaration_changed_is_none_for_a_class_with_a_colon_that_is_not_last_on_its_line() {
+        for (old, new) in [
+            (
+                "class A<T : Any>(x: T) {\n    val y = 1\n}",
+                "class A<T : Any>(x: T, z: T) {\n    val y = 1\n}",
+            ),
+            (
+                "class A : B {\n    val y = 1\n}",
+                "class A : C {\n    val y = 1\n}",
+            ),
+            ("class A: x = {}", "class A: y = {}"),
+        ] {
+            assert_eq!(declaration_changed(old, new), None, "{old} -> {new}");
+        }
+        // A colon that ends the line still ends the header, also after a bracket.
+        assert_eq!(
+            declaration_changed(
+                "class A(\n    B,\n):\n    x = 1\n",
+                "class A(\n    B,\n):\n    x = 2\n"
+            ),
+            Some(false)
+        );
     }
 
     #[test]
