@@ -47,8 +47,8 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 | CIW-13 | any | S | done | GG-11: `librarian` § Reference sits 14 B under its 2,500 B cap |
 | CIW-14 | any | S | open | GG-8: re-run the section-use probe against its pre-registered predictions |
 | CIW-15 | any | M | open | A write-time check on an `entry_prefix` declaration (F-1's owed mechanism) |
-| CIW-16 | any | S | open | Eval runner: re-link the credential cell every round |
-| CIW-17 | any | S | open | A-46's "median run < 5 s" health rule misfires on short control prompts |
+| CIW-16 | any | S | done | Eval runner: re-link the credential cell every round |
+| CIW-17 | any | S | done | A-46's "median run < 5 s" health rule misfires on short control prompts |
 | CIW-18 | any | M–L | open | Principal identity: the edges the ADR left unmeasured |
 | CIW-19 | any | S | done | Guide-ledger residuals S-01, S-02 and S-04 |
 | CIW-20 | any | M | done | Classify the 55% repeat deliveries by re-arm cause |
@@ -233,7 +233,7 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 ## CIW-16 — Eval runner: re-link the credential cell every round
 
-**Status:** open
+**Status:** done
 **Valid:** dated 2026-11-04
 
 **Owner:** any (prompt-engineering). **Source:** `prompt-hamsa-audit-log:A-44` runner repair; `src/prompt_tdd/profiles.py` `link_credentials` docstring.
@@ -242,9 +242,13 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 **Next:** call `link_credentials` at the start of every `run_arms.py` round, and correct the docstring.
 
+**Result (2026-11-05, `prompt-engineering:997b4cd`).** Ruling: the call lives in `prompt-tdd run`, not in `run_arms.py`. `run_arms.py` starts one `prompt-tdd run` per arm, so that is the start of every round, and only `run` knows each arm's account and isolation class. New `profiles.refresh_cell_credentials(account, isolation_class, config_dir)` returns None for a `config_dir` or ambient profile (no account source, so nothing to link) and otherwise calls `link_credentials`. A missing account source now refuses the run with the existing remedy text. The docstring's claim that a linked cell cannot materialize a file is marked as true for 2.1.252 only. Tests: `test_refresh_restores_a_link_that_claude_code_replaced_with_a_regular_file`, `test_refresh_touches_nothing_unless_the_cell_is_chosen_by_account_and_class`, both RED first.
+
+**Not mine, found on the way.** Three tests already fail at `prompt-engineering` HEAD `70e9d19`, checked in a clean worktree: `test_sync_creds_and_snapshot_projects_both_walk_the_round_cells`, `test_sync_creds_and_snapshot_projects_behave_correctly_under_a_stub_round` (both in `test_run_pilot_wiring.py`, `sync_creds` in `run_pilot.sh` now calls `profiles link` and no longer walks `round_cells`) and `test_no_scenario_file_imports_an_ambiguous_module_by_bare_name` (bare `il3_shapes` imports in three il3 scenarios). Full suite with my change: 731 passed, those 3 failed.
+
 ## CIW-17 — A-46's "median run < 5 s" health rule misfires on short control prompts
 
-**Status:** open
+**Status:** done
 **Valid:** dated 2026-11-04
 
 **Owner:** any (prompt-engineering). **Source:** `prompt-hamsa-audit-log:A-46` outcome.
@@ -252,6 +256,8 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 **Observed.** Two control cells ran at a 3.9 s and 4.3 s median with 8–10 distinct genuine answers, so the frozen dead-instrument rule fired on healthy cells.
 
 **Next:** key the duration rule on distinct answers plus an auth/refusal pattern, or apply it to treatment cells only, in `scenarios/operator-rules/` before the next run.
+
+**Result (2026-11-05, `prompt-engineering:892d90c`).** Ruling: the rule was prose in the unregistered decision tables of `gen_oprules.py`, with no code behind it, so the amendment is prose too. A cell is dead on distinct answers == 1, or on a median under 5 s together with an auth or refusal pattern (every run exits 1, or the answer is a login or refusal text). A short median alone is not a tell. OP-6 row 1 and the OP-3 row now say so, and the OP-4 row still reads "OP-11 tells" and so follows. Regenerated with `gen_oprules.py --runs 10`: 25 `scenario.yaml` files changed, `description:` field only. Cost if wrong: a dead cell that answers fast with varied text is now read as alive; the auth or refusal pattern is the only guard, and it is stated, not coded.
 
 ## CIW-18 — Principal identity: the edges the ADR left unmeasured
 
