@@ -1546,6 +1546,53 @@ mod tests {
             assert_eq!(ch(old, new, "java"), None, "{old:?}");
         }
     }
+    #[test]
+    fn unclean_text_whose_wrapper_parse_errs_is_unknown() {
+        // Pins the wrapper's own `has_error` check: each text has an error as-is, so it is
+        // retried in `class W { ... }`, and the wrapper parse errs too. Without that second
+        // check the error-recovered wrapper tree still yields one member with a body, and
+        // the parameter edits below would read as `Some(true)`.
+        for lang in SCRIPT_FAMILY {
+            for (old, new) in [
+                ("if (a) { b(; }", "if (z) { b(; }"),
+                ("return foo(x) { a(); }", "return foo(y) { a(); }"),
+                ("if (a) { b(); ", "if (z) { b(); "),
+                ("foo(x) {", "foo(y) {"),
+                ("x =", "y ="),
+            ] {
+                assert_eq!(ch(old, new, lang), None, "{lang} {old:?}");
+            }
+        }
+        for (old, new) in [
+            ("if (a) { b(); ", "if (z) { b(); "),
+            ("foo(int x) {", "foo(int y) {"),
+            ("A(int a) {", "A(int b) {"),
+        ] {
+            assert_eq!(ch(old, new, "java"), None, "{old:?}");
+        }
+    }
+
+    #[test]
+    fn python_concatenated_string_parts_stay_separate() {
+        // Pins the `concatenated_string` exception to the string-atom rule: its parts are
+        // separate string tokens, so whitespace between them is not a header change. Taken
+        // as one atom, the span would include that whitespace and read as `Some(true)`.
+        let old = "def f(a=\"a\" \"b\"):\n    return 1";
+        assert_eq!(
+            ch(old, "def f(a=\"a\"   \"b\"):\n    return 1", "python"),
+            Some(false)
+        );
+        // Newline-split variant: the parameter list's parentheses join the lines.
+        assert_eq!(
+            ch(old, "def f(a=\"a\"\n      \"b\"):\n    return 1", "python"),
+            Some(false)
+        );
+        // A real change to one part is still a header change.
+        assert_eq!(
+            ch(old, "def f(a=\"a\" \"c\"):\n    return 1", "python"),
+            Some(true)
+        );
+    }
 
     #[test]
     fn error_inside_an_owner_is_unknown() {
