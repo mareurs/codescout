@@ -156,6 +156,9 @@ def gate_fixture(tmp_path):
         "echo \"cargo $*\" >> \"$CALLS\"\n"
         "echo \"$CARGO_TARGET_DIR\" >> \"$TARGETS\"\n"
         "[ -z \"${CARGO_STARTED:-}\" ] || touch \"$CARGO_STARTED\"\n"
+        "echo \"${TMPDIR:-<unset>}\" >> \"$TMPDIRS\"\n"
+        # TMPDIR_LITTER: leave a file in whatever TMPDIR this lane sees, as a test would.
+        "[ -z \"${TMPDIR_LITTER:-}\" ] || touch \"$TMPDIR/litter-$$\"\n"
         "lane=default\n"
         "[ \"$1\" = clippy ] && lane=clippy\n"
         "case \"$*\" in *--no-default-features*) lane=lean ;; esac\n"
@@ -187,6 +190,11 @@ def gate_fixture(tmp_path):
         "[ \"$FAILED_LANE\" != python ]\n"
     )
     python.chmod(0o755)
+    findmnt = commands / "findmnt"
+    findmnt.write_text("#!/usr/bin/env bash\necho \"${FIXTURE_FSTYPE:-tmpfs}\"\n")
+    findmnt.chmod(0o755)
+    (tmp_path / "orig-tmp").mkdir()
+    (tmp_path / "tmpbase").mkdir()
     env = os.environ.copy()
     for key in ("CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "CODEX_THREAD_ID",
                 "CODESCOUT_CONTEXT_FILE", "SLOT_FD", "HOLD_DEFAULT", "PY_HOLD", "PY_WAIT_FOR_CARGO"):
@@ -195,6 +203,8 @@ def gate_fixture(tmp_path):
         CARGO_TARGET_DIR=str(tmp_path / "target"), SLOT_FD="",
         CALLS=str(tmp_path / "calls.txt"), TARGETS=str(tmp_path / "targets.txt"),
         CARGO_STARTED=str(tmp_path / "cargo-started"), PY_RESULT=str(tmp_path / "py-result"),
+        TMPDIRS=str(tmp_path / "tmpdirs.txt"), TMPDIR=str(tmp_path / "orig-tmp"),
+        CODESCOUT_GATE_TMPFS_BASE=str(tmp_path / "tmpbase"),
         PY_PID_FILE=str(tmp_path / "py-pid"),
         FORMAT_MARKER=str(tmp_path / "format-called"), SNAPSHOT_RECORD=str(tmp_path / "snapshot.json"),
         FMT_EXIT="0", FAILED_LANE="none", REAL_PYTHON=sys.executable,
@@ -472,3 +482,107 @@ def test_interrupted_gate_stops_its_python_lane(tmp_path):
                 os.kill(pid, 9)
             except ProcessLookupError:
                 pass
+
+
+def tmpdir_lines(root):
+    return (root / "tmpdirs.txt").read_text().splitlines()
+
+
+def test_nextest_lanes_get_a_private_tmpfs_tmpdir(tmp_path):
+    # Measured 2026-11-05 (memory research/gate-tmpdir-tmpfs-20261105): the nextest phase ran faster with
+    # TMPDIR on tmpfs in 3 of 3 pairs. Only the nextest commands get it; clippy and the doctest steps
+    # keep the caller's TMPDIR, because those were not measured.
+    fixture = gate_fixture(tmp_path)
+    root, _ = fixture
+    result = run_gate_fixture(fixture, "--check")
+    assert result.returncode == 0, result.stderr
+    lines = tmpdir_lines(root)
+    original = str(root / "orig-tmp")
+    # clippy, lean nextest, lean doctests, default nextest, default doctests
+    assert len(lines) == 5
+    assert lines[0] == lines[2] == lines[4] == original
+    assert lines[1] == lines[3] != original
+    private = Path(lines[1])
+    assert private.parent == root / "tmpbase" and private.name.startswith("codescout-gate-tmp.")
+    assert f"test temp files in {private}" in result.stdout
+
+
+@pytest.mark.parametrize("failed_lane", ["none", "python", "lean", "default"])
+def test_the_private_tmpdir_is_removed_whatever_the_outcome(tmp_path, failed_lane):
+    fixture = gate_fixture(tmp_path)
+    root, _ = fixture
+    run_gate_fixture(fixture, "--check", FAILED_LANE=failed_lane, TMPDIR_LITTER="1")
+    private = Path(tmpdir_lines(root)[1])
+    # Not the caller's directory: the removal below would otherwise be of nothing.
+    assert private != root / "orig-tmp" and private.parent == root / "tmpbase"
+    assert not private.exists()
+    assert list((root / "tmpbase").iterdir()) == []
+
+
+def test_an_interrupted_gate_removes_its_private_tmpdir(tmp_path):
+    import signal
+    import time
+    fixture = gate_fixture(tmp_path)
+    root, env = fixture
+    hold = root / "hold-default"
+    started = root / "default-started"
+    hold.touch()
+    env.update(HOLD_DEFAULT=str(hold), DEFAULT_STARTED=str(started), TMPDIR_LITTER="1")
+    process = subprocess.Popen(["bash", str(root / "scripts/gate.sh"), "--check"], cwd=root, env=env,
+                               text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 10
+        while not started.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert started.exists()
+        private = Path(tmpdir_lines(root)[1])
+        assert private.parent == root / "tmpbase" and private.exists()
+        process.send_signal(signal.SIGTERM)
+        hold.unlink()
+        process.communicate(timeout=10)
+        assert process.returncode == 143
+        assert not private.exists()
+        assert list((root / "tmpbase").iterdir()) == []
+    finally:
+        hold.unlink(missing_ok=True)
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=10)
+
+
+@pytest.mark.parametrize("change", [
+    {"FIXTURE_FSTYPE": "ext4"},                       # the base is not tmpfs
+    {"CODESCOUT_GATE_TMPFS_MIN_MB": "999999999"},     # tmpfs without room
+    {"CODESCOUT_GATE_TMPFS_BASE": "off"},             # switched off
+])
+def test_no_private_tmpdir_unless_tmpfs_has_room_and_is_not_switched_off(tmp_path, change):
+    fixture = gate_fixture(tmp_path)
+    root, _ = fixture
+    result = run_gate_fixture(fixture, "--check", **change)
+    assert result.returncode == 0, result.stderr
+    assert set(tmpdir_lines(root)) == {str(root / "orig-tmp")}
+    assert list((root / "tmpbase").iterdir()) == []
+    assert "test temp files" not in result.stdout
+
+
+def test_a_stale_private_tmpdir_left_by_a_killed_gate_is_swept(tmp_path):
+    # SIGKILL cannot run the EXIT trap, so the next gate removes what a killed one left. Only a
+    # directory with the gate's own name and older than half a day goes: a fresh one may belong to a gate
+    # another session is running, and a directory with another name is not this script's to remove.
+    import time
+    fixture = gate_fixture(tmp_path)
+    root, _ = fixture
+    base = root / "tmpbase"
+    stale, fresh, other = (base / "codescout-gate-tmp.stale1", base / "codescout-gate-tmp.fresh1",
+                           base / "unrelated-dir")
+    for directory in (stale, fresh, other):
+        directory.mkdir()
+        (directory / "file").write_text("x")
+    old = time.time() - 2 * 86400
+    for directory in (stale, other):
+        os.utime(directory, (old, old))
+    result = run_gate_fixture(fixture, "--check")
+    assert result.returncode == 0, result.stderr
+    assert not stale.exists()
+    assert fresh.exists()
+    assert other.exists()

@@ -90,13 +90,20 @@ fi
 # parent pid, never by a pattern that could match a peer's process.
 PY_PID=""
 PY_DIR=""
+GATE_TMP=""
 gate_stop_python() {
     if [ -n "$PY_PID" ]; then pkill -P "$PY_PID" 2>/dev/null; kill "$PY_PID" 2>/dev/null; fi
     if [ -n "$PY_DIR" ]; then rm -rf -- "$PY_DIR"; fi
     return 0
 }
+# The private test TMPDIR (made below) goes whatever the exit: green, red or a signal. The pattern guard
+# means a bad value of GATE_TMP can never make this remove something that is not the gate's own directory.
+gate_remove_tmp() {
+    case "$GATE_TMP" in */codescout-gate-tmp.*) rm -rf -- "$GATE_TMP" ;; esac
+    return 0
+}
 CONTEXT_SNAPSHOT=""
-trap 'rm -f -- "${CONTEXT_SNAPSHOT:-}"; gate_stop_python' EXIT
+trap 'rm -f -- "${CONTEXT_SNAPSHOT:-}"; gate_stop_python; gate_remove_tmp' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 CONTEXT_BLOCKED=0
@@ -173,6 +180,32 @@ echo
 # the tokenizer files and unset this.
 export CODESCOUT_SKIP_ONNX_TESTS="${CODESCOUT_SKIP_ONNX_TESTS:-1}"
 
+# Test temp files on tmpfs. Measured 2026-11-05 (memory research/gate-tmpdir-tmpfs-20261105), nextest phase of
+# the default lane: faster with TMPDIR on tmpfs in 3 of 3 pairs (4 s at low load, 27 s and 31 s at high load; n=3,
+# load not controlled) and more stable, and the tests used at most 38 MB there. Only the two nextest commands
+# get it: clippy, the doctest steps and the Python lane were not measured. It is used only when the base is a
+# tmpfs with CODESCOUT_GATE_TMPFS_MIN_MB free (default 1024); CODESCOUT_GATE_TMPFS_BASE moves the base, and
+# `off` or an empty value switches it off.
+GATE_TMP=""
+gate_tmp_base="${CODESCOUT_GATE_TMPFS_BASE-/tmp}"
+gate_tmp_min="${CODESCOUT_GATE_TMPFS_MIN_MB:-1024}"
+if [ -n "$gate_tmp_base" ] && [ "$gate_tmp_base" != off ] && [ -d "$gate_tmp_base" ] \
+        && [[ "$gate_tmp_min" =~ ^[0-9]{1,12}$ ]] \
+        && [ "$(findmnt -no FSTYPE -T "$gate_tmp_base" 2>/dev/null | head -n 1)" = tmpfs ] \
+        && [ "$(df -Pm -- "$gate_tmp_base" 2>/dev/null | awk 'NR == 2 { print $4; exit }')" -ge "$gate_tmp_min" ] 2>/dev/null; then
+    # A gate killed with SIGKILL cannot run its EXIT trap. Its directory is old by the time a later gate
+    # starts, so that gate removes the gate's own stale ones, by name, owner and age. A fresh one may belong
+    # to a gate another session is running now, and a directory with another name is not this script's.
+    find "$gate_tmp_base" -maxdepth 1 -type d -name 'codescout-gate-tmp.*' -user "$(id -u)" -mmin +720 \
+        -exec rm -rf -- {} + 2>/dev/null
+    GATE_TMP=$(mktemp -d "$gate_tmp_base/codescout-gate-tmp.XXXXXX") || GATE_TMP=""
+fi
+GATE_TMP_ENV=()
+if [ -n "$GATE_TMP" ]; then
+    GATE_TMP_ENV=(env "TMPDIR=$GATE_TMP")
+    echo "gate.sh: test temp files in $GATE_TMP (tmpfs), removed when the gate exits"
+fi
+
 # The light Python lane needs neither the leased target dir nor a built binary (tests/test_python_runner.py
 # pins that by making the fixture lane wait for a Cargo lane), so it runs in the background beside the
 # Rust lanes and is joined after the default lane. The default Cargo lane therefore still finishes last
@@ -208,7 +241,7 @@ T_FMT=$((SECONDS - T_PREV)); T_PREV=$SECONDS
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 CLIPPY=$?
 T_CLIPPY=$((SECONDS - T_PREV)); T_PREV=$SECONDS
-cargo nextest run --workspace --no-default-features --no-fail-fast
+${GATE_TMP_ENV[@]+"${GATE_TMP_ENV[@]}"} cargo nextest run --workspace --no-default-features --no-fail-fast
 LEAN=$?
 # nextest does not run doctests, so each test lane has a second command. A lane is red when EITHER is:
 # the nextest exit wins when it is non-zero, else the doctest exit is the lane's. `;` and `||` only,
@@ -217,7 +250,7 @@ cargo test --workspace --doc --no-default-features
 LEAN_DOC=$?
 [ "$LEAN" -ne 0 ] || LEAN=$LEAN_DOC
 T_LEAN=$((SECONDS - T_PREV)); T_PREV=$SECONDS
-cargo nextest run --workspace --no-fail-fast
+${GATE_TMP_ENV[@]+"${GATE_TMP_ENV[@]}"} cargo nextest run --workspace --no-fail-fast
 DEFAULT=$?
 cargo test --workspace --doc
 DEFAULT_DOC=$?

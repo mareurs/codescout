@@ -122,7 +122,7 @@ run_gate() {
     scrub_ram_env
     ( echo "$BASHPID" > "$WORK/gatepid-$tag"; cd "$WORK/repo" && exec env -u CARGO_TARGET_DIR -u CARGO_HOME "${SCRUB[@]}" \
         -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE \
-        HOME="$WORK/home" PATH="$WORK/bin:$PATH" "${session_env[@]}" CODESCOUT_GATE_POOL="$POOL" \
+        HOME="$WORK/home" PATH="$WORK/bin:$PATH" "${session_env[@]}" CODESCOUT_GATE_POOL="$POOL" CODESCOUT_GATE_TMPFS_BASE=off \
         GATE_TEST_TAG="$tag" GATE_TEST_WORK="$WORK" "$@" bash "$GATE" "${mode[@]}" ) \
         > "$WORK/out-$tag" 2>&1
 }
