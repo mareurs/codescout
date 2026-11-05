@@ -1057,7 +1057,9 @@ fn declaration_header(text: &str) -> Option<String> {
 /// fun f() {`, Rust `#[inline] fn f() {`), because skipping that line whole would
 /// make the next body line the first header line. An `@name` with no bracket group
 /// is followed by nothing but a comment. Brackets inside `"` strings are ignored
-/// (single quotes are not tracked).
+/// (single quotes are not tracked, so a bracket inside `'...'` can leak: the group can
+/// close early, or late on a body line, after which the next body line is read as the
+/// header; see the known limits of [`declaration_changed`]).
 fn skip_annotation_line(mut depth: usize, t: &str) -> Option<usize> {
     let mut rest = t;
     if depth == 0 {
@@ -1279,10 +1281,18 @@ fn header_end(code: &str, st: &mut HeaderScan, lead: Lead) -> HeaderEnd {
 /// - an assignment written without spaces, or with a space only on its left
 ///   (`x= cond ? {`, `const x =c ? {`), is not seen as one, so the `{` ends the
 ///   header and a body-only edit before it reads as a header change (`Some(true)`);
-/// - single-quoted strings are not tracked, so a bracket inside `'...'` leaks into
-///   the bracket depth and can give a false `Some(true)` in Python
-///   (`def f(a='('):\n    for x in g(')'):`, `x` -> `y`); in a decorator the same
-///   leak reads as `None` (`@d(')',\n    1,\n)` leaves text after a closed bracket);
+/// - single-quoted strings are not tracked, so a bracket inside `'...'`, in a `def`
+///   default or in a decorator or annotation argument, leaks into the bracket depth.
+///   The result can be `None` or a false `Some(true)` in Python. A false `Some(true)`
+///   on a body-only edit: `def f(a='('):\n    for x in g(')'):` (`x` -> `y`), and,
+///   through a decorator (`log()` -> `warn()` in both):
+///   `@d(\n    '(',\n)\ndef f(self):\n    g(')')\n    log()\n    return {}` and
+///   `@app.route('/a(')\ndef f(self):\n    g(')')\n    log()\n    return {}`.
+///   The decorator's bracket group stays open until the body line `g(')')` closes it,
+///   so `log()` is read as the first header line (headers `log() return {` and
+///   `warn() return {`). `None` instead: `@d(')',\n    1,\n)` (text after a closed
+///   bracket). Kotlin/Java char literals (`@A('(')`) may behave the same (not probed).
+///   This is an accepted limit;
 /// - a Rust associated-type binding (`Iterator<Item = u8>`) counts as an
 ///   assignment, so such a signature gives `None`.
 pub fn declaration_changed(old: &str, new: &str) -> Option<bool> {
