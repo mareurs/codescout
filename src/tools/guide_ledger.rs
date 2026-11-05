@@ -116,6 +116,48 @@ pub struct GuideLedger {
     /// whether the last session start WAS one.
     /// docs/issues/archive/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md
     session_start_source: Option<String>,
+    /// Why this ledger lost keys since the last delivery was recorded. Filled by
+    /// the paths that remove keys (`clear`, `re_arm`, `expire_idle`) and emptied
+    /// by [`take_rearm_causes`](Self::take_rearm_causes), which the coordinator
+    /// calls once, for the first delivery it records. The cause therefore rides
+    /// the next delivery rather than being written when the re-arm happens.
+    ///
+    /// `rekey` and `adopt` record nothing: they point the ledger at another
+    /// conversation, and `usage.db` groups repeats by conversation, so a session
+    /// change cannot produce a repeat to explain.
+    rearm_causes: Vec<RearmCause>,
+}
+
+/// What made a ledger forget keys it held. One variant per path that removes keys
+/// from a live conversation's ledger; `as_str` is the value recorded in
+/// `DeliveryRecord::rearm`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RearmCause {
+    /// `workspace(activate)` on a server with no companion rendezvous: the blunt
+    /// total clear.
+    Activate,
+    /// `workspace(post_compact=true)` that found no proof of a plain reconnect.
+    PostCompact,
+    /// A project switch, or a reconnect to a ledger that was not empty: only the
+    /// project-scoped guide re-arms.
+    ProjectSwitch,
+    /// A `SubagentStart` or resume request file re-armed topics for one subagent.
+    SubagentRearm,
+    /// The anonymous tier's idle TTL.
+    IdleTtl,
+}
+
+impl RearmCause {
+    /// The recorded name. Stable: scripts group `deliveries_json` rows by it.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Activate => "activate",
+            Self::PostCompact => "post_compact",
+            Self::ProjectSwitch => "project_switch",
+            Self::SubagentRearm => "subagent_rearm",
+            Self::IdleTtl => "idle_ttl",
+        }
+    }
 }
 
 /// Accepts both on-disk shapes. `untagged` is unambiguous here because a JSON
@@ -148,6 +190,7 @@ impl GuideLedger {
             key: Some(session_id.to_string()),
             rendezvous_active: false,
             session_start_source: None,
+            rearm_causes: Vec::new(),
         }
     }
 
@@ -163,6 +206,7 @@ impl GuideLedger {
             key: None,
             rendezvous_active: false,
             session_start_source: None,
+            rearm_causes: Vec::new(),
         }
     }
 
@@ -275,7 +319,7 @@ impl GuideLedger {
 
     /// Forget all topics (workspace activate / post-compact re-arm). Persists
     /// by removing the file so a later reload re-arms every guide.
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self, cause: RearmCause) {
         let was_nonempty = !self.emitted.is_empty();
         self.emitted.clear();
         // Notices re-arm with the guides: an `activate` is precisely the act a
@@ -284,8 +328,27 @@ impl GuideLedger {
         self.notices.clear();
         self.held.clear();
         if was_nonempty {
+            self.note_rearm(cause);
             self.persist();
         }
+    }
+
+    /// Remember `cause` for the next recorded delivery. Called only when keys
+    /// were actually removed, and keeps one entry per cause.
+    fn note_rearm(&mut self, cause: RearmCause) {
+        if !self.rearm_causes.contains(&cause) {
+            self.rearm_causes.push(cause);
+        }
+    }
+
+    /// Hand over, and forget, the causes recorded since the last call. The
+    /// coordinator calls this once, when it records a delivery, so a cause rides
+    /// the first delivery after the re-arm and no other.
+    pub fn take_rearm_causes(&mut self) -> Vec<&'static str> {
+        std::mem::take(&mut self.rearm_causes)
+            .into_iter()
+            .map(RearmCause::as_str)
+            .collect()
     }
 
     /// Point this ledger at a different conversation, discarding everything the
@@ -456,7 +519,7 @@ impl GuideLedger {
     /// starvation of an unrelated guide.
     ///
     /// Persists only when something was actually removed.
-    pub fn re_arm(&mut self, topics: &[&str]) {
+    pub fn re_arm(&mut self, topics: &[&str], cause: RearmCause) {
         let mut changed = false;
         self.emitted.retain(|key, _| {
             let matches = topics.iter().any(|t| {
@@ -475,6 +538,7 @@ impl GuideLedger {
             // will be served again, which registers a fresh hold.
             let emitted = &self.emitted;
             self.held.retain(|key, _| emitted.contains_key(key));
+            self.note_rearm(cause);
             self.persist();
         }
     }
@@ -495,6 +559,7 @@ impl GuideLedger {
         self.emitted.retain(|_topic, at| *at > cutoff);
         let removed = before - self.emitted.len();
         if removed > 0 {
+            self.note_rearm(RearmCause::IdleTtl);
             self.persist();
         }
         removed
@@ -674,7 +739,7 @@ mod tests {
 
         // Clear persists (removes the file) → next reload re-arms (compaction).
         let mut l4 = GuideLedger::load("sess-A", Some(hints_dir.clone()));
-        l4.clear();
+        l4.clear(RearmCause::PostCompact);
         drop(l4);
         let l5 = GuideLedger::load("sess-A", Some(hints_dir));
         assert!(!l5.contains("librarian"), "clear must persist");
@@ -687,7 +752,7 @@ mod tests {
         let mut l = GuideLedger::default();
         assert!(l.insert("x".to_string()));
         assert!(l.contains("x"));
-        l.clear();
+        l.clear(RearmCause::PostCompact);
         assert!(!l.contains("x"));
     }
 
@@ -895,7 +960,7 @@ mod tests {
         l.insert("librarian".to_string());
         l.insert("symbol-navigation".to_string());
 
-        l.re_arm(&["project-activation-bootstrap"]);
+        l.re_arm(&["project-activation-bootstrap"], RearmCause::ProjectSwitch);
 
         assert!(
             !l.contains("project-activation-bootstrap"),
@@ -932,7 +997,7 @@ mod tests {
             .modified()
             .unwrap();
 
-        l.re_arm(&["never-emitted"]);
+        l.re_arm(&["never-emitted"], RearmCause::ProjectSwitch);
         assert!(l.contains("librarian"));
 
         let after = std::fs::metadata(hints.join("sess-rearm-absent.json"))
@@ -951,7 +1016,7 @@ mod tests {
         l.insert("librarian#Artifact Model".to_string());
         l.insert("librarian#Filter AST".to_string());
         l.insert("tracker-conventions".to_string());
-        l.re_arm(&["librarian"]);
+        l.re_arm(&["librarian"], RearmCause::ProjectSwitch);
         assert!(!l.contains("librarian#Artifact Model"));
         assert!(!l.contains("librarian#Filter AST"));
         // Unrelated topics survive; and a topic that merely SHARES a prefix must not
@@ -964,9 +1029,55 @@ mod tests {
         let mut l = GuideLedger::anonymous(None);
         l.insert("librarian-runtime".to_string());
         l.insert("librarian-runtime#Trackers".to_string());
-        l.re_arm(&["librarian"]);
+        l.re_arm(&["librarian"], RearmCause::ProjectSwitch);
         assert!(l.contains("librarian-runtime"));
         assert!(l.contains("librarian-runtime#Trackers"));
+    }
+    #[test]
+    fn every_rearm_path_records_the_cause_of_what_it_removed() {
+        use std::time::Duration;
+        let causes = |l: &mut GuideLedger| l.take_rearm_causes();
+
+        let mut l = GuideLedger::anonymous(None);
+        l.insert("librarian".to_string());
+        l.clear(RearmCause::PostCompact);
+        assert_eq!(causes(&mut l), vec!["post_compact"]);
+
+        l.insert("librarian".to_string());
+        l.clear(RearmCause::Activate);
+        assert_eq!(causes(&mut l), vec!["activate"]);
+
+        l.insert("librarian".to_string());
+        l.re_arm(&["librarian"], RearmCause::ProjectSwitch);
+        assert_eq!(causes(&mut l), vec!["project_switch"]);
+
+        l.insert("librarian".to_string());
+        l.re_arm(&["librarian"], RearmCause::SubagentRearm);
+        assert_eq!(causes(&mut l), vec!["subagent_rearm"]);
+
+        l.insert("librarian".to_string());
+        l.backdate_for_test("librarian", chrono::Duration::hours(6));
+        assert_eq!(l.expire_idle(Duration::from_secs(2 * 60 * 60)), 1);
+        assert_eq!(causes(&mut l), vec!["idle_ttl"]);
+    }
+
+    #[test]
+    fn a_rearm_that_removed_nothing_records_no_cause() {
+        let mut l = GuideLedger::anonymous(None);
+        l.clear(RearmCause::PostCompact);
+        l.re_arm(&["never-emitted"], RearmCause::ProjectSwitch);
+        assert!(l.take_rearm_causes().is_empty());
+    }
+
+    #[test]
+    fn causes_wait_for_the_next_delivery_and_are_taken_once() {
+        let mut l = GuideLedger::anonymous(None);
+        l.insert("a".to_string());
+        l.clear(RearmCause::PostCompact);
+        l.insert("b".to_string());
+        l.re_arm(&["b"], RearmCause::PostCompact);
+        assert_eq!(l.take_rearm_causes(), vec!["post_compact"], "deduplicated");
+        assert!(l.take_rearm_causes().is_empty(), "taken once");
     }
 
     #[test]
@@ -1487,7 +1598,7 @@ mod tests {
         let mut l = GuideLedger::anonymous(None);
         l.set_rendezvous_active(true);
         l.insert("librarian".to_string());
-        l.clear();
+        l.clear(RearmCause::PostCompact);
         assert!(l.rendezvous_active(), "clear must not close the gate");
     }
 }

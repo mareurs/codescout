@@ -1784,6 +1784,7 @@ mod content_tests {
                 bytes: 1,
             }],
             hint: true,
+            rearm: vec![],
         };
         let _ = recorder
             .record_content("symbols", &json!({"query": "x"}), None, || async move {
