@@ -1000,7 +1000,7 @@ pub fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String 
 /// text ends.
 fn declaration_header(text: &str) -> Option<String> {
     let mut header = String::new();
-    let mut depth = 0;
+    let mut scan = HeaderScan::default();
     let mut pythonic = false;
     let lines = text.lines().skip_while(|line| {
         let t = line.trim();
@@ -1015,7 +1015,11 @@ fn declaration_header(text: &str) -> Option<String> {
         if n == 0 {
             pythonic = matches!(code.split_whitespace().next(), Some("def" | "async"));
         }
-        let end = header_end(code, &mut depth, pythonic);
+        let end = match header_end(code, &mut scan, pythonic) {
+            HeaderEnd::Unreadable => return None,
+            HeaderEnd::At(end) => Some(end),
+            HeaderEnd::Open => None,
+        };
         for word in code[..end.unwrap_or(code.len())].split_whitespace() {
             if !header.is_empty() {
                 header.push(' ');
@@ -1029,16 +1033,51 @@ fn declaration_header(text: &str) -> Option<String> {
     None
 }
 
-/// Byte offset in `code` (one comment-free header line) where the declaration
-/// header ends and the body begins, or `None` when this line does not end it.
-/// `depth` is the open `(`/`[` count carried across lines. The header ends only:
-/// just after a `{` outside strings and brackets; or, for a Python-style `def`
-/// (`pythonic`), just after a top-level `:` unless an ` = ` follows on the line (a
-/// Scala `def f(x: Int): Int = ..` is not cut there), or at the end of a line
-/// that ends in `:` with all brackets closed. Every other shape (a line ending in
-/// `;`, a `=>` or ` = ` expression body, a brace body inside call arguments) has
-/// no header end here: the caller must not guess one.
-fn header_end(code: &str, depth: &mut usize, pythonic: bool) -> Option<usize> {
+/// What [`header_end`] found on one header line.
+#[derive(Debug, PartialEq)]
+enum HeaderEnd {
+    /// The header does not end on this line; read the next one.
+    Open,
+    /// The header ends at this byte offset of the line.
+    At(usize),
+    /// The header has no readable end: a `{` that may open an expression, not a body.
+    Unreadable,
+}
+
+/// State [`header_end`] carries across the lines of one header.
+#[derive(Default)]
+struct HeaderScan {
+    /// Open `(`/`[` count.
+    depth: usize,
+    /// A depth-0 `=>` or standalone `=` (space, line start or line end on both sides)
+    /// has been seen.
+    assigned: bool,
+    /// The last two non-whitespace characters read, outside strings, across lines.
+    tail: [char; 2],
+}
+
+impl HeaderScan {
+    /// The text read so far, ignoring whitespace, ends with `=>` or `=`.
+    fn ends_in_assignment(&self) -> bool {
+        self.tail == ['=', '>'] || self.tail[1] == '='
+    }
+}
+
+/// Where in `code` (one comment-free header line) the declaration header ends and
+/// the body begins. The header ends only: just after a `{` outside strings and
+/// brackets; or, for a Python-style `def` (`pythonic`), just after a top-level `:`
+/// unless an ` = ` follows on the line (a Scala `def f(x: Int): Int = ..` is not cut
+/// there), or at the end of a line that ends in `:` with all brackets closed.
+///
+/// Once a top-level `=>` or standalone `=` has been read, a later top-level `{`
+/// ends the header only when the text right before it (whitespace ignored, line
+/// breaks included) ends with `=>` or `=`: `const f = (x) => {` and `const x = {`
+/// end there, `x ? {a: 1} : ..`, `when (x) {` and `run {` do not and make the header
+/// [`HeaderEnd::Unreadable`], because the text before such a brace is a body
+/// expression. Every other shape (a line ending in `;`, a `=>` or ` = ` expression
+/// body, a brace body inside call arguments) has no header end: the caller must
+/// not guess one.
+fn header_end(code: &str, st: &mut HeaderScan, pythonic: bool) -> HeaderEnd {
     let mut in_str = false;
     for (i, c) in code.char_indices() {
         if c == '"' {
@@ -1048,15 +1087,31 @@ fn header_end(code: &str, depth: &mut usize, pythonic: bool) -> Option<usize> {
             continue;
         }
         match c {
-            '(' | '[' => *depth += 1,
-            ')' | ']' => *depth = depth.saturating_sub(1),
-            _ if *depth > 0 => {}
-            '{' => return Some(i + 1),
-            ':' if pythonic && !code[i..].contains(" = ") => return Some(i + 1),
+            '(' | '[' => st.depth += 1,
+            ')' | ']' => st.depth = st.depth.saturating_sub(1),
+            _ if st.depth > 0 => {}
+            '{' if !st.assigned || st.ends_in_assignment() => return HeaderEnd::At(i + 1),
+            '{' => return HeaderEnd::Unreadable,
+            '=' => {
+                let next = code[i + 1..].chars().next();
+                let prev = code[..i].chars().next_back();
+                let arrow = next == Some('>');
+                let standalone =
+                    prev.is_none_or(char::is_whitespace) && next.is_none_or(char::is_whitespace);
+                st.assigned |= arrow || standalone;
+            }
+            ':' if pythonic && !code[i..].contains(" = ") => return HeaderEnd::At(i + 1),
             _ => {}
         }
+        if !c.is_whitespace() {
+            st.tail = [st.tail[1], c];
+        }
     }
-    (pythonic && *depth == 0 && code.trim_end().ends_with(':')).then_some(code.len())
+    if pythonic && st.depth == 0 && code.trim_end().ends_with(':') {
+        HeaderEnd::At(code.len())
+    } else {
+        HeaderEnd::Open
+    }
 }
 
 /// Whether a replaced symbol's declaration header (see [`declaration_header`])
@@ -1073,7 +1128,9 @@ fn header_end(code: &str, depth: &mut usize, pythonic: bool) -> Option<usize> {
 /// - `None`: no header end was read on one side: the text has no header line, or
 ///   its body does not start at a depth-0 `{` or a Python `def` colon (a bodyless
 ///   `fn f();`, a `=>` or ` = ` expression body, a brace body inside call
-///   arguments, a Python one-liner whose body holds ` = `, a `class` header).
+///   arguments, a Python one-liner whose body holds ` = `, a `class` header), or
+///   the first depth-0 `{` after a `=>` or ` = ` does not directly follow it
+///   (`x ? {a: 1} : ..`, `when (x) {`, `run {`, `function(x) {`).
 ///   The caller must not claim either way.
 pub fn declaration_changed(old: &str, new: &str) -> Option<bool> {
     Some(declaration_header(old)? != declaration_header(new)?)
@@ -1269,6 +1326,81 @@ mod tests {
             // Bodyless declarations end at `;`, which is not a header end.
             ("fn a(x: u8);", "fn a(x: u8, y: u8);"),
             ("fn a(x: u8);  // one", "fn a(x: u8);  // two"),
+        ] {
+            assert_eq!(declaration_changed(old, new), None, "{old} -> {new}");
+        }
+    }
+    #[test]
+    fn declaration_changed_reads_a_brace_that_directly_follows_an_arrow_or_an_assignment() {
+        // Body-only edits: the header is `const f = (x) => {` / `const x = {`.
+        assert_eq!(
+            declaration_changed(
+                "const f = (x) => {\n  a();\n}",
+                "const f = (x) => {\n  b();\n}"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            declaration_changed("const x = {\n  a: 1,\n};", "const x = {\n  a: 2,\n};"),
+            Some(false)
+        );
+        // The brace may sit on the next line.
+        assert_eq!(
+            declaration_changed("const x =\n{\n  a: 1,\n};", "const x =\n{\n  a: 2,\n};"),
+            Some(false)
+        );
+        // A parameter change is a header change.
+        assert_eq!(
+            declaration_changed(
+                "const f = (x) => {\n  a();\n}",
+                "const f = (x, y) => {\n  a();\n}"
+            ),
+            Some(true)
+        );
+        // No earlier `=` or `=>`: a depth-0 `{` ends the header as before.
+        for decl in [
+            "fn a() -> u8 {\n    1\n}",
+            "fn a<T>(x: T) -> u8 where T: Copy {\n    1\n}",
+            "function f(a: {x: number}) {\n  1;\n}",
+            "class A extends B {\n  m() {}\n}",
+        ] {
+            assert_eq!(declaration_changed(decl, decl), Some(false), "{decl}");
+        }
+    }
+
+    #[test]
+    fn declaration_changed_is_none_for_a_brace_inside_an_expression_body() {
+        for (old, new) in [
+            // The edited `x` sits before the first `{` of an arrow expression body.
+            (
+                "const f = (x: number) => x ? {a: 1} : {b: 2};",
+                "const f = (x: number) => !x ? {a: 1} : {b: 2};",
+            ),
+            // Kotlin `when` after a line break, and a `run {` lambda.
+            (
+                "fun f(x: Int) =\n    when (x) {\n        1 -> 2\n        else -> 3\n    }",
+                "fun f(x: Int) =\n    when (x + 1) {\n        1 -> 2\n        else -> 3\n    }",
+            ),
+            ("fun f() = run {\n    1\n}", "fun f() = run {\n    2\n}"),
+            // A later `{` that does follow an `=` is body text, not the header end.
+            (
+                "fun f() = run {\n    val y = {\n        1\n    }\n}",
+                "fun f() = run {\n    val y = {\n        2\n    }\n}",
+            ),
+            // Accepted, safe direction: the brace follows `)`, `Foo`, not `=>` or `=`.
+            (
+                "const f = function(x) {\n  a();\n}",
+                "const f = function(x) {\n  b();\n}",
+            ),
+            (
+                "static S: Foo = Foo {\n    a: 1,\n};",
+                "static S: Foo = Foo {\n    a: 2,\n};",
+            ),
+            // Known limit: ` = ` of an associated-type binding counts as an assignment.
+            (
+                "fn a() -> impl Iterator<Item = u8> {\n    1\n}",
+                "fn a() -> impl Iterator<Item = u8> {\n    2\n}",
+            ),
         ] {
             assert_eq!(declaration_changed(old, new), None, "{old} -> {new}");
         }
