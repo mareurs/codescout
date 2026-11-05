@@ -370,6 +370,15 @@ A missing row after a `"cleared"` response falsifies prediction 2 and means the 
 
 **What it takes to run the test for real.** Restart the MCP server for the session (`/mcp`) so it loads the current `target/release/codescout`. Confirm the serving process by matching `instance=` in `.codescout/diagnostic-*.log` to its pid, then `grep -c -a subagent_rearm /proc/<pid>/exe` must give at least 1. Only then compact again and run the check query. A `rekey` or `adopt` before the clear would leave `clear` nothing to remove, so no cause is recorded by design; with the right binary, check the log for `restored`/`adopted` lines before calling a missing `rearm` a failure.
 
+**Result of the second compaction, on the right binary (2026-11-05, 15:53-15:54 UTC).** Serving process: pid 2749660, instance `0696`, log `.codescout/diagnostic-0696.log`, `subagent_rearm` count 1 in its image. The log has no `restored`/`adopted` line before the clear, so the empty-ledger exception did not apply.
+
+1. Held. `workspace(post_compact=true)` answered `"ledger": "cleared"` (log line 35).
+2. Held. Row 268049 (`workspace`, engine `session-opener`) has `rearm` equal to `["post_compact"]`. No later main-thread row has `post_compact`. Row 268000 has `["project_switch"]`: it is the first delivery after the server started, so the cause is correct, and it was a bonus observation, not a prediction.
+3. Held. Rows 268011, 268049 and 268050-268053 (main thread) have `agent_id` NULL.
+4. Held, with a correction to the prediction. A NEW subagent (`a90ee21e2388320ae`, row 268055, `get_guide`) has a non-NULL `agent_id` and a `session-opener` delivery, but NO `rearm`. The log shows the server did call `re_arm` for it (line 52), but its ledger was empty, so `re_arm` removed no key and `note_rearm` recorded nothing. This is by design. After `SendMessage` resumed the same subagent, row 268071 has `agent_id` `a90ee21e2388320ae` and `rearm` equal to `["subagent_rearm"]`. The log shows `restored the guide ledger of a previously served principal` (line 74) and then `re-arming guide topics` (line 75). So `subagent_rearm` marks a RESUMED subagent whose ledger holds the topic, not a first dispatch.
+
+**Consequence for readers of `deliveries_json`.** A missing `rearm` on a subagent's first row is normal. Count `subagent_rearm` rows as resumes, never as dispatches.
+
 ## Template for new entries
 
 ```
