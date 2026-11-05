@@ -22,3 +22,8 @@ Design: `docs/superpowers/specs/2026-11-04-harness-delivered-hints-design.md` (i
 - The controller does not fix findings itself; every task is review-gated, a reviewer that RUNS code finds what reading does not (the scanner and the hook text filter both hid false-positive classes that only a run showed).
 - A claim in a summary of an earlier task can contradict that task's own data (a 2 MiB stdout listed as a failure mode that relocated): check summaries against the raw output.
 - Shared checkout index holds peers' staged files: commit by pathspec (`docs/conventions/shared-checkout-commit-sequence.md`), never bare `git commit`.
+
+## Live check after the merge (2026-11-05, this session, `/reload-plugins`, no cold start)
+- `/reload-plugins` re-read `codescout-companion@sdd-misc-plugins` from `~/work/claude/claude-plugins/codescout-companion` (the main checkout), and the hook was active at once in the running session. What a cold start reads (working tree or cache) is still unmeasured.
+- One real `edit_code replace` on a scratch TypeScript file (worktree, deleted after) gave the first product-path relocation: the visible result had no `advice`, and a system-role message `PostToolUse:mcp__codescout__edit_code hook additional context: [cs-verified] ...` arrived. n=1, one model, not a measurement of the model's behaviour.
+- What makes `verified:true` (read in `src/tools/symbol/tests.rs`, `callers_check.rs`): a replace that CHANGES THE SIGNATURE and a call in ANOTHER file. A body-only edit carries no advice and no hint (tests `..._body_only_edit_carries_no_advice`); a signature change with the caller in the same file gave `verified:false` (TypeScript cannot prove absence), and the hook left that advice in the result, as designed.
