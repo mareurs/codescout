@@ -268,7 +268,19 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 **Observed.** Not measured: whether `agent_id` survives a subagent's own compaction or resume; nested dispatch beyond the fork-seed guard (companion `3b94e5f`); clients other than Claude Code. The cross-repo key-drift guard is local only: codescout now pins the full literal (`4516d674c`), but no CI job sees both repos.
 
-**Next:** a live probe of `agent_id` across a subagent resume (S); a CI job that checks out both repos (M–L).
+**Probe result (2026-11-05, Claude Code 2.1.318, headless, Sonnet).** One persisted `claude -p` session driven with `--resume` in the isolated `plugin-free` cell, with a logging hook on `PreToolUse`, `SubagentStart`, `SubagentStop`, `PreCompact` and `SessionStart`. Four turns: dispatch a subagent (it ran one `Bash`), `SendMessage` to resume it (one `Bash`), `/compact` on the parent, `SendMessage` to resume it again (one `Bash`). Cost about $0.55.
+
+| step | subagent `Bash` call `agent_id` | parent calls |
+|---|---|---|
+| dispatch | `a2ea815e9d940ed22` | no `agent_id` |
+| resume by `SendMessage` | `a2ea815e9d940ed22` | no `agent_id` |
+| resume after the parent's `/compact` | `a2ea815e9d940ed22` | no `agent_id` |
+
+`agent_id` survives a `SendMessage` resume and a parent compaction. `session_id` stayed `c2b187b5-e0a4-43f9-be66-2d9d5982fc19` throughout. Each resume fired a fresh `SubagentStart` with the same `agent_id`, so `guide_rearm` re-arms on every resume by design. The compaction itself ran as a hidden agent: one `SubagentStop` with `agent_id` `a4ae8eb857838b3c1` and an empty `agent_type`, no `SubagentStart`, no tool call. `agent-guide-restore.mjs` treats a missing snapshot as a silent no-op, so that event is harmless to the companion.
+
+**Limits.** One agent and one resume path (`SendMessage`). The probe reads the Claude Code hook payload, which is what `principal-stamp.mjs` stamps from, but it did not run the codescout MCP server, so the stamped key and the ledger file were not observed. A subagent's own compaction was not measured: it cannot be forced cheaply, and the ADR line stays open for it. The scripts lived in the session scratchpad and are not kept.
+
+**Next:** a CI job that checks out both repos (M–L). The subagent's own compaction needs a subagent long enough to auto-compact.
 
 ## CIW-19 — Guide-ledger residuals S-01, S-02 and S-04
 
