@@ -98,6 +98,19 @@ Actual Codex app-server API `config/mcpServer/reload` accepted `{}` for the runn
 
 Receipts and source snapshot: `/home/marius/.cache/codescout-resident/codescout/native-build-provenance-20261104`. No new model/onboarding calls or paid worker admission.
 
+## Claude-side `/mcp` reconnect check — 2026-11-05
+
+Read from tool output in the Claude session `48d211eb` after `/mcp`:
+
+- `index(action="status")` reports `reading_binary_sha: 538068636`, `reading_binary_dirty: false`. `git rev-parse HEAD` gave `538068636222134f2d5de8bff1c498400ca4104e`.
+- `target/release/codescout` has mtime 2026-11-05 09:20:21 +0200. HEAD was committed at 08:58:05 +0200.
+- `git merge-base --is-ancestor` says `a8ee4db68` (this fix) is an ancestor of `538068636`.
+- The semantic store is queryable: 108513 chunks, 3254 files. The bootstrap block says `Built`.
+
+What this does not show: this project has both the legacy `.codescout/embeddings/project.db` and a populated store. The old code would also say `Built` here. So the live server is not tested on the two cells that differ (populated store without the legacy file, empty store with the legacy file). Only the copied binary was tested on those cells (see the sections above). The `unverified` caveat stays.
+
+The semantic index was 15 commits behind HEAD (`last_indexed_commit: 89b7e151`). No `index(action="build")` was run.
+
 ## Workarounds
 Read actual status, verify and query results; do not schedule a paid comparison from the banner or blindly rebuild from it.
 
