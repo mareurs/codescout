@@ -1,0 +1,24 @@
+# Harness-delivered hints — slices 1 and 2: state and resume pointers (2026-11-05)
+
+Design: `docs/superpowers/specs/2026-11-04-harness-delivered-hints-design.md` (id `95abaa31c77daa39`, `## Rollout` is the record). Eval behind it: memory `research/hint-channel-authority`.
+
+## Done
+- Slice 1 (server, codescout `experiments`): `edit_code replace` emits `advice {text, verified}`; the safety warning in `hint` is kept; `rename` hint names the new symbol. First emitting commit `08775f958`. The declaration check is a TREE-SITTER header reader (`src/symbol/declaration.rs`, added in `310a20e86`, wired in at `4414a44fb`, merge `4214c5f77`): five rounds of a text scanner each left a new false-`verified:true` class, so it was replaced. Bugs `053ca236198f1b9b` (fixed with a caveat, not archived: no test can force `CorruptionVerdict::Unverified` through the real replace arm) and `66b133ffaa36de89` (archived).
+- Slice 2 (hook, repo claude-plugins, branch `feat/cs-verified-hook`, worktree `claude-plugins.worktrees/cs-verified-hook`, base main `54c2f25`, NOT merged, NOT pushed, NOT released): `codescout-companion/hooks/cs-verified-relocate.mjs`; Tasks 1-4 reviewed and complete (Task 4, the end-to-end run on the real CLI: `11c7b1e`, fix rounds `1c54607` and `2a1a7a8`, both re-reviews clean); the design Rollout is committed in codescout as `5a16350e0`; full test run of the worktree at `2a1a7a8` and the finishing menu are the next steps. Deferred minors: the `run.sh` interactive path aborts when the CLI writes no transcript (glob without nullglob); the design says only the slowed f4 run separates finishing order from registration order, but f1 does too. Plan `docs/superpowers/plans/2026-11-05-cs-verified-companion-hook.md` (id `1741311c9fa4d5af`). Ledger with every Ruling and the RESUME block: `/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-05-cs-verified-companion-hook/progress.md` (git-ignored scratch; copy it before any `git clean`).
+
+## Measured facts the hook rests on (Claude Code 2.1.318 and 2.1.311, `claude-haiku-5-5`, n = 1 per mode per version; see `codescout-companion/contracts/fixtures/cs-verified/results.md`)
+- `tool_response` is a list of blocks; empty stdout is accepted; `exit 2` leaks stderr and the full command line to the model (never use it); a timeout cancels and leaves the result unchanged; the relocated text reaches the model as a system-role message `PostToolUse:<tool> hook additional context: ...`, not a system-reminder tag.
+- Host gate: hook stdin `session_id` equals the `CLAUDE_CODE_SESSION_ID` the CLI sets for the hook (it overwrites an inherited value), in -p, resume, fork, interactive across `/clear`, subagent. Silent fail-closed in unmeasured modes is the risk.
+- A `--settings` hook whose command contains `${CLAUDE_PLUGIN_ROOT}` is refused by the CLI: the shipped entry runs only as a plugin hook.
+- The hook refuses advice text with invisible or non-printing characters (Unicode Cc, Cf, Co, Cn, Cs, Zl, Zp, Default_Ignorable, U+2800, Zs except space, 9+ combining marks), a `[cs-` or `system-reminder` marker after NFKC, anything over 1000 code points, and requires a `mcp__codescout__` tool-name prefix.
+
+## Open (the user decides)
+- Consent-gated relocation: today the hook relocates with or without the CLAUDE.md consent statement (slice 3, unshipped). Effect on the model of unendorsed `[cs-verified]` context is unmeasured.
+- Token rotation: `/home/marius/.config/s5/token` (default account, used for Task 4) and `token-claude-stef` (used for Task 1) are both recorded exposed in `research/setup-ab-eval-token-files`.
+- Finishing the claude-plugins branch (merge only as fast-forward and only if clean: the claude-plugins main checkout holds another session's uncommitted work) and the release (`./scripts/release.sh codescout-companion`, clean main, cold restart of every Claude Code instance, refresh tracker `cc8cb9e23ab5cc67`, remove "(not released)" from the companion README).
+- Later slices: 3 consent text, 4 product-path measurement (pre-register before data), 5 more hint classes; buddy hook bugs `9419db55285a2f81`, `67ee3305dce3224c`; compaction persistence of relocated context unmeasured.
+
+## Traps paid for
+- The controller does not fix findings itself; every task is review-gated, a reviewer that RUNS code finds what reading does not (the scanner and the hook text filter both hid false-positive classes that only a run showed).
+- A claim in a summary of an earlier task can contradict that task's own data (a 2 MiB stdout listed as a failure mode that relocated): check summaries against the raw output.
+- Shared checkout index holds peers' staged files: commit by pathspec (`docs/conventions/shared-checkout-commit-sequence.md`), never bare `git commit`.
