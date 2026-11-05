@@ -334,6 +334,33 @@ So at most **3.27 MB in 30 days (about 109 KB a day, about 0.82 M tokens at 4 B 
 **Result (2026-11-05, `9ea0cb840`).** Ruling: the cause rides the next delivery. `GuideLedger` keeps `rearm_causes`; `clear`, `re_arm` and `expire_idle` add one `RearmCause` when they removed keys. `run_post_in` takes them once, for the first delivery it records, into `DeliveryRecord.rearm` (omitted when empty, so old rows keep their shape). A response that delivers nothing leaves the cause for the next one. Causes: `activate`, `post_compact`, `project_switch`, `subagent_rearm`, `idle_ttl`. `rekey` and `adopt` record nothing, because a conversation change cannot show as a repeat in `usage.db`. Tests: `every_rearm_path_records_the_cause_of_what_it_removed`, `a_rearm_that_removed_nothing_records_no_cause`, `causes_wait_for_the_next_delivery_and_are_taken_once`, `a_rearm_cause_rides_the_first_delivery_only_and_survives_an_empty_response`. Gate: lean 6,067 and default 8,935 passed.
 
 **Limits.** Only new rows carry `rearm`; old rows cannot be classified this way. A `post_compact` that the `SessionStart:compact` request file handles without a `workspace(post_compact)` call may still record no cause. Re-run the CIW-20 classification on rows after this commit to see how much of the 31.6% remains.
+## Resume — state before the live compaction test, 2026-11-05
+
+**Session.** `732f1c09-df3f-48d4-be63-d9326860edda`, profile `~/.claude-kat`, project `/home/marius/work/claude/codescout`, branch `experiments`. Transcript `~/.claude-kat/projects/-home-marius-work-claude-codescout/732f1c09-df3f-48d4-be63-d9326860edda.jsonl`. Buddy state `.buddy/732f1c09-df3f-48d4-be63-d9326860edda/`. The serving MCP process is pid 268135, started 2026-11-05 13:28:38 +02:00; its binary is `target/release/codescout`, since rebuilt (the running image shows `(deleted)`), and contains `subagent_rearm`, so it has CIW-21 (`9ea0cb840`).
+
+**Why a live test.** CIW-21 was only tested in unit tests and the gate. CIW-18's probe ran headless, without the codescout server. This compaction is the first one where the shipped `RearmCause` code, the companion hooks and a real ledger meet.
+
+**Baseline before compacting** (`.codescout/usage.db`, `cc_session_id` above): 837 rows, `max(id)` 267593 at 2026-11-05 14:37:39 UTC, 0 rows whose `deliveries_json` holds `"rearm"`. No re-arm has happened in this server's life.
+
+**Prediction, to be held or falsified.**
+
+1. The companion's `SessionStart` hook reports `source: compact`, and the first `workspace(post_compact=true)` clears the ledger (response says `"ledger": "cleared"`, not `"kept"`).
+2. The row for that call has `rearm` equal to `["post_compact"]` on its first delivery in `deliveries_json`, and no later row in the session has `rearm`.
+3. Main-thread rows keep `agent_id` NULL before and after.
+4. A subagent dispatched after compaction gets its first delivery tagged `subagent_rearm`, with an `agent_id` that is not NULL.
+
+**Check after compaction.**
+
+```
+sqlite3 .codescout/usage.db "select id, tool_name, agent_id, deliveries_json from tool_calls where cc_session_id='732f1c09-df3f-48d4-be63-d9326860edda' and id > 267593 and deliveries_json like '%\"rearm\"%'"
+```
+
+A missing row after a `"cleared"` response falsifies prediction 2 and means the cause was taken by a response that delivered nothing, or lost. A `rearm` on a row that is not the first delivery after the clear falsifies the take-once rule.
+
+**Repo state.** codescout HEAD `ce69033c7` (peer commits on top of `6e85e1183`). Nothing of this session is uncommitted. Nothing is pushed in any repo (CIW-9). `prompt-engineering` carries `997b4cd`, `892d90c`, `bd67360`, `39672ce` unpushed; its untracked `scenarios/plan-opens-the-body/` and `.codescout/write.lock.holder` are not ours. The peer's staged files in codescout (`.codescout/memories/bug-triage-2026-10-27.md` and the hint-authority files) must not be touched.
+
+**Open after this session.** CIW-14 (blocked on sample and desktop transcripts), CIW-15 (policy half is the operator's), CIW-18's CI half (design), CIW-1..9 (operator). The ADR `2026-09-14-a-subagent-is-a-principal.md` still says resume and compaction are "not measured"; amending it waits for the operator's word, as does keeping the probe scripts (they lived in the scratchpad and are gone).
+
 ## Template for new entries
 
 ```
