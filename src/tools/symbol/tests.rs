@@ -11483,6 +11483,33 @@ async fn check_callers_cannot_tell_for_go_because_the_reader_has_no_owner_kinds(
     assert_eq!(got, CallersCheck::CannotTell);
 }
 
+// `declaration_changed` and `get_ts_language` lowercase the language id, `call_kinds_for`
+// matches it exactly. A mixed-case id can therefore read `Some(true)` for the header and
+// still have no call classification. This pins the VERDICT for that id, `CannotTell` even
+// with an outside call: it never reaches `OutsideCalls`. (The `classifies_calls` guard in
+// `check_callers` is an early exit: without it the scan finds no call kinds and also gives
+// `CannotTell`, so this test cannot tell the guard from its absence.)
+#[tokio::test]
+async fn check_callers_cannot_tell_for_a_mixed_case_language_id() {
+    use super::callers_check::{check_callers, CallersCheck};
+    assert_eq!(
+        crate::symbol::declaration::declaration_changed(A_OLD, A_NEW_SIGNATURE, "Rust"),
+        Some(true),
+        "precondition: the reader lowercases the id and reads the header change"
+    );
+    assert!(
+        !crate::tools::symbol::call_edges::resolver::classifies_calls("Rust"),
+        "precondition: the call classifier matches the id exactly"
+    );
+    let (_dir, ctx, edited) = callers_project(&[
+        ("src/lib.rs", "fn a(x: u8) -> u8 { x }\n"),
+        ("src/other.rs", "fn b() -> u8 {\n    crate::a(1)\n}\n"),
+    ])
+    .await;
+    let got = check_callers(&ctx, &edited, "Rust", "a", A_OLD, A_NEW_SIGNATURE).await;
+    assert_eq!(got, CallersCheck::CannotTell);
+}
+
 #[tokio::test]
 async fn check_callers_cannot_tell_when_candidates_exceed_the_cap() {
     use super::callers_check::{check_callers, CallersCheck, MAX_CANDIDATE_FILES};

@@ -2611,4 +2611,59 @@ mod tests {
             ]);
         }
     }
+
+    #[test]
+    fn every_reader_language_is_classified_for_calls() {
+        // A reader language that is not classified would reach a verified-advice path
+        // without call classification: `check_callers` could not show a call for it.
+        // `Family::of` and `get_ts_language` lowercase the id; `classifies_calls` matches
+        // exactly, so the lowercase ids are the ones to check.
+        use crate::tools::symbol::call_edges::resolver::classifies_calls;
+        let reader_ids = [
+            "rust",
+            "python",
+            "typescript",
+            "javascript",
+            "tsx",
+            "jsx",
+            "java",
+            "kotlin",
+        ];
+        for id in reader_ids {
+            assert!(Family::of(id).is_some(), "{id} is not a reader language");
+            assert!(classifies_calls(id), "{id} has no call classification");
+        }
+        // The list above is the whole set: ids with a grammar but no owner kinds are out.
+        for id in [
+            "go", "bash", "ruby", "c", "cpp", "csharp", "scala", "toml", "",
+        ] {
+            assert!(Family::of(id).is_none(), "{id} is now a reader language");
+        }
+    }
+
+    #[test]
+    fn known_limits_read_as_body_edits() {
+        // The losses the CHANGELOG lists: these header-looking edits read `Some(false)`.
+        check_all(&[
+            (
+                "rust",
+                "#[inline]\nfn a() {}",
+                "#[cold]\nfn a() {}",
+                Some(false),
+            ),
+            (
+                "typescript",
+                "interface I {\n  a: number;\n}",
+                "interface I {\n  a: string;\n}",
+                Some(false),
+            ),
+            // A decorator on a plain TypeScript class (no `export`) is a header change.
+            (
+                "typescript",
+                "@C(\"x\")\nclass A {}",
+                "@C(\"y\")\nclass A {}",
+                Some(true),
+            ),
+        ]);
+    }
 }
