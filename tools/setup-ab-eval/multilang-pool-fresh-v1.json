@@ -1,0 +1,73 @@
+{
+  "pool": "setup-ab fresh v1",
+  "registered": "2026-11-05",
+  "gate": "strict fresh builder (spec 2026-11-04) + spec verdicts",
+  "dropped": [
+    {
+      "id": "rust-lang__rust-analyzer-23096",
+      "reason": "leak prescan failed: 6 sweep hits on the needle 'signatures::TypeAliasSignature,' in compiled output (libhir_def.rlib, rust-analyzer binaries, incremental objects) of the base image; the string is not in the base source and is only an added import line of the gold patch, so a false positive from rustc debug-info type names is likely, but a gate is not overridden by judgement; decided before any model run; it may return after a check of the compiled output"
+    },
+    {
+      "id": "nushell__nushell-18979",
+      "reason": "leak prescan failed: 1 sweep hit, the needle 's i z e s i z e' (the spaced word 'size') in /usr/bin/uconv, a coincidence; a gate is not overridden by judgement; decided before any model run (the task also has 70 F2P tests that are variants of one behaviour)"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "rust-lang__rust-analyzer-23586",
+      "repo": "rust-lang/rust-analyzer",
+      "control_sha256": "c65e2e3b42c5e2cf5b6e4182b6352fd4316e7cb9868e47dfe91163763827423a",
+      "expected_count": 8292,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    },
+    {
+      "id": "rust-lang__rust-analyzer-23115",
+      "repo": "rust-lang/rust-analyzer",
+      "control_sha256": "fc5e18fae4d3f3ad40d1ea50aebe96b606cd1b48233e503c84ab4429f0b35cec",
+      "expected_count": 8160,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    },
+    {
+      "id": "rust-lang__rust-analyzer-22992",
+      "repo": "rust-lang/rust-analyzer",
+      "control_sha256": "698df486a0c8a500e24e792ab63632dd1ff4544fe41bb4c3831e02d5feb9ed98",
+      "expected_count": 8182,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    },
+    {
+      "id": "nushell__nushell-19283",
+      "repo": "nushell/nushell",
+      "control_sha256": "9922c8a55822706bb72ef9cd65e0db8301bed0d9abd53bb2008c7438034f5fd8",
+      "expected_count": 10898,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    },
+    {
+      "id": "nushell__nushell-19172",
+      "repo": "nushell/nushell",
+      "control_sha256": "6dba711fcd1d8d0f6e9909a10e6a6a6c30968b4dfc11509383325d0e19584126",
+      "expected_count": 9865,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    },
+    {
+      "id": "nushell__nushell-18976",
+      "repo": "nushell/nushell",
+      "control_sha256": "785258b7877cf52716c9973e37df43090b3665a211e9597011bd82cf62a5d69b",
+      "expected_count": 9279,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    },
+    {
+      "id": "nushell__nushell-18863",
+      "repo": "nushell/nushell",
+      "control_sha256": "5e79742da836d831213a05ce308b11324abf3a794ad59610e07110642f87b61f",
+      "expected_count": 8622,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    }
+  ]
+}
