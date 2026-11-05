@@ -336,7 +336,7 @@ So at most **3.27 MB in 30 days (about 109 KB a day, about 0.82 M tokens at 4 B 
 **Limits.** Only new rows carry `rearm`; old rows cannot be classified this way. A `post_compact` that the `SessionStart:compact` request file handles without a `workspace(post_compact)` call may still record no cause. Re-run the CIW-20 classification on rows after this commit to see how much of the 31.6% remains.
 ## Resume — state before the live compaction test, 2026-11-05
 
-**Session.** `732f1c09-df3f-48d4-be63-d9326860edda`, profile `~/.claude-kat`, project `/home/marius/work/claude/codescout`, branch `experiments`. Transcript `~/.claude-kat/projects/-home-marius-work-claude-codescout/732f1c09-df3f-48d4-be63-d9326860edda.jsonl`. Buddy state `.buddy/732f1c09-df3f-48d4-be63-d9326860edda/`. The serving MCP process is pid 268135, started 2026-11-05 13:28:38 +02:00; its binary is `target/release/codescout`, since rebuilt (the running image shows `(deleted)`), and contains `subagent_rearm`, so it has CIW-21 (`9ea0cb840`).
+**Session.** `732f1c09-df3f-48d4-be63-d9326860edda`, profile `~/.claude-kat`, project `/home/marius/work/claude/codescout`, branch `experiments`. Transcript `~/.claude-kat/projects/-home-marius-work-claude-codescout/732f1c09-df3f-48d4-be63-d9326860edda.jsonl`. Buddy state `.buddy/732f1c09-df3f-48d4-be63-d9326860edda/`. **CORRECTED after the compaction: the serving MCP process is NOT pid 268135.** It is pid 3194264 (instance `acf8`, started 2026-11-04 19:43:07Z, log `.codescout/diagnostic-acf8.log`). Its image has no `subagent_rearm` (`grep -c -a` on `/proc/3194264/exe` gives 0), so it predates CIW-21 (`9ea0cb840`, 2026-11-05 08:57 +02:00). Pid 268135 does contain it (count 1) but serves another session. The first version of this paragraph picked the process from `ps` without matching the instance id in the log.
 
 **Why a live test.** CIW-21 was only tested in unit tests and the gate. CIW-18's probe ran headless, without the codescout server. This compaction is the first one where the shipped `RearmCause` code, the companion hooks and a real ledger meet.
 
@@ -360,6 +360,15 @@ A missing row after a `"cleared"` response falsifies prediction 2 and means the 
 **Repo state.** codescout HEAD `ce69033c7` (peer commits on top of `6e85e1183`). Nothing of this session is uncommitted. Nothing is pushed in any repo (CIW-9). `prompt-engineering` carries `997b4cd`, `892d90c`, `bd67360`, `39672ce` unpushed; its untracked `scenarios/plan-opens-the-body/` and `.codescout/write.lock.holder` are not ours. The peer's staged files in codescout (`.codescout/memories/bug-triage-2026-10-27.md` and the hint-authority files) must not be touched.
 
 **Open after this session.** CIW-14 (blocked on sample and desktop transcripts), CIW-15 (policy half is the operator's), CIW-18's CI half (design), CIW-1..9 (operator). The ADR `2026-09-14-a-subagent-is-a-principal.md` still says resume and compaction are "not measured"; amending it waits for the operator's word, as does keeping the probe scripts (they lived in the scratchpad and are gone).
+
+**Result of the live compaction test (2026-11-05, 15:42 UTC).**
+
+1. Held. `workspace(post_compact=true)` answered `"ledger": "cleared"`, and the log line `PostCompact: flushed all LSP clients ... ledger="cleared"` is in `diagnostic-acf8.log`.
+2. NOT TESTED. Row 267892 (`workspace`, first delivery after the clear, engine `session-opener`) has no `rearm`, and no later row has one. The server that answered has no CIW-21 code, so this absence says nothing about the shipped code.
+3. Held for what was observed. Rows 267892 and 267894 (main thread, after compaction) have `agent_id` NULL, as do the 10 rows before.
+4. NOT TESTED, for the same reason as 2.
+
+**What it takes to run the test for real.** Restart the MCP server for the session (`/mcp`) so it loads the current `target/release/codescout`. Confirm the serving process by matching `instance=` in `.codescout/diagnostic-*.log` to its pid, then `grep -c -a subagent_rearm /proc/<pid>/exe` must give at least 1. Only then compact again and run the check query. A `rekey` or `adopt` before the clear would leave `clear` nothing to remove, so no cause is recorded by design; with the right binary, check the log for `restored`/`adopted` lines before calling a missing `rearm` a failure.
 
 ## Template for new entries
 
