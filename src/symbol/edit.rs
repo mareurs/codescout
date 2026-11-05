@@ -1013,7 +1013,11 @@ fn declaration_header(text: &str) -> Option<String> {
             .filter(|p| p.matches('"').count() % 2 == 0 && p.matches('\'').count() % 2 == 0);
         let code = code.unwrap_or(line);
         if n == 0 {
-            pythonic = matches!(code.split_whitespace().next(), Some("def" | "async"));
+            let mut words = code.split_whitespace();
+            pythonic = matches!(
+                (words.next(), words.next()),
+                (Some("def" | "class"), _) | (Some("async"), Some("def"))
+            );
         }
         let end = match header_end(code, &mut scan, pythonic) {
             HeaderEnd::Unreadable => return None,
@@ -1040,7 +1044,8 @@ enum HeaderEnd {
     Open,
     /// The header ends at this byte offset of the line.
     At(usize),
-    /// The header has no readable end: a `{` that may open an expression, not a body.
+    /// The header has no readable end: a `{` that may open an expression, not a body,
+    /// or a `pythonic` line that does not read as a Python header.
     Unreadable,
 }
 
@@ -1049,36 +1054,57 @@ enum HeaderEnd {
 struct HeaderScan {
     /// Open `(`/`[` count.
     depth: usize,
-    /// A depth-0 `=>` or standalone `=` (space, line start or line end on both sides)
-    /// has been seen.
-    assigned: bool,
-    /// The last two non-whitespace characters read, outside strings, across lines.
-    tail: [char; 2],
+    /// Top-level `=>` read so far.
+    arrows: usize,
+    /// Top-level standalone `=` (whitespace, line start or line end on both sides) read so far.
+    assigns: usize,
+    /// The previous non-whitespace token read, outside strings, across lines.
+    prev: Token,
+}
+
+/// The tokens [`header_end`] tells apart from other text.
+#[derive(Default, Clone, Copy, PartialEq)]
+enum Token {
+    #[default]
+    Other,
+    /// A standalone `=`.
+    Assign,
+    /// A `=>`.
+    Arrow,
 }
 
 impl HeaderScan {
-    /// The text read so far, ignoring whitespace, ends with `=>` or `=`.
-    fn ends_in_assignment(&self) -> bool {
-        self.tail == ['=', '>'] || self.tail[1] == '='
+    /// Whether a top-level `{` ends the header. With no `=>` or standalone `=` read, it
+    /// does. Otherwise only when it directly follows the one `=>`, or, with no `=>`, the
+    /// one standalone `=` (a second `=>` or `=` before the brace means the text before
+    /// it is a body expression, not the header).
+    fn brace_ends_header(&self) -> bool {
+        match (self.arrows, self.assigns) {
+            (0, 0) => true,
+            (0, 1) => self.prev == Token::Assign,
+            (1, 0 | 1) => self.prev == Token::Arrow,
+            _ => false,
+        }
     }
 }
 
 /// Where in `code` (one comment-free header line) the declaration header ends and
-/// the body begins. The header ends only: just after a `{` outside strings and
-/// brackets; or, for a Python-style `def` (`pythonic`), just after a top-level `:`
-/// unless an ` = ` follows on the line (a Scala `def f(x: Int): Int = ..` is not cut
-/// there), or at the end of a line that ends in `:` with all brackets closed.
+/// the body begins. `pythonic`: the header starts with `def`, `class` or `async def`.
 ///
-/// Once a top-level `=>` or standalone `=` has been read, a later top-level `{`
-/// ends the header only when the text right before it (whitespace ignored, line
-/// breaks included) ends with `=>` or `=`: `const f = (x) => {` and `const x = {`
-/// end there, `x ? {a: 1} : ..`, `when (x) {` and `run {` do not and make the header
-/// [`HeaderEnd::Unreadable`], because the text before such a brace is a body
-/// expression. Every other shape (a line ending in `;`, a `=>` or ` = ` expression
-/// body, a brace body inside call arguments) has no header end: the caller must
-/// not guess one.
+/// The header ends only at a top-level `{` that [`HeaderScan::brace_ends_header`]
+/// accepts (a `{` outside strings and brackets, and, once a `=>` or standalone `=`
+/// was read, only one that directly follows it), or, for a `pythonic` header, at a
+/// top-level `:` with no ` = ` after it on the line. For a `pythonic` header, a
+/// top-level `:` followed by ` = ` on the line, and a line that ends at top level
+/// without a `:`, are [`HeaderEnd::Unreadable`]: a Python `def`/`class` header can
+/// only stay open through an open bracket, so the text is a one-liner whose body
+/// holds an assignment, or not Python (Ruby `def total`). A rejected `{` is
+/// [`HeaderEnd::Unreadable`] too, because the text before it is a body expression.
+/// Every other shape (a line ending in `;`, a `=>` or ` = ` expression body, a brace
+/// body inside call arguments) has no header end: the caller must not guess one.
 fn header_end(code: &str, st: &mut HeaderScan, pythonic: bool) -> HeaderEnd {
     let mut in_str = false;
+    let mut after_arrow = false;
     for (i, c) in code.char_indices() {
         if c == '"' {
             in_str = !in_str;
@@ -1086,29 +1112,47 @@ fn header_end(code: &str, st: &mut HeaderScan, pythonic: bool) -> HeaderEnd {
         if in_str {
             continue;
         }
+        if after_arrow {
+            // The `>` of the `=>` just read.
+            after_arrow = false;
+            continue;
+        }
+        let mut token = Token::Other;
         match c {
             '(' | '[' => st.depth += 1,
             ')' | ']' => st.depth = st.depth.saturating_sub(1),
             _ if st.depth > 0 => {}
-            '{' if !st.assigned || st.ends_in_assignment() => return HeaderEnd::At(i + 1),
+            '{' if st.brace_ends_header() => return HeaderEnd::At(i + 1),
             '{' => return HeaderEnd::Unreadable,
             '=' => {
                 let next = code[i + 1..].chars().next();
                 let prev = code[..i].chars().next_back();
-                let arrow = next == Some('>');
-                let standalone =
-                    prev.is_none_or(char::is_whitespace) && next.is_none_or(char::is_whitespace);
-                st.assigned |= arrow || standalone;
+                if next == Some('>') {
+                    st.arrows += 1;
+                    token = Token::Arrow;
+                    after_arrow = true;
+                } else if prev.is_none_or(char::is_whitespace)
+                    && next.is_none_or(char::is_whitespace)
+                {
+                    st.assigns += 1;
+                    token = Token::Assign;
+                }
             }
-            ':' if pythonic && !code[i..].contains(" = ") => return HeaderEnd::At(i + 1),
+            ':' if pythonic => {
+                return if code[i..].contains(" = ") {
+                    HeaderEnd::Unreadable
+                } else {
+                    HeaderEnd::At(i + 1)
+                };
+            }
             _ => {}
         }
         if !c.is_whitespace() {
-            st.tail = [st.tail[1], c];
+            st.prev = token;
         }
     }
-    if pythonic && st.depth == 0 && code.trim_end().ends_with(':') {
-        HeaderEnd::At(code.len())
+    if pythonic && st.depth == 0 {
+        HeaderEnd::Unreadable
     } else {
         HeaderEnd::Open
     }
@@ -1118,20 +1162,32 @@ fn header_end(code: &str, st: &mut HeaderScan, pythonic: bool) -> HeaderEnd {
 /// differs between `old` and `new`.
 ///
 /// Answers `Some(_)` only when both headers were read with confidence: the end
-/// of each header was found at a `{` outside strings and brackets, or at the
-/// colon of a Python `def` header (see [`header_end`]). Anything else is `None`.
+/// of each header was found at a top-level `{` outside strings and brackets, or
+/// at the top-level colon of a Python `def`/`class`/`async def` header (see
+/// [`header_end`]). Anything else is `None`.
 ///
 /// - `Some(true)`: the headers differ (a parameter, name, visibility or return
 ///   type changed).
 /// - `Some(false)`: both headers were read and are equal after whitespace and
-///   trailing comments are ignored, so only the body changed.
-/// - `None`: no header end was read on one side: the text has no header line, or
-///   its body does not start at a depth-0 `{` or a Python `def` colon (a bodyless
-///   `fn f();`, a `=>` or ` = ` expression body, a brace body inside call
-///   arguments, a Python one-liner whose body holds ` = `, a `class` header), or
-///   the first depth-0 `{` after a `=>` or ` = ` does not directly follow it
-///   (`x ? {a: 1} : ..`, `when (x) {`, `run {`, `function(x) {`).
-///   The caller must not claim either way.
+///   trailing comments are ignored, so only the body changed. The text of a
+///   Python `class` body is not read, so a method renamed inside a class is a
+///   body-only edit.
+/// - `None`: no header end was read on one side. That is the case for a text
+///   with no header line, a bodyless `fn f();`, a `=>` or ` = ` expression body,
+///   a brace body inside call arguments, a Python `def`/`class` one-liner whose
+///   body holds ` = ` (`def f(a): x = {}`), a Ruby `def` (no colon), a `{` after
+///   a `=>` or `=` that does not directly follow the one `=>` (or, with no
+///   `=>`, the one standalone `=`) of the header (`x ? {a: 1} : ..`, `when (x) {`,
+///   `run {`, `function(x) {`, `(a) => (b) => {`, `o !== {`), and a Scala
+///   `def f(x: Int): Int = ..`. The caller must not claim either way.
+///
+/// Known limits: an assignment written without
+/// spaces (`x= cond ? {`) is not seen as one, so the `{` ends the header; a
+/// Rust associated-type binding (`Iterator<Item = u8>`) counts as an assignment,
+/// so such a signature gives `None`; single-quoted strings are not tracked, so a
+/// bracket inside `'...'` can leak into the bracket depth; a Kotlin
+/// `class A : B {` is read only up to the colon, so a change to its supertypes
+/// is not seen.
 pub fn declaration_changed(old: &str, new: &str) -> Option<bool> {
     Some(declaration_header(old)? != declaration_header(new)?)
 }
@@ -1400,6 +1456,98 @@ mod tests {
             (
                 "fn a() -> impl Iterator<Item = u8> {\n    1\n}",
                 "fn a() -> impl Iterator<Item = u8> {\n    2\n}",
+            ),
+        ] {
+            assert_eq!(declaration_changed(old, new), None, "{old} -> {new}");
+        }
+    }
+    #[test]
+    fn declaration_changed_reads_a_python_class_header_and_ignores_its_body() {
+        for (old, new) in [
+            (
+                "class A:\n    def __init__(self):\n        self.cache = {}\n",
+                "class A:\n    def __init__(self):\n        self.items = {}\n",
+            ),
+            // A method renamed inside the class body is a body-only edit of the class.
+            (
+                "class A:\n    def f(self):\n        return {1: 2}\n",
+                "class A:\n    def g(self):\n        return {1: 2}\n",
+            ),
+            (
+                "class A:\n    \"\"\"Old.\"\"\"\n    def f(self):\n        return {}\n",
+                "class A:\n    \"\"\"New.\"\"\"\n    def f(self):\n        return {}\n",
+            ),
+            (
+                "class A(B):\n    def f(self):\n        print({1})\n        return {}",
+                "class A(B):\n    def g(self):\n        print({1})\n        return {}",
+            ),
+            ("class A:\n    x = 1\n", "class A:\n    x = 2\n"),
+        ] {
+            assert_eq!(declaration_changed(old, new), Some(false), "{old}");
+        }
+        assert_eq!(
+            declaration_changed("class A:\n    x = 1\n", "class B:\n    x = 1\n"),
+            Some(true)
+        );
+        assert_eq!(
+            declaration_changed("class A(B):\n    x = 1\n", "class A(C):\n    x = 1\n"),
+            Some(true)
+        );
+        // `async` is Python only before `def`: the TS return type is part of the header.
+        assert_eq!(
+            declaration_changed(
+                "async function f(a: number): Promise<void> {\n  a;\n}",
+                "async function f(a: number): Promise<number> {\n  a;\n}"
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            declaration_changed(
+                "async def f(a):\n    return 1",
+                "async def f(a, b):\n    return 1"
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn declaration_changed_is_none_for_text_that_does_not_read_as_a_header() {
+        for (old, new) in [
+            // A Python one-liner whose body holds ` = ` and a brace.
+            (
+                "def reset(self): self.cache = {}",
+                "def reset(self): self.items = {}",
+            ),
+            (
+                "def reset(self) -> None: self.cache = {}",
+                "def reset(self) -> None: self.items = {}",
+            ),
+            // A second arrow before the brace.
+            (
+                "const f = (x) => x ? (y) => {\n  a();\n} : null;",
+                "const f = (x) => !x ? (y) => {\n  a();\n} : null;",
+            ),
+            (
+                "const f = (a) => (b) => {\n  a();\n}",
+                "const f = (a) => (b) => {\n  b();\n}",
+            ),
+            // `!==` is not an assignment: the brace does not follow one.
+            (
+                "const f = (o) => o !== {\n};",
+                "const f = (p) => p !== {\n};",
+            ),
+            // Ruby `def` has no colon: the line ends at top level.
+            (
+                "def total\n  items.each { |i| p i }\nend",
+                "def total\n  items.each { |i| puts i }\nend",
+            ),
+            (
+                "def show\n  render json: @user\nend",
+                "def show\n  render json: @users\nend",
+            ),
+            (
+                "def foo(a)\n  x = {a: 1}\nend",
+                "def foo(a)\n  x = {a: 2}\nend",
             ),
         ] {
             assert_eq!(declaration_changed(old, new), None, "{old} -> {new}");

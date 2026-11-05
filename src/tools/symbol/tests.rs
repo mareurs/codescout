@@ -11789,6 +11789,34 @@ async fn edit_code_replace_of_a_python_one_liner_with_an_assignment_is_never_ver
     );
 }
 
+#[tokio::test]
+async fn edit_code_replace_of_a_python_class_body_with_an_outside_call_is_never_verified() {
+    // `class a:` is a readable header and only its body changed, so there is no advice;
+    // either way `verified: true` would be a false claim for a body edit.
+    let old = "class a:\n    def __init__(self):\n        self.cache = {}\n";
+    let new = "class a:\n    def __init__(self):\n        self.items = {}";
+    assert_eq!(
+        crate::symbol::edit::declaration_changed(old, new),
+        Some(false)
+    );
+    let (_dir, ctx) = replace_project(
+        &[
+            ("src/lib.py", old),
+            ("src/other.py", "from lib import a\nb = a()\n"),
+        ],
+        2,
+        6,
+    )
+    .await;
+    let out = replace_a(&ctx, "src/lib.py", new).await;
+    assert_ne!(
+        out.get("advice").and_then(|a| a.get("verified")),
+        Some(&json!(true)),
+        "{out}"
+    );
+    assert!(out.get("advice").is_none(), "{out}");
+}
+
 #[test]
 fn attach_advice_keeps_an_existing_safety_warning() {
     let warning = "The edit was written but NOT verified against dropped symbols. \
