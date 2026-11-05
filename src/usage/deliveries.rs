@@ -40,6 +40,14 @@ pub(crate) struct DeliveryRecord {
     /// primary block's single `_guide_hint` field. A hint that lost to an
     /// earlier engine's is `false`.
     pub hint: bool,
+    /// Why the ledger lost keys before this delivery (`RearmCause::as_str`): the
+    /// causes recorded since the previous delivery. Set on the first delivery of
+    /// a response only, and omitted from the JSON when empty so a row with no
+    /// re-arm keeps its earlier byte shape. A repeat of a `ledger_keys` entry that
+    /// has no `rearm` is the ledger failing to remember, or a re-arm path that
+    /// records nothing (`rekey`, `adopt`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rearm: Vec<&'static str>,
 }
 
 /// A block's identity without its bytes.
@@ -128,6 +136,7 @@ mod tests {
                 bytes: 1,
             }],
             hint: false,
+            rearm: vec![],
         }
     }
 
@@ -192,6 +201,7 @@ mod tests {
                 bytes: 2,
             }],
             hint: true,
+            rearm: vec![],
         };
         assert_eq!(
             to_column(&Some(vec![one])).as_deref(),

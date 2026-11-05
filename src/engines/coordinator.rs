@@ -162,11 +162,19 @@ pub(crate) fn run_post_in(
         // claims on every call with a selector, so recording empty claims would
         // leave `[]` unwritable. See `DeliveryRecord`.
         if !blocks.is_empty() || !ledger_keys.is_empty() || kept_hint {
+            // The causes ride the first delivery recorded, so a cause is never
+            // taken by a response that delivered nothing.
+            let rearm = if out.deliveries.is_empty() {
+                ledger.take_rearm_causes()
+            } else {
+                Vec::new()
+            };
             out.deliveries.push(DeliveryRecord {
                 engine: engine.id,
                 ledger_keys,
                 blocks,
                 hint: kept_hint,
+                rearm,
             });
         }
         out.blocks.extend(e.blocks);
@@ -425,6 +433,36 @@ mod tests {
             }]
         );
         assert!(!r.hint, "this engine carried no hint");
+    }
+    /// A cause rides the FIRST delivery recorded and no other: attaching it to every
+    /// delivery of the response would count one re-arm once per engine, and taking
+    /// it on a response that delivered nothing would lose it before any repeat.
+    #[test]
+    fn a_rearm_cause_rides_the_first_delivery_only_and_survives_an_empty_response() {
+        use crate::tools::guide_ledger::RearmCause;
+        let v = json!({});
+        let mut ledger = GuideLedger::default();
+        ledger.insert("held".to_string());
+        ledger.clear(RearmCause::PostCompact);
+
+        let nothing = [decl("empty", Corpus::CompiledGuides, claims_nothing)];
+        let out = run_post_in(&nothing, &ctx(&v), &mut ledger);
+        assert!(out.deliveries.is_empty());
+
+        let two = [
+            decl("guides", Corpus::CompiledGuides, claims_a_block),
+            decl("rules", Corpus::OperatorLedger, claims_second),
+        ];
+        let out = run_post_in(&two, &ctx(&v), &mut ledger);
+        assert_eq!(out.deliveries.len(), 2);
+        assert_eq!(out.deliveries[0].rearm, vec!["post_compact"]);
+        assert!(out.deliveries[1].rearm.is_empty());
+
+        let out = run_post_in(&two, &ctx(&v), &mut ledger);
+        assert!(
+            out.deliveries.iter().all(|d| d.rearm.is_empty()),
+            "taken once"
+        );
     }
 
     /// The decliner's absence is only evidence beside the claimer's presence: an

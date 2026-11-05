@@ -52,7 +52,7 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 | CIW-18 | any | M–L | open | Principal identity: the edges the ADR left unmeasured |
 | CIW-19 | any | S | done | Guide-ledger residuals S-01, S-02 and S-04 |
 | CIW-20 | any | M | done | Classify the 55% repeat deliveries by re-arm cause |
-| CIW-21 | any | M | open | Record the re-arm cause where the ledger re-arms |
+| CIW-21 | any | M | done | Record the re-arm cause where the ledger re-arms |
 
 ## CIW-1 — System 1: label pilot-2 and give the k=11 ruling
 
@@ -304,7 +304,7 @@ So at most **3.27 MB in 30 days (about 109 KB a day, about 0.82 M tokens at 4 B 
 
 ## CIW-21 — Record the re-arm cause where the ledger re-arms
 
-**Status:** open
+**Status:** done
 **Valid:** dated 2026-11-04
 
 **Owner:** any. **Source:** CIW-20 result (this ledger).
@@ -313,6 +313,9 @@ So at most **3.27 MB in 30 days (about 109 KB a day, about 0.82 M tokens at 4 B 
 
 **Next:** record the re-arm cause where the ledger re-arms, so a repeat delivery can be tied to it. Smallest shape to try: a `rearm` field next to `ledger_keys` in the delivery record, or one row per re-arm in `usage.db`. The ledger is in memory and shared per process, so decide first whether the cause rides the next delivery or is written when the re-arm happens. Add a test that each re-arm path records its cause.
 
+**Result (2026-11-05, `9ea0cb840`).** Ruling: the cause rides the next delivery. `GuideLedger` keeps `rearm_causes`; `clear`, `re_arm` and `expire_idle` add one `RearmCause` when they removed keys. `run_post_in` takes them once, for the first delivery it records, into `DeliveryRecord.rearm` (omitted when empty, so old rows keep their shape). A response that delivers nothing leaves the cause for the next one. Causes: `activate`, `post_compact`, `project_switch`, `subagent_rearm`, `idle_ttl`. `rekey` and `adopt` record nothing, because a conversation change cannot show as a repeat in `usage.db`. Tests: `every_rearm_path_records_the_cause_of_what_it_removed`, `a_rearm_that_removed_nothing_records_no_cause`, `causes_wait_for_the_next_delivery_and_are_taken_once`, `a_rearm_cause_rides_the_first_delivery_only_and_survives_an_empty_response`. Gate: lean 6,067 and default 8,935 passed.
+
+**Limits.** Only new rows carry `rearm`; old rows cannot be classified this way. A `post_compact` that the `SessionStart:compact` request file handles without a `workspace(post_compact)` call may still record no cause. Re-run the CIW-20 classification on rows after this commit to see how much of the 31.6% remains.
 ## Template for new entries
 
 ```

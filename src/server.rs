@@ -538,7 +538,10 @@ impl CodeScoutServer {
         {
             let mut led = guide_hints_emitted.lock();
             if !led.is_empty() {
-                led.re_arm(PROJECT_SCOPED);
+                led.re_arm(
+                    PROJECT_SCOPED,
+                    crate::tools::guide_ledger::RearmCause::ProjectSwitch,
+                );
             }
         }
         let resources = Arc::new(tokio::sync::RwLock::new(Arc::new(
@@ -1326,7 +1329,9 @@ impl CodeScoutServer {
             return;
         }
         tracing::info!(topics = ?refs, agent, "re-arming guide topics for the subagent that requested them");
-        ledger.lock().re_arm(&refs);
+        ledger
+            .lock()
+            .re_arm(&refs, crate::tools::guide_ledger::RearmCause::SubagentRearm);
     }
 
     /// Serve `asserted`'s ledger, parking whichever principal's we were serving, and

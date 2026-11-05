@@ -324,13 +324,16 @@ impl Tool for ActivateProject {
                 // project-scoped topic on a genuine switch, leaving the
                 // tool-contract guides the model already holds untouched.
                 if switched {
-                    led.re_arm(PROJECT_SCOPED);
+                    led.re_arm(
+                        PROJECT_SCOPED,
+                        crate::tools::guide_ledger::RearmCause::ProjectSwitch,
+                    );
                 }
             } else {
                 // No rendezvous ⇒ a `/clear` is invisible to this server ⇒ surgical
                 // re-arming could starve a new conversation that kept the old
                 // session key. Keep the blunt, always-safe behaviour.
-                led.clear();
+                led.clear(crate::tools::guide_ledger::RearmCause::Activate);
             }
         }
 
@@ -438,7 +441,7 @@ impl Tool for ProjectStatus {
                 if not_a_compaction {
                     "kept"
                 } else {
-                    led.clear();
+                    led.clear(crate::tools::guide_ledger::RearmCause::PostCompact);
                     "cleared"
                 }
             };
