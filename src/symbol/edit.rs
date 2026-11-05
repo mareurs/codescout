@@ -993,27 +993,31 @@ pub fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String 
 
 /// The declaration header of a symbol's source text: from the first line that
 /// is not blank, a comment or an attribute/decorator, up to the point where the
-/// body starts (see [`header_end`]). A decorator or attribute is skipped through
-/// its closing bracket, so a multi-line `@d(\n    a=1,\n)` or `#[derive(\n ..\n)]`
-/// is skipped whole; one whose bracket never closes leaves no header (`None`).
-/// Trailing comments are left out (a `//` or ` #` marker counts only when the text
-/// before it has an even number of `"` and of `'`) and whitespace runs collapse to
-/// one space. `None` when no header can be read: no header line, or no header end
-/// (see [`header_end`]) before the text ends.
+/// body starts (see [`header_end`]). A decorator or attribute that is alone on its
+/// line (a comment may follow) is skipped through its closing bracket, so a
+/// multi-line `@d(\n    a=1,\n)` or `#[derive(\n ..\n)]` is skipped whole. One
+/// followed on its own line by code (`@JvmStatic fun f() {`, `#[inline] fn f() {`,
+/// `@A(\n  "x") fun f() {`), or whose bracket never closes, leaves no header
+/// (`None`). Trailing comments are left out (a `//` or ` #` marker counts only when
+/// the text before it has an even number of `"` and of `'`) and whitespace runs
+/// collapse to one space. `None` when no header can be read: no header line, or no
+/// header end (see [`header_end`]) before the text ends.
 fn declaration_header(text: &str) -> Option<String> {
     let mut header = String::new();
     let mut scan = HeaderScan::default();
     let mut lead = Lead::Other;
     let mut open = 0;
-    let lines = text.lines().skip_while(|line| {
+    let mut lines = text.lines();
+    let first = loop {
+        let line = lines.next()?;
         let t = line.trim();
         if open > 0 || ["@", "#[", "#!["].iter().any(|p| t.starts_with(p)) {
-            open = depth_after(open, t);
-            return true;
+            open = skip_annotation_line(open, t)?;
+        } else if !(t.is_empty() || ["//", "/*", "*", "#"].iter().any(|p| t.starts_with(p))) {
+            break line;
         }
-        t.is_empty() || ["//", "/*", "*", "#"].iter().any(|p| t.starts_with(p))
-    });
-    for (n, line) in lines.enumerate() {
+    };
+    for (n, line) in std::iter::once(first).chain(lines).enumerate() {
         let cut = line.find("//").into_iter().chain(line.find(" #")).min();
         let code = cut
             .map(|i| &line[..i])
@@ -1045,19 +1049,56 @@ fn declaration_header(text: &str) -> Option<String> {
     None
 }
 
-/// The open `(`/`[` count after `text`, starting from `depth`, ignoring brackets
-/// inside `"` strings (single quotes are not tracked).
-fn depth_after(mut depth: usize, text: &str) -> usize {
+/// Skip one line of a decorator or attribute that starts (`depth == 0`: the line
+/// begins with `@`, `#[` or `#![`) or continues (`depth > 0`) a bracket group.
+/// Returns the bracket depth left open at the end of the line, or `None` when code
+/// other than a comment follows the annotation on its own line (the declaration, or
+/// a second annotation, shares the line: Kotlin `@A(\n  "x") fun f() {`, `@JvmStatic
+/// fun f() {`, Rust `#[inline] fn f() {`), because skipping that line whole would
+/// make the next body line the first header line. An `@name` with no bracket group
+/// is followed by nothing but a comment. Brackets inside `"` strings are ignored
+/// (single quotes are not tracked).
+fn skip_annotation_line(mut depth: usize, t: &str) -> Option<usize> {
+    let mut rest = t;
+    if depth == 0 {
+        if let Some(r) = t.strip_prefix("#![").or_else(|| t.strip_prefix("#[")) {
+            depth = 1;
+            rest = r;
+        } else {
+            let after = &t[1..];
+            let name_len = after
+                .find(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '.')))
+                .unwrap_or(after.len());
+            rest = &after[name_len..];
+            if !rest.starts_with(['(', '[']) {
+                return annotation_tail_is_blank(rest).then_some(0);
+            }
+        }
+    }
     let mut in_str = false;
-    for c in text.chars() {
+    for (i, c) in rest.char_indices() {
         match c {
             '"' => in_str = !in_str,
             '(' | '[' if !in_str => depth += 1,
-            ')' | ']' if !in_str => depth = depth.saturating_sub(1),
+            ')' | ']' if !in_str => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return annotation_tail_is_blank(&rest[i + 1..]).then_some(0);
+                }
+            }
             _ => {}
         }
     }
-    depth
+    Some(depth)
+}
+
+/// The text after a complete annotation is empty or a comment (`//`, or `#` that
+/// does not start an attribute).
+fn annotation_tail_is_blank(tail: &str) -> bool {
+    let tail = tail.trim();
+    tail.is_empty()
+        || tail.starts_with("//")
+        || (tail.starts_with('#') && !tail.starts_with("#[") && !tail.starts_with("#!["))
 }
 
 /// How the first header line starts, which decides whether a top-level `:` can end it.
@@ -1079,7 +1120,7 @@ enum HeaderEnd {
     /// The header ends at this byte offset of the line.
     At(usize),
     /// The header has no readable end: a `{` that may open an expression, not a body,
-    /// or a `pythonic` line that does not read as a Python header.
+    /// or a `def`/`class` line that does not read as a Python header.
     Unreadable,
 }
 
@@ -1213,10 +1254,12 @@ fn header_end(code: &str, st: &mut HeaderScan, lead: Lead) -> HeaderEnd {
 /// - `Some(false)`: both headers were read and are equal after whitespace and
 ///   trailing comments are ignored, so only the body changed. The text of a
 ///   Python `class` body is not read, so a method renamed inside a class is a
-///   body-only edit. A decorator or attribute before the header is skipped
-///   through its closing bracket, also when it spans lines.
+///   body-only edit. A decorator or attribute alone on its line (a comment may
+///   follow) is skipped through its closing bracket, also when it spans lines.
 /// - `None`: no header end was read on one side. That is the case for a text
-///   with no header line (or a decorator whose bracket never closes), a bodyless
+///   with no header line, a decorator whose bracket never closes, an annotation
+///   or decorator followed on its own line by code (`@JvmStatic fun f() {`,
+///   `#[inline] fn f() {`, `@A(\n  "x") fun f() {`), a bodyless
 ///   `fn f();`, a `=>` or ` = ` expression body, a brace body inside call
 ///   arguments, a Python `def`/`class` one-liner whose body holds ` = `
 ///   (`def f(a): x = {}`), a `class` with a colon that is not last on its line
@@ -1238,7 +1281,8 @@ fn header_end(code: &str, st: &mut HeaderScan, lead: Lead) -> HeaderEnd {
 ///   header and a body-only edit before it reads as a header change (`Some(true)`);
 /// - single-quoted strings are not tracked, so a bracket inside `'...'` leaks into
 ///   the bracket depth and can give a false `Some(true)` in Python
-///   (`def f(a='('):\n    for x in g(')'):`, `x` -> `y`);
+///   (`def f(a='('):\n    for x in g(')'):`, `x` -> `y`); in a decorator the same
+///   leak reads as `None` (`@d(')',\n    1,\n)` leaves text after a closed bracket);
 /// - a Rust associated-type binding (`Iterator<Item = u8>`) counts as an
 ///   assignment, so such a signature gives `None`.
 pub fn declaration_changed(old: &str, new: &str) -> Option<bool> {
@@ -1675,6 +1719,73 @@ mod tests {
             ),
             Some(false)
         );
+    }
+    #[test]
+    fn declaration_changed_is_none_when_code_shares_a_line_with_an_annotation() {
+        for (old, new) in [
+            // The declaration follows the closing bracket of a multi-line annotation.
+            (
+                "@Suppress(\n    \"x\") fun f(): Int {\n    log()\n    return run {\n        1\n    }\n}",
+                "@Suppress(\n    \"x\") fun f(): Int {\n    warn()\n    return run {\n        1\n    }\n}",
+            ),
+            (
+                "@SuppressWarnings({\n  \"a\"}) public int f() {\n  log();\n  int[] a = {1};\n}",
+                "@SuppressWarnings({\n  \"a\"}) public int f() {\n  warn();\n  int[] a = {1};\n}",
+            ),
+            (
+                "@Component({\n  selector: \"x\",\n}) export class A {\n  m() {}\n}",
+                "@Component({\n  selector: \"y\",\n}) export class A {\n  m() {}\n}",
+            ),
+            (
+                "#[cfg(\n    test)] fn f() {\n    1\n}",
+                "#[cfg(\n    test)] fn f() {\n    2\n}",
+            ),
+            // A one-line annotation with the declaration on the same line.
+            (
+                "@JvmStatic fun f(): Int {\n    log()\n    return run {\n        1\n    }\n}",
+                "@JvmStatic fun f(): Int {\n    warn()\n    return run {\n        1\n    }\n}",
+            ),
+            (
+                "@HostListener(\"click\") onClick(e) {\n  log();\n  return {a: 1};\n}",
+                "@HostListener(\"click\") onClick(e) {\n  warn();\n  return {a: 1};\n}",
+            ),
+            (
+                "#[inline] fn f() -> S {\n    log();\n    S {\n        a: 1,\n    }\n}",
+                "#[inline] fn f() -> S {\n    warn();\n    S {\n        a: 1,\n    }\n}",
+            ),
+        ] {
+            assert_eq!(declaration_changed(old, new), None, "{old} -> {new}");
+        }
+    }
+
+    #[test]
+    fn declaration_changed_still_skips_an_annotation_that_is_alone_on_its_line() {
+        // Body-only edits read `Some(false)`, a signature change `Some(true)`.
+        for (old, same, changed) in [
+            (
+                "@Override\npublic String toString() {\n  return a;\n}",
+                "@Override\npublic String toString() {\n  return b;\n}",
+                "@Override\npublic String toString(int x) {\n  return a;\n}",
+            ),
+            (
+                "@app.route(\"/x\")\ndef view(self):\n    return {}",
+                "@app.route(\"/x\")\ndef view(self):\n    return {1}",
+                "@app.route(\"/x\")\ndef view(self, x):\n    return {}",
+            ),
+            (
+                "#[derive(Debug)]\nstruct S {\n    a: u8,\n}",
+                "#[derive(Debug)]\nstruct S {\n    a: u16,\n}",
+                "#[derive(Debug)]\nstruct T {\n    a: u8,\n}",
+            ),
+            (
+                "@d  # note\ndef f(a):\n    pass",
+                "@d  # other\ndef f(a):\n    return 1",
+                "@d  # note\ndef f(a, b):\n    pass",
+            ),
+        ] {
+            assert_eq!(declaration_changed(old, same), Some(false), "{old}");
+            assert_eq!(declaration_changed(old, changed), Some(true), "{old}");
+        }
     }
 
     #[test]
