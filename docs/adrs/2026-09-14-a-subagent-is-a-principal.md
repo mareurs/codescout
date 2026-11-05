@@ -220,6 +220,14 @@ activation flipped process-wide by a child.
   > seed above when the dispatcher may itself be a subagent, so a nested fork is not seeded
   > from the wrong ledger. Nested dispatch as a whole is still unmeasured.
 - **Whether `agent_id` survives a subagent's own compaction or resume** — not measured.
+
+  > **Amended 2026-11-05 — resume and parent compaction measured; the subagent's own compaction is not.**
+  > Headless Claude Code 2.1.318: `agent_id` was the same across a `SendMessage` resume and across a
+  > parent `/compact`. Live, with the server running `RearmCause`: the resumed subagent's row kept its
+  > `agent_id`, and its first delivery carried `rearm` `["subagent_rearm"]` (`usage.db` row 268071).
+  > A first dispatch records no `rearm`, because a new principal's ledger is empty and `re_arm`
+  > records a cause only when it removed a key. Evidence: `docs/trackers/resume-context-injection-remaining-work.md`,
+  > CIW-18 and the second-compaction result (`2e931f4f2`). A subagent that itself compacts is still unmeasured.
 - **Non-Claude clients** — hooks are Claude Code's; other clients keep session grain.
 - **Engine 4 / `craft-skills`.** Briefing a fresh principal with what the parent holds is a
   *different* engine, in the `RetrievalKey::TaskIntent` slot that ships today as
