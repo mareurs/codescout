@@ -1727,11 +1727,11 @@ fn strip_python_docstring(s: &str) -> String {
         .and_then(|s| s.strip_suffix("\"\"\""))
     {
         inner.trim().to_string()
-    } else if let Some(inner) = s.strip_prefix("'''").and_then(|s| s.strip_suffix("'''")) {
+    } else if let Some(inner) = s.strip_circumfix("'''", "'''") {
         inner.trim().to_string()
-    } else if let Some(inner) = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+    } else if let Some(inner) = s.strip_circumfix('"', '"') {
         inner.to_string()
-    } else if let Some(inner) = s.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
+    } else if let Some(inner) = s.strip_circumfix('\'', '\'') {
         inner.to_string()
     } else {
         s.to_string()
@@ -1778,7 +1778,7 @@ fn strip_go_comment(s: &str) -> String {
     let s = s.trim();
     if let Some(rest) = s.strip_prefix("//") {
         rest.strip_prefix(' ').unwrap_or(rest).to_string()
-    } else if let Some(inner) = s.strip_prefix("/*").and_then(|s| s.strip_suffix("*/")) {
+    } else if let Some(inner) = s.strip_circumfix("/*", "*/") {
         inner.trim().to_string()
     } else {
         s.to_string()
@@ -1858,7 +1858,7 @@ fn extract_ts_docstrings(node: Node, source: &str) -> Vec<DocstringInfo> {
 
 fn strip_jsdoc(s: &str) -> String {
     let s = s.trim();
-    if let Some(inner) = s.strip_prefix("/**").and_then(|s| s.strip_suffix("*/")) {
+    if let Some(inner) = s.strip_circumfix("/**", "*/") {
         // Clean each line: strip leading * and whitespace
         inner
             .lines()

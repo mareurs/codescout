@@ -224,7 +224,7 @@ pub fn parse_declarations(body: &str) -> Result<(Vec<Shape>, Vec<String>), Strin
         if t.is_empty() {
             break;
         }
-        let Some(inner) = t.strip_prefix("<!--").and_then(|r| r.strip_suffix("-->")) else {
+        let Some(inner) = t.strip_circumfix("<!--", "-->") else {
             // A non-comment, non-blank line ends the declaration block.
             break;
         };

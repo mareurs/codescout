@@ -1925,7 +1925,7 @@ impl OutputBuffer {
             ));
         }
         let bytes = std::fs::read(&log).map_err(unavailable)?;
-        Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+        Ok(Some(String::from_utf8_lossy_owned(bytes)))
     }
 
     /// Resolve `@cmd_<8hex>` (and `@cmd_<8hex>.err`) references in a command string.

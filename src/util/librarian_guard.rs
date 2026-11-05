@@ -348,7 +348,7 @@ pub(crate) fn declared_entry_prefixes(text: &str) -> Vec<String> {
         };
         let val = val.trim();
         // Inline flow: `entry_prefix: [F, W]`.
-        if let Some(inner) = val.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
+        if let Some(inner) = val.strip_circumfix('[', ']') {
             return inner.split(',').filter_map(clean_prefix).collect();
         }
         // Scalar: `entry_prefix: R`.
@@ -432,7 +432,7 @@ pub(crate) fn is_librarian_id(val: &str) -> bool {
 /// through it.
 fn strip_matching_quotes(val: &str) -> &str {
     for q in ['\'', '"'] {
-        if let Some(inner) = val.strip_prefix(q).and_then(|v| v.strip_suffix(q)) {
+        if let Some(inner) = val.strip_circumfix(q, q) {
             return inner;
         }
     }

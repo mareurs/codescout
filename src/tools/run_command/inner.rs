@@ -478,8 +478,8 @@ pub(super) async fn run_filter_on_capture(
                 guard.0 = None;
             }
             FilterRun::Ran {
-                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                stdout: String::from_utf8_lossy_owned(output.stdout),
+                stderr: String::from_utf8_lossy_owned(output.stderr),
                 exit_code: output.status.code().unwrap_or(-1),
             }
         }

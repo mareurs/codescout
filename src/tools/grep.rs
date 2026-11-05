@@ -1345,7 +1345,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
 /// does. Lets buffer-ref greps survive LLM quoting habits.
 fn strip_buffer_ref_quotes(path: &str) -> &str {
     for q in ['"', '\'', '`'] {
-        if let Some(inner) = path.strip_prefix(q).and_then(|s| s.strip_suffix(q)) {
+        if let Some(inner) = path.strip_circumfix(q, q) {
             if inner.starts_with("@file_")
                 || inner.starts_with("@cmd_")
                 || inner.starts_with("@tool_")

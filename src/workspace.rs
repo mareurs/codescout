@@ -870,7 +870,7 @@ fn deps_from_gradle(project_root: &Path) -> Vec<String> {
             let path = inner
                 .strip_prefix('"')
                 .and_then(|s| s.strip_suffix('"'))
-                .or_else(|| inner.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')));
+                .or_else(|| inner.strip_circumfix('\'', '\''));
             if let Some(p) = path {
                 if p.starts_with("../") || p.starts_with("./") {
                     paths.push(p.to_string());

@@ -357,7 +357,7 @@ async fn run_list_command(list_command: String, work_dir: std::path::PathBuf) ->
             Ok(Ok(o)) if o.status.success() => o,
             _ => return None,
         };
-    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+    Some(String::from_utf8_lossy_owned(out.stdout))
 }
 
 /// Name any `cargo test` filter that matched NOTHING when other named filters in the same
