@@ -285,6 +285,43 @@ eq "and runs no lane" "$([ -e "$WORK/seen-o" ] && echo ran || echo none)" "none"
 run_gate p sid-p CODESCOUT_GATE_POOL_KEEP=three; eq "a bad KEEP exits 2" "$?" "2"
 eq "and runs no lane" "$([ -e "$WORK/seen-p" ] && echo ran || echo none)" "none"
 
+echo "J2. a free slot idle past CODESCOUT_SLOT_IDLE_DAYS is removed; a held, fresh, unstamped or own slot is not"
+# A size ceiling and a count never expire a slot that stays small and low-numbered, so a slot
+# whose lessee had left (a deleted worktree) kept its tree for ever (bug e7442516ad9fa057, 22G
+# idle for three days). KEEP is raised past every slot here, so only the idle rule can act.
+j2_slot() { # j2_slot <dir> [stamp age for touch -d, e.g. '-10 days']
+    mkdir -p "$1"; : > "$1/marker"; : > "$1.lock"
+    if [ -n "${2:-}" ]; then printf '%s\n' /elsewhere > "$1/.codescout-lessee"; touch -d "$2" "$1/.codescout-lessee"; fi
+}
+POOL="$WORK/pool-j2"
+j2_slot "$POOL/slot-0" '-10 days'; j2_slot "$POOL/slot-1" '-10 days'; j2_slot "$POOL/slot-2" '-1 day'
+j2_slot "$POOL/slot-3"; j2_slot "$POOL/slot-4" '-10 days'
+if hold_lock j2h "$POOL/slot-4.lock"; then
+    run_gate j2a sid-j2a CODESCOUT_SLOT_IDLE_DAYS=3 CODESCOUT_GATE_POOL_KEEP=9
+    eq "the run leases slot-0" "$(first_seen j2a)" "$POOL/slot-0"
+    eq "its own slot survives its own pass, whatever its old stamp says" "$(state "$POOL/slot-0/marker")" "kept"
+    eq "a free slot idle past the limit is removed" "$(state "$POOL/slot-1")" "gone"
+    eq "and the removal is reported" "$(grep -c 'removing idle slot' "$WORK/out-j2a")" "1"
+    eq "a free slot idle under the limit is kept" "$(state "$POOL/slot-2/marker")" "kept"
+    eq "a free slot with no stamp is kept, because its age is unknown" "$(state "$POOL/slot-3/marker")" "kept"
+    eq "a held slot is kept although its stamp is old" "$(state "$POOL/slot-4/marker")" "kept"
+    run_gate j2b sid-j2b CODESCOUT_SLOT_IDLE_DAYS=3 CODESCOUT_GATE_POOL_KEEP=9
+    eq "a slot already removed is not reported again" "$(grep -c 'removing idle slot' "$WORK/out-j2b")" "0"
+else
+    no "the slot-4 holder took its lock" "it never did"
+fi
+rm -f "$WORK/hold-j2h"
+POOL="$WORK/pool-j3"; j2_slot "$POOL/slot-0" '-10 days'; j2_slot "$POOL/slot-1" '-10 days'
+run_gate j2c sid-j2c CODESCOUT_SLOT_IDLE_DAYS=0 CODESCOUT_GATE_POOL_KEEP=9
+eq "IDLE_DAYS=0 turns the rule off" "$(state "$POOL/slot-1/marker")" "kept"
+POOL="$WORK/pool-j4"; j2_slot "$POOL/slot-0"; j2_slot "$POOL/slot-1" '-10 days'; j2_slot "$POOL/slot-2" '-2 days'
+run_gate j2d sid-j2d CODESCOUT_GATE_POOL_KEEP=9
+eq "with no setting the limit is 3 days: a 10-day stamp goes" "$(state "$POOL/slot-1")" "gone"
+eq "and a 2-day stamp stays" "$(state "$POOL/slot-2/marker")" "kept"
+POOL="$WORK/pool-j5"
+run_gate j2e sid-j2e CODESCOUT_SLOT_IDLE_DAYS=three; eq "a bad IDLE_DAYS exits 2" "$?" "2"
+eq "and runs no lane" "$([ -e "$WORK/seen-j2e" ] && echo ran || echo none)" "none"
+
 echo "K. with-slot.sh runs one command inside a leased slot"
 WITH="$(dirname "$GATE")/with-slot.sh"
 run_with() { # run_with <tag> [VAR=value ...] bash "$WITH" <command...>
@@ -1228,8 +1265,8 @@ eq "W0 no 'RAM tier' text" "$(w_count w0 'RAM tier')" "0"
 eq "W0 no 'tier RAM' line" "$(w_count w0 'tier RAM')" "0"
 eq "W0 the disk lease is the one used" "$(seen_all w0)" "$POOL/slot-0"
 eq "W0 the gate.sh: lines are the pre-tier ones, in order" \
-    "$(grep '^gate\.sh:' "$WORK/out-w0" | sed -E 's/^(gate\.sh: (CARGO_TARGET_DIR=|leased for THIS run only|tree size|pool total|green here does not cover:)).*/\1/')" \
-    "$(printf '%s\n' 'gate.sh: CARGO_TARGET_DIR=' 'gate.sh: leased for THIS run only' 'gate.sh: tree size' 'gate.sh: pool total' 'gate.sh: green here does not cover:')"
+    "$(grep '^gate\.sh:' "$WORK/out-w0" | sed -E 's/^(gate\.sh: (CARGO_TARGET_DIR=|leased for THIS run only|Python light lane output|tree size|pool total|PYTHON ran beside|green here does not cover:)).*/\1/')" \
+    "$(printf '%s\n' 'gate.sh: CARGO_TARGET_DIR=' 'gate.sh: leased for THIS run only' 'gate.sh: Python light lane output' 'gate.sh: tree size' 'gate.sh: pool total' 'gate.sh: PYTHON ran beside' 'gate.sh: green here does not cover:')"
 ram_cfg "CODESCOUT_GATE_RAM_POOL=$RAM_W"; rm -rf "$POOL"
 
 run_gate w1 sid-w1 "${W_OK[@]}"; rc=$?

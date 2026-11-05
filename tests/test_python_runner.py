@@ -155,6 +155,7 @@ def gate_fixture(tmp_path):
         "if [ \"$1\" = nextest ] && [ \"${2:-}\" = --version ]; then [ -z \"${NO_NEXTEST:-}\" ]; exit $?; fi\n"
         "echo \"cargo $*\" >> \"$CALLS\"\n"
         "echo \"$CARGO_TARGET_DIR\" >> \"$TARGETS\"\n"
+        "[ -z \"${CARGO_STARTED:-}\" ] || touch \"$CARGO_STARTED\"\n"
         "lane=default\n"
         "[ \"$1\" = clippy ] && lane=clippy\n"
         "case \"$*\" in *--no-default-features*) lane=lean ;; esac\n"
@@ -171,16 +172,30 @@ def gate_fixture(tmp_path):
         "#!/usr/bin/env bash\n"
         "if [ \"${1:-}\" != ./scripts/python-tests.py ]; then exec \"$REAL_PYTHON\" \"$@\"; fi\n"
         "echo \"python3 $*\" >> \"$CALLS\"\n"
+        "echo FIXTURE-PYTHON-OUTPUT\n"
+        # PY_WAIT_FOR_CARGO: record whether a cargo lane had started by the time this lane ran on.
+        "if [ -n \"${PY_WAIT_FOR_CARGO:-}\" ]; then\n"
+        "  seen=serial\n"
+        "  for _ in $(seq 1 100); do [ -e \"$CARGO_STARTED\" ] && { seen=overlapped; break; }; sleep 0.05; done\n"
+        "  echo \"$seen\" > \"$PY_RESULT\"\n"
+        "fi\n"
+        # PY_HOLD: stay alive, and say which process, until the named file is removed.
+        "if [ -n \"${PY_HOLD:-}\" ]; then\n"
+        "  echo $$ > \"$PY_PID_FILE\"\n"
+        "  while [ -e \"$PY_HOLD\" ]; do sleep 0.05; done\n"
+        "fi\n"
         "[ \"$FAILED_LANE\" != python ]\n"
     )
     python.chmod(0o755)
     env = os.environ.copy()
     for key in ("CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "CODEX_THREAD_ID",
-                "CODESCOUT_CONTEXT_FILE", "SLOT_FD", "HOLD_DEFAULT"):
+                "CODESCOUT_CONTEXT_FILE", "SLOT_FD", "HOLD_DEFAULT", "PY_HOLD", "PY_WAIT_FOR_CARGO"):
         env.pop(key, None)
     env.update(
         CARGO_TARGET_DIR=str(tmp_path / "target"), SLOT_FD="",
         CALLS=str(tmp_path / "calls.txt"), TARGETS=str(tmp_path / "targets.txt"),
+        CARGO_STARTED=str(tmp_path / "cargo-started"), PY_RESULT=str(tmp_path / "py-result"),
+        PY_PID_FILE=str(tmp_path / "py-pid"),
         FORMAT_MARKER=str(tmp_path / "format-called"), SNAPSHOT_RECORD=str(tmp_path / "snapshot.json"),
         FMT_EXIT="0", FAILED_LANE="none", REAL_PYTHON=sys.executable,
         PATH=str(commands) + os.pathsep + env["PATH"],
@@ -195,7 +210,8 @@ def run_gate_fixture(fixture, *args, **changes):
 
 
 def assert_gate_calls(root, fmt_args=None, interrupted=False):
-    expected = ["python3 ./scripts/python-tests.py --lane light"]
+    python_call = "python3 ./scripts/python-tests.py --lane light"
+    expected = []
     if fmt_args is not None:
         expected.append("fmt " + fmt_args)
     expected += [
@@ -209,7 +225,11 @@ def assert_gate_calls(root, fmt_args=None, interrupted=False):
     # `exit 143` only after that foreground command, so the doctest step after it never starts.
     if interrupted:
         expected = expected[:-1]
-    assert (root / "calls.txt").read_text().splitlines() == expected
+    # The Python lane runs beside the Rust lanes, so where its call lands among theirs is not pinned;
+    # that it ran exactly once is, and so is the order of everything else (default Cargo last).
+    calls = (root / "calls.txt").read_text().splitlines()
+    assert calls.count(python_call) == 1
+    assert [call for call in calls if call != python_call] == expected
     cargo_calls = 4 if interrupted else 5
     assert (root / "targets.txt").read_text().splitlines() == [str(root / "target")] * cargo_calls
 
@@ -357,3 +377,98 @@ def test_interrupted_gate_cleans_private_context_snapshot(tmp_path):
         if process.poll() is None:
             process.kill()
             process.communicate(timeout=10)
+
+
+def test_python_lane_runs_beside_the_cargo_lanes(tmp_path):
+    # The light Python lane needs neither the leased target dir nor a built binary, so it starts first
+    # and runs while the Rust lanes do. The fixture lane waits up to 5 s for a cargo lane to start and
+    # records what it saw: "serial" means the gate ran it to its end before any cargo lane began.
+    fixture = gate_fixture(tmp_path)
+    root, _ = fixture
+    result = run_gate_fixture(fixture, "--check", PY_WAIT_FOR_CARGO="1")
+    assert result.returncode == 0, result.stderr
+    assert (root / "py-result").read_text().strip() == "overlapped"
+    assert_gate_calls(root, "--check")
+    # Its output is held and printed once, whole, before the summary, so it cannot interleave with a
+    # cargo lane's output.
+    assert result.stdout.count("FIXTURE-PYTHON-OUTPUT") == 1
+    assert result.stdout.index("FIXTURE-PYTHON-OUTPUT") < result.stdout.index("GATE SECONDS")
+
+
+def test_gate_waits_for_a_python_lane_that_outlasts_the_cargo_lanes(tmp_path):
+    import time
+    fixture = gate_fixture(tmp_path)
+    root, env = fixture
+    hold = root / "hold-python"
+    hold.touch()
+    env.update(PY_HOLD=str(hold), FAILED_LANE="python")
+    process = subprocess.Popen(["bash", str(root / "scripts/gate.sh"), "--check"], cwd=root, env=env,
+                               text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def cargo_lanes_done():
+        calls = root / "calls.txt"
+        return calls.exists() and calls.read_text().splitlines()[-1:] == ["cargo test --workspace --doc"]
+
+    try:
+        deadline = time.monotonic() + 10
+        while not cargo_lanes_done() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert cargo_lanes_done(), "the cargo lanes never ran while the Python lane was still running"
+        # The verdict needs the Python exit code, so the gate must still be waiting for it.
+        assert process.poll() is None
+        hold.unlink()
+        out, err = process.communicate(timeout=10)
+        assert process.returncode == 1, err
+        assert "PYTHON_LIGHT=1" in out
+    finally:
+        hold.unlink(missing_ok=True)
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=10)
+
+
+def test_interrupted_gate_stops_its_python_lane(tmp_path):
+    import signal
+    import time
+    fixture = gate_fixture(tmp_path)
+    root, env = fixture
+    py_hold = root / "hold-python"
+    cargo_hold = root / "hold-default"
+    started = root / "default-started"
+    py_hold.touch()
+    cargo_hold.touch()
+    env.update(PY_HOLD=str(py_hold), HOLD_DEFAULT=str(cargo_hold), DEFAULT_STARTED=str(started))
+    process = subprocess.Popen(["bash", str(root / "scripts/gate.sh"), "--check"], cwd=root, env=env,
+                               text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    pid = None
+    try:
+        deadline = time.monotonic() + 10
+        while not (started.exists() and (root / "py-pid").exists()) and process.poll() is None \
+                and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert started.exists() and (root / "py-pid").exists()
+        pid = int((root / "py-pid").read_text())
+        os.kill(pid, 0)  # alive while the gate runs
+        process.send_signal(signal.SIGTERM)
+        cargo_hold.unlink()
+        process.communicate(timeout=10)
+        assert process.returncode == 143
+        for _ in range(60):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError(f"the Python lane process {pid} outlived the interrupted gate")
+    finally:
+        py_hold.unlink(missing_ok=True)
+        cargo_hold.unlink(missing_ok=True)
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=10)
+        if pid is not None:
+            try:
+                os.kill(pid, 9)
+            except ProcessLookupError:
+                pass
