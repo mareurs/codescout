@@ -1,6 +1,11 @@
 //! Whether an edit changed a declaration's header, read from the tree-sitter parse.
-
-use std::borrow::Cow;
+//!
+//! The header of a declaration is the comment-free run of tokens from the start of
+//! its owner node to the start of its body. Two texts have the same header when those
+//! token runs are equal, so whitespace, line endings and comments never count. A text
+//! this reader cannot place exactly (a parse error, no single owner, an owner without
+//! a body, a language without owner kinds) gives `None`: "cannot tell" is never
+//! reported as "unchanged" or "changed".
 
 use tree_sitter::{Language, Node, Parser, Tree};
 
@@ -27,8 +32,8 @@ impl Family {
         }
     }
 
-    /// Whether a text that is not a single top-level owner is retried as the sole
-    /// member of a wrapper class (a method alone).
+    /// Whether a text whose as-is parse has an error is retried as the sole member of
+    /// a wrapper class (a method or constructor alone).
     fn retries_in_wrapper(self) -> bool {
         matches!(self, Self::Script | Self::Java)
     }
@@ -86,29 +91,32 @@ pub fn declaration_changed(old: &str, new: &str, language_id: &str) -> Option<bo
     Some(old != new)
 }
 
-/// The comment-free leaf tokens from the start of the single top-level declaration
-/// in `text` to the start of its body, or `None` when there is no such declaration.
+/// The comment-free tokens from the start of the single top-level declaration in
+/// `text` to the start of its body, or `None` when there is no such declaration.
+///
+/// The text is parsed as-is. Only when that parse holds an ERROR or MISSING node, and
+/// only for Java and the TypeScript family, is it re-parsed as the sole member of a
+/// wrapper class (a method or constructor alone). A clean parse that is not exactly one
+/// owner is `None`: re-reading it in a class body would turn statements such as
+/// `if (a) { ... }` into methods named `if`.
 fn declaration_tokens(text: &str, language_id: &str) -> Option<Vec<String>> {
     let family = Family::of(language_id)?;
     let language = crate::ast::get_ts_language(language_id)?;
-    let source: Cow<'_, str> = if family == Family::Python {
-        Cow::Owned(dedent(text))
-    } else {
-        Cow::Borrowed(text)
-    };
 
-    if let Some(tokens) = parse_clean(&source, &language).and_then(|tree| {
-        let owner = sole_member(tree.root_node(), &[])?;
-        header_tokens(owner, family, &source)
-    }) {
-        return Some(tokens);
+    let tree = parse(text, &language)?;
+    if !tree.root_node().has_error() {
+        return sole_member(tree.root_node(), &[])
+            .and_then(|owner| header_tokens(owner, family, text));
     }
     if !family.retries_in_wrapper() {
         return None;
     }
 
-    let wrapped = format!("class W {{\n{source}\n}}");
-    let tree = parse_clean(&wrapped, &language)?;
+    let wrapped = format!("class W {{\n{text}\n}}");
+    let tree = parse(&wrapped, &language)?;
+    if tree.root_node().has_error() {
+        return None;
+    }
     let class = sole_member(tree.root_node(), &[])?;
     if class.kind() != "class_declaration" {
         return None;
@@ -119,12 +127,11 @@ fn declaration_tokens(text: &str, language_id: &str) -> Option<Vec<String>> {
     header_tokens(member, family, &wrapped)
 }
 
-/// Parse `source`; `None` when the parse fails or the tree holds an ERROR or MISSING node.
-fn parse_clean(source: &str, language: &Language) -> Option<Tree> {
+/// Parse `source` with `language`; `None` only when the parser itself fails.
+fn parse(source: &str, language: &Language) -> Option<Tree> {
     let mut parser = Parser::new();
     parser.set_language(language).ok()?;
-    let tree = parser.parse(source, None)?;
-    (!tree.root_node().has_error()).then_some(tree)
+    parser.parse(source, None)
 }
 
 fn is_comment(kind: &str) -> bool {
@@ -222,20 +229,27 @@ fn script_owner(node: Node<'_>) -> Option<(usize, Node<'_>)> {
     }
 }
 
-/// The source text of the non-comment leaves under `root` whose byte range lies in
-/// `[start, end)`, in document order. A string node without named children counts as
-/// one leaf. The walk is iterative so its depth never follows the input's nesting.
+/// The tokens under `root` whose byte range lies in `[start, end)`, in document order.
+///
+/// A token is the source text of a leaf, or the whole source span of a string node
+/// (its kind contains "string"; `concatenated_string` excepted, it is a sequence of
+/// string nodes), so escapes and comment-looking content inside a string stay in the
+/// token. A comment node is skipped with everything under it, delimiters included.
+/// The walk is iterative so its depth never follows the input's nesting.
 fn collect_tokens(root: Node<'_>, start: usize, end: usize, source: &str) -> Option<Vec<String>> {
     let mut tokens = Vec::new();
     let mut cursor = root.walk();
     let mut depth = 0usize;
     loop {
         let node = cursor.node();
-        let atom = node.child_count() == 0
-            || (node.kind().contains("string") && node.named_child_count() == 0);
+        let kind = node.kind();
+        let string = kind.contains("string") && kind != "concatenated_string";
+        let atom = node.child_count() == 0 || string;
         let in_range = node.start_byte() >= start && node.end_byte() <= end;
-        if atom {
-            if in_range && !is_comment(node.kind()) && node.end_byte() > node.start_byte() {
+        if is_comment(kind) {
+            // Skipped whole: neither a token nor descended into.
+        } else if atom {
+            if in_range && node.end_byte() > node.start_byte() {
                 tokens.push(source.get(node.byte_range())?.to_owned());
             }
         } else if node.start_byte() < end && cursor.goto_first_child() {
@@ -253,38 +267,6 @@ fn collect_tokens(root: Node<'_>, start: usize, end: usize, source: &str) -> Opt
             depth -= 1;
         }
     }
-}
-
-/// Strip the whitespace prefix common to every non-blank line, so an indented Python
-/// method parses as a top-level definition.
-fn dedent(text: &str) -> String {
-    let indent_of =
-        |line: &str| -> usize { line.len() - line.trim_start_matches([' ', '\t']).len() };
-    let mut common: Option<&str> = None;
-    for line in text.lines().filter(|l| !l.trim().is_empty()) {
-        let indent = &line[..indent_of(line)];
-        common = Some(match common {
-            None => indent,
-            Some(prev) => {
-                let shared = prev
-                    .bytes()
-                    .zip(indent.bytes())
-                    .take_while(|(a, b)| a == b)
-                    .count();
-                &prev[..shared]
-            }
-        });
-    }
-    let common = common.unwrap_or("");
-    if common.is_empty() {
-        return text.to_owned();
-    }
-    text.split_inclusive('\n')
-        .map(|line| {
-            line.strip_prefix(common)
-                .unwrap_or_else(|| line.trim_start_matches([' ', '\t']))
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -569,7 +551,7 @@ mod tests {
     }
 
     #[test]
-    fn python_indented_method_is_dedented() {
+    fn python_indented_method_parses_as_is() {
         assert_eq!(
             ch(
                 "    def f(self):\n        return 1",
@@ -744,8 +726,8 @@ mod tests {
         // Decision: a method alone is not one owner at top level (tree-sitter-typescript
         // reads it as an ERROR-wrapped call `foo(x)` followed by a block), so it is
         // re-parsed inside `class W { ... }` and read as the single `method_definition`
-        // of the wrapper class body. The retry fires on "not exactly one owner", so it
-        // would also fire if the as-is parse were clean.
+        // of the wrapper class body. The retry fires only because the as-is parse has
+        // an error; a clean parse that is not one owner is `None`.
         let old = "foo(x) {\n  return 1;\n}";
         for lang in SCRIPT_FAMILY {
             assert_eq!(
@@ -1373,5 +1355,555 @@ mod tests {
         let old = format!("fn a() -> u8 {{ {body} }}");
         let new = format!("fn a() -> u8 {{ {body}; 2 }}");
         assert_eq!(declaration_changed(&old, &new, "rust"), Some(false));
+    }
+    #[test]
+    fn deep_nesting_in_the_header_does_not_recurse() {
+        let depth = 5_000;
+        // Rust: a 5,000-deep tuple type in a parameter.
+        let ty = |inner: &str| format!("{}{inner}{}", "(".repeat(depth), ",)".repeat(depth));
+        let rust_old = format!("fn a(x: {}) {{ 1 }}", ty("u8"));
+        assert_eq!(
+            ch(&rust_old, &format!("fn a(x: {}) {{ 2 }}", ty("u8")), "rust"),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                &rust_old,
+                &format!("fn a(x: {}) {{ 1 }}", ty("u16")),
+                "rust"
+            ),
+            Some(true)
+        );
+        // TypeScript and Python: 5,000-deep parentheses in a default value.
+        let parens = |inner: &str| format!("{}{inner}{}", "(".repeat(depth), ")".repeat(depth));
+        let ts_old = format!("function f(a = {}) {{\n  x();\n}}", parens("1"));
+        assert_eq!(
+            ch(
+                &ts_old,
+                &format!("function f(a = {}) {{\n  y();\n}}", parens("1")),
+                "typescript"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                &ts_old,
+                &format!("function f(a = {}) {{\n  x();\n}}", parens("2")),
+                "typescript"
+            ),
+            Some(true)
+        );
+        let py_old = format!("def f(a={}):\n    return 1", parens("1"));
+        assert_eq!(
+            ch(
+                &py_old,
+                &format!("def f(a={}):\n    return 2", parens("1")),
+                "python"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                &py_old,
+                &format!("def f(a={}):\n    return 1", parens("2")),
+                "python"
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn python_multi_line_string_default_with_indented_body_edit_is_unchanged() {
+        // Regression for the removed dedent: it stripped the indent shared by every
+        // non-blank line, body lines included, so a body edit that shrank that indent
+        // changed the text of a header string spanning lines. The text is now parsed
+        // as-is (tree-sitter-python reads an indented module-level `def` clean), so a
+        // header token is the exact source span and a body edit cannot reach it.
+        assert_eq!(
+            ch(
+                "    def f(a='''x\n    y'''):\n        return 1",
+                "    def f(a='''x\n    y'''):\n        s = '''\nz'''\n        return 1",
+                "python"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                "  def f(a='''x\n    y'''):\n    return 1",
+                "  def f(a='''x\n    y'''):\n    s = '''\n z'''\n    return 1",
+                "python"
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn python_indented_decorated_method() {
+        // Pins the decorator rule and the as-is indentation handling together: an
+        // indented decorated method parses clean, the decorator stays outside the
+        // `function_definition` owner, and only a real header change is reported.
+        let old = "    @property\n    def f(self):\n        return 1";
+        assert_eq!(
+            ch(
+                old,
+                "    @property\n    def f(self):\n        return 2",
+                "python"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                old,
+                "    @cached_property\n    def f(self):\n        return 1",
+                "python"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                old,
+                "    @property\n    def g(self):\n        return 1",
+                "python"
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn added_comment_in_the_header_is_unchanged() {
+        // Pins the comment filter: a comment node is skipped whole, so its delimiters
+        // (`/*`, `*/`, `//`, `///`, anonymous children in tree-sitter-rust) never become
+        // tokens. Earlier tests only changed comment text, where delimiters cancel.
+        let rust = "fn a(x: u8) {}";
+        for new in [
+            "fn /* c */ a(x: u8) {}",
+            "fn a(x: u8) // c\n{}",
+            "fn a(\n    /// d\n    x: u8) {}",
+        ] {
+            assert_eq!(ch(rust, new, "rust"), Some(false), "{new:?}");
+        }
+        for lang in SCRIPT_FAMILY {
+            for new in ["function /* c */ f(x) {}", "function f(x) // c\n{}"] {
+                assert_eq!(
+                    ch("function f(x) {}", new, lang),
+                    Some(false),
+                    "{lang} {new:?}"
+                );
+            }
+        }
+        for new in [
+            "class /* c */ A {\n}",
+            "class A // c\n{\n}",
+            "/** d */\nclass A {\n}",
+        ] {
+            assert_eq!(ch("class A {\n}", new, "java"), Some(false), "{new:?}");
+        }
+        for new in [
+            "fun /* c */ f(x: Int) {}",
+            "fun f(\n    // c\n    x: Int) {}",
+        ] {
+            assert_eq!(
+                ch("fun f(x: Int) {}", new, "kotlin"),
+                Some(false),
+                "{new:?}"
+            );
+        }
+        assert_eq!(
+            ch(
+                "def f(a):\n    return 1",
+                "def f(  # c\n    a):\n    return 1",
+                "python"
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn clean_script_statement_is_not_retried_as_a_method() {
+        // Pins "retry in the wrapper only when the as-is parse has an error": these
+        // parse clean as statements, and inside `class W { ... }` they would read as
+        // methods named `if`, `while`, `with` or `foo`.
+        for lang in SCRIPT_FAMILY {
+            for (old, new) in [
+                ("if (a) { b(); }", "if (z) { b(); }"),
+                ("while (x) { y(); }", "while (z) { y(); }"),
+                ("with (x) { y(); }", "with (z) { y(); }"),
+                ("foo(x)\n{\n  a();\n}", "foo(x)\n{\n  b();\n}"),
+            ] {
+                assert_eq!(ch(old, new, lang), None, "{lang} {old:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn clean_java_statement_is_not_retried_as_a_member() {
+        for (old, new) in [
+            ("int x = 1;", "int x = 2;"),
+            ("if (a) { b(); }", "if (z) { b(); }"),
+            ("foo(x);", "foo(y);"),
+            ("static {}", "static { a(); }"),
+        ] {
+            assert_eq!(ch(old, new, "java"), None, "{old:?}");
+        }
+    }
+
+    #[test]
+    fn error_inside_an_owner_is_unknown() {
+        // Pins the ERROR/MISSING rule: each text keeps a single `function_item` with a
+        // body around the error, so without the check it would read as `Some(false)`.
+        assert_eq!(
+            ch("fn a(x: u8) { 1 }", "fn a(x: u8) { let = ; }", "rust"),
+            None
+        );
+        assert_eq!(ch("fn a(x: u8) { 1 }", "fn a(x: u8 +) { 1 }", "rust"), None);
+    }
+
+    #[test]
+    fn script_function_declarator_first_of_several_is_unknown() {
+        // Pins the one-declarator rule: the function declarator comes first, so a
+        // reader that took the first declarator would answer.
+        for lang in SCRIPT_FAMILY {
+            assert_eq!(
+                ch(
+                    "const f = () => {\n  x();\n}, a = 1;",
+                    "const f = () => {\n  y();\n}, a = 1;",
+                    lang
+                ),
+                None,
+                "{lang}"
+            );
+        }
+    }
+
+    #[test]
+    fn script_class_expression_value_is_unknown() {
+        // Pins the function-value rule: a class expression also has a `body` field, so
+        // a reader that accepted any value with a body would answer.
+        for lang in SCRIPT_FAMILY {
+            assert_eq!(
+                ch(
+                    "const A = class extends B {\n  m() {}\n};",
+                    "const A = class extends B {\n  m() { x(); }\n};",
+                    lang
+                ),
+                None,
+                "{lang}"
+            );
+        }
+    }
+
+    #[test]
+    fn string_in_the_header_is_one_token() {
+        // Pins the string atom: a string's escapes and comment-looking content are part
+        // of the token. Read leaf by leaf, `"x\n"` would lose the `x` (its content node
+        // has a named escape child) and the change would be missed.
+        assert_eq!(
+            ch(
+                "def f(a=\"x\\n\"):\n    return 1",
+                "def f(a=\"y\\n\"):\n    return 1",
+                "python"
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            ch(
+                "def f(a=\"//\"):\n    return 1",
+                "def f(a=\"#\"):\n    return 1",
+                "python"
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            ch(
+                "def f(a=\"x\\n\"):\n    return 1",
+                "def f(a=\"x\\n\"):\n    return 2",
+                "python"
+            ),
+            Some(false)
+        );
+        for lang in SCRIPT_FAMILY {
+            assert_eq!(
+                ch(
+                    "function f(a = \"x\\n\") {}",
+                    "function f(a = \"y\\n\") {}",
+                    lang
+                ),
+                Some(true),
+                "{lang}"
+            );
+            assert_eq!(
+                ch(
+                    "function f(a = \"//\") {}",
+                    "function f(a = \"/*\") {}",
+                    lang
+                ),
+                Some(true),
+                "{lang}"
+            );
+            assert_eq!(
+                ch(
+                    "function f(a = `x\\n`) {}",
+                    "function f(a = `y\\n`) {}",
+                    lang
+                ),
+                Some(true),
+                "{lang}"
+            );
+        }
+        assert_eq!(
+            ch(
+                "extern \"C\\n\" fn a() {}",
+                "extern \"D\\n\" fn a() {}",
+                "rust"
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            ch(
+                "@SuppressWarnings(\"a\\n\") void f() {}",
+                "@SuppressWarnings(\"b\\n\") void f() {}",
+                "java"
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            ch(
+                "@Suppress(\"a\\n\") fun f() {}",
+                "@Suppress(\"b\\n\") fun f() {}",
+                "kotlin"
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn python_other_shapes() {
+        assert_eq!(
+            ch(
+                "async def f(a):\n    return 1",
+                "async def f(a):\n    return 2",
+                "python"
+            ),
+            Some(false)
+        );
+        // An `if`-guarded def is an `if_statement`, not an owner.
+        assert_eq!(
+            ch(
+                "if X:\n    def f():\n        pass",
+                "if X:\n    def f():\n        return 1",
+                "python"
+            ),
+            None
+        );
+        // An assigned lambda is an assignment, not an owner.
+        assert_eq!(
+            ch("f = lambda a: a + 1", "f = lambda a: a + 2", "python"),
+            None
+        );
+        assert_eq!(
+            ch(
+                "def f(a):\r\n    return 1",
+                "def f(a):\r\n    return 2",
+                "python"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                "def naïve(a):\n    return 1",
+                "def naïve(a):\n    return 2",
+                "python"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                "def naïve(a):\n    return 1",
+                "def naive(a):\n    return 1",
+                "python"
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn script_other_shapes() {
+        for lang in SCRIPT_FAMILY {
+            // Overloads are several declarations.
+            assert_eq!(
+                ch(
+                    "function f(a: string): void;\nfunction f(a: any) {\n  x();\n}",
+                    "function f(a: string): void;\nfunction f(a: any) {\n  y();\n}",
+                    lang
+                ),
+                None,
+                "{lang}"
+            );
+            // A getter alone does not parse clean, so it is read in the wrapper.
+            assert_eq!(
+                ch(
+                    "get x() {\n  return 1;\n}",
+                    "get x() {\n  return 2;\n}",
+                    lang
+                ),
+                Some(false),
+                "{lang}"
+            );
+            assert_eq!(
+                ch("class A {\n  x = 1;\n}", "class A {\n  x = 2;\n}", lang),
+                Some(false),
+                "{lang}"
+            );
+        }
+        for lang in ["typescript", "tsx"] {
+            // An ambient declaration has no body.
+            assert_eq!(
+                ch(
+                    "declare function f(a: number): void;",
+                    "declare function f(a: string): void;",
+                    lang
+                ),
+                None,
+                "{lang}"
+            );
+            // A namespace is not an owner kind.
+            assert_eq!(
+                ch(
+                    "namespace N {\n  const a = 1;\n}",
+                    "namespace N {\n  const a = 2;\n}",
+                    lang
+                ),
+                None,
+                "{lang}"
+            );
+        }
+    }
+
+    #[test]
+    fn java_other_shapes() {
+        assert_eq!(
+            ch(
+                "record P(int x) {\n  P {}\n}",
+                "record P(int x) {\n  P { a(); }\n}",
+                "java"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                "enum E {\n  A;\n  void m() {}\n}",
+                "enum E {\n  A;\n  void m() { x(); }\n}",
+                "java"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                "@Override\npublic String toString() {\n  return \"a\";\n}",
+                "@Override\npublic String toString() {\n  return \"b\";\n}",
+                "java"
+            ),
+            Some(false)
+        );
+        // A local lambda is a variable declaration, not an owner.
+        assert_eq!(
+            ch(
+                "Runnable r = () -> {\n  a();\n};",
+                "Runnable r = () -> {\n  b();\n};",
+                "java"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn kotlin_other_shapes() {
+        assert_eq!(
+            ch(
+                "suspend fun f(x: Int) {\n    a()\n}",
+                "suspend fun f(x: Int) {\n    b()\n}",
+                "kotlin"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                "fun f(x: Int) {\n    a()\n}",
+                "suspend fun f(x: Int) {\n    a()\n}",
+                "kotlin"
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            ch(
+                "fun String.f(x: Int): Int {\n    return 1\n}",
+                "fun String.f(x: Int): Int {\n    return 2\n}",
+                "kotlin"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            ch(
+                "fun String.f(x: Int): Int {\n    return 1\n}",
+                "fun Int.f(x: Int): Int {\n    return 1\n}",
+                "kotlin"
+            ),
+            Some(true)
+        );
+        for (old, new) in [
+            (
+                "sealed class S {\n    object A : S()\n}",
+                "sealed class S {\n    object B : S()\n}",
+            ),
+            (
+                "data class P(val x: Int) {\n    fun m() = 1\n}",
+                "data class P(val x: Int) {\n    fun m() = 2\n}",
+            ),
+            (
+                "abstract class A {\n    abstract fun m()\n}",
+                "abstract class A {\n    abstract fun n()\n}",
+            ),
+        ] {
+            assert_eq!(ch(old, new, "kotlin"), Some(false), "{old:?}");
+        }
+        for (old, new) in [
+            (
+                "companion object {\n    fun m() {}\n}",
+                "companion object {\n    fun m() { a() }\n}",
+            ),
+            (
+                "constructor(x: Int) : this() {\n    a()\n}",
+                "constructor(x: Int) : this() {\n    b()\n}",
+            ),
+            (
+                "val x: Int\n    get() {\n        return 1\n    }",
+                "val x: Int\n    get() {\n        return 2\n    }",
+            ),
+            ("val x = run {\n    1\n}", "val x = run {\n    2\n}"),
+        ] {
+            assert_eq!(ch(old, new, "kotlin"), None, "{old:?}");
+        }
+    }
+
+    #[test]
+    fn text_encoding_shapes() {
+        // A BOM before the declaration, on both sides, with a body edit.
+        assert_eq!(
+            ch("\u{feff}fn a() { 1 }", "\u{feff}fn a() { 2 }", "rust"),
+            Some(false)
+        );
+        assert_eq!(
+            ch("fn\ta(x:\tu8)\t{}", "fn a(x: u8) {}", "rust"),
+            Some(false)
+        );
+        assert_eq!(
+            ch("fn café(x: u8) { 1 }", "fn café(x: u8) { 2 }", "rust"),
+            Some(false)
+        );
+        assert_eq!(
+            ch("fn café(x: u8) { 1 }", "fn cafe(x: u8) { 1 }", "rust"),
+            Some(true)
+        );
+        assert_eq!(ch("fn a() {}", "struct a {}", "rust"), Some(true));
     }
 }
