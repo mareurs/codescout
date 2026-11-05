@@ -5,3 +5,6 @@
 - The runner reads the token from the file named by the env var `SAB_TOKEN_FILE` (no default path; mode 0600 regular file required) and puts it into each agent container's env file for the run's duration.
 - `~/.claude-stef` itself authenticates through a short-lived `.credentials.json` (no long-lived token in settings env), so the runner cannot use that profile directly: it needs a long-lived token string from `claude setup-token` run with `CLAUDE_CONFIG_DIR=~/.claude-stef`.
 - The study spans two accounts: disclose it (plan tier, rate limits and the cost basis may differ; model, prompts, arms and cost measurement are identical). See memory `research/setup-ab-eval`.
+
+## Rotation decision (2026-11-05)
+- The operator decided that rotating either token is NOT needed: the repository is private and the operator is the only developer. The earlier "exposed, rotate after the study" notes record how the tokens were handled, not an open action. Do not raise rotation again unless the repository or its audience changes. The rule that no token text is ever written into a file, commit or report still stands.

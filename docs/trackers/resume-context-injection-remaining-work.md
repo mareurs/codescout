@@ -47,8 +47,8 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 | CIW-13 | any | S | done | GG-11: `librarian` § Reference sits 14 B under its 2,500 B cap |
 | CIW-14 | any | S | open | GG-8: re-run the section-use probe against its pre-registered predictions |
 | CIW-15 | any | M | open | A write-time check on an `entry_prefix` declaration (F-1's owed mechanism) |
-| CIW-16 | any | S | open | Eval runner: re-link the credential cell every round |
-| CIW-17 | any | S | open | A-46's "median run < 5 s" health rule misfires on short control prompts |
+| CIW-16 | any | S | done | Eval runner: re-link the credential cell every round |
+| CIW-17 | any | S | done | A-46's "median run < 5 s" health rule misfires on short control prompts |
 | CIW-18 | any | M–L | open | Principal identity: the edges the ADR left unmeasured |
 | CIW-19 | any | S | done | Guide-ledger residuals S-01, S-02 and S-04 |
 | CIW-20 | any | M | done | Classify the 55% repeat deliveries by re-arm cause |
@@ -233,7 +233,7 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 ## CIW-16 — Eval runner: re-link the credential cell every round
 
-**Status:** open
+**Status:** done
 **Valid:** dated 2026-11-04
 
 **Owner:** any (prompt-engineering). **Source:** `prompt-hamsa-audit-log:A-44` runner repair; `src/prompt_tdd/profiles.py` `link_credentials` docstring.
@@ -242,9 +242,13 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 **Next:** call `link_credentials` at the start of every `run_arms.py` round, and correct the docstring.
 
+**Result (2026-11-05, `prompt-engineering:997b4cd`).** Ruling: the call lives in `prompt-tdd run`, not in `run_arms.py`. `run_arms.py` starts one `prompt-tdd run` per arm, so that is the start of every round, and only `run` knows each arm's account and isolation class. New `profiles.refresh_cell_credentials(account, isolation_class, config_dir)` returns None for a `config_dir` or ambient profile (no account source, so nothing to link) and otherwise calls `link_credentials`. A missing account source now refuses the run with the existing remedy text. The docstring's claim that a linked cell cannot materialize a file is marked as true for 2.1.252 only. Tests: `test_refresh_restores_a_link_that_claude_code_replaced_with_a_regular_file`, `test_refresh_touches_nothing_unless_the_cell_is_chosen_by_account_and_class`, both RED first.
+
+**Found on the way, fixed in `prompt-engineering:bd67360` (2026-11-05).** Three tests already failed at `prompt-engineering` HEAD `70e9d19`, checked in a clean worktree: `test_sync_creds_and_snapshot_projects_both_walk_the_round_cells`, `test_sync_creds_and_snapshot_projects_behave_correctly_under_a_stub_round` (both in `test_run_pilot_wiring.py`, `sync_creds` in `run_pilot.sh` now calls `profiles link` and no longer walks `round_cells`) and `test_no_scenario_file_imports_an_ambiguous_module_by_bare_name` (bare `il3_shapes` imports in three il3 scenarios). Full suite with my CIW-16 change: 731 passed, those 3 failed. After `bd67360`: 735 passed, 0 failed. The two `sync_creds` tests had a bug file, `docs/issues/2026-09-09-sync-creds-rewrite-left-two-tests-asserting-the-pre-rewrite-shape.md`, now `fixed`. The il3 guard failure is fixed by loading `il3_shapes` by path in four checkers; the il3 test scripts (23/23, 43/43, 55/55) and mutation probes (6/6, 28/28, 45/45) all hold.
+
 ## CIW-17 — A-46's "median run < 5 s" health rule misfires on short control prompts
 
-**Status:** open
+**Status:** done
 **Valid:** dated 2026-11-04
 
 **Owner:** any (prompt-engineering). **Source:** `prompt-hamsa-audit-log:A-46` outcome.
@@ -252,6 +256,8 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 **Observed.** Two control cells ran at a 3.9 s and 4.3 s median with 8–10 distinct genuine answers, so the frozen dead-instrument rule fired on healthy cells.
 
 **Next:** key the duration rule on distinct answers plus an auth/refusal pattern, or apply it to treatment cells only, in `scenarios/operator-rules/` before the next run.
+
+**Result (2026-11-05, `prompt-engineering:892d90c`).** Ruling: the rule was prose in the unregistered decision tables of `gen_oprules.py`, with no code behind it, so the amendment is prose too. A cell is dead on distinct answers == 1, or on a median under 5 s together with an auth or refusal pattern (every run exits 1, or the answer is a login or refusal text). A short median alone is not a tell. OP-6 row 1 and the OP-3 row now say so, and the OP-4 row still reads "OP-11 tells" and so follows. Regenerated with `gen_oprules.py --runs 10`: 25 `scenario.yaml` files changed, `description:` field only. Cost if wrong: a dead cell that answers fast with varied text is now read as alive; the auth or refusal pattern is the only guard, and it is stated, not coded.
 
 ## CIW-18 — Principal identity: the edges the ADR left unmeasured
 
@@ -262,7 +268,21 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 **Observed.** Not measured: whether `agent_id` survives a subagent's own compaction or resume; nested dispatch beyond the fork-seed guard (companion `3b94e5f`); clients other than Claude Code. The cross-repo key-drift guard is local only: codescout now pins the full literal (`4516d674c`), but no CI job sees both repos.
 
-**Next:** a live probe of `agent_id` across a subagent resume (S); a CI job that checks out both repos (M–L).
+**Probe result (2026-11-05, Claude Code 2.1.318, headless, Sonnet).** One persisted `claude -p` session driven with `--resume` in the isolated `plugin-free` cell, with a logging hook on `PreToolUse`, `SubagentStart`, `SubagentStop`, `PreCompact` and `SessionStart`. Four turns: dispatch a subagent (it ran one `Bash`), `SendMessage` to resume it (one `Bash`), `/compact` on the parent, `SendMessage` to resume it again (one `Bash`). Cost about $0.55.
+
+| step | subagent `Bash` call `agent_id` | parent calls |
+|---|---|---|
+| dispatch | `a2ea815e9d940ed22` | no `agent_id` |
+| resume by `SendMessage` | `a2ea815e9d940ed22` | no `agent_id` |
+| resume after the parent's `/compact` | `a2ea815e9d940ed22` | no `agent_id` |
+
+`agent_id` survives a `SendMessage` resume and a parent compaction. `session_id` stayed `c2b187b5-e0a4-43f9-be66-2d9d5982fc19` throughout. Each resume fired a fresh `SubagentStart` with the same `agent_id`, so `guide_rearm` re-arms on every resume by design. The compaction itself ran as a hidden agent: one `SubagentStop` with `agent_id` `a4ae8eb857838b3c1` and an empty `agent_type`, no `SubagentStart`, no tool call. `agent-guide-restore.mjs` treats a missing snapshot as a silent no-op, so that event is harmless to the companion.
+
+**Limits.** One agent and one resume path (`SendMessage`). The probe reads the Claude Code hook payload, which is what `principal-stamp.mjs` stamps from, but it did not run the codescout MCP server, so the stamped key and the ledger file were not observed. A subagent's own compaction was not measured: it cannot be forced cheaply, and the ADR line stays open for it. The scripts lived in the session scratchpad and are not kept.
+
+**Measured 2026-11-05 (key-drift guard).** Both repos pin the same literal, each in its own test: `session_key.rs` `the_principal_key_is_the_literal_the_companion_hook_stamps`, and `principal-stamp.test.sh` `key-matches-pinned-literal`. A consistent rename inside ONE repo edits the constant and its own pin together, so neither pin reds in either repo's CI. Only `key-matches-server` can catch it. Baseline with both checkouts side by side: 22 of 22 pass. With a synthetic `session_key.rs` carrying `dev.codescout.mcp/principal` beside the real hook: 21 of 22, `FAIL [key-matches-server]: expected=dev.codescout.mcp/principal got=dev.codescout.mcp/agentId`. So the guard works when it runs; the gap is only that no CI job makes it run. Size is S–M, not M–L: (1) in `principal-stamp.test.sh` let an env var override `RS`, because `actions/checkout` cannot place a repo outside `$GITHUB_WORKSPACE` and the default path assumes a sibling directory; (2) one step in each repo's workflow that checks out the other and runs the test, since a rename in either repo must red in that repo's own CI. NOT verified: whether `mareurs/codescout` and `mareurs/claude-plugins` are readable to each other's CI without a token, and the workflow itself, which can only be exercised on GitHub after the push (CIW-9). Cost if the gap stays: a deliberate one-sided rename silently drops every subagent's principal until someone notices at runtime.
+
+**Next:** a CI job that checks out both repos (M–L). The subagent's own compaction needs a subagent long enough to auto-compact.
 
 ## CIW-19 — Guide-ledger residuals S-01, S-02 and S-04
 
@@ -316,6 +336,51 @@ So at most **3.27 MB in 30 days (about 109 KB a day, about 0.82 M tokens at 4 B 
 **Result (2026-11-05, `9ea0cb840`).** Ruling: the cause rides the next delivery. `GuideLedger` keeps `rearm_causes`; `clear`, `re_arm` and `expire_idle` add one `RearmCause` when they removed keys. `run_post_in` takes them once, for the first delivery it records, into `DeliveryRecord.rearm` (omitted when empty, so old rows keep their shape). A response that delivers nothing leaves the cause for the next one. Causes: `activate`, `post_compact`, `project_switch`, `subagent_rearm`, `idle_ttl`. `rekey` and `adopt` record nothing, because a conversation change cannot show as a repeat in `usage.db`. Tests: `every_rearm_path_records_the_cause_of_what_it_removed`, `a_rearm_that_removed_nothing_records_no_cause`, `causes_wait_for_the_next_delivery_and_are_taken_once`, `a_rearm_cause_rides_the_first_delivery_only_and_survives_an_empty_response`. Gate: lean 6,067 and default 8,935 passed.
 
 **Limits.** Only new rows carry `rearm`; old rows cannot be classified this way. A `post_compact` that the `SessionStart:compact` request file handles without a `workspace(post_compact)` call may still record no cause. Re-run the CIW-20 classification on rows after this commit to see how much of the 31.6% remains.
+## Resume — state before the live compaction test, 2026-11-05
+
+**Session.** `732f1c09-df3f-48d4-be63-d9326860edda`, profile `~/.claude-kat`, project `/home/marius/work/claude/codescout`, branch `experiments`. Transcript `~/.claude-kat/projects/-home-marius-work-claude-codescout/732f1c09-df3f-48d4-be63-d9326860edda.jsonl`. Buddy state `.buddy/732f1c09-df3f-48d4-be63-d9326860edda/`. **CORRECTED after the compaction: the serving MCP process is NOT pid 268135.** It is pid 3194264 (instance `acf8`, started 2026-11-04 19:43:07Z, log `.codescout/diagnostic-acf8.log`). Its image has no `subagent_rearm` (`grep -c -a` on `/proc/3194264/exe` gives 0), so it predates CIW-21 (`9ea0cb840`, 2026-11-05 08:57 +02:00). Pid 268135 does contain it (count 1) but serves another session. The first version of this paragraph picked the process from `ps` without matching the instance id in the log.
+
+**Why a live test.** CIW-21 was only tested in unit tests and the gate. CIW-18's probe ran headless, without the codescout server. This compaction is the first one where the shipped `RearmCause` code, the companion hooks and a real ledger meet.
+
+**Baseline before compacting** (`.codescout/usage.db`, `cc_session_id` above): 837 rows, `max(id)` 267593 at 2026-11-05 14:37:39 UTC, 0 rows whose `deliveries_json` holds `"rearm"`. No re-arm has happened in this server's life.
+
+**Prediction, to be held or falsified.**
+
+1. The companion's `SessionStart` hook reports `source: compact`, and the first `workspace(post_compact=true)` clears the ledger (response says `"ledger": "cleared"`, not `"kept"`).
+2. The row for that call has `rearm` equal to `["post_compact"]` on its first delivery in `deliveries_json`, and no later row in the session has `rearm`.
+3. Main-thread rows keep `agent_id` NULL before and after.
+4. A subagent dispatched after compaction gets its first delivery tagged `subagent_rearm`, with an `agent_id` that is not NULL.
+
+**Check after compaction.**
+
+```
+sqlite3 .codescout/usage.db "select id, tool_name, agent_id, deliveries_json from tool_calls where cc_session_id='732f1c09-df3f-48d4-be63-d9326860edda' and id > 267593 and deliveries_json like '%\"rearm\"%'"
+```
+
+A missing row after a `"cleared"` response falsifies prediction 2 and means the cause was taken by a response that delivered nothing, or lost. A `rearm` on a row that is not the first delivery after the clear falsifies the take-once rule.
+
+**Repo state.** codescout HEAD `ce69033c7` (peer commits on top of `6e85e1183`). Nothing of this session is uncommitted. Nothing is pushed in any repo (CIW-9). `prompt-engineering` carries `997b4cd`, `892d90c`, `bd67360`, `39672ce` unpushed; its untracked `scenarios/plan-opens-the-body/` and `.codescout/write.lock.holder` are not ours. The peer's staged files in codescout (`.codescout/memories/bug-triage-2026-10-27.md` and the hint-authority files) must not be touched.
+
+**Open after this session.** CIW-14 (blocked on sample and desktop transcripts), CIW-15 (policy half is the operator's), CIW-18's CI half (design), CIW-1..9 (operator). The ADR `2026-09-14-a-subagent-is-a-principal.md` still says resume and compaction are "not measured"; amending it waits for the operator's word, as does keeping the probe scripts (they lived in the scratchpad and are gone).
+
+**Result of the live compaction test (2026-11-05, 15:42 UTC).**
+
+1. Held. `workspace(post_compact=true)` answered `"ledger": "cleared"`, and the log line `PostCompact: flushed all LSP clients ... ledger="cleared"` is in `diagnostic-acf8.log`.
+2. NOT TESTED. Row 267892 (`workspace`, first delivery after the clear, engine `session-opener`) has no `rearm`, and no later row has one. The server that answered has no CIW-21 code, so this absence says nothing about the shipped code.
+3. Held for what was observed. Rows 267892 and 267894 (main thread, after compaction) have `agent_id` NULL, as do the 10 rows before.
+4. NOT TESTED, for the same reason as 2.
+
+**What it takes to run the test for real.** Restart the MCP server for the session (`/mcp`) so it loads the current `target/release/codescout`. Confirm the serving process by matching `instance=` in `.codescout/diagnostic-*.log` to its pid, then `grep -c -a subagent_rearm /proc/<pid>/exe` must give at least 1. Only then compact again and run the check query. A `rekey` or `adopt` before the clear would leave `clear` nothing to remove, so no cause is recorded by design; with the right binary, check the log for `restored`/`adopted` lines before calling a missing `rearm` a failure.
+
+**Result of the second compaction, on the right binary (2026-11-05, 15:53-15:54 UTC).** Serving process: pid 2749660, instance `0696`, log `.codescout/diagnostic-0696.log`, `subagent_rearm` count 1 in its image. The log has no `restored`/`adopted` line before the clear, so the empty-ledger exception did not apply.
+
+1. Held. `workspace(post_compact=true)` answered `"ledger": "cleared"` (log line 35).
+2. Held. Row 268049 (`workspace`, engine `session-opener`) has `rearm` equal to `["post_compact"]`. No later main-thread row has `post_compact`. Row 268000 has `["project_switch"]`: it is the first delivery after the server started, so the cause is correct, and it was a bonus observation, not a prediction.
+3. Held. Rows 268011, 268049 and 268050-268053 (main thread) have `agent_id` NULL.
+4. Held, with a correction to the prediction. A NEW subagent (`a90ee21e2388320ae`, row 268055, `get_guide`) has a non-NULL `agent_id` and a `session-opener` delivery, but NO `rearm`. The log shows the server did call `re_arm` for it (line 52), but its ledger was empty, so `re_arm` removed no key and `note_rearm` recorded nothing. This is by design. After `SendMessage` resumed the same subagent, row 268071 has `agent_id` `a90ee21e2388320ae` and `rearm` equal to `["subagent_rearm"]`. The log shows `restored the guide ledger of a previously served principal` (line 74) and then `re-arming guide topics` (line 75). So `subagent_rearm` marks a RESUMED subagent whose ledger holds the topic, not a first dispatch.
+
+**Consequence for readers of `deliveries_json`.** A missing `rearm` on a subagent's first row is normal. Count `subagent_rearm` rows as resumes, never as dispatches.
+
 ## Template for new entries
 
 ```
