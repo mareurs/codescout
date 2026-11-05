@@ -14,8 +14,9 @@ cargo test
 The Rust version is pinned in [`rust-toolchain.toml`](rust-toolchain.toml), so the first
 `cargo` command may spend a minute letting rustup fetch that toolchain and its components
 — that is expected, and it is why the checks below reproduce CI exactly. The file's own
-comment explains why it is pinned and how to bump it. Note it is **not** the MSRV; that is
-`rust-version` in `Cargo.toml`, checked separately by CI.
+comment explains why it is pinned and how to bump it. Note it is a separate setting from the MSRV, which is
+`rust-version` in `Cargo.toml` and is checked separately by CI; the project tracks the newest stable,
+so the two currently name the same minor version.
 
 ## Git Hooks
 

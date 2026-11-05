@@ -24,13 +24,18 @@
 # warnings && cargo test` locally, and expect new lints. Do it as its own commit so a
 # lint fix never rides along with a feature.
 #
-# NOT the MSRV. MSRV is `rust-version = "1.88"` in Cargo.toml and is verified by CI's
-# `msrv` job, which runs `cargo +1.88 check` — the explicit `+1.88` is load-bearing,
+# Separate from the MSRV. MSRV is `rust-version = "1.99"` in Cargo.toml and is verified by
+# CI's `msrv` job, which runs `cargo +1.99 check` — the explicit `+1.99` is load-bearing,
 # because this file would otherwise override the toolchain that job installs and the
-# MSRV gate would pass while measuring the pinned compiler instead.
+# MSRV gate would pass while measuring the pinned compiler instead. Since 2026-11-05 the
+# policy is to track the newest stable: when this pin moves to a new minor, move `rust-version`
+# and the `msrv` job with it (docs/trackers/rust-toolchain-upgrade.md).
+
+# 1.99.1 since 2026-11-05 (was 1.97.1). The bump, the problems it surfaced and what it
+# leaves open are kept in docs/trackers/rust-toolchain-upgrade.md.
 
 [toolchain]
-channel = "1.97.1"
+channel = "1.99.1"
 
 # rustfmt + clippy: the fmt and clippy jobs. rust-analyzer: the test matrix — several
 # LSP tests drive a real rust-analyzer, and its absence is F-9's 12 "failures".

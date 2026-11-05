@@ -27,8 +27,8 @@ env:
 # precisely the local-vs-CI skew the pin exists to remove — and it would be silent,
 # because everything still compiles. See rust-toolchain.toml for the W-9 / F-9 history.
 #
-# The one exception is the `msrv` job, which deliberately installs 1.88 and invokes it
-# as `cargo +1.88` so the explicit override beats the pin file. Read its comment before
+# The one exception is the `msrv` job, which deliberately installs 1.99 and invokes it
+# as `cargo +1.99` so the explicit override beats the pin file. Read its comment before
 # touching it.
 
 jobs:
@@ -985,27 +985,31 @@ jobs:
           diff -u /tmp/code-tools.txt /tmp/doc-tools.txt
 
   msrv:
-    name: MSRV (1.88)
+    name: MSRV (1.99)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # The one job that DOES install a toolchain, because it must not use the pinned
-      # one. `rust-version = "1.88"` in Cargo.toml is the promise; this job is the only
-      # thing that checks it.
+      # one. `rust-version = "1.99"` in Cargo.toml is the promise; this job is the only
+      # thing that checks it. Policy 2026-11-05: the project tracks the newest stable
+      # (docs/trackers/rust-toolchain-upgrade.md), so the MSRV is the current minor and
+      # moves with the pin. The job name is a required-check name on GitHub if branch
+      # protection lists it: renaming it there is the operator's step, not this file's.
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.88"
+          toolchain: "1.99"
       - uses: rui314/setup-mold@v1
       - uses: mozilla-actions/sccache-action@v0.0.7
       - uses: Swatinem/rust-cache@v2
         with:
           key: msrv
-      # `+1.88` is LOAD-BEARING — do not simplify to `cargo check`. rust-toolchain.toml
-      # pins 1.97.1, and a toolchain file beats `rustup default`, so a bare `cargo check`
-      # here would compile with 1.97.1 and this job would report MSRV green while never
-      # having built with 1.88. An explicit `+<toolchain>` outranks the file, so this is
-      # correct whether or not the install step also exports RUSTUP_TOOLCHAIN.
-      - run: cargo +1.88 check
+      # `+1.99` is LOAD-BEARING — do not simplify to `cargo check`. rust-toolchain.toml
+      # pins the project toolchain, and a toolchain file beats `rustup default`, so a bare
+      # `cargo check` here would compile with the pinned compiler and this job would report
+      # MSRV green while never having built with 1.99. An explicit `+<toolchain>` outranks
+      # the file, so this is correct whether or not the install step also exports
+      # RUSTUP_TOOLCHAIN.
+      - run: cargo +1.99 check
 
   audit-doc-refs:
     name: Audit Doc Refs

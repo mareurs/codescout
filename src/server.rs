@@ -671,7 +671,7 @@ impl CodeScoutServer {
         name: &str,
         is_write: bool,
         workspace_override: Option<&std::path::Path>,
-    ) -> std::result::Result<(), CallToolResult> {
+    ) -> std::result::Result<(), Box<CallToolResult>> {
         // A write is decided against the config that carries the pin's consent (for this
         // call only); everything else against the plain one. `is_write` here is the gate's
         // question, so an exempt exit call (`workspace(activate)`) takes the plain config.
@@ -696,7 +696,7 @@ impl CodeScoutServer {
             text.push_str("\n\n");
             text.push_str(&crate::config::project::failed_reload_notice(&load_error));
         }
-        Err(CallToolResult::error(vec![Content::text(text)]))
+        Err(Box::new(CallToolResult::error(vec![Content::text(text)])))
     }
 
     /// `ledger` is the handle adoption resolved for this call. It is a parameter,
@@ -1622,7 +1622,7 @@ impl CodeScoutServer {
                     self.agent.mark_displaced_told(&n).await;
                 }
             }
-            return Ok(err);
+            return Ok(*err);
         }
 
         // BEFORE the ledger this request will consult, and therefore before

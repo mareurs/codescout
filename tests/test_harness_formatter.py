@@ -31,7 +31,7 @@ def project(tmp_path):
         env.pop(key, None)
     env.setdefault("RUSTUP_HOME", str(Path(os.environ["HOME"]) / ".rustup"))
     env.setdefault("CARGO_HOME", str(Path(os.environ["HOME"]) / ".cargo"))
-    env.setdefault("RUSTUP_TOOLCHAIN", "1.97.1")
+    env.setdefault("RUSTUP_TOOLCHAIN", "1.99.1")
     env.update(HOME=str(home), FILE_PROVENANCE_ROOTS=str(tmp_path / "claude"),
                FILE_PROVENANCE_CODEX_ROOTS_JSON=json.dumps([str(tmp_path / "codex")]),
                FILE_PROVENANCE_REGISTRY_ROOTS=str(tmp_path / "registry"),
