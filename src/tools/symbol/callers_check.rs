@@ -15,7 +15,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::edit_code::verify_callers_hint;
-use crate::symbol::edit::declaration_changed;
+use crate::symbol::declaration::declaration_changed;
 use crate::tools::grep::Grep;
 use crate::tools::symbol::call_edges::resolver::{classifies_calls, count_calls_named};
 use crate::tools::{Tool, ToolContext};
@@ -55,7 +55,7 @@ pub(super) async fn check_callers(
     old_text: &str,
     new_text: &str,
 ) -> CallersCheck {
-    match declaration_changed(old_text, new_text) {
+    match declaration_changed(old_text, new_text, language_id) {
         Some(false) => return CallersCheck::Unchanged,
         None => return CallersCheck::CannotTell,
         Some(true) => {}

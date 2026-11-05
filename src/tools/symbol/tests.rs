@@ -11462,14 +11462,17 @@ async fn check_callers_is_unchanged_for_a_body_only_edit() {
 }
 
 #[tokio::test]
-async fn check_callers_cannot_tell_for_a_language_without_call_classification() {
+async fn check_callers_cannot_tell_for_go_because_the_reader_has_no_owner_kinds() {
     use super::callers_check::{check_callers, CallersCheck};
     let old = "func a() int { return 1 }";
     let new = "func a(x int) int { return x }";
+    // The old text scanner read Go and answered `Some(true)`, so this verdict came from
+    // the call scan. The tree-sitter reader has no owner kinds for Go: it cannot tell,
+    // and the verdict comes from the header comparison, before any call scan.
     assert_eq!(
-        crate::symbol::edit::declaration_changed(old, new),
-        Some(true),
-        "precondition: the header comparison passes, so the verdict comes from the call scan"
+        crate::symbol::declaration::declaration_changed(old, new, "go"),
+        None,
+        "precondition: the reader cannot tell for Go"
     );
     let (_dir, ctx, edited) = callers_project(&[
         ("src/lib.go", "func a(x int) int { return x }\n"),
@@ -11517,25 +11520,11 @@ async fn check_callers_cannot_tell_when_no_header_can_be_read() {
         ("src/other.rs", "fn b() -> u8 {\n    crate::a(1)\n}\n"),
     ])
     .await;
-    assert_eq!(crate::symbol::edit::declaration_changed("", ""), None);
-    let got = check_callers(&ctx, &edited, "rust", "a", "", "").await;
-    assert_eq!(got, CallersCheck::CannotTell);
-}
-
-#[tokio::test]
-async fn check_callers_cannot_tell_for_an_unclassified_language_with_no_candidates() {
-    use super::callers_check::{check_callers, CallersCheck};
-    let old = "func a() int { return 1 }";
-    let new = "func a(x int) int { return x }";
     assert_eq!(
-        crate::symbol::edit::declaration_changed(old, new),
-        Some(true)
+        crate::symbol::declaration::declaration_changed("", "", "rust"),
+        None
     );
-    // The only .go file is the edited one, so no candidate is ever read: the verdict
-    // must come from the language check, not from the candidate loop.
-    let (_dir, ctx, edited) =
-        callers_project(&[("src/lib.go", "func a(x int) int { return x }\n")]).await;
-    let got = check_callers(&ctx, &edited, "go", "a", old, new).await;
+    let got = check_callers(&ctx, &edited, "rust", "a", "", "").await;
     assert_eq!(got, CallersCheck::CannotTell);
 }
 
@@ -11545,7 +11534,7 @@ async fn check_callers_cannot_tell_for_typescript_when_no_call_is_found() {
     let old = "function a(): number { return 1 }";
     let new = "function a(x: number): number { return x }";
     assert_eq!(
-        crate::symbol::edit::declaration_changed(old, new),
+        crate::symbol::declaration::declaration_changed(old, new, "typescript"),
         Some(true)
     );
     // `.tsx`/`.mts` callers are outside the `*.ts` glob, so "no call found" is not a
@@ -11565,7 +11554,7 @@ async fn check_callers_python_with_no_call_is_no_outside_calls() {
     let old = "def a():\n    return 1";
     let new = "def a(x):\n    return x";
     assert_eq!(
-        crate::symbol::edit::declaration_changed(old, new),
+        crate::symbol::declaration::declaration_changed(old, new, "python"),
         Some(true)
     );
     let (_dir, ctx, edited) = callers_project(&[
@@ -11680,6 +11669,96 @@ async fn edit_code_replace_of_a_python_signature_with_an_outside_call_carries_ve
         "{out}"
     );
 }
+#[tokio::test]
+async fn edit_code_replace_of_a_typescript_signature_with_an_outside_call_carries_verified_advice()
+{
+    // TypeScript is the script family of the header reader; `callers_share_one_extension`
+    // is false for it, so only a FOUND call can verify, and one is present.
+    let (_dir, ctx) = replace_project(
+        &[
+            ("src/lib.ts", "function a(): number {\n  return 1;\n}\n"),
+            (
+                "src/other.ts",
+                "import { a } from \"./lib\";\nexport function h(): number {\n  return a();\n}\n",
+            ),
+        ],
+        2,
+        9,
+    )
+    .await;
+    let out = replace_a(
+        &ctx,
+        "src/lib.ts",
+        "function a(x: number): number {\n  return x;\n}",
+    )
+    .await;
+    assert_eq!(out["advice"]["verified"], json!(true), "{out}");
+    assert!(
+        out["advice"]["text"]
+            .as_str()
+            .is_some_and(|t| t.contains("src/other.ts")),
+        "{out}"
+    );
+}
+
+#[tokio::test]
+async fn edit_code_replace_of_a_typescript_body_only_edit_carries_no_advice() {
+    let (_dir, ctx) = replace_project(
+        &[
+            ("src/lib.ts", "function a(): number {\n  return 1;\n}\n"),
+            (
+                "src/other.ts",
+                "import { a } from \"./lib\";\nexport function h(): number {\n  return a();\n}\n",
+            ),
+        ],
+        2,
+        9,
+    )
+    .await;
+    let out = replace_a(&ctx, "src/lib.ts", "function a(): number {\n  return 2;\n}").await;
+    assert!(out.get("advice").is_none(), "{out}");
+    assert!(out.get("hint").is_none(), "{out}");
+}
+
+// The Kotlin pair runs through the same hermetic `edit_code replace` harness as the Rust,
+// Python and TypeScript ones: the mock language server answers the symbol lookup, and the
+// header reader and call scan are tree-sitter only, so no real Kotlin server is needed.
+#[tokio::test]
+async fn edit_code_replace_of_a_kotlin_signature_with_an_outside_call_carries_verified_advice() {
+    let (_dir, ctx) = replace_project(
+        &[
+            ("src/lib.kt", "fun a(): Int {\n    return 1\n}\n"),
+            ("src/other.kt", "fun g(): Int {\n    return a(1)\n}\n"),
+        ],
+        2,
+        4,
+    )
+    .await;
+    let out = replace_a(&ctx, "src/lib.kt", "fun a(x: Int): Int {\n    return x\n}").await;
+    assert_eq!(out["advice"]["verified"], json!(true), "{out}");
+    assert!(
+        out["advice"]["text"]
+            .as_str()
+            .is_some_and(|t| t.contains("src/other.kt")),
+        "{out}"
+    );
+}
+
+#[tokio::test]
+async fn edit_code_replace_of_a_kotlin_body_only_edit_carries_no_advice() {
+    let (_dir, ctx) = replace_project(
+        &[
+            ("src/lib.kt", "fun a(): Int {\n    return 1\n}\n"),
+            ("src/other.kt", "fun g(): Int {\n    return a()\n}\n"),
+        ],
+        2,
+        4,
+    )
+    .await;
+    let out = replace_a(&ctx, "src/lib.kt", "fun a(): Int {\n    return 2\n}").await;
+    assert!(out.get("advice").is_none(), "{out}");
+    assert!(out.get("hint").is_none(), "{out}");
+}
 
 #[tokio::test]
 async fn edit_code_replace_of_a_body_only_edit_carries_no_advice_and_no_hint() {
@@ -11740,11 +11819,15 @@ async fn edit_code_replace_that_cannot_tell_carries_unverified_advice() {
 
 #[tokio::test]
 async fn edit_code_replace_of_a_brace_body_inside_call_arguments_is_never_verified() {
-    // The scanner finds no depth-0 `{` here, so `declaration_changed` is `None`. A body-only
-    // edit with an outside call by name must give `verified: false`, never `true`.
+    // A call value is not a function, so the reader cannot tell: `declaration_changed` is
+    // `None`. A body-only edit with an outside call by name must give `verified: false`,
+    // never `true`.
     let old = "const a = debounce((x) => {\n  f();\n}, 100);\n";
     let new = "const a = debounce((x) => {\n  g();\n}, 100);";
-    assert_eq!(crate::symbol::edit::declaration_changed(old, new), None);
+    assert_eq!(
+        crate::symbol::declaration::declaration_changed(old, new, "typescript"),
+        None
+    );
     let (_dir, ctx) = replace_project(
         &[
             ("src/lib.ts", old),
@@ -11767,10 +11850,16 @@ async fn edit_code_replace_of_a_brace_body_inside_call_arguments_is_never_verifi
 }
 
 #[tokio::test]
-async fn edit_code_replace_of_a_python_one_liner_with_an_assignment_is_never_verified() {
+async fn edit_code_replace_of_a_python_one_liner_with_an_assignment_carries_no_advice() {
+    // The old scanner could not find this header's end (`None`, so `verified: false`).
+    // The reader parses one `def` with a body whose header is equal: `Some(false)`, so
+    // there is no advice at all.
     let old = "def a(x): y = 1\n";
     let new = "def a(x): y = 2";
-    assert_eq!(crate::symbol::edit::declaration_changed(old, new), None);
+    assert_eq!(
+        crate::symbol::declaration::declaration_changed(old, new, "python"),
+        Some(false)
+    );
     let (_dir, ctx) = replace_project(
         &[
             ("src/lib.py", old),
@@ -11781,12 +11870,7 @@ async fn edit_code_replace_of_a_python_one_liner_with_an_assignment_is_never_ver
     )
     .await;
     let out = replace_a(&ctx, "src/lib.py", new).await;
-    assert_eq!(out["advice"]["verified"], json!(false), "{out}");
-    assert_eq!(
-        out["advice"]["text"],
-        json!(super::edit_code::verify_callers_hint("a", "src/lib.py")),
-        "{out}"
-    );
+    assert!(out.get("advice").is_none(), "{out}");
 }
 
 #[tokio::test]
@@ -11796,7 +11880,7 @@ async fn edit_code_replace_of_a_python_class_body_with_an_outside_call_is_never_
     let old = "class a:\n    def __init__(self):\n        self.cache = {}\n";
     let new = "class a:\n    def __init__(self):\n        self.items = {}";
     assert_eq!(
-        crate::symbol::edit::declaration_changed(old, new),
+        crate::symbol::declaration::declaration_changed(old, new, "python"),
         Some(false)
     );
     let (_dir, ctx) = replace_project(
@@ -11824,7 +11908,7 @@ async fn edit_code_replace_of_a_python_body_under_a_multi_line_decorator_is_neve
     let old = "@d(\n    1,\n)\ndef a(self):\n    return {}\n";
     let new = "@d(\n    1,\n)\ndef a(self):\n    log()\n    return {}";
     assert_eq!(
-        crate::symbol::edit::declaration_changed(old, new),
+        crate::symbol::declaration::declaration_changed(old, new, "python"),
         Some(false)
     );
     let (_dir, ctx) = replace_project(

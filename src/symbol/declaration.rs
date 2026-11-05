@@ -1953,4 +1953,662 @@ mod tests {
         );
         assert_eq!(ch("fn a() {}", "struct a {}", "rust"), Some(true));
     }
+
+    // ------------------------------------------------ retired text scanner corpus
+    //
+    // The shapes below are the corpus of the text scanner that `declaration_changed`
+    // replaced (the `declaration_changed` tests that lived in `symbol/edit.rs`). Each is asserted with
+    // the value the reader returns. The invariant of every pair that edits only the
+    // body: never `Some(true)`. Where the scanner answered `None` for a body-only
+    // edit and the reader can now tell, the value is `Some(false)`. Where a pair
+    // changes the header as well (a parameter, a name, a decorator argument) the
+    // value is `Some(true)`, which is what the edit does.
+
+    type Case<'a> = (&'a str, &'a str, &'a str, Option<bool>);
+
+    /// Runs every case and reports all mismatches at once.
+    fn check_all(cases: &[Case]) {
+        let bad: Vec<String> = cases
+            .iter()
+            .filter_map(|(lang, old, new, want)| {
+                let got = ch(old, new, lang);
+                (got != *want)
+                    .then(|| format!("{lang}: {old:?} -> {new:?}: want {want:?}, got {got:?}"))
+            })
+            .collect();
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
+    }
+
+    #[test]
+    fn corpus_basic_rust_edits() {
+        check_all(&[
+            (
+                "rust",
+                "fn a() -> u8 {\n    1\n}",
+                "fn a() -> u8 {\n    3\n}",
+                Some(false),
+            ),
+            (
+                "rust",
+                "fn a() -> u8 {\n    1\n}",
+                "fn a(x: u8) -> u8 {\n    1\n}",
+                Some(true),
+            ),
+            ("rust", "fn a() {}", "pub fn a() {}", Some(true)),
+            (
+                "rust",
+                "fn a(x: u8) -> u8 {}",
+                "fn  a(x: u8)\n    -> u8 {}",
+                Some(false),
+            ),
+            (
+                "rust",
+                "fn a() -> u8 {\r\n    1\r\n}",
+                "fn a() -> u8 {\n    3\n}",
+                Some(false),
+            ),
+            (
+                "rust",
+                "fn a() { // one\n    1\n}",
+                "fn a() { // two\n    1\n}",
+                Some(false),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_leading_attributes_comments_and_decorators_are_skipped() {
+        check_all(&[
+            (
+                "rust",
+                "/// doc\n#[inline]\nfn a() {}",
+                "fn a() {}",
+                Some(false),
+            ),
+            (
+                "python",
+                "@d\ndef f(a):\n    pass",
+                "def f(a):\n    return 1",
+                Some(false),
+            ),
+            (
+                "python",
+                "@d\ndef f(a):\n    pass",
+                "def f(a, b):\n    pass",
+                Some(true),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_no_header_is_unknown() {
+        check_all(&[
+            ("rust", "", "fn a() {}", None),
+            ("rust", "fn a() {}", "", None),
+            ("rust", "// only a comment", "fn a() {}", None),
+            ("rust", "fn a() {}", "// only a comment", None),
+        ]);
+    }
+
+    #[test]
+    fn corpus_python_trailing_comment_on_the_header_line() {
+        check_all(&[
+            (
+                "python",
+                "def f(a):  # note\n    pass",
+                "def f(a):  # note\n    return 1",
+                Some(false),
+            ),
+            (
+                "python",
+                "def f(a):  # note\n    pass",
+                "def f(a, b):  # note\n    pass",
+                Some(true),
+            ),
+            (
+                "python",
+                "def f(a):  # one\n    pass",
+                "def f(a):  # two\n    pass",
+                Some(false),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_crlf_reads_like_lf() {
+        check_all(&[(
+            "rust",
+            "fn a() -> u8 {\r\n    1\r\n}",
+            "fn a() -> u8 {\n    3\n}",
+            Some(false),
+        )]);
+    }
+
+    #[test]
+    fn corpus_url_in_a_string_default_does_not_cut_the_header() {
+        let old = "def f(\n    url=\"http://x\",\n    a=1,\n):\n    pass";
+        check_all(&[
+            (
+                "python",
+                old,
+                "def f(\n    url=\"http://x\",\n    a=2,\n):\n    pass",
+                Some(true),
+            ),
+            (
+                "python",
+                old,
+                "def f(\n    url=\"http://x\",\n    a=1,\n):\n    return 1",
+                Some(false),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_hash_in_a_string_default_does_not_cut_the_header() {
+        check_all(&[(
+            "python",
+            "def f(sep=\" #\"):\n    pass",
+            "def f(sep=\" #\"):\n    return 1",
+            Some(false),
+        )]);
+    }
+
+    #[test]
+    fn corpus_bodyless_rust_header_with_a_trailing_comment_next_to_a_function() {
+        // The scanner read the first header and answered `Some(false)`. Two
+        // declarations are not one declaration, so the reader cannot tell.
+        check_all(&[(
+            "rust",
+            "fn a();  // one\nfn b() {}",
+            "fn a();  // one\nfn b() { 1 }",
+            None,
+        )]);
+    }
+
+    #[test]
+    fn corpus_one_line_declarations() {
+        check_all(&[
+            (
+                "rust",
+                "pub fn len(&self) -> usize { self.0.len() }",
+                "pub fn len(&self) -> usize { self.items.len() }",
+                Some(false),
+            ),
+            (
+                "python",
+                "def f(a): return 1",
+                "def f(a): return 2",
+                Some(false),
+            ),
+            (
+                "rust",
+                "pub fn len(&self) -> usize { self.0.len() }",
+                "pub fn len(&self, n: u8) -> usize { self.0.len() }",
+                Some(true),
+            ),
+            (
+                "python",
+                "def f(a): return 1",
+                "def f(a, b): return 1",
+                Some(true),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_header_without_a_terminator_is_unknown() {
+        check_all(&[
+            ("kotlin", "val x = 5", "val x = 6", None),
+            ("rust", "fn a(x: u8)", "fn a(x: u8) {}", None),
+            ("rust", "fn a() {}", "fn a(x: u8)", None),
+        ]);
+    }
+
+    #[test]
+    fn corpus_shapes_the_scanner_could_not_read() {
+        check_all(&[
+            // Python one-liner whose body holds ` = `: a body edit, now readable.
+            ("python", "def f(a): x = 1", "def f(a): y = 1", Some(false)),
+            // A call value is not a function: unknown.
+            (
+                "typescript",
+                "const save = debounce((x) => {\n  a();\n}, 100);",
+                "const save = debounce((x) => {\n  b();\n}, 100);",
+                None,
+            ),
+            (
+                "typescript",
+                "export const M = React.memo((p) => {\n  return 1;\n});",
+                "export const M = React.memo((p) => {\n  return 2;\n});",
+                None,
+            ),
+            (
+                "rust",
+                "static R: Lazy<u8> = Lazy::new(|| {\n    1\n});",
+                "static R: Lazy<u8> = Lazy::new(|| {\n    2\n});",
+                None,
+            ),
+            // Kotlin expression bodies.
+            (
+                "kotlin",
+                "fun f(x: Int) = x + 1",
+                "fun f(x: Int) = x + 2",
+                Some(false),
+            ),
+            (
+                "kotlin",
+                "fun f(x: Int) = x + 1",
+                "fun f(x: Int, y: Int) = x + 1",
+                Some(true),
+            ),
+            // `=>` expression bodies.
+            (
+                "typescript",
+                "const f = (x: number) => x + 1;",
+                "const f = (x: number) => x + 2;",
+                Some(false),
+            ),
+            (
+                "typescript",
+                "const f = (x: number) => x + 1;",
+                "const f = (x: number, y: number) => x + 1;",
+                Some(true),
+            ),
+            // Scala has no grammar here.
+            (
+                "scala",
+                "def f(x: Int): Int = x + 1",
+                "def f(x: Int): Int = x + 2",
+                None,
+            ),
+            // Bodyless declarations.
+            ("rust", "fn a(x: u8);", "fn a(x: u8, y: u8);", None),
+            ("rust", "fn a(x: u8);  // one", "fn a(x: u8);  // two", None),
+        ]);
+    }
+
+    #[test]
+    fn corpus_brace_directly_after_an_arrow_or_an_assignment() {
+        check_all(&[
+            (
+                "typescript",
+                "const f = (x) => {\n  a();\n}",
+                "const f = (x) => {\n  b();\n}",
+                Some(false),
+            ),
+            // An object literal is not a function: unknown (the scanner read it).
+            (
+                "typescript",
+                "const x = {\n  a: 1,\n};",
+                "const x = {\n  a: 2,\n};",
+                None,
+            ),
+            (
+                "typescript",
+                "const x =\n{\n  a: 1,\n};",
+                "const x =\n{\n  a: 2,\n};",
+                None,
+            ),
+            (
+                "typescript",
+                "const f = (x) => {\n  a();\n}",
+                "const f = (x, y) => {\n  a();\n}",
+                Some(true),
+            ),
+            (
+                "rust",
+                "fn a() -> u8 {\n    1\n}",
+                "fn a() -> u8 {\n    1\n}",
+                Some(false),
+            ),
+            (
+                "rust",
+                "fn a<T>(x: T) -> u8 where T: Copy {\n    1\n}",
+                "fn a<T>(x: T) -> u8 where T: Copy {\n    1\n}",
+                Some(false),
+            ),
+            (
+                "typescript",
+                "function f(a: {x: number}) {\n  1;\n}",
+                "function f(a: {x: number}) {\n  1;\n}",
+                Some(false),
+            ),
+            (
+                "typescript",
+                "class A extends B {\n  m() {}\n}",
+                "class A extends B {\n  m() {}\n}",
+                Some(false),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_brace_inside_an_expression_body() {
+        check_all(&[
+            (
+                "typescript",
+                "const f = (x: number) => x ? {a: 1} : {b: 2};",
+                "const f = (x: number) => !x ? {a: 1} : {b: 2};",
+                Some(false),
+            ),
+            (
+                "kotlin",
+                "fun f(x: Int) =\n    when (x) {\n        1 -> 2\n        else -> 3\n    }",
+                "fun f(x: Int) =\n    when (x + 1) {\n        1 -> 2\n        else -> 3\n    }",
+                Some(false),
+            ),
+            (
+                "kotlin",
+                "fun f() = run {\n    1\n}",
+                "fun f() = run {\n    2\n}",
+                Some(false),
+            ),
+            (
+                "kotlin",
+                "fun f() = run {\n    val y = {\n        1\n    }\n}",
+                "fun f() = run {\n    val y = {\n        2\n    }\n}",
+                Some(false),
+            ),
+            (
+                "typescript",
+                "const f = function(x) {\n  a();\n}",
+                "const f = function(x) {\n  b();\n}",
+                Some(false),
+            ),
+            (
+                "rust",
+                "static S: Foo = Foo {\n    a: 1,\n};",
+                "static S: Foo = Foo {\n    a: 2,\n};",
+                None,
+            ),
+            (
+                "rust",
+                "fn a() -> impl Iterator<Item = u8> {\n    1\n}",
+                "fn a() -> impl Iterator<Item = u8> {\n    2\n}",
+                Some(false),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_python_class_header_ignores_its_body() {
+        check_all(&[
+            (
+                "python",
+                "class A:\n    def __init__(self):\n        self.cache = {}\n",
+                "class A:\n    def __init__(self):\n        self.items = {}\n",
+                Some(false),
+            ),
+            (
+                "python",
+                "class A:\n    def f(self):\n        return {1: 2}\n",
+                "class A:\n    def g(self):\n        return {1: 2}\n",
+                Some(false),
+            ),
+            (
+                "python",
+                "class A:\n    \"\"\"Old.\"\"\"\n    def f(self):\n        return {}\n",
+                "class A:\n    \"\"\"New.\"\"\"\n    def f(self):\n        return {}\n",
+                Some(false),
+            ),
+            (
+                "python",
+                "class A(B):\n    def f(self):\n        print({1})\n        return {}",
+                "class A(B):\n    def g(self):\n        print({1})\n        return {}",
+                Some(false),
+            ),
+            (
+                "python",
+                "class A:\n    x = 1\n",
+                "class A:\n    x = 2\n",
+                Some(false),
+            ),
+            (
+                "python",
+                "class A:\n    x = 1\n",
+                "class B:\n    x = 1\n",
+                Some(true),
+            ),
+            (
+                "python",
+                "class A(B):\n    x = 1\n",
+                "class A(C):\n    x = 1\n",
+                Some(true),
+            ),
+            (
+                "typescript",
+                "async function f(a: number): Promise<void> {\n  a;\n}",
+                "async function f(a: number): Promise<number> {\n  a;\n}",
+                Some(true),
+            ),
+            (
+                "python",
+                "async def f(a):\n    return 1",
+                "async def f(a, b):\n    return 1",
+                Some(true),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_text_that_did_not_read_as_a_header() {
+        check_all(&[
+            (
+                "python",
+                "def reset(self): self.cache = {}",
+                "def reset(self): self.items = {}",
+                Some(false),
+            ),
+            (
+                "python",
+                "def reset(self) -> None: self.cache = {}",
+                "def reset(self) -> None: self.items = {}",
+                Some(false),
+            ),
+            (
+                "typescript",
+                "const f = (x) => x ? (y) => {\n  a();\n} : null;",
+                "const f = (x) => !x ? (y) => {\n  a();\n} : null;",
+                Some(false),
+            ),
+            (
+                "typescript",
+                "const f = (a) => (b) => {\n  a();\n}",
+                "const f = (a) => (b) => {\n  b();\n}",
+                Some(false),
+            ),
+            // The parameter is renamed too (`o` -> `p`): a header change.
+            (
+                "typescript",
+                "const f = (o) => o !== {\n};",
+                "const f = (p) => p !== {\n};",
+                Some(true),
+            ),
+            // Ruby has no grammar here.
+            (
+                "ruby",
+                "def total\n  items.each { |i| p i }\nend",
+                "def total\n  items.each { |i| puts i }\nend",
+                None,
+            ),
+            (
+                "ruby",
+                "def show\n  render json: @user\nend",
+                "def show\n  render json: @users\nend",
+                None,
+            ),
+            (
+                "ruby",
+                "def foo(a)\n  x = {a: 1}\nend",
+                "def foo(a)\n  x = {a: 2}\nend",
+                None,
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_multi_line_decorator_and_attribute() {
+        check_all(&[
+            (
+                "python",
+                "@pytest.mark.parametrize(\n    \"a\", [1, 2],\n)\ndef test_x(a):\n    x()\n    assert {a} == {a}",
+                "@pytest.mark.parametrize(\n    \"a\", [1, 2],\n)\ndef test_x(a):\n    y()\n    assert {a} == {a}",
+                Some(false),
+            ),
+            (
+                "python",
+                "@app.route(\n    \"/x\",\n    methods=[\"GET\"],\n)\ndef view(self):\n    self.cache = {}",
+                "@app.route(\n    \"/x\",\n    methods=[\"GET\"],\n)\ndef view(self):\n    self.items = {}",
+                Some(false),
+            ),
+            (
+                "python",
+                "@dataclass(\n    frozen=True,\n)\nclass P:\n    def to_dict(self):\n        return {1: 2}",
+                "@dataclass(\n    frozen=True,\n)\nclass P:\n    def as_dict(self):\n        return {1: 2}",
+                Some(false),
+            ),
+            (
+                "python",
+                "@d(\n    a=1,\n    b=2,\n)\ndef f(x):\n    y = {}",
+                "@d(\n    a=1,\n    b=2,\n)\ndef f(x):\n    z = {}",
+                Some(false),
+            ),
+            (
+                "python",
+                "@d(\n    1,\n)\ndef f(self):\n    return {}",
+                "@d(\n    1,\n)\ndef f(self):\n    log()\n    return {}",
+                Some(false),
+            ),
+            (
+                "rust",
+                "#[derive(\n    Debug,\n)]\nfn a() -> u8 {\n    1\n}",
+                "#[derive(\n    Debug,\n)]\nfn a() -> u8 {\n    2\n}",
+                Some(false),
+            ),
+            (
+                "python",
+                "@d(\n    1,\n)\ndef f(self):\n    return {}",
+                "@d(\n    1,\n)\ndef f(self, x):\n    return {}",
+                Some(true),
+            ),
+            // A decorator whose bracket never closes does not parse.
+            (
+                "python",
+                "@d(\n    1,\ndef f(self):\n    return {}",
+                "def f(self):",
+                None,
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_class_with_a_colon_that_is_not_last_on_its_line() {
+        check_all(&[
+            // The header changes in the first two pairs (a constructor parameter, a
+            // supertype); the scanner could not read them.
+            (
+                "kotlin",
+                "class A<T : Any>(x: T) {\n    val y = 1\n}",
+                "class A<T : Any>(x: T, z: T) {\n    val y = 1\n}",
+                Some(true),
+            ),
+            (
+                "kotlin",
+                "class A : B {\n    val y = 1\n}",
+                "class A : C {\n    val y = 1\n}",
+                Some(true),
+            ),
+            ("python", "class A: x = {}", "class A: y = {}", Some(false)),
+            (
+                "python",
+                "class A(\n    B,\n):\n    x = 1\n",
+                "class A(\n    B,\n):\n    x = 2\n",
+                Some(false),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_code_sharing_a_line_with_an_annotation() {
+        check_all(&[
+            (
+                "kotlin",
+                "@Suppress(\n    \"x\") fun f(): Int {\n    log()\n    return run {\n        1\n    }\n}",
+                "@Suppress(\n    \"x\") fun f(): Int {\n    warn()\n    return run {\n        1\n    }\n}",
+                Some(false),
+            ),
+            (
+                "java",
+                "@SuppressWarnings({\n  \"a\"}) public int f() {\n  log();\n  int[] a = {1};\n}",
+                "@SuppressWarnings({\n  \"a\"}) public int f() {\n  warn();\n  int[] a = {1};\n}",
+                Some(false),
+            ),
+            // The decorator argument changes (`x` -> `y`): a header change.
+            (
+                "typescript",
+                "@Component({\n  selector: \"x\",\n}) export class A {\n  m() {}\n}",
+                "@Component({\n  selector: \"y\",\n}) export class A {\n  m() {}\n}",
+                Some(true),
+            ),
+            (
+                "rust",
+                "#[cfg(\n    test)] fn f() {\n    1\n}",
+                "#[cfg(\n    test)] fn f() {\n    2\n}",
+                Some(false),
+            ),
+            (
+                "kotlin",
+                "@JvmStatic fun f(): Int {\n    log()\n    return run {\n        1\n    }\n}",
+                "@JvmStatic fun f(): Int {\n    warn()\n    return run {\n        1\n    }\n}",
+                Some(false),
+            ),
+            (
+                "typescript",
+                "@HostListener(\"click\") onClick(e) {\n  log();\n  return {a: 1};\n}",
+                "@HostListener(\"click\") onClick(e) {\n  warn();\n  return {a: 1};\n}",
+                Some(false),
+            ),
+            (
+                "rust",
+                "#[inline] fn f() -> S {\n    log();\n    S {\n        a: 1,\n    }\n}",
+                "#[inline] fn f() -> S {\n    warn();\n    S {\n        a: 1,\n    }\n}",
+                Some(false),
+            ),
+        ]);
+    }
+
+    #[test]
+    fn corpus_annotation_alone_on_its_line() {
+        for (lang, old, same, changed) in [
+            (
+                "java",
+                "@Override\npublic String toString() {\n  return a;\n}",
+                "@Override\npublic String toString() {\n  return b;\n}",
+                "@Override\npublic String toString(int x) {\n  return a;\n}",
+            ),
+            (
+                "python",
+                "@app.route(\"/x\")\ndef view(self):\n    return {}",
+                "@app.route(\"/x\")\ndef view(self):\n    return {1}",
+                "@app.route(\"/x\")\ndef view(self, x):\n    return {}",
+            ),
+            (
+                "rust",
+                "#[derive(Debug)]\nstruct S {\n    a: u8,\n}",
+                "#[derive(Debug)]\nstruct S {\n    a: u16,\n}",
+                "#[derive(Debug)]\nstruct T {\n    a: u8,\n}",
+            ),
+            (
+                "python",
+                "@d  # note\ndef f(a):\n    pass",
+                "@d  # other\ndef f(a):\n    return 1",
+                "@d  # note\ndef f(a, b):\n    pass",
+            ),
+        ] {
+            check_all(&[
+                (lang, old, same, Some(false)),
+                (lang, old, changed, Some(true)),
+            ]);
+        }
+    }
 }
