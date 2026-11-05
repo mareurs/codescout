@@ -73,8 +73,8 @@ it (upstream dtolnay/async-trait#303), so the fix is the lockfile bump, not an `
 | 6 | Flaky test | open | `tools::run_command::tests::a_truncated_tool_query_names_a_real_route_on_its_own_handle_and_it_runs` failed once in 8 runs (1.97.1, lean and default of one run). Bug: `docs/issues/2026-11-05-truncated-tool-query-test-failed-once-in-eight-gate-runs.md`. |
 | 7 | Read the clippy 1.98 and 1.99 changelogs | open | The blog posts only link to them. New lints could be useful. Not read yet. |
 | 8 | Edition 2024 | not planned | Cargo 1.99 lets edition-2024 members override an inherited workspace dependency's `default-features`. We are on edition 2021. Separate, large job. |
-| 9 | sccache cache size | pending restart | `~/.config/sccache/config` sets 20 GiB. The running daemon keeps 10 GiB until it restarts. Machine-local, not in the repo. |
-| 10 | Clean up the experiment | open | Worktree `rust-1.99.1`, RAM slots, and the 1.97.1 toolchain in rustup once nobody needs it. |
+| 9 | sccache cache size | done 2026-11-05 | `sccache --show-stats` reports max cache size 20 GiB (11 GiB used). The daemon restarted on its own. Machine-local, not in the repo. |
+| 10 | Clean up the experiment | done 2026-11-05, except 1.97.1 | Removed: worktree `rust-1.99.1`, branch `chore/rust-1.99.1` (merged, `git branch -d`), RAM slot-3 contents (9.8 GB), toolchains 1.88 and 1.95.0 (no live file pins them). Kept on purpose: toolchain 1.97.1, because worktrees `mutation-slot-0`, `mutation-slot-1` and `.codex/worktrees/615e/codescout` still pin it. Remove it when those move. |
 | 11 | First CI run on 1.99.1 | open | After the push, CI reads `rust-toolchain.toml` and rustup must install 1.99.1 on the runners. Not tried. Read the first run before trusting it. |
 
 ## How to bump next time
