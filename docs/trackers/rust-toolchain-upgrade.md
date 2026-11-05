@@ -23,7 +23,7 @@ ledger: nothing here is citable as an entry and nothing allocates ids. See
 
 **Status 2026-11-05:** the operator decided to move the pin from 1.97.1 to 1.99.1. The bump is
 prepared and gated on branch `chore/rust-1.99.1` (worktree `codescout.worktrees/rust-1.99.1`).
-Both commits are on that branch (`4098f07bb`, `2933e242c`) and the full gate is green there. Merging into `experiments` waits for the operator, and nothing is pushed. Update this line when it lands.
+The bump landed on `experiments` the same day by fast-forward (tip `76335cb39`, operator said "da"). The gate on the merged tree was green (exit 0 on all lanes, TOTAL 387 s with a crate rebuild). Nothing is pushed.
 
 ## Why we move, stated honestly
 
@@ -54,7 +54,7 @@ Evidence and method: codescout memory `research/rust-toolchain-upgrade-20261105`
 | 9 files under `src/` | `strip_circumfix` (11 sites) and `String::from_utf8_lossy_owned` (3 sites), commit `2933e242c` |
 
 CI installs no toolchain: it reads `rust-toolchain.toml`, so CI follows the pin. The `msrv` job
-still installs 1.88 on purpose (`cargo +1.88 check`).
+now installs 1.99 (`cargo +1.99 check`), because the project tracks the newest stable (row 4).
 
 **Upgrade problems found (two, both fixed on the branch).** The first: `clippy::double_must_use` fired on `#[async_trait::async_trait]
 pub trait Embedder` (`crates/codescout-embed/src/embedder.rs:107`), under `-D warnings`. The
@@ -65,7 +65,7 @@ it (upstream dtolnay/async-trait#303), so the fix is the lockfile bump, not an `
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 1 | Land the 1.99.1 bump on `experiments` | committed on branch | Branch `chore/rust-1.99.1`: `4098f07bb` (toolchain, MSRV 1.99, async-trait 0.1.92, boxed refusal) and `2933e242c` (std APIs). Gate green in the worktree, base `6bd3745e4`: all lanes exit 0, 6162 lean, 9030 default, 1599 Python. Not merged into `experiments`, not pushed. A commit hook (`dead-artifact-ids`) skipped itself because the worktree has no `codescout` binary. |
+| 1 | Land the 1.99.1 bump on `experiments` | done 2026-11-05, not pushed | Branch `chore/rust-1.99.1`: `4098f07bb` (toolchain, MSRV 1.99, async-trait 0.1.92, boxed refusal) and `2933e242c` (std APIs). Gate green in the worktree, base `6bd3745e4`: all lanes exit 0, 6162 lean, 9030 default, 1599 Python. Landed on `experiments` by `git merge --ff-only` at `76335cb39` after merging `experiments` into the branch twice; the final gate on the merged tree was green (FMT, CLIPPY, LEAN, DEFAULT all exit 0). The last merge added one memory file only and was not re-gated. Not pushed. A commit hook (`dead-artifact-ids`) skipped itself because the worktree has no `codescout` binary. |
 | 2 | `build.rs` re-runs after any commit in the repo | open | `bake_git_sha` watches `refs` and `packed-refs` of the shared git dir. Observed cost about 3.5 minutes per gate (clippy 72 s, lean 52 s, default 90 s). Candidate fix: watch `HEAD` and the one ref it points to. Must keep the baked SHA correct after a commit. Bug: `docs/issues/2026-11-05-build-rs-watches-shared-refs-so-any-commit-rebuilds-codescout.md`. |
 | 3 | `pytest-xdist` in the light Python lane | open | `-n 16`: 20 s against 140 s, 1599 passed in all 6 runs. Not wired in. Warm TOTAL would then follow the Rust lanes (about 119 s), an estimate, not a measured gate run. |
 | 4 | MSRV decision | decided 2026-11-05 | Operator: MSRV does not matter, the project tracks the newest stable. `rust-version` is 1.99 and the `msrv` job follows the pin. GitHub checked with `gh` on the same day: no classic branch protection on `master` or `experiments`, and the two rulesets only require a pull request (0 approvals, owner bypasses), so no required check names the job. Not checked: organisation-level settings. |
