@@ -11738,6 +11738,57 @@ async fn edit_code_replace_that_cannot_tell_carries_unverified_advice() {
     assert!(out.get("hint").is_none(), "{out}");
 }
 
+#[tokio::test]
+async fn edit_code_replace_of_a_brace_body_inside_call_arguments_is_never_verified() {
+    // The scanner finds no depth-0 `{` here, so `declaration_changed` is `None`. A body-only
+    // edit with an outside call by name must give `verified: false`, never `true`.
+    let old = "const a = debounce((x) => {\n  f();\n}, 100);\n";
+    let new = "const a = debounce((x) => {\n  g();\n}, 100);";
+    assert_eq!(crate::symbol::edit::declaration_changed(old, new), None);
+    let (_dir, ctx) = replace_project(
+        &[
+            ("src/lib.ts", old),
+            (
+                "src/other.ts",
+                "import { a } from \"./lib\";\nexport function h() {\n  a(1);\n}\n",
+            ),
+        ],
+        2,
+        6,
+    )
+    .await;
+    let out = replace_a(&ctx, "src/lib.ts", new).await;
+    assert_eq!(out["advice"]["verified"], json!(false), "{out}");
+    assert_eq!(
+        out["advice"]["text"],
+        json!(super::edit_code::verify_callers_hint("a", "src/lib.ts")),
+        "{out}"
+    );
+}
+
+#[tokio::test]
+async fn edit_code_replace_of_a_python_one_liner_with_an_assignment_is_never_verified() {
+    let old = "def a(x): y = 1\n";
+    let new = "def a(x): y = 2";
+    assert_eq!(crate::symbol::edit::declaration_changed(old, new), None);
+    let (_dir, ctx) = replace_project(
+        &[
+            ("src/lib.py", old),
+            ("src/other.py", "from lib import a\nb = a(1)\n"),
+        ],
+        0,
+        4,
+    )
+    .await;
+    let out = replace_a(&ctx, "src/lib.py", new).await;
+    assert_eq!(out["advice"]["verified"], json!(false), "{out}");
+    assert_eq!(
+        out["advice"]["text"],
+        json!(super::edit_code::verify_callers_hint("a", "src/lib.py")),
+        "{out}"
+    );
+}
+
 #[test]
 fn attach_advice_keeps_an_existing_safety_warning() {
     let warning = "The edit was written but NOT verified against dropped symbols. \

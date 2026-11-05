@@ -996,7 +996,8 @@ pub fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String 
 /// body starts (see [`header_end`]). Trailing comments are left out (a `//` or
 /// ` #` marker counts only when the text before it has an even number of `"`
 /// and of `'`) and whitespace runs collapse to one space. `None` when no header
-/// can be read: no header line, or no body-start marker before the text ends.
+/// can be read: no header line, or no header end (see [`header_end`]) before the
+/// text ends.
 fn declaration_header(text: &str) -> Option<String> {
     let mut header = String::new();
     let mut depth = 0;
@@ -1014,7 +1015,7 @@ fn declaration_header(text: &str) -> Option<String> {
         if n == 0 {
             pythonic = matches!(code.split_whitespace().next(), Some("def" | "async"));
         }
-        let end = header_end(code, &mut depth, pythonic, header.contains('('));
+        let end = header_end(code, &mut depth, pythonic);
         for word in code[..end.unwrap_or(code.len())].split_whitespace() {
             if !header.is_empty() {
                 header.push(' ');
@@ -1030,13 +1031,14 @@ fn declaration_header(text: &str) -> Option<String> {
 
 /// Byte offset in `code` (one comment-free header line) where the declaration
 /// header ends and the body begins, or `None` when this line does not end it.
-/// `depth` is the open `(`/`[` count carried across lines. The header ends:
-/// just after a `{` outside strings and brackets; before a top-level `=>`;
-/// before a top-level ` = ` that follows a parameter list (`fun f(x: Int) = ..`);
-/// just after a top-level `:` of a Python `def`, unless an ` = ` follows (a
-/// Scala `def f(x: Int): Int = ..`); or at the end of a line that ends in `:` or
-/// `;` with all brackets closed. `seen_paren`: an earlier line held a `(`.
-fn header_end(code: &str, depth: &mut usize, pythonic: bool, seen_paren: bool) -> Option<usize> {
+/// `depth` is the open `(`/`[` count carried across lines. The header ends only:
+/// just after a `{` outside strings and brackets; or, for a Python-style `def`
+/// (`pythonic`), just after a top-level `:` unless an ` = ` follows on the line (a
+/// Scala `def f(x: Int): Int = ..` is not cut there), or at the end of a line
+/// that ends in `:` with all brackets closed. Every other shape (a line ending in
+/// `;`, a `=>` or ` = ` expression body, a brace body inside call arguments) has
+/// no header end here: the caller must not guess one.
+fn header_end(code: &str, depth: &mut usize, pythonic: bool) -> Option<usize> {
     let mut in_str = false;
     for (i, c) in code.char_indices() {
         if c == '"' {
@@ -1045,33 +1047,34 @@ fn header_end(code: &str, depth: &mut usize, pythonic: bool, seen_paren: bool) -
         if in_str {
             continue;
         }
-        let rest = &code[i..];
         match c {
             '(' | '[' => *depth += 1,
             ')' | ']' => *depth = depth.saturating_sub(1),
             _ if *depth > 0 => {}
             '{' => return Some(i + 1),
-            '=' if rest.starts_with("=>") => return Some(i),
-            ' ' if rest.starts_with(" = ") && (seen_paren || code[..i].contains('(')) => {
-                return Some(i)
-            }
-            ':' if pythonic && !rest.contains(" = ") => return Some(i + 1),
+            ':' if pythonic && !code[i..].contains(" = ") => return Some(i + 1),
             _ => {}
         }
     }
-    let t = code.trim_end();
-    (*depth == 0 && (t.ends_with(':') || t.ends_with(';'))).then_some(code.len())
+    (pythonic && *depth == 0 && code.trim_end().ends_with(':')).then_some(code.len())
 }
 
 /// Whether a replaced symbol's declaration header (see [`declaration_header`])
 /// differs between `old` and `new`.
 ///
-/// - `Some(true)`: the headers differ (a parameter, name, visibility, return
-///   type changed, or the heuristic read a body fragment into one of them).
+/// Answers `Some(_)` only when both headers were read with confidence: the end
+/// of each header was found at a `{` outside strings and brackets, or at the
+/// colon of a Python `def` header (see [`header_end`]). Anything else is `None`.
+///
+/// - `Some(true)`: the headers differ (a parameter, name, visibility or return
+///   type changed).
 /// - `Some(false)`: both headers were read and are equal after whitespace and
 ///   trailing comments are ignored, so only the body changed.
-/// - `None`: no header could be read from one side, because the text has no
-///   header line or no body-start marker. The caller must not claim either way.
+/// - `None`: no header end was read on one side: the text has no header line, or
+///   its body does not start at a depth-0 `{` or a Python `def` colon (a bodyless
+///   `fn f();`, a `=>` or ` = ` expression body, a brace body inside call
+///   arguments, a Python one-liner whose body holds ` = `, a `class` header).
+///   The caller must not claim either way.
 pub fn declaration_changed(old: &str, new: &str) -> Option<bool> {
     Some(declaration_header(old)? != declaration_header(new)?)
 }
@@ -1205,11 +1208,6 @@ mod tests {
                 "pub fn len(&self) -> usize { self.items.len() }",
             ),
             ("def f(a): return 1", "def f(a): return 2"),
-            ("fun f(x: Int) = x + 1", "fun f(x: Int) = x + 2"),
-            (
-                "const f = (x: number) => x + 1;",
-                "const f = (x: number) => x + 2;",
-            ),
         ] {
             assert_eq!(declaration_changed(old, new), Some(false), "{old}");
         }
@@ -1223,11 +1221,6 @@ mod tests {
                 "pub fn len(&self, n: u8) -> usize { self.0.len() }",
             ),
             ("def f(a): return 1", "def f(a, b): return 1"),
-            ("fun f(x: Int) = x + 1", "fun f(x: Int, y: Int) = x + 1"),
-            (
-                "const f = (x: number) => x + 1;",
-                "const f = (x: number, y: number) => x + 1;",
-            ),
         ] {
             assert_eq!(declaration_changed(old, new), Some(true), "{old}");
         }
@@ -1238,6 +1231,47 @@ mod tests {
         assert_eq!(declaration_changed("val x = 5", "val x = 6"), None);
         assert_eq!(declaration_changed("fn a(x: u8)", "fn a(x: u8) {}"), None);
         assert_eq!(declaration_changed("fn a() {}", "fn a(x: u8)"), None);
+    }
+    #[test]
+    fn declaration_changed_is_none_where_no_header_end_can_be_read() {
+        // Each pair changes only the body (or, for the arrow/Kotlin shapes, the parameters
+        // too): the scanner must not guess where such a header ends, so it answers `None`.
+        for (old, new) in [
+            // Python one-liner whose body holds ` = `: the colon is not taken as the header end.
+            ("def f(a): x = 1", "def f(a): y = 1"),
+            // Brace body inside call arguments: no depth-0 `{`.
+            (
+                "const save = debounce((x) => {\n  a();\n}, 100);",
+                "const save = debounce((x) => {\n  b();\n}, 100);",
+            ),
+            (
+                "export const M = React.memo((p) => {\n  return 1;\n});",
+                "export const M = React.memo((p) => {\n  return 2;\n});",
+            ),
+            (
+                "static R: Lazy<u8> = Lazy::new(|| {\n    1\n});",
+                "static R: Lazy<u8> = Lazy::new(|| {\n    2\n});",
+            ),
+            // ` = ` expression bodies.
+            ("fun f(x: Int) = x + 1", "fun f(x: Int) = x + 2"),
+            ("fun f(x: Int) = x + 1", "fun f(x: Int, y: Int) = x + 1"),
+            // `=>` expression bodies without a depth-0 `{`.
+            (
+                "const f = (x: number) => x + 1;",
+                "const f = (x: number) => x + 2;",
+            ),
+            (
+                "const f = (x: number) => x + 1;",
+                "const f = (x: number, y: number) => x + 1;",
+            ),
+            // A Scala colon followed by ` = ` is not a Python colon.
+            ("def f(x: Int): Int = x + 1", "def f(x: Int): Int = x + 2"),
+            // Bodyless declarations end at `;`, which is not a header end.
+            ("fn a(x: u8);", "fn a(x: u8, y: u8);"),
+            ("fn a(x: u8);  // one", "fn a(x: u8);  // two"),
+        ] {
+            assert_eq!(declaration_changed(old, new), None, "{old} -> {new}");
+        }
     }
 
     #[test]

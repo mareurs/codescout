@@ -235,7 +235,7 @@ All notable changes to codescout are documented here.
 
 ### Changed
 
-- **`edit_code replace` returns an `advice` field when a changed declaration has a by-name call in another file, and no longer carries an unconditional `hint`; the `rename` hint names the new symbol.** A body-only replace now returns neither.
+- **`edit_code replace` returns an `advice` field when a changed declaration has a by-name call in another file, and no longer carries an unconditional `hint`; the `rename` hint names the new symbol.** A replace whose declaration header was read on both sides and did not change returns neither. When the header cannot be read with confidence (a bodyless `fn f();`, a `=>` or ` = ` expression body, a brace body inside call arguments, a Python one-liner whose body holds ` = `, a Python `class`), the replace returns `advice` with `verified: false` and the `verify callers` text, whether or not the body changed; `verified: true` is reported only when the header was read and changed and a by-name call exists in another file.
 
 - **`codescout backfill-chunks` reports its scope as `scope.abs_path_root`, not
   `scope.abs_path_like`, and the value is a plain path.** The scoped run now selects rows at or
