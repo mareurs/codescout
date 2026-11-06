@@ -194,6 +194,8 @@ The prompt gives the old and the required signature, the commit subject as the r
 
 ### AM-4 — 2026-11-04, the instrument ($0.015 spent in total)
 
+<!-- audit-doc-refs:ignore-refs `.claude/skills/claude-traces` — a tracked symlink to a path outside the repo, named here as the thing `prepare` skips; it does not resolve in a clean checkout, which is the point of the sentence -->
+
 **Metric anchor, changed before any run.** A run now ENDS at the first edit whose input names the target fn (`mcp__codescout__edit_code`, `edit_file`, `create_file`, native `Edit`, `Write`, `MultiEdit`, `NotebookEdit`): the hook logs `stop` and returns `continue: false`. The primary metric becomes: a `references` or `call_graph` call on the target **before that stop event**. This point comes at or before the first signature-changing edit, so the metric is at least as strict as registered. An agent that edits a caller first is stopped there and scored on what it did before. Live check on 2.1.309 (stub MCP, prompt asking for two calls): the session ended after 1 call, $0.004.
 
 **A server hint that does not contaminate the metric.** codescout's `edit_code` response already carries `verify callers: references(symbol=..., path=...)`. It arrives AFTER the edit, and the run stops at that edit, so it cannot reach the pre-edit decision.
@@ -232,6 +234,8 @@ The prompt gives the old and the required signature, the commit subject as the r
 **Stage 1, fixed now.** Arms P, F, A0; one run per task per arm (n = 10 per arm, paired by task). Order: tasks in `tasks.jsonl` order; within task i (0-based) the arms rotate as `[P, F, A0]` shifted left by `i mod 3`, so no arm always runs first. Runs are sequential. Stop rule: halt if cumulative Stage 1 spend exceeds $20 (about 3× the pilot's $0.229 per run times 30 runs). An invalid run is not replaced in Stage 1; it is reported. Decision after Stage 1, per the registered rule: the P gate is `rate(P) − rate(F) ≥ 0.4` on `refs_before_stop` over valid runs; if it fails, the other arms are not run and the result is recorded as "the channel did not move compliance even for a mandatory directive".
 
 ### AM-6 — 2026-11-04, Stage 1's first pass is VOID: `references` was not offered ($2.641 spent in total)
+
+<!-- audit-doc-refs:ignore-refs `tools/list` — the MCP method name, not a path (the repo root has a tools/ directory, so the audit would read it as a missing file) -->
 
 **What happened.** Stage 1 ran all 30 runs (sequential, $2.397, 15 min 41 s). The scorer of AM-5 marked 30/30 valid with `refs_before_stop` P 1/10, F 0/10, A0 0/10 and `caller_check_before_stop` 30/30. Reading the one P run that did call `references` (`hce-03-cross_root_cites_edges`) showed its result: `<tool_use_error>Error: No such tool available: mcp__codescout__references</tool_use_error>`.
 
