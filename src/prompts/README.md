@@ -56,6 +56,8 @@ Read this when touching `source.md` (the single source for the `server_instructi
 
 ## Caps follow the harness — when one may rise
 
+<!-- audit-doc-refs:ignore-refs `tools/list` — the MCP method name, not a path (the repo root has a tools/ directory, so the audit would read it as a missing file) -->
+
 **No prompt cap in this repo is a hard cap.** Each one is calibrated to what a harness needs or tolerates, and when that changes, the cap follows. Operator ruling, 2026-11-04. This section is the one home of that rule; every "do not raise" elsewhere means *do not raise it to make a red pass* and points here.
 
 | cap | calibrated to |
