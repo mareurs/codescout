@@ -1,0 +1,119 @@
+[
+  {
+    "task_id": "hce-01-unexported_count",
+    "fn": "unexported_count",
+    "path": "src/librarian/catalog/audit/shard.rs",
+    "edit_reply": "{\n  \"status\": \"ok\",\n  \"replaced_lines\": \"77-84\",\n  \"advice\": {\n    \"text\": \"verify callers: references(symbol=\\\"unexported_count\\\", path=\\\"src/librarian/catalog/audit/shard.rs\\\") | `unexported_count` is called by name in src/librarian/tools/doctor.rs (a syntactic match, not resolved by the language server)\",\n    \"verified\": true\n  },\n  \"rel_path\": \"src/librarian/catalog/audit/shard.rs\"\n}",
+    "advice": {
+      "text": "verify callers: references(symbol=\"unexported_count\", path=\"src/librarian/catalog/audit/shard.rs\") | `unexported_count` is called by name in src/librarian/tools/doctor.rs (a syntactic match, not resolved by the language server)",
+      "verified": true
+    },
+    "hint": null,
+    "verified": true
+  },
+  {
+    "task_id": "hce-02-prefix_conflicts",
+    "fn": "prefix_conflicts",
+    "path": "src/librarian/tools/link_scan/resolve.rs",
+    "edit_reply": "{\n  \"status\": \"ok\",\n  \"replaced_lines\": \"145-160\",\n  \"advice\": {\n    \"text\": \"verify callers: references(symbol=\\\"prefix_conflicts\\\", path=\\\"src/librarian/tools/link_scan/resolve.rs\\\") | `prefix_conflicts` is called by name in src/librarian/tools/link_scan/mod.rs (a syntactic match, not resolved by the language server)\",\n    \"verified\": true\n  },\n  \"rel_path\": \"src/librarian/tools/link_scan/resolve.rs\"\n}",
+    "advice": {
+      "text": "verify callers: references(symbol=\"prefix_conflicts\", path=\"src/librarian/tools/link_scan/resolve.rs\") | `prefix_conflicts` is called by name in src/librarian/tools/link_scan/mod.rs (a syntactic match, not resolved by the language server)",
+      "verified": true
+    },
+    "hint": null,
+    "verified": true
+  },
+  {
+    "task_id": "hce-03-cross_root_cites_edges",
+    "fn": "cross_root_cites_edges",
+    "path": "src/librarian/tools/doctor/scope.rs",
+    "edit_reply": "{\n  \"status\": \"ok\",\n  \"replaced_lines\": \"284-286\",\n  \"advice\": {\n    \"text\": \"verify callers: references(symbol=\\\"impl DoctorScope/cross_root_cites_edges\\\", path=\\\"src/librarian/tools/doctor/scope.rs\\\") | `cross_root_cites_edges` is called by name in src/librarian/tools/doctor.rs (a syntactic match, not resolved by the language server)\",\n    \"verified\": true\n  },\n  \"rel_path\": \"src/librarian/tools/doctor/scope.rs\"\n}",
+    "advice": {
+      "text": "verify callers: references(symbol=\"impl DoctorScope/cross_root_cites_edges\", path=\"src/librarian/tools/doctor/scope.rs\") | `cross_root_cites_edges` is called by name in src/librarian/tools/doctor.rs (a syntactic match, not resolved by the language server)",
+      "verified": true
+    },
+    "hint": null,
+    "verified": true
+  },
+  {
+    "task_id": "hce-04-append_preferences_section",
+    "fn": "append_preferences_section",
+    "path": "src/prompts/builders.rs",
+    "edit_reply": "{\n  \"status\": \"ok\",\n  \"replaced_lines\": \"434-470\",\n  \"advice\": {\n    \"text\": \"verify callers: references(symbol=\\\"append_preferences_section\\\", path=\\\"src/prompts/builders.rs\\\") | `append_preferences_section` is called by name in src/tools/onboarding.rs (a syntactic match, not resolved by the language server)\",\n    \"verified\": true\n  },\n  \"rel_path\": \"src/prompts/builders.rs\"\n}",
+    "advice": {
+      "text": "verify callers: references(symbol=\"append_preferences_section\", path=\"src/prompts/builders.rs\") | `append_preferences_section` is called by name in src/tools/onboarding.rs (a syntactic match, not resolved by the language server)",
+      "verified": true
+    },
+    "hint": null,
+    "verified": true
+  },
+  {
+    "task_id": "hce-05-ensure_resident",
+    "fn": "ensure_resident",
+    "path": "src/agent/mod.rs",
+    "edit_reply": "{\n  \"status\": \"ok\",\n  \"replaced_lines\": \"758-786\",\n  \"advice\": {\n    \"text\": \"verify callers: references(symbol=\\\"ensure_resident\\\", path=\\\"src/agent/mod.rs\\\") | `ensure_resident` is called by name in src/server.rs (a syntactic match, not resolved by the language server)\",\n    \"verified\": true\n  },\n  \"rel_path\": \"src/agent/mod.rs\"\n}",
+    "advice": {
+      "text": "verify callers: references(symbol=\"ensure_resident\", path=\"src/agent/mod.rs\") | `ensure_resident` is called by name in src/server.rs (a syntactic match, not resolved by the language server)",
+      "verified": true
+    },
+    "hint": null,
+    "verified": true
+  },
+  {
+    "task_id": "hce-06-read_capture",
+    "fn": "read_capture",
+    "path": "src/tools/run_command/output.rs",
+    "edit_reply": "{\n  \"status\": \"ok\",\n  \"replaced_lines\": \"1156-1173\",\n  \"advice\": {\n    \"text\": \"verify callers: references(symbol=\\\"read_capture\\\", path=\\\"src/tools/run_command/output.rs\\\")\",\n    \"verified\": false\n  },\n  \"rel_path\": \"src/tools/run_command/output.rs\"\n}",
+    "advice": {
+      "text": "verify callers: references(symbol=\"read_capture\", path=\"src/tools/run_command/output.rs\")",
+      "verified": false
+    },
+    "hint": null,
+    "verified": false
+  },
+  {
+    "task_id": "hce-07-build_chunks",
+    "fn": "build_chunks",
+    "path": "src/librarian/catalog/chunk.rs",
+    "edit_reply": "{\n  \"status\": \"ok\",\n  \"replaced_lines\": \"26-47\",\n  \"advice\": {\n    \"text\": \"verify callers: references(symbol=\\\"build_chunks\\\", path=\\\"src/librarian/catalog/chunk.rs\\\") | `build_chunks` is called by name in src/librarian/catalog/find.rs (a syntactic match, not resolved by the language server)\",\n    \"verified\": true\n  },\n  \"rel_path\": \"src/librarian/catalog/chunk.rs\"\n}",
+    "advice": {
+      "text": "verify callers: references(symbol=\"build_chunks\", path=\"src/librarian/catalog/chunk.rs\") | `build_chunks` is called by name in src/librarian/catalog/find.rs (a syntactic match, not resolved by the language server)",
+      "verified": true
+    },
+    "hint": null,
+    "verified": true
+  },
+  {
+    "task_id": "hce-08-store_background",
+    "fn": "store_background",
+    "path": "src/tools/output_buffer.rs",
+    "edit_reply": "{\n  \"status\": \"ok\",\n  \"replaced_lines\": \"602-626\",\n  \"advice\": {\n    \"text\": \"verify callers: references(symbol=\\\"store_background\\\", path=\\\"src/tools/output_buffer.rs\\\") | `store_background` is called by name in src/tools/run_command/inner.rs (a syntactic match, not resolved by the language server)\",\n    \"verified\": true\n  },\n  \"rel_path\": \"src/tools/output_buffer.rs\"\n}",
+    "advice": {
+      "text": "verify callers: references(symbol=\"store_background\", path=\"src/tools/output_buffer.rs\") | `store_background` is called by name in src/tools/run_command/inner.rs (a syntactic match, not resolved by the language server)",
+      "verified": true
+    },
+    "hint": null,
+    "verified": true
+  },
+  {
+    "task_id": "hce-09-note_activation",
+    "fn": "note_activation",
+    "path": "src/agent/mod.rs",
+    "edit_reply": "{\n  \"status\": \"ok\",\n  \"replaced_lines\": \"1161-1183\",\n  \"advice\": {\n    \"text\": \"verify callers: references(symbol=\\\"note_activation\\\", path=\\\"src/agent/mod.rs\\\")\",\n    \"verified\": false\n  },\n  \"rel_path\": \"src/agent/mod.rs\"\n}",
+    "advice": {
+      "text": "verify callers: references(symbol=\"note_activation\", path=\"src/agent/mod.rs\")",
+      "verified": false
+    },
+    "hint": null,
+    "verified": false
+  },
+  {
+    "task_id": "hce-10-in_one_commit",
+    "fn": "in_one_commit",
+    "path": "src/librarian/indexer.rs",
+    "edit_reply": "{\n  \"status\": \"ok\",\n  \"replaced_lines\": \"172-184\",\n  \"rel_path\": \"src/librarian/indexer.rs\"\n}",
+    "advice": null,
+    "hint": null,
+    "verified": null
+  }
+]

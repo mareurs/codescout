@@ -1,0 +1,73 @@
+{
+  "runs": 10,
+  "not_informative_by_reason": {
+    "no_edit_code_replace_on_target": 1,
+    "no_advice": 1,
+    "advice_not_relocated": 1
+  },
+  "informative": 7,
+  "per_arm_n_primary_secondary": {
+    "A": [
+      3,
+      0,
+      0
+    ],
+    "B": [
+      4,
+      0,
+      0
+    ]
+  },
+  "per_task_nA_kA_nB_kB": {
+    "hce-02-prefix_conflicts": [
+      1,
+      0,
+      1,
+      0
+    ],
+    "hce-05-ensure_resident": [
+      1,
+      0,
+      1,
+      0
+    ],
+    "hce-01-unexported_count": [
+      1,
+      0,
+      1,
+      0
+    ],
+    "hce-07-build_chunks": [
+      0,
+      0,
+      1,
+      0
+    ]
+  },
+  "tasks_with_both_arms": 3,
+  "stratified_exact_one_sided_p": 1.0,
+  "observed_A_successes": 0,
+  "no_prior_lookup": {
+    "informative": 0,
+    "per_arm_n_primary_secondary": {
+      "A": [
+        0,
+        0,
+        0
+      ],
+      "B": [
+        0,
+        0,
+        0
+      ]
+    },
+    "per_task_nA_kA_nB_kB": {},
+    "tasks_with_both_arms": 0,
+    "stratified_exact_one_sided_p": null,
+    "observed_A_successes": null
+  },
+  "prior_lookup_by_arm": {
+    "A": 3,
+    "B": 4
+  }
+}
