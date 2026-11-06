@@ -1,0 +1,65 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-06-executable-native-baseline-evidence.tar.gz",
+  "sha256": "a6f224468b952c814988dc784f1bf036d02ad71aea1ba22ab3408b0bfc405f38",
+  "bytes": 211918,
+  "payload_files": 44,
+  "all_reopened_and_hash_verified": true,
+  "all_public_passed": true,
+  "cases": [
+    {
+      "id": "nushell__nushell-18863",
+      "passed": true,
+      "checks": [
+        {
+          "id": "public_build",
+          "command": "cargo build --offline",
+          "exit_code": 0,
+          "error": null,
+          "wall_s": 8.298127207905054,
+          "log": "/home/marius/.cache/codescout-resident/codescout/external-exec-baseline-20261106-v3/nushell__nushell-18863/0.log",
+          "log_sha256": "d0eda1de06a3cfd445b1cca563333a6c6a6bce6c121be605f8ee463a198dcd4e"
+        },
+        {
+          "id": "public_tests",
+          "command": "cargo test --offline --workspace --no-fail-fast -- --skip plugin_persistence::plugin_process_exits_when_nushell_exits",
+          "exit_code": 0,
+          "error": null,
+          "wall_s": 518.5867217951454,
+          "log": "/home/marius/.cache/codescout-resident/codescout/external-exec-baseline-20261106-v3/nushell__nushell-18863/1.log",
+          "log_sha256": "8fec16a0404a16cbaea4fb1e1de14ea90b9eb14abadf5dda5e72403b98ddd1c6"
+        }
+      ],
+      "pre_equals_post_source_guard": true,
+      "independently_absent_at_closure": true,
+      "container_id": "553498c6de28d9a92cf0d7086ed3686fcb614befb35a7521d43822cb9f1fa571"
+    },
+    {
+      "id": "rust-lang__rust-analyzer-22992",
+      "passed": true,
+      "checks": [
+        {
+          "id": "public_build",
+          "command": "cargo build --offline",
+          "exit_code": 0,
+          "error": null,
+          "wall_s": 5.993297080975026,
+          "log": "/home/marius/.cache/codescout-resident/codescout/external-exec-baseline-20261106-v3/rust-lang__rust-analyzer-22992/0.log",
+          "log_sha256": "7881c06c3bc496df68c117309f3662c0364bdf6821d49679cb116b043b1255b4"
+        },
+        {
+          "id": "public_tests",
+          "command": "RUN_SLOW_TESTS=1 cargo +stable test --offline --no-fail-fast -- --nocapture",
+          "exit_code": 0,
+          "error": null,
+          "wall_s": 175.99641274707392,
+          "log": "/home/marius/.cache/codescout-resident/codescout/external-exec-baseline-20261106-v3/rust-lang__rust-analyzer-22992/1.log",
+          "log_sha256": "436f1038fbb349c9d313e82c94d4d94b48357b711c016479634432b038febe2c"
+        }
+      ],
+      "pre_equals_post_source_guard": true,
+      "independently_absent_at_closure": true,
+      "container_id": "4d87bee8169d36787551e634dac45689cbea6fa6bcb3402bfe8d85c9dfe36341"
+    }
+  ],
+  "provider_calls": 0
+}
