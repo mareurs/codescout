@@ -15,7 +15,8 @@ Pre-registration with amendments AM-1..AM-4: `docs/evals/cs-verified-product-pat
 - A run leaves about 1.6 GB (`testbed/`, cargo target); scoring needs only transcript, stream, run-record, outcome (about 600 KB). Prune `testbed/` after scoring.
 - Agents often could not compile in this setup: they call `run_command` without the MCP prefix, or the companion `PreToolUse:Bash` hook blocks `cargo check`. Same in both arms.
 - Do not set a HOME or RUSTUP_TOOLCHAIN for the server on the host without the real RUSTUP_HOME: rustup then downloads a toolchain into the fake HOME.
+- Census copies are the other disk cost: the firing censuses copied whole task trees plus build output into the session scratchpad (`cen` 16 GB, `cen5` 11 GB, `rr-census*` 2.9 GB each; 34 GB in all). Free space did not rise after the testbeds were deleted until these were removed (72 to 102 GB free). Delete a census tree as soon as its result file is committed.
 
 ## Open
 - The declaration stays active in the codescout checkout (`CLAUDE.local.md`, unmeasured effect). A design that tests it needs tasks where the agent does not scout callers first; new pre-registration.
-- Uncommitted at the time of writing: the pre-registration, stage5.py, its test, the data directory.
+- Committed in `f7d65b877` (pre-registration, stage5.py, its test, the data directory) and pushed to `origin/experiments` on 2026-11-06. The push carried 183 commits of other sessions, by operator ack.
