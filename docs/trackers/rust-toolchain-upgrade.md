@@ -23,7 +23,7 @@ ledger: nothing here is citable as an entry and nothing allocates ids. See
 
 **Status 2026-11-05:** the operator decided to move the pin from 1.97.1 to 1.99.1. The bump is
 prepared and gated on branch `chore/rust-1.99.1` (worktree `codescout.worktrees/rust-1.99.1`).
-The bump landed on `experiments` the same day by fast-forward (tip `76335cb39`, operator said "da"). The gate on the merged tree was green (exit 0 on all lanes, TOTAL 387 s with a crate rebuild). Nothing is pushed.
+The bump landed on `experiments` the same day by fast-forward (tip `76335cb39`, operator said "da"). The gate on the merged tree was green (exit 0 on all lanes, TOTAL 387 s with a crate rebuild). Nothing was pushed by this session. On 2026-11-06 another session pushed `experiments` (`537eb2cdf..f7d65b877`) on its operator's decision, so the bump is now on `origin/experiments`. Verified with `git branch -r --contains 4098f07bb`.
 
 ## Why we move, stated honestly
 
@@ -65,7 +65,7 @@ it (upstream dtolnay/async-trait#303), so the fix is the lockfile bump, not an `
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 1 | Land the 1.99.1 bump on `experiments` | done 2026-11-05, not pushed | Branch `chore/rust-1.99.1`: `4098f07bb` (toolchain, MSRV 1.99, async-trait 0.1.92, boxed refusal) and `2933e242c` (std APIs). Gate green in the worktree, base `6bd3745e4`: all lanes exit 0, 6162 lean, 9030 default, 1599 Python. Landed on `experiments` by `git merge --ff-only` at `76335cb39` after merging `experiments` into the branch twice; the final gate on the merged tree was green (FMT, CLIPPY, LEAN, DEFAULT all exit 0). The last merge added one memory file only and was not re-gated. Not pushed. A commit hook (`dead-artifact-ids`) skipped itself because the worktree has no `codescout` binary. |
+| 1 | Land the 1.99.1 bump on `experiments` | done 2026-11-05, published 2026-11-06 | Branch `chore/rust-1.99.1`: `4098f07bb` (toolchain, MSRV 1.99, async-trait 0.1.92, boxed refusal) and `2933e242c` (std APIs). Gate green in the worktree, base `6bd3745e4`: all lanes exit 0, 6162 lean, 9030 default, 1599 Python. Landed on `experiments` by `git merge --ff-only` at `76335cb39` after merging `experiments` into the branch twice; the final gate on the merged tree was green (FMT, CLIPPY, LEAN, DEFAULT all exit 0). The last merge added one memory file only and was not re-gated. Pushed by another session on 2026-11-06. A commit hook (`dead-artifact-ids`) skipped itself because the worktree has no `codescout` binary. |
 | 2 | `build.rs` re-runs after any commit in the repo | open | `bake_git_sha` watches `refs` and `packed-refs` of the shared git dir. Observed cost about 3.5 minutes per gate (clippy 72 s, lean 52 s, default 90 s). Candidate fix: watch `HEAD` and the one ref it points to. Must keep the baked SHA correct after a commit. Bug: `docs/issues/2026-11-05-build-rs-watches-shared-refs-so-any-commit-rebuilds-codescout.md`. |
 | 3 | `pytest-xdist` in the light Python lane | open | `-n 16`: 20 s against 140 s, 1599 passed in all 6 runs. Not wired in. Warm TOTAL would then follow the Rust lanes (about 119 s), an estimate, not a measured gate run. |
 | 4 | MSRV decision | decided 2026-11-05 | Operator: MSRV does not matter, the project tracks the newest stable. `rust-version` is 1.99 and the `msrv` job follows the pin. GitHub checked with `gh` on the same day: no classic branch protection on `master` or `experiments`, and the two rulesets only require a pull request (0 approvals, owner bypasses), so no required check names the job. Not checked: organisation-level settings. |
@@ -75,7 +75,7 @@ it (upstream dtolnay/async-trait#303), so the fix is the lockfile bump, not an `
 | 8 | Edition 2024 | not planned | Cargo 1.99 lets edition-2024 members override an inherited workspace dependency's `default-features`. We are on edition 2021. Separate, large job. |
 | 9 | sccache cache size | done 2026-11-05 | `sccache --show-stats` reports max cache size 20 GiB (11 GiB used). The daemon restarted on its own. Machine-local, not in the repo. |
 | 10 | Clean up the experiment | done 2026-11-05, except 1.97.1 | Removed: worktree `rust-1.99.1`, branch `chore/rust-1.99.1` (merged, `git branch -d`), RAM slot-3 contents (9.8 GB), toolchains 1.88 and 1.95.0 (no live file pins them). Kept on purpose: toolchain 1.97.1, because worktrees `mutation-slot-0`, `mutation-slot-1` and `.codex/worktrees/615e/codescout` still pin it. Remove it when those move. |
-| 11 | First CI run on 1.99.1 | open | After the push, CI reads `rust-toolchain.toml` and rustup must install 1.99.1 on the runners. Not tried. Read the first run before trusting it. |
+| 11 | First CI run on 1.99.1 | open, now due | The bump is on `origin/experiments` since 2026-11-06. CI reads `rust-toolchain.toml` and rustup must install 1.99.1 on the runners. Read the first run before trusting it; not read yet. |
 
 ## How to bump next time
 

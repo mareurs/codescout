@@ -35,7 +35,7 @@ The operator decided on 2026-11-05 to move the pin from 1.97.1 to 1.99.1 and sai
 
 ## State
 
-- LANDED 2026-11-05 on `experiments` by `git merge --ff-only` (tip 76335cb39), operator said "da". Not pushed. Contents: rust-toolchain.toml channel 1.99.1, rust-version 1.99, Cargo.lock async-trait 0.1.92, ci.yml msrv job on 1.99, boxed `check_tool_access` error, `strip_circumfix` and `from_utf8_lossy_owned` adopted.
+- LANDED 2026-11-05 on `experiments` by `git merge --ff-only` (tip 76335cb39), operator said "da". Pushed on 2026-11-06 by another session (origin/experiments f7d65b877), not by this one. Contents: rust-toolchain.toml channel 1.99.1, rust-version 1.99, Cargo.lock async-trait 0.1.92, ci.yml msrv job on 1.99, boxed `check_tool_access` error, `strip_circumfix` and `from_utf8_lossy_owned` adopted.
 - Final gate on the merged tree: all lanes exit 0 (TOTAL 387 s, crate rebuilt). The last merge of `experiments` added one memory file and was not re-gated.
 - Toolchains in rustup now: stable (1.99.1), 1.99.1, 1.97.1. The pacman `rustup` package has no update. Only the Docker eval image (`tools/setup-ab-eval/agent-cs.Dockerfile`) still pins 1.97.1; the operator told us to leave it.
 - Cleaned 2026-11-05: worktree rust-1.99.1, branch chore/rust-1.99.1, RAM slot-3 contents, toolchains 1.88 and 1.95.0. Kept 1.97.1: worktrees mutation-slot-0/1 and .codex/worktrees/615e/codescout pin it. sccache max is 20 GiB.
