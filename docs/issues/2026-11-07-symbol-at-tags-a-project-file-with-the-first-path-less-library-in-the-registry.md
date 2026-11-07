@@ -1,14 +1,15 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: symbol_at tags a project file''s definition with the first path-less library in the registry (lib:pandas, lib:codescout_embed)'
 owners:
 - marius
 tags:
 - cluster/attribute-derived-at-container-granularity
+closed: 2026-11-07
 opened: 2026-11-07
 severity: low
-unverified: Both defects now have tests, but only targeted tests on one Windows GNU toolchain were run; the full gate (clippy, both nextest runs, Linux CI) has not. Defect A's test is Windows-only. Not re-checked on a live symbol_at after the fix.
+unverified: 'Defect A (verbatim prefix) is covered only by a Windows-only test, which was not run: the gate and the live check ran on Linux. Defect B (empty path) was seen fixed live on Linux. `symbols` was not run live.'
 ---
 
 # BUG: symbol_at tags a project file's definition with the first path-less library in the registry (lib:pandas, lib:codescout_embed)
@@ -61,6 +62,13 @@ None beyond the above.
   in its first check.
 - B: `LibraryRegistry::is_library_path` skips entries whose `path` is empty.
 
+## Fix provenance
+
+- **SHA:** `b5c67ecdef6dc5b7e55d51b9e2e78e2a12cbe65d` (`experiments`)
+- **patch-id:** `d41fa914791321e4d5f13802bdbeff107a668729`
+
+The commit is a portability subset from PR 33 and also holds the Windows pid-alive probe and a subshell producer status. Another session made it.
+
 ## Tests added
 - `a_library_with_no_path_owns_no_file` (`src/library/registry.rs`): a path-less entry registered first must
   not own a file.
@@ -71,8 +79,12 @@ None beyond the above.
 Ignore the `source` field on `symbol_at` for files that are plainly the project's own.
 
 ## Resume
-Status stays `open` until the gate is green. Then: run the gate, confirm on a live `symbol_at` that `source` is
-`project`, and check whether `symbols` consumes the same helper.
+
+Gate green on Linux on 2026-11-07 (Python, fmt, clippy, LEAN and DEFAULT nextest). Live: after a rebuild at 21:30, `symbol_at` on the call of `display_path` at `src/tools/grep.rs:289` returns the definition `src/util/fs.rs:567` with no `lib:` tag, in a project whose `.codescout/libraries.json` has path-less entries (`codescout_embed` first).
+
+`symbols` does not call `tag_external_path` (its callers are `symbol_at.rs` lines 164 and 282). The other callers of `is_library_path` are `src/fs/mod.rs` line 542, inside `tag_external_path`, and `src/tools/read_file.rs` line 1085. The second one gets the defect B fix through the registry.
+
+Still open: run the Windows-only test on a Windows host or in CI.
 
 ## References
 - `fed1c5731a623c30` (same verbatim-prefix defect in `references`)
