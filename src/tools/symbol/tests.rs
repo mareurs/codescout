@@ -1874,6 +1874,47 @@ async fn tag_external_path_returns_project_for_internal() {
     let tag = tag_external_path(&internal, &root, &agent).await;
     assert_eq!(tag, "project");
 }
+/// A language server reports `C:\…` (a `file://` URI cannot carry the `\\?\` marker) while the
+/// project root is held canonical (`\\?\C:\…`). `Path::starts_with` compares components, and
+/// `VerbatimDisk` != `Disk`, so the project's own file was not "inside the project" and fell
+/// through to the library registry
+/// (`docs/issues/2026-11-07-symbol-at-tags-a-project-file-with-the-first-path-less-library-in-the-registry.md`).
+/// Windows-only: no other platform has the two spellings.
+#[cfg(windows)]
+#[tokio::test]
+async fn tag_external_path_returns_project_for_a_uri_spelled_path_under_a_verbatim_root() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    // Load-bearing: the root carries the verbatim marker and the path does not. With both in
+    // the same spelling `starts_with` already holds and the test passes on the broken code.
+    let plain = dir.path().to_path_buf();
+    let verbatim_root = std::path::PathBuf::from(format!(r"\\?\{}", plain.display()));
+    let uri_spelled = plain.join("src").join("app.py");
+
+    let tag = tag_external_path(&uri_spelled, &verbatim_root, &agent).await;
+    assert_eq!(tag, "project");
+}
+
+/// An LSP URI cannot carry Windows' `\\?\` marker, so a definition inside the project arrives as
+/// `C:\…` while the project root is held canonical (`\\?\C:\…`). `Path::starts_with` compares
+/// components and the two prefixes differ, so the file was taken for an external one and then
+/// handed to whichever registered library matched first
+/// (`docs/issues/2026-11-07-symbol-at-tags-a-project-file-with-the-first-path-less-library-in-the-registry.md`).
+/// Off Windows both spellings are one and this passes without exercising the defect.
+#[tokio::test]
+async fn tag_external_path_returns_project_for_a_uri_spelled_internal_path() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let root = agent.require_project_root().await.unwrap();
+
+    let uri_spelled = crate::util::fs::strip_verbatim(&root)
+        .join("src")
+        .join("app.py");
+    let tag = tag_external_path(&uri_spelled, &root, &agent).await;
+    assert_eq!(tag, "project");
+}
 
 #[tokio::test]
 async fn tag_external_path_discovers_and_registers() {
@@ -5884,6 +5925,7 @@ fn references_completeness_hint_warns_only_when_calls_exceed_refs() {
     // Equal counts are not proof of incompleteness.
     assert!(references_completeness_hint(5, 5).is_none());
 }
+
 #[test]
 fn contains_word_respects_identifier_boundaries() {
     use crate::tools::symbol::references::contains_word;

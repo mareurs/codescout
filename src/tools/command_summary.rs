@@ -3215,7 +3215,7 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
                 Some("seq 1 1000"),
             ),
             ("FOO=1 seq 3 | head -1", Some("FOO=1 seq 3")),
-            ("(seq 3; seq 2) | head -1", None),
+            ("(seq 3; seq 2) | head -1", Some("(seq 3; seq 2)")),
             ("{ seq 3; seq 2; } | head -1", None),
             ("! seq 3 | head -1", None),
             ("if true; then seq 3; fi | head -1", None),
@@ -3225,6 +3225,24 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             assert_eq!(Some(plan.pipe_pos), tee_splice_point(cmd), "{cmd}");
             let want = want.map(|text| cmd.find(text).expect(text));
             assert_eq!(plan.producer_start, want, "{cmd}");
+        }
+    }
+
+    #[test]
+    fn subshell_producer_has_a_status_wrapper() {
+        for (command, producer) in [
+            ("(printf x; exit 7) | grep x", "(printf x; exit 7)"),
+            (
+                "printf before; (printf x; exit 7) | grep x",
+                "(printf x; exit 7)",
+            ),
+            (
+                "true && (printf '('; (exit 7)) | grep x",
+                "(printf '('; (exit 7))",
+            ),
+        ] {
+            let plan = plan_tee_splice(command).expect(command);
+            assert_eq!(plan.producer_start, command.find(producer), "{command}");
         }
     }
 

@@ -6401,6 +6401,32 @@ async fn a_capture_under_the_store_limit_is_kept_whole() {
     );
 }
 
+#[tokio::test]
+async fn a_subshell_pipe_reports_the_producers_exit_code() {
+    let (_dir, ctx) = project_ctx().await;
+    for (command, status) in [
+        ("(printf 'smoke-failure\\n'; exit 7) | grep smoke", 7),
+        (
+            "true && (printf 'smoke-failure\\n'; (exit 9)) | grep smoke",
+            9,
+        ),
+        ("(printf 'smoke-failure\\n'; exit 0) | grep smoke", 0),
+    ] {
+        let result = RunCommand
+            .call(json!({ "command": command }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["exit_code"], 0, "{command}: {result}");
+        assert_eq!(result["producer_exit_code"], status, "{command}: {result}");
+        assert_eq!(result["stdout"], "smoke-failure\n", "{command}: {result}");
+        assert!(
+            result["unfiltered_output"].is_string(),
+            "{command}: {result}"
+        );
+        assert!(result.get("stderr").is_none(), "{command}: {result}");
+    }
+}
+
 /// A pipeline's own status is its last stage's, so a failing `cargo test | grep FAILED` answered
 /// `exit_code: 0`. The splice records the producer's status beside it: `producer_exit_code` is what
 /// the command before the first pipe returned, and `exit_code` stays the filter's (R28).
@@ -6464,7 +6490,7 @@ async fn a_pipe_reports_the_producers_exit_code_beside_the_filters() {
     }
 }
 
-/// The status is a bonus and never costs the capture: a producer that is not a plain command, or a
+/// The status is a bonus and never costs the capture: a producer that cannot be wrapped, or a
 /// compound command whose wrapped text the shell rejects, runs as written with its capture and no
 /// `producer_exit_code`; a command with no pipe has none either.
 #[cfg(unix)]
@@ -6472,7 +6498,6 @@ async fn a_pipe_reports_the_producers_exit_code_beside_the_filters() {
 async fn a_producer_that_cannot_be_wrapped_keeps_its_capture_without_a_status() {
     let (_dir, ctx) = project_ctx().await;
     for command in [
-        "(sh -c 'seq 1 3; exit 5'; true) | head -1",
         "{ sh -c 'seq 1 3; exit 5'; true; } | head -1",
         "if true; then sh -c 'seq 1 3; exit 6'; fi | head -1",
         "for i in 1 2; do seq $i; done | head -1",

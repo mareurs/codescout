@@ -1905,9 +1905,10 @@ pub(crate) fn is_one_pipeline(command: &str) -> bool {
 ///
 /// The producer is the LAST command of the list before the pipe (`cd /tmp && cargo test | …`
 /// pipes `cargo test`, and `cd` runs in the caller's shell), so the wrapper goes around that
-/// segment alone and the text before it stays verbatim. [`pipeline_segments`] models quotes and
-/// backslashes, not nesting, so a segment is refused when it could be the tail of something larger:
-/// a bracket or brace (`(a; b) | …`, `{ a; b; } | …`, `$( )`), a backtick, a `#` comment, a `<<`
+/// segment alone and the text before it stays verbatim. A complete subshell is located through the
+/// Bash syntax tree. [`pipeline_segments`] models quotes and backslashes, not nesting, so other
+/// segments are refused when they could be the tail of something larger: a brace (`{ a; b; } | …`),
+/// `$( )`, a backtick, a `#` comment, a `<<`
 /// heredoc, a `$'…'` string, a trailing `\`, an unbalanced quote. `! cmd` is refused because the
 /// wrapper would record the negated status, and `time cmd` because it would time the producer alone
 /// where bash times the whole pipeline (`time ! cmd` would move the negation too). A compound command (`if … fi | …`) is NOT refused
@@ -1915,6 +1916,24 @@ pub(crate) fn is_one_pipeline(command: &str) -> bool {
 /// parse check falls back to the plain splice.
 pub(crate) fn producer_command_start(prefix: &str) -> Option<usize> {
     let text = prefix.trim_end();
+    if text.ends_with(')') {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_bash::LANGUAGE.into())
+            .ok()?;
+        let tree = parser.parse(text, None)?;
+        let mut node = tree.root_node();
+        if node.has_error() {
+            return None;
+        }
+        while matches!(node.kind(), "program" | "list") {
+            let last_child = node.named_child_count().checked_sub(1)?.try_into().ok()?;
+            node = node.named_child(last_child)?;
+        }
+        if node.kind() == "subshell" && node.end_byte() == text.len() {
+            return Some(node.start_byte());
+        }
+    }
     let last = pipeline_segments(text).pop()?;
     if !text.ends_with(last.as_str()) {
         return None;
@@ -5775,7 +5794,11 @@ mod tests {
             ("a & b", Some("b")),
             ("echo 'x;y' && seq 3", Some("seq 3")),
             // The segment could be the tail of something larger, or the wrapper would mean more.
-            ("(a; b)", None),
+            ("(a; b)", Some("(a; b)")),
+            ("a && (b; c)", Some("(b; c)")),
+            ("a; (b; (c))", Some("(b; (c))")),
+            ("! (a; b)", None),
+            ("time (a; b)", None),
             ("{ a; b; }", None),
             ("echo $(a; b)", None),
             ("echo `a; b`", None),

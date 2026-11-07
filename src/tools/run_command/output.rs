@@ -1033,7 +1033,7 @@ pub(crate) struct LateKeys {
     pub stdout_prefix: String,
     /// The producer's exit status the spliced wrapper recorded ([`read_producer_status`]): the
     /// `producer_exit_code` key. `None` when none was recorded: no capture, a producer that is not a
-    /// plain command, a status file that could not be made or read.
+    /// wrappable command, a status file that could not be made or read.
     pub producer_exit_code: Option<i32>,
     /// The signal that ended the command ([`terminating_signal`]): the `terminated_by_signal` key.
     /// A signal death has no exit code, so `exit_code` reads `-1` and says nothing else. `None`

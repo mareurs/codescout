@@ -1309,7 +1309,7 @@ def dependency_measurement(repo: Path, runtime_binary: Path) -> dict[str, Any]:
             "{p}",
         ),
         "deployed": (
-            "cargo", "tree", "--features", "server-stack,local-embed",
+            "cargo", "tree", "--features", "server-stack",
             "-e", "normal", "--prefix", "none", "--format", "{p}",
         ),
     }
