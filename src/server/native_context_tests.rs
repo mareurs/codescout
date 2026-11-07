@@ -455,3 +455,85 @@ async fn native_attribution_is_unchanged_without_a_verified_codex_root() {
         );
     }
 }
+
+/// An asserted principal (the companion's stamp) or `_meta` conversation is per-call too, and
+/// the only source that separates a subagent from its parent, so it outranks the native Codex
+/// root. A wrong fix `native_root.or(asserted_session)` records the bare root instead.
+#[tokio::test]
+async fn native_codex_root_does_not_outrank_an_asserted_principal_or_conversation() {
+    for (index, (asserted, expected)) in [
+        (
+            json!({"dev.codescout.mcp/agentId":"principal-session/agent-a"}),
+            "principal-session/agent-a",
+        ),
+        (
+            json!({"_meta":{"dev.codescout.mcp/conversationId":"asserted-conversation"}}),
+            "asserted-conversation",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut wire = NativeContextWire::new("codex-mcp-client").await;
+        wire.call(
+            2,
+            json!({}),
+            json!({"command":"printf warmup","effect":"read"}),
+        )
+        .await;
+        native_stamp_rendezvous(wire.dir.path(), "rendezvous-session");
+        let marker = format!("marker-asserted-{index}");
+        let mut meta = json!({"sessionId":"native-root","threadId":"native-child"});
+        let mut arguments = json!({"command":format!("printf {marker}"),"effect":"read"});
+        match asserted {
+            Value::Object(map) if map.contains_key("_meta") => {
+                meta.as_object_mut()
+                    .unwrap()
+                    .extend(map["_meta"].as_object().unwrap().clone());
+            }
+            Value::Object(map) => arguments.as_object_mut().unwrap().extend(map),
+            _ => unreachable!(),
+        }
+        wire.call(3, meta, arguments).await;
+        assert_eq!(
+            native_recorded_session(wire.dir.path(), &marker),
+            expected,
+            "{expected}"
+        );
+    }
+}
+
+/// A Codex call whose native id does not parse yields `NativeInvocation::Invalid`, which is
+/// not a root: the recorder falls through to the order it always had.
+#[tokio::test]
+async fn native_codex_invalid_root_falls_through_to_the_rendezvous_slot() {
+    for (index, meta) in [
+        json!({"sessionId":"","threadId":"native-child"}),
+        json!({"sessionId":42,"threadId":"native-child"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut wire = NativeContextWire::new("codex-mcp-client").await;
+        wire.call(
+            2,
+            json!({}),
+            json!({"command":"printf warmup","effect":"read"}),
+        )
+        .await;
+        native_stamp_rendezvous(wire.dir.path(), "rendezvous-session");
+        let marker = format!("marker-invalid-{index}");
+        wire.call(
+            3,
+            meta,
+            json!({"command":format!("printf {marker}"),"effect":"read"}),
+        )
+        .await;
+        assert_eq!(
+            native_recorded_session(wire.dir.path(), &marker),
+            "rendezvous-session",
+            "{index}"
+        );
+    }
+}
+
