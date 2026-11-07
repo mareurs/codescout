@@ -1867,6 +1867,71 @@ async fn run_in_background_returns_bg_handle() {
         "hint should reference the handle, got: {hint}"
     );
 }
+/// Two background calls started at the same time each get the handle of THEIR OWN command.
+///
+/// `docs/issues/2026-11-06-parallel-background-replies-mismatch-job-handles.md` saw a pair of
+/// concurrent calls whose replies named each other's handles. In this server the reply, the stored
+/// job and the record file are all written by one call from one `ref_id`, so a swap cannot arise
+/// here. This test pins that: the reply of each call, the job behind its handle and the record at
+/// its path must all name that call's command, across many concurrent pairs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_background_calls_each_get_the_handle_of_their_own_command() {
+    let (dir, ctx) = project_ctx().await;
+    let root = dir.path().to_path_buf();
+    let security: crate::util::path_security::PathSecurityConfig = Default::default();
+
+    for round in 0..20 {
+        let a_cmd = format!("echo marker-a-{round}");
+        let b_cmd = format!("echo marker-b-{round}");
+        let ctx_ref = &ctx;
+        let call = |cmd: String| {
+            let root = root.clone();
+            let security = security.clone();
+            async move {
+                let result = run_command_inner(
+                    &cmd,
+                    &cmd,
+                    30,
+                    false,
+                    None,
+                    false,
+                    true,
+                    &root,
+                    &security,
+                    ctx_ref,
+                    &Default::default(),
+                )
+                .await
+                .expect("should succeed");
+                (cmd, result)
+            }
+        };
+        let (a, b) = tokio::join!(call(a_cmd), call(b_cmd));
+
+        for (cmd, result) in [a, b] {
+            let handle = result["output_id"].as_str().expect("output_id missing");
+            let job = ctx
+                .output_buffer
+                .get_background(handle)
+                .expect("the handle of a fresh job resolves");
+            assert_eq!(
+                job.command, cmd,
+                "round {round}: the job behind {handle} must be the call's own command"
+            );
+            let record_path = result["record"].as_str().expect("record path missing");
+            let record = std::fs::read_to_string(record_path).expect("record readable");
+            assert!(
+                record.contains(&cmd),
+                "round {round}: the record of {handle} must name {cmd}, got: {record}"
+            );
+            let hint = result["hint"].as_str().unwrap_or("");
+            assert!(
+                hint.contains(handle),
+                "round {round}: the hint must name the call's own handle {handle}, got: {hint}"
+            );
+        }
+    }
+}
 
 /// The defect this slice exists to close, end to end.
 ///
