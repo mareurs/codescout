@@ -4,9 +4,9 @@ status: fixed
 title: a memory topic whose file name holds a backslash lists under a rewritten name that reads back as nothing
 tags:
 - cluster/addressing-without-an-escape-hatch
-opened: 2026-11-07
 closed: 2026-11-07
-unverified: 'Fixed, gated, with a failing test first and a killed mutant at both sites. Not seen live: the running server was not rebuilt after 4099a06f5. The cfg(windows) arm of display_path is not run here, and the dashboard and the memory tool were not traced for other uses of a listed topic name.'
+opened: 2026-11-07
+unverified: 'Fixed, gated, with a failing test first and a killed mutant at both sites, and seen live for list and read after a rebuild. Not seen live: check_all_memories (the anchors report). The cfg(windows) arm of display_path is not run here, and the dashboard was not traced for other uses of a listed topic name.'
 ---
 
 # BUG: a memory topic whose file name holds a backslash lists under a rewritten name that reads back as nothing
@@ -74,7 +74,7 @@ Avoid a backslash in a memory topic name.
 
 ## Resume
 
-Fixed in `4099a06f5`. See the `unverified` caveat in the frontmatter. Found while tracing the callers listed in `2d8475ed5bc831e5`.
+Fixed in `4099a06f5` and seen live on 2026-11-07 after a rebuild and `/mcp` reconnect: in a scratch project, `memory(write, topic="a\b")` then `memory(list)` listed `a\b`, and `memory(read, topic="a\b")` returned the content. Before the fix `list` named `a/b`. See the `unverified` caveat in the frontmatter. Found while tracing the callers listed in `2d8475ed5bc831e5`.
 
 ## References
 
