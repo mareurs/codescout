@@ -818,7 +818,7 @@ pub fn text_sweep(
         }
 
         if !lines.is_empty() {
-            let rel_path = crate::util::fs::relative_forward_slash(path, project_root);
+            let rel_path = crate::util::fs::relative_display_path(path, project_root);
             let kind = classify_file(path);
             let occurrence_count = lines.len();
 

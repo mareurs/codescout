@@ -11,7 +11,7 @@ use crate::agent::Agent;
 use crate::ast;
 use crate::lsp::LspProvider;
 use crate::tools::RecoverableError;
-use crate::util::fs::{relative_forward_slash, to_forward_slash};
+use crate::util::fs::{display_path, relative_display_path};
 
 /// Lightweight timer for recording LSP first-response latency.
 /// Start before the LSP call, then call `.record()` on success.
@@ -256,8 +256,8 @@ pub(crate) async fn resolve_library_roots(
 pub(crate) fn format_library_path(lib_name: &str, lib_root: &Path, file_path: &Path) -> String {
     file_path
         .strip_prefix(lib_root)
-        .map(|rel| format!("lib:{}/{}", lib_name, to_forward_slash(rel)))
-        .unwrap_or_else(|_| to_forward_slash(file_path))
+        .map(|rel| format!("lib:{}/{}", lib_name, display_path(rel)))
+        .unwrap_or_else(|_| display_path(file_path))
 }
 
 /// Classify a reference path as project, library, or external.
@@ -277,7 +277,7 @@ pub(crate) fn classify_reference_path(
     if path.starts_with(&project_root) {
         (
             "project".to_string(),
-            relative_forward_slash(path, &project_root),
+            relative_display_path(path, &project_root),
         )
     } else if let Some((name, lib_root)) = library_roots
         .iter()
@@ -289,7 +289,7 @@ pub(crate) fn classify_reference_path(
             format_library_path(name, &lib_root, path),
         )
     } else {
-        ("external".to_string(), to_forward_slash(path))
+        ("external".to_string(), display_path(path))
     }
 }
 

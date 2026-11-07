@@ -292,3 +292,113 @@ async fn rename_corruption_hint_names_the_real_file() {
     );
     assert_names_the_real_file("rename corruption hint", &result, name);
 }
+/// The main `references` result names each location's file under the name the file has.
+#[tokio::test]
+async fn references_locations_name_the_real_file() {
+    use crate::lsp::{SymbolInfo, SymbolKind};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let decl = root.join("src/lib.rs");
+    std::fs::write(&decl, "fn helper() {}\n").unwrap();
+    let name = "a\\b.rs";
+    let user = root.join("src").join(name);
+    std::fs::write(&user, "fn caller() { helper(); }\n").unwrap();
+    assert!(user.is_file(), "the fixture is one file named {name:?}");
+
+    let symbol = SymbolInfo {
+        name: "helper".to_string(),
+        name_path: "helper".to_string(),
+        kind: SymbolKind::Function,
+        file: decl.clone(),
+        start_line: 0,
+        end_line: 0,
+        start_col: 3,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let mock = crate::lsp::mock::MockLspClient::new().with_symbols(decl.clone(), vec![symbol]);
+    mock.references_results.lock().unwrap().insert(
+        decl.clone(),
+        vec![location_in(&decl, 0, 3, 9), location_in(&user, 0, 14, 20)],
+    );
+    let ctx = mock_ctx(&root, mock).await;
+
+    let result = crate::tools::symbol::References
+        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        result["total"].as_u64(),
+        Some(2),
+        "the fixture must report both locations: {result}"
+    );
+    assert_names_the_real_file("references", &result, name);
+}
+
+/// The textual sweep of a rename lists a file that still names the old identifier under the name
+/// the file has. The language server edits only the declaration; the sweep finds the other file.
+#[tokio::test]
+async fn rename_textual_matches_name_the_real_file() {
+    use crate::lsp::{SymbolInfo, SymbolKind};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let decl = root.join("src/lib.rs");
+    std::fs::write(&decl, "fn old_name() {}\n").unwrap();
+    let name = "a\\b.rs";
+    let other = root.join("src").join(name);
+    std::fs::write(&other, "fn caller() { old_name(); }\n").unwrap();
+    assert!(other.is_file(), "the fixture is one file named {name:?}");
+
+    let symbol = SymbolInfo {
+        name: "old_name".to_string(),
+        name_path: "old_name".to_string(),
+        kind: SymbolKind::Function,
+        file: decl.clone(),
+        start_line: 0,
+        end_line: 0,
+        start_col: 3,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let uri: lsp_types::Uri = url::Url::from_file_path(&decl)
+        .unwrap()
+        .as_str()
+        .parse()
+        .unwrap();
+    let edit = lsp_types::WorkspaceEdit {
+        changes: Some(std::collections::HashMap::from([(
+            uri,
+            vec![lsp_types::TextEdit {
+                range: location_in(&decl, 0, 3, 11).range,
+                new_text: "fresh_name".to_string(),
+            }],
+        )])),
+        ..Default::default()
+    };
+    let mock = crate::lsp::mock::MockLspClient::new()
+        .with_symbols(decl, vec![symbol])
+        .with_rename_edit(edit);
+    let ctx = mock_ctx(&root, mock).await;
+
+    let result = crate::tools::symbol::EditCode
+        .call(
+            json!({
+                "action": "rename", "symbol": "old_name", "path": "src/lib.rs",
+                "new_name": "fresh_name",
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        result["textual_matches"]
+            .as_array()
+            .is_some_and(|m| !m.is_empty()),
+        "the sweep must find the old name in the other file: {result}"
+    );
+    assert_names_the_real_file("rename textual matches", &result, name);
+}
