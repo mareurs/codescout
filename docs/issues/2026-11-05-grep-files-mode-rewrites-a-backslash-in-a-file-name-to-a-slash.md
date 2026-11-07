@@ -1,11 +1,13 @@
 ---
 id: f9abe7185324eec2
 kind: bug
-status: open
+status: fixed
 title: grep rewrites a backslash in a file name to a slash, so the listed path names a file that does not exist
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-11-07
 opened: 2026-11-04
+unverified: 'Fixed and gated, but two gaps remain. (1) Not every one of the 13 sites is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run. (2) Five other callers of relative_forward_slash (symbol_at, references, edit_code, fs/mod.rs, symbol/edit.rs) may rewrite a backslash in a name the same way; not checked. The running server was not rebuilt after the fix, so the live tool still shows the old behaviour.'
 ---
 
 # BUG: grep rewrites a backslash in a file name to a slash, so the listed path names a file that does not exist
@@ -60,11 +62,31 @@ The two grep results quoted in Symptom, against `ls -b` showing the single liter
 
 ## Fix
 
-Not started. Direction: apply `to_forward_slash` only where a path separator can be `\` (cfg(windows)), or emit the path unchanged on Unix. A regression test would create a file whose name contains a backslash and assert the listed `file` equals the real path.
+Two new functions in `src/util/fs.rs`:
+
+- `display_path(&Path) -> String`: on Windows it is `to_forward_slash`; on every other platform it returns the path unchanged.
+- `relative_display_path(&Path, &Path) -> String`: `strip_prefix` then `display_path`.
+
+`to_forward_slash` is untouched, because the catalog stores the forward-slash form and 39 files depend on it. The listing tools now use the display form at 13 sites: `src/tools/grep.rs` (6: the per-file count key, three `"file"` fields, and the two paths in the `WalkClock` cut notice), `src/tools/tree.rs` (2: directory listing and glob), `src/tools/symbol/list_overview.rs` (3 `display_path` calls and 4 `relative_display_path` calls).
+
+Not changed, on purpose: five other callers of `relative_forward_slash` (`src/tools/symbol/symbol_at.rs`, `references.rs`, `edit_code.rs`, `src/fs/mod.rs`, `src/symbol/edit.rs`). They report paths too and may have the same defect. Not checked; see Resume.
+
+## Fix provenance
+
+- **SHA:** `a6babe715` (`experiments`)
+- **patch-id:** `530240666631e11b6523c2c4a5aeb5f03c2939b4`
+
+Fix committed 2026-11-07, not pushed when this was written. Gate on the tree before two blank lines were added in `util/fs.rs`: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0; LEAN 6172 and DEFAULT 9040 passed.
 
 ## Tests added
 
-N/A: bug only filed; no fix yet.
+`src/tools/backslash_name_tests.rs` (`cfg(all(test, unix))`), 7 tests. Each runs one tool over a directory whose only file is `a\b.*` and requires the result's JSON text to hold the real name and not `a/b.*`:
+
+- `grep` in `files` mode, grouped content mode, context mode, and context mode with two blocks
+- `tree` directory listing and glob
+- `symbols` directory overview
+
+Red first: all six original tests failed on the old code with `a/b.txt` in the result. Mutant: `display_path` changed back to `replace('\\', "/")` on non-Windows failed all 7. Covered by reading, not by per-site mutation: not every one of the 13 sites is reached. Two probably are not: the `lsp: "warming"` error-path entry near the end of `list_overview.rs`, and the paths in the `WalkClock` cut notice in `grep.rs`.
 
 ## Workarounds
 
@@ -72,7 +94,7 @@ Avoid backslashes in file names; or locate such a file with `tree` or `run_comma
 
 ## Resume
 
-Open. First step: check `to_forward_slash` callers outside `grep.rs` for the same rewrite, then fix and add the regression test.
+Fixed in `a6babe715`; see the `unverified` caveat in the frontmatter for what is not proven. Open follow-up: check the five `relative_forward_slash` callers listed in Fix for the same rewrite of a backslash in a file name, and rebuild the server (`./scripts/rb.sh`, then `/mcp`) to see the fix live.
 
 ## References
 
