@@ -70,11 +70,12 @@ def _result_items(block: dict) -> tuple[list[str], bool]:
     return [], False
 
 
-def _deliveries_in(text: str, provable: bool = True) -> list[dict]:
+def _deliveries_in(text: str, provable: bool = True, with_text: bool = False) -> list[dict]:
     """Every block in one result item, in order, each with the bytes it really occupies.
 
     `own_block` is true only when item boundaries are known and the block opens the item. A
     marker in the middle of an item is a quotation (a grep, a cat, a doc), not a delivery.
+    `with_text` adds the block's own text, for the layer-2 reader packets.
     """
     found: list[tuple[int, dict]] = []
     for m in OPEN.finditer(text):
@@ -91,34 +92,30 @@ def _deliveries_in(text: str, provable: bool = True) -> list[dict]:
         at = text.find(close, m.end())
         closed = at != -1
         end = at + len(close) if closed else len(text)
-        found.append(
-            (
-                m.start(),
-                {
-                    "topic": topic,
-                    "form": form,
-                    "heading": heading,
-                    "bytes": len(text[m.start() : end].encode("utf-8")),
-                    "closed": closed,
-                    "own_block": provable and not text[: m.start()].strip(),
-                },
-            )
-        )
+        d = {
+            "topic": topic,
+            "form": form,
+            "heading": heading,
+            "bytes": len(text[m.start() : end].encode("utf-8")),
+            "closed": closed,
+            "own_block": provable and not text[: m.start()].strip(),
+        }
+        if with_text:
+            d["text"] = text[m.start() : end]
+        found.append((m.start(), d))
     for m in POINTER.finditer(text):
         if m.group(1) in TOPICS:
-            found.append(
-                (
-                    m.start(),
-                    {
-                        "topic": m.group(1),
-                        "form": "pointer",
-                        "heading": None,
-                        "bytes": len(m.group(0).encode("utf-8")),
-                        "closed": True,
-                        "own_block": provable and not text[: m.start()].strip(),
-                    },
-                )
-            )
+            d = {
+                "topic": m.group(1),
+                "form": "pointer",
+                "heading": None,
+                "bytes": len(m.group(0).encode("utf-8")),
+                "closed": True,
+                "own_block": provable and not text[: m.start()].strip(),
+            }
+            if with_text:
+                d["text"] = m.group(0)
+            found.append((m.start(), d))
     return [d for _, d in sorted(found, key=lambda x: x[0])]
 
 

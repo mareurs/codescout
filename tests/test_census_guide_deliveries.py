@@ -314,6 +314,13 @@ class CensusTests(unittest.TestCase):
         self.assertEqual((len(kept), dropped), (2, 0))
 
 
+    def test_the_delivered_text_can_be_asked_for(self):
+        blk = section("librarian", "Filter Syntax", "naïve — body")
+        got = census._deliveries_in("\n" + blk + "\ntrailing", True, with_text=True)
+        self.assertEqual(got[0]["text"], blk)
+        self.assertNotIn("text", census._deliveries_in("\n" + blk, True)[0])
+
+
     def test_markers_match_the_emitter(self):
         for needle in (
             "<!-- auto-injected get_guide('{topic}') — first call this session",
