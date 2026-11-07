@@ -531,7 +531,10 @@ impl Tool for SemanticSearch {
                  - `limit`: number of results (default 10). Raise to 20-30 for broad concepts.\n\
                  - `scope`: `\"project\"` (default), `\"libraries\"`, `\"all\"`, or `\"lib:<name>\"`.\n\
                  - `include_memories=true`: also search semantic memories.\n\
-                 - `project_id`: filter to a specific workspace sub-project.\n\
+                 - `project_id`: filter to a specific workspace sub-project. Result `file_path`s are\n\
+                   relative to the workspace root, not the sub-project, so they feed `read_file`\n\
+                   unchanged. (When the call is pinned to the member itself with `workspace=<member root>`,\n\
+                   the root is the member, so they stay member-relative.)\n\
                  - `mode`: `\"code\"` (default) excludes markdown chunks — best for finding implementations.\n\
                            `\"full\"` includes all indexed content.\n\
                  \n\
@@ -820,13 +823,20 @@ impl Tool for SemanticSearch {
             }
         }
 
-        let hits = client
+        let mut hits = client
             .search_code(&project_id, query, opts)
             .await
             .map_err(|e| {
                 let hint = classify_search_error(&e.to_string(), &project_id);
                 crate::tools::RecoverableError::with_hint(format!("stack search failed: {e}"), hint)
             })?;
+        // A member's chunks are stored relative to the member directory; every other tool
+        // resolves a path against the focused root, so an explicit member id gets its hits
+        // re-rooted. Only an explicit id: the default id is the focused project's own name,
+        // whose paths already resolve there.
+        if explicit_project_id {
+            lift_explicit_member_hits(ctx, &project_id, root.as_deref(), &mut hits).await;
+        }
         let mut out = search_response(&hits, limit);
         if hits.is_empty() {
             // Fail-soft: a failed lookup leaves the empty page as it was, never an error.
@@ -939,6 +949,70 @@ fn search_response(hits: &[crate::retrieval::search::Hit], limit: usize) -> Valu
         );
     }
     out
+}
+/// Re-root hits that the store keeps relative to a workspace member's own root.
+///
+/// A member is indexed under its own project id with paths relative to the member directory, so
+/// `src/ser.rs` from member `crates/nu-json` is a path no other tool resolves against the
+/// workspace root. `relative_root` is the member directory relative to the root the following
+/// `read_file` resolves against; `"."` (or empty) is that root itself and changes nothing.
+/// docs/issues/2026-11-05-member-semantic-result-paths-miss-workspace-root.md
+pub(crate) fn lift_member_paths(hits: &mut [crate::retrieval::search::Hit], relative_root: &str) {
+    let normalised = relative_root.replace('\\', "/");
+    let prefix = normalised
+        .split('/')
+        .filter(|seg| !seg.is_empty() && *seg != ".")
+        .collect::<Vec<_>>()
+        .join("/");
+    if prefix.is_empty() {
+        return;
+    }
+    for hit in hits {
+        hit.file_path = format!("{prefix}/{}", hit.file_path);
+    }
+}
+
+/// Re-root the hits of an explicit `project_id` that names a workspace member, so their
+/// `file_path`s resolve against the root `read_file` uses (`focused_root`).
+///
+/// The member's directory comes from the workspace's discovered projects
+/// (`DiscoveredProject::relative_root`, relative to the workspace root). The prefix is that
+/// directory relative to `focused_root`, not the raw `relative_root`: when the session already
+/// stands in the member (pinned `workspace=<member>`, or `activate_within_workspace`), the
+/// store's paths are already relative to the root `read_file` resolves against, and prefixing
+/// again would double the member directory. A root project, an id that names no member, and a
+/// member outside `focused_root` are left untouched.
+pub(crate) async fn lift_explicit_member_hits(
+    ctx: &ToolContext,
+    project_id: &str,
+    focused_root: Option<&std::path::Path>,
+    hits: &mut [crate::retrieval::search::Hit],
+) {
+    let Some(focused_root) = focused_root else {
+        return;
+    };
+    let Some(member) = ctx
+        .agent
+        .discovered_projects_at(ctx.workspace_override.as_deref())
+        .await
+        .into_iter()
+        .find(|p| p.id == project_id && p.relative_root != std::path::Path::new("."))
+    else {
+        return;
+    };
+    let workspace_root = match ctx.workspace_override.as_deref() {
+        Some(pin) => Some(pin.to_path_buf()),
+        None => ctx.agent.default_workspace_root().await,
+    };
+    let Some(workspace_root) = workspace_root else {
+        return;
+    };
+    let canon = |p: std::path::PathBuf| std::fs::canonicalize(&p).unwrap_or(p);
+    let member_root = canon(workspace_root.join(&member.relative_root));
+    let focused_root = canon(focused_root.to_path_buf());
+    if let Ok(rel) = member_root.strip_prefix(&focused_root) {
+        lift_member_paths(hits, &crate::util::fs::to_forward_slash(rel));
+    }
 }
 
 /// The durable code-index skip marker, rendered as a one-line note, or `None`

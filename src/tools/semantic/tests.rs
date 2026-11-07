@@ -1002,3 +1002,169 @@ fn running_elsewhere_indexing_block_names_the_holder_pid() {
     assert_eq!(v["status"], "running_elsewhere");
     assert_eq!(v["holder_pid"], 4242);
 }
+
+// --- member-scoped semantic_search paths are workspace-root-relative -----------------------
+// docs/issues/2026-11-05-member-semantic-result-paths-miss-workspace-root.md (d3a90bec4f8f5ced)
+
+fn member_hit(file: &str) -> crate::retrieval::search::Hit {
+    crate::retrieval::search::Hit {
+        chunk_id: format!("chunk-{file}"),
+        file_path: file.to_string(),
+        start_line: 1,
+        end_line: 2,
+        content: String::new(),
+        score: 1.0,
+        rerank_score: None,
+    }
+}
+
+#[test]
+fn lift_member_paths_prefixes_the_member_root() {
+    let mut hits = vec![member_hit("src/ser.rs")];
+    super::semantic_search::lift_member_paths(&mut hits, "crates/nu-json");
+    assert_eq!(hits[0].file_path, "crates/nu-json/src/ser.rs");
+}
+
+#[test]
+fn lift_member_paths_leaves_the_workspace_root_project_alone() {
+    let mut hits = vec![member_hit("src/ser.rs")];
+    super::semantic_search::lift_member_paths(&mut hits, ".");
+    assert_eq!(hits[0].file_path, "src/ser.rs");
+}
+
+#[test]
+fn lift_member_paths_normalises_backslash_separators() {
+    let mut hits = vec![member_hit("src/ser.rs")];
+    super::semantic_search::lift_member_paths(&mut hits, "crates\\nu-json");
+    assert_eq!(hits[0].file_path, "crates/nu-json/src/ser.rs");
+}
+
+/// A workspace with no `workspace.toml` and two manifest members, `crates/alpha` and `crates/beta`.
+fn two_member_workspace() -> (tempfile::TempDir, std::path::PathBuf) {
+    let host = tempdir().unwrap();
+    let root = std::fs::canonicalize(host.path()).unwrap();
+    for (member, file) in [("alpha", "ser.rs"), ("beta", "lib.rs")] {
+        let dir = root.join("crates").join(member);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            format!("[package]\nname = \"{member}\"\nversion = \"0.1.0\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join("src").join(file), "pub fn f() {}\n").unwrap();
+    }
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    (host, root)
+}
+
+fn ctx_for(agent: Agent, workspace_override: Option<std::path::PathBuf>) -> ToolContext {
+    ToolContext {
+        agent,
+        lsp: LspManager::new_arc(),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override,
+    }
+}
+
+/// The hits of `project_id` as the store returns them (member-root-relative), after the step
+/// `SemanticSearch::call` applies to an explicit `project_id`.
+async fn lifted_paths(ctx: &ToolContext, project_id: &str) -> Vec<String> {
+    let focused = ctx
+        .agent
+        .project_root_for(ctx.workspace_override.as_deref())
+        .await;
+    let mut hits = vec![member_hit("src/ser.rs")];
+    super::semantic_search::lift_explicit_member_hits(
+        ctx,
+        project_id,
+        focused.as_deref(),
+        &mut hits,
+    )
+    .await;
+    hits.into_iter().map(|h| h.file_path).collect()
+}
+
+#[tokio::test]
+async fn an_explicit_member_project_id_yields_paths_that_exist_under_the_workspace_root() {
+    let (_host, root) = two_member_workspace();
+    let agent = Agent::new(Some(root.clone())).await.unwrap();
+    let projects = agent.discovered_projects_at(None).await;
+    let alpha = projects
+        .iter()
+        .find(|p| p.id == "alpha")
+        .unwrap_or_else(|| {
+            panic!(
+                "fixture must discover member `alpha`: {:?}",
+                projects.iter().map(|p| &p.id).collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(
+        alpha.relative_root,
+        std::path::PathBuf::from("crates/alpha")
+    );
+    let ctx = ctx_for(agent, None);
+
+    let paths = lifted_paths(&ctx, "alpha").await;
+
+    assert_eq!(paths, vec!["crates/alpha/src/ser.rs".to_string()]);
+    assert!(
+        root.join(&paths[0]).is_file(),
+        "{} must exist under the workspace root",
+        paths[0]
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_project_id_keeps_its_paths() {
+    let (_host, root) = two_member_workspace();
+    let ctx = ctx_for(Agent::new(Some(root)).await.unwrap(), None);
+    assert_eq!(
+        lifted_paths(&ctx, "no-such-member").await,
+        vec!["src/ser.rs".to_string()]
+    );
+}
+
+/// Pinning the member as the workspace is the other way to reach its files: `read_file` then
+/// resolves against the member root, which is exactly what the store's paths are relative to.
+/// Prefixing there would double the member directory.
+#[tokio::test]
+async fn pinning_the_member_workspace_does_not_double_the_prefix() {
+    let (_host, root) = two_member_workspace();
+    let member_root = root.join("crates/alpha");
+    std::fs::create_dir_all(member_root.join(".codescout")).unwrap();
+    let ctx = ctx_for(
+        Agent::new(Some(root.clone())).await.unwrap(),
+        Some(member_root.clone()),
+    );
+
+    let paths = lifted_paths(&ctx, "alpha").await;
+
+    assert_eq!(paths, vec!["src/ser.rs".to_string()]);
+    assert!(member_root.join(&paths[0]).is_file());
+}
+
+/// Focusing a member inside the workspace (`activate_within_workspace`) moves the root
+/// `read_file` resolves against to the member's directory, while the discovered list keeps the
+/// member's path relative to the workspace root.
+#[tokio::test]
+async fn a_focused_member_does_not_double_the_prefix() {
+    let (_host, root) = two_member_workspace();
+    let agent = Agent::new(Some(root.clone())).await.unwrap();
+    agent
+        .activate_within_workspace("alpha", None)
+        .await
+        .unwrap();
+    let ctx = ctx_for(agent, None);
+
+    let paths = lifted_paths(&ctx, "alpha").await;
+
+    assert_eq!(paths, vec!["src/ser.rs".to_string()]);
+    let focused = ctx.agent.project_root_for(None).await.unwrap();
+    assert!(focused.join(&paths[0]).is_file());
+}
