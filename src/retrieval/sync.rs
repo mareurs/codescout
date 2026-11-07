@@ -1843,8 +1843,9 @@ mod tests {
             "and it must not make scripts/ look empty either"
         );
     }
-    /// A file `stream_index` can never represent (zero bytes, or only whitespace, so every
-    /// chunk is blank and skipped) is not a coverage defect. Before the fix `verify` took
+    /// A file `stream_index` can never represent (zero bytes, only whitespace, or not UTF-8,
+    /// so every chunk is blank or unreadable and skipped) is not a coverage defect. Before the
+    /// fix `verify` took
     /// such a file from the walk, found no chunk for it, and reported it missing on every
     /// run, so an index that was exactly as complete as it could be never read complete.
     #[tokio::test]
@@ -1853,6 +1854,9 @@ mod tests {
         std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
         std::fs::write(dir.path().join("empty.rs"), "").unwrap();
         std::fs::write(dir.path().join("ws.rs"), "\n\n\n").unwrap();
+        // Non-empty but not UTF-8: `read_to_string` fails, so the indexer skips it too. This is
+        // the second exit of `indexer_can_represent`; the two files above only reach the first.
+        std::fs::write(dir.path().join("bad.rs"), [0xff_u8, 0xfe]).unwrap();
 
         let store = RecordingStore::default();
         let emb = FakeEmbedder {
@@ -1884,7 +1888,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             report.missing_count, 0,
-            "empty.rs and ws.rs hold nothing to embed; missing_sample={:?}",
+            "empty.rs, ws.rs and bad.rs hold nothing to embed; missing_sample={:?}",
             report.missing_sample
         );
         assert_eq!(
