@@ -1868,9 +1868,20 @@ pub trait Tool: Send + Sync {
             .agent
             .project_root_for(ctx.workspace_override.as_deref())
             .await;
-        let root_prefix = project_root
+        // The spelling a tool shows for a path (`display_path`) and the forward-slash spelling
+        // (`to_forward_slash`) differ only when the root's own name holds a backslash. A value
+        // starts with whichever of them its producer used, so both are stripped.
+        let root_prefixes: Vec<String> = project_root
             .as_ref()
-            .map(|p| format!("{}/", crate::util::fs::to_forward_slash(p)))
+            .map(|p| {
+                let shown = format!("{}/", crate::util::fs::display_path(p));
+                let rewritten = format!("{}/", crate::util::fs::to_forward_slash(p));
+                if shown == rewritten {
+                    vec![shown]
+                } else {
+                    vec![shown, rewritten]
+                }
+            })
             .unwrap_or_default();
         // The displaced-default notice is only PEEKED here; it is marked spent below, once
         // a block has actually carried it.
@@ -1886,7 +1897,9 @@ pub trait Tool: Send + Sync {
         // it, or fills `notice_block` (a result with no object to hold a field).
         let mut notice_carried = false;
         let mut notice_block: Option<Content> = None;
-        crate::tools::core::path_strip::strip_paths_in_value(&mut val, &root_prefix);
+        for root_prefix in &root_prefixes {
+            crate::tools::core::path_strip::strip_paths_in_value(&mut val, root_prefix);
+        }
         // AFTER stripping, deliberately: the annotation's whole job is to name
         // the checkout absolutely, and the stripper rewrites project-rooted
         // paths into relative ones.

@@ -135,7 +135,7 @@ async fn scan_for_outside_call(
             Some(_) => {
                 let rel = path.strip_prefix(&root).unwrap_or(path);
                 return CallersCheck::OutsideCalls {
-                    file: crate::util::fs::to_forward_slash(rel),
+                    file: crate::util::fs::display_path(rel),
                 };
             }
         }
@@ -296,5 +296,41 @@ mod tests {
         })
         .await;
         assert_eq!(out, CallersCheck::NoOutsideCalls);
+    }
+    /// An outside call found in a file whose name holds a backslash names that file as it is on disk.
+    /// On Linux a backslash is an ordinary file-name character; the rewritten `src/a/b.rs` is no file.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_outside_call_in_a_file_with_a_backslash_names_that_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let edited = root.join("src/lib.rs");
+        std::fs::write(&edited, "pub fn helper() {}\n").unwrap();
+        let caller = root.join("src").join("a\\b.rs");
+        std::fs::write(&caller, "pub fn caller() { helper(); }\n").unwrap();
+        assert!(caller.is_file(), "the fixture is one file named a\\b.rs");
+
+        let ctx = crate::tools::ToolContext {
+            agent: crate::agent::Agent::new(Some(root.clone())).await.unwrap(),
+            lsp: crate::lsp::LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        };
+
+        let check = scan_for_outside_call(&ctx, &edited, "rust", "helper").await;
+        assert_eq!(
+            check,
+            CallersCheck::OutsideCalls {
+                file: "src/a\\b.rs".to_string()
+            }
+        );
     }
 }

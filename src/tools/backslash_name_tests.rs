@@ -402,3 +402,40 @@ async fn rename_textual_matches_name_the_real_file() {
     );
     assert_names_the_real_file("rename textual matches", &result, name);
 }
+/// A name search reports each symbol's file under the name the file has.
+#[tokio::test]
+async fn symbols_name_search_names_the_real_file() {
+    use crate::lsp::{SymbolInfo, SymbolKind};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/lib.rs"), "fn other() {}\n").unwrap();
+    let name = "a\\b.rs";
+    let target = root.join("src").join(name);
+    std::fs::write(&target, "fn helper() {}\n").unwrap();
+    assert!(target.is_file(), "the fixture is one file named {name:?}");
+
+    let symbol = SymbolInfo {
+        name: "helper".to_string(),
+        name_path: "helper".to_string(),
+        kind: SymbolKind::Function,
+        file: target.clone(),
+        start_line: 0,
+        end_line: 0,
+        start_col: 3,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let mock = crate::lsp::mock::MockLspClient::new().with_workspace_symbols(vec![symbol]);
+    let ctx = mock_ctx(&root, mock).await;
+    let result = Symbols
+        .call(json!({ "name": "helper" }), &ctx)
+        .await
+        .unwrap();
+    assert!(
+        result.to_string().contains("helper"),
+        "the fixture must find the symbol: {result}"
+    );
+    assert_names_the_real_file("symbols name search", &result, name);
+}

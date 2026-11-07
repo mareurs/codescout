@@ -3324,6 +3324,45 @@ async fn call_content_relativizes_path_keys_but_not_content() {
         "root-valued field must stay absolute, never \"\": {text}"
     );
 }
+/// A project root whose own path holds a backslash is an ordinary Linux directory. A path value
+/// shown in its real spelling (`display_path`) and one still in the forward-slash spelling
+/// (`to_forward_slash`) both start with a different text of that root, so both must relativize.
+/// Before the second prefix existed, the real spelling stayed absolute under such a root.
+#[cfg(unix)]
+#[tokio::test]
+async fn call_content_relativizes_a_path_under_a_root_whose_name_holds_a_backslash() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap().join("aw\\proj");
+    std::fs::create_dir_all(&root).unwrap();
+    let ctx = rooted_ctx(&root).await;
+    let shown = crate::util::fs::display_path(&root);
+    let rewritten = crate::util::fs::to_forward_slash(&root);
+    assert_ne!(shown, rewritten, "the fixture root must hold a backslash");
+
+    let tool = EchoTool {
+        result: serde_json::json!({
+            "file": format!("{shown}/src/lib.rs"),
+            "path": format!("{rewritten}/src/other.rs"),
+        }),
+        user_summary: None,
+    };
+    let content = tool
+        .call_content(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("primary block must be JSON");
+    assert_eq!(
+        parsed["file"].as_str(),
+        Some("src/lib.rs"),
+        "the real spelling of a path under the root must relativize: {text}"
+    );
+    assert_eq!(
+        parsed["path"].as_str(),
+        Some("src/other.rs"),
+        "the forward-slash spelling must still relativize: {text}"
+    );
+}
 
 #[tokio::test]
 async fn call_content_buffered_summary_is_built_from_the_stripped_value() {
