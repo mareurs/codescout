@@ -157,7 +157,9 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 - claude-plugins: `836aadd`, `8f230f7` and `696a592` are not in the ahead set. Now ahead by 2, both docs commits: `a4ce3da` (hook released in 1.21.0) and `1e985eb`. Session not checked.
 - prompt-engineering: ahead by 9. The three listed (`9bc8e4e`, `c2025d6`, `70e9d19`), this session's `997b4cd`, `892d90c`, `bd67360` and `39672ce`, and two more, `fc8c9ab` and `98c5431`, whose session was not checked. Untracked `scenarios/plan-opens-the-body/` belongs to someone else.
 
-The operator chose on 2026-11-07 to push later. Until `32c296e81` and `5e004e998` are pushed, the CI job `Audit Doc Refs` stays red on origin. CIW-18's CI half still cannot be exercised for claude-plugins.
+**Superseded the same day, 2026-11-07.** Another session pushed `f7d65b877..267d8cd01` (12 commits) after its operator saw this session's commits. `32c296e81`, `5e004e998` and `565999f11` are on `origin/experiments`, and `git rev-list --left-right --count origin/experiments...HEAD` reads `0 0` in codescout. This session did not push and was not asked. So the codescout bullet above and the sentence below are history: codescout has nothing unpushed, and the CI job `Audit Doc Refs` should turn green on that run. NOT read yet: that CI result. claude-plugins (2 ahead) and prompt-engineering (9 ahead) are unchanged.
+
+The operator chose on 2026-11-07 to push later (said before that push). Until `32c296e81` and `5e004e998` are pushed, the CI job `Audit Doc Refs` stays red on origin. CIW-18's CI half still cannot be exercised for claude-plugins.
 
 **Next:** push when ready; claude-plugins via `scripts/release.sh` after CIW-8.
 
