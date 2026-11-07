@@ -7,7 +7,7 @@ tags:
 - cluster/addressing-without-an-escape-hatch
 closed: 2026-11-07
 opened: 2026-11-04
-unverified: 'Fixed, gated and seen live in grep and tree, but two gaps remain. (1) Not every one of the 13 sites is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run. (2) Five other callers of relative_forward_slash (symbol_at, references, edit_code, fs/mod.rs, symbol/edit.rs) may rewrite a backslash in a name the same way; not checked.'
+unverified: 'Fixed, gated and seen live in grep and tree, but gaps remain. (1) Not every one of the 13 sites of a6babe715 is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run for them. (2) The references.rs warning site fixed in 665a7758e has no test of its own. (3) Two other callers of the rewriting helpers are not fixed and are tracked in bb462b414e559152.'
 ---
 
 # BUG: grep rewrites a backslash in a file name to a slash, so the listed path names a file that does not exist
@@ -78,6 +78,8 @@ Not changed, on purpose: five other callers of `relative_forward_slash` (`src/to
 
 Fix committed 2026-11-07, not pushed when this was written. Gate on the tree before two blank lines were added in `util/fs.rs`: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0; LEAN 6172 and DEFAULT 9040 passed.
 
+Follow-up commit `665a7758e` (patch-id not computed here): three of the five callers named under Fix now use `relative_display_path`: `symbol_at.rs` (definition `file`), `edit_code.rs` (rename `corruption_hints`) and `references.rs` (the example paths in `completeness_warning`). Red first: `symbol_at_definition_names_the_real_file` and `rename_corruption_hint_names_the_real_file` failed with `src/a/b.rs`. Mutant: both sites restored to `relative_forward_slash` failed both tests. Gate: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, LEAN 6174 and DEFAULT 9042 passed. The `references.rs` site has no test of its own.
+
 ## Tests added
 
 `src/tools/backslash_name_tests.rs` (`cfg(all(test, unix))`), 7 tests. Each runs one tool over a directory whose only file is `a\b.*` and requires the result's JSON text to hold the real name and not `a/b.*`:
@@ -94,7 +96,7 @@ Avoid backslashes in file names; or locate such a file with `tree` or `run_comma
 
 ## Resume
 
-Fixed in `a6babe715` and seen live on 2026-11-07 after a rebuild and `/mcp` reconnect: on a directory holding `a\b.txt`, `grep(mode="files")` and `tree` list `a\b.txt` (before: `a/b.txt`). `symbols` on a directory was not run live; only its test covers it. See the `unverified` caveat in the frontmatter for what is not proven. Open follow-up: check the five `relative_forward_slash` callers listed in Fix for the same rewrite of a backslash in a file name.
+Fixed in `a6babe715` and `665a7758e`; seen live after `a6babe715` on 2026-11-07 (`grep(mode="files")` and `tree` list `a\b.txt`). `symbols` on a directory, `symbol_at` and the rename hint are covered by tests only. The two callers not fixed here, `classify_reference_path` (the `file` of every `references` location) and `TextualMatch.file` (the `textual_matches` of a rename), are filed as `bb462b414e559152`. See the `unverified` caveat in the frontmatter.
 
 ## References
 
