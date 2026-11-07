@@ -115,7 +115,10 @@ None of these was run, and none is changed.
 - **`src/tools/memory/mod.rs` lines 1205 and 1209:** `resolved_from` and `write_target`, memory directories shown in the response. Same.
 - **`src/tools/config/mod.rs` and `src/agent/mod.rs`:** absolute root displays (`project_root`, the CWD hint, `main_root`, the root of the project status). Same; the status comment names a forward-slash `RepoPath` convention, not checked.
 - **`relative_root` of a workspace member, in `src/prompts/`, `src/tools/onboarding.rs`, `src/tools/config/mod.rs`, `src/agent/mod.rs`: by design.** It is normalized to forward slashes when the configuration is read (`src/workspace.rs`, `declared_relative_root`), so a member root with a backslash cannot be declared, and the test `the_tree_call_of_a_project_prompt_reads_back_to_its_root` expects the rewritten form.
-- **Not traced:** `src/git/mod.rs` and the `librarian` paths, which keep the catalog's forward-slash form and were not checked one by one.
+- **`src/git/mod.rs` `diff_tree_to_tree` (lines 59 and 70): no production caller.** `grep` and `references` find the function only in its own tests. `DiffEntry` and `DiffStatus` are used nowhere else. Its two `replace('\\', "/")` calls have no effect in a running server. If a caller appears, it needs a decision first, as for `chunk_id`.
+- **`src/librarian/tools/doctor.rs` `paths_touched_since` (line 8339): by design.** It builds a set of paths with `replace('\\', "/")`. The catalog stores paths in forward-slash form (`normalize_rel_path` in `src/librarian/util.rs` replaces a backslash on every platform on purpose), so the set is a lookup key against catalog rows. It is not shown to a caller.
+- **`src/librarian/tools/create.rs` line 576, `artifact.rs` line 181, `mv.rs` lines 598, 599 and 686: by design.** They show `abs_path` and the old and new path of a catalog row, in the form the catalog holds. The catalog cannot hold a file name with a backslash (a write rewrites it), so such a file has no row to show. Not run.
+- **Not traced:** the remaining `librarian` read paths that return a catalog string unchanged. They were read as a class, not one by one.
 
 See the `unverified` caveat in the frontmatter.
 
