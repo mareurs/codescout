@@ -2886,6 +2886,14 @@ fn has_tool_handle(text: &str) -> bool {
         .expect("static pattern")
         .is_match(text)
 }
+/// True when `hint` names `id` and no other `@tool_*` handle and no `<field>` placeholder.
+/// A `@tool_` id is minted from the clock (`store_tool`), so a magic prefix such as `@tool_abc`
+/// stands for a placeholder only until the clock mints an id that starts with it (bug
+/// 649df5b30d126f2b): the real handle is removed first, and what remains must hold no handle.
+fn hint_names_only_handle(hint: &str, id: &str) -> bool {
+    let rest = hint.replace(id, "");
+    !rest.contains("@tool_") && !rest.contains("<field>")
+}
 
 /// A stored `@cmd_*` entry whose stderr is ONE wide line with distinguishable ends.
 fn wide_stderr() -> String {
@@ -3240,10 +3248,7 @@ async fn a_truncated_tool_query_names_a_real_route_on_its_own_handle_and_it_runs
 
     assert_eq!(parsed["truncated"], true, "{text:.300}");
     let hint = parsed["hint"].as_str().unwrap_or_default();
-    assert!(
-        !hint.contains("<field>") && !hint.contains("@tool_abc"),
-        "{hint}"
-    );
+    assert!(hint_names_only_handle(hint, &id), "{hint}");
     let shown = parsed["stdout_shown"].as_u64().unwrap();
     let route = format!("sed -n '{},{}p' {id}", shown + 1, shown + 100);
     assert!(hint.contains(&route), "{hint}");
@@ -3258,6 +3263,34 @@ async fn a_truncated_tool_query_names_a_real_route_on_its_own_handle_and_it_runs
         "`{route}` did not continue the slice: {t2:.300}"
     );
 }
+// BUG 649df5b30d126f2b: `store_tool` mints `@tool_{:08x}` from the clock, so for ~17.5 minutes
+// every 49.7 days the real id starts with `@tool_abc` and the old placeholder check rejected it.
+#[test]
+fn a_real_handle_that_starts_with_the_old_placeholder_prefix_is_not_a_placeholder() {
+    let id = "@tool_abcbcb69";
+    let hint = format!("Next page: sed -n '4,103p' {id}.");
+    // The old predicate, inline: red for this input, which is the defect.
+    let old = !hint.contains("<field>") && !hint.contains("@tool_abc");
+    assert!(
+        !old,
+        "the old predicate must reject this real handle, or this test proves nothing"
+    );
+    assert!(hint_names_only_handle(&hint, id), "{hint}");
+}
+
+#[test]
+fn a_hint_naming_a_different_handle_or_a_placeholder_is_still_rejected() {
+    let id = "@tool_abcbcb69";
+    for hint in [
+        "Next page: sed -n '4,103p' @tool_abc123.".to_string(),
+        format!("Use {id}, or read_file(@tool_abc, json_path=\"$.<field>\")."),
+        format!("Use read_file({id}, json_path=\"$.<field>\")."),
+        format!("Next page: sed -n '4,103p' {id}; also @tool_00000001."),
+    ] {
+        assert!(!hint_names_only_handle(&hint, id), "{hint}");
+    }
+}
+
 // ---- the summary-or-inline gate measures the response, not the raw output ----
 //
 // BUG-adjacent, found by the 2026-10-05 sibling sweep and verified live: a 175-record pretty-JSON
