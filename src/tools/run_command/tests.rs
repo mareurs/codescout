@@ -2892,7 +2892,7 @@ fn has_tool_handle(text: &str) -> bool {
 /// 649df5b30d126f2b): the real handle is removed first, and what remains must hold no handle.
 fn hint_names_only_handle(hint: &str, id: &str) -> bool {
     let rest = hint.replace(id, "");
-    !rest.contains("@tool_") && !rest.contains("<field>")
+    hint.contains(id) && !rest.contains("@tool_") && !rest.contains("<field>")
 }
 
 /// A stored `@cmd_*` entry whose stderr is ONE wide line with distinguishable ends.
@@ -3286,6 +3286,8 @@ fn a_hint_naming_a_different_handle_or_a_placeholder_is_still_rejected() {
         format!("Use {id}, or read_file(@tool_abc, json_path=\"$.<field>\")."),
         format!("Use read_file({id}, json_path=\"$.<field>\")."),
         format!("Next page: sed -n '4,103p' {id}; also @tool_00000001."),
+        // Control: a hint that names no handle at all is not a route on `id` either.
+        "Next page: sed -n '4,103p' on the ref.".to_string(),
     ] {
         assert!(!hint_names_only_handle(&hint, id), "{hint}");
     }
