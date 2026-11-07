@@ -7,7 +7,7 @@ tags:
 - cluster/addressing-without-an-escape-hatch
 closed: 2026-11-07
 opened: 2026-11-04
-unverified: 'Fixed, gated and seen live in grep and tree, but gaps remain. (1) Not every one of the 13 sites of a6babe715 is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run for them. (2) The references.rs warning site fixed in 665a7758e has no test of its own. (3) Two other callers of the rewriting helpers are not fixed and are tracked in bb462b414e559152.'
+unverified: 'Fixed, gated and seen live in grep and tree, but gaps remain. (1) Not every one of the 13 sites of a6babe715 is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run for them. (2) The references.rs warning site fixed in 665a7758e has no test of its own. (3) The callers fixed in d05072221 are tracked in bb462b414e559152, with their own caveat.'
 ---
 
 # BUG: grep rewrites a backslash in a file name to a slash, so the listed path names a file that does not exist
@@ -96,7 +96,7 @@ Avoid backslashes in file names; or locate such a file with `tree` or `run_comma
 
 ## Resume
 
-Fixed in `a6babe715` and `665a7758e`; seen live after `a6babe715` on 2026-11-07 (`grep(mode="files")` and `tree` list `a\b.txt`). `symbols` on a directory, `symbol_at` and the rename hint are covered by tests only. The two callers not fixed here, `classify_reference_path` (the `file` of every `references` location) and `TextualMatch.file` (the `textual_matches` of a rename), are filed as `bb462b414e559152`. See the `unverified` caveat in the frontmatter.
+Fixed in `a6babe715` and `665a7758e`; the two callers left out of those, `classify_reference_path` and `TextualMatch.file`, were fixed in `d05072221` under `bb462b414e559152`. Seen live after `a6babe715` on 2026-11-07 (`grep(mode="files")` and `tree` list `a\b.txt`). `symbols` on a directory, `symbol_at`, `references` and the rename hints are covered by tests only. See the `unverified` caveat in the frontmatter.
 
 ## References
 

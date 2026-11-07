@@ -1,10 +1,12 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: references and the rename textual matches list a file whose name holds a backslash under a rewritten path
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-11-07
 opened: 2026-11-07
+unverified: 'Fixed and gated, but no test reaches the external branch of classify_reference_path or the lib: branch of format_library_path; both use the same display_path swap as the tested project branch. Not seen live: the running server was not rebuilt after d05072221.'
 ---
 
 # BUG: references and the rename textual matches list a file whose name holds a backslash under a rewritten path
@@ -54,11 +56,29 @@ None.
 
 ## Fix
 
-Not started. Direction: use `relative_display_path` in the project branch and `display_path` in the external branch of `classify_reference_path`; check `format_library_path` for the same rewrite; use `relative_display_path` in `src/symbol/edit.rs`. Check first that no caller of `classify_reference_path` or `TextualMatch.file` compares the string with a catalog form.
+Written and committed 2026-11-07 (`d05072221`):
+
+- `classify_reference_path` (`src/fs/mod.rs`): the project branch uses `relative_display_path` and the external branch uses `display_path`. The classification half of the tuple is unchanged, so the comparison at `references.rs` line 423 behaves as before.
+- `format_library_path` (`src/fs/mod.rs`): both of its `to_forward_slash` calls became `display_path`. It builds the `lib:` form shown by `references`, `symbols` and the directory overview, a path that has the same defect.
+- `text_sweep` (`src/symbol/edit.rs`): `TextualMatch.file` uses `relative_display_path`.
+
+Checked before the change: `TextualMatch.file` reaches only the `textual_matches` JSON and the `uncovered_sources` list of a rename response; no caller compares it with a catalog form.
+
+## Fix provenance
+
+- **SHA:** `d05072221` (`experiments`)
+- **patch-id:** `348471ee3bd48ba49ac76abd2d610d9ee258a336`
+
+Fix committed 2026-11-07, not pushed when this was written. Gate: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0; LEAN 6176 and DEFAULT 9044 passed.
 
 ## Tests added
 
-N/A: bug only filed.
+In `src/tools/backslash_name_tests.rs`, both with `MockLspClient`:
+
+- `references_locations_name_the_real_file`: a reference in `src/a\b.rs` must be listed under that name in `file_groups`.
+- `rename_textual_matches_name_the_real_file`: the textual sweep of a rename must list `src/a\b.rs` under that name.
+
+Red first: both failed on the old code with `src/a/b.rs`. Mutant: `relative_forward_slash` restored in the project branch of `classify_reference_path` and in `text_sweep` failed both; reverted.
 
 ## Workarounds
 
@@ -66,7 +86,7 @@ Avoid backslashes in file names, or locate the file with `tree` (fixed in `a6bab
 
 ## Resume
 
-Open. Next step: write the `references` test with `MockLspClient` and watch it fail with `src/a/b.rs`, then apply the fix above.
+Fixed in `d05072221`. See the `unverified` caveat in the frontmatter for what no test reaches. Follow-up of `2d8475ed5bc831e5`.
 
 ## References
 
