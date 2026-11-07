@@ -252,7 +252,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // docs/issues/archive/2026-08-17-prose-ledger-worktree-id-collision.md
         if let Some(cp) = ctx.current_project.as_deref() {
             if let Some(row) = artifact::get(&cat, &a.id)? {
-                if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
+                // The shadow half: a caller that names the worktree's own fork of a main
+                // ledger (the `artifact_id` an earlier write returned) is not a
+                // "main checkout artifact" by path, yet allocates against an id main's
+                // reservation never sees. A ledger born in the worktree is neither.
+                if super::worktree::is_main_checkout_artifact(cp, &row.abs_path)
+                    || super::worktree::is_worktree_shadow(&cat, cp, &row)?
+                {
                     return Err(LibrarianRecoverableError::with_hint(
                         "append_entry: id allocation is not supported from a worktree checkout"
                             .to_string(),
@@ -1302,6 +1308,148 @@ mod tests {
             lineage, 0,
             "must refuse before resolve_write_target inserts a worktree_of lineage link"
         );
+    }
+    /// A worktree session over a prose ledger that both checkouts hold at fork time:
+    /// returns the tempdir guard, the context, and the (main, worktree) ledger paths.
+    /// The ledger carries `entry_prefix: HY` and a newest entry `HY-10`.
+    fn worktree_prose_fixture() -> (
+        tempfile::TempDir,
+        ToolContext,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    ) {
+        use crate::librarian::current_project::CurrentProject;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let main_root = dir.path().join("repo");
+        let wt_root = main_root.join(".worktrees/feat");
+        let rel = "docs/trackers/ledger.md";
+        let body = "---\nkind: tracker\nentry_prefix: HY\n---\n\n# Ledger\n\n## HY-10 — the newest entry\n";
+        for root in [&main_root, &wt_root] {
+            std::fs::create_dir_all(root.join("docs/trackers")).unwrap();
+            std::fs::write(root.join(rel), body).unwrap();
+        }
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: wt_root.clone(),
+                git_root: wt_root.clone(),
+                main_root: Some(main_root.clone()),
+                umbrella: None,
+            }))
+            .build();
+        (dir, ctx, main_root.join(rel), wt_root.join(rel))
+    }
+
+    fn catalogue_ledger(ctx: &ToolContext, id: &str, abs_path: &std::path::Path) {
+        let now = chrono::Utc::now().timestamp_millis();
+        let cat = ctx.catalog.lock();
+        art_upsert(
+            &cat,
+            &ArtifactRow {
+                id: id.to_string(),
+                abs_path: abs_path.to_path_buf(),
+                kind: "tracker".to_string(),
+                status: "active".to_string(),
+                title: Some("Ledger".to_string()),
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: now,
+                updated_at: now,
+                file_mtime: now,
+                file_sha256: "x".to_string(),
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
+    }
+
+    /// `docs/issues/2026-11-05-append-entry-worktree-override-bypasses-main-only-rule.md`.
+    ///
+    /// `prose_allocation_is_refused_from_a_worktree` covers a caller that names the
+    /// MAIN row. A caller that names the worktree's own SHADOW of that ledger (the
+    /// `artifact_id` an earlier write returned) passed the same guard, because a row
+    /// under the worktree root is not a "main checkout artifact" — and the allocator
+    /// then ran against the shadow's id, missing main's reservation: the collision the
+    /// guard's own comment describes.
+    #[tokio::test]
+    async fn prose_allocation_is_refused_on_a_worktree_shadow_of_a_main_ledger() {
+        use crate::librarian::ids;
+
+        let (_dir, ctx, main_abs, wt_abs) = worktree_prose_fixture();
+        let main_id = ids::artifact_id_from_abs(&main_abs);
+        catalogue_ledger(&ctx, &main_id, &main_abs);
+
+        // Fork main's ledger into the worktree overlay, exactly as any worktree write
+        // to the main row does.
+        let shadow_id = {
+            let mut cat = ctx.catalog.lock();
+            crate::librarian::tools::worktree::resolve_write_target(&mut cat, &ctx, &main_id)
+                .unwrap()
+        };
+        assert_ne!(shadow_id, main_id, "the fork must have produced a shadow");
+        assert_eq!(
+            artifact::get(&ctx.catalog.lock(), &shadow_id)
+                .unwrap()
+                .unwrap()
+                .abs_path,
+            wt_abs
+        );
+        let before = std::fs::read_to_string(&wt_abs).unwrap();
+
+        let err = call(
+            &ctx,
+            json!({
+                "id": shadow_id, "id_prefix": "HY",
+                "title": "from the shadow", "body": "b", "anchor_heading": "# Ledger"
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
+        assert!(
+            err.to_string().contains("worktree"),
+            "expected the worktree guard, got: {err}"
+        );
+
+        // Writes nothing: no section, no high-water mark, no extra artifact row.
+        assert_eq!(
+            std::fs::read_to_string(&wt_abs).unwrap(),
+            before,
+            "a refused call must leave the shadow file untouched"
+        );
+        let artifacts: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(artifacts, 2, "main row + the one shadow, nothing new");
+    }
+
+    /// Control for the test above: a ledger BORN in the worktree has no main twin, so no
+    /// ledger-wide id exists for it to collide with, and it must keep allocating.
+    #[tokio::test]
+    async fn prose_allocation_is_allowed_on_a_worktree_born_ledger() {
+        use crate::librarian::ids;
+
+        let (_dir, ctx, _main_abs, wt_abs) = worktree_prose_fixture();
+        let wt_id = ids::artifact_id_from_abs(&wt_abs);
+        catalogue_ledger(&ctx, &wt_id, &wt_abs);
+
+        let out = call(
+            &ctx,
+            json!({
+                "id": wt_id, "id_prefix": "HY",
+                "title": "born here", "body": "b", "anchor_heading": "# Ledger"
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["id"], "HY-11");
     }
 
     #[tokio::test]

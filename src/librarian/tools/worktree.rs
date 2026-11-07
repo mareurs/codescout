@@ -38,6 +38,42 @@ pub(crate) fn is_main_checkout_artifact(
     under(&row, &main_s) && !under(&row, &wt_s)
 }
 
+/// True iff `row` is this worktree session's OVERLAY SHADOW of a main-checkout artifact:
+/// the session is a worktree, the row sits under the worktree root, and the catalog
+/// records its fork — a `worktree_of` lineage link to a main row, or a `worktree_fork`
+/// event ([`resolve_write_target`] writes both).
+///
+/// [`is_main_checkout_artifact`] is false for such a row (its path is under the worktree),
+/// so a guard that only asks that question lets a caller who names the shadow's id past a
+/// rule that exists for the main row. A ledger BORN in the worktree has neither record,
+/// has no main twin to collide with, and is not a shadow.
+pub(crate) fn is_worktree_shadow(
+    cat: &Catalog,
+    cp: &CurrentProject,
+    row: &artifact::ArtifactRow,
+) -> Result<bool> {
+    if cp.main_root.is_none() {
+        return Ok(false);
+    }
+    let wt_s = RepoPath::from(cp.git_root.as_path()).into_string();
+    let row_s = RepoPath::from(row.abs_path.as_path()).into_string();
+    if !under(&row_s, &wt_s) {
+        return Ok(false);
+    }
+    if links::outgoing(cat, &row.id)?
+        .iter()
+        .any(|l| l.rel == LINEAGE_REL)
+    {
+        return Ok(true);
+    }
+    let forked: i64 = cat.conn.query_row(
+        "SELECT COUNT(*) FROM events WHERE artifact_id = ?1 AND kind = ?2",
+        rusqlite::params![row.id, FORK_EVENT_KIND],
+        |r| r.get(0),
+    )?;
+    Ok(forked > 0)
+}
+
 /// Best-effort branch name: worktree `.git` file → gitdir → `<gitdir>/HEAD`
 /// → `ref: refs/heads/<branch>`. Filesystem-only, like current_project.rs.
 fn read_branch(worktree_root: &std::path::Path) -> Option<String> {
