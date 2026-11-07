@@ -537,3 +537,34 @@ async fn native_codex_invalid_root_falls_through_to_the_rendezvous_slot() {
     }
 }
 
+/// A refused `workspace=` pin is recorded too (`refuse_pin`), and must rank the native Codex
+/// root like any other row: otherwise a refused Codex row carries the foreign rendezvous
+/// session while its siblings carry the root.
+#[tokio::test]
+async fn native_codex_root_is_recorded_for_a_refused_pin() {
+    let mut wire = NativeContextWire::new("codex-mcp-client").await;
+    wire.call(
+        2,
+        json!({}),
+        json!({"command":"printf warmup","effect":"read"}),
+    )
+    .await;
+    native_stamp_rendezvous(wire.dir.path(), "other-threads-session");
+    let missing = wire.dir.path().join("no-such-workspace");
+    let response = wire
+        .call(
+            3,
+            json!({"sessionId":"native-root","threadId":"native-child"}),
+            json!({"command":"printf marker-refused","effect":"read",
+                   "workspace":missing.to_string_lossy()}),
+        )
+        .await;
+    assert!(
+        response.to_string().contains("no-such-workspace"),
+        "the pin must have been refused: {response}"
+    );
+    assert_eq!(
+        native_recorded_session(wire.dir.path(), "marker-refused"),
+        "native-root"
+    );
+}

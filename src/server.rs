@@ -838,8 +838,9 @@ impl CodeScoutServer {
     /// - what it stores is the refusal's message, which is already capped and escaped.
     ///
     /// The caller is resolved as the access-gate refusal resolves it: the stamped principal,
-    /// else the `_meta` conversation, else the rendezvous poll (consumed once per call; this
-    /// early return is that call's only poll), else the server's own id.
+    /// else the `_meta` conversation, else the request's native Codex root, else the rendezvous
+    /// poll (consumed once per call; this early return is that call's only poll), else the
+    /// server's own id. The same order `call_tool_inner` records ordinary rows under.
     #[allow(clippy::too_many_arguments)]
     async fn refuse_pin(
         &self,
@@ -848,6 +849,7 @@ impl CodeScoutServer {
         refusal: crate::tools::RecoverableError,
         principal: Option<&str>,
         conversation: Option<&str>,
+        native_root: Option<&str>,
         agent_id: Option<String>,
         tool_use_id: Option<String>,
     ) -> CallToolResult {
@@ -868,6 +870,7 @@ impl CodeScoutServer {
         let cc_session = principal
             .map(str::to_owned)
             .or_else(|| conversation.map(str::to_owned))
+            .or_else(|| native_root.map(str::to_owned))
             .or_else(|| self.poll_rendezvous())
             .unwrap_or_else(|| self.cc_session_id.clone());
         let recorder = UsageRecorder::new(
@@ -1530,6 +1533,36 @@ impl CodeScoutServer {
             .and_then(|p| p.split_once('/'))
             .map(|(_, agent)| agent.to_string());
 
+        // The native Codex root the request itself carries, parsed once for the recorder (here
+        // and in `refuse_pin`) and for the task-local scope below. It is per-call, unlike the
+        // rendezvous slot: several Codex servers share one ppid, so a slot can name ANOTHER
+        // thread's session, and the commit guard reads `usage.db.cc_session_id` as the writer of
+        // a path (4b4fac5682a4303b, 421ed73df25f795d). Read from `peer` before `build_context`
+        // takes it, mirroring `ToolContext::client_identity`.
+        let client =
+            peer.as_ref()
+                .and_then(|p| p.peer_info())
+                .map(|info| crate::tools::ClientIdentity {
+                    name: info.client_info.name.clone(),
+                    version: Some(info.client_info.version.clone()).filter(|v| !v.is_empty()),
+                });
+        let native = crate::tools::invocation_context::NativeInvocation::from_meta(
+            req.meta.as_ref().map(|m| &m.0),
+            client.as_ref(),
+        );
+        // The BARE root id, never `codex:<id>`: usage.db holds bare ids and the guard strips the
+        // qualifier from commit trailers before comparing (`foreign_writer` in
+        // `scripts/post-index-change-stage-log.sh`). Ranked below an asserted principal or
+        // conversation, above the rendezvous slot and the construction-time snapshot. A client
+        // that is not Codex, or a Codex call without a root, yields `Absent` and keeps the
+        // order it always had.
+        let native_root = match &native {
+            crate::tools::invocation_context::NativeInvocation::Codex { session_id, .. } => {
+                Some(session_id.clone())
+            }
+            _ => None,
+        };
+
         // A `workspace=` pin that is not an existing directory, or whose project cannot be made
         // resident (an unparseable project.toml, an unopenable directory), is refused HERE,
         // once, before anything resolves it: every later consumer (the access gate, the write
@@ -1551,6 +1584,7 @@ impl CodeScoutServer {
                         refusal,
                         asserted_principal.as_deref(),
                         asserted_conversation.as_deref(),
+                        native_root.as_deref(),
                         asserted_agent,
                         asserted_tool_use_id,
                     )
@@ -1566,6 +1600,7 @@ impl CodeScoutServer {
                         crate::agent::pin_resolution_refusal(root, e),
                         asserted_principal.as_deref(),
                         asserted_conversation.as_deref(),
+                        native_root.as_deref(),
                         asserted_agent,
                         asserted_tool_use_id,
                     )
@@ -1699,27 +1734,6 @@ impl CodeScoutServer {
                 .ok()
         };
 
-        // The native Codex root the request itself carries, parsed once for the recorder here
-        // and for the task-local scope below. It is per-call, unlike the rendezvous slot: several
-        // Codex servers share one ppid, so a slot can name ANOTHER thread's session, and the
-        // commit guard reads `usage.db.cc_session_id` as the writer of a path
-        // (4b4fac5682a4303b, 421ed73df25f795d).
-        let native = crate::tools::invocation_context::NativeInvocation::from_meta(
-            req.meta.as_ref().map(|m| &m.0),
-            ctx.client_identity().as_ref(),
-        );
-        // The BARE root id, never `codex:<id>`: usage.db holds bare ids and the guard strips the
-        // qualifier from commit trailers before comparing (`foreign_writer` in
-        // `scripts/post-index-change-stage-log.sh`). Ranked below an asserted principal or
-        // conversation, above the rendezvous slot and the construction-time snapshot. A client
-        // that is not Codex, or a Codex call without a root, yields `Absent` and keeps the
-        // order it always had.
-        let native_root = match &native {
-            crate::tools::invocation_context::NativeInvocation::Codex { session_id, .. } => {
-                Some(session_id.clone())
-            }
-            _ => None,
-        };
         let recorded_session = asserted_session
             .or(native_root)
             .or(serving_session)
