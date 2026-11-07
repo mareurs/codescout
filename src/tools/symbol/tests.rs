@@ -11972,7 +11972,7 @@ fn attach_advice_keeps_an_existing_safety_warning() {
     super::edit_code::attach_advice(&mut bare, None);
     assert!(bare.get("advice").is_none() && bare.get("hint").is_none());
 }
-/// Bug `053ca236198f1b9b`: the `Unverified` verdict cannot be forced through `replace` with
+/// Bug `b2eaa51eba0cec2a`: the `Unverified` verdict cannot be forced through `replace` with
 /// a real file (both extractions read the same path through the same parser, and the written
 /// text is valid UTF-8), so the response assembly that once had two writers of `hint` is
 /// pinned here, on exactly the function `do_replace` ends with.

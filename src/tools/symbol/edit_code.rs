@@ -381,7 +381,7 @@ pub(super) fn attach_advice(response: &mut Value, advice: Option<Value>) {
 ///
 /// Kept as one function because both steps write next to the single-valued `hint`, and the
 /// order is the contract: `Unverified` sets `hint`, `attach_advice` must leave it alone
-/// (bug `053ca236198f1b9b`). The verdict cannot be forced through a real file, so this is
+/// (bug `b2eaa51eba0cec2a`). The verdict cannot be forced through a real file, so this is
 /// where a test can reach it.
 pub(super) fn finish_replace_response(
     response: &mut Value,

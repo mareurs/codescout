@@ -1,5 +1,5 @@
 ---
-id: '1dfa43ac9834a309'
+id: ecf86374143251f0
 kind: bug
 status: fixed
 title: Companion tool-name gate treats negative .test.mjs fixtures as live tool references
@@ -51,7 +51,7 @@ Closed job/raw logs and source read this session. Literal cs-verified-relocate/i
 
 ## Fix
 
-Applied, commit `914c2a60f` on `experiments` (not pushed; patch-id `57d0c2acc13a0ecf0bffe0d57305eba451a8df3a`). `src/server.rs` gains `NEGATIVE_FIXTURE_TOKENS`, the four exact `(file, token)` pairs, and `is_negative_fixture_token`; `companion_surfaces_reference_only_real_tools` skips a captured name when the pair is listed.
+Applied, commit `914c2a60f` on `experiments` (on `origin/experiments` since 2026-11-07; patch-id `57d0c2acc13a0ecf0bffe0d57305eba451a8df3a`). `src/server.rs` gains `NEGATIVE_FIXTURE_TOKENS`, the four exact `(file, token)` pairs, and `is_negative_fixture_token`; `companion_surfaces_reference_only_real_tools` skips a captured name when the pair is listed.
 
 Chosen over two alternatives, both measured against the source:
 - Skipping `*.test.mjs` like `*.test.sh`: would also stop checking `host-normalization.test.mjs`, which carries one real `mcp__codescout__` reference, and the retired-name sentinel on every test file.
@@ -77,7 +77,7 @@ Report gate red; research controls retain their independently archived evidence.
 
 ## Resume
 
-Done 2026-11-07. Archive this file once `914c2a60f` is pushed. Re-open if a new negative fixture is added to a companion `.test.mjs` and the gate goes red on its token: add the `(file, token)` pair, do not widen the scan.
+Done 2026-11-07. Archived 2026-11-07, after `914c2a60f` was pushed. Re-open if a new negative fixture is added to a companion `.test.mjs` and the gate goes red on its token: add the `(file, token)` pair, do not widen the scan.
 
 ## References
 

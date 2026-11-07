@@ -7149,7 +7149,7 @@ mod tests {
         NEGATIVE_FIXTURE_TOKENS.contains(&(fname, name))
     }
 
-    /// Bug `1dfa43ac9834a309`: `cs-verified-relocate.test.mjs` feeds the hook tool names of OTHER
+    /// Bug `ecf86374143251f0`: `cs-verified-relocate.test.mjs` feeds the hook tool names of OTHER
     /// servers (`mcp__codescout__evil__edit_code` is a tool of a server named `codescout__evil`)
     /// to prove it stays silent. The companion-surface scan reads those as stale references to
     /// codescout tools. Only these exact `(file, token)` pairs are exempt; every other token in

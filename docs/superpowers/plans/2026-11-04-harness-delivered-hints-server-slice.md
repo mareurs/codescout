@@ -17,7 +17,7 @@ owners:
 
 **Tech Stack:** Rust (codescout, `src/symbol/edit.rs`, `src/tools/symbol/`), tree-sitter, tokio, serde_json. Tests are `cargo test --lib` unit and integration tests in `src/tools/symbol/tests.rs`.
 
-**Spec:** `docs/superpowers/specs/2026-11-04-harness-delivered-hints-design.md` (id `95abaa31c77daa39`), parts 1 and 2 and rollout slice 1. Bugs this plan closes: `053ca236198f1b9b`, `f5e732b0efeebd9e`.
+**Spec:** `docs/superpowers/specs/2026-11-04-harness-delivered-hints-design.md` (id `95abaa31c77daa39`), parts 1 and 2 and rollout slice 1. Bugs this plan closes: `b2eaa51eba0cec2a`, `b8e1ddadd0d39fea`.
 
 ## Global Constraints
 
@@ -142,9 +142,9 @@ Most likely first. Each line has its test in the task named.
 ### Task 5: gate and close the bugs
 
 **Files:**
-- Modify (through `doc`): bugs `053ca236198f1b9b` and `f5e732b0efeebd9e`; the design `95abaa31c77daa39`
+- Modify (through `doc`): bugs `b2eaa51eba0cec2a` and `b8e1ddadd0d39fea`; the design `95abaa31c77daa39`
 
 - [ ] **Step 1: Run the gate** — `./scripts/gate.sh` — Expected: exit 0 with all stages green. A red stage not caused by this change is recorded in the bug, not hidden.
 - [ ] **Step 2: Close both bugs.** For each: `status` to `fixed`, `closed` to today's date, fill `Fix` and `Tests added` with the test names above, record the fix SHA labelled `experiments` and its patch id (`git show <sha> | git patch-id --stable`), clear the `unverified` caveat with `CLEARED <date>`, then `doc(action="move", ...)` into `docs/issues/archive/`.
 - [ ] **Step 3: Update the design.** Add to `## Rollout` that slice 1 is done, with the SHA; note what the integration tests measured about the check's latency on this repository (run `check_callers` on three real symbols and record the milliseconds).
-- [ ] **Step 4: Commit** — `git add` the three files by name; message `docs: slice 1 of harness-delivered hints done; bugs 053ca236198f1b9b and f5e732b0efeebd9e fixed on experiments`.
+- [ ] **Step 4: Commit** — `git add` the three files by name; message `docs: slice 1 of harness-delivered hints done; bugs b2eaa51eba0cec2a and b8e1ddadd0d39fea fixed on experiments`.
