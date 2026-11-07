@@ -13,6 +13,16 @@ pub struct EmbeddingService {
     /// length comparison in `embed_artifact` is then always true, so opting out needs no
     /// special-case branch that could drift from the real one.
     budget_chars: usize,
+    /// How many `embed_artifact` calls a reindex keeps in flight at once. `1` — the default —
+    /// is the sequential behaviour every constructor starts with; only
+    /// [`Self::with_concurrency`] raises it, from `LIBRARIAN_EMBED_CONCURRENCY`.
+    ///
+    /// It is a setting the OPERATOR makes, not one derived from the backend or the host name:
+    /// how well an embedding server scales with parallel requests depends on its hardware and
+    /// its own slot count, which the client cannot see. Measured 2026-11-07 against a local
+    /// llama-server (CodeRankEmbed, ROCm GPU, `--parallel 16`): 12.2 ms per text at 1 request in
+    /// flight, 16.6 ms at 8, 19.0 ms at 16. A server on other hardware may scale the other way.
+    concurrency: usize,
 }
 
 impl EmbeddingService {
@@ -27,6 +37,7 @@ impl EmbeddingService {
         Self {
             embedder: e,
             budget_chars: usize::MAX,
+            concurrency: 1,
         }
     }
 
@@ -40,7 +51,24 @@ impl EmbeddingService {
         Self {
             embedder: e,
             budget_chars,
+            concurrency: 1,
         }
+    }
+
+    /// Keep up to `n` artifact embeds in flight during a reindex. `0` is taken as `1`: there is
+    /// no "zero requests at a time", and a stalled reindex would be the only reading of it.
+    ///
+    /// Every constructor starts at 1, so a caller that never asks keeps the sequential
+    /// behaviour. Whether more helps depends on the embedding server, which the client cannot
+    /// see — see the field doc for one measurement where 8 was slower than 1.
+    pub fn with_concurrency(mut self, n: usize) -> Self {
+        self.concurrency = n.max(1);
+        self
+    }
+
+    /// How many artifact embeds a reindex keeps in flight at once; always at least 1.
+    pub fn concurrency(&self) -> usize {
+        self.concurrency
     }
 
     /// Embed one text on the **document** side.
@@ -250,6 +278,34 @@ mod tests {
             "under budget must be one un-pooled call"
         );
     }
+    #[test]
+    fn every_constructor_starts_at_one_embed_at_a_time() {
+        // The default is what keeps every existing caller sequential. Both constructors are checked
+        // because a future third one that forgot the field would not compile, but one that set it to
+        // something else would.
+        let emb = Arc::new(CeilingEmbedder::new(BUDGET));
+        assert_eq!(EmbeddingService::new(emb.clone()).concurrency(), 1);
+        assert_eq!(EmbeddingService::with_budget(emb, BUDGET).concurrency(), 1);
+    }
+
+    #[test]
+    fn with_concurrency_sets_the_value_and_zero_is_one() {
+        let emb = Arc::new(CeilingEmbedder::new(BUDGET));
+        let svc = EmbeddingService::with_budget(emb.clone(), BUDGET).with_concurrency(8);
+        assert_eq!(svc.concurrency(), 8);
+        // Zero must not reach `buffer_unordered(0)`, which never polls a future.
+        let svc = EmbeddingService::with_budget(emb, BUDGET).with_concurrency(0);
+        assert_eq!(svc.concurrency(), 1);
+    }
+
+    #[test]
+    fn with_concurrency_keeps_the_segmentation_budget() {
+        // The builder consumes and returns the service: a bug that rebuilt it through `new` would
+        // silently reset the budget to `usize::MAX` and send oversized artifacts whole.
+        let emb = Arc::new(CeilingEmbedder::new(BUDGET));
+        let svc = EmbeddingService::with_budget(emb, BUDGET).with_concurrency(4);
+        assert_eq!(svc.budget_chars, BUDGET);
+    }
 
     #[tokio::test]
     async fn the_budgetless_constructor_sends_raw_and_therefore_hits_the_ceiling() {
@@ -324,6 +380,36 @@ mod tests {
              the absence check above while the librarian embeds nothing"
         );
     }
+    /// Same device as the budget test above, for the operator's concurrency setting. The behavioural
+    /// test in `librarian::tests` reaches the `build_tool_context_with` site only; `reindex_cli`
+    /// builds its own service and no test can observe how many embeds it runs at once, so a site that
+    /// forgot `with_concurrency` would pass everything and ignore `LIBRARIAN_EMBED_CONCURRENCY`
+    /// there. Counting both forms ties them together: a new construction site that omits the setting
+    /// makes the two counts differ.
+    #[test]
+    fn every_production_construction_site_passes_the_concurrency_setting() {
+        let src =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/librarian/mod.rs"))
+                .expect("src/librarian/mod.rs must be readable");
+
+        let sites = src.matches("EmbeddingService::with_budget(").count();
+        let passing = src
+            .matches(".with_concurrency(env.embed_concurrency.unwrap_or(1))")
+            .count();
+
+        assert!(
+            sites >= 2,
+            "the librarian builds the service at two production sites (the tool context and the \
+         reindex CLI); found {sites}"
+        );
+        assert_eq!(
+            passing, sites,
+            "every `EmbeddingService::with_budget(` in src/librarian/mod.rs must be followed by \
+         `.with_concurrency(env.embed_concurrency.unwrap_or(1))`, or \
+         LIBRARIAN_EMBED_CONCURRENCY is silently ignored at that site"
+        );
+    }
+
     /// Stored content must not go through the QUERY seam.
     ///
     /// `embed_query` is where `RemoteEmbedder` applies an asymmetric model's query

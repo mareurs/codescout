@@ -68,6 +68,12 @@ pub struct LibrarianEnv {
     pub embed_url: Option<String>,
     /// `LIBRARIAN_EMBED_API_KEY`, same fallback shape as `embed_model`.
     pub embed_api_key: Option<String>,
+    /// `LIBRARIAN_EMBED_CONCURRENCY` — how many artifact embeds a reindex keeps in flight.
+    /// `None` (unset, blank, not a whole number, or `0`) means 1: the sequential loop. There is
+    /// deliberately no `CODESCOUT_EMBEDDING_*` fallback and no default derived from the URL: how a
+    /// server scales with parallel requests depends on its hardware, which the client cannot
+    /// see, so only the operator can say. See [`embedding::EmbeddingService::with_concurrency`].
+    pub embed_concurrency: Option<usize>,
     /// `LIBRARIAN_CWD` — overrides the process cwd for current-project resolution.
     pub cwd: Option<std::path::PathBuf>,
     /// Ask [`workspace::load_or_init`] to create the default `workspace.toml` when it is
@@ -89,6 +95,16 @@ pub struct LibrarianEnv {
 fn librarian_embed_field(explicit: Option<String>, fallback: Option<String>) -> Option<String> {
     let non_blank = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
     non_blank(explicit).or_else(|| non_blank(fallback))
+}
+/// Parse `LIBRARIAN_EMBED_CONCURRENCY`. A whole number of at least 1 is the value; anything
+/// else — unset, blank, `abc`, `-2`, `3.5`, `0` — is `None`, which the caller reads as 1.
+///
+/// `0` is `None` rather than an error because "zero requests at a time" has no meaning, and a
+/// reindex that never starts would be the only reading of it. A value that is set but rejected
+/// is reported by the caller (see [`LibrarianEnv::from_env`]), not here, so this stays pure.
+fn parse_embed_concurrency(raw: Option<&str>) -> Option<usize> {
+    raw.and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|n| *n >= 1)
 }
 
 impl LibrarianEnv {
@@ -115,6 +131,21 @@ impl LibrarianEnv {
                 std::env::var("LIBRARIAN_EMBED_API_KEY").ok(),
                 envs::read(&envs::API_KEY),
             ),
+            embed_concurrency: {
+                let raw = std::env::var("LIBRARIAN_EMBED_CONCURRENCY").ok();
+                let parsed = parse_embed_concurrency(raw.as_deref());
+                // A value that was set and then ignored must not pass silently: the operator
+                // asked for parallel embedding and would otherwise get 1 with no word of it.
+                if let (None, Some(value)) = (parsed, raw.as_deref().map(str::trim)) {
+                    if !value.is_empty() {
+                        tracing::warn!(
+                            value,
+                            "LIBRARIAN_EMBED_CONCURRENCY must be a whole number of at least 1; using 1"
+                        );
+                    }
+                }
+                parsed
+            },
             cwd: std::env::var_os("LIBRARIAN_CWD").map(PathBuf::from),
             init_default_workspace: true,
         }
@@ -123,7 +154,9 @@ impl LibrarianEnv {
 
 #[cfg(test)]
 mod librarian_env_tests {
-    use super::{librarian_embed_field, should_init_default_workspace, LibrarianEnv};
+    use super::{
+        librarian_embed_field, parse_embed_concurrency, should_init_default_workspace, LibrarianEnv,
+    };
 
     #[test]
     fn explicit_wins_when_both_are_set() {
@@ -148,6 +181,37 @@ mod librarian_env_tests {
         // something, or every project would get librarian embedding whether it
         // configured anything or not.
         assert_eq!(librarian_embed_field(None, None), None);
+    }
+    #[test]
+    fn a_whole_number_of_at_least_one_is_the_concurrency() {
+        assert_eq!(parse_embed_concurrency(Some("1")), Some(1));
+        assert_eq!(parse_embed_concurrency(Some("8")), Some(8));
+        assert_eq!(parse_embed_concurrency(Some(" 4 ")), Some(4));
+    }
+
+    #[test]
+    fn anything_else_is_no_setting_and_so_one() {
+        // Each of these must come back `None`, which `build_tool_context` reads as 1. Zero is the
+        // case that matters most: taken literally it would never start a request.
+        for raw in [
+            None,
+            Some(""),
+            Some("   "),
+            Some("0"),
+            Some("-2"),
+            Some("3.5"),
+            Some("eight"),
+            Some("8 requests"),
+        ] {
+            assert_eq!(parse_embed_concurrency(raw), None, "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn the_default_env_has_no_concurrency_setting() {
+        // `Default` is what every test literal `..Default::default()` and a run with the variable
+        // unset both land on: it must mean "one at a time", never a parallel run by accident.
+        assert_eq!(LibrarianEnv::default().embed_concurrency, None);
     }
 
     #[test]
@@ -271,7 +335,8 @@ pub async fn build_tool_context_with(
                 embedding::EmbeddingService::with_budget(
                     std::sync::Arc::from(e),
                     codescout_embed::chunk_size_for_model(model),
-                ),
+                )
+                .with_concurrency(env.embed_concurrency.unwrap_or(1)),
             )),
             Err(err) => {
                 tracing::warn!("embedding service unavailable: {err:#}");
@@ -560,10 +625,13 @@ pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>) -> Resul
         let api_key = env.embed_api_key.clone();
         match codescout_embed::create_embedder_with_config(model, url.as_deref(), api_key).await {
             // Same model-derived budget as the primary construction site above.
-            Ok(e) => Some(embedding::EmbeddingService::with_budget(
-                std::sync::Arc::from(e),
-                codescout_embed::chunk_size_for_model(model),
-            )),
+            Ok(e) => Some(
+                embedding::EmbeddingService::with_budget(
+                    std::sync::Arc::from(e),
+                    codescout_embed::chunk_size_for_model(model),
+                )
+                .with_concurrency(env.embed_concurrency.unwrap_or(1)),
+            ),
             Err(err) => {
                 eprintln!("warn: embedding service unavailable: {err:#}");
                 None
@@ -829,6 +897,43 @@ kind = "spec"
             "the user's file is left untouched"
         );
     }
+    /// The wiring from `LibrarianEnv::embed_concurrency` to the service a reindex runs on.
+    /// `RemoteEmbedder::from_url` does not connect, so an unreachable URL still builds a service.
+    #[cfg(feature = "remote-embed")]
+    async fn embedding_concurrency_built_from(embed_concurrency: Option<usize>) -> usize {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace = tmp.path().join("workspace.toml");
+        std::fs::write(&workspace, "").unwrap();
+        let env = LibrarianEnv {
+            workspace: Some(workspace),
+            db: Some(tmp.path().join("catalog.db")),
+            embed_model: Some("any-model".into()),
+            embed_url: Some("http://127.0.0.1:1/v1".into()),
+            embed_concurrency,
+            ..Default::default()
+        };
+        let ctx = build_tool_context_with(crate::lsp::LspManager::new_arc(), &env)
+            .await
+            .expect("an empty workspace file is a valid workspace");
+        ctx.embedding
+            .expect("a model and a URL build an embedding service")
+            .concurrency()
+    }
+
+    #[cfg(feature = "remote-embed")]
+    #[tokio::test]
+    async fn the_concurrency_setting_reaches_the_service_a_reindex_runs_on() {
+        // Load-bearing: 5 is neither the default nor a value any other field could produce, so
+        // a wiring that dropped the setting (or hard-coded the default) cannot pass.
+        assert_eq!(embedding_concurrency_built_from(Some(5)).await, 5);
+    }
+
+    #[cfg(feature = "remote-embed")]
+    #[tokio::test]
+    async fn no_concurrency_setting_builds_a_sequential_service() {
+        assert_eq!(embedding_concurrency_built_from(None).await, 1);
+    }
+
     #[test]
     fn the_default_path_is_created_only_when_the_env_asks() {
         let tmp = tempfile::TempDir::new().unwrap();

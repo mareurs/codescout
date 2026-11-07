@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures::{stream, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -585,9 +586,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             let mut last_published_ms = started_ms;
             publish_progress(ctx, &progress_row(0, started_ms));
 
-            // Embedded vectors wait here and land in ONE store request per `UPSERT_BATCH`; the
-            // embedding itself stays one request at a time (the local server does not scale with
-            // concurrency: 17-20 ms per text sequentially, 29-32 ms at 8 and 16 workers).
+            // Embedded vectors wait here and land in ONE store request per `UPSERT_BATCH`.
+            //
+            // How many embeds run at once is `svc.concurrency()`: 1 unless the operator set
+            // `LIBRARIAN_EMBED_CONCURRENCY`, so the default is the sequential loop this replaced
+            // (a local llama-server did not scale with concurrency: 17-20 ms per text
+            // sequentially, 29-32 ms at 8 and 16 workers; measured again 2026-11-07, 12.2 ms at 1
+            // and 16.6 ms at 8). The flush below is awaited inside this loop, so while a store
+            // write runs no new embed starts: the cost is about one store write per batch, the same
+            // as sequentially.
             let mut unwritten: Vec<(&indexer::EmbedQueueItem, Vec<f32>)> = Vec::new();
             // `(chunk_id, input_hash)` of every chunk whose vector landed; written to the catalog
             // after the loop, in one commit.
@@ -595,15 +602,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // `reembed=true` ignores every marker: it is the escape for a marker that lies
             // (a store that lost its points, a model or backend switch).
             let reembed = a.reembed.unwrap_or(false);
-            for item in &embed_queue {
-                if item.up_to_date && !reembed {
-                    // The chunk already has a vector embedded from exactly this input. Counted
-                    // as landed so the per-artifact stamp below sees every chunk covered, and
-                    // not as `embedded`, which counts only the embedder's work.
-                    *landed.entry(item.artifact_id.as_str()).or_insert(0) += 1;
-                    total_skipped += 1;
-                } else {
-                    match svc.embed_artifact(item.title.as_deref(), &item.text).await {
+            let queue = &embed_queue;
+            let embeddings = stream::iter(0..queue.len())
+                .map(|index| async move {
+                    let item = &queue[index];
+                    let vector = if item.up_to_date && !reembed {
+                        None
+                    } else {
+                        Some(svc.embed_artifact(item.title.as_deref(), &item.text).await)
+                    };
+                    (item, vector)
+                })
+                .buffer_unordered(svc.concurrency());
+            futures::pin_mut!(embeddings);
+            while let Some((item, vector)) = embeddings.next().await {
+                if let Some(vector) = vector {
+                    match vector {
                         Ok(vec) => {
                             unwritten.push((item, vec));
                             if unwritten.len() >= UPSERT_BATCH {
@@ -623,6 +637,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                             embed_errors.push(format!("{}: embed failed: {e}", item.chunk_id))
                         }
                     }
+                } else {
+                    // The chunk already has a vector embedded from exactly this input. Counted
+                    // as landed so the per-artifact stamp below sees every chunk covered, and
+                    // not as `embedded`, which counts only the embedder's work.
+                    *landed.entry(item.artifact_id.as_str()).or_insert(0) += 1;
+                    total_skipped += 1;
                 }
 
                 // Counted per item PROCESSED, not per item embedded: a run that is

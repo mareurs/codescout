@@ -17,6 +17,7 @@
 
 mod companion_hint;
 mod goal_archetype;
+mod reindex_concurrency;
 // The next two compile but do NOT execute — annotated so neither is credited with
 // coverage it does not provide. This target is 19 tests, 17 of which run.
 //
