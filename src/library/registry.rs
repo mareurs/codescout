@@ -179,13 +179,19 @@ impl LibraryRegistry {
 
     /// Check whether an absolute path falls inside any registered library.
     /// Returns the matching entry if found.
+    ///
+    /// An entry with no `path` (a `manifest_scan` library whose sources were never resolved)
+    /// owns no file: an empty path is a prefix of every path, so counting it would hand the first
+    /// such entry to every file asked about
+    /// (`docs/issues/2026-11-07-symbol-at-tags-a-project-file-with-the-first-path-less-library-in-the-registry.md`).
     pub fn is_library_path(&self, absolute_path: &Path) -> Option<&LibraryEntry> {
         // Compare spellings that name one location: a read path is canonical (`\\?\C:\…`, long
         // names on Windows) while a registered path is what the caller typed.
         let target = crate::util::long_path::comparable(absolute_path);
-        self.entries
-            .iter()
-            .find(|e| target.starts_with(crate::util::long_path::comparable(&e.path)))
+        self.entries.iter().find(|e| {
+            !e.path.as_os_str().is_empty()
+                && target.starts_with(crate::util::long_path::comparable(&e.path))
+        })
     }
 
     /// Return registered libraries where `version != version_indexed` (stale).
@@ -338,6 +344,42 @@ mod tests {
 
         // Path outside any library
         assert!(reg.is_library_path(Path::new("/other/file.rs")).is_none());
+    }
+    /// A `manifest_scan` entry whose sources were never resolved is stored with an empty `path`
+    /// (`docs/issues/2026-11-07-symbol-at-tags-a-project-file-with-the-first-path-less-library-in-the-registry.md`).
+    /// An empty path is a prefix of every path, so such an entry must not claim any file.
+    #[test]
+    fn a_library_with_no_path_owns_no_file() {
+        let mut reg = LibraryRegistry::new();
+        // Load-bearing: the path-less entry is registered FIRST. `is_library_path` returns the
+        // first match, so an entry placed after the real one would never be reached and the
+        // test would pass on the broken code.
+        reg.register(
+            "pandas".into(),
+            PathBuf::new(),
+            "python".into(),
+            DiscoveryMethod::ManifestScan,
+            false,
+        );
+        reg.register(
+            "tokio".into(),
+            PathBuf::from("/libs/tokio"),
+            "rust".into(),
+            DiscoveryMethod::Manual,
+            true,
+        );
+
+        assert!(
+            reg.is_library_path(Path::new("/work/project/src/app.py"))
+                .is_none(),
+            "a project file must not be attributed to a library that has no path"
+        );
+        assert_eq!(
+            reg.is_library_path(Path::new("/libs/tokio/src/runtime.rs"))
+                .map(|e| e.name.as_str()),
+            Some("tokio"),
+            "a path-less entry must not shadow a real library registered after it"
+        );
     }
 
     #[test]

@@ -1382,11 +1382,11 @@ impl LspClient {
     }
 
     /// How long a SUCCESSFUL-but-empty answer is re-asked before it is taken as final:
-    /// 5 s inside the cold-start window, 1 s once warm. See `request_until_answered`.
+    /// 15 s inside the cold-start window, 1 s once warm. See `request_until_answered`.
     fn not_answered_budget(&self) -> std::time::Duration {
         // cap-class: NOT_A_CAP — wait ceiling; each caller decides what exhaustion means
         if self.in_cold_start_window() {
-            std::time::Duration::from_secs(5)
+            std::time::Duration::from_secs(15)
         } else {
             std::time::Duration::from_secs(1)
         }
@@ -4000,6 +4000,56 @@ struct Point {
             }
         });
         (dir, sock, served)
+    }
+
+    #[test]
+    fn navigation_answer_budget_tracks_initialization_and_stays_short_when_warm() {
+        let mut client = bare_client(LspTransport::Process { child_pid: None }, None);
+        assert_eq!(
+            client.not_answered_budget(),
+            std::time::Duration::from_secs(15)
+        );
+        client.started_at = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(600))
+            .unwrap();
+        assert_eq!(
+            client.not_answered_budget(),
+            std::time::Duration::from_secs(1)
+        );
+        client
+            .init_completed_at
+            .set(std::time::Instant::now())
+            .unwrap();
+        assert_eq!(
+            client.not_answered_budget(),
+            std::time::Duration::from_secs(15)
+        );
+    }
+
+    #[tokio::test]
+    async fn cold_navigation_waits_for_an_answer_after_five_seconds() {
+        let mut client = bare_client(LspTransport::Process { child_pid: None }, None);
+        let (writer, peer) = tokio::io::duplex(4096);
+        client.writer = Arc::new(Mutex::new(
+            Box::new(writer) as Box<dyn AsyncWrite + Unpin + Send>
+        ));
+        let pending = client.pending.clone();
+        let peer_task = tokio::spawn(async move {
+            let mut reader = BufReader::new(peer);
+            for attempt in 0..=30 {
+                let request = transport::read_message(&mut reader).await.unwrap();
+                let request_id = request["id"].as_i64().unwrap();
+                let sender = pending.lock().unwrap().remove(&request_id).unwrap();
+                let answer = if attempt < 30 { Value::Null } else { json!([]) };
+                sender.send(Ok(answer)).unwrap();
+            }
+        });
+        let answer = client
+            .request_until_answered("textDocument/documentSymbol", json!({}), Value::is_null)
+            .await
+            .unwrap();
+        assert_eq!(answer, Ok(json!([])));
+        peer_task.await.unwrap();
     }
 
     #[cfg(unix)]

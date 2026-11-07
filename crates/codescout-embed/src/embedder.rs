@@ -109,6 +109,11 @@ pub trait Embedder: Send + Sync {
     /// Return the dimensionality of the produced vectors.
     fn dimensions(&self) -> usize;
 
+    /// Maximum number of embedding requests callers should run concurrently.
+    fn max_concurrency(&self) -> usize {
+        1
+    }
+
     /// Embed a batch of texts, returning one vector per text.
     async fn embed(&self, texts: &[&str]) -> Result<Vec<Embedding>>;
 

@@ -391,7 +391,7 @@ pub(super) fn inject_tee_in(
     // filter, a whole-stream one (`grep`, `tail`) included, while the filter still reads it all.
     let filter = resolved_command[pipe_pos + 1..].trim_start().to_string();
     let prefix = resolved_command[..pipe_pos].to_string();
-    // The status file is a bonus like the capture: a producer that is not a plain command, or a file
+    // The status file is a bonus like the capture: a producer that cannot be wrapped, or a file
     // that cannot be made, leaves the producer as written and the response without
     // `producer_exit_code`. It never refuses the command and never skips the capture.
     let producer_status = plan

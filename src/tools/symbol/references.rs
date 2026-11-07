@@ -33,6 +33,54 @@ pub(crate) fn references_completeness_hint(refs_total: usize, call_sites: usize)
         None
     }
 }
+/// Pauses before each re-ask of `textDocument/references` whose answer looked unsettled.
+///
+/// The first call after a start can come back with only the definition file's hits while the
+/// server is still indexing, and an immediate second call returns the full set
+/// (`docs/issues/2026-11-07-first-references-call-after-start-returns-a-partial-result-and-a-retry-returns-the-rest.md`).
+/// The tool already detects that case (see the zero-external-callers corroboration in `call`); this
+/// is the wait it used to leave to the caller. A symbol that is genuinely used only in its own file
+/// but whose name appears elsewhere pays the whole budget once per call.
+// cap-class: NOT_A_CAP — wait ceiling; exhaustion falls through to the existing `completeness_warning`, nothing is shortened or presented as complete
+pub(crate) const UNSETTLED_REASK_DELAYS: [std::time::Duration; 3] = [
+    std::time::Duration::from_millis(200),
+    std::time::Duration::from_millis(600),
+    std::time::Duration::from_millis(1200),
+];
+
+/// Re-ask while `unsettled` says the answer in hand looks like a warming one, pausing `delays[i]`
+/// before the i-th re-ask.
+///
+/// Best-effort by construction: a failed re-ask ends the wait and keeps what is in hand, and an
+/// answer with FEWER locations than the one in hand is not taken (a reloading server answers `[]`
+/// or `null` in the same window), so waiting can only improve the result, never replace it with a
+/// worse one. If the delays run out while still unsettled, the last answer is returned and the
+/// caller's existing completeness warning applies.
+pub(crate) async fn reask_while_unsettled<F, Fut>(
+    first: Vec<lsp_types::Location>,
+    delays: &[std::time::Duration],
+    unsettled: impl Fn(&[lsp_types::Location]) -> bool,
+    mut refetch: F,
+) -> Vec<lsp_types::Location>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<Vec<lsp_types::Location>>>,
+{
+    let mut current = first;
+    for delay in delays {
+        if !unsettled(&current) {
+            break;
+        }
+        tokio::time::sleep(*delay).await;
+        match refetch().await {
+            Ok(next) if next.len() >= current.len() => current = next,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    current
+}
+
 /// True if `needle` occurs in `haystack` bounded by non-identifier characters
 /// on both sides, so `foo` matches `foo(` but not `foobar` or `barfoo`.
 pub(crate) fn contains_word(haystack: &str, needle: &str) -> bool {
@@ -394,6 +442,34 @@ impl Tool for References {
         )
         .await?;
         timer.record(&*ctx.lsp, raw_lang, &root).await;
+
+        // A server still indexing answers with only the definition file's hits (or nothing), and
+        // the same request a moment later returns the rest. These are the two shapes the
+        // completeness warning below reports; wait for them to settle before reporting.
+        let refs = {
+            let def_file_plain = crate::util::fs::strip_verbatim(&full_path).into_owned();
+            let ident = name_path.rsplit('/').next().unwrap_or(name_path);
+            reask_while_unsettled(
+                refs,
+                &UNSETTLED_REASK_DELAYS,
+                |refs| {
+                    if refs.is_empty() {
+                        return true;
+                    }
+                    let outside_def_file = refs.iter().any(|loc| {
+                        uri_to_path(loc.uri.as_str())
+                            .map(|p| p != def_file_plain)
+                            .unwrap_or(false)
+                    });
+                    !outside_def_file
+                        && !corroborate_zero_references(&root, &full_path, ident, raw_lang)
+                            .hits
+                            .is_empty()
+                },
+                || client.references(&full_path, sym_line, sym_col, &lang),
+            )
+            .await
+        };
 
         // Resolve all library roots for classification (Scope::All to get every lib).
         let lib_roots =

@@ -232,12 +232,62 @@ def registry_roots() -> list[Path]:
     return profile_dirs("sessions")
 
 
+def _pid_alive_windows(pid: object) -> bool:
+    """The Windows half of `_pid_alive`: ask for a handle, never send a signal.
+
+    `os.kill(pid, 0)` is the POSIX existence probe and is NOT one here. `signal.CTRL_C_EVENT`
+    is 0, so the call asks the console to deliver Ctrl+C: every process attached to the
+    caller's console receives it (measured 2026-11-07: the probed process AND the caller), and
+    it does not raise for a pid that is gone, so a dead pid read as alive
+    (docs/issues/2026-11-07-pid-alive-probe-os-kill-0-sends-ctrl-c-to-the-whole-console-on-windows.md).
+
+    `OpenProcess` with the narrowest right that still allows `GetExitCodeProcess` answers
+    without touching the process. Access denied means it exists and is not ours: alive, the
+    same third value the POSIX branch gets from `PermissionError`. One residual: a process that
+    exited with code 259 (`STILL_ACTIVE`) reads as alive, which Windows documents and no
+    pid-only probe can tell apart.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        number = int(pid)
+    except (TypeError, ValueError):
+        return False
+    # ctypes truncates an out-of-range integer silently; a pid is a positive DWORD.
+    if not 0 < number <= 0xFFFFFFFF:
+        return False
+    process_query_limited_information = 0x1000
+    still_active = 259
+    error_access_denied = 5
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(process_query_limited_information, False, number)
+    if not handle:
+        return ctypes.get_last_error() == error_access_denied
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
 def _pid_alive(pid: object) -> bool:
     """True when a process with this pid exists.
 
     PermissionError means it exists and is owned by someone else — alive, not absent.
     Collapsing that to False would report a live foreign-profile session as exited.
+
+    Windows takes its own branch: `os.kill(pid, 0)` there sends Ctrl+C to the whole console
+    instead of probing (see `_pid_alive_windows`).
     """
+    if sys.platform == "win32":
+        return _pid_alive_windows(pid)
     try:
         os.kill(int(pid), 0)
     except ProcessLookupError:
