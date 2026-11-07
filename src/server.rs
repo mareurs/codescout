@@ -35,6 +35,9 @@ use crate::tools::{
     Onboarding, RunCommand, Tool, ToolContext,
 };
 use crate::usage::UsageRecorder;
+use crate::util::fs::display_path;
+// Only the test modules reach for the forward-slash spelling, through `use super::*`.
+#[cfg(test)]
 use crate::util::fs::to_forward_slash;
 
 // Note: `library` (action='register') writes libraries.json but is intentionally excluded —
@@ -1066,7 +1069,7 @@ impl CodeScoutServer {
             .path_note_emitted_since_activation
             .swap(true, std::sync::atomic::Ordering::Relaxed);
         if !already_emitted {
-            let root = to_forward_slash(&root);
+            let root = display_path(&root);
             call_result.content.push(Content::text(format!(
                 "\n[codescout] paths are relative to {root}"
             )));
@@ -3182,7 +3185,9 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{make_server, make_server_no_project, make_server_with_project_toml};
+    use super::test_support::{
+        make_server, make_server_in_root, make_server_no_project, make_server_with_project_toml,
+    };
     use super::*;
     // `test_env` and `Agent` reach exactly four consumers in this module — the
     // `#[cfg(unix)]` `peer_tool_*` tests below — because `peer` delegation is
@@ -11441,6 +11446,42 @@ mod tests {
         );
     }
 
+    /// A project root whose own name holds a backslash is an ordinary Linux directory. The banner
+    /// names the root as it is on disk: `aw/proj` is a different path (857d783e8b548294).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_banner_names_a_root_whose_name_holds_a_backslash_as_it_is_on_disk() {
+        let (_dir, server) = make_server_in_root(None, Some("aw\\proj")).await;
+        let root = server
+            .agent
+            .project_root()
+            .await
+            .expect("server has an active project root");
+        assert!(
+            root.to_string_lossy().ends_with("aw\\proj"),
+            "the fixture root must hold a backslash: {root:?}"
+        );
+
+        let first = server
+            .post_process(
+                CallToolResult::success(vec![Content::text("{}")]),
+                "read_file",
+                None,
+            )
+            .await;
+        let joined: String = first
+            .content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let banner = format!("[codescout] paths are relative to {}", root.display());
+        assert!(
+            joined.contains(&banner),
+            "the banner must name the real root.\nwant: {banner}\ngot:\n{joined}"
+        );
+    }
+
     #[tokio::test]
     async fn activation_and_the_next_two_calls_carry_the_banner_exactly_once() {
         // Regression (fix round 1 on the field-aware-path-strip Task 3 review):
@@ -12530,8 +12571,24 @@ pub(crate) mod test_support {
     pub(crate) async fn make_server_with_project_toml(
         project_toml: Option<&str>,
     ) -> (tempfile::TempDir, CodeScoutServer) {
+        make_server_in_root(project_toml, None).await
+    }
+
+    /// `make_server_with_project_toml`, with the project root one directory below the temp dir.
+    ///
+    /// `root_name` names that directory, so a test can give the project a root whose own name
+    /// holds a character the display code rewrites, such as a backslash. `None` roots the
+    /// project at the temp dir, as `make_server` always did.
+    pub(crate) async fn make_server_in_root(
+        project_toml: Option<&str>,
+        root_name: Option<&str>,
+    ) -> (tempfile::TempDir, CodeScoutServer) {
         let dir = tempdir().unwrap();
-        let codescout_dir = dir.path().join(".codescout");
+        let root = match root_name {
+            Some(name) => dir.path().join(name),
+            None => dir.path().to_path_buf(),
+        };
+        let codescout_dir = root.join(".codescout");
         std::fs::create_dir_all(&codescout_dir).unwrap();
         let ws_path = codescout_dir.join("librarian-workspace.toml");
         std::fs::write(&ws_path, "").unwrap();
@@ -12549,12 +12606,12 @@ pub(crate) mod test_support {
                 db: Some(codescout_dir.join("librarian.db")),
                 ..Default::default()
             },
-            ..test_env(dir.path())
+            ..test_env(&root)
         };
         #[cfg(not(feature = "librarian"))]
-        let env = test_env(dir.path());
+        let env = test_env(&root);
 
-        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let agent = Agent::new(Some(root)).await.unwrap();
         let lsp = LspManager::new_arc();
         let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
         (dir, server)
