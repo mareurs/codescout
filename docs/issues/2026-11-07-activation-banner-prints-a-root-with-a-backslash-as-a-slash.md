@@ -6,7 +6,7 @@ tags:
 - cluster/addressing-without-an-escape-hatch
 closed: 2026-11-07
 opened: 2026-11-07
-unverified: 'Fixed and gated, with a failing test first and a killed mutant, but not seen live after a rebuild: the running server was not rebuilt after afdb4c3d3. The other root-valued fields listed under Fix were traced by reading only.'
+unverified: 'Fixed, gated and seen live after a rebuild, with a failing test first and a killed mutant. One gap remains: the other root-valued fields listed under Fix were traced by reading only.'
 ---
 
 # BUG: the activation banner prints a project root whose name holds a backslash as a different path
@@ -87,7 +87,7 @@ Avoid backslashes in directory names. The relative paths in the response are cor
 
 ## Resume
 
-Fixed in `afdb4c3d3`. See the `unverified` caveat in the frontmatter. Part of the class of `2d8475ed5bc831e5`.
+Fixed in `afdb4c3d3` and seen live on 2026-11-07 after a rebuild and `/mcp` reconnect: `grep(mode="files")` on the project rooted at `aw\proj` answered `src/x.txt`, and the banner read `paths are relative to <scratchpad>/aw\proj`, with the backslash (before: `aw/proj`). See the `unverified` caveat in the frontmatter. Part of the class of `2d8475ed5bc831e5`.
 
 ## References
 
