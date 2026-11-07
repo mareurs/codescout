@@ -329,3 +329,129 @@ async fn native_wire_foreign_workspace_command_is_refused_while_formatting() {
     );
     assert_eq!(std::fs::read(&path).unwrap(), b"before");
 }
+
+/// Stamp the server's pid-keyed rendezvous slot with `session`, the way the companion hook does.
+/// Several Codex servers share one ppid, so a slot can name another thread's session; this is
+/// that shape. The mtime is forced forward so `Rendezvous::poll` re-reads the slot.
+fn native_stamp_rendezvous(dir: &std::path::Path, session: &str) {
+    let slot = dir
+        .join("servers")
+        .join(format!("{}.json", std::process::id()));
+    let mut entry: crate::tools::rendezvous::Entry =
+        serde_json::from_str(&std::fs::read_to_string(&slot).unwrap()).unwrap();
+    entry.session = Some(session.to_string());
+    entry.hook_at = Some(chrono::Utc::now());
+    std::fs::write(&slot, serde_json::to_string(&entry).unwrap()).unwrap();
+    filetime::set_file_mtime(&slot, filetime::FileTime::from_unix_time(2_000_000_000, 0)).unwrap();
+}
+
+/// The `cc_session_id` usage.db recorded for the one `run_command` whose input names `marker`.
+fn native_recorded_session(dir: &std::path::Path, marker: &str) -> String {
+    rusqlite::Connection::open(dir.join(".codescout").join("usage.db"))
+        .unwrap()
+        .query_row(
+            "SELECT cc_session_id FROM tool_calls \
+             WHERE tool_name = 'run_command' AND input_json LIKE ?1",
+            [format!("%{marker}%")],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|e| panic!("no single usage row for {marker}: {e}"))
+}
+
+/// Docs: 4b4fac5682a4303b, 421ed73df25f795d. The commit guard reads `usage.db.cc_session_id`
+/// as the writer of a path. A Codex call used to be recorded under whatever the rendezvous
+/// slot named, which another Codex thread sharing the ppid can stamp, so the writer came out
+/// as the wrong thread. The native root on the request is the per-call identity.
+#[tokio::test]
+async fn native_codex_root_is_the_recorded_session_not_the_rendezvous_slot() {
+    let mut wire = NativeContextWire::new("codex-mcp-client").await;
+    wire.call(
+        2,
+        json!({}),
+        json!({"command":"printf warmup","effect":"read"}),
+    )
+    .await;
+    native_stamp_rendezvous(wire.dir.path(), "other-threads-session");
+    wire.call(
+        3,
+        json!({"sessionId":"native-root","threadId":"native-child"}),
+        json!({"command":"printf marker-own","effect":"read"}),
+    )
+    .await;
+    // BARE id: the guard's `foreign_writer` compares usage.db's value with a trailer-stripped
+    // `codex:<id>`, so a qualified `codex:native-root` here would never match it.
+    assert_eq!(
+        native_recorded_session(wire.dir.path(), "marker-own"),
+        "native-root"
+    );
+}
+
+#[tokio::test]
+async fn native_codex_interleaved_roots_are_recorded_each_under_its_own_id() {
+    let mut wire = NativeContextWire::new("codex-mcp-client").await;
+    wire.call(
+        2,
+        json!({}),
+        json!({"command":"printf warmup","effect":"read"}),
+    )
+    .await;
+    native_stamp_rendezvous(wire.dir.path(), "other-threads-session");
+    for (id, root, marker) in [
+        (3, "first-root", "marker-first"),
+        (4, "second-root", "marker-second"),
+    ] {
+        wire.send(json!({"jsonrpc":"2.0","id":id,"method":"tools/call",
+            "params":{"name":"run_command",
+                      "arguments":{"command":format!("sleep 0.05; printf {marker}"),"effect":"read"},
+                      "_meta":{"sessionId":root,"threadId":root}}}))
+            .await;
+    }
+    wire.recv(3).await;
+    wire.recv(4).await;
+    assert_eq!(
+        native_recorded_session(wire.dir.path(), "marker-first"),
+        "first-root"
+    );
+    assert_eq!(
+        native_recorded_session(wire.dir.path(), "marker-second"),
+        "second-root"
+    );
+}
+
+#[tokio::test]
+async fn native_attribution_is_unchanged_without_a_verified_codex_root() {
+    for (index, (client, meta)) in [
+        // A foreign client's `sessionId` is not a native Codex root.
+        (
+            "claude-code",
+            json!({"sessionId":"foreign-root","threadId":"foreign-root"}),
+        ),
+        // A thread alone does not establish the native logical root.
+        ("codex-mcp-client", json!({"threadId":"unverified-child"})),
+        ("codex-mcp-client", json!({})),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut wire = NativeContextWire::new(client).await;
+        wire.call(
+            2,
+            json!({}),
+            json!({"command":"printf warmup","effect":"read"}),
+        )
+        .await;
+        native_stamp_rendezvous(wire.dir.path(), "rendezvous-session");
+        let marker = format!("marker-unchanged-{index}");
+        wire.call(
+            3,
+            meta,
+            json!({"command":format!("printf {marker}"),"effect":"read"}),
+        )
+        .await;
+        assert_eq!(
+            native_recorded_session(wire.dir.path(), &marker),
+            "rendezvous-session",
+            "{client}"
+        );
+    }
+}
