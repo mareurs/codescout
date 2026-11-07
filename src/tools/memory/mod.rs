@@ -305,6 +305,7 @@ async fn cross_embed_memory(
         pin,
         &project_id,
         content,
+        budget_chars,
         path_anchor_files,
         min_sim,
         top_n,
@@ -376,8 +377,13 @@ async fn call_pin(ctx: &ToolContext) -> Option<PathBuf> {
 /// Search the code index for the files a memory's content is about: the semantic anchors.
 /// Excludes files already covered by path anchors.
 ///
-/// Embeds nothing: the caller already holds the memory's vector, and the anchor search is
-/// a query that the retrieval stack embeds on its own side.
+/// The caller already holds the memory's vector, but the retrieval stack embeds the anchor
+/// query itself (and the reranker reads it too), and an embedder refuses an input past its
+/// context. So the query is NOT the whole `content`: it is the first segment of
+/// `segment_for_budget(content, budget_chars)`, the head of the memory, which is the whole
+/// content when it already fits the budget. Sending a long memory whole failed the search
+/// (llama.cpp HTTP 500, "input is too large") and filed the memory without anchors.
+/// docs/issues/2026-11-06-long-memory-semantic-anchor-input-too-large.md
 ///
 /// Errors are returned to the caller, which files the memory without anchors and reports them.
 async fn find_semantic_anchors(
@@ -385,6 +391,7 @@ async fn find_semantic_anchors(
     pin: Option<&Path>,
     project_id: &str,
     content: &str,
+    budget_chars: usize,
     path_anchor_files: &HashSet<String>,
     min_sim: f32,
     top_n: usize,
@@ -409,7 +416,12 @@ async fn find_semantic_anchors(
         exclude_languages: vec!["markdown".to_string()],
         exclude_paths: Vec::new(),
     };
-    let hits = client.search_code(project_id, content, opts).await?;
+    // Bounded by the same budget the memory's own vector is segmented with; see the doc comment.
+    let query = crate::embed::document::segment_for_budget(content, budget_chars)
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    let hits = client.search_code(project_id, &query, opts).await?;
 
     // Dedupe by file path, keep highest score, apply min_sim + path-anchor exclusions.
     // Prefer rerank_score when the reranker ran; fall back to RRF score otherwise.

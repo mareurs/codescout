@@ -1223,6 +1223,98 @@ mod single_embed_and_upsert {
             "one embed attempt per write, with no retry"
         );
     }
+    /// A code-search seam that records the length (in chars) and text of every query it is
+    /// asked, and answers with no hits.
+    struct QuerySpy(Arc<Mutex<Vec<String>>>);
+    #[async_trait::async_trait]
+    impl crate::retrieval::search::CodeChunkSearch for QuerySpy {
+        async fn search_code(
+            &self,
+            _project_id: &str,
+            query: &str,
+            _opts: crate::retrieval::search::SearchOpts,
+        ) -> anyhow::Result<Vec<crate::retrieval::search::Hit>> {
+            self.0.lock().unwrap().push(query.to_string());
+            Ok(Vec::new())
+        }
+    }
+
+    /// Installs a [`QuerySpy`] over the stub `ctx_with` put in place; the seam is read per call,
+    /// so overwriting it is allowed (see `a_memory_write_reaches_code_search_through_the_seam`).
+    fn spy_on_queries(ctx: &ToolContext) -> Arc<Mutex<Vec<String>>> {
+        let queries = Arc::new(Mutex::new(Vec::new()));
+        ctx.agent
+            .set_code_search_for_test(Arc::new(QuerySpy(queries.clone()))
+                as Arc<dyn crate::retrieval::search::CodeChunkSearch>);
+        queries
+    }
+
+    /// The anchor query is embedded by the retrieval stack on its own side, and an embedder
+    /// refuses an input past its context ("input is too large", HTTP 500). The memory's own
+    /// vector is built from budget-sized segments for exactly that reason, so the anchor query
+    /// must be bounded by the same budget: a long memory used to send its WHOLE content, fail
+    /// the search, and be filed without anchors behind a warning.
+    /// docs/issues/2026-11-06-long-memory-semantic-anchor-input-too-large.md
+    #[tokio::test]
+    async fn a_long_memory_anchors_through_a_query_bounded_by_the_chunk_budget() {
+        let (dir, ctx, _embeds, upserts) = ctx_with(Ok(Vec::new())).await;
+        let queries = spy_on_queries(&ctx);
+        let budget = super::super::resolved_chunk_budget(dir.path()).unwrap();
+        let line = "alpha beta gamma delta epsilon\n";
+        let content = format!("# Long\n\n{}", line.repeat(budget * 4 / line.len() + 1));
+        assert!(
+            content.chars().count() > budget * 3,
+            "the fixture must be several times the budget"
+        );
+
+        let r = Memory
+            .call(
+                json!({"action": "write", "topic": "long", "content": content}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            r,
+            json!("ok"),
+            "a long memory must write without a warning: {r}"
+        );
+        let queries = queries.lock().unwrap();
+        assert!(!queries.is_empty(), "the anchor search must have run");
+        for q in queries.iter() {
+            assert!(
+                q.chars().count() <= budget,
+                "the anchor query must fit the chunk budget ({budget} chars), got {} chars",
+                q.chars().count()
+            );
+            assert!(!q.trim().is_empty(), "the bounded query must carry content");
+            assert!(
+                content.starts_with(q.as_str()),
+                "the bounded query is the head of the memory"
+            );
+        }
+        assert_eq!(upserts.lock().unwrap().len(), 1, "still one upsert");
+    }
+
+    /// The bound must not touch a memory that already fits: its query is its whole content.
+    #[tokio::test]
+    async fn a_short_memory_anchors_through_its_whole_content() {
+        let (_dir, ctx, _embeds, _upserts) = ctx_with(Ok(Vec::new())).await;
+        let queries = spy_on_queries(&ctx);
+        let content = "# Short\n\nunder the budget\n";
+
+        let r = Memory
+            .call(
+                json!({"action": "write", "topic": "short", "content": content}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(r, json!("ok"), "{r}");
+        assert_eq!(*queries.lock().unwrap(), vec![content.to_string()]);
+    }
 }
 
 /// CONSERVATION: segmenting must not drop or duplicate a single character.
