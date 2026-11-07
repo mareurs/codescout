@@ -1430,8 +1430,10 @@ mod tests {
         assert_eq!(artifacts, 2, "main row + the one shadow, nothing new");
     }
 
-    /// Control for the test above: a ledger BORN in the worktree has no main twin, so no
-    /// ledger-wide id exists for it to collide with, and it must keep allocating.
+    /// Control for the test above: a ledger BORN in the worktree has no catalog lineage (no
+    /// `worktree_of` link, no `worktree_fork` event), so the guard has no record of a main
+    /// row it shadows, and it must keep allocating. (The fixture writes the same ledger file
+    /// under both roots, so a main twin exists on disk; only the catalog says it is not a fork.)
     #[tokio::test]
     async fn prose_allocation_is_allowed_on_a_worktree_born_ledger() {
         use crate::librarian::ids;
@@ -1450,6 +1452,106 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(out["id"], "HY-11");
+    }
+    /// Prose allocation on `wt_id` must be refused by the worktree guard and leave the
+    /// file untouched. Shared by the two single-record shadow tests below.
+    async fn assert_prose_allocation_refused_as_shadow(
+        ctx: &ToolContext,
+        wt_id: &str,
+        wt_abs: &std::path::Path,
+    ) {
+        let before = std::fs::read_to_string(wt_abs).unwrap();
+        let err = call(
+            ctx,
+            json!({
+                "id": wt_id, "id_prefix": "HY",
+                "title": "from the shadow", "body": "b", "anchor_heading": "# Ledger"
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
+        assert!(
+            err.to_string().contains("worktree"),
+            "expected the worktree guard, got: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(wt_abs).unwrap(),
+            before,
+            "a refused call must leave the shadow file untouched"
+        );
+    }
+
+    /// `is_worktree_shadow`'s LINEAGE half alone: a row under the worktree root that the
+    /// catalog records with a `worktree_of` link and NO `worktree_fork` event (the legacy
+    /// shape `merge_worktree`'s tests build) is still a shadow. Deleting the link check
+    /// leaves the event check, which sees nothing here, so this fails only if the link
+    /// half is gone.
+    #[tokio::test]
+    async fn prose_allocation_is_refused_on_a_lineage_only_worktree_shadow() {
+        use crate::librarian::catalog::links;
+        use crate::librarian::ids;
+
+        let (_dir, ctx, main_abs, wt_abs) = worktree_prose_fixture();
+        let main_id = ids::artifact_id_from_abs(&main_abs);
+        let wt_id = ids::artifact_id_from_abs(&wt_abs);
+        catalogue_ledger(&ctx, &main_id, &main_abs);
+        catalogue_ledger(&ctx, &wt_id, &wt_abs);
+        links::insert(
+            &ctx.catalog.lock(),
+            &links::LinkRow {
+                src_id: wt_id.clone(),
+                dst_id: main_id,
+                rel: crate::librarian::tools::worktree::LINEAGE_REL.to_string(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+        let fork_events: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fork_events, 0, "precondition: no event of any kind");
+
+        assert_prose_allocation_refused_as_shadow(&ctx, &wt_id, &wt_abs).await;
+    }
+
+    /// `is_worktree_shadow`'s EVENT half alone: a row under the worktree root with a
+    /// `worktree_fork` event and NO `worktree_of` link is still a shadow. Replacing the
+    /// event count's verdict with `false` leaves the link check, which sees nothing here.
+    #[tokio::test]
+    async fn prose_allocation_is_refused_on_an_event_only_worktree_shadow() {
+        use crate::librarian::catalog::events;
+        use crate::librarian::ids;
+
+        let (_dir, ctx, _main_abs, wt_abs) = worktree_prose_fixture();
+        let wt_id = ids::artifact_id_from_abs(&wt_abs);
+        catalogue_ledger(&ctx, &wt_id, &wt_abs);
+        events::insert(
+            &ctx.catalog.lock(),
+            &events::EventRow {
+                id: ulid::Ulid::new().to_string(),
+                artifact_id: wt_id.clone(),
+                kind: crate::librarian::tools::worktree::FORK_EVENT_KIND.to_string(),
+                payload: "{}".to_string(),
+                anchor_commit: None,
+                head_commit: None,
+                author: Some("worktree-overlay".to_string()),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+        let links: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_link", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(links, 0, "precondition: no lineage link");
+
+        assert_prose_allocation_refused_as_shadow(&ctx, &wt_id, &wt_abs).await;
     }
 
     #[tokio::test]
