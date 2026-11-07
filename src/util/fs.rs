@@ -557,6 +557,24 @@ pub fn to_forward_slash(p: &std::path::Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
+/// The form of a path a tool shows to a caller, who may feed it back as an address.
+///
+/// On Windows the separator is `\`, and the display form uses `/`, as the catalog does. On every
+/// other platform a `\` is an ordinary file-name character, so the path is shown unchanged: a
+/// listed `a\b.txt` must stay `a\b.txt`, because `a/b.txt` names a different file that does not
+/// exist. Use [`to_forward_slash`] for a string that is matched against the catalog, and this
+/// function for a string that a response returns.
+pub fn display_path(p: &std::path::Path) -> String {
+    #[cfg(windows)]
+    {
+        to_forward_slash(p)
+    }
+    #[cfg(not(windows))]
+    {
+        p.to_string_lossy().into_owned()
+    }
+}
+
 /// Render `path` relative to `root` in forward-slash form, falling back to
 /// the absolute forward-slash form when `path` is not under `root`.
 ///
@@ -569,6 +587,12 @@ pub fn to_forward_slash(p: &std::path::Path) -> String {
 /// correctly per host platform.
 pub fn relative_forward_slash(path: &std::path::Path, root: &std::path::Path) -> String {
     to_forward_slash(path.strip_prefix(root).unwrap_or(path))
+}
+
+/// [`relative_forward_slash`] for a path a response returns: the path relative to `root`, shown
+/// through [`display_path`], so a `\` inside a file name on a non-Windows host stays a `\`.
+pub fn relative_display_path(path: &std::path::Path, root: &std::path::Path) -> String {
+    display_path(path.strip_prefix(root).unwrap_or(path))
 }
 
 /// Length in bytes of a Windows drive-letter prefix (`C:`) at the start of

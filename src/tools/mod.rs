@@ -7,6 +7,8 @@ mod core;
 pub use core::*;
 
 pub mod approve_write;
+#[cfg(all(test, unix))]
+mod backslash_name_tests;
 pub mod command_summary;
 pub mod config;
 pub mod create_file;

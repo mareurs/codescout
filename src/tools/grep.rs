@@ -7,7 +7,7 @@ use super::format::{insert_below_header, overflow_head};
 use super::{
     optional_bool_param, optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext,
 };
-use crate::util::fs::to_forward_slash;
+use crate::util::fs::display_path;
 
 // ── grep ───────────────────────────────────────────────────────
 
@@ -57,8 +57,8 @@ impl WalkClock {
              directories), or raise `time_budget_ms`.",
             self.budget.as_millis(),
             files_read,
-            to_forward_slash(at),
-            to_forward_slash(search_path),
+            display_path(at),
+            display_path(search_path),
         ));
         true
     }
@@ -286,7 +286,7 @@ impl Tool for Grep {
                 let n = text.lines().filter(|l| re.is_match(l)).count();
                 if n > 0 {
                     total += n;
-                    *counts.entry(to_forward_slash(entry.path())).or_default() += n;
+                    *counts.entry(display_path(entry.path())).or_default() += n;
                 }
             }
             let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
@@ -349,7 +349,7 @@ impl Tool for Grep {
                         let content = clamp_match(line);
                         emitted_bytes += content.len();
                         matches.push(json!({
-                            "file": to_forward_slash(entry.path()),
+                            "file": display_path(entry.path()),
                             "line": i + 1,
                             "content": content
                         }));
@@ -393,7 +393,7 @@ impl Tool for Grep {
                                 let content = clamp_match(&content);
                                 emitted_bytes += content.len();
                                 matches.push(json!({
-                                    "file": to_forward_slash(entry.path()),
+                                    "file": display_path(entry.path()),
                                     "match_lines": match_lines,
                                     "start_line": blk_start + 1,
                                     "content": content,
@@ -418,7 +418,7 @@ impl Tool for Grep {
                     let content = clamp_match(&content);
                     emitted_bytes += content.len();
                     matches.push(json!({
-                        "file": to_forward_slash(entry.path()),
+                        "file": display_path(entry.path()),
                         "match_lines": match_lines,
                         "start_line": blk_start + 1,
                         "content": content,

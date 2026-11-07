@@ -11,7 +11,7 @@ use super::format::{insert_below_header, overflow_head};
 use super::{
     optional_u64_param, parse_bool_param, OutputForm, RecoverableError, Tool, ToolContext,
 };
-use crate::util::fs::to_forward_slash;
+use crate::util::fs::display_path;
 
 // ── tree ────────────────────────────────────────────────────────────────────
 
@@ -185,7 +185,7 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         // emits backslashes on Windows, which defeats post_process's
         // forward-slash root-stripping and degrades the `/`-based
         // common_path_prefix + tree indentation (omnibus 49ee6a03, F7).
-        entries.push(format!("{}{}", to_forward_slash(entry.path()), suffix));
+        entries.push(format!("{}{}", display_path(entry.path()), suffix));
         if let Some(c) = cap {
             if entries.len() >= c {
                 break;
@@ -367,7 +367,7 @@ async fn glob_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
             hidden_withheld += 1;
             continue;
         }
-        matches.push(to_forward_slash(entry.path()));
+        matches.push(display_path(entry.path()));
         if matches.len() >= max {
             hit_cap = true;
             break;
