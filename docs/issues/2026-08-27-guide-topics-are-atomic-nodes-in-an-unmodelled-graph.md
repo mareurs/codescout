@@ -1,7 +1,7 @@
 ---
 id: '7579b32b1cd2362f'
 kind: bug
-status: open
+status: taken
 title: Guide topics are atomic nodes in a graph nobody modelled — 63% of the corpus auto-injected in one session, and three guides already cite sections the API cannot serve
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -10,6 +10,8 @@ tags:
 - get_guide
 - progressive-disclosure
 - proposal
+claimed_at: 2026-11-07
+claimed_by: 732f1c09-df3f-48d4-be63-d9326860edda
 unverified: 'PARTIALLY SHIPPED, and `open` alone does not say so. Phase 1 (section-grain get_guide) SHIPPED 2026-08-27; the USE probe ran the same day. The DISTRIBUTION probe that directions (b)/(c) were gated on RAN 2026-08-31 -- n=166 sessions, two machines, instrument scripts/probe_guide_section_use.py -- so that gate is SATISFIED. It changed the recommendation: the largest lever is subagent delivery (92.5% of delivered bytes never engaged, 2.3x the main-session waste), orthogonal to BOTH Phase 2 blockers. THREE STRATIFICATION CAVEATS, all measured, none optional when quoting a number: (1) main vs subagent must never be blended -- 45% vs 92%; (2) the sample is COMMIT-MIXED, 84% of it predating the 2026-08-27 section-grain ship, and the apparent 49.0%->34.4% improvement is project MIX, not regime -- codescout-project sessions are flat at 28.0%->27.5% while their share moved 38%->57%; (3) project is the dominant stratifier, ~28% waste in codescout sessions vs ~44-62% elsewhere. Still outstanding: the 17,378 B decomposition and cross-topic shape disambiguation (topic_declaring made `serves:` a cross-topic namespace; no_two_topics_declare_an_overlapping_shape fails the build on the collision, deliberately). Also outstanding and explicitly NOT a measurement: `tracker-conventions is really six topics` is an authoring judgement that needs re-costing before anyone builds on it.'
 ---
 
@@ -793,3 +795,31 @@ Reopen when one of these happens:
 - The measured headroom under `TOOL_SURFACE_CHAR_BUDGET` is larger than the cost of the property, and nothing else claims it.
 
 Nothing was run for this decision and no code changed.
+
+
+## Measured 2026-11-07 — what subagents were delivered, and layer 1 of whether it was used
+
+Window: sessions that started 2026-10-08 to 2026-11-07 (30 days, capped at the operator's instruction). Transcripts of this machine, profiles `.claude`, `.claude-sdd`, `.claude-kat`. Instruments, both committed: `scripts/census_guide_deliveries.py` (`0f0e943cc`) and `scripts/score_guide_engagement.py` (`c44bb5ff0`), with tests under `tests/`.
+
+**Delivery census** (one row per injected block, real bytes, deduplicated). Two defects of the first version were found by checking it, and both are fixed and tested: markers quoted inside another result (96 rows, 0.2 MB) and the same session present in two or three profile directories (316 of 1,298 subagent transcripts, 23% of subagent bytes).
+
+| who | delivered blocks | bytes | transcripts | bytes per transcript | repeats inside one transcript |
+|---|---|---|---|---|---|
+| subagent | 3,999 | 20.0 MB | 1,299 | 15.4 KB | 16% of bytes |
+| main thread | 3,007 | 10.5 MB | 169 | 62.2 KB | 59% of bytes |
+
+Subagent bytes by topic: `progressive-disclosure` 9.93 MB (whole topic, 791 of 1,299 transcripts), `project-activation-bootstrap` 5.67 MB (whole, 1,296 of 1,299), `symbol-navigation` 3.07 MB (whole, 785), `workspace-state` 0.64 MB (whole), `librarian` 0.49 MB (by section), `tracker-conventions` 0.22 MB (by section). 18.9 of the 20.0 MB are whole-topic deliveries. So the two topics `probe_guide_section_use.py` can measure are under 4% of what subagents receive, and the earlier "92.5% never engaged" figure assumed whole-topic delivery for topics that are now delivered by section; it is an upper bound.
+
+**Layer 1, mechanical predicates** (did the behaviour the guide teaches appear in the next K tool calls?).
+
+| topic | events | K=10 | K=50 |
+|---|---|---|---|
+| `progressive-disclosure` | 917 | 57% [54-60] | 76% [73-79] |
+| `symbol-navigation` | 893 | 48% [45-51] | 68% [65-71] |
+| `symbol-navigation`, subagents with a `symbols` call and no delivery | 38 | 50% [35-65] | 63% [47-77] |
+
+The strong evidence is the zeros. Events with no taught behaviour in 50 calls hold 2.34 MB (`progressive-disclosure`, 11.7% of subagent bytes) and 0.98 MB (`symbol-navigation`, 4.9%): at least 3.3 MB, 16.6%, was not used. The rest cannot be judged from this layer.
+
+**Limits, none optional when quoting a number.** (1) Relevance, not causation: a non-zero is an upper bound. (2) The `symbol-navigation` comparison group is not a clean control; those subagents were mostly seeded with the parent's ledger or resumed, so the guide was probably already in context. It shows only that the behaviour is as common without a fresh delivery. (3) `progressive-disclosure` is confounded by the situation: after a buffered result the agent must read the handle anyway, and the response already carries a hint. By trigger, K=10: `run_command` 426 of 638, `grep` 50 of 186, `symbols` 14 of 56. That is an inference from these counts, not a measured cause. (4) 159 events have fewer than 10 calls after the delivery and 859 fewer than 50, so the window is cut by the end of the session. (5) The predicates are the author's and are not yet validated. (6) `project-activation-bootstrap`, `librarian`, `tracker-conventions` and `workspace-state` have no honest mechanical predicate and are not scored. (7) One machine, three profiles. (8) Against `usage.db`: the probe subagent has exactly the two expected deliveries (3,316 B each; `usage.db` says 3,317 B with the leading newline), and the codescout-project total is close but not equal, because the two sources classify main thread and subagent differently.
+
+**Layer 2, not run.** A reader judges a stratified sample of events (bootstrap first, then `progressive-disclosure` triggered by `grep` or `symbols`) and validates the predicates, with a shuffled-pairing negative control. It needs model calls and a budget; neither is set. Recorded for the split of sections: the data point to cut is the whole-topic delivery, not the sectioned topics.
