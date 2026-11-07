@@ -123,7 +123,15 @@ def kappa(a: dict[str, str], b: dict[str, str]) -> float:
     return (po - pe) / (1 - pe)
 
 
-def score(keys: list[dict], readers: dict[str, dict[str, str]]) -> dict:
+def score(keys: list[dict], readers: dict[str, dict[str, str]], common_only: bool = False) -> dict:
+    """Join labels with the answer key.
+
+    With `common_only`, only packets every reader labelled are scored. That is how a second reader
+    who saw a subset is compared with the first. Without it, a missing label is an error.
+    """
+    if common_only:
+        common = set.intersection(*(set(labels) for labels in readers.values()))
+        keys = [k for k in keys if k["id"] in common]
     ids = [k["id"] for k in keys]
     for name, labels in readers.items():
         missing = [i for i in ids if i not in labels]
@@ -156,7 +164,8 @@ def score(keys: list[dict], readers: dict[str, dict[str, str]]) -> dict:
         out["rates"][name] = {t: tuple(v) for t, v in rates.items()}
     names = sorted(readers)
     if len(names) >= 2:
-        a, b = readers[names[0]], readers[names[1]]
+        a = {i: l for i, l in readers[names[0]].items() if i in set(ids)}
+        b = {i: l for i, l in readers[names[1]].items() if i in set(ids)}
         out["kappa"] = {
             "three_way": kappa(a, b),
             "binary": kappa({i: "U" if is_used(l) else "N" for i, l in a.items()}, {i: "U" if is_used(l) else "N" for i, l in b.items()}),
@@ -195,6 +204,7 @@ def main() -> int:
     sc.add_argument("--key", required=True)
     sc.add_argument("--reader", action="append", required=True, help="NAME=glob of label files")
     sc.add_argument("--disagreements-out", default=None)
+    sc.add_argument("--common-only", action="store_true", help="score only packets every reader labelled")
     args = ap.parse_args()
 
     if args.cmd == "shard":
@@ -209,7 +219,7 @@ def main() -> int:
     for spec in args.reader:
         name, _, pattern = spec.partition("=")
         readers[name] = load_labels([Path(p) for p in sorted(glob.glob(pattern))])
-    rep = score(keys, readers)
+    rep = score(keys, readers, common_only=args.common_only)
     print(format_report(rep))
     if args.disagreements_out and "disagreements" in rep:
         Path(args.disagreements_out).write_text("\n".join(rep["disagreements"]) + "\n", encoding="utf-8")

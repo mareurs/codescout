@@ -97,6 +97,22 @@ class ScoreTests(unittest.TestCase):
         b = {"p0": "NOT_USED", "p1": "NOT_USED"}
         self.assertEqual(self.report(keys, a, b)["disagreements"], ["p0"])
 
+    def test_common_only_scores_just_the_packets_every_reader_labelled(self):
+        keys = [key(0, control="shuffled"), key(1), key(2)]
+        a = {"p0": "NOT_USED", "p1": "USED_EXPLICIT", "p2": "NOT_USED"}
+        b = {"p0": "USED_EXPLICIT", "p1": "USED_EXPLICIT"}  # reader B never saw p2
+        r = judge.score(keys, {"A": a, "B": b}, common_only=True)
+        self.assertEqual(r["n"], 2)
+        self.assertEqual(r["controls"]["A"]["n"], 1)
+        self.assertEqual(r["controls"]["B"], {"n": 1, "used": 1, "explicit": 1})
+        self.assertEqual(r["disagreements"], ["p0"])
+
+    def test_without_common_only_a_missing_label_is_still_an_error(self):
+        keys = [key(0), key(1)]
+        with self.assertRaises(ValueError):
+            judge.score(keys, {"A": {"p0": "NOT_USED", "p1": "NOT_USED"}, "B": {"p0": "NOT_USED"}})
+
+
     def test_a_label_missing_for_a_key_is_an_error(self):
         with self.assertRaises(ValueError):
             judge.score([key(0), key(1)], {"A": {"p0": "NOT_USED"}, "B": {"p0": "NOT_USED", "p1": "NOT_USED"}})
