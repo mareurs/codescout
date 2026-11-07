@@ -7,7 +7,7 @@ tags:
 - cluster/addressing-without-an-escape-hatch
 closed: 2026-11-07
 opened: 2026-11-04
-unverified: 'Fixed and gated, but two gaps remain. (1) Not every one of the 13 sites is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run. (2) Five other callers of relative_forward_slash (symbol_at, references, edit_code, fs/mod.rs, symbol/edit.rs) may rewrite a backslash in a name the same way; not checked. The running server was not rebuilt after the fix, so the live tool still shows the old behaviour.'
+unverified: 'Fixed, gated and seen live in grep and tree, but two gaps remain. (1) Not every one of the 13 sites is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run. (2) Five other callers of relative_forward_slash (symbol_at, references, edit_code, fs/mod.rs, symbol/edit.rs) may rewrite a backslash in a name the same way; not checked.'
 ---
 
 # BUG: grep rewrites a backslash in a file name to a slash, so the listed path names a file that does not exist
@@ -94,7 +94,7 @@ Avoid backslashes in file names; or locate such a file with `tree` or `run_comma
 
 ## Resume
 
-Fixed in `a6babe715`; see the `unverified` caveat in the frontmatter for what is not proven. Open follow-up: check the five `relative_forward_slash` callers listed in Fix for the same rewrite of a backslash in a file name, and rebuild the server (`./scripts/rb.sh`, then `/mcp`) to see the fix live.
+Fixed in `a6babe715` and seen live on 2026-11-07 after a rebuild and `/mcp` reconnect: on a directory holding `a\b.txt`, `grep(mode="files")` and `tree` list `a\b.txt` (before: `a/b.txt`). `symbols` on a directory was not run live; only its test covers it. See the `unverified` caveat in the frontmatter for what is not proven. Open follow-up: check the five `relative_forward_slash` callers listed in Fix for the same rewrite of a backslash in a file name.
 
 ## References
 
