@@ -1,5 +1,5 @@
 ---
-id: 8b466b2c4502a6ea
+id: '8b466b2c4502a6ea'
 kind: bug
 status: fixed
 title: append_entry accepts worktree ledger allocation despite main-only guide
@@ -11,7 +11,7 @@ closed: 2026-11-07
 opened: 2026-11-05
 owner: marius
 severity: medium
-unverified: is_worktree_shadow covers only worktree sessions (cp.main_root is Some). A main-checkout session naming a worktree shadow's id, a call with no current project, and a session in worktree A naming worktree B's shadow outside main_root still allocate on the shadow; the params-ledger branch was left alone. This residual has no tracking bug file yet. The gate does not cover the three heavy Python suites, server-stack, librarian code in the lean lane, or the local ONNX weight tests. The fix author did not fetch get_guide("tracker-conventions") or get_guide("librarian"). Which exact row the originally observed id 7728cf1b9c13a59b was (shadow or worktree-born) is not verifiable from the bug file.
+unverified: TRACKED ee030095cae1cf76 the residual shadow-allocation cases (a main-checkout session naming a worktree shadow's id, a call with no current project, a session in worktree A naming worktree B's shadow outside main_root, and the params-ledger branch) moved to that open bug. The gate does not cover the three heavy Python suites, server-stack, librarian code in the lean lane, or the local ONNX weight tests. The fix author did not fetch get_guide("tracker-conventions") or get_guide("librarian"). Which exact row the originally observed id 7728cf1b9c13a59b was (shadow or worktree-born) is not verifiable from the bug file.
 ---
 
 # BUG: append_entry accepted allocation in a worktree ledger despite the main-only guide

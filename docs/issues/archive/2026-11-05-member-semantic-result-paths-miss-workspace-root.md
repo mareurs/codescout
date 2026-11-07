@@ -1,5 +1,5 @@
 ---
-id: 25c50e1b512bce92
+id: '25c50e1b512bce92'
 kind: bug
 status: fixed
 title: Member-scoped semantic search returns member-relative paths that fail under the active workspace root
@@ -9,7 +9,7 @@ tags:
 - workspace
 closed: 2026-11-07
 opened: 2026-11-05
-unverified: 'Two limits remain, and neither has a tracking bug file yet: (1) a session focused on member alpha that passes project_id=beta still gets member-relative paths that resolve against the wrong root (pinned by a test as a known limitation, NOT fixed; the manual sentence does not mention the exception); (2) the one-line call site in SemanticSearch::call that routes hits through lift_explicit_member_hits has no test (no injection seam in RetrievalClient::from_env), so deleting it leaves the suite green. The gate check on experiments (FMT, CLIPPY, LEAN, DEFAULT and PYTHON_LIGHT all 0) does not cover the heavy Python suites, server-stack, librarian code in the lean lane, or the local ONNX weight tests.'
+unverified: TRACKED b4c80abc4f6cd956 the cross-member path gap (a session focused on member alpha passing project_id=beta) and the untested call site of lift_explicit_member_hits moved to that open bug. The gate check on experiments (FMT, CLIPPY, LEAN, DEFAULT and PYTHON_LIGHT all 0) does not cover the heavy Python suites, server-stack, librarian code in the lean lane, or the local ONNX weight tests.
 ---
 
 # BUG: Member semantic result paths cannot be read from the unchanged workspace root
@@ -94,4 +94,4 @@ After the fast-forward, ./scripts/gate.sh --check on the identical tree (experim
 
 The fix landed on experiments (fast-forward to 143c1941f), the gate check was green on that tree, and this file was archived into docs/issues/archive/ with doc(action="move"). The fix SHA and patch-id are in Fix provenance above.
 
-Two limits remain open, and neither has a tracking bug file yet: (1) a session focused on member alpha that passes project_id=beta still gets member-relative paths that resolve against the wrong root (pinned by a test, not fixed; the manual sentence does not mention the exception); (2) the one-line call site in SemanticSearch::call that routes hits through lift_explicit_member_hits has no test, because RetrievalClient::from_env has no injection seam.
+Two limits remain open, and both are now tracked in docs/issues/2026-11-08-semantic-search-sibling-member-project-id-returns-member-relative-paths-and-the-call-site-is-untested.md (b4c80abc4f6cd956): (1) a session focused on member alpha that passes project_id=beta still gets member-relative paths that resolve against the wrong root (pinned by a test, not fixed; the manual sentence does not mention the exception); (2) the one-line call site in SemanticSearch::call that routes hits through lift_explicit_member_hits has no test, because RetrievalClient::from_env has no injection seam.
