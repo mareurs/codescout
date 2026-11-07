@@ -374,15 +374,58 @@ async fn call_pin(ctx: &ToolContext) -> Option<PathBuf> {
     }
 }
 
+/// The anchor query for `content` under `budget_chars`: `content` itself when it fits, otherwise
+/// its longest leading slice of at most `budget_chars` chars.
+///
+/// The cut falls just after the last whitespace of the window, so a word is not split, unless
+/// the window already ends at a word boundary or has no whitespace in its second half (a
+/// minified blob, a long path, or a lone early space that would leave a sliver), where it is a
+/// hard cut on a char boundary. Leading whitespace is skipped for an over-budget memory so the
+/// slice is never blank, which the embedder refuses.
+/// Never longer than `budget_chars` chars (a budget of 0 is treated as 1).
+fn anchor_query_prefix(content: &str, budget_chars: usize) -> &str {
+    let budget = budget_chars.max(1);
+    if content.chars().count() <= budget {
+        return content;
+    }
+    let body = content.trim_start();
+    let Some((window_end, _)) = body.char_indices().nth(budget) else {
+        return body;
+    };
+    if body[window_end..].starts_with(char::is_whitespace) {
+        return &body[..window_end];
+    }
+    let window = &body[..window_end];
+    let min_fill = budget.div_ceil(2);
+    let cut = window
+        .char_indices()
+        .enumerate()
+        .filter(|&(n, (i, c))| {
+            c.is_whitespace() && n + 1 >= min_fill && !window[..i].trim().is_empty()
+        })
+        .last()
+        .map_or(window_end, |(_, (i, c))| i + c.len_utf8());
+    &body[..cut]
+}
+
 /// Search the code index for the files a memory's content is about: the semantic anchors.
 /// Excludes files already covered by path anchors.
 ///
 /// The caller already holds the memory's vector, but the retrieval stack embeds the anchor
-/// query itself (and the reranker reads it too), and an embedder refuses an input past its
-/// context. So the query is NOT the whole `content`: it is the first segment of
-/// `segment_for_budget(content, budget_chars)`, the head of the memory, which is the whole
-/// content when it already fits the budget. Sending a long memory whole failed the search
-/// (llama.cpp HTTP 500, "input is too large") and filed the memory without anchors.
+/// query itself, and an embedder refuses an input past its context. So the query is NOT the
+/// whole `content`: it is [`anchor_query_prefix`], the longest leading slice of the memory that
+/// fits `budget_chars`, which is the whole content, byte for byte, when it already fits. Sending
+/// a long memory whole failed the search (llama.cpp HTTP 500, "input is too large") and filed
+/// the memory without anchors.
+///
+/// The query is a prefix, not the first `segment_for_budget` segment: that function flushes a
+/// short heading as a segment of its own before it cuts an over-budget line, so a heading plus
+/// one long line gave a query of the heading alone.
+///
+/// Residual: the reranker (an operator opt-in, `CODESCOUT_RERANK`) receives this same query and
+/// it is bounded by the EMBEDDER's budget only. A reranker with a smaller context is not
+/// accounted for here; `rerank_or_passthrough` degrades to the vector-query order when the
+/// reranker errors, so such a failure costs ranking quality, not the search.
 /// docs/issues/2026-11-06-long-memory-semantic-anchor-input-too-large.md
 ///
 /// Errors are returned to the caller, which files the memory without anchors and reports them.
@@ -417,11 +460,8 @@ async fn find_semantic_anchors(
         exclude_paths: Vec::new(),
     };
     // Bounded by the same budget the memory's own vector is segmented with; see the doc comment.
-    let query = crate::embed::document::segment_for_budget(content, budget_chars)
-        .into_iter()
-        .next()
-        .unwrap_or_default();
-    let hits = client.search_code(project_id, &query, opts).await?;
+    let query = anchor_query_prefix(content, budget_chars);
+    let hits = client.search_code(project_id, query, opts).await?;
 
     // Dedupe by file path, keep highest score, apply min_sim + path-anchor exclusions.
     // Prefer rerank_score when the reranker ran; fall back to RRF score otherwise.

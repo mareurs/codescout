@@ -1255,7 +1255,12 @@ mod single_embed_and_upsert {
     /// must be bounded by the same budget: a long memory used to send its WHOLE content, fail
     /// the search, and be filed without anchors behind a warning.
     /// docs/issues/2026-11-06-long-memory-semantic-anchor-input-too-large.md
+    ///
+    /// `serial`: the budget is read from the env-resolved model, twice (here and in the write),
+    /// and `resolved_chunk_budget_reflects_the_projects_configured_model` unsets those variables
+    /// in a window; a bare `#[tokio::test]` could see two different budgets across that window.
     #[tokio::test]
+    #[serial_test::serial]
     async fn a_long_memory_anchors_through_a_query_bounded_by_the_chunk_budget() {
         let (dir, ctx, _embeds, upserts) = ctx_with(Ok(Vec::new())).await;
         let queries = spy_on_queries(&ctx);
@@ -1293,8 +1298,106 @@ mod single_embed_and_upsert {
                 content.starts_with(q.as_str()),
                 "the bounded query is the head of the memory"
             );
+            // A lower bound too: a query of only the first line or heading would satisfy every
+            // check above while anchoring from almost nothing.
+            assert!(
+                q.chars().count() > budget / 2,
+                "the anchor query must use most of the budget ({budget} chars), got {} chars",
+                q.chars().count()
+            );
         }
         assert_eq!(upserts.lock().unwrap().len(), 1, "still one upsert");
+    }
+    /// A short heading followed by ONE line longer than the budget: `segment_for_budget` flushes the
+    /// heading as a segment of its own before it cuts the long line, so taking its first segment gave
+    /// a query of the heading alone ("# Title\n\n") and anchors from the title only, behind an `ok`
+    /// with no warning. The query is a budget-bounded PREFIX of the memory instead.
+    /// `serial` for the reason `a_long_memory_anchors_through_a_query_bounded_by_the_chunk_budget` gives.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_heading_before_one_over_budget_line_still_anchors_from_the_body() {
+        let (dir, ctx, _embeds, _upserts) = ctx_with(Ok(Vec::new())).await;
+        let queries = spy_on_queries(&ctx);
+        let budget = super::super::resolved_chunk_budget(dir.path()).unwrap();
+        let content = format!("# Title\n\n{}", "word ".repeat(budget * 3 / 5 + 1));
+        assert!(
+            content.lines().nth(2).unwrap().chars().count() > budget,
+            "the fixture's body line must exceed the budget on its own"
+        );
+
+        let r = Memory
+            .call(
+                json!({"action": "write", "topic": "heading-long-line", "content": content}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(r, json!("ok"), "{r}");
+        let queries = queries.lock().unwrap();
+        assert!(!queries.is_empty(), "the anchor search must have run");
+        for q in queries.iter() {
+            assert!(
+                q.chars().count() <= budget,
+                "the anchor query must fit the chunk budget ({budget} chars), got {} chars",
+                q.chars().count()
+            );
+            assert!(
+                q.contains("word"),
+                "the anchor query must carry body text, not the heading alone: {q:?}"
+            );
+            assert!(
+                q.chars().count() > budget / 2,
+                "the anchor query must use most of the budget ({budget} chars), got {} chars",
+                q.chars().count()
+            );
+            assert!(
+                content.starts_with(q.as_str()),
+                "the bounded query is a prefix of the memory"
+            );
+        }
+    }
+    /// The prefix helper's edges: under or at the budget is the content untouched, a cut never
+    /// exceeds the budget in chars (multibyte included), never splits a word when it can avoid
+    /// it, and never yields a blank query.
+    #[test]
+    fn the_anchor_query_prefix_is_bounded_and_word_aligned() {
+        use super::super::anchor_query_prefix as prefix;
+        assert_eq!(prefix("", 10), "");
+        assert_eq!(prefix("exactly ten", 11), "exactly ten", "fits exactly");
+        assert_eq!(
+            prefix("  keep me  \n", 100),
+            "  keep me  \n",
+            "under budget: untouched"
+        );
+        assert_eq!(
+            prefix("abc def ghi", 9),
+            "abc def ",
+            "cut after the last whitespace"
+        );
+        assert_eq!(
+            prefix("abc def ghi", 7),
+            "abc def",
+            "window already ends at a word"
+        );
+        assert_eq!(prefix("abcdefghij", 4), "abcd", "no whitespace: hard cut");
+        assert_eq!(prefix("ééééé", 3), "ééé", "cuts on char boundaries");
+        assert_eq!(
+            prefix("a bcdefghij", 5),
+            "a bcd",
+            "a lone early space is not a cut point"
+        );
+        let long = prefix("   \n   x y z", 4);
+        assert!(!long.trim().is_empty(), "never blank: {long:?}");
+        for budget in 1..40 {
+            let text = "# Title\n\nword ".to_string() + &"word ".repeat(30);
+            let p = prefix(&text, budget);
+            assert!(p.chars().count() <= budget.max(1), "budget {budget}: {p:?}");
+            assert!(
+                text.starts_with(p),
+                "budget {budget} must be a prefix: {p:?}"
+            );
+        }
     }
 
     /// The bound must not touch a memory that already fits: its query is its whole content.
