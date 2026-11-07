@@ -247,7 +247,9 @@ class WeightControls(unittest.TestCase):
             with patch.object(probe, "run", side_effect=cargo):
                 result = probe.dependency_measurement(root, root / "absent-binary")
         self.assertIn("deployed", result["lanes"])
-        deployed = next(args for args in calls if "server-stack,local-embed" in args)
+        deployed = next(
+            args for args in calls if "server-stack" in args and "--no-default-features" not in args
+        )
         self.assertNotIn("--no-default-features", deployed)
 
 

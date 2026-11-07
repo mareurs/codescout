@@ -1874,6 +1874,47 @@ async fn tag_external_path_returns_project_for_internal() {
     let tag = tag_external_path(&internal, &root, &agent).await;
     assert_eq!(tag, "project");
 }
+/// A language server reports `C:\…` (a `file://` URI cannot carry the `\\?\` marker) while the
+/// project root is held canonical (`\\?\C:\…`). `Path::starts_with` compares components, and
+/// `VerbatimDisk` != `Disk`, so the project's own file was not "inside the project" and fell
+/// through to the library registry
+/// (`docs/issues/2026-11-07-symbol-at-tags-a-project-file-with-the-first-path-less-library-in-the-registry.md`).
+/// Windows-only: no other platform has the two spellings.
+#[cfg(windows)]
+#[tokio::test]
+async fn tag_external_path_returns_project_for_a_uri_spelled_path_under_a_verbatim_root() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    // Load-bearing: the root carries the verbatim marker and the path does not. With both in
+    // the same spelling `starts_with` already holds and the test passes on the broken code.
+    let plain = dir.path().to_path_buf();
+    let verbatim_root = std::path::PathBuf::from(format!(r"\\?\{}", plain.display()));
+    let uri_spelled = plain.join("src").join("app.py");
+
+    let tag = tag_external_path(&uri_spelled, &verbatim_root, &agent).await;
+    assert_eq!(tag, "project");
+}
+
+/// An LSP URI cannot carry Windows' `\\?\` marker, so a definition inside the project arrives as
+/// `C:\…` while the project root is held canonical (`\\?\C:\…`). `Path::starts_with` compares
+/// components and the two prefixes differ, so the file was taken for an external one and then
+/// handed to whichever registered library matched first
+/// (`docs/issues/2026-11-07-symbol-at-tags-a-project-file-with-the-first-path-less-library-in-the-registry.md`).
+/// Off Windows both spellings are one and this passes without exercising the defect.
+#[tokio::test]
+async fn tag_external_path_returns_project_for_a_uri_spelled_internal_path() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let root = agent.require_project_root().await.unwrap();
+
+    let uri_spelled = crate::util::fs::strip_verbatim(&root)
+        .join("src")
+        .join("app.py");
+    let tag = tag_external_path(&uri_spelled, &root, &agent).await;
+    assert_eq!(tag, "project");
+}
 
 #[tokio::test]
 async fn tag_external_path_discovers_and_registers() {
@@ -5884,6 +5925,137 @@ fn references_completeness_hint_warns_only_when_calls_exceed_refs() {
     // Equal counts are not proof of incompleteness.
     assert!(references_completeness_hint(5, 5).is_none());
 }
+/// A location at `line` of one fixed file; only the COUNT of locations matters to the re-ask tests.
+fn reask_loc(line: u32) -> lsp_types::Location {
+    lsp_types::Location {
+        uri: "file:///work/app.py".parse::<lsp_types::Uri>().unwrap(),
+        range: lsp_types::Range {
+            start: lsp_types::Position { line, character: 0 },
+            end: lsp_types::Position { line, character: 1 },
+        },
+    }
+}
+
+/// Drive `reask_while_unsettled` with a scripted server: each re-ask pops the next answer.
+/// "Unsettled" is "fewer than three locations". Returns the result and the answers NOT consumed,
+/// so a test can say exactly how many re-asks happened.
+async fn run_reask(
+    first: Vec<lsp_types::Location>,
+    script: Vec<anyhow::Result<Vec<lsp_types::Location>>>,
+    delays: &[std::time::Duration],
+) -> (Vec<lsp_types::Location>, usize) {
+    use crate::tools::symbol::references::reask_while_unsettled;
+    let queue = std::cell::RefCell::new(std::collections::VecDeque::from(script));
+    let result = reask_while_unsettled(
+        first,
+        delays,
+        |refs| refs.len() < 3,
+        || {
+            let next = queue
+                .borrow_mut()
+                .pop_front()
+                .expect("re-asked more often than scripted");
+            async move { next }
+        },
+    )
+    .await;
+    let unused = queue.borrow().len();
+    (result, unused)
+}
+
+#[tokio::test]
+async fn reask_while_unsettled_does_not_ask_again_when_the_first_answer_is_settled() {
+    let delays = [std::time::Duration::ZERO; 3];
+    let (result, unused) = run_reask(
+        vec![reask_loc(1), reask_loc(2), reask_loc(3)],
+        vec![Ok(vec![])],
+        &delays,
+    )
+    .await;
+    assert_eq!(result.len(), 3);
+    assert_eq!(unused, 1, "a settled answer must not trigger a re-ask");
+}
+
+#[tokio::test]
+async fn reask_while_unsettled_asks_again_until_the_answer_settles() {
+    let delays = [std::time::Duration::ZERO; 3];
+    // Load-bearing: three scripted answers for a budget of three re-asks. The server settles on
+    // the SECOND re-ask, so a loop that stops after one re-ask returns 2 locations, and one that
+    // keeps going after settling leaves `unused == 0`.
+    let (result, unused) = run_reask(
+        vec![reask_loc(1)],
+        vec![
+            Ok(vec![reask_loc(1), reask_loc(2)]),
+            Ok(vec![reask_loc(1), reask_loc(2), reask_loc(3)]),
+            Ok(vec![reask_loc(9)]),
+        ],
+        &delays,
+    )
+    .await;
+    assert_eq!(result.len(), 3, "the settled answer is the one returned");
+    assert_eq!(unused, 1, "it stops asking as soon as the answer settles");
+}
+
+#[tokio::test]
+async fn reask_while_unsettled_gives_up_when_the_delays_run_out() {
+    let delays = [std::time::Duration::ZERO; 2];
+    let (result, unused) = run_reask(
+        vec![reask_loc(1)],
+        vec![
+            Ok(vec![reask_loc(1), reask_loc(2)]),
+            Ok(vec![reask_loc(1), reask_loc(2)]),
+        ],
+        &delays,
+    )
+    .await;
+    assert_eq!(
+        result.len(),
+        2,
+        "the last answer is returned unchanged, still unsettled"
+    );
+    assert_eq!(unused, 0, "exactly one re-ask per delay");
+}
+
+#[tokio::test]
+async fn reask_while_unsettled_keeps_the_answer_in_hand_when_a_reask_fails() {
+    let delays = [std::time::Duration::ZERO; 3];
+    let (result, unused) = run_reask(
+        vec![reask_loc(1), reask_loc(2)],
+        vec![
+            Err(anyhow::anyhow!("server went away")),
+            Ok(vec![reask_loc(9)]),
+        ],
+        &delays,
+    )
+    .await;
+    assert_eq!(
+        result.len(),
+        2,
+        "a failed re-ask must not lose the answer in hand"
+    );
+    assert_eq!(unused, 1, "a failed re-ask ends the wait");
+}
+
+#[tokio::test]
+async fn reask_while_unsettled_does_not_take_a_smaller_answer() {
+    // Load-bearing: the budget is ONE re-ask and the smaller answer is the only thing it returns.
+    // With a fuller answer scripted after it, taking or skipping the empty one ends in the same
+    // place and the test cannot tell the two apart (a guard-removal mutation survived exactly that).
+    let delays = [std::time::Duration::ZERO; 1];
+    // A reloading server answers `[]` in the same window it later answers in full.
+    let (result, unused) =
+        run_reask(vec![reask_loc(1), reask_loc(2)], vec![Ok(vec![])], &delays).await;
+    assert_eq!(
+        result.len(),
+        2,
+        "an empty re-ask must not replace the answer in hand"
+    );
+    assert_eq!(
+        unused, 0,
+        "the re-ask did happen; only its answer was refused"
+    );
+}
+
 #[test]
 fn contains_word_respects_identifier_boundaries() {
     use crate::tools::symbol::references::contains_word;

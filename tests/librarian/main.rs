@@ -17,8 +17,9 @@
 
 mod companion_hint;
 mod goal_archetype;
+mod reindex_concurrency;
 // The next two compile but do NOT execute — annotated so neither is credited with
-// coverage it does not provide. This target is 19 tests, 17 of which run.
+// coverage it does not provide.
 //
 // `goal_eval` is a tier-3 eval, `#[ignore]`d pending an API key and `synthesize()`
 // being wired. `mcp_integration` is `#[ignore]`d because it spawns a `librarian-mcp`

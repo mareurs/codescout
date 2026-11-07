@@ -520,12 +520,20 @@ pub(crate) fn path_in_excluded_dir(path: &std::path::Path) -> bool {
 
 /// Check if a path is outside the project root. If so, attempt to discover
 /// and register the library. Returns the source tag.
+///
+/// The containment test compares marker-free spellings: `project_root` is the canonical
+/// `\\?\C:\…` on Windows while a language server reports `C:\…` (a `file://` URI cannot carry the
+/// marker), and `Path::starts_with` would treat the project's own file as external, register its
+/// directory as a library and tag it `lib:<dir>`
+/// (`docs/issues/2026-11-07-symbol-at-tags-a-project-file-with-the-first-path-less-library-in-the-registry.md`).
 pub(crate) async fn tag_external_path(
     path: &std::path::Path,
     project_root: &std::path::Path,
     agent: &crate::agent::Agent,
 ) -> String {
-    if path.starts_with(project_root) {
+    if crate::util::fs::strip_verbatim(path)
+        .starts_with(crate::util::fs::strip_verbatim(project_root))
+    {
         return "project".to_string();
     }
 

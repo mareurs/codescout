@@ -462,6 +462,25 @@ impl Embedder for RemoteEmbedder {
         self.cached_dims.load(Ordering::Relaxed)
     }
 
+    fn max_concurrency(&self) -> usize {
+        let Ok(url) = reqwest::Url::parse(&self.endpoint) else {
+            return 1;
+        };
+        match url.host_str() {
+            Some(host)
+                if host.trim_end_matches('.').eq_ignore_ascii_case("localhost")
+                    || host
+                        .trim_matches(['[', ']'])
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|address| address.is_loopback()) =>
+            {
+                1
+            }
+            Some(_) => 8,
+            None => 1,
+        }
+    }
+
     async fn embed(&self, texts: &[&str]) -> Result<Vec<Embedding>> {
         // Filter empty/whitespace-only strings — embedding servers reject them with 400.
         let non_empty: Vec<(usize, &str)> = texts
