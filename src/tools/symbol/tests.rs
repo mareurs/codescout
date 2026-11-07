@@ -11972,6 +11972,48 @@ fn attach_advice_keeps_an_existing_safety_warning() {
     super::edit_code::attach_advice(&mut bare, None);
     assert!(bare.get("advice").is_none() && bare.get("hint").is_none());
 }
+/// Bug `053ca236198f1b9b`: the `Unverified` verdict cannot be forced through `replace` with
+/// a real file (both extractions read the same path through the same parser, and the written
+/// text is valid UTF-8), so the response assembly that once had two writers of `hint` is
+/// pinned here, on exactly the function `do_replace` ends with.
+#[test]
+fn replace_response_keeps_the_unverified_warning_next_to_the_callers_advice() {
+    use crate::symbol::edit::CorruptionVerdict;
+
+    let mut response = json!({ "status": "ok", "replaced_lines": "1-3" });
+    super::edit_code::finish_replace_response(
+        &mut response,
+        &CorruptionVerdict::Unverified,
+        Some("tree-sitter parse failed".to_string()),
+        Some(json!({ "text": "verify callers: ...", "verified": false })),
+    );
+
+    let hint = response["hint"].as_str().expect("hint must survive");
+    assert!(
+        hint.contains("NOT verified against dropped symbols"),
+        "{response}"
+    );
+    assert_eq!(response["corruption_check"], json!("skipped"), "{response}");
+    assert_eq!(
+        response["corruption_check_error"],
+        json!("tree-sitter parse failed"),
+        "{response}"
+    );
+    assert_eq!(response["advice"]["verified"], json!(false), "{response}");
+}
+
+/// The other half of the contract: a verified edit gets no warning, and no advice means no
+/// `advice` key. Without this the test above would also pass for a helper that always warns.
+#[test]
+fn replace_response_of_a_clean_verdict_carries_no_warning_and_no_advice() {
+    use crate::symbol::edit::CorruptionVerdict;
+
+    let mut response = json!({ "status": "ok", "replaced_lines": "1-3" });
+    super::edit_code::finish_replace_response(&mut response, &CorruptionVerdict::Clean, None, None);
+    assert!(response.get("hint").is_none(), "{response}");
+    assert!(response.get("corruption_check").is_none(), "{response}");
+    assert!(response.get("advice").is_none(), "{response}");
+}
 
 #[test]
 fn renamed_name_path_replaces_the_last_segment() {

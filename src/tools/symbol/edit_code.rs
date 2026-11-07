@@ -377,6 +377,32 @@ pub(super) fn attach_advice(response: &mut Value, advice: Option<Value>) {
         response["advice"] = advice;
     }
 }
+/// Finish a `replace` response: mark an unverified edit, then attach the callers advice.
+///
+/// Kept as one function because both steps write next to the single-valued `hint`, and the
+/// order is the contract: `Unverified` sets `hint`, `attach_advice` must leave it alone
+/// (bug `053ca236198f1b9b`). The verdict cannot be forced through a real file, so this is
+/// where a test can reach it.
+pub(super) fn finish_replace_response(
+    response: &mut Value,
+    verdict: &CorruptionVerdict,
+    extract_err: Option<String>,
+    advice: Option<Value>,
+) {
+    // The write succeeded but the dropped-symbol / dropped-sibling checks could
+    // not run. Say so — the previous code reported a bare "ok" here, which read
+    // as "verified clean" when nothing had actually been verified.
+    if *verdict == CorruptionVerdict::Unverified {
+        response["corruption_check"] = json!("skipped");
+        response["corruption_check_error"] =
+            json!(extract_err.unwrap_or_else(|| "post-edit symbol extraction failed".to_string()));
+        response["hint"] = json!(
+            "The edit was written but NOT verified against dropped symbols. \
+             Re-read the file with symbols(path) to confirm it is intact."
+        );
+    }
+    attach_advice(response, advice);
+}
 
 /// The name path `name_path` has after a rename to `new_name`: its last `/` segment replaced.
 /// `"Agent/old"`, `"new"` gives `"Agent/new"`; a path with no `/` is just `new_name`.
@@ -1541,19 +1567,6 @@ impl EditCode {
         if let Some(note) = indent_note {
             response["indent_converted"] = json!(note);
         }
-        // The write succeeded but the dropped-symbol / dropped-sibling checks could
-        // not run. Say so — the previous code reported a bare "ok" here, which read
-        // as "verified clean" when nothing had actually been verified.
-        if verdict == CorruptionVerdict::Unverified {
-            response["corruption_check"] = json!("skipped");
-            response["corruption_check_error"] = json!(
-                extract_err.unwrap_or_else(|| "post-edit symbol extraction failed".to_string())
-            );
-            response["hint"] = json!(
-                "The edit was written but NOT verified against dropped symbols. \
-                 Re-read the file with symbols(path) to confirm it is intact."
-            );
-        }
         // The write added symbols the target did not contain. `replace` is symbol-scoped,
         // so they were inserted, not reconciled against same-named definitions elsewhere,
         // and `replaced_lines` alone says nothing about them. Report; never roll back —
@@ -1565,8 +1578,10 @@ impl EditCode {
                 response["also_defined"] = json!(added);
             }
         }
-        attach_advice(
+        finish_replace_response(
             &mut response,
+            &verdict,
+            extract_err,
             advice_for(&callers, &sym.name, name_path, rel_path),
         );
         Ok(response)
