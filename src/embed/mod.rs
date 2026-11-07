@@ -31,6 +31,13 @@ pub use codescout_embed::{Embedder, Embedding};
 ///
 /// Matching is case-sensitive on the raw extension, mirroring `sync_project`'s
 /// historical behaviour (e.g. `README.MD` is *not* treated as markdown here).
+///
+/// C and C++ are indexed too, although no tree-sitter grammar backs them for
+/// chunking: `split_file` falls back to the plain-text chunker for a language
+/// without one. The tags (`c`, `cpp`) are the names `crate::ast::detect_language`
+/// uses, so a grammar added later takes effect without touching this table.
+/// `.h` maps to `c`: a header alone cannot tell C from C++, and the plain-text
+/// chunker treats both the same.
 pub fn lang_for_ext(ext: &str) -> Option<&'static str> {
     Some(match ext {
         "rs" => "rust",
@@ -40,6 +47,8 @@ pub fn lang_for_ext(ext: &str) -> Option<&'static str> {
         "go" => "go",
         "java" => "java",
         "kt" => "kotlin",
+        "c" | "h" => "c",
+        "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" => "cpp",
         "md" | "mdx" => "markdown",
         "sh" | "bash" => "shell",
         "toml" => "toml",
@@ -115,5 +124,13 @@ mod tests {
         use std::path::Path;
         let m = super::build_ignore_matcher(Path::new("/proj"), &[]);
         assert!(!m.matched("/proj/node_modules", true).is_ignore());
+    }
+    #[test]
+    fn lang_for_ext_indexes_c_and_cpp_sources_and_headers() {
+        assert_eq!(super::lang_for_ext("c"), Some("c"));
+        assert_eq!(super::lang_for_ext("h"), Some("c"));
+        for ext in ["cc", "cpp", "cxx", "hpp", "hh", "hxx"] {
+            assert_eq!(super::lang_for_ext(ext), Some("cpp"), "{ext}");
+        }
     }
 }

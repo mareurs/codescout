@@ -466,6 +466,27 @@ mod tests {
             PreflightVerdict::Clear
         ));
     }
+    #[test]
+    fn cpp_preflight_counts_sources_and_headers_toward_size_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = "int answer() { return 42; }\n";
+        std::fs::write(dir.path().join("a.cpp"), source).unwrap();
+        std::fs::write(dir.path().join("b.h"), source).unwrap();
+        std::fs::write(dir.path().join("unrelated.bin"), source.repeat(10)).unwrap();
+        let both = 2 * source.len() as u64;
+        match check_index_scope(dir.path(), both - 1, &[]).unwrap() {
+            PreflightVerdict::RequiresConfirmation(info) => {
+                assert_eq!(info.file_count, 2);
+                assert_eq!(info.approx_bytes, both);
+                assert!(info.size_exceeds_threshold);
+            }
+            other => panic!("the eligible .cpp and .h must trigger size confirmation: {other:?}"),
+        }
+        assert!(matches!(
+            check_index_scope(dir.path(), both, &[]).unwrap(),
+            PreflightVerdict::Clear
+        ));
+    }
 
     #[test]
     fn elicitation_message_includes_home_reason() {

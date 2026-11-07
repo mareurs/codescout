@@ -1825,6 +1825,27 @@ mod tests {
             "and it must not make scripts/ look empty either"
         );
     }
+    /// A C/C++ tree must reach the index: `lang_for_ext` used to have no arm for these
+    /// extensions, so the walk skipped every file and `verify` (which measures against
+    /// that same walk) reported the empty index as complete.
+    #[test]
+    fn indexable_files_walks_c_and_cpp_sources_and_headers() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.cpp"), "int a() { return 1; }\n").unwrap();
+        std::fs::write(dir.path().join("b.h"), "int b(void);\n").unwrap();
+
+        let mut found: Vec<(&str, String)> = indexable_files(dir.path(), &[])
+            .into_iter()
+            .map(|(_, lang, rel)| (lang, rel))
+            .collect();
+        found.sort();
+
+        assert_eq!(
+            found,
+            vec![("c", "b.h".to_string()), ("cpp", "a.cpp".to_string())],
+            "both the C++ source and the header must be walked"
+        );
+    }
 
     /// Rows for files the walk no longer sees are reported, never deleted.
     #[tokio::test]
