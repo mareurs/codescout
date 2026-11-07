@@ -7,7 +7,7 @@ tags:
 - cluster/addressing-without-an-escape-hatch
 closed: 2026-11-07
 opened: 2026-11-04
-unverified: 'Fixed, gated, and seen live in grep, tree, the references completeness_warning and the two-prefix stripper (2026-11-07), but gaps remain. (1) Not every one of the 13 sites of a6babe715 is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run for them. (2) The references.rs warning site fixed in 665a7758e has no test of its own; it was seen live only. (3) The callers fixed in d05072221 are tracked in bb462b414e559152, with their own caveat. (4) The remaining callers were traced by reading only (see Resume). The retrieval index key in sync.rs is an open decision: it collides a\b.rs with a/b.rs and fixing it changes chunk ids. The memory topic names, git and librarian paths were not traced.'
+unverified: 'Fixed, gated, and seen live in grep, tree, the references completeness_warning and the two-prefix stripper (2026-11-07), but gaps remain. (1) Not every one of the 13 sites of a6babe715 is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run for them. (2) The references.rs warning site fixed in 665a7758e has no test of its own; it was seen live only. (3) The callers fixed in d05072221 are tracked in bb462b414e559152, with their own caveat. (4) The remaining callers were traced by reading only (see Resume). The retrieval chunk id is a documented cross-host choice with a possible collision on Linux, not measured. The git and librarian paths were not traced.'
 ---
 
 # BUG: grep rewrites a backslash in a file name to a slash, so the listed path names a file that does not exist
@@ -102,18 +102,20 @@ Fixed in `a6babe715`, `665a7758e`, `d05072221` (under `bb462b414e559152`) and `f
 
 `fe7f4cfdf` closed a sweep of every remaining caller of `to_forward_slash` and `relative_forward_slash`: it fixed `symbol_to_json` (the `file` of `symbols` name searches) and `callers_check.rs` (the file of an outside call), and it repaired a regression of the earlier commits. Seen live on a project rooted at `aw\proj`: after `display_path` kept a backslash in a path, `Tool::call_content` stopped relativizing it, because it stripped only the forward-slash spelling of the root. It now strips both spellings. After a rebuild on 2026-11-07, `grep` on that project lists `src/x.txt` (relative), and on `bs-proj` it lists `src/a\b.rs`.
 
-The root-name half of the class, seen live in the same run, is `857d783e8b548294`: the activation banner printed the root `aw\proj` as `aw/proj`. Fixed in `afdb4c3d3`.
+The root-name half of the class is `857d783e8b548294`: the activation banner printed the root `aw\proj` as `aw/proj`. Fixed in `afdb4c3d3` and seen live after a rebuild.
+
+The memory topic names are `527d44b6cb098cf4`: `MemoryStore::list` and `check_all_memories` named the topic of the file `a\b.md` as `a/b`, which reads back as nothing. Reproduced by a unit test and fixed in `4099a06f5`.
 
 ### The remaining callers, traced by reading on 2026-11-07
 
 None of these was run, and none is changed.
 
-- **`src/retrieval/sync.rs` line 530 (`rel_display`): an index key, not only a display.** It is the `file_path` stored with each chunk and an input of `chunk_id`. On Linux `a\b.rs` and a file `b.rs` in a directory `a` get the same `chunk_id`, and a semantic search result would list the path `a/b.rs`. Changing it changes existing chunk ids and needs a reindex, so it needs a decision, not a swap.
+- **`src/retrieval/sync.rs` line 530 (`rel_display`) and `chunk_id`: by design.** The doc comment of `chunk_id` requires a forward-slash path on every host, so that ids can be compared across hosts, and the test `chunk_id_normalizes_native_separators` expects `src\retrieval\sync.rs` to become `src/retrieval/sync.rs` on any platform. The cost, not measured: on Linux `a\b.rs` and a file `b.rs` in a directory `a` get the same `chunk_id`, and a semantic search result would list the path `a/b.rs`. Changing it changes existing chunk ids and needs a reindex, so it needs a decision, not a swap.
 - **`src/tools/library.rs` line 47 and `src/dashboard/api/libraries.rs` line 18:** the absolute path of a library directory, shown in the response. Same defect, only for a library directory whose name holds a backslash.
 - **`src/tools/memory/mod.rs` lines 1205 and 1209:** `resolved_from` and `write_target`, memory directories shown in the response. Same.
 - **`src/tools/config/mod.rs` and `src/agent/mod.rs`:** absolute root displays (`project_root`, the CWD hint, `main_root`, the root of the project status). Same; the status comment names a forward-slash `RepoPath` convention, not checked.
 - **`relative_root` of a workspace member, in `src/prompts/`, `src/tools/onboarding.rs`, `src/tools/config/mod.rs`, `src/agent/mod.rs`: by design.** It is normalized to forward slashes when the configuration is read (`src/workspace.rs`, `declared_relative_root`), so a member root with a backslash cannot be declared, and the test `the_tree_call_of_a_project_prompt_reads_back_to_its_root` expects the rewritten form.
-- **Not traced:** the topic names built from file names in `src/memory/mod.rs` line 313 and `src/memory/anchors.rs` line 278; `src/git/mod.rs` and the `librarian` paths, which keep the catalog's forward-slash form and were not checked one by one.
+- **Not traced:** `src/git/mod.rs` and the `librarian` paths, which keep the catalog's forward-slash form and were not checked one by one.
 
 See the `unverified` caveat in the frontmatter.
 
