@@ -92,6 +92,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from claude_history import discover_claude_histories, read_claude_history
 from provenance_records import CoverageGap, HistoryBatch, Operation, ProvenanceScan
 from codex_history import discover_codex_histories, read_codex_history
+from native_provenance_history import apply_checkpoint
 from typing import Iterable
 from session_context import principal_key, resolve_context
 from history_cache import cache_dir as history_cache_dir, caching as caching_reader
@@ -823,7 +824,7 @@ def scan_provenance(root: Path, environ: dict[str, str], modified_since: float |
     batch = merge_history_batches([
         HistoryBatch([], claude_gaps + codex_gaps),
         *(read_claude(path) for path in claude_files),
-        *(read_codex(path) for path in codex_files),
+        *(apply_checkpoint(path, read_codex(path), environ, root) for path in codex_files),
     ])
     owners, evidence, gaps = {}, {}, list(batch.gaps)
     # `normalize` answers for THIS call only. It resolves symlinks, which is the filesystem as it

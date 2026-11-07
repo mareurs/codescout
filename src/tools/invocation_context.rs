@@ -101,7 +101,8 @@ pub(crate) async fn scope<F: Future>(identity: NativeInvocation, future: F) -> F
 pub(crate) fn apply_to_shell(command: &mut tokio::process::Command) -> anyhow::Result<()> {
     INVOCATION
         .try_with(|identity| identity.apply(command))
-        .unwrap_or(Ok(()))
+        .unwrap_or(Ok(()))?;
+    super::provenance_fence_context::apply_to_shell(command)
 }
 
 #[cfg(test)]

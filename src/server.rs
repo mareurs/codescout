@@ -933,7 +933,7 @@ impl CodeScoutServer {
                 Some(root) => {
                     return Ok(Err(route_tool_error(
                         crate::agent::pin_resolution_refusal(root, e).into(),
-                    )))
+                    )));
                 }
                 None => return Err(McpError::internal_error(format!("write gate: {}", e), None)),
             },
@@ -1741,6 +1741,16 @@ impl CodeScoutServer {
             tool_call_fut,
         );
 
+        let tool_call_fut = crate::tools::provenance_fence_context::scope(
+            &ctx,
+            self.is_write_call(&req.name, &input_for_record),
+            &req.name,
+            &input_for_record,
+            req.meta.as_ref().map(|meta| &meta.0),
+            // Keep the large dispatch future on the heap before another task-local wrapper.
+            Box::pin(tool_call_fut),
+        );
+
         let result = Self::race_against_cancel(
             tool_call_fut,
             cancel_token,
@@ -2258,14 +2268,24 @@ fn peer_enabled_at_runtime(env_override: Option<&str>, project_path: Option<&str
 
 impl ServerHandler for CodeScoutServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_tool_list_changed()
-                .enable_resources()
-                .build(),
-        )
-        .with_instructions(self.instructions.read().clone())
+        let capabilities = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_tool_list_changed()
+            .enable_resources()
+            .build();
+        #[cfg(unix)]
+        let capabilities = {
+            let mut capabilities = capabilities;
+            capabilities.experimental.get_or_insert_default().insert(
+                "codescout/nativeExecutionFence".to_owned(),
+                serde_json::json!({"version": 2, "protocol": "coordinated-checkout-v1"})
+                    .as_object()
+                    .expect("capability is an object")
+                    .clone(),
+            );
+            capabilities
+        };
+        ServerInfo::new(capabilities).with_instructions(self.instructions.read().clone())
     }
 
     async fn list_tools(
@@ -10292,9 +10312,7 @@ mod tests {
         // `text` is serialised JSON, so a Windows backslash in `wrote_to` is written `\\`.
         assert!(
             text.contains("wrote_to")
-                && text.contains(&crate::util::text::json_quote(
-                    &main_root.to_string_lossy()
-                )),
+                && text.contains(&crate::util::text::json_quote(&main_root.to_string_lossy())),
             "an unpinned write in a repo with linked worktrees names the checkout it reached: {text}"
         );
         assert!(
@@ -17208,7 +17226,8 @@ mod guide_hint_tests {
         );
         let guide = guide_blocks(&out).join("");
         assert!(
-            guide.contains("Avoid this anti-pattern") && !content_carries_guide_body(&out, "tracker-conventions"),
+            guide.contains("Avoid this anti-pattern")
+                && !content_carries_guide_body(&out, "tracker-conventions"),
             "the FIRST update, a status change, ships the librarian's anti-wipe section, got {} B: {}",
             guide.len(),
             guide.chars().take(300).collect::<String>()

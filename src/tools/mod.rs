@@ -19,6 +19,9 @@ pub mod file_summary;
 pub(crate) mod format;
 pub mod grep;
 pub(crate) mod invocation_context;
+pub(crate) mod native_provenance_fence;
+pub(crate) mod provenance_fence_context;
+
 pub mod job_record;
 pub mod library;
 pub mod libtest_compact;
@@ -57,3 +60,5 @@ pub(crate) mod hint_probe;
 #[cfg(unix)]
 pub mod peer;
 pub mod rendezvous;
+
+mod trusted_formatter;

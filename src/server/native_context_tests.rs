@@ -282,3 +282,50 @@ async fn native_context_wire_reaches_interactive_shell() {
         "{response}"
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn native_provenance_fence_is_advertised_on_supported_hosts() {
+    let (_dir, server) = make_server().await;
+    let capabilities = rmcp::ServerHandler::get_info(&server).capabilities;
+    let expected = json!({"version":2,"protocol":"coordinated-checkout-v1"});
+    assert_eq!(
+        capabilities
+            .experimental
+            .as_ref()
+            .and_then(|map| map.get("codescout/nativeExecutionFence")),
+        expected.as_object(),
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn native_wire_foreign_workspace_command_is_refused_while_formatting() {
+    let mut wire = NativeContextWire::new("codex-mcp-client").await;
+    let target = tempfile::tempdir().unwrap();
+    assert!(std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(target.path())
+        .status()
+        .unwrap()
+        .success());
+    let path = target.path().join("probe.txt");
+    std::fs::write(&path, b"before").unwrap();
+    let domain = crate::tools::native_provenance_fence::coordination_root().unwrap();
+    let _coordinator = crate::tools::native_provenance_fence::Fence::try_acquire(&domain).unwrap();
+    let _checkout =
+        crate::tools::native_provenance_fence::Fence::try_acquire(target.path()).unwrap();
+    wire.send(json!({"jsonrpc":"2.0","id":2,"method":"tools/call",
+        "params":{"name":"run_command","arguments":{
+            "command":format!("printf changed > '{}'",path.display()),"effect":"read"
+        },"_meta":{"sessionId":"native-root","threadId":"native-root"}}}))
+        .await;
+    let response = wire.recv(2).await;
+    assert!(
+        response
+            .to_string()
+            .contains("native provenance coordination refused dispatch"),
+        "{response}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), b"before");
+}
