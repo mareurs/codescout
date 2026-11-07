@@ -174,3 +174,121 @@ async fn symbols_directory_overview_names_the_real_file() {
         .unwrap();
     assert_names_the_real_file("symbols overview", &result, &name);
 }
+/// A context whose language server is the given mock, rooted at `root`.
+async fn mock_ctx(root: &Path, mock: crate::lsp::mock::MockLspClient) -> crate::tools::ToolContext {
+    let mut ctx = project_ctx(root).await;
+    ctx.lsp = crate::lsp::mock::MockLspProvider::with_client(mock);
+    ctx
+}
+
+fn location_in(file: &Path, line: u32, from: u32, to: u32) -> lsp_types::Location {
+    lsp_types::Location {
+        uri: url::Url::from_file_path(file)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap(),
+        range: lsp_types::Range {
+            start: lsp_types::Position {
+                line,
+                character: from,
+            },
+            end: lsp_types::Position {
+                line,
+                character: to,
+            },
+        },
+    }
+}
+
+/// `symbol_at` reports the definition's file under the name the file has.
+#[tokio::test]
+async fn symbol_at_definition_names_the_real_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/lib.rs"), "fn caller() { helper(); }\n").unwrap();
+    let name = "a\\b.rs";
+    let target = root.join("src").join(name);
+    std::fs::write(&target, "fn helper() {}\n").unwrap();
+    assert!(target.is_file(), "the fixture is one file named {name:?}");
+
+    let mock = crate::lsp::mock::MockLspClient::new().with_definitions(
+        0,
+        14,
+        vec![location_in(&target, 0, 3, 9)],
+    );
+    let ctx = mock_ctx(&root, mock).await;
+    let result = crate::tools::symbol::SymbolAt
+        .call(
+            json!({ "path": "src/lib.rs", "line": 1, "col": 15, "fields": ["def"] }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_names_the_real_file("symbol_at definition", &result, name);
+}
+/// A rename that edits a file whose name holds a backslash names that file in its corruption
+/// hint under the name the file has. The edit turns `xold_name` into `xfresh_name`, which the
+/// embedded-identifier check flags.
+#[tokio::test]
+async fn rename_corruption_hint_names_the_real_file() {
+    use crate::lsp::{SymbolInfo, SymbolKind};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let decl = root.join("src/lib.rs");
+    std::fs::write(&decl, "fn old_name() {}\n").unwrap();
+    let name = "a\\b.rs";
+    let edited = root.join("src").join(name);
+    std::fs::write(&edited, "let xold_name = 1;\n").unwrap();
+    assert!(edited.is_file(), "the fixture is one file named {name:?}");
+
+    let symbol = SymbolInfo {
+        name: "old_name".to_string(),
+        name_path: "old_name".to_string(),
+        kind: SymbolKind::Function,
+        file: decl.clone(),
+        start_line: 0,
+        end_line: 0,
+        start_col: 3,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let uri: lsp_types::Uri = url::Url::from_file_path(&edited)
+        .unwrap()
+        .as_str()
+        .parse()
+        .unwrap();
+    let edit = lsp_types::WorkspaceEdit {
+        changes: Some(std::collections::HashMap::from([(
+            uri,
+            vec![lsp_types::TextEdit {
+                range: location_in(&edited, 0, 5, 13).range,
+                new_text: "fresh_name".to_string(),
+            }],
+        )])),
+        ..Default::default()
+    };
+    let mock = crate::lsp::mock::MockLspClient::new()
+        .with_symbols(decl, vec![symbol])
+        .with_rename_edit(edit);
+    let ctx = mock_ctx(&root, mock).await;
+
+    let result = crate::tools::symbol::EditCode
+        .call(
+            json!({
+                "action": "rename", "symbol": "old_name", "path": "src/lib.rs",
+                "new_name": "fresh_name",
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        result["corruption_hints"].is_array() || result.to_string().contains("xfresh_name"),
+        "the fixture must trigger the embedded-identifier check: {result}"
+    );
+    assert_names_the_real_file("rename corruption hint", &result, name);
+}

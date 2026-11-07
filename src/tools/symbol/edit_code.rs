@@ -832,7 +832,7 @@ impl EditCode {
                     let Ok(content) = std::fs::read_to_string(path) else {
                         continue;
                     };
-                    let rel = crate::util::fs::relative_forward_slash(path, &root);
+                    let rel = crate::util::fs::relative_display_path(path, &root);
                     let mut flagged_lines: Vec<u32> = vec![];
                     let mut previews: Vec<String> = vec![];
                     for (i, line) in content.lines().enumerate() {
