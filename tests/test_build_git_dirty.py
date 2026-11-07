@@ -76,6 +76,88 @@ class BuildGitDirtyTests(unittest.TestCase):
         return dict(line.removeprefix("cargo:rustc-env=").split("=", 1)
                     for line in result.stdout.splitlines()
                     if line.startswith("cargo:rustc-env="))
+    def watched(self, root=None):
+        """Absolute paths build.rs asks Cargo to watch for the git state (resolved)."""
+        root = root or self.root
+        out = Path(self.tmp.name) / "generated-watch"
+        out.mkdir(exist_ok=True)
+        env = {**self.env, "CARGO_MANIFEST_DIR": str(root), "OUT_DIR": str(out)}
+        result = subprocess.run([str(self.binary)], cwd=root, env=env,
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        paths = (Path(line.removeprefix("cargo:rerun-if-changed="))
+                 for line in result.stdout.splitlines()
+                 if line.startswith("cargo:rerun-if-changed="))
+        return {p.resolve() for p in paths if p.is_absolute()}
+
+    def git_path(self, name, root=None):
+        """Where git keeps `name` for the checkout at `root`, resolved."""
+        root = root or self.root
+        out = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-path", name],
+            env=self.env, capture_output=True, text=True, check=True, timeout=15).stdout.strip()
+        return Path(out).resolve()
+
+    def linked(self, *worktree_args):
+        other = Path(self.tmp.name) / "linked"
+        self.git("worktree", "add", "-q", *worktree_args[:-1], str(other), worktree_args[-1])
+        return other
+
+    def test_linked_worktree_watches_only_its_own_branch_ref(self):
+        other = self.linked("-b", "feature-a", "HEAD")
+        common_refs = self.git_path("refs", other)
+        self.assertEqual(self.watched(other), {
+            self.git_path("HEAD", other),
+            self.git_path("index", other),
+            self.git_path("refs/heads/feature-a", other),
+        })
+        self.assertNotIn(common_refs, self.watched(other))
+        self.assertNotIn(self.git_path("packed-refs", other), self.watched(other))
+
+    def test_detached_head_watches_only_head_and_index(self):
+        other = self.linked("--detach", "HEAD")
+        self.assertEqual(self.watched(other),
+                         {self.git_path("HEAD", other), self.git_path("index", other)})
+
+    def test_packed_branch_watches_packed_refs_not_the_whole_refs_tree(self):
+        self.git("pack-refs", "--all", "--prune")
+        branch = self.git("symbolic-ref", "HEAD")
+        self.assertFalse(self.git_path(branch).exists(), "fixture must have a packed branch")
+        watched = self.watched()
+        self.assertIn(self.git_path("packed-refs"), watched)
+        self.assertNotIn(self.git_path("refs"), watched)
+
+    def test_unborn_branch_watches_where_its_first_commit_lands(self):
+        fresh = Path(self.tmp.name) / "fresh"
+        fresh.mkdir()
+        (fresh / "src/prompts").mkdir(parents=True)
+        (fresh / "src/prompts/source.md").write_text(
+            "<!-- @surface server_instructions -->\nSERVER\n<!-- @end -->\n"
+            "<!-- @surface onboarding_prompt -->\nONBOARD\n<!-- @end -->\n")
+        subprocess.run(["git", "init", "-q", str(fresh)], env=self.env, check=True,
+                       capture_output=True, timeout=15)
+        branch = subprocess.run(["git", "-C", str(fresh), "symbolic-ref", "HEAD"], env=self.env,
+                                capture_output=True, text=True, check=True).stdout.strip()
+        watched = self.watched(fresh)
+        self.assertIn(self.git_path("HEAD", fresh), watched)
+        self.assertNotIn(self.git_path("refs", fresh), watched)
+        loose = self.git_path(branch, fresh)
+        self.assertFalse(loose.exists())
+        # The first commit creates `loose`; some watched path must contain or be it.
+        self.assertTrue(any(w == loose.parent or w in loose.parents for w in watched), watched)
+
+    def test_commit_on_checked_out_branch_changes_baked_sha_and_the_watched_ref(self):
+        before = self.metadata()["CODESCOUT_GIT_SHA_FULL"]
+        self.write("src/lib.rs", "second\n")
+        self.git("commit", "-qam", "second")
+        after = self.metadata()["CODESCOUT_GIT_SHA_FULL"]
+        self.assertNotEqual(before, after)
+        self.assertEqual(after, self.git("rev-parse", "HEAD"))
+        branch = self.git("symbolic-ref", "HEAD")
+        ref_file = self.git_path(branch)
+        self.assertIn(ref_file, self.watched())
+        self.assertEqual(ref_file.read_text().strip(), after)
+
 
     def test_clean_fixture_preserves_git_identity(self):
         data = self.metadata()

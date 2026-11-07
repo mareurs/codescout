@@ -78,18 +78,59 @@ fn bake_git_sha() {
     for path in DIRTY_SCOPE {
         println!("cargo:rerun-if-changed={path}");
     }
-    // Resolve administrative paths for both ordinary and linked worktrees.
-    for name in ["HEAD", "index", "refs", "packed-refs"] {
-        if let Some(path) = git_output(&repo, &["rev-parse", "--git-path", name])
-            .and_then(|s| String::from_utf8(s).ok())
-        {
-            let path = repo.join(path.trim());
-            // Missing administrative files make Cargo rerun on every invocation.
-            // Loose refs detect packing, after which packed-refs is watched too.
-            if path.exists() {
-                println!("cargo:rerun-if-changed={}", path.display());
-            }
+    watch_git_state(&repo);
+}
+
+/// Resolve where git keeps `name` for the checkout at `repo`, for ordinary and linked worktrees.
+/// `HEAD` and `index` are per worktree; everything under `refs/` and `packed-refs` live in the
+/// common git directory shared by every worktree.
+fn git_admin_path(repo: &std::path::Path, name: &str) -> Option<PathBuf> {
+    let out = git_output(repo, &["rev-parse", "--git-path", name])?;
+    let out = String::from_utf8(out).ok()?;
+    Some(repo.join(out.trim_end_matches(['\n', '\r'])))
+}
+
+/// Ask Cargo to rerun this script when the baked SHA could change, and not otherwise.
+///
+/// Watching the whole `refs` directory or `packed-refs` reruns the script (and rebuilds the
+/// crate) in every checkout that shares the repository whenever ANY branch gets a commit
+/// (f8d06297d629928e). Only `HEAD`, `index` and the one ref `HEAD` points to decide the value.
+/// A missing path makes Cargo rerun on every invocation, so a path is printed only when it exists.
+fn watch_git_state(repo: &std::path::Path) {
+    for name in ["HEAD", "index"] {
+        if let Some(path) = git_admin_path(repo, name).filter(|p| p.exists()) {
+            println!("cargo:rerun-if-changed={}", path.display());
         }
+    }
+    // Detached HEAD names no ref: `HEAD` itself changes on checkout, `index` on staging.
+    let Some(branch) = git_output(repo, &["symbolic-ref", "-q", "HEAD"])
+        .and_then(|s| String::from_utf8(s).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    else {
+        return;
+    };
+    let Some(loose) = git_admin_path(repo, &branch) else {
+        return;
+    };
+    if loose.exists() {
+        println!("cargo:rerun-if-changed={}", loose.display());
+        return;
+    }
+    // The branch is packed or still unborn. Its next commit CREATES the loose ref and leaves
+    // `packed-refs` alone, so watching only `packed-refs` would miss it: also watch the nearest
+    // existing ancestor directory of the missing ref, where that file will appear. This is
+    // wider than one file, but only until the first commit turns the ref loose.
+    if let Some(packed) = git_admin_path(repo, "packed-refs").filter(|p| p.exists()) {
+        println!("cargo:rerun-if-changed={}", packed.display());
+    }
+    let mut dir = loose.parent();
+    while let Some(d) = dir {
+        if d.exists() {
+            println!("cargo:rerun-if-changed={}", d.display());
+            break;
+        }
+        dir = d.parent();
     }
 }
 
