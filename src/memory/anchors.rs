@@ -275,7 +275,7 @@ pub fn check_all_memories(project_root: &Path, memories_dir: &Path) -> Result<Va
         let Ok(rel) = path.strip_prefix(memories_dir) else {
             continue;
         };
-        let topic = rel.with_extension("").to_string_lossy().replace('\\', "/");
+        let topic = crate::util::fs::display_path(&rel.with_extension(""));
 
         let sidecar = anchor_path_for_topic(memories_dir, &topic);
 
@@ -559,6 +559,21 @@ mod tests {
 
         assert_eq!(report["unreadable"][0]["topic"], "a");
         assert!(report["untracked"].as_array().unwrap().is_empty());
+    }
+
+    /// A memory file whose name holds a backslash is reported as untracked under the name the file
+    /// has. The report named `a/b`, a topic that does not exist, for the file `a\b.md`.
+    #[cfg(unix)]
+    #[test]
+    fn an_untracked_topic_with_a_backslash_is_named_as_it_is_on_disk() {
+        let dir = tempdir().unwrap();
+        let memories_dir = dir.path().join("memories");
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        std::fs::write(memories_dir.join("a\\b.md"), "# a").unwrap();
+
+        let report = check_all_memories(dir.path(), &memories_dir).unwrap();
+
+        assert_eq!(report["untracked"][0], "a\\b", "{report}");
     }
 
     #[test]

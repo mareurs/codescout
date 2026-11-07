@@ -310,7 +310,7 @@ impl MemoryStore {
                 if let Some(ext) = entry.path().extension() {
                     if ext == "md" {
                         if let Ok(rel) = entry.path().strip_prefix(&self.memories_dir) {
-                            let topic = rel.with_extension("").to_string_lossy().replace('\\', "/");
+                            let topic = crate::util::fs::display_path(&rel.with_extension(""));
                             topics.push(topic);
                         }
                     }
@@ -1294,6 +1294,26 @@ mod tests {
         );
         // Must be a file path, not the directory itself
         assert_ne!(path, store.memories_dir);
+    }
+
+    /// On Linux a backslash is an ordinary file-name character, so the topic `a\b` is one file
+    /// `a\b.md`. `list` rewrote the `\` to `/` and named a topic that does not exist: reading the
+    /// listed name looked for `a/b.md`. A listed topic must read back.
+    #[cfg(unix)]
+    #[test]
+    fn a_topic_with_a_backslash_lists_under_its_own_name_and_reads_back() {
+        let (_dir, store) = make_store();
+        store.write("a\\b", "content").unwrap();
+
+        let topics = store.list().unwrap();
+        assert_eq!(topics, vec!["a\\b".to_string()], "the listed topic name");
+        for topic in &topics {
+            assert_eq!(
+                store.read(topic).unwrap(),
+                Some("content".to_string()),
+                "the listed topic {topic:?} must read back"
+            );
+        }
     }
 
     #[test]
