@@ -7133,6 +7133,48 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    /// `(file, captured name)` pairs of `mcp__codescout__<name>` that are deliberate negative
+    /// inputs in a companion test, not references to a codescout tool. See
+    /// `negative_fixture_exemption_is_exactly_the_four_relocate_tokens` for why each is here.
+    /// There is no check that an entry is still needed: if the fixture is removed from the
+    /// plugin, the entry stays inert until the same token reappears in that file.
+    const NEGATIVE_FIXTURE_TOKENS: &[(&str, &str)] = &[
+        ("cs-verified-relocate.test.mjs", "y"),
+        ("cs-verified-relocate.test.mjs", "evil__"),
+        ("cs-verified-relocate.test.mjs", "evil__edit_code"),
+        ("cs-verified-relocate.test.mjs", "_edit_code"),
+    ];
+
+    fn is_negative_fixture_token(fname: &str, name: &str) -> bool {
+        NEGATIVE_FIXTURE_TOKENS.contains(&(fname, name))
+    }
+
+    /// Bug `1dfa43ac9834a309`: `cs-verified-relocate.test.mjs` feeds the hook tool names of OTHER
+    /// servers (`mcp__codescout__evil__edit_code` is a tool of a server named `codescout__evil`)
+    /// to prove it stays silent. The companion-surface scan reads those as stale references to
+    /// codescout tools. Only these exact `(file, token)` pairs are exempt; every other token in
+    /// every other file, and any new token in this file, is still checked.
+    #[test]
+    fn negative_fixture_exemption_is_exactly_the_four_relocate_tokens() {
+        let relocate = "cs-verified-relocate.test.mjs";
+        for name in ["y", "evil__", "evil__edit_code", "_edit_code"] {
+            assert!(
+                is_negative_fixture_token(relocate, name),
+                "`{name}` in {relocate} is a deliberate negative input"
+            );
+        }
+        // A new nonexistent token in the same file is real drift, not a fixture.
+        assert!(!is_negative_fixture_token(relocate, "replace_symbol"));
+        // The same names in a live hook are real drift: the exemption is per file.
+        assert!(!is_negative_fixture_token(
+            "cs-verified-relocate.mjs",
+            "evil__"
+        ));
+        assert!(!is_negative_fixture_token(
+            "host-normalization.test.mjs",
+            "y"
+        ));
+    }
 
     /// Companion plugin surfaces (`../claude-plugins/codescout-companion/hooks/*`)
     /// reference codescout tool names as plain text in matcher regexes, case
@@ -7152,6 +7194,9 @@ mod tests {
     /// Filters:
     /// - `*.test.sh` files: skip entirely — those exercise stale names on purpose
     ///   as regression sentinels for matcher coverage.
+    /// - `NEGATIVE_FIXTURE_TOKENS`: exact `(file, token)` pairs that are deliberate negative
+    ///   inputs in a companion test (another server's tool name, fed to a hook to prove it
+    ///   stays silent). Per token, not per file, so the rest of that file stays checked.
     /// - Shell comments (`#`-prefixed lines): scrub before stale-name check so
     ///   header comments can document consolidation history ("replace_symbol/
     ///   insert_code/remove_symbol were consolidated into edit_code") without
@@ -7250,7 +7295,10 @@ mod tests {
             for cap in positive_re.captures_iter(&content) {
                 let group = cap.get(1).map(|m| m.as_str()).unwrap_or("");
                 for name in group.split('|') {
-                    if name.is_empty() || real_tools.contains(name) {
+                    if name.is_empty()
+                        || real_tools.contains(name)
+                        || is_negative_fixture_token(&fname, name)
+                    {
                         continue;
                     }
                     drift.push(format!(
