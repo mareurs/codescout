@@ -151,6 +151,14 @@ up. Statuses: `open | in-progress | done | declined | deferred`.
 
 **Observed.** codescout: `a80c8eaec`, `b697e19bd`, `c6159eb7f`, `4516d674c`, `3addb3e7d`, `e474f7bc5`, `1dbc7e033` (plus this file's commit). claude-plugins: `836aadd`, `8f230f7`, `696a592` (codescout-companion 1.20.29, already cached in all four profiles). prompt-engineering: `9bc8e4e`, `c2025d6`, `70e9d19`.
 
+**Update 2026-11-07 (read from local remote-tracking refs, no `fetch`).** The listed commits are no longer the open set.
+
+- codescout: `experiments` was pushed on 2026-11-06 by another session (`537eb2cdf..f7d65b877`, 183 commits, 33 of them from this session, with `CODESCOUT_PUSH_ACK`; that session's message says its operator decided it, which this session did not see). `origin/experiments` contains `c1b31b681` and `7c2047c6d`. Now ahead by 6, none of them listed above: `32c296e81` and `5e004e998` (both from this session: the `audit-doc-refs` ignore-refs comments that clear the red CI job), plus `4c90f8fab`, `9a1e1a527`, `867546ab6` and `e1e289ec1`, whose session was not checked.
+- claude-plugins: `836aadd`, `8f230f7` and `696a592` are not in the ahead set. Now ahead by 2, both docs commits: `a4ce3da` (hook released in 1.21.0) and `1e985eb`. Session not checked.
+- prompt-engineering: ahead by 9. The three listed (`9bc8e4e`, `c2025d6`, `70e9d19`), this session's `997b4cd`, `892d90c`, `bd67360` and `39672ce`, and two more, `fc8c9ab` and `98c5431`, whose session was not checked. Untracked `scenarios/plan-opens-the-body/` belongs to someone else.
+
+The operator chose on 2026-11-07 to push later. Until `32c296e81` and `5e004e998` are pushed, the CI job `Audit Doc Refs` stays red on origin. CIW-18's CI half still cannot be exercised for claude-plugins.
+
 **Next:** push when ready; claude-plugins via `scripts/release.sh` after CIW-8.
 
 ## CIW-10 — Attribution scan: store each operation's write targets in the cache entry (approach 2)
