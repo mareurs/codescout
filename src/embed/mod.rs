@@ -34,8 +34,10 @@ pub use codescout_embed::{Embedder, Embedding};
 ///
 /// C and C++ are indexed too, although no tree-sitter grammar backs them for
 /// chunking: `split_file` falls back to the plain-text chunker for a language
-/// without one. The tags (`c`, `cpp`) are the names `crate::ast::detect_language`
-/// uses, so a grammar added later takes effect without touching this table.
+/// without one. Only the tag NAMES (`c`, `cpp`) match what `crate::ast::detect_language`
+/// returns, so a grammar added later for those names takes effect without touching this
+/// table; `detect_language` itself maps just `c`, `cpp`, `cc` and `cxx` and does not know
+/// the header extensions (`h`, `hpp`, `hh`, `hxx`), which only this table maps.
 /// `.h` maps to `c`: a header alone cannot tell C from C++, and the plain-text
 /// chunker treats both the same.
 pub fn lang_for_ext(ext: &str) -> Option<&'static str> {
