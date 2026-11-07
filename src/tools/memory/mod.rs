@@ -304,8 +304,9 @@ async fn cross_embed_memory(
         ctx,
         pin,
         &project_id,
-        content,
-        budget_chars,
+        // Bounded by the same budget the memory's own vector is segmented with; see the doc
+        // comment of `find_semantic_anchors`.
+        anchor_query_prefix(content, budget_chars),
         path_anchor_files,
         min_sim,
         top_n,
@@ -375,13 +376,14 @@ async fn call_pin(ctx: &ToolContext) -> Option<PathBuf> {
 }
 
 /// The anchor query for `content` under `budget_chars`: `content` itself when it fits, otherwise
-/// its longest leading slice of at most `budget_chars` chars.
+/// its longest leading slice, after any leading whitespace, of at most `budget_chars` chars.
 ///
 /// The cut falls just after the last whitespace of the window, so a word is not split, unless
 /// the window already ends at a word boundary or has no whitespace in its second half (a
 /// minified blob, a long path, or a lone early space that would leave a sliver), where it is a
 /// hard cut on a char boundary. Leading whitespace is skipped for an over-budget memory so the
-/// slice is never blank, which the embedder refuses.
+/// slice is not blank, which the embedder refuses. A memory made only of whitespace is the one
+/// exception: it gives an empty slice, as the old first-segment query did.
 /// Never longer than `budget_chars` chars (a budget of 0 is treated as 1).
 fn anchor_query_prefix(content: &str, budget_chars: usize) -> &str {
     let budget = budget_chars.max(1);
@@ -413,10 +415,10 @@ fn anchor_query_prefix(content: &str, budget_chars: usize) -> &str {
 ///
 /// The caller already holds the memory's vector, but the retrieval stack embeds the anchor
 /// query itself, and an embedder refuses an input past its context. So the query is NOT the
-/// whole `content`: it is [`anchor_query_prefix`], the longest leading slice of the memory that
-/// fits `budget_chars`, which is the whole content, byte for byte, when it already fits. Sending
-/// a long memory whole failed the search (llama.cpp HTTP 500, "input is too large") and filed
-/// the memory without anchors.
+/// whole memory: the caller passes [`anchor_query_prefix`], the longest leading slice of the
+/// memory that fits the embedder's budget. That slice is the whole content, byte for byte, when it
+/// already fits. Sending a long memory whole failed the search (llama.cpp HTTP 500, "input is too
+/// large") and filed the memory without anchors.
 ///
 /// The query is a prefix, not the first `segment_for_budget` segment: that function flushes a
 /// short heading as a segment of its own before it cuts an over-budget line, so a heading plus
@@ -433,8 +435,7 @@ async fn find_semantic_anchors(
     ctx: &ToolContext,
     pin: Option<&Path>,
     project_id: &str,
-    content: &str,
-    budget_chars: usize,
+    query: &str,
     path_anchor_files: &HashSet<String>,
     min_sim: f32,
     top_n: usize,
@@ -459,8 +460,6 @@ async fn find_semantic_anchors(
         exclude_languages: vec!["markdown".to_string()],
         exclude_paths: Vec::new(),
     };
-    // Bounded by the same budget the memory's own vector is segmented with; see the doc comment.
-    let query = anchor_query_prefix(content, budget_chars);
     let hits = client.search_code(project_id, query, opts).await?;
 
     // Dedupe by file path, keep highest score, apply min_sim + path-anchor exclusions.
