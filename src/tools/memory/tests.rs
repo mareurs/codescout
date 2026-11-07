@@ -1254,7 +1254,7 @@ mod single_embed_and_upsert {
     /// vector is built from budget-sized segments for exactly that reason, so the anchor query
     /// must be bounded by the same budget: a long memory used to send its WHOLE content, fail
     /// the search, and be filed without anchors behind a warning.
-    /// docs/issues/2026-11-06-long-memory-semantic-anchor-input-too-large.md
+    /// docs/issues/archive/2026-11-06-long-memory-semantic-anchor-input-too-large.md
     ///
     /// `serial`: the budget is read from the env-resolved model, twice (here and in the write),
     /// and `resolved_chunk_budget_reflects_the_projects_configured_model` unsets those variables

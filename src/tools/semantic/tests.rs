@@ -1004,7 +1004,7 @@ fn running_elsewhere_indexing_block_names_the_holder_pid() {
 }
 
 // --- member-scoped semantic_search paths are workspace-root-relative -----------------------
-// docs/issues/2026-11-05-member-semantic-result-paths-miss-workspace-root.md (d3a90bec4f8f5ced)
+// docs/issues/archive/2026-11-05-member-semantic-result-paths-miss-workspace-root.md (25c50e1b512bce92)
 
 fn member_hit(file: &str) -> crate::retrieval::search::Hit {
     crate::retrieval::search::Hit {

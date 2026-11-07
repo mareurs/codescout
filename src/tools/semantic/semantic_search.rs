@@ -956,7 +956,7 @@ fn search_response(hits: &[crate::retrieval::search::Hit], limit: usize) -> Valu
 /// `src/ser.rs` from member `crates/nu-json` is a path no other tool resolves against the
 /// workspace root. `relative_root` is the member directory relative to the root the following
 /// `read_file` resolves against; `"."` (or empty) is that root itself and changes nothing.
-/// docs/issues/2026-11-05-member-semantic-result-paths-miss-workspace-root.md
+/// docs/issues/archive/2026-11-05-member-semantic-result-paths-miss-workspace-root.md
 pub(crate) fn lift_member_paths(hits: &mut [crate::retrieval::search::Hit], relative_root: &str) {
     let normalised = relative_root.replace('\\', "/");
     let prefix = normalised

@@ -2954,7 +2954,7 @@ fn has_tool_handle(text: &str) -> bool {
 /// True when `hint` names `id` and no other `@tool_*` handle and no `<field>` placeholder.
 /// A `@tool_` id is minted from the clock (`store_tool`), so a magic prefix such as `@tool_abc`
 /// stands for a placeholder only until the clock mints an id that starts with it (bug
-/// 649df5b30d126f2b): the real handle is removed first, and what remains must hold no handle.
+/// 99a91afd5d137c59): the real handle is removed first, and what remains must hold no handle.
 fn hint_names_only_handle(hint: &str, id: &str) -> bool {
     let rest = hint.replace(id, "");
     hint.contains(id) && !rest.contains("@tool_") && !rest.contains("<field>")
@@ -3328,7 +3328,7 @@ async fn a_truncated_tool_query_names_a_real_route_on_its_own_handle_and_it_runs
         "`{route}` did not continue the slice: {t2:.300}"
     );
 }
-// BUG 649df5b30d126f2b: `store_tool` mints `@tool_{:08x}` from the clock, so for ~17.5 minutes
+// BUG 99a91afd5d137c59: `store_tool` mints `@tool_{:08x}` from the clock, so for ~17.5 minutes
 // every 49.7 days the real id starts with `@tool_abc` and the old placeholder check rejected it.
 #[test]
 fn a_real_handle_that_starts_with_the_old_placeholder_prefix_is_not_a_placeholder() {

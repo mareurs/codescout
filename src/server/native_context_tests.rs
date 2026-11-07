@@ -358,7 +358,7 @@ fn native_recorded_session(dir: &std::path::Path, marker: &str) -> String {
         .unwrap_or_else(|e| panic!("no single usage row for {marker}: {e}"))
 }
 
-/// Docs: 4b4fac5682a4303b, 421ed73df25f795d. The commit guard reads `usage.db.cc_session_id`
+/// Docs: ce484db75532c7f0. The commit guard reads `usage.db.cc_session_id`
 /// as the writer of a path. A Codex call used to be recorded under whatever the rendezvous
 /// slot named, which another Codex thread sharing the ppid can stamp, so the writer came out
 /// as the wrong thread. The native root on the request is the per-call identity.

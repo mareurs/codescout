@@ -1537,7 +1537,7 @@ impl CodeScoutServer {
         // and in `refuse_pin`) and for the task-local scope below. It is per-call, unlike the
         // rendezvous slot: several Codex servers share one ppid, so a slot can name ANOTHER
         // thread's session, and the commit guard reads `usage.db.cc_session_id` as the writer of
-        // a path (4b4fac5682a4303b, 421ed73df25f795d). Read from `peer` before `build_context`
+        // a path (ce484db75532c7f0). Read from `peer` before `build_context`
         // takes it, mirroring `ToolContext::client_identity`.
         let client =
             peer.as_ref()

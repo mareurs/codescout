@@ -1367,7 +1367,7 @@ mod tests {
         .unwrap();
     }
 
-    /// `docs/issues/2026-11-05-append-entry-worktree-override-bypasses-main-only-rule.md`.
+    /// `docs/issues/archive/2026-11-05-append-entry-worktree-override-bypasses-main-only-rule.md`.
     ///
     /// `prose_allocation_is_refused_from_a_worktree` covers a caller that names the
     /// MAIN row. A caller that names the worktree's own SHADOW of that ledger (the

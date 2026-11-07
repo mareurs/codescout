@@ -94,7 +94,7 @@ fn git_admin_path(repo: &std::path::Path, name: &str) -> Option<PathBuf> {
 ///
 /// Watching the whole `refs` directory or `packed-refs` reruns the script (and rebuilds the
 /// crate) in every checkout that shares the repository whenever ANY branch gets a commit
-/// (f8d06297d629928e). Only `HEAD`, `index` and the one ref `HEAD` points to decide the value.
+/// (60d07b752885b353). Only `HEAD`, `index` and the one ref `HEAD` points to decide the value.
 /// A missing path makes Cargo rerun on every invocation, so a path is printed only when it exists.
 fn watch_git_state(repo: &std::path::Path) {
     for name in ["HEAD", "index"] {

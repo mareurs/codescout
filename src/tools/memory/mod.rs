@@ -428,7 +428,7 @@ fn anchor_query_prefix(content: &str, budget_chars: usize) -> &str {
 /// it is bounded by the EMBEDDER's budget only. A reranker with a smaller context is not
 /// accounted for here; `rerank_or_passthrough` degrades to the vector-query order when the
 /// reranker errors, so such a failure costs ranking quality, not the search.
-/// docs/issues/2026-11-06-long-memory-semantic-anchor-input-too-large.md
+/// docs/issues/archive/2026-11-06-long-memory-semantic-anchor-input-too-large.md
 ///
 /// Errors are returned to the caller, which files the memory without anchors and reports them.
 async fn find_semantic_anchors(
