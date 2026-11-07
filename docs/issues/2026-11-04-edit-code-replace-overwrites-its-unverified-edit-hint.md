@@ -12,7 +12,7 @@ opened: 2026-11-04
 related:
 - '95abaa31c77daa39'
 severity: medium
-unverified: No test forces the Unverified verdict through the replace arm; attach_advice_keeps_an_existing_safety_warning covers only the helper the arm now uses.
+unverified: 'CLEARED 2026-11-07. Was: no test forces the Unverified verdict through the replace arm. Now: the response assembly the arm ends with is pinned by replace_response_keeps_the_unverified_warning_next_to_the_callers_advice (commit 4d66ee760). RESIDUAL, stated rather than hidden: the verdict cannot be forced through a real file, so do_replace''s own call into finish_replace_response is exercised only by the Clean path, never by Unverified.'
 ---
 
 # BUG: edit_code replace overwrites its own "edit NOT verified against dropped symbols" hint with the verify-callers hint
@@ -66,7 +66,8 @@ Applied. `do_replace` no longer loses its safety warning: the `replace` arm of `
 
 - `attach_advice_keeps_an_existing_safety_warning`, `src/tools/symbol/tests.rs:11742`: an existing `hint` survives `attach_advice`, and `advice` is a separate field. This covers the helper the arm now uses.
 - `edit_code_replace_of_a_body_only_edit_carries_no_advice_and_no_hint`, `src/tools/symbol/tests.rs:11685`, and the other `edit_code_replace_*` advice tests added in the same commit cover the arm's `advice` shapes.
-- **Not covered:** no test forces the `Unverified` verdict through the whole `replace` arm. The test that this bug's `## Fix` section asked for does not exist.
+- 2026-11-07, commit `4d66ee760` on `experiments` (not pushed; patch-id `70aa4cb6c58280c9940efacfd1cdcb6e1698e47f`): `replace_response_keeps_the_unverified_warning_next_to_the_callers_advice` and `replace_response_of_a_clean_verdict_carries_no_warning_and_no_advice`, `src/tools/symbol/tests.rs`. The `Unverified` marking and `attach_advice` moved out of `do_replace` into `finish_replace_response` (`src/tools/symbol/edit_code.rs`), which `do_replace` now ends with. Red: both tests failed to compile on the missing function. Mutant: a second writer of `hint` after `attach_advice` fails the first test at its `hint` assertion. Targeted run: 21 passed.
+- **Not covered, and why:** no test forces the `Unverified` verdict through the whole `replace` arm. Read from source, not measured: `do_replace` extracts symbols from the same path through the same parser before and after the write, and the written text is valid UTF-8, so no input makes the second extraction fail alone. Only a race (the file removed or changed between write and re-extract) would. The arm's call into `finish_replace_response` is therefore exercised only with a `Clean` verdict.
 
 ## Workarounds
 
@@ -74,7 +75,7 @@ Read `corruption_check` in the result; it is set when the check was skipped.
 
 ## Resume
 
-1. Write the arm-level test that forces an `Unverified` verdict on `replace` and asserts the warning text survives next to `advice`. Then discharge the `unverified:` caveat and archive this file.
+1. Done 2026-11-07 at the helper, not at the arm (see `## Tests added`). Archive this file once the commit is pushed. Re-open only if a real input is found that forces the `Unverified` verdict through `replace`; then add the arm-level test.
 
 ## References
 
