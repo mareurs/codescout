@@ -85,8 +85,15 @@ def block_text(ev: dict, lines: list[dict | None]) -> str:
     return ""
 
 
-def continuation(ev: dict, lines: list[dict | None], n_calls: int, max_chars: int) -> list[dict]:
-    """What followed: assistant text, the next `n_calls` tool calls and their results, in order."""
+def continuation(
+    ev: dict, lines: list[dict | None], n_calls: int, max_chars: int, max_result_chars: int | None = None
+) -> list[dict]:
+    """What followed: assistant text, the next `n_calls` tool calls and their results, in order.
+
+    Results are cut at `max_result_chars` (default: `max_chars`). They are the largest part of a
+    continuation and the least informative about whether a guide was used; the calls are the evidence.
+    """
+    res_cap = max_chars if max_result_chars is None else max_result_chars
     out: list[dict] = []
     included: set[str] = set()
     answered: set[str] = set()
@@ -111,14 +118,14 @@ def continuation(ev: dict, lines: list[dict | None], n_calls: int, max_chars: in
             for b in probe.blocks(d.get("message")):
                 if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") in included:
                     items, _ = census._result_items(b)
-                    out.append({"role": "tool_result", "text": _trunc("\n".join(items), max_chars)})
+                    out.append({"role": "tool_result", "text": _trunc("\n".join(items), res_cap)})
                     answered.add(b.get("tool_use_id"))
             if len(included) >= n_calls and answered >= included:
                 return out
     return out
 
 
-def build_packet(ev: dict, n_calls: int = 10, max_chars: int = 600) -> dict:
+def build_packet(ev: dict, n_calls: int = 10, max_chars: int = 600, max_result_chars: int | None = None) -> dict:
     lines = _read_lines(ev["path"])
     return {
         "id": _opaque(f"{ev['session_id']}-{ev['agent_id']}-{ev['line']}"),
@@ -127,7 +134,7 @@ def build_packet(ev: dict, n_calls: int = 10, max_chars: int = 600) -> dict:
         "trigger_tool": ev["trigger_tool"],
         "trigger_action": ev["trigger_action"],
         "block": block_text(ev, lines),
-        "continuation": continuation(ev, lines, n_calls, max_chars),
+        "continuation": continuation(ev, lines, n_calls, max_chars, max_result_chars),
         "control": None,
     }
 
@@ -214,6 +221,7 @@ def main() -> int:
     ap.add_argument("--shuffled-per-stratum", type=int, default=6)
     ap.add_argument("--calls", type=int, default=10)
     ap.add_argument("--max-chars", type=int, default=600)
+    ap.add_argument("--max-result-chars", type=int, default=300)
     ap.add_argument("--seed", type=int, default=20261107)
     ap.add_argument("--out-dir", required=True)
     args = ap.parse_args()
@@ -224,7 +232,7 @@ def main() -> int:
     pks: list[dict] = []
     keys: list[dict] = []
     for ev in drawn:
-        pk = build_packet(ev, args.calls, args.max_chars)
+        pk = build_packet(ev, args.calls, args.max_chars, args.max_result_chars)
         if not pk["block"]:
             continue  # the block could not be read back; never show a reader an empty one
         pks.append(pk)

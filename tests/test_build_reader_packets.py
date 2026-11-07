@@ -143,6 +143,20 @@ class PacketTests(unittest.TestCase):
         self.assertEqual([u["input"]["pattern"] for u in uses], ["p0", "p1"])
 
 
+    def test_results_can_be_cut_shorter_than_inputs(self):
+        rows = [
+            call("t1", "mcp__codescout__symbols", {"name": "x"}),
+            result("t1", ["{}", block("symbol-navigation")]),
+            call("c1", "mcp__codescout__grep", {"pattern": "q" * 500}),
+            result("c1", ["r" * 500]),
+        ]
+        pk = packets.build_packet(self.event_rows(rows)[0], n_calls=1, max_chars=400, max_result_chars=100)
+        use = next(c for c in pk["continuation"] if c["role"] == "tool_use")
+        res = next(c for c in pk["continuation"] if c["role"] == "tool_result")
+        self.assertTrue(use["input"]["pattern"].startswith("q" * 400 + "…"))  # inputs keep the longer cap
+        self.assertTrue(res["text"].startswith("r" * 100 + "…"))
+
+
     def test_a_short_session_gives_a_short_continuation_not_an_error(self):
         pk = packets.build_packet(self.event_rows(self.basic(n_after=3))[0], n_calls=10)
         self.assertEqual(len([c for c in pk["continuation"] if c["role"] == "tool_use"]), 3)
