@@ -1,10 +1,12 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: the activation banner prints a project root whose name holds a backslash as a different path
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-11-07
 opened: 2026-11-07
+unverified: 'Fixed and gated, with a failing test first and a killed mutant, but not seen live after a rebuild: the running server was not rebuilt after afdb4c3d3. The other root-valued fields listed under Fix were traced by reading only.'
 ---
 
 # BUG: the activation banner prints a project root whose name holds a backslash as a different path
@@ -60,11 +62,24 @@ None.
 
 ## Fix
 
-Not started. Direction: use `display_path(&root)` for the banner. The test `responses_emit_paths_relative_annotation_once_per_activation` in `src/server.rs` builds its expected root with `to_forward_slash`; add a case whose root name holds a backslash and requires the banner to name the real root. Related and not traced: other root-valued fields that use `to_forward_slash(&root)`, for example `project_root` in `src/tools/config/mod.rs` line 492 and the roots in `src/agent/mod.rs`, `src/tools/onboarding.rs` and `src/prompts/`.
+Written and committed 2026-11-07 (`afdb4c3d3`): `src/server.rs`, `CodeScoutServer::post_process`, the banner root goes through `display_path` instead of `to_forward_slash`. The `to_forward_slash` import stays under `#[cfg(test)]`, because the test modules reach it through `use super::*`.
+
+A test helper was added: `test_support::make_server_in_root(project_toml, root_name)`, with `make_server_with_project_toml` delegating to it, so a test can root the project under a chosen directory name.
+
+Not changed: the other root-valued fields that use `to_forward_slash(&root)`: `project_root`, the CWD hint and `main_root` in `src/tools/config/mod.rs`, and the root in `src/agent/mod.rs`. They were traced by reading only. `relative_root` of a workspace member is normalized to forward slashes when the configuration is read (`src/workspace.rs`, `declared_relative_root`), so a member root with a backslash cannot be declared; that one is by design.
+
+## Fix provenance
+
+- **SHA:** `afdb4c3d3` (`experiments`)
+- **patch-id:** `134975bbe211d7bc89f545f2589db9826db11fda`
+
+Fix committed 2026-11-07, not pushed when this was written. Gate: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0; LEAN 6184 and DEFAULT 9064 passed, counts that include other sessions' commits.
 
 ## Tests added
 
-N/A: bug only filed.
+`the_banner_names_a_root_whose_name_holds_a_backslash_as_it_is_on_disk` in `src/server.rs` (`cfg(unix)`): a project rooted at `aw\proj`; the first `post_process` response must carry `[codescout] paths are relative to <real root>`.
+
+Red first: it failed on the old code with `want: .../aw\proj` and `got: .../aw/proj`. Mutant: `to_forward_slash` restored on the banner failed it; reverted. The existing `responses_emit_paths_relative_annotation_once_per_activation` still passes.
 
 ## Workarounds
 
@@ -72,7 +87,7 @@ Avoid backslashes in directory names. The relative paths in the response are cor
 
 ## Resume
 
-Open. First step: write the test with a root named `aw\proj` and watch it fail with `aw/proj`.
+Fixed in `afdb4c3d3`. See the `unverified` caveat in the frontmatter. Part of the class of `2d8475ed5bc831e5`.
 
 ## References
 
