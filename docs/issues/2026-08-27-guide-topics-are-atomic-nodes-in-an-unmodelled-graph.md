@@ -846,4 +846,19 @@ The strong evidence is the zeros. Events with no taught behaviour in 50 calls ho
 
 **Limits, none optional.** (1) One reader and one model; there is no inter-reader agreement yet. (2) 24 controls. (3) A 10-call window and truncation can hide use that comes later or in a cut field. (4) "Would a competent agent have done it anyway" is the reader's judgement. (5) `USED_EXPLICIT` is the strict reading; the true use is between it and the any-kind rate minus the false-positive rate, and this data cannot narrow that. (6) The strata are not all of the population: whole-topic deliveries only, one machine, 30 days. (7) Rubric v2 was written after the calibration controls were seen; the calibration shard is excluded from the totals above by being re-run under v2.
 
-**Not done.** A second reader (Sonnet) on the bootstrap packets and on the 28 real packets where predicate and reader disagree, then Opus on their disagreements. The cost is not estimated again; it would be about 112 packets, near 0.7M tokens at the measured rate, at a higher price per token.
+**Done afterwards, see the next section.** A second reader (Sonnet 5.5) on the bootstrap packets, all controls and the 28 real packets where predicate and reader A disagree; no Opus pass, because the remaining disagreements are "plausible" labels that a stronger model cannot make evidence.
+
+
+### Layer 2 result, second reader (2026-11-07)
+
+Reader B, Sonnet 5.5, same rubric v2, on 112 packets chosen by a stated rule: all 60 bootstrap packets, all 24 controls, and the 28 real packets where the layer-1 predicate (K=10) and reader A's any-kind label disagree. Cost 555K subagent tokens (the first reader's 11 runs were 1.62M, calibration 0.41M; total about 2.59M). `scripts/judge_guide_use.py score --common-only` (`6852cd568`). The ids and the rule are in the session scratchpad.
+
+**Controls again.** Reader B called 8 of 24 controls used (33%) and 1 explicit, the same packet as reader A: progressive-disclosure 5 of 12 (4 plausible, 1 explicit), symbol-navigation 3 of 6, bootstrap 0 of 6. The two readers have the same false-positive floor.
+
+**Bootstrap: the two readers agree on 60 of 60.** 55 not used by both, 5 used by both (8%, 95% interval 4% to 18%). Explicit: A 3, B 1; the one B marked is also A's, an exact ledger query `doc(find, kind=bug, filter status in [open, taken, investigating, zombie])`. A's other two explicit are a `memory(read, gotchas)` and a `get_guide(error-handling)` call; B marked them used but plausible. Controls 0 of 6 for both. This is the result that survives two models: at most about 18% of bootstrap deliveries to subagents show use of the guide's specific content in the next 10 calls, and most likely 5% to 10%.
+
+**Symbol-navigation and progressive-disclosure: not resolved.** The two readers disagree on 23 of 112 packets (kappa 0.36 three-way, 0.43 used or not). That figure is biased by the selection: the 28 packets were chosen because A contradicted the predicate, and B agrees with the predicate on 22 of them. On symbol-navigation B called 14 of 15 used and none explicit, against a control false-positive rate of 3 of 6, so those labels are not evidence. Explicit labels do not reproduce either: 4 (A) and 3 (B) real packets, 1 in common.
+
+**What this supports.** (1) Bootstrap to subagents is rarely used in a way that shows. It is also small: about 3.3 KB, roughly 830 tokens, per subagent, and 1,296 of 1,299 subagents got it. (2) For symbol-navigation and progressive-disclosure, "was the delivered text used" cannot be answered by reading 10 calls: a reader, human or model, cannot separate use of the guide from what a competent agent does anyway. A different instrument is needed, such as withholding the guide from some subagents, which was the option C rejected earlier for cost and sensitivity.
+
+**What it does not support.** It does not show that the guides are worthless. A guide can shape behaviour that does not appear in 10 calls, or prevent a failure that never happens. The result is about visible use, in one machine's transcripts, over 30 days.
