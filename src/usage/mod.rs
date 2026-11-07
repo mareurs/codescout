@@ -36,8 +36,10 @@ pub struct UsageRecorder {
     /// docs/issues/archive/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md
     ///
     /// **This field holds two different kinds of value and the column named after it
-    /// cannot say which.** The server passes `serving_session`, which is the companion's
-    /// composed `<session>/<agent>` principal token when one was stamped and a bare
+    /// cannot say which.** The server passes the asserted principal or conversation when the
+    /// request carries one, else the request's native Codex root, else the rendezvous slot's
+    /// session, else the construction-time id. The principal is the companion's
+    /// composed `<session>/<agent>` token when one was stamped and a bare
     /// session id otherwise — measured 2026-09-20, 1,873 of 68,988 rows in this
     /// checkout's db carry the composed form. That is why `agent_id` below is its own
     /// field rather than something a consumer recovers by splitting this one: doing so
