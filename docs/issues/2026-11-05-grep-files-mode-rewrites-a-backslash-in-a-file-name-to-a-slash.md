@@ -7,7 +7,7 @@ tags:
 - cluster/addressing-without-an-escape-hatch
 closed: 2026-11-07
 opened: 2026-11-04
-unverified: 'Fixed, gated and seen live in grep and tree, but gaps remain. (1) Not every one of the 13 sites of a6babe715 is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run for them. (2) The references.rs warning site fixed in 665a7758e has no test of its own. (3) The callers fixed in d05072221 are tracked in bb462b414e559152, with their own caveat.'
+unverified: 'Fixed, gated and seen live in grep, tree and the references completeness_warning (src/a\b.rs listed with its backslash, 2026-11-07), but gaps remain. (1) Not every one of the 13 sites of a6babe715 is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run for them. (2) The references.rs warning site fixed in 665a7758e has no test of its own; it was seen live only. (3) The callers fixed in d05072221 are tracked in bb462b414e559152, with their own caveat.'
 ---
 
 # BUG: grep rewrites a backslash in a file name to a slash, so the listed path names a file that does not exist

@@ -6,7 +6,7 @@ tags:
 - cluster/addressing-without-an-escape-hatch
 closed: 2026-11-07
 opened: 2026-11-07
-unverified: 'Fixed and gated, but no test reaches the external branch of classify_reference_path or the lib: branch of format_library_path; both use the same display_path swap as the tested project branch. Not seen live: the running server was not rebuilt after d05072221.'
+unverified: 'Fixed and gated, but no test reaches the external branch of classify_reference_path or the lib: branch of format_library_path; both use the same display_path swap as the tested project branch. Not seen live in the main references result: after a rebuild on 2026-11-07, rust-analyzer returned no location from src/a\b.rs for a scratch project that declares it with #[path] (3 tries, one after 25 s), so only the mock test covers file_groups. The cause of the missing location was not investigated.'
 ---
 
 # BUG: references and the rename textual matches list a file whose name holds a backslash under a rewritten path
