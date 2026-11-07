@@ -577,6 +577,18 @@ fn top_level_of(rel_path: &str) -> &str {
     }
 }
 
+/// Whether `stream_index` could ever store a chunk for the file at `path`: it must be
+/// readable as UTF-8 text and hold something other than whitespace (an empty or blank
+/// chunk is skipped because embedders reject empty inputs). Mirrors the two `continue`s
+/// at the top of `stream_index`'s loop; the zero-length metadata check is only a fast
+/// path that avoids reading a file that cannot qualify.
+fn indexer_can_represent(path: &Path) -> bool {
+    if std::fs::metadata(path).is_ok_and(|m| m.len() == 0) {
+        return false;
+    }
+    std::fs::read_to_string(path).is_ok_and(|s| !s.trim().is_empty())
+}
+
 /// Compare what the walk says belongs in the index against what the store holds.
 ///
 /// Deliberately uses [`indexable_files`] — the same walk `stream_index` uses — rather
@@ -600,8 +612,14 @@ pub(crate) async fn verify_index_coverage(
 ) -> Result<IndexIntegrity> {
     use std::collections::{BTreeMap, BTreeSet};
 
+    // `stream_index` skips a file it cannot read and every chunk that is blank, so a
+    // zero-byte or whitespace-only file has no chunk in the index and never can. Such a
+    // file is not a coverage defect: count it as expected and it is reported missing on
+    // every run, whatever the index does. The walk stays the single source of "which
+    // files"; this only drops the files the indexer could never represent.
     let expected: BTreeSet<String> = indexable_files(root, ignore_patterns)
         .into_iter()
+        .filter(|(path, _, _)| indexer_can_represent(path))
         .map(|(_, _, rel)| rel)
         .collect();
 
@@ -1825,6 +1843,56 @@ mod tests {
             "and it must not make scripts/ look empty either"
         );
     }
+    /// A file `stream_index` can never represent (zero bytes, or only whitespace, so every
+    /// chunk is blank and skipped) is not a coverage defect. Before the fix `verify` took
+    /// such a file from the walk, found no chunk for it, and reported it missing on every
+    /// run, so an index that was exactly as complete as it could be never read complete.
+    #[tokio::test]
+    async fn verify_does_not_count_files_the_indexer_cannot_represent_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(dir.path().join("empty.rs"), "").unwrap();
+        std::fs::write(dir.path().join("ws.rs"), "\n\n\n").unwrap();
+
+        let store = RecordingStore::default();
+        let emb = FakeEmbedder {
+            dim: 4,
+            seen: Mutex::new(Vec::new()),
+        };
+        stream_index(
+            dir.path(),
+            "p",
+            "coll",
+            &[],
+            &emb,
+            &store,
+            false,
+            1200,
+            3,
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            store.upserted_file_paths(),
+            vec!["a.rs".to_string()],
+            "precondition: the indexer stores only the file with content"
+        );
+
+        let report = verify_index_coverage(dir.path(), "p", "coll", &store, &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            report.missing_count, 0,
+            "empty.rs and ws.rs hold nothing to embed; missing_sample={:?}",
+            report.missing_sample
+        );
+        assert_eq!(
+            report.expected_files, 1,
+            "only a.rs can be represented in the index"
+        );
+    }
+
     /// A C/C++ tree must reach the index: `lang_for_ext` used to have no arm for these
     /// extensions, so the walk skipped every file and `verify` (which measures against
     /// that same walk) reported the empty index as complete.
