@@ -120,7 +120,10 @@ fn watch_git_state(repo: &std::path::Path) {
     // The branch is packed or still unborn. Its next commit CREATES the loose ref and leaves
     // `packed-refs` alone, so watching only `packed-refs` would miss it: also watch the nearest
     // existing ancestor directory of the missing ref, where that file will appear. This is
-    // wider than one file, but only until the first commit turns the ref loose.
+    // wider than one file. The main way in is `git gc` or `git pack-refs --all --prune`, which
+    // empties `refs/heads`, so every checkout whose branch has had no commit since falls back
+    // together; each leaves the fallback when its first commit turns its ref loose. An unborn
+    // branch (fresh `git init`) lands here too.
     if let Some(packed) = git_admin_path(repo, "packed-refs").filter(|p| p.exists()) {
         println!("cargo:rerun-if-changed={}", packed.display());
     }
