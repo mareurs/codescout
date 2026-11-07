@@ -14,6 +14,11 @@ pub fn workspace_hash(workspace_root: &Path) -> String {
 }
 
 /// A directory for socket/lock files private to the current user.
+///
+/// Order: a usable `XDG_RUNTIME_DIR`, then `/run/user/<uid>` when it exists, then
+/// `<temp_dir>/codescout-<uid>`. The middle step keeps a launcher that lost the variable on the
+/// same directory as the ones that kept it, so one workspace has one mux (the temp directory
+/// follows the caller's `TMPDIR`, so skipping it made two directories for one name).
 pub fn per_user_runtime_dir() -> Result<PathBuf, RuntimeDirError> {
     #[cfg(unix)]
     {
@@ -21,6 +26,7 @@ pub fn per_user_runtime_dir() -> Result<PathBuf, RuntimeDirError> {
         let name_uid = unsafe { libc::getuid() };
         runtime_dir_from(
             std::env::var_os("XDG_RUNTIME_DIR"),
+            Some(&PathBuf::from(format!("/run/user/{name_uid}"))),
             &std::env::temp_dir(),
             name_uid,
             crate::util::private_dir::effective_uid(),
@@ -43,6 +49,7 @@ pub(crate) fn short_per_user_runtime_dir() -> Result<PathBuf, RuntimeDirError> {
     // SAFETY: getuid is always safe; returns the real UID.
     let name_uid = unsafe { libc::getuid() };
     runtime_dir_from(
+        None,
         None,
         Path::new("/tmp"),
         name_uid,
@@ -107,6 +114,7 @@ impl std::error::Error for RuntimeDirError {
 #[cfg(unix)]
 fn runtime_dir_from(
     xdg: Option<std::ffi::OsString>,
+    user_run: Option<&Path>,
     temp: &Path,
     name_uid: crate::util::private_dir::Uid,
     verify_uid: crate::util::private_dir::Uid,
@@ -119,6 +127,23 @@ fn runtime_dir_from(
             return match verify_private_dir(&p, verify_uid) {
                 Ok(()) => Ok(p),
                 Err(why) => Err(RuntimeDirError::Refused { dir: p, why }),
+            };
+        }
+    }
+    // No usable `XDG_RUNTIME_DIR`: the per-user run directory is where it would have pointed.
+    // Without this step a launcher that lost the variable (a service, `cargo`-spawned, a harness
+    // that scrubs its environment) named `<temp>/codescout-<uid>` while every launcher that kept
+    // it named this directory, so one workspace got two muxes. A directory that exists but is
+    // not private is refused, as for `xdg`: a different one chosen quietly would split processes
+    // that must meet. One that does not exist (macOS, a container) is skipped.
+    if let Some(p) = user_run {
+        if p.is_absolute() && p.exists() {
+            return match verify_private_dir(p, verify_uid) {
+                Ok(()) => Ok(p.to_path_buf()),
+                Err(why) => Err(RuntimeDirError::Refused {
+                    dir: p.to_path_buf(),
+                    why,
+                }),
             };
         }
     }
@@ -215,10 +240,13 @@ mod runtime_dir_trust {
     #[test]
     fn a_missing_directory_is_created_private_and_reused() {
         let tmp = tempfile::tempdir().unwrap();
-        let got = runtime_dir_from(None, tmp.path(), me(), me()).unwrap();
+        let got = runtime_dir_from(None, None, tmp.path(), me(), me()).unwrap();
         assert_eq!(got, named(tmp.path()));
         assert_eq!(mode_of(&got), 0o700);
-        assert_eq!(runtime_dir_from(None, tmp.path(), me(), me()).unwrap(), got);
+        assert_eq!(
+            runtime_dir_from(None, None, tmp.path(), me(), me()).unwrap(),
+            got
+        );
     }
 
     #[test]
@@ -228,7 +256,7 @@ mod runtime_dir_trust {
         std::fs::create_dir(&elsewhere).unwrap();
         chmod(&elsewhere, 0o700);
         symlink(&elsewhere, named(tmp.path())).unwrap();
-        let err = runtime_dir_from(None, tmp.path(), me(), me()).unwrap_err();
+        let err = runtime_dir_from(None, None, tmp.path(), me(), me()).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -247,7 +275,7 @@ mod runtime_dir_trust {
         let dir = named(tmp.path());
         std::fs::create_dir(&dir).unwrap();
         chmod(&dir, 0o777);
-        let err = runtime_dir_from(None, tmp.path(), me(), me()).unwrap_err();
+        let err = runtime_dir_from(None, None, tmp.path(), me(), me()).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -263,7 +291,7 @@ mod runtime_dir_trust {
     #[test]
     fn a_directory_owned_by_another_uid_is_refused() {
         let tmp = tempfile::tempdir().unwrap();
-        let err = runtime_dir_from(None, tmp.path(), me(), me().wrapping_add(1)).unwrap_err();
+        let err = runtime_dir_from(None, None, tmp.path(), me(), me().wrapping_add(1)).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -280,7 +308,7 @@ mod runtime_dir_trust {
     fn an_empty_or_relative_temp_dir_is_refused_and_creates_nothing() {
         for bad in ["", "relative/tmp"] {
             let temp = Path::new(bad);
-            let err = runtime_dir_from(None, temp, me(), me()).unwrap_err();
+            let err = runtime_dir_from(None, None, temp, me(), me()).unwrap_err();
             assert!(
                 matches!(err, RuntimeDirError::NotAbsolute(_)),
                 "{bad:?} must be refused as not absolute, got: {err}"
@@ -298,6 +326,7 @@ mod runtime_dir_trust {
         chmod(xdg.path(), 0o777);
         let err = runtime_dir_from(
             Some(xdg.path().as_os_str().to_owned()),
+            None,
             Path::new("/nonexistent-temp"),
             me(),
             me(),
@@ -321,6 +350,104 @@ mod runtime_dir_trust {
         chmod(xdg.path(), 0o700);
         let got = runtime_dir_from(
             Some(xdg.path().as_os_str().to_owned()),
+            None,
+            Path::new("/nonexistent-temp"),
+            me(),
+            me(),
+        )
+        .unwrap();
+        assert_eq!(got, xdg.path());
+    }
+    /// The defect of `docs/issues/2026-11-07-two-kotlin-muxes-for-one-workspace-when-the-runtime-dir-differs-between-launchers.md`:
+    /// one launcher with `XDG_RUNTIME_DIR=/run/user/<uid>` and one without it named two different
+    /// directories for one workspace's mux socket, so two muxes and two JVMs served it.
+    #[test]
+    fn a_launcher_without_xdg_meets_one_that_has_it() {
+        let run = tempfile::tempdir().unwrap();
+        chmod(run.path(), 0o700);
+        let temp = tempfile::tempdir().unwrap();
+
+        let with_xdg = runtime_dir_from(
+            Some(run.path().as_os_str().to_owned()),
+            Some(run.path()),
+            temp.path(),
+            me(),
+            me(),
+        )
+        .unwrap();
+        let without_xdg =
+            runtime_dir_from(None, Some(run.path()), temp.path(), me(), me()).unwrap();
+
+        assert_eq!(
+            without_xdg, with_xdg,
+            "a process with no XDG_RUNTIME_DIR must name the directory the per-user run directory gives"
+        );
+        assert!(
+            !named(temp.path()).exists(),
+            "the temp name must not be created when the per-user run directory serves"
+        );
+    }
+
+    #[test]
+    fn an_unusable_xdg_value_falls_to_the_per_user_run_directory() {
+        let run = tempfile::tempdir().unwrap();
+        chmod(run.path(), 0o700);
+        let temp = tempfile::tempdir().unwrap();
+        for bad in ["", "relative/run", "/nonexistent-xdg"] {
+            let got = runtime_dir_from(Some(bad.into()), Some(run.path()), temp.path(), me(), me())
+                .unwrap();
+            assert_eq!(got, run.path(), "XDG value {bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_missing_per_user_run_directory_falls_to_the_temp_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let got = runtime_dir_from(
+            None,
+            Some(Path::new("/nonexistent-run-user")),
+            temp.path(),
+            me(),
+            me(),
+        )
+        .unwrap();
+        assert_eq!(got, named(temp.path()));
+    }
+
+    /// A refusal, not a fallback: a different directory chosen quietly would split processes that
+    /// must meet (the doc of [`RuntimeDirError`]).
+    #[test]
+    fn a_per_user_run_directory_that_is_not_private_is_refused() {
+        let run = tempfile::tempdir().unwrap();
+        chmod(run.path(), 0o777);
+        let temp = tempfile::tempdir().unwrap();
+        let err = runtime_dir_from(None, Some(run.path()), temp.path(), me(), me()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                RuntimeDirError::Refused {
+                    why: DirRefusal::GroupOrOtherWritable { .. },
+                    ..
+                }
+            ),
+            "a 0777 per-user run directory must be refused, got: {err}"
+        );
+        assert!(
+            !named(temp.path()).exists(),
+            "a refused run directory must not fall through to the temp name"
+        );
+    }
+
+    /// `XDG_RUNTIME_DIR` still wins when it is usable and differs from the per-user directory.
+    #[test]
+    fn a_usable_xdg_directory_wins_over_the_per_user_run_directory() {
+        let xdg = tempfile::tempdir().unwrap();
+        chmod(xdg.path(), 0o700);
+        let run = tempfile::tempdir().unwrap();
+        chmod(run.path(), 0o700);
+        let got = runtime_dir_from(
+            Some(xdg.path().as_os_str().to_owned()),
+            Some(run.path()),
             Path::new("/nonexistent-temp"),
             me(),
             me(),
@@ -335,7 +462,7 @@ mod runtime_dir_trust {
         let dir = named(tmp.path());
         std::fs::create_dir(&dir).unwrap();
         chmod(&dir, 0o777);
-        let text = runtime_dir_from(None, tmp.path(), me(), me())
+        let text = runtime_dir_from(None, None, tmp.path(), me(), me())
             .unwrap_err()
             .to_string();
         assert!(text.contains(&dir.display().to_string()), "{text}");
