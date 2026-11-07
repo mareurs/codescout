@@ -7,7 +7,7 @@ tags:
 - cluster/addressing-without-an-escape-hatch
 closed: 2026-11-07
 opened: 2026-11-04
-unverified: 'Fixed, gated and seen live in grep, tree and the references completeness_warning (src/a\b.rs listed with its backslash, 2026-11-07), but gaps remain. (1) Not every one of the 13 sites of a6babe715 is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run for them. (2) The references.rs warning site fixed in 665a7758e has no test of its own; it was seen live only. (3) The callers fixed in d05072221 are tracked in bb462b414e559152, with their own caveat.'
+unverified: 'Fixed, gated, and seen live in grep, tree and the references completeness_warning (src/a\b.rs listed with its backslash, 2026-11-07), but gaps remain. (1) Not every one of the 13 sites of a6babe715 is proven reached by a test: the lsp warming error entry in list_overview.rs and the paths in the WalkClock cut notice in grep.rs probably are not, and no per-site mutation was run for them. (2) The references.rs warning site fixed in 665a7758e has no test of its own; it was seen live only. (3) The callers fixed in d05072221 are tracked in bb462b414e559152, with their own caveat. (4) The sweep of the other callers of to_forward_slash is incomplete: the sites listed under Resume were not traced to a response. (5) The two-prefix stripper in fe7f4cfdf was not seen live after a rebuild; the live reading of the regression was on the build before it.'
 ---
 
 # BUG: grep rewrites a backslash in a file name to a slash, so the listed path names a file that does not exist
@@ -78,7 +78,9 @@ Not changed, on purpose: five other callers of `relative_forward_slash` (`src/to
 
 Fix committed 2026-11-07, not pushed when this was written. Gate on the tree before two blank lines were added in `util/fs.rs`: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0; LEAN 6172 and DEFAULT 9040 passed.
 
-Follow-up commit `665a7758e` (patch-id not computed here): three of the five callers named under Fix now use `relative_display_path`: `symbol_at.rs` (definition `file`), `edit_code.rs` (rename `corruption_hints`) and `references.rs` (the example paths in `completeness_warning`). Red first: `symbol_at_definition_names_the_real_file` and `rename_corruption_hint_names_the_real_file` failed with `src/a/b.rs`. Mutant: both sites restored to `relative_forward_slash` failed both tests. Gate: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, LEAN 6174 and DEFAULT 9042 passed. The `references.rs` site has no test of its own.
+Follow-up commit `665a7758e` (patch-id not computed here): three of the five callers named under Fix now use `relative_display_path`: `symbol_at.rs` (definition `file`), `edit_code.rs` (rename `corruption_hints`) and `references.rs` (the example paths in `completeness_warning`). Red first: `symbol_at_definition_names_the_real_file` and `rename_corruption_hint_names_the_real_file` failed with `src/a/b.rs`. Mutant: both sites restored to `relative_forward_slash` failed both tests. Gate: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, LEAN 6174 and DEFAULT 9042 passed. The `references.rs` site has no test of its own; it was seen live.
+
+Follow-up commit `fe7f4cfdf`, patch-id `ba3841efad8dc05994a07da9776c651db33dd6ab`: `symbol_to_json`, `callers_check.rs`, and the two-prefix stripper in `Tool::call_content`. Red first for all three new tests; mutants killed for each site. Gate: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, LEAN 6179 and DEFAULT 9047 passed.
 
 ## Tests added
 
@@ -96,7 +98,13 @@ Avoid backslashes in file names; or locate such a file with `tree` or `run_comma
 
 ## Resume
 
-Fixed in `a6babe715` and `665a7758e`; the two callers left out of those, `classify_reference_path` and `TextualMatch.file`, were fixed in `d05072221` under `bb462b414e559152`. Seen live after `a6babe715` on 2026-11-07 (`grep(mode="files")` and `tree` list `a\b.txt`). `symbols` on a directory, `symbol_at`, `references` and the rename hints are covered by tests only. See the `unverified` caveat in the frontmatter.
+Fixed in `a6babe715`, `665a7758e`, `d05072221` (under `bb462b414e559152`) and `fe7f4cfdf`. Seen live after `a6babe715` on 2026-11-07 (`grep(mode="files")` and `tree` list `a\b.txt`).
+
+`fe7f4cfdf` closed a sweep of every remaining caller of `to_forward_slash` and `relative_forward_slash`: it fixed `symbol_to_json` (the `file` of `symbols` name searches) and `callers_check.rs` (the file of an outside call), and it repaired a regression of the earlier commits. Seen live on a project rooted at `aw\proj`: after `display_path` kept a backslash in a path, `Tool::call_content` stopped relativizing it, because it stripped only the forward-slash spelling of the root. It now strips both spellings.
+
+Still open, sites that use the rewriting helpers and were NOT traced to a response or to a catalog comparison: `src/tools/library.rs` and `src/dashboard/api/libraries.rs` (library paths); `src/retrieval/sync.rs` line 530 (`rel_display`); `src/tools/memory/mod.rs` (the moved-memory paths) and the topic names built from file names in `src/memory/mod.rs` line 313 and `src/memory/anchors.rs` line 278; the project roots in `src/tools/config/mod.rs`, `src/agent/mod.rs`, `src/tools/onboarding.rs` and `src/prompts/`. Left on purpose: `src/git/mod.rs` and the `librarian` paths, which keep the catalog's forward-slash form. Not verified that each is on purpose.
+
+See the `unverified` caveat in the frontmatter.
 
 ## References
 
