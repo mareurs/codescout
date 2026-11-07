@@ -1132,7 +1132,10 @@ async fn an_unknown_project_id_keeps_its_paths() {
 
 /// Pinning the member as the workspace is the other way to reach its files: `read_file` then
 /// resolves against the member root, which is exactly what the store's paths are relative to.
-/// Prefixing there would double the member directory.
+///
+/// This guards discovery, not the prefix logic: under its own pin the member is listed as `.`, a
+/// root project, so `lift_explicit_member_hits` returns before it computes any prefix. The test
+/// that guards against doubling the prefix is `a_focused_member_does_not_double_the_prefix`.
 #[tokio::test]
 async fn pinning_the_member_workspace_does_not_double_the_prefix() {
     let (_host, root) = two_member_workspace();
@@ -1167,4 +1170,36 @@ async fn a_focused_member_does_not_double_the_prefix() {
     assert_eq!(paths, vec!["src/ser.rs".to_string()]);
     let focused = ctx.agent.project_root_for(None).await.unwrap();
     assert!(focused.join(&paths[0]).is_file());
+}
+
+/// Pins a CURRENT LIMITATION, not a wanted behaviour: a session focused on member `alpha` that
+/// passes an explicit `project_id` naming a sibling member `beta`. `beta`'s directory is not under
+/// the focused root (`crates/alpha`), so `strip_prefix` fails and the hits stay as the store
+/// returned them (`src/lib.rs`, relative to `crates/beta`). Those paths do not resolve against
+/// the root `read_file` uses. If this is ever fixed, this test must change with it.
+#[tokio::test]
+async fn pins_current_limitation_sibling_member_hits_stay_member_relative() {
+    let (_host, root) = two_member_workspace();
+    let agent = Agent::new(Some(root.clone())).await.unwrap();
+    agent
+        .activate_within_workspace("alpha", None)
+        .await
+        .unwrap();
+    let ctx = ctx_for(agent, None);
+    let focused = ctx.agent.project_root_for(None).await.unwrap();
+    assert!(
+        focused.ends_with("crates/alpha"),
+        "precondition: focused on alpha, got {}",
+        focused.display()
+    );
+
+    let mut hits = vec![member_hit("src/lib.rs")];
+    super::semantic_search::lift_explicit_member_hits(&ctx, "beta", Some(&focused), &mut hits)
+        .await;
+
+    assert_eq!(hits[0].file_path, "src/lib.rs");
+    assert!(
+        !focused.join(&hits[0].file_path).is_file(),
+        "the unlifted path does not resolve against the focused root"
+    );
 }
