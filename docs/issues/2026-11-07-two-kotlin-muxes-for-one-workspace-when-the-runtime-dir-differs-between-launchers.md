@@ -1,7 +1,7 @@
 ---
 id: eceae82e2fd45815
 kind: bug
-status: open
+status: fixed
 title: Two kotlin muxes and two JVMs serve one workspace when codescout servers start with different XDG_RUNTIME_DIR
 owners:
 - marius
@@ -9,9 +9,10 @@ tags:
 - cluster/unclassified
 - lsp
 - mux
+closed: 2026-11-08
 opened: 2026-11-07
 severity: low
-unverified: 'No controlled reproduction: both muxes were observed live, not started on purpose. The launcher that started the second one is only partly identified (its parent is `/home/marius/.cargo/bin/codescout start`, pid 2674124, itself a child of pid 646545, not traced further). No harm beyond memory was observed, and whether two JVMs on separate index dirs ever corrupt or starve each other was not tested.'
+unverified: Not seen live. The two-mux case was not reproduced, before or after the fix, and the fix was proved only through the pure function runtime_dir_from. A deliberate XDG_RUNTIME_DIR that differs from /run/user/<uid> still splits launchers. The launcher that dropped the variable was not traced.
 ---
 
 # BUG: Two kotlin muxes and two JVMs serve one workspace when codescout servers start with different XDG_RUNTIME_DIR
@@ -59,11 +60,32 @@ None tested. The environment difference is read from two live processes. Which l
 
 ## Fix
 
-None. Candidates, none evaluated: resolve the runtime directory from the uid alone (`/run/user/<uid>`) when it exists, whatever the caller's environment says; or discover an existing mux by workspace hash across both directories before spawning. Each changes where sockets live for every launcher, so each needs its own design.
+`runtime_dir_from` (`src/socket_discovery.rs`) takes a new input, `user_run`, and `per_user_runtime_dir` passes `/run/user/<uid>`. The order is now:
+
+1. A usable `XDG_RUNTIME_DIR` (absolute and existing), checked as before.
+2. `/run/user/<uid>`, when it is absolute and exists. If it exists and is not private to this user, the call refuses, as for the first step. The docstring of `RuntimeDirError` asks for a refusal here, because a different directory chosen quietly would split processes that must meet.
+3. `<temp>/codescout-<uid>`, as before.
+
+A launcher that lost the variable now meets the ones that kept it, on a host where systemd makes `/run/user/<uid>`. Where that directory does not exist (macOS, a container), nothing changes. A deliberate `XDG_RUNTIME_DIR` that points elsewhere still gives another directory: this fix does not cover that case.
+
+The second candidate in the earlier text (finding a mux across both directories) was not done.
+
+**Scope found while fixing.** `per_user_runtime_dir()` also sites the index lock (`src/retrieval/index_lock.rs`, `lock_path`, line 139). The same environment difference therefore gave two index-lock files for one project, so the single-writer lock did not hold across such launchers. The fix covers that too. No live case of it was seen.
+
+## Fix provenance
+
+- **SHA:** `b4c4cad537e2ac644e49eb72c53ed44fa88c8599` (`experiments`)
+- **patch-id:** `e152fa234d371578723691adc40be2a7b3b34283`
 
 ## Tests added
 
-None.
+In `runtime_dir_trust` (`src/socket_discovery.rs`), through the pure `runtime_dir_from`:
+- `a_launcher_without_xdg_meets_one_that_has_it`: the defect itself. It failed before the fix.
+- `a_per_user_run_directory_that_is_not_private_is_refused`: a 0777 directory is refused, and the temp name is not created. It failed before the fix.
+- `an_unusable_xdg_value_falls_to_the_per_user_run_directory`: an empty, relative or missing `XDG_RUNTIME_DIR` falls to the run directory. It failed before the fix.
+- `a_missing_per_user_run_directory_falls_to_the_temp_name` and `a_usable_xdg_directory_wins_over_the_per_user_run_directory`: guard the kept behaviour. Both passed before the fix.
+
+Mutant: a variant where the run directory wins over a usable `XDG_RUNTIME_DIR` fails `a_usable_xdg_directory_wins_over_the_per_user_run_directory`, and nothing else. It was reverted.
 
 ## Workarounds
 
@@ -71,7 +93,9 @@ Start every codescout server with the same `XDG_RUNTIME_DIR`. A stale duplicate 
 
 ## Resume
 
-Find what starts `~/.cargo/bin/codescout start` without `XDG_RUNTIME_DIR`. Then decide between the two candidate fixes above, and add a test through `runtime_dir_from` with the variable absent.
+Gate green on 2026-11-08 (FMT, CLIPPY, LEAN 6233, DEFAULT 9125, Python 1761). Not seen live: the duplicate mux was gone when the fix was written (one kotlin mux for the workspace, in `/run/user/1000`), and the case was never reproduced on purpose. After a rebuild, a mux that an older binary left in `/tmp/codescout-<uid>` can live up to its 300 s idle timeout beside a new one in `/run/user/<uid>`.
+
+Still open: which launcher omitted `XDG_RUNTIME_DIR` (`/home/marius/.cargo/bin/codescout start`, pid 2674124 in the report) was not traced. The fix does not need it, but it would show whether other variables go missing too.
 
 ## References
 
