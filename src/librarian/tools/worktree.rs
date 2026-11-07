@@ -47,6 +47,12 @@ pub(crate) fn is_main_checkout_artifact(
 /// so a guard that only asks that question lets a caller who names the shadow's id past a
 /// rule that exists for the main row. A ledger BORN in the worktree has neither record,
 /// has no main twin to collide with, and is not a shadow.
+///
+/// Scope: only WORKTREE sessions are covered (`cp.main_root` is `Some`); for any other
+/// session this returns `false` without looking at the row. A main-checkout session that
+/// names a worktree shadow's id, and a call with no current project at all, are therefore
+/// NOT caught by this predicate. That is deliberate: this widens nothing beyond the
+/// worktree-session guard it serves.
 pub(crate) fn is_worktree_shadow(
     cat: &Catalog,
     cp: &CurrentProject,
