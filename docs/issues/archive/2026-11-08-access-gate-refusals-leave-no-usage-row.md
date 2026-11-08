@@ -7,7 +7,7 @@ tags:
 - cluster/unclassified
 closed: 2026-11-08
 opened: 2026-11-08
-unverified: Not run on a live MCP server built from 6cb2aa615, only through call_tool_inner. A call cancelled by Escape and a call that hits tool_timeout_secs are not covered and leave no row today; that is read from race_against_cancel, not measured, and is not fixed here.
+unverified: The access-gate exit was run live on a rebuilt server (2 refusals, 2 rows). The write-lock and unknown-tool exits were not, only through call_tool_inner. A call cancelled by Escape and a call that hits tool_timeout_secs are not covered and leave no row today; that is read from race_against_cancel, not measured, and is not fixed here.
 ---
 
 # BUG: a refusal by the access gate leaves no usage row, so usage.db cannot see it
@@ -84,6 +84,8 @@ A call with no project to hold the row is skipped, as `refuse_pin` already did.
 Plus `usage::db::tests::the_dispatcher_refusals_have_a_family_whatever_their_data_says`, with hostile data (`heading Fix not found`, `index is locked`) in each message.
 
 All 5 failed before the change, for the reason named: 0 rows, and the ack row with no family. After: 15 of 15 in the targeted run. `./scripts/gate.sh` 2026-11-08: FMT, CLIPPY, LEAN, DEFAULT and Python all exit 0, on the third run. The first run's LEAN lane failed 2 `prompts` tests; they passed (140 of 140) on the next run of the same tree, and the files involved (`src/prompts/source.md` and its fixture) were another session's uncommitted edits.
+
+Live check, 2026-11-08, on a server rebuilt after `6cb2aa615`: a fresh directory activated read-only, then two `create_file` calls, both refused. Its `usage.db` held 3 rows: the `workspace` call and 2 `create_file` rows, `outcome` `error`, `err_family` `write_blocked_read_only`, `cc_session_id` set, `input_json` 50 and 51 bytes. The same check before the fix gave 0 rows for the two refusals. The unknown-tool and write-lock exits were not run live; they are covered only by the tests above.
 
 ## Workarounds
 Count refusals from the harness transcript, not from `usage.db`.
