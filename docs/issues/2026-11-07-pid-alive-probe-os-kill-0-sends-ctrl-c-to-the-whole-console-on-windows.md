@@ -1,14 +1,15 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: _pid_alive probes liveness with os.kill(pid, 0), which on Windows sends Ctrl+C to every process on the console and reports dead pids as alive'
 owners:
 - marius
 tags:
 - cluster/blast-radius-exceeds-visibility
+closed: 2026-11-08
 opened: 2026-11-07
 severity: high
-unverified: 'Verified on Windows only: the new test, four neighbouring suites (same 14 failures with and without the fix), and one controlled red run on a rebuilt binary (n = 1, no live peer on the helper''s console). Not run on Linux, not run through the full gate. That the old os.kill call is what ended Claude Code sessions remains an association: the Claude Code process is not attached to the console the helper shares, so how it died is not established.'
+unverified: 'The Ctrl+C broadcast half was verified on Windows only (one controlled red, n = 1, no live peer on the helper''s console); Wine does not reproduce it. That the old os.kill call is what ended Claude Code sessions remains an association: the Claude Code process is not attached to the console the helper shares, so how it died is not established.'
 ---
 
 # BUG: _pid_alive probes liveness with os.kill(pid, 0), which on Windows sends Ctrl+C to every process on the console and reports dead pids as alive
@@ -64,6 +65,11 @@ Not established: the exact route by which a Ctrl+C on that console ends the agen
   exits 0, or 2 for a deliberate wake; the "Stop hook blocking error" text is how Claude Code labels that wake.
 
 ## Fix
+
+## Fix provenance
+
+- **SHA:** `b5c67ecdef6dc5b7e55d51b9e2e78e2a12cbe65d` (`experiments`)
+- **patch-id:** `d41fa914791321e4d5f13802bdbeff107a668729`
 `scripts/file-provenance.py`: `_pid_alive` dispatches on `sys.platform`. Windows goes to the new
 `_pid_alive_windows`: `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` then `GetExitCodeProcess == STILL_ACTIVE`;
 access denied counts as alive; a non-numeric or out-of-DWORD-range pid is dead (ctypes truncates silently).
@@ -93,12 +99,17 @@ attribution; `src/tools/run_command/attribution.rs`, `DISABLE_ENV`). Verify the 
 Claude Code settings `env` entry does not override an inherited variable.
 
 ## Resume
-Not archived: the gate has not run. Still open:
-1. Run `tests/test_pid_alive.py` on Linux (CI). The POSIX branch is untouched; the test's POSIX expectations
-   (pid 1 alive, exited child dead, no SIGINT from signal 0) were reasoned, not run.
-2. Run the full light Python lane and the Rust gate before archiving.
-3. Watch further red `run_command` results on a fixed image. Only a run of reds with no session lost, in a session
-   that still has live peers on its console, would link the old call to the session losses.
+
+Status `fixed` by `b5c67ecdef6dc5b7e55d51b9e2e78e2a12cbe65d` (on `origin/experiments` since 2026-11-08).
+
+Evidence, by surface:
+- Windows (reporter, 2026-11-07): the new test, one controlled red run on a rebuilt binary (n = 1).
+- Linux, 2026-11-08: `tests/test_pid_alive.py` 7 passed, 1 skipped (the Windows-only range case); the full gate at `b75ccae18` is green (FMT, CLIPPY, LEAN 6239, DEFAULT 9131, Python 1764).
+- Wine 11.21 with Windows Python 3.11.9, 2026-11-08 (`wine-windows-test-suite` memory): with the fix 7 passed, 1 failed. The failure is `test_a_process_that_exists_but_cannot_be_opened_is_alive`: Wine has no pid 4 (System), and `OpenProcess` returns error 87 instead of 5, so it is a Wine difference, not a defect. On a mutant that skips `_pid_alive_windows`, `test_a_process_that_has_exited_is_reported_dead` fails (an exited process reads as alive), the out-of-range pid raises `OverflowError`, and the probe itself dies.
+
+Wine does NOT reproduce the Ctrl+C broadcast: on the mutant `sentinel_interrupted` and `prober_interrupted` stay `False`, so `test_probing_a_live_process_sends_a_signal_to_nobody` is green on the broken code under Wine and proves nothing there. That half rests on the Windows run alone.
+
+Still open: watch further red `run_command` results on a fixed image. Only a run of reds with no session lost, in a session that still has live peers on its console, would link the old call to the session losses.
 
 ## References
 - `scripts/file-provenance.py`, `src/tools/run_command/attribution.rs`
