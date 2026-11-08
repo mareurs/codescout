@@ -1,0 +1,66 @@
+{
+  "pool": "setup-ab fresh v2",
+  "registered": "2026-11-08",
+  "gate": "strict fresh builder (spec 2026-11-04) + spec verdicts + gold x2 / empty replay through the real grader; tolerant log parser; P2P hazard tests removed",
+  "amends": "setup-ab fresh v1",
+  "dropped": [
+    {
+      "id": "nushell__nushell-19172",
+      "reason": "the :b3 rebuild under the tolerant parser failed the strict gate (a result line interleaved inside a 'test result:' summary line in gold.log); not retried; a ceiling task in the v1 screen"
+    },
+    {
+      "id": "rust-lang__rust-analyzer-23586",
+      "reason": "not carried into v2: passed for both models in every variant of the v1 screen (ceiling); image removed"
+    },
+    {
+      "id": "rust-lang__rust-analyzer-23115",
+      "reason": "not carried into v2: passed for both models in every variant of the v1 screen (ceiling); image removed"
+    },
+    {
+      "id": "nushell__nushell-18976",
+      "reason": "not carried into v2: passed for both models in every variant of the v1 screen (ceiling); image removed"
+    },
+    {
+      "id": "rust-lang__rust-analyzer-23096",
+      "reason": "v1 leak prescan failed (false positive suspected); never run; not revisited in v2"
+    },
+    {
+      "id": "nushell__nushell-18979",
+      "reason": "v1 leak prescan failed (coincidence in /usr/bin/uconv); never run; not revisited in v2"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "rust-lang__rust-analyzer-22992",
+      "repo": "rust-lang/rust-analyzer",
+      "control_sha256": "698df486a0c8a500e24e792ab63632dd1ff4544fe41bb4c3831e02d5feb9ed98",
+      "expected_count": 8182,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    },
+    {
+      "id": "nushell__nushell-19052",
+      "repo": "nushell/nushell",
+      "control_sha256": "a981fe1f6ecc75a1f74b4c57ef796978e1099163dbf68926023f5ca91314b5e3",
+      "expected_count": 9453,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    },
+    {
+      "id": "nushell__nushell-19283",
+      "repo": "nushell/nushell",
+      "control_sha256": "1120fb489bf4c80e04e5fee5edc5a6af540c122af7805174bc4a47488eb9f1b3",
+      "expected_count": 10900,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    },
+    {
+      "id": "nushell__nushell-18863",
+      "repo": "nushell/nushell",
+      "control_sha256": "c07bf514d3d4490c3ae19e60c6e13c1da2b2ec8008c660771ca8bc0a746e6f55",
+      "expected_count": 8622,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    }
+  ]
+}
