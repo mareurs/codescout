@@ -28,7 +28,7 @@ Image sha256:0d74e4f14c68a438dce6cf9e4a02c626432ce12b866f55ac69c6cc687f7fff7a; n
 
 ## Cause boundary
 
-Observed native verification compares an eligible-file population with files represented by code chunks; these empty files have no source content to represent. Correction 2026-11-07: the source cause is now known and the earlier 'unverified' statement no longer holds. In src/retrieval/sync.rs, verify_index_coverage built its expected set from indexable_files, which lists every walked file, while stream_index skips a file it cannot read as UTF-8 and a file whose chunks are all blank. Such a file can never be stored, so verify reported it as missing. Whether MAIN (experiments) already changed this behavior: Unknown. Do not erase the original incomplete verdict or repeatedly rebuild unchanged empty files.
+Observed native verification compares an eligible-file population with files represented by code chunks; these empty files have no source content to represent. Correction 2026-11-07: the source cause is now known and the earlier 'unverified' statement no longer holds. In src/retrieval/sync.rs, verify_index_coverage built its expected set from indexable_files, which lists every walked file, while stream_index skips a file it cannot read as UTF-8 and a file whose chunks are all blank. Such a file can never be stored, so verify reported it as missing. The fix is commit a34c4e2fe, which is an ancestor of experiments (checked 2026-11-08 with git merge-base --is-ancestor). Do not erase the original incomplete verdict or repeatedly rebuild unchanged empty files.
 
 ## Containment
 
@@ -47,7 +47,7 @@ Commits (made on branch fix/open-issues-batch-20261107-r2; all are now on experi
 - a34c4e2fec888c1b80108c8bcae93bce4c541798 (branch fix/open-issues-batch-20261107-r2) / patch-id 7ce287733f6b11803f27ff78d402ebc8b68e8b68 - the fix.
 - 6d75578828765941385d79ea3a97a41695d887ef (branch fix/open-issues-batch-20261107-r2) / patch-id d7874f2a0f154fde3bd3994cea4024684055dc61 - test for the non-UTF-8 exit.
 
-Verification evidence: ./scripts/gate.sh --check was run on fix/open-issues-batch-20261107-r2 at its tip af3e2a9ec on 2026-11-07. Result: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, PYTHON_LIGHT=0 (lean nextest 6227 tests; default lane green). The gate does NOT cover: the three heavy Python suites, server-stack, librarian code in the lean lane, the local ONNX weight tests. An Opus reviewer examined the fix adversarially. The reviewer ran the new test red against the reverted production change (or used mutants) and approved.
+Verification evidence: ./scripts/gate.sh --check was run on fix/open-issues-batch-20261107-r2 at its tip af3e2a9ec on 2026-11-07. That branch is deleted; af3e2a9ec is an ancestor of experiments. Result: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, PYTHON_LIGHT=0 (lean nextest 6227 tests; default lane green). The gate does NOT cover: the three heavy Python suites, server-stack, librarian code in the lean lane, the local ONNX weight tests. An Opus reviewer examined the fix adversarially. The reviewer ran the new test red against the reverted production change (or used mutants) and approved.
 
 Limits of the fix:
 

@@ -47,7 +47,7 @@ Branch `experiments`, `build.rs` at the state of 2026-11-05, rustc 1.97.1 and 1.
 ## Evidence
 - Commit times on `experiments`: 14:49:58, 15:00:24, 15:07:02 on 2026-11-05. Rebuilt runs: warm1 and warm2 of both toolchains (14:58 to 15:21). No rebuild: warm3 of both toolchains (15:22 onward, after the last commit).
 - `Finished` lines per run are in the logs under the session scratchpad `tc-ab/logs/` (not committed). Summary: codescout memory `research/rust-toolchain-upgrade-20261105`.
-- Fix verification, 2026-11-07: `./scripts/gate.sh --check` on `fix/open-issues-batch-20261107-r2` at `af3e2a9ec`: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, PYTHON_LIGHT=0. Details and gate coverage limits in `## Fix`.
+- Fix verification, 2026-11-07: `./scripts/gate.sh --check` on `fix/open-issues-batch-20261107-r2` at `af3e2a9ec` (an ancestor of experiments; the branch is deleted): FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, PYTHON_LIGHT=0. Details and gate coverage limits in `## Fix`.
 
 ## Hypotheses tried
 1. **Hypothesis:** the rebuilds come from the compiler change. **Verdict:** rejected for this effect. Both toolchains rebuilt in warm1 and warm2 and neither in warm3, in their own slots.
@@ -70,7 +70,7 @@ Fixed on branch `fix/open-issues-batch-20261107-r2`. All of the commits below ar
 - 631a804662b1f6da98db61e8b5ce7699f3217858 (branch fix/open-issues-batch-20261107-r2) / patch-id 257478350380dfcc4643a8745b189c6515da7223: the packed and unborn tests assert the exact watch set.
 - daffefaf938c889208bdaacbafd60e10e6fd691a (branch fix/open-issues-batch-20261107-r2) / patch-id 1383319d70ff8f30a3bcdba17832c408f7a2cb31: the comment names `git gc` and `pack-refs --prune`.
 
-**Verification:** `./scripts/gate.sh --check` on `fix/open-issues-batch-20261107-r2` at its tip `af3e2a9ec`, 2026-11-07: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, PYTHON_LIGHT=0 (lean nextest 6227 tests; default lane green). The gate does NOT cover: the three heavy Python suites, server-stack, librarian code in the lean lane, the local ONNX weight tests. Each fix in the batch was reviewed adversarially by an Opus reviewer who ran the new test red against the reverted production change (or by mutants) and approved.
+**Verification:** `./scripts/gate.sh --check` on `fix/open-issues-batch-20261107-r2` at its tip `af3e2a9ec`, 2026-11-07 (that branch is deleted; `af3e2a9ec` is an ancestor of experiments): FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, PYTHON_LIGHT=0 (lean nextest 6227 tests; default lane green). The gate does NOT cover: the three heavy Python suites, server-stack, librarian code in the lean lane, the local ONNX weight tests. Each fix in the batch was reviewed adversarially by an Opus reviewer who ran the new test red against the reverted production change (or by mutants) and approved.
 
 **Not measured:** the rebuild-cost benefit itself (cargo `Finished` lines in a sibling worktree after a commit elsewhere). Only the watch set was checked. See the `unverified` field for the other limits.
 
