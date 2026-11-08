@@ -1,14 +1,15 @@
 ---
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: first references call after start returns a partial result with a warning; an immediate retry returns the full one'
 owners:
 - marius
 tags:
 - cluster/lazy-warmup-bills-the-first-caller
+closed: 2026-11-08
 opened: 2026-11-07
 severity: medium
-unverified: 'Still one observation, never reproduced. One cold-start attempt on Linux, pyright 1.1.412, small symbol: the first call was complete. The re-ask is covered by unit tests of the retry decision only. The full gate has not been run.'
+unverified: 'Not reproduced, before or after the fix: one cold pyright start on Linux (1.1.412) returned the full set on the first call even without it. The re-ask is tested on its own loop; the wiring in References::call and the window check are not tested. The 5 s ceiling is a guess, not a measured warm-up time. A re-ask that answers [] can add one client wait of up to 5 s past the budget; not measured.'
 ---
 
 # BUG: first references call after start returns a partial result with a warning; an immediate retry returns the full one
@@ -51,32 +52,29 @@ None.
 
 ## Fix
 
-Not applied on this branch. PR 33 proposed `reask_while_unsettled` in `src/tools/symbol/references.rs` and a longer
-`not_answered_budget` (5 s to 15 s) in `src/lsp/client.rs`. Review measurements on Linux, 2026-11-07, with a fake
-LSP server that answers every request of one method with a fixed answer inside the cold-start window (one run each):
+The wait lives in the tool, not the client. `LspClient::references` re-asks only an EMPTY answer (`request_until_answered`). The reported answer was non-empty (2 hits, both in the definition file), so the client could not see the gap; only `References::call` can, by comparing it with the text scan.
 
-- One `client.references` call, server answers `[]`: 5.04 s and 26 requests on the base, 15.14 s and 76 requests with
-  the 15 s budget.
-- `document_symbols`, server answers `null`: 5.06 s on the base, 15.16 s with the 15 s budget.
-- One `references` call with the proposed re-ask loop around it, server answers `[]`: 62.43 s and 304 requests.
+`References::call` (`src/tools/symbol/references.rs`) now calls `reask_until_outside_hit` when all three hold: the client reports its cold-start window open (`LspClientOps::cold_start_window_open`, default `false`, `LspClient` overrides it), no location lies outside the definition file or a build directory, and `corroborate_zero_references` finds the symbol as a whole word in other files. It re-asks every 500 ms for at most 5 s (`PARTIAL_REASK_BUDGET`, `PARTIAL_REASK_INTERVAL`), keeps the answer in hand when a re-ask fails or answers `[]`, and on exhaustion returns the partial answer, which still gets the existing zero-external `completeness_warning`.
 
-The 62 s is a worst case: a server that never leaves `[]`. `LspClient::references` already re-asks an empty answer
-for `not_answered_budget`, so a second retry layer in the tool multiplies the wait. The proposed predicate also reads
-the raw locations, before the build-directory and scope filters that `external_refs` uses. A fix must decide where
-the wait belongs (the client or the tool, not both).
+Why the two waits do not multiply (PR 33 measured 62 s): a non-empty answer costs the client no wait, so the tool's loop is the only wait in the partial case. A re-ask that answers `[]` can still cost one client wait of up to 5 s past the tool budget; that case was not measured.
+
+## Fix provenance
+
+- **SHA:** `9f78d028e27d8b0e38b34963218b357c9c9c13e5` (`experiments`)
+- **patch-id:** `c6901954325299c0012bb0225f89e41da3c4b141`
 
 ## Tests added
 
-None on this branch. The helper tests from PR 33 were not brought over with the helper.
+`src/tools/symbol/tests.rs`, on `reask_until_outside_hit` and `has_outside_hit`: a partial answer is re-asked until an outside location appears; an answer that already has one is not re-asked; a server that never improves is asked for the budget and no longer; a failed re-ask and an empty re-ask keep the answer in hand; a build-directory location is not an outside hit. Two of them failed against a stub that returned its input; a mutant that drops the empty-answer guard fails `an_empty_re_ask_does_not_replace_the_partial_answer`. Gate green 2026-11-08: FMT, CLIPPY, LEAN 6239, DEFAULT 9131, Python 1764.
+
+Not tested: the wiring in `References::call`. The mock reports the window closed, and a mock that never improves would hold a test for the full 5 s budget.
 
 ## Workarounds
 Run `references` twice, or corroborate with `grep` / `call_graph(direction="callers")` as the warning says.
 
 ## Resume
 
-Status stays `open`. Decide where the wait belongs (the client or the tool, not both). A test of the `References::call` wiring is still missing.
-
-Cold-start attempt 2026-11-08 (Linux, pyright 1.1.412, not the reporter's 1.1.413 on Windows): after `workspace(post_compact=true)` flushed the LSP clients, the first `references(symbol="_test_toolchain", path="tools/setup-ab-eval/fresh_build.py")` returned the full set at once: 7 references in 2 files, no `completeness_warning`. `ps` showed the `pyright-langserver` process 14 s old right after that call, so the call started a cold server. This does not reproduce the report. It does not clear it either: the symbol has few uses, and the project is small, so warm-up may finish inside `not_answered_budget`. A project like the reporter's, with a slower first index, was not tried.
+Status `mitigated`: a retry exists for the reported shape, but the defect was never reproduced, so it is not shown to cure the report. To close: reproduce on a project like the reporter's (Windows, pyright 1.1.413, a slower first index) and confirm the first call returns the full set, or the warning stays and the re-ask ends at 5 s. Add a wiring test if the mock gains a window switch and a settable budget.
 
 ## References
 - `docs/trackers/issue-clusters/IC-7-lazy-warmup-bills-the-first-caller.md`
