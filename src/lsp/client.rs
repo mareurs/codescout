@@ -134,10 +134,10 @@ pub(crate) fn is_retryable_lsp_error(err: &anyhow::Error) -> bool {
 /// Return true if cold-start's extended retry budget makes sense for `method`.
 ///
 /// Most LSP queries that return `-32800 RequestCancelled` during cold start
-/// become answerable per-file as the server parses each file, so retrying
-/// for ~45s catches them. But `workspace/symbol` stays unanswerable until
+/// become answerable per-file as the server parses each file, so the cold
+/// retries (delays of 3 s x N, 165 s in all on Linux, `request`) catch them. But `workspace/symbol` stays unanswerable until
 /// the *whole* project is indexed (minutes for large Rust/Kotlin projects),
-/// and a 45s retry budget + 30s per-attempt timeout blows through the MCP
+/// and that retry budget, with a 30 s timeout per attempt, blows through the MCP
 /// 60s tool timeout. For that method we keep the short warm budget and let
 /// callers (e.g. `symbols`) fail over to tree-sitter quickly.
 fn uses_cold_start_retry_budget(method: &str) -> bool {
@@ -880,10 +880,14 @@ impl LspClient {
         // the server returns -32800 (RequestCancelled) for every query. We use a
         // patient retry window while fresh, and a short one once warm.
         //
-        // Cold: cold_start_max_retries() retries × 3 s linear backoff.
-        //       Linux ≈ 45 s max, macOS ≈ 67 s, Windows ≈ 90 s (per
-        //       `cold_start_max_retries`).
-        // Warm:  3 retries × 300 ms linear backoff ≈ 1.2 s max wait.
+        // Cold: cold_start_max_retries() retries, the delay before retry N being 3 s x N
+        //       (linear backoff), so the delays alone total 3 s x (1 + ... + retries):
+        //       Linux 10 retries = 165 s, macOS 15 = 360 s, Windows 20 = 630 s. Each of the
+        //       retries + 1 requests can also wait its own 30 s timeout, so the worst case is
+        //       165 + 11 x 30 = 495 s on Linux, 360 + 16 x 30 = 840 s on macOS and
+        //       630 + 21 x 30 = 1260 s on Windows. (`cold_start_max_retries`.)
+        // Warm:  3 retries, delay 300 ms x N: 0.3 + 0.6 + 0.9 = 1.8 s of delays, plus up to
+        //       4 x 30 s of request timeouts in the worst case.
         // cap-class: NOT_A_CAP — retry ceiling; exhaustion surfaces as an error, never as a shortened result
         const MAX_RETRIES_COLD: usize = cold_start_max_retries();
         const RETRY_DELAY_COLD_MS: u64 = 3_000;
