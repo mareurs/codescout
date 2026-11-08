@@ -20,7 +20,8 @@ cannot prove" before you cite a result. The user asked for this to be a standing
   `--no-default-features --features http` (~30 s each in a warm slot).
 - Reproduction project `C:\pybig` (2169 `.py` files: the Python 3.11.9 standard library plus a package `pkg`), made by
   `tools/wine-repro/make-project.sh`. `C:\pyproj` is a small 8-file variant, too small to show the defect.
-- NOT installed: Git for Windows (`bash.exe`), `winetricks`, `wine-mono`, `wine-gecko`. On 2026-11-08 `api.github.com`
+- MSYS2 base at `C:\msys64` (a partial `bash.exe`, see "MSYS2 `bash.exe` under Wine" below).
+- NOT installed: Git for Windows, `winetricks`, `wine-mono`, `wine-gecko`. On 2026-11-08 `api.github.com`
   answered 504 four times and `github.com` timed out, so Git for Windows is blocked: retry later. The user approved
   installing `winetricks` (pacman `extra`, 20260125-2) if it is needed; `sudo -n` printed no error. Not needed so far.
 - Python installer provenance: `python-3.11.9-amd64.exe` from python.org, 26216840 bytes, GPG signature good, key
@@ -56,6 +57,33 @@ Windows codescout server, driven from Linux (the `tools/wine-repro/` scripts):
 To test another revision: `git worktree add --detach <scratchpad>/wt <rev>`, build there with `with-slot.sh`, copy the
 exe, `git worktree remove --force`. Never mutate the shared checkout. A controlled red is mandatory: a test that is
 green on the broken code proves nothing.
+
+## MSYS2 `bash.exe` under Wine (instead of Git for Windows), 2026-11-08
+
+Git for Windows could not be downloaded: `github.com:443` never answers the TLS ClientHello from this machine (TCP connects;
+`--curves X25519` changes nothing; `api.github.com` the same; `git-scm.com` answers but links to `github.com`). Retry later; a
+VPN or proxy would also do. `repo.msys2.org` answers, so MSYS2 was used.
+
+- Installed: `msys2-base-x86_64-20260927.tar.xz` from `repo.msys2.org/distrib/x86_64/`, extracted to `C:\msys64` (no
+  `pacman` run to install it). The signature is good: key `5A62D0CAB6264964`, primary fingerprint
+  `0EBF 782C 5D53 F7E5 FB02  A667 46BD 761F 7A49 B0EC` (Christoph Reiter), the same fingerprint that `msys2.org/docs/installer/`
+  publishes. `C:\drivers` (a copy of `system32\drivers`) and `C:\fork-test.sh` were also added to the prefix.
+- It is NOT a faithful shell. Measured, and the same on every run:
+  - `bash.exe -c` without `--login`: builtins and `( )` subshells work, but every external program it starts fails with
+    `Bad address` (rc 126), with or without `MSYS2_PATH_TYPE=inherit` and `MSYS2_ARG_CONV_EXCL='*'`.
+  - `--login` fails with `Directory \drivers\etc does not exist` when the current directory is on `Z:` (any Linux path such
+    as `/tmp`). Run it with the current directory INSIDE `~/.wine/drive_c`, so Wine maps it to `C:`. The first `--login`
+    run does the MSYS2 first-run setup and generates the pacman keyring; it did not hang here (WineHQ bug 53574 reports
+    that it can).
+  - With `--login` from `C:`: `echo hi | /usr/bin/cat` prints `hi`, `uname -a` once printed `MSYS_NT-10.0-19045 ... 3.6.10 ...
+    Msys`, and `$(echo hello | tr a-z A-Z)` works. But in one script `uname -a` and `ls /usr/bin | wc -l` printed nothing,
+    and `x=$(echo $i | cat)` came back empty ten times. So some child programs run and some lose their output.
+  - Every start prints a Cygwin warning `Couldn't compute FAST_CWD pointer`.
+- So: do not use this to judge a shell-dependent Windows bug. It shows only that a `bash.exe` process can exist in the
+  process tree. Run as: `cd ~/.wine/drive_c && MSYS2_PATH_TYPE=inherit WINEDEBUG=-all wine 'C:\msys64\usr\bin\bash.exe' --login
+  /c/<script>`, with MSYS paths (`/c/...`, `/z/...`).
+- Sources: the WineHQ forum thread `viewtopic.php?t=42551` (a workaround for bug 53574, not readable with curl: 403) says to
+  set `MSYS2_PATH_TYPE=inherit` and run `bash.exe --login`; Wine 11.0 and 11.2/3-staging are named as tested there.
 
 ## Traps found
 
