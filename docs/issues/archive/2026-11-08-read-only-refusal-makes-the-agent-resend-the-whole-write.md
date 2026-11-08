@@ -1,5 +1,5 @@
 ---
-id: 6f9cbf174e261add
+id: '6f9cbf174e261add'
 kind: bug
 status: fixed
 title: a read-only refusal makes the agent resend the whole write
@@ -7,7 +7,7 @@ tags:
 - cluster/unclassified
 closed: 2026-11-08
 opened: 2026-11-08
-unverified: Not run against a live MCP session, only through call_tool_inner. The claim that the refusal branch returns before the usage recorder is inferred from reading call_tool_inner, with no test (see F-219 in docs/trackers/bug-fix-session-log.md).
+unverified: 'CLEARED 2026-11-08. Was: not run against a live MCP session, and the refusal-leaves-no-usage-row cause only inferred. Both settled: on a server rebuilt from a96963c96 the refusal named the handle, an ack-only call wrote the original payload, and the activation stayed read-only; two refusals left zero rows in usage.db. The missing-row defect is its own bug: docs/issues/2026-11-08-access-gate-refusals-leave-no-usage-row.md.'
 ---
 
 # BUG: a read-only refusal makes the agent resend the whole write
@@ -36,7 +36,7 @@ Both remedies make the agent write the same payload again.
 codescout on branch `experiments`, 2026-11-08. MCP stdio.
 
 ## Root cause
-`CodeScoutServer::check_tool_access` (`src/server.rs`) refuses before the tool runs. `path_security::check_tool_access` is a pure function of the config and never sees the input. The out-of-scope write path already keeps its input under `@ack_*` (`OutputBuffer::store_pending_write`, `src/tools/core/write_ack.rs`), but the read-only refusal does not use it. Inferred from reading the source, not yet measured at runtime.
+`CodeScoutServer::check_tool_access` (`src/server.rs`) refuses before the tool runs. `path_security::check_tool_access` is a pure function of the config and never sees the input. The out-of-scope write path already keeps its input under `@ack_*` (`OutputBuffer::store_pending_write`, `src/tools/core/write_ack.rs`), but the read-only refusal does not use it. Read from the source; the refusal text and the replay were then run on a live server rebuilt from `a96963c96` (2026-11-08) and behaved as read.
 
 ## Evidence
 Measured 2026-11-08 over every `usage.db` under `~/work` larger than 1 MB and modified after 2026-10-01: failed write-tool calls with input over 1000 bytes, whose next call in the same session repeated the same tool with an input of similar size (next 6 calls).
@@ -46,7 +46,7 @@ Measured 2026-11-08 over every `usage.db` under `~/work` larger than 1 MB and mo
 | `worktree_activate_required` | 93 | 397,212 |
 | `target_already_exists` | 93 | 437,729 |
 
-The read-only refusal itself has zero rows in `tool_calls` in every database checked, so its own share cannot be measured. The refusal branch returns before the recorder (read in `call_tool_inner`; not yet confirmed by a test).
+The read-only refusal itself has zero rows in `tool_calls` in every database checked, so its own share cannot be measured. The refusal branch returns before the recorder: confirmed in `call_tool_inner` and by a live run, two refusals and zero rows (filed as `docs/issues/2026-11-08-access-gate-refusals-leave-no-usage-row.md`).
 
 ## Hypotheses tried
 1. **Hypothesis:** the refusal text is wrong. **Verdict:** rejected. It names a working remedy; the remedy is the problem.
