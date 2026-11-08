@@ -53,20 +53,29 @@ See Symptom. In this project's `usage.db` the only rows matching `timed out afte
 1. **Hypothesis:** the recorder skips rows whose outcome is an error. **Test:** the control above, and `tool_calls` already holds `error` and `recoverable_error` rows. **Verdict:** rejected.
 
 ## Fix
-Not done. Two exits, two designs, and one open vocabulary question.
 
-- **Timeout.** The error text is known where it is built. A typed error (for example `ToolTimedOut`) that `dispatch_tool_call`'s `Err(e)` branch can downcast would let it record once, through `record_refusal_row`, without double-writing the errors `record_content` already wrote. It needs a family (`tool_timeout`) in `normalize_err_family` and `ERR_FAMILIES`.
-- **Cancel.** The cancel arm of `race_against_cancel` can `await` before it parks, so it can write the row there, with the input and identity passed in. The call's side effects may have partly run, so the row is worth having.
-- **Open:** a cancelled call has no `outcome` today (`success`, `recoverable_error`, `error`). A new `cancelled` value is counted as friction by `write_content` (`outcome != "success"`), and any query that counts non-success rows would change. That decision is the user's.
+**Timeout: done on the working tree, not committed yet.** The caller's answer is unchanged; the row is new.
+
+- `race_against_cancel` now builds a typed `ToolTimedOut { tool, secs }` instead of a bare `anyhow!`. Its `Display` is the same text the caller has always got.
+- `dispatch_tool_call` takes the start time and a clock beside the race. When the race ends in a `ToolTimedOut`, it writes the row through `UsageRecorder::record_abandoned` (`src/usage/mod.rs`), which takes the latency from the caller. A row written from inside `record_content` would say about 0 ms for a call held for the whole timeout. An error the tool returned is not a `ToolTimedOut`, so it is not written twice.
+- New family `tool_timeout` in `normalize_err_family` and `ERR_FAMILIES`, decided by the fixed prefix (`Tool '`) and the fixed closing sentence, with a hostile tool name in the test.
+
+**Cancel (Escape): not done.** Decided with the user 2026-11-08: the row gets `outcome = 'error'` and a new family `tool_cancelled`, not a new `cancelled` outcome, so the outcome vocabulary and the queries that count non-success rows stay as they are. The cancel arm of `race_against_cancel` can `await` before it parks the task, so it can write the row there, with the input and identity passed in. It needs a test with a parked task (spawn `call_tool_inner`, cancel the token, read the row, abort the task).
 
 ## Tests added
-None. This file records the defect only.
+
+Timeout, in `src/server/exit_rows_tests.rs`: `a_server_timeout_leaves_one_row_with_the_time_it_waited` injects a tool that sleeps 5 s into `server.tools`, with `tool_timeout_secs = 1`. It asserts the caller still gets `Tool 'slow_test_tool' timed out after 1s.`, then exactly one row (counted again after 300 ms, so a double write fails) with `outcome = 'error'`, `err_family = 'tool_timeout'` and `latency_ms` between 900 and 4000. It failed before the change with no rows and the precondition passing. A `tool_timeout` case with a hostile tool name was added to `usage::db::tests::the_dispatcher_refusals_have_a_family_whatever_their_data_says`.
+
+After: 16 of 16 in the targeted run. `./scripts/gate.sh` 2026-11-08: FMT, CLIPPY, LEAN and DEFAULT exit 0. Its Python lane failed 2 timing tests (`tests/test_phase1b_stage2_shell.py`, a 10 s subprocess timeout) while the machine's load average was 52; that file passes alone (8 of 8), and `python3 scripts/python-tests.py --lane light` passes on its own (1764 passed).
+
+Cancel: none yet.
 
 ## Workarounds
 Read cancellations and timeouts from the harness transcript, not from `usage.db`.
 
 ## Resume
-Start from `race_against_cancel` and the `Exit` type in `src/server.rs`, and from `src/server/exit_rows_tests.rs` for the test shape. The probe's shape is in Symptom: inject a slow `Tool` into `server.tools`, and spawn `call_tool_inner` for the cancel case.
+
+Cancel is what is left. Start from the cancel arm of `race_against_cancel` in `src/server.rs` and from `record_abandoned`, which already takes a caller-measured latency. Then fix provenance and archive.
 
 ## References
 `src/server.rs` (`race_against_cancel`, `dispatch_tool_call`, `record_refusal_row`); `src/usage/mod.rs` (`record_content`, `write_content`); `docs/issues/archive/2026-11-08-access-gate-refusals-leave-no-usage-row.md`.

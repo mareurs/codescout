@@ -208,3 +208,67 @@ async fn a_refused_ack_handle_leaves_one_row_in_its_family() {
         "ack refusal",
     );
 }
+
+/// A tool that outlives `tool_timeout_secs`. Injected into the server's own tool list, because
+/// no real tool is both slow on demand and subject to the server timeout (`run_command`, `index`
+/// and `librarian reindex` are exempt, see `tool_skips_server_timeout`).
+struct SlowTool;
+
+#[async_trait::async_trait]
+impl crate::tools::Tool for SlowTool {
+    fn name(&self) -> &str {
+        "slow_test_tool"
+    }
+    fn description(&self) -> &str {
+        "sleeps for five seconds"
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        json!({"type": "object"})
+    }
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: &crate::tools::ToolContext,
+    ) -> anyhow::Result<serde_json::Value> {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        Ok(json!({"done": true}))
+    }
+}
+
+/// The server's own timeout drops the future that holds the recorder, so the recorder's write,
+/// which runs after the tool body, never happened: the slowest calls were the ones missing.
+/// Measured 2026-11-08 with a probe: the caller got the error, `usage.db` got nothing.
+/// docs/issues/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
+///
+/// The caller's answer must not change, and the row must say how long the call was held.
+#[tokio::test]
+async fn a_server_timeout_leaves_one_row_with_the_time_it_waited() {
+    let toml = "[project]\nname = \"t\"\ntool_timeout_secs = 1\n";
+    let (dir, mut server) = make_server_with_project_toml(Some(toml)).await;
+    server.tools.push(std::sync::Arc::new(SlowTool));
+
+    let (is_error, text) = call(&server, "slow_test_tool", json!({})).await;
+    assert!(
+        is_error && text.contains("Tool 'slow_test_tool' timed out after 1s."),
+        "precondition: the caller still gets the timeout error, unchanged: {text}"
+    );
+
+    let rows = rows_for(dir.path(), "slow_test_tool").await;
+    assert_one_row(&rows, "error", "tool_timeout", "server timeout");
+
+    let latency_ms: i64 = rusqlite::Connection::open_with_flags(
+        dir.path().join(".codescout").join("usage.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap()
+    .query_row(
+        "SELECT latency_ms FROM tool_calls WHERE tool_name = 'slow_test_tool'",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap();
+    assert!(
+        (900..4_000).contains(&latency_ms),
+        "the row records the wait (about 1000 ms), not the instant the write ran; got {latency_ms}"
+    );
+}

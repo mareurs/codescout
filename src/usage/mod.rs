@@ -154,6 +154,40 @@ impl UsageRecorder {
         result
     }
 
+    /// Write the row for a call whose future was dropped before [`Self::record_content`] could:
+    /// the server's own timeout. The caller measures `started_at` and `latency_ms` itself,
+    /// because the clock inside `record_content` is in the future that was dropped, and a row
+    /// that said 0 ms for a call held for the whole timeout would hide the one fact worth having.
+    ///
+    /// Best-effort, like every write here: a failure is swallowed and the answer is untouched.
+    /// No delivery, observed-effect or attribution data exists for an abandoned call, so those
+    /// columns stay NULL.
+    /// docs/issues/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
+    pub async fn record_abandoned(
+        &self,
+        tool_name: &str,
+        started_at: &str,
+        latency_ms: i64,
+        input: &Value,
+        workspace_override: Option<&std::path::Path>,
+        error: anyhow::Error,
+    ) {
+        let result: Result<Vec<Content>> = Err(error);
+        let _ = self
+            .write_content(
+                tool_name,
+                started_at,
+                latency_ms,
+                input,
+                workspace_override,
+                &result,
+                None,
+                None,
+                None,
+            )
+            .await;
+    }
+
     // Ten parameters since `attribution` joined; `db::write_record`, which
     // this feeds, carries the same allow.
     #[allow(clippy::too_many_arguments)]

@@ -1140,12 +1140,13 @@ impl CodeScoutServer {
                     std::time::Duration::from_secs(secs),
                     tool_call_fut,
                 ) => res.unwrap_or_else(|_| {
-                    Err(anyhow::anyhow!(
-                        "Tool '{}' timed out after {}s. \
-                         Increase tool_timeout_secs in .codescout/project.toml if needed.",
-                        tool_name,
-                        secs
-                    ))
+                    // Typed, so `dispatch_tool_call` can tell this error from one the tool
+                    // returned (which `record_content` already wrote a row for). The text is
+                    // the one the caller always got.
+                    Err(anyhow::Error::new(ToolTimedOut {
+                        tool: tool_name.to_string(),
+                        secs,
+                    }))
                 }),
             }
         } else {
@@ -1607,9 +1608,9 @@ impl CodeScoutServer {
     /// analysis over that table was blind to those calls. [`Exit`] closes that by type: a new
     /// early return does not compile until it says whether the recorder covers it.
     ///
-    /// Not covered here, on purpose (a later step): a call cancelled by Escape and a call that
-    /// hits `tool_timeout_secs`. Both drop the future that holds the recorder, and the cancel
-    /// arm parks the task instead of returning, so neither reaches this code.
+    /// Not covered here, on purpose (a later step): a call cancelled by Escape. The cancel arm
+    /// parks the task instead of returning, so it never reaches this code. A call that hits
+    /// `tool_timeout_secs` is recorded by `dispatch_tool_call` itself (`record_abandoned`).
     /// docs/issues/archive/2026-11-08-access-gate-refusals-leave-no-usage-row.md
     async fn call_tool_inner(
         &self,
@@ -2080,6 +2081,12 @@ impl CodeScoutServer {
             Box::pin(tool_call_fut),
         );
 
+        // The recorder's write runs after the tool body, and the timeout drops that future, so a
+        // call that times out is recorded here instead, with the time it was held. The start is
+        // taken beside the race, not inside `record_content`, which is the future being dropped.
+        // docs/issues/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
+        let race_started_at = crate::usage::db::now_timestamp();
+        let race_clock = std::time::Instant::now();
         let result = Self::race_against_cancel(
             tool_call_fut,
             cancel_token,
@@ -2088,6 +2095,20 @@ impl CodeScoutServer {
             write_guard,
         )
         .await;
+        if let Err(e) = &result {
+            if let Some(timed_out) = e.downcast_ref::<ToolTimedOut>() {
+                recorder
+                    .record_abandoned(
+                        &req.name,
+                        &race_started_at,
+                        race_clock.elapsed().as_millis() as i64,
+                        &input_for_record,
+                        ctx.workspace_override.as_deref(),
+                        anyhow::anyhow!("{timed_out}"),
+                    )
+                    .await;
+            }
+        }
 
         // Assemble the result — success or error both produce a CallToolResult
         // so we can apply post-processing in one place.
@@ -2968,6 +2989,30 @@ fn select_error_render(e: &anyhow::Error) -> ErrorRender {
 /// row is best-effort; the answer is not.
 // cap-class: NOT_A_CAP — a wait budget for a telemetry write, a timeout; the caller's answer is complete whether or not the row landed
 const REFUSAL_RECORD_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The server's own `tool_timeout_secs` expired. A type and not a message, so
+/// `dispatch_tool_call` can tell it from an error the tool returned: `record_content` already
+/// wrote a row for those, and nothing wrote one for this. `Display` is the text the caller has
+/// always been given.
+/// docs/issues/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
+#[derive(Debug)]
+struct ToolTimedOut {
+    tool: String,
+    secs: u64,
+}
+
+impl std::fmt::Display for ToolTimedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Tool '{}' timed out after {}s. \
+             Increase tool_timeout_secs in .codescout/project.toml if needed.",
+            self.tool, self.secs
+        )
+    }
+}
+
+impl std::error::Error for ToolTimedOut {}
 
 /// Who made a call, as far as a usage row needs it. Cloned out of `dispatch_tool_call` once the
 /// call is known, because the exits move the originals.

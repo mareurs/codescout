@@ -566,6 +566,15 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     if msg.starts_with("unknown tool: ") {
         return Some("unknown_tool");
     }
+    // The server's own `tool_timeout_secs` expired (`ToolTimedOut`). The tool name inside the
+    // quotes is data, so the fixed prefix and the fixed closing sentence decide. An LSP timeout
+    // reads `LSP request timed out after …` and is not this.
+    if msg.starts_with("Tool '")
+        && msg.contains("' timed out after ")
+        && msg.contains("Increase tool_timeout_secs")
+    {
+        return Some("tool_timeout");
+    }
     // The 2026-11-02 audit's NULL head (119 of 1,113 non-success rows). These three messages embed
     // data (a path, a parameter name) that a substring rule further down could claim, so the fixed
     // prefix decides, here, first. Pinned with hostile data by
@@ -1021,6 +1030,7 @@ const ERR_FAMILIES: &[&str] = &[
     "symbol_not_found",
     "symbols_pattern_is_regex",
     "target_already_exists",
+    "tool_timeout",
     "unanchored_archive_refused",
     "unknown_enum_value",
     "unknown_tool",
@@ -4503,6 +4513,14 @@ mod tests {
                 "create_file",
                 format!("ack handle was minted by '{hostile}', not 'edit_file'"),
                 "ack_handle_refused",
+            ),
+            (
+                "slow_test_tool",
+                format!(
+                    "Tool '{hostile}' timed out after 60s. \
+                     Increase tool_timeout_secs in .codescout/project.toml if needed."
+                ),
+                "tool_timeout",
             ),
             (
                 "index is locked",
