@@ -447,7 +447,7 @@ pub(crate) async fn get_lsp_client(
 ///    eviction cycle). The bug file this used to cite was pruned as a
 ///    duplicate in `c6184884`; the codescout memory `gotchas` (LSP section) is
 ///    the canonical account of the concurrent-instance failures, per CLAUDE.md.
-fn is_mux_disconnect(e: &anyhow::Error) -> bool {
+pub(crate) fn is_mux_disconnect(e: &anyhow::Error) -> bool {
     let s = e.to_string();
     s.contains("Mux connection lost")
         || s.contains("Failed to spawn mux process")

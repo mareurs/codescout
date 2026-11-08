@@ -126,7 +126,7 @@ fn is_idempotent_lsp_method(method: &str) -> bool {
 ///
 /// Both are explicitly "retry on the new snapshot" signals per the LSP
 /// spec. We treat them identically — same backoff, same idempotency guard.
-fn is_retryable_lsp_error(err: &anyhow::Error) -> bool {
+pub(crate) fn is_retryable_lsp_error(err: &anyhow::Error) -> bool {
     let s = err.to_string();
     s.contains("code -32800") || s.contains("code -32801")
 }
@@ -482,6 +482,10 @@ pub struct LspClient {
     /// decides how long a `null` answer is re-asked in the cold-start window; see
     /// [`ProgressTracker`].
     progress: Arc<ProgressTracker>,
+    /// Set once the `references` tool has finished its one cold-start wait on this client
+    /// (settled or deadline hit), so later calls never wait again. Lives on the client because a
+    /// client is one language server for one root: a restart builds a new client and a new wait.
+    pub(crate) references_warmup_done: AtomicBool,
 }
 
 impl LspClient {
@@ -738,6 +742,7 @@ impl LspClient {
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
             progress,
+            references_warmup_done: AtomicBool::new(false),
         };
 
         // Perform the LSP initialize handshake
@@ -852,6 +857,7 @@ impl LspClient {
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
             progress,
+            references_warmup_done: AtomicBool::new(false),
         })
     }
 
@@ -2793,6 +2799,7 @@ struct Point {
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
             progress: Arc::new(ProgressTracker::default()),
+            references_warmup_done: AtomicBool::new(false),
         }
     }
 
@@ -2945,6 +2952,24 @@ struct Point {
             answer.is_err(),
             "the in-flight request fails as disconnected"
         );
+    }
+
+    /// The `references` tool's one-wait-per-client flag: a new client has not spent it, marking
+    /// spends it, and it stays spent. `NoopLsp`-style fakes answer `true`; only the real client's
+    /// `false` start is what makes the first `references` call wait.
+    #[test]
+    fn a_fresh_client_has_not_spent_its_references_warmup() {
+        use crate::lsp::ops::LspClientOps;
+        let client = bare_client(LspTransport::Process { child_pid: None }, None);
+
+        assert!(
+            !client.references_warmup_done(),
+            "a client that has served no `references` call has not waited yet"
+        );
+        client.mark_references_warmup_done();
+        assert!(client.references_warmup_done());
+        client.mark_references_warmup_done();
+        assert!(client.references_warmup_done(), "marking is idempotent");
     }
 
     /// The direct client's timed-out wait (a child that ignores `exit` and keeps stdout open)
@@ -3371,6 +3396,7 @@ struct Point {
             started_at: std::time::Instant::now(),
             init_completed_at: std::sync::OnceLock::new(),
             progress: Arc::new(ProgressTracker::default()),
+            references_warmup_done: AtomicBool::new(false),
         };
 
         assert!(

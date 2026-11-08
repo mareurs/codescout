@@ -324,64 +324,283 @@ pub(crate) fn corroboration_incomplete_warning(
     ))
 }
 
-#[async_trait::async_trait]
-impl Tool for References {
-    fn name(&self) -> &str {
-        "references"
-    }
+/// How long the first `references` call on a cold client waits for the server to settle.
+///
+/// Why 45 s and not 60 s: the server wraps every tool call, `references` included, in
+/// `tool_timeout_secs` (default 60 s, `src/config/project.rs`; only `index`, `index_library`,
+/// `run_command` and the librarian reindex skip it, `tool_skips_server_timeout` in
+/// `src/server.rs`). The wait is paid INSIDE that call, so it must leave room for the rest of it:
+/// the call-hierarchy cross-check ([`CALL_HIERARCHY_BOUND`]) and building the answer. The same
+/// reasoning sized `MUX_PEER_STARTUP_WAIT` (30 s, `src/lsp/manager.rs`). A test pins
+/// `FIRST_CALL_SETTLE_WAIT + CALL_HIERARCHY_BOUND + TOOL_TIMEOUT_MARGIN` within the default tool
+/// timeout.
+// cap-class: NOT_A_CAP — bound on how long a cold call waits for the server to warm; it picks when the partial answer is returned, never what an answer contains
+pub(crate) const FIRST_CALL_SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(45);
+/// Bound on the call-hierarchy cross-check after the call has waited for the server: on a cold
+/// server a call-hierarchy request can retry `-32800` for minutes by itself (`LspClient::request`:
+/// cold retries of 3 s x attempt, 3 s x (1 + ... + 10) = 165 s on Linux, each request up to 30 s),
+/// which would push the call past the server's tool timeout. When the wait ended by its deadline
+/// the cross-check is skipped instead.
+// cap-class: NOT_A_CAP — bound on a best-effort cross-check's time; skipping it only drops an extra warning
+pub(crate) const CALL_HIERARCHY_BOUND: std::time::Duration = std::time::Duration::from_secs(5);
+/// Margin kept free of the server's tool timeout, for answering after the last LSP request. The
+/// cross-check of a call that did not wait is bounded by the timeout minus this and the time
+/// already spent.
+// cap-class: NOT_A_CAP — safety margin under the server's tool timeout; never part of a result
+pub(crate) const TOOL_TIMEOUT_MARGIN: std::time::Duration = std::time::Duration::from_secs(5);
+/// Pause between two settle attempts. Each attempt already re-asks an empty answer inside the
+/// client, so this only spaces whole attempts.
+pub(crate) const SETTLE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
-    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
-        crate::tools::annot::read_only_closed()
-    }
+/// What the text scan and the server's answer say about whether the reference index is ready.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Settle {
+    /// Nothing suggests the server is still warming.
+    Settled,
+    /// No locations at all, before any filtering: not even the declaration the request asks for.
+    NoLocations,
+    /// No location outside the definition file. The scan (computed once per call, see
+    /// [`AttemptEnv::scan`]) decides: hits mean the server missed uses (warming); none mean a
+    /// real zero, or an incomplete scan (NOT a warming signal).
+    ExternalZero,
+}
 
-    fn description(&self) -> &str {
-        "Find all usages of a symbol. Requires symbol and file."
-    }
+/// One run of the symbol-then-references flow, filtered, with its [`Settle`] verdict.
+struct Attempt {
+    line: u32,
+    col: u32,
+    refs: Vec<lsp_types::Location>,
+    excluded: usize,
+    settle: Settle,
+    /// Whether this attempt looks like a server that is still warming: `NoLocations`, or
+    /// `ExternalZero` with a corroborating whole-word hit in another file.
+    unsettled: bool,
+}
 
-    fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
-        // Same split as `symbols`: overflow → the buffer guide, otherwise the navigation
-        // guide, which `call_content` would have dropped anyway on a result that fits.
-        // See `Symbols::relevant_guide_topic` for the full rationale and BL-25.
-        if result.get("overflow").is_some() || result.get("output_id").is_some() {
-            Some("progressive-disclosure")
-        } else {
-            Some("symbol-navigation")
-        }
-    }
+/// Everything [`evaluate_attempt`] needs besides the raw answer.
+struct AttemptEnv<'a> {
+    root: &'a std::path::Path,
+    lib_roots: &'a [(String, std::path::PathBuf)],
+    scope: &'a crate::library::scope::Scope,
+    full_path: &'a std::path::Path,
+    ident: &'a str,
+    lang: &'a str,
+    /// The corroboration scan, run on first need and then reused: it reads the on-disk text,
+    /// which does not change while the call waits, so re-running it per attempt buys nothing.
+    scan: std::sync::OnceLock<CorroborationScan>,
+}
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "required": ["symbol"],
-            // NO top-level anyOf/oneOf/allOf — the Anthropic Messages API rejects them
-            // and Claude Code drops the whole tool client-side. The path alternation is
-            // enforced in call() below, not here. See
-            // no_tool_schema_declares_a_top_level_combinator (src/server.rs).
-            "properties": {
-                "symbol": { "type": "string", "description": "Symbol identifier (e.g. 'MyStruct/my_method')" },
-                "path": { "type": "string", "description": "File containing the symbol" },
-                "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
-                "offset": { "type": "integer", "description": "Pagination offset" },
-                "limit": { "type": "integer", "description": "Max results (default 50)" },
-                "scope": {
-                    "description": "'project' (default), 'libraries', 'all', or 'lib:<name>' — a different axis from doc/librarian's scope (project|repo|umbrella|all).",
-                    "default": "project",
-                    // Nested combinator, not root-level — see the identical comment in
-                    // src/tools/symbol/symbols.rs's "scope" property for the full rationale.
-                    "oneOf": [
-                        { "type": "string", "enum": ["project", "libraries", "all"] },
-                        { "type": "string", "pattern": "^lib:.+$" }
-                    ]
-                }
-            }
+impl AttemptEnv<'_> {
+    fn scan(&self) -> &CorroborationScan {
+        self.scan.get_or_init(|| {
+            corroborate_zero_references(self.root, self.full_path, self.ident, self.lang)
         })
     }
+}
 
-    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
-        crate::fs::PATH_PARAM_ALIAS_MAP
+/// Filter a raw answer (build directories, then scope) and decide whether it looks settled.
+fn evaluate_attempt(
+    env: &AttemptEnv<'_>,
+    line: u32,
+    col: u32,
+    raw: Vec<lsp_types::Location>,
+    client: &dyn crate::lsp::LspClientOps,
+    pending: bool,
+) -> Attempt {
+    use crate::library::scope::Scope;
+    let total_raw = raw.len();
+    let refs: Vec<_> = raw
+        .into_iter()
+        .filter(|loc| {
+            uri_to_path(loc.uri.as_str())
+                .map(|p| !path_in_excluded_dir(&p))
+                .unwrap_or(true)
+        })
+        .collect();
+    let excluded = total_raw - refs.len();
+    let refs: Vec<_> = refs
+        .into_iter()
+        .filter(|loc| {
+            let Some(path) = uri_to_path(loc.uri.as_str()) else {
+                return true; // keep references we can't resolve
+            };
+            let (classification, _) = classify_reference_path(&path, env.root, env.lib_roots);
+            match env.scope {
+                Scope::Project => classification == "project",
+                Scope::Libraries => classification.starts_with("lib:"),
+                Scope::All => true,
+                Scope::Library(name) => classification == format!("lib:{}", name),
+            }
+        })
+        .collect();
+    // `full_path` is canonical (`\\?\C:\…` on Windows) while a location's path
+    // comes from a URI (`C:\…`), so compare against the marker-free spelling;
+    // unequal spellings counted the declaration as an outside reference
+    // (fed1c5731a623c30).
+    let full_path_plain = crate::util::fs::strip_verbatim(env.full_path);
+    let external_refs = refs
+        .iter()
+        .filter(|loc| {
+            uri_to_path(loc.uri.as_str())
+                .map(|p| p.as_path() != &*full_path_plain)
+                .unwrap_or(false)
+        })
+        .count();
+    // No locations AT ALL, before any filtering, contradicts the request itself:
+    // `LspClient::references` sends `includeDeclaration: true`, so a server that has
+    // resolved the symbol returns at least its declaration. A cold rust-analyzer
+    // answers `[]` or `null` for exactly this (measured 2026-09-24: `[]` at 0.02 s,
+    // `null` at each crate-graph swap, correct from 10.5 s). This needs no text
+    // scan, which is what makes it reach a FILE-LOCAL symbol, where the scan has no
+    // other file to find it in
+    // (docs/issues/archive/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md).
+    let settle = if total_raw == 0 {
+        Settle::NoLocations
+    } else if external_refs == 0 {
+        // Zero-external-callers corroboration (BUG 2026-06-09 references-false-zero-stale-graph):
+        // after an incremental reindex the LSP reference graph can lag the on-disk text and return
+        // only the definition, and an agent reads a 0-callers result as dead code and deletes it.
+        // Corroborate with an LSP-independent text scan.
+        Settle::ExternalZero
+    } else {
+        Settle::Settled
+    };
+    // Only a call that may still wait needs the verdict, so a warm call (or a later call on the
+    // client) never runs the scan here: it runs it, once, only if it must name the gap in a warning.
+    //
+    // `ExternalZero` (no location outside the definition file, a text scan that finds the symbol
+    // elsewhere) is provisional only while the client is inside its cold-start window
+    // (`cold_start_window_open`), and then for EVERY server: none of them says when it is done
+    // indexing (only rust-analyzer is even asked for `$/progress`). Past the window the same answer
+    // is final, so a used file-local `helper` named in another file returns at once with the plain
+    // warning. `NoLocations` contradicts the request itself and waits regardless of the window.
+    //
+    // Known limit of that window (docs/issues/2026-10-30-references-treats-every-new-mux-
+    // connection-as-a-cold-server-and-re-asks-for-5-s.md): it is a clock on the CLIENT, not a
+    // reading of the server. A spawned stdio client starts it when `initialize` returns; a mux
+    // socket client never runs `initialize`, so it starts it at connection (`LspClient::connect*`
+    // leave `init_completed_at` unset). So (1) on the mux path a fresh connection to a long-warm
+    // shared server finds the window open: one wasted wait, at most `FIRST_CALL_SETTLE_WAIT`, then
+    // the client is marked done; (2) on either path a client older than the window whose server
+    // starts indexing again, or a stdio server still importing after 5 minutes (kotlin-lsp), finds
+    // it closed: no wait, the plain warning at once.
+    let unsettled = pending
+        && match settle {
+            Settle::Settled => false,
+            Settle::NoLocations => true,
+            Settle::ExternalZero => client.cold_start_window_open() && !env.scan().hits.is_empty(),
+        };
+    Attempt {
+        line,
+        col,
+        refs,
+        excluded,
+        settle,
+        unsettled,
     }
+}
 
-    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+/// Whether a failed settle attempt looks like a warming or reconnecting server (a cancelled or
+/// content-modified request, a dropped mux) and is worth another try within the deadline.
+fn is_transient_attempt_error(e: &anyhow::Error) -> bool {
+    crate::lsp::client::is_retryable_lsp_error(e) || crate::fs::is_mux_disconnect(e)
+}
+
+/// The `completeness_warning` that the server's answer and the text scan call for, or `None` when
+/// they raise none. With `waited_secs` set, the call has already waited that long for the server
+/// and the warming texts say so instead of telling the caller to re-run.
+fn signal_warning(
+    settle: Settle,
+    env: &AttemptEnv<'_>,
+    root: &std::path::Path,
+    waited_secs: Option<f32>,
+) -> Option<String> {
+    const CORROBORATE: &str =
+        "corroborate with grep / call_graph(direction='callers') before treating this symbol as unused.";
+    let tail = |rerun: &str| {
+        match waited_secs {
+        None => format!(" {rerun}, or {CORROBORATE}"),
+        Some(secs) => format!(
+            " This call already waited {secs:.1} s for the language server to settle, so an immediate re-run is unlikely to help; {CORROBORATE}"
+        ),
+    }
+    };
+    match settle {
+        Settle::Settled => None,
+        Settle::NoLocations => Some(format!(
+            "LSP returned no locations at all — not even the symbol's own declaration, which this request asks it to include — so the reference index is not ready yet (a cold or reloading language server answers this way).{}",
+            tail("Re-run shortly")
+        )),
+        Settle::ExternalZero => {
+            let scan = env.scan();
+            let others = &scan.hits;
+            if !others.is_empty() {
+                let sample = others
+                    .iter()
+                    .take(3)
+                    .map(|p| crate::util::fs::relative_display_path(p, root))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ident = env.ident;
+                Some(format!(
+                    "LSP returned 0 references outside the definition file, but `{ident}` appears as a whole word in {n}+ other source file(s) (e.g. {sample}) — the reference index may still be warming after a reindex.{tail}",
+                    n = others.len(),
+                    tail = tail("Re-run")
+                ))
+            } else {
+                // The walk did not cover the project (file cap, an unreadable candidate,
+                // an unenterable directory): an empty hit list is "not reached", not
+                // "not present" (BUG 2026-10-16
+                // references-corroboration-scan-cap-yields-a-false-zero).
+                corroboration_incomplete_warning(env.ident, scan)
+            }
+        }
+    }
+}
+
+/// Marks the warm-up flag of the client the latest attempt ran on when it is dropped. See the use
+/// in `call_with_settle`: it makes a cancelled or timed-out first call still spend the client's one
+/// wait, so a later call does not wait (and get cut) again.
+struct SpendWait<'a> {
+    used: &'a std::sync::Mutex<(std::sync::Arc<dyn crate::lsp::LspClientOps>, String)>,
+}
+
+impl Drop for SpendWait<'_> {
+    fn drop(&mut self) {
+        let client = self
+            .used
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .0
+            .clone();
+        client.mark_references_warmup_done();
+    }
+}
+
+impl References {
+    /// `call` with the first-call settle wait parameterised, so a test can use milliseconds.
+    ///
+    /// On the FIRST `references` call served by a client (`references_warmup_done` unset), an
+    /// attempt that looks unsettled (`Attempt::unsettled`) is re-run every `interval` until one
+    /// does not, or until `deadline` has elapsed since the call began. Unsettled means: the server
+    /// answered no location at all, or only the definition file while the client is inside its
+    /// cold-start window (`cold_start_window_open`) and the project text names the symbol
+    /// elsewhere. The client is then marked
+    /// done, so a later call never waits. The wait lives here and not in `LspClient::references`,
+    /// which already re-asks an empty answer for its own budget: a second loop around it
+    /// multiplies the wait (docs/issues/2026-11-07-first-references-call-after-start-...md).
+    ///
+    /// The whole call, wait included, runs under the server's `tool_timeout_secs` (60 s by
+    /// default), which is why [`FIRST_CALL_SETTLE_WAIT`] is 45 s and the work after the wait is
+    /// bounded or skipped.
+    pub(crate) async fn call_with_settle(
+        &self,
+        input: Value,
+        ctx: &ToolContext,
+        deadline: std::time::Duration,
+        interval: std::time::Duration,
+    ) -> anyhow::Result<Value> {
+        let started = tokio::time::Instant::now();
         let name_path = require_str_param(&input, "symbol")?;
         let rel_path = require_path_param(&input)?;
         let scope_raw = input["scope"].as_str();
@@ -407,112 +626,152 @@ impl Tool for References {
             ctx.workspace_override.as_deref(),
         )
         .await?;
-
-        // Find the symbol's position by walking document symbols, then resolve
-        // references. I-4: wrap the whole symbol-then-references flow in a
-        // single mux-disconnect retry — both calls are idempotent reads.
-        // `client` and `lang` are cloned so the post-retry call-hierarchy
-        // cross-check (below) still has them.
-        let timer = LspTimer::start();
-        let name_path_owned = name_path.to_string();
-        // Read once for the alias fallback below — the closure may run twice.
-        let file_text = tokio::fs::read_to_string(&full_path)
+        // What the server will let this call run: its tool timeout, less a margin. Every wait
+        // after the first attempt is bounded by it.
+        let tool_timeout = ctx
+            .agent
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                Ok(p.config.project.tool_timeout_secs)
+            })
             .await
-            .unwrap_or_default();
-        let (sym_line, sym_col, refs) = retry_on_mux_disconnect(
-            &ctx.agent,
-            &*ctx.lsp,
-            &full_path,
-            ctx.workspace_override.as_deref(),
-            client.clone(),
-            lang.clone(),
-            |c, l| {
-                let p = full_path.clone();
-                let np = name_path_owned.clone();
-                let text = file_text.clone();
-                async move {
-                    let symbols = c.document_symbols(&p, &l).await?;
-                    let (line, col) = match find_unique_symbol_by_name_path(&symbols, &np) {
-                        Ok(s) => (s.start_line, s.start_col),
-                        Err(name_err) => {
-                            resolve_binding_by_position(&*c, &p, &l, &np, &text, &symbols)
-                                .await
-                                .ok_or(name_err)?
-                        }
-                    };
-                    let refs = c.references(&p, line, col, &l).await?;
-                    anyhow::Ok((line, col, refs))
-                }
-            },
-        )
-        .await?;
-        timer.record(&*ctx.lsp, raw_lang, &root).await;
-
-        // A cold server may answer with the definition file alone (the client's own re-ask
-        // covers only an EMPTY answer). When the window is open, no location lies outside the
-        // definition file, and the project text names the symbol elsewhere, ask again for a
-        // bounded time before the zero-external warning below is written
-        // (docs/issues/2026-11-07-first-references-call-after-start-returns-a-partial-result-and-a-retry-returns-the-rest.md).
-        // `full_path` is canonical (`\\?\C:\…` on Windows) while a location's path comes
-        // from a URI, so compare against the marker-free spelling (fed1c5731a623c30).
-        let full_path_plain = crate::util::fs::strip_verbatim(&full_path);
-        let refs = if client.cold_start_window_open() && !has_outside_hit(&refs, &full_path_plain) {
-            let ident = name_path.rsplit('/').next().unwrap_or(name_path);
-            let seen_elsewhere = !corroborate_zero_references(&root, &full_path, ident, raw_lang)
-                .hits
-                .is_empty();
-            if seen_elsewhere {
-                reask_until_outside_hit(
-                    || client.references(&full_path, sym_line, sym_col, &lang),
-                    refs,
-                    &full_path_plain,
-                    PARTIAL_REASK_BUDGET,
-                    PARTIAL_REASK_INTERVAL,
-                )
-                .await
-            } else {
-                refs
-            }
-        } else {
-            refs
-        };
+            .map(std::time::Duration::from_secs)
+            .unwrap_or(std::time::Duration::from_secs(
+                crate::config::project::DEFAULT_TOOL_TIMEOUT_SECS,
+            ));
+        let tool_budget = tool_timeout.saturating_sub(TOOL_TIMEOUT_MARGIN);
+        // The settle wait is bounded by the configured tool timeout too, not only by its own
+        // constant: the server cuts the call at `tool_timeout_secs` (src/server.rs), the done flag
+        // would never be marked, and every later call would wait and be cut again. What is left
+        // after the cross-check's bound is all the loop may spend. A budget at or under that bound
+        // (a configured timeout of 10 s or less) gives a zero deadline: the first answer is
+        // returned with today's warning, the wait is spent, nothing sleeps. A timeout at or under
+        // `TOOL_TIMEOUT_MARGIN` leaves no budget at all, so even a warm call skips the cross-check.
+        let deadline = deadline.min(tool_budget.saturating_sub(CALL_HIERARCHY_BOUND));
 
         // Resolve all library roots for classification (Scope::All to get every lib).
         let lib_roots =
             resolve_library_roots(&crate::library::scope::Scope::All, &ctx.agent).await?;
+        let ident = name_path.rsplit('/').next().unwrap_or(name_path);
+        let env = AttemptEnv {
+            root: &root,
+            lib_roots: &lib_roots,
+            scope: &scope,
+            full_path: &full_path,
+            ident,
+            lang: raw_lang,
+            scan: std::sync::OnceLock::new(),
+        };
 
-        // Filter out references inside build-artifact directories. LSP servers often
-        // index generated files (target/, node_modules/, dist/, …) and including them
-        // creates noise without actionable information.
-        let total_raw = refs.len();
-        let refs: Vec<_> = refs
-            .into_iter()
-            .filter(|loc| {
-                uri_to_path(loc.uri.as_str())
-                    .map(|p| !path_in_excluded_dir(&p))
-                    .unwrap_or(true)
-            })
-            .collect();
-        let excluded = total_raw - refs.len();
+        // Find the symbol's position by walking document symbols, then resolve
+        // references. I-4: wrap the whole symbol-then-references flow in a
+        // single mux-disconnect retry — both calls are idempotent reads.
+        let timer = LspTimer::start();
+        // Read once for the alias fallback below — the closure may run twice.
+        let file_text = tokio::fs::read_to_string(&full_path)
+            .await
+            .unwrap_or_default();
+        // The client (and its language id) the latest attempt actually ran on:
+        // `retry_on_mux_disconnect` swaps in a fresh client after a disconnect. The warm-up flag
+        // belongs to THAT client, and the next attempt must start on it, not on the dead original.
+        let used = std::sync::Mutex::new((client.clone(), lang.clone()));
+        let used_now = || used.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let run_flow = || {
+            let (start_client, start_lang) = used_now();
+            retry_on_mux_disconnect(
+                &ctx.agent,
+                &*ctx.lsp,
+                &full_path,
+                ctx.workspace_override.as_deref(),
+                start_client,
+                start_lang,
+                |c, l| {
+                    *used.lock().unwrap_or_else(|e| e.into_inner()) = (c.clone(), l.clone());
+                    let p = full_path.clone();
+                    let np = name_path.to_string();
+                    let text = file_text.clone();
+                    async move {
+                        let symbols = c.document_symbols(&p, &l).await?;
+                        let (line, col) = match find_unique_symbol_by_name_path(&symbols, &np) {
+                            Ok(s) => (s.start_line, s.start_col),
+                            Err(name_err) => {
+                                resolve_binding_by_position(&*c, &p, &l, &np, &text, &symbols)
+                                    .await
+                                    .ok_or(name_err)?
+                            }
+                        };
+                        let refs = c.references(&p, line, col, &l).await?;
+                        anyhow::Ok((line, col, refs))
+                    }
+                },
+            )
+        };
 
-        // Scope-filter references
-        let refs: Vec<_> = refs
-            .into_iter()
-            .filter(|loc| {
-                let Some(path) = uri_to_path(loc.uri.as_str()) else {
-                    return true; // keep references we can't resolve
-                };
-                let (classification, _) = classify_reference_path(&path, &root, &lib_roots);
-                match &scope {
-                    crate::library::scope::Scope::Project => classification == "project",
-                    crate::library::scope::Scope::Libraries => classification.starts_with("lib:"),
-                    crate::library::scope::Scope::All => true,
-                    crate::library::scope::Scope::Library(name) => {
-                        classification == format!("lib:{}", name)
+        // Only a client that has not yet spent its wait can make this call wait.
+        let pending = !client.references_warmup_done();
+        let (line, col, raw) = run_flow().await?;
+        timer.record(&*ctx.lsp, raw_lang, &root).await;
+        let mut cur = evaluate_attempt(&env, line, col, raw, &*used_now().0, pending);
+
+        // The first call served by this client waits for the server to settle. The wait is per
+        // client until a first call FINISHES: concurrent first calls each see `pending` and each
+        // wait, up to the deadline from their own start (one waits for nothing but is not wrong).
+        let mut waited = false;
+        let mut waited_out = false;
+        if pending {
+            // Spends the client's wait when this block ends, normally or because the call future
+            // is dropped mid-wait (a server timeout, a client cancel): otherwise every later call
+            // would wait and be cut again. It marks the client of the latest attempt, and holds no
+            // lock across an await.
+            let _spend = SpendWait { used: &used };
+            while cur.unsettled {
+                let remaining = deadline.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    // "Waited out" is only true if this call re-asked: a first attempt that alone
+                    // used the whole deadline waited inside the client, not here.
+                    waited_out = waited;
+                    break;
+                }
+                tokio::time::sleep(interval.min(remaining)).await;
+                let remaining = deadline.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    waited_out = waited;
+                    break;
+                }
+                waited = true;
+                match tokio::time::timeout(remaining, run_flow()).await {
+                    Ok(Ok((line, col, raw))) => {
+                        let next = evaluate_attempt(&env, line, col, raw, &*used_now().0, pending);
+                        // An empty answer after a non-empty one is a server mid-reload, not a
+                        // better answer: keep the partial one in hand and ask again.
+                        let regressed = matches!(next.settle, Settle::NoLocations)
+                            && !matches!(cur.settle, Settle::NoLocations);
+                        if !regressed {
+                            cur = next;
+                        }
+                    }
+                    // A transient error (a cancelled request, a dropped mux) is what a warming
+                    // server produces: try again, the deadline still bounds the loop.
+                    Ok(Err(e)) if is_transient_attempt_error(&e) => continue,
+                    // A deterministic error (symbol not found) must not turn the partial answer
+                    // we already hold into a failure: keep it, as the call did before the wait.
+                    Ok(Err(_)) => break,
+                    Err(_) => {
+                        waited_out = true;
+                        break;
                     }
                 }
-            })
-            .collect();
+            }
+        }
+        let waited_for = started.elapsed();
+        let Attempt {
+            line: sym_line,
+            col: sym_col,
+            refs,
+            excluded,
+            settle,
+            unsettled,
+        } = cur;
+        let (client, lang) = used_now();
 
         let locations: Vec<Value> = refs
             .iter()
@@ -575,68 +834,109 @@ impl Tool for References {
         // strict subset of references — so more call sites than references found is
         // proof of an incomplete reference set. Cheap: one prepare_call_hierarchy
         // (None for non-callable symbols → skipped) plus one incoming_calls.
-        if let Ok(Some(item)) = client
-            .prepare_call_hierarchy(&full_path, sym_line, sym_col, &lang)
-            .await
-        {
-            if let Ok(incoming) = client.incoming_calls(&item, &lang).await {
-                let call_sites: usize = incoming.iter().map(|c| c.from_ranges.len().max(1)).sum();
-                if let Some(hint) = references_completeness_hint(total, call_sites) {
-                    result["completeness_warning"] = json!(hint);
+        //
+        // It is bounded, because a cold server can retry -32800 here for minutes on its own: by
+        // CALL_HIERARCHY_BOUND after a settle wait, otherwise by what is left of the tool
+        // timeout. It is skipped once the wait hit its deadline: the call is already near the
+        // server's tool timeout.
+        let budget_left = tool_budget.saturating_sub(started.elapsed());
+        if !waited_out && !budget_left.is_zero() {
+            let cross_check = async {
+                if let Ok(Some(item)) = client
+                    .prepare_call_hierarchy(&full_path, sym_line, sym_col, &lang)
+                    .await
+                {
+                    if let Ok(incoming) = client.incoming_calls(&item, &lang).await {
+                        let call_sites: usize =
+                            incoming.iter().map(|c| c.from_ranges.len().max(1)).sum();
+                        if let Some(hint) = references_completeness_hint(total, call_sites) {
+                            result["completeness_warning"] = json!(hint);
+                        }
+                    }
                 }
-            }
+            };
+            let bound = if waited {
+                CALL_HIERARCHY_BOUND.min(budget_left)
+            } else {
+                budget_left
+            };
+            let _ = tokio::time::timeout(bound, cross_check).await;
         }
 
-        // Zero-external-callers corroboration (BUG 2026-06-09 references-false-zero-stale-graph):
-        // no callers OUTSIDE the definition file is the high-consequence failure mode — after an
-        // incremental reindex the LSP reference graph can lag the on-disk text and return only the
-        // definition, and an agent reads a 0-callers result as dead code and deletes it. The
-        // call-hierarchy cross-check above is also LSP-backed (shares the staleness), so corroborate
-        // with an LSP-independent text scan.
-        // `full_path` is canonical (`\\?\C:\…` on Windows) while a location's path
-        // comes from a URI (`C:\…`), so compare against the marker-free spelling;
-        // unequal spellings counted the declaration as an outside reference
-        // (fed1c5731a623c30).
-        let external_refs = refs
-            .iter()
-            .filter(|loc| {
-                uri_to_path(loc.uri.as_str())
-                    .map(|p| p.as_path() != &*full_path_plain)
-                    .unwrap_or(false)
-            })
-            .count();
-        // No locations AT ALL, before any filtering, contradicts the request itself:
-        // `LspClient::references` sends `includeDeclaration: true`, so a server that has
-        // resolved the symbol returns at least its declaration. A cold rust-analyzer
-        // answers `[]` or `null` for exactly this (measured 2026-09-24: `[]` at 0.02 s,
-        // `null` at each crate-graph swap, correct from 10.5 s). This needs no text
-        // scan, which is what makes it reach a FILE-LOCAL symbol, where the scan below
-        // has no other file to find it in and used to leave a bare zero
-        // (docs/issues/archive/2026-09-24-references-silent-false-zero-for-file-local-symbols-while-warming.md).
-        if total_raw == 0 && result.get("completeness_warning").is_none() {
-            result["completeness_warning"] = json!("LSP returned no locations at all — not even the symbol's own declaration, which this request asks it to include — so the reference index is not ready yet (a cold or reloading language server answers this way). Re-run shortly, or corroborate with grep / call_graph(direction='callers') before treating this symbol as unused.");
-        } else if external_refs == 0 && result.get("completeness_warning").is_none() {
-            let ident = name_path.rsplit('/').next().unwrap_or(name_path);
-            let scan = corroborate_zero_references(&root, &full_path, ident, raw_lang);
-            let others = &scan.hits;
-            if !others.is_empty() {
-                let sample = others
-                    .iter()
-                    .take(3)
-                    .map(|p| crate::util::fs::relative_display_path(p, &root))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                result["completeness_warning"] = json!(format!("LSP returned 0 references outside the definition file, but `{ident}` appears as a whole word in {n}+ other source file(s) (e.g. {sample}) — the reference index may still be warming after a reindex. Re-run, or corroborate with grep / call_graph(direction='callers') before treating this symbol as unused.", n = others.len()));
-            } else if let Some(w) = corroboration_incomplete_warning(ident, &scan) {
-                // The walk did not cover the project (file cap, an unreadable candidate,
-                // an unenterable directory): an empty hit list is "not reached", not
-                // "not present" (BUG 2026-10-16
-                // references-corroboration-scan-cap-yields-a-false-zero).
+        // The signals behind `settle` (see `evaluate_attempt`) become the caller's warning when
+        // the call-hierarchy cross-check above has not already set one. When the wait ran out,
+        // the warning says so instead of telling the caller to re-run.
+        if result.get("completeness_warning").is_none() {
+            let waited_secs = (waited_out && unsettled).then_some(waited_for.as_secs_f32());
+            if let Some(w) = signal_warning(settle, &env, &root, waited_secs) {
                 result["completeness_warning"] = json!(w);
             }
         }
 
         Ok(result)
+    }
+}
+
+#[async_trait::async_trait]
+impl Tool for References {
+    fn name(&self) -> &str {
+        "references"
+    }
+
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::read_only_closed()
+    }
+
+    fn description(&self) -> &str {
+        "Find all usages of a symbol. Requires symbol and file."
+    }
+
+    fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
+        // Same split as `symbols`: overflow → the buffer guide, otherwise the navigation
+        // guide, which `call_content` would have dropped anyway on a result that fits.
+        // See `Symbols::relevant_guide_topic` for the full rationale and BL-25.
+        if result.get("overflow").is_some() || result.get("output_id").is_some() {
+            Some("progressive-disclosure")
+        } else {
+            Some("symbol-navigation")
+        }
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["symbol"],
+            // NO top-level anyOf/oneOf/allOf — the Anthropic Messages API rejects them
+            // and Claude Code drops the whole tool client-side. The path alternation is
+            // enforced in call() below, not here. See
+            // no_tool_schema_declares_a_top_level_combinator (src/server.rs).
+            "properties": {
+                "symbol": { "type": "string", "description": "Symbol identifier (e.g. 'MyStruct/my_method')" },
+                "path": { "type": "string", "description": "File containing the symbol" },
+                "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
+                "offset": { "type": "integer", "description": "Pagination offset" },
+                "limit": { "type": "integer", "description": "Max results (default 50)" },
+                "scope": {
+                    "description": "'project' (default), 'libraries', 'all', or 'lib:<name>' — a different axis from doc/librarian's scope (project|repo|umbrella|all).",
+                    "default": "project",
+                    // Nested combinator, not root-level — see the identical comment in
+                    // src/tools/symbol/symbols.rs's "scope" property for the full rationale.
+                    "oneOf": [
+                        { "type": "string", "enum": ["project", "libraries", "all"] },
+                        { "type": "string", "pattern": "^lib:.+$" }
+                    ]
+                }
+            }
+        })
+    }
+
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        crate::fs::PATH_PARAM_ALIAS_MAP
+    }
+
+    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        self.call_with_settle(input, ctx, FIRST_CALL_SETTLE_WAIT, SETTLE_POLL_INTERVAL)
+            .await
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {

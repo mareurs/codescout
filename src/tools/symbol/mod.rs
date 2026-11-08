@@ -21,6 +21,9 @@ mod kotlin_lsp_tests;
 #[cfg(test)]
 mod route_path_tests;
 
+#[cfg(test)]
+mod references_settle_tests;
+
 pub use call_graph::CallGraph;
 pub use edit_code::EditCode;
 pub use references::References;

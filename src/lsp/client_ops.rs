@@ -33,9 +33,6 @@ impl crate::lsp::ops::LspClientOps for LspClient {
     ) -> anyhow::Result<Vec<lsp_types::Location>> {
         LspClient::references(self, path, line, col, language_id).await
     }
-    fn cold_start_window_open(&self) -> bool {
-        self.in_cold_start_window()
-    }
 
     async fn goto_definition(
         &self,
@@ -96,5 +93,17 @@ impl crate::lsp::ops::LspClientOps for LspClient {
         language_id: &str,
     ) -> anyhow::Result<Vec<lsp_types::CallHierarchyOutgoingCall>> {
         LspClient::outgoing_calls(self, item, language_id).await
+    }
+    fn references_warmup_done(&self) -> bool {
+        self.references_warmup_done
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn cold_start_window_open(&self) -> bool {
+        self.in_cold_start_window()
+    }
+
+    fn mark_references_warmup_done(&self) {
+        self.references_warmup_done
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }

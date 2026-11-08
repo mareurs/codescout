@@ -53,6 +53,30 @@ pub struct MockLspClient {
     /// Canned responses for `references`, keyed by file path.
     pub references_results:
         std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, Vec<lsp_types::Location>>>,
+    /// Scripted `references` answers: each call pops the front; once empty, answers fall back to
+    /// `references_results`. Simulates a server that answers `[]` while it warms and the full set
+    /// after (`with_references_sequence`).
+    references_sequence:
+        std::sync::Mutex<std::collections::VecDeque<Result<Vec<lsp_types::Location>, String>>>,
+    /// How many times `references` was called.
+    pub references_calls: std::sync::atomic::AtomicUsize,
+    /// `references` answers once the script runs out with this error instead of the canned map,
+    /// as a dead client does (`with_references_failing_after_script`).
+    references_failing_after_script: Option<String>,
+    /// Per-call sleep before `references` answers: call N sleeps `references_delays[N]`, then no
+    /// delay. A tokio sleep, so a paused-time test advances it without wall time.
+    references_delays: std::sync::Mutex<std::collections::VecDeque<std::time::Duration>>,
+    /// Sleep before `prepare_call_hierarchy` and `incoming_calls` answer (a server still cold).
+    call_hierarchy_delay: std::time::Duration,
+    /// How many times `incoming_calls` was called (`prepare_call_hierarchy_calls` counts the other).
+    pub incoming_calls_count: std::sync::atomic::AtomicUsize,
+    /// What `cold_start_window_open` answers. Starts `true`, a freshly started client, which is
+    /// what makes a server that reports no progress at all (pyright) wait.
+    cold_start_window: std::sync::atomic::AtomicBool,
+    /// The per-client "references cold-start wait spent" flag. Starts `true` so a test that does not
+    /// care about the wait never blocks; `with_references_warmup_pending` models a freshly
+    /// started client, as `LspClient` is.
+    references_warmup_done: std::sync::atomic::AtomicBool,
     /// The edit `rename` answers with. `None` answers an empty edit.
     rename_edit: Option<lsp_types::WorkspaceEdit>,
     /// How many times `document_symbols` was called, answered or failed.
@@ -74,6 +98,14 @@ impl MockLspClient {
             incoming_calls_results: std::sync::Mutex::new(std::collections::HashMap::new()),
             outgoing_calls_results: std::sync::Mutex::new(std::collections::HashMap::new()),
             references_results: std::sync::Mutex::new(std::collections::HashMap::new()),
+            references_sequence: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            references_calls: std::sync::atomic::AtomicUsize::new(0),
+            references_failing_after_script: None,
+            references_delays: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            call_hierarchy_delay: std::time::Duration::ZERO,
+            incoming_calls_count: std::sync::atomic::AtomicUsize::new(0),
+            cold_start_window: std::sync::atomic::AtomicBool::new(true),
+            references_warmup_done: std::sync::atomic::AtomicBool::new(true),
             rename_edit: None,
             document_symbols_calls: std::sync::atomic::AtomicUsize::new(0),
         }
@@ -89,6 +121,60 @@ impl MockLspClient {
     /// Make `rename` answer with `edit`, as a language server does with the sites it would change.
     pub fn with_rename_edit(mut self, edit: lsp_types::WorkspaceEdit) -> Self {
         self.rename_edit = Some(edit);
+        self
+    }
+    /// Script the next `references` answers: call N answers `answers[N]`; after the script runs
+    /// out, answers come from `references_results`.
+    pub fn with_references_sequence(self, answers: Vec<Vec<lsp_types::Location>>) -> Self {
+        self.with_references_script(answers.into_iter().map(Ok).collect())
+    }
+
+    /// Like [`Self::with_references_sequence`], where an entry may be an error: `Err(message)`
+    /// makes that `references` call fail with `message` (for a transient-error test, include
+    /// `code -32800`).
+    pub fn with_references_script(
+        self,
+        answers: Vec<Result<Vec<lsp_types::Location>, String>>,
+    ) -> Self {
+        self.references_sequence
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(answers);
+        self
+    }
+
+    /// Model a freshly started client: the `references` cold-start wait has not been spent yet.
+    pub fn with_references_warmup_pending(self) -> Self {
+        self.references_warmup_done
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        self
+    }
+    /// Once the `references` script runs out, fail every call with `message` rather than falling
+    /// back to the canned map: a client whose server is gone.
+    pub fn with_references_failing_after_script(mut self, message: &str) -> Self {
+        self.references_failing_after_script = Some(message.to_string());
+        self
+    }
+
+    /// Sleep `delays[N]` before the Nth `references` call answers (then no delay).
+    pub fn with_references_delays(self, delays: Vec<std::time::Duration>) -> Self {
+        self.references_delays
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(delays);
+        self
+    }
+
+    /// Sleep `delay` before `prepare_call_hierarchy` and `incoming_calls` answer.
+    pub fn with_call_hierarchy_delay(mut self, delay: std::time::Duration) -> Self {
+        self.call_hierarchy_delay = delay;
+        self
+    }
+
+    /// Make `cold_start_window_open` answer `open`: `false` models a client long past start-up.
+    pub fn with_cold_start_window(self, open: bool) -> Self {
+        self.cold_start_window
+            .store(open, std::sync::atomic::Ordering::SeqCst);
         self
     }
 
@@ -204,6 +290,27 @@ impl LspClientOps for MockLspClient {
         _col: u32,
         _language_id: &str,
     ) -> anyhow::Result<Vec<lsp_types::Location>> {
+        self.references_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let delay = self
+            .references_delays
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pop_front();
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
+        if let Some(next) = self
+            .references_sequence
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pop_front()
+        {
+            return next.map_err(|message| anyhow::anyhow!("{message}"));
+        }
+        if let Some(message) = &self.references_failing_after_script {
+            return Err(anyhow::anyhow!("{message}"));
+        }
         let map = self
             .references_results
             .lock()
@@ -287,6 +394,9 @@ impl LspClientOps for MockLspClient {
             .lock()
             .unwrap()
             .push((path.to_path_buf(), language_id.to_string()));
+        if !self.call_hierarchy_delay.is_zero() {
+            tokio::time::sleep(self.call_hierarchy_delay).await;
+        }
         Ok(self
             .prepare_call_hierarchy_results
             .lock()
@@ -301,6 +411,11 @@ impl LspClientOps for MockLspClient {
         item: &lsp_types::CallHierarchyItem,
         _language_id: &str,
     ) -> anyhow::Result<Vec<lsp_types::CallHierarchyIncomingCall>> {
+        self.incoming_calls_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if !self.call_hierarchy_delay.is_zero() {
+            tokio::time::sleep(self.call_hierarchy_delay).await;
+        }
         Ok(self
             .incoming_calls_results
             .lock()
@@ -323,23 +438,47 @@ impl LspClientOps for MockLspClient {
             .cloned()
             .unwrap_or_default())
     }
+    fn references_warmup_done(&self) -> bool {
+        self.references_warmup_done
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn cold_start_window_open(&self) -> bool {
+        self.cold_start_window
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn mark_references_warmup_done(&self) {
+        self.references_warmup_done
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 pub struct MockLspProvider {
-    client: Arc<MockLspClient>,
+    /// The clients `get_or_start` hands out, in order; the last one repeats. One entry is the
+    /// usual case; two model a mux disconnect that the next `get_or_start` heals.
+    clients: Vec<Arc<MockLspClient>>,
+    next: std::sync::atomic::AtomicUsize,
 }
 
 impl MockLspProvider {
     pub fn with_client(client: MockLspClient) -> Arc<dyn LspProvider> {
-        Arc::new(Self {
-            client: Arc::new(client),
-        })
+        Self::with_shared_client(Arc::new(client))
     }
 
     /// Like [`Self::with_client`], for a test that keeps its own handle on the client to read
     /// what the code under test asked of it (`document_symbols_calls`).
     pub fn with_shared_client(client: Arc<MockLspClient>) -> Arc<dyn LspProvider> {
-        Arc::new(Self { client })
+        Self::with_shared_clients(vec![client])
+    }
+
+    /// `get_or_start` answers `clients[0]`, then `clients[1]`, and so on; the last repeats. The
+    /// tool's first `get_lsp_client` takes the first, a retry after a disconnect takes the next.
+    pub fn with_shared_clients(clients: Vec<Arc<MockLspClient>>) -> Arc<dyn LspProvider> {
+        assert!(!clients.is_empty(), "a provider needs at least one client");
+        Arc::new(Self {
+            clients,
+            next: std::sync::atomic::AtomicUsize::new(0),
+        })
     }
 }
 
@@ -351,7 +490,9 @@ impl LspProvider for MockLspProvider {
         _workspace_root: &Path,
         _mux_override: Option<bool>,
     ) -> anyhow::Result<Arc<dyn LspClientOps>> {
-        Ok(Arc::clone(&self.client) as Arc<dyn LspClientOps>)
+        let n = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let client = &self.clients[n.min(self.clients.len() - 1)];
+        Ok(Arc::clone(client) as Arc<dyn LspClientOps>)
     }
 
     async fn notify_file_changed(&self, _path: &Path) {}

@@ -731,8 +731,12 @@ impl EmbeddingsSection {
 fn default_encoding() -> String {
     "utf-8".into()
 }
+/// The server's default per-tool timeout (`ProjectSection::tool_timeout_secs`).
+// cap-class: NOT_A_CAP — default wall-clock bound on a tool call; picks when a call is abandoned, never what a result contains
+pub const DEFAULT_TOOL_TIMEOUT_SECS: u64 = 60;
+
 fn default_timeout() -> u64 {
-    60
+    DEFAULT_TOOL_TIMEOUT_SECS
 }
 pub fn default_embed_model() -> String {
     "local:AllMiniLML6V2Q".into()

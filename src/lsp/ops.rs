@@ -22,13 +22,14 @@ pub trait LspClientOps: Send + Sync {
         col: u32,
         language_id: &str,
     ) -> anyhow::Result<Vec<lsp_types::Location>>;
-
-    /// Whether the server is still inside its cold-start window, where a first answer may
-    /// cover only part of the project. `false` by default: a client that cannot tell never
-    /// makes a caller wait on a guess. `LspClient` overrides it with its real clock.
-    fn cold_start_window_open(&self) -> bool {
-        false
-    }
+    /// Whether the client is inside its cold-start window (`LspClient::in_cold_start_window`: 5
+    /// minutes from the end of `initialize`, or from construction when it never ran one). The
+    /// `references` tool reads it to tell a server that may still be indexing, whose "no use
+    /// outside the definition file" is provisional, from one long past start-up.
+    ///
+    /// Required, no default, like the warm-up flag below: an implementor that forgot it would
+    /// silently never (or always) wait. A stateless fake returns `false`.
+    fn cold_start_window_open(&self) -> bool;
 
     async fn goto_definition(
         &self,
@@ -76,6 +77,14 @@ pub trait LspClientOps: Send + Sync {
         item: &lsp_types::CallHierarchyItem,
         language_id: &str,
     ) -> anyhow::Result<Vec<lsp_types::CallHierarchyOutgoingCall>>;
+    /// Whether the `references` tool has already spent its one cold-start wait on this client.
+    /// Required, with no default: an implementor that forgot it would silently never wait (or
+    /// always wait), so each one states its answer. A stateless fake returns `true`.
+    fn references_warmup_done(&self) -> bool;
+
+    /// Record that the cold-start wait is over for this client, whether the server settled or the
+    /// deadline passed. Later `references` calls must not wait again.
+    fn mark_references_warmup_done(&self);
 }
 
 /// Abstract factory that starts or retrieves an LSP client for a given language.
@@ -203,6 +212,15 @@ mod call_hierarchy_trait_tests {
         ) -> anyhow::Result<Vec<lsp_types::CallHierarchyOutgoingCall>> {
             Ok(vec![])
         }
+        fn cold_start_window_open(&self) -> bool {
+            false
+        }
+
+        fn references_warmup_done(&self) -> bool {
+            true
+        }
+
+        fn mark_references_warmup_done(&self) {}
     }
 
     #[tokio::test]
