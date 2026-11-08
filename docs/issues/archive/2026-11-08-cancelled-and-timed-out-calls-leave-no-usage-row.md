@@ -1,10 +1,11 @@
 ---
-id: d7315a96632ef30f
+id: 27ed8d5fbc627324
 kind: bug
-status: open
+status: fixed
 title: a call cancelled by Escape or timed out by tool_timeout_secs leaves no usage row
 tags:
 - cluster/unclassified
+closed: 2026-11-08
 opened: 2026-11-08
 ---
 
@@ -54,13 +55,13 @@ See Symptom. In this project's `usage.db` the only rows matching `timed out afte
 
 ## Fix
 
-**Timeout: done on the working tree, not committed yet.** The caller's answer is unchanged; the row is new.
+**Timeout: done, committed as `655dab401`.** The caller's answer is unchanged; the row is new.
 
 - `race_against_cancel` now builds a typed `ToolTimedOut { tool, secs }` instead of a bare `anyhow!`. Its `Display` is the same text the caller has always got.
 - `dispatch_tool_call` takes the start time and a clock beside the race. When the race ends in a `ToolTimedOut`, it writes the row through `UsageRecorder::record_abandoned` (`src/usage/mod.rs`), which takes the latency from the caller. A row written from inside `record_content` would say about 0 ms for a call held for the whole timeout. An error the tool returned is not a `ToolTimedOut`, so it is not written twice.
 - New family `tool_timeout` in `normalize_err_family` and `ERR_FAMILIES`, decided by the fixed prefix (`Tool '`) and the fixed closing sentence, with a hostile tool name in the test.
 
-**Cancel (Escape): not done.** Decided with the user 2026-11-08: the row gets `outcome = 'error'` and a new family `tool_cancelled`, not a new `cancelled` outcome, so the outcome vocabulary and the queries that count non-success rows stay as they are. The cancel arm of `race_against_cancel` can `await` before it parks the task, so it can write the row there, with the input and identity passed in. It needs a test with a parked task (spawn `call_tool_inner`, cancel the token, read the row, abort the task).
+**Cancel (Escape): not done, by decision.** The user decided on 2026-11-08 not to record it. Escape is an act of the user, not a decision of codescout: the server did not refuse, fail or time out, so there is no server outcome to record. A design had been agreed earlier (`outcome = 'error'`, a new family `tool_cancelled`, written in the cancel arm of `race_against_cancel` before the task is parked), and it is not built. A reader of `usage.db` must know that a cancelled call has no row; the Workarounds section says where to look.
 
 ## Tests added
 
@@ -68,14 +69,22 @@ Timeout, in `src/server/exit_rows_tests.rs`: `a_server_timeout_leaves_one_row_wi
 
 After: 16 of 16 in the targeted run. `./scripts/gate.sh` 2026-11-08: FMT, CLIPPY, LEAN and DEFAULT exit 0. Its Python lane failed 2 timing tests (`tests/test_phase1b_stage2_shell.py`, a 10 s subprocess timeout) while the machine's load average was 52; that file passes alone (8 of 8), and `python3 scripts/python-tests.py --lane light` passes on its own (1764 passed).
 
-Cancel: none yet.
+Cancel: none, by decision.
 
 ## Workarounds
-Read cancellations and timeouts from the harness transcript, not from `usage.db`.
+
+A timeout has a row now (`err_family = 'tool_timeout'`). For a cancelled call, read the harness transcript: `usage.db` has no row for it.
 
 ## Resume
 
-Cancel is what is left. Start from the cancel arm of `race_against_cancel` in `src/server.rs` and from `record_abandoned`, which already takes a caller-measured latency. Then fix provenance and archive.
+Done for the timeout. Cancel is declined, so there is nothing to resume.
+
+## Fix provenance
+
+- **SHA:** `655dab401` (`experiments`)
+- **patch-id:** `3b972669eee9`
+
+The patch-id covers the whole commit. It carries the timeout row only.
 
 ## References
 `src/server.rs` (`race_against_cancel`, `dispatch_tool_call`, `record_refusal_row`); `src/usage/mod.rs` (`record_content`, `write_content`); `docs/issues/archive/2026-11-08-access-gate-refusals-leave-no-usage-row.md`.

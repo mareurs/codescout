@@ -2105,7 +2105,7 @@ impl CodeScoutServer {
         // The recorder's write runs after the tool body, and the timeout drops that future, so a
         // call that times out is recorded here instead, with the time it was held. The start is
         // taken beside the race, not inside `record_content`, which is the future being dropped.
-        // docs/issues/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
+        // docs/issues/archive/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
         let race_started_at = crate::usage::db::now_timestamp();
         let race_clock = std::time::Instant::now();
         let result = Self::race_against_cancel(
@@ -3038,7 +3038,7 @@ const REFUSAL_RECORD_BUDGET: std::time::Duration = std::time::Duration::from_mil
 /// `dispatch_tool_call` can tell it from an error the tool returned: `record_content` already
 /// wrote a row for those, and nothing wrote one for this. `Display` is the text the caller has
 /// always been given.
-/// docs/issues/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
+/// docs/issues/archive/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
 #[derive(Debug)]
 struct ToolTimedOut {
     tool: String,

@@ -238,7 +238,7 @@ impl crate::tools::Tool for SlowTool {
 /// The server's own timeout drops the future that holds the recorder, so the recorder's write,
 /// which runs after the tool body, never happened: the slowest calls were the ones missing.
 /// Measured 2026-11-08 with a probe: the caller got the error, `usage.db` got nothing.
-/// docs/issues/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
+/// docs/issues/archive/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
 ///
 /// The caller's answer must not change, and the row must say how long the call was held.
 #[tokio::test]

@@ -162,7 +162,7 @@ impl UsageRecorder {
     /// Best-effort, like every write here: a failure is swallowed and the answer is untouched.
     /// No delivery, observed-effect or attribution data exists for an abandoned call, so those
     /// columns stay NULL.
-    /// docs/issues/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
+    /// docs/issues/archive/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
     pub async fn record_abandoned(
         &self,
         tool_name: &str,
