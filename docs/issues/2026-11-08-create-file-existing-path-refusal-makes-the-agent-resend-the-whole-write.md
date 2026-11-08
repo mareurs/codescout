@@ -49,7 +49,7 @@ Limits: the match is by length, so an edited resend counts the same as an identi
 1. **Hypothesis:** callers could use `edit_file` instead. **Verdict:** not tested. For a script rewritten from scratch the whole content is the change.
 
 ## Fix
-Not done. Candidate: keep the input under an `@ack_*` handle and let `ack` replay it with `overwrite=true`. Two points differ from the read-only case. Overwrite destroys the existing file, so the refusal should state what would be lost (size and mtime of the existing file), and the replay must re-check that the file is unchanged since the refusal. And the replay is not a pin, so `lift_read_only_root` does not apply; the handle needs its own marker.
+Not done. Candidate: keep the input under an `@ack_*` handle and let `ack` replay it with `overwrite=true`. Two points differ from the read-only case. Overwrite destroys the existing file, so the refusal should state what would be lost (size and mtime of the existing file), and the replay must re-check that the file is unchanged since the refusal. And the replay is not a pin, so `PendingAckWrite.pin_root` does not apply; the handle needs its own marker.
 
 ## Tests added
 None. This file records the defect only.

@@ -433,11 +433,12 @@ pub struct PendingAckWrite {
     pub input: serde_json::Value,
     /// Directory granted as a session write root when the handle is replayed.
     pub approve_dir: PathBuf,
-    /// `Some(root)` marks a handle minted by a read-only refusal. The server
+    /// `Some(root)` marks a handle minted by a refusal that a `workspace=<root>` pin
+    /// answers: a read-only activation, or the worktree write guard. The server
     /// replays it by pinning the call to `root` (consent for that call alone),
-    /// not by approving a directory, so the activation stays read-only.
+    /// not by approving a directory, so the session state stays as it was.
     /// `None` is an out-of-scope-write handle, replayed by the tool itself.
-    pub lift_read_only_root: Option<PathBuf>,
+    pub pin_root: Option<PathBuf>,
 }
 
 /// A pending acknowledgment — either a dangerous command or an out-of-scope
@@ -1722,7 +1723,7 @@ impl OutputBuffer {
             tool_name,
             input,
             approve_dir,
-            lift_read_only_root: None,
+            pin_root: None,
         }))
     }
 
@@ -1733,7 +1734,7 @@ impl OutputBuffer {
     /// `root`, which lifts the read-only activation for that call only
     /// (`Agent::security_config_for_write`); nothing process-wide changes.
     /// docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
-    pub fn store_read_only_refused_write(
+    pub fn store_pin_replayable_write(
         &self,
         tool_name: String,
         input: serde_json::Value,
@@ -1743,7 +1744,7 @@ impl OutputBuffer {
             tool_name,
             input,
             approve_dir: root.clone(),
-            lift_read_only_root: Some(root),
+            pin_root: Some(root),
         }))
     }
 

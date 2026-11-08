@@ -714,7 +714,7 @@ impl CodeScoutServer {
                 cause: crate::util::path_security::WriteBlockCause::ActivatedReadOnly,
             }) = &security.write_block
             {
-                let handle = self.output_buffer.store_read_only_refused_write(
+                let handle = self.output_buffer.store_pin_replayable_write(
                     name.to_string(),
                     input.clone(),
                     root.clone(),
@@ -739,7 +739,7 @@ impl CodeScoutServer {
     /// `ack` is taken off `input` whether or not it is valid, so no tool ever sees it.
     /// A handle is refused when it is unknown or evicted, when another tool minted it, and
     /// when it is an out-of-scope-write handle (those replay through `path`, in the tool).
-    fn replay_read_only_ack(
+    fn replay_pin_ack(
         &self,
         tool_name: &str,
         input: &mut Value,
@@ -768,11 +768,11 @@ impl CodeScoutServer {
                 format!("Call {}(ack=\"{handle}\") instead.", kept.tool_name),
             ));
         }
-        let Some(root) = kept.lift_read_only_root else {
+        let Some(root) = kept.pin_root else {
             return Err(crate::tools::RecoverableError::with_hint(
-                "ack handle is for an out-of-scope write, not a read-only refusal",
+                "ack handle is for an out-of-scope write, not a refusal that a pin answers",
                 format!(
-                    "Pass it as the path: {tool_name}(path=\"{handle}\"). `ack` replays a write that a read-only activation refused."
+                    "Pass it as the path: {tool_name}(path=\"{handle}\"). `ack` replays a write that a read-only activation or the worktree guard refused."
                 ),
             ));
         };
@@ -1797,7 +1797,7 @@ impl CodeScoutServer {
         // treats the call as the pinned call it now is. A bad handle is refused like a bad
         // pin: the recoverable answer, plus a usage row.
         // docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
-        if let Err(refusal) = self.replay_read_only_ack(&req.name, &mut input) {
+        if let Err(refusal) = self.replay_pin_ack(&req.name, &mut input) {
             return Exit::Recorded(
                 self.refuse_pin(
                     &req.name,
@@ -2128,6 +2128,29 @@ impl CodeScoutServer {
                 // docs/trackers/2026-08-16-iron-law-gate-firing-audit.md.
                 let family = crate::usage::db::normalize_err_family(&req.name, &e.to_string());
                 let mut result = route_tool_error(e);
+                // The worktree write guard refuses inside the tool, which never sees the input,
+                // so the handle is minted here, where the kept input is. The remedy the guard
+                // names is a `workspace=<root>` pin; `ack` replays it without the payload.
+                // Matched on the family because the guard's text is already pinned to it by
+                // `normalize_err_family` and its tests; a pinned call is never refused by this
+                // guard, so `workspace_override` is `None` here by construction.
+                // docs/issues/2026-11-08-worktree-write-guard-refusal-makes-the-agent-resend-the-whole-write.md
+                if family == Some("worktree_activate_required") && ctx.workspace_override.is_none()
+                {
+                    if let Ok(root) = self.agent.require_project_root_for(None).await {
+                        let handle = self.output_buffer.store_pin_replayable_write(
+                            req.name.to_string(),
+                            input_for_record.clone(),
+                            root,
+                        );
+                        result.content.push(crate::tools::guide_emit::trailing_block(format!(
+                            "Nothing was written, and this call's input is kept. To make the write \
+                             to the main repo for this one call, without changing the session, call \
+                             {}(ack=\"{handle}\") and send nothing else.",
+                            req.name
+                        )));
+                    }
+                }
                 if let Some(text) =
                     family
                         .and_then(crate::prompts::refusal_predicate)
@@ -19000,6 +19023,10 @@ mod protected_config_write_tests;
 #[cfg(test)]
 #[path = "server/read_only_ack_tests.rs"]
 mod read_only_ack_tests;
+
+#[cfg(test)]
+#[path = "server/worktree_ack_tests.rs"]
+mod worktree_ack_tests;
 
 #[cfg(test)]
 #[path = "server/exit_rows_tests.rs"]
