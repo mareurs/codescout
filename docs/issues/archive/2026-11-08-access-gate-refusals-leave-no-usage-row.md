@@ -7,7 +7,7 @@ tags:
 - cluster/unclassified
 closed: 2026-11-08
 opened: 2026-11-08
-unverified: The access-gate exit was run live on a rebuilt server (2 refusals, 2 rows). The write-lock and unknown-tool exits were not, only through call_tool_inner. A call cancelled by Escape and a call that hits tool_timeout_secs are not covered and leave no row today; that is read from race_against_cancel, not measured, and is not fixed here.
+unverified: The access-gate exit was run live on a rebuilt server (2 refusals, 2 rows). The write-lock and unknown-tool exits were not, only through call_tool_inner. A call cancelled by Escape and a call that hits tool_timeout_secs are not covered and leave no row; measured 2026-11-08 and filed as docs/issues/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md.
 ---
 
 # BUG: a refusal by the access gate leaves no usage row, so usage.db cannot see it
@@ -62,7 +62,7 @@ Exits now covered: the access gate, the write-lock refusal, and an unknown tool 
 
 Seven families were added to `normalize_err_family` and `ERR_FAMILIES` (`src/usage/db.rs`): `write_blocked_read_only`, `write_blocked_by_config`, `write_blocked_cause_unknown`, `indexing_disabled`, `write_lock_unavailable`, `ack_handle_refused`, `unknown_tool`. Each is decided by the message's fixed prefix.
 
-Not covered, on purpose: a call cancelled by Escape and a call that hits `tool_timeout_secs`. Both drop the future that holds the recorder, and the cancel arm parks the task instead of returning. That needs its own change, and the claim that they leave no row today is read from `race_against_cancel`, not measured.
+Not covered, on purpose: a call cancelled by Escape and a call that hits `tool_timeout_secs`. Both drop the future that holds the recorder, and the cancel arm parks the task instead of returning. That needs its own change. Measured later the same day (2026-11-08): both leave no row, filed as `docs/issues/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md`.
 
 A call with no project to hold the row is skipped, as `refuse_pin` already did.
 
