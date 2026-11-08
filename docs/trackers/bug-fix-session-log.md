@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 218
+entry_high_water_F: 219
 entry_high_water_W: 158
 ---
 
@@ -18054,6 +18054,21 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Counterfactual:** Without the review, `6a89e8366` was the version the branch would have merged, and `cross_embed_memory` would have searched for anchors with a heading-only query for memories of that shape. I did not measure how many memories have that shape.
 
 **Status:** validated
+
+## F-219 — The read-only refusal leaves no usage row, so usage.db could not size the bug it was asked to size
+
+**Valid:** dated 2026-11-08
+
+**Observed:** The task was "stop the agent writing the same payload twice after the read-only refusal", and "look at usage.db for other places". Two premises did not hold when read.
+
+1. The read-only refusal (`File writes are disabled: … activated read-only`) has **zero rows** in `tool_calls` in every `usage.db` under `~/work` (>100 KB), matched on `error_msg LIKE 'File writes are disabled%'` and on `output_json`. The usage record cannot size this bug directly. Cause is **inferred, not measured**: the refusal branch in `call_tool_inner` does `return Ok(*err)` before the recorder runs, unlike `refuse_pin`, which records. A regression test for "the refusal leaves a usage row" is not written yet.
+2. The existing `@ack_*` replay (`maybe_replay_ack`) lives inside individual tools and keys on `input["path"]`. The read-only gate runs earlier, in the server, so a tool-level ack cannot reach it. `memory`, `doc` and `librarian` have no `path`. The fix therefore replays at the dispatcher with a top-level `ack` key.
+
+**Measured (2026-11-08):** across every `usage.db` >1 MB modified after 2026-10-01, failed write-tool calls with input >1000 bytes whose next call (same session, same tool, next 6 calls, input length within 30%) repeats the input: `worktree_activate_required` 93 resends / 397,212 bytes, `target_already_exists` 93 / 437,729. Not worked here; they need their own bug files.
+
+**Cost:** med. The first plan (look up the refusal in `usage.db`) would have returned an empty set and read as "the problem is rare".
+
+**Recorded in:** `docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`.
 
 ## Template for new entries
 

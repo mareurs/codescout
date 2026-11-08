@@ -669,11 +669,18 @@ impl CodeScoutServer {
     /// rather than re-derived here: the gate below must agree with the predicate
     /// that already decided whether to take the write lock, or the two disagree
     /// and the narrower one silently wins.
+    ///
+    /// `input` is kept, under an `@ack_*` handle, when the refusal is a read-only
+    /// activation and the call carries no pin. The refusal's own remedy (a pin)
+    /// makes the caller send the same payload twice; the handle lets
+    /// `ack="@ack_…"` replay it ([`Self::replay_read_only_ack`]).
+    /// docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
     async fn check_tool_access(
         &self,
         name: &str,
         is_write: bool,
         workspace_override: Option<&std::path::Path>,
+        input: &Value,
     ) -> std::result::Result<(), Box<CallToolResult>> {
         // A write is decided against the config that carries the pin's consent (for this
         // call only); everything else against the plain one. `is_write` here is the gate's
@@ -699,7 +706,85 @@ impl CodeScoutServer {
             text.push_str("\n\n");
             text.push_str(&crate::config::project::failed_reload_notice(&load_error));
         }
+        // Only a cause a pin lifts gets a handle: a handle for `file_write_enabled = false`
+        // would replay into the same refusal. A pinned call is never `ActivatedReadOnly`.
+        if workspace_override.is_none() {
+            if let Some(crate::util::path_security::WriteBlock {
+                root,
+                cause: crate::util::path_security::WriteBlockCause::ActivatedReadOnly,
+            }) = &security.write_block
+            {
+                let handle = self.output_buffer.store_read_only_refused_write(
+                    name.to_string(),
+                    input.clone(),
+                    root.clone(),
+                );
+                text.push_str(&format!(
+                    "\n\nNothing was written, and this call's input is kept. To make the write \
+                     for this one call, without changing the read-only activation, call \
+                     {name}(ack=\"{handle}\") and send nothing else."
+                ));
+            }
+        }
         Err(Box::new(CallToolResult::error(vec![Content::text(text)])))
+    }
+
+    /// Replay a write that [`Self::check_tool_access`] kept, when `input` carries
+    /// `ack="@ack_…"`.
+    ///
+    /// On success `input` is the kept input with `workspace=<root>` added, so the existing
+    /// pin path does the rest: consent for this call alone, the write lock, the recorder.
+    /// The activation is not touched. Runs before the pin is read, for that reason.
+    ///
+    /// `ack` is taken off `input` whether or not it is valid, so no tool ever sees it.
+    /// A handle is refused when it is unknown or evicted, when another tool minted it, and
+    /// when it is an out-of-scope-write handle (those replay through `path`, in the tool).
+    fn replay_read_only_ack(
+        &self,
+        tool_name: &str,
+        input: &mut Value,
+    ) -> std::result::Result<(), crate::tools::RecoverableError> {
+        let Some(raw) = input.as_object_mut().and_then(|m| m.remove("ack")) else {
+            return Ok(());
+        };
+        let handle = raw.as_str().unwrap_or_default().trim().to_string();
+        let kept = if crate::tools::output_buffer::looks_like_ack_handle(&handle) {
+            self.output_buffer.get_pending_write(&handle)
+        } else {
+            None
+        };
+        let Some(kept) = kept else {
+            return Err(crate::tools::RecoverableError::with_hint(
+                "ack handle expired or unknown",
+                "Send the write again. A handle is held for the server's lifetime only, and the oldest are dropped first.",
+            ));
+        };
+        if kept.tool_name != tool_name {
+            return Err(crate::tools::RecoverableError::with_hint(
+                format!(
+                    "ack handle was minted by '{}', not '{}'",
+                    kept.tool_name, tool_name
+                ),
+                format!("Call {}(ack=\"{handle}\") instead.", kept.tool_name),
+            ));
+        }
+        let Some(root) = kept.lift_read_only_root else {
+            return Err(crate::tools::RecoverableError::with_hint(
+                "ack handle is for an out-of-scope write, not a read-only refusal",
+                format!(
+                    "Pass it as the path: {tool_name}(path=\"{handle}\"). `ack` replays a write that a read-only activation refused."
+                ),
+            ));
+        };
+        let mut replayed = kept.input;
+        if let Some(map) = replayed.as_object_mut() {
+            map.insert(
+                "workspace".to_string(),
+                Value::String(root.to_string_lossy().into_owned()),
+            );
+        }
+        *input = replayed;
+        Ok(())
     }
 
     /// `ledger` is the handle adoption resolved for this call. It is a parameter,
@@ -1574,6 +1659,27 @@ impl CodeScoutServer {
         // (see `refuse_pin`). The incident that found this was diagnosed from a usage row, and
         // a refused call that left none would have been invisible.
         // docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
+        // `ack="@ack_…"` replays a write that a read-only activation refused (see
+        // `check_tool_access`). It must run BEFORE the pin is read: the replay puts the
+        // refusal's own remedy, `workspace=<root>`, into `input`, and everything below then
+        // treats the call as the pinned call it now is. A bad handle is refused like a bad
+        // pin: the recoverable answer, plus a usage row.
+        // docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
+        if let Err(refusal) = self.replay_read_only_ack(&req.name, &mut input) {
+            return Ok(self
+                .refuse_pin(
+                    &req.name,
+                    &input,
+                    refusal,
+                    asserted_principal.as_deref(),
+                    asserted_conversation.as_deref(),
+                    native_root.as_deref(),
+                    asserted_agent,
+                    asserted_tool_use_id,
+                )
+                .await);
+        }
+
         let workspace_override = match Self::extract_workspace_override(&input) {
             Ok(pin) => pin,
             Err(refusal) => {
@@ -1633,7 +1739,12 @@ impl CodeScoutServer {
         let gated_as_write = is_write && !tool.lifts_write_block(&input);
 
         if let Err(mut err) = self
-            .check_tool_access(&req.name, gated_as_write, workspace_override.as_deref())
+            .check_tool_access(
+                &req.name,
+                gated_as_write,
+                workspace_override.as_deref(),
+                &input,
+            )
             .await
         {
             // The harmed party's first signal is often THIS refusal: a subagent's
@@ -18614,6 +18725,10 @@ mod config_reload_tests;
 #[cfg(test)]
 #[path = "server/protected_config_write_tests.rs"]
 mod protected_config_write_tests;
+
+#[cfg(test)]
+#[path = "server/read_only_ack_tests.rs"]
+mod read_only_ack_tests;
 
 #[cfg(test)]
 mod resilient_stdin_tests {
