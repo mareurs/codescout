@@ -257,7 +257,7 @@ manifest:
 Purpose: the per-project system prompt. Write it **directly** to the root file
 `.codescout/system-prompt.md` with `create_file` — NOT via `memory(action:
 "write", topic: "system-prompt")`. It is the always-on file injected into every
-session (read by `project_status` from the project root), not a memory topic.
+session (read from the project root into the server instructions), not a memory topic.
 
 Required subsections:
 - `## Entry Points`

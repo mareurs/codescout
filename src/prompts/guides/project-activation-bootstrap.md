@@ -17,7 +17,7 @@ bug is the one you never re-investigate because the project already documented i
   KNOWN and cite the ledger path.
 - If a `get_guide` topic matches your area (`error-handling`,
   `progressive-disclosure`, `workspace-state`, `librarian`,
-  `tracker-conventions`), read it — it states the contract whose violations you
+  `tracker-conventions`, `untrusted-content`), read it — it states the contract whose violations you
   hunt.
 
 ## Phase 1 — route each lookup by what you know

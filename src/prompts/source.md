@@ -9,8 +9,8 @@ Subagents inherit these rules. Pass them along.
    read_file is right for imports/glue; force=true overrides.
 2. NEVER edit_file structural code → edit_code (LSP-aware).
 3. NEVER pipe unbounded run_command → run bare, query @cmd_* buffer
-   (grep "ERROR" @cmd_abc). Bounded LHS (ls, cat, awk,
-   sed) is OK. Shell on source files is blocked.
+   (grep "ERROR" @cmd_abc). No && or ; after a pipe.
+   cat/sed/awk on source: blocked, use read_file.
 4. `read_file` on markdown → heading-addressed (force=true raw).
 5. `edit_file` on markdown → heading+action (managed → doc).
 6. Subagents see only what you brief them with. Name the guides they
@@ -61,7 +61,7 @@ Be exhaustive. Read widely. When in doubt, read more.
 
 <HARD-GATE>
 Do NOT call `memory(action: "write", ...)` until you have:
-1. Completed ALL 7 exploration steps below
+1. Pursued every Phase 2 goal below
 2. Verified EVERY item in the Phase 2 Gate Checklist
 3. Written the Exploration Summary in your response
 
@@ -155,7 +155,7 @@ Wait for the user's choice before proceeding.
   seconds until the response shows completion or failure. If it fails, inform
   the user of the error and fall back to option 3.
 - **Option 2:** Stop and wait for the user to return.
-- **Option 3:** Proceed to Phase 2. Step 6 will use `grep` instead
+- **Option 3:** Proceed to Phase 2. Concept searches will use `grep` instead
   of `semantic_search`.
 
 ---
@@ -176,8 +176,8 @@ strategy you judge best. The gate checklist below is your hard constraint.
   contain decisions you need for accurate memories.
 - **Trace at least 2 data flows.** Follow concrete operations end-to-end through
   the code, with actual function/method names — not just "the request goes through
-  the middleware layer." Use `call_graph(symbol, direction="callees", max_depth=3)`
-  to trace call chains; use `call_graph(direction="callers")` to size blast radius
+  the middleware layer." Use `call_graph(symbol, path, direction="callees", max_depth=3)`
+  to trace call chains; use `call_graph(symbol, path, direction="callers")` to size blast radius
   before edits.
 - **Search by concept.** Run at least 5 semantic or keyword searches for concepts
   the codebase likely embodies (error handling, caching, authentication, etc.).
@@ -197,7 +197,7 @@ Before writing ANY memory, verify ALL of these are true. If any is unchecked, co
 - [ ] Ran `symbols` on the top-level source AND on at least 4 subdirectories individually
 - [ ] Read the FULL body (not just signature) of at least 5 core types/functions
 - [ ] Read ALL architecture docs found, completely (not skimmed)
-- [ ] Traced two distinct data flows from entry point to terminal output (use `call_graph(direction="callees")` for at least one)
+- [ ] Traced two distinct data flows from entry point to terminal output (use `call_graph(symbol, path, direction="callees")` for at least one)
 - [ ] Ran at least 5 concept-level queries (`semantic_search` or `grep` fallback)
 - [ ] Read 2–3 test files and understood the testing pattern
 - [ ] Verified build/dev commands against actual repo contents
@@ -354,8 +354,8 @@ After confirming all 6 memories and the system prompt with the user, deliver thi
   - Libraries are **auto-discovered** when `symbol_at` resolves outside the project root.
   - `library(action="list")` — view all registered libraries and their index/version status.
   - `index(action='build', scope="lib:<name>")` — index a specific library for semantic search.
-  - Once registered, use `scope="lib:<name>"` with `symbols`, `symbols`,
-    `grep`, and `semantic_search` to navigate library code.
+  - Once registered, use `scope="lib:<name>"` with `symbols`, `references` and
+    `semantic_search` to navigate library code.
 
 ---
 
@@ -381,7 +381,7 @@ Proposed CLAUDE.md memory-table update:
 Apply? [y/N]
 ```
 
-On `y`: `edit_file(path: "CLAUDE.md", action: "replace", heading: "## codescout Memories", content: <new table>)`. On `N` or no answer: log `claude_md: skipped (user declined)` for the final summary. No follow-up questions.
+On `y`: `edit_file(path: "CLAUDE.md", action: "replace", heading: "## codescout Memories", body: <new table>)`. On `N` or no answer: log `claude_md: skipped (user declined)` for the final summary. No follow-up questions.
 ## Gathered Project Data
 
 The data below was collected automatically. Use it as your starting point, then explore with codescout tools to fill gaps.

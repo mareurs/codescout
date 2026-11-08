@@ -17,7 +17,7 @@ Every artifact is a markdown file with YAML frontmatter stored under the project
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string (16-hex) | Immutable, auto-assigned on create |
+| `id` | string (16-hex) | Auto-assigned; `move` re-mints it |
 | `kind` | string | `spec`, `plan`, `adr`, `tracker`, or any custom kind |
 | `status` | string | `draft`, `active`, `done`, `archived` — or any custom value |
 | `title` | string | Human-readable title |
@@ -26,8 +26,8 @@ Every artifact is a markdown file with YAML frontmatter stored under the project
 | `topic` | string | Semantic topic for `librarian(action="context")` grouping |
 | `rel_path` | string | Path relative to repo root (e.g. `docs/plans/foo.md`) |
 
-**Important:** `id` and `rel_path` together are the canonical identifiers.
-Use `id` for stable references (links, events); use `rel_path` for filesystem-oriented lookups.
+**Important:** use `id` for stable references (links, events) and `rel_path`
+(catalog-only, not in frontmatter) for filesystem-oriented lookups.
 
 **Required fields for `action="create"`:**
 ```
@@ -57,7 +57,7 @@ event history, cross-project relationships.
 Always enter via the catalog:
 ```
 doc(action="find", semantic="my topic")         ← search
-doc(action="get", id="<id>")                   ← read full content
+doc(action="get", id="<id>", full=true)         ← full body
 doc(action="get", id="<id>", heading="## Foo") ← read one section
 ```
 
@@ -231,8 +231,7 @@ index. **Editing the body has three surfaces, with different blast radius:**
 |---|---|---|---|
 | `doc(update, patch={body_edits: [...]})` | Surgical, per-section | Each entry mirrors `edit_file`'s heading-grammar batch shape: `{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}`. action is one of replace, insert_before, insert_after, remove, edit - `edit` = scoped text swap (old_string/new_string), `replace` = whole-section overwrite (content). Atomic. | **Default choice for tracker maintenance.** Adding a new section, fixing a typo, replacing one section. |
 | `doc(update, patch={body: "..."})` | Total overwrite | The new string replaces the entire body. **Gated by the 50% shrink guard** unless `force=true` is passed. | Initial body authoring, intentional full rewrite. |
-| `edit_file` (any grammar) | Refused on managed files | Returns a `librarian_guard` error pointing back at `doc(update)`. Refused on **every** branch — heading grammar, `old_string`/`new_string`, `insert`, `replace_all`. | Never on augmented artifacts. |
-| `edit_file` | Refused on managed files, **on every write path** | Batch `edits[]`, `insert` prepend/append, and single `old_string`/`new_string` all guard. The `.md` gate's `replace_all=true` escape is not a way around it. | Never on augmented artifacts. |
+| `edit_file` (any grammar) | Refused on managed files, **on every write path** | Returns a `librarian_guard` error pointing back at `doc(update)`. Refused on **every** branch — heading grammar, batch `edits[]`, `insert` prepend/append, and single `old_string`/`new_string`. The `.md` gate's `replace_all=true` escape is not a way around it. | Never on augmented artifacts. |
 
 ### Choosing a mode — anti-patterns
 <!-- serves: doc.update -->
@@ -459,7 +458,7 @@ Operational reference — caps and limits, scope-hint fields, `contains`/`prefix
 SQL semantics, augmentation gather sources + `[LIVE]` mechanics, where the
 catalog DB lives (and what is *not* in the repo), per-project classifier
 overrides, and event-authorship discipline — lives in a dedicated on-demand
-topic so this guide (auto-injected on the first `artifact` call of a session)
+topic so this guide (delivered by section on `doc` calls)
 stays lean:
 
 → **`get_guide("librarian-runtime")`**

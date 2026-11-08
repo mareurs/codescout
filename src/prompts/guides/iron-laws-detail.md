@@ -1,10 +1,9 @@
 # Iron Laws — gates, exceptions, and edge cases
 
 Per-law expansion of the six Iron Laws in the `server_instructions`
-surface. The static slice is intentionally compact (1900-character cap,
-sized under the MCP channel's measured 2048-CHARACTER limit);
-this guide carries the gate error text, exceptions, and edge cases
-that don't fit in the slice itself.
+surface. The static slice is intentionally compact; this guide carries
+the gate error text, exceptions, and edge cases that don't fit in the
+slice itself.
 
 ## Iron Law 1: source reads → `symbols`
 
@@ -48,19 +47,19 @@ comments, config-only.
 **Gate fires when** `edit_file` is called on a source file AND a
 **multi-line** edit adds or removes a line containing a
 symbol-definition keyword (`fn `, `struct`, `enum`, `impl `, `trait `,
-`class`, `def `, `interface`, `function`, etc.), or the edit overlaps a
-known symbol range. **Single-line literal edits are always allowed** —
+`class`, `def `, `interface`, `function`, etc.). **Single-line literal edits are always allowed** —
 including changing a modifier or keyword on the declaration line
 (e.g. `class X` → `data class X`). Error message
 includes:
 
-> edit contains a symbol definition — use symbol tools
+> edit contains a symbol definition ("fn ") — use symbol tools for structural changes
 
 **Exceptions:** `edit_file` is allowed for:
 - `insert: "prepend"` / `insert: "append"` at file boundaries
-- `replace_all: true` for file-wide find/replace (no symbol overlap)
 - Imports, literals, comments — content the gate's keyword filter
-  doesn't catch
+  doesn't catch. `replace_all: true` is **not** an exception: the keyword
+  gate runs before the replace, so a multi-line `replace_all` that adds or
+  removes a definition line is refused like any other edit.
 - Multi-line edits where a definition keyword sits only on an
   **unchanged context line** — e.g. inserting a blank line or comment
   before an existing `fn`, or changing a function body without
@@ -171,12 +170,10 @@ whole pipeline, so a trimmer after it has nothing left to trim:
 **Two gates, same words — read both before concluding.** Everything
 above is the PIPE gate. `cat`, `awk` and `sed` are bounded LHS here
 and still refused on a *source file* by the read-mode gate below.
-`grep` used to be the sharpest case — bounded LHS on this gate, still
-refused on a source path by the other — but as of 2026-09-14 `grep`
-is exempt from the read-mode gate entirely (it has its own MCP tool,
-unlike `cat`/`sed`/`awk`), so a non-recursive `grep` on a source file
-now only has this PIPE gate's rules to satisfy. A sentence about one
-gate still says nothing about the other.
+`grep` is exempt from the read-mode gate entirely (it has its own MCP
+tool, unlike `cat`/`sed`/`awk`), so a non-recursive `grep` on a source
+file only has this PIPE gate's rules to satisfy. A sentence about one
+gate says nothing about the other.
 
 **Windows note:** prefer codescout-native discovery
 (`tree(glob=...)`, `grep(pattern=...)`) over shell `find`. On
@@ -195,21 +192,16 @@ a content reader, even though the message contains both `tail` and
 `.rs`. Route through the codescout `symbols` / `read_file` tools, or
 pass `acknowledge_risk: true` for genuine raw shell access.
 
-**`grep` is exempt from this gate, command-wide.** Unlike the other
-six, `grep` already has a first-class MCP equivalent (`grep(pattern,
-path)`) doing the identical job, so blocking the shell command bought
-routing, not capability — and it was the dominant source of this
-gate's friction (52 of the largest error bucket in one 3-day usage
-window). Shell `grep` on a source file no longer refuses here at all;
-it is still subject to the PIPE gate above like any other command.
+**`grep` is exempt from this gate, command-wide.** `grep` has a first-class
+MCP equivalent (`grep(pattern, path)`) doing the identical job, so shell
+`grep` on a source file is not refused here; it is still subject to the PIPE
+gate above like any other command.
 
 **Metadata commands are NOT blocked.** `wc`, `ls`, `stat`, `du` and
 `file` return a measurement *of* the content rather than the content
-itself, and codescout ships no tool that returns a line count — so
-refusing them named an alternative that does not exist. `wc` came off
-the blocked list on 2026-08-16 for that reason. The line this list
-draws is content vs a measurement of content, **not** read-only vs
-mutating: `head` and `tail` are read-only and stay blocked, because
+itself, and codescout ships no tool that returns a line count. The line
+this list draws is content vs a measurement of content, **not** read-only vs
+mutating: `head` and `tail` are read-only and blocked, because
 they return the file's bytes.
 
 **Why this matters:** every `@cmd_*` buffer is queryable for the
@@ -221,7 +213,8 @@ a pipe it serves keeps it as `unfiltered_output`.
 ## Iron Law 4: markdown reads → `read_file` (heading-addressed)
 
 **Rule:** `read_file` on a `.md` path is heading-addressed by default — no
-separate tool. Call `read_file(path)` for the heading map,
+separate tool. Call `read_file(path)` for the heading map (a file that fits in
+9,000 bytes and has at most 40 headings comes back whole instead),
 `read_file(path, heading="## Section")` for a single section,
 `read_file(path, headings=[...])` for multiple, `read_file(path,
 start_line=N, end_line=M)` for a line slice, or `read_file(path,
@@ -263,8 +256,11 @@ heading-addressed items (`heading`+`action`) and plain items
 (`old_string`+`new_string`) — in the same call.
 
 **A managed artifact is refused regardless of which grammar or write
-path is used** — anything under `docs/trackers/`, or any file whose
-frontmatter carries an `id:`. *Every* `edit_file` write path refuses
+path is used** — an augmented artifact (its `params` live in the catalog),
+or a declared ledger (frontmatter `entry_prefix`). A file whose frontmatter
+only carries an `id:` is refused for frontmatter writes, not body writes; the
+path alone (for example `docs/trackers/`) decides nothing. *Every*
+`edit_file` write path refuses
 those: a direct write bypasses the catalog, so no `field_patch` event
 is recorded, the body-shrink guard never runs, and `updated_at` goes
 stale. Use `doc(action="update", id=…, patch={body_edits: […]})`
@@ -294,14 +290,16 @@ underbriefed. A subagent calling `get_guide(topic)` is **not** that
 symptom; it is the prescribed behaviour (see the last two bullets
 below), because the auto-inject cannot reach it.
 
-**Substrate fact this compensates for:** the `guide_hints_emitted`
-ledger is process-wide and shared across the parent and its subagents,
+**Substrate fact this compensates for:** without the companion stamp, the
+`guide_hints_emitted` ledger is shared across the parent and its subagents,
 persisted per session so most topics survive `/mcp` restarts (the
 session-opening topic is a deliberate exception — server construction
 re-arms it on every reconnect; see `get_guide("workspace-state")`).
-Once the parent triggers a topic hint, NO subagent receives that hint
-independently — the ledger says "already delivered." Iron Law 6 is the
-only channel that delivers parent-known context to subagents.
+In that case, once the parent triggers a topic hint, NO subagent receives that
+hint independently — the ledger says "already delivered." With the stamp, each
+subagent has its own ledger and its own auto-injects. A brief cannot know which
+case applies, so Iron Law 6 is the only channel that always delivers parent-known
+context to subagents.
 
 **Recursion:** applies at every spawn boundary. Grandparent →
 parent → child each pass context downward; intermediate agents do

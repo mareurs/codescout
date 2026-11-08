@@ -141,13 +141,13 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
     {
         format!(
             "Qdrant collection is missing for project `{project_id}`. \
-             Populate it: `cargo run --release --bin sync_project -- . {project_id}`"
+             Populate it with `index(action=\"build\")`."
         )
     } else if err_str.contains("Vector dimension") || err_str.contains("expected dim") {
         "Embedding dim mismatch between index and configured model. \
          Drop the collection and re-index: \
          `curl -X DELETE $CODESCOUT_QDRANT_URL/../collections/code_chunks` \
-         then `cargo run --release --bin sync_project -- . <project-id>`"
+         then `index(action=\"build\")`"
             .to_string()
     } else if err_str.contains("dense tei")
         || err_str.contains("sparse tei")
@@ -1201,10 +1201,10 @@ mod classify_search_error_tests {
     use super::classify_search_error;
 
     #[test]
-    fn missing_collection_routes_to_sync_project_hint() {
+    fn missing_collection_routes_to_index_build_hint() {
         let err = "hybrid_query: Collection `code_chunks` doesn't exist!";
         let hint = classify_search_error(err, "codescout");
-        assert!(hint.contains("sync_project"), "hint: {hint}");
+        assert!(hint.contains("index(action=\"build\")"), "hint: {hint}");
         assert!(hint.contains("codescout"), "hint must name project: {hint}");
     }
 
@@ -1218,7 +1218,7 @@ mod classify_search_error_tests {
             "hint must give drop command: {hint}"
         );
         assert!(
-            hint.contains("sync_project"),
+            hint.contains("index(action=\"build\")"),
             "hint must follow with reindex: {hint}"
         );
     }
@@ -1251,7 +1251,7 @@ mod classify_search_error_tests {
         let err = "Collection `code_chunks` not found via tonic transport";
         let hint = classify_search_error(err, "codescout");
         assert!(
-            hint.contains("sync_project"),
+            hint.contains("index(action=\"build\")"),
             "specificity ordering: {hint}"
         );
     }

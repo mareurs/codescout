@@ -135,7 +135,7 @@ impl Tool for Symbols {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "description": "Path only \u{2192} file/dir overview (formerly list_symbols). Name \u{2192} search (formerly find_symbol). Both \u{2192} scoped search.",
+            "description": "Path only \u{2192} file/dir overview. Name \u{2192} search. Both \u{2192} scoped search.",
             "properties": {
                 "name": { "type": "string", "description": "Symbol to find. Plain text is a substring match; a value containing '/' is an exact name-path ('MyStruct/my_method'). The MODE comes from this value, never from a second parameter — `exact` overrides it. Exact name matches lead the results." },
                 "exact": { "type": "boolean", "description": "Override what `name`'s shape implies: true = exact lookup on a bare name; false = substring search on a value that contains '/'. Omit to infer from the value." },

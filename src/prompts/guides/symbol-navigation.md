@@ -15,9 +15,11 @@ strings, and unrelated identifiers.
 - **Find across the project, then read the body:**
   `symbols(name="edit_code")` to locate it, then
   `symbols(name="ToolName/edit_code", include_body=true)` for the body.
-- **Kind filter + path scope:** `symbols(path="src/tools/", kind="struct")`.
-  `kind` values vary by language (see table below). Run `symbols(path)` once on a
-  representative file to see which kinds your LSP emits.
+- **Kind filter on a name search:** `symbols(name="X", path="src/tools/", kind="struct")`.
+  `kind` filters name searches only: a file or directory overview ignores it. `kind` is one of
+  `function`, `class`, `struct`, `interface`, `type`, `enum`, `module`, `constant`; which one your
+  language's symbols carry varies (see table below).
+  Run `symbols(path)` once on a representative file to see which kinds your LSP emits.
 - **Who calls X?** `references(symbol, path)` — structured call sites, not
   `grep`.
 - **Impact analysis before any structural change:**
@@ -36,7 +38,7 @@ structural change) — those are identical across languages. Only three things
 vary per language: the name-path form `name` takes, the `kind` to pass to
 `symbols(path=..., kind=...)`, and a per-language gotcha.
 
-| Language | `name` name-path form | `kind` for list-by-kind | Gotcha |
+| Language | `name` name-path form | `kind` for a name search | Gotcha |
 |---|---|---|---|
 | **Rust** | `Type/method`, `impl Trait for Type/method` | `struct` | rust-analyzer reports traits as `kind="interface"`; trait impls use the `impl Trait for Type/method` form |
 | **Python** | `Class/method`, `module_func` | `class` | decorators aren't part of the symbol — search by the decorated function's name |
@@ -44,6 +46,9 @@ vary per language: the name-path form `name` takes, the `kind` to pass to
 | **Kotlin / Java** | `Class/method`, `Object.companion/method` | `class` (covers classes, objects, annotations) | annotations aren't part of the symbol — search by method name |
 | **Go** | `Type/Method`, `PackageFunc` | `function` (covers funcs + methods) | interfaces use `kind="interface"`; receiver methods stay `Type/Method` |
 | **C#** | `Class/Method`, `Namespace.Class/Method` (nested) | `class`, `interface` | properties surface as `function` getters/setters in some LSPs |
+
+In every language `kind="function"` matches functions, methods and constructors, and `kind="type"`
+matches only type parameters.
 
 ## Related
 

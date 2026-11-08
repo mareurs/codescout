@@ -20,8 +20,8 @@ args to widen, and every count it covers is reachable by passing them.
 
 `more_in_workspace` is the exception and is **not** in `expand`: it counts
 catalog rows beyond the umbrella ceiling, which no `scope` value reaches —
-`scope="all"` aliases to umbrella when the project has one, and errors when
-it does not. Treat it as "rows exist elsewhere on this machine"; to read
+in `doc(find)`, `scope="all"` aliases to umbrella when the project has one, and errors when
+it does not; in `librarian(context)`, `all` is literal. Treat it as "rows exist elsewhere on this machine"; to read
 them, activate the owning project.
 
 **Umbrellas are user-declared** in `workspace.toml` `[[umbrella]]`
@@ -54,8 +54,8 @@ catalog from disk — never the other way around.
 ## Augmentation runtime details
 
 **Gather sources** (used by `doc(action="gather")`
-params): `git_log`, `artifacts`, `observations`, `file`, `grep`.
-Unknown sources are skipped with a warning.
+params): `git_log`, `artifacts`, `observations`, `file`, `grep`, `config_value`
+(`path`, `key`: one key of a TOML, YAML or JSON file). Unknown sources are skipped with a warning.
 
 **`[LIVE]` header in context bundles:** augmented artifacts surface in
 `librarian(context)` with a `<!-- [LIVE] -->` header and their prompt
@@ -69,7 +69,7 @@ as a blockquote directive — read it as a standing instruction.
   every `doc(action="augment")` call. Violations return as recoverable
   errors before the write lands.
 
-Both fields are optional; legacy augmentations work unchanged.
+Both fields are optional.
 
 ## When the index is stale
 
@@ -98,16 +98,16 @@ markdown files only.
 | State | Source of truth | Regenerable from disk? |
 |---|---|---|
 | Artifact rows (id, kind, status, title, frontmatter, body text) | the `.md` file | **Yes** — `reindex` rebuilds them from disk |
-| Augmentation **shape** (`prompt`, `params_schema`, `render_template`, `entry_collection`, `append_mode`, `history_cap`) | the catalog DB, projected to a committed sidecar | **Yes, since 2026-08-30** — export it with `librarian(action="doctor", fix="export_augmentations")`, declare it with `expects_augmentation:`, and `reindex` re-attaches it |
+| Augmentation **shape** (`prompt`, `params_schema`, `render_template`, `entry_collection`, `append_mode`, `history_cap`) | the catalog DB, projected to a committed sidecar | **Yes** — export it with `librarian(action="doctor", fix="export_augmentations")`, declare it with `expects_augmentation:`, and `reindex` re-attaches it |
 | Augmentation **params** (the live rows) | the **catalog DB only** | **No**, and deliberately so — params churn, and committing them recreates the params-vs-body drift the sidecar split exists to avoid |
 
 Implications for augmented trackers (anything with `entry_collection` /
 filterable `params`):
 
 - **An augment produces no git diff *to the `.md` body*.** `doc(action="augment")`
-  writes the catalog row and leaves the body untouched. `git status` no longer
-  stays clean, though: a call that changes the *shape* writes through to the
-  artifact's committed sidecar (`sidecar_write_through`, `augment.rs:248`), so
+  writes the catalog row and leaves the body untouched. `git status` is not
+  clean afterwards, though: a call that changes the *shape* writes through to the
+  artifact's committed sidecar (`sidecar_write_through`, `augment.rs`), so
   read `git diff` on `docs/augmentations/` as you would for any generated file.
   A params-only merge does leave the sidecar byte-identical.
 - **Augmentations survive `reindex`** (even `force=true`). Reindex

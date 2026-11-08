@@ -47,8 +47,7 @@ impl Tool for Tree {
                 "detail_level": { "type": "string", "description": "'full' for all entries (default: compact)" },
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "limit": { "type": "integer", "description": "Max entries per page (default 50; for `glob`, max files default 100)" }
-            },
-            "description": "When `glob` is set → file search. Otherwise → directory listing (optionally recursive)."
+            }
         })
     }
 

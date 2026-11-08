@@ -835,7 +835,7 @@ impl Tool for References {
     }
 
     fn description(&self) -> &str {
-        "Find all usages of a symbol. Requires symbol and file."
+        "Find all usages of a symbol. Requires symbol and path."
     }
 
     fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {

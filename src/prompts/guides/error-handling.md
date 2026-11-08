@@ -14,8 +14,8 @@ parallel siblings only when it sees `isError: true`.
 
 Examples of recoverable conditions:
 
-- Unknown symbol name passed to `symbols(name=...)`.
 - Topic not found in `get_guide(topic)`.
+- Bad line range, or a markdown-only parameter passed for a non-markdown file.
 - Path not found, unsupported file type, empty glob match.
 - No index built yet for the queried project.
 - User declined an elicitation prompt.
@@ -36,9 +36,12 @@ need to intervene.
 
 The MCP response has an `isError` field.
 
-- `isError: true` → fatal; stop and surface to the user.
+- `isError: true` → fatal; stop and surface to the user. One exception: a
+  read-only refusal (the project was activated read-only) is `isError: true`,
+  but its text names `ack="@ack_…"`: replay the refused call with it to make that one write.
 - `isError: false` → recoverable; read the message + guidance field
-  (`hint` / `warning` / `must_follow`) and adapt the next call.
+  (`hint` / `warning` / `must_follow`) and adapt the next call. The body starts
+  `"ok": false`, so read that field: the harness may not show you `isError`.
 
 For tool authors: return `RecoverableError::new(message)` — or the
 `RecoverableError::with_hint(message, hint)` / `with_warning` /

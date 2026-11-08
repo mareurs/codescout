@@ -4575,10 +4575,9 @@ fn system_prompt_points_to_tool_guide_resource() {
     // ONBOARDING_VERSION so a bump cannot be silent — it must be paired with an edit here.
     // Bumping is required when the `onboarding_prompt` surface changes, because already-
     // onboarded projects cache the rendered prompt; see src/prompts/README.md. Last moved
-    // to 31 on 2026-09-05, when the surface's artifact-tracking step stopped naming
-    // `librarian_context(topic)` — retired 2026-05-02, and invisible to the prompt-surface
-    // gate for four months because that gate could not see a name written in CALL form.
-    assert_eq!(ONBOARDING_VERSION, 31);
+    // to 32 when the surface's `call_graph` calls gained `path` and the draft's Iron Law
+    // citation was corrected.
+    assert_eq!(ONBOARDING_VERSION, 32);
 }
 
 #[test]
@@ -4595,8 +4594,8 @@ fn system_prompt_draft_read_file_hint_mentions_file_ref_reuse() {
         "draft must teach @file_* reuse for read_file (heading-addressed); got:\n{draft}"
     );
     assert!(
-        draft.contains("IRON LAW #6"),
-        "draft must cite IRON LAW #6 in the read_file guidance; got:\n{draft}"
+        draft.contains("Iron Law 4"),
+        "draft must cite Iron Law 4 in the read_file guidance; got:\n{draft}"
     );
 }
 

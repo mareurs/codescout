@@ -273,7 +273,7 @@ struct Args {
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if args.get("include_body").is_some() {
         return Err(LibrarianRecoverableError::new(
-            "parameter `include_body` was removed; use `full: true` for the full body, or `heading=\"<section>\"` for a targeted section",
+            "parameter `include_body` is not accepted; use `full: true` for the full body, or `heading=\"<section>\"` for a targeted section",
         ));
     }
     let a: Args = serde_json::from_value(args).map_err(|e| {

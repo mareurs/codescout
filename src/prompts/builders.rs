@@ -286,7 +286,7 @@ pub(crate) fn build_system_prompt_draft(
         draft.push_str(
             "**Markdown files** (memories, plans, docs): \
              `read_file(\"path\")` — heading-addressed by default, returns heading map + `@file_ref` for large files. \
-             **IRON LAW #6:** subsequent reads MUST use `@file_ref` (not the original path): \
+             **Iron Law 4:** subsequent reads MUST use `@file_ref` (not the original path): \
              `read_file(\"@file_ref\", heading=\"## Section\")` or `start_line=/end_line=`.\n\n",
         );
     } else {
@@ -306,14 +306,14 @@ pub(crate) fn build_system_prompt_draft(
         draft.push_str("4b. `symbol_at(path, line)` — hover + type sig when you have an exact location from prior tool output; skip re-searching\n");
         draft.push_str("4c. `references(symbol, path)` — all call sites before any edit\n");
         draft.push_str(
-            "5. `call_graph(symbol=\"Name\", direction=\"callers\")` — transitive blast radius; `direction=\"callees\"` for flow tracing\n",
+            "5. `call_graph(symbol=\"Name\", path=\"...\", direction=\"callers\")` — transitive blast radius; `direction=\"callees\"` for flow tracing\n",
         );
         draft.push_str(
             "6. `memory(action=\"recall\", query=\"...\")` — search memories by meaning\n\n",
         );
         draft.push_str(
             "7. `read_file(\"path/to/file.md\")` — heading-addressed by default, returns heading map + `@file_ref` for large files. \
-             **IRON LAW #6:** subsequent reads MUST use `@file_ref` (not the original path): \
+             **Iron Law 4:** subsequent reads MUST use `@file_ref` (not the original path): \
              `read_file(\"@file_ref\", heading=\"## Section\")` or `start_line=/end_line=`.\n\n",
         );
     }
@@ -322,8 +322,8 @@ pub(crate) fn build_system_prompt_draft(
     draft.push_str("## Retrieval Stack\n");
     draft.push_str(
         "`semantic_search` runs through the Qdrant + TEI hybrid stack. \
-         Start it once per machine with `./scripts/retrieval-stack.sh up`, then index this \
-         project with `cargo run --release --bin sync_project -- <path> <project_id>`. \
+         Start it once per machine with `./scripts/retrieval-stack.sh up`. \
+         Build or refresh the index with `index(action=\"build\")`. \
          If a call returns `retrieval stack offline`, the stack isn't running.\n\n",
     );
 
@@ -340,7 +340,7 @@ pub(crate) fn build_system_prompt_draft(
 
     // Project rules — empty section for the LLM to fill from exploration
     draft.push_str("## Project Rules\n");
-    draft.push_str("- [Fill from Phase 1 exploration: linting, formatting, commit conventions]\n");
+    draft.push_str("- [Fill from Phase 2 exploration: linting, formatting, commit conventions]\n");
 
     // Workspace projects table — only for multi-project repos
     if projects_slice.len() > 1 {
@@ -412,7 +412,7 @@ pub(crate) fn build_system_prompt_draft(
             ));
         }
         draft.push_str(
-            "\nUse `scope=\"lib:<name>\"` with `symbols`, `grep`, \
+            "\nUse `scope=\"lib:<name>\"` with `symbols`, `references` \
              and `semantic_search` to navigate library code. \
              Run `index(action=\"build\", scope=\"lib:<name>\")` to enable semantic search for a library.\n",
         );

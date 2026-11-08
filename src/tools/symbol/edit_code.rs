@@ -118,7 +118,7 @@ impl Tool for EditCode {
     fn description(&self) -> &str {
         "Mutate a symbol. action='replace' overwrites body. PRESERVES outer \
          #[...] attributes (drop with attributes:[] / set with attributes:[...] — \
-         see schema). action='insert' injects code adjacent. action='remove' \
+         see schema). action='insert' adds `body` before/after `symbol`. action='remove' \
          deletes. action='rename' renames across codebase via LSP."
     }
 
@@ -157,7 +157,7 @@ impl Tool for EditCode {
                 "body": {
                     "type": "string",
                     "description": format!(
-                        "{} 'replace': the new symbol body. 'insert': the code to inject. \
+                        "{} 'replace': the new symbol body. 'insert': the code to insert. Spelled `body`, not code/new_body. \
              Not read by 'rename' or 'remove'.",
                         required_for(BODY_REQUIRED_ACTIONS)
                     )

@@ -295,10 +295,15 @@ pub(crate) const WRITE_CEILING_UPDATE_ENTRY: usize = 9_077 + 128;
 pub(crate) const WRITE_CEILING_AUGMENT: usize = 5_261 + 128;
 #[cfg(test)]
 pub(crate) const WRITE_CEILING_LINK: usize = 2_591 + 128;
-/// A floor for `append_entry`, between its section BODIES (10,641 B) and what it delivers
-/// wrapped (12,928 B on 2026-10-17, 12,936 B on 2026-10-18): it fails a delivered-bytes measure that forgot the wrappers.
+/// A floor for `append_entry`, between its section BODIES and what it delivers wrapped: it fails
+/// a delivered-bytes measure that forgot the wrappers. On 2026-10-17 bodies were 10,641 B and the
+/// wrapped delivery 12,928 B (12,936 B on 2026-10-18), a 2,287 B wrapper share. On 2026-11-08 the
+/// stale "not while the ledger's own commits are unpushed" bullet left tracker-conventions §Entry
+/// ids (the refusal was removed 2026-09-11), and the wrapped delivery measured 11,631 B; the same
+/// wrapper share puts the bodies near 9,344 B. The floor moved from 12,000 to 10,500 B to stay
+/// between the two; the ceilings above were not raised.
 #[cfg(test)]
-pub(crate) const WRITE_FLOOR_APPEND_ENTRY: usize = 12_000;
+pub(crate) const WRITE_FLOOR_APPEND_ENTRY: usize = 10_500;
 
 /// A guide section with its declarations resolved.
 #[derive(Debug, Clone)]
@@ -1242,7 +1247,7 @@ Body Mu.
                 vec![ue_t, app_i, aug_t, lnk_t, upd_t],
             ),
             (
-                "Entry ids — refusals: main checkout only, and unpushed ledgers",
+                "Entry ids — refusals: main checkout only (prose ledgers)",
                 vec![app_t],
                 vec![ue_t, app_i, aug_t, lnk_t, upd_t],
             ),

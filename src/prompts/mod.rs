@@ -445,7 +445,7 @@ pub const GUIDE_TOPICS: &[&str] = &[
 ///
 /// Authoring a guide and wiring its trigger are two separate edits, and nothing used to
 /// prompt for the second. `src/prompts/README.md` rule 8 tells an author to move content
-/// into a guide when `server_instructions` overflows its 2200-byte cap — so "move it to a
+/// into a guide when `server_instructions` overflows its cap — so "move it to a
 /// guide" read as *filed* when, absent a trigger, it is closer to *deleted from the
 /// agent's view*. Measured 2026-08-16: 7 of 10 topics, 47,343 of 75,441 bytes — 63% of the
 /// guide corpus — fired for nothing.
@@ -456,19 +456,15 @@ pub const GUIDE_TOPICS: &[&str] = &[
 /// entry — a topic listed here that later gains a trigger — while
 /// `pull_only_guide_topics_are_registered_with_real_reasons` fails on one that no longer exists.
 ///
-/// Entries marked `PENDING BL-25` are honest about the current state rather than
-/// retrofitting a rationale: they are candidates for a trigger whose wiring is blocked on
-/// a byte-budget decision, because `librarian` alone is 19.9 KB and already auto-injects on
-/// a routine `artifact` call. Wiring more triggers before cutting the corpus trades one
-/// problem for another.
-///
 /// See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
 pub const PULL_ONLY_GUIDE_TOPICS: &[(&str, &str)] = &[
     (
         "librarian-runtime",
-        "By design. It is the spill-out half of `librarian` (19.9 KB, auto-injected), and \
-         the parent guide ends by naming it. Wiring it would add 9.4 KB to a call that \
-         already receives 19.9 KB, which is the byte problem this whole bug is about.",
+        "Operational reference no single call shape owns (caps, scope hints, SQL \
+         semantics, classifier overrides). Section grain cannot serve it: its natural \
+         shapes (`doc.gather`, `librarian.reindex`) are declared by `librarian`, and two \
+         topics may not declare one shape. `librarian` § Runtime tips and \
+         `tracker-conventions` name it.",
     ),
     (
         "error-handling",
@@ -483,8 +479,9 @@ pub const PULL_ONLY_GUIDE_TOPICS: &[(&str, &str)] = &[
     ),
     (
         "untrusted-content",
-        "PENDING BL-25: not yet classified. The candidate trigger is whichever surface \
-         first admits third-party text, which has not been identified.",
+        "Named in the `get_guide` description and the activation bootstrap's topic list. A \
+         read-time trigger would add 5.3 KB to a session's first file read, and the p50 \
+         emission-byte ceiling leaves no room for it.",
     ),
 ];
 

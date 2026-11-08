@@ -4849,7 +4849,7 @@ mod tests {
             "Native-Read-style alias: line count from offset (end_line = offset + limit - 1). offset defaults to line 1 if omitted."
         ));
         assert!(!description_declares_an_alias(
-            "For fix=rehome: absolute path the repo USED TO live at (must no longer exist on disk). Preferred alias of root — use this name, it's the one the doctor hints and error text surface."
+            "For fix=rehome: absolute path of the repo's previous location (must not exist on disk). Alias of root — use this name; doctor hints and error text surface it."
         ));
     }
 
@@ -17343,7 +17343,7 @@ mod guide_hint_tests {
         let out = call_tool(&server, "doc", json!({"action": "get", "id": id})).await;
         let guide = guide_blocks(&out).join("");
         assert!(
-            guide.contains("`id` and `rel_path` together are the canonical identifiers"),
+            guide.contains("Every artifact is a markdown file with YAML frontmatter"),
             "the declared section's BODY must arrive once the content topic is \
              spent — asserting body text, not the `§ Artifact Model` marker, which \
              an empty section would satisfy. got {} B: {}",

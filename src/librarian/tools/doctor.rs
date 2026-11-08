@@ -1963,7 +1963,7 @@ fn validate_rehome_request<'a>(
 ) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
     let old = old_root.ok_or_else(|| {
         LibrarianRecoverableError::new(
-            "fix=rehome requires old_root=<absolute path the repo used to live at>",
+            "fix=rehome requires old_root=<absolute path of the repo's previous location>",
         )
     })?;
     let new = new_root.ok_or_else(|| {

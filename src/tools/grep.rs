@@ -104,7 +104,7 @@ impl Tool for Grep {
                 "whole_word": { "type": "boolean", "default": false, "description": "Match whole words only (\\b boundaries)" },
                 "glob": { "type": ["string", "array"], "description": "Restrict to files matching glob(s), e.g. \"*.rs\" or [\"src/**\", \"*.md\"]" },
                 "include_hidden": { "type": "boolean", "default": false, "description": "Also search hidden files/dirs (dotfiles, .github/)" },
-                "mode": { "type": "string", "enum": ["lines", "files"], "default": "lines", "description": "\"files\": ranked files + per-file counts, no line content (tames broad searches)" },
+                "mode": { "type": "string", "enum": ["lines", "files"], "default": "lines", "description": "\"files\" (= native output_mode count/files_with_matches): ranked files + counts, no lines" },
                 "time_budget_ms": { "type": "integer", "description": "Walk wall-clock ms (default 20000)" }
             }
         })

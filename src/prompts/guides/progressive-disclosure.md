@@ -83,8 +83,9 @@ envelope that cannot be clipped to fit (bulk nested, spread over many small fiel
 the clip stops cutting at 1,000 raw bytes each) is still wrapped in a `@tool_*`. Other tools
 produce `@tool_*`. All are addressable by any tool that accepts a path.
 `@file_*` and `@ack_*` are sibling handle kinds — same mechanics. `@ack_*`
-covers both dangerous commands and out-of-scope writes: re-invoke the tool with
-the handle to acknowledge and proceed.
+covers dangerous commands, out-of-scope writes and writes refused by a read-only
+activation: re-invoke the tool with the handle to acknowledge and proceed
+(a read-only refusal replays with `ack="@ack_…"` on the refused call, sending nothing else).
 
 ### Reading the stderr of a buffered command: the `.err` suffix
 
@@ -154,12 +155,12 @@ The class does not match its own text in the command line.
 ## Path-relative annotation
 
 Paths in tool responses are project-relative. The response to each
-`activate_project` call carries a trailing `[codescout] paths are relative
+`workspace(action="activate")` call carries a trailing `[codescout] paths are relative
 to <root>` note naming the root they resolve against; every later response
 in that activation window omits it, because the same fact lives in the
 `Active project` line of `server_instructions`. The gate also fires on the
 first eligible response after **server start**, not only after an explicit
-`activate_project` call — launching codescout with `--project <path>`
+`workspace(action="activate")` call — launching codescout with `--project <path>`
 (`src/main.rs:23-25`) activates a project before any tool call, so that
 first response carries the banner too.
 

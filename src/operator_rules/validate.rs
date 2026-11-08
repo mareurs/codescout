@@ -7,8 +7,8 @@ use crate::operator_rules::rule::{Binding, Rule};
 
 /// Gate 6 — every rule has a disposition and a coherent binding.
 ///
-/// `tracker-conventions` records that an absent field-presence sweep left 39 of 57
-/// entries unharvestable for three months. This is that sweep, run as a gate.
+/// A field-presence sweep over the entries makes the unharvestable ones visible. This is
+/// that sweep, run as a gate.
 pub fn validate(rules: &[Rule]) -> Result<()> {
     let mut seen: HashSet<&str> = HashSet::new();
     for r in rules {

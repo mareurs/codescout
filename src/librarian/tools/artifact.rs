@@ -207,7 +207,7 @@ impl Tool for Artifact {
                 "action": {
                     "type": "string",
                     "enum": ["find", "get", "create", "update", "move", "delete", "graft", "link", "graph", "state_at", "append_entry", "update_entry", "rekey_prefix", "event_create", "event_list", "augment", "gather", "list_stale"],
-                    "description": "Operation to perform"
+                    "description": "Operation to perform. get = read a document."
                 },
                 "filter": {
                     "type": "object",
@@ -266,7 +266,7 @@ impl Tool for Artifact {
                 },
                 "id": {
                     "type": "string",
-                    "description": "get/update/move/delete/graph/state_at/append_entry/update_entry/rekey_prefix/event_create/event_list/gather/augment: document id (16-hex). find and create take none."
+                    "description": "get/update/move/delete/graph/state_at/append_entry/update_entry/rekey_prefix/event_create/event_list/gather/augment: document id (16-hex). No path form: find(rel_path=…) returns it."
                 },
                 "threshold_hours": {
                     "type": "integer",
@@ -361,7 +361,7 @@ impl Tool for Artifact {
                 },
                 "patch": {
                     "type": "object",
-                    "description": "update: the fields to change. Accepted keys: status, title, owners, tags, topic, time_scope, extra, body, body_edits, params (any other key returns RecoverableError). Top-level status/title/owners/tags/topic/time_scope/extra are lifted into patch automatically and reported under `corrections`; an update that changes nothing is refused. Body editing — three modes: (1) `body_edits: [{heading, action, content?|old_string+new_string?, at?, occurrence?, replace_all?, include_subsections?}]` for surgical per-section edits — edit_file's heading-addressed batch shape exactly, including its action semantics and occurrence rule; applied atomically, RECOMMENDED for tracker maintenance; `heading` also takes `\"^\"` for the PREAMBLE (action `edit` only); (2) `body` for total overwrite, gated by the 50% shrink guard unless `force=true` is passed at top level; (3) frontmatter-only changes via status/title/owners/tags/topic/time_scope. `body` and `body_edits` are mutually exclusive. `params` is RFC 7396 merge-patched into the augmentation params — arrays are REPLACED whole, so use update_entry to change one row. Body mutations emit `field_patch` events (kind=field_patch, payload.field=body)."
+                    "description": "update: the fields to change. Accepted keys: status, title, owners, tags, topic, time_scope, extra, body, body_edits, params (any other key returns RecoverableError). Top-level status/title/owners/tags/topic/time_scope/extra are lifted into patch automatically and reported under `corrections`; an update that changes nothing is refused. Body editing — three modes: (1) `body_edits: [{heading, action, content?|old_string+new_string?, at?, occurrence?, replace_all?, include_subsections?}]` for surgical per-section edits — edit_file's heading items, including its action semantics and occurrence rule — every item needs `heading` (no text-only items); applied atomically, RECOMMENDED for tracker maintenance; `heading` also takes `\"^\"` for the PREAMBLE (action `edit` only); (2) `body` for total overwrite, gated by the 50% shrink guard unless `force=true` is passed at top level; (3) frontmatter-only changes via status/title/owners/tags/topic/time_scope. `body` and `body_edits` are mutually exclusive. `params` is RFC 7396 merge-patched into the augmentation params — arrays are REPLACED whole, so use update_entry to change one row. Body mutations emit `field_patch` events (kind=field_patch, payload.field=body)."
                 },
                 "force": {
                     "type": "boolean",

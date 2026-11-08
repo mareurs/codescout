@@ -18,13 +18,13 @@
    - regex-like patterns belong in `grep`, not `symbols`
 4b. `symbol_at(path, line)` — hover + type sig when you have an exact location from prior tool output; skip re-searching
 4c. `references(symbol, path)` — all call sites before any edit
-5. `call_graph(symbol="Name", direction="callers")` — transitive blast radius; `direction="callees"` for flow tracing
+5. `call_graph(symbol="Name", path="...", direction="callers")` — transitive blast radius; `direction="callees"` for flow tracing
 6. `memory(action="recall", query="...")` — search memories by meaning
 
-7. `read_file("path/to/file.md")` — heading-addressed by default, returns heading map + `@file_ref` for large files. **IRON LAW #6:** subsequent reads MUST use `@file_ref` (not the original path): `read_file("@file_ref", heading="## Section")` or `start_line=/end_line=`.
+7. `read_file("path/to/file.md")` — heading-addressed by default, returns heading map + `@file_ref` for large files. **Iron Law 4:** subsequent reads MUST use `@file_ref` (not the original path): `read_file("@file_ref", heading="## Section")` or `start_line=/end_line=`.
 
 ## Retrieval Stack
-`semantic_search` runs through the Qdrant + TEI hybrid stack. Start it once per machine with `./scripts/retrieval-stack.sh up`, then index this project with `cargo run --release --bin sync_project -- <path> <project_id>`. If a call returns `retrieval stack offline`, the stack isn't running.
+`semantic_search` runs through the Qdrant + TEI hybrid stack. Start it once per machine with `./scripts/retrieval-stack.sh up`. Build or refresh the index with `index(action="build")`. If a call returns `retrieval stack offline`, the stack isn't running.
 
 ## MCP Resources
 Extended docs and project context are available via MCP resources (`resources/read <uri>`):
@@ -33,4 +33,4 @@ Extended docs and project context are available via MCP resources (`resources/re
 - `project://summary` — active project + index + LSP snapshot
 
 ## Project Rules
-- [Fill from Phase 1 exploration: linting, formatting, commit conventions]
+- [Fill from Phase 2 exploration: linting, formatting, commit conventions]

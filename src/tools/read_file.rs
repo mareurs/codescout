@@ -41,8 +41,8 @@ impl Tool for ReadFile {
             // no_tool_schema_declares_a_top_level_combinator (src/server.rs).
             "properties": {
                 "path": { "type": "string", "description": "File path relative to project root" },
-                "start_line": { "type": "integer", "description": "First line (1-indexed). Pair with end_line." },
-                "end_line": { "type": "integer", "description": "Last line (1-indexed, inclusive). Pair with start_line." },
+                "start_line": { "type": "integer", "description": "First line (1-indexed). Without end_line: a 50-line window." },
+                "end_line": { "type": "integer", "description": "Last line (1-indexed, inclusive). Needs start_line." },
                 "offset": { "type": "integer", "description": "Native-Read-style alias: 1-indexed start line (= start_line). Ignored when start_line/end_line are set." },
                 "limit": { "type": "integer", "description": "Native-Read-style alias: line count from offset (end_line = offset + limit - 1). offset defaults to line 1 if omitted." },
                 "heading": { "type": "string", "description": "Markdown only: return one section by heading (e.g. \"## Auth\")." },

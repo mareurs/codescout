@@ -1,17 +1,18 @@
 # Workspace state
 
-How `workspace.activate` (alias `activate_project`) switches the codescout
+How `workspace(action="activate")` switches the codescout
 MCP server's active project, and what state is shared across every tool
 call — including across subagents that share the parent's MCP server.
 
-## What `activate_project` does
+## What `workspace(action="activate")` does
 
-A single call to `activate_project(path=...)` flips the server's active
+A single call to `workspace(action="activate", path=...)` flips the server's active
 project to the given root. The call has these side effects, in order:
 
-1. **Resolves the path.** Bare project IDs (no `/`) inside a workspace
-   are focus-switches — they skip step 2 entirely (the ledger is never
-   touched), then still run steps 3–5 and return. Absolute paths trigger
+1. **Resolves the path.** A bare project ID (no `/`) inside a workspace, or
+   a path to a non-root member of the current workspace, is a focus-switch —
+   it skips step 2 entirely (the ledger is never
+   touched), then still runs steps 3–5 and returns. Any other path triggers
    full activation: path must be an existing directory or you get a
    `RecoverableError` (`isError: false`, sibling calls survive) —
    raised *before* step 2, so a malformed or nonexistent path leaves
@@ -26,7 +27,7 @@ project to the given root. The call has these side effects, in order:
    block the response).
 4. **Auto-registers dependencies** for cross-project navigation.
 5. **Re-arms the path-relative banner** — resets the novelty gate so
-   this `activate_project` call's own response carries
+   this `workspace(action="activate")` call's own response carries
    `[codescout] paths are relative to <root>`; later responses in the
    same activation window omit it.
 
@@ -47,10 +48,7 @@ activation. The `read_only` param defaults differ:
 **An explicit `read_only` wins at either root.** The two values above are
 *defaults*; passing the flag overrides them in both directions —
 `read_only=false` opens a foreign root, and `read_only=true` protects the
-home one. Before 2026-09-02 the second half was not true: `true` was
-silently dropped, which made it inert at every root, since a foreign root
-already defaults to protected. On an older build, read the `read_only`
-field echoed in the response rather than assuming the value took effect.
+home one.
 
 This matters because the MCP server is shared state across the session.
 Activating a foreign project leaves the server pointed at it until you
@@ -128,7 +126,7 @@ Subagents that share the parent's MCP server share:
 - The same `path_note_emitted_since_activation` flag
 
 A subagent that needs the workspace pointed at a different root must
-itself call `activate_project` — and then restore the parent's home
+itself call `workspace(action="activate")` — and then restore the parent's home
 before returning. This is dangerous: the parent's next call after the
 subagent returns will see whatever workspace state the subagent left.
 Prefer not to switch workspace inside subagents; if you must, document
@@ -136,7 +134,7 @@ in the subagent's spawn prompt that it will restore home before exit.
 
 ## Per-call workspace pinning
 
-`activate_project` flips the *one* shared active-project slot, so parallel
+`workspace(action="activate")` flips the *one* shared active-project slot, so parallel
 subagents that activate different workspaces race — last writer wins, and a
 subagent can silently read another's worktree. The fix is to **pin per call**
 instead of activating: pass `workspace=<absolute path>` on each tool call.
@@ -151,13 +149,12 @@ instead of activating: pass `workspace=<absolute path>` on each tool call.
 
 **When a peer has activated read-only, pin — do not re-activate.** A refused write
 naming a project you never chose *is* this collision: another caller sharing the
-process activated it with `read_only=true`, and activation is process-wide. The
-remedy the refusal used to offer first — re-activating with `read_only=false` —
-clears your block by flipping the substrate under whoever set it, mid-task. Passing
+process activated it with `read_only=true`, and activation is process-wide.
+Re-activating with `read_only=false` clears your block by flipping the
+substrate under whoever set it, mid-task. Passing
 `workspace=<absolute path>` on the call resolves it for you alone and leaves their
-activation intact. Measured 2026-09-01: the pin worked first try during an SDD run
-where re-activation would have disrupted a running implementer
-(`docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`).
+activation intact. To make one refused write without either, replay the refused call
+with `ack="@ack_…"` and nothing else.
 ## Unpinned concurrent use is unsupported
 
 The server holds **one** default workspace, and an unpinned call resolves against
@@ -198,15 +195,15 @@ What the server does about it, and what it cannot:
   Parent's next tool call lands in the subagent's workspace. Caller
   has no way to detect this without an extra `workspace(status)` call.
 - **Relying on `guide_hints_emitted` to survive activation, restart, or compaction.** (On the keyed tier most topics *do* survive `/mcp` restarts — persisted per conversation identity, not per project — except the session-opening topic, which server construction re-arms on every reconnect; see "Per-session state reset" above.) Whether
-  `activate_project` clears it, re-arms one topic, or leaves it untouched
+  `workspace(action="activate")` clears it, re-arms one topic, or leaves it untouched
   depends on the predicate in § Per-session state reset — don't assume it
   survives. If a hint was useful, capture the guide content in the
   parent's prompt or call `get_guide(topic)` again after activation.
 - **Treating `read_only=true` as advisory.** It is enforced at the agent
-  layer on any root, home included — tools that try to write fail with
-  `RecoverableError`. Pass it deliberately for scout-only work, including on
-  your own project, which is the case that silently did nothing before
-  2026-09-02. What it does *not* do is protect you from a peer sharing the
+  layer on any root, home included — tools that try to write are refused
+  (`isError: true`), and the refusal text names `ack="@ack_…"`: replay the refused call with it to make that one
+  write without changing the activation. Pass it deliberately for scout-only work, including on
+  your own project. What it does *not* do is protect you from a peer sharing the
   process: activation is process-wide, so pin per call (`workspace=<path>`)
   when the concern is someone else moving the default under you.
 

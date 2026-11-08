@@ -39,7 +39,7 @@ impl Tool for IndexProject {
                 "scope": {
                     "type": "string",
                     "default": "project",
-                    "description": "Scope to index: 'project' (default) to index the active project, or 'lib:<name>' to index a registered library. Replaces index_library."
+                    "description": "Scope to index: 'project' (default) to index the active project, or 'lib:<name>' to index a registered library."
                 }
             }
         })
