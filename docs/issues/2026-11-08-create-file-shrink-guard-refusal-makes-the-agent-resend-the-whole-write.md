@@ -32,7 +32,19 @@ codescout on branch `experiments`, 2026-11-08.
 The branch returns `RecoverableError::with_hint(..)` and keeps no copy of the input. Inferred from the source; not measured at runtime. It also covers an `ack` replay of the existing-path refusal: a replay over a file that the content would shrink by more than 50% meets this refusal, with no handle.
 
 ## Evidence
-None measured. The `usage.db` family for this refusal has not been counted, so the size of the cost is unknown.
+
+Measured 2026-11-08 in this project's `.codescout/usage.db` only: `select err_family, count(*) from tool_calls where tool_name='create_file' and outcome<>'success' group by 1`.
+
+| family | failed calls |
+|---|---|
+| `worktree_activate_required` | 34 |
+| `target_already_exists` | 29 |
+| `write_scope_denied` | 5 |
+| (no family) | 4 |
+| `shrink_guard_blocked` | 2 |
+| `missing_required_param` | 1 |
+
+So this refusal is about 1/15 of the existing-path one in this database. Limits: one project's database, not the all-databases sweep the sibling files used; the table counts refusals, not resends, so it does not say how many were followed by a resend. Low observed cost, so the fix is not urgent.
 
 ## Hypotheses tried
 None.
