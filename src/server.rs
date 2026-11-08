@@ -739,7 +739,7 @@ impl CodeScoutServer {
     /// `ack` is taken off `input` whether or not it is valid, so no tool ever sees it.
     /// A handle is refused when it is unknown or evicted, when another tool minted it, and
     /// when it is an out-of-scope-write handle (those replay through `path`, in the tool).
-    fn replay_pin_ack(
+    fn replay_ack(
         &self,
         tool_name: &str,
         input: &mut Value,
@@ -768,20 +768,41 @@ impl CodeScoutServer {
                 format!("Call {}(ack=\"{handle}\") instead.", kept.tool_name),
             ));
         }
-        let Some(root) = kept.pin_root else {
-            return Err(crate::tools::RecoverableError::with_hint(
-                "ack handle is for an out-of-scope write, not a refusal that a pin answers",
-                format!(
-                    "Pass it as the path: {tool_name}(path=\"{handle}\"). `ack` replays a write that a read-only activation or the worktree guard refused."
-                ),
-            ));
-        };
         let mut replayed = kept.input;
-        if let Some(map) = replayed.as_object_mut() {
-            map.insert(
-                "workspace".to_string(),
-                Value::String(root.to_string_lossy().into_owned()),
-            );
+        match (kept.pin_root, kept.overwrite_guard) {
+            // A refusal that a `workspace=<root>` pin answers: replay with that pin.
+            (Some(root), _) => {
+                if let Some(map) = replayed.as_object_mut() {
+                    map.insert(
+                        "workspace".to_string(),
+                        Value::String(root.to_string_lossy().into_owned()),
+                    );
+                }
+            }
+            // `create_file` refused an existing path: replay with `overwrite=true`, but only
+            // over the file the caller was told about.
+            (None, Some(guard)) => {
+                if !guard.still_holds() {
+                    return Err(crate::tools::RecoverableError::with_hint(
+                        format!(
+                            "{} changed since create_file refused to overwrite it, so the kept write was not replayed",
+                            guard.path.display()
+                        ),
+                        "Read the file again, then send create_file(path=..., content=..., overwrite=true) or edit it.",
+                    ));
+                }
+                if let Some(map) = replayed.as_object_mut() {
+                    map.insert("overwrite".to_string(), Value::Bool(true));
+                }
+            }
+            (None, None) => {
+                return Err(crate::tools::RecoverableError::with_hint(
+                    "ack handle is for an out-of-scope write, not a refusal that a pin or an overwrite answers",
+                    format!(
+                        "Pass it as the path: {tool_name}(path=\"{handle}\"). `ack` replays a write that a read-only activation, the worktree guard or an existing path refused."
+                    ),
+                ));
+            }
         }
         *input = replayed;
         Ok(())
@@ -1797,7 +1818,7 @@ impl CodeScoutServer {
         // treats the call as the pinned call it now is. A bad handle is refused like a bad
         // pin: the recoverable answer, plus a usage row.
         // docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
-        if let Err(refusal) = self.replay_pin_ack(&req.name, &mut input) {
+        if let Err(refusal) = self.replay_ack(&req.name, &mut input) {
             return Exit::Recorded(
                 self.refuse_pin(
                     &req.name,
@@ -19027,6 +19048,10 @@ mod read_only_ack_tests;
 #[cfg(test)]
 #[path = "server/worktree_ack_tests.rs"]
 mod worktree_ack_tests;
+
+#[cfg(test)]
+#[path = "server/overwrite_ack_tests.rs"]
+mod overwrite_ack_tests;
 
 #[cfg(test)]
 #[path = "server/exit_rows_tests.rs"]

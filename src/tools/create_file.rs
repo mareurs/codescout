@@ -76,10 +76,34 @@ impl Tool for CreateFile {
                 super::WriteOutcome::Pending(env) => return Ok(env),
             };
         if !overwrite && resolved.exists() {
+            let mut hint = String::from(
+                "Use edit_file to modify, or pass overwrite: true to replace. \
+                     create_file is for new files only.",
+            );
+            // The refusal discards nothing now: the input is kept under a handle, so
+            // replacing the file does not mean sending `content` a second time. The handle
+            // remembers the file's size and modification time and refuses a replay over a
+            // file that changed since.
+            // docs/issues/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md
+            if let Some(guard) = crate::tools::output_buffer::OverwriteGuard::of(&resolved) {
+                let (len, age) = (guard.len, guard.age_secs());
+                let handle = ctx.output_buffer.store_overwrite_replayable_write(
+                    "create_file".to_string(),
+                    input.clone(),
+                    guard,
+                );
+                let age = age
+                    .map(|s| format!(", last modified {s}s ago"))
+                    .unwrap_or_default();
+                hint.push_str(&format!(
+                    " To replace it with the content you just sent, call \
+                         create_file(ack=\"{handle}\") and send nothing else. The existing file \
+                         is {len} bytes{age}; the replay is refused if it changes before then."
+                ));
+            }
             return Err(super::RecoverableError::with_hint(
                 format!("file already exists: {}", resolved.display()),
-                "Use edit_file to modify, or pass overwrite: true to replace. \
-                 create_file is for new files only.",
+                hint,
             )
             .into());
         }

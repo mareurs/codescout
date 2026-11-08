@@ -439,6 +439,10 @@ pub struct PendingAckWrite {
     /// not by approving a directory, so the session state stays as it was.
     /// `None` is an out-of-scope-write handle, replayed by the tool itself.
     pub pin_root: Option<PathBuf>,
+    /// `Some(guard)` marks a handle minted by `create_file` refusing an existing path. The
+    /// server replays it with `overwrite=true`, after checking the file is still as the guard
+    /// recorded it. Exclusive with `pin_root`.
+    pub overwrite_guard: Option<OverwriteGuard>,
 }
 
 /// A pending acknowledgment — either a dangerous command or an out-of-scope
@@ -447,6 +451,39 @@ pub struct PendingAckWrite {
 pub enum PendingAck {
     Command(PendingAckCommand),
     Write(PendingAckWrite),
+}
+/// What an existing file looked like when `create_file` refused to overwrite it.
+///
+/// A handle that replays the refused write with `overwrite=true` must not replace a file that
+/// changed in between: the caller agreed to replace THAT file, not whatever is there later.
+/// Size and modification time are the identity; either differing makes the replay refuse.
+#[derive(Debug, Clone)]
+pub struct OverwriteGuard {
+    pub path: PathBuf,
+    pub len: u64,
+    pub modified: Option<std::time::SystemTime>,
+}
+
+impl OverwriteGuard {
+    /// Read the file's current identity, or `None` when it cannot be read.
+    pub fn of(path: &std::path::Path) -> Option<Self> {
+        let meta = std::fs::metadata(path).ok()?;
+        Some(Self {
+            path: path.to_path_buf(),
+            len: meta.len(),
+            modified: meta.modified().ok(),
+        })
+    }
+
+    /// True while the file still has the size and modification time it had at the refusal.
+    pub fn still_holds(&self) -> bool {
+        Self::of(&self.path).is_some_and(|now| now.len == self.len && now.modified == self.modified)
+    }
+
+    /// How long ago the file was last modified, for the refusal's text.
+    pub fn age_secs(&self) -> Option<u64> {
+        self.modified?.elapsed().ok().map(|d| d.as_secs())
+    }
 }
 
 /// Observed lifecycle state of a background job.
@@ -1724,6 +1761,24 @@ impl OutputBuffer {
             input,
             approve_dir,
             pin_root: None,
+            overwrite_guard: None,
+        }))
+    }
+    /// Store a `create_file` write that refused an existing path, so the caller can replay it
+    /// with `overwrite=true` by handle instead of sending the same content again.
+    /// docs/issues/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md
+    pub fn store_overwrite_replayable_write(
+        &self,
+        tool_name: String,
+        input: serde_json::Value,
+        guard: OverwriteGuard,
+    ) -> String {
+        self.store_pending(PendingAck::Write(PendingAckWrite {
+            tool_name,
+            input,
+            approve_dir: guard.path.clone(),
+            pin_root: None,
+            overwrite_guard: Some(guard),
         }))
     }
 
@@ -1745,6 +1800,7 @@ impl OutputBuffer {
             input,
             approve_dir: root.clone(),
             pin_root: Some(root),
+            overwrite_guard: None,
         }))
     }
 
