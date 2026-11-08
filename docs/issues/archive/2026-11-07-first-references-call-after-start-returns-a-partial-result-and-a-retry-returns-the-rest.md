@@ -9,7 +9,7 @@ tags:
 closed: 2026-11-08
 opened: 2026-11-07
 severity: medium
-unverified: 'Not reproduced, before or after the fix, against a real language server: one cold pyright start on Linux (1.1.412) returned the full set without it. Every test runs against the mock LSP provider, including the client swap after a mux disconnect; no real server, real mux or real server timeout was exercised. The first attempt is not bounded by the settle deadline, the MCP client''s own tool-call timeout was not checked, concurrent first calls each wait, and which servers answer an empty list for ever was not measured. The gate does not cover the heavy Python suites, server-stack, librarian code in the lean lane or the ONNX weight tests.'
+unverified: Reproduced on the base and not on `ec450d195`, but only under Wine 11.21 (a re-implementation of the Windows API, not Windows), with a synthetic project (standard library plus six files), pyright 1.1.413, 3 cold runs per binary. Not run on a real Windows host, not run on the reporter's project, and not run with the real CPU load of a user session. Every unit test still runs against the mock LSP provider, including the client swap after a mux disconnect. The first attempt is not bounded by the settle deadline, the MCP client's own tool-call timeout was not checked, concurrent first calls each wait, and which servers answer an empty list for ever was not measured. The gate does not cover the heavy Python suites, server-stack, librarian code in the lean lane or the ONNX weight tests.
 ---
 
 # BUG: first references call after start returns a partial result with a warning; an immediate retry returns the full one
@@ -34,8 +34,19 @@ Reported once by a peer session on a Python project, home project activated mome
 2. same call, repeated: "17 references in 3 files".
 
 ## Reproduction
-Not reproduced by the filer: a `references` call on the same symbol returned the 17 hits on the first call
-(index already warm). Needs a cold pyright start.
+
+Not reproduced by the filer: a `references` call on the same symbol returned the 17 hits on the first call (index already warm).
+
+Reproduced 2026-11-08 under Wine 11.21 against a real pyright 1.1.413 (setup and scripts: codescout memory `wine-windows-test-suite`, `tools/wine-repro/`). Project: the 2169 `.py` files of the Python 3.11.9 standard library plus a package `pkg` (`pkg/core.py` defines `build_chain`, six files import and call it). A fresh Windows `codescout.exe` (`--no-default-features --features http`) per run, driven over HTTP from Linux, `references(symbol="build_chain", path="pkg/core.py")` called twice, first call on a cold server.
+
+| Binary | First call | Second call, at once |
+|---|---|---|
+| `267d8cd01` (no fix), 4 runs | partial, 1.8 s, 1.3 s, 1.0 s, 1.3 s: the definition file only, with the `LSP returned 0 references outside the definition file` warning | partial in 2 runs (0.4 s, 0.5 s); complete in 2 runs, after a 12.7 s and an 11.2 s wait |
+| `5cf72a154` (with `ec450d195`, the 45 s settle wait), 3 runs | complete, 8.0 s, 8.3 s, 8.3 s: 19 references in 7 files, no warning | complete, 4.3 s, 6.7 s, 4.6 s |
+
+So the first call is partial on the base in 4 of 4 cold runs and complete with the settle wait in 3 of 3. The report's claim that an immediate retry returns the full set held in 2 of 4 base runs here; in the other 2 the retry answered at once and was still partial.
+
+A first attempt with `textwrap.dedent` was NOT a reproduction and is not evidence: `from textwrap import dedent` resolves to the typeshed stub `textwrap.pyi`, so pyright reports 3 references on Linux and under Wine alike, however long it runs (a Linux control on the same files gave the same 3). Use a symbol whose module name is not a standard-library name.
 
 ## Environment
 Windows, pyright 1.1.413, Python 3.11, `pyright-langserver.cmd` from the npm shim.

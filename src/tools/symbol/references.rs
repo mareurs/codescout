@@ -535,7 +535,7 @@ impl References {
     /// elsewhere. The client is then marked
     /// done, so a later call never waits. The wait lives here and not in `LspClient::references`,
     /// which already re-asks an empty answer for its own budget: a second loop around it
-    /// multiplies the wait (docs/issues/2026-11-07-first-references-call-after-start-...md).
+    /// multiplies the wait (docs/issues/archive/2026-11-07-first-references-call-after-start-...md).
     ///
     /// The whole call, wait included, runs under the server's `tool_timeout_secs` (60 s by
     /// default), which is why [`FIRST_CALL_SETTLE_WAIT`] is 45 s and the work after the wait is

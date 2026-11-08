@@ -1,6 +1,6 @@
 //! `references` on a cold language server: the first call WAITS for the server to settle instead of
 //! returning a partial answer plus a "re-run" warning
-//! (`docs/issues/2026-11-07-first-references-call-after-start-returns-a-partial-result-and-a-retry-returns-the-rest.md`).
+//! (`docs/issues/archive/2026-11-07-first-references-call-after-start-returns-a-partial-result-and-a-retry-returns-the-rest.md`).
 //!
 //! Every test drives `References::call_with_settle`, the seam that takes the deadline and poll
 //! interval, with millisecond values. The mock answers from a script, so the attempt count is read
