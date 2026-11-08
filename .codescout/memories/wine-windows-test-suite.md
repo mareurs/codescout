@@ -66,6 +66,13 @@ green on the broken code proves nothing.
   dedent` resolves to the typeshed stub, so pyright reports 3 references for `textwrap.dedent` on Linux and under Wine,
   however long it runs. Not a warm-up effect. Use `pkg.build_chain`.
 - `rm -rf` is blocked by the run_command guard; use fresh directory names instead.
+- `git add -- <directory>` makes the stage log record the new files with owner `-` and route `unnamed`, and the
+  pathspec-commit guard then refuses them as another session's. Fix, with no ack: `git reset -q -- <files>` (index
+  only), then `git add -- <file> <file> ...` naming each file; the log then records your session id with route
+  `named`. Only for files you wrote yourself.
+- Another session may archive a bug file while you edit it: `doc(move)` carries the working-tree content, so your
+  edits land in THEIR commit and the id changes (5d2b664a26dfaee3 became 659e1b6e59f10840). Look the file up by path
+  before you try to commit it.
 
 ## What Wine can and cannot prove
 
@@ -89,7 +96,7 @@ Windows. Record such results as `unverified: seen under Wine 11.21 only`.
 - 6d3b04bf30e0fcf9: `tests/test_pid_alive.py` with the fix 7 passed, 1 failed (pid 4, a Wine difference). On a mutant
   that skips `_pid_alive_windows`: the dead-pid case failed, the out-of-range pid raised `OverflowError`; the Ctrl+C
   broadcast did not reproduce.
-- 5d2b664a26dfaee3 REPRODUCED (pyright 1.1.413, `C:\pybig`, cold server, `references` on `pkg.build_chain`, twice):
+- 5d2b664a26dfaee3 (archived as 659e1b6e59f10840) REPRODUCED (pyright 1.1.413, `C:\pybig`, cold server, `references` on `pkg.build_chain`, twice):
   base `267d8cd01`, 4 runs: first call partial 4 of 4 (1.0-1.8 s, definition file only, with the warning); the
   immediate second call partial in 2 (0.4 s, 0.5 s) and complete in 2 (after 12.7 s and 11.2 s). HEAD `5cf72a154`,
   3 runs: first call complete 3 of 3 (8.0, 8.3, 8.3 s), second complete (4.3, 6.7, 4.6 s). Recorded in the bug file.
