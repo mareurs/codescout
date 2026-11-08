@@ -150,59 +150,6 @@ async fn resolve_binding_by_position(
     None
 }
 
-/// How long `References::call` re-asks a cold server whose answer names no location outside
-/// the definition file while the project text does. Measured on no server: the reporter's
-/// retry returned the full set "immediately" (docs/issues/2026-11-07-first-references-call-after-start-returns-a-partial-result-and-a-retry-returns-the-rest.md),
-/// so this is a ceiling for the wait, not an observed warm-up time.
-// cap-class: NOT_A_CAP — wait ceiling; on exhaustion the partial answer is returned and the zero-external completeness_warning still names the gap
-pub(crate) const PARTIAL_REASK_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
-/// Gap between two re-asks of `reask_until_outside_hit`.
-pub(crate) const PARTIAL_REASK_INTERVAL: std::time::Duration =
-    std::time::Duration::from_millis(500);
-
-/// Whether `locs` holds a location outside `def_file` and outside a build directory, the same
-/// test `References::call` applies before it counts an external reference.
-pub(crate) fn has_outside_hit(locs: &[lsp_types::Location], def_file: &std::path::Path) -> bool {
-    locs.iter().any(|loc| {
-        crate::fs::uri_to_path(loc.uri.as_str())
-            .map(|p| p.as_path() != def_file && !crate::fs::path_in_excluded_dir(&p))
-            .unwrap_or(false)
-    })
-}
-
-/// Re-ask for references until one lies outside `def_file`, or `budget` ends. `first` is the
-/// answer already in hand; it is returned unchanged when it already has an outside hit.
-///
-/// The LSP client re-asks only an EMPTY answer (`LspClient::references`). A cold server that
-/// has indexed just the definition file answers non-empty, so the client cannot see the gap;
-/// only the caller can, by comparing with a text scan. This is that caller's wait, and it is
-/// the only one: a non-empty answer costs the client nothing, so the two waits do not multiply.
-/// A failed re-ask keeps the previous answer.
-pub(crate) async fn reask_until_outside_hit<F, Fut>(
-    mut ask: F,
-    first: Vec<lsp_types::Location>,
-    def_file: &std::path::Path,
-    budget: std::time::Duration,
-    interval: std::time::Duration,
-) -> Vec<lsp_types::Location>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = anyhow::Result<Vec<lsp_types::Location>>>,
-{
-    let started = std::time::Instant::now();
-    let mut current = first;
-    while !has_outside_hit(&current, def_file) && started.elapsed() < budget {
-        tokio::time::sleep(interval).await;
-        // An empty answer is a server mid-reload, not a better answer than the one in hand.
-        if let Ok(next) = ask().await {
-            if !next.is_empty() {
-                current = next;
-            }
-        }
-    }
-    current
-}
-
 /// LSP-independent corroboration for a zero-external-callers `references` result
 /// (BUG 2026-06-09 references-false-zero-stale-graph). After an incremental
 /// reindex the LSP reference graph can lag the on-disk text, so
