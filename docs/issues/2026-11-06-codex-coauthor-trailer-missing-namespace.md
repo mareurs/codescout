@@ -1,15 +1,17 @@
 ---
 id: f4926e0a61d4cd69
 kind: bug
-status: open
+status: mitigated
 title: Codex co-author trailer recorded as a bare Claude identity
 tags:
 - cluster/unclassified
 - provenance
 - publish-holds
+closed: 2026-11-08
 opened: 2026-11-06
 owner: marius
 severity: medium
+unverified: The warning cannot tell a mistaken Codex id from a legacy bare Claude id, so it fires on both and refuses neither. Archive commit 867546ab6 stays published with the bare token. Tested in a disposable repo only; not seen on a real commit. The pre-commit and pre-push guards still resolve a bare token to a Claude hold ref.
 ---
 
 # BUG: Codex co-author trailer recorded without its namespace
@@ -73,11 +75,20 @@ Bare and codex-prefixed tokens are equivalent: refuted by the actual helper retu
 
 ## Fix
 
+Update 2026-11-08: `scripts/prepare-commit-msg-session-id.sh` names any `Co-Authored-Session-Id` token without a `codex:` or `claude-code:` prefix on stderr and edits nothing. It does not refuse, because the harness cannot be read from a uuid. There is no `commit-msg` hook; the check lives in the existing `prepare-commit-msg` hook, which sees hand-written trailers.
+
+## Fix provenance
+
+- **SHA:** `41bfc5311a4f8471009e383aab30b0f538868c0d` (`experiments`)
+- **patch-id:** `a953d1729888baa126ba13c328f3acb91c300421`
+
 The committing Claude Code session amended its isolated fix-branch commit: `30e4d9285` is historical; current `36fec1201` has the canonical co-author token. Source tree and stable patch-id `e97db759fc5d8684ce5dd7faed27309d59a106f1` are unchanged. Verified through actual Git metadata and tree comparison.
 
 Archive commit `867546ab6` remains unchanged on the shared experiments history. Its repair must respect subsequent peer commits; this Codex session does not amend or rewrite it. Investigate a guard regression for known cross-harness co-author representation without inferring harness from UUID alone.
 
 ## Tests added
+
+`tests/test_codex_publish_hold.py`: `test_a_bare_co_author_token_is_named_on_stderr_and_left_in_place` (red before the hook change), and `test_a_qualified_co_author_token_is_silent` for `codex:` and `claude-code:`. Mutation: dropping the prefix filter fails both qualified cases. Gate green 2026-11-08: FMT, CLIPPY, LEAN 6233, DEFAULT 9125, Python 1764.
 
 None. Read-only helper comparison executed; source remains untouched.
 
@@ -87,18 +98,9 @@ Record the correct namespaced co-author explicitly in coordination. Preserve the
 
 ## Resume
 
-Do not repeat the already-completed fix-branch amendment. Current source commit is `36fec1201`. Archive commit `867546ab6` is published as is; preserve that history.
+Status `mitigated`: new commits get a warning, history is unchanged. Do not repeat the fix-branch amendment (`36fec1201`). Archive commit `867546ab6` is published as is; preserve that history and do not amend another session's commits.
 
-Traced 2026-11-08 (read in source, not run):
-
-- The trailer is hand-written. In `867546ab6` `Co-Authored-Session-Id` precedes `Session-Id`, and `scripts/prepare-commit-msg-session-id.sh` appends `Session-Id` last.
-- The hook writes `Co-Authored-Session-Id` only from `CODESCOUT_INDEX_ACK`, and copies each token verbatim. It checks only that the token is not `-`.
-- `scripts/install-hooks.sh` installs no `commit-msg` hook, so nothing validates the shape of a hand-written trailer.
-- `publish_hold_ref` in `scripts/publish-identity.sh` maps a bare token to `refs/holds/<sid>` on purpose. The guard therefore resolves a bare Codex UUID to a Claude hold ref.
-
-Open decision for the operator: add a `commit-msg` check that refuses or warns on a bare `Co-Authored-Session-Id` token. A UUID alone cannot name the harness, so the check can only demand an explicit `codex:` or `claude-code:` prefix. That also rejects every legacy bare Claude trailer in history, unless the check applies to new commits only. Nothing is changed in code yet.
-
-Coordinate metadata policy through the operator; do not amend another session's commits.
+Still open, by design: the guards accept a bare token as a Claude session, because legacy trailers are bare Claude ids. A refusal would need a rule for those legacy ids, and a uuid alone cannot name its harness. Revisit if a bare Codex token again reaches a published commit after the warning.
 
 ## References
 
