@@ -9,7 +9,7 @@
 //! Every test drives the real dispatch (`call_tool_inner`): the mint is in the refusal branch and
 //! the replay is before the pin is read, and a tool's own `call()` meets neither.
 //!
-//! docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
+//! docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
 
 use super::config_reload_tests::call;
 use super::test_support::{make_server, make_server_with_project_toml};

@@ -1,14 +1,13 @@
 ---
-id: '4afb3ebb57f9ba56'
+id: 6f9cbf174e261add
 kind: bug
 status: fixed
 title: a read-only refusal makes the agent resend the whole write
 tags:
 - cluster/unclassified
 closed: 2026-11-08
-no_fix_commit: Not committed yet. The change sits uncommitted in the shared checkout, and the user has not asked for a commit. Replace this with a Fix provenance section once a SHA exists.
 opened: 2026-11-08
-unverified: Uncommitted, so no fix SHA yet and not archived. Not run against a live MCP session, only through call_tool_inner. The claim that the refusal branch returns before the usage recorder is inferred from reading call_tool_inner, with no test.
+unverified: Not run against a live MCP session, only through call_tool_inner. The claim that the refusal branch returns before the usage recorder is inferred from reading call_tool_inner, with no test (see F-219 in docs/trackers/bug-fix-session-log.md).
 ---
 
 # BUG: a read-only refusal makes the agent resend the whole write
@@ -54,6 +53,13 @@ The read-only refusal itself has zero rows in `tool_calls` in every database che
 
 ## Fix
 The refusal keeps the input under an `@ack_*` handle when the cause is `ActivatedReadOnly` and the call has no pin. `ack="@ack_…"` on the same tool replays the kept input with `workspace=<root>`, so the lift is for that call only. The project stays read-only. A refusal that a pin cannot lift (`file_write_enabled = false`) offers no handle.
+
+## Fix provenance
+
+- **SHA:** `198b6278a` (`experiments`)
+- **patch-id:** `fb681034bc93`
+
+The commit also carries the two sibling bug files and F-219; the patch-id covers the whole commit.
 
 ## Tests added
 

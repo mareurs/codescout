@@ -18068,7 +18068,7 @@ Also seen, not a gap: background children run in their own process group (`proce
 
 **Cost:** med. The first plan (look up the refusal in `usage.db`) would have returned an empty set and read as "the problem is rare".
 
-**Recorded in:** `docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`.
+**Recorded in:** `docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`.
 
 ## Template for new entries
 

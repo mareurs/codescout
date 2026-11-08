@@ -61,7 +61,7 @@ None. This file records the defect only.
 Pass `workspace=<absolute path>` and resend the payload.
 
 ## Resume
-Start from the read-only fix: `docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`, and `src/server/read_only_ack_tests.rs` for the test shape.
+Start from the read-only fix: `docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`, and `src/server/read_only_ack_tests.rs` for the test shape.
 
 ## References
-`src/tools/core/guards.rs`; `src/server.rs`; `docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`; `docs/issues/archive/2026-09-02-the-write-guard-refuses-a-correctly-pinned-call.md`; `docs/issues/archive/2026-10-26-the-worktree-write-guard-ignores-the-target-and-refuses-writes-outside-every-project.md`.
+`src/tools/core/guards.rs`; `src/server.rs`; `docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`; `docs/issues/archive/2026-09-02-the-write-guard-refuses-a-correctly-pinned-call.md`; `docs/issues/archive/2026-10-26-the-worktree-write-guard-ignores-the-target-and-refuses-writes-outside-every-project.md`.

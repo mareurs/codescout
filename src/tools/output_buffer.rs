@@ -1732,7 +1732,7 @@ impl OutputBuffer {
     /// The handle carries the full tool input. Replaying it pins the call to
     /// `root`, which lifts the read-only activation for that call only
     /// (`Agent::security_config_for_write`); nothing process-wide changes.
-    /// docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
+    /// docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
     pub fn store_read_only_refused_write(
         &self,
         tool_name: String,

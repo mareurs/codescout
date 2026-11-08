@@ -674,7 +674,7 @@ impl CodeScoutServer {
     /// activation and the call carries no pin. The refusal's own remedy (a pin)
     /// makes the caller send the same payload twice; the handle lets
     /// `ack="@ack_…"` replay it ([`Self::replay_read_only_ack`]).
-    /// docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
+    /// docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
     async fn check_tool_access(
         &self,
         name: &str,
@@ -1664,7 +1664,7 @@ impl CodeScoutServer {
         // refusal's own remedy, `workspace=<root>`, into `input`, and everything below then
         // treats the call as the pinned call it now is. A bad handle is refused like a bad
         // pin: the recoverable answer, plus a usage row.
-        // docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
+        // docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
         if let Err(refusal) = self.replay_read_only_ack(&req.name, &mut input) {
             return Ok(self
                 .refuse_pin(

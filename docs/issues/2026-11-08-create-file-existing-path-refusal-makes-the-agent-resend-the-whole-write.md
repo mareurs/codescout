@@ -58,7 +58,7 @@ None. This file records the defect only.
 Resend with `overwrite: true`, or use `edit_file`.
 
 ## Resume
-Start from `docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md` and `src/server/read_only_ack_tests.rs` for the test shape.
+Start from `docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md` and `src/server/read_only_ack_tests.rs` for the test shape.
 
 ## References
-`src/tools/create_file.rs`; `src/usage/db.rs`; `src/tools/core/write_ack.rs`; `docs/issues/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`.
+`src/tools/create_file.rs`; `src/usage/db.rs`; `src/tools/core/write_ack.rs`; `docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`.
