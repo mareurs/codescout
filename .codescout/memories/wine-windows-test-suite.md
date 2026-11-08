@@ -85,6 +85,27 @@ green on the broken code proves nothing.
 - Not tested: `run_command` of a Windows codescout through this bash, long-running children, signals, `git` with hooks or
   `core.autocrlf` effects (`git add` warned that LF becomes CRLF).
 
+## `run_command` of a Windows `codescout.exe` under Wine, 2026-11-08
+
+Set `CODESCOUT_BASH='C:\PortableGit\bin\bash.exe'` when you start the server: `resolve_git_bash` (`src/platform/windows.rs`) reads
+it first, before `CLAUDE_CODE_GIT_BASH_PATH`, `%ProgramFiles%\Git\bin\bash.exe` and `PATH`. Without it a PortableGit under
+`C:\PortableGit` is not found. Server: `CODESCOUT_BASH=... WINEPATH='C:\node;C:\pyright\node_modules\.bin' wine
+C:\codescout-bin\codescout-head.exe start --project C:\pyproj --transport http --port N --auth-token wine-test`; calls through
+`tools/wine-repro/mcp_call.py N run_command '{"command":"..."}'`.
+
+- Works: `echo`, pipelines of MSYS tools (`echo hello | tr a-z A-Z` = HELLO, `ls /usr/bin | wc -l` = 366), `uname -a`
+  (`MINGW64_NT-10.0-19045`), the working directory (`pwd` = `/c/pyproj`), exit codes (`exit 3` returns 3), `sleep 1` (1.4 s call).
+  Every call's `stderr` starts with the Cygwin `FAST_CWD` warning (about 400 bytes of noise).
+- FAILS, for every native (non-MSYS) Windows program: `git --version`, `/c/Python311/python.exe -c "print(42)"`, `cmd.exe /c
+  echo hi`, `node.exe --version` all return rc=1 with NO output when stdout is a pipe. With `> file 2>&1` the same commands
+  succeed (rc=0 and the right text). `command -v git` finds `/ucrt64/bin/git`, so it is not a lookup problem.
+- It is not codescout's pipes: the same four commands from a Wine-side Python (`subprocess.run([bash.exe, '-c', ...],
+  capture_output=True)`, so the pipes are made by Python) give the same result: `msys cat` ok, the three native ones rc=1,
+  no output. So the cause is Wine together with an MSYS bash passing a pipe to a native program. It matches the earlier
+  Node `open EBADF` on a pipe. Not shown to be a codescout defect, and not shown to happen on real Windows.
+- Consequence: under Wine a `run_command` can run MSYS tools and shell logic, but cannot capture the output of `git`, `cargo`,
+  `python` or `node`. To check such a program, redirect to a file inside the command and `cat` it.
+
 ## MSYS2 `bash.exe` under Wine (instead of Git for Windows), 2026-11-08
 
 Git for Windows could not be downloaded while `github.com:443` stalled in the TLS handshake (TCP connected, no ServerHello;
