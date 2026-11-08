@@ -8,7 +8,7 @@ tags:
 - cluster/lazy-warmup-bills-the-first-caller
 opened: 2026-11-07
 severity: medium
-unverified: Still one observation, never reproduced on a cold pyright. The re-ask is covered by unit tests of the retry decision only, not by a real cold start. Mutations 1 and 2 of the helper were killed; mutation 3 was not confirmed. The full gate has not been run.
+unverified: 'Still one observation, never reproduced. One cold-start attempt on Linux, pyright 1.1.412, small symbol: the first call was complete. The re-ask is covered by unit tests of the retry decision only. The full gate has not been run.'
 ---
 
 # BUG: first references call after start returns a partial result with a warning; an immediate retry returns the full one
@@ -74,9 +74,9 @@ Run `references` twice, or corroborate with `grep` / `call_graph(direction="call
 
 ## Resume
 
-Status stays `open`. Decide where the wait belongs, then reproduce on a cold pyright (restart the server, call
-`references` on a symbol used in other files) to see whether the first call returns the full set. A test of the
-`References::call` wiring is still missing.
+Status stays `open`. Decide where the wait belongs (the client or the tool, not both). A test of the `References::call` wiring is still missing.
+
+Cold-start attempt 2026-11-08 (Linux, pyright 1.1.412, not the reporter's 1.1.413 on Windows): after `workspace(post_compact=true)` flushed the LSP clients, the first `references(symbol="_test_toolchain", path="tools/setup-ab-eval/fresh_build.py")` returned the full set at once: 7 references in 2 files, no `completeness_warning`. `ps` showed the `pyright-langserver` process 14 s old right after that call, so the call started a cold server. This does not reproduce the report. It does not clear it either: the symbol has few uses, and the project is small, so warm-up may finish inside `not_answered_budget`. A project like the reporter's, with a slower first index, was not tried.
 
 ## References
 - `docs/trackers/issue-clusters/IC-7-lazy-warmup-bills-the-first-caller.md`
