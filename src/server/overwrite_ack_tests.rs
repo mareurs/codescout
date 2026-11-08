@@ -8,7 +8,7 @@
 //! Every test drives the real dispatch (`call_tool_inner`): the replay is in the dispatcher,
 //! before the tool body, and a tool's own `call()` never reaches it.
 //!
-//! docs/issues/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md
+//! docs/issues/archive/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md
 
 use super::config_reload_tests::call;
 use super::test_support::make_server;

@@ -1,10 +1,11 @@
 ---
-id: d7b3d8a0d8756370
+id: f9a4cd9ba331916e
 kind: bug
-status: open
+status: fixed
 title: create_file refuses an existing path and discards its input, so the caller resends the whole payload with overwrite
 tags:
 - cluster/unclassified
+closed: 2026-11-08
 opened: 2026-11-08
 ---
 
@@ -49,16 +50,33 @@ Limits: the match is by length, so an edited resend counts the same as an identi
 1. **Hypothesis:** callers could use `edit_file` instead. **Verdict:** not tested. For a script rewritten from scratch the whole content is the change.
 
 ## Fix
-Not done. Candidate: keep the input under an `@ack_*` handle and let `ack` replay it with `overwrite=true`. Two points differ from the read-only case. Overwrite destroys the existing file, so the refusal should state what would be lost (size and mtime of the existing file), and the replay must re-check that the file is unchanged since the refusal. And the replay is not a pin, so `PendingAckWrite.pin_root` does not apply; the handle needs its own marker.
+
+`create_file` keeps the input when it refuses an existing path. In `CreateFile::call` (`src/tools/create_file.rs`) the refusal stores the input under an `@ack_*` handle (`OutputBuffer::store_overwrite_replayable_write`) and its hint names `create_file(ack="@ack_…")`, the existing file's size and its age. The handle is minted inside the tool, where the resolved path and the input are both at hand, so no error text is parsed.
+
+`ack` replays through `CodeScoutServer::replay_ack` (renamed from `replay_pin_ack`; it serves three refusals now). The handle carries an `OverwriteGuard` (path, size, modification time) beside `pin_root`, because an overwrite is not a pin. The replay inserts `overwrite=true` only while the file still has the size and modification time it had at the refusal. Otherwise it is refused and the file is left as it is.
+
+Residual: a replay that then meets the shrink guard (a reduction of more than 50% over a file of at least 200 bytes) is refused again, with the old text that asks for `force=true` and a resend. That is a second refusal with the same cost shape, and it has no handle.
 
 ## Tests added
-None. This file records the defect only.
+
+`src/server/overwrite_ack_tests.rs`, all through `call_tool_inner`:
+- `an_existing_path_refusal_keeps_the_write_and_an_ack_replaces_the_file`: the refusal names the handle and the size, nothing is written, and the replay carries only the handle and writes the kept content verbatim.
+- `an_ack_does_not_replace_a_file_that_changed_since_the_refusal`: the replay is refused and the changed file is untouched.
+- `an_overwrite_ack_cannot_be_replayed_through_another_tool`.
+
+The first test failed once on its own assertion, which looked for `ack="@ack_` in a JSON body where the quotes are escaped. The code was right, and the assertion was fixed.
 
 ## Workarounds
 Resend with `overwrite: true`, or use `edit_file`.
 
 ## Resume
-Start from `docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md` and `src/server/read_only_ack_tests.rs` for the test shape.
+
+Done. Open follow-up: the shrink-guard refusal after a replay (see Fix, Residual).
+
+## Fix provenance
+
+- **SHA:** `8936f3924` (`experiments`)
+- **patch-id:** `519483e90bcc`
 
 ## References
 `src/tools/create_file.rs`; `src/usage/db.rs`; `src/tools/core/write_ack.rs`; `docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`.

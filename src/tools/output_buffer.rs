@@ -1766,7 +1766,7 @@ impl OutputBuffer {
     }
     /// Store a `create_file` write that refused an existing path, so the caller can replay it
     /// with `overwrite=true` by handle instead of sending the same content again.
-    /// docs/issues/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md
+    /// docs/issues/archive/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md
     pub fn store_overwrite_replayable_write(
         &self,
         tool_name: String,

@@ -84,7 +84,7 @@ impl Tool for CreateFile {
             // replacing the file does not mean sending `content` a second time. The handle
             // remembers the file's size and modification time and refuses a replay over a
             // file that changed since.
-            // docs/issues/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md
+            // docs/issues/archive/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md
             if let Some(guard) = crate::tools::output_buffer::OverwriteGuard::of(&resolved) {
                 let (len, age) = (guard.len, guard.age_secs());
                 let handle = ctx.output_buffer.store_overwrite_replayable_write(

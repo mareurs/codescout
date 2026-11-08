@@ -73,7 +73,7 @@ Pass `workspace=<absolute path>` and resend the payload.
 
 ## Resume
 
-Done. The same mechanism is the candidate for `docs/issues/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md`, with a different replay (overwrite, not a pin).
+Done. The same mechanism is the candidate for `docs/issues/archive/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md`, with a different replay (overwrite, not a pin).
 
 ## Fix provenance
 
