@@ -9,7 +9,7 @@ tags:
 closed: 2026-11-08
 opened: 2026-11-07
 severity: medium
-unverified: 'Not reproduced, before or after the fix: one cold pyright start on Linux (1.1.412) returned the full set on the first call even without it. The re-ask is tested on its own loop; the wiring in References::call and the window check are not tested. The 5 s ceiling is a guess, not a measured warm-up time. A re-ask that answers [] can add one client wait of up to 5 s past the budget; not measured.'
+unverified: 'Not reproduced, before or after the fix, against a real language server: one cold pyright start on Linux (1.1.412) returned the full set without it. Every test runs against the mock LSP provider, including the client swap after a mux disconnect; no real server, real mux or real server timeout was exercised. The first attempt is not bounded by the settle deadline, the MCP client''s own tool-call timeout was not checked, concurrent first calls each wait, and which servers answer an empty list for ever was not measured. The gate does not cover the heavy Python suites, server-stack, librarian code in the lean lane or the ONNX weight tests.'
 ---
 
 # BUG: first references call after start returns a partial result with a warning; an immediate retry returns the full one
@@ -52,29 +52,43 @@ None.
 
 ## Fix
 
-The wait lives in the tool, not the client. `LspClient::references` re-asks only an EMPTY answer (`request_until_answered`). The reported answer was non-empty (2 hits, both in the definition file), so the client could not see the gap; only `References::call` can, by comparing it with the text scan.
+The wait lives in the tool, not the client. `LspClient::references` re-asks only an EMPTY answer (`request_until_answered`), so a non-empty but partial answer (the reported 2 hits, both in the definition file) is invisible to it; only `References::call` can see the gap, by comparing the answer with the text scan.
 
-`References::call` (`src/tools/symbol/references.rs`) now calls `reask_until_outside_hit` when all three hold: the client reports its cold-start window open (`LspClientOps::cold_start_window_open`, default `false`, `LspClient` overrides it), no location lies outside the definition file or a build directory, and `corroborate_zero_references` finds the symbol as a whole word in other files. It re-asks every 500 ms for at most 5 s (`PARTIAL_REASK_BUDGET`, `PARTIAL_REASK_INTERVAL`), keeps the answer in hand when a re-ask fails or answers `[]`, and on exhaustion returns the partial answer, which still gets the existing zero-external `completeness_warning`.
+The first `references` call served by a client waits (blocking) for the server to settle, once per client, with one wall-clock deadline (`FIRST_CALL_SETTLE_WAIT` = 45 s, poll interval `SETTLE_POLL_INTERVAL` = 500 ms) in `References::call_with_settle` (`src/tools/symbol/references.rs`). The per-client state is `LspClientOps::references_warmup_done` / `mark_references_warmup_done`, required methods with no defaults.
 
-Why the two waits do not multiply (PR 33 measured 62 s): a non-empty answer costs the client no wait, so the tool's loop is the only wait in the partial case. A re-ask that answers `[]` can still cost one client wait of up to 5 s past the tool budget; that case was not measured.
+Two signals count as unsettled: (a) no locations at all, on any server and in any window state; (b) no location outside the definition file or a build directory, the corroboration scan finds the symbol as a whole word in another file, and the client is inside its cold-start window (`LspClientOps::cold_start_window_open`, 5 minutes), on any server. An incomplete scan and the call-hierarchy completeness warning are not warming signals.
+
+Bounds: the deadline is clamped to the configured `tool_timeout_secs` minus the call-hierarchy bound (`CALL_HIERARCHY_BOUND`, 5 s) and a margin; every attempt after the first runs under `timeout(remaining)` on the live client (after a mux disconnect the loop continues on the replacement client); a later empty answer never replaces a partial one already in hand; a call dropped mid-wait still spends the client's wait. The call-hierarchy cross-check is skipped when the wait ran out, bounded to 5 s after a wait that settled, and bounded by the remaining tool budget when the call never waited. On exhaustion the partial answer keeps its existing warning plus a note that the call already waited N s.
+
+45 s, not 60 s: the server wraps every tool, `references` included, in `tool_timeout_secs` (default 60; `src/server.rs`, `tool_skips_server_timeout`), and `src/lsp/manager.rs` (`MUX_PEER_STARTUP_WAIT`) already sizes its wait below that limit for the same reason.
+
+This replaces the 5 s re-ask of `9f78d028e` (`reask_until_outside_hit`, `PARTIAL_REASK_BUDGET`, `has_outside_hit`), which is removed in its own commit; two wait layers would multiply (PR 33 measured 62 s). The author of `9f78d028e` confirmed nothing else relied on it.
+
+The comments in `LspClient::request` that said the cold-start retry costs about 45 s now state the arithmetic: delays of 3 s x (1+..+N), 165 s on Linux, plus up to (N+1) x 30 s of request timeouts (comment-only commit).
 
 ## Fix provenance
 
-- **SHA:** `9f78d028e27d8b0e38b34963218b357c9c9c13e5` (`experiments`)
-- **patch-id:** `c6901954325299c0012bb0225f89e41da3c4b141`
+- **SHA:** `ec450d195a2d527a1b9d68770ac82a895af6bbd5` (`experiments`)
+- **patch-id:** `f14fe2e3c335bed791fe167ff8fda90a18c66596`
+
+Supporting commits on `experiments`: `c7d077f2f9aae74d2536b012b7653bf77fdb132f` (removes the re-ask of `9f78d028e`, patch-id `f49507725ab798ee4473a2eb0e09454796a064c9`) and `f4162fbf101c865925c4deab83206a91c0bfca85` (comment-only, patch-id `6116806c5caa2510e6b01e5a9e48f16fb27b86e6`). Superseded: `9f78d028e27d8b0e38b34963218b357c9c9c13e5` (patch-id `c6901954325299c0012bb0225f89e41da3c4b141`).
 
 ## Tests added
 
-`src/tools/symbol/tests.rs`, on `reask_until_outside_hit` and `has_outside_hit`: a partial answer is re-asked until an outside location appears; an answer that already has one is not re-asked; a server that never improves is asked for the budget and no longer; a failed re-ask and an empty re-ask keep the answer in hand; a build-directory location is not an outside hit. Two of them failed against a stub that returned its input; a mutant that drops the empty-answer guard fails `an_empty_re_ask_does_not_replace_the_partial_answer`. Gate green 2026-11-08: FMT, CLIPPY, LEAN 6239, DEFAULT 9131, Python 1764.
+`src/tools/symbol/references_settle_tests.rs` (24 test functions), driven through the seam `call_with_settle` with millisecond deadlines, plus paused-time tests that call `Tool::call` with the production constants. They cover: a cold-then-warm server answered by one call with no warning; a server that never settles returns at the deadline with the waited note; a second call, and a call after a settled first call, never wait; a used file-local symbol on a client past its window and a symbol named in no other file return at once; an incomplete scan does not trigger the wait; a no-locations answer waits whatever the window; a later empty answer does not replace the partial one; a build-directory location is not an outside hit; transient and deterministic errors on a later attempt; attempts after a mux disconnect start on the replacement client; a configured short `tool_timeout_secs` shortens or removes the wait; a call dropped mid-wait spends the client's wait; the 45 s wait plus the cross-check bound fits under the default tool timeout; `LspClient`'s flag starts false.
 
-Not tested: the wiring in `References::call`. The mock reports the window closed, and a mock that never improves would hold a test for the full 5 s budget.
+Mutants run and reverted, each turning at least one of these red: delete the loop; never mark done; ignore the done flag; ignore or invert the window gate; gate no-locations on the window; count a complete scan with no hits or an incomplete scan as unsettled; bare await instead of `timeout(remaining)`; remove the cross-check bound or the skip after a wait that ran out; remove the tool-timeout clamp; remove the partial-answer guard; compute `external_refs` from the unfiltered answer; disable the drop guard; swap or zero the constants in `Tool::call`. Not killable: running the corroboration scan once per call instead of once per attempt (identical results, no counter). Three independent Opus reviews of the combined change found, in turn: a wait equal to the server tool timeout, a loop that restarted on a dead client after a mux disconnect, untested time bounds, a loop that ignored a configured `tool_timeout_secs`, and a later empty answer that erased a partial one; each was fixed with a test before the merge.
+
+Gate 2026-11-08: `./scripts/gate.sh --check` on `7275cb7b2`, whose `src/`, `crates/`, `Cargo.toml` and `Cargo.lock` are identical to those of `f4162fbf1` (`git diff` empty): FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, PYTHON_LIGHT=0. It does not cover the heavy Python suites, server-stack, librarian code in the lean lane or the ONNX weight tests. The tests of `9f78d028e` were removed together with its code.
 
 ## Workarounds
 Run `references` twice, or corroborate with `grep` / `call_graph(direction="callers")` as the warning says.
 
 ## Resume
 
-Status `mitigated`: a retry exists for the reported shape, but the defect was never reproduced, so it is not shown to cure the report. To close: reproduce on a project like the reporter's (Windows, pyright 1.1.413, a slower first index) and confirm the first call returns the full set, or the warning stays and the re-ask ends at 5 s. Add a wiring test if the mock gains a window switch and a settable budget.
+Status stays `mitigated`: the first call now waits, but the defect was never reproduced against a real language server, so it is not shown to cure the report, and every test runs against the mock. To close: reproduce on a project like the reporter's (Windows, pyright 1.1.413, a slower first index) and confirm the first call returns the full set within the deadline.
+
+Known costs, accepted by the user: a first call on a client waits up to 45 s (less under a short `tool_timeout_secs`) when the server answers nothing at all, on any server; and when the answer holds only the definition file, the text names the symbol elsewhere and the client is inside its 5-minute window, which includes a used file-local symbol with a generic name on a warm server and a fresh mux connection to a long-warm server. Known gaps: the first attempt is not bounded by the deadline (the client's own cold-start retry budget is 165 s of delays on Linux), so a call can still reach the server's tool timeout regardless of this change; concurrent first calls each wait; the cold window is anchored at construction on the mux path (`docs/issues/2026-10-30-references-treats-every-new-mux-connection-as-a-cold-server-and-re-asks-for-5-s.md`); the MCP client's own tool-call timeout was not checked.
 
 ## References
 - `docs/trackers/issue-clusters/IC-7-lazy-warmup-bills-the-first-caller.md`
