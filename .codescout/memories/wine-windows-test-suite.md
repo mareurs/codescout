@@ -21,10 +21,11 @@ cannot prove" before you cite a result. The user asked for this to be a standing
 - Reproduction project `C:\pybig` (2169 `.py` files: the Python 3.11.9 standard library plus a package `pkg`), made by
   `tools/wine-repro/make-project.sh`. `C:\pyproj` is a small 8-file variant, too small to show the defect.
 - MSYS2 base at `C:\msys64` (a partial `bash.exe`, see "MSYS2 `bash.exe` under Wine" below).
-- NOT installed: Git for Windows, `winetricks`, `wine-mono`, `wine-gecko`. On 2026-11-08 from about 12:54 EET
-  `api.github.com` answered 504 and `github.com` stalled in TLS; this was a GitHub incident and it was over by 13:57 EET
-  (`~/agents/system/GITHUB_TLS_STALL_2026-11-08.md`, SYS-022). Git for Windows was not retried after it: try the
-  PortableGit download again. The user approved
+- Git for Windows 2.56.0.windows.4 (PortableGit) at `C:\PortableGit` (`bin\bash.exe`, `cmd\git.exe`), see "Git for
+  Windows (PortableGit) under Wine" below. This is the shell to use, not MSYS2.
+- NOT installed: `winetricks`, `wine-mono`, `wine-gecko`. On 2026-11-08 from about 12:54 EET `api.github.com` answered 504
+  and `github.com` stalled in TLS: a GitHub incident, over by 13:57 EET (`~/agents/system/GITHUB_TLS_STALL_2026-11-08.md`,
+  SYS-022). The user approved
   installing `winetricks` (pacman `extra`, 20260125-2) if it is needed; `sudo -n` printed no error. Not needed so far.
 - Python installer provenance: `python-3.11.9-amd64.exe` from python.org, 26216840 bytes, GPG signature good, key
   `FC624643487034E5` (Steve Dower), fingerprint `7ED1 0B65 31D7 C8E1 BC29  6021 FC62 4643 4870 34E5`. Silent options:
@@ -60,6 +61,30 @@ To test another revision: `git worktree add --detach <scratchpad>/wt <rev>`, bui
 exe, `git worktree remove --force`. Never mutate the shared checkout. A controlled red is mandatory: a test that is
 green on the broken code proves nothing.
 
+## Git for Windows (PortableGit) under Wine, 2026-11-08
+
+- Installed: `PortableGit-2.56.0.4-64-bit.7z.exe` from the release `v2.56.0.windows.4`, 60087472 bytes, sha256
+  `b1f3e52216e2ed6882d1bebfd4d3fdf319bec40d2edbbf9fd26ec4fd3fce7ed1`, read from the release page's own asset list (it
+  matched the value a search snippet gave) and checked with `sha256sum -c`. Extracted with `7z x` (no Wine run of the
+  self-extractor): `7z x -y -o~/.wine/drive_c/PortableGit <file>`; 9616 files, 407 MB. No GPG signature was checked.
+- `git.exe` (native Windows, `C:\PortableGit\cmd\git.exe`) works: `--version`, `-C <dir> status|log|config`, and
+  `-c user.name=... -c user.email=... commit -m` (made commit `2850714`).
+- `bash.exe` (`C:\PortableGit\bin\bash.exe`), unlike the MSYS2 one, starts external programs without `--login`, from any
+  current directory. Same Cygwin warning `Couldn't compute FAST_CWD pointer` on every start. With the default PATH a test
+  script gave the right answers: `$(echo hello | tr a-z A-Z)` = HELLO, `( )` subshell, ten `$(echo $i | cat)` summing to 55,
+  `ls /usr/bin | wc -l` = 366, `uname -a` = `MINGW64_NT-10.0-19045 ... Msys`, `mkdir`, `git` inside bash.
+- Do NOT put `export PATH=/usr/bin` in a test script: after it `ls | wc` printed nothing and `mkdir` returned 1 with no
+  message. It looked like a Wine defect and was my own override.
+- `/c` is the current directory's drive: with the current directory `C:\`, `pwd` printed `/c`. Use `/c/...` for files in the
+  prefix, `/z/...` for Linux paths. In a bash script, a `git commit` without an identity fails with `Author identity
+  unknown` (exit 128): set `-c user.name=... -c user.email=...`.
+- Unexplained, not chased: in one script run (`git init`, `git add`, `git commit -q`, `git log | cat`, `git status | wc`) the
+  stderr of the commands after `git add` was not shown, so the missing identity error was invisible. The same commit run
+  through `bash.exe -c '...'` printed the error correctly. If a script under Wine seems to do nothing, rerun the step
+  through `-c` and check the exit code before blaming the code under test.
+- Not tested: `run_command` of a Windows codescout through this bash, long-running children, signals, `git` with hooks or
+  `core.autocrlf` effects (`git add` warned that LF becomes CRLF).
+
 ## MSYS2 `bash.exe` under Wine (instead of Git for Windows), 2026-11-08
 
 Git for Windows could not be downloaded while `github.com:443` stalled in the TLS handshake (TCP connected, no ServerHello;
@@ -83,6 +108,9 @@ block is permanent: retry the PortableGit download first, and treat MSYS2 as the
     Msys`, and `$(echo hello | tr a-z A-Z)` works. But in one script `uname -a` and `ls /usr/bin | wc -l` printed nothing,
     and `x=$(echo $i | cat)` came back empty ten times. So some child programs run and some lose their output.
   - Every start prints a Cygwin warning `Couldn't compute FAST_CWD pointer`.
+- Correction, same day, after Git for Windows was tested: the lost `ls /usr/bin | wc -l` output above was caused by my own
+  `export PATH=/usr/bin` in the test script. Without it `ls | wc -l` works on MSYS2 too (458). Still wrong on MSYS2 with
+  the default PATH: `x=$(echo $i | cat)` in a loop returns empty (sum 0), and `uname -a` prints nothing in a script.
 - So: do not use this to judge a shell-dependent Windows bug. It shows only that a `bash.exe` process can exist in the
   process tree. Run as: `cd ~/.wine/drive_c && MSYS2_PATH_TYPE=inherit WINEDEBUG=-all wine 'C:\msys64\usr\bin\bash.exe' --login
   /c/<script>`, with MSYS paths (`/c/...`, `/z/...`).
