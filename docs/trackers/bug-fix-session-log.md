@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 212
-entry_high_water_W: 157
+entry_high_water_F: 218
+entry_high_water_W: 158
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -65,12 +65,15 @@ entry_high_water_W: 157
 
 | ID | Date | Severity | Category | Status | Title |
 | F-207 | 2026-11-01 | med | test-design | fixed-verified | **A diagnostic hint passed its tests and did not fire on the one tree it was built for** — a 50,000-entry bound taken from a count of directories met 311,890 entries; found only by reading the live warning. |
+| F-213 | 2026-11-06 | med | test-design | fixed-verified | **A crash fixture failed in its toy parser before reaching the classifier** — wrong-reason red replaced by observed intended red before reapplying production wiring. |
+| F-214 | 2026-11-06 | med | test-design | promoted-to-bug-tracker | **Stripping log indentation promoted a debug field to compiler evidence** — real four-log overlap exposed the false provenance; three observed RED variants before fix. |
 | F-210 | 2026-11-01 | med | process | mitigated | **A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path** — `fmt-mine` named three of my files UNKNOWN after a 19-minute gate; `rustfmt --check` on the diff's files beforehand takes seconds. |
 | F-211 | 2026-11-01 | med | plan-vs-reality | open | **A plan step that read "make update return a list of topics" hid four coupled changes, and the grammar cannot express the call it names** — the loop, the shape grammar, the overlap gate and the byte ceiling all move together; found by scouting before code. |
 | F-212 | 2026-11-02 | med | process | fixed-verified | **Five friction-log entries read open although the code had fixed them, found only by re-verifying every open entry** — U-27, U-30, U-31, U-33, U-35; three more fixed in part. |
 | F-209 | 2026-11-01 | low | claim-vs-state | mitigated | **"Leaving these two directories costs nothing" was said before the directory counts were read** — I counted symlinks, the watcher counts directories; one remaining directory holds 1,808. |
 | F-208 | 2026-11-01 | low | plan-drift | fixed-verified | **A bug record's guessed cause for a remedy that did not clear a refusal pointed at a row state, and the cause was the lookup running again** — `581b05bbe41134f3`: the remedy's reset then add makes the row `retained`, and a named add clears a `retained` row and runs the file-level write lookup again on an unchanged record; fixed in `300cb29ea`. |
 |----|------|---------:|----------|--------|-------|
+| F-218 | 2026-11-08 | med | process | mitigated | **A chained fast-forward merge exited 1 with no message, twice, because a peer held a dirty file and then committed to the base** - recovered by messaging the peer, then merging in the isolated worktree and gating the identical tree after the fast-forward. |
 | F-206 | 2026-11-01 | med | plan-drift | open | **"Owners only" holds for the red hint but not for `file-provenance.py`, which the gate and the pre-edit hook also run** — a floor on operations would change the CLI's MINE/SHARED verdicts; the hook's "~7s" is now 16 to 23 s warm. |
 | F-197 | 2026-10-15 | med | stale-doc | fixed-verified | **The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it** — the live collection is per project (`artifact_chunks_<base>_<hash>`, 48,223 points here), so my "the Qdrant index looks stale" was wrong. Corrected in `934946e9`. |
 | F-198 | 2026-10-21 | med | tool-behavior | fixed-verified | **Quiet ref verification conflates absence with corruption** — a real commit passed until the lookup distinguished missing from failure. |
@@ -277,6 +280,9 @@ entry_high_water_W: 157
 | F-162 | 2026-09-15 | med | self-friction | open | **Three mis-scoped instruments in one verification, two of them a commit RANGE read as authorship — while the rule against it sat quoted in my context.** `85642b1b^..HEAD` reported **7** peer commits as my `IC-12` citations; a line-granularity `grep -c` on the `**Members:**` line (IC-6's, ~38k chars at that instant and 40,018 two appends later — the scalar decays, see the entry) reported a bare `n=` I had not written, because appending re-writes the whole line and any other author's `n=` anywhere in it counts. Both corrected readings came back clean, and what caught the first two was their **impossibility** (7 citations in a session that wrote none) rather than vigilance — `shared-checkout-commit-sequence.md` § 2 forbids exactly this and was in context, quoted by the peer message that prompted the check. Remedies, both one-liners: enumerate your own shas explicitly instead of a range, and use `--word-diff` when the unit you care about is a phrase inside a mega-line. Generalises past the positive-control law: **when an instrument's UNIT (line, commit, file) is coarser than the thing asked about (a word, an author, a field), its answer can be neither right nor wrong** |
 | F-164 | 2026-09-16 | med | measurement | mitigated | **A nullable JSON field that returns the EMPTY STRING makes an `is None` guard fail open, and the failure direction is ALARM.** `gh run view --json jobs` emits `conclusion: ""` for a still-running job, not `null`, so `not in ('success','skipped',None)` flagged **12 of 24 jobs as failures on a run with zero failures**. Caught by a contradiction, not by suspicion: the flagged list contained a job my own output also reported as succeeded, and two contradictory statements about one job from one payload is an instrument fault (`W-139`'s discriminator). Worth an entry because it fails toward alarm — it manufactures failures, and the next actions (report broken CI, go debug a green pipeline) both feel like diligence. One step from the publish path, so `W-140` from the reporting side again. **Denominator:** peer `9403d62d`'s independent predicate `if c and c not in (...)` IS safe, since `bool('')` is False — and their note is the useful half, *"I would not have found mine safe by inspection; I ran the truth table."* Two implementations, one safe, neither author able to tell by reading. Prefer an **allowlist of terminal values** to a denylist of non-terminal ones: the allowlist fails toward *not finished yet*, the denylist toward *broken*. Scope checked before filing — nothing in this repo consumes `gh run --json`, so it is a lesson and not a defect. |
 | F-168 | 2026-09-16 | med | measurement | mitigated | **`/proc` order is START-TIME order, so `head -N` samples exactly the processes that answer a freshness question wrongly.** Verifying a `cargo rb` had reached the running MCP server: `pgrep -f codescout \| head -8` returned **4 processes, all `(deleted)`** — which reads as *the rebuild reached nothing*, and sends you to re-run it or to tell the operator their build silently failed. The full `/proc[0-9]*` walk returned **22**: 14 stale and **8 clean, started 15:09:15–15:10:31 against a binary mtime of 15:08:38**. The rebuild had landed perfectly. **Not an unlucky sample — anti-correlated with the property measured:** the glob is pid order, which is start-time order, so `head -N` takes the N OLDEST, i.e. precisely the population guaranteed to predate any rebuild. Caught by the marks being **4 of 4**: a unanimous reading over a tiny sample is `W-139`'s `0/0/0` shape, since long- and short-lived servers do not restart together. | The scout's other half confirmed and is recorded as a denominator: this session's server resolved to pid 2546536, exe carrying **no** `(deleted)` suffix — string-free identity rather than a content probe — and the behavioural check discriminated live, `empty_test_selection` present on a filter matching nothing and **absent** on the whole target, at `exit_code: 0` both times. Worth separating from the defect: 14 stale processes is not a fault, it is what a rebuild does to running servers, so any peer that has not run `/mcp` is serving pre-rebuild behaviour. The fault is an instrument rendering that ordinary state as *"the rebuild did not take"*. **When enumerating processes to answer an AGE question, do not truncate** — filter on the predicate, or take the whole set. | mitigated |
+| F-217 | 2026-11-07 | med | architectural | promoted-to-bug-tracker | **Single-use runtime installer reused across author sessions** — second install nested wrappers and failed before the executor; caught before paid launch, corrected with fresh processes and actual regression/mutation evidence. MAIN e5cf80dbc72c9c5e. |
+| F-216 | 2026-11-07 | med | measurement | promoted-to-bug-tracker | **Running was mistaken for MCP initialization** — the CLI discovery probe became the immutable owner; sampled timing could hide the startup defect. |
+| F-215 | 2026-11-07 | med | measurement | promoted-to-bug-tracker | **A copied function-prefix selector counted a helper as an executable test** — real four-versus-three calibration before spending; one applied mutant killed. |
 
 ## Wins Index
 <!-- audit-doc-refs:ignore-refs `1f8784f932f042bc` — a CATALOG DIGEST, not an artifact id — the sentence reads "4786 rows, digest ...". Sixteen lowercase hex, same shape, different namespace. -->
@@ -289,6 +295,7 @@ entry_high_water_W: 157
 | W-156 | 2026-11-02 | med | **A local wine profile with the lane's own tools (bash, git, a full CPython) found the cause of four Windows failures that a bare prefix had hidden.** `normalize` returned `src\held.rs`, git prints `src/held.rs`. Recipe: `scripts/wine-env.sh`, `scripts/wine-env.manifest`. | Observed: no attributed cause across three CI runs of about 25 minutes each; read in about ten tool calls once python3 existed in wine. Inverse: a hand-made short `TMP` gave 255 false failures, so the limits are part of the entry. | validated |
 | W-157 | 2026-11-04 | med | **A pre-plan scout of tests that `include_str!` a script found one asserting on the file's TEXT.** Moving `CS_WRITE_TOOLS` out of `file-provenance.py` would red `provenance_probes_reference_only_real_tool_names`. | Inferred: a misleading "instrument is blind" red at gate time after implementation. Observed: the test's `surfaces` list names `scripts/file-provenance.py` only. | validated |
 |----|------|-------:|---------|----------------|--------|
+| W-158 | 2026-11-08 | med | **Send input-shaping fixes to a stronger-model reviewer who runs the new test red against the reverted change.** The first-segment fix for the oversized memory anchor query was rejected for a heading-only query. | `6a89e8366` would have merged and `cross_embed_memory` would have searched with a heading-only query for such memories; the number of such memories was not measured. | validated |
 | W-153 | 2026-10-31 | med | **A scout of the gate pool's test runner found that only CI runs `tests/gate-slot.sh`, through a hit the default grep hid.** Re-running a negative search with `include_hidden=true` before planning on it. | Inferred: a plan that trusted gate-green for the pool tests and read real `/sys/block/zram*` in CI. Observed: 23 files without `.github/workflows/ci.yml`, 27 with it. | validated |
 | W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
 | W-152 | 2026-10-31 | med | **A write-side fix was verified live on a record I could restore byte for byte.** Clean in git, one call, read the diff, restore, clean again; then the `unverified:` caveat was discharged. | Inferred: gate-green read as live-verified on a server that predated the fix, or a real bug left closed by the probe. Observed: `closed: 2026-10-31` written by a status-only call, `git status` empty after the restore. | validated |
@@ -17919,6 +17926,132 @@ Also seen, not a gap: background children run in their own process group (`proce
 **What happened:** the approved design for bug `20927ccfe293c34e` (`docs/superpowers/specs/2026-11-04-attribution-write-targets-in-cache-design.md`, CIW-10) moves the write-tool name sets (`CS_WRITE_TOOLS` and others) out of `scripts/file-provenance.py` into a new `scripts/write_targets.py`. Scouting before the plan found `provenance_probes_reference_only_real_tool_names` (`src/server.rs`), which `include_str!`s `scripts/file-provenance.py` alone and requires it to contain `mcp__codescout__{create_file,doc,edit_code,edit_file,run_command}`. A second gate over `*_TOOLS` constants scans every `scripts/*.py`, so that one survives the move; the surface-list test does not.
 
 **Counterfactual:** the move as designed would have removed `create_file`, `edit_code` and `edit_file` from `file-provenance.py`'s text, and the gate would have reported the instrument as blind to three write tools while it was not — a red with a misleading message, found only at gate time after the implementation. The plan now adds `write_targets.py` to that test's surfaces and checks the union.
+
+**Status:** validated
+
+## F-213 — A crash fixture failed in its toy parser before reaching the classifier
+
+**Observed:** 2026-11-06, grader-validity plan144495d0b8e0f23e.
+
+**When:** Adding zero-status crash boundary tests using existing FakeDocker.
+
+**Expected:** Crash diagnostics parse to an empty status map, allowing the test to observe missing infrastructure classification.
+
+**Got:** The fixture's simplistic record parser split every line at '='; diagnostic prose raised ParserError before the new branch. The initial red therefore did not establish the classifier gap. Two negative controls also red for this unrelated reason.
+
+**Probable cause:** The Docker fixture was scouted, but its record-parser assumption was not reconciled with the newly introduced log population.
+
+**Workaround:** Removed the production wiring, replaced only the boundary test parser with one filtering status records, observed the intended one missing-infra assertion failure and two passing controls, then reapplied the wiring. Classifier helper missing-function red was independent. Logs retained under resident grader-validity-20261106.
+
+**Severity:** med — one mistaken implementation/red-green cycle absorbed locally.
+
+**Status:** fixed-verified
+
+**Valid:** dated 2026-11-06
+
+**Rests on:** Actual pytest output identifying ParserError first, followed by intended infra assertion failure after removing implementation. Full classifier trio212tests/76subtests passes.
+
+**Fix idea / Pointer:** test_multilang_tasks.py LiveGraderTests; MAIN plan144495d0b8e0f23e implementation evidence. A red reaching a different failure cannot license the intended assertion.
+
+## F-214 — Stripping test log indentation promoted a debug field to compiler evidence
+
+**Observed:** 2026-11-06, prospective grader policy overlap calibration of all4historicallogs.
+
+**When:** Differentiating semantic compile failure from test failure without rewriting the record parser.
+
+**Expected:** An error: header identifies Rust compiler output.
+
+**Got:** Real NUxhigh grade.log physical line7824 is `                error: "boom",` inside GenericError failed-test stdout. Stripping indentation made it a compiler diagnostic; excluding Cargo test-summary footers alone still misclassified the real log in calibration-v2. Three debug-field variants failed the regression test before the fix.
+
+**Workaround:** Retain physical indentation, require top-level Rust E-code or adjacent Rust source context. Current17policytests29subtests pass; calibration-v3 matches all4expectedkinds with explicit SYNTHETIC runtime fixture. Both previous failed calibrations retained,17protectedoldfilesunchanged.
+
+**Severity:** med — would preserve false failure kind in a source-bound primary policy, although this particular pass=false stays false.
+
+**Status:** promoted-to-bug-tracker
+
+**Valid:** dated 2026-11-06
+
+**Rests on:** saved calibration-v1/v2/v3, actual log context, debug-field-red.log and policy-green-v3.log in resident prospective-grader-policy-20261106. Synthetic runtime proves logical overlap only; no native qualification.
+
+**Fix idea / Pointer:** docs/issues/2026-11-06-prospective-policy-cargo-summary-compiler-false-positive.md (663cf412ab711c0a), plan93c543c96e2d7766.
+
+## F-215 — A copied function-prefix selector counted a helper as an executable test
+
+**Observed:** 2026-11-07, before launching the differential-oracle author.
+
+**When:** Reusing the closed blind-verifier evaluator for generated test patches that may include helpers.
+
+**Expected:** Functions named contrast_* were treated as the executable test population. The previous two-test patch had no similarly named helper, so that example did not distinguish the predicate from the intended property.
+
+**Got:** Applying the actual selector to the newly executed observation patch returned four names: contrast_observe and contrast_observe_1/2/3. Both completed native logs and the independent status audit show only three executable tests; contrast_observe has no test attribute. The literal predicate counted prefixed functions, not tests.
+
+**Workaround:** Before any paid author call, verify and stop only the unlaunched admission waiter, preserve its frozen inputs, and register a new evaluator revision. Select supported test declarations, cross-check the actor's declared list, and still require actual runtime statuses. Unknown forms are unscorable. A response without an executable oracle is an abstention, not an infrastructure error.
+
+**Observed verification:** Corrected selector equals the three actually executed tests. One mutation applied to an isolated source copy restores the prefix predicate; the same calibration fails with four versus three names. Applied 1, killed 1, survived 0. Earlier blocked mutation insertion was not counted as an applied mutant.
+
+**Severity:** med — would have produced a spurious missing-status rejection after a paid actor completed; controller could absorb it without changing the generated tests.
+
+**Status:** promoted-to-bug-tracker
+
+**Valid:** dated 2026-11-07
+
+**Rests on:** The real completed observation patch and native statuses, not an expected count inferred from a second prefix scan. This is conservative support for the prototype's standard test declarations, not a general Rust parser or a coverage claim.
+
+**Fix idea / Pointer:** [Selector issue](../issues/2026-11-07-contrast-selector-counts-helper-functions.md); differential-oracle-20261107/selector-calibration.json in the resident evidence root.
+
+## F-216 — A Running container was mistaken for an initialized MCP worker
+
+**Valid:** dated 2026-11-07
+
+**Observed:** The native supervisor pins the first correctly labelled Running Docker CID before MCP initialization. The pinned CLI can first send server/discover to a legacy server, let that worker exit, then restart successfully with initialize. Failed OAuth control43 pinned the discovery worker, then killed its own client on native worker missing before any local proxy request. Healthy control44 saw only the second worker even though both launches existed. The first unique stderr file proves server-discover-probe-1 before initialize; sanitized CLI debug explicitly records the intended fallback. A green workflow therefore did not prove that ownership selection was correct.
+
+**Expected versus actual:** Docker Running/image/name/label/limits prove process ownership and configuration, not protocol readiness or durability. The plan assumed these properties were equivalent. They diverge during a client's startup negotiation.
+
+**Cost:** One pre-provider author attempt and several zero-upstream diagnostics; no model-quality outcome was scored. Original unknown final-cost flag and4USDreservation remain visible.
+
+**Resolution:** MAIN issuec6bf6e5fc9578d79 tracks the startup identity defect. Installed pinned CLI source explicitly supports MCP_PROTOCOL_NEGOTIATION=legacy; actual control45 with the process-local override has one worker, full scripted workflow/capture/cleanup,3local requests and0forwarded. This is a compatibility workaround, not a general supervisor fix. The fresh technical recovery has the identical public prompt/packet and no onboarding model repeat; all old failures remain intact.
+
+**Rests on:** differential-oracle-20261107/oauth-startup-probe-v3 per-name stderr, sanitized CLI debug, native inspections/supervision/cleanup; legacy-startup-probe receipts; fresh recovery plan12afd63bee6c6b30. Raw credential-bearing debug is private mode0600 and excluded from report exports.
+
+**Status:** promoted-to-bug-tracker
+
+## F-217 — A single-use runtime installer was reused across sequential author sessions
+
+**Valid:** dated 2026-11-07
+
+**Observed:** The new baseline-first controller loaded a previously qualified single-author runner once and called it for low then xhigh. Independent review executed the actual compatibility installer with a synthetic external executor: low completed, xhigh raised FileExistsError creating its debug file, and only one underlying execution occurred. The second install had captured the first wrapper, so both wrappers tried the same exclusive-create path. A qualified single invocation did not prove reentrant module-global state.
+
+**Cost and correction:** Caught before any new paid author. MAIN e5cf80dbc72c9c5e was filed immediately. Each author now runs in its own fresh qualified Python process; the actual controller-entry fixture observed the old failure before the fix and two successful synthetic executions after it. A restored same-process mutant is actually killed. Native/model success is not inferred from this fixture; the real fixed pair is separately measured.
+
+**Lesson:** When copying a qualified integration, scout its lifetime boundary as well as its function arguments. A process-local monkeypatch installer is not a reusable session factory. Preserve the proven one-install-per-process boundary unless reset/reentrancy is separately verified.
+
+**Status:** promoted-to-bug-tracker
+
+## F-218 — A chained fast-forward merge exited 1 with no message, twice, because a peer held a dirty file and then committed to the base
+
+**Valid:** dated 2026-11-08
+
+**Observed:** Merging the integrated fix branch into `experiments` ran as one chained command and exited 1 with no explanatory output, twice. First cause: peer session pid 1205181 held an uncommitted change to `src/tools/run_command/tests.rs`, a file my merge also changed. Second cause: after I had gated the tip, a peer committed a docs file (`89112c839`), so `experiments` had moved past the base I gated.
+
+**Expected versus actual:** I expected "gate the tip, then fast-forward". The base moved under the gated tip, and a shared checkout cannot hold `experiments` still while a gate runs.
+
+**Cost:** Two failed merge attempts, one user decision (message the peer), one message to the peer and one deviation from the order "gate, then merge".
+
+**Resolution:** The peer committed `2abaca44a`, and I re-verified ancestry. For the second failure I merged again in the isolated worktree, checked that only the peer's docs file differed from the gated tip, fast-forwarded at once to tip `143c1941f`, then ran `./scripts/gate.sh --check` on the identical tree: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0, PYTHON_LIGHT=0. The gate does not cover the heavy Python suites, server-stack, librarian code in the lean lane or the ONNX weight tests. I told the user that the order was reversed. Nothing here changes the shared-checkout behaviour that caused it.
+
+**Rests on:** Commits `2abaca44a`, `89112c839` and `143c1941f` on `experiments`, and this session's tool output for the two exits.
+
+**Status:** mitigated
+
+## W-158 — An Opus review rejected a first-segment fix for an oversized memory anchor query before it merged
+
+**Valid:** dated 2026-11-08
+
+**Pattern:** for code that shapes an input to a lookup, send the fix to a stronger-model reviewer who must run the new test red against the reverted change, and read what it rejects.
+
+**What happened:** The fix for bug `139881c33d1798b7` (formerly `7b9c9e4a`, a memory anchor query too large for the embedder) first took the first segment of the memory content (`6a89e8366`). The Opus reviewer rejected it: a heading followed by one over-budget line gives a heading-only query. The repair is `anchor_query_prefix` in `src/tools/memory/mod.rs` (`83e1f68c1`), which returns a bounded leading prefix of the content.
+
+**Counterfactual:** Without the review, `6a89e8366` was the version the branch would have merged, and `cross_embed_memory` would have searched for anchors with a heading-only query for memories of that shape. I did not measure how many memories have that shape.
 
 **Status:** validated
 
