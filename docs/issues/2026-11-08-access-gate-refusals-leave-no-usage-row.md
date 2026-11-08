@@ -51,10 +51,32 @@ See Symptom. Both measurements are above; the second one is the live run.
 1. **Hypothesis:** the recorder skips rows whose outcome is an error. **Test:** `tool_calls` holds `recoverable_error` and `error` rows in this and other projects. **Verdict:** rejected.
 
 ## Fix
-Not done. Candidate: record the gate refusal the way `refuse_pin` records a pin refusal (default project, best-effort, blocking pool, short budget), so the row carries the refusal text and an `err_family`. Open points: `normalize_err_family` in `src/usage/db.rs` has no family for these texts yet, and a refusal must not make the caller wait on SQLite's busy timeout.
+
+Done on the working tree, not committed yet.
+
+`call_tool_inner` is now a thin wrapper over `dispatch_tool_call`, which returns an `Exit` (`src/server.rs`). Every `return` in the dispatcher picks `Exit::Recorded` (the recorder wrote, or `refuse_pin` wrote the row itself) or `Exit::Unrecorded`; the wrapper writes the row for the second kind through `record_unrecorded`, then returns the answer unchanged. A new early return does not compile until it chooses. A guard with `Drop` was rejected: `Drop` cannot await, so a test could not read the row deterministically.
+
+Exits now covered: the access gate, the write-lock refusal, and an unknown tool (still a protocol error). `refuse_pin` and `record_unrecorded` share one writer, `record_refusal_row`. The rendezvous poll is consumed once per call, so the result is handed on in `CallIdentity::rendezvous` and not polled twice.
+
+Seven families were added to `normalize_err_family` and `ERR_FAMILIES` (`src/usage/db.rs`): `write_blocked_read_only`, `write_blocked_by_config`, `write_blocked_cause_unknown`, `indexing_disabled`, `write_lock_unavailable`, `ack_handle_refused`, `unknown_tool`. Each is decided by the message's fixed prefix.
+
+Not covered, on purpose: a call cancelled by Escape and a call that hits `tool_timeout_secs`. Both drop the future that holds the recorder, and the cancel arm parks the task instead of returning. That needs its own change, and the claim that they leave no row today is read from `race_against_cancel`, not measured.
+
+A call with no project to hold the row is skipped, as `refuse_pin` already did.
 
 ## Tests added
-None. This file records the defect only.
+
+`src/server/exit_rows_tests.rs`, 5 tests through the real dispatch. Each reads the row back with a second connection and counts again after 300 ms, so a double write fails too:
+
+- a read-only gate refusal leaves one row, family `write_blocked_read_only`
+- a configured-off gate refusal leaves one row, family `write_blocked_by_config`
+- a refused write lock leaves one row, family `write_lock_unavailable`
+- an unknown tool stays a protocol error and leaves one row, family `unknown_tool`
+- a refused `ack` handle leaves one row, family `ack_handle_refused`
+
+Plus `usage::db::tests::the_dispatcher_refusals_have_a_family_whatever_their_data_says`, with hostile data (`heading Fix not found`, `index is locked`) in each message.
+
+All 5 failed before the change, for the reason named: 0 rows, and the ack row with no family. After: 15 of 15 in the targeted run. `./scripts/gate.sh` 2026-11-08: FMT, CLIPPY, LEAN, DEFAULT and Python all exit 0, on the third run. The first run's LEAN lane failed 2 `prompts` tests; they passed (140 of 140) on the next run of the same tree, and the files involved (`src/prompts/source.md` and its fixture) were another session's uncommitted edits.
 
 ## Workarounds
 Count refusals from the harness transcript, not from `usage.db`.

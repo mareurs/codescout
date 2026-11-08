@@ -910,6 +910,76 @@ impl CodeScoutServer {
             .collect()
     }
 
+    /// Write one usage row for a call that was refused before the recorder saw it, and wait for
+    /// it for at most [`REFUSAL_RECORD_BUDGET`].
+    ///
+    /// `workspace` names the project that holds the row: `None` is the session's DEFAULT
+    /// project, which is what a refused `workspace=` pin must use (nothing may be created at the
+    /// pinned path); `Some(root)` is a pin that was already accepted and made resident.
+    ///
+    /// Best-effort in three ways, none of which changes the answer the caller gets:
+    /// - it is skipped when the default project's root is gone: `open_db` no longer re-creates
+    ///   a missing root (it creates only `.codescout/`), and a row for a project that is gone has
+    ///   nowhere to live;
+    /// - it runs on the blocking pool under a short budget, because the database waits out
+    ///   SQLite's 5 s busy timeout when another process holds it, and the caller must not;
+    /// - what it stores is the refusal's message, which is already capped and escaped.
+    ///
+    /// The caller is resolved the way `call_tool_inner` records ordinary rows: the stamped
+    /// principal, else the `_meta` conversation, else the request's native Codex root, else the
+    /// rendezvous poll, else the server's own id. The poll is consumed once per call, so a call
+    /// that already made it passes the result in [`CallIdentity::rendezvous`].
+    async fn record_refusal_row(
+        &self,
+        tool: &str,
+        input: &Value,
+        error: anyhow::Error,
+        workspace: Option<&std::path::Path>,
+        identity: &CallIdentity,
+    ) {
+        if workspace.is_none()
+            && !self
+                .agent
+                .project_root()
+                .await
+                .is_some_and(|root| root.is_dir())
+        {
+            return;
+        }
+        let polled = match &identity.rendezvous {
+            Some(already) => already.clone(),
+            None => self.poll_rendezvous(),
+        };
+        let cc_session = identity
+            .principal
+            .clone()
+            .or_else(|| identity.conversation.clone())
+            .or_else(|| identity.native_root.clone())
+            .or(polled)
+            .unwrap_or_else(|| self.cc_session_id.clone());
+        let recorder = UsageRecorder::new(
+            self.agent.clone(),
+            self.debug,
+            self.session_id.clone(),
+            cc_session,
+            identity.agent_id.clone(),
+            identity.tool_use_id.clone(),
+        );
+        let (name, input) = (tool.to_string(), input.clone());
+        let workspace = workspace.map(std::path::Path::to_path_buf);
+        let runtime = tokio::runtime::Handle::current();
+        let job = tokio::task::spawn_blocking(move || {
+            runtime.block_on(recorder.record_content(
+                &name,
+                &input,
+                workspace.as_deref(),
+                || async move { Err::<Vec<Content>, anyhow::Error>(error) },
+            ))
+        });
+        // The job keeps running past the budget; only the wait for it is bounded.
+        let _ = tokio::time::timeout(REFUSAL_RECORD_BUDGET, job).await;
+    }
+
     /// Answer a call whose `workspace=` pin is unusable: the recoverable refusal, plus a usage
     /// row for it.
     ///
@@ -944,37 +1014,18 @@ impl CodeScoutServer {
             refusal.hint().unwrap_or_default(),
         );
         let response = route_tool_error(refusal.into());
-        if !self
-            .agent
-            .project_root()
-            .await
-            .is_some_and(|root| root.is_dir())
-        {
-            return response;
-        }
-        let cc_session = principal
-            .map(str::to_owned)
-            .or_else(|| conversation.map(str::to_owned))
-            .or_else(|| native_root.map(str::to_owned))
-            .or_else(|| self.poll_rendezvous())
-            .unwrap_or_else(|| self.cc_session_id.clone());
-        let recorder = UsageRecorder::new(
-            self.agent.clone(),
-            self.debug,
-            self.session_id.clone(),
-            cc_session,
+        let identity = CallIdentity {
+            principal: principal.map(str::to_owned),
+            conversation: conversation.map(str::to_owned),
+            native_root: native_root.map(str::to_owned),
             agent_id,
             tool_use_id,
-        );
-        let (name, input) = (tool.to_string(), input.clone());
-        let runtime = tokio::runtime::Handle::current();
-        let job = tokio::task::spawn_blocking(move || {
-            runtime.block_on(recorder.record_content(&name, &input, None, || async move {
-                Err::<Vec<Content>, anyhow::Error>(recorded.into())
-            }))
-        });
-        // The job keeps running past the budget; only the wait for it is bounded.
-        let _ = tokio::time::timeout(REFUSAL_RECORD_BUDGET, job).await;
+            rendezvous: None,
+        };
+        // Against the DEFAULT project (`None`), never the pin: nothing may be created at the
+        // pinned path.
+        self.record_refusal_row(tool, input, recorded.into(), None, &identity)
+            .await;
         response
     }
 
@@ -1547,6 +1598,75 @@ impl CodeScoutServer {
         self.poll_rendezvous();
     }
 
+    /// The entry point tests and the MCP handler call. Runs [`Self::dispatch_tool_call`] and
+    /// gives any call that never reached the usage recorder its row, so `usage.db` has one row
+    /// per call that had a project to hold it.
+    ///
+    /// The recorder wraps only the tool body. An exit taken before it (a gate refusal, a
+    /// refused write lock, an unknown tool) used to leave nothing in `tool_calls`, and every
+    /// analysis over that table was blind to those calls. [`Exit`] closes that by type: a new
+    /// early return does not compile until it says whether the recorder covers it.
+    ///
+    /// Not covered here, on purpose (a later step): a call cancelled by Escape and a call that
+    /// hits `tool_timeout_secs`. Both drop the future that holds the recorder, and the cancel
+    /// arm parks the task instead of returning, so neither reaches this code.
+    /// docs/issues/2026-11-08-access-gate-refusals-leave-no-usage-row.md
+    async fn call_tool_inner(
+        &self,
+        req: CallToolRequestParams,
+        progress: Option<Arc<progress::ProgressReporter>>,
+        peer: Option<Peer<RoleServer>>,
+        cancel_token: tokio_util::sync::CancellationToken,
+    ) -> std::result::Result<CallToolResult, McpError> {
+        // Read here because `dispatch_tool_call` consumes `req`.
+        let name = req.name.clone();
+        match self
+            .dispatch_tool_call(req, progress, peer, cancel_token)
+            .await
+        {
+            Exit::Recorded(result) => Ok(result),
+            Exit::Unrecorded(exit) => {
+                self.record_unrecorded(&name, &exit).await;
+                exit.result
+            }
+        }
+    }
+
+    /// Write the row for a call that left [`Self::dispatch_tool_call`] before the recorder.
+    ///
+    /// The row carries the refusal's own message (the first text block; a recoverable answer
+    /// is `{"ok": false, "error": …, "hint": …}`, so its `error` and `hint` are read back out,
+    /// which is how `classify_content_result` stores a tool's own recoverable error) and the
+    /// family `normalize_err_family` gives it. The answer to the caller is not touched.
+    async fn record_unrecorded(&self, tool: &str, exit: &Unrecorded) {
+        let error: anyhow::Error = match &exit.result {
+            Err(e) => anyhow::anyhow!("{}", e.message),
+            Ok(result) => {
+                let text = result
+                    .content
+                    .iter()
+                    .find_map(|c| c.as_text().map(|t| t.text.clone()))
+                    .unwrap_or_default();
+                match serde_json::from_str::<Value>(&text) {
+                    Ok(v) if v.get("ok") == Some(&Value::Bool(false)) => {
+                        let message = v.get("error").and_then(Value::as_str).unwrap_or(&text);
+                        let hint = v.get("hint").and_then(Value::as_str).unwrap_or_default();
+                        crate::tools::RecoverableError::with_hint(message, hint).into()
+                    }
+                    _ => anyhow::anyhow!("{text}"),
+                }
+            }
+        };
+        self.record_refusal_row(
+            tool,
+            &exit.input,
+            error,
+            exit.workspace.as_deref(),
+            &exit.identity,
+        )
+        .await;
+    }
+
     /// Core tool dispatch, separated from the MCP trait method so tests can
     /// call it without constructing a `RequestContext`.
     ///
@@ -1559,13 +1679,13 @@ impl CodeScoutServer {
     /// cancellation can pass `tokio_util::sync::CancellationToken::new()` —
     /// a fresh token never fires.
     #[tracing::instrument(skip_all, fields(tool = %req.name))]
-    async fn call_tool_inner(
+    async fn dispatch_tool_call(
         &self,
         req: CallToolRequestParams,
         progress: Option<Arc<progress::ProgressReporter>>,
         peer: Option<Peer<RoleServer>>,
         cancel_token: tokio_util::sync::CancellationToken,
-    ) -> std::result::Result<CallToolResult, McpError> {
+    ) -> Exit {
         tracing::debug!(args = ?req.arguments, "tool call");
 
         let arg_keys: Vec<&str> = req
@@ -1578,8 +1698,6 @@ impl CodeScoutServer {
         // if RSS climbs during this call, the heartbeat line names the operation.
         crate::heartbeat::note_tool(&req.name);
         let tool_start = std::time::Instant::now();
-
-        let tool = self.resolve_tool(&req.name)?;
 
         // Read before `req.arguments` moves on the next line: that partial move
         // makes `req` unusable as a whole afterwards, and `meta` is the only
@@ -1648,6 +1766,52 @@ impl CodeScoutServer {
             _ => None,
         };
 
+        // Who this call is, for the row an exit before the recorder gets (see `Exit`). Cloned
+        // here because the exits below move the originals.
+        let mut identity = CallIdentity {
+            principal: asserted_principal.clone(),
+            conversation: asserted_conversation.clone(),
+            native_root: native_root.clone(),
+            agent_id: asserted_agent.clone(),
+            tool_use_id: asserted_tool_use_id.clone(),
+            rendezvous: None,
+        };
+
+        // An unknown tool name stays the protocol error it was. It now also leaves a row.
+        let tool = match self.resolve_tool(&req.name) {
+            Ok(tool) => tool,
+            Err(e) => {
+                return Exit::unrecorded(Unrecorded {
+                    result: Err(e),
+                    input,
+                    workspace: None,
+                    identity,
+                });
+            }
+        };
+
+        // `ack="@ack_…"` replays a write that a read-only activation refused (see
+        // `check_tool_access`). It must run BEFORE the pin is read: the replay puts the
+        // refusal's own remedy, `workspace=<root>`, into `input`, and everything below then
+        // treats the call as the pinned call it now is. A bad handle is refused like a bad
+        // pin: the recoverable answer, plus a usage row.
+        // docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
+        if let Err(refusal) = self.replay_read_only_ack(&req.name, &mut input) {
+            return Exit::Recorded(
+                self.refuse_pin(
+                    &req.name,
+                    &input,
+                    refusal,
+                    asserted_principal.as_deref(),
+                    asserted_conversation.as_deref(),
+                    native_root.as_deref(),
+                    asserted_agent,
+                    asserted_tool_use_id,
+                )
+                .await,
+            );
+        }
+
         // A `workspace=` pin that is not an existing directory, or whose project cannot be made
         // resident (an unparseable project.toml, an unopenable directory), is refused HERE,
         // once, before anything resolves it: every later consumer (the access gate, the write
@@ -1659,32 +1823,11 @@ impl CodeScoutServer {
         // (see `refuse_pin`). The incident that found this was diagnosed from a usage row, and
         // a refused call that left none would have been invisible.
         // docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
-        // `ack="@ack_…"` replays a write that a read-only activation refused (see
-        // `check_tool_access`). It must run BEFORE the pin is read: the replay puts the
-        // refusal's own remedy, `workspace=<root>`, into `input`, and everything below then
-        // treats the call as the pinned call it now is. A bad handle is refused like a bad
-        // pin: the recoverable answer, plus a usage row.
-        // docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md
-        if let Err(refusal) = self.replay_read_only_ack(&req.name, &mut input) {
-            return Ok(self
-                .refuse_pin(
-                    &req.name,
-                    &input,
-                    refusal,
-                    asserted_principal.as_deref(),
-                    asserted_conversation.as_deref(),
-                    native_root.as_deref(),
-                    asserted_agent,
-                    asserted_tool_use_id,
-                )
-                .await);
-        }
-
         let workspace_override = match Self::extract_workspace_override(&input) {
             Ok(pin) => pin,
             Err(refusal) => {
-                return Ok(self
-                    .refuse_pin(
+                return Exit::Recorded(
+                    self.refuse_pin(
                         &req.name,
                         &input,
                         refusal,
@@ -1694,13 +1837,14 @@ impl CodeScoutServer {
                         asserted_agent,
                         asserted_tool_use_id,
                     )
-                    .await);
+                    .await,
+                );
             }
         };
         if let Some(root) = workspace_override.as_deref() {
             if let Err(e) = self.agent.ensure_resident(root.to_path_buf()).await {
-                return Ok(self
-                    .refuse_pin(
+                return Exit::Recorded(
+                    self.refuse_pin(
                         &req.name,
                         &input,
                         crate::agent::pin_resolution_refusal(root, e),
@@ -1710,7 +1854,8 @@ impl CodeScoutServer {
                         asserted_agent,
                         asserted_tool_use_id,
                     )
-                    .await);
+                    .await,
+                );
             }
         }
 
@@ -1738,15 +1883,18 @@ impl CodeScoutServer {
         // call still serialises behind it.
         let gated_as_write = is_write && !tool.lifts_write_block(&input);
 
-        if let Err(mut err) = self
+        // Awaited into its own binding, not inside the `if let`: a temporary in an `if let`
+        // scrutinee lives to the end of the block, and the refusal below moves `input` and
+        // `workspace_override` out.
+        let gate = self
             .check_tool_access(
                 &req.name,
                 gated_as_write,
                 workspace_override.as_deref(),
                 &input,
             )
-            .await
-        {
+            .await;
+        if let Err(mut err) = gate {
             // The harmed party's first signal is often THIS refusal: a subagent's
             // read-only activation became the default, and the parent's next write was
             // refused with text that names nothing about who moved it. Carry the
@@ -1757,11 +1905,20 @@ impl CodeScoutServer {
             // a `/clear`. A pinned call named its own tree and is owed nothing.
             // docs/issues/archive/2026-10-16-a-write-refused-by-the-gate-carries-no-displaced-default-notice.md
             if workspace_override.is_none() {
+                // The poll is consumed once per call. `record_unrecorded` runs after this
+                // branch returns, so what it found is handed on in `identity` rather than
+                // polled a second time and read as empty.
+                let mut polled = None;
                 let caller = asserted_principal
                     .clone()
                     .or_else(|| asserted_conversation.clone())
-                    .or_else(|| self.poll_rendezvous())
+                    .or_else(|| {
+                        let p = self.poll_rendezvous();
+                        polled = Some(p.clone());
+                        p
+                    })
                     .or_else(|| self.base_ledger_key.clone());
+                identity.rendezvous = polled;
                 if let Some(n) = self.agent.displaced_default_notice(caller.as_deref()).await {
                     err.content
                         .push(crate::tools::guide_emit::trailing_block(format!(
@@ -1771,7 +1928,12 @@ impl CodeScoutServer {
                     self.agent.mark_displaced_told(&n).await;
                 }
             }
-            return Ok(*err);
+            return Exit::unrecorded(Unrecorded {
+                result: Ok(*err),
+                input,
+                workspace: workspace_override,
+                identity,
+            });
         }
 
         // BEFORE the ledger this request will consult, and therefore before
@@ -1789,6 +1951,9 @@ impl CodeScoutServer {
         // subagent reusing this live process never updates, while the rendezvous is
         // polled on every call and tracks the conversation we are CURRENTLY serving.
         let rendezvous_session = self.poll_rendezvous();
+        // Handed to an exit below that is taken after this poll, so the row it gets does not poll
+        // again (the poll is consumed once per call).
+        identity.rendezvous = Some(rendezvous_session.clone());
         // A principal or conversation asserted on the REQUEST outranks the
         // rendezvous slot: both are per-call rather than per-process, and they are
         // the only sources that can separate a subagent's calls from its parent's.
@@ -1871,10 +2036,27 @@ impl CodeScoutServer {
                 &input_for_record,
                 ctx.workspace_override.as_deref(),
             )
-            .await?
+            .await
         {
-            Ok(g) => g,
-            Err(result) => return Ok(result),
+            Ok(Ok(g)) => g,
+            // A refused lock is a refusal, not a call the recorder saw: it returns here,
+            // before `record_content` is built below.
+            Ok(Err(result)) => {
+                return Exit::unrecorded(Unrecorded {
+                    result: Ok(result),
+                    input: input_for_record,
+                    workspace: ctx.workspace_override.clone(),
+                    identity,
+                });
+            }
+            Err(e) => {
+                return Exit::unrecorded(Unrecorded {
+                    result: Err(e),
+                    input: input_for_record,
+                    workspace: ctx.workspace_override.clone(),
+                    identity,
+                });
+            }
         };
 
         let tool_call_fut = recorder.record_content(
@@ -2005,7 +2187,7 @@ impl CodeScoutServer {
             .post_process(call_result, &req.name, ctx.workspace_override.as_deref())
             .await;
 
-        Ok(call_result)
+        Exit::Recorded(call_result)
     }
 }
 
@@ -2786,6 +2968,50 @@ fn select_error_render(e: &anyhow::Error) -> ErrorRender {
 /// row is best-effort; the answer is not.
 // cap-class: NOT_A_CAP — a wait budget for a telemetry write, a timeout; the caller's answer is complete whether or not the row landed
 const REFUSAL_RECORD_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Who made a call, as far as a usage row needs it. Cloned out of `dispatch_tool_call` once the
+/// call is known, because the exits move the originals.
+#[derive(Clone, Default)]
+struct CallIdentity {
+    principal: Option<String>,
+    conversation: Option<String>,
+    native_root: Option<String>,
+    agent_id: Option<String>,
+    tool_use_id: Option<String>,
+    /// `Some(found)`: this call already polled the rendezvous slot and found `found`. The poll
+    /// is consumed once per call, so a row written afterwards must not poll again and read an
+    /// empty slot. `None`: not polled yet.
+    rendezvous: Option<Option<String>>,
+}
+
+/// A call that left `dispatch_tool_call` before the usage recorder saw it. `call_tool_inner`
+/// writes its row from this, then returns `result` unchanged.
+struct Unrecorded {
+    /// What the caller gets. An unknown tool stays `Err`, a protocol error.
+    result: std::result::Result<CallToolResult, McpError>,
+    input: Value,
+    /// The project that holds the row: `None` is the session default.
+    workspace: Option<std::path::PathBuf>,
+    identity: CallIdentity,
+}
+
+/// How `dispatch_tool_call` ended. Every `return` in it picks one, so a new early return cannot
+/// be added without saying whether the usage recorder covers it. Before this existed, three
+/// exits (the access gate, the write lock, an unknown tool) returned before the recorder was
+/// built and left no row, and nothing in the code said they should have.
+/// docs/issues/2026-11-08-access-gate-refusals-leave-no-usage-row.md
+enum Exit {
+    /// A row was written, or `refuse_pin` wrote it itself.
+    Recorded(CallToolResult),
+    /// No row yet. Boxed: it is far larger than the other variant.
+    Unrecorded(Box<Unrecorded>),
+}
+
+impl Exit {
+    fn unrecorded(exit: Unrecorded) -> Self {
+        Exit::Unrecorded(Box::new(exit))
+    }
+}
 
 /// Route a tool `Err(e)` to the appropriate `CallToolResult`.
 ///
@@ -18729,6 +18955,10 @@ mod protected_config_write_tests;
 #[cfg(test)]
 #[path = "server/read_only_ack_tests.rs"]
 mod read_only_ack_tests;
+
+#[cfg(test)]
+#[path = "server/exit_rows_tests.rs"]
+mod exit_rows_tests;
 
 #[cfg(test)]
 mod resilient_stdin_tests {

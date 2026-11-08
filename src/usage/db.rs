@@ -528,6 +528,44 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     if msg.starts_with("json_path '[*]' needs an array, found ") {
         return Some("json_path_shape_mismatch");
     }
+    // Refusals the dispatcher gives BEFORE a tool runs (2026-11-08: they left no row at all, and
+    // the `ack` refusals left one with no family). Each is decided by the message's own fixed
+    // prefix, here and first, because every one of them embeds data a substring rule further
+    // down could claim: a project path, a holder name, a tool name. Pinned with hostile data by
+    // `the_dispatcher_refusals_have_a_family_whatever_their_data_says`.
+    //
+    // `File writes are disabled: the active project is …` is a read-only ACTIVATION, which a
+    // pin lifts for one call. `… for <project>: security.file_write_enabled …` is the project's
+    // own setting, which a pin does not lift. The two take opposite remedies, so two families.
+    // The third text names no cause (no project root reached the gate) and says so.
+    if msg.starts_with("File writes are disabled: the active project is ") {
+        return Some("write_blocked_read_only");
+    }
+    if msg.starts_with("File writes are disabled for this project") {
+        return Some("write_blocked_cause_unknown");
+    }
+    if msg.starts_with("File writes are disabled for ") {
+        return Some("write_blocked_by_config");
+    }
+    if msg.starts_with("Indexing tools are disabled by security.indexing_enabled") {
+        return Some("indexing_disabled");
+    }
+    // The four texts `agent::write_guard` gives for a write it would not wait for any longer.
+    if msg.starts_with("timed out waiting for in-process write lock")
+        || msg.starts_with("timed out before checking cross-process write lock")
+        || msg.starts_with("write lock held by ")
+        || msg.starts_with("another codescout instance is writing to this project")
+    {
+        return Some("write_lock_unavailable");
+    }
+    // `ack="@ack_…"` refused: unknown or evicted, minted by another tool, or the wrong kind.
+    if msg.starts_with("ack handle ") {
+        return Some("ack_handle_refused");
+    }
+    // A tool name the server does not have. The protocol error is unchanged; this only names it.
+    if msg.starts_with("unknown tool: ") {
+        return Some("unknown_tool");
+    }
     // The 2026-11-02 audit's NULL head (119 of 1,113 non-success rows). These three messages embed
     // data (a path, a parameter name) that a substring rule further down could claim, so the fixed
     // prefix decides, here, first. Pinned with hostile data by
@@ -925,6 +963,7 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
 /// which reads this file's own source: a new arm cannot ship without appearing
 /// here, and appearing here changes the fingerprint the gate derives. BL-4.
 const ERR_FAMILIES: &[&str] = &[
+    "ack_handle_refused",
     "ambiguous_heading",
     "ambiguous_name_path",
     "ambiguous_old_string",
@@ -947,6 +986,7 @@ const ERR_FAMILIES: &[&str] = &[
     "il3_shell_on_source",
     "il4_read_markdown_routing",
     "il5_edit_markdown_routing",
+    "indexing_disabled",
     "invalid_line_range",
     "invalid_param_shape",
     "invalid_regex",
@@ -983,7 +1023,12 @@ const ERR_FAMILIES: &[&str] = &[
     "target_already_exists",
     "unanchored_archive_refused",
     "unknown_enum_value",
+    "unknown_tool",
     "worktree_activate_required",
+    "write_blocked_by_config",
+    "write_blocked_cause_unknown",
+    "write_blocked_read_only",
+    "write_lock_unavailable",
     "write_scope_denied",
 ];
 
@@ -4402,6 +4447,76 @@ mod tests {
             sorted.as_slice(),
             "keep ERR_FAMILIES sorted so a pure reordering cannot change the fingerprint"
         );
+    }
+    /// The dispatcher's pre-tool refusals each embed data a substring rule further down the
+    /// classifier could claim: a project path, a holder name, a tool name. The fixed prefix has to
+    /// decide first. The hostile fragments below are the ones that re-routed other families before
+    /// (`heading … not found`, `index is locked`).
+    #[test]
+    fn the_dispatcher_refusals_have_a_family_whatever_their_data_says() {
+        let hostile = "/tmp/heading Fix not found/index is locked";
+        let cases: Vec<(&str, String, &str)> = vec![
+            (
+                "create_file",
+                format!(
+                    "File writes are disabled: the active project is {hostile} and it was activated \
+                 read-only. To write somewhere else without disturbing it, pass workspace='x'"
+                ),
+                "write_blocked_read_only",
+            ),
+            (
+                "create_file",
+                format!(
+                    "File writes are disabled for {hostile}: security.file_write_enabled is false in \
+                 its .codescout/project.toml"
+                ),
+                "write_blocked_by_config",
+            ),
+            (
+                "create_file",
+                "File writes are disabled for this project. To write somewhere else, pass workspace=x"
+                    .to_string(),
+                "write_blocked_cause_unknown",
+            ),
+            (
+                "semantic_search",
+                format!("Indexing tools are disabled by security.indexing_enabled = false in {hostile}"),
+                "indexing_disabled",
+            ),
+            (
+                "create_file",
+                "timed out waiting for in-process write lock — hint: Another tool call is holding it"
+                    .to_string(),
+                "write_lock_unavailable",
+            ),
+            (
+                "edit_file",
+                format!("write lock held by codescout:{hostile} edit_file — hint: Held for 3s"),
+                "write_lock_unavailable",
+            ),
+            (
+                "create_file",
+                "another codescout instance is writing to this project — hint: retry".to_string(),
+                "write_lock_unavailable",
+            ),
+            (
+                "create_file",
+                format!("ack handle was minted by '{hostile}', not 'edit_file'"),
+                "ack_handle_refused",
+            ),
+            (
+                "index is locked",
+                format!("unknown tool: '{hostile}'"),
+                "unknown_tool",
+            ),
+        ];
+        for (tool, msg, family) in cases {
+            assert_eq!(
+                normalize_err_family(tool, &msg),
+                Some(family),
+                "the fixed prefix must decide, whatever the data after it says: {msg}"
+            );
+        }
     }
 
     /// The other half of BL-4's fix, and the half the old test could not express:
