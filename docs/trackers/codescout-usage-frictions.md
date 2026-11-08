@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 52
+entry_high_water_U: 57
 entry_prefix: U
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-frictions.yaml
 ---
@@ -623,6 +623,8 @@ output, and it is the only thing in the response that cannot be about the wrong 
 **Filed:** `docs/issues/archive/2026-08-17-worktree-reads-resolve-against-the-old-project.md`.
 
 **Status:** mitigated — fix idea 3 (prefix the notice into `stdout`, not just a sibling field) landed in `src/tools/core/types.rs`'s `inject_notice`. Fix idea 2 (guard reads outright) was deliberately rejected: `worktree_read_notice`'s own doc comment already argues against refusing reads mid-orientation, and that reasoning holds. Fix idea 1 (`EnterWorktree` self-activates) remains open and lives in `codescout-companion`, a different repo — not done here.
+
+**Recurrence (Pika scan 2026-11-08, window 2026-10-25..2026-11-08):** the mitigation covers the read half only. `worktree_activate_required` still refused 98 writes in the window (create_file 30, edit_file 29, doc 25, edit_code 14), 57 of them in the last 7 days, last seen 2026-11-08. Lifetime 108 since 2026-10-15. Each refusal is the write half working as designed; the count is the cost of fix idea 1 staying open. Source: `pika_observations` row 14 and `tool_calls.err_family`. Status stays mitigated, not closed, until `EnterWorktree` activates the worktree itself.
 ### U-50 — Nothing surfaces concurrent writers in a shared checkout; a peer's uncommitted refactor appeared in my working tree mid-task
 
 **Valid:** conditional — a concurrent-writer signal ships (session-start or `workspace(action="status")`), or worktree-per-session becomes the default for agent sessions
@@ -732,6 +734,108 @@ anchoring commit
 **Status:** open. No hookify rule proposed: the cause is not known, and a rule would block reads that may be the only way to see worktree files.
 
 **Rests on:** `sweep-transcripts.py` and `sub-read-what.py` run on 2026-11-02 (scripts kept in the session job directory, not in the repo).
+
+### U-53 — IL3 pipe-to-trimmer followed by `&&` / `;` / newline: 310 refusals in 14 days, the largest recoverable-error family
+
+**Valid:** dated 2026-11-08
+
+**When:** Pika audit, window 2026-10-25..2026-11-08, `usage.db` `tool_calls`, `outcome='recoverable_error'`, `err_family='il3_pipe_to_trimmer'`.
+
+**Pattern (Iron Law 3):** a bounded pipe to a log trimmer (`| head -3`, `| tail`) followed by more commands in the same call. The gate refuses it. Related: U-48 (n=1 replication of the same habit).
+
+**Tool called:** `run_command`, e.g. `git add ... && git commit ... && git log --oneline | head -3 && git status` and `ls -d .git a.txt ...; echo ---; git --git-dir=.git log --oneline 2>&1 | ...`.
+
+**Should have called:** one plain pipeline per call, or run the command bare and query the `@cmd_*` buffer with `grep`.
+
+**Whistle delivered:** yes, a refusal (`recoverable_error`), obeyed on the next call. The substrate already blocks; the model still slips.
+
+**Recurrence:** 310 refusals in the window (185 in the last 7 days per `pika_observations` id 11), 718 lifetime. Not a violation count: 3206 piped `run_command` successes in the window are spliced captures and are allowed.
+
+**Severity:** high by volume, low per instance (one wasted round-trip, no wrong output).
+
+**Status:** open. Proposed hint, not a new block: H-15 (also covers U-54).
+
+### U-54 — IL3 shell on source files (`sed -n`, `awk`) through `run_command`: 220 refusals in 14 days
+
+**Valid:** dated 2026-11-08
+
+**When:** Pika audit, window 2026-10-25..2026-11-08, `err_family='il3_shell_on_source'`.
+
+**Pattern (Iron Law 3, "shell on source files is blocked"):** reading or slicing source or scripts with shell tools instead of codescout readers.
+
+**Tool called:** `run_command`, e.g. `sed -n '1,60p' scripts/pre-push-foreign-session-guard.sh` and `awk 'NR>=1590 && NR<=2040 && (/return /||...) {print NR": "$0}' src/server.rs`.
+
+**Should have called:** `read_file(path, start_line, end_line)` for a range, `symbols(name, include_body=true)` for a body, `grep` for a pattern.
+
+**Whistle delivered:** yes, a refusal, obeyed on the next call.
+
+**Recurrence:** 220 in the window (109 in the last 7 days per `pika_observations` id 12); my re-query counted 221 because one row arrived after the snapshot. 480 lifetime.
+
+**Severity:** high by volume, low per instance.
+
+**Status:** open. Grouped with U-53 (pipe-to-trimmer) under H-15 (warn hint).
+
+### U-55 — IL1 ranged `read_file` that overlaps a symbol body: 181 refusals in 14 days, and the raw IL1 predicate is a 98% false positive
+
+**Valid:** dated 2026-11-08
+
+**When:** Pika audit, window 2026-10-25..2026-11-08, `err_family='il1_read_overlaps_symbol'`.
+
+**Pattern (Iron Law 1):** a line-ranged `read_file` over a range that covers a symbol body, where `symbols(name, include_body=true)` is the intended call.
+
+**Tool called:** `read_file`, e.g. `{"path":"src/server.rs","start_line":630,"end_line":790}` and `{"path":"src/tools/semantic/semantic_search.rs","start_line":770,"end_line":850}`.
+
+**Should have called:** `symbols(name=..., include_body=true)`.
+
+**Whistle delivered:** yes, a refusal naming the overlap.
+
+**Recurrence:** 181 in the window (106 in the last 7 days per `pika_observations` id 9), 316 lifetime.
+
+**Measurement note, not violations:** the raw IL1 predicate "source file read" is a 98% false positive. 1845 of 1875 source reads in the window are ranged and allowed. Only the 181 overlap refusals are slips. Any Pika scan must count `err_family`, never source reads.
+
+**Severity:** medium.
+
+**Status:** open. No new hook: the gate exists; the open question is whether the refusal teaches the predicate (see A-24, U-48).
+
+### U-56 — IL2 `edit_file` used for structural Rust/Python edits (`fn `, `def `): 131 refusals in 14 days
+
+**Valid:** dated 2026-11-08
+
+**When:** Pika audit, window 2026-10-25..2026-11-08, `err_family='il2_structural_edit'`.
+
+**Pattern (Iron Law 2):** `edit_file` whose new text contains function definitions, e.g. adding `#[tokio::test] async fn ...` test functions with a doc comment.
+
+**Tool called:** `edit_file` with a `new_string` that opens `/// (l) No location at all contradicts the request ...` then `#[tokio::test] async fn no_locations_at_all_wait...` (verbatim start from `input_json`).
+
+**Should have called:** `edit_code` (LSP-aware insert after a symbol).
+
+**Whistle delivered:** yes, a refusal.
+
+**Recurrence:** 131 in the window (70 in the last 7 days per `pika_observations` id 10), 236 lifetime.
+
+**Severity:** medium. Test-function insertion appears to be the common case; worth checking whether `edit_code insert` after the last test is as cheap as the `edit_file` the model reaches for.
+
+**Status:** open.
+
+### U-57 — `read_file` on librarian-managed trackers (`docs/trackers/*.md`): 97 refusals in 14 days, should be `doc(action=get)`
+
+**Valid:** dated 2026-11-08
+
+**When:** Pika audit, window 2026-10-25..2026-11-08, `err_family='librarian_managed_artifact'`.
+
+**Pattern (Iron Law 4 / librarian guide "Backing Store, Not a Docs Folder"):** reading a tracker file by raw path.
+
+**Tool called:** `read_file`, e.g. `{"path":"docs/trackers/issue-clusters.md"}` and `{"path":"docs/trackers/open-issue-work-queue.md"}`.
+
+**Should have called:** `doc(action="find", semantic=...)` then `doc(action="get", id=..., heading=...)`.
+
+**Whistle delivered:** yes, a refusal pointing at `doc`.
+
+**Recurrence:** 97 in the window (35 in the last 7 days per `pika_observations` id 13), 178 lifetime.
+
+**Severity:** low (one wasted call per slip; no data loss since the guard blocks the read).
+
+**Status:** open. Candidate cause: tracker paths are listed in prose docs the model reads before it learns the catalog route; not verified.
 
 ## Template for new entries
 

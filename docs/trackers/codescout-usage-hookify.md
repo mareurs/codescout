@@ -6,7 +6,7 @@ tags:
 - pika
 - hookify
 - promotion-candidates
-entry_high_water_H: 14
+entry_high_water_H: 16
 entry_prefix: H
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-hookify.yaml
 ---
@@ -845,6 +845,42 @@ because they asked for the narrowing.
 
 **Rests on:** `b93cfb34`, `bdc13887`, `e2b5acaf` — three commits adding prior-art citations that
 should have been present at filing time.
+
+### H-15 — Name the predicate on IL3 refusals: warn on a trimmer pipe followed by a chain, and on shell reads of source files
+
+**Valid:** dated 2026-11-08
+
+**Evidence:** U-53 (`il3_pipe_to_trimmer`: 310 refusals in 2026-10-25..2026-11-08, 718 lifetime) and U-54 (`il3_shell_on_source`: 220, 480 lifetime). `pika_observations` ids 11 and 12. Substrate already refuses both; the model repeats them.
+
+**Predicate (hint, pre-call):** a `run_command` input that (a) contains a bounded trimmer pipe (`| head`, `| tail`) AND a later `&&`, `;` or newline, or (b) starts with `sed -n`, `awk` or `cat` over a path ending in a source extension (`.rs`, `.py`, `.ts`, `.sh`, `.kt`, `.java`).
+
+**Decision:** warn (a hint prepended to the call's own refusal or, when the call is allowed, to its result). No new deny: the substrate already denies both, and a second deny would add a round-trip, not a behavior change.
+
+**Reason text (draft):** "Chained after a trim: `X | head -3 && Y` is refused as one command. Run `X` and `Y` as separate calls, or run bare and `grep` the `@cmd_*` buffer." For (b): "Source ranges: `read_file(path, start_line, end_line)`; bodies: `symbols(name, include_body=true)`."
+
+**Why a hint and not a block:** the refusal text today teaches the call, not the predicate (see A-24, U-48: 47% per-session repeat for `il3_pipe`). The point of this rule is to name the predicate ("pipe followed by a chain") on the refusal itself.
+
+**Not a violation:** 3206 piped `run_command` successes in the window are spliced captures. Any measure must key on `err_family`, not on the presence of a pipe.
+
+**Promote-when:** the refusal count for `il3_pipe_to_trimmer` stays above 100 per 14-day window for two further Pika audits after the hint ships. Rejected if it drops below 50 with no hint.
+
+**Status:** warn (proposal, not shipped).
+
+### H-16 — IL1, IL2 and librarian-guard refusals should carry the tripped predicate and a pre-filled replacement call
+
+**Valid:** dated 2026-11-08
+
+**Evidence:** U-55 (`il1_read_overlaps_symbol`: 181 in 2026-10-25..2026-11-08, 316 lifetime), U-56 (`il2_structural_edit`: 131, 236 lifetime), U-57 (`librarian_managed_artifact`: 97, 178 lifetime). `pika_observations` ids 9, 10, 13. All three are already refused by the substrate.
+
+**Predicate (hint at refusal):** the refusal text for each family states the predicate that tripped it: IL1 "range L-M overlaps symbol `name` (L1-L2)", IL2 "new text defines `fn`/`def`", librarian "path is a managed tracker (id ...)", each with the exact replacement call pre-filled (for the librarian case the `doc(action=get, id=...)` call with the real id).
+
+**Decision:** warn-level text change on an existing deny; no new gate and no deny to remove. Do not deny `read_file` on source by extension (see H-7, rejected).
+
+**Measurement caveat:** the raw IL1 predicate "read of a source file" is a 98% false positive (1845 of 1875 source reads in the window are ranged and allowed). Never build a hook on it.
+
+**Promote-when:** a Pika audit shows the family's per-session repeat rate falls after the text lands. Rejected if the counts do not move over two windows.
+
+**Status:** warn (proposal, not shipped).
 
 ## Template for new entries
 
