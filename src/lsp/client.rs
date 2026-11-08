@@ -862,7 +862,7 @@ impl LspClient {
     /// Anchored at init completion if we have it; otherwise at construction time,
     /// so in-flight init requests (and socket clients, which never run `initialize`)
     /// still get the patient window.
-    fn in_cold_start_window(&self) -> bool {
+    pub(crate) fn in_cold_start_window(&self) -> bool {
         const COLD_START_WINDOW: std::time::Duration = std::time::Duration::from_secs(5 * 60);
         let anchor = self.init_completed_at.get().unwrap_or(&self.started_at);
         anchor.elapsed() < COLD_START_WINDOW

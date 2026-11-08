@@ -23,6 +23,13 @@ pub trait LspClientOps: Send + Sync {
         language_id: &str,
     ) -> anyhow::Result<Vec<lsp_types::Location>>;
 
+    /// Whether the server is still inside its cold-start window, where a first answer may
+    /// cover only part of the project. `false` by default: a client that cannot tell never
+    /// makes a caller wait on a guess. `LspClient` overrides it with its real clock.
+    fn cold_start_window_open(&self) -> bool {
+        false
+    }
+
     async fn goto_definition(
         &self,
         path: &Path,

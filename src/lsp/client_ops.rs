@@ -33,6 +33,9 @@ impl crate::lsp::ops::LspClientOps for LspClient {
     ) -> anyhow::Result<Vec<lsp_types::Location>> {
         LspClient::references(self, path, line, col, language_id).await
     }
+    fn cold_start_window_open(&self) -> bool {
+        self.in_cold_start_window()
+    }
 
     async fn goto_definition(
         &self,
