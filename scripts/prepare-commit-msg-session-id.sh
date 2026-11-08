@@ -103,6 +103,23 @@ if [ "$raw_n" -gt "$parsed_n" ]; then
         "writes it for you." >&2
 fi
 
+# A BARE `Co-Authored-Session-Id:` TOKEN. The guard resolves a token with no `codex:` or
+# `claude-code:` prefix to a CLAUDE hold ref (`publish_hold_ref`), on purpose: legacy trailers are
+# bare Claude ids. A Codex thread id written bare is therefore read as a Claude session, and its
+# hold is looked up in the wrong namespace (867546ab6; docs/issues/2026-11-06-codex-coauthor-trailer-missing-namespace.md).
+# A uuid does not name its harness, so this cannot tell a legacy Claude id from a mistaken Codex
+# one. It NAMES the token and changes nothing, like the Session-Id check above: stderr here is the
+# committing session's own output, and that session can amend the message. Only the final
+# paragraph is read (`--parse`), the one place git reads trailers from.
+bare_co="$(git interpret-trailers --parse "$msg_file" \
+    | sed -n 's/^Co-Authored-Session-Id:[[:space:]]*//p' \
+    | grep -Ev '^(codex:|claude-code:|-$|$)' | paste -sd, -)"
+if [ -n "$bare_co" ]; then
+    echo "prepare-commit-msg-session-id: Co-Authored-Session-Id has a token with no harness prefix" \
+        "($bare_co). The publish guard reads it as a Claude Code session. If a Codex thread wrote the" \
+        "work, write codex:<id> instead (git commit --amend). A bare Claude Code id is correct as it is." >&2
+fi
+
 # `interpret-trailers` rather than an append: this repo's commits already carry a
 # Co-Authored-By trailer, and appending after a blank line would open a SECOND
 # trailer block, which `git log --format='%(trailers:key=...)'` does not read as one.

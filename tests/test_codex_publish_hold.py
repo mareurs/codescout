@@ -207,6 +207,32 @@ def test_codex_trailer_stamps_root_and_preserves_replayed_author(repo):
     assert f"Session-Id: codex:{SID}" not in msg.read_text()
 
 
+def stamp_message(repo, text):
+    checkout, run = repo
+    msg = checkout / "message"
+    msg.write_text(text)
+    result = run("bash", str(ROOT / "scripts/prepare-commit-msg-session-id.sh"), str(msg))
+    return msg.read_text(), result
+
+
+def test_a_bare_co_author_token_is_named_on_stderr_and_left_in_place(repo):
+    # 867546ab6 carried a Codex thread id here with no `codex:` prefix, and the guard reads a
+    # bare token as a Claude session. The hook cannot tell the harness from the uuid, so it
+    # names the token and edits nothing (docs/issues/2026-11-06-codex-coauthor-trailer-missing-namespace.md).
+    text, result = stamp_message(
+        repo, f"work\n\nCo-Authored-Session-Id: {OTHER}\n")
+    assert f"Co-Authored-Session-Id: {OTHER}" in text
+    assert OTHER in result.stderr
+    assert "codex:" in result.stderr
+
+
+@pytest.mark.parametrize("token", [f"codex:{OTHER}", f"claude-code:{OTHER}"])
+def test_a_qualified_co_author_token_is_silent(repo, token):
+    text, result = stamp_message(repo, f"work\n\nCo-Authored-Session-Id: {token}\n")
+    assert f"Co-Authored-Session-Id: {token}" in text
+    assert "Co-Authored-Session-Id" not in result.stderr
+
+
 @pytest.mark.parametrize("pusher", ["codex", "claude-code"])
 @pytest.mark.parametrize("ref", ["refs/heads/main", "refs/tags/v1", "refs/wip/snapshot"])
 def test_codex_held_push_refuses_all_ack_from_either_harness(repo, pusher, ref):
