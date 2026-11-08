@@ -21,8 +21,10 @@ cannot prove" before you cite a result. The user asked for this to be a standing
 - Reproduction project `C:\pybig` (2169 `.py` files: the Python 3.11.9 standard library plus a package `pkg`), made by
   `tools/wine-repro/make-project.sh`. `C:\pyproj` is a small 8-file variant, too small to show the defect.
 - MSYS2 base at `C:\msys64` (a partial `bash.exe`, see "MSYS2 `bash.exe` under Wine" below).
-- NOT installed: Git for Windows, `winetricks`, `wine-mono`, `wine-gecko`. On 2026-11-08 `api.github.com`
-  answered 504 four times and `github.com` timed out, so Git for Windows is blocked: retry later. The user approved
+- NOT installed: Git for Windows, `winetricks`, `wine-mono`, `wine-gecko`. On 2026-11-08 from about 12:54 EET
+  `api.github.com` answered 504 and `github.com` stalled in TLS; this was a GitHub incident and it was over by 13:57 EET
+  (`~/agents/system/GITHUB_TLS_STALL_2026-11-08.md`, SYS-022). Git for Windows was not retried after it: try the
+  PortableGit download again. The user approved
   installing `winetricks` (pacman `extra`, 20260125-2) if it is needed; `sudo -n` printed no error. Not needed so far.
 - Python installer provenance: `python-3.11.9-amd64.exe` from python.org, 26216840 bytes, GPG signature good, key
   `FC624643487034E5` (Steve Dower), fingerprint `7ED1 0B65 31D7 C8E1 BC29  6021 FC62 4643 4870 34E5`. Silent options:
@@ -60,9 +62,11 @@ green on the broken code proves nothing.
 
 ## MSYS2 `bash.exe` under Wine (instead of Git for Windows), 2026-11-08
 
-Git for Windows could not be downloaded: `github.com:443` never answers the TLS ClientHello from this machine (TCP connects;
-`--curves X25519` changes nothing; `api.github.com` the same; `git-scm.com` answers but links to `github.com`). Retry later; a
-VPN or proxy would also do. `repo.msys2.org` answers, so MSYS2 was used.
+Git for Windows could not be downloaded while `github.com:443` stalled in the TLS handshake (TCP connected, no ServerHello;
+`--curves X25519` changed nothing; `api.github.com` the same; `git-scm.com` answered but links to `github.com`). That was a
+GitHub incident ("Increase in timeouts for some unauthenticated users", 10:36Z to 11:56Z), not a fault of this machine, and
+GitHub answered again at 13:57 EET. `repo.msys2.org` answered throughout, so MSYS2 was used meanwhile. Do not assume the
+block is permanent: retry the PortableGit download first, and treat MSYS2 as the fallback.
 
 - Installed: `msys2-base-x86_64-20260927.tar.xz` from `repo.msys2.org/distrib/x86_64/`, extracted to `C:\msys64` (no
   `pacman` run to install it). The signature is good: key `5A62D0CAB6264964`, primary fingerprint
