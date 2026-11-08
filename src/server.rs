@@ -1610,7 +1610,7 @@ impl CodeScoutServer {
     /// Not covered here, on purpose (a later step): a call cancelled by Escape and a call that
     /// hits `tool_timeout_secs`. Both drop the future that holds the recorder, and the cancel
     /// arm parks the task instead of returning, so neither reaches this code.
-    /// docs/issues/2026-11-08-access-gate-refusals-leave-no-usage-row.md
+    /// docs/issues/archive/2026-11-08-access-gate-refusals-leave-no-usage-row.md
     async fn call_tool_inner(
         &self,
         req: CallToolRequestParams,
@@ -2999,7 +2999,7 @@ struct Unrecorded {
 /// be added without saying whether the usage recorder covers it. Before this existed, three
 /// exits (the access gate, the write lock, an unknown tool) returned before the recorder was
 /// built and left no row, and nothing in the code said they should have.
-/// docs/issues/2026-11-08-access-gate-refusals-leave-no-usage-row.md
+/// docs/issues/archive/2026-11-08-access-gate-refusals-leave-no-usage-row.md
 enum Exit {
     /// A row was written, or `refuse_pin` wrote it itself.
     Recorded(CallToolResult),

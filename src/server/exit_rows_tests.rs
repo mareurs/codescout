@@ -11,7 +11,7 @@
 //! second connection and counted again after a pause, because "one row" must also rule out
 //! a second write.
 //!
-//! docs/issues/2026-11-08-access-gate-refusals-leave-no-usage-row.md
+//! docs/issues/archive/2026-11-08-access-gate-refusals-leave-no-usage-row.md
 
 use super::config_reload_tests::call;
 use super::test_support::{make_server, make_server_with_project_toml};

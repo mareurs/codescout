@@ -1,11 +1,13 @@
 ---
-id: '34d094297c76ca4c'
+id: d71ec1b8c7edbe18
 kind: bug
-status: open
+status: fixed
 title: a refusal by the access gate leaves no usage row, so usage.db cannot see it
 tags:
 - cluster/unclassified
+closed: 2026-11-08
 opened: 2026-11-08
+unverified: Not run on a live MCP server built from 6cb2aa615, only through call_tool_inner. A call cancelled by Escape and a call that hits tool_timeout_secs are not covered and leave no row today; that is read from race_against_cancel, not measured, and is not fixed here.
 ---
 
 # BUG: a refusal by the access gate leaves no usage row, so usage.db cannot see it
@@ -52,7 +54,7 @@ See Symptom. Both measurements are above; the second one is the live run.
 
 ## Fix
 
-Done on the working tree, not committed yet.
+Done in 6cb2aa615.
 
 `call_tool_inner` is now a thin wrapper over `dispatch_tool_call`, which returns an `Exit` (`src/server.rs`). Every `return` in the dispatcher picks `Exit::Recorded` (the recorder wrote, or `refuse_pin` wrote the row itself) or `Exit::Unrecorded`; the wrapper writes the row for the second kind through `record_unrecorded`, then returns the answer unchanged. A new early return does not compile until it chooses. A guard with `Drop` was rejected: `Drop` cannot await, so a test could not read the row deterministically.
 
@@ -63,6 +65,11 @@ Seven families were added to `normalize_err_family` and `ERR_FAMILIES` (`src/usa
 Not covered, on purpose: a call cancelled by Escape and a call that hits `tool_timeout_secs`. Both drop the future that holds the recorder, and the cancel arm parks the task instead of returning. That needs its own change, and the claim that they leave no row today is read from `race_against_cancel`, not measured.
 
 A call with no project to hold the row is skipped, as `refuse_pin` already did.
+
+## Fix provenance
+
+- **SHA:** `6cb2aa615` (`experiments`)
+- **patch-id:** `cc8686a70e4a`
 
 ## Tests added
 
