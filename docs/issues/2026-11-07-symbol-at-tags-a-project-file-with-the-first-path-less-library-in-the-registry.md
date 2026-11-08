@@ -9,7 +9,7 @@ tags:
 closed: 2026-11-07
 opened: 2026-11-07
 severity: low
-unverified: 'Defect A (verbatim prefix) is covered only by a Windows-only test, which was not run: the gate and the live check ran on Linux. Defect B (empty path) was seen fixed live on Linux. `symbols` was not run live.'
+unverified: 'Defect A (verbatim prefix) was run only under Wine 11.21, never on Windows: red on the pre-fix line, green with the fix. Wine is a re-implementation of the Windows path layer, so this is evidence of the mechanism, not proof of the Windows behaviour. Defect B (empty path) was seen fixed live on Linux. `symbols` was not run live.'
 ---
 
 # BUG: symbol_at tags a project file's definition with the first path-less library in the registry (lib:pandas, lib:codescout_embed)
@@ -84,7 +84,9 @@ Gate green on Linux on 2026-11-07 (Python, fmt, clippy, LEAN and DEFAULT nextest
 
 `symbols` does not call `tag_external_path` (its callers are `symbol_at.rs` lines 164 and 282). The other callers of `is_library_path` are `src/fs/mod.rs` line 542, inside `tag_external_path`, and `src/tools/read_file.rs` line 1085. The second one gets the defect B fix through the registry.
 
-Still open: run the Windows-only test on a Windows host or in CI.
+Wine run 2026-11-08 (Wine 11.21, `cargo test --lib --no-default-features --target x86_64-pc-windows-gnu`, filter `tag_external_path_returns_project_for_a_uri`, at `b75ccae18`): with the fix both tests pass, 2 of 2. With the pre-fix line `if path.starts_with(project_root)` in a throwaway worktree, both fail with `left: "lib:src"`, `right: "project"`, which is the reported symptom. So under Wine the test discriminates, and it does so for the second test too, which on Linux passes without exercising the defect.
+
+Still open: run the Windows-only test on a real Windows host or in CI. Wine re-implements the Windows path layer; it is not Windows.
 
 ## References
 - `fed1c5731a623c30` (same verbatim-prefix defect in `references`)
