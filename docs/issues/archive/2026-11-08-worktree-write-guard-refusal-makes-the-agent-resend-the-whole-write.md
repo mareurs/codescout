@@ -1,10 +1,11 @@
 ---
-id: '7fdc4845c6315846'
+id: c3c3ebcdb0e293fc
 kind: bug
-status: open
+status: fixed
 title: the worktree write guard refuses a write and discards its input, so the caller resends the whole payload
 tags:
 - cluster/unclassified
+closed: 2026-11-08
 opened: 2026-11-08
 ---
 
@@ -52,16 +53,34 @@ Limit of the measure: it matches by length, so it cannot tell an identical resen
 1. **Hypothesis:** the refusal's hint is unclear, so callers retry badly. **Verdict:** not tested. The resend itself is the cost whichever remedy they pick.
 
 ## Fix
-Not done. Candidate: reuse the replay that the read-only refusal now has (`CodeScoutServer::replay_read_only_ack`, `OutputBuffer::store_read_only_refused_write`, `src/server.rs`, `src/tools/output_buffer.rs`). It replays a kept input with `workspace=<root>`, which is the pin this guard already honours. Open design points: the guard runs inside the tool and does not receive the input, so the mint needs the input passed in or minted at the dispatcher; and the handle should record which root the pin targets.
+
+The dispatcher mints the handle. In `dispatch_tool_call`'s error arm (`src/server.rs`), a refusal whose family is `worktree_activate_required` and whose call carries no pin gets the input kept under an `@ack_*` handle (`OutputBuffer::store_pin_replayable_write`, pinned to the project root) and a trailing block naming `<tool>(ack="@ack_…")`. `ack` replays through the existing `CodeScoutServer::replay_pin_ack` with `workspace=<root>`, so consent is for that one call and the session is not changed.
+
+The marker on the handle was renamed `lift_read_only_root` → `pin_root`, because it now serves two refusals that the same pin answers.
+
+Limit: the mint is keyed on the family, which `normalize_err_family` derives from the guard's text. The guard was not given a typed error. A rewording of the guard that breaks the family also breaks `a_worktree_refusal_keeps_the_write_and_an_ack_replays_it_without_resending`, which drives the real guard.
 
 ## Tests added
-None. This file records the defect only.
+
+`src/server/worktree_ack_tests.rs`, both through `call_tool_inner`:
+- `a_worktree_refusal_keeps_the_write_and_an_ack_replays_it_without_resending`: the refusal names a handle, nothing is written, the replay carries only the handle and writes the kept content verbatim, and an unpinned write afterwards is still refused.
+- `a_pinned_write_is_not_refused_and_offers_no_ack`.
+
+Not run before the fix to see the first one red: it asserts a handle that did not exist, so it could not pass without the mint.
 
 ## Workarounds
 Pass `workspace=<absolute path>` and resend the payload.
 
 ## Resume
-Start from the read-only fix: `docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`, and `src/server/read_only_ack_tests.rs` for the test shape.
+
+Done. The same mechanism is the candidate for `docs/issues/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md`, with a different replay (overwrite, not a pin).
+
+## Fix provenance
+
+- **SHA:** `4a9b0353a` (`experiments`)
+- **patch-id:** `09453a38ab4e`
+
+The commit also carries the rename of the handle marker and one line in the `create_file` sibling issue; the patch-id covers the whole commit.
 
 ## References
 `src/tools/core/guards.rs`; `src/server.rs`; `docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`; `docs/issues/archive/2026-09-02-the-write-guard-refuses-a-correctly-pinned-call.md`; `docs/issues/archive/2026-10-26-the-worktree-write-guard-ignores-the-target-and-refuses-writes-outside-every-project.md`.

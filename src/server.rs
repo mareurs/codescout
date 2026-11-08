@@ -2134,7 +2134,7 @@ impl CodeScoutServer {
                 // Matched on the family because the guard's text is already pinned to it by
                 // `normalize_err_family` and its tests; a pinned call is never refused by this
                 // guard, so `workspace_override` is `None` here by construction.
-                // docs/issues/2026-11-08-worktree-write-guard-refusal-makes-the-agent-resend-the-whole-write.md
+                // docs/issues/archive/2026-11-08-worktree-write-guard-refusal-makes-the-agent-resend-the-whole-write.md
                 if family == Some("worktree_activate_required") && ctx.workspace_override.is_none()
                 {
                     if let Ok(root) = self.agent.require_project_root_for(None).await {
