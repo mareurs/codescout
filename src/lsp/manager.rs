@@ -180,6 +180,18 @@ pub(super) fn mux_failure_is_index_contention(detail: &str) -> bool {
         || detail.contains("another mux instance holds the lock")
 }
 
+/// True when the language server's own startup output says its build has expired.
+///
+/// kotlin-lsp builds carry an expiry date and exit at startup once it has passed, with
+/// `This build of kotlin-server has expired.` on stderr. That is permanent: the same
+/// binary refuses to start on every retry and in direct mode, so the caller surfaces
+/// the cause instead of retrying or falling back. Both phrases are required so that an
+/// unrelated `... has expired` (a token, a certificate) is not read as a dead build.
+#[cfg(unix)]
+pub(super) fn mux_failure_is_expired_build(detail: &str) -> bool {
+    detail.contains("This build of") && detail.contains("has expired")
+}
+
 /// True when a spawned mux's stderr says it lost the mux's own ownership lock to another mux:
 /// the one failure after which the caller should wait for that other mux. A RocksDB index lock
 /// or any other failure is not this (a held index is not a mux that will bind our socket).
@@ -205,11 +217,17 @@ pub(super) fn mux_failure_report(stdout_line: &str, stderr_tail: &[String]) -> (
         "(no diagnostic output — mux exited silently)".to_string()
     };
     let message = format!("mux process failed to start: {summary}");
-    let hint = if mux_failure_is_index_contention(&format!("{stdout_line}\n{detail}")) {
+    let evidence = format!("{stdout_line}\n{detail}");
+    let hint = if mux_failure_is_index_contention(&evidence) {
         "The workspace's LSP index is locked by another running server (RocksDB/mux lock). \
          A stale or concurrent LSP for this workspace holds it. Close other sessions on this \
          workspace, or locate the holder with `fuser <lsp-home>/.../rocks/*/LOCK` and stop it, \
          then retry."
+            .to_string()
+    } else if mux_failure_is_expired_build(&evidence) {
+        "The language server's own build has expired, so it exits at startup and no retry will \
+         start it. Install a current build of the server (the detail above says where to get \
+         it), then retry."
             .to_string()
     } else {
         "Check that another codescout mux isn't already running for this workspace and that \
@@ -1000,6 +1018,15 @@ impl LspManager {
                     // index AND leave a squatter that deadlocks every future mux.
                     // Surface the (now-actionable) error instead of poison-falling-back.
                     if mux_failure_is_index_contention(&e.to_string()) {
+                        self.record_lsp_failure(&key, handshake_ms, "new_session", &e.to_string())
+                            .await;
+                        return Err(e);
+                    }
+                    // An expired server build is permanent: a direct start would run the
+                    // same binary and fail the same way, and the generic refusal below
+                    // tells the caller to retry. `e` already carries the cause and the
+                    // right hint (`mux_failure_report`), so it goes back as it is.
+                    if mux_failure_is_expired_build(&e.to_string()) {
                         self.record_lsp_failure(&key, handshake_ms, "new_session", &e.to_string())
                             .await;
                         return Err(e);
@@ -2797,6 +2824,123 @@ sys.exit(1)
              fall back to direct mode); got: {err}"
         );
     }
+    #[cfg(unix)]
+    #[test]
+    fn mux_failure_is_expired_build_detects_the_servers_own_message() {
+        use super::mux_failure_is_expired_build as is_expired;
+        // The kotlin-lsp wording, as `lsp_events.error` recorded it.
+        assert!(is_expired(
+            "INFO mux::server_stderr: This build of kotlin-server has expired.\n\
+             INFO mux::server_stderr: The IDE will now close."
+        ));
+        // Another "expired" message is not a build that cannot start.
+        assert!(!is_expired("OAuth token has expired"));
+        assert!(!is_expired("This build of kotlin-server is current"));
+        assert!(!is_expired(
+            "Resource temporarily unavailable (os error 11)"
+        ));
+        assert!(!is_expired(""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_expired_build_report_names_the_expiry_and_not_the_lock() {
+        use super::{
+            mux_failure_is_expired_build, mux_failure_is_index_contention, mux_failure_report,
+        };
+        let tail = vec![
+            "INFO mux::server_stderr: Picked up JAVA_TOOL_OPTIONS: -Xmx2g".to_string(),
+            "INFO mux::server_stderr: This build of kotlin-server has expired.".to_string(),
+            "INFO mux::server_stderr: Please download a new build from https://github.com/kotlin/kotlin-lsp"
+                .to_string(),
+        ];
+        let (message, hint) = mux_failure_report("", &tail);
+        assert!(
+            message.contains("has expired"),
+            "the server's own words stay in the message: {message}"
+        );
+        assert!(hint.contains("expired"), "the hint names the cause: {hint}");
+        assert!(
+            !hint.contains("lock-file directory") && !hint.contains("another codescout mux"),
+            "the lock hint is for a held lock, not an expired build: {hint}"
+        );
+        // `get_or_start` re-reads the ERROR STRING, not the (message, hint) pair, so the
+        // classification has to survive `RecoverableError`'s Display.
+        let err = crate::tools::RecoverableError::with_hint(message, hint);
+        assert!(mux_failure_is_expired_build(&err.to_string()), "{err}");
+        assert!(!mux_failure_is_index_contention(&err.to_string()), "{err}");
+    }
+
+    /// A mux whose server build has expired ends the call with the cause and does not fall
+    /// back to a direct start: the same build would refuse to start there too. In a test
+    /// runner the direct fallback is allowed for any other mux failure, so this pins the
+    /// guard itself and not the production refusal that sits after it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn get_or_start_returns_an_expired_build_error_without_a_direct_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws).unwrap();
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws).unwrap();
+        let _ = std::fs::remove_file(&sock_path);
+        let _ = std::fs::remove_file(&lock_path);
+        let spawns = dir.path().join("spawns.txt");
+        let fake_mux = dir.path().join("fake-mux-expired.py");
+        std::fs::write(
+            &fake_mux,
+            r#"import sys
+with open(sys.argv[1], "a") as f:
+    f.write("spawn\n")
+sys.stderr.write("INFO mux::server_stderr: This build of kotlin-server has expired.\n")
+sys.stderr.write("INFO mux::server_stderr: Please download a new build from https://example.invalid/lsp\n")
+sys.exit(1)
+"#,
+        )
+        .unwrap();
+        let mgr = LspManager::new_for_test_with_root(ws).await;
+        *mgr.mux_binary_for_test.lock().unwrap() = Some((
+            PathBuf::from("python3"),
+            vec![
+                fake_mux.to_string_lossy().into_owned(),
+                spawns.to_string_lossy().into_owned(),
+            ],
+        ));
+        let result = tokio::time::timeout(
+            Duration::from_secs(60),
+            mgr.get_or_start("rust", ws, Some(true)),
+        )
+        .await
+        .expect("bounded");
+        let msg = match result {
+            Ok(_) => panic!("an expired build must not connect, and must not fall back to direct"),
+            Err(e) => format!("{e:#}"),
+        };
+        assert!(
+            msg.contains("has expired"),
+            "the cause is in the error: {msg}"
+        );
+        assert!(
+            !msg.contains("will not fall back") && !msg.contains("lock-file directory"),
+            "the generic refusal and the lock hint name a different cause: {msg}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&spawns).unwrap().lines().count(),
+            1,
+            "one mux spawn, no retry"
+        );
+        let conn = crate::usage::db::open_db(ws).unwrap();
+        let rows: Vec<(String, String)> = conn
+            .prepare("SELECT outcome, COALESCE(error, '') FROM lsp_events")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(rows.len(), 1, "exactly one start was recorded: {rows:?}");
+        assert_eq!(rows[0].0, "failed");
+        assert!(rows[0].1.contains("has expired"), "{rows:?}");
+    }
+
     #[cfg(unix)]
     #[test]
     fn posix_write_lock_is_held_false_on_unlocked_file() {
