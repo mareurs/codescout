@@ -48,7 +48,7 @@ Conventions and architecture → memories `conventions` and `architecture`. Befo
 
 ## Prompt Surface Consistency
 
-The prompt surfaces (the `src/prompts/` ones and `.codescout/system-prompt.md`), when to bump `ONBOARDING_VERSION`, the slice cap and the style guide → [`src/prompts/README.md`](src/prompts/README.md).
+The prompt surfaces (the `src/prompts/` ones and `.codescout/system-prompt.md`), when to bump `ONBOARDING_VERSION`, the slice cap and the style guide → [`src/prompts/README.md`](src/prompts/README.md). Agent-facing prompt text states the current situation only, with no history ("was removed", "formerly"); history belongs in bugs, memories and trackers.
 
 ## Companion Plugin: codescout-companion
 
