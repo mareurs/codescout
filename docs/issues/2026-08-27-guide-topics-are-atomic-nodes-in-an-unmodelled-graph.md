@@ -984,3 +984,27 @@ A fresh Opus reviewer read `281ff16b3` read-only and found no Critical issue and
 **Deferred minors (not fixed).** The shared `Section` hint says other sections may arrive on later calls, which is false for the four pull-only parts. If one of the eight served tools later implements `is_destructive`, its first destructive call would be held and shown the buffer sections; nothing pins this. The spec's test that a subagent's ledger behaves the same, and a test for the 450 B preamble limit, were not written. Stale lines older than this change: the `topic_declaring` doc (it says the trait default is None), and comments near `prompts/mod.rs` and the overflow hint test in `server.rs`.
 
 **Live check on the rebuilt server (the operator rebuilt and reconnected).** A `grep` overflow shipped exactly the two core sections, with the hint that sections of this topic were auto-injected. A later `run_command` overflow in the same session shipped only the `.err` section and the two background sections, since the core was spent. A `doc.find` overflow shipped the 643 B preamble. That is correct but does not show whether that binary has the emitter fix: the librarian `doc.find` section was already in this session's ledger, so the fallback was the right answer under either build. Not yet checked live: a first `doc` overflow in a fresh session.
+
+## Follow-up check, due about 2026-11-17 — did buffer misuse rise after the split?
+
+The split went live on 2026-11-09 23:03 UTC (the first `usage.db` row with a `progressive-disclosure#` section key, build `ea44079c4`, which contains `281ff16b3`; the trim build `f34fbc8b3` does not). Script `scripts/measure_buffer_misuse.py`, tests `tests/test_measure_buffer_misuse.py`, commit `978d898e2`.
+
+**Run it:**
+
+```
+python3 scripts/measure_buffer_misuse.py --since 2026-10-11
+python3 scripts/measure_buffer_misuse.py --since 2026-10-11 --agent subagent
+python3 scripts/measure_buffer_misuse.py --since 2026-10-11 --agent parent
+```
+
+**What it counts.** Exposure: `SUM(overflowed)` in `tool_calls`. Events: rows whose `err_family` is `json_path_key_miss`, `json_path_unsupported`, `json_path_wrong_buffer_kind`, `json_path_shape_mismatch` or `buffer_ref_expired`. Rate: events per 1,000 overflowed calls. Cohorts are by build, from `git merge-base --is-ancestor 281ff16b3 <codescout_sha>`: many builds write to this database at once, so a date cutoff would mix them. Dirty builds are kept (68% of all rows are dirty, and a committed commit stays in a dirty binary).
+
+**Baseline on 2026-11-10 (before cohort, 137 builds, since 2026-10-11):** 6,814 overflowed calls, 95 events, **13.9 per 1,000**. By family: `json_path_key_miss` 58, `buffer_ref_expired` 25, `json_path_unsupported` 6, `json_path_wrong_buffer_kind` 5, `json_path_shape_mismatch` 1. After cohort at that moment: 1 build, 9 overflowed calls, so "not enough data".
+
+**Decision rule, fixed before the data exists** (`verdict` in the script):
+
+- Fewer than 1,000 overflowed calls in the after cohort: `not-enough-data`. Wait and re-run. At about 230 overflowed calls a day over all builds, expect this around 2026-11-17, later if most sessions have not reconnected.
+- Rate at least 2x the before rate, exact p below 0.05, and at least 10 events: `alarm`. Read the families first. The `json_path_*` families point at the grammar details that moved into `Buffer internals`; `buffer_ref_expired` points at the handle-lifetime text. Consider serving `Buffer internals` to the tools involved.
+- Otherwise `no-change-detected`. This is not "no effect": at the baseline rate a week holds about 20 events, enough to see roughly a doubling and not a 30% change. Re-run after 30 days.
+
+**Limits.** Not randomised: other changes ship in the same builds. The `.err` suffix and the background-job recipe have no error family, so their loss is not measured here. The metric counts errors, not wasted calls, so an agent that re-runs a tool instead of querying its buffer is invisible. A flat result does not clear the `run_command` lever (making `.err` and the background sections pull-only), which this check cannot see.
