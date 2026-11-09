@@ -934,10 +934,21 @@ Nothing was built. Source: `scratchpad/census-30d.jsonl` (own-block whole delive
 
 **Redundancy seen while reading (no mechanism needed).**
 
-- The Anti-patterns bullet about piping an unbounded `run_command` is about 1.7 KB and restates the IL-3 text that `get_guide("iron-laws-detail")` already owns.
+- The Anti-patterns bullet about piping an unbounded `run_command` was 1,484 B and restated the IL-3 text that `get_guide("iron-laws-detail")` already owns (its capture keys, the `timeout_secs` behaviour and the refused forms).
 - Path-relative annotation (2,068 B) is the detailed form of a rule that `workspace-state` cites as canonical (`workspace-state.md` points at `progressive-disclosure` § Path-relative annotation). A split must keep that citation resolvable: the API cannot serve a section by name (decision 2026-11-01), so it stays reachable only as part of the whole topic.
-- Trimming these two alone would cut roughly 2.5 to 3 MB over the census with no new delivery mechanism, against 7.4 MB for the split.
+- Trimming Path-relative annotation is NOT possible as first written: three places cite it as the canonical statement (`workspace-state.md:87`, a comment at `src/server.rs:317`, `docs/conventions/cross-machine-catalog-resume.md:462`). That figure was wrong. Only the pipe bullet was a duplicate.
 
 **Not established.** Whether any section's absence changes behaviour: no control group exists for this topic. Whether the first overflow in a session is also the one where the guide would matter. Whether making this topic declare sections interacts badly with the `overflowing` gate and `every_observed_shape_of_a_declaring_topic_has_a_section` (read, not run). The 7.4 MB figure rests on the two assumed section sizes.
 
 **Options.** (1) Trim the two redundant passages, no mechanism change. (2) Build the split by overflowing tool as a pilot, then re-run the census to confirm the delivery pattern (it shows what is delivered, not whether behaviour changes). (3) Both, trim first. (4) Stop here.
+
+## Pilot, step 1 done 2026-11-09 — the pipe-capture bullet is a pointer (831 B shorter per delivery)
+
+Operator chose option 3 (trim first, then the split by overflowing tool). Commit `f34fbc8b3`.
+
+- The Anti-patterns bullet went from 1,484 B to 653 B. It keeps what a reader of an overflow needs: the `unfiltered_output` handle, `grep FAILED @cmd_id`, that a pipe the capture cannot serve is refused, and that every pipe under `run_in_background` is refused. The terminal filters, the capture's limits, the refused forms and the response keys are left to `get_guide("iron-laws-detail")`.
+- The guide went from 14,115 B to 13,284 B. Over the census's 1,250 deliveries the saving is about 1.04 MB, 7.6% of this topic's 13.7 MB. This is the real size of the trim; the earlier estimate of 2.5 to 3 MB was wrong (see above).
+- New test `progressive_disclosure_guide_points_at_iron_laws_detail_for_the_pipe_capture_mechanics`: `capture_incomplete`, `filter_not_run` and `unfiltered_truncated` must stay in `iron-laws-detail` and must not reappear in `progressive-disclosure`, and the pointer must be present. It failed first on `capture_incomplete` being restated. The two existing pins (`..._states_the_foreground_pipe_capture`, `..._states_the_background_job_recipe`) still pass.
+- Gate green in one run on the committed tree: Python 1,816, lean 6,366, default 9,266, clippy and fmt clean.
+
+**Next:** step 2, the split by overflowing tool. It needs a design first: how a topic that declares sections interacts with the `overflowing` gate in `emit_guide_sections`, and a `serves:` shape for "any overflow".
