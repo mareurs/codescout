@@ -2010,14 +2010,20 @@ mod tests {
         }
     }
     #[test]
-    fn subagent_opening_body_is_short_and_keeps_the_used_steps() {
+    fn subagent_opening_body_is_a_pointer_and_keeps_always_verify() {
+        // The `SubagentStart` hook already hands every stamped subagent the Phase 0/1/2
+        // protocol (docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-an-unmodelled-
+        // graph.md § Correction 2026-11-09: 1,296 of 1,296 census subagents). This body
+        // adds only the pointer to the full guide and the verification line that the
+        // opener has always carried (`session_opens_with_bootstrap_from_a_non_workspace_tool`).
         let b = SUBAGENT_OPENING_BODY;
-        assert!(b.len() <= 1024, "short body is {} B", b.len());
+        assert!(b.len() <= 400, "pointer body is {} B", b.len());
         assert!(b.contains("ALWAYS VERIFY"));
-        assert!(b.contains(
-            r#"filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}}"#
-        ));
         assert!(b.contains(r#"get_guide("project-activation-bootstrap")"#));
+        assert!(
+            b.contains("EXPLORATION PROTOCOL"),
+            "the pointer names the hook's block by its title"
+        );
     }
 
     /// Iron Law 3 was retired for foreground pipes ending in a terminal filter; the
