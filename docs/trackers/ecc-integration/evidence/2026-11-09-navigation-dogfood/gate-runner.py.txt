@@ -1,0 +1,13 @@
+import pathlib,subprocess,os,json,hashlib,datetime
+w=pathlib.Path("/home/marius/work/claude/codescout/.worktrees/ecc-navigation-gate")
+out=w.parents[1]/"docs/trackers/ecc-integration/evidence/2026-11-09-navigation-dogfood"
+source=w/"src/tools/symbol/call_graph/mod.rs"
+env=dict(os.environ,TMPDIR="/home/marius/.cache/codescout-ecc-tmp",CODESCOUT_GATE_TMPFS_BASE="off")
+before=hashlib.sha256(source.read_bytes()).hexdigest()
+started=datetime.datetime.now(datetime.timezone.utc).isoformat()
+with (out/"gate.log").open("wb") as f:
+    r=subprocess.run(["./scripts/gate.sh","--check"],cwd=w,env=env,stdout=f,stderr=subprocess.STDOUT)
+record={"workspace":str(w),"head":subprocess.check_output(["git","rev-parse","HEAD"],cwd=w,text=True).strip(),"source_before":before,"source_after":hashlib.sha256(source.read_bytes()).hexdigest(),"exit_code":r.returncode,"command":"./scripts/gate.sh --check","scratch":env["TMPDIR"],"CODESCOUT_GATE_TMPFS_BASE":"off","target":env.get("CARGO_TARGET_DIR"),"started":started,"finished":datetime.datetime.now(datetime.timezone.utc).isoformat()}
+(out/"gate-result.json").write_text(json.dumps(record,indent=2)+"\n")
+print(json.dumps(record),flush=True)
+raise SystemExit(r.returncode)

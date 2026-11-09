@@ -1,0 +1,35 @@
+{
+  "source_commit": "4a0ba58564a39e4bb5688f1f2421c0e0172234b3",
+  "integration_commit": "3fe613bddca6ddd344164f6ece3278be56186c1a",
+  "integration_parent": "9b3e9fc6f2c0098aa12598ddf76094364d009cef",
+  "source_patch_id": "4b7cad6bf7b5eda6f600304f4969fb13929b5eeb",
+  "integration_patch_id": "4b7cad6bf7b5eda6f600304f4969fb13929b5eeb",
+  "integration_tree": "d26c3dba68584ca4a99436520ba62d7d84509413",
+  "matches_verified_tree": false,
+  "foreign_staged_before": [
+    ".codescout/memories/bug-triage-2026-10-27.md",
+    "docs/issues/2026-11-04-shared-checkout-gate-red-during-hint-authority-audit.md",
+    "docs/research/2026-11-04-claude-instructions-comparison.md",
+    "docs/research/data/2026-11-04-hint-authority-gate.log.gz",
+    "docs/research/data/2026-11-04-hint-authority-inputs.tar.gz",
+    "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md"
+  ],
+  "foreign_staged_after": [
+    ".codescout/memories/bug-triage-2026-10-27.md",
+    "docs/issues/2026-11-04-shared-checkout-gate-red-during-hint-authority-audit.md",
+    "docs/research/2026-11-04-claude-instructions-comparison.md",
+    "docs/research/data/2026-11-04-hint-authority-gate.log.gz",
+    "docs/research/data/2026-11-04-hint-authority-inputs.tar.gz",
+    "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md"
+  ],
+  "foreign_staged_preserved": true,
+  "source_sha256": "d5b158f5e38d67119e0abb4ffa077e65b083f9dc8d2c439b965c04af713693c8",
+  "tree_difference_from_verified_state": [
+    "docs/research/2026-11-09-parallel-tool-calls-transcript-mining.md",
+    "docs/research/data/2026-11-09-parallel-tool-calls/effect_check.py",
+    "docs/research/data/2026-11-09-parallel-tool-calls/run_command_ro.py"
+  ],
+  "code_and_build_surfaces_match_verified_state": true,
+  "whole_integrated_tree_gate_claim": false,
+  "scope_note": "Integration includes intervening peer research-only commits. Full gate passed the recorded frozen tree; source/build/test surfaces match exactly, but the global integrated tree is not represented as the same tree or separately gated."
+}

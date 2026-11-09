@@ -1,0 +1,6 @@
+{
+  "expected_integrated_tree": "b935dc5dc049e3c259bbbcfe4f9872bce617f1ce",
+  "base_commit": "09c35b67847db6ee795b5a42699b7f7de55d7653",
+  "source_sha256": "d5b158f5e38d67119e0abb4ffa077e65b083f9dc8d2c439b965c04af713693c8",
+  "method": "Separate temporary Git index over frozen verification HEAD plus its exact reviewed source; shared index untouched."
+}

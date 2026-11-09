@@ -1,0 +1,130 @@
+{
+  "initial_source_hash": "fc6db29690a4046265088239404bc641222148f122abc479d3220e8e22526c75",
+  "results": [
+    {
+      "name": "m1-suppress-failure-record",
+      "find": "self.analysis_failures\n                    .lock()\n                    .unwrap()\n                    .insert(format!(\"`{symbol}` direction={direction_label}: {e}\"));",
+      "replace": "let _ = direction_label;",
+      "command": [
+        "scripts/mutation-probe.sh",
+        "--strict",
+        "--file",
+        "src/tools/symbol/call_graph/mod.rs",
+        "--find",
+        "self.analysis_failures\n                    .lock()\n                    .unwrap()\n                    .insert(format!(\"`{symbol}` direction={direction_label}: {e}\"));",
+        "--replace",
+        "let _ = direction_label;",
+        "--",
+        "cargo",
+        "test",
+        "--lib",
+        "tools::symbol::call_graph::tests"
+      ],
+      "returncode": 101,
+      "elapsed_seconds": 114.92,
+      "source_hash": "fc6db29690a4046265088239404bc641222148f122abc479d3220e8e22526c75",
+      "source_unchanged": true,
+      "log": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-navigation-dogfood/review/m1-suppress-failure-record.log"
+    },
+    {
+      "name": "m2-remove-outer-attachment",
+      "find": "        attach_analysis_failures(&mut out, &analysis_failures);",
+      "replace": "",
+      "command": [
+        "scripts/mutation-probe.sh",
+        "--strict",
+        "--file",
+        "src/tools/symbol/call_graph/mod.rs",
+        "--find",
+        "        attach_analysis_failures(&mut out, &analysis_failures);",
+        "--replace",
+        "",
+        "--",
+        "cargo",
+        "test",
+        "--lib",
+        "tools::symbol::call_graph::tests"
+      ],
+      "returncode": 101,
+      "elapsed_seconds": 43.58,
+      "source_hash": "fc6db29690a4046265088239404bc641222148f122abc479d3220e8e22526c75",
+      "source_unchanged": true,
+      "log": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-navigation-dogfood/review/m2-remove-outer-attachment.log"
+    },
+    {
+      "name": "m3-discard-existing-warning",
+      "find": "Some(existing) => format!(\"{existing}\\n{warning}\"),",
+      "replace": "Some(_existing) => warning,",
+      "command": [
+        "scripts/mutation-probe.sh",
+        "--strict",
+        "--file",
+        "src/tools/symbol/call_graph/mod.rs",
+        "--find",
+        "Some(existing) => format!(\"{existing}\\n{warning}\"),",
+        "--replace",
+        "Some(_existing) => warning,",
+        "--",
+        "cargo",
+        "test",
+        "--lib",
+        "tools::symbol::call_graph::tests"
+      ],
+      "returncode": 0,
+      "elapsed_seconds": 46.18,
+      "source_hash": "fc6db29690a4046265088239404bc641222148f122abc479d3220e8e22526c75",
+      "source_unchanged": true,
+      "log": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-navigation-dogfood/review/m3-discard-existing-warning.log"
+    },
+    {
+      "name": "m4-warn-on-trustworthy-leaf",
+      "find": "    if failures.is_empty() {\n        return;\n    }\n    const SHOWN",
+      "replace": "    const SHOWN",
+      "command": [
+        "scripts/mutation-probe.sh",
+        "--strict",
+        "--file",
+        "src/tools/symbol/call_graph/mod.rs",
+        "--find",
+        "    if failures.is_empty() {\n        return;\n    }\n    const SHOWN",
+        "--replace",
+        "    const SHOWN",
+        "--",
+        "cargo",
+        "test",
+        "--lib",
+        "tools::symbol::call_graph::tests"
+      ],
+      "returncode": 101,
+      "elapsed_seconds": 40.22,
+      "source_hash": "fc6db29690a4046265088239404bc641222148f122abc479d3220e8e22526c75",
+      "source_unchanged": true,
+      "log": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-navigation-dogfood/review/m4-warn-on-trustworthy-leaf.log"
+    },
+    {
+      "name": "m5-remove-detail-bound",
+      "find": "    const SHOWN: usize = 5;",
+      "replace": "    const SHOWN: usize = usize::MAX;",
+      "command": [
+        "scripts/mutation-probe.sh",
+        "--strict",
+        "--file",
+        "src/tools/symbol/call_graph/mod.rs",
+        "--find",
+        "    const SHOWN: usize = 5;",
+        "--replace",
+        "    const SHOWN: usize = usize::MAX;",
+        "--",
+        "cargo",
+        "test",
+        "--lib",
+        "tools::symbol::call_graph::tests"
+      ],
+      "returncode": 2,
+      "elapsed_seconds": 0.17,
+      "source_hash": "fc6db29690a4046265088239404bc641222148f122abc479d3220e8e22526c75",
+      "source_unchanged": true,
+      "log": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-navigation-dogfood/review/m5-remove-detail-bound.log"
+    }
+  ]
+}

@@ -12,6 +12,9 @@ topic: ecc-integration
 
 # ECC evaluation reports
 
+- [Navigation dogfood — 2026-11-09](2026-11-09-navigation-dogfood.md): recoverable-hop disclosure correction, real MCP controls, applied mutations and passing full gate; locally integrated at3fe613bdd.
+- [Navigation observed-behavior draft](2026-11-09-navigation-observed.md): bounded enforcement/contract/evidence distinctions.
+
 - [doc(create) dogfood — 2026-11-09](2026-11-09-doc-create-dogfood.md): deterministic reproduction, verified correction in a worktree, applied mutations, real MCP, full gate and future replay capture.
 
 - [Real-code doc(create) comparison — 2026-11-09](2026-11-09-doc-create-comparison.md): explicit adapter use versus non-use, adjudication, native usage and limits.

@@ -1,0 +1,15 @@
+import pathlib, subprocess, os, json, hashlib
+w=pathlib.Path("/home/marius/work/claude/codescout/.worktrees/ecc-navigation-truth")
+e=w.parents[1]/"docs/trackers/ecc-integration/evidence/2026-11-09-navigation-dogfood"
+env=dict(os.environ,TMPDIR="/home/marius/.cache/codescout-ecc-tmp")
+with (e/"candidate-build.log").open("wb") as f:
+    r=subprocess.run(["cargo","build","--bin","codescout"],cwd=w,env=env,stdout=f,stderr=subprocess.STDOUT)
+(e/"candidate-build-result.json").write_text(json.dumps({"exit_code":r.returncode,"target":env.get("CARGO_TARGET_DIR")},indent=2)+"\n")
+if r.returncode: raise SystemExit(r.returncode)
+binary=pathlib.Path(env["CARGO_TARGET_DIR"])/"debug/codescout"
+(e/"candidate-binary.json").write_text(json.dumps({"binary":str(binary),"sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),"source_sha256":hashlib.sha256((w/"src/tools/symbol/call_graph/mod.rs").read_bytes()).hexdigest()},indent=2)+"\n")
+with (e/"constant-probe.log").open("wb") as f:
+    r=subprocess.run(["python3",str(e/"probe_constant.py"),"--binary",str(binary),"--output",str(e/"constant-mcp.json")],cwd=w,env=env,stdout=f,stderr=subprocess.STDOUT)
+(e/"constant-probe-result.json").write_text(json.dumps({"exit_code":r.returncode},indent=2)+"\n")
+print(json.dumps({"build":0,"mcp":r.returncode}))
+raise SystemExit(r.returncode)

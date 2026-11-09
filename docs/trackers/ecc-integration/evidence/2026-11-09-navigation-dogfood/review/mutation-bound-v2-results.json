@@ -1,0 +1,24 @@
+{
+  "name": "m6-remove-detail-bound-unique",
+  "find": "    let details = failures\n        .iter()\n        .take(SHOWN)",
+  "replace": "    let details = failures\n        .iter()",
+  "command": [
+    "scripts/mutation-probe.sh",
+    "--strict",
+    "--file",
+    "src/tools/symbol/call_graph/mod.rs",
+    "--find",
+    "    let details = failures\n        .iter()\n        .take(SHOWN)",
+    "--replace",
+    "    let details = failures\n        .iter()",
+    "--",
+    "cargo",
+    "test",
+    "--lib",
+    "tools::symbol::call_graph::tests"
+  ],
+  "returncode": 0,
+  "initial_source_hash": "fc6db29690a4046265088239404bc641222148f122abc479d3220e8e22526c75",
+  "final_source_hash": "fc6db29690a4046265088239404bc641222148f122abc479d3220e8e22526c75",
+  "source_unchanged": true
+}

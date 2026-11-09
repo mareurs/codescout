@@ -1,0 +1,3 @@
+mutation-probe: --find must occur exactly once in src/tools/symbol/call_graph/mod.rs; found 2.
+  A pattern matching 0 makes a survival meaningless; one matching >1 mutates
+  more than you named. Widen the literal until it is unique.

@@ -1,0 +1,64 @@
+mutation-probe: carried the working tree into the isolated worktree —
+  1 tracked change(s), 2 untracked file(s).
+mutation-probe: ARMED  mode=isolated  file=src/tools/symbol/call_graph/mod.rs  tree=/home/marius/work/claude/codescout/.worktrees/ecc-navigation-truth.worktrees/mutation-slot-0
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout/.worktrees/ecc-navigation-truth.worktrees/mutation-slot-0)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 50.20s
+     Running unittests src/lib.rs (/home/marius/.cache/codescout-gate/slot-2/debug/deps/codescout-1bd12142968308e9)
+
+running 36 tests
+test tools::symbol::call_graph::tests::a_cache_error_names_the_store_and_the_step ... ok
+test tools::symbol::call_graph::tests::call_graph_declares_output_form_text ... ok
+test tools::symbol::call_graph::tests::analysis_warnings_preserve_scan_scope_and_bound_details_without_losing_total ... FAILED
+test tools::symbol::call_graph::tests::format_compact_carries_the_completeness_warning ... ok
+test tools::symbol::call_graph::tests::format_compact_renders_count_and_files ... ok
+test tools::symbol::call_graph::tests::format_compact_renders_full_mode_edges ... ok
+test tools::symbol::call_graph::tests::call_graph_invalid_direction_returns_recoverable_error ... ok
+test tools::symbol::call_graph::tests::format_output_auto_promotes_small_results ... ok
+test tools::symbol::call_graph::tests::format_output_compact_summary_for_large_results ... ok
+test tools::symbol::call_graph::tests::opening_the_cache_in_a_broken_project_names_the_store ... ok
+test tools::symbol::call_graph::tests::a_walk_that_admitted_no_candidate_at_all_is_incomplete ... ok
+test tools::symbol::call_graph::tests::a_rust_walk_does_not_examine_typescript_files ... ok
+test tools::symbol::call_graph::tests::lookup_pos_falls_back_to_ts_workspace_when_def_in_sibling_file ... ok
+test tools::symbol::call_graph::tests::lookup_pos_falls_back_to_ts_same_file_when_ws_symbols_empty ... ok
+test tools::symbol::call_graph::tests::a_seed_language_with_no_definition_parser_is_refused_before_walking ... ok
+test tools::symbol::call_graph::tests::an_unenterable_directory_makes_a_miss_incomplete ... ok
+test tools::symbol::call_graph::tests::an_unreadable_candidate_file_makes_a_miss_incomplete ... ok
+test tools::symbol::call_graph::tests::a_definition_found_within_the_cap_is_not_flagged ... ok
+test tools::symbol::call_graph::tests::a_workspace_walk_stopped_by_its_cap_is_reported_not_passed_off_as_no_such_symbol ... ok
+test tools::symbol::call_graph::tests::a_workspace_walk_that_ends_exactly_on_its_cap_is_a_real_miss ... ok
+test tools::symbol::call_graph::tests::only_a_symlink_that_leads_outside_the_project_is_a_gap_for_the_walk ... ok
+test tools::symbol::call_graph::tests::a_react_seed_walk_examines_react_files ... ok
+test tools::symbol::call_graph::tests::the_walk_prunes_below_the_project_root_not_above_it ... ok
+test tools::symbol::call_graph::tests::a_symlinked_candidate_outside_the_project_is_counted_not_followed ... ok
+test tools::symbol::call_graph::tests::the_cap_stops_the_walk_instead_of_only_reporting_it ... ok
+test tools::symbol::call_graph::tests::the_walk_does_not_spend_its_budget_on_vendored_directories ... ok
+test tools::symbol::call_graph::tests::one_hop_parses_each_node_with_its_own_files_grammar_and_caches_the_full_set ... ok
+test tools::symbol::call_graph::tests::a_compiled_twin_of_a_typescript_file_is_not_a_candidate ... ok
+test tools::symbol::call_graph::tests::a_seed_language_with_a_grammar_but_no_extractor_is_refused_too ... ok
+test tools::symbol::call_graph::tests::the_typescript_family_is_one_population_for_the_walk ... ok
+test tools::symbol::call_graph::tests::a_definition_living_in_a_build_directory_is_found ... ok
+test tools::symbol::call_graph::tests::call_graph_stays_bare_when_the_walk_for_an_unplaced_caller_finished ... ok
+test tools::symbol::call_graph::tests::call_graph_names_the_files_it_could_not_read_when_it_cannot_place_a_caller ... ok
+test tools::symbol::call_graph::tests::recoverable_hop_failure_is_disclosed_without_losing_edges_or_warning_on_a_leaf ... ok
+test tools::symbol::call_graph::tests::call_graph_reports_a_caller_it_could_not_place_because_the_walk_hit_its_cap ... ok
+test tools::symbol::call_graph::tests::call_graph_warning_survives_the_overflow_summary_of_a_large_result ... ok
+
+failures:
+
+---- tools::symbol::call_graph::tests::analysis_warnings_preserve_scan_scope_and_bound_details_without_losing_total stdout ----
+
+thread 'tools::symbol::call_graph::tests::analysis_warnings_preserve_scan_scope_and_bound_details_without_losing_total' (1089735) panicked at src/tools/symbol/call_graph/mod.rs:1332:13:
+the language server could not place 1 symbol(s) — `unplaced` — and the fallback source walk stopped after 3 same-language files with more left unexamined, so their edges were not followed and this graph may be incomplete. Corroborate with `references` or grep before treating a missing caller/callee as absent.
+call_graph could not analyze 7 hop(s) — hop_0 direction=callees: unavailable_0; hop_1 direction=callees: unavailable_1; hop_2 direction=callees: unavailable_2; hop_3 direction=callees: unavailable_3; hop_4 direction=callees: unavailable_4; hop_5 direction=callees: unavailable_5; hop_6 direction=callees: unavailable_6 (+2 more) — so this graph may be incomplete; missing edges in those scopes do not establish absence.
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tools::symbol::call_graph::tests::analysis_warnings_preserve_scan_scope_and_bound_details_without_losing_total
+
+test result: FAILED. 35 passed; 1 failed; 0 ignored; 0 measured; 8594 filtered out; finished in 1.62s
+
+error: test failed, to rerun pass `--lib`
+mutation-probe: KILLED (rc=101, 36 test(s) ran) — a test caught it.
+  Applied-ness needs no further audit: a red cannot be produced by a mutation that
+  never applied, and the count above rules out a compile failure wearing this verdict.

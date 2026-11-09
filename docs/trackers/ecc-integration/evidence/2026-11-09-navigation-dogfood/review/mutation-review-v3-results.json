@@ -1,0 +1,52 @@
+{
+  "initial_source_hash": "d5b158f5e38d67119e0abb4ffa077e65b083f9dc8d2c439b965c04af713693c8",
+  "baseline_returncode": 0,
+  "results": [
+    {
+      "name": "m3-discard-existing-warning-v3",
+      "command": [
+        "scripts/mutation-probe.sh",
+        "--strict",
+        "--file",
+        "src/tools/symbol/call_graph/mod.rs",
+        "--find",
+        "Some(existing) => format!(\"{existing}\\n{warning}\"),",
+        "--replace",
+        "Some(_existing) => warning,",
+        "--",
+        "cargo",
+        "test",
+        "--lib",
+        "tools::symbol::call_graph::tests"
+      ],
+      "returncode": 101,
+      "elapsed_seconds": 124.37,
+      "source_hash": "d5b158f5e38d67119e0abb4ffa077e65b083f9dc8d2c439b965c04af713693c8",
+      "source_unchanged": true,
+      "log": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-navigation-dogfood/review/m3-discard-existing-warning-v3.log"
+    },
+    {
+      "name": "m6-remove-detail-bound-unique-v3",
+      "command": [
+        "scripts/mutation-probe.sh",
+        "--strict",
+        "--file",
+        "src/tools/symbol/call_graph/mod.rs",
+        "--find",
+        "    let details = failures\n        .iter()\n        .take(SHOWN)",
+        "--replace",
+        "    let details = failures\n        .iter()",
+        "--",
+        "cargo",
+        "test",
+        "--lib",
+        "tools::symbol::call_graph::tests"
+      ],
+      "returncode": 101,
+      "elapsed_seconds": 52.8,
+      "source_hash": "d5b158f5e38d67119e0abb4ffa077e65b083f9dc8d2c439b965c04af713693c8",
+      "source_unchanged": true,
+      "log": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-navigation-dogfood/review/m6-remove-detail-bound-unique-v3.log"
+    }
+  ]
+}

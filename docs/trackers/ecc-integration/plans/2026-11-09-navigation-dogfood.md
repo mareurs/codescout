@@ -1,7 +1,7 @@
 ---
 id: '0ea82264703c00fe'
 kind: plan
-status: active
+status: done
 title: 'ECC dogfood: navigation completeness and recoverable failures'
 tags:
 - ecc
@@ -36,11 +36,11 @@ Start with real positive/empty/unsupported controls and an isolated catalog. If 
 
 - [x] Freeze baseline commit/tree and inspect enforcement/callers/contract/known bugs.
 - [x] Finish post-integration verification before source edits: exact frozen baseline gate passed, FMT/CLIPPY/LEAN/DEFAULT/PYTHON_LIGHT all 0, with external scratch and `CODESCOUT_GATE_TMPFS_BASE=off`. Earlier cut-off and quota-failed runs are retained in the first report.
-- [ ] Reproduce the navigation suspicion through real MCP or a deterministic end-to-end tool test. Preserve no-warning leaf and actual edges as controls.
-- [ ] Record/claim a distinct bug after checking related archived scan bugs; preserve the exact starting code and task inputs for future replay. No replay runs now.
-- [ ] Observe a failing regression before production edits; implement the smallest scoped correction using edit_code.
-- [ ] Execute focused tests, independent review with actually applied diagnostic mutations and exact restoration, real MCP checks and the required full gate.
-- [ ] Record result/limits and index artifacts. Do not conflate this new cycle's baseline with the first cycle's fe965888 commit. Integration of a second correction is a later step only after verification.
+- [x] Reproduce the navigation suspicion through real MCP or a deterministic end-to-end tool test. Preserve no-warning leaf and actual edges as controls.
+- [x] Record/claim a distinct bug after checking related archived scan bugs; preserve the exact starting code and task inputs for future replay. No replay runs now.
+- [x] Observe a failing regression before production edits; implement the smallest scoped correction using edit_code.
+- [x] Execute focused tests, independent review with actually applied diagnostic mutations and exact restoration, real MCP checks and the required full gate.
+- [x] Record result/limits and index artifacts. Do not conflate this new cycle's baseline with the first cycle's fe965888 commit. Integration of a second correction is a later step only after verification.
 
 ## Review focus
 
@@ -49,3 +49,14 @@ The warning must reach compact/buffered consumer output, retain any existing sca
 ## Execution ledger
 
 - First correction source commit `561c945d72a3997c972d5ef055e2c9d38e922e67`; integrated on experiments as this baseline `b3d02d482eaeb3cabf329f4f37a2d3649a6057b7`, patch-id `3e8ba9084781d79228efe0f163c04ce19ffdd203`. Foreign staged path set preserved; no push or server deployment.
+
+
+- Frozen baseline gate passed before navigation source edits. Initial private MCP leaf/positive class controls passed; the class zero alone did not reproduce the suppression branch.
+- Consumer-boundary RED @bg50: actual parser/cache with external hierarchy unavailable, 1 test failed specifically at missing completeness_warning after verifying quiet leaf and preserved incoming edge. Minimal correction records recoverable analysis failures separately from scan gaps, merges their true symbol/direction/reason into the existing warning field, and preserves partial results.
+- First corrected focused run @bg52: 34 passed / 1 failed only because the new test omitted the established compact renderer's `warning: ` prefix. Corrected that test expectation after reading actual output; product behavior unchanged. GREEN @bg54: 35 passed / 0 failed. Independent review with applied mutations is now running; MCP/gate pending. No no-ECC replay.
+
+
+- User follow-up, after finishing this correction: audit active prompt surfaces for accurate, visible call_graph promotion and current behavior; remove superseded historical guidance from active instructions while preserving historical evidence. Trace effective delivery, not just source-file presence. This is the next task after verification, not an already completed audit.
+
+
+- COMPLETE: focused36/0; real MCP baseline→candidate reproduced and corrected TOKEN failure disclosure with true-negative and positive controls. Independent first pass5 distinct mutations3killed2survived; after observed survivors and the added helper test, both exact survivors killed35/1 each. Source restoration verified. Full gate exit0, lean6309/default9198/Python1764 plus recorded skips/subtests. Source commit4a0ba58564a39e4bb5688f1f2421c0e0172234b3; experiments integration3fe613bddca6ddd344164f6ece3278be56186c1a; stable patch-id4b7cad6bf7b5eda6f600304f4969fb13929b5eeb. Integrated code/build/test surfaces equal frozen verified state; three peer research files differ globally. Whole-tree equality assertion failed truthfully after successful commits, recorded without mislabelling integration failure. No push/rollout/replay. [Final report](../reports/2026-11-09-navigation-dogfood.md).

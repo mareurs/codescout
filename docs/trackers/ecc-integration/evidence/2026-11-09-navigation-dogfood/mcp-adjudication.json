@@ -1,0 +1,11 @@
+{
+  "method": "Exact first text block of each named raw MCP response; paired same fixture on hash-verified baseline executable and candidate. This is a tool regression probe, not a no-ECC agent replay.",
+  "checks": {
+    "transport_both_completed": true,
+    "baseline_TOKEN_empty_no_warning": true,
+    "candidate_TOKEN_failed_scope_warning": true,
+    "both_leaf_empty_quiet": true,
+    "both_positive_incoming_edge": true,
+    "no_tool_error": true
+  }
+}

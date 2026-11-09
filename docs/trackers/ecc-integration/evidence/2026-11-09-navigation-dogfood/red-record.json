@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000050",
+  "command": "TMPDIR=/home/marius/.cache/codescout-ecc-tmp ./scripts/with-slot.sh --slot 2 cargo test --lib recoverable_hop_failure_is_disclosed -- --nocapture",
+  "server_pid": 1520813,
+  "job_pid": 641482,
+  "state": "exited",
+  "exit_code": 101,
+  "error": null,
+  "started_at": "2026-11-09T13:01:30.279909431+00:00",
+  "finished_at": "2026-11-09T13:02:04.730708861+00:00",
+  "log_path": "/tmp/codescout-bg-p0y45h.log"
+}

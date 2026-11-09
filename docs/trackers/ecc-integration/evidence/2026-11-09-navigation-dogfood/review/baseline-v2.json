@@ -1,0 +1,15 @@
+{
+  "reviewed_workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-navigation-truth",
+  "baseline_head": "b3d02d482eaeb3cabf329f4f37a2d3649a6057b7",
+  "reviewed_file": "src/tools/symbol/call_graph/mod.rs",
+  "reviewed_sha256": "fc6db29690a4046265088239404bc641222148f122abc479d3220e8e22526c75",
+  "command": "env TMPDIR=/home/marius/.cache/codescout-ecc-tmp scripts/with-slot.sh --slot 2 cargo test --lib tools::symbol::call_graph::tests",
+  "observed_exit": 0,
+  "observed_test_summary": "test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 8594 filtered out; finished in 1.79s",
+  "initial_git_status": [
+    " M src/tools/symbol/call_graph/mod.rs",
+    "?? .codescout/native-provenance-v1.counter",
+    "?? .codescout/native-provenance-v1.lock"
+  ],
+  "review_scope": "Only uncommitted change to call_graph/mod.rs; parent owns full gate and MCP smoke."
+}

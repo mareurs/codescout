@@ -1,0 +1,8 @@
+{
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-navigation-gate",
+  "head": "09c35b67847db6ee795b5a42699b7f7de55d7653",
+  "source_sha256": "d5b158f5e38d67119e0abb4ffa077e65b083f9dc8d2c439b965c04af713693c8",
+  "same_as_reviewed_worktree": true,
+  "source_patch_sha256": "84a565c7a4a8e8528bc433c4e7a0f6f6003d52b5337f269ee914af9a000d0a59",
+  "includes_committed_tracker_replay_files": true
+}

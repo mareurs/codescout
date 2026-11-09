@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000054",
+  "command": "TMPDIR=/home/marius/.cache/codescout-ecc-tmp ./scripts/with-slot.sh --slot 2 cargo test --lib tools::symbol::call_graph::tests",
+  "server_pid": 1520813,
+  "job_pid": 710737,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T13:04:49.823747353+00:00",
+  "finished_at": "2026-11-09T13:05:48.198647456+00:00",
+  "log_path": "/tmp/codescout-bg-8iVS4a.log"
+}

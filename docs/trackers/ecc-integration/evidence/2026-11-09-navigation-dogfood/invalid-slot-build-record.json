@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000055",
+  "command": "./scripts/with-slot.sh --slot 3 python3 /tmp/ecc-navigation-build-probe.py",
+  "server_pid": 1520813,
+  "job_pid": 731772,
+  "state": "exited",
+  "exit_code": 2,
+  "error": null,
+  "started_at": "2026-11-09T13:05:53.978127941+00:00",
+  "finished_at": "2026-11-09T13:05:54.225060347+00:00",
+  "log_path": "/tmp/codescout-bg-biQk3M.log"
+}
