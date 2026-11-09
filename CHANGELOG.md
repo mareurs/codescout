@@ -41,8 +41,10 @@ All notable changes to codescout are documented here.
 - **Removed:** `RetrievalClient::search_libraries`. It queried a `library_chunks` collection
   that nothing writes to, so wiring it in as planned would have returned nothing.
 - **Also removed:** twelve functions and types with no use anywhere in the tree, found by the
-  dead-code audit of 2026-11-09 (the commit message lists them). `LspClient::did_close` and
-  `RetrievalClient::search_memories` were examined and kept.
+  dead-code audit of 2026-11-09 (the commit message lists them), and
+  `RetrievalClient::search_memories`. Nothing called it, and under the default sqlite store it
+  would have searched the code index, not the memories (that store ignores the collection name).
+  Memory recall uses `SemanticMemoryStore`. `LspClient::did_close` was examined and kept.
 
 ### Fixed — `grep` bounds the size of a file it reads
 

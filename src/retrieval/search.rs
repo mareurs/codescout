@@ -248,22 +248,6 @@ impl RetrievalClient {
         )
         .await
     }
-
-    pub async fn search_memories(
-        &self,
-        project_id: &str,
-        query: &str,
-        opts: SearchOpts,
-    ) -> Result<Vec<Hit>> {
-        self.search_in(
-            &self.config.collection("memories"),
-            project_id,
-            None,
-            query,
-            opts,
-        )
-        .await
-    }
 }
 
 /// Merge two score-ordered hit lists and truncate to `limit`.

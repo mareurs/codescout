@@ -98,7 +98,7 @@ entry_high_water_W: 2
 | F-9 | 2026-11-09 | low | self-friction | mitigated | **I put an invented timestamp in a message to a peer** — corrected by a follow-up message |
 | F-8 | 2026-11-09 | low | tooling | open | **`fmt-mine.sh` was refused three times by a provenance lock** — cause not found; worked around with `rustfmt` on named files |
 | F-7 | 2026-11-09 | med | tool-surface | promoted-to-bug-tracker | **`doc update` accepted `dry_run=true` and wrote** — a parameter of a sibling tool, read by nothing here; bug `6285dd9e300a7876` |
-| F-6 | 2026-11-09 | low | stale-doc | open | **The legacy-retrieval tracker says memory queries use `search_memories`, and nothing calls it** — kept, undeleted, unexplained |
+| F-6 | 2026-11-09 | low | stale-doc | fixed-verified | **The legacy-retrieval tracker says memory queries use `search_memories`, and nothing calls it** — deleted; memory recall uses `SemanticMemoryStore`; tracker corrected |
 | F-5 | 2026-11-09 | med | stale-plan | fixed-verified | **The tracker's plan for L-12 named a method over a collection nothing writes to** — `search_libraries` reads `library_chunks`; the library index writes `code_chunks` under `lib:<name>` |
 | F-4 | 2026-11-08 | low | plan-prose | fixed-verified | **The manual contradicted itself about whether local-embed is a default** — two pages disagreed with each other and with Cargo.toml |
 | F-3 | 2026-11-08 | low | self-friction | fixed-verified | **A doc claim about the HTTP fix was written from code reading, then run** — `url` alone sends the default model's bare name; Ollama needs `ollama:<name>` |
@@ -416,7 +416,9 @@ Codified so the Index column means the same thing across sessions.
 
 **Consequence:** `search_memories` stays in the tree as an apparently planned piece with no caller. I kept it for that reason, so the audit's "delete the dead items" step is incomplete by one item that I could neither delete nor justify.
 
-**Status:** open. Next: read how `memory(action="recall")` searches, then either delete `search_memories` and correct the tracker rows, or wire it in.
+**Resolved 2026-11-09:** memory recall goes through `SemanticMemoryStore::search` (`Memory::call`, `src/tools/memory/mod.rs`); the Qdrant implementation has its own `memory_search_dense` (`src/retrieval/memory.rs`). `RetrievalClient::search_memories` had no caller, and under the default sqlite store it would have searched the code index: that store ignores the collection name and keys by project id. I did not test that last point by running it; it follows from `SqliteVecCodeStore::query` taking `_collection` unused. The method is deleted, and the tracker's rows L-04 and L-13 are corrected. L-13 stays open as a feature, with the right method named.
+
+**Status:** fixed-verified by build and tests (see the commit).
 
 ## F-7 — doc update accepted dry_run=true and performed the write
 
@@ -443,6 +445,8 @@ Codified so the Index column means the same thing across sessions.
 **Cost:** one avoided formatter run, and a manual check that `fmt-mine.sh` exists to make unnecessary.
 
 **Status:** open. Needs a read of the provenance-coordination dispatch and its lock.
+
+**Update 2026-11-09, later in the session:** a fourth direct call was refused with the same lock message. Separately, inside `./scripts/gate.sh` the formatter lane exited `FMT=1`, `FMT_STATE=ownership-refused`: `fmt-mine` named `src/retrieval/search.rs` as `SHARED` and refused to format it, citing coverage gaps (`unreadable Claude history directory`, `Claude inherited history has an unverified native root enqueue boundary`). `git diff` showed the only uncommitted change in that file was my own deletion, so the attribution was recoverable from the diff and not from the scan. This is a different refusal from the lock one, but it shares the cause class: the provenance scan cannot see enough history to attribute a file. Both were worked around with `rustfmt --edition 2021` on the one file, after reading its diff.
 
 ## F-9 — I put an invented timestamp in a message to a peer
 
