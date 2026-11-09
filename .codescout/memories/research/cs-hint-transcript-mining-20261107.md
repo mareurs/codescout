@@ -23,6 +23,15 @@ Results:
 - parallel writes (18): all 18 had 2+ writes in one batch. Repeat within 10 calls: 2 of 14 before the declaration, 0 of 4 after. No control.
 - uncommitted changes (6): not scored.
 
+## Inventory of additionalContext sources (scripts `mine7.py` to `mine9.py`)
+Scope: 21 transcript files, 203,591,767 bytes. Counted: `hook_additional_context` attachments, 177 blocks, 421,036 bytes.
+- SessionStart superpowers intro: 43 blocks, 146,931 B. SessionStart MEMORIES list: 38 blocks, 193,151 B. SessionStart PROJECT BOOTSTRAP: 9 blocks, 46,649 B. Together 387 KB, about 92% of the bytes.
+- All `[cs-hint]`: 64 blocks, about 14.6 KB (about 3.5%). `[cs-verified]`: 4 blocks, about 1 KB. The remaining 19 blocks are recon-before-edit, the first-Agent-dispatch hint and persisted large outputs.
+- `hook_success` records show 108 `SessionStart:compact` runs against 14 `startup` and 2 `resume`. The SessionStart cost therefore grows with the number of compactions, not sessions.
+- Largest `[cs-hint]` per delivery: uncommitted changes, about 1.2 KB (6 deliveries, not scored). The other hints are 100 to 200 B.
+- About 7,000 `PreToolUse` runs on codescout tools emit only `permissionDecision: allow` (141 B). That is a permission decision, not model context. Read as samples for `run_command`, `grep` and `edit_file`; not every run was read.
+- Limits: transcript bytes are not context bytes. The harness records such as `prompt_snapshot` (8.9 MB), `output_style` (5.3 MB) and `invoked_skills` (5.3 MB) were not checked for visibility to the model.
+
 ## Limits
 - Small samples, one project. Windows of 3, 5 and 10 calls are my choice and were not tested for sensitivity.
 - The declaration covers only messages marked `[cs-verified]`, so the pre/post split is not a test of the declaration.
@@ -30,5 +39,5 @@ Results:
 - Wrong claim made and corrected in the session: that the structural-edit hint fires on any `edit_file`. It fires by the rule above.
 
 ## Open
-- The grep heuristic lives in the claude-plugins repo. A bug file with the 17 cases is not written yet.
+- The grep heuristic lives in the claude-plugins repo. The bug file with the 17 cases is committed there as `c5113d4` (`docs/issues/2026-11-07-grep-for-concept-heuristic-fires-on-literal-phrase-searches.md`). Not pushed.
 - Not done: subagent coverage for sessions in other working directories, a sensitivity check on the windows.
