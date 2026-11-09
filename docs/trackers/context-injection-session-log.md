@@ -8,7 +8,7 @@ tags:
 - subagents
 - session-log
 topic: context-injection
-entry_high_water_F: 19
+entry_high_water_F: 20
 entry_high_water_W: 6
 entry_prefix:
 - F
@@ -53,6 +53,7 @@ author to make.
 | F-17 | 2026-09-26 | high | architectural | fixed-verified | The live check found `tool_use_id` NULL on every row: rmcp puts `_meta` in RequestContext.meta, and the test built params in-process |
 | F-18 | 2026-09-28 | med | context-rendering | mitigated | A harness-rendered CLAUDE.md strips HTML comments, so the controller read "no markers" and designed a ruling around it |
 | F-19 | 2026-11-04 | med | plan-prose | mitigated | Plan statuses, this log's Index and GG-N all lag the code — unbuilt steps are indistinguishable from shipped ones |
+| F-20 | 2026-11-09 | med | plan-prose | mitigated | The subagent short-opener spec is silent on `_guide_hint` (the Whole hint would forbid the fetch the body recommends) and on the census marker drift guard |
 
 ## Wins Index
 
@@ -1636,6 +1637,22 @@ True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` o
 **Fix idea:** reconcile statuses in one hygiene pass; for the unbuilt-and-undeclined steps, record an explicit decision (build / park with trigger / decline) so the gap stops being invisible.
 
 **Status:** mitigated (2026-11-04, same session) — the hygiene pass landed in `3addb3e7d` (F-1/5/6/11/12/13, GG-1/9, ten plans, two ADRs, both deep-agent trackers closed with their review), the OP-4 defect in `a80c8eaec`, and the never-built gates 1 (post half) and 5 in `4516d674c`. The unmeasured rules were measured (`prompt-hamsa-audit-log:A-44`, `:A-45`, `:A-46`). Still open, and the operator's call rather than work: build or decline retrieval steps 2b/3/2c/4 and section-grain Phase 3, so they stop reading as pending.
+
+## F-20 — The subagent short-opener spec is silent on `_guide_hint` and on the census marker drift guard
+
+**Valid:** dated 2026-11-09
+**Status:** mitigated — resolved in the plan, not yet in code
+
+**Observed:** The spec `docs/superpowers/specs/2026-11-09-subagent-bootstrap-short-variant-design.md` (commit `d16b08ec9`) names the body, the flag and the block marker for a subagent's short session opener. It is silent on two contracts that the opener path also carries:
+
+1. `_guide_hint`. `emit_session_opener` returns `GuideDeliveryShape::Whole`, and `inject_hint` (`src/tools/core/guide_emit.rs`) turns `Whole` into "Full guide auto-injected … do not re-call get_guide". For a short body that pointer is false, and it tells the subagent the opposite of what the body says. The `Preamble` arm exists because the same lie once neutered the preamble fallback.
+2. The marker drift guard. `tests/test_census_guide_deliveries.py::test_markers_match_the_emitter` asserts that every marker literal is in `guide_emit.rs`, so the new marker must be built in that file and added to that list.
+
+A third thing is not a gap but a constraint on wording: `session_opens_with_bootstrap_from_a_non_workspace_tool` asserts the opener carries `ALWAYS VERIFY`, which measured 100% plausibility-verified as eval arm s1. The short body must carry that literal too.
+
+**Cost if missed:** med. A subagent would get a hint that forbids the one fetch the short body recommends, and the census would never see the new form.
+
+**Resolution:** the plan adds a `GuideDeliveryShape::Short` variant with its own `inject_hint` text, builds the block in `guide_emit.rs`, extends the drift-guard list, and pins `ALWAYS VERIFY` in a test of the short body.
 
 ## Template for new entries
 
