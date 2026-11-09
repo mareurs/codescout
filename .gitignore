@@ -28,6 +28,7 @@
 /.codescout/usage.db-wal
 /.codescout/usage.db-shm
 /.codescout/usage-dropped-rows.log
+/.codescout/usage-lock-holds.log
 /.codescout/librarian.db
 /.codescout/librarian.db-wal
 /.codescout/librarian.db-shm
@@ -69,6 +70,7 @@ crates/*/.codescout/usage.db-shm
 crates/*/.codescout/usage.db-wal
 crates/*/.codescout/usage.db.bak-*
 crates/*/.codescout/usage-dropped-rows.log
+crates/*/.codescout/usage-lock-holds.log
 crates/*/.codescout/workspace.toml
 crates/*/.codescout/write.lock
 crates/*/.codescout/write.lock.holder

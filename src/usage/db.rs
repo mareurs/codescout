@@ -414,6 +414,66 @@ pub fn now_timestamp() -> String {
         .to_string()
 }
 
+/// A write statement that held the database for at least this long is logged by
+/// [`note_lock_hold`]. Short holds are the normal case and say nothing about a waiter that
+/// timed out after the 5 s `busy_timeout`; the logged ones are the candidates for the holder.
+const LOCK_HOLD_LOG_MS: u128 = 250;
+
+#[cfg(test)]
+thread_local! {
+    /// Lets a test lower the threshold to 0 without a slow database. Thread-local because
+    /// every `rusqlite` call in these tests runs on the test's own thread.
+    static LOCK_HOLD_LOG_THRESHOLD_MS: std::cell::Cell<u128> =
+        const { std::cell::Cell::new(LOCK_HOLD_LOG_MS) };
+}
+
+fn lock_hold_log_threshold_ms() -> u128 {
+    #[cfg(test)]
+    {
+        LOCK_HOLD_LOG_THRESHOLD_MS.with(std::cell::Cell::get)
+    }
+    #[cfg(not(test))]
+    {
+        LOCK_HOLD_LOG_MS
+    }
+}
+
+/// Record that a write statement held `usage.db` for `ms` milliseconds, when that is long
+/// enough to matter. Best-effort, like every write around the recorder: a failure here
+/// never reaches the caller.
+///
+/// The line is `started_at` (UTC, the shape of `usage-dropped-rows.log`), pid, build, `kind`
+/// (`backfill`, `insert` or `retention_sweep`), `ms`, then free `detail`. A waiter that gave
+/// up shows `started_at` of its attempt and a `wait_ms` near 5000 in `usage-dropped-rows.log`;
+/// the holder is the line here whose interval `[started_at, started_at + ms]` covers that
+/// attempt. The file lives beside the database, found from `conn.path()`, so a pinned
+/// project's holds land in that project's `.codescout/`.
+/// docs/issues/2026-11-09-concurrent-pinned-calls-leave-no-usage-row.md
+fn note_lock_hold(conn: &Connection, kind: &str, started_at: &str, ms: u128, detail: &str) {
+    use std::io::Write;
+    if ms < lock_hold_log_threshold_ms() {
+        return;
+    }
+    let Some(dir) = conn.path().and_then(|p| Path::new(p).parent()) else {
+        return;
+    };
+    let build = BuildProvenance::current();
+    let line = format!(
+        "{started_at}\t{}\t{}{}\t{kind}\t{ms}\t{}\n",
+        std::process::id(),
+        build.sha,
+        if build.dirty { "+dirty" } else { "" },
+        detail.replace(['\n', '\r', '\t'], " "),
+    );
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("usage-lock-holds.log"))
+    {
+        let _ = file.write_all(line.as_bytes());
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
     conn: &Connection,
@@ -441,6 +501,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
     // Taken by value so the sha and its dirty bit cannot be separated at the call site.
     // They were separable before BL-24, and the flag was the half that got dropped.
     let build = build.into();
+    let insert_started_at = now_timestamp();
+    let insert_timer = std::time::Instant::now();
     conn.execute(
         // `called_at` is `strftime(…%f…)`, not `datetime()`: the latter is SECOND
         // granular against a measured p50 latency of 20 ms, so a burst of calls
@@ -481,6 +543,13 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             measurement.attribution_ms,
             ],
     )?;
+    note_lock_hold(
+        conn,
+        "insert",
+        &insert_started_at,
+        insert_timer.elapsed().as_millis(),
+        tool_name,
+    );
     // `pika_observations` is not codescout's table (a buddy-plugin skill creates it,
     // zero references in this crate), but usage.db is opened without
     // `PRAGMA foreign_keys`, so its `ON DELETE CASCADE` never fires and a pruned
@@ -496,18 +565,27 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             |_| Ok(true),
         )
         .unwrap_or(false);
-    if has_pika_observations {
+    let sweep_started_at = now_timestamp();
+    let sweep_timer = std::time::Instant::now();
+    let deleted = if has_pika_observations {
         conn.execute(
             "DELETE FROM tool_calls WHERE called_at < datetime('now', '-30 days') \
              AND id NOT IN (SELECT tool_call_id FROM pika_observations)",
             [],
-        )?;
+        )?
     } else {
         conn.execute(
             "DELETE FROM tool_calls WHERE called_at < datetime('now', '-30 days')",
             [],
-        )?;
-    }
+        )?
+    };
+    note_lock_hold(
+        conn,
+        "retention_sweep",
+        &sweep_started_at,
+        sweep_timer.elapsed().as_millis(),
+        &format!("deleted={deleted}"),
+    );
     Ok(())
 }
 
@@ -1119,10 +1197,14 @@ fn backfill_legacy_rows(conn: &Connection, project_root: &str) -> Result<()> {
         return Ok(());
     }
 
+    let started_at = now_timestamp();
+    let total = std::time::Instant::now();
+    let scan = std::time::Instant::now();
     conn.execute(
         "UPDATE tool_calls SET project_root = ?1 WHERE project_root IS NULL",
         params![project_root],
     )?;
+    let update_scan_ms = scan.elapsed().as_millis();
 
     let unclassified: Vec<(i64, String, String)> = {
         let mut stmt = conn.prepare(
@@ -1142,6 +1224,13 @@ fn backfill_legacy_rows(conn: &Connection, project_root: &str) -> Result<()> {
     }
 
     conn.execute_batch(&format!("PRAGMA user_version = {fingerprint};"))?;
+    note_lock_hold(
+        conn,
+        "backfill",
+        &started_at,
+        total.elapsed().as_millis(),
+        &format!("from={current} to={fingerprint} update_scan_ms={update_scan_ms}"),
+    );
     Ok(())
 }
 
@@ -1616,6 +1705,110 @@ mod tests {
         conn.execute("SELECT 1 FROM tool_calls LIMIT 0", [])
             .unwrap();
     }
+
+    fn write_one_row(conn: &Connection, tool: &str) {
+        write_record(
+            conn,
+            tool,
+            1,
+            "success",
+            false,
+            None,
+            "unknown",
+            None,
+            "s",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Default::default(),
+            None,
+            Default::default(),
+        )
+        .unwrap();
+    }
+
+    /// Sets the threshold for the current thread and restores it on drop.
+    struct LockHoldThreshold(u128);
+    impl LockHoldThreshold {
+        fn set(ms: u128) -> Self {
+            let prev = LOCK_HOLD_LOG_THRESHOLD_MS.with(|c| c.replace(ms));
+            Self(prev)
+        }
+    }
+    impl Drop for LockHoldThreshold {
+        fn drop(&mut self) {
+            LOCK_HOLD_LOG_THRESHOLD_MS.with(|c| c.set(self.0));
+        }
+    }
+
+    /// A write statement that holds the database for at least the threshold leaves one line in
+    /// `usage-lock-holds.log` beside the database, naming what held it: the backfill that runs
+    /// on the first open of a file whose `user_version` differs, the insert, and the retention
+    /// sweep. The threshold is dropped to 0 so a fast database logs every hold; the control
+    /// raises it out of reach and leaves no file, so the first half cannot pass because the
+    /// file always exists.
+    /// docs/issues/2026-11-09-concurrent-pinned-calls-leave-no-usage-row.md
+    #[test]
+    fn a_long_write_leaves_a_line_in_the_lock_holds_log_and_a_short_one_does_not() {
+        // Control: a threshold nothing reaches, the same three statements, no file.
+        {
+            let _t = LockHoldThreshold::set(u128::MAX);
+            let dir = TempDir::new().unwrap();
+            let conn = open_db(dir.path()).unwrap();
+            write_one_row(&conn, "control");
+            assert!(
+                !dir.path()
+                    .join(".codescout")
+                    .join("usage-lock-holds.log")
+                    .exists(),
+                "a hold under the threshold must leave no line"
+            );
+        }
+
+        let _t = LockHoldThreshold::set(0);
+        let dir = TempDir::new().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        write_one_row(&conn, "probe_tool");
+        let log =
+            std::fs::read_to_string(dir.path().join(".codescout").join("usage-lock-holds.log"))
+                .expect("a hold at the threshold leaves a line");
+        let lines: Vec<Vec<&str>> = log.lines().map(|l| l.split('\t').collect()).collect();
+        for cols in &lines {
+            assert_eq!(
+                cols.len(),
+                6,
+                "started_at, pid, build, kind, ms, detail; got {log:?}"
+            );
+            assert_eq!(cols[1], std::process::id().to_string(), "pid: {log:?}");
+            assert_eq!(
+                cols[2].trim_end_matches("+dirty"),
+                BuildProvenance::current().sha,
+                "build: {log:?}"
+            );
+            assert!(cols[4].parse::<u128>().is_ok(), "ms is a number: {log:?}");
+        }
+        let detail = |kind: &str| -> &str {
+            lines
+                .iter()
+                .find(|c| c[3] == kind)
+                .unwrap_or_else(|| panic!("no `{kind}` line in {log:?}"))[5]
+        };
+        let backfill = detail("backfill");
+        assert!(
+            backfill.starts_with("from=0 to=") && backfill.contains("update_scan_ms="),
+            "the backfill names the stamp it replaced and its scan: {backfill:?}"
+        );
+        assert_eq!(detail("insert"), "probe_tool", "the insert names its tool");
+        assert_eq!(detail("retention_sweep"), "deleted=0");
+        assert_eq!(lines.len(), 3, "one line per held statement: {log:?}");
+    }
+
     /// The tables the analyze-usage skill's "Clear each DB" step deletes from.
     ///
     /// Reads only that section, so a `DELETE FROM` quoted elsewhere in the skill
