@@ -2,7 +2,7 @@
 entry_prefix:
   - F
   - W
-entry_high_water_F: 9
+entry_high_water_F: 10
 entry_high_water_W: 2
 ---
 # Session Log — local-embed Opt-In Work Stream
@@ -94,6 +94,7 @@ entry_high_water_W: 2
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-<n> | YYYY-MM-DD | low/med/high | <category> | open | <one-line title> |
+| F-10 | 2026-11-09 | med | instrument-blindness | open | **A new untracked file escaped a `git ls-files` guard, so the gate was green before the commit and red after** — `every_cap_constant_is_classified` never saw `holders.rs` until it was tracked |
 | W-2 | 2026-11-09 | — | pattern | validated | **Read the gate before filing the bug** — the root's leniency in `doc` is deliberate; the filed bug is the narrow `dry_run` hazard |
 | F-9 | 2026-11-09 | low | self-friction | mitigated | **I put an invented timestamp in a message to a peer** — corrected by a follow-up message |
 | F-8 | 2026-11-09 | low | tooling | promoted-to-bug-tracker | **`fmt-mine.sh` was refused five times by a provenance lock** — the rust-analyzer mux holds an inherited shared copy for hours; bug `312cde2f4698874b` |
@@ -444,7 +445,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Cost:** one avoided formatter run, and a manual check that `fmt-mine.sh` exists to make unnecessary.
 
-**Status:** promoted-to-bug-tracker. Cause found 2026-11-09 and filed as bug `312cde2f4698874b`: the formatter takes the provenance lock exclusively, and the `codescout mux` for rust-analyzer (with its children) holds a shared copy through inherited descriptors, about three hours after the call and the server that took it. The refusal names no holder. Measured with `/proc/locks`, `/proc/<pid>/fdinfo`, `lsof`, `ps` and `flock -n -x` (exit 1) versus `flock -n -s` (exit 0). Not fixed: the fence is another effort's design, and the bug lists two options.
+**Status:** promoted-to-bug-tracker. Cause found 2026-11-09 and filed as bug `312cde2f4698874b`: the formatter takes the provenance lock exclusively, and the `codescout mux` for rust-analyzer (with its children) holds a shared copy through inherited descriptors, about three hours after the call and the server that took it. The refusal names no holder. Measured with `/proc/locks`, `/proc/<pid>/fdinfo`, `lsof` and `ps`. A `flock -n -x` that I also ran from inside `run_command` exited 1, but that call holds a shared lock itself while it runs, so it was confounded and is not evidence; the bug record says so. Not fixed at the root: the fence is another effort's design, and the bug lists two options. **Option 2 is done** (`4eceee5e7`, `0d47f5898`): a refusal now names its holders and marks a cut list. The bug stays open for option 1.
 
 **Update 2026-11-09, later in the session:** a fourth direct call was refused with the same lock message. Separately, inside `./scripts/gate.sh` the formatter lane exited `FMT=1`, `FMT_STATE=ownership-refused`: `fmt-mine` named `src/retrieval/search.rs` as `SHARED` and refused to format it, citing coverage gaps (`unreadable Claude history directory`, `Claude inherited history has an unverified native root enqueue boundary`). `git diff` showed the only uncommitted change in that file was my own deletion, so the attribution was recoverable from the diff and not from the scan. This is a different refusal from the lock one, but it shares the cause class: the provenance scan cannot see enough history to attribute a file. Both were worked around with `rustfmt --edition 2021` on the one file, after reading its diff.
 
@@ -471,6 +472,22 @@ Codified so the Index column means the same thing across sessions.
 **Cost of the pattern:** two reads (a `grep` for `additionalProperties`, then the comment). It paid for itself in one filing.
 
 **Status:** validated.
+
+## F-10 — A new untracked file escaped a git ls-files guard, so the gate was green before the commit and red after
+
+**Valid:** dated 2026-11-09
+
+**Observed:** 2026-11-09. I added a new file, `src/tools/native_provenance_fence/holders.rs`, with `const MAX_LISTED: usize = 12;`. The full gate before I committed it was green. The gate after the commit was red: `result_caps::every_cap_constant_is_classified` named the constant as an unclassified cap. HEAD (`4eceee5e7`) carried a red guard test until the fix commit (`0d47f5898`).
+
+**Cause:** the guard reads its population from `git ls-files src`, so it sees tracked files only. A new file is untracked until its first commit, and every gate run before that commit passes over it. This is a property of the guard's selector, the class `IC-18` (selector narrower than its population), and it applies to every `git ls-files`-based guard in `tests/`, not only this one. I have not listed the others.
+
+**Cost here:** HEAD red for one commit, caught by the very next gate. I also nearly relied on a focused test run (the fence tests) that did not include `result_caps`.
+
+**Rule I am applying:** after the first commit that adds a file under `src/`, run `result_caps` again, or the whole gate, before treating the change as verified; and run the gate once with the new file staged (`git add -N`) so that `git ls-files` lists it. I did not test that `git add -N` makes the guard see the file.
+
+**Not fixed:** the guard itself. A fix would read `git ls-files --cached --others --exclude-standard`. I did not check what that does to the guard's fixtures.
+
+**Status:** open.
 
 ## Template for new entries
 

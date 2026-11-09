@@ -12,7 +12,7 @@ owner: marius
 related:
 - docs/trackers/issue-clusters/IC-12-transient-shared-state-lies-to-readers.md
 severity: medium
-unverified: 'Which run_command started the mux is not established, nor whether closing the inherited descriptors in the mux would weaken a guarantee the fence gives. The two peer-owned shared locks (pids 1520813 and 1731442) may be transient and were not waited out, so it is not shown that the mux''s lock alone keeps the exclusive try failing: that would need the peers'' processes to end, or a test that holds only the mux''s lock. The refusal count of five is from this session only.'
+unverified: 'Which run_command started the mux is not established, nor whether closing the inherited descriptors in the mux would weaken a guarantee the fence gives. The flock exit codes were taken inside a run_command, which itself holds a shared lock, so they do not isolate the mux, and the record no longer relies on them. What is established without them: the kernel records a shared lock owned by a pid that no longer exists, and the mux and its children hold that same description. The refusal count of five is from this session only. Owner 1731442 was first misidentified as a peer and is corrected in the body.'
 ---
 
 ## Summary
@@ -29,14 +29,22 @@ Observed 2026-11-09, session 677278c4: `./scripts/fmt-mine.sh` refused five time
 
 ## Reproduction
 
+Two parts, and the second is the stronger one.
+
+1. Look at the lock without trying it:
+
 ```
 F=/home/marius/.local/state/codescout/native-provenance-v2/.codescout/native-provenance-v1.lock
-flock -n -x $F true; echo $?     # 1   (the exclusive try the formatter makes)
-flock -n -s $F true; echo $?     # 0   (the shared try every other call makes)
-grep <inode of $F> /proc/locks   # the holders
+grep <inode of $F> /proc/locks                 # the owners, as the kernel records them
+ps -p <owner pid>                              # an owner that no longer exists
+grep -E '^(lock|flags)' /proc/<mux pid>/fdinfo/<fd>   # the mux holds that same lock
 ```
 
-Measured 2026-11-09: exit 1, then exit 0.
+   Measured 2026-11-09: owner 3325677 does not exist, and `fdinfo` of the mux, its `rust-analyzer` and its `proc-macro-srv` children each names that lock.
+
+2. A unit test rebuilds the mechanism without any peer: `a_lock_kept_by_a_child_of_a_dead_owner_is_named_as_such` in `src/tools/native_provenance_fence/tests.rs` runs `flock -s <file> sh -c 'sleep 30 & echo $!'`, so the owner exits and a background child keeps the lock, then calls `Fence::try_acquire`.
+
+**Do not use `flock -n -x` run from inside `run_command` as a reproduction.** I did, and got exit 1, but the `run_command` that ran it holds a shared lock itself while it runs, so the exclusive try fails whatever else is true. That result is confounded and proves nothing about the mux. Run it from a terminal outside codescout, and read `/proc/locks` first to see which locks exist.
 
 ## Environment
 
@@ -50,7 +58,7 @@ Established by reading code and by measurement:
 - `apply_to_shell` (called only from the `run_command` spawn sites) duplicates both lock descriptors into the shell and clears close-on-exec in the child (`apply_to_command_named`, `src/tools/native_provenance_fence.rs`). Every descendant of the shell shares the same open file description, and a `flock` lasts while any descriptor on that description lives.
 - Measured: `/proc/locks` shows three shared locks on the inode, owned by pids 3325677, 1520813 and 1731442. `ps` shows 3325677 does not exist. It was this session's own codescout server earlier: its pid is in the names of this session's earlier background-job records. The lock it took is still held by `codescout mux … -- rust-analyzer` (pid 3690455, up about 3 hours), its `rust-analyzer` (3690525) and two `rust-analyzer-proc-macro-srv` (3690992, 3690996): `/proc/<pid>/fdinfo/24` of each names that lock.
 - The mux's environment carries `CODESCOUT_PROVENANCE_COORDINATOR_FD=24`, `CODESCOUT_PROVENANCE_FENCE_FD=25`, both roots and generations (5743 and 1353). So it was started through `apply_to_shell`, from a `run_command` shell.
-- The other two owners are live peers: 1520813 (`codescout start`, with a `python3 …/live_smoke.py` child 34 s old) and 1731442 (`codescout start --debug`, 494 s old). Those may end on their own.
+- The other two owners: 1520813 is a live `codescout start` of another session, with a `python3 …/live_smoke.py` child 34 s old at the time. 1731442 is this session's own server (its pid prefixes the names of this session's background-job records): the `run_command` that made these measurements held a shared lock itself while it ran. I first called 1731442 a live peer; that was wrong.
 - The mux is shared by design (a socket under `/run/user/1000`, `--idle-timeout 180`), so it lives while any session uses rust-analyzer in this checkout.
 
 Not established: which `run_command` started the mux (the generations 5743 and 1353 would identify it if the generation log can be queried; I did not look). Whether closing the inherited descriptors in the mux would weaken any guarantee the fence gives; the tests named `formatter_excludes_a_foreign_workspace_shell_targeting_its_checkout` and `the_actual_shell_inherits_the_request_scoped_fence` show the inheritance is intended for shells.
@@ -60,10 +68,10 @@ Not established: which `run_command` started the mux (the generations 5743 and 1
 - `lsof` on the lock file: six processes (the two codescout servers, the python3 smoke test, the mux and its two children).
 - `/proc/locks` and `/proc/<pid>/fdinfo/<fd>` as above.
 - `ps -o pid,ppid,etimes,cmd` for the pids named.
-- `flock -n -x` and `flock -n -s` results above.
+- `flock -n -x` (exit 1) and `flock -n -s` (exit 0), run from inside `run_command`: CONFOUNDED, see Reproduction. They show only that some shared lock existed, and the measuring call supplied one itself.
 
 
-Re-measured a few minutes later in the same session: `/proc/locks` listed FIVE shared locks on the inode (owners 662110, 1520813, 3325677, 3647863, 1731442), and `flock -n -x` still exited 1. Two owners were new, so other sessions take this lock continuously. The mux's lock (owner 3325677, a dead pid) was among the five. So the exclusive try could not be isolated to the mux by waiting. What the evidence does establish is the narrower claim: while the mux lives, the exclusive try cannot succeed, whatever the other holders do. A caller who gets "would block" cannot tell a peer that is mid-call from a lock that no call owns.
+Re-measured a few minutes later in the same session: `/proc/locks` listed FIVE shared locks on the inode (owners 662110, 1520813, 3325677, 3647863, 1731442; the last is this session's own server), and `flock -n -x` still exited 1, which is confounded as above. Two owners were new, so other sessions take this lock continuously. The mux's lock (owner 3325677, a dead pid) was among the five. So the exclusive try could not be isolated to the mux by waiting. What the evidence does establish is the narrower claim: while the mux lives, the exclusive try cannot succeed, whatever the other holders do. A caller who gets "would block" cannot tell a peer that is mid-call from a lock that no call owns.
 
 ## Hypotheses tried
 
@@ -72,10 +80,13 @@ Re-measured a few minutes later in the same session: `/proc/locks` listed FIVE s
 
 ## Fix
 
-Not fixed. This fence is another effort's design, so these are options, not a change:
+Partly done. **Option 2 is in; option 1 is not, and this bug stays open.**
 
-1. Daemons close the inherited provenance descriptors at startup: `codescout mux` closes the descriptors named by `CODESCOUT_PROVENANCE_*_FD` and drops those variables, so neither it nor `rust-analyzer` carries the lock. Smallest change. Its cost is whatever guarantee the fence wants from the mux, which is not a write effect of the shell.
-2. Make the refusal name its holders: on `WouldBlock`, read `/proc/locks` and say which pids hold the lock and whether they are alive. Independent of option 1, and it makes this diagnosable in one call.
+- Option 2, `4eceee5e7` and `0d47f5898`: a refused fence lock now names its holders (Linux): the processes that have the lock file open, inherited descriptors included, and the owners the kernel records, each marked "not running" when gone. A list cut by its 12-entry cap or by the 400 ms scan limit ends in "and more". Only the process name and a plain lowercase subcommand are shown, never other arguments.
+- Verified: unit tests on the pure parts; a test that rebuilds the dead-owner case with `flock -s <file> sh -c 'sleep 30 & echo $!'`; a test that starts 14 holders; mutation runs for the holder text and for the cut flag; and live on the rebuilt server. A refused `./scripts/fmt-mine.sh` named the running gate and its children, a dead owner (this session's previous server, whose gate was still running on inherited descriptors, the mechanism of this bug reproduced within minutes), and the dead owner of the mux's lock.
+- Option 1, not done: daemons such as `codescout mux` close the inherited provenance descriptors at startup. The fence is another effort's design, so this stays a decision for its owner.
+
+What option 2 does and does not change: a caller who is refused can now tell a peer that is mid-call from a lock that no call owns. The refusal itself is unchanged, and the mux can still keep the lock for hours.
 
 ## Tests added
 
@@ -87,9 +98,9 @@ Format the files you changed with `rustfmt --edition 2021 <file>` after reading 
 
 ## Resume
 
-1. Decide option 1, option 2, or both.
-2. For option 1, find which `run_command` started the mux and whether the fence's own tests rely on a daemon holding the lock.
-3. For either option, add a test that spawns a daemon inside a fenced shell and checks the formatter can still be taken after the shell ends.
+1. Decide option 1. Find which `run_command` started the mux, and whether the fence's own tests rely on a daemon holding the lock.
+2. For option 1, add a test that spawns a daemon inside a fenced shell and checks the formatter can still be taken after the shell ends. The existing `a_lock_kept_by_a_child_of_a_dead_owner_is_named_as_such` rebuilds the dead-owner setup and can be extended.
+3. Close this bug when the mux no longer keeps the lock, not when the refusal is more readable.
 
 ## References
 
