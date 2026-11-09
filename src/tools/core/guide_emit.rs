@@ -917,6 +917,18 @@ mod tests {
         assert!(short.contains("get_guide(\"t\")"), "got: {short}");
         assert!(!short.contains("do not re-call"), "got: {short}");
     }
+    #[test]
+    fn the_subagent_opener_block_is_a_fraction_of_the_whole_one() {
+        // Measured 2026-11-09 (bug 7579b32b1cd2362f): the short wrapped block is 1,278 B.
+        // The point of the short form is bytes: a block past 1,300 B, or one not far below
+        // the whole block, means the saving is gone.
+        let topic = crate::prompts::SESSION_OPENING_GUIDE;
+        let len = |c: Content| c.as_text().expect("text block").text.len();
+        let short = len(subagent_opener_block(topic));
+        let whole = len(guide_block(topic).expect("the opener topic has a body"));
+        assert!(short <= 1_300, "wrapped short block is {short} B");
+        assert!(short * 2 < whole, "short {short} B vs whole {whole} B");
+    }
 
     /// A ledger that belongs to a conversation, as every MCP session's does.
     /// `anonymous` has no key and the gate stands down for it by design.
