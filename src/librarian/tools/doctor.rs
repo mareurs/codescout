@@ -8293,6 +8293,12 @@ struct TouchedWalk {
 /// files count as touched. Missing that made a one-commit fixture report *nothing* recent,
 /// which is the state every test repo is in.
 ///
+/// **`candidates` narrows the question, not the bounds.** `Some(paths)` restricts each commit's
+/// diff to those literal paths (never patterns), so `paths` then holds only the candidates a
+/// walked commit touched; `None` returns every touched path. `Some(&[])` asks about no path and
+/// returns none rather than every path. The ceiling and window flags below are the same either
+/// way, because the walk over commits is the same.
+///
 /// The returned [`TouchedWalk`] says whether the ceiling bit, and whether it bit INSIDE the
 /// window (the only case where `paths` can be wrong); consumers that read absence from
 /// `paths` as "not recently touched" must carry those flags to whoever reads their result.
@@ -8300,6 +8306,7 @@ fn paths_touched_since(
     repo: &git2::Repository,
     cutoff_epoch_secs: i64,
     max_commits: usize,
+    candidates: Option<&[String]>,
 ) -> TouchedWalk {
     let mut out = TouchedWalk {
         paths: std::collections::HashSet::new(),
@@ -8316,6 +8323,16 @@ fn paths_touched_since(
         return out;
     }
     let _ = walk.set_sorting(git2::Sort::TIME);
+    // The candidates as a diff filter, built once for the whole walk. Literal, because a
+    // candidate is a file name (`a[1].rs` is a name, not a character class).
+    let mut diff_opts = candidates.map(|asked| {
+        let mut opts = git2::DiffOptions::new();
+        opts.disable_pathspec_match(true);
+        for path in asked {
+            opts.pathspec(path);
+        }
+        opts
+    });
     // Committer time of the last commit actually read; `None` until one is.
     let mut last_walked_secs: Option<i64> = None;
     for (seen, oid) in walk.flatten().enumerate() {
@@ -8334,9 +8351,16 @@ fn paths_touched_since(
         if commit.time().seconds() < cutoff_epoch_secs {
             continue;
         }
+        // An empty candidate list asks about no path. A diff with no pathspec would return
+        // every path, so the commit is still counted and timed above and skipped here.
+        if candidates.is_some_and(<[String]>::is_empty) {
+            continue;
+        }
         let Ok(tree) = commit.tree() else { continue };
         let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
-        let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) else {
+        let Ok(diff) =
+            repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), diff_opts.as_mut())
+        else {
             continue;
         };
         for delta in diff.deltas() {
@@ -8553,7 +8577,16 @@ fn scan_open_bug_cited_from_source_walking(
 
     let now = chrono::Utc::now().timestamp();
     let cutoff = now - SETTLE_DAYS * 24 * 60 * 60;
-    let walk = paths_touched_since(&repo, cutoff, max_walk_commits);
+    // Only the files in `citations` are ever looked up in the touched set below, so only they
+    // are asked about: each commit's diff then covers those paths, not the whole tree.
+    let citing_files: Vec<String> = citations
+        .values()
+        .flatten()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let walk = paths_touched_since(&repo, cutoff, max_walk_commits, Some(&citing_files));
     let recently_touched = &walk.paths;
 
     let mut unsettled = 0usize;
@@ -13409,7 +13442,7 @@ mod tests {
         let (_tmp, root) = git_fixture_with_history("src/first.rs", "//! first\n", 4);
         let repo = git2::Repository::open(&root).unwrap();
 
-        let walk = paths_touched_since(&repo, 0, 3);
+        let walk = paths_touched_since(&repo, 0, 3, None);
         assert!(
             walk.ceiling_reached,
             "5 commits against a ceiling of 3: the walk stopped with commits unread and must \
@@ -13431,7 +13464,7 @@ mod tests {
             walk.paths
         );
 
-        let walk = paths_touched_since(&repo, 0, 5);
+        let walk = paths_touched_since(&repo, 0, 5, None);
         assert!(
             !walk.ceiling_reached && !walk.ceiling_reached_in_window,
             "a ceiling EQUAL to the history length reaches no unread commit, so the set is \
@@ -13444,12 +13477,82 @@ mod tests {
             walk.paths
         );
 
-        let walk = paths_touched_since(&repo, 0, 4000);
+        let walk = paths_touched_since(&repo, 0, 4000, None);
         assert!(
             !walk.ceiling_reached,
             "a ceiling above the history never bites"
         );
         assert!(!walk.unavailable, "a readable history is not unavailable");
+    }
+    /// Asked about a few paths, the walk answers for exactly those. A candidate that a walked
+    /// commit touched is present; one that only an UNWALKED (older) commit touched is not; and a
+    /// path nobody asked about is never returned, however recently it changed. The caller reads
+    /// absence as "not recently touched", so the walk's bounds are unchanged by the question.
+    #[test]
+    fn paths_touched_since_answers_only_for_the_candidates_it_was_given() {
+        let (_tmp, root) = git_fixture_with_history("src/first.rs", "//! first\n", 4);
+        let repo = git2::Repository::open(&root).unwrap();
+        let asked = vec![
+            "filler-4.txt".to_string(),
+            "filler-1.txt".to_string(),
+            "src/first.rs".to_string(),
+        ];
+
+        // Ceiling 3 walks the newest three commits: filler-4, filler-3, filler-2.
+        let walk = paths_touched_since(&repo, 0, 3, Some(&asked));
+
+        let expected: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["filler-4.txt".to_string()]);
+        assert_eq!(
+            walk.paths, expected,
+            "filler-4 is walked and asked about; filler-1 and first.rs are asked about but only \
+         unwalked commits touched them; filler-3 and filler-2 were walked but not asked about"
+        );
+        assert!(
+            walk.ceiling_reached,
+            "the candidate list must not change the walk's own bound"
+        );
+    }
+
+    /// A candidate is a literal path, not a pattern: a name with glob characters is found as
+    /// written, and a pattern is not expanded into the files it would match.
+    #[test]
+    fn paths_touched_since_matches_a_candidate_literally_not_as_a_glob() {
+        let (_tmp, root) = git_fixture_with_history("src/a[1].rs", "x", 1);
+        let repo = git2::Repository::open(&root).unwrap();
+
+        let named = vec!["src/a[1].rs".to_string()];
+        let walk = paths_touched_since(&repo, 0, 4000, Some(&named));
+        assert!(
+            walk.paths.contains("src/a[1].rs"),
+            "a bracketed file name is found as written: {:?}",
+            walk.paths
+        );
+
+        let pattern = vec!["filler-*.txt".to_string()];
+        let walk = paths_touched_since(&repo, 0, 4000, Some(&pattern));
+        assert!(
+            walk.paths.is_empty(),
+            "a candidate is not a pattern, so `filler-*.txt` names no file: {:?}",
+            walk.paths
+        );
+    }
+
+    /// An empty candidate list is a question about no path: nothing is returned, and the walk
+    /// still reports its own bound (an empty list must not mean "every path").
+    #[test]
+    fn paths_touched_since_with_no_candidates_returns_nothing_and_still_reports_its_bound() {
+        let (_tmp, root) = git_fixture_with_history("src/first.rs", "//! first\n", 4);
+        let repo = git2::Repository::open(&root).unwrap();
+
+        let walk = paths_touched_since(&repo, 0, 3, Some(&[]));
+
+        assert!(
+            walk.paths.is_empty(),
+            "no candidate was asked about, so none is touched: {:?}",
+            walk.paths
+        );
+        assert!(walk.ceiling_reached, "5 commits against a ceiling of 3");
     }
 
     /// Reaching the ceiling is harmful only when it happens INSIDE the settle window; reached
@@ -13467,7 +13570,7 @@ mod tests {
 
         // Ceiling 3 stops after the 4.5-day commit; the 6.5-day commit is unread and inside
         // the window. The harmful case.
-        let walk = paths_touched_since(&repo, cutoff, 3);
+        let walk = paths_touched_since(&repo, cutoff, 3, None);
         assert!(walk.ceiling_reached, "6 commits against a ceiling of 3");
         assert!(
             walk.ceiling_reached_in_window,
@@ -13477,7 +13580,7 @@ mod tests {
 
         // Ceiling 5 stops after the 8.5-day commit — already past the cutoff. The ceiling
         // bit, and the unread tail is only older history: harmless, and must read so.
-        let walk = paths_touched_since(&repo, cutoff, 5);
+        let walk = paths_touched_since(&repo, cutoff, 5, None);
         assert!(
             walk.ceiling_reached,
             "the ceiling still bit: the 10.5-day commit is unread"
@@ -13489,7 +13592,7 @@ mod tests {
         );
 
         // Ceiling 6 reads all six commits: complete.
-        let walk = paths_touched_since(&repo, cutoff, 6);
+        let walk = paths_touched_since(&repo, cutoff, 6, None);
         assert!(
             !walk.ceiling_reached && !walk.ceiling_reached_in_window,
             "the whole history was read"
@@ -13504,7 +13607,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(tmp.path()).unwrap();
 
-        let walk = paths_touched_since(&repo, 0, 4000);
+        let walk = paths_touched_since(&repo, 0, 4000, None);
         assert!(
             walk.unavailable,
             "a repository with no HEAD commit was not read at all"
