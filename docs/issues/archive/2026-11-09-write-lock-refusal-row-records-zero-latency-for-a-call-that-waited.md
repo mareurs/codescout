@@ -1,10 +1,11 @@
 ---
-id: b11f090a939e45aa
+id: ce9f061086a62bd7
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a write-lock refusal row records latency_ms 0 for a call that waited up to write_lock_timeout_secs'
 tags:
 - cluster/unclassified
+closed: 2026-11-09
 opened: 2026-11-09
 ---
 
@@ -40,16 +41,28 @@ Not measured: the exact wait of each call. The call start is not visible from ou
 None. Cause read from `src/server.rs` only.
 
 ## Fix
-Unknown. Likely: take a clock before `acquire_write_guard_if_writing` and carry it in `Unrecorded` so `record_unrecorded` can write `started_at` and `latency_ms`. Only the write-lock exit has a real wait; the other `Unrecorded` exits return at once.
+
+Fixed in `6b3f42c49` on `experiments` (patch-id `8308c8d080d4`).
+
+`dispatch_tool_call` takes a clock before `acquire_write_guard_if_writing`. Only the lock-refusal arm puts `(started_at, latency_ms)` into the new `Unrecorded::held` field. `record_refusal_row` takes `held` and, when it is `Some`, writes the row through `UsageRecorder::record_abandoned`, as the timeout row does. The other `Unrecorded` exits pass `None` and keep the recorder's own clock.
+
+Verified live on a rebuilt server (binary `6b3f42c49`) on 2026-11-09: a refusal under a lock held from another process left row 282746 with `latency_ms` 5006, `started_at` 07:53:45.328 and `called_at` 07:53:50.337. The row before the fix (282728, binary `863f6de1c`) has `latency_ms` 0. The 5 s is `write_lock_timeout_secs`, so the call did wait, which the Evidence section had left unmeasured.
 
 ## Tests added
-N/A — not fixed. `a_refused_write_lock_leaves_one_row` asserts the family and the outcome; it does not assert `latency_ms`.
+
+`a_refused_write_lock_leaves_one_row` (`src/server/exit_rows_tests.rs`) now asserts `latency_ms` is between 900 and 4000 ms. With `held` forced to `None` the test fails with "got 0"; with the fix it passes. Gate green on 2026-11-09: LEAN 6282 passed, DEFAULT 9156 passed, Python 1764 passed.
 
 ## Workarounds
 Read `called_at` of the row beside `write_lock_timeout_secs`. The wait is not recoverable from the row alone.
 
 ## Resume
-Add a start clock to `Unrecorded`, set it before the lock wait, and extend `a_refused_write_lock_leaves_one_row` to assert `latency_ms >= 900` as the timeout test does.
+
+Nothing left to do: the fix is committed, verified live and the gate is green. The steps taken were: add a start clock to `Unrecorded`, set it before the lock wait, and assert `latency_ms >= 900` in `a_refused_write_lock_leaves_one_row`.
+
+## Fix provenance
+
+- **SHA:** `6b3f42c49` (`experiments`)
+- **patch-id:** `8308c8d080d4`
 
 ## References
 - `docs/issues/archive/2026-11-08-access-gate-refusals-leave-no-usage-row.md`
