@@ -909,3 +909,35 @@ Saving per stamped subagent: 2,060 B. The census counted 1,299 subagents in 30 d
 **Not established.** Whether the hook text is read at all: this checks delivery, not use. Whether a subagent without the companion hook would use the guide as its only source: the census cannot show it, because every delivery in it had the hook.
 
 **Decision and result (same day).** The operator chose "a pointer only" over keeping the short body or giving a stamped subagent nothing. Commit `6faee93b4`: the stamped subagent's body is 292 B, 578 B wrapped, against 1,278 B for the first short body and 3,338 B for the whole guide. Saving per stamped subagent against today's whole guide: 2,760 B. **Count correction:** the census holds 1,711 own-block bootstrap deliveries to subagents (5.67 MB, 18.6% of the 30.5 MB delivered in 30 days), in 1,296 transcripts; a re-armed subagent receives the guide again. The saving over the census is therefore up to 1,711 x 2,760 B = 4.7 MB, not the 3.6 MB (1,296 x 2,760 B) this paragraph first gave, and not the 2.7 MB in "Shipped 2026-11-09". Both earlier figures counted transcripts, not deliveries. Only subagents that carry the companion's principal stamp are counted in the saving. The pointer names the hook's "EXPLORATION PROTOCOL" block by its title. `subagent_opening_body_is_a_pointer_and_keeps_always_verify` pins only that the pointer contains the title. The title is defined in the companion repo (`subagent-guidance.mjs`), and no test spans the two repos, so a rename there would leave a stale pointer unnoticed. Gate green on `6faee93b4` in one run: Python 1,765, lean 6,330, default 9,228, clippy and fmt clean. The "Shipped 2026-11-09" section above describes the first short body; its byte table is superseded by these numbers.
+
+## Pilot, part 1 (read and measure) 2026-11-09 — `progressive-disclosure` is 45% of delivered bytes; the mechanism can split it by overflowing tool only
+
+Nothing was built. Source: `scratchpad/census-30d.jsonl` (own-block whole deliveries), `scratchpad/pd_sections.py`, `src/prompts/guide_index.rs`, `src/engines/emitters.rs`.
+
+**What is delivered.** 1,250 whole deliveries of `progressive-disclosure` in 30 days: 917 to subagents (9.93 MB), 333 to parents (3.78 MB), 13.7 MB in all, 45% of the 30.5 MB the census holds. Block size is 7,731 to 14,178 B, median 10,040 B (the guide changed during the window; six sizes cover most deliveries). Today's file is 14,115 B.
+
+**Sections (current file, bytes):** preamble 118; Output budgets 901; The @ref buffer 4,231 (of which the `.err` subsection 989); Background jobs 2,847; Path-relative annotation 2,068; Anti-patterns 2,877; Related 84. Over the 2,500 B declared-section cap (`MAX_DECLARED_SECTION_BYTES`): The @ref buffer, Background jobs, Anti-patterns.
+
+**Mechanism limit (read at `Shape::matches`).** A declared shape is `tool`, an optional `action`, and an optional `path~` substring of a path named in the RESULT. It cannot see call arguments, so a `run_command` that starts a background job is not distinguishable from any other `run_command`. There is no "overflow" shape either: `emit_guide_sections` gates this one topic on the `overflowing` boolean, whichever tool overflowed. So the finest split available is by the OVERFLOWING TOOL.
+
+**Who overflows (917 subagent deliveries):** `run_command` 638 (70%), `grep` 186 (20%), `symbols` 56, `doc.get` 26, the rest under 10. For the 333 parent deliveries: `run_command` 204, `grep` 67, `doc.get` 26, `doc.find` 17.
+
+**Layer-1 predicates, next 30 calls after delivery (relevance, not cause; no control group).** Subagents / parents:
+
+- a `@cmd_`/`@tool_`/`@file_`/`@bg_` handle in the NEXT call: 38% / 33%;
+- a handle anywhere in 30 calls: 65% / 66%;
+- `run_in_background` or `@bg_`: 16% / 39%;
+- the `.err` suffix on a buffer: 2% (17 of 917) / 2% (7 of 333). Zeros and near-zeros are the strong evidence in this instrument: the `.err` subsection is almost never followed by its use.
+- The handle figures are confounded the same way the bootstrap figure was: the overflow envelope's own `hint` names the follow-up call, so handle use is explained by the result alone. They do not show that the guide's body was used.
+
+**Scenario, stated assumptions.** If the topic declared a core section of about 2.7 KB (preamble, Output budgets, the envelope and query forms) served on any overflow, and `run_command` overflows also got the `.err` subsection and Background jobs trimmed to the 2,500 B cap (about 6.2 KB in all), the saving over the census would be 5.23 MB for subagents and 2.17 MB for parents: 7.4 MB, 54% of this topic and 24% of all delivered bytes. Path-relative annotation and Anti-patterns would become pull-only. The 2.7 KB and 6.2 KB are assumptions, not measurements of a built guide.
+
+**Redundancy seen while reading (no mechanism needed).**
+
+- The Anti-patterns bullet about piping an unbounded `run_command` is about 1.7 KB and restates the IL-3 text that `get_guide("iron-laws-detail")` already owns.
+- Path-relative annotation (2,068 B) is the detailed form of a rule that `workspace-state` cites as canonical (`workspace-state.md` points at `progressive-disclosure` § Path-relative annotation). A split must keep that citation resolvable: the API cannot serve a section by name (decision 2026-11-01), so it stays reachable only as part of the whole topic.
+- Trimming these two alone would cut roughly 2.5 to 3 MB over the census with no new delivery mechanism, against 7.4 MB for the split.
+
+**Not established.** Whether any section's absence changes behaviour: no control group exists for this topic. Whether the first overflow in a session is also the one where the guide would matter. Whether making this topic declare sections interacts badly with the `overflowing` gate and `every_observed_shape_of_a_declaring_topic_has_a_section` (read, not run). The 7.4 MB figure rests on the two assumed section sizes.
+
+**Options.** (1) Trim the two redundant passages, no mechanism change. (2) Build the split by overflowing tool as a pilot, then re-run the census to confirm the delivery pattern (it shows what is delivered, not whether behaviour changes). (3) Both, trim first. (4) Stop here.
