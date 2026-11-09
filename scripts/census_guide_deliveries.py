@@ -4,7 +4,7 @@
 Why this exists: docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-an-unmodelled-graph.md.
 scripts/probe_guide_section_use.py scores a topic as if it were delivered whole, so its
 "never engaged" share is an upper bound. This census counts what was delivered: each injected
-block (a whole topic, one section, a preamble, or an oversize pointer) with its real byte size,
+block (a whole topic, one section, a preamble, a subagent's pointer body, or an oversize pointer) with its real byte size,
 the call that triggered it, and what the session did next.
 
 It measures delivery, not use. Whether a later action depended on a delivered section is a

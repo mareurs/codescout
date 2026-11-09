@@ -139,8 +139,9 @@ pub(crate) fn inject_hint(val: &mut Value, topic: &str, shape: GuideDeliveryShap
 /// the registered-topics table, not as a supported delivery path.
 ///
 /// `pub(crate)` because it has **two** callers, not one: `guide_blocks_for`'s
-/// non-declaring branch below, and `call_content`'s session-opener path, which
-/// delivers `SESSION_OPENING_GUIDE` whole and deliberately bypasses
+/// non-declaring branch below, and `engines::emitters::emit_session_opener`, which
+/// delivers `SESSION_OPENING_GUIDE` whole to every caller but a subagent (a subagent
+/// gets [`subagent_opener_block`]) and deliberately bypasses
 /// `guide_blocks_for` (that topic never declares sections in Phase 1, asserted
 /// by `session_opening_guide_never_declares_sections`).
 pub(crate) fn guide_block(topic: &str) -> Option<Content> {

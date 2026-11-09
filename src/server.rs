@@ -19208,9 +19208,10 @@ mod guide_hint_tests {
              guarding nothing."
         );
     }
-    /// The session-opener branch (`types.rs`'s `call_content`) inserts the bare
-    /// `SESSION_OPENING_GUIDE` ledger key and always reports
-    /// `GuideDeliveryShape::Whole`, on the assumption — stated only as a
+    /// The session-opener branch (`engines::emitters::emit_session_opener`) inserts the
+    /// bare `SESSION_OPENING_GUIDE` ledger key and reports `GuideDeliveryShape::Whole`
+    /// (`Short` for a subagent's pointer body), never a section shape, on the assumption
+    /// — stated only as a
     /// comment — that this topic never declares `##`/`###` sections in
     /// Phase 1. `guide_blocks_for` keys everything else at `topic#heading`;
     /// the two never collide TODAY only because that assumption holds. The
@@ -19227,7 +19228,7 @@ mod guide_hint_tests {
                 .declares(crate::prompts::SESSION_OPENING_GUIDE),
             "SESSION_OPENING_GUIDE ('{}') now declares sections, but the opener branch \
              in `engines::emitters::emit_session_opener` still keys it as a bare topic and reports \
-             GuideDeliveryShape::Whole unconditionally — it will double-deliver \
+             Whole or Short unconditionally — it will double-deliver \
              against `guide_blocks_for`'s `topic#heading` keys. Update the opener \
              branch to route through `guide_blocks_for` (or an equivalent \
              section-aware path) before removing this assertion.",
