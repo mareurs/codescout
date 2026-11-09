@@ -31,6 +31,7 @@ pub fn install_default_crypto_provider() {
         });
     }
 }
+pub mod observations;
 
 pub mod agent;
 pub mod ast;
