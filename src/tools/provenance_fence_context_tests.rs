@@ -322,9 +322,53 @@ async fn strong_formatter_checks_the_actual_helper_closure_before_its_body() {
         .contains("trusted formatter closure"));
 }
 
+/// Metadata that makes `bash scripts/fmt-mine.sh` a trusted native formatter for `root`: bound to
+/// the current generations of `root` and of this test's coordination domain.
+async fn native_formatter_meta(root: &Path) -> (Value, ClientIdentity) {
+    let domain = crate::tools::native_provenance_fence::coordination_root().unwrap();
+    let coordination_generation = quiescent_generation(&domain).await;
+    let fence_generation = quiescent_generation(root).await;
+    let meta = json!({
+        "sessionId":"root","threadId":"thread","codex/toolCallId":"formatter",
+        "codex/nativeExecutionProvenance":{
+            "checkpoint":{"identity":{"root":"root","thread":"thread"},"call_id":"formatter"},
+            "fence_capability":true,"coordination_root":domain,
+            "coordination_generation":coordination_generation,
+            "fence":{"root":root.canonicalize().unwrap(),"generation":fence_generation}
+        }
+    });
+    let client = ClientIdentity {
+        name: "codex-mcp-client".to_owned(),
+        version: None,
+    };
+    (meta, client)
+}
+
+/// Metadata that makes a formatter call ELIGIBLE for the exclusive leases, with placeholder
+/// generations and no lock reads. For a test that only needs the lease decision: the eligible
+/// call is refused at the leases or never reaches `certificate` with these values. Reading real
+/// generations takes the lock exclusively, and a fork in a parallel test can carry that
+/// exclusive copy past the read, so a test that needs no certificate must not read them.
+fn eligible_formatter_meta(root: &Path) -> (Value, ClientIdentity) {
+    let meta = json!({
+        "sessionId":"root","threadId":"thread","codex/toolCallId":"formatter",
+        "codex/nativeExecutionProvenance":{
+            "checkpoint":{"identity":{"root":"root","thread":"thread"},"call_id":"formatter"},
+            "fence_capability":true,"coordination_root":"/unread","coordination_generation":0,
+            "fence":{"root":root,"generation":0}
+        }
+    });
+    let client = ClientIdentity {
+        name: "codex-mcp-client".to_owned(),
+        version: None,
+    };
+    (meta, client)
+}
+
 #[tokio::test]
-async fn ordinary_edits_coexist_with_commands_but_formatting_requires_quiescence() {
+async fn ordinary_edits_coexist_with_commands_but_native_formatting_requires_quiescence() {
     let dir = checkout();
+    let (meta, client) = eligible_formatter_meta(dir.path());
     let _command =
         crate::tools::native_provenance_fence::Fence::try_participate(dir.path()).unwrap();
     let ran = AtomicBool::new(false);
@@ -348,58 +392,159 @@ async fn ordinary_edits_coexist_with_commands_but_formatting_requires_quiescence
         false,
         "run_command",
         &json!({"command":"bash scripts/fmt-mine.sh"}),
-        None,
-        None,
+        meta.as_object(),
+        Some(&client),
         async {
-            panic!("formatter dispatched during participating command");
+            panic!("native formatter dispatched during participating command");
             #[allow(unreachable_code)]
             Ok(Vec::new())
         },
     )
     .await;
-    assert!(formatter.is_err());
+    assert!(
+        formatter
+            .unwrap_err()
+            .to_string()
+            .contains("refused dispatch"),
+        "the refusal must come from the leases, not from a later check"
+    );
 }
+
+/// A formatter call that cannot use a native checkpoint shares the leases: a live participant
+/// does not refuse it, and it does not refuse a participant. Before bug 312cde2f4698874b such a
+/// call took the leases exclusively too; that is removed on purpose, so this pins the new scope.
+#[tokio::test]
+async fn a_formatter_without_a_native_proof_shares_the_leases() {
+    let dir = checkout();
+    let _command =
+        crate::tools::native_provenance_fence::Fence::try_participate(dir.path()).unwrap();
+    let ran = AtomicBool::new(false);
+    let peer_ran = AtomicBool::new(false);
+    scope_root(
+        dir.path(),
+        false,
+        "run_command",
+        &json!({"command":"bash scripts/fmt-mine.sh"}),
+        None,
+        None,
+        async {
+            ran.store(true, Ordering::SeqCst);
+            scope_root(
+                dir.path(),
+                true,
+                "create_file",
+                &json!({}),
+                None,
+                None,
+                async {
+                    peer_ran.store(true, Ordering::SeqCst);
+                    Ok(Vec::new())
+                },
+            )
+            .await?;
+            Ok(Vec::new())
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        ran.load(Ordering::SeqCst),
+        "a live participant refused the formatter"
+    );
+    assert!(
+        peer_ran.load(Ordering::SeqCst),
+        "the formatter refused a participant"
+    );
+}
+
+/// The eligibility boundary of the exclusive leases: only `codex-mcp-client` with
+/// `fence_capability` exactly `true` is a native formatter. Every near miss shares the leases,
+/// so a live participant does not refuse it.
+#[tokio::test]
+async fn only_the_codex_client_with_the_fence_capability_takes_the_leases_exclusively() {
+    let dir = checkout();
+    let (native, codex) = eligible_formatter_meta(dir.path());
+    let other = ClientIdentity {
+        name: "claude-code".to_owned(),
+        version: None,
+    };
+    let mut absent = native.clone();
+    absent["codex/nativeExecutionProvenance"]
+        .as_object_mut()
+        .unwrap()
+        .remove("fence_capability");
+    let mut off = native.clone();
+    off["codex/nativeExecutionProvenance"]["fence_capability"] = json!(false);
+    let mut text = native.clone();
+    text["codex/nativeExecutionProvenance"]["fence_capability"] = json!("true");
+    let cases: [(&str, &Value, Option<&ClientIdentity>); 5] = [
+        ("codex client, capability absent", &absent, Some(&codex)),
+        ("codex client, capability false", &off, Some(&codex)),
+        ("codex client, capability as a string", &text, Some(&codex)),
+        (
+            "another client claiming the capability",
+            &native,
+            Some(&other),
+        ),
+        ("no client, meta claiming the capability", &native, None),
+    ];
+    let _command =
+        crate::tools::native_provenance_fence::Fence::try_participate(dir.path()).unwrap();
+    for (case, meta, client) in cases {
+        let ran = AtomicBool::new(false);
+        scope_root(
+            dir.path(),
+            false,
+            "run_command",
+            &json!({"command":"bash scripts/fmt-mine.sh"}),
+            meta.as_object(),
+            client,
+            async {
+                ran.store(true, Ordering::SeqCst);
+                Ok(Vec::new())
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{case}: refused: {error}"));
+        assert!(ran.load(Ordering::SeqCst), "{case}: body did not run");
+    }
+}
+
 #[tokio::test]
 async fn formatter_excludes_a_foreign_workspace_shell_targeting_its_checkout() {
     let a = checkout();
     let b = checkout();
     let target = b.path().join("probe.txt");
     std::fs::write(&target, "before").unwrap();
-    scope_root(
-        b.path(),
-        true,
-        "run_command",
-        &json!({"command":"bash scripts/fmt-mine.sh"}),
-        None,
-        None,
-        async {
-            let result = scope_root(
-                a.path(),
-                false,
-                "run_command",
-                &json!({"command":"foreign target"}),
-                None,
-                None,
-                async {
-                    let mut command = tokio::process::Command::new("python3");
-                    command
-                        .arg("-c")
-                        .arg("import pathlib,sys;pathlib.Path(sys.argv[1]).write_text('changed')")
-                        .arg(&target);
-                    crate::tools::invocation_context::apply_to_shell(&mut command)?;
-                    assert!(command.status().await?.success());
-                    Ok(vec![])
-                },
-            )
-            .await;
-            assert!(
-                result.is_err(),
-                "foreign workspace wrote while another formatter held its lease"
-            );
-            assert_eq!(std::fs::read_to_string(&target).unwrap(), "before");
-            Ok(vec![])
-        },
-    )
+    // The exclusion is the native formatter's: it is the one that holds the leases exclusively.
+    let (meta, client) = native_formatter_meta(b.path()).await;
+    quiescent_formatter_call(b.path(), &meta, &client, || async {
+        let result = scope_root(
+            a.path(),
+            false,
+            "run_command",
+            &json!({"command":"foreign target"}),
+            None,
+            None,
+            async {
+                let mut command = tokio::process::Command::new("python3");
+                command
+                    .arg("-c")
+                    .arg("import pathlib,sys;pathlib.Path(sys.argv[1]).write_text('changed')")
+                    .arg(&target);
+                crate::tools::invocation_context::apply_to_shell(&mut command)?;
+                assert!(command.status().await?.success());
+                Ok(vec![])
+            },
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "foreign workspace wrote while another formatter held its lease"
+        );
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "before");
+        Ok(vec![])
+    })
     .await
     .unwrap();
 }

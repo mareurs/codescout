@@ -282,7 +282,7 @@ impl Fence {
 
     pub fn bump(&mut self) -> io::Result<u64> {
         // Ordinary participants share the effect fence, but increments must
-        // still serialize. The formatter holds the effect fence exclusively.
+        // still serialize. A native formatter holds the effect fence exclusively.
         let mut file = open(&self.counter_path, true)?;
         file.lock()?;
         let generation = counter(&mut file)?

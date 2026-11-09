@@ -141,8 +141,21 @@ where
         // lease closes effects from another checkout or server/profile as well.
         let domain = super::native_provenance_fence::coordination_root()?;
         let formatter = is_foreground_formatter(name, input);
+        let native_proof = client.is_some_and(|client| client.name == "codex-mcp-client")
+            && meta
+                .and_then(|meta| meta.get("codex/nativeExecutionProvenance"))
+                .and_then(|proof| proof.get("fence_capability"))
+                == Some(&Value::Bool(true));
+        let trusted_formatter = formatter && native_proof;
+        // Scope decision (bug 312cde2f4698874b): the approved design motivates exclusivity by
+        // native checkpoint validity through the formatter's last write, so only a formatter
+        // that can use a checkpoint takes the leases exclusively. Before this change every
+        // foreground formatter did, which also kept concurrent writers away from formatters
+        // without a proof; that extra behavior is removed deliberately, and they now share the
+        // leases like any other command. `trusted_formatter` is only eligibility: an eligible
+        // call is still refused below when its proof does not validate.
         let acquire = |root: &Path| {
-            if formatter {
+            if trusted_formatter {
                 Fence::try_acquire(root)
             } else {
                 Fence::try_participate(root)
@@ -157,12 +170,6 @@ where
         let mut fence = acquire(&root).map_err(|error| {
             RecoverableError::new(format!("native provenance fence refused dispatch: {error}"))
         })?;
-        let native_proof = client.is_some_and(|client| client.name == "codex-mcp-client")
-            && meta
-                .and_then(|meta| meta.get("codex/nativeExecutionProvenance"))
-                .and_then(|proof| proof.get("fence_capability"))
-                == Some(&Value::Bool(true));
-        let trusted_formatter = formatter && native_proof;
         if trusted_formatter {
             super::trusted_formatter::verify(&root, input).map_err(|error| {
                 RecoverableError::new(format!(
