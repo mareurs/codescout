@@ -271,32 +271,6 @@ pub fn normalize_line_nav_aliases(input: &mut serde_json::Value) {
     }
 }
 
-/// Extract an optional i64 parameter with lenient coercion.
-///
-/// Accepts both native JSON numbers and string-encoded integers (`"-1"` → -1).
-/// Returns `None` if the parameter is absent, null, or not coercible.
-pub fn optional_i64_param(input: &serde_json::Value, name: &str) -> Option<i64> {
-    let val = input.get(name)?;
-    if val.is_null() {
-        return None;
-    }
-    val.as_i64()
-        .or_else(|| val.as_str().and_then(|s| s.trim().parse::<i64>().ok()))
-}
-
-/// Extract an optional f64 parameter with lenient coercion.
-///
-/// Accepts both native JSON numbers and string-encoded floats (`"0.5"` → 0.5).
-/// Returns `None` if the parameter is absent, null, or not coercible.
-pub fn optional_f64_param(input: &serde_json::Value, name: &str) -> Option<f64> {
-    let val = input.get(name)?;
-    if val.is_null() {
-        return None;
-    }
-    val.as_f64()
-        .or_else(|| val.as_str().and_then(|s| s.trim().parse::<f64>().ok()))
-}
-
 /// Extract an optional JSON array parameter with lenient coercion.
 ///
 /// Some MCP clients serialize array-typed tool parameters as JSON strings

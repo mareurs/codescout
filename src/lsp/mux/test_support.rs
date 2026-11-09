@@ -33,29 +33,3 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     }
     Ok(())
 }
-
-/// Spawn two agents on the same workspace, both pointed at the same mux.
-/// Returns `(agent_a, agent_b, workspace_root, _tempdir)`. Drop the tempdir
-/// to remove the workspace.
-#[allow(dead_code)]
-pub(crate) async fn two_agents_on_fixture(
-    fixture_rel: &str,
-) -> (
-    crate::agent::Agent,
-    crate::agent::Agent,
-    PathBuf,
-    tempfile::TempDir,
-) {
-    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/lsp-mux")
-        .join(fixture_rel);
-    assert!(fixture.exists(), "fixture missing: {}", fixture.display());
-    let (tempdir, root) = stage_fixture(&fixture);
-    let a = crate::agent::Agent::new(Some(root.clone()))
-        .await
-        .expect("Agent A");
-    let b = crate::agent::Agent::new(Some(root.clone()))
-        .await
-        .expect("Agent B");
-    (a, b, root, tempdir)
-}

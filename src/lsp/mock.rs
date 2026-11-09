@@ -232,21 +232,6 @@ impl MockLspClient {
         drop(q);
         self
     }
-
-    /// Pre-load a sequence of `goto_definition` responses. Each call pops the
-    /// front; when the queue is empty, falls back to the (line, col) map.
-    pub fn with_goto_responses(
-        self,
-        responses: Vec<anyhow::Result<Vec<lsp_types::Location>>>,
-    ) -> Self {
-        let mut q = self
-            .goto_responses
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        q.extend(responses);
-        drop(q);
-        self
-    }
 }
 
 impl Default for MockLspClient {

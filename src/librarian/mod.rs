@@ -466,13 +466,6 @@ pub async fn build_tool_context_with(
     })
 }
 
-#[allow(dead_code)]
-pub(crate) async fn run_stdio_server() -> Result<()> {
-    let lsp = crate::lsp::LspManager::new_arc();
-    let ctx = build_tool_context(lsp).await?;
-    server::LibrarianServer::new(ctx).serve_stdio().await
-}
-
 #[cfg(test)]
 pub(crate) fn import_codescout(
     registry_path: &std::path::Path,

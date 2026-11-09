@@ -2563,16 +2563,6 @@ impl Agent {
             .active_project()
             .map(|p| p.library_registry.clone())
     }
-
-    /// Persist the library registry to disk.
-    pub async fn save_library_registry(&self) -> Result<()> {
-        let inner = self.inner.read().await;
-        let project = inner
-            .active_project()
-            .ok_or_else(|| anyhow::anyhow!("No active project"))?;
-        let path = project.root.join(".codescout").join("libraries.json");
-        project.library_registry.save(&path)
-    }
 }
 
 // ---------------------------------------------------------------------------

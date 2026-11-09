@@ -86,14 +86,6 @@ impl PeerClient {
         self.round_trip("buffer.read", serde_json::json!({ "handle": handle }))
             .await
     }
-
-    pub async fn grep_buffer(&mut self, handle: &str, pattern: &str) -> Result<Value> {
-        self.round_trip(
-            "buffer.grep",
-            serde_json::json!({ "handle": handle, "pattern": pattern }),
-        )
-        .await
-    }
 }
 
 #[cfg(test)]

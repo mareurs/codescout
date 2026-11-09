@@ -50,19 +50,7 @@ pub enum PathEvidence {
     Inferred,
 }
 
-impl PathEvidence {
-    /// Purely syntactic half of the judgement: a token with no separator at all
-    /// earned `FilePath` from an extension alone. The other half — whether the
-    /// root segment exists in the repo — needs the filesystem and so lives in
-    /// `resolver::path_evidence`.
-    pub fn of_syntax(raw_ref: &str) -> Self {
-        if raw_ref.contains('/') {
-            Self::Structural
-        } else {
-            Self::Inferred
-        }
-    }
-}
+impl PathEvidence {}
 
 /// Cap a `missing` severity when the path classification itself was a guess.
 ///

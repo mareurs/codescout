@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Owed by every refusal whose remedy is an edit to a `[security]` key of
 /// `.codescout/project.toml`.
@@ -1013,11 +1013,6 @@ impl ProjectConfig {
             libraries: LibrariesSection::default(),
             lsp: LspSection::default(),
         }
-    }
-
-    /// Path to the per-project data directory.
-    pub fn data_dir(root: &Path) -> PathBuf {
-        root.join(".codescout")
     }
 }
 

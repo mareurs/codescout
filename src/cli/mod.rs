@@ -75,26 +75,6 @@ pub async fn open_ctx(opts: &CommonOpts) -> Result<crate::librarian::tools::Tool
         .context("opening librarian tool context")
 }
 
-/// Print `result` and exit with the right code. JSON mode wraps errors so
-/// hooks can parse them; pretty mode writes to stderr.
-pub fn exit_with(result: Result<()>, opts: &format::OutputOpts) -> ! {
-    match result {
-        Ok(()) => std::process::exit(0),
-        Err(e) => {
-            if opts.json {
-                let _ = serde_json::to_writer(
-                    std::io::stdout(),
-                    &serde_json::json!({"ok": false, "error": format!("{e:#}")}),
-                );
-                println!();
-            } else {
-                eprintln!("error: {e:#}");
-            }
-            std::process::exit(1);
-        }
-    }
-}
-
 /// Resolve a CLI string that may be `@<path>`, `-` (stdin), or a literal value.
 pub fn read_at_or_stdin(value: &str) -> Result<String> {
     if value == "-" {

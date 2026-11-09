@@ -491,18 +491,6 @@ pub fn resolve_project_for_path<'a>(
         .max_by_key(|p| p.relative_root.components().count())
 }
 
-/// Given a file path and a list of discovered projects, return the project ID.
-/// Falls back to `ROOT_PROJECT_ID` if no project claims the file.
-pub fn resolve_project_id(
-    projects: &[DiscoveredProject],
-    workspace_root: &Path,
-    file_path: &Path,
-) -> String {
-    resolve_project_for_path(projects, workspace_root, file_path)
-        .map(|p| p.id.clone())
-        .unwrap_or_else(|| ROOT_PROJECT_ID.to_string())
-}
-
 /// State of a project within the workspace.
 pub enum ProjectState {
     /// Not yet activated — LSP not started, config not loaded.
