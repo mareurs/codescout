@@ -44,9 +44,11 @@ Not verified: that giving cs the same deny list closes most of the cost gap.
 
 Open. Candidate: a versioned arm profile in which cs lists only the tools the daily setup lists (without Bash, Edit and Write), selected by a parameter whose default is the old behaviour, so registered screens stay reproducible.
 
+Code landed 2026-11-09, opt-in: arm profile `v2` in `8a44c4eca` (cs lists `Read,Glob,Grep`; `arms.py` `CS_TOOLS_V2`), and the registration pins the profile in `acf72c2d6` (`run.py` passes it to every arm). The default stays `v1`, and no registered run has used `v2` yet. The record stays open until a `v2` registration runs. It also rests on an open decision: whether the daily setup's deny list is the intended reference for the cs arm. Owner of the setup-ab work: session `fbe38184-5a8d-4bc3-89dd-fdd3024c909a`, which asked on 2026-11-09 that this record not be closed as fixed yet.
+
 ## Tests added
 
-N/A — not fixed yet.
+Unit tests only, in `8a44c4eca` and `acf72c2d6`: `test_arms.py` `test_v2_cs_lists_no_tool_the_daily_setup_denies` and its siblings, `test_run.py` `RegisteredArmProfileTest`, `test_freeze_screen.py` `test_freeze_pins_the_arm_profile_in_the_hashed_registration`. They check the argument lists, not a live run.
 
 ## Workarounds
 

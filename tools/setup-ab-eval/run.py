@@ -752,6 +752,19 @@ def _result_record(records):
     return results[-1] if results else None
 
 
+def num_turns(records):
+    """The run's turn count: `num_turns` summed over every result record (bug a9f8671c8f8b4fad).
+
+    The CLI writes one result record per segment, and a queued task-notification turn after the
+    run adds a segment, so the last record alone counts only that turn. None when there is no
+    result record, or when one of them has no integer count: a partial sum would be a wrong
+    number under a whole-run name."""
+    counts = [r.get("num_turns") for r in records if r.get("type") == "result"]
+    if not counts or not all(type(c) is int for c in counts):
+        return None
+    return sum(counts)
+
+
 def _cost(result):
     if not isinstance(result, dict):
         return None
@@ -1241,7 +1254,7 @@ def _run_one(ctx, spec):
             (run_dir / "agent.patch").write_text(patch)
         fields = dict(costUsd=cost, wallMs=wall, capHit=cap_hit(result),
                       oomKills=mem["oom_kill"], memoryPeakBytes=mem["peak"],
-                      numTurns=result.get("num_turns") if result else None, usage=usage,
+                      numTurns=num_turns(records), usage=usage,
                       effectiveEffort=effective_effort(usage), integrity=integ,
                       bashCommands=bash_commands(records), editedFiles=edited,
                       inputTokens=usage["total"]["input_total"] if usage.get("reason") is None else None,

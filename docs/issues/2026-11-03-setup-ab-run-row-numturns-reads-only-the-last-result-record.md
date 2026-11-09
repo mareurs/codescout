@@ -1,10 +1,11 @@
 ---
 id: a9f8671c8f8b4fad
 kind: bug
-status: open
+status: fixed
 title: setup-ab run.py row numTurns reads only the last result record, so a background-task turn overwrites the real turn count
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
+closed: 2026-11-09
 opened: 2026-11-03
 ---
 
@@ -48,16 +49,30 @@ measured 2026-11-03: python scan of both streams (output above). The mechanism i
 1. **Hypothesis:** the agent really took one turn. **Test:** counted API messages in `usage.main.messages`. **Verdict:** rejected (47 and 51). **Evidence:** rows.jsonl `usage` block.
 
 ## Fix
-Not applied. `run.py` is hashed into the screen, stage 1 and stage 3 registrations (`freeze_screen.py` `files`), so an edit now breaks `freeze_screen.py check` for all three. Fold the fix into the next registration freeze: sum `num_turns` over all `result` records, keep the last record for cost, error status and cap-hit. Add a test with a two-record stream. Until then, read the two rows as 47 and 52 turns.
+
+Applied 2026-11-09. New helper `num_turns(records)` in `tools/setup-ab-eval/run.py` sums `num_turns` over every `type == "result"` record. `_run_one` sets the row field from it (`numTurns=num_turns(records)`). Cost, error status and cap-hit still read the last record through `_result_record`, because `total_cost_usd` is cumulative. The helper returns None when there is no result record, and also when any result record lacks an integer `num_turns` (a bool is refused too), so a partial sum is never published as the run total.
+
+Not changed: `duration_ms` is also per segment, but no row field reads it. The two rows already in `live-screen/rows.jsonl` keep `numTurns: 1`; the fix applies to new runs only.
+
+Timing: the setup-ab owner (session `fbe38184-5a8d-4bc3-89dd-fdd3024c909a`) confirmed on 2026-11-09 that no frozen registration was in flight: `fresh-screen-v2/live-screen` and `live-screen-rep2` are finished (16 rows each), and the cs/full registration is not frozen yet, so the new `run.py` hash goes into it.
 
 ## Tests added
-N/A — no code changed yet. The fix must add a two-record fixture to `test_run.py`.
+
+`tools/setup-ab-eval/test_run.py` `NumTurnsTest`:
+
+- `test_a_second_result_record_adds_its_turns_and_keeps_the_last_cost`: `FakeCLI` emits a second result record (`num_turns` 1, cumulative cost 0.534). The row must carry `numTurns` 4 and `costUsd` 0.534. Before the fix it failed with `1 != 4`.
+- `test_num_turns_sums_every_result_record`: no records, a non-result record, one record, two records with an assistant record between them.
+- `test_a_result_record_without_an_integer_count_makes_the_total_unknown`: a missing, None, string or bool count gives None.
+
+`FakeCLI` gained the script key `extra_result`, a dict merged over the run's result record and appended after it.
 
 ## Workarounds
-Correct the two rows at analysis time (47 and 52), or exclude `numTurns` for rows whose stream has more than one `result` record.
+
+For the two rows written before the fix, read them as 47 and 52 turns at analysis time, or exclude `numTurns` for rows whose stream has more than one `result` record.
 
 ## Resume
-Next step: include the fix in the next `freeze_screen.py` run, then re-run `run.py` tests.
+
+Nothing left in code. Archive this record once the fix commit is cited with its SHA and patch-id.
 
 ## References
 - `tools/setup-ab-eval/run.py:739`, `:1233`

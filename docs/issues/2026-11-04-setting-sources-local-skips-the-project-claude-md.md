@@ -64,6 +64,8 @@ N/A — the probe answered the question directly.
 
 Applied to the hint channel eval only, in Stage 3 (AM-10): `HCE_SETTING_SOURCES=project,local`, with `memcheck` showing the model quotes a `CLAUDE.md` token. Not applied to setup-ab, which has been merged into `experiments`. The hint channel eval's runner must load the project `CLAUDE.md` in every arm before A3 can be rerun, which changes what all arms see; that is an operator decision recorded in the eval's next amendment. Adding `project` to the sources may also load the tree's tracked `.claude/` settings and hooks, which must be checked first. setup-ab needs its own decision.
 
+setup-ab code landed 2026-11-09, opt-in: arm profile `v2` in `8a44c4eca` makes every arm load the `project` source (`arms.py` `SETTING_SOURCES_V2 = "project,local"`, `FULL_SETTING_SOURCES_V2 = "user,project,local"`), and `acf72c2d6` pins the profile in the registration. The default stays `v1`, and no registered run has used `v2` yet. Not verified: that the task `CLAUDE.md` reaches the agent in a real `v2` run. The unit tests check only the sources string. Still open: whether earlier setup-ab results need a caveat. The record stays open until a `v2` run confirms delivery; the setup-ab owner (session `fbe38184-5a8d-4bc3-89dd-fdd3024c909a`) asked on 2026-11-09 that it not be closed as fixed yet.
+
 ## Tests added
 
 N/A — no fix applied yet. A fix should come with a probe in the runner's smoke step that asserts a token from the task `CLAUDE.md` reaches the model.

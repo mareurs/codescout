@@ -175,7 +175,7 @@ DEFAULT = {"effort": "medium", "cost": 0.5, "text": "Fixed the bug.", "is_error"
            "codescout_call": True, "oom": False, "timeout": False, "no_result": False,
            "dup": False, "bad_tool_use": False, "raise": None, "duration_api_ms": 1200,
            "no_work": False, "subtype": "success", "terminal_reason": "completed",
-           "oom_kill": 0, "no_hook": False}
+           "oom_kill": 0, "no_hook": False, "extra_result": None}
 
 
 class FakeCLI:
@@ -251,6 +251,8 @@ class FakeCLI:
                          "usage": ({"input_tokens": 0, "output_tokens": 0} if sc["no_work"]
                                    else {"input_tokens": 100, "output_tokens": 20}),
                          "result": sc["text"]})
+            if sc["extra_result"] is not None:  # a queued task-notification turn after the run
+                recs.append(dict(recs[-1], **sc["extra_result"]))
         stdout = "".join(json.dumps(r) + "\n" for r in recs)
         return stdout, "", (None if sc["timeout"] else (137 if sc["no_result"] else 0))
 
@@ -1163,6 +1165,38 @@ class CapHitTest(RunnerCase):
         self.assertTrue(run.cap_hit({"subtype": "error_max_budget_usd", "is_error": True}))
         self.assertTrue(run.cap_hit({"subtype": "error_during_execution",
                                      "terminal_reason": "budget_exhausted"}))
+
+
+class NumTurnsTest(RunnerCase):
+    """Bug a9f8671c8f8b4fad: a background task-notification turn emits a second result record.
+
+    `num_turns` counts one segment of the session, so the row sums it over every result record;
+    `total_cost_usd` is cumulative, so cost still comes from the last record."""
+
+    def test_a_second_result_record_adds_its_turns_and_keeps_the_last_cost(self):
+        extra = {"num_turns": 1, "total_cost_usd": 0.534, "duration_api_ms": 1300}
+        cli = FakeCLI(self.world, self.data, lambda arm, n: {"extra_result": extra})
+        self.batch([spec()], BUDGET, cli=cli)
+        row = self.latest()[run.run_id(spec())]
+        self.assertEqual(row["numTurns"], 4)       # 3 in the run + 1 in the queued turn
+        self.assertEqual(row["costUsd"], 0.534)    # the last, cumulative total
+
+    def test_num_turns_sums_every_result_record(self):
+        res = lambda n: {"type": "result", "num_turns": n}
+        self.assertIsNone(run.num_turns([]))
+        self.assertIsNone(run.num_turns([{"type": "assistant", "num_turns": 9}]))
+        self.assertEqual(run.num_turns([res(47)]), 47)
+        self.assertEqual(run.num_turns([res(47), {"type": "assistant"}, res(1)]), 48)
+
+    def test_a_result_record_without_an_integer_count_makes_the_total_unknown(self):
+        # A partial sum would publish a wrong number under a whole-run name; unknown is honest.
+        good = {"type": "result", "num_turns": 47}
+        for bad in ({"type": "result"}, {"type": "result", "num_turns": None},
+                    {"type": "result", "num_turns": "1"}, {"type": "result", "num_turns": True}):
+            with self.subTest(bad=bad):
+                self.assertIsNone(run.num_turns([good, bad]))
+
+
 class TimeoutTest(RunnerCase):
     """Task 12 (operator 2026-10-30): pilot attempt 1 lost a run at RUN_TIMEOUT_S 1800 s."""
 
