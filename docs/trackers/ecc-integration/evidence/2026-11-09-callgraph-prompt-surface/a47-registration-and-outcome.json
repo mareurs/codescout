@@ -1,0 +1,32 @@
+{
+  "note": "Export of catalog A-47 row after outcome update. Prediction/threshold fields were preregistered before model arms; outcome/status were added afterward. Full historical prediction retained in ledger.",
+  "entry": {
+    "date": "2026-11-09",
+    "artifact": "Current call_graph promotion across server_instructions, tools/list, symbol-navigation guide and stored project prompt; isolated feat/ecc-callgraph-prompt-surface-20261109 at018bbfc49d679c7b5247f5dbf6f29a5e17fbc117.",
+    "gap": "Requested current-only and effective call_graph promotion. Inspection: short quickref routes who-calls to references; tool description, guide and stored prompt already promote call_graph. A-26 measured older Sonnet proposal-layer opening choices, not current Codex runtime adoption; no current Codex deficit claimed yet. Description labels LSP edges authoritative despite documented partial-analysis mechanisms; accuracy and routing are evaluated separately.",
+    "move": "Inventory actual initialize/tools/list/triggered guidance; verify current-only text against live behavior. Measure current Codex actual routing before changing it. If routing deficit appears, fold the overlapping who-calls line into direct-usage vs transitive-chain guidance, retaining all existing protections; no bare extra mention. Keep immutable history outside active surfaces.",
+    "prediction": "PRE-REGISTERED: pin gpt-6.1-sol/high, isolated read-only native Codex with private MCP state, same fixture/profile across arms. Base FIRST:10 transitive caller tasks (five phrasings twice),3 direct-usage controls. At>=9/10 correctly completed call_graph caller traversals with correct public-entrypoint answers and3/3 direct-reference controls, no routing edit and treatment skipped. At<=7/10 and valid transport/fixture, run contrastive treatment10+3; ship routing only if>=9/10, improvement>=3/10, and direct controls3/3. At8/10, extend base to20; satisfactory>=18/20=>no edit, deficient<=14/20=>treatment20+6, ship>=18/20 with>=6/20 improvement and direct6/6; middle=>inconclusive/no routing ship. Invalid transport/fixture/model/hash runs excluded and separately retained. Positive mandatory-routing control if a treatment null needs delivery validation. Check actual completed MCP tool+arguments+successful result and exact answer set, not a mention or first-choice-only answer.",
+    "confidence": "Inspection high; current routing deficit/effect unverified, N=0. Model behavior never inferred from wording. Current factual text cleanup can satisfy literal accuracy checks without claiming routing improvement.",
+    "outcome": "Satisfactory base: 10/10 verified transitive traversals plus exact answers, 3/3 direct-use controls. No routing edit; treatment skipped by prespecified branch. Independent raw recount confirms completed MCP events; initialize/tools-list only are wire-captured. One unrelated factual write-response rule corrected after actual MCP probe; no efficacy claim for that line.",
+    "observable_table": [
+      {
+        "world": "treatment works",
+        "returns": "(delivery=verified current arm, completed target traversal=true, correct answer=true)"
+      },
+      {
+        "world": "treatment fails",
+        "returns": "(delivery=verified current arm, completed target traversal=false or wrong scope, answer scored separately)"
+      },
+      {
+        "world": "treatment absent",
+        "returns": "(delivery=absent/unbound, traversal=null, answer=null); invalid manipulation, excluded from rates"
+      }
+    ],
+    "checker_controls": "Before arms, mutation-test checker on a passing completed target traversal+answer; a delivered references-only/manual answer; no bound-delivery trace; wrong direction/depth/symbol, failed tool, duplicated start+complete, missing final answer. Expected distinct delivery/routing/correctness tuple, no judge.",
+    "limits": "This is a NEW prompt-routing experiment, not the deferred no-ECC replay of either dogfood repair. All arms use identical isolated skill/profile conditions. Source/fixture/model/CLI/runtime hashes retained. Current-only inventory does not treat generic stale-state vocabulary, comments/tests or immutable research as active historical guidance.",
+    "id": "A-47",
+    "status": "measured",
+    "result_scope": "Fresh private native Codex profile; gpt-6.1-sol/high; exact current generic Navigation Strategy and actual MCP metadata; one Python fixture. Not the default plugin profile, production task benchmark, or deferred no-ECC repair replay.",
+    "evidence": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/adjudication.json"
+  }
+}

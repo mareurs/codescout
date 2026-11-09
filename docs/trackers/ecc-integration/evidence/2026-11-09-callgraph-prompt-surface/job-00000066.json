@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000066",
+  "command": "python3 docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/run_base.py --binary /home/marius/.cache/codescout-gate/slot-0/debug/codescout --output /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/smoke --smoke",
+  "server_pid": 1520813,
+  "job_pid": 1768820,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T13:46:53.850218228+00:00",
+  "finished_at": "2026-11-09T13:47:32.396688248+00:00",
+  "log_path": "/tmp/codescout-bg-g4KqvT.log"
+}

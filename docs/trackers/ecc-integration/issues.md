@@ -26,6 +26,10 @@ Both runs identified the same statically confirmed conditional cleanup-reporting
 
 Partial state after augmentation/registration failure, catalog-location discovery and canonicalization fallbacks remain open contract/reachability questions, not extra confirmed defects.
 
+## Prompt-routing instrument — fixed-verified 2026-11-09
+
+The [prompt audit](reports/2026-11-09-callgraph-prompt-surface.md) uncovered two scorer false positives through actual trace perturbations, recorded as bug-fix-session-log:F-221. Hardened fixture-specific scoring rejects both (0/2 survive), passes16 controls and preserves the independently verified13 original results. Actual tool evidence is completed Codex events; wire capture contains initialization/list only. Requested model/effort and generated-config hash are retained, without backend attestation or immutable profile inventory. The satisfactory base supports no routing edit in this fixture; it does not establish effectiveness of the default ECC/plugin profile or replay the repair tasks.
+
 ## Scope boundary
 
 Only two adapted Codex skills are in this pilot. Full ECC adoption, automatic orchestration changes and broader rollout are separate decisions. Keep the user's backup/revert path in [notes](notes/README.md).

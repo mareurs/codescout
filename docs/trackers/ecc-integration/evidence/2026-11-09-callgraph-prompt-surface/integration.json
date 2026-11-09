@@ -1,0 +1,40 @@
+{
+  "source_commit": "877003e9907a8a104d890e9e3f0b1b0d61748899",
+  "integration_commit": "6586622a30f0d790db17b1bf234aa7962837f510",
+  "stable_patch_id": "05cb71e8fcfa8b7513ecf3a5904847d211da967a",
+  "same_patch_id": true,
+  "same_stored_prompt_blob": true,
+  "integration_tree": "4b4b065297d3911fe88808341551e711f3e25ddd",
+  "source_file_sha256": "cc80985e14fbfa7ee6bd3716748b3832e6877cd5d5e7d15afea91dc153e95e29",
+  "jobs": [
+    {
+      "handle": "@bg_00000066",
+      "state": "exited",
+      "exit_code": 0
+    },
+    {
+      "handle": "@bg_00000067",
+      "state": "exited",
+      "exit_code": 0
+    },
+    {
+      "handle": "@bg_0000006a",
+      "state": "exited",
+      "exit_code": 0
+    },
+    {
+      "handle": "@bg_00000070",
+      "state": "exited",
+      "exit_code": 0
+    }
+  ],
+  "foreign_staged_paths_at_evidence_capture": [
+    ".codescout/memories/bug-triage-2026-10-27.md",
+    "docs/issues/2026-11-04-shared-checkout-gate-red-during-hint-authority-audit.md",
+    "docs/research/2026-11-04-claude-instructions-comparison.md",
+    "docs/research/data/2026-11-04-hint-authority-gate.log.gz",
+    "docs/research/data/2026-11-04-hint-authority-inputs.tar.gz",
+    "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md"
+  ],
+  "note": "Integration commits exactly one stored-prompt line. Existing foreign staged path names remained present; no byte-identity claim without before/after blob snapshots. Frozen integration gate verifies this exact committed tree, excluding unrelated dirty shared-checkout files."
+}

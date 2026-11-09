@@ -1,0 +1,6 @@
+{
+  "head": "018bbfc49d679c7b5247f5dbf6f29a5e17fbc117",
+  "source_sha256": "d5b158f5e38d67119e0abb4ffa077e65b083f9dc8d2c439b965c04af713693c8",
+  "source_mtime_unchanged": true,
+  "method": "Stage only own already-verified source; detach to integrated commit containing identical bytes. No reset or shared-index change."
+}

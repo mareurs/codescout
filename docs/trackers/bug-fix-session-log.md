@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 219
+entry_high_water_F: 221
 entry_high_water_W: 158
 ---
 
@@ -65,6 +65,8 @@ entry_high_water_W: 158
 
 | ID | Date | Severity | Category | Status | Title |
 | F-207 | 2026-11-01 | med | test-design | fixed-verified | **A diagnostic hint passed its tests and did not fire on the one tree it was built for** — a 50,000-entry bound taken from a count of directories met 311,890 entries; found only by reading the live warning. |
+| F-220 | 2026-11-09 | med | tool-behavior | mitigated | **A symbol label and its returned body disagreed after integrating shifted source** — cache flush and fresh pinned-worktree read restored agreement before auditing the description. |
+| F-221 | 2026-11-09 | med | eval-design | fixed-verified | **The routing scorer counted endpoint words without verifying graph edges or the MCP server** — 2 observed false positives before hardening, 0 afterward; current13 raw traces independently verified. |
 | F-213 | 2026-11-06 | med | test-design | fixed-verified | **A crash fixture failed in its toy parser before reaching the classifier** — wrong-reason red replaced by observed intended red before reapplying production wiring. |
 | F-214 | 2026-11-06 | med | test-design | promoted-to-bug-tracker | **Stripping log indentation promoted a debug field to compiler evidence** — real four-log overlap exposed the false provenance; three observed RED variants before fix. |
 | F-210 | 2026-11-01 | med | process | mitigated | **A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path** — `fmt-mine` named three of my files UNKNOWN after a 19-minute gate; `rustfmt --check` on the diff's files beforehand takes seconds. |
@@ -18069,6 +18071,40 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Cost:** med. The first plan (look up the refusal in `usage.db`) would have returned an empty set and read as "the problem is rare".
 
 **Recorded in:** `docs/issues/archive/2026-11-08-read-only-refusal-makes-the-agent-resend-the-whole-write.md`.
+
+## F-220 — A symbol label and its returned body disagreed after integrating shifted source
+
+**Valid:** dated 2026-11-09
+
+**Observed:** During the ECC call_graph prompt audit after integrating the navigation correction, a symbols lookup labelled CallGraph::description returned coordinates/body belonging to shifted format_output text. The controller stopped using that response as source evidence, flushed LSP position caches with workspace(post_compact=true), and re-read the symbol in the fresh audit worktree; label and body then agreed.
+
+**Expected:** Source coordinates and returned symbol body identify the same current declaration.
+
+**Severity:** med — accepting the first body would have audited the wrong tool description and sent the wrong contract to review.
+
+**Status:** mitigated
+
+**Scope:** One observed stale-position response across source integration; cache reset and fresh pinned-worktree read resolved this observation. This entry does not establish a new underlying product defect or its cause.
+
+**Lesson:** Treat a label/body contradiction as a failed lookup, flush/re-read before drawing a contract claim. See [audit plan](ecc-integration/plans/2026-11-09-callgraph-prompt-surface.md).
+
+## F-221 — The routing scorer counted endpoint words without verifying graph edges or the MCP server
+
+**Valid:** dated 2026-11-09
+
+**Observed:** Independent review perturbed deep copies of the retained native 06-chain trace. A completed tool marked server=unrelated-server still counted as routing success. Replacing its entire graph result by endpoint names plus an explicit no-edges sentence also counted. Both perturbations were actually scored: 2/2 survived. The existing ten calibration controls did not express these failures.
+
+**Expected:** A routing success in this fixture requires a completed codescout call with the four expected depth-qualified caller edges, not endpoint word presence.
+
+**Severity:** med — a future invalid trace could inflate the measured adoption rate without a tool error.
+
+**Status:** fixed-verified
+
+**Verification:** Retained score-prereview.py reproduces both false positives. The hardened score.py pins server=codescout, reads only the primary result block, and requires all four fixture edges at their actual depths. rescore.py observes both mutations rejected (0/2 survive), all16 controls pass, and all13 original traces retain verified routing and exact answers. Independent raw inspection confirms those original records already had the right server and edges, so the audit conclusion is unchanged. This is evidence-instrument development, not a production call_graph defect.
+
+**Evidence:** [Review](ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/review.txt), [observed re-score](ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/rescored.json), [runner](ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/rescore.py).
+
+**Lesson:** A pass control made only from endpoint words can license the same false positive the scorer is supposed to exclude. Perturb actual completed traces and check identity plus returned graph structure.
 
 ## Template for new entries
 

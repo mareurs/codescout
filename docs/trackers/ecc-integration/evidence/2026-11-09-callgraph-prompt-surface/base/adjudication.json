@@ -1,0 +1,17 @@
+{
+  "chain": {
+    "runs": 10,
+    "routed": 10,
+    "correct_answer": 10,
+    "both": 10
+  },
+  "direct": {
+    "runs": 3,
+    "routed": 3,
+    "correct_answer": 3,
+    "both": 3
+  },
+  "branch": "satisfactory base: no routing edit, skip treatment",
+  "model": "gpt-6.1-sol/high",
+  "scope": "Current generic navigation section + real MCP instruction/tool metadata; fresh private Codex profile, toy Python fixture. Not the full default-plugin profile or deferred repair replay."
+}

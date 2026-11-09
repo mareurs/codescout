@@ -1,0 +1,65 @@
+Independent scoped review — 2026-11-09
+
+Findings first
+
+No blocking finding in the one-line product edit. Two nonblocking evaluation-instrument false positives were observed; they do not affect the recounted current traces:
+
+1. score.py:21-26 does not bind completed MCP events to server="codescout". Changing the server field on the sole call_graph completion in base/06-chain/events.jsonl to "unrelated-server" leaves delivery=verified, routing=true, correct_answer=true. The initialization/list evidence is separate and does not bind that event's server. All current qualifying completions were independently checked to name codescout.
+
+2. score.py:32-34 recognizes a graph by substring presence, not graph edges. Replacing that same completion's content with "call_graph for write_row: handle_ingest and handle_shutdown are excluded; no caller edges found." still returns routing=true. All ten current graph results were independently checked for the actual four expected edge/depth records, with no handle_preview edge.
+
+These are limitations of this fixture scorer before reuse, not reasons to broaden the product patch. No production source, authoritative evidence or running profile was mutated.
+
+Four observed adversarial trace perturbations (deep copies of raw06-chain events): wrong server accepted; names without edges accepted; wrong final answer rejected; unparseable final answer rejected. Thus 2 of 4 invalid traces escaped their intended predicate. The existing score.selftest() ran and completed all 10 controls without assertion failure; Python command exit0. These were input-trace perturbations, not source-code mutations, and are not cargo mutation-probe KILLED/SURVIVED verdicts.
+
+Product correction
+
+Reviewed .worktrees/ecc-callgraph-prompt-surface/.codescout/system-prompt.md:40 and git diff. The old json!("ok")-only statement is replaced by compact acknowledgements or operation metadata without echoing file contents. It preserves the substantive no-content-echo guidance and states current behavior without historical accretion.
+
+src/tools/create_file.rs:147 returns json!("ok") internally. src/tools/core/types.rs:627-643 (annotate_write_path) promotes string responses to status objects and adds rel_path/abs_path without overwriting a tool-owned path. The recorded real MCP probe demonstrates create_file status/rel_path at write-result-probe.json:36 and doc create id/abs_path at :59. My review write also uses a real create_file call, independently exercising the rendered response layer. The inner Tool::call result and model-visible MCP response are distinct layers.
+
+The Navigation Strategy remains substantively unchanged: references for usages/call sites, call_graph callers for impact and callees for flow. The one-line change does not alter Rust, templates, guides or tool routing, so the onboarding-source version-bump rule in src/prompts/README.md:154 does not require a bump.
+
+Independent raw recount
+
+Read every base/[00..12]-*/events.jsonl and wire.jsonl, without using adjudication.json or results.json as the counting source. A Python pass asserted: exactly one completed turn in each run; unique completed MCP item IDs; initialize instructions start with the preflight static slice; relevant call_graph/references metadata hash equals the preflight hash; qualifying completed calls name server=codescout, status=completed, error=null, symbol=write_row and path=store.py; all four graph edge/depth strings and exact final symbol sets.
+
+Observed all 13 runs valid on these checks, 79 completed MCP navigation calls total, 10/10 chain runs with a qualifying call_graph traversal and correct endpoints, 3/3 direct runs references-first with correct direct-call/value-use names. All ten qualifying graph calls requested callers and max_depth10. All ten returned persist_batch→write_row depth1, flush_queue→persist_batch depth2, handle_ingest→flush_queue depth3, handle_shutdown→flush_queue depth3. All three direct results showed the declaration, WRITE_HANDLER binding and write_row(v) call; final answers were exactly WRITE_HANDLER and persist_batch.
+
+Raw evidence coordinates:
+Run       total completed MCP calls  target completion line  final answer line
+00-chain  8                          9                       20
+01-chain  8                          9                       20
+02-chain  7                          7                       18
+03-chain  7                          7                       18
+04-chain  6                          7                       16
+05-chain  6                          9                       16
+06-chain  5                          7                       14
+07-chain  8                          7                       20
+08-chain  5                          7                       14
+09-chain  5                          7                       14
+10-direct 4                          7                       12
+11-direct 5                          7                       14
+12-direct 5                          7                       14
+
+Coordinates refer to events.jsonl in each named base directory. Every wire.jsonl had initialize then tools/list records at lines1-2. call_graph was the first relationship tool in 7/10 chain runs; references preceded it in00,01,05. Therefore do not report10/10 call_graph-first. The registered outcome is successful traversal plus correct answer, which is10/10. The one smoke run was excluded from all these denominators.
+
+Delivery, model and immutability limits
+
+wire_proxy.py:22-23 records initialize and tools/list only. Actual completed tool-call evidence comes from Codex events.jsonl, not tools/call wire records. run_base.py:9,87,93-96 configures gpt-6.1-sol/high in a fresh per-run CODEX_HOME; runtime.json:2-3 records the requested configuration. The retained events do not carry independent provider-resolved model/effort identity. Report configured/requested model and effort, without upgrading that to backend attestation.
+
+run_base.py:81-90 creates a private temporary profile and copies auth only into that private directory, then writes a generated config. :106 hashes the generated config string, not a post-run disk snapshot. The temporary profile is deleted at context exit. Therefore generated-config hash and distinct temporary profiles are supported; a fully inventoried, post-run immutable profile is not proven. No plugins, skills or personal AGENTS are copied by this runner; this is not evidence about a complete default-plugin environment.
+
+The fixture's AGENTS file contains the current generic Navigation Strategy (run_base.py:55). The wire evidence proves initialization/list delivery, but retained evidence does not separately attest that the host consumed every AGENTS byte. Do not generalize the result to the deferred no-ECC repair replay, other models, large codebases, languages, or all default-plugin profiles. No treatment was run; no causal improvement from a routing edit was measured.
+
+Privacy check
+
+Scanned all93 files present under this evidence directory at review time. There were no auth.json, AGENTS.md or config.toml files in that inventory. Calibrated regex checks using known-positive controls found no JWT-shaped values, sk-prefixed API-key-shaped values, quoted access_token/refresh_token/id_token fields, or the personal-instruction headings "Three Codex Instances"/"Personal Codex Configuration". This is a bounded leak-pattern check plus runner inspection, not a universal secret-detection guarantee. The runner source mentions auth.json intentionally but does not persist its contents into versioned evidence.
+
+Decision
+
+The independently verified10/10 chain and3/3 direct observations satisfy the preregistered satisfactory-base branch described in A-47. Leaving routing text unchanged is consistent with that branch. Approve the one-line prompt correction subject to the parent's gate/integration process. I did not rerun the gate or any model, commit, merge, change a profile, or activate a foreign workspace. Parent-reported gate results are not independent reviewer results.
+
+Phase0 completed: home activation, system-prompt/eval-design memory access, explicit progressive-disclosure/workspace-state guides, open/taken/investigating/zombie bug ledger query. Reviewed all67 returned ledger titles; none matches these fixture-scorer limitations. Relevant existing eval bugs (different instruments) were not re-reported.
+
+Ledger checked: 67 active-status bug titles; none matching these findings.

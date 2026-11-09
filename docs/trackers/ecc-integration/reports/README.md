@@ -12,6 +12,8 @@ topic: ecc-integration
 
 # ECC evaluation reports
 
+- [call_graph prompt surface — 2026-11-09](2026-11-09-callgraph-prompt-surface.md): current delivery, satisfactory native Codex base, no routing edit, factual write-response correction and verification.
+
 - [Navigation dogfood — 2026-11-09](2026-11-09-navigation-dogfood.md): recoverable-hop disclosure correction, real MCP controls, applied mutations and passing full gate; locally integrated at3fe613bdd.
 - [Navigation observed-behavior draft](2026-11-09-navigation-observed.md): bounded enforcement/contract/evidence distinctions.
 

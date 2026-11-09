@@ -1,0 +1,74 @@
+{
+  "responses": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {
+          "experimental": {
+            "codescout/nativeExecutionFence": {
+              "version": 2,
+              "protocol": "coordinated-checkout-v1"
+            }
+          },
+          "resources": {},
+          "tools": {
+            "listChanged": true
+          }
+        },
+        "serverInfo": {
+          "name": "rmcp",
+          "version": "1.3.0"
+        },
+        "instructions": "codescout MCP \u2014 semantic code intelligence.\nSubagents inherit these rules. Pass them along.\n\n## Iron Laws (never X, do Y)\n\n1. NEVER full-read source \u2192 symbols(path) overview,\n   symbols(name=..., include_body=true) bodies. Line-range\n   read_file is right for imports/glue; force=true overrides.\n2. NEVER edit_file structural code \u2192 edit_code (LSP-aware).\n3. NEVER pipe unbounded run_command \u2192 run bare, query @cmd_* buffer\n   (grep \"ERROR\" @cmd_abc). No && or ; after a pipe.\n   cat/sed/awk on source: blocked, use read_file.\n4. `read_file` on markdown \u2192 heading-addressed (force=true raw).\n5. `edit_file` on markdown \u2192 heading+action (managed \u2192 doc).\n6. Subagents see only what you brief them with. Name the guides they\n   must fetch themselves, prior results, paths, symbols \u2014 at every\n   spawn. Re-discovery is your dispatch defect, not theirs.\n## Search/Edit decision quickref\n\n- Know name \u2192 symbols(name=X) | symbol_at(path, line, col)\n- Know concept \u2192 semantic_search(query)\n- Exact string/regex \u2192 grep(pattern, glob, mode=\"files\")\n- Who calls X \u2192 references(symbol, path) \u2014 NOT grep\n- Structural code edit \u2192 edit_code | Text/import edit \u2192 edit_file\n- After workspace(activate, foreign) \u2192 activate home before turn end\n\n## Deeper guidance\n\nCall get_guide(topic) FIRST before deeper work:\n- \"librarian\" \u2014 artifacts, filters, trackers\n- \"tracker-conventions\" \u2014 entry fields (`**Valid:**`, `**Rests on:**`), status, archive\n- \"progressive-disclosure\" \u2014 output budgets, @ref buffers, .err\n- \"error-handling\" \u2014 RecoverableError vs anyhow::bail\n- \"workspace-state\" \u2014 activate, home/foreign, pinning, reset\n- \"iron-laws-detail\" \u2014 gate text + exceptions\n- \"symbol-navigation\" \u2014 per-language nav tips\n\n\n## Project Status\n\n- **Active project:** routing-fixture at `/home/marius/.cache/codescout-ecc-tmp/routing-write-shape-voetc969/project`\n"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"status\": \"ok\",\n  \"rel_path\": \"witness.txt\",\n  \"_guide_hint\": \"First call this session for topic 'project-activation-bootstrap'. Full guide auto-injected as a separate content block below; do not re-call get_guide(\\\"project-activation-bootstrap\\\").\"\n}"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('project-activation-bootstrap') \u2014 first call this session that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\n# Project Activation Bootstrap\n\nYou just activated a project. Orient before you explore or edit \u2014 the cheapest\nbug is the one you never re-investigate because the project already documented it.\n\n## Phase 0 \u2014 load what the project already knows (do FIRST)\n\n- `memory(action=\"list\")`, then read the topics matching your task.\n  `architecture`, `gotchas`, and `conventions` usually pay off.\n- Bug or regression work:\n  `doc(action=\"find\", kind=\"bug\", filter={\"status\": {\"in\": [\"open\", \"taken\", \"investigating\", \"zombie\"]}})` \u2014\n  `status=\"open\"` alone hides `taken` (a live session holds it \u2014 check before starting),\n  `investigating` (worked, no live owner) and\n  `zombie` (recurring-but-unconfirmed \u2014 a \"has this come back?\" check, not a\n  task to pick up) \u2014\n  the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery\n  KNOWN and cite the ledger path.\n- If a `get_guide` topic matches your area (`error-handling`,\n  `progressive-disclosure`, `workspace-state`, `librarian`,\n  `tracker-conventions`, `untrusted-content`), read it \u2014 it states the contract whose violations you\n  hunt.\n\n## Phase 1 \u2014 route each lookup by what you know\n\n- symbol name \u2192 `symbols(name=X)`\n- concept \u2192 `semantic_search(query)`\n- exact string \u2192 `grep(pattern)`\n- who calls X \u2192 `references(symbol, path)` \u2014 never grep for callers\n\n## Phase 2 \u2014 verify at the bytes, not from belief\n\n**Do not hypothesise but ALWAYS VERIFY. Do not state what a doc, a memory, or a\nprior belief says the code does \u2014 open the artifact or run the command, and ALWAYS\nVERIFY.**\n\n- A finding needs lines you actually read (`symbols include_body` / `read_file`),\n  not a grep hit alone.\n- A claim about how a TOOL behaves needs the call run once and the real output\n  read \u2014 reading the source alone misses runtime shape.\n- A comment, doc, or README the code contradicts is itself a finding\n  (doc-vs-code drift).\n\n## Before you plan or touch a contract \u2014 run reconnaissance\n\nIf you will write a plan, change a struct / function signature / API contract,\nor verify claims against `docs/trackers`, invoke the reconnaissance skill FIRST.\n\n- Claude Code: `/codescout-companion:reconnaissance`.\n- Other harnesses: follow `docs/templates/session-log.md` (any agent that reads\n  markdown can use the template \u2014 no plugin required).\n\nIt forces the doc-vs-code reconciliation and logs frictions (F-N) and wins (W-N)\nso the next session inherits them.\n\n## When you dispatch subagents \u2014 brief them\n\nPass what you already loaded: memories read, open bugs, prior results. For\nguides, pass the *instruction to fetch*, not a \"these are loaded\" note \u2014 your\ncontext is not theirs, and unless the companion hook gives each subagent its\nown guide ledger, a topic you triggered will not auto-inject for them. Name\nthe topics and tell them to call `get_guide` on the ones their task needs; an\nexplicit fetch always\nreturns the full body. A subagent re-discovering what you already knew is a\ndispatch defect (Iron Law 6), not the subagent's fault \u2014 but a subagent fetching\nits own guide is doing exactly what it should.\n\n\n<!-- end auto-injected get_guide('project-activation-bootstrap') -->"
+          },
+          {
+            "type": "text",
+            "text": "\n[codescout] paths are relative to /home/marius/.cache/codescout-ecc-tmp/routing-write-shape-voetc969/project"
+          },
+          {
+            "type": "text",
+            "text": "\n## Project Status (details)\n- **Languages:** python\n- **Memories:** None yet \u2014 run `onboarding` to create project memories\n- **Semantic index:** Not built \u2014 run `index(action='build')` to enable `semantic_search`\n"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"id\": \"b9cce2178585b768\",\n  \"abs_path\": \"docs/witness.md\",\n  \"_guide_hint\": \"Section(s) of 'librarian' auto-injected below, selected for this call. Other sections may arrive on later calls; `get_guide(\\\"librarian\\\")` returns the full topic.\"\n}"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('librarian') \u00a7 Artifact Model \u2014 first call this session that serves this section. Do NOT re-call get_guide for it. -->\n\n## Artifact Model\n<!-- serves: doc.get, doc.create -->\n<!-- requires: docs/trackers/ \u2014 Backing Store, Not a Docs Folder -->\n\nEvery artifact is a markdown file with YAML frontmatter stored under the project root.\n\n**Fields (frontmatter):**\n\n| Field | Type | Description |\n|-------|------|-------------|\n| `id` | string (16-hex) | Auto-assigned; `move` re-mints it |\n| `kind` | string | `spec`, `plan`, `adr`, `tracker`, or any custom kind |\n| `status` | string | `draft`, `active`, `done`, `archived` \u2014 or any custom value |\n| `title` | string | Human-readable title |\n| `owners` | list | Owner names or handles |\n| `tags` | list | Free-form tags for filtering |\n| `topic` | string | Semantic topic for `librarian(action=\"context\")` grouping |\n| `rel_path` | string | Path relative to repo root (e.g. `docs/plans/foo.md`) |\n\n**Important:** use `id` for stable references (links, events) and `rel_path`\n(catalog-only, not in frontmatter) for filesystem-oriented lookups.\n\n**Required fields for `action=\"create\"`:**\n```\ndoc(\n  action=\"create\",\n  kind=\"...\",          \u2190 required\n  title=\"...\",         \u2190 required\n  rel_path=\"...\",      \u2190 required \u2014 e.g. \"docs/plans/my-plan.md\"\n  repo=\"...\",          \u2190 optional \u2014 workspace root name; if omitted, base path is derived from the active project\n  body=\"...\",          \u2190 markdown body (optional but recommended)\n  tags=[...],          \u2190 optional\n  owners=[...],        \u2190 optional\n  topic=\"...\",         \u2190 optional \u2014 used by librarian(action=\"context\") grouping\n)\n```\nThe file at `rel_path` must not exist \u2014 `doc(action=\"find\")` first to avoid collisions.\n\n---\n\n\n\n<!-- end auto-injected get_guide('librarian') \u00a7 Artifact Model -->"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('librarian') \u00a7 docs/trackers/ \u2014 Backing Store, Not a Docs Folder \u2014 first call this session that serves this section. Do NOT re-call get_guide for it. -->\n\n## docs/trackers/ \u2014 Backing Store, Not a Docs Folder\n\n`docs/trackers/` is the librarian's backing store for tracker artifacts.\n**Never read files there directly with `read_file`.**\nThe raw file lacks metadata that only the catalog holds: link graph, augmentation state,\nevent history, cross-project relationships.\n\nAlways enter via the catalog:\n```\ndoc(action=\"find\", semantic=\"my topic\")         \u2190 search\ndoc(action=\"get\", id=\"<id>\", full=true)         \u2190 full body\ndoc(action=\"get\", id=\"<id>\", heading=\"## Foo\") \u2190 read one section\n```\n\n---\n\n\n\n<!-- end auto-injected get_guide('librarian') \u00a7 docs/trackers/ \u2014 Backing Store, Not a Docs Folder -->"
+          }
+        ],
+        "isError": false
+      }
+    }
+  ]
+}

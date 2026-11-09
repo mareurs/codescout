@@ -1,0 +1,91 @@
+{
+  "commit": "6586622a30f0d790db17b1bf234aa7962837f510",
+  "tree": "4b4b065297d3911fe88808341551e711f3e25ddd",
+  "files": {
+    "src/prompts/source.md": {
+      "sha256": "4fc898e3b65b5cfc280ab4c7549dfdb8a52050c3b634192f53e5f688ec15102c",
+      "bytes": 20993
+    },
+    "src/prompts/builders.rs": {
+      "sha256": "341ec320c82e237ef9c1471d018bdb61beff4d42ba5d4e7c027326b1d4e65688",
+      "bytes": 54011
+    },
+    ".codescout/system-prompt.md": {
+      "sha256": "cc80985e14fbfa7ee6bd3716748b3832e6877cd5d5e7d15afea91dc153e95e29",
+      "bytes": 3468
+    },
+    "src/prompts/guides/symbol-navigation.md": {
+      "sha256": "afcc0d828cc5f25417404475c58ecc6dbd135f255dc9bac9bde3467dc6974f93",
+      "bytes": 3568
+    },
+    "src/tools/symbol/call_graph/mod.rs": {
+      "sha256": "d5b158f5e38d67119e0abb4ffa077e65b083f9dc8d2c439b965c04af713693c8",
+      "bytes": 92087
+    }
+  },
+  "static_characters": 1698,
+  "static_cap": 1900,
+  "static_equals_actual_initialize_prefix": true,
+  "navigation_equals_fixture_AGENTS_section": true,
+  "guide_delivery": [
+    {
+      "run": "00-chain",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "01-chain",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "02-chain",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "03-chain",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "04-chain",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "05-chain",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "06-chain",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "07-chain",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "08-chain",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "09-chain",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "10-direct",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "11-direct",
+      "exact_symbol_navigation_guide_present": true
+    },
+    {
+      "run": "12-direct",
+      "exact_symbol_navigation_guide_present": true
+    }
+  ],
+  "literal_history_pattern": "formerly|used to|was removed|since [0-9a-f]{7,40}|\\b202[0-9]-\\d{2}-\\d{2}\\b|BUG-|LIMIT-",
+  "literal_history_hits": {
+    "src/prompts/source.md": [],
+    ".codescout/system-prompt.md": [],
+    "src/prompts/guides/symbol-navigation.md": []
+  },
+  "scope": "Literal scans of source.md, stored prompt and symbol-navigation guide plus manual review of call_graph-related builder/description/schema/trigger bodies. Not a semantic audit of all guides, refusal strings or tool descriptions. Contributor comments/tests and immutable evidence preserve history."
+}

@@ -1,0 +1,22 @@
+{
+  "index": 2,
+  "case": "chain",
+  "model": "gpt-6.1-sol",
+  "effort": "high",
+  "exit_code": 0,
+  "metadata_match": true,
+  "profile_sha256": "3618e71e1d8b3d1828ea01f4b6069b37af85ea0ccd6f6d51dc2b12255ef7ded4",
+  "fixture_sha256": "c5dcde59769196d73b67341c53bce66d9d098d01f4b69360dd3563e2813bdeba",
+  "navigation_sha256": "ccc87e9957cc973dab04d5431eace88c478b44557c85eaa68fa5f1b0e9c21031",
+  "started": "2026-11-09T13:49:15.431396+00:00",
+  "finished": "2026-11-09T13:49:39.733270+00:00",
+  "delivery": "verified",
+  "routing": true,
+  "correct_answer": true,
+  "target": "call_graph",
+  "relationship_tools": [
+    "call_graph",
+    "references",
+    "references"
+  ]
+}

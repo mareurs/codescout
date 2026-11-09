@@ -1,0 +1,545 @@
+{
+  "excludes": "manifest itself, __pycache__ and pyc; private binary/profile outside evidence",
+  "files": [
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/a47-registration-and-outcome.json",
+      "bytes": 4649,
+      "sha256": "780d3998256511759e6c3a667e10d2ad6ef6ee83420ebc38e8b2922d6c088a03"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/00-chain/events.jsonl",
+      "bytes": 14084,
+      "sha256": "dbb584f2e7e289d402e26950722d8a0450eef15343ee3d9be5116964219e1ead"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/00-chain/result.json",
+      "bytes": 673,
+      "sha256": "d3baa108a08fe3df12c170f41a923e0540aebf7447f30ed0a2afa82d701a5d3a"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/00-chain/stderr.txt",
+      "bytes": 259,
+      "sha256": "1971c82b9bc1c45121dce7899183f30dc4e46945a42dd237cf3451756e63cdbf"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/00-chain/task.txt",
+      "bytes": 385,
+      "sha256": "8b1f78af8ff14474cd17669c8f97f0f4c9eef086e55a10eefffdab3e8385ecc8"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/00-chain/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "24c3174c64b418b7aa186ced512f77a3363d3979c63d948f0d813fb5befb8415"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/01-chain/events.jsonl",
+      "bytes": 14099,
+      "sha256": "e7991f7c75aad531a3a6e14290792587ec233f587f2b0cd71e3d8f214f67c532"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/01-chain/result.json",
+      "bytes": 673,
+      "sha256": "3b3571710d85e5872cd56c30310d5843b60d57a7cbe4fe3a828bd9e8bd2043cc"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/01-chain/stderr.txt",
+      "bytes": 259,
+      "sha256": "7b0ab91de1a5660d34edc42bec96dedfa70f378fc9c7b95ab98762d194c7139a"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/01-chain/task.txt",
+      "bytes": 374,
+      "sha256": "bd68526093566fffde6edd2a23447498c60b2355a81b84e80fc896126edf3796"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/01-chain/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "327b23c6cf28d34d12ccf22ea32a4b1327986a07a981b47430a05205b775103b"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/02-chain/events.jsonl",
+      "bytes": 13209,
+      "sha256": "7912991c418156f314a4d429f01c81f59ce594e11388c7826d54ea08eae6f728"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/02-chain/result.json",
+      "bytes": 673,
+      "sha256": "47289aa0b703eba9ac67a46ebcb7b7cc448fc769fd674a6d1d52d54c2c586468"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/02-chain/stderr.txt",
+      "bytes": 259,
+      "sha256": "a5a87b36deab8fe3a6b67c528621d0dc4fb1d75b914e34dac840c62407e79545"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/02-chain/task.txt",
+      "bytes": 380,
+      "sha256": "b1922b5b3f00064953cbbcf5452f949d3fe9206eb101efa15224a5a33afeee6a"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/02-chain/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "799175312771d2d448ab9f91b5490dbf5c568a901a1d646634e3740d410c74dd"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/03-chain/events.jsonl",
+      "bytes": 13212,
+      "sha256": "5485cf9e1bbf9efba8530851a61bceca0401ed3538175bfb2c8acf2ade498f5c"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/03-chain/result.json",
+      "bytes": 673,
+      "sha256": "dde3c0e46c899f6068737cf1da2b22f661167ee87c1ba042a3d45926c947f94a"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/03-chain/stderr.txt",
+      "bytes": 259,
+      "sha256": "6e3f508ea172b7d03d4e2804d3c2a55278db1f0fbd249950ca9a509d179221b5"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/03-chain/task.txt",
+      "bytes": 374,
+      "sha256": "1581816866d83f2388cdc9f34375deea0c7264e6b3abc19703c1b46a84533caf"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/03-chain/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "ff795a209ef474071fc00688b1f68bc494f6bb4d9c12695ba5bb238947c90c98"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/04-chain/events.jsonl",
+      "bytes": 12991,
+      "sha256": "612c5beae4468abdd30e6a0f0c823c0eacff77bc2383e8dbae2be708e0344cc0"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/04-chain/result.json",
+      "bytes": 673,
+      "sha256": "5a4807abe64a1c0ccfae0d2270c35d81c08ff5e2694fa7ce2edc1c2f1589828b"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/04-chain/stderr.txt",
+      "bytes": 259,
+      "sha256": "fec66cf29d2ee9cb5f5c08f3e46b44d5b08b60288bbb5b123c08748378eb87a7"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/04-chain/task.txt",
+      "bytes": 374,
+      "sha256": "095dc1ab5d101e716d2710ffb9bf6b2a75ae49a2fbb92af1e671656fc4070b83"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/04-chain/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "57421bc9c004d398d6afdc14a877822f44b85057bd5302157e083e7f604ff1d2"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/05-chain/events.jsonl",
+      "bytes": 13340,
+      "sha256": "86e39b4f96640f47ccedb3b91de979dde25f567d766f5674d9363976c1360679"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/05-chain/result.json",
+      "bytes": 673,
+      "sha256": "ee35d121f829013fc2995dc4a9f684833555b760e6a8b4db83d20fcf2cc8ad5c"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/05-chain/stderr.txt",
+      "bytes": 259,
+      "sha256": "528d13c8bc7baa398a5d990a1a5689947a57eff9da7d28a745a2b0ebbe1722c4"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/05-chain/task.txt",
+      "bytes": 385,
+      "sha256": "8b1f78af8ff14474cd17669c8f97f0f4c9eef086e55a10eefffdab3e8385ecc8"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/05-chain/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "fc7c76149840a8667b992601e45807a09e8abefcdc1a7bcb0263869e87d35289"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/06-chain/events.jsonl",
+      "bytes": 11934,
+      "sha256": "6d09ee8ffdb9462a1cc7b7c794e0a16fe8834be043f37c4b5aebced52825da76"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/06-chain/result.json",
+      "bytes": 637,
+      "sha256": "7c79b6df71850662c50b9d4f2e671a00aab04740a10cff610ab1a7d5a0451884"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/06-chain/stderr.txt",
+      "bytes": 259,
+      "sha256": "7b8991b19be476277dd8a2caf91ba8cfddadd8905c370b4e5789151df9095a1b"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/06-chain/task.txt",
+      "bytes": 374,
+      "sha256": "bd68526093566fffde6edd2a23447498c60b2355a81b84e80fc896126edf3796"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/06-chain/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "52d553766dde4568e562cc6076bdb1aa84c2482184d7e163ac190d54cc4dd629"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/07-chain/events.jsonl",
+      "bytes": 14260,
+      "sha256": "d442405b7c5df6113669d2f900a29711661fb1648746729f9d915ce90c2a0dba"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/07-chain/result.json",
+      "bytes": 673,
+      "sha256": "931cfd3b41638d67888913f91ad377d6b05431d2aa69468ea9a79e4da83141aa"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/07-chain/stderr.txt",
+      "bytes": 259,
+      "sha256": "bcbcb607ac8992a7c939c706aba43f89768757b6b2b32392f72e35a5afa4d5f8"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/07-chain/task.txt",
+      "bytes": 380,
+      "sha256": "b1922b5b3f00064953cbbcf5452f949d3fe9206eb101efa15224a5a33afeee6a"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/07-chain/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "2f6cadd6e78920ae705a9b8d4f499119cd836bba8b2f38cb05a623007d4258cd"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/08-chain/events.jsonl",
+      "bytes": 12096,
+      "sha256": "b0f555c9153a7c2f9403e79dd1d2ad920feac65fb3d780fde2d365f1263d825f"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/08-chain/result.json",
+      "bytes": 637,
+      "sha256": "f5a6a24793392f4327e223ea0a8c9da9f03ba7dd88979c1f72cee76d7d36bfa8"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/08-chain/stderr.txt",
+      "bytes": 259,
+      "sha256": "47ad4282e26b3a1de8e424fbbc7159b145f9e39959ea2a109ee77a56a439588c"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/08-chain/task.txt",
+      "bytes": 374,
+      "sha256": "1581816866d83f2388cdc9f34375deea0c7264e6b3abc19703c1b46a84533caf"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/08-chain/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "0e59ad443aca73e98ece0f98c38af0862d8224faf13737f14b9b20d6439296f1"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/09-chain/events.jsonl",
+      "bytes": 12009,
+      "sha256": "6e24e8d50502f10438bd43225a20a5c658a7840b27cf5c2c94431c6e24bba52c"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/09-chain/result.json",
+      "bytes": 637,
+      "sha256": "bfa798c4d52b61ada69c509af9919bb75b8f59729dd3c60d1563e1701015a1fe"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/09-chain/stderr.txt",
+      "bytes": 259,
+      "sha256": "266911d2e6c07ced922bc4fa1b2eca144c46950d05700ee43f58131af48ad1d8"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/09-chain/task.txt",
+      "bytes": 374,
+      "sha256": "095dc1ab5d101e716d2710ffb9bf6b2a75ae49a2fbb92af1e671656fc4070b83"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/09-chain/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "10d4dc4d10c0e4c0ecdef0c468b762cd67215a16dae09a76fdacd534147bbf89"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/10-direct/events.jsonl",
+      "bytes": 11105,
+      "sha256": "e1178b34d4d20faa2ace4f2baaa61cdd429aeb6431aa9c5113c18ab2b1111897"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/10-direct/result.json",
+      "bytes": 639,
+      "sha256": "8d864a8891d04d65f039bc5869079a8f507ac3894c49c536f65b61acfeeab371"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/10-direct/stderr.txt",
+      "bytes": 259,
+      "sha256": "41fd52594bdcf29ce72da5dfd7d01c81d2d0021075d2db4371187973b9ce150b"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/10-direct/task.txt",
+      "bytes": 412,
+      "sha256": "fc243591a7533cb2cde8a74fe3d194c74da4838aadc2d5593732da384d68db99"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/10-direct/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "840ca51b4ab7536dacaf3898b650ed3bde762495c2581c91820f49c4e7463bad"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/11-direct/events.jsonl",
+      "bytes": 11729,
+      "sha256": "d7a64c69c38ecdbfd1528e19e610307ef7714d7f03f8c988a70428c6b0a510e5"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/11-direct/result.json",
+      "bytes": 639,
+      "sha256": "121ad589cd51fb013225103a4ebaa74967b3f9ceb0ecc42f93b34cf4f29c9e3a"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/11-direct/stderr.txt",
+      "bytes": 259,
+      "sha256": "8c92bb72c4351082353fcab4f506c0b530b87a2dcafdf301649a1113f1d8abdf"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/11-direct/task.txt",
+      "bytes": 427,
+      "sha256": "9d934435045e1ed0e1b401edcb1bb5bc1b6fc76cce844f182e6090a9ce9a636b"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/11-direct/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "0656413c4e292ed4e81223652d1f4cb11daf93dc1e08055bcf0780268b0b28f0"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/12-direct/events.jsonl",
+      "bytes": 11733,
+      "sha256": "5d3250bd5f77fa266bc71241082556b85988ac0da049b446c98999994495b862"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/12-direct/result.json",
+      "bytes": 639,
+      "sha256": "64ae6c9a7622652b4c4ea00cc6891fc158e931ebe9c5cfafeccb12b981baa9d3"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/12-direct/stderr.txt",
+      "bytes": 259,
+      "sha256": "87d86c32aaaea1a10e874b531b40aad18592a74538a18d9959ac974cddc08dba"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/12-direct/task.txt",
+      "bytes": 409,
+      "sha256": "d6dd0cd0d55aa5a4154157adbbdd3016014b09100f245388e268fdf43e2e7975"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/12-direct/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "b02ef3952d1d952dfe4575f7d7fdfdb91bfe5fef562a2d28efd3ebe752132ae8"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/adjudication.json",
+      "bytes": 482,
+      "sha256": "f98b5f3ce311ef023a899b7814ea7d169f6612c604eecdb9cbc93abd6d86d7bb"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/checker-controls.json",
+      "bytes": 188,
+      "sha256": "578a85bc842a5a0f4ce9fc981120cefcd317098e7be7a05b50bf9ea6c40c72f4"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/preflight.json",
+      "bytes": 108145,
+      "sha256": "24132f04a842df558f75ffc3e4e6aac5aedb4a91cc9d1a08dca197fd96637928"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/results.json",
+      "bytes": 9103,
+      "sha256": "166242c1472821dd59afefe8153e1c5552c5b9212047ca4ab96abf8695b10230"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/base/runtime.json",
+      "bytes": 1051,
+      "sha256": "7bf09a42c4717eda8f1491c107bf531da2c95563aaeb6ed4a2a419766c4000ba"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/binary-snapshot.json",
+      "bytes": 431,
+      "sha256": "3f1b28b24262e7f7ef8074c9055ebf5316fc60a9bba7dfa1628166382b17814b"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/capture_integration.py",
+      "bytes": 1869,
+      "sha256": "05c7388e6e639be30820dc663b116b21f9d422fd98a97c8f00a7f8731b9611d8"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/capture_validation.py",
+      "bytes": 4276,
+      "sha256": "f62134cdb43064bd7ba19291d63b4736d88d3829b7139071843fbb73813808b1"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/gate-base-sync.json",
+      "bytes": 322,
+      "sha256": "628c31e47fc8ffc821ac8b15927bb4be776ba4995260ab5a6d361b89bd990ffb"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/gate-result.json",
+      "bytes": 657,
+      "sha256": "a0531df19976ddcd6f742bbb9496535319d09ba6228c4b4da5e645347e69d9d8"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/gate.log",
+      "bytes": 1943951,
+      "sha256": "e3712bc57435f9659b0d894b2b9abf541da1b5b615c08109d99beee74ee3c0d8"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/integration-gate-result.json",
+      "bytes": 693,
+      "sha256": "7704d334c46c4d87efef9d86da8292a08c4dd36ced9ccebbb08e467736005c59"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/integration-gate.log",
+      "bytes": 1943878,
+      "sha256": "14f2d2505eb9728e7eb9af6bea0a353c4f802c1303d9630d60f656ab4b0c511a"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/integration.json",
+      "bytes": 1547,
+      "sha256": "a5c232663863cf9c92b5f5449946fe992ea6f592fd2cff21ac9c00792daf4e0a"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/job-00000066.json",
+      "bytes": 616,
+      "sha256": "4aa9a1be5abba3e49d689e301b040fc7248c6c32885c1d00920cde7df9fbf9a5"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/job-00000067.json",
+      "bytes": 634,
+      "sha256": "5960b99e7e611771f852091121c3eec2def65546cf9da63d074ad439668817d8"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/job-0000006a.json",
+      "bytes": 488,
+      "sha256": "e0cb0f1377597019ff68283ff6a736d5ac056d1a7509dc66f1d047c9b3003f1f"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/job-00000070.json",
+      "bytes": 493,
+      "sha256": "cc04687465b5b50055d359e9104882760acbe5ed32f3a9c0171faaef20a8a183"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/probe_write_results.py",
+      "bytes": 1451,
+      "sha256": "ecd6fa5d83aa317d16341a386a06dddab9b6694200704beb24ed98d5003d019b"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/prompt-tests-result.json",
+      "bytes": 677,
+      "sha256": "77d733ba878e16c3be87e286073a7205b558f3c7fde8a77676160af4e324279e"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/prompt-tests.log",
+      "bytes": 17883,
+      "sha256": "fd0e4cd7209ac16157a86d691aa3dbf66047ffcdc9e79d35dfa5da546ffacebe"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/rescore.py",
+      "bytes": 2636,
+      "sha256": "5c92106447e03ced46528c2b935e4e7f6e1fd30d099624abf2a31c314eda2519"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/rescored.json",
+      "bytes": 4857,
+      "sha256": "2bf138c63a9d525276b5ab1d33bcd08e9dcdb41281b100c05ed3a47e4fdd7b30"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/review.txt",
+      "bytes": 8499,
+      "sha256": "ae131af51b82cdea751d684b09b9e572efc5ab856cc0d8b4d52271180c6608f4"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/run_base.py",
+      "bytes": 9578,
+      "sha256": "e5e0ab3385009d9b64d5d358688dff9c60c1936f1b42e023f16c53fa01b14277"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/score-prereview.py",
+      "bytes": 4506,
+      "sha256": "76071b0564faa2c1ab93369ff5c572bc92e3615dc3840cf46aa1fd295786af99"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/score.py",
+      "bytes": 6394,
+      "sha256": "b7cfbcbedfa94c7e81a10b00fe6fc1049ebe2f92d551fe49b4f43c7af22d4a0a"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/smoke/00-chain/events.jsonl",
+      "bytes": 12552,
+      "sha256": "48c4e934be76a12190d68cedfbf713e2375a1fc57939142a838e9ff71d8eacc6"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/smoke/00-chain/result.json",
+      "bytes": 673,
+      "sha256": "b075fbb3b30eea3e9a22f202a4178f692eaed77e5036c2b5c51e9fb3abfdc1cc"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/smoke/00-chain/stderr.txt",
+      "bytes": 259,
+      "sha256": "5f7136899ea6bdf59416c343e847b156ad96c025960f6d3b8880ec9ef38bbc51"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/smoke/00-chain/task.txt",
+      "bytes": 385,
+      "sha256": "8b1f78af8ff14474cd17669c8f97f0f4c9eef086e55a10eefffdab3e8385ecc8"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/smoke/00-chain/wire.jsonl",
+      "bytes": 63909,
+      "sha256": "8638021b07e3b59ca80af8fd9458b598e9bb4b48d1dd86f092b5921666347bfc"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/smoke/checker-controls.json",
+      "bytes": 188,
+      "sha256": "578a85bc842a5a0f4ce9fc981120cefcd317098e7be7a05b50bf9ea6c40c72f4"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/smoke/preflight.json",
+      "bytes": 108145,
+      "sha256": "7343470cc30c4db68a462bfdc6850ea51e97ade4632ea77ec7b82531aca21e9e"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/smoke/results.json",
+      "bytes": 721,
+      "sha256": "39733d71db83189919631fd8d1cc844e052c06b72e2666745063a2447298f86d"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/smoke/runtime.json",
+      "bytes": 1024,
+      "sha256": "cf0e969183cf75f9454d74e7e13dcd75a364cc41a93cd7d65accbc3112f134db"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/source-inventory.json",
+      "bytes": 2822,
+      "sha256": "7234a86e6cd82892c2cb224ea10e9a002a799d5972040674e605dff418339393"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/source_inventory.py",
+      "bytes": 3008,
+      "sha256": "847cb5a21fac5451cb0f01125f0190a762a86732468bd207ab7178fd9a2b2547"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/verify_integration.py",
+      "bytes": 1539,
+      "sha256": "479e783b1fd3ee7a35c522b59d268c5517a8ad43b39b0d0cd0386c6a04f83d0b"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/verify_prompt.py",
+      "bytes": 1409,
+      "sha256": "fdbfe31948f69cf3a2f3038769b05cbd0f48eeb3720658415d7a9559d8caca3c"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/wire_proxy.py",
+      "bytes": 1296,
+      "sha256": "83905ef2e47967a69adea0c000be378173da041cc9ab1cb6977d4411a50d8eca"
+    },
+    {
+      "path": "docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/write-result-probe.json",
+      "bytes": 10648,
+      "sha256": "6370158573ae9ffa40db06ef59c38bf397f9593f0fed545cb8e15555bf84a33c"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+[
+  "pass",
+  "delivered_wrong_tool",
+  "absent_delivery",
+  "wrong_direction",
+  "wrong_max_depth",
+  "wrong_symbol",
+  "wrong_path",
+  "tool_error",
+  "no_answer",
+  "lifecycle_dedup"
+]

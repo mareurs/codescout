@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000070",
+  "command": "./scripts/with-slot.sh --slot 0 python3 /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/verify_integration.py",
+  "server_pid": 1520813,
+  "job_pid": 2296214,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T14:09:47.685746805+00:00",
+  "finished_at": "2026-11-09T14:16:01.510085387+00:00",
+  "log_path": "/tmp/codescout-bg-dAtDAt.log"
+}

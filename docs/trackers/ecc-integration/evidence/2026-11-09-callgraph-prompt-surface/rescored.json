@@ -1,0 +1,217 @@
+{
+  "original_scorer_sha256": "76071b0564faa2c1ab93369ff5c572bc92e3615dc3840cf46aa1fd295786af99",
+  "hardened_scorer_sha256": "b7cfbcbedfa94c7e81a10b00fe6fc1049ebe2f92d551fe49b4f43c7af22d4a0a",
+  "controls": [
+    "pass",
+    "delivered_wrong_tool",
+    "absent_delivery",
+    "wrong_direction",
+    "wrong_max_depth",
+    "wrong_symbol",
+    "wrong_path",
+    "tool_error",
+    "no_answer",
+    "lifecycle_dedup",
+    "wrong_server",
+    "endpoint_names_without_edges",
+    "missing_persist_batch",
+    "missing_flush_queue",
+    "missing_handle_ingest",
+    "missing_handle_shutdown"
+  ],
+  "control_count": 16,
+  "observed_false_positive_mutations": [
+    {
+      "name": "wrong_server",
+      "before": {
+        "delivery": "verified",
+        "routing": true,
+        "correct_answer": true,
+        "target": "call_graph",
+        "relationship_tools": [
+          "call_graph"
+        ]
+      },
+      "after": {
+        "delivery": "verified",
+        "routing": false,
+        "correct_answer": true,
+        "target": "call_graph",
+        "relationship_tools": []
+      }
+    },
+    {
+      "name": "endpoint_names_without_edges",
+      "before": {
+        "delivery": "verified",
+        "routing": true,
+        "correct_answer": true,
+        "target": "call_graph",
+        "relationship_tools": [
+          "call_graph"
+        ]
+      },
+      "after": {
+        "delivery": "verified",
+        "routing": false,
+        "correct_answer": true,
+        "target": "call_graph",
+        "relationship_tools": [
+          "call_graph"
+        ]
+      }
+    }
+  ],
+  "runs": [
+    {
+      "run": "00-chain",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "call_graph",
+      "relationship_tools": [
+        "references",
+        "call_graph",
+        "references"
+      ]
+    },
+    {
+      "run": "01-chain",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "call_graph",
+      "relationship_tools": [
+        "references",
+        "call_graph",
+        "references"
+      ]
+    },
+    {
+      "run": "02-chain",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "call_graph",
+      "relationship_tools": [
+        "call_graph",
+        "references",
+        "references"
+      ]
+    },
+    {
+      "run": "03-chain",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "call_graph",
+      "relationship_tools": [
+        "call_graph",
+        "references",
+        "references"
+      ]
+    },
+    {
+      "run": "04-chain",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "call_graph",
+      "relationship_tools": [
+        "call_graph",
+        "references",
+        "references"
+      ]
+    },
+    {
+      "run": "05-chain",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "call_graph",
+      "relationship_tools": [
+        "references",
+        "call_graph",
+        "references"
+      ]
+    },
+    {
+      "run": "06-chain",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "call_graph",
+      "relationship_tools": [
+        "call_graph"
+      ]
+    },
+    {
+      "run": "07-chain",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "call_graph",
+      "relationship_tools": [
+        "call_graph",
+        "references",
+        "references"
+      ]
+    },
+    {
+      "run": "08-chain",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "call_graph",
+      "relationship_tools": [
+        "call_graph"
+      ]
+    },
+    {
+      "run": "09-chain",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "call_graph",
+      "relationship_tools": [
+        "call_graph"
+      ]
+    },
+    {
+      "run": "10-direct",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "references",
+      "relationship_tools": [
+        "references"
+      ]
+    },
+    {
+      "run": "11-direct",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "references",
+      "relationship_tools": [
+        "references"
+      ]
+    },
+    {
+      "run": "12-direct",
+      "delivery": "verified",
+      "routing": true,
+      "correct_answer": true,
+      "target": "references",
+      "relationship_tools": [
+        "references"
+      ]
+    }
+  ],
+  "summary": {
+    "chain": 10,
+    "direct": 3,
+    "all_delivery_routing_answer_pass": true
+  },
+  "scope": "Existing raw events only; no new model calls. Fixture-specific edge parser, not a general graph evaluator."
+}

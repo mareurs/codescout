@@ -1,0 +1,2 @@
+Identify every public handle_ entry point whose call chain can reach write_row in store.py, including indirect callers.
+Use codescout navigation to verify the answer. Stay read-only within this project; do not run behavior tests or edit files. Stop after the verified answer, within eight navigation calls. Return only JSON {"symbols":[...]} with the exact requested names.

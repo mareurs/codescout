@@ -1,0 +1,2 @@
+write_row in store.py will change its signature. Which public handle_ entry points are affected through any intermediate wrappers?
+Use codescout navigation to verify the answer. Stay read-only within this project; do not run behavior tests or edit files. Stop after the verified answer, within eight navigation calls. Return only JSON {"symbols":[...]} with the exact requested names.

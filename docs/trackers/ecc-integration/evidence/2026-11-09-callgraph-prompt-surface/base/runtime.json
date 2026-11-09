@@ -1,0 +1,17 @@
+{
+  "model": "gpt-6.1-sol",
+  "effort": "high",
+  "binary": "/home/marius/work/claude/codescout/.codescout/ecc-routing-private-20261109/codescout",
+  "binary_sha256": "a73d3df5eeedd66e91376ac43ff9e931827fbf87c25841da67e2715142638699",
+  "static_sha256": "e3fd471a0e82f50abed14528b5dc4f8dfe58b88113fd0de74778fe6ad0d995ee",
+  "metadata_sha256": "cd7d253a19846e9e2d81be98790699ff72c88dfbbcb82d456ac1ed12136665b5",
+  "cli": "codex-cli 0.167.0",
+  "base_commit": "acf72c2d6d8705762250d5150bf96a011a03ce04",
+  "source_files": {
+    "src/prompts/source.md": "4fc898e3b65b5cfc280ab4c7549dfdb8a52050c3b634192f53e5f688ec15102c",
+    "src/prompts/builders.rs": "341ec320c82e237ef9c1471d018bdb61beff4d42ba5d4e7c027326b1d4e65688",
+    ".codescout/system-prompt.md": "f1d3a08b045b05ac7808487883cb0ccaaf8cd566e0f68d2db207b2a0f1dddb30",
+    "src/prompts/guides/symbol-navigation.md": "afcc0d828cc5f25417404475c58ecc6dbd135f255dc9bac9bde3467dc6974f93",
+    "src/tools/symbol/call_graph/mod.rs": "d5b158f5e38d67119e0abb4ffa077e65b083f9dc8d2c439b965c04af713693c8"
+  }
+}
