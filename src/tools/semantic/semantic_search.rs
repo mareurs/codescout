@@ -40,7 +40,9 @@ pub(crate) fn map_from_env_error(
 ///
 /// `backend` picks the remedy text for the arms that name a restart script or a
 /// container: the Qdrant stack is started with `./scripts/retrieval-stack.sh`, the lite
-/// stack has nothing to start and names its embedding endpoint settings instead.
+/// stack has nothing to start and names its embedding endpoint settings instead. The
+/// collection-missing and Qdrant dimension arms are Qdrant-only: the lite store has no
+/// collection to miss, and a lite index at another width gets its own rebuild hint.
 ///
 /// The embedder-connect bucket must precede transport: a client-side connect
 /// failure's message carries reqwest's "Connection refused", which would
@@ -61,6 +63,10 @@ pub(crate) fn classify_search_error(
     // embedding endpoint. Arms that would send the operator to `retrieval-stack.sh` name that
     // endpoint's settings instead.
     const LITE_ENDPOINT: &str = "CODESCOUT_EMBEDDER_URL and EMBED_API_KEY";
+    // sqlite-vec's own wording when a query vector's width differs from the index's. It comes
+    // from the C library, so `a_lite_query_at_another_width_is_told_to_rebuild` produces the
+    // real error and fails if a library upgrade rewords it.
+    const LITE_DIM_MISMATCH: &str = "Dimension mismatch for query vector";
     let lite = matches!(
         backend,
         crate::retrieval::code_store::VectorBackend::SqliteVec
@@ -155,15 +161,23 @@ pub(crate) fn classify_search_error(
              body is included in the error above — read it first; it usually names the \
              cause exactly. {next}"
         )
-    } else if err_str.contains("doesn't exist")
-        || err_str.contains("not found")
-        || err_str.contains("Collection")
+    } else if !lite
+        && (err_str.contains("doesn't exist")
+            || err_str.contains("not found")
+            || err_str.contains("Collection"))
     {
+        // Qdrant only: the lite store has no collection to miss. Its `query` answers an
+        // unindexed project with no hits and no error, so these words in a lite error come
+        // from some other cause and must not be reported as a missing collection.
         format!(
             "Qdrant collection is missing for project `{project_id}`. \
              Populate it with `index(action=\"build\")`."
         )
-    } else if err_str.contains("Vector dimension") || err_str.contains("expected dim") {
+    } else if lite && err_str.contains(LITE_DIM_MISMATCH) {
+        "The index was built at a different embedding dimension than the configured \
+         model produces. Rebuild it with `index(action=\"build\", force=true)`."
+            .to_string()
+    } else if !lite && (err_str.contains("Vector dimension") || err_str.contains("expected dim")) {
         "Embedding dim mismatch between index and configured model. \
          Drop the collection and re-index: \
          `curl -X DELETE $CODESCOUT_QDRANT_URL/../collections/code_chunks` \
@@ -1807,6 +1821,83 @@ mod classify_search_error_tests {
                 "the Qdrant hint must name the script: {err:?} -> {hint}"
             );
         }
+    }
+    /// The error is produced by the real lite store, not typed here: its wording comes from the
+    /// sqlite-vec C library, so a literal in this test would pass while the classifier missed
+    /// the real text (the failure this arm was added for).
+    #[tokio::test]
+    async fn a_lite_query_at_another_width_is_told_to_rebuild() {
+        use crate::retrieval::code_store::CodeVectorStore;
+        use crate::retrieval::embedder::{EmbedOutput, SparseVector};
+        use crate::retrieval::payload::CodePayload;
+        use crate::retrieval::sqlite_code_store::SqliteVecCodeStore;
+
+        let sparse = || SparseVector {
+            indices: vec![],
+            values: vec![],
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SqliteVecCodeStore::at(tmp.path().to_path_buf());
+        let payload = CodePayload {
+            project_id: "proj".into(),
+            file_path: "a.rs".into(),
+            language: "rust".into(),
+            start_line: 1,
+            end_line: 2,
+            ast_header: String::new(),
+            content: "content".into(),
+            content_hash: "h1".into(),
+            last_indexed_commit: String::new(),
+            chunk_id: "c1".into(),
+        };
+        store
+            .upsert_chunks(
+                "code_chunks",
+                &[(
+                    payload,
+                    EmbedOutput {
+                        dense: vec![0.1, 0.2, 0.3],
+                        sparse: sparse(),
+                    },
+                )],
+            )
+            .await
+            .unwrap();
+        let err = store
+            .query(
+                "code_chunks",
+                "proj",
+                &[0.1, 0.2, 0.3, 0.4, 0.5],
+                &sparse(),
+                10,
+                0.0,
+                true,
+                &[],
+                &[],
+            )
+            .await
+            .expect_err("a 5-wide query against a 3-wide index must fail")
+            .to_string();
+
+        let hint = classify_search_error(&err, "codescout", VectorBackend::SqliteVec);
+        assert!(
+            hint.contains("force=true"),
+            "the lite hint must name the rebuild: {err:?} -> {hint}"
+        );
+        assert!(
+            !hint.contains("curl") && !hint.contains("Qdrant"),
+            "the lite stack has no Qdrant collection to drop: {err:?} -> {hint}"
+        );
+    }
+
+    #[test]
+    fn a_lite_error_that_says_not_found_is_not_a_missing_qdrant_collection() {
+        let err = "open index database: No such file or directory (os error 2); model not found";
+        let hint = classify_search_error(err, "codescout", VectorBackend::SqliteVec);
+        assert!(
+            !hint.contains("Qdrant collection"),
+            "the lite store has no collection to miss: {hint}"
+        );
     }
 }
 
