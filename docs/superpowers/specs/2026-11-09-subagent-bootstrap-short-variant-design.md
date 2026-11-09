@@ -1,6 +1,7 @@
 # Subagent bootstrap — short variant (design)
 
 **Status:** approved by the operator 2026-11-09 (design A).
+**Revised 2026-11-09 (operator, "Doar un pointer"):** "what the short body keeps" below is superseded. The `SubagentStart` hook delivered the same Phase 0/1/2 protocol to 1,296 of 1,296 census subagents before the guide (bug 7579b32b1cd2362f, § Correction 2026-11-09), so the 5 "used" cases do not isolate the guide. The stamped subagent's body is now a pointer of 292 B (578 B wrapped): the name of the hook's EXPLORATION PROTOCOL, the pointer to `get_guide("project-activation-bootstrap")`, and the `ALWAYS VERIFY` line. Selection, marker, shape and tests are unchanged.
 **Bug:** `7579b32b1cd2362f` (`docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-an-unmodelled-graph.md`), § "Layer 2 result, second reader".
 
 ## Intent
