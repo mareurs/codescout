@@ -567,7 +567,7 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     // not replayed. The remedy is a fresh write, not a fresh handle, so it is not
     // `ack_handle_refused`. The message STARTS with a path, which is data, so the fixed sentence
     // after it decides, here and early, before a substring rule below can claim the path.
-    // docs/issues/2026-11-09-stale-ack-replay-refusal-has-no-err-family.md
+    // docs/issues/archive/2026-11-09-stale-ack-replay-refusal-has-no-err-family.md
     if msg.contains(
         " changed since create_file refused to overwrite it, so the kept write was not replayed",
     ) {
