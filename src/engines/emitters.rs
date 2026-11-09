@@ -173,6 +173,41 @@ mod tests {
     }
 
     #[test]
+    fn a_subagent_caller_gets_the_short_block_with_the_short_shape() {
+        // The shape is what keeps `_guide_hint` from saying "do not re-call get_guide"
+        // beside a body that tells the reader to fetch the full guide (context-injection-
+        // session-log F-20). A `Whole` shape here, with the short block, would pass every
+        // marker assertion in `guide_hint_tests`.
+        let mut ledger = GuideLedger::default();
+        ledger.set_caller_is_subagent(true);
+        let v = json!({});
+        let topic = crate::prompts::SESSION_OPENING_GUIDE;
+
+        let Emitted::Claimed(got) = emit_session_opener(&ctx(&v, Some("t.a")), &mut ledger) else {
+            panic!("a subagent's first call must open the session");
+        };
+        let (hint_topic, shape) = got.hint.expect("the opener must produce a hint");
+        assert_eq!(hint_topic, topic);
+        assert!(
+            matches!(shape, GuideDeliveryShape::Short),
+            "a subagent's opener must report the Short shape"
+        );
+        let text = got.blocks[0]
+            .as_text()
+            .map(|t| t.text.clone())
+            .expect("text block");
+        let short = subagent_opener_block(topic)
+            .as_text()
+            .map(|t| t.text.clone())
+            .unwrap();
+        assert_eq!(text, short);
+        assert!(
+            ledger.contains(topic),
+            "the short form stamps the same bare topic key as the whole one"
+        );
+    }
+
+    #[test]
     fn the_opener_declines_once_its_topic_is_stamped() {
         let mut ledger = GuideLedger::default();
         let v = json!({});

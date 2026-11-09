@@ -16018,6 +16018,16 @@ mod guide_hint_tests {
         let text = first_call_text(&server, Some("conv-A/testagent")).await;
         assert!(text.contains(OPEN_SHORT), "no short marker in: {text}");
         assert!(text.contains("ALWAYS VERIFY"));
+        // The hint rides the primary block. It must point at the full guide: `Whole`'s
+        // "do not re-call" would forbid the fetch the short body recommends (F-20).
+        assert!(
+            text.contains("short subagent form"),
+            "no short hint in: {text}"
+        );
+        assert!(
+            !text.contains("do not re-call"),
+            "the whole-guide hint shipped: {text}"
+        );
         assert!(!text.contains(OPEN_WHOLE), "the whole guide also shipped");
         assert!(
             !text.contains(FULL_ONLY),
@@ -16049,6 +16059,28 @@ mod guide_hint_tests {
             "the parent inherited the subagent's flag: {parent}"
         );
         assert!(!parent.contains(OPEN_SHORT));
+    }
+
+    #[tokio::test]
+    async fn a_never_seen_principal_without_an_agent_is_not_served_as_a_subagent() {
+        // `adopt_request_conversation` hands a principal this process has never seen a COPY
+        // of the outgoing ledger, flag included. After a subagent call that copy carries
+        // `caller_is_subagent == true`; only the per-call reset in `dispatch_tool_call`
+        // keeps it from deciding the next caller's opener. A stamp with no `/` carries no
+        // `agent_id`, so its caller is not a subagent. (Review Focus 2 and 4.)
+        let (_dir, server) = make_server().await;
+        let sub = first_call_text(&server, Some("conv-A/testagent")).await;
+        assert!(
+            sub.contains(OPEN_SHORT),
+            "precondition: the subagent got the short form"
+        );
+
+        let other = first_call_text(&server, Some("conv-B")).await;
+        assert!(
+            other.contains(OPEN_WHOLE),
+            "a stamp with no agent_id inherited the subagent flag: {other}"
+        );
+        assert!(!other.contains(OPEN_SHORT));
     }
 
     #[tokio::test]
