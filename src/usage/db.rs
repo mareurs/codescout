@@ -562,6 +562,17 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
     if msg.starts_with("ack handle ") {
         return Some("ack_handle_refused");
     }
+    // `ack="@ack_…"` for a `create_file` write that the file moved away from: the handle was valid,
+    // and the file's size or modification time changed since the refusal, so the kept write was
+    // not replayed. The remedy is a fresh write, not a fresh handle, so it is not
+    // `ack_handle_refused`. The message STARTS with a path, which is data, so the fixed sentence
+    // after it decides, here and early, before a substring rule below can claim the path.
+    // docs/issues/2026-11-09-stale-ack-replay-refusal-has-no-err-family.md
+    if msg.contains(
+        " changed since create_file refused to overwrite it, so the kept write was not replayed",
+    ) {
+        return Some("ack_replay_file_changed");
+    }
     // A tool name the server does not have. The protocol error is unchanged; this only names it.
     if msg.starts_with("unknown tool: ") {
         return Some("unknown_tool");
@@ -973,6 +984,7 @@ pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'stati
 /// here, and appearing here changes the fingerprint the gate derives. BL-4.
 const ERR_FAMILIES: &[&str] = &[
     "ack_handle_refused",
+    "ack_replay_file_changed",
     "ambiguous_heading",
     "ambiguous_name_path",
     "ambiguous_old_string",
@@ -4513,6 +4525,15 @@ mod tests {
                 "create_file",
                 format!("ack handle was minted by '{hostile}', not 'edit_file'"),
                 "ack_handle_refused",
+            ),
+            (
+                "create_file",
+                format!(
+                    "{hostile} changed since create_file refused to overwrite it, so the kept write \
+                           was not replayed — hint: Read the file again, then send create_file(path=..., \
+                           content=..., overwrite=true) or edit it."
+                ),
+                "ack_replay_file_changed",
             ),
             (
                 "slow_test_tool",

@@ -80,6 +80,20 @@ async fn an_ack_does_not_replace_a_file_that_changed_since_the_refusal() {
         reply.contains("changed since"),
         "the refusal must say why: {reply}"
     );
+    // The row for this refusal needs a family, and the message starts with a path, so the
+    // classifier cannot decide it by a prefix. The text under test is the real one the
+    // server sent, not a copy of it.
+    // docs/issues/2026-11-09-stale-ack-replay-refusal-has-no-err-family.md
+    let body: serde_json::Value =
+        serde_json::from_str(&reply).expect("a recoverable refusal is a JSON body");
+    let error = body["error"]
+        .as_str()
+        .expect("the refusal carries an error text");
+    assert_eq!(
+        crate::usage::db::normalize_err_family("create_file", error),
+        Some("ack_replay_file_changed"),
+        "the stale-replay refusal must have its own family: {error}"
+    );
     assert_eq!(
         std::fs::read_to_string(&target).unwrap(),
         "someone else wrote this meanwhile",
