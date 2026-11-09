@@ -505,6 +505,38 @@ pub const PULL_ONLY_GUIDE_TOPICS: &[(&str, &str)] = &[
 /// `PULL_ONLY_GUIDE_TOPICS` above, the convention this mirrors).
 pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
     (
+        "progressive-disclosure",
+        "Buffer internals",
+        "Pull-only by design (bug 7579b32b1cd2362f): paging a handle, the pool limits, \
+         truncation and the handle kinds are reference detail that the envelope's own \
+         `hint` makes unnecessary on a first overflow. Serving it would put 2 KB on every \
+         overflow of every tool; `get_guide` returns it to a caller that asks.",
+    ),
+    (
+        "progressive-disclosure",
+        "Path-relative annotation",
+        "Pull-only by design (bug 7579b32b1cd2362f): the canonical statement of the \
+         path-relative convention, cited by name from `workspace-state`, a comment in \
+         `server.rs` and `cross-machine-catalog-resume.md`, so the heading must stay. It \
+         concerns every tool's response, not one tool's overflow, so no shape serves it; \
+         the activation banner states the convention where it matters.",
+    ),
+    (
+        "progressive-disclosure",
+        "Anti-patterns",
+        "Pull-only by design (bug 7579b32b1cd2362f): general misuse notes (re-running a \
+         tool instead of querying its buffer, passing a handle to a non-codescout reader) \
+         that no single tool's overflow calls for. The envelope's `hint` and the core \
+         section carry the correct pattern; `get_guide` returns this list on request.",
+    ),
+    (
+        "progressive-disclosure",
+        "Related",
+        "Pure cross-reference: one pointer to `error-handling` for inputs that overflow, \
+         not guidance a caller acts on for any one call shape. A `serves:` here would put \
+         a forwarding line on an overflow whose reader needs the core section instead.",
+    ),
+    (
         "librarian",
         "Common Mistakes",
         "Troubleshooting prose spanning nearly every `doc`/`librarian` shape, not \

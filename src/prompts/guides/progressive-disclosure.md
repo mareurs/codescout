@@ -3,7 +3,13 @@
 How codescout handles results too big to inline, and how the model
 should respond to them.
 
+A result over the inline budget is stored server-side. The response is an envelope with an
+`output_id` handle (`@tool_*`, `@cmd_*`, `@file_*`, `@bg_*`). Read it with
+`read_file("@tool_xyz", json_path="$.foo")`, `grep PATTERN @cmd_abc` or a line range. Do not
+re-run the tool.
+
 ## Output budgets
+<!-- serves: run_command, grep, read_file, tree, semantic_search, symbols, references, call_graph -->
 
 Tool output is capped to keep the model's context window healthy.
 Results exceeding the inline budget are stored in a server-side
@@ -23,7 +29,8 @@ Token estimate is `bytes / 4`. Above `MAX_INLINE_TOKENS`, the full
 result is buffered and the response shrinks to `{output_id, summary,
 hint, …}`.
 
-## The @ref buffer
+## Reading a buffer
+<!-- serves: run_command, grep, read_file, tree, semantic_search, symbols, references, call_graph -->
 
 When a tool returns an overflow envelope (typical fields: `output_id`,
 `summary`, `hint`, `complete`, `next`):
@@ -61,6 +68,8 @@ path. A line wider than the inline budget is shown clipped and marked, and
 `sed -n` or plain `grep` cannot page inside it: print the part you need with
 `grep -o 'PATTERN[^,]*'`.
 
+## Buffer internals
+
 **Reading a buffer never makes another buffer.** `read_file` on a `@cmd_*`, `@file_*` or
 `@tool_*` ref answers with pages of that same ref. `next` names the ref and counts in the ref's own
 lines. A `json_path` value that is larger than one page is paged on the same ref: add
@@ -88,6 +97,7 @@ activation: re-invoke the tool with the handle to acknowledge and proceed
 (a read-only refusal replays with `ack="@ack_…"` on the refused call, sending nothing else).
 
 ### Reading the stderr of a buffered command: the `.err` suffix
+<!-- serves: run_command -->
 
 A `@cmd_*` handle holds **both streams**, and the bare handle answers from
 **stdout only**. Append `.err` to read the stderr instead:
@@ -113,6 +123,7 @@ finds nothing, because those kinds carry no stderr.
 
 
 ## Background jobs: start, end the turn, read after the wake
+<!-- serves: run_command -->
 
 `run_command(..., run_in_background=true)` returns at once with `output_id` (`@bg_N`), a `record`
 path and a `hint`. The job's outcome is not in that response. Do not poll with sleeps or repeated
@@ -129,6 +140,9 @@ status calls.
    job's state and its output. The exit code in the wake is the last command's. For `cargo test | tail`
    that is `tail`'s `0`, even when cargo failed, so start the job without the pipe and search its
    buffer with `grep`.
+
+## Background jobs: when no wake arrives, and waiting on another process
+<!-- serves: run_command -->
 
 **No wake arrives** when the plugin or its hook is absent, when another harness runs the session,
 or when a subagent started the job. The record file is still written. Use your harness's timer

@@ -9924,12 +9924,15 @@ mod tests {
     /// while Gates 1–6 all stay green.
     ///
     /// Measured 2026-09-01 while scoping the T-15a annotation pass, which this gate then
-    /// refuted. Of the nine topics, only `librarian` and `tracker-conventions` are
-    /// reachable this way. Every tool routing to `progressive-disclosure` (nine of them),
-    /// `symbol-navigation` (three) and `workspace-state` (one) returns `None`, and
-    /// `project-activation-bootstrap` has no `relevant_guide_topic` at all — it is the
-    /// session-opening special case. Annotating any of them would have been a silent
-    /// content regression, and that pass was already scoped, queued and approved.
+    /// refuted: at that date every tool routing to `progressive-disclosure` (nine of
+    /// them), `symbol-navigation` (three) and `workspace-state` (one) returned `None`
+    /// from `selector_key`, so annotating any of those topics would have been a silent
+    /// content regression. That premise has since changed: since `30b6fc41` the default
+    /// `selector_key` is the tool name, or `tool.action` (`action_selector_key`), and
+    /// nothing overrides it. `progressive-disclosure` now declares sections, served to the
+    /// eight tools that route to it, and this gate is what verifies that route is live.
+    /// `project-activation-bootstrap` still has no `relevant_guide_topic` at all — it is the
+    /// session-opening special case.
     ///
     /// The inputs are derived from each tool's own `input_schema()` action enum — the
     /// same oracle Gate 6 uses — rather than hand-listed, so a new action is covered
@@ -17417,6 +17420,45 @@ mod guide_hint_tests {
             render_content(&second)
         );
     }
+    /// End to end: an overflowing `run_command` ships the sections written for it, with the
+    /// section markers, and not the whole guide (bug 7579b32b1cd2362f).
+    #[tokio::test]
+    async fn a_run_command_overflow_ships_sections_not_the_whole_guide() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        warm_ledger(&ctx);
+        let tool = tool_by_name(&server, "run_command");
+        let big = tool
+            .call_content(json!({"command": "yes filler | head -2000"}), &ctx)
+            .await
+            .unwrap();
+        // Every block: the guide sections ride behind the primary block, which is all
+        // `render_content` shows.
+        let rendered = big
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for marker in [
+            "auto-injected get_guide('progressive-disclosure') § Output budgets",
+            "auto-injected get_guide('progressive-disclosure') § Reading a buffer",
+            "auto-injected get_guide('progressive-disclosure') § Background jobs",
+        ] {
+            assert!(
+                rendered.contains(marker),
+                "an overflowing run_command must ship {marker:?}; got: {rendered}"
+            );
+        }
+        assert!(
+            !rendered.contains("## Path-relative annotation"),
+            "the pull-only parts must not ship on an overflow"
+        );
+        assert!(
+            !rendered.contains("auto-injected get_guide('progressive-disclosure') — first call"),
+            "the whole-topic block must not ship for a declaring topic"
+        );
+    }
+
     // --- Section-grain delivery (Task 8) ---------------------------------
     //
     // `GUIDE_INDEX.declares(topic)` is true only for `librarian` in Phase 1.

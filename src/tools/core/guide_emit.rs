@@ -543,6 +543,179 @@ mod tests {
         assert!(blocks.is_empty());
         assert!(shape.is_none());
     }
+    // ── progressive-disclosure: sections for the overflowing tool (bug 7579b32b1cd2362f) ──
+
+    const PD: &str = "progressive-disclosure";
+    const PD_CORE: [&str; 2] = ["Output budgets", "Reading a buffer"];
+    const PD_STDERR: &str = "Reading the stderr of a buffered command: the `.err` suffix";
+    const PD_BG_START: &str = "Background jobs: start, end the turn, read after the wake";
+    const PD_BG_WAKE: &str =
+        "Background jobs: when no wake arrives, and waiting on another process";
+    /// The eight tools that route an overflow to `progressive-disclosure`.
+    const PD_ROUTED_TOOLS: [&str; 8] = [
+        "run_command",
+        "grep",
+        "read_file",
+        "tree",
+        "semantic_search",
+        "symbols",
+        "references",
+        "call_graph",
+    ];
+
+    /// The `§ <heading>` of each delivered section block, sorted.
+    fn section_headings(blocks: &[Content]) -> Vec<String> {
+        let mut out: Vec<String> = blocks
+            .iter()
+            .map(|c| {
+                let t = text(c);
+                let after = t
+                    .split_once("§ ")
+                    .expect("a section block names its heading")
+                    .1;
+                after
+                    .split_once(" — first call")
+                    .expect("a section marker closes its heading with ` — first call`")
+                    .0
+                    .to_string()
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    fn sorted(mut v: Vec<&str>) -> Vec<String> {
+        v.sort();
+        v.into_iter().map(str::to_string).collect()
+    }
+
+    fn pd_run_command_headings() -> Vec<String> {
+        let mut want = PD_CORE.to_vec();
+        want.extend([PD_STDERR, PD_BG_START, PD_BG_WAKE]);
+        sorted(want)
+    }
+
+    #[test]
+    fn an_overflow_from_grep_ships_the_two_core_sections_only() {
+        let mut led = ledger();
+        let (blocks, shape) = guide_blocks_for(PD, Some("grep"), &json!({}), &mut led);
+        assert!(matches!(shape, Some(GuideDeliveryShape::Section)));
+        assert_eq!(section_headings(&blocks), sorted(PD_CORE.to_vec()));
+    }
+
+    #[test]
+    fn an_overflow_from_run_command_ships_the_core_stderr_and_background_sections() {
+        let mut led = ledger();
+        let (blocks, shape) = guide_blocks_for(PD, Some("run_command"), &json!({}), &mut led);
+        assert!(matches!(shape, Some(GuideDeliveryShape::Section)));
+        assert_eq!(section_headings(&blocks), pd_run_command_headings());
+    }
+
+    #[test]
+    fn a_later_grep_overflow_after_run_command_ships_nothing() {
+        let mut led = ledger();
+        guide_blocks_for(PD, Some("run_command"), &json!({}), &mut led);
+        assert!(
+            led.contains(&format!("{PD}#Output budgets")),
+            "a declaring topic stamps `topic#heading` keys, not the bare topic"
+        );
+        let (blocks, shape) = guide_blocks_for(PD, Some("grep"), &json!({}), &mut led);
+        assert!(blocks.is_empty(), "everything grep serves was already sent");
+        assert!(shape.is_none());
+    }
+
+    /// A tool that routes here but whose shape no section serves (`doc`, whose shapes
+    /// belong to the librarian topics) still gets a usable minimum: the preamble.
+    #[test]
+    fn an_overflow_from_doc_ships_the_preamble_with_the_handle_paragraph() {
+        let mut led = ledger();
+        let (blocks, shape) = guide_blocks_for(PD, Some("doc.get"), &json!({}), &mut led);
+        assert!(matches!(shape, Some(GuideDeliveryShape::Preamble)));
+        assert_eq!(blocks.len(), 1);
+        let t = text(&blocks[0]);
+        for needle in [
+            "output_id",
+            "read_file(",
+            "grep PATTERN @cmd_",
+            r#"get_guide("progressive-disclosure")"#,
+        ] {
+            assert!(
+                t.contains(needle),
+                "the preamble must carry {needle:?}: {t}"
+            );
+        }
+        assert!(t.len() < 900, "the preamble block is {} B", t.len());
+    }
+
+    #[test]
+    fn every_routed_tool_matches_a_core_section() {
+        for tool in PD_ROUTED_TOOLS {
+            let hit: Vec<&str> = GUIDE_INDEX
+                .match_sections(PD, Some(tool), &json!({}))
+                .iter()
+                .map(|s| s.heading.as_str())
+                .collect();
+            for core in PD_CORE {
+                assert!(
+                    hit.contains(&core),
+                    "`{tool}` must be served `{core}`; got {hit:?}"
+                );
+            }
+        }
+    }
+
+    /// Review Focus 1: a compaction or resume re-arm clears the `topic#heading` keys, so the
+    /// next overflow ships the sections again.
+    #[test]
+    fn a_re_armed_ledger_redelivers_the_overflow_sections() {
+        let mut led = ledger();
+        guide_blocks_for(PD, Some("grep"), &json!({}), &mut led);
+        led.re_arm(&[PD], crate::tools::guide_ledger::RearmCause::PostCompact);
+        let (blocks, _) = guide_blocks_for(PD, Some("grep"), &json!({}), &mut led);
+        assert_eq!(
+            section_headings(&blocks),
+            sorted(PD_CORE.to_vec()),
+            "a re-armed ledger must receive the sections again"
+        );
+    }
+
+    /// Review Focus 2, pinning ACCEPTED behaviour: a persisted ledger that holds the bare
+    /// topic key from before the split does not suppress the sections. The cost is one
+    /// double delivery per old session. Do not "fix" it without deciding that cost again.
+    #[test]
+    fn a_bare_topic_key_from_before_the_split_does_not_suppress_the_sections() {
+        let mut led = ledger();
+        led.insert(PD.to_string());
+        let (blocks, _) = guide_blocks_for(PD, Some("grep"), &json!({}), &mut led);
+        assert_eq!(section_headings(&blocks), sorted(PD_CORE.to_vec()));
+    }
+
+    /// The point of the split is bytes. Ceilings are the wrapped delivery measured on
+    /// 2026-11-10 (grep 3,703 B, run_command 8,730 B; each section carries about 250 B of
+    /// markers) plus 5%. A section that grows, or a core tool list that widens what a
+    /// `grep` overflow receives, fails here and gets re-measured.
+    #[test]
+    fn the_overflow_deliveries_stay_within_their_byte_budgets() {
+        const GREP_CEILING: usize = 3_900;
+        const RUN_COMMAND_CEILING: usize = 9_200;
+        let total = |sel: &str| -> usize {
+            let (blocks, _) = guide_blocks_for(PD, Some(sel), &json!({}), &mut ledger());
+            blocks.iter().map(|c| text(c).len()).sum()
+        };
+        let grep = total("grep");
+        let run_command = total("run_command");
+        let whole = text(&guide_block(PD).expect("the topic has a body")).len();
+        assert!(grep <= GREP_CEILING, "grep delivery is {grep} B");
+        assert!(
+            run_command <= RUN_COMMAND_CEILING,
+            "run_command delivery is {run_command} B"
+        );
+        assert!(grep * 3 < whole, "grep {grep} B vs whole {whole} B");
+        assert!(
+            run_command < whole,
+            "run_command {run_command} B vs whole {whole} B"
+        );
+    }
 
     /// The reply a caller reads is these blocks laid end to end, and the tool's own block
     /// ends on its last line with no newline. Putting one in front of the block under test

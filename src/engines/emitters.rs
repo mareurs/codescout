@@ -301,8 +301,33 @@ mod tests {
             "the hint must name the delivered topic, and must not be dropped"
         );
         assert!(
-            matches!(shape, GuideDeliveryShape::Whole),
-            "progressive-disclosure is a non-declaring topic, so its shape is always Whole"
+            matches!(shape, GuideDeliveryShape::Preamble),
+            "progressive-disclosure declares sections, and no section serves `t.a`, so an \
+             overflow from it ships the preamble"
+        );
+    }
+
+    /// An overflow from a tool the topic names ships its sections, not the whole guide.
+    #[test]
+    fn an_overflow_from_grep_is_delivered_as_sections() {
+        let v = json!({});
+        let mut c = ctx(&v, Some("grep"));
+        c.content_topic = Some("progressive-disclosure");
+        c.overflowing = true;
+        let Emitted::Claimed(e) = emit_guide_sections(&c, &mut GuideLedger::default()) else {
+            panic!("a named content topic must claim");
+        };
+        let (hint_topic, shape) = e.hint.expect("the overflow path must hint its own topic");
+        assert_eq!(hint_topic, "progressive-disclosure");
+        assert!(
+            matches!(shape, GuideDeliveryShape::Section),
+            "an overflow from `grep` must ship sections"
+        );
+        assert_eq!(
+            e.blocks.len(),
+            2,
+            "the two core sections, got {}",
+            e.blocks.len()
         );
     }
 

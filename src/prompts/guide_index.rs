@@ -935,7 +935,14 @@ n body
     #[test]
     fn a_topic_without_declarations_reports_false() {
         let idx = GuideIndex::try_build().unwrap();
-        assert!(!idx.declares("progressive-disclosure"));
+        assert!(!idx.declares("error-handling"));
+    }
+    /// `progressive-disclosure` declares its sections so an overflow ships only the parts
+    /// written for the overflowing tool (bug 7579b32b1cd2362f).
+    #[test]
+    fn progressive_disclosure_declares_sections() {
+        let idx = GuideIndex::try_build().unwrap();
+        assert!(idx.declares("progressive-disclosure"));
     }
 
     #[test]

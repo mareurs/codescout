@@ -457,4 +457,31 @@ mod tests {
             "guide must include the reconnaissance trigger"
         );
     }
+    /// `progressive-disclosure` declares sections, so an overflow ships only some of them. An
+    /// explicit fetch still returns the whole topic, the pull-only parts included.
+    #[tokio::test]
+    async fn get_guide_returns_every_section_of_progressive_disclosure() {
+        let g = GetGuide::new();
+        let result = g
+            .call(json!({ "topic": "progressive-disclosure" }), &ctx().await)
+            .await
+            .unwrap();
+        let body = result["body"].as_str().expect("body must be a string");
+        for heading in [
+            "## Output budgets",
+            "## Reading a buffer",
+            "## Buffer internals",
+            "the `.err` suffix",
+            "## Background jobs: start, end the turn, read after the wake",
+            "## Background jobs: when no wake arrives, and waiting on another process",
+            "## Path-relative annotation",
+            "## Anti-patterns",
+            "## Related",
+        ] {
+            assert!(
+                body.contains(heading),
+                "an explicit fetch must return every section; missing {heading:?}"
+            );
+        }
+    }
 }
