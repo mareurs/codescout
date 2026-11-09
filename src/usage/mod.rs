@@ -139,6 +139,7 @@ impl UsageRecorder {
         let deliveries_json = deliveries::to_column(&delivered);
         // Best-effort — never let recording fail the tool call. A failed write still leaves a
         // trace: a silent gap makes every rate over `tool_calls` wrong with no sign of it.
+        let attempt = std::time::Instant::now();
         if let Err(e) = self
             .write_content(
                 tool_name,
@@ -153,8 +154,14 @@ impl UsageRecorder {
             )
             .await
         {
-            self.note_dropped_row(tool_name, &started_at, workspace_override, &e)
-                .await;
+            self.note_dropped_row(
+                tool_name,
+                &started_at,
+                workspace_override,
+                &e,
+                attempt.elapsed().as_millis(),
+            )
+            .await;
         }
         result
     }
@@ -179,6 +186,7 @@ impl UsageRecorder {
         error: anyhow::Error,
     ) {
         let result: Result<Vec<Content>> = Err(error);
+        let attempt = std::time::Instant::now();
         if let Err(e) = self
             .write_content(
                 tool_name,
@@ -193,8 +201,14 @@ impl UsageRecorder {
             )
             .await
         {
-            self.note_dropped_row(tool_name, started_at, workspace_override, &e)
-                .await;
+            self.note_dropped_row(
+                tool_name,
+                started_at,
+                workspace_override,
+                &e,
+                attempt.elapsed().as_millis(),
+            )
+            .await;
         }
     }
 
@@ -203,7 +217,11 @@ impl UsageRecorder {
     /// Two sinks, both best-effort: a `warn!` (stderr, which the MCP client captures) and one
     /// line in `<home project>/.codescout/usage-dropped-rows.log`, a plain file a person can
     /// read when the database is the thing that failed. The line is `started_at`, tool, pin
-    /// (`-` when none), then the error chain with its newlines folded.
+    /// (`-` when none), the error chain with its newlines folded, then three fields that name
+    /// the writer: the process id, the build (`sha`, with `+dirty` when the tree was not
+    /// clean) and `wait_ms`, how long the write attempt ran before it failed. A lock that
+    /// outlasts the 5 s `busy_timeout` shows as a `wait_ms` near 5000; the build and the pid
+    /// say which server process was waiting, which is the half of a lock the log can name.
     /// docs/issues/2026-11-09-concurrent-pinned-calls-leave-no-usage-row.md
     async fn note_dropped_row(
         &self,
@@ -211,19 +229,26 @@ impl UsageRecorder {
         started_at: &str,
         workspace_override: Option<&std::path::Path>,
         error: &anyhow::Error,
+        wait_ms: u128,
     ) {
         let chain = format!("{error:#}").replace(['\n', '\r', '\t'], " ");
+        let build = db::BuildProvenance::current();
+        let build = format!("{}{}", build.sha, if build.dirty { "+dirty" } else { "" });
         tracing::warn!(
             tool = tool_name,
             pin = ?workspace_override,
             error = %chain,
+            wait_ms = wait_ms as u64,
+            build = %build,
             "usage row dropped: the call answered but its row was not written"
         );
         let Some(root) = self.agent.project_root().await else {
             return;
         };
         let pin = workspace_override.map_or_else(|| "-".to_string(), |p| p.display().to_string());
-        let line = format!("{started_at}\t{tool_name}\t{pin}\t{chain}\n");
+        let pid = std::process::id();
+        let line =
+            format!("{started_at}\t{tool_name}\t{pin}\t{chain}\t{pid}\t{build}\t{wait_ms}\n");
         let Ok(mut file) = tokio::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -1076,12 +1101,26 @@ mod content_tests {
         let cols: Vec<&str> = log.lines().next().unwrap().split('\t').collect();
         assert_eq!(
             cols.len(),
-            4,
-            "started_at, tool, pin, error chain; got {log:?}"
+            7,
+            "started_at, tool, pin, error chain, pid, build, wait_ms; got {log:?}"
         );
         assert_eq!(cols[1], "symbols", "the tool is named: {log:?}");
         assert_eq!(cols[2], "-", "no pin was passed: {log:?}");
         assert!(!cols[3].is_empty(), "the error chain is not empty: {log:?}");
+        assert_eq!(
+            cols[4],
+            std::process::id().to_string(),
+            "the writer's pid is named: {log:?}"
+        );
+        assert_eq!(
+            cols[5].trim_end_matches("+dirty"),
+            db::BuildProvenance::current().sha,
+            "the build is named: {log:?}"
+        );
+        assert!(
+            cols[6].parse::<u128>().is_ok(),
+            "wait_ms is a whole number: {log:?}"
+        );
         assert_eq!(log.lines().count(), 1, "one dropped row, one line: {log:?}");
     }
 
