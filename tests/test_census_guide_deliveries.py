@@ -55,6 +55,13 @@ def preamble(topic: str, body: str = "intro") -> str:
 
 def pointer(topic: str) -> str:
     return f"<!-- get_guide('{topic}') NOT auto-injected: 20000 bytes is over the cap. Call it. -->"
+def subagent(topic: str, body: str = "short") -> str:
+    return (
+        f"<!-- auto-injected get_guide('{topic}') subagent — first call this session "
+        f"that triggers the topic, short form. get_guide('{topic}') returns the full guide. -->\n"
+        f"{body}\n"
+        f"<!-- end auto-injected get_guide('{topic}') subagent -->"
+    )
 
 
 def assistant_call(ts, call_id, name, inp):
@@ -319,6 +326,20 @@ class CensusTests(unittest.TestCase):
         got = census._deliveries_in("\n" + blk + "\ntrailing", True, with_text=True)
         self.assertEqual(got[0]["text"], blk)
         self.assertNotIn("text", census._deliveries_in("\n" + blk, True)[0])
+    def test_the_subagent_short_form_is_told_apart_and_measured_by_its_own_close(self):
+        text = subagent("project-activation-bootstrap") + "\n" + whole("symbol-navigation")
+        got = census._deliveries_in("\n" + text, True)
+        self.assertEqual(
+            {(d["topic"], d["form"]) for d in got},
+            {("project-activation-bootstrap", "subagent"), ("symbol-navigation", "whole")},
+        )
+        short = next(d for d in got if d["form"] == "subagent")
+        self.assertTrue(short["closed"])
+        self.assertTrue(short["own_block"])
+        # The short block's bytes end at ITS close marker, not at the next block's.
+        self.assertEqual(
+            short["bytes"], len(subagent("project-activation-bootstrap").encode("utf-8"))
+        )
 
 
     def test_markers_match_the_emitter(self):
@@ -329,6 +350,8 @@ class CensusTests(unittest.TestCase):
             "<!-- end auto-injected get_guide('{topic}') § {} -->",
             "<!-- auto-injected get_guide('{topic}') preamble — no section",
             "<!-- end auto-injected get_guide('{topic}') preamble -->",
+            "<!-- auto-injected get_guide('{topic}') subagent — first call this session",
+            "<!-- end auto-injected get_guide('{topic}') subagent -->",
             "<!-- get_guide('{topic}') NOT auto-injected:",
         ):
             self.assertIn(needle, GUIDE_EMIT, f"emitter wording moved: {needle!r}")

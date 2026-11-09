@@ -42,12 +42,13 @@ def _load_probe():
 probe = _load_probe()
 TOPICS = set(probe.TOPICS)
 
-# The three opening forms the emitter writes (src/tools/core/guide_emit.rs). The heading part
+# The four opening forms the emitter writes (src/tools/core/guide_emit.rs). The heading part
 # may not cross `-->` or `<!--`, and is lazy so a heading containing ` — ` is kept whole.
 OPEN = re.compile(
     r"<!-- auto-injected get_guide\('([a-z][a-z-]*)'\)"
     r"(?: § ((?:(?!-->|<!--)[^\n])*?) — first call"
     r"| — first call"
+    r"| subagent — first call"
     r"| preamble — no section)"
 )
 POINTER = re.compile(r"<!-- get_guide\('([a-z][a-z-]*)'\) NOT auto-injected:[^\n]*?-->")
@@ -87,6 +88,8 @@ def _deliveries_in(text: str, provable: bool = True, with_text: bool = False) ->
             form, close = "section", f"<!-- end auto-injected get_guide('{topic}') § {heading} -->"
         elif "preamble" in m.group(0):
             form, close = "preamble", f"<!-- end auto-injected get_guide('{topic}') preamble -->"
+        elif m.group(0).endswith("') subagent — first call"):
+            form, close = "subagent", f"<!-- end auto-injected get_guide('{topic}') subagent -->"
         else:
             form, close = "whole", f"<!-- end auto-injected get_guide('{topic}') -->"
         at = text.find(close, m.end())
