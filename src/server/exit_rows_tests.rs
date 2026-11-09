@@ -166,6 +166,24 @@ async fn a_refused_write_lock_leaves_one_row() {
         "write_lock_unavailable",
         "lock refusal",
     );
+
+    // The wait is the one fact this row has that the recorder's own clock cannot see: it starts
+    // when the row is written, after the wait, and would say 0 ms.
+    let latency_ms: i64 = rusqlite::Connection::open_with_flags(
+        dir.path().join(".codescout").join("usage.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap()
+    .query_row(
+        "SELECT latency_ms FROM tool_calls WHERE tool_name = 'create_file'",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap();
+    assert!(
+        (900..4_000).contains(&latency_ms),
+        "the row records the wait for the lock (about 1000 ms), not 0; got {latency_ms}"
+    );
 }
 
 /// An unknown tool is a protocol error and must stay one; it must also leave a row.

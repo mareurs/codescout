@@ -938,6 +938,12 @@ impl CodeScoutServer {
     /// project, which is what a refused `workspace=` pin must use (nothing may be created at the
     /// pinned path); `Some(root)` is a pin that was already accepted and made resident.
     ///
+    /// `held` is `(started_at, latency_ms)` for a call that waited before it was refused, the
+    /// write-lock refusal. The recorder's own clock starts only when the row is written, so it
+    /// would say 0 ms for a call held up to `write_lock_timeout_secs`; the caller's clock is
+    /// used instead, as `UsageRecorder::record_abandoned` does for a timeout. `None` keeps the
+    /// recorder's clock, which is right for a refusal that returns at once.
+    ///
     /// Best-effort in three ways, none of which changes the answer the caller gets:
     /// - it is skipped when the default project's root is gone: `open_db` no longer re-creates
     ///   a missing root (it creates only `.codescout/`), and a row for a project that is gone has
@@ -957,6 +963,7 @@ impl CodeScoutServer {
         error: anyhow::Error,
         workspace: Option<&std::path::Path>,
         identity: &CallIdentity,
+        held: Option<&(String, i64)>,
     ) {
         if workspace.is_none()
             && !self
@@ -988,14 +995,32 @@ impl CodeScoutServer {
         );
         let (name, input) = (tool.to_string(), input.clone());
         let workspace = workspace.map(std::path::Path::to_path_buf);
+        let held = held.cloned();
         let runtime = tokio::runtime::Handle::current();
         let job = tokio::task::spawn_blocking(move || {
-            runtime.block_on(recorder.record_content(
-                &name,
-                &input,
-                workspace.as_deref(),
-                || async move { Err::<Vec<Content>, anyhow::Error>(error) },
-            ))
+            runtime.block_on(async move {
+                match held {
+                    Some((started_at, latency_ms)) => {
+                        recorder
+                            .record_abandoned(
+                                &name,
+                                &started_at,
+                                latency_ms,
+                                &input,
+                                workspace.as_deref(),
+                                error,
+                            )
+                            .await;
+                    }
+                    None => {
+                        let _ = recorder
+                            .record_content(&name, &input, workspace.as_deref(), || async move {
+                                Err::<Vec<Content>, anyhow::Error>(error)
+                            })
+                            .await;
+                    }
+                }
+            })
         });
         // The job keeps running past the budget; only the wait for it is bounded.
         let _ = tokio::time::timeout(REFUSAL_RECORD_BUDGET, job).await;
@@ -1045,7 +1070,7 @@ impl CodeScoutServer {
         };
         // Against the DEFAULT project (`None`), never the pin: nothing may be created at the
         // pinned path.
-        self.record_refusal_row(tool, input, recorded.into(), None, &identity)
+        self.record_refusal_row(tool, input, recorded.into(), None, &identity, None)
             .await;
         response
     }
@@ -1685,6 +1710,7 @@ impl CodeScoutServer {
             error,
             exit.workspace.as_deref(),
             &exit.identity,
+            exit.held.as_ref(),
         )
         .await;
     }
@@ -1808,6 +1834,7 @@ impl CodeScoutServer {
                     input,
                     workspace: None,
                     identity,
+                    held: None,
                 });
             }
         };
@@ -1955,6 +1982,7 @@ impl CodeScoutServer {
                 input,
                 workspace: workspace_override,
                 identity,
+                held: None,
             });
         }
 
@@ -2052,6 +2080,8 @@ impl CodeScoutServer {
         // explicitly before parking if the request is cancelled. This ensures
         // the cross-process write lock is released even when the task is parked
         // waiting for rmcp to drop it on connection close.
+        let lock_started_at = crate::usage::db::now_timestamp();
+        let lock_clock = std::time::Instant::now();
         let write_guard = match self
             .acquire_write_guard_if_writing(
                 &req.name,
@@ -2062,13 +2092,15 @@ impl CodeScoutServer {
         {
             Ok(Ok(g)) => g,
             // A refused lock is a refusal, not a call the recorder saw: it returns here,
-            // before `record_content` is built below.
+            // before `record_content` is built below. The call may have waited for the lock for
+            // up to `write_lock_timeout_secs`, so the row takes that wait as its latency.
             Ok(Err(result)) => {
                 return Exit::unrecorded(Unrecorded {
                     result: Ok(result),
                     input: input_for_record,
                     workspace: ctx.workspace_override.clone(),
                     identity,
+                    held: Some((lock_started_at, lock_clock.elapsed().as_millis() as i64)),
                 });
             }
             Err(e) => {
@@ -2077,6 +2109,7 @@ impl CodeScoutServer {
                     input: input_for_record,
                     workspace: ctx.workspace_override.clone(),
                     identity,
+                    held: None,
                 });
             }
         };
@@ -3082,6 +3115,10 @@ struct Unrecorded {
     /// The project that holds the row: `None` is the session default.
     workspace: Option<std::path::PathBuf>,
     identity: CallIdentity,
+    /// When the call was held before it was refused, as `(started_at, latency_ms)`. Only the
+    /// write-lock refusal has a wait: it blocks for up to `write_lock_timeout_secs`. Every
+    /// other exit returns at once and leaves this `None`, so its row keeps the recorder's own 0 ms.
+    held: Option<(String, i64)>,
 }
 
 /// How `dispatch_tool_call` ended. Every `return` in it picks one, so a new early return cannot
