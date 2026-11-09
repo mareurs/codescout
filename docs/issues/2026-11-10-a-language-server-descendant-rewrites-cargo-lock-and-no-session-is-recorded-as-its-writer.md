@@ -10,7 +10,7 @@ owner: marius
 related:
 - '91b5ffce06ede31a'
 severity: low
-unverified: The provenance verdict for a mux-written Cargo.lock was read from scripts/file-provenance.py, not run end to end. The write itself was measured once, in a scratch workspace, not in this checkout.
+unverified: 'CLEARED 2026-11-10. Was: the provenance verdict for a mux-written Cargo.lock was read from scripts/file-provenance.py, not run end to end. M3 ran it: UNKNOWN. Still true: the write itself was measured once, in a scratch workspace, not in this checkout.'
 ---
 
 # BUG: a language-server descendant rewrites the tracked Cargo.lock with no tool call, so no session is recorded as its writer
@@ -85,7 +85,11 @@ Before committing a manifest change, read `git diff Cargo.lock`. If the change o
 
 ## Resume
 
-Next step: measure the actual `file-provenance.py` verdict for a lock file that a mux-started `cargo check` wrote after this session edited the manifest. Until then the `UNKNOWN` claim above rests on reading the code. Not established: whether the cargo run was rust-analyzer's build-script pass or flycheck, any other language server, a crate with a `build.rs`, and more than one run.
+The verdict is measured (M3, below). The remaining question is whether this record should be fixed or closed, because M3 shows the tool already gives an honest answer and no consequence was found.
+
+M3, 2026-11-10: a throwaway test in the session scratchpad (`test_m3_cargo_lock.py`) used the fixtures of `tests/test_harness_provenance.py`. It committed `Cargo.toml` and `Cargo.lock`, then wrote both on disk. One recorded `Write` named `Cargo.toml`. Nothing recorded the lock file. The real `scripts/file-provenance.py` printed `MINE      Cargo.toml` and `UNKNOWN   Cargo.lock`. Its text for `Cargo.lock` says that absence of a record is a statement about coverage and must not be read as "not mine".
+
+Not established: whether the cargo run was rust-analyzer's build-script pass or flycheck, any other language server, a crate with a `build.rs`, and more than one run of M2.
 
 ## References
 
