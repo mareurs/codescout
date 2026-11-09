@@ -53,7 +53,7 @@ author to make.
 | F-17 | 2026-09-26 | high | architectural | fixed-verified | The live check found `tool_use_id` NULL on every row: rmcp puts `_meta` in RequestContext.meta, and the test built params in-process |
 | F-18 | 2026-09-28 | med | context-rendering | mitigated | A harness-rendered CLAUDE.md strips HTML comments, so the controller read "no markers" and designed a ruling around it |
 | F-19 | 2026-11-04 | med | plan-prose | mitigated | Plan statuses, this log's Index and GG-N all lag the code — unbuilt steps are indistinguishable from shipped ones |
-| F-20 | 2026-11-09 | med | plan-prose | mitigated | The subagent short-opener spec is silent on `_guide_hint` (the Whole hint would forbid the fetch the body recommends) and on the census marker drift guard |
+| F-20 | 2026-11-09 | med | plan-prose | fixed-verified | The subagent short-opener spec is silent on `_guide_hint` (the Whole hint would forbid the fetch the body recommends) and on the census marker drift guard |
 
 ## Wins Index
 
@@ -1641,7 +1641,7 @@ True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` o
 ## F-20 — The subagent short-opener spec is silent on `_guide_hint` and on the census marker drift guard
 
 **Valid:** dated 2026-11-09
-**Status:** mitigated — resolved in the plan, not yet in code
+**Status:** fixed-verified — built in `24cb43ce4` (`GuideDeliveryShape::Short`, marker built in `guide_emit.rs`, census form `subagent`); the hint is pinned end to end by `a_subagent_caller_gets_the_short_block_with_the_short_shape` and `a_subagent_opener_ships_the_short_body`, proved against a `Whole`-shape mutant in `afeb9b40b`. Residual, deferred: a later explicit `get_guide` after the short opener returns a repeat note that says the guide was "already delivered once" (see bug 7579b32b1cd2362f, "Shipped 2026-11-09").
 
 **Observed:** The spec `docs/superpowers/specs/2026-11-09-subagent-bootstrap-short-variant-design.md` (commit `d16b08ec9`) names the body, the flag and the block marker for a subagent's short session opener. It is silent on two contracts that the opener path also carries:
 
@@ -1652,7 +1652,7 @@ A third thing is not a gap but a constraint on wording: `session_opens_with_boot
 
 **Cost if missed:** med. A subagent would get a hint that forbids the one fetch the short body recommends, and the census would never see the new form.
 
-**Resolution:** the plan adds a `GuideDeliveryShape::Short` variant with its own `inject_hint` text, builds the block in `guide_emit.rs`, extends the drift-guard list, and pins `ALWAYS VERIFY` in a test of the short body.
+**Resolution (shipped):** the plan adds a `GuideDeliveryShape::Short` variant with its own `inject_hint` text, builds the block in `guide_emit.rs`, extends the drift-guard list, and pins `ALWAYS VERIFY` in a test of the short body.
 
 ## Template for new entries
 

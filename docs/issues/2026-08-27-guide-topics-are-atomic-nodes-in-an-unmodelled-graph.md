@@ -1,7 +1,7 @@
 ---
 id: '7579b32b1cd2362f'
 kind: bug
-status: taken
+status: investigating
 title: Guide topics are atomic nodes in a graph nobody modelled — 63% of the corpus auto-injected in one session, and three guides already cite sections the API cannot serve
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -10,8 +10,6 @@ tags:
 - get_guide
 - progressive-disclosure
 - proposal
-claimed_at: 2026-11-07
-claimed_by: 732f1c09-df3f-48d4-be63-d9326860edda
 unverified: 'PARTIALLY SHIPPED, and `open` alone does not say so. Phase 1 (section-grain get_guide) SHIPPED 2026-08-27; the USE probe ran the same day. The DISTRIBUTION probe that directions (b)/(c) were gated on RAN 2026-08-31 -- n=166 sessions, two machines, instrument scripts/probe_guide_section_use.py -- so that gate is SATISFIED. It changed the recommendation: the largest lever is subagent delivery (92.5% of delivered bytes never engaged, 2.3x the main-session waste), orthogonal to BOTH Phase 2 blockers. THREE STRATIFICATION CAVEATS, all measured, none optional when quoting a number: (1) main vs subagent must never be blended -- 45% vs 92%; (2) the sample is COMMIT-MIXED, 84% of it predating the 2026-08-27 section-grain ship, and the apparent 49.0%->34.4% improvement is project MIX, not regime -- codescout-project sessions are flat at 28.0%->27.5% while their share moved 38%->57%; (3) project is the dominant stratifier, ~28% waste in codescout sessions vs ~44-62% elsewhere. Still outstanding: the 17,378 B decomposition and cross-topic shape disambiguation (topic_declaring made `serves:` a cross-topic namespace; no_two_topics_declare_an_overlapping_shape fails the build on the collision, deliberately). Also outstanding and explicitly NOT a measurement: `tracker-conventions is really six topics` is an authoring judgement that needs re-costing before anyone builds on it.'
 ---
 
@@ -862,3 +860,34 @@ Reader B, Sonnet 5.5, same rubric v2, on 112 packets chosen by a stated rule: al
 **What this supports.** (1) Bootstrap to subagents is rarely used in a way that shows. It is also small: about 3.3 KB, roughly 830 tokens, per subagent, and 1,296 of 1,299 subagents got it. (2) For symbol-navigation and progressive-disclosure, "was the delivered text used" cannot be answered by reading 10 calls: a reader, human or model, cannot separate use of the guide from what a competent agent does anyway. A different instrument is needed, such as withholding the guide from some subagents, which was the option C rejected earlier for cost and sensitivity.
 
 **What it does not support.** It does not show that the guides are worthless. A guide can shape behaviour that does not appear in 10 calls, or prevent a failure that never happens. The result is about visible use, in one machine's transcripts, over 30 days.
+
+## Shipped 2026-11-09 — a subagent's session opener is a short body
+
+Decision (operator, 2026-11-09, "ok, go" on the recommendation): of the three bootstrap options the layer-2 readers left open, a subagent gets a short variant of `project-activation-bootstrap`. Spec `docs/superpowers/specs/2026-11-09-subagent-bootstrap-short-variant-design.md`, plan `docs/superpowers/plans/2026-11-09-subagent-bootstrap-short-opener.md`.
+
+**What the short body keeps.** Only what the 5 "used" subagents (both readers agree, 5 of 60) actually did: a memory read, the exact open-bug `doc(find ...)` query, `get_guide` of a named contract topic, and the Phase 1 lookup routing. It also keeps the one `ALWAYS VERIFY` line (operator rule, pinned by an existing test), although no reader saw it used.
+
+**How it is selected.** `dispatch_tool_call` sets a per-call `caller_is_subagent` flag on the call's ledger from `asserted_agent.is_some()`. `emit_session_opener` reads it. The ledger stamps the same bare topic key on both paths, so an explicit `get_guide("project-activation-bootstrap")` still returns the whole guide. The shape is `GuideDeliveryShape::Short`, because `Whole`'s hint ("do not re-call get_guide") would forbid the fetch the short body recommends (`context-injection-session-log` F-20).
+
+**Bytes** (computed from the two format strings in `src/tools/core/guide_emit.rs`; the same computation reproduces the 1,278 B the unit test measures for the short block):
+
+| Block | Body | Wrapped |
+|---|---|---|
+| whole guide (parent, explicit fetch) | 3,107 B | 3,338 B |
+| short body (stamped subagent) | 992 B | 1,278 B |
+
+Saving per stamped subagent: 2,060 B. The census counted 1,299 subagents in 30 days, 1,296 of them delivered the bootstrap, so the saving is at most about 2.7 MB a month, and only for subagents that carry the companion's principal stamp.
+
+**Commits:** `24cb43ce4` (server), `cacad722d` (census learns the `subagent` marker form), `e7eff4c76` (byte budget pinned: wrapped short block <= 1,300 B and under half the whole one), `afeb9b40b` (two review findings, below).
+
+**Verification.** All lanes of `./scripts/gate.sh` are green on `afeb9b40b`: Python 1,765 passed, LEAN 6,329, DEFAULT 9,227, clippy (both variants) and fmt clean. One gate run was red twice for reasons outside this change: a peer's archive commit moved a tracked issue file mid-run (`every_tracked_issue_file_has_wellformed_frontmatter`), and a peer's uncommitted edit of `src/tools/semantic/semantic_search.rs` failed fmt and clippy. Each passed when re-run alone.
+
+**Review.** A fresh Opus reviewer found no Critical issue and three Important ones. Two were fixed with tests proved against mutants (the `Whole`-shape mutant fails `a_subagent_caller_gets_the_short_block_with_the_short_shape` and `a_subagent_opener_ships_the_short_body`; a set-only-true mutant fails `a_never_seen_principal_without_an_agent_is_not_served_as_a_subagent` while the older `the_subagent_flag_does_not_leak_to_the_parent` still passed it, so that test was blind). The third was re-graded to Minor by effect and is deferred:
+
+- After the short opener, a later explicit `get_guide("project-activation-bootstrap")` takes the repeat branch in `src/tools/guide.rs`, so its `note` says the guide "was already delivered once to this ledger" and that a caller holding its earlier copy can skip re-reading. The subagent holds a SHORT copy. The full body is still returned in the same response, so nothing is withheld; the cost is a misleading sentence. A fix is a marker key for a short stamp, or a note variant.
+
+**Deferred minors** (not fixed): stale prose in `session_opening_guide_never_declares_sections` (says the opener "always reports Whole"), in the `guide_block` doc comment, and in the `census_guide_deliveries.py` docstring; and a possible cross-read of the per-call flag by concurrent calls in the anonymous tier (a ledger shared by an unstamped parent and a subagent, no rendezvous). The race is not shown reachable. A `task_local!` per call would remove it.
+
+**Not shipped yet.** The running server binary predates these commits. A stamped subagent in the review session still received the whole guide on `workspace(activate)`. It ships with `./scripts/rb.sh` and `/mcp`.
+
+**Still open from this issue:** the guide-withholding experiment (the only way to separate guide use from generic competence for `symbol-navigation` and `progressive-disclosure`), and a section-split pilot for the whole-topic deliveries (18.9 of 20.0 MB in the census). Also open: the companion's `SubagentStart` hook injects an exploration-protocol block that nearly duplicates the short body, so a stamped subagent now gets both.
