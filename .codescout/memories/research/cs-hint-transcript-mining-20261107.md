@@ -32,12 +32,29 @@ Scope: 21 transcript files, 203,591,767 bytes. Counted: `hook_additional_context
 - About 7,000 `PreToolUse` runs on codescout tools emit only `permissionDecision: allow` (141 B). That is a permission decision, not model context. Read as samples for `run_command`, `grep` and `edit_file`; not every run was read.
 - Limits: transcript bytes are not context bytes. The harness records such as `prompt_snapshot` (8.9 MB), `output_style` (5.3 MB) and `invoked_skills` (5.3 MB) were not checked for visibility to the model.
 
+## Window sensitivity (2026-11-09, `mine10.py`, scratchpad, not kept)
+Population at that time: 74 transcript files (19 in the main scan above), 187 genuine `[cs-hint]` deliveries. One subagent file (`agent-a8f17e062359f09cc`) held 43 of them, 37 of the parallel-write class, so the table excludes it. Deliveries: edit_code nudge 54, grep literal 39, parallel writes 45. Before the narrowing of the grep rule (see Open).
+
+| Class | Window (calls after the hint) | Result |
+|---|---|---|
+| edit_code nudge, `edit_code` on the same path | 1 | 23 followed, 31 not |
+| | 3, 5, 10, 20 | 34 followed, 20 not, identical in all four |
+| grep literal, switch to `semantic_search`, `symbols` or `references` | 1, 2 | 1 of 39 |
+| | 3 / 5 / 10 | 2 / 8 / 12 of 39 |
+| parallel writes, another batch with 2+ writes | 3 / 5 / 10 | 1 / 2 / 3 of 45 |
+| | 20 / 40 | 6 / 10 of 45 |
+
+- edit_code: the result does not depend on the window from 3 calls up. "Followed" is not split by whether the server had refused the edit first, so it is not credit for the hint.
+- grep literal: the count grows with the window because a session uses `symbols` or `references` anyway within 10 calls. There is no control, so the base rate is unknown; 1 to 3 calls is the window closest to a reaction.
+- parallel writes with the one subagent included: 16 / 25 / 31 / 41 / 46 of 82 at windows 3 / 5 / 10 / 20 / 40. That subagent writes in parallel by design, so those repeats are not ignored hints. Beyond about 5 calls the figure measures how much a session writes.
+- Not done: subagent coverage for other working directories.
+
 ## Limits
-- Small samples, one project. Windows of 3, 5 and 10 calls are my choice and were not tested for sensitivity.
+- Small samples, one project. Windows of 3, 5 and 10 calls are my choice; their sensitivity was tested afterwards (section above): edit_code does not depend on the window, grep and parallel-write counts do.
 - The declaration covers only messages marked `[cs-verified]`, so the pre/post split is not a test of the declaration.
 - The transcript set grows while it is measured: the mining session's own edits added 3 deliveries between two runs (found by the count change and one direct sample).
 - Wrong claim made and corrected in the session: that the structural-edit hint fires on any `edit_file`. It fires by the rule above.
 
 ## Open
 - The grep heuristic lives in the claude-plugins repo. The bug file with the 17 cases (`c5113d4`, `docs/issues/2026-11-07-grep-for-concept-heuristic-fires-on-literal-phrase-searches.md`) is on `origin/main`. A peer narrowed the rule on 2026-11-09 (claude-plugins `46dbed6`, `0002145`: quiet on quoted prose and identifiers) and the issue is `mitigated`. Re-run 2026-11-09 on the 15 distinct recorded patterns with the current rule: 12 quiet, 3 still fire (`substrate fact`, `verify callers`, `matches text literally`); two concept-shaped controls (`how are retries scheduled`, `retry backoff scheduling`) fire. The deliveries counted above are from before the change.
-- Not done: subagent coverage for sessions in other working directories, a sensitivity check on the windows.
+- Not done: subagent coverage for sessions in other working directories. The window sensitivity check is done (section above).
