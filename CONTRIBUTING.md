@@ -155,6 +155,10 @@ reaches `#[test]` code and `codescout-embed`'s feature-gated `local` module. CI 
 (`.github/workflows/ci.yml:50` and `:61`), so the first passing proves nothing about the
 second.
 
+A third invocation, with `--no-default-features`, lints the lean set. The librarian is off there, so
+an item that only `src/librarian/` uses is dead code, and `-D warnings` makes that an error; no other
+clippy invocation can see it. The gate and CI's `clippy` job both run it.
+
 ```bash
 python3 -m pip install -r requirements-python-light.txt
 cargo install cargo-nextest --locked   # once: the two test lanes below run under nextest
@@ -162,6 +166,7 @@ python3 scripts/python-tests.py --lane light
 cargo fmt
 cargo clippy -- -D warnings
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo clippy --workspace --all-targets --no-default-features -- -D warnings
 cargo nextest run --workspace --no-default-features --no-fail-fast
 cargo test --workspace --doc --no-default-features
 cargo nextest run --workspace --no-fail-fast

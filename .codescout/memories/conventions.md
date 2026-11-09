@@ -14,7 +14,8 @@ slot with `scripts/with-slot.sh cargo test …`
    uncommitted Rust on a shared checkout. Formats only what this session wrote and
    refuses the rest, naming the owner. Outside a Claude session it exits 2 and points
    you at `cargo fmt`, which is right for a solo checkout.
-2. `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`
+2. `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, then the same
+   with `--no-default-features` instead of the feature (the lean set; same lane, either red fails it)
 3. `cargo nextest run --workspace --no-default-features` — the **LEAN** lane, runs **THIRD**
 4. `cargo nextest run --workspace` — the default lane, runs **LAST**
 

@@ -380,6 +380,12 @@ jobs:
       # default-features build (no `local` module); this second pass is
       # what actually reaches local.rs and its tests.
       - run: cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+      # The lean set, `--no-default-features`: the librarian is off there, so an item only
+      # `src/librarian/` uses is dead code, and `-D warnings` makes that an error. No lane linted
+      # this set until 2026-11-09, and it was red on `ReadDenyList`. The `no-features` test lane
+      # builds it but denies no warnings, and every clippy line above runs with default features.
+      # docs/issues/2026-11-09-no-lane-runs-clippy-on-the-lean-feature-set-and-it-is-red-on-readdenylist.md
+      - run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
 
   test:
     name: Test (${{ matrix.os }} / ${{ matrix.config.name }})

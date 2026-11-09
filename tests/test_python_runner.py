@@ -161,7 +161,7 @@ def gate_fixture(tmp_path):
         "[ -z \"${TMPDIR_LITTER:-}\" ] || touch \"$TMPDIR/litter-$$\"\n"
         "lane=default\n"
         "[ \"$1\" = clippy ] && lane=clippy\n"
-        "case \"$*\" in *--no-default-features*) lane=lean ;; esac\n"
+        "case \"$*\" in *--no-default-features*) [ \"$1\" = clippy ] || lane=lean ;; esac\n"
         "case \"$*\" in *--doc*) lane=$lane-doc ;; esac\n"
         "if [ \"$lane\" = default ] && [ -n \"${HOLD_DEFAULT:-}\" ]; then\n"
         "  touch \"$DEFAULT_STARTED\"\n"
@@ -226,6 +226,7 @@ def assert_gate_calls(root, fmt_args=None, interrupted=False):
         expected.append("fmt " + fmt_args)
     expected += [
         "cargo clippy --workspace --all-targets --features local-embed -- -D warnings",
+        "cargo clippy --workspace --all-targets --no-default-features -- -D warnings",
         "cargo nextest run --workspace --no-default-features --no-fail-fast",
         "cargo test --workspace --doc --no-default-features",
         "cargo nextest run --workspace --no-fail-fast",
@@ -240,7 +241,7 @@ def assert_gate_calls(root, fmt_args=None, interrupted=False):
     calls = (root / "calls.txt").read_text().splitlines()
     assert calls.count(python_call) == 1
     assert [call for call in calls if call != python_call] == expected
-    cargo_calls = 4 if interrupted else 5
+    cargo_calls = 5 if interrupted else 6
     assert (root / "targets.txt").read_text().splitlines() == [str(root / "target")] * cargo_calls
 
 
@@ -498,11 +499,11 @@ def test_nextest_lanes_get_a_private_tmpfs_tmpdir(tmp_path):
     assert result.returncode == 0, result.stderr
     lines = tmpdir_lines(root)
     original = str(root / "orig-tmp")
-    # clippy, lean nextest, lean doctests, default nextest, default doctests
-    assert len(lines) == 5
-    assert lines[0] == lines[2] == lines[4] == original
-    assert lines[1] == lines[3] != original
-    private = Path(lines[1])
+    # clippy, lean clippy, lean nextest, lean doctests, default nextest, default doctests
+    assert len(lines) == 6
+    assert lines[0] == lines[1] == lines[3] == lines[5] == original
+    assert lines[2] == lines[4] != original
+    private = Path(lines[2])
     assert private.parent == root / "tmpbase" and private.name.startswith("codescout-gate-tmp.")
     assert f"test temp files in {private}" in result.stdout
 
@@ -512,7 +513,7 @@ def test_the_private_tmpdir_is_removed_whatever_the_outcome(tmp_path, failed_lan
     fixture = gate_fixture(tmp_path)
     root, _ = fixture
     run_gate_fixture(fixture, "--check", FAILED_LANE=failed_lane, TMPDIR_LITTER="1")
-    private = Path(tmpdir_lines(root)[1])
+    private = Path(tmpdir_lines(root)[2])
     # Not the caller's directory: the removal below would otherwise be of nothing.
     assert private != root / "orig-tmp" and private.parent == root / "tmpbase"
     assert not private.exists()
@@ -535,7 +536,7 @@ def test_an_interrupted_gate_removes_its_private_tmpdir(tmp_path):
         while not started.exists() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.05)
         assert started.exists()
-        private = Path(tmpdir_lines(root)[1])
+        private = Path(tmpdir_lines(root)[2])
         assert private.parent == root / "tmpbase" and private.exists()
         process.send_signal(signal.SIGTERM)
         hold.unlink()

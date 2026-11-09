@@ -2423,13 +2423,21 @@ mod tests {
     /// is lowered in the commit that moves text out, and is never raised to make a red go away. It
     /// rises only for a harness reason recorded in the raising commit (`src/prompts/README.md`
     /// § *Caps follow the harness*). It
-    /// is the measured size at the commit that last lowered it, rounded up to 100 B.
+    /// was the measured size at the commit that last lowered it, rounded up to 100 B (5,600).
+    ///
+    /// **Raised 5,600 → 5,900 on 2026-11-09, by operator instruction and not for a harness
+    /// reason.** The operator wrote: "we can increase the claude.md with 2-300 chars to have a
+    /// slack". The file sat 2 bytes under the old cap (5,598), so the gate's new lean clippy
+    /// command could not be named in § *Development Commands* without cutting something. It
+    /// measures 5,633 bytes after that edit, so the slack is 267. That is outside the two
+    /// conditions in README § *Caps follow the harness*, and it is recorded here so it is not
+    /// mistaken for the ratchet: the ratchet resumes from 5,900, and a trim should lower it.
     ///
     /// The decision lives in [`claude_md_budget_verdict`] so the boundary and the refusal text are
     /// tested against sizes chosen to discriminate, not only against a file that is within budget
     /// today.
     // cap-class: NOT_A_CAP — test-only ratchet asserting a document's size; it bounds no runtime path
-    const CLAUDE_MD_BYTE_BUDGET: usize = 5_600;
+    const CLAUDE_MD_BYTE_BUDGET: usize = 5_900;
 
     /// Whether the `CLAUDE.md` at `path` is within `budget` bytes, and what to do when it is not.
     /// It measures the file itself, so the live test and the synthetic ones share one measurement

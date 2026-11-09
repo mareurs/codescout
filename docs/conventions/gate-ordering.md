@@ -143,8 +143,10 @@ Measured 2026-08-27: ten task gates, ten task reviews and a whole-branch review 
 The lean `cargo nextest run --workspace --no-default-features` is there for the same reason one command
 over: every other gate command runs **with** default features, so an unconditional module reaching a
 `#[cfg(feature = "librarian")]` one compiles clean locally and fails only in CI's `no-features`
-*test-matrix* lane — the slow 3-OS job, not the fast clippy job, which never runs that config at
-all. Four instances of that class in one day (2026-08-27); the one that shipped left `experiments`
+*test-matrix* lane — the slow 3-OS job, not the fast clippy job, which did not run that config at
+all until 2026-11-09. The `clippy` job and the gate's clippy lane now lint it too
+(`cargo clippy --workspace --all-targets --no-default-features -- -D warnings`), after it was found red
+on a dead `ReadDenyList`; the test lane still builds it and still denies no warnings. Four instances of that class in one day (2026-08-27); the one that shipped left `experiments`
 HEAD failing the lean build, so every session that merged inherited the break.
 
 ## The lean lane is VACUOUS for librarian code — the same gate, a second consequence

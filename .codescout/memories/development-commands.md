@@ -12,6 +12,7 @@ carries the full evidence for each command; this is the executable summary.
 ```bash
 ./scripts/fmt-mine.sh                           # replaces bare `cargo fmt`: formats only own/CLEAN paths
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo clippy --workspace --all-targets --no-default-features -- -D warnings   # same CLIPPY lane: lints the lean set (the librarian is off)
 cargo nextest run --workspace --no-default-features --no-fail-fast   # LEAN lane — runs THIRD
 cargo test --workspace --doc --no-default-features                   # its doctest step (nextest runs none)
 cargo nextest run --workspace --no-fail-fast                         # default lane — runs LAST

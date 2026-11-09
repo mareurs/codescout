@@ -447,6 +447,10 @@ pub fn validate_read_path(
 /// as the caller's own lifetime: one tool call or one walk, not the process.
 /// docs/issues/2026-10-30-librarian-doctor-makes-twelve-passes-over-the-corpus-and-caches-no-file-read.md
 #[derive(Debug)]
+// Built only by the librarian's read door (src/librarian/read_door.rs). Under
+// `--no-default-features` that module is not compiled, and an unused item fails `-D warnings`,
+// so the type exists with the feature, and in tests, which build it in every feature set.
+#[cfg(any(feature = "librarian", test))]
 pub(crate) struct ReadDenyList(Vec<PathBuf>);
 
 // How many times [`ReadDenyList::resolve`] ran on this thread. Thread-local so a test counts its
@@ -456,6 +460,7 @@ thread_local! {
     pub(crate) static RESOLVES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+#[cfg(any(feature = "librarian", test))]
 impl ReadDenyList {
     /// Resolve the deny list as [`validate_read_path`] would for this call.
     pub(crate) fn resolve() -> Self {
