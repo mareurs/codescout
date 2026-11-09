@@ -1,10 +1,11 @@
 ---
-id: '770cdf0bd181e193'
+id: c1442420a9a57420
 kind: bug
-status: open
+status: fixed
 title: An unknown librarian action is classed as a write, so a read-only session refuses it as "File writes are disabled"
 tags:
 - cluster/hint-composed-without-the-request
+closed: 2026-11-09
 opened: 2026-11-09
 ---
 
@@ -52,16 +53,32 @@ Second finding, read from source only (not run): the "action required" text in `
 None needed: the call reproduces and the arm that answers it is in the source.
 
 ## Fix
-Not started. The `doc` fix transfers: read the action list from the schema enum once, refuse an action outside it in `Librarian::call` before any arm, and have `is_write` return false for an unadvertised or missing action. Both tools then share the same three small helpers; they are kept per tool today, in `src/librarian/tools/artifact.rs`. Build the "action required" and "unknown action" texts from that list.
+
+Fixed in `e16cb87c8` on `experiments` (patch-id `2630850521717`). The `doc` fix transferred, and the helpers it kept in `artifact.rs` moved to `src/librarian/tools/mod.rs` because two tools now use them.
+
+`LibrarianAdapter::is_write` says that a `librarian` action the schema does not advertise, or none, is not a write. `librarian::is_unknown_action` reads the schema enum once, and `Librarian::call` refuses such an action before any dispatch arm runs, so an arm that is not advertised is unreachable and not unguarded. Every advertised action keeps its answer, and `_ => true` still guards a new one because a new one is advertised. The "unknown action" and "action required" texts are built from the same enum, so the second finding of this file is fixed: the text no longer omits `status`.
+
+Verified live on a rebuilt server on 2026-11-09, with the session activated read-only: `librarian(action="frobnicate")` answered `unknown action 'frobnicate' — expected one of: context, reindex, status, …` with no "File writes are disabled" and no `@ack_` handle. `librarian(action="reindex")` in the same session was still refused by the gate.
 
 ## Tests added
-None yet. Shape to copy: the three tests of `3ef97cb42` (adapter predicate over unknown, missing and every advertised action; the enum against `is_unknown_action` and the answer text; a read-only server session that names the unknown action and still refuses `librarian(reindex)`).
+
+- `an_unadvertised_or_missing_librarian_action_is_not_a_write_and_every_advertised_one_keeps_its_answer` (`src/librarian/adapter.rs`). Its table must equal the schema enum, so a new advertised action is a failing test until it is classified.
+- `an_unknown_action_is_told_apart_from_every_advertised_one_and_both_answers_list_them` (`src/librarian/tools/librarian.rs`).
+- `an_unknown_librarian_action_under_a_read_only_activation_names_the_action_not_the_gate` (`src/server/read_only_ack_tests.rs`), with a control that `librarian(reindex)` is still refused.
+
+With `is_unknown_action` forced to `true`, 11 tests fail, these three among them. The opposite direction (restore the old `is_write` arm) was not run as a mutation. Gate green on 2026-11-09: LEAN 6300, DEFAULT 9188, Python 1764 passed, clippy clean.
 
 ## Workarounds
 Check the action name against the schema enum before calling. In a read-write session the handler names the unknown action correctly.
 
 ## Resume
-Start from `docs/issues/archive/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md` and `src/librarian/tools/artifact.rs` (`advertised_actions`, `is_unknown_action`, `unknown_action_error`). Decide whether to factor them into `src/librarian/tools/mod.rs` now that there are two concrete users.
+
+Nothing left to do for `librarian`.
+
+## Fix provenance
+
+- **SHA:** `e16cb87c8` (`experiments`)
+- **patch-id:** `2630850521717`
 
 ## References
 - `src/librarian/adapter.rs` (`is_write`)

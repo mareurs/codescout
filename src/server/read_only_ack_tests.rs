@@ -198,7 +198,7 @@ async fn an_unknown_doc_action_under_a_read_only_activation_names_the_action_not
 /// The `librarian` twin of the `doc` test above: an unknown `librarian` action cannot write, so a
 /// read-only activation names it and offers no handle, and `librarian(reindex)`, which writes, is
 /// still refused by the same gate in the same session.
-/// docs/issues/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
+/// docs/issues/archive/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
 #[cfg(feature = "librarian")]
 #[tokio::test]
 async fn an_unknown_librarian_action_under_a_read_only_activation_names_the_action_not_the_gate() {

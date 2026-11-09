@@ -18,7 +18,7 @@ fn advertised_actions() -> &'static [String] {
 /// that, the access gate saw an unknown verb as a write and a read-only activation answered
 /// `librarian(action="frobnicate")` with "File writes are disabled".
 /// See [`super::action_is_unknown`].
-/// docs/issues/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
+/// docs/issues/archive/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
 pub(crate) fn is_unknown_action(action: &str) -> bool {
     super::action_is_unknown(advertised_actions(), action)
 }
@@ -354,7 +354,7 @@ mod tests {
     /// non-write, so it must say "known" for every advertised action (else a write loses its guard)
     /// and "unknown" for what is not advertised. Both answers list the schema's own enum: the
     /// "action required" text once left `status` out because it was a typed-out copy.
-    /// docs/issues/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
+    /// docs/issues/archive/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
     #[test]
     fn an_unknown_action_is_told_apart_from_every_advertised_one_and_both_answers_list_them() {
         let advertised = crate::librarian::tools::schema_actions(&Librarian.input_schema());

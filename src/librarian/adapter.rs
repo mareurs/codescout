@@ -470,7 +470,7 @@ impl crate::tools::Tool for LibrarianAdapter {
                 // `librarian(action="frobnicate")` with "File writes are disabled" instead of
                 // naming the action. The default at the bottom still holds for every ADVERTISED
                 // action, which is where a new mutating one appears.
-                // docs/issues/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
+                // docs/issues/archive/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
                 None => false,
                 Some(a) if crate::librarian::tools::librarian::is_unknown_action(a) => false,
                 // Unconditional reads.
@@ -1382,7 +1382,7 @@ mod tests {
     /// before this fix, and the table must cover the schema enum exactly. A new action is therefore
     /// a failing test until someone classifies it, and the `_ => true` default still guards it
     /// meanwhile, because the new action is advertised.
-    /// docs/issues/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
+    /// docs/issues/archive/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
     #[test]
     fn an_unadvertised_or_missing_librarian_action_is_not_a_write_and_every_advertised_one_keeps_its_answer(
     ) {
