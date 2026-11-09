@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use crate::tools::symbol::call_edges::cache::EdgeCache;
+use crate::tools::symbol::call_edges::cache::{EdgeCache, ResolutionKey};
 use crate::tools::symbol::call_edges::resolver::{resolve_one_hop, Direction, Edge, EdgeSource};
 use crate::tools::symbol::call_graph::traversal::{EdgeWithDepth, OneHopResolver, TraversalResult};
 use crate::tools::symbol::scan_budget::{is_compiled_twin, scan_walk, ScanBudget, ScanCoverage};
@@ -35,10 +35,10 @@ async fn open_cache(root: PathBuf) -> anyhow::Result<rusqlite::Connection> {
         .map_err(|e| cache_error("opening", &for_error, e))
 }
 
-/// Cache-checking one-hop resolver.
+/// Definition-scoped one-hop resolver.
 ///
-/// Checks the SQLite edge cache before calling LSP/ts. On a miss, calls
-/// `resolve_one_hop`, upserts the results, and returns them.
+/// Resolves the definition before checking its completed SQLite adjacency.
+/// On a miss, calls `resolve_one_hop` and stores successful nonempty results.
 ///
 /// `positions` maps symbol names to their definition (path, line, col) so
 /// that non-seed symbols discovered during BFS traversal can be resolved.
@@ -419,35 +419,29 @@ fn find_named_def<'a>(
 #[async_trait]
 impl OneHopResolver for CachedResolver {
     async fn one_hop(&self, symbol: &str, direction: Direction) -> anyhow::Result<Vec<Edge>> {
-        // Cache hit? Lock conn briefly to query, then drop the lock.
-        let cached = {
-            let conn = self.conn.lock().unwrap();
-            let cache = EdgeCache::new(&conn, &self.project_id);
-            match direction {
-                Direction::Callers => cache.lookup_callers(symbol),
-                Direction::Callees => cache.lookup_callees(symbol),
-            }
-            .map_err(|e| cache_error("reading", &self.root, e))?
-        };
-        if !cached.is_empty() {
-            return Ok(cached);
-        }
-
-        // Cache miss: resolve the symbol's definition location
+        // Resolve identity before reading completed adjacency, including for the pinned seed.
         let (path, line, col) = match self.lookup_pos(symbol).await {
             Some(p) => p,
-            None => {
-                // Can't locate the symbol — skip rather than error so BFS
-                // can continue for the rest of the graph
-                return Ok(vec![]);
-            }
+            None => return Ok(vec![]),
         };
+        let key = ResolutionKey {
+            symbol,
+            file: &path,
+            line,
+            col,
+            direction: &direction,
+        };
+        let cached = {
+            let conn = self.conn.lock().unwrap();
+            EdgeCache::new(&conn, &self.project_id)
+                .lookup_resolution(&key)
+                .map_err(|e| cache_error("reading", &self.root, e))?
+        };
+        if let Some(edges) = cached {
+            return Ok(edges);
+        }
 
-        // Each node is parsed, and its file opened by the language server, with the language
-        // of ITS OWN file, not the seed's: Phase B places a `.tsx` seed's callee in a `.ts`
-        // module and the reverse, and the seed's grammar mis-parses the other one (a type
-        // assertion `<string>x` is a JSX tag to the TSX grammar, JSX is no TypeScript at all),
-        // silently yielding a partial edge set that `upsert` below would then persist.
+        // Each node is parsed and opened under the language of its own file.
         let node_language_id = crate::lsp::servers::lsp_language_id(
             crate::ast::detect_language(&path)
                 .unwrap_or_else(|| crate::lsp::servers::ast_language_for_lsp_id(&self.lang)),
@@ -463,13 +457,12 @@ impl OneHopResolver for CachedResolver {
             line,
             col,
             node_language_id,
-            direction,
+            direction.clone(),
         )
         .await
         {
             Ok(e) => e,
             Err(e) if e.downcast_ref::<crate::tools::RecoverableError>().is_some() => {
-                // Keep useful edges from other hops, but disclose this unanalysed scope.
                 self.analysis_failures
                     .lock()
                     .unwrap()
@@ -483,6 +476,9 @@ impl OneHopResolver for CachedResolver {
             let cache = EdgeCache::new(&conn, &self.project_id);
             cache
                 .upsert(&edges)
+                .map_err(|e| cache_error("writing to", &self.root, e))?;
+            cache
+                .store_resolution(&key, &edges)
                 .map_err(|e| cache_error("writing to", &self.root, e))?;
         }
         Ok(edges)
@@ -2059,6 +2055,108 @@ mod tests {
                 vec![(path.clone(), expected_id.to_string())],
                 "{file} must be opened under its own languageId, not the {seed_ast_lang} seed's"
             );
+        }
+    }
+    #[tokio::test]
+    async fn completed_resolutions_keep_same_name_definitions_separate() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.rs");
+        let b = dir.path().join("b.rs");
+        std::fs::write(&a, "fn call() { leaf_a(); }\nfn leaf_a() {}\n").unwrap();
+        std::fs::write(&b, "fn call() { leaf_b(); }\nfn leaf_b() {}\n").unwrap();
+        let mut resolver = resolver_over(dir.path(), 100);
+        let mock = Arc::new(MockLspClient::new());
+        resolver.client = mock.clone();
+        for (path, expected) in [(&a, "leaf_a"), (&b, "leaf_b"), (&a, "leaf_a")] {
+            resolver
+                .positions
+                .lock()
+                .unwrap()
+                .insert("call".to_string(), (path.clone(), 0, 3));
+            let edges = resolver.one_hop("call", Direction::Callees).await.unwrap();
+            assert_eq!(edges.len(), 1);
+            assert_eq!(edges[0].caller_sym, "call");
+            assert_eq!(
+                edges[0].callee_sym, expected,
+                "must resolve the requested definition"
+            );
+            assert_eq!(&edges[0].file, path);
+        }
+        assert_eq!(
+            *mock.prepare_call_hierarchy_calls.lock().unwrap(),
+            vec![(a, "rust".to_string()), (b, "rust".to_string())],
+            "each completed definition should be analysed once and reused independently"
+        );
+    }
+
+    #[tokio::test]
+    async fn completed_resolutions_do_not_trust_accumulated_partial_edges() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fixture.rs");
+        std::fs::write(
+            &path,
+            "fn call() { leaf_a(); other_a(); }\nfn leaf_a() {}\nfn other_a() {}\n",
+        )
+        .unwrap();
+        let resolver = resolver_over(dir.path(), 100);
+        resolver
+            .positions
+            .lock()
+            .unwrap()
+            .insert("call".to_string(), (path.clone(), 0, 3));
+        // An incoming query for leaf_a (or a legacy cache) can contribute only this edge.
+        EdgeCache::new(&resolver.conn.lock().unwrap(), &resolver.project_id)
+            .upsert(&[crate::tools::symbol::call_edges::resolver::Edge {
+                caller_sym: "call".to_string(),
+                callee_sym: "leaf_a".to_string(),
+                file: path.clone(),
+                line: 0,
+                col: 12,
+                source: crate::tools::symbol::call_edges::resolver::EdgeSource::Ts,
+            }])
+            .unwrap();
+        let edges = resolver.one_hop("call", Direction::Callees).await.unwrap();
+        let mut names: Vec<_> = edges.iter().map(|edge| edge.callee_sym.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            ["leaf_a", "other_a"],
+            "a stored subset is not complete outgoing adjacency"
+        );
+    }
+    #[tokio::test]
+    async fn completed_resolutions_discriminate_definition_coordinates() {
+        for (label, source) in [
+            ("different-lines", "mod left {\n    fn call() { leaf_a(); }\n    fn leaf_a() {}\n}\nmod right {\n    fn call() { leaf_b(); }\n    fn leaf_b() {}\n}\n"),
+            ("different-columns", "mod left { fn call() { leaf_a(); } fn leaf_a() {} } mod right { fn call() { leaf_b(); } fn leaf_b() {} }\n"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join("fixture.rs");
+            std::fs::write(&file, source).unwrap();
+            // ASCII fixture: locate the two actual declaration identifiers independently of cache keys.
+            let points: Vec<_> = source.match_indices("fn call").map(|(offset, _)| {
+                let before_name = &source[..offset + 3];
+                let line = before_name.bytes().filter(|byte| *byte == b'\n').count() as u32;
+                let col = before_name.rsplit('\n').next().unwrap().len() as u32;
+                (line, col)
+            }).collect();
+            assert_eq!(points.len(), 2);
+            if label == "different-lines" {
+                assert_ne!(points[0].0, points[1].0);
+                assert_eq!(points[0].1, points[1].1);
+            } else {
+                assert_eq!(points[0].0, points[1].0);
+                assert_ne!(points[0].1, points[1].1);
+            }
+            let resolver = resolver_over(dir.path(), 100);
+            for (point, expected) in [(points[0], "leaf_a"), (points[1], "leaf_b"), (points[0], "leaf_a")] {
+                resolver.positions.lock().unwrap().insert("call".to_string(), (file.clone(), point.0, point.1));
+                let edges = resolver.one_hop("call", Direction::Callees).await.unwrap();
+                assert_eq!(edges.len(), 1, "{label}");
+                assert_eq!(edges[0].caller_sym, "call", "{label}");
+                assert_eq!(edges[0].callee_sym, expected, "{label}: completed adjacency belongs to the exact definition");
+                assert_eq!(edges[0].file, file, "{label}");
+            }
         }
     }
 } // mod tests
