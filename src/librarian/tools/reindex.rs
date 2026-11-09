@@ -45,6 +45,7 @@ struct Args {
 /// unstamped, so the next run retries it. A batch that fails says only that SOME item did not
 /// land, so it is retried item by item: a single bad vector is then the only one reported,
 /// never the 63 that were fine.
+#[allow(clippy::too_many_arguments)] // one run's counters, passed as before; a struct would only rename them
 async fn flush_vectors<'q>(
     store: &dyn crate::librarian::artifact_store::ArtifactVectorStore,
     project_id: &str,
@@ -52,6 +53,7 @@ async fn flush_vectors<'q>(
     landed: &mut std::collections::HashMap<&'q str, usize>,
     marks: &mut Vec<(&'q str, &'q str)>,
     total_embedded: &mut usize,
+    embedded_by_artifact: &mut std::collections::HashMap<String, usize>,
     embed_errors: &mut Vec<String>,
 ) {
     use crate::librarian::artifact_store::ChunkVector;
@@ -84,6 +86,9 @@ async fn flush_vectors<'q>(
         match outcome {
             Ok(()) => {
                 *total_embedded += 1;
+                *embedded_by_artifact
+                    .entry(item.artifact_id.clone())
+                    .or_insert(0) += 1;
                 *landed.entry(item.artifact_id.as_str()).or_insert(0) += 1;
                 // Marked only now that the vector is in the store, so a failed upsert leaves
                 // the chunk unmarked and the next run embeds it again.
@@ -414,6 +419,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut total_embedded = 0usize;
     // Chunks the drain did not embed because their stored marker matched their current input.
     let mut total_skipped = 0usize;
+    // Wall time of the embedding phase, summed over the targets, and the chunks each artifact cost.
+    // `embedded: N` alone could not attribute a slow run: it named no artifact and no duration.
+    let mut total_embed_ms = 0u64;
+    let mut embedded_by_artifact: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     // Fix (c) of docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md.
     // `None` until some target actually measures it, so "embeddings disabled"
     // stays distinguishable from "measured, nothing missing". A count that
@@ -583,6 +593,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // Published BEFORE the first embed, so a run whose first item is slow
             // is still visible. Left to the throttle below, the row would be absent
             // for exactly the opening of the window an observer looks in.
+            let embed_started = std::time::Instant::now();
             let mut last_published_ms = started_ms;
             publish_progress(ctx, &progress_row(0, started_ms));
 
@@ -628,6 +639,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                                     &mut landed,
                                     &mut marks,
                                     &mut total_embedded,
+                                    &mut embedded_by_artifact,
                                     &mut embed_errors,
                                 )
                                 .await;
@@ -674,9 +686,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 &mut landed,
                 &mut marks,
                 &mut total_embedded,
+                &mut embedded_by_artifact,
                 &mut embed_errors,
             )
             .await;
+            total_embed_ms += embed_started.elapsed().as_millis() as u64;
 
             // Record which input each landed vector was embedded from, so the next run can skip
             // those chunks. One commit for the whole batch of rows, not one fsync per chunk.
@@ -813,6 +827,32 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         None => json!({"skipped": "no current project"}),
     };
 
+    // The artifacts that cost the most embeds, so a slow run can be attributed from its own response.
+    // `embedded_artifacts` and `embedded` carry the full count and total beside this window, so the
+    // list never reads as the whole set.
+    let embedded_artifacts = embedded_by_artifact.len();
+    let embedded_top: Vec<Value> = {
+        const EMBEDDED_TOP: usize = 5;
+        let mut ranked: Vec<(&String, &usize)> = embedded_by_artifact.iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        let cat = ctx.catalog.lock();
+        ranked
+            .into_iter()
+            .take(EMBEDDED_TOP)
+            .map(|(id, chunks)| {
+                let path: Option<String> = cat
+                    .conn
+                    .query_row(
+                        "SELECT abs_path FROM artifact WHERE id = ?1",
+                        rusqlite::params![id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                json!({ "path": path.unwrap_or_else(|| id.clone()), "chunks": chunks })
+            })
+            .collect()
+    };
+
     Ok(json!({
         "added": total_added,
         "updated": total_updated,
@@ -845,6 +885,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "unchanged": total_unchanged,
         "embedded": total_embedded,
         "embed_skipped_chunks": total_skipped,
+        "embed_ms": total_embed_ms,
+        "embedded_artifacts": embedded_artifacts,
+        "embedded_top": embedded_top,
         "skipped_roots": skipped_roots,
         "vectorless": total_vectorless,
         "vectorless_note": match total_vectorless {
@@ -1687,6 +1730,62 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap()
+    }
+
+    /// A slow reindex must say what it spent its time on. `embedded: 3042` named no artifact and no
+    /// duration, so a 46 s run (2026-11-07) could not be attributed from its own response: the 40
+    /// artifacts touched in its window held 543 chunks, not 3042, and nothing recorded where the
+    /// rest came from. The response now carries the embedding phase's wall time and the artifacts
+    /// that cost the most embeds.
+    #[tokio::test]
+    async fn a_reindex_names_the_artifacts_that_cost_its_embeds() {
+        let tmp = TempDir::new().unwrap();
+        let proj = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        let big = proj.join("docs/specs/big.md");
+        let small = proj.join("docs/specs/small.md");
+        std::fs::create_dir_all(big.parent().unwrap()).unwrap();
+        let entries = [
+            ("W-1", "alpha", 1),
+            ("W-2", "beta", 1),
+            ("W-3", "gamma", 1),
+            ("W-4", "delta", 1),
+        ];
+        std::fs::write(&big, ledger_text(&entries)).unwrap();
+        std::fs::write(&small, ledger_text(&[("S-1", "one", 1)])).unwrap();
+
+        let store = RecordingStore::new(None);
+        let ctx = external_store_ctx(&[("proj", &proj)], store.clone());
+        let first = call(&ctx, json!({})).await.unwrap();
+
+        let top = first["embedded_top"]
+            .as_array()
+            .unwrap_or_else(|| panic!("the response must name its costliest artifacts: {first}"));
+        assert_eq!(top.len(), 2, "both artifacts were embedded: {first}");
+        assert!(
+            top[0]["path"]
+                .as_str()
+                .unwrap()
+                .ends_with("docs/specs/big.md"),
+            "the costliest artifact comes first: {first}"
+        );
+        let big_chunks = top[0]["chunks"].as_u64().unwrap();
+        let small_chunks = top[1]["chunks"].as_u64().unwrap();
+        assert!(big_chunks > small_chunks, "{first}");
+        assert_eq!(
+            big_chunks + small_chunks,
+            first["embedded"].as_u64().unwrap(),
+            "the named artifacts account for every embed: {first}"
+        );
+        assert_eq!(first["embedded_artifacts"].as_u64().unwrap(), 2, "{first}");
+        assert!(
+            first["embed_ms"].is_u64(),
+            "the embedding phase's wall time is reported: {first}"
+        );
+
+        // Nothing changed, so nothing was embedded and no artifact is named.
+        let again = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(again["embedded_top"].as_array().map(Vec::len), Some(0));
+        assert_eq!(again["embedded_artifacts"].as_u64(), Some(0));
     }
 
     /// Appending one entry to a ledger must embed that entry and nothing else. Before the
