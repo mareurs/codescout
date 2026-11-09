@@ -30,6 +30,16 @@ All notable changes to codescout are documented here.
 - `docs/adrs/2026-11-08-local-embed-is-opt-in.md` has the full account and the alternative
   that was rejected.
 
+### Changed — a refused provenance lock names its holders (Linux)
+
+- **"…refused dispatch: lock acquisition failed because the operation would block" now says who
+  holds the lock.** The message appends the processes that have the lock file open (an inherited
+  descriptor counts) and the owners the kernel records, each marked "not running" when the
+  process is gone. Before, a peer that was mid-call and a lock kept for hours by a daemon read
+  the same. The text before the new part is unchanged, and nothing else about the lock changed:
+  a process started inside a fenced call, such as the shared rust-analyzer mux, can still keep
+  the lock after the call ends. That root cause is open (bug `312cde2f4698874b`).
+
 ### Fixed — `doc` refuses `dry_run=true`
 
 - **`doc(action="update", dry_run=true, …)` used to perform the write.** `dry_run` is a parameter

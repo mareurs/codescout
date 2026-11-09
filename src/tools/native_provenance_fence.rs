@@ -43,6 +43,19 @@ fn open(path: &Path, create: bool) -> io::Result<File> {
     }
     Ok(file)
 }
+/// Who holds the lock at `path`, as text to append to a refusal. Linux only; empty elsewhere.
+#[cfg(unix)]
+fn holders_of(path: &Path) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        holders::describe(path)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = path;
+        String::new()
+    }
+}
 
 fn counter(file: &mut File) -> io::Result<u64> {
     file.seek(SeekFrom::Start(0))?;
@@ -224,12 +237,19 @@ impl Fence {
                     .ok_or_else(|| io::Error::other("fence parent missing"))?,
             )?;
             let file = open(&path, true)?;
-            if exclusive {
+            let locked = if exclusive {
                 file.try_lock()
             } else {
                 file.try_lock_shared()
-            }
-            .map_err(io::Error::other)?;
+            };
+            locked.map_err(|error| match error {
+                // The text before the holders is the error's own, unchanged; the holders say
+                // whether this is a peer mid-call or a lock no call owns (bug 312cde2f4698874b).
+                std::fs::TryLockError::WouldBlock => {
+                    io::Error::other(format!("{error}{}", holders_of(&path)))
+                }
+                other => io::Error::other(other),
+            })?;
             let counter_path = path.with_extension("counter");
             let mut counter_file = open(&counter_path, true)?;
             counter_file.lock()?;
@@ -314,6 +334,9 @@ impl Fence {
         self.apply_to_command_named(command, "CODESCOUT_PROVENANCE_FENCE")
     }
 }
+
+#[cfg(target_os = "linux")]
+mod holders;
 
 #[cfg(test)]
 #[path = "native_provenance_fence/tests.rs"]

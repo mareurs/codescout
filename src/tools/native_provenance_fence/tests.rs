@@ -103,3 +103,77 @@ fn ordinary_participants_coexist_but_exclude_a_formatter() {
     drop(second);
     assert_eq!(acquire_after_release(dir.path()).generation(), 2);
 }
+/// A refused acquisition names who holds the lock instead of saying only "would block".
+/// Bug `312cde2f4698874b`.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_refused_acquisition_names_the_process_holding_the_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let _participant = Fence::try_participate(dir.path()).unwrap();
+    let message = Fence::try_acquire(dir.path()).unwrap_err().to_string();
+    assert!(
+        message.contains("would block"),
+        "the original text must survive: {message}"
+    );
+    assert!(
+        message.contains(&format!("pid {}", std::process::id())),
+        "the holder must be named: {message}"
+    );
+    assert!(
+        !message.contains("not running"),
+        "this process is running, so nothing may be called dead: {message}"
+    );
+}
+
+/// The case that prompted the change, rebuilt for real: a process takes the lock shared and starts
+/// a background child that inherits the descriptor; the parent exits. The lock's owner is then
+/// gone and its child keeps the lock, which is what the `rust-analyzer` mux did for hours. The
+/// refusal must say the owner is not running and must name the child.
+///
+/// Needs the `flock` utility; skips quietly where it is absent.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_lock_kept_by_a_child_of_a_dead_owner_is_named_as_such() {
+    use std::process::{Command, Stdio};
+    if Command::new("flock")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_err()
+    {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    // Creates the lock file, then releases it: only the file is wanted.
+    drop(Fence::try_participate(dir.path()).unwrap());
+    let lock = dir
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join(".codescout")
+        .join(LOCK_NAME);
+    let output = Command::new("flock")
+        .arg("-s")
+        .arg(&lock)
+        .args(["sh", "-c", "sleep 30 >/dev/null 2>&1 </dev/null & echo $!"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let child: u32 = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .expect("the shell prints the background child's pid");
+
+    let message = Fence::try_acquire(dir.path()).unwrap_err().to_string();
+    let _ = Command::new("kill").arg(child.to_string()).status();
+
+    assert!(
+        message.contains(&format!("pid {child}")),
+        "the child that kept the lock must be named: {message}"
+    );
+    assert!(
+        message.contains("(not running"),
+        "the owner that took the lock has exited and must be called not running: {message}"
+    );
+}
