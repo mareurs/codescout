@@ -374,6 +374,49 @@ pub(crate) fn containing_root<'a>(
         target == root || (target.starts_with(&root) && target.get(root.len()) == Some(&b'/'))
     })
 }
+/// The actions a tool's schema advertises: its `action` enum.
+///
+/// The enum is the one list of valid actions that a test already holds against each tool's
+/// dispatch arms (`every_advertised_action_reaches_a_dispatch_arm`), so the unknown-action check
+/// and the text of its answer read it rather than keep a typed-out copy. The list is empty only
+/// if the schema's shape moved; [`action_is_unknown`] then calls every action known, which is the
+/// side on which a write stays guarded.
+pub(crate) fn schema_actions(schema: &serde_json::Value) -> Vec<String> {
+    schema["properties"]["action"]["enum"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// True when `action` is not one of the `known` actions. An unknown action is refused by the
+/// handler before any dispatch arm runs ([`unknown_action_error`]), so it cannot write; the
+/// adapter's `is_write` says so, and a read-only activation then names the action instead of
+/// answering "File writes are disabled".
+///
+/// An arm that is not advertised is therefore unreachable, not unguarded: adding a mutating
+/// action means advertising it, and the write guard then applies to it.
+/// docs/issues/archive/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
+pub(crate) fn action_is_unknown(known: &[String], action: &str) -> bool {
+    !known.is_empty() && !known.iter().any(|a| a == action)
+}
+
+/// The answer to an action a tool does not advertise. The list is the schema enum's, so it
+/// cannot drift from what the schema says.
+pub(crate) fn unknown_action_error(action: &str, known: &[String]) -> anyhow::Error {
+    LibrarianRecoverableError::new(format!(
+        "unknown action '{action}' — expected one of: {}",
+        known.join(", ")
+    ))
+}
+
+/// The answer to a call that names no action.
+pub(crate) fn action_required_error(known: &[String]) -> anyhow::Error {
+    LibrarianRecoverableError::new(format!("action required — one of: {}", known.join(", ")))
+}
 
 /// Route a `serde_json::from_value` failure for a `doc` sub-action's `Args`.
 ///

@@ -2,9 +2,26 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use super::{LibrarianRecoverableError, Tool, ToolContext};
+use super::{Tool, ToolContext};
 
 pub struct Librarian;
+
+/// The actions `librarian` advertises, read once from its own schema enum.
+/// See [`super::schema_actions`] for why the enum is the source.
+fn advertised_actions() -> &'static [String] {
+    static ACTIONS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    ACTIONS.get_or_init(|| super::schema_actions(&Librarian.input_schema()))
+}
+
+/// True when `action` is not one of the actions `librarian` advertises: `call` refuses it before
+/// any dispatch arm runs, so it cannot write, and `LibrarianAdapter::is_write` says so. Without
+/// that, the access gate saw an unknown verb as a write and a read-only activation answered
+/// `librarian(action="frobnicate")` with "File writes are disabled".
+/// See [`super::action_is_unknown`].
+/// docs/issues/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
+pub(crate) fn is_unknown_action(action: &str) -> bool {
+    super::action_is_unknown(advertised_actions(), action)
+}
 
 #[async_trait]
 impl Tool for Librarian {
@@ -125,11 +142,12 @@ impl Tool for Librarian {
     }
 
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let action = args["action"].as_str().ok_or_else(|| {
-                LibrarianRecoverableError::new(
-                    "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree, audit_log",
-                )
-            })?;
+        let action = args["action"]
+            .as_str()
+            .ok_or_else(|| super::action_required_error(advertised_actions()))?;
+        if is_unknown_action(action) {
+            return Err(super::unknown_action_error(action, advertised_actions()));
+        }
         // Best-effort: identity enrichment must never fail a tool call; a failed
         // stamp degrades the row to verb=NULL, which audit_log surfaces honestly.
         if let Err(e) = ctx
@@ -147,21 +165,19 @@ impl Tool for Librarian {
         let not_read = keys_for_other_actions(&args, &schema, action);
         let action = action.to_owned();
         let mut out = match action.as_str() {
-                "context"            => super::context::call(ctx, args).await,
-                "reindex"            => super::reindex::call(ctx, args).await,
-                "status"             => super::status::call(ctx, args).await,
-                "tracker_design"     => super::tracker_design::call(ctx, args).await,
-                "workspace_state_at" => super::workspace_state_at::call(ctx, args).await,
-                "audit_doc_refs"     => super::audit_doc_refs::call(ctx, args).await,
-                "legibility_scan"    => super::legibility_scan::call(ctx, args).await,
-                "link_scan"          => super::link_scan::call(ctx, args).await,
-                "doctor"             => super::doctor::call(ctx, args).await,
-                "merge_worktree"     => super::merge_worktree::call(ctx, args).await,
-                "audit_log"          => super::audit_log::call(ctx, args).await,
-                other => Err(LibrarianRecoverableError::new(format!(
-                    "unknown action '{other}' — expected one of: context, reindex, status, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree, audit_log"
-                ))),
-            }?;
+            "context" => super::context::call(ctx, args).await,
+            "reindex" => super::reindex::call(ctx, args).await,
+            "status" => super::status::call(ctx, args).await,
+            "tracker_design" => super::tracker_design::call(ctx, args).await,
+            "workspace_state_at" => super::workspace_state_at::call(ctx, args).await,
+            "audit_doc_refs" => super::audit_doc_refs::call(ctx, args).await,
+            "legibility_scan" => super::legibility_scan::call(ctx, args).await,
+            "link_scan" => super::link_scan::call(ctx, args).await,
+            "doctor" => super::doctor::call(ctx, args).await,
+            "merge_worktree" => super::merge_worktree::call(ctx, args).await,
+            "audit_log" => super::audit_log::call(ctx, args).await,
+            other => Err(super::unknown_action_error(other, advertised_actions())),
+        }?;
         if let (false, Some(obj)) = (
             ignored.is_empty() && not_read.is_empty(),
             out.as_object_mut(),
@@ -281,6 +297,7 @@ fn ignored_params_hint(action: &str, keys: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::LibrarianRecoverableError;
     use super::*;
     use crate::librarian::catalog::Catalog;
     use crate::librarian::tools::TestToolContextBuilder;
@@ -332,6 +349,48 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
+    }
+    /// `is_unknown_action` is what lets `LibrarianAdapter::is_write` call an unknown verb a
+    /// non-write, so it must say "known" for every advertised action (else a write loses its guard)
+    /// and "unknown" for what is not advertised. Both answers list the schema's own enum: the
+    /// "action required" text once left `status` out because it was a typed-out copy.
+    /// docs/issues/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
+    #[test]
+    fn an_unknown_action_is_told_apart_from_every_advertised_one_and_both_answers_list_them() {
+        let advertised = crate::librarian::tools::schema_actions(&Librarian.input_schema());
+        assert!(
+            advertised.len() >= 11,
+            "anti-vacuity floor: got {advertised:?}"
+        );
+        for action in &advertised {
+            assert!(
+                !is_unknown_action(action),
+                "`{action}` is advertised, so it is not unknown: it would lose its write guard"
+            );
+        }
+        for action in ["frobnicate", "read", "write", ""] {
+            assert!(is_unknown_action(action), "`{action}` is not advertised");
+        }
+
+        let unknown = format!(
+            "{:#}",
+            crate::librarian::tools::unknown_action_error("frobnicate", advertised_actions())
+        );
+        let required = format!(
+            "{:#}",
+            crate::librarian::tools::action_required_error(advertised_actions())
+        );
+        assert!(unknown.contains("unknown action 'frobnicate'"), "{unknown}");
+        for action in &advertised {
+            assert!(
+                unknown.contains(action.as_str()),
+                "the unknown-action answer must list `{action}`: {unknown}"
+            );
+            assert!(
+                required.contains(action.as_str()),
+                "the action-required answer must list `{action}`: {required}"
+            );
+        }
     }
 
     /// Probe site for `librarian`, forward direction. Rationale, the `deny_unknown_fields` measurement, and the reason the

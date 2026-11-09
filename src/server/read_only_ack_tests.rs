@@ -195,3 +195,30 @@ async fn an_unknown_doc_action_under_a_read_only_activation_names_the_action_not
         "control: a real write action must still be refused under read-only: {control}"
     );
 }
+/// The `librarian` twin of the `doc` test above: an unknown `librarian` action cannot write, so a
+/// read-only activation names it and offers no handle, and `librarian(reindex)`, which writes, is
+/// still refused by the same gate in the same session.
+/// docs/issues/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
+#[cfg(feature = "librarian")]
+#[tokio::test]
+async fn an_unknown_librarian_action_under_a_read_only_activation_names_the_action_not_the_gate() {
+    let (_home, server) = make_server().await;
+    let dir = tempfile::tempdir().unwrap();
+    read_only_root(&server, &dir).await;
+
+    let (_e, text) = call(&server, "librarian", json!({ "action": "frobnicate" })).await;
+    assert!(
+        text.contains("unknown action 'frobnicate'") && text.contains("context, reindex, status"),
+        "the caller must be told the action is unknown, with the valid ones: {text}"
+    );
+    assert!(
+        !text.contains("File writes are disabled") && !text.contains("@ack_"),
+        "an action that cannot write must not meet the write gate or be offered a replay: {text}"
+    );
+
+    let (refused, control) = call(&server, "librarian", json!({ "action": "reindex" })).await;
+    assert!(
+        refused && control.contains("File writes are disabled"),
+        "control: a real write action must still be refused under read-only: {control}"
+    );
+}

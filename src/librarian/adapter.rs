@@ -464,6 +464,15 @@ impl crate::tools::Tool for LibrarianAdapter {
                     )
             }
             "librarian" => match action {
+                // An action `librarian` does not advertise, or none, is refused by the handler
+                // before any arm runs (`librarian::is_unknown_action`), so it cannot write.
+                // Calling it a write made a read-only activation answer
+                // `librarian(action="frobnicate")` with "File writes are disabled" instead of
+                // naming the action. The default at the bottom still holds for every ADVERTISED
+                // action, which is where a new mutating one appears.
+                // docs/issues/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
+                None => false,
+                Some(a) if crate::librarian::tools::librarian::is_unknown_action(a) => false,
                 // Unconditional reads.
                 //
                 // `status` is here for a reason stronger than "it happens not to
@@ -1363,6 +1372,76 @@ mod tests {
             writes += usize::from(is_write);
         }
         assert!(writes >= 11, "anti-vacuity floor: the writes are {writes}");
+    }
+    /// The `librarian` twin of the `doc` test above. An action `librarian` does not advertise, or
+    /// none, cannot write (the handler refuses it before any arm runs) and must not be classed as
+    /// a write, or a read-only activation answers `librarian(action="frobnicate")` with "File
+    /// writes are disabled" instead of naming the action.
+    ///
+    /// The half that guards is the table: EVERY advertised action is in it with the answer it had
+    /// before this fix, and the table must cover the schema enum exactly. A new action is therefore
+    /// a failing test until someone classifies it, and the `_ => true` default still guards it
+    /// meanwhile, because the new action is advertised.
+    /// docs/issues/2026-11-09-unknown-librarian-action-is-refused-as-a-read-only-write.md
+    #[test]
+    fn an_unadvertised_or_missing_librarian_action_is_not_a_write_and_every_advertised_one_keeps_its_answer(
+    ) {
+        use crate::librarian::tools::Tool as _;
+        let ctx = Arc::new(
+            crate::librarian::tools::TestToolContextBuilder::new(
+                crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
+            )
+            .build(),
+        );
+        let inner = lib_all_tools()
+            .into_iter()
+            .find(|t| t.name() == "librarian")
+            .expect("the `librarian` tool must be registered");
+        let adapter = LibrarianAdapter { inner, ctx };
+
+        for input in [
+            json!({ "action": "frobnicate" }),
+            json!({ "action": "" }),
+            json!({ "action": null }),
+            json!({}),
+        ] {
+            assert!(
+                !adapter.is_write(&input),
+                "{input}: the handler refuses it before any arm runs, so it cannot write"
+            );
+        }
+
+        // Each advertised action, called bare, with the answer it had before the fix.
+        let table: [(&str, bool); 11] = [
+            ("context", false),
+            ("reindex", true),
+            ("status", false),
+            ("tracker_design", false),
+            ("workspace_state_at", false),
+            ("audit_doc_refs", true),
+            ("legibility_scan", true),
+            ("link_scan", false),
+            ("doctor", false),
+            ("merge_worktree", true),
+            ("audit_log", false),
+        ];
+        let schema = crate::librarian::tools::librarian::Librarian.input_schema();
+        let mut advertised = crate::librarian::tools::schema_actions(&schema);
+        advertised.sort();
+        let mut covered: Vec<String> = table.iter().map(|(a, _)| (*a).to_string()).collect();
+        covered.sort();
+        assert_eq!(
+            advertised, covered,
+            "an advertised librarian action is missing from this table, or the table lists one \
+             that is not advertised: classify it here, as the write it is or the read it is"
+        );
+        for (action, expect_write) in table {
+            assert_eq!(
+                adapter.is_write(&json!({ "action": action })),
+                expect_write,
+                "librarian(action={action:?}) must keep its answer"
+            );
+        }
     }
 
     /// The pre-call gate's coverage, decided on the EFFECT of the call. The

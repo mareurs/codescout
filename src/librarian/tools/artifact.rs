@@ -93,49 +93,27 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
         _ => Ok(()),
     }
 }
+
 /// The actions `doc` advertises, read once from its own schema enum.
-///
-/// The schema enum is the one list of valid `doc` actions that a test already holds against the
-/// dispatch arms (`every_advertised_action_reaches_a_dispatch_arm`), so this reads it rather than
-/// keeping a third copy. The list is empty only if that shape moved; [`is_unknown_action`] then
-/// calls every action known, which is the side on which a write stays guarded.
+/// See [`super::schema_actions`] for why the enum is the source.
 fn advertised_actions() -> &'static [String] {
     static ACTIONS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    ACTIONS.get_or_init(|| {
-        Artifact.input_schema()["properties"]["action"]["enum"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default()
-    })
+    ACTIONS.get_or_init(|| super::schema_actions(&Artifact.input_schema()))
 }
 
-/// True when `action` is not one of the actions `doc` advertises.
-///
-/// `call` refuses such an action before any dispatch arm runs ([`unknown_action_error`]), so it
-/// cannot write, and `LibrarianAdapter::is_write` says so. Without that, the access gate saw an
-/// unknown verb as a write and a read-only activation answered `doc(action="read")` with "File
-/// writes are disabled" instead of naming the action.
-///
-/// An arm that is not in the schema enum is therefore unreachable, not unguarded: adding a
-/// mutating action means advertising it, and the write guard then applies to it.
+/// True when `action` is not one of the actions `doc` advertises: `call` refuses it before any
+/// dispatch arm runs, so it cannot write, and `LibrarianAdapter::is_write` says so.
+/// See [`super::action_is_unknown`].
 /// docs/issues/archive/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
 pub(crate) fn is_unknown_action(action: &str) -> bool {
-    let known = advertised_actions();
-    !known.is_empty() && !known.iter().any(|a| a == action)
+    super::action_is_unknown(advertised_actions(), action)
 }
 
-/// The answer to an action `doc` does not advertise. The list is the schema enum's, so it
-/// cannot drift from what the schema says.
+/// The answer to an action `doc` does not advertise.
 fn unknown_action_error(action: &str) -> anyhow::Error {
-    LibrarianRecoverableError::new(format!(
-        "unknown action '{action}' — expected one of: {}",
-        advertised_actions().join(", ")
-    ))
+    super::unknown_action_error(action, advertised_actions())
 }
+
 /// Refuse `dry_run=true`, which `doc` does not implement and would otherwise drop.
 ///
 /// `doc`'s root object is lenient about undeclared keys on purpose: the dispatcher hands one
@@ -549,11 +527,9 @@ impl Tool for Artifact {
     }
 
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let action = args["action"].as_str().ok_or_else(|| {
-                LibrarianRecoverableError::new(
-                    "action required — one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, rekey_prefix, event_create, event_list, augment, gather, list_stale",
-                )
-            })?;
+        let action = args["action"]
+            .as_str()
+            .ok_or_else(|| super::action_required_error(advertised_actions()))?;
         if is_unknown_action(action) {
             return Err(unknown_action_error(action));
         }
