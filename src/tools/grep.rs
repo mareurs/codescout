@@ -71,7 +71,7 @@ const BINARY_SNIFF_BYTES: usize = 8192;
 
 /// The largest file `grep` reads, in bytes. A text file was read whole with no bound, so one
 /// huge log held its whole size in memory and spent its whole read time past the walk's
-/// wall-clock check, which fires once per file (docs/issues/2026-11-09-grep-time-budget-is-
+/// wall-clock check, which fires once per file (docs/issues/archive/2026-11-09-grep-time-budget-is-
 /// polled-per-file-so-one-large-text-file-overruns-it.md). A file over this is not searched:
 /// it is counted in `skipped_large` and the rendered text names the count, so a missing match
 /// is never read as "searched and absent". The value is a judgment, not a measurement: it is
@@ -3957,7 +3957,7 @@ mod tests {
     /// A text file over `MAX_FILE_BYTES` is not read, and the result must SAY so in both modes: a
     /// zero or a short list that reads as "searched everything" is the failure. The file is
     /// sparse, so the test writes a few KiB, not 64 MiB; its leading text carries the pattern, so
-    /// a search that did open it would match and list it. Bug 569b13c182dda64f.
+    /// a search that did open it would match and list it. Bug 059a403c12e5283e.
     #[tokio::test]
     async fn a_file_over_the_cap_is_skipped_and_named_in_both_modes() {
         let dir = tempfile::tempdir().unwrap();

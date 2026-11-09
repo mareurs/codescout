@@ -1,5 +1,5 @@
 ---
-id: '569b13c182dda64f'
+id: 059a403c12e5283e
 kind: bug
 status: fixed
 title: 'BUG: grep''s time budget is polled per file, so one large text file overruns it'
@@ -13,7 +13,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-16-grep-limit-bounds-lines-not-bytes.md
 severity: low
-unverified: 'The 600 MB reproduction was not re-run against a rebuilt binary: the bound is shown by tests (a counting reader and a sparse file through the tool call), not by that run. The three real overruns (usage.db ids 210368, 208396, 226057) are NOT attributed to this mechanism and this fix is not known to remove them: the largest files under the 386 s call''s root are binary and were already skipped by the sniff. Disk contention or a stalled walker are not ruled out.'
+unverified: 'STANDING — the three real overruns (usage.db ids 210368, 208396, 226057) are not attributed to this mechanism and this fix is not known to remove them: the largest files under the 386 s call''s root are binary and were already skipped by the sniff. The past calls cannot be re-examined. The mechanism itself was re-run on the rebuilt server 2026-11-09: 499 ms before, 9 ms after, one run each.'
 ---
 
 ## Summary
@@ -94,8 +94,9 @@ Callers can narrow `path` or `glob`, and can lower `time_budget_ms`, but a lower
 
 ## Resume
 
-1. Rebuild (`./scripts/rb.sh`, then `/mcp`) and re-run the 600 MB reproduction. The call should return in about the budget and report `skipped_large: 1`. Then archive this record.
-2. If the three real overruns recur, capture the process state during the call, to attribute them. This fix is not known to address them.
+Nothing outstanding for this fix. The 600 MB reproduction was re-run on the rebuilt server on 2026-11-09: 499 ms before (`usage.db` id 282421) and 9 ms after (id 283557), with `skipped_large: 1` named in the result. One run each, file in the page cache both times.
+
+If the three real overruns recur, capture the process state during the call, to attribute them. This fix is not known to address them.
 
 
 ## Fix provenance
