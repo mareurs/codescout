@@ -1,10 +1,11 @@
 ---
-id: '7b7154df28e2978c'
+id: 41ee521667ef3437
 kind: bug
-status: open
+status: fixed
 title: create_file's shrink-guard refusal discards its input, so the caller resends the whole payload with force
 tags:
 - cluster/unclassified
+closed: 2026-11-09
 opened: 2026-11-08
 ---
 
@@ -50,16 +51,28 @@ So this refusal is about 1/15 of the existing-path one in this database. Limits:
 None.
 
 ## Fix
-Not done. Candidate: mint a handle here too, with the existing-path marker (`OverwriteGuard`) and an input that carries `overwrite=true, force=true` on replay. The refusal's text must say how much would be lost, which `report.describe()` already does. See the sibling fix: `docs/issues/archive/2026-11-08-create-file-existing-path-refusal-makes-the-agent-resend-the-whole-write.md`.
+
+Fixed in `a52d68284` on `experiments` (patch-id `730f0d94a45e`).
+
+The shrink-guard branch of `CreateFile::call` now builds an `OverwriteGuard` of the file, sets its new `force` flag, and stores the input with `store_overwrite_replayable_write`. The refusal text keeps its old wording and adds the handle. `replay_ack` inserts `overwrite=true`, and `force=true` when the guard's `force` is set. The replay is refused when the file's size or modification time changed since the refusal. An `ack` replay of the existing-path refusal that meets the shrink guard now mints its own handle, which closes the gap that Root cause named.
+
+Verified live on a rebuilt server on 2026-11-09. A 400-byte file, `create_file(content="tiny", overwrite=true)`: refused with a handle. `create_file(ack=...)` with the pin and nothing else wrote `tiny` (4 bytes). With the file changed to 500 bytes between the refusal and the replay, the replay was refused with "changed since create_file refused to overwrite it" and the file stayed at 500 bytes.
 
 ## Tests added
-None. This file records the defect only.
+
+In `src/server/overwrite_ack_tests.rs`: `a_shrink_guard_refusal_keeps_the_write_and_an_ack_applies_it_with_force`, `an_existing_path_ack_that_meets_the_shrink_guard_mints_a_second_handle`, `a_shrink_guard_ack_does_not_apply_to_a_file_that_changed_since_the_refusal`. With the `force` insert in `replay_ack` disabled, the first two fail; the third passes, as it should. Gate green on 2026-11-09: LEAN 6287, DEFAULT 9162, Python 1764 passed, clippy clean.
 
 ## Workarounds
 Resend with `force=true`, or use `edit_file`.
 
 ## Resume
-Start from `CodeScoutServer::replay_ack` in `src/server.rs` and `src/server/overwrite_ack_tests.rs` for the test shape.
+
+Nothing left to do: the fix is committed, verified live and the gate is green.
+
+## Fix provenance
+
+- **SHA:** `a52d68284` (`experiments`)
+- **patch-id:** `730f0d94a45e`
 
 ## References
 `src/tools/create_file.rs`; `src/tools/output_buffer.rs`; `src/server.rs`.

@@ -118,7 +118,7 @@ impl Tool for CreateFile {
                 // Like the existing-path refusal, this one keeps the input under a handle, so
                 // agreeing to the reduction does not mean sending `content` a second time. The
                 // replay adds `force=true` and is refused if the file changed since.
-                // docs/issues/2026-11-08-create-file-shrink-guard-refusal-makes-the-agent-resend-the-whole-write.md
+                // docs/issues/archive/2026-11-08-create-file-shrink-guard-refusal-makes-the-agent-resend-the-whole-write.md
                 if let Some(mut guard) = crate::tools::output_buffer::OverwriteGuard::of(&resolved)
                 {
                     guard.force = true;

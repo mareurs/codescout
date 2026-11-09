@@ -112,7 +112,7 @@ async fn an_overwrite_ack_cannot_be_replayed_through_another_tool() {
 /// The shrink guard refuses an overwrite that cuts a file by more than half. That refusal keeps
 /// the input too, so agreeing to the reduction does not mean sending the payload again, and the
 /// replay carries `force=true` that the caller never sent.
-/// docs/issues/2026-11-08-create-file-shrink-guard-refusal-makes-the-agent-resend-the-whole-write.md
+/// docs/issues/archive/2026-11-08-create-file-shrink-guard-refusal-makes-the-agent-resend-the-whole-write.md
 #[tokio::test]
 async fn a_shrink_guard_refusal_keeps_the_write_and_an_ack_applies_it_with_force() {
     let (dir, server) = make_server().await;

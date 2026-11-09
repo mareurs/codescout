@@ -465,7 +465,7 @@ pub struct OverwriteGuard {
     /// `true` when the refusal was the shrink guard's: the replay then adds `force=true` as well
     /// as `overwrite=true`, because the caller is told how much the replacement would cut and
     /// the handle is how they agree to it.
-    /// docs/issues/2026-11-08-create-file-shrink-guard-refusal-makes-the-agent-resend-the-whole-write.md
+    /// docs/issues/archive/2026-11-08-create-file-shrink-guard-refusal-makes-the-agent-resend-the-whole-write.md
     pub force: bool,
 }
 
