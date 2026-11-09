@@ -30,7 +30,7 @@ Pairs of consecutive calls in one message whose first call lasted at least 300 m
 - A live test confirmed it: three `grep` calls in one message started 0.3 s apart and all ended at the same moment.
 - The first version of the metric counted calls shorter than 300 ms and reported `read_file` pairs as serial. That was wrong: a 1 ms call cannot overlap anything.
 - The harness is the likely cause of the serial runs, because the server takes no lock for reads. This was not tested by changing the annotation.
-- Not measured: how many `run_command` calls are read-only (`git status`, `ls`, `sed -n`). Claude Code classifies built-in Bash per command, but a static MCP annotation cannot.
+- Measured in Finding 4: 34% of `run_command` calls are read-only by their text, and overlapping the in-message pairs would hide about 2 minutes of execution in a month. Claude Code classifies built-in Bash per command; a static MCP annotation cannot.
 
 ## Finding 2 — how many rounds could have been one round
 
@@ -71,6 +71,24 @@ Read-only chains rarely collapse because the agent searches and then reads what 
 - This is an upper bound: the extra generation time of the merged call's arguments is not subtracted.
 - The 1,144 h adds the main session and its subagents, which run in parallel. The share is approximate.
 
+## Finding 4 — `run_command`: how many calls are read-only, and what overlapping them is worth
+
+`run_command` (63,087 calls with `Bash`) is 42% of all calls and never overlaps, so a read-only variant with `readOnlyHint` looked like the obvious lever. Script: `run_command_ro.py`.
+
+A call is read-only when every segment of its `&&`, `;` or `|` chain is a known read-only command (`ls`, `cat`, `grep`, `rg`, `git status|log|diff|show`, `sed -n`, `sqlite3` without writes, …) and it has no redirection, `tee` or `sed -i`. Builds and tests are `VERIFY`. Anything else, `python3` scripts included, is `MUT`, so the read-only share is a floor.
+
+| Class | Calls | Share |
+|---|---|---|
+| read-only | 21,518 | 34.1% |
+| other (writes, scripts) | 31,939 | 50.6% |
+| build or test | 9,630 | 15.3% |
+
+- Timed read-only calls (15,732): median 0.06 s, p90 1.15 s. Their mean is 21 s because a few are waits (`sleep`, `tail --pid`).
+- 5,468 pairs of `run_command` calls sit inside one message; 2,091 of them are both read-only. Overlapping those 1,659 that have timing would hide the shorter call of each pair: 0.03 h, about 2 minutes, in a month.
+- The agent declares `effect` on `run_command`: `read` on 23,282 calls. My text rule disagrees on 11,355 of them (48.8%). I did not inspect which side is right: the rule counts every `python3` script as not read-only, and the declared value may be true for many of them.
+
+So a separate read-only tool would buy almost no execution overlap, because these commands finish in tens of milliseconds. The saving that is left is the model turn between two calls, and that comes from putting both calls in one message, which a serial harness still gives (Finding 3).
+
 ## What others do (retrieved 2026-11-09)
 
 - Anthropic: parallel tool use is on by default. The API prescribes no execution order. Prompting raises the rate, and all `tool_result` blocks go in one user message. <https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use>
@@ -90,6 +108,6 @@ The reports were read from search excerpts. The Claude Code chapter and the Code
 
 ## Open
 
-- Measure how many `run_command` calls are read-only. If many are, a separate read-only tool with `readOnlyHint` would let them overlap.
 - Test a prompt that groups write chains in one message. A refused `edit` does not stop the next call in the same message, so the risk is larger than for reads.
 - Replay a sample of pairs with the second call forced into the first message, to replace the judges' opinion with an outcome.
+- Check what the declared `effect` is worth: sample `effect=read` calls that my rule calls not read-only and see whether they wrote anything.
