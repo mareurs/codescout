@@ -812,6 +812,63 @@ async fn semantic_search_uses_scope_for_library_search() {
         }
     }
 }
+/// `scope="lib:<name>"` is checked against the registry before any embedder call, so these two
+/// cases need no embedding model: an unregistered name and a registered-but-unindexed one each
+/// get a refusal that says what to do, not an empty page that reads as "no match".
+#[tokio::test]
+async fn a_library_search_refuses_an_unregistered_library_by_name() {
+    let (_dir, ctx) = project_ctx().await;
+    let err = SemanticSearch
+        .call(json!({"query": "runtime", "scope": "lib:ghost"}), &ctx)
+        .await
+        .expect_err("an unregistered library must be refused");
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("a RecoverableError, not a plain failure");
+    assert_eq!(rec.message, "library 'ghost' is not registered");
+    assert!(
+        format!("{:?}", rec.guidance).contains("library(action='list')"),
+        "the hint must point at the registry listing: {:?}",
+        rec.guidance
+    );
+}
+
+#[tokio::test]
+async fn a_library_search_refuses_a_registered_library_that_is_not_indexed() {
+    let (_dir, ctx) = project_ctx().await;
+    let lib_dir = tempfile::tempdir().unwrap();
+    {
+        let mut inner = ctx.agent.inner.write().await;
+        let project = inner.active_project_mut().unwrap();
+        project.library_registry.register(
+            "testlib".to_string(),
+            lib_dir.path().to_path_buf(),
+            "rust".to_string(),
+            crate::library::registry::DiscoveryMethod::Manual,
+            true,
+        );
+        assert!(
+            !project.library_registry.lookup("testlib").unwrap().indexed,
+            "a freshly registered library starts unindexed"
+        );
+    }
+    let err = SemanticSearch
+        .call(json!({"query": "runtime", "scope": "lib:testlib"}), &ctx)
+        .await
+        .expect_err("an unindexed library must be refused");
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("a RecoverableError, not a plain failure");
+    assert_eq!(
+        rec.message,
+        "library 'testlib' is registered but not indexed"
+    );
+    assert!(
+        format!("{:?}", rec.guidance).contains("scope='lib:testlib'"),
+        "the hint must name the index call for this library: {:?}",
+        rec.guidance
+    );
+}
 
 // --- Progress notification tests (T11) ---
 

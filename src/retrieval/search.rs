@@ -264,18 +264,6 @@ impl RetrievalClient {
         )
         .await
     }
-
-    /// Search across all library chunks regardless of project.
-    pub async fn search_libraries(&self, query: &str, opts: SearchOpts) -> Result<Vec<Hit>> {
-        self.search_in(
-            &self.config.collection("library_chunks"),
-            "*",
-            None,
-            query,
-            opts,
-        )
-        .await
-    }
 }
 
 /// Merge two score-ordered hit lists and truncate to `limit`.

@@ -624,9 +624,8 @@ impl Tool for SemanticSearch {
         // doc/librarian's different scope axis) is a caller error, not a silent
         // fold into project-scope search. `Scope::Libraries`/`Scope::All` parse
         // fine but are otherwise UNUSED below — this backend only ever searches
-        // `project_id`'s own collection (Phase 7 note above) — so passing them
-        // does not yet broaden the search; only `Scope::Library` is rejected
-        // outright, below, as genuinely unsupported.
+        // one project id (Phase 7 note above) — so passing them does not yet
+        // broaden the search. `Scope::Library` is searched: see `library_id`.
         let scope_raw = input.get("scope").and_then(|v| v.as_str());
         let scope = crate::library::scope::Scope::parse(scope_raw).map_err(|raw| {
             crate::tools::RecoverableError::with_hint(
@@ -634,19 +633,52 @@ impl Tool for SemanticSearch {
                 crate::library::scope::SCOPE_ACCEPTED_HINT,
             )
         })?;
-        if matches!(scope, crate::library::scope::Scope::Library(_)) {
-            return Err(crate::tools::RecoverableError::with_hint(
-                "library scope is not yet supported by the Qdrant retrieval stack",
-                "Track L-12 in docs/trackers/2026-05-07-legacy-retrieval-removal.md; \
-             use `symbols(name=...)` against the library project as a workaround.",
-            )
-            .into());
-        }
+        // `index(scope="lib:<name>")` stores a library under the project id `lib:<name>` in the
+        // same `code_chunks` collection as code, so a library search is the ordinary search aimed
+        // at that id. The registry is checked first: an unregistered or unindexed library would
+        // otherwise come back as an empty page that looks like "no match".
+        let library_id = match &scope {
+            crate::library::scope::Scope::Library(name) => {
+                let indexed = ctx
+                    .agent
+                    .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                        Ok(p.library_registry.lookup(name).map(|e| e.indexed))
+                    })
+                    .await
+                    .map_err(|_| {
+                        crate::tools::RecoverableError::with_hint(
+                            "No active project. Use workspace(action='activate') first.",
+                            "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
+                        )
+                    })?;
+                match indexed {
+                    None => {
+                        return Err(crate::tools::RecoverableError::with_hint(
+                            format!("library '{name}' is not registered"),
+                            "Use `library(action='list')` to see registered libraries, or \
+                             `library(action='register', ...)` to add one.",
+                        )
+                        .into());
+                    }
+                    Some(false) => {
+                        return Err(crate::tools::RecoverableError::with_hint(
+                            format!("library '{name}' is registered but not indexed"),
+                            format!("Run `index(action='build', scope='lib:{name}')` first."),
+                        )
+                        .into());
+                    }
+                    Some(true) => Some(format!("lib:{name}")),
+                }
+            }
+            _ => None,
+        };
 
         if let Some(p) = ctx.progress.as_ref() {
             p.report_text("loading embedding model").await;
         }
-        let project_id = if let Some(pid) = input.get("project_id").and_then(|v| v.as_str()) {
+        let project_id = if let Some(id) = &library_id {
+            id.clone()
+        } else if let Some(pid) = input.get("project_id").and_then(|v| v.as_str()) {
             pid.to_string()
         } else {
             ctx.agent
@@ -697,9 +729,10 @@ impl Tool for SemanticSearch {
         //
         // Skipped entirely when the caller passed an explicit `project_id`: that
         // names a specific collection to search, and redirecting it to main+delta
-        // would silently ignore the caller's choice.
+        // would silently ignore the caller's choice. A library search is skipped for
+        // the same reason: `lib:<name>` is a project id of its own, not a worktree's.
         let explicit_project_id = input.get("project_id").and_then(|v| v.as_str()).is_some();
-        if !explicit_project_id {
+        if !explicit_project_id && library_id.is_none() {
             let worktree_main_repo = root
                 .as_deref()
                 .and_then(crate::prompts::detect_worktree_info)
@@ -833,12 +866,13 @@ impl Tool for SemanticSearch {
         // A member's chunks are stored relative to the member directory; every other tool
         // resolves a path against the focused root, so an explicit member id gets its hits
         // re-rooted. Only an explicit id: the default id is the focused project's own name,
-        // whose paths already resolve there.
-        if explicit_project_id {
+        // whose paths already resolve there. Not for a library: its chunks are stored relative
+        // to the library directory, which is not a workspace member.
+        if explicit_project_id && library_id.is_none() {
             lift_explicit_member_hits(ctx, &project_id, root.as_deref(), &mut hits).await;
         }
         let mut out = search_response(&hits, limit);
-        if hits.is_empty() {
+        if hits.is_empty() && library_id.is_none() {
             // Fail-soft: a failed lookup leaves the empty page as it was, never an error.
             let collection = client.config.collection("code_chunks");
             if let Ok(searched_has_chunks) =

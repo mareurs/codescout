@@ -126,6 +126,10 @@ After indexing, `semantic_search` with `scope: "lib:<name>"` searches within tha
 }
 ```
 
+A library that is not registered, or is registered but not yet indexed, is refused with a message
+that names the call to run next (`library(action: list)` or `index(action: build, scope: "lib:<name>")`).
+An empty page therefore means the indexed library has no match, not that the index is missing.
+
 **Tips:**
 
 - Only index libraries you actively need to search semantically. LSP symbol

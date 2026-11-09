@@ -30,6 +30,20 @@ All notable changes to codescout are documented here.
 - `docs/adrs/2026-11-08-local-embed-is-opt-in.md` has the full account and the alternative
   that was rejected.
 
+### Fixed — `semantic_search` searches a library again
+
+- **`semantic_search(scope="lib:<name>")` now searches the library.** It had returned "library
+  scope is not yet supported by the Qdrant retrieval stack" since the retrieval stack replaced
+  the legacy index, while the manual said it worked. `index(scope="lib:<name>")` stores a
+  library under the project id `lib:<name>` in `code_chunks`, and the search now targets that id.
+  An unregistered library, or a registered one that is not indexed yet, is refused with the call
+  to run next, not returned as an empty page. Tracker row L-12 is closed.
+- **Removed:** `RetrievalClient::search_libraries`. It queried a `library_chunks` collection
+  that nothing writes to, so wiring it in as planned would have returned nothing.
+- **Also removed:** twelve functions and types with no use anywhere in the tree, found by the
+  dead-code audit of 2026-11-09 (the commit message lists them). `LspClient::did_close` and
+  `RetrievalClient::search_memories` were examined and kept.
+
 ### Changed — tool surface collapse (26 → 21 tools)
 
 - **`artifact` is now `doc`.** `artifact_event`, `artifact_augment` and `artifact_refresh`
