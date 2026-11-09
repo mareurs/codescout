@@ -1,0 +1,138 @@
+"""One bounded baseline/pilot application pair in the installed default profile."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import queue
+import signal
+import subprocess
+import threading
+import time
+
+ROOT=Path("/home/marius/work/claude/codescout")
+PROFILE=Path("/home/marius/.codex")
+PLUGIN="ecc-codescout@ecc-codescout-pilot"
+OVERRIDE='plugins."'+PLUGIN+'".enabled=false'
+COMMON="""Inspect the real codescout checkout /home/marius/work/claude/codescout.
+Scope: doc(action="create") at src/librarian/tools/create.rs::call, including
+src/librarian/tools/temp_write_guard.rs, the nearest dispatcher/error conversion,
+and directly relevant test assertions. Stay within this boundary; do not review
+unrelated doc actions except the nearest caller boundary needed for a claim.
+Deliver (1) a bounded observed-behavior spec draft, especially temporary workspace
+admission/refusal and create error outcomes, and (2) a silent-failure review of this
+same boundary. This is a static, chat-only evaluation: do not write files,
+artifacts, memory, bug records or source, do not apply mutations, and do not run
+builds, gates or behavior tests. The controller will persist adjudicated results
+and perform required repository verification separately. Read repository
+instructions. Use the existing codescout MCP for source navigation and evidence.
+Pin calls to the absolute source workspace. Use references/call_graph where useful,
+and distinguish returned navigation coverage from absence of dynamic callers.
+Inspect real test assertions; do not call test inspection an executed pass.
+Separate observed implementation from intended contract, confirmed defects from
+permitted fallbacks/open questions, and name uninspected scope. Do not force a
+finding. Do not read evaluation results, pilot worktree evidence or other run
+outputs. Return both deliverables in one final Markdown response with file/symbol
+anchors, evidence state and limitations."""
+parser=argparse.ArgumentParser()
+parser.add_argument("--output-dir",type=Path,required=True)
+args=parser.parse_args()
+OUT=args.output_dir
+OUT.mkdir(parents=True,exist_ok=False,mode=0o700)
+ENV=dict(os.environ,CODEX_HOME=str(PROFILE))
+def save(name,value):
+    (OUT/name).write_text(json.dumps(value,indent=2)+"\n")
+def snapshots():
+    paths=set(ROOT.glob("src/**/*.rs"))|set(ROOT.glob("tests/**/*.rs"))
+    paths|={ROOT/p for p in ("CLAUDE.md","AGENTS.md","Cargo.toml","Cargo.lock")}
+    return {str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in sorted(paths) if p.is_file()}
+def discovery(extra):
+    proc=subprocess.Popen(["codex",*extra,"app-server"],cwd=ROOT,env=ENV,
+        stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+    q=queue.Queue()
+    def collect():
+        for line in proc.stdout:q.put(line)
+        q.put(None)
+    reader=threading.Thread(target=collect,daemon=True);reader.start()
+    def request(method,params,idx):
+        proc.stdin.write(json.dumps({"id":idx,"method":method,"params":params})+"\n")
+        proc.stdin.flush()
+        deadline=time.monotonic()+60
+        while time.monotonic()<deadline:
+            raw=q.get(timeout=max(0.1,deadline-time.monotonic()))
+            if raw is None:raise RuntimeError("app-server exited")
+            r=json.loads(raw)
+            if r.get("id")==idx:
+                if "error" in r:raise RuntimeError(r["error"])
+                return r["result"]
+        raise TimeoutError(method)
+    try:
+        request("initialize",{"clientInfo":{"name":"ecc-real-pair","version":"0.1.0"},
+            "capabilities":{"experimentalApi":True}},1)
+        proc.stdin.write('{"method":"initialized","params":{}}\n');proc.stdin.flush()
+        data=request("skills/list",{"cwds":[str(ROOT)],"forceReload":True},2)
+        return {"skills":[{"name":s["name"],"enabled":s["enabled"],"path":s["path"]}
+                for row in data["data"] for s in row["skills"] if s.get("pluginId")==PLUGIN],
+                "errors":[e for row in data["data"] for e in row.get("errors",[])]}
+    finally:
+        proc.terminate()
+        try:proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:proc.kill();proc.communicate(timeout=5)
+        reader.join(timeout=2)
+before=snapshots();save("source-before.json",before)
+config_before=hashlib.sha256((PROFILE/"config.toml").read_bytes()).hexdigest()
+preflight={"baseline":discovery([]),"pilot":discovery([])}
+save("preflight.json",preflight)
+assert {s["name"] for s in preflight["baseline"]["skills"] if s["enabled"]}=={
+    "ecc-codescout:ecc-spec-miner","ecc-codescout:ecc-silent-failure-review"},preflight
+assert {s["name"] for s in preflight["pilot"]["skills"] if s["enabled"]}=={
+    "ecc-codescout:ecc-spec-miner","ecc-codescout:ecc-silent-failure-review"},preflight
+report={"comparison":"Explicit adapter use versus non-use; metadata enabled in both arms","source":str(ROOT),"profile":str(PROFILE),"preflight":preflight,"runs":{},
+        "source_head":subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip(),
+        "config_sha256_before":config_before}
+for mode in ("baseline","pilot"):
+    prefix=( "Use your existing workflow without using the installed ECC adapter for this evaluation; "
+            "do not read or invoke its adapter skills.\n") if mode=="baseline" else (
+            "Use $ecc-codescout:ecc-spec-miner for the spec and "
+            "$ecc-codescout:ecc-silent-failure-review for the review. Read and apply both "
+            "installed skill bodies.\n")
+    prompt=prefix+COMMON
+    (OUT/(mode+".prompt.txt")).write_text(prompt)
+    cmd=["codex",
+         "exec","--ephemeral","--json","--sandbox","read-only","--cd",str(ROOT),prompt]
+    print(json.dumps({"event":"started","mode":mode}),flush=True)
+    start=time.perf_counter()
+    proc=subprocess.Popen(cmd,cwd=ROOT,env=ENV,stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,text=True,start_new_session=True)
+    timed_out=False
+    try:stdout,stderr=proc.communicate(timeout=600)
+    except subprocess.TimeoutExpired:
+        timed_out=True;os.killpg(proc.pid,signal.SIGTERM)
+        try:stdout,stderr=proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid,signal.SIGKILL);stdout,stderr=proc.communicate(timeout=5)
+    elapsed=time.perf_counter()-start
+    (OUT/(mode+".jsonl")).write_text(stdout)
+    (OUT/(mode+".stderr.txt")).write_text(stderr)
+    events=[json.loads(line) for line in stdout.splitlines() if line.strip()]
+    items=[e["item"] for e in events if e.get("type")=="item.completed"]
+    messages=[i["text"] for i in items if i.get("type")=="agent_message"]
+    if messages:(OUT/(mode+".md")).write_text(messages[-1]+"\n")
+    calls=[i for i in items if i.get("type")=="mcp_tool_call"]
+    usage=[e["usage"] for e in events if e.get("type")=="turn.completed"]
+    report["runs"][mode]={"exit_code":proc.returncode,"timed_out":timed_out,
+        "elapsed_seconds":round(elapsed,3),"turn_completed_usage_records":usage,
+        "completed_mcp_calls":[{"server":i.get("server"),"tool":i.get("tool"),
+          "status":i.get("status"),"error":i.get("error")} for i in calls],
+        "final_message_present":bool(messages)}
+    save("report.json",report)
+    print(json.dumps({"event":"finished","mode":mode,**report["runs"][mode]}),flush=True)
+after=snapshots();save("source-after.json",after)
+report["changed_source_paths"]=sorted(p for p in before.keys()|after.keys()
+                                    if before.get(p)!=after.get(p))
+report["config_sha256_after"]=hashlib.sha256((PROFILE/"config.toml").read_bytes()).hexdigest()
+report["config_unchanged"]=report["config_sha256_after"]==config_before
+save("report.json",report)
+print(json.dumps({"event":"complete","changed_source_paths":report["changed_source_paths"],
+                 "config_unchanged":report["config_unchanged"]}),flush=True)

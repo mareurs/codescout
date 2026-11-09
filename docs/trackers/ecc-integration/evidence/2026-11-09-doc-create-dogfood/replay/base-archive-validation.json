@@ -1,0 +1,11 @@
+{
+  "base_commit": "fe965888377151110f7fd10ab7c20469d6ea2f1c",
+  "base_tree": "cf72bce1d9232b8361f499fab5136ee696c58a0e",
+  "expected_tracked_records": 5370,
+  "archive_file_or_symlink_members": 5370,
+  "missing": [],
+  "extra": [],
+  "blob_oid_mismatches": [],
+  "archive_bytes": 44551478,
+  "sha256": "d26cac06b49eda9d352129cc04303f1c6e2bfe3d4c2120d9080402f1fb3d3d6f"
+}

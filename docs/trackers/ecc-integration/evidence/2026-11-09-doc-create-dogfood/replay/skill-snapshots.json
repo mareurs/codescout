@@ -1,0 +1,224 @@
+[
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/upstream.json",
+    "snapshot": "skills/ecc-pilot/upstream.json",
+    "sha256": "b4a544abbfb6b88aa66ed374ef23b0a7fa369e40bec8852ed70ad9f05591691a",
+    "bytes": 848
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/LICENSE",
+    "snapshot": "skills/ecc-pilot/LICENSE",
+    "sha256": "326146379f01bb137c0a5d3c54770c1aa31076705c8b88a7f6b26a460f6221b2",
+    "bytes": 1071
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/README.md",
+    "snapshot": "skills/ecc-pilot/README.md",
+    "sha256": "3be358c2a949aa0a4ce36835b6e0a5f6d143688cc3d54a7b8e56f24f3a310a4a",
+    "bytes": 5664
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/tests/test_package.py",
+    "snapshot": "skills/ecc-pilot/tests/test_package.py",
+    "sha256": "5d22b0677dc8dd372afac4eb77c2ca68654c03200fbe95c7590b823213320384",
+    "bytes": 6547
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/tests/test_live_smoke.py",
+    "snapshot": "skills/ecc-pilot/tests/test_live_smoke.py",
+    "sha256": "04637c07d476cb413ea572acd48e327026b66e86b611bc8dff587db50a394095",
+    "bytes": 2006
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/tests/test_navigation.py",
+    "snapshot": "skills/ecc-pilot/tests/test_navigation.py",
+    "sha256": "f1fec41a04bd5f616b8f400c61e35fc5ea985c51a86d3ea402a88b5469e4c846",
+    "bytes": 3487
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/tests/mcp_probe.py",
+    "snapshot": "skills/ecc-pilot/tests/mcp_probe.py",
+    "sha256": "d6a5e449a3ffc4538aebe6fa547aa759c54b145e41a2df563bd7f68f6b7d561c",
+    "bytes": 4917
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/tests/test_native_config.py",
+    "snapshot": "skills/ecc-pilot/tests/test_native_config.py",
+    "sha256": "ca6bf983d768fb003ff6664e44b19c70132e3b8fee65fdaac8109c7d2404fdb2",
+    "bytes": 1603
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/tests/live_smoke.py",
+    "snapshot": "skills/ecc-pilot/tests/live_smoke.py",
+    "sha256": "98fb46d6dbeecdcf788af581ed78b310ec4cbe7e0bc28090eaae5e0955065256",
+    "bytes": 9756
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/.codex-plugin/plugin.json",
+    "snapshot": "skills/ecc-pilot/.codex-plugin/plugin.json",
+    "sha256": "d47bab882dcd78a49ab2023b90ba7bcf29a6f9e9d5c11808a5891afc61291377",
+    "bytes": 350
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/evidence/retry-observed.md",
+    "snapshot": "skills/ecc-pilot/evidence/retry-observed.md",
+    "sha256": "7e442900d5d4039b3103ce604dd3520e7b67deceb90343f28408a148f3caf859",
+    "bytes": 7276
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/evidence/native-report.json",
+    "snapshot": "skills/ecc-pilot/evidence/native-report.json",
+    "sha256": "9295273ebf1f703667212a54909cb5d8e523d39bb1430e81ba54b8a0e092c394",
+    "bytes": 1471
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/evidence/native-retry-observed.md",
+    "snapshot": "skills/ecc-pilot/evidence/native-retry-observed.md",
+    "sha256": "2f1511b57f72bbcabd08ff96591a77fcc42dd3349063dcc43e57f0eece1ffbdb",
+    "bytes": 7115
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/evidence/failure-review.md",
+    "snapshot": "skills/ecc-pilot/evidence/failure-review.md",
+    "sha256": "d0251706f6473728acd0011191b652a646e71c9274e4eeaf4426c6e03cb426b7",
+    "bytes": 3582
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/evidence/verification.md",
+    "snapshot": "skills/ecc-pilot/evidence/verification.md",
+    "sha256": "959085c41e4971b1579f38b0fc1243e4c6953a87d334b1e9fe82ad4ae0cc5b98",
+    "bytes": 6188
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-spec-miner/SKILL.md",
+    "snapshot": "skills/ecc-pilot/skills/ecc-spec-miner/SKILL.md",
+    "sha256": "f5badffe1d0cecc4e5aa34cf9ba13cac719c1c5c569aad6ef24ab3a44304121c",
+    "bytes": 3886
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-silent-failure-review/SKILL.md",
+    "snapshot": "skills/ecc-pilot/skills/ecc-silent-failure-review/SKILL.md",
+    "sha256": "3011675999b3fc361e208d4b624cedba24468051315faae1c954643676c6b84d",
+    "bytes": 4244
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-silent-failure-review/agents/openai.yaml",
+    "snapshot": "skills/ecc-pilot/skills/ecc-silent-failure-review/agents/openai.yaml",
+    "sha256": "97f74d3811e36d9ddfc5057119cfbc4a363b04fce5655b6298c5d9e37889f2d8",
+    "bytes": 278
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-spec-miner/agents/openai.yaml",
+    "snapshot": "skills/ecc-pilot/skills/ecc-spec-miner/agents/openai.yaml",
+    "sha256": "048b44ff631e5c3abe2ce5a77d11f66ef230a81c999ec4fdbabed849605392f7",
+    "bytes": 269
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/.agents/plugins/marketplace.json",
+    "snapshot": "skills/ecc-pilot/.agents/plugins/marketplace.json",
+    "sha256": "2bb38f42022edd30d05e9a1e078a37c4935c557ff09bd49c481b6b93f3a521e1",
+    "bytes": 367
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/tests/fixtures/README.md",
+    "snapshot": "skills/ecc-pilot/tests/fixtures/README.md",
+    "sha256": "a61c581394521a6aa8fa2ce736986a346001727e701b9b4c9ada550d6acef20d",
+    "bytes": 1355
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/tests/fixtures/behavior.py",
+    "snapshot": "skills/ecc-pilot/tests/fixtures/behavior.py",
+    "sha256": "32e36590c51cc612e23965e5612895e927a68e166f59c6cf6f90e3b81305735a",
+    "bytes": 598
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/tests/fixtures/.gitignore",
+    "snapshot": "skills/ecc-pilot/tests/fixtures/.gitignore",
+    "sha256": "26e6d97992f33a6b5db010dae1789f69b535170d5819a82402fb9c80115da14c",
+    "bytes": 130
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/tests/fixtures/.codescout/project.toml",
+    "snapshot": "skills/ecc-pilot/tests/fixtures/.codescout/project.toml",
+    "sha256": "be99c8625334a2b3ebc74ed5c3a1132847cb3f73b50d9f7b551e3b58ac62bc95",
+    "bytes": 64
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/using-superpowers/SKILL.md",
+    "snapshot": "skills/superpowers/using-superpowers/SKILL.md",
+    "sha256": "82c5c8866ad7f5dd4440ce66bd7806ba48a2f13771beae5cf112e53f08fe36ba",
+    "bytes": 3192
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/brainstorming/SKILL.md",
+    "snapshot": "skills/superpowers/brainstorming/SKILL.md",
+    "sha256": "2c9ca71f94886f9ca9f4aef055f7cafb3e1a9bdf3aeebf8f4cb547c69405d207",
+    "bytes": 15190
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/using-git-worktrees/SKILL.md",
+    "snapshot": "skills/superpowers/using-git-worktrees/SKILL.md",
+    "sha256": "8cfb86f121269e8f7f12361e6795c4f6738828340e28964c9229d365666c9edd",
+    "bytes": 6813
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/systematic-debugging/SKILL.md",
+    "snapshot": "skills/superpowers/systematic-debugging/SKILL.md",
+    "sha256": "51c6435d98c83c42c96ba7c35725a0b2c376cd487fb1a4e6bd0ddbe7e33ef202",
+    "bytes": 9530
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/test-driven-development/SKILL.md",
+    "snapshot": "skills/superpowers/test-driven-development/SKILL.md",
+    "sha256": "64b03fce4aee5a97a93160cea8111f3ba13a17b7c001db4bd5836d67fd10705d",
+    "bytes": 9578
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/writing-plans/SKILL.md",
+    "snapshot": "skills/superpowers/writing-plans/SKILL.md",
+    "sha256": "a6c67c1900064347c2a329990dd3c555657c51c3ec53b259a08aa01a2c26139a",
+    "bytes": 10335
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/executing-plans/SKILL.md",
+    "snapshot": "skills/superpowers/executing-plans/SKILL.md",
+    "sha256": "deaf176fa179827e80f2ea3101db3ea90fdf562ebef340eba761e4687940f5f5",
+    "bytes": 18364
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/requesting-code-review/SKILL.md",
+    "snapshot": "skills/superpowers/requesting-code-review/SKILL.md",
+    "sha256": "2180e14a448e9410bec88e6646a2d1f0ce7fdd58de27388c1e052e929679d2bc",
+    "bytes": 2974
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/verification-before-completion/SKILL.md",
+    "snapshot": "skills/superpowers/verification-before-completion/SKILL.md",
+    "sha256": "2befe7fc55bcadaa3d97dd9e8efeb633d2561c0ebe74c5a8b17c4d9e7e4520b3",
+    "bytes": 3646
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/test-driven-development/writing-good-tests.md",
+    "snapshot": "skills/superpowers/test-driven-development/writing-good-tests.md",
+    "sha256": "51471c853306ff92ca8bb41dcaea05f31c0e46b03651f8f3c99754b7172f4ae1",
+    "bytes": 8268
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/requesting-code-review/code-reviewer.md",
+    "snapshot": "skills/superpowers/requesting-code-review/code-reviewer.md",
+    "sha256": "82e370be6b3447523816286195571e4216ba56ba1ad6ad0e87862294c4c78dcb",
+    "bytes": 6449
+  },
+  {
+    "installed_source": "/home/marius/.codex/plugins/cache/sdd-misc-plugins/codescout-companion/1.21.0/skills/reconnaissance/SKILL.md",
+    "snapshot": "skills/reconnaissance/SKILL.md",
+    "sha256": "2d8ab25571531737c27e3ebc4bebea41dc110b57154c1f4afdb81484f3c3959b",
+    "bytes": 14020
+  },
+  {
+    "installed_source": "/home/marius/.codex/skills/.system/openai-docs/SKILL.md",
+    "snapshot": "skills/openai-docs/SKILL.md",
+    "sha256": "aa6829e21df2223167c85d2e49b6337a7345c84c1033f1ec10182c7882b36d45",
+    "bytes": 5437
+  }
+]

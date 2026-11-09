@@ -1,0 +1,44 @@
+{
+  "files": [
+    {
+      "path": "baseline-binary.json",
+      "bytes": 210,
+      "sha256": "7f9d93eba5cf7454a03ce14370c1c9054932ca025cbe7ef8c3e619d56c6007cc"
+    },
+    {
+      "path": "baseline-delta.patch",
+      "bytes": 100551,
+      "sha256": "e3464f05aae28b9b3d1b777605e798cd90e59ba8d8f8a8c22d3169acebe280fa"
+    },
+    {
+      "path": "baseline-mcp.json",
+      "bytes": 10721,
+      "sha256": "87068b3465a66a5631692fb7a4943395446a205c53265bd3c132bc7d7fe65d63"
+    },
+    {
+      "path": "baseline-probe-result.json",
+      "bytes": 21,
+      "sha256": "81868a6e94ffc0178bf833deb1c9013d9fab4ee95ddb876a5e8ec4f1d26376d2"
+    },
+    {
+      "path": "baseline-probe.log",
+      "bytes": 162,
+      "sha256": "7a601de99de1c2390e86c444a7151c2c4136f00aeec881ebcd7d680481bd78f4"
+    },
+    {
+      "path": "baseline.json",
+      "bytes": 1001,
+      "sha256": "d4fb83860254079b53556ad4e42bb96bbb90f3377615e620e2b6b87fc655b332"
+    },
+    {
+      "path": "candidate-task.txt",
+      "bytes": 1744,
+      "sha256": "f64b57d38a816356eb9f56295032562e10fa0833b7e35756f0e4dc2389ddd0ed"
+    },
+    {
+      "path": "probe.py",
+      "bytes": 2380,
+      "sha256": "22024f01f86ac376bca43504d1404ac57725fcabc8fd1eadea4752d47f8065c1"
+    }
+  ]
+}

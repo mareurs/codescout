@@ -1,0 +1,22 @@
+[
+  {
+    "timestamp": "2026-11-09T11:30:18.410Z",
+    "text": "ok, ce mai putem face?"
+  },
+  {
+    "timestamp": "2026-11-09T11:34:52.600Z",
+    "text": "[Private personal AGENTS instructions retained locally; not committed] sha256=027b05feeb0310c12866cc95a319585917ff1c5bc2addd4cf508cab85584c43c"
+  },
+  {
+    "timestamp": "2026-11-09T11:34:53.095Z",
+    "text": "inainte sa demonstram, hai sa facem dogfood si sa profitam de ecc pentru a depista pb de codescout sau a-l imbunatati. cum facem asta?"
+  },
+  {
+    "timestamp": "2026-11-09T11:36:00.432Z",
+    "text": "ok, go"
+  },
+  {
+    "timestamp": "2026-11-09T11:53:49.082Z",
+    "text": "in experimentul asta pe care il facem, hai sa scriem si commit-ul la care lucram ca apoi poate facem un replay cu codex fara skill-urile astea. nu facem acum replay-ul dar sa avem toate datele de care avem nevoie pt el"
+  }
+]

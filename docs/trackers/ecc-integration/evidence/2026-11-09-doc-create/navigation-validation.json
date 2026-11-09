@@ -1,0 +1,16 @@
+{
+  "baseline": {
+    "successful_required_navigation": [
+      "call_graph",
+      "references",
+      "symbols"
+    ]
+  },
+  "pilot": {
+    "successful_required_navigation": [
+      "call_graph",
+      "references",
+      "symbols"
+    ]
+  }
+}

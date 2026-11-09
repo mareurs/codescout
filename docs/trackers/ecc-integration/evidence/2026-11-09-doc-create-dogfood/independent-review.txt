@@ -1,0 +1,15 @@
+Independent whole-change review by gpt-6-astra, high reasoning, isolated fresh context.
+No Critical, Important or Minor findings in the inspected change.
+
+Applied mutation 1: restore old production diagnostic. Observed KILLED, cargo selected suite 48 executed, 47 passed, 1 failed; new regression at create.rs:1424 rejects false rollback assurance after I/O/residual-row checks.
+Applied mutation 2: remove production undo_failed_create call. Observed KILLED, 48 executed, 46 passed, 2 failed: existing successful-cleanup test at:1321 and new delete_fails=false subcase at:1410.
+No completed candidate survived. Earlier quota/timeout launch attempts gave no usable verdict and are not counted as additional candidates.
+
+Both completed scripts restored reviewed and isolated source to SHA256 6614bf9b1184f12398181b7a35d2c2625f8a073159f57ea690a7e2e4ac4c9132, and the mutation marker directory was empty. Parent independently inspected archived logs for ARMED, intended assertion failures, executed test counts and KILLED verdicts.
+Mutation2 copied 356 untracked scratch files with copy warnings; the intended Rust tests still executed. The parent subsequently excluded and removed only its own scratch directory. No source changes followed review.
+
+Declined to judge:
+- Full gate and actual MCP execution: assigned to parent, not independently rerun by reviewer.
+- Actual disk exhaustion and partial-file unlink failure: fixture exercises directory-creation failure. Unchanged helper behavior was inspected, not independently fault-injected for those paths.
+
+Parent ruling: these scope limits stand. Existing helper test executes real partial-file removal. This correction changes only truthful outer diagnostics and does not add stronger cleanup/atomicity guarantees. Cost if that boundary proves insufficient: a separate failure-injection test and possibly a separate cleanup behavior fix, not a reason to claim this run covered those unexecuted paths.

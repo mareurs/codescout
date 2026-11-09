@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000035",
+  "command": "TMPDIR=/home/marius/work/claude/codescout/.worktrees/ecc-doc-create-cleanup/.codescout/ecc-dogfood-tmp ./scripts/with-slot.sh bash -c 'cargo build --bin codescout && sha256sum \"$CARGO_TARGET_DIR/debug/codescout\" > /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-doc-create-dogfood/binary.sha256 && python3 /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-doc-create-dogfood/probe.py --binary \"$CARGO_TARGET_DIR/debug/codescout\" --output /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-doc-create-dogfood/mcp-result.json && ./scripts/gate.sh --check'",
+  "server_pid": 1520813,
+  "job_pid": 973186,
+  "state": "exited",
+  "exit_code": 1,
+  "error": null,
+  "started_at": "2026-11-09T11:49:36.191782745+00:00",
+  "finished_at": "2026-11-09T11:56:26.293139850+00:00",
+  "log_path": "/tmp/codescout-bg-XwoCJy.log"
+}

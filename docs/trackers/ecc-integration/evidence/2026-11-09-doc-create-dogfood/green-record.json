@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000031",
+  "command": "./scripts/with-slot.sh cargo test --lib librarian::tools::create::tests",
+  "server_pid": 1520813,
+  "job_pid": 723306,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T11:43:35.498636833+00:00",
+  "finished_at": "2026-11-09T11:46:23.327213036+00:00",
+  "log_path": "/tmp/codescout-bg-z2tQRb.log"
+}

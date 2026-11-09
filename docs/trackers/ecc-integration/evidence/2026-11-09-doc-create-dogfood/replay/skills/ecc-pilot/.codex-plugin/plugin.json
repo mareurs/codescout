@@ -1,0 +1,11 @@
+{
+  "name": "ecc-codescout",
+  "version": "0.1.0",
+  "description": "ECC spec mining and silent-failure review adapted to codescout for a Codex pilot.",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ECC for codescout",
+    "shortDescription": "Evidence-based specs and failure reviews with codescout.",
+    "category": "Coding"
+  }
+}

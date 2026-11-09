@@ -1,0 +1,8 @@
+{
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-doc-create-cleanup",
+  "head": "fe965888377151110f7fd10ab7c20469d6ea2f1c",
+  "branch": "fix/ecc-doc-create-cleanup-20261109",
+  "source_sha256": "6614bf9b1184f12398181b7a35d2c2625f8a073159f57ea690a7e2e4ac4c9132",
+  "helper_sha256": "d6a5e449a3ffc4538aebe6fa547aa759c54b145e41a2df563bd7f68f6b7d561c",
+  "parent_source_modified": false
+}

@@ -1,0 +1,7 @@
+{
+  "markdown_files_checked": 16,
+  "inline_file_link_targets_checked": 182,
+  "scope": "kind/status/title/tags presence, optional owners array shape, inline file target existence with :line suffix stripped; not semantic citation correctness or heading-anchor validation",
+  "errors": [],
+  "instrument_correction": "Previous version incorrectly required omitted empty owners and treated supported clickable :line suffixes as filename bytes. Original false-alarm result retained."
+}

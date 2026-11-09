@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000023",
+  "command": "./scripts/gate.sh --check",
+  "server_pid": 1520813,
+  "job_pid": 3569102,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T11:10:31.433103786+00:00",
+  "finished_at": "2026-11-09T11:16:14.565322883+00:00",
+  "log_path": "/tmp/codescout-bg-CCAYst.log"
+}

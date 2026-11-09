@@ -1,0 +1,6 @@
+interface:
+  display_name: "ECC Spec Miner"
+  short_description: "Extract observed behavior with codescout evidence"
+  default_prompt: "Use $ecc-codescout:ecc-spec-miner to extract a bounded behavioral spec of this module with codescout."
+policy:
+  products: ["CODEX"]

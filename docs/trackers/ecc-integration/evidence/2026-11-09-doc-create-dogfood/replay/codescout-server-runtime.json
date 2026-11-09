@@ -1,0 +1,14 @@
+{
+  "server_pid_at_capture": 1520813,
+  "original_exe_link": "/home/marius/work/claude/codescout/target/release/codescout (deleted)",
+  "uncompressed_bytes": 44761680,
+  "uncompressed_sha256": "9e4db9b94323fb5bc65e3af403904f883459979206077488e448a362291620dc",
+  "compressed_bytes": 15085637,
+  "platform": "Linux-7.2.8-zen1-2-zen-x86_64-with-glibc2.44",
+  "libc": [
+    "glibc",
+    "2.44"
+  ],
+  "ldd": "\tlinux-vdso.so.1 (0x00007f7a64d47000)\n\tlibz.so.1 => /usr/lib/libz.so.1 (0x00007f7a64ce5000)\n\tlibgcc_s.so.1 => /usr/lib/libgcc_s.so.1 (0x00007f7a61fd3000)\n\tlibm.so.6 => /usr/lib/libm.so.6 (0x00007f7a61e9c000)\n\tlibc.so.6 => /usr/lib/libc.so.6 (0x00007f7a61c00000)\n\t/lib64/ld-linux-x86-64.so.2 => /usr/lib64/ld-linux-x86-64.so.2 (0x00007f7a64d49000)\n",
+  "note": "Snapshot of the actual shared MCP server executable used for navigation and commands, distinct from the worktree candidate binary used for final MCP behavior testing. Requires compatible Linux runtime and private replay state; no server started by capture."
+}

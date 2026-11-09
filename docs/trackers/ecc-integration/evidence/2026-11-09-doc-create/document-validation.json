@@ -1,0 +1,8 @@
+{
+  "checked_tracker_markdown_files": 12,
+  "checked_bug_files": 1,
+  "checked_inline_file_links": 137,
+  "errors": [],
+  "evidence_hash_mismatches": [],
+  "scope": "YAML required fields, inline file-link target existence and retained evidence bytes; not semantic citation correctness"
+}

@@ -1,0 +1,9 @@
+{
+  "codex_version": "codex-cli 0.167.0",
+  "profile": "/home/marius/.codex",
+  "model_settings": {
+    "model": "gpt-6.1-sol",
+    "model_reasoning_effort": "medium",
+    "service_tier": "default"
+  }
+}

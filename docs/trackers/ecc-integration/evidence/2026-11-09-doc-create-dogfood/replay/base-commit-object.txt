@@ -1,0 +1,26 @@
+tree cf72bce1d9232b8361f499fab5136ee696c58a0e
+parent c3ef79c071836a2887022fa0c9abb4e4190a7afb
+author Marius Ailinca <ailinca.marius@gmail.com> 1794223398 +0200
+committer Marius Ailinca <ailinca.marius@gmail.com> 1794223398 +0200
+gpgsig -----BEGIN PGP SIGNATURE-----
+ 
+ iQIzBAABCgAdFiEEwXEIfoqCUZAyEISUM6AY3/32u00FAmrxrS4ACgkQM6AY3/32
+ u02GRQ//eIjIqRalzKWOCcfyN2oMYRPziQZSS2LLw4FnP+4RZkJYwq3L/9y/GpUR
+ oFGrvgeEbsCEBEM5FGi3BccjxmGJZiowJIyxWTacABGSV0l8ysMEHfcax32AZN8j
+ pKXOfmp2ec6Zi61irNnb/v3bHroTlZjF6Tmssk1ut+3VJDFFBQ09+oEAiuuwI60S
+ zldPSiIcDmozmA9D/hFaBDQysH3SfgHmd84a3r/GrEkhoR/r+lGRVb6SPO7lUdDh
+ oAzLP1kkbmuPSkPMU9a6HJtih93sNaaai5sXYGHqOPKiB1Gn4e7E4mNqn0e7Mqlf
+ LgA30POpIVgi+1nEYecDvWzcuGEquzT0gMKf6hROTnaSBqjWN49gSTa5FBpnxe2k
+ +OtL9CmuBzy/88bwGDYccLCuYC8f0aFB3Xt83w6GWjcjRItqwV7zTNhn9ZO5RlGc
+ 39oABLA6GHIxiDSs7qeYuuwnVHiTlySNJSQos7a8NqAXkQB0dLnTG8md7LVSv3eW
+ Bq8GlSp2VRRjEEWGakscKT2wqZ1x+GUgG7gg2Xp9VbgLtTmpHl4QyummQNta2Sdz
+ d1AFk9PVWx0OE2FJk0BD3980DcrLZ1GxSZ70iXL1FSS1jEmZUNkKOPG/2gCXgofM
+ GrFDvoXOLO2VLRUVzeDMMO6/dM07oW9R0DZPd0iLCbg5znM6kP4=
+ =2dEC
+ -----END PGP SIGNATURE-----
+
+docs(issues): archive the stale ack replay err_family bug as fixed
+
+Fixed in 6043fb27a (patch-id 7b0c9912cc5d). Verified live on a rebuilt server: a replay over a changed file left row 285420 with err_family ack_replay_file_changed, and no row with that message has a NULL family any more. Gate green: LEAN 6303, DEFAULT 9191, Python 1764 passed, clippy clean. The two source comments that cited the old path now cite the archive path.
+
+Session-Id: ab81c74b-8451-4aa0-a4b0-198937555f6e

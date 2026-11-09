@@ -1,0 +1,25 @@
+{
+  "source_commit": "561c945d72a3997c972d5ef055e2c9d38e922e67",
+  "integration_parent": "4b446cb1eefbe8c9d85b1704a02df41f54c5b57f",
+  "integration_commit": "b3d02d482eaeb3cabf329f4f37a2d3649a6057b7",
+  "patch_id": "3e8ba9084781d79228efe0f163c04ce19ffdd203",
+  "source_sha256": "6614bf9b1184f12398181b7a35d2c2625f8a073159f57ea690a7e2e4ac4c9132",
+  "foreign_staged_before": [
+    ".codescout/memories/bug-triage-2026-10-27.md",
+    "docs/issues/2026-11-04-shared-checkout-gate-red-during-hint-authority-audit.md",
+    "docs/research/2026-11-04-claude-instructions-comparison.md",
+    "docs/research/data/2026-11-04-hint-authority-gate.log.gz",
+    "docs/research/data/2026-11-04-hint-authority-inputs.tar.gz",
+    "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md"
+  ],
+  "foreign_staged_after": [
+    ".codescout/memories/bug-triage-2026-10-27.md",
+    "docs/issues/2026-11-04-shared-checkout-gate-red-during-hint-authority-audit.md",
+    "docs/research/2026-11-04-claude-instructions-comparison.md",
+    "docs/research/data/2026-11-04-hint-authority-gate.log.gz",
+    "docs/research/data/2026-11-04-hint-authority-inputs.tar.gz",
+    "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md"
+  ],
+  "foreign_index_path_set_preserved": true,
+  "branch": "experiments"
+}

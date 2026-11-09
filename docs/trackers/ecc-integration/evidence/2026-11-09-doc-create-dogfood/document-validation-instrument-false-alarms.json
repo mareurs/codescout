@@ -1,0 +1,475 @@
+{
+  "markdown_files_checked": 16,
+  "inline_file_link_targets_checked": 179,
+  "scope": "YAML required-field presence and inline file target existence; not semantic citation correctness or heading-anchor validation",
+  "errors": [
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/README.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/issues.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/plans/README.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/plans/2026-11-09-codex-pilot-evaluation.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/plans/2026-11-09-doc-create-dogfood.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/README.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:341"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:62"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:50"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:34"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/catalog/mod.rs:729"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:341"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:289"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:330"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/artifact.rs:529"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/adapter.rs:335"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/adapter.rs:1190"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:3013"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:3172"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:128"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:113"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:2084"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:607"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:777"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:816"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:917"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1247"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1290"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1333"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/adapter.rs:2523"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:10280"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:10381"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:330"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:561"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/catalog/artifact.rs:336"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/catalog/augmentation.rs:35"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/worktree.rs:95"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-baseline.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:49"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:363"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:400"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:62"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:50"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:2084"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:32"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:62"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/catalog/mod.rs:729"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:306"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:9"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:341"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1525"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1229"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:777"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:506"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:330"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1247"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1290"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1333"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:569"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/worktree.rs:95"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:607"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1399"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/artifact.rs:529"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/adapter.rs:335"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/adapter.rs:1190"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:3013"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:3172"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/adapter.rs:2523"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/adapter.rs:2540"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:10087"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:10180"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/server.rs:86"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:330"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:560"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-ecc.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/catalog/artifact.rs:489"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:363"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:400"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:62"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:50"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:2084"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:32"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/temp_write_guard.rs:62"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/catalog/mod.rs:729"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:306"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:9"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:341"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1525"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1229"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:777"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:506"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:330"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1247"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1290"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1333"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:569"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/worktree.rs:95"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:607"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/create.rs:1399"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/tools/artifact.rs:529"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/adapter.rs:335"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/adapter.rs:1190"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:3013"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:3172"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/adapter.rs:2523"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/adapter.rs:2540"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:10087"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/server.rs:10180"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-observed.md",
+      "target": "/home/marius/work/claude/codescout/src/librarian/server.rs:86"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-comparison.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/reports/2026-11-09-doc-create-dogfood.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/notes/README.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/notes/2026-11-09-pilot-setup-history.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/notes/2026-11-09-doc-create-replay.md",
+      "missing": "owners"
+    },
+    {
+      "file": "/home/marius/work/claude/codescout/docs/issues/2026-11-09-doc-create-claims-rollback-after-best-effort-cleanup.md",
+      "missing": "owners"
+    }
+  ]
+}

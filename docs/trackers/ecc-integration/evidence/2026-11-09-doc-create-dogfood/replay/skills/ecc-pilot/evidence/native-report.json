@@ -1,0 +1,53 @@
+{
+  "modes": {
+    "review": {
+      "exit_code": 0,
+      "completed_tools": [
+        "call_graph",
+        "get_guide",
+        "read_file",
+        "references",
+        "symbols",
+        "tree",
+        "workspace"
+      ],
+      "result_file": "review.md"
+    },
+    "spec": {
+      "exit_code": 0,
+      "completed_tools": [
+        "call_graph",
+        "doc",
+        "get_guide",
+        "librarian",
+        "memory",
+        "read_file",
+        "references",
+        "run_command",
+        "symbols",
+        "tree",
+        "workspace"
+      ],
+      "result_file": "spec.md",
+      "artifact": {
+        "kind": "spec",
+        "status": "draft",
+        "evidence_file": "retry-observed.md"
+      }
+    }
+  },
+  "fixture_hashes": {
+    "behavior.py": "32e36590c51cc612e23965e5612895e927a68e166f59c6cf6f90e3b81305735a",
+    "README.md": "a61c581394521a6aa8fa2ce736986a346001727e701b9b4c9ada550d6acef20d",
+    ".codescout/project.toml": "be99c8625334a2b3ebc74ed5c3a1132847cb3f73b50d9f7b551e3b58ac62bc95"
+  },
+  "preflight": {
+    "languages": [
+      "python"
+    ],
+    "navigation": {
+      "references": "behavior.py (2)\n     20  def required_sync(fetch):\n     28  items = required_sync(fetch)",
+      "call_graph": "call_graph for `required_sync`\n  callers: 1 edges across 1 files\n    behavior.py (1)\n         28: commit_sync → required_sync (depth=1, lsp)\n  (auto-promoted to full detail — small result)\n  max_depth_reached: 2"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+Frozen reconstructed task brief for a FUTURE no-ECC comparison; no replay has run.
+
+Start from codescout commit b3d02d482eaeb3cabf329f4f37a2d3649a6057b7, tree 34977f2047694714e5f852ee427c2dfca435d9e8, in a fresh isolated worktree/session. Read the repository CLAUDE.md and the operator-supplied personal instructions. Keep the normal codescout tooling and other workflow setup available.
+
+Dogfood references and call_graph. Determine whether a consumer can distinguish a trustworthy empty result from unavailable or incomplete analysis. Extract a bounded description of the observed behavior, trace actual enforcement and callers, and check existing contracts and known issues. Search leads are not confirmed findings; intentional fallbacks may be valid. Use positive, genuine-empty and failure/unavailable controls.
+
+For one confirmed bounded defect, if any, reproduce it before production edits, observe a failing regression, implement the smallest contract-preserving correction, run relevant tests and actually applied discriminating mutations with restoration, exercise the real MCP response in a private project/catalog, and run the required repository gate. Record commands, exact results, limits, source/config hashes and the final patch. Leave reviewable changes without merge, push or server rollout.
+
+The no-ECC candidate must not load or read the two ECC adapter skills. Other setup should be held comparable and the condition verified before execution. Do not expose the navigation issue, solution report, planned fixture, regression, previous trace, probe outputs or evaluator skill snapshots to the candidate. The operator must use private doc/memory state so searches cannot retrieve this investigation from the shared catalog.

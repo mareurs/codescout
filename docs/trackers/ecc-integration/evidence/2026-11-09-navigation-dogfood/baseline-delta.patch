@@ -1,0 +1,1408 @@
+diff --git a/docs/conventions/gate-ordering.md b/docs/conventions/gate-ordering.md
+index 2855d2a09..9610b894e 100644
+--- a/docs/conventions/gate-ordering.md
++++ b/docs/conventions/gate-ordering.md
+@@ -266,6 +266,18 @@ one arrangement and silently wrong after any reorder — the same defect a bare
+ this project pairs one with a patch-id. A paragraph that tells you its own order is load-bearing
+ must not then refer to its commands by number.
+ 
++## What the gate cannot see — a file that is not tracked yet
++
++Six guards under `tests/` read their population from `git ls-files`: `result_caps.rs`, `inline_gates.rs` and `buffer_stream_policy.rs` (all `src`), `issue_clusters.rs` and `issue_frontmatter.rs` (`docs/issues`), and `committed_paths.rs` (`scripts`). The selector is deliberate. `tests/result_caps.rs` (`tracked_src_files`) says an untracked file is a peer's in-flight work, and gating on it lets one session turn another session's build red.
++
++The consequence is that a new file is invisible to those guards until it is tracked. The gate can be green before the commit that adds the file and red after it. Measured 2026-11-09: commit `4eceee5e7` added `src/tools/native_provenance_fence/holders.rs` with a cap constant nobody had classified. The full gate had passed before the commit. `every_cap_constant_is_classified` was red at HEAD until `0d47f5898`.
++
++**The rule for the author of a new file.** Stage the file by explicit path before the gate run you will cite as evidence. `git add -N <file>` is enough to make `git ls-files` list it. Checked 2026-11-09 in a scratch repository: `git ls-files src` did not list an untracked file, and listed it after `git add -N`. That check did not run the guards themselves.
++
++**The price.** A staged file is visible in the shared index, so a peer's gate reads it too, and a red guard on your file is then red for them as well. Stage a new file only when you are ready for that, and name it in the commit by pathspec as [the commit sequence](shared-checkout-commit-sequence.md) says.
++
++**What this does not do.** It does not change the selector. Reading untracked files (`--others`) would remove the protection the selector gives.
++
+ ## Related
+ 
+ - The executable copy: [`CLAUDE.md`](../../CLAUDE.md) § *Development Commands*.
+diff --git a/docs/issues/2026-11-09-fmt-mine-is-refused-for-as-long-as-the-rust-analyzer-mux-lives-because-it-inherits-the-provenance-lock.md b/docs/issues/2026-11-09-fmt-mine-is-refused-for-as-long-as-the-rust-analyzer-mux-lives-because-it-inherits-the-provenance-lock.md
+index ee39c1078..0d198904c 100644
+--- a/docs/issues/2026-11-09-fmt-mine-is-refused-for-as-long-as-the-rust-analyzer-mux-lives-because-it-inherits-the-provenance-lock.md
++++ b/docs/issues/2026-11-09-fmt-mine-is-refused-for-as-long-as-the-rust-analyzer-mux-lives-because-it-inherits-the-provenance-lock.md
+@@ -84,7 +84,9 @@ Partly done. **Option 2 is in; option 1 is not, and this bug stays open.**
+ 
+ - Option 2, `4eceee5e7` and `0d47f5898`: a refused fence lock now names its holders (Linux): the processes that have the lock file open, inherited descriptors included, and the owners the kernel records, each marked "not running" when gone. A list cut by its 12-entry cap or by the 400 ms scan limit ends in "and more". Only the process name and a plain lowercase subcommand are shown, never other arguments.
+ - Verified: unit tests on the pure parts; a test that rebuilds the dead-owner case with `flock -s <file> sh -c 'sleep 30 & echo $!'`; a test that starts 14 holders; mutation runs for the holder text and for the cut flag; and live on the rebuilt server. A refused `./scripts/fmt-mine.sh` named the running gate and its children, a dead owner (this session's previous server, whose gate was still running on inherited descriptors, the mechanism of this bug reproduced within minutes), and the dead owner of the mux's lock.
+-- Option 1, not done: daemons such as `codescout mux` close the inherited provenance descriptors at startup. The fence is another effort's design, so this stays a decision for its owner.
++- Option 1, drafted and not merged: branch `fix/mux-closes-provenance-leases-20261109`, commit `8f18f6689`, worktree `/home/marius/work/claude/codescout.worktrees/mux-closes-provenance-leases`. The mux closes the inherited leases at startup, only when the descriptor is the lock file the variables name (by device and inode), and strips the seven variables from its language server's environment. The fence is another effort's design, so merging stays a decision for its owner.
++- What the draft gives up: a mux that closed its leases is outside the fence's promise that no process descended from an earlier fenced call is alive when the formatter holds the lock exclusively. The shell's own copy is untouched, so the lock still lasts as long as the shell.
++- Measured 2026-11-09 before the draft: of four real muxes, one (rust, pid 3690455, 3h50m old) held both descriptors, with `FENCE_FD=25` and `COORDINATOR_FD=24` in its environment; the other three held none. So the lock reaches a mux only when a process inside a fenced shell starts it. Which command started that mux is still not known.
+ 
+ What option 2 does and does not change: a caller who is refused can now tell a peer that is mid-call from a lock that no call owns. The refusal itself is unchanged, and the mux can still keep the lock for hours.
+ 
+@@ -98,7 +100,8 @@ Format the files you changed with `rustfmt --edition 2021 <file>` after reading
+ 
+ ## Resume
+ 
+-1. Decide option 1. Find which `run_command` started the mux, and whether the fence's own tests rely on a daemon holding the lock.
++0. Review requested 2026-11-09T11:47Z from Codex thread `01a1b59b-676f-7881-b7eb-4d8e1687c3f8` (app-server pid 646545, title "Verifica starea repo-ului"), read only, with three questions: is the mux's exclusion acceptable, does any fence test or proof rely on a daemon keeping the lock, and should `peer::server::run` change too. The send is attributed by one fact, the `Session-Id` trailer of `9cab1095e`; nobody confirmed that thread owns the fence today. The rollout file grew, so a turn ran; no reply had arrived when this was written. A reply is not an approval.
++1. Decide whether to merge the draft (`8f18f6689`). Open points: the call from `mux::process::run` is not tested, only the helper is; `peer::server::run` is a second daemon of the same shape and is not changed; one run of `cargo test --lib provenance` on the branch failed `a_terminal_shell_result_does_not_certify_detached_descendants` (`provenance_fence_context_tests.rs:451`, error text not captured), while 6 of 6 repeated runs on the branch and 6 of 6 on the base passed. That test uses the real account-wide coordination directory; whether live peer locks caused the failure was not measured.
+ 2. For option 1, add a test that spawns a daemon inside a fenced shell and checks the formatter can still be taken after the shell ends. The existing `a_lock_kept_by_a_child_of_a_dead_owner_is_named_as_such` rebuilds the dead-owner setup and can be extended.
+ 3. Close this bug when the mux no longer keeps the lock, not when the refusal is more readable.
+ 
+diff --git a/docs/issues/archive/2026-11-09-memory-embedder-hint-names-the-qdrant-stack-on-every-backend.md b/docs/issues/archive/2026-11-09-memory-embedder-hint-names-the-qdrant-stack-on-every-backend.md
+new file mode 100644
+index 000000000..27d654e6c
+--- /dev/null
++++ b/docs/issues/archive/2026-11-09-memory-embedder-hint-names-the-qdrant-stack-on-every-backend.md
+@@ -0,0 +1,79 @@
++---
++id: af689c86c4e6f03c
++kind: bug
++status: fixed
++title: 'BUG: memory embedder failure tells a lite-stack user to run retrieval-stack.sh up'
++tags:
++- cluster/hint-composed-without-the-request
++closed: 2026-11-09
++opened: 2026-11-09
++unverified: The two call sites in src/tools/memory/mod.rs delegate to embedder_unavailable in one line each, and no test drives a failing embedder through memory(remember/recall). The helper is tested per backend; the call-site wiring is read from the diff, not exercised.
++---
++
++# BUG: memory embedder failure tells a lite-stack user to run retrieval-stack.sh up
++
++## Summary
++When the memory embedder cannot be built, `memory(action="remember")` and `memory(action="recall")` answer with the hint "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack." The hint is the same for every backend. On the default (lite, `sqlite-vec`) build there is no stack and no script to start, so the hint sends the agent to a command that does not exist outside this repo.
++
++## Class fit
++The hint is a fixed string written for the Qdrant case. It does not read the request's backend, which `semantic_search` already does in `map_from_env_error` (`src/tools/semantic/semantic_search.rs`). It differs from the class's other members in that the correct text is already implemented one module away.
++
++## Symptom (Effect)
++```
++embedder unavailable: <error>
++hint: Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.
++```
++Shown on a lite-stack build, where the real fix is `CODESCOUT_EMBEDDER_URL` / `EMBED_API_KEY` (see `docs/manual/src/concepts/lite-stack.md`).
++
++## Reproduction
++Not run. Best lead: on a default build, with `CODESCOUT_VECTOR_BACKEND` unset and no reachable embedding endpoint, call `memory(action="remember", ...)`.
++
++## Environment
++Branch `experiments`. Default build (no `server-stack` feature).
++
++## Root cause
++Two call sites map the embedder error to a fixed hint: `src/tools/memory/mod.rs` (the `remember` path, `memory_embedder_for(...).map_err`) and the `recall` path a few hundred lines later. Both pass the literal `"Run `./scripts/retrieval-stack.sh up` to start the retrieval stack."` regardless of `VectorBackend::resolve()`. `Agent::memory_embedder_for_with` (`src/agent/mod.rs`) reaches the same error on the `SqliteVec` arm through `memory_embedder_for_config`.
++
++inferred from the source on 2026-11-09 — not measured at runtime.
++
++## Evidence
++`grep retrieval-stack src/tools/memory/mod.rs` on 2026-11-09 finds the literal at two sites. `map_from_env_error` in `src/tools/semantic/semantic_search.rs` already branches on `VectorBackend`.
++
++## Hypotheses tried
++None.
++
++## Fix
++
++Fixed on `experiments` in `9b43a3d01` (patch-id `a56e01c91e6c716ee1cb859c6119b72f013016d1`).
++
++- `VectorBackend::offline_hint()` (`src/retrieval/code_store.rs`) holds each backend's text, moved unchanged from `map_from_env_error`.
++- `map_from_env_error` (`src/tools/semantic/semantic_search.rs`) calls it.
++- `embedder_unavailable` (`src/tools/memory/mod.rs`) builds the memory refusal from it. Both memory sites call it with `VectorBackend::resolve()`.
++
++Gate green before the commit: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
++
++## Fix provenance
++
++- **SHA:** `9b43a3d0145acb7b7e1cfc4075b2152ac07d89c0` (`experiments`)
++- **patch-id:** `a56e01c91e6c716ee1cb859c6119b72f013016d1`
++
++## Tests added
++
++In `src/tools/memory/tests.rs`:
++
++- `a_lite_stack_memory_call_is_not_sent_to_the_qdrant_script`
++- `a_qdrant_memory_call_is_told_to_start_the_stack`
++- `the_embedder_cause_stays_in_the_message`
++
++They pin `embedder_unavailable` per backend. Limit: no test drives a failing embedder through the two call sites, so reverting one site to the literal would not fail them (see `unverified` in the frontmatter).
++
++## Workarounds
++Read the `embedder unavailable: <error>` text, which names the real cause.
++
++## Resume
++
++The call-site limit in `unverified` is the only open item. To close it, build a memory call whose embedder fails at construction and assert its hint.
++
++## References
++- `docs/issues/archive/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md` (same class)
++- `src/prompts/builders.rs` retrieval-stack paragraph, rewritten on 2026-11-09 to name no backend
+diff --git a/docs/research/2026-11-09-parallel-tool-calls-transcript-mining.md b/docs/research/2026-11-09-parallel-tool-calls-transcript-mining.md
+new file mode 100644
+index 000000000..d9e6a5317
+--- /dev/null
++++ b/docs/research/2026-11-09-parallel-tool-calls-transcript-mining.md
+@@ -0,0 +1,95 @@
++# Could consecutive tool calls run in parallel? Mining 151,565 calls (2026-11-09)
++
++Question: when the agent issues tool calls one after another, how many could have been issued in one message, and how much time would that save?
++
++Short answer: about 37% of consecutive round pairs could be one round, which is about 3–4% of working time. That is an upper bound with a wide margin. The first automatic estimate (80%, later 67.6%) was about twice too high.
++
++## Scope
++
++- Transcripts: 1,243 files of the codescout project in the four profiles (`~/.claude`, `-sdd`, `-kat`, `-stef`), modified since 2026-10-01. 96,850 calls are in subagent files, 54,701 in main sessions.
++- Exact call timing: `.codescout/usage.db` (`started_at`, `latency_ms`, joined on `tool_use_id`). 98,106 of 151,565 calls joined.
++- A **round** is the set of calls of one assistant message. 28,267 of 115,861 rounds have two or more calls.
++- Scripts, judge inputs and verdicts: `docs/research/data/2026-11-09-parallel-tool-calls/`. Run `extract.py out` first. The other scripts read `out/all.jsonl` from the current directory.
++
++## Finding 1 — inside one message, only `readOnlyHint` tools overlap
++
++Pairs of consecutive calls in one message whose first call lasted at least 300 ms (shorter calls cannot show overlap):
++
++| Pair | Overlapped / serial |
++|---|---|
++| `symbols` → `symbols` | 137 / 12 |
++| `grep` → `grep` | 92 / 19 |
++| `symbols` → `grep` | 64 / 9 |
++| `references` → `references` | 47 / 1 |
++| `run_command` → `run_command` | 3 / 906 |
++| `edit_code` → `edit_code` | 0 / 93 |
++| `edit_file` → `edit_file` | 0 / 49 |
++| `doc` → `doc` | 0 / 25 |
++
++- `grep`, `read_file`, `symbols`, `references`, `tree` and `get_guide` advertise `readOnlyHint` (`src/tools/annot`, `read_only_closed`). `run_command`, `edit_*`, `doc`, `memory` and `workspace` do not.
++- A live test confirmed it: three `grep` calls in one message started 0.3 s apart and all ended at the same moment.
++- The first version of the metric counted calls shorter than 300 ms and reported `read_file` pairs as serial. That was wrong: a 1 ms call cannot overlap anything.
++- The harness is the likely cause of the serial runs, because the server takes no lock for reads. This was not tested by changing the annotation.
++- Not measured: how many `run_command` calls are read-only (`git status`, `ls`, `sed -n`). Claude Code classifies built-in Bash per command, but a static MCP annotation cannot.
++
++## Finding 2 — how many rounds could have been one round
++
++Method: for each pair of adjacent rounds with no user prompt between them (104,553 pairs; 6,231 pairs with agents, `SendMessage` or questions to the user were left out), test whether the second round depends on the first:
++
++- **data**: a token of the first result that appeared nowhere earlier in the file is in the second input;
++- **control**: the first result is an error or refusal, a verification command (`cargo`, `gate.sh`, …), or a `Skill` or `ToolSearch` load.
++
++Effect order needs no test: inside one message the harness runs calls in order, and only adjacent read-only calls overlap. So "edit, then build" is safe in one message.
++
++| Stage | Pairs independent |
++|---|---|
++| Heuristic v1 (data + error + verify) | 79.8% |
++| Heuristic v2 (adds `"ok": false`, refusals, empty results, outline reads, 3-digit numbers) | 67.6% |
++| After blind judges, on 90 sampled pairs marked independent | 49% (95% CI 39–59%) |
++| Judges on 30 sampled pairs marked dependent | 13% were collapsible anyway (CI 5–30%) |
++| Calibrated estimate over all pairs | **37%** |
++
++The hand review of 24 pairs before the judges gave about 60% precision for v1 and showed three misses: a line range read from an outline, a retry after an error, a refinement after an empty result. Rules for them are in v2.
++
++Four Opus judges, blind to the heuristic's label, answered: could the second round have been written without the first result? 16 of 120 verdicts were UNSURE and counted as "needs result".
++
++Share confirmed by the judges, among pairs the heuristic marked independent:
++
++| First → second | Confirmed |
++|---|---|
++| no-hint tool → no-hint tool (`edit` → `run_command`, `edit` → `edit`) | 28 / 40 (70%) |
++| no-hint tool → read-only | 6 / 10 (60%) |
++| read-only → read-only | 7 / 25 (28%) |
++| read-only → no-hint tool | 3 / 15 (20%) |
++
++Read-only chains rarely collapse because the agent searches and then reads what the search found. Write chains collapse more often because the agent had already planned them.
++
++## Finding 3 — time
++
++- Model latency between a result and the next call (capped at 120 s): median 4.4 s over all pairs, 3.9 s over the judged-collapsible pairs.
++- 37% of 104,553 pairs is about 39,000 rounds. At 3.9 s each: about 42 h, about 3–4% of 1,144 h of segment wall time.
++- This is an upper bound: the extra generation time of the merged call's arguments is not subtracted.
++- The 1,144 h adds the main session and its subagents, which run in parallel. The share is approximate.
++
++## What others do (retrieved 2026-11-09)
++
++- Anthropic: parallel tool use is on by default. The API prescribes no execution order. Prompting raises the rate, and all `tool_result` blocks go in one user message. <https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use>
++- Claude Code: `partitionToolCalls` builds concurrent-safe batches and single serial calls; limit 10 (`CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY`). <https://claude-code-from-source.com/ch07-concurrency/>
++- Codex CLI ≥ 0.134 runs MCP tools concurrently only when they advertise `readOnlyHint`. <https://codex.danielvaughan.com/2026/05/27/codex-cli-mcp-readonlyhint-concurrent-tool-execution-annotations-parallelism/>
++- Programmatic tool calling runs many calls without sampling the model between them. <https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling>
++- LLMCompiler plans calls as a dependency graph (<https://arxiv.org/abs/2312.04511>). PASTE speculates on recurring call patterns (<https://arxiv.org/html/2603.18897v1>).
++
++The reports were read from search excerpts. The Claude Code chapter and the Codex page are third-party write-ups, not vendor documentation.
++
++## Limits
++
++- One project, one month, one operator.
++- 120 judged pairs. The dependent sample covers only the `failsig` and `data` reasons; `verify`, `error` and `loader` pairs are not calibrated.
++- The judges are models. The collapse verdict is an informed opinion, not a replay: nobody ran the agent without the earlier result.
++- Pairs only. A chain of three independent rounds saves two round trips; the pair sum counts each pair once, which is close but not equal.
++
++## Open
++
++- Measure how many `run_command` calls are read-only. If many are, a separate read-only tool with `readOnlyHint` would let them overlap.
++- Test a prompt that groups write chains in one message. A refused `edit` does not stop the next call in the same message, so the risk is larger than for reads.
++- Replay a sample of pairs with the second call forced into the first message, to replace the judges' opinion with an outcome.
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/extract.py b/docs/research/data/2026-11-09-parallel-tool-calls/extract.py
+new file mode 100644
+index 000000000..62beac862
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/extract.py
+@@ -0,0 +1,110 @@
++"""Stage 1: pull ordered tool calls out of transcripts. Read-only on the transcripts.
++
++Output: one JSON line per record in OUT/<n>.jsonl, record kinds:
++  {"k":"call", f, sid, i, mid, tu, name, inp, tr, res, err}
++  {"k":"bound", f, i, ts, why}      real user prompt or compaction boundary
++"""
++import json, os, sys, glob, hashlib
++from multiprocessing import Pool
++
++HOME = os.path.expanduser("~")
++PROFILES = [".claude", ".claude-sdd", ".claude-kat", ".claude-stef"]
++SINCE = "2026-10-01"
++OUT = sys.argv[1]
++INP_CAP = 3000
++RES_CAP = 4000
++
++
++def files():
++    import subprocess
++    out = []
++    for p in PROFILES:
++        d = f"{HOME}/{p}/projects/-home-marius-work-claude-codescout"
++        r = subprocess.run(["find", d, "-name", "*.jsonl", "-newermt", SINCE],
++                           capture_output=True, text=True).stdout.split("\n")
++        out += [x for x in r if x]
++    return sorted(out)
++
++
++def text_of(content):
++    if isinstance(content, str):
++        return content
++    s = []
++    for c in content or []:
++        if isinstance(c, dict):
++            if c.get("type") == "text":
++                s.append(c.get("text", ""))
++            elif c.get("type") == "tool_reference":
++                s.append(str(c))
++    return "\n".join(s)
++
++
++def work(path):
++    kind = "sub" if "/subagents/" in path else "main"
++    fid = hashlib.sha1(path.encode()).hexdigest()[:10]
++    calls = {}      # tool_use_id -> record
++    order = []
++    recs = []
++    i = 0
++    seen_ids = set()
++    try:
++        fh = open(path, encoding="utf-8", errors="replace")
++    except OSError:
++        return fid, path, kind, 0, []
++    for line in fh:
++        if '"type":"assistant"' not in line and '"type":"user"' not in line:
++            continue
++        if line.startswith('{"type":"api-request'):
++            continue
++        try:
++            o = json.loads(line)
++        except Exception:
++            continue
++        t = o.get("type")
++        ts = o.get("timestamp")
++        if t == "assistant":
++            m = o.get("message") or {}
++            for b in m.get("content") or []:
++                if b.get("type") == "tool_use":
++                    tid = b.get("id")
++                    if tid in seen_ids:
++                        continue
++                    seen_ids.add(tid)
++                    inp = json.dumps(b.get("input"), ensure_ascii=False)
++                    rec = {"k": "call", "f": fid, "kind": kind, "i": i, "mid": m.get("id"), "id": tid,
++                           "tu": ts, "name": b.get("name"), "inp": inp[:INP_CAP],
++                           "inp_len": len(inp), "tr": None, "res": None, "err": False}
++                    calls[tid] = rec
++                    recs.append(rec)
++                    i += 1
++        elif t == "user":
++            c = (o.get("message") or {}).get("content")
++            has_res = False
++            if isinstance(c, list):
++                for b in c:
++                    if b.get("type") == "tool_result":
++                        has_res = True
++                        r = calls.get(b.get("tool_use_id"))
++                        if r is not None and r["tr"] is None:
++                            r["tr"] = ts
++                            r["res"] = text_of(b.get("content"))[:RES_CAP]
++                            r["err"] = bool(b.get("is_error"))
++            if not has_res and not o.get("isMeta"):
++                txt = text_of(c)
++                why = "compact" if "continued from a previous conversation" in txt[:400] else "prompt"
++                recs.append({"k": "bound", "f": fid, "kind": kind, "i": i, "ts": ts, "why": why})
++    return fid, path, kind, i, recs
++
++
++if __name__ == "__main__":
++    os.makedirs(OUT, exist_ok=True)
++    fl = files()
++    print("files", len(fl), file=sys.stderr)
++    idx = []
++    with Pool(48) as pool, open(f"{OUT}/all.jsonl", "w") as w:
++        for fid, path, kind, n, recs in pool.imap_unordered(work, fl, chunksize=2):
++            idx.append({"f": fid, "path": path, "kind": kind, "calls": n})
++            for r in recs:
++                w.write(json.dumps(r, ensure_ascii=False) + "\n")
++    json.dump(idx, open(f"{OUT}/index.json", "w"))
++    print("done", sum(x["calls"] for x in idx), "calls", file=sys.stderr)
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/judge_key.json b/docs/research/data/2026-11-09-parallel-tool-calls/judge_key.json
+new file mode 100644
+index 000000000..3b58be17d
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/judge_key.json
+@@ -0,0 +1 @@
++[{"n": 1, "idx": ["cfa72bb9fc", 851], "heur": "dep", "why": "failsig", "kind": "main", "a": ["MUT"], "b": ["MUT"], "M": 2.3529999256134033}, {"n": 2, "idx": ["52e8ad061a", 570], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 2.8590002059936523}, {"n": 3, "idx": ["9961ae7a22", 176], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 12.25}, {"n": 4, "idx": ["2f276d84a8", 155], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["MUT"], "M": 23.138999938964844}, {"n": 5, "idx": ["3bda22c733", 57], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["RO"], "M": 3.1679999828338623}, {"n": 6, "idx": ["02b637fb5d", 17], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 4.496000051498413}, {"n": 7, "idx": ["f724e6dcb7", 279], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["MUT"], "M": 1.7250001430511475}, {"n": 8, "idx": ["64c21d7334", 47], "heur": "dep", "why": "data:total_is_lower_bound", "kind": "sub", "a": ["MUT"], "b": ["RO"], "M": 7.630000114440918}, {"n": 9, "idx": ["79b170535b", 816], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["LOADER"], "M": 5.187000036239624}, {"n": 10, "idx": ["8187366d23", 13], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 5.812000036239624}, {"n": 11, "idx": ["e7ba7cb9f4", 23], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT", "RO"], "b": ["MUT"], "M": 7.456000089645386}, {"n": 12, "idx": ["1c564f94da", 230], "heur": "indep", "why": null, "kind": "main", "a": ["MUT", "RO"], "b": ["LOADER"], "M": 4.562999963760376}, {"n": 13, "idx": ["9caa48676a", 2], "heur": "dep", "why": "data:@cmd_97917fa6", "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 1.7760000228881836}, {"n": 14, "idx": ["b55025319d", 0], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 9.271000146865845}, {"n": 15, "idx": ["2f92897c66", 29], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 6.9040000438690186}, {"n": 16, "idx": ["c574612674", 688], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["MUT"], "M": 1.9700000286102295}, {"n": 17, "idx": ["bd5d3294f9", 75], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 1.7309999465942383}, {"n": 18, "idx": ["7d93bae660", 316], "heur": "indep", "why": null, "kind": "main", "a": ["RO"], "b": ["RO"], "M": 2.7799999713897705}, {"n": 19, "idx": ["8864cf199f", 290], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["VERIFY"], "M": 3.618000030517578}, {"n": 20, "idx": ["42ba1d10d4", 30], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 4.189000129699707}, {"n": 21, "idx": ["ee6c6e90f8", 13], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 19.670000076293945}, {"n": 22, "idx": ["9ff07cb160", 90], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["MUT", "RO", "VERIFY"], "M": 1.7030000686645508}, {"n": 23, "idx": ["54167086b5", 35], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 3.8999998569488525}, {"n": 24, "idx": ["63b5c7ce1f", 766], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["LOADER", "RO"], "M": 3.0309998989105225}, {"n": 25, "idx": ["b28829aa82", 100], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 2.122999906539917}, {"n": 26, "idx": ["ccc160aff6", 40], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 3.49399995803833}, {"n": 27, "idx": ["51661d10b3", 24], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 9.515000104904175}, {"n": 28, "idx": ["647f2b3d6a", 91], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT", "RO"], "b": ["VERIFY"], "M": 16.483999967575073}, {"n": 29, "idx": ["ccd3625a28", 67], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["MUT"], "M": 6.739000082015991}, {"n": 30, "idx": ["17241dcf18", 26], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 7.382999897003174}, {"n": 31, "idx": ["2f59ea20ee", 532], "heur": "indep", "why": null, "kind": "main", "a": ["RO"], "b": ["RO"], "M": 9.452000141143799}, {"n": 32, "idx": ["16f16197be", 113], "heur": "indep", "why": null, "kind": "main", "a": ["RO"], "b": ["RO", "VERIFY"], "M": 14.322999954223633}, {"n": 33, "idx": ["441bc180cf", 481], "heur": "indep", "why": null, "kind": "main", "a": ["RO"], "b": ["MUT", "RO"], "M": 1.062999963760376}, {"n": 34, "idx": ["cb32b3fe25", 46], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 3.3589999675750732}, {"n": 35, "idx": ["694404fe71", 37], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["VERIFY"], "M": 3.2249999046325684}, {"n": 36, "idx": ["661cbf3998", 695], "heur": "dep", "why": "failsig", "kind": "main", "a": ["RO"], "b": ["RO"], "M": 3.693000078201294}, {"n": 37, "idx": ["70bbd3690a", 163], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["MUT"], "M": 3.5829999446868896}, {"n": 38, "idx": ["b83dae3eb6", 288], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["MUT"], "M": 8.05299997329712}, {"n": 39, "idx": ["2ff186b76d", 23], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["MUT", "RO"], "b": ["MUT"], "M": 2.5990002155303955}, {"n": 40, "idx": ["54f56b5f04", 27], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 5.679999828338623}, {"n": 41, "idx": ["4574262d2d", 1], "heur": "dep", "why": "data:@tool_0bca6fdc", "kind": "sub", "a": ["MUT", "RO"], "b": ["RO"], "M": 4.5269999504089355}, {"n": 42, "idx": ["12360ec8e1", 94], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["RO"], "M": 14.339999914169312}, {"n": 43, "idx": ["30da36088b", 40], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 3.9830000400543213}, {"n": 44, "idx": ["9ff07cb160", 854], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["MUT"], "M": 3.453000068664551}, {"n": 45, "idx": ["4341bec33f", 116], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 7.21399998664856}, {"n": 46, "idx": ["9ffe00fb15", 203], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["RO"], "M": 2.9720001220703125}, {"n": 47, "idx": ["63b5c7ce1f", 1595], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["MUT"], "M": 3.8299999237060547}, {"n": 48, "idx": ["751bc15427", 56], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 8.717000007629395}, {"n": 49, "idx": ["8a5355375b", 34], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 3.6070001125335693}, {"n": 50, "idx": ["c0b6f2b988", 108], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 2.194000005722046}, {"n": 51, "idx": ["2ff55fe50a", 24], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["LOADER"], "M": 24.013000011444092}, {"n": 52, "idx": ["c9edcaab3c", 6], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 2.6409997940063477}, {"n": 53, "idx": ["05733bac58", 23], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["RO"], "b": ["MUT"], "M": 25.9760000705719}, {"n": 54, "idx": ["2bee483ab5", 13], "heur": "dep", "why": "data:bound_buffer_stderr", "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 6.175999879837036}, {"n": 55, "idx": ["95f166773f", 28], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 1.875}, {"n": 56, "idx": ["5815f036ca", 168], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["MUT", "VERIFY"], "M": 4.733000040054321}, {"n": 57, "idx": ["f91bf68c57", 8], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 11.552000045776367}, {"n": 58, "idx": ["96db743d01", 1], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 1.8459999561309814}, {"n": 59, "idx": ["52e8ad061a", 453], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["VERIFY"], "M": 7.249000072479248}, {"n": 60, "idx": ["b83dae3eb6", 17], "heur": "indep", "why": null, "kind": "main", "a": ["RO"], "b": ["LOADER", "RO"], "M": 6.04200005531311}, {"n": 61, "idx": ["6f2965bac1", 16], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["RO"], "M": 1.7650001049041748}, {"n": 62, "idx": ["810ea22587", 559], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["MUT"], "M": 3.109999895095825}, {"n": 63, "idx": ["3ffd3878d6", 57], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["MUT"], "M": 7.305000066757202}, {"n": 64, "idx": ["6458cb9146", 16], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 2.564000129699707}, {"n": 65, "idx": ["d67b431200", 36], "heur": "indep", "why": null, "kind": "main", "a": ["RO"], "b": ["VERIFY"], "M": 7.960000038146973}, {"n": 66, "idx": ["f7866aea2d", 77], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 22.58999991416931}, {"n": 67, "idx": ["922b4a9063", 61], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 5.8420000076293945}, {"n": 68, "idx": ["9961ae7a22", 132], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["VERIFY"], "M": 3.7950000762939453}, {"n": 69, "idx": ["b08d841b3f", 71], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 3.7239999771118164}, {"n": 70, "idx": ["f058d3a507", 554], "heur": "dep", "why": "failsig", "kind": "main", "a": ["MUT", "RO"], "b": ["RO"], "M": 2.9110000133514404}, {"n": 71, "idx": ["2f59ea20ee", 223], "heur": "dep", "why": "failsig", "kind": "main", "a": ["MUT"], "b": ["RO"], "M": 3.3959999084472656}, {"n": 72, "idx": ["9714703ad7", 6], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["MUT"], "M": 4.069000005722046}, {"n": 73, "idx": ["694404fe71", 27], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["RO"], "M": 4.3420000076293945}, {"n": 74, "idx": ["2ff186b76d", 16], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 14.184999942779541}, {"n": 75, "idx": ["2a38a0e94d", 15], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 4.6509997844696045}, {"n": 76, "idx": ["3896e60689", 60], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 2.23799991607666}, {"n": 77, "idx": ["a423e15acc", 517], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["MUT", "RO"], "b": ["MUT"], "M": 4.55400013923645}, {"n": 78, "idx": ["27f8c2fd4a", 68], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT", "RO"], "b": ["MUT", "RO"], "M": 10.344000101089478}, {"n": 79, "idx": ["e2f2d30b39", 63], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["MUT"], "M": 5.565999984741211}, {"n": 80, "idx": ["94dfd77639", 86], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 112.06900000572205}, {"n": 81, "idx": ["22c3838b45", 32], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 15.723000049591064}, {"n": 82, "idx": ["b856844362", 262], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["RO"], "M": 2.490000009536743}, {"n": 83, "idx": ["42b984d81c", 37], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 28.373000144958496}, {"n": 84, "idx": ["12b0a65d1c", 78], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["RO"], "M": 3.818000078201294}, {"n": 85, "idx": ["552980603b", 2], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["MUT", "RO"], "b": ["RO"], "M": 3.996999979019165}, {"n": 86, "idx": ["fd771859ab", 5], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 2.302999973297119}, {"n": 87, "idx": ["9ff07cb160", 67], "heur": "indep", "why": null, "kind": "main", "a": ["MUT", "RO"], "b": ["RO", "VERIFY"], "M": 3.0880000591278076}, {"n": 88, "idx": ["9bb1afd798", 1787], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["MUT"], "M": 2.0160000324249268}, {"n": 89, "idx": ["5815f036ca", 186], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT", "RO"], "b": ["RO"], "M": 3.322999954223633}, {"n": 90, "idx": ["68139beeae", 31], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 3.6069998741149902}, {"n": 91, "idx": ["c6e1bdba42", 23], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT", "RO"], "M": 13.085000038146973}, {"n": 92, "idx": ["1c564f94da", 1], "heur": "indep", "why": null, "kind": "main", "a": ["MUT", "RO"], "b": ["LOADER", "MUT"], "M": 2.3919999599456787}, {"n": 93, "idx": ["39cf7531f5", 0], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 83.52799987792969}, {"n": 94, "idx": ["12e4f7439a", 1367], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["MUT"], "M": 2.8940000534057617}, {"n": 95, "idx": ["bd19f5d36b", 70], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 4.066999912261963}, {"n": 96, "idx": ["b83dae3eb6", 296], "heur": "dep", "why": "failsig", "kind": "main", "a": ["RO"], "b": ["MUT"], "M": 2.5399999618530273}, {"n": 97, "idx": ["b80998c72d", 40], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 2.0160000324249268}, {"n": 98, "idx": ["68fb9cdda2", 1], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 2.5329999923706055}, {"n": 99, "idx": ["cfa72bb9fc", 1063], "heur": "dep", "why": "failsig", "kind": "main", "a": ["RO"], "b": ["RO"], "M": 2.9730000495910645}, {"n": 100, "idx": ["8864cf199f", 19], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 4.2790000438690186}, {"n": 101, "idx": ["5f65f7c734", 11], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT", "RO"], "b": ["MUT", "VERIFY"], "M": 6.504999876022339}, {"n": 102, "idx": ["382ae2d5cb", 13], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 2.9099998474121094}, {"n": 103, "idx": ["12b0a65d1c", 139], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["MUT"], "b": ["RO"], "M": 16.533999919891357}, {"n": 104, "idx": ["a889b6b80e", 69], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 3.552999973297119}, {"n": 105, "idx": ["68af7cd963", 249], "heur": "dep", "why": "failsig", "kind": "main", "a": ["RO"], "b": ["RO"], "M": 2.3320000171661377}, {"n": 106, "idx": ["9ffe00fb15", 306], "heur": "indep", "why": null, "kind": "main", "a": ["RO"], "b": ["MUT"], "M": 2.11899995803833}, {"n": 107, "idx": ["1c564f94da", 62], "heur": "indep", "why": null, "kind": "main", "a": ["RO"], "b": ["LOADER", "MUT"], "M": 12.440000057220459}, {"n": 108, "idx": ["abcd890c53", 86], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 6.171000003814697}, {"n": 109, "idx": ["07031bf0ca", 23], "heur": "dep", "why": "data:TestArtifactRowBuilder", "kind": "sub", "a": ["RO"], "b": ["MUT"], "M": 9.88699984550476}, {"n": 110, "idx": ["a6bada960e", 72], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["RO"], "M": 3.5139999389648438}, {"n": 111, "idx": ["12e4f7439a", 1958], "heur": "indep", "why": null, "kind": "main", "a": ["MUT"], "b": ["RO"], "M": 5.080000162124634}, {"n": 112, "idx": ["8864cf199f", 323], "heur": "dep", "why": "failsig", "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 2.2350001335144043}, {"n": 113, "idx": ["f76a5c3842", 94], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["RO"], "M": 2.0849997997283936}, {"n": 114, "idx": ["418c67bb9e", 98], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 17.12600016593933}, {"n": 115, "idx": ["f516c01552", 466], "heur": "dep", "why": "data:@ack_bf6b4789", "kind": "main", "a": ["MUT"], "b": ["MUT", "VERIFY"], "M": 1.4509999752044678}, {"n": 116, "idx": ["74a575aaff", 74], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["MUT", "RO", "VERIFY"], "M": 9.115999937057495}, {"n": 117, "idx": ["5420c01fae", 218], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT"], "M": 6.148999929428101}, {"n": 118, "idx": ["810ea22587", 1913], "heur": "dep", "why": "data:@ack_9cde5dff", "kind": "main", "a": ["MUT"], "b": ["MUT"], "M": 3.2009999752044678}, {"n": 119, "idx": ["f0411fd875", 60], "heur": "indep", "why": null, "kind": "sub", "a": ["RO"], "b": ["MUT"], "M": 4.767999887466431}, {"n": 120, "idx": ["12a401c150", 733], "heur": "indep", "why": null, "kind": "sub", "a": ["MUT"], "b": ["MUT", "RO"], "M": 3.4010000228881836}]
+\ No newline at end of file
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_1.json b/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_1.json
+new file mode 100644
+index 000000000..327fe34b1
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_1.json
+@@ -0,0 +1,32 @@
++[
++{"n": 1, "verdict": "NEEDS_RESULT", "reason": "Retry split into separate commands after IL3 block error."},
++{"n": 2, "verdict": "NEEDS_RESULT", "reason": "UNSURE: catalog find overview may follow from body read."},
++{"n": 3, "verdict": "SAME_MESSAGE_OK", "reason": "Planned second test insert; independent of replace result."},
++{"n": 4, "verdict": "NEEDS_RESULT", "reason": "UNSURE: insert placement/content may depend on lines read."},
++{"n": 5, "verdict": "SAME_MESSAGE_OK", "reason": "git status/diff after doc update needs nothing from result."},
++{"n": 6, "verdict": "NEEDS_RESULT", "reason": "Follows up on empty workspace/symbol responses seen in log counts."},
++{"n": 7, "verdict": "NEEDS_RESULT", "reason": "Repeat poll decided because job still running."},
++{"n": 8, "verdict": "NEEDS_RESULT", "reason": "Search terms derived from IC-20 claim text just read."},
++{"n": 9, "verdict": "SAME_MESSAGE_OK", "reason": "Loading SendMessage schema needs no peer list content."},
++{"n": 10, "verdict": "NEEDS_RESULT", "reason": "Grep terms likely taken from with-slot.sh contents."},
++{"n": 11, "verdict": "NEEDS_RESULT", "reason": "UNSURE: inode probe decided after seeing fix commit and RA processes."},
++{"n": 12, "verdict": "SAME_MESSAGE_OK", "reason": "Invoking finishing skill independent of ledger append/grep results."},
++{"n": 13, "verdict": "NEEDS_RESULT", "reason": "Reads buffer id @cmd_97917fa6 returned by FIRST."},
++{"n": 14, "verdict": "NEEDS_RESULT", "reason": "Retry without pipe after IL3 block error."},
++{"n": 15, "verdict": "SAME_MESSAGE_OK", "reason": "Unrelated file overview; nothing in result drives it."},
++{"n": 16, "verdict": "SAME_MESSAGE_OK", "reason": "Create commit message then git add; order only."},
++{"n": 17, "verdict": "NEEDS_RESULT", "reason": "Reads buffer @file_3695a3da produced by FIRST result."},
++{"n": 18, "verdict": "NEEDS_RESULT", "reason": "Line range chosen from grep heading hits."},
++{"n": 19, "verdict": "SAME_MESSAGE_OK", "reason": "Running tests after commit; order effect only."},
++{"n": 20, "verdict": "NEEDS_RESULT", "reason": "Refined search after first grep's matches."},
++{"n": 21, "verdict": "SAME_MESSAGE_OK", "reason": "Grep patterns not derived from the one-line function body."},
++{"n": 22, "verdict": "SAME_MESSAGE_OK", "reason": "Format check, diff, gate follow format; order only."},
++{"n": 23, "verdict": "SAME_MESSAGE_OK", "reason": "Pre-planned edits in same file; no dependency on results."},
++{"n": 24, "verdict": "SAME_MESSAGE_OK", "reason": "Tool loading and known brief read need no result."},
++{"n": 25, "verdict": "NEEDS_RESULT", "reason": "Continues reading after seeing file extends beyond first window."},
++{"n": 26, "verdict": "NEEDS_RESULT", "reason": "Refined grep after seeing test run output."},
++{"n": 27, "verdict": "NEEDS_RESULT", "reason": "UNSURE: specific rekey.rs line range may come from read."},
++{"n": 28, "verdict": "SAME_MESSAGE_OK", "reason": "Base comparison run is planned; independent of probe output."},
++{"n": 29, "verdict": "SAME_MESSAGE_OK", "reason": "Cleanup command independent of grep verification contents."},
++{"n": 30, "verdict": "NEEDS_RESULT", "reason": "Re-edits same symbol with corrected text after seeing result."}
++]
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_2.json b/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_2.json
+new file mode 100644
+index 000000000..1e3f09d65
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_2.json
+@@ -0,0 +1,32 @@
++[
++{"n": 1, "verdict": "NEEDS_RESULT", "reason": "UNSURE: targets reconnaissance-patterns, a file named in grep result"},
++{"n": 2, "verdict": "NEEDS_RESULT", "reason": "server-stack check follows gate output saying server-stack not covered"},
++{"n": 3, "verdict": "SAME_MESSAGE_OK", "reason": "stat and commit message rely on already-known staged change"},
++{"n": 4, "verdict": "NEEDS_RESULT", "reason": "awk line ranges likely taken from cfg grep output"},
++{"n": 5, "verdict": "SAME_MESSAGE_OK", "reason": "revert, edit, then run tests: pure order effect"},
++{"n": 6, "verdict": "NEEDS_RESULT", "reason": "retry splitting command after IL3 pipe block"},
++{"n": 7, "verdict": "NEEDS_RESULT", "reason": "UNSURE: edits plausibly informed by test body grep returned"},
++{"n": 8, "verdict": "SAME_MESSAGE_OK", "reason": "independent doc update with predetermined content"},
++{"n": 9, "verdict": "NEEDS_RESULT", "reason": "commit after green checks; note quotes diff hunk from result"},
++{"n": 10, "verdict": "NEEDS_RESULT", "reason": "broadened search after zero matches in sdd directory"},
++{"n": 11, "verdict": "NEEDS_RESULT", "reason": "queries result buffer and reads files found by grep"},
++{"n": 12, "verdict": "SAME_MESSAGE_OK", "reason": "test-name grep uses names absent from status result"},
++{"n": 13, "verdict": "SAME_MESSAGE_OK", "reason": "second doc-comment edit is predetermined; order effect only"},
++{"n": 14, "verdict": "SAME_MESSAGE_OK", "reason": "copy project, then start server: order effect"},
++{"n": 15, "verdict": "NEEDS_RESULT", "reason": "grepped test names come from missing-test list in result"},
++{"n": 16, "verdict": "NEEDS_RESULT", "reason": "sed range 84-100 derived from removed lines 93-141"},
++{"n": 17, "verdict": "SAME_MESSAGE_OK", "reason": "independent id replacement under another heading"},
++{"n": 18, "verdict": "SAME_MESSAGE_OK", "reason": "second file not taken from first file's content"},
++{"n": 19, "verdict": "SAME_MESSAGE_OK", "reason": "unrelated sqlite query, no dependence on poll results"},
++{"n": 20, "verdict": "SAME_MESSAGE_OK", "reason": "create script, then run it: order effect"},
++{"n": 21, "verdict": "SAME_MESSAGE_OK", "reason": "tool schema load has fixed arguments"},
++{"n": 22, "verdict": "NEEDS_RESULT", "reason": "refined query: wider messages, dropped families after seeing rows"},
++{"n": 23, "verdict": "NEEDS_RESULT", "reason": "UNSURE: proceeding after error list may depend on it"},
++{"n": 24, "verdict": "NEEDS_RESULT", "reason": "UNSURE: related bounder names likely surfaced by read"},
++{"n": 25, "verdict": "SAME_MESSAGE_OK", "reason": "edit mutation script, then run it: order effect"},
++{"n": 26, "verdict": "NEEDS_RESULT", "reason": "file and import fixed come from clippy grep hit"},
++{"n": 27, "verdict": "NEEDS_RESULT", "reason": "UNSURE: searching plan for transcripts after ls listing"},
++{"n": 28, "verdict": "NEEDS_RESULT", "reason": "uses buffer id and line numbers from results"},
++{"n": 29, "verdict": "SAME_MESSAGE_OK", "reason": "edit tests, then format and run: order effect"},
++{"n": 30, "verdict": "NEEDS_RESULT", "reason": "debugging and bug filing decided after reading code"}
++]
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_3.json b/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_3.json
+new file mode 100644
+index 000000000..9efe25b31
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_3.json
+@@ -0,0 +1,32 @@
++[
++{"n": 1, "verdict": "NEEDS_RESULT", "reason": "Investigates install shim after mutation test showed a FAIL."},
++{"n": 2, "verdict": "SAME_MESSAGE_OK", "reason": "Create script then run it; path known from FIRST."},
++{"n": 3, "verdict": "SAME_MESSAGE_OK", "reason": "Planned follow-up edits referencing the section just inserted."},
++{"n": 4, "verdict": "NEEDS_RESULT", "reason": "Reads gate-slot.sh, a file listed by the tree result."},
++{"n": 5, "verdict": "NEEDS_RESULT", "reason": "Rerun decision follows from reading background job output."},
++{"n": 6, "verdict": "SAME_MESSAGE_OK", "reason": "Further planned edits then syntax check and test run."},
++{"n": 7, "verdict": "SAME_MESSAGE_OK", "reason": "Caller updates for the planned new by_bytes parameter."},
++{"n": 8, "verdict": "SAME_MESSAGE_OK", "reason": "Edit then run tests; order effect only."},
++{"n": 9, "verdict": "NEEDS_RESULT", "reason": "Greps the file path returned by the buffer read."},
++{"n": 10, "verdict": "NEEDS_RESULT", "reason": "Read line range chosen around the grep hit at line 11."},
++{"n": 11, "verdict": "NEEDS_RESULT", "reason": "Retry after shell-access refusal, with literal path."},
++{"n": 12, "verdict": "NEEDS_RESULT", "reason": "UNSURE; isolating data paths may follow from the ls listing."},
++{"n": 13, "verdict": "SAME_MESSAGE_OK", "reason": "Unrelated read of another file with preknown range."},
++{"n": 14, "verdict": "NEEDS_RESULT", "reason": "Report cites commit SHA 8fca33b produced by FIRST."},
++{"n": 15, "verdict": "SAME_MESSAGE_OK", "reason": "SHAs in NEXT do not appear in FIRST results."},
++{"n": 16, "verdict": "SAME_MESSAGE_OK", "reason": "Reading a known script path; existence check not needed."},
++{"n": 17, "verdict": "NEEDS_RESULT", "reason": "Edit old_string located by the preceding augment.rs reads."},
++{"n": 18, "verdict": "NEEDS_RESULT", "reason": "Insert anchored on test line found by grep result."},
++{"n": 19, "verdict": "NEEDS_RESULT", "reason": "UNSURE; build prerequisite checks likely prompted by script contents."},
++{"n": 20, "verdict": "NEEDS_RESULT", "reason": "UNSURE; review file likely incorporates the binary grep finding."},
++{"n": 21, "verdict": "SAME_MESSAGE_OK", "reason": "Independent grep in a different document."},
++{"n": 22, "verdict": "SAME_MESSAGE_OK", "reason": "git add then inspect staged files; order effect only."},
++{"n": 23, "verdict": "SAME_MESSAGE_OK", "reason": "Review range SHAs known from the task brief."},
++{"n": 24, "verdict": "NEEDS_RESULT", "reason": "Read range chosen from grep line numbers 209-274."},
++{"n": 25, "verdict": "NEEDS_RESULT", "reason": "Investigation after file-not-found error."},
++{"n": 26, "verdict": "NEEDS_RESULT", "reason": "Rereads tail range after FIRST output was cut."},
++{"n": 27, "verdict": "SAME_MESSAGE_OK", "reason": "Grep and test in worktree path set by FIRST arguments."},
++{"n": 28, "verdict": "NEEDS_RESULT", "reason": "Reissue after the destructive-call gate refused execution."},
++{"n": 29, "verdict": "NEEDS_RESULT", "reason": "Read range chosen around the grep hit near line 782."},
++{"n": 30, "verdict": "SAME_MESSAGE_OK", "reason": "Independent git log and branch query."}
++]
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_4.json b/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_4.json
+new file mode 100644
+index 000000000..e26dde269
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/judge_out_4.json
+@@ -0,0 +1,32 @@
++[
++{"n": 1, "verdict": "SAME_MESSAGE_OK", "reason": "Edits target text the agent itself wrote; wc/ls need nothing new."},
++{"n": 2, "verdict": "NEEDS_RESULT", "reason": "UNSURE: settings permission check seems prompted by bug file content."},
++{"n": 3, "verdict": "NEEDS_RESULT", "reason": "Function name and worktree file likely taken from report/diff."},
++{"n": 4, "verdict": "SAME_MESSAGE_OK", "reason": "Commit message describes the decision already written; no result used."},
++{"n": 5, "verdict": "NEEDS_RESULT", "reason": "File and 'armed' term come from buffer match content."},
++{"n": 6, "verdict": "NEEDS_RESULT", "reason": "Archiving decided after seeing status fixed and zero references."},
++{"n": 7, "verdict": "NEEDS_RESULT", "reason": "Broadened search after zero matches."},
++{"n": 8, "verdict": "NEEDS_RESULT", "reason": "Buffer ids and line counts taken from outline results."},
++{"n": 9, "verdict": "NEEDS_RESULT", "reason": "File and line range from compiler error at line 111."},
++{"n": 10, "verdict": "NEEDS_RESULT", "reason": "UNSURE: grep terms appear driven by code just read."},
++{"n": 11, "verdict": "SAME_MESSAGE_OK", "reason": "Continues file survey; targets not derived from awk numbers."},
++{"n": 12, "verdict": "NEEDS_RESULT", "reason": "Line ranges in mod.rs come from grep hits."},
++{"n": 13, "verdict": "NEEDS_RESULT", "reason": "Investigates M5 log after seeing mutant outcomes."},
++{"n": 14, "verdict": "NEEDS_RESULT", "reason": "Reads stderr after seeing rc=1 and timeout results."},
++{"n": 15, "verdict": "NEEDS_RESULT", "reason": "New search after zero matches."},
++{"n": 16, "verdict": "NEEDS_RESULT", "reason": "old_string copied from the function body returned."},
++{"n": 17, "verdict": "NEEDS_RESULT", "reason": "UNSURE: own listener possibly written because ls found no UDS source."},
++{"n": 18, "verdict": "SAME_MESSAGE_OK", "reason": "guide_blocks name and path already in FIRST's arguments."},
++{"n": 19, "verdict": "NEEDS_RESULT", "reason": "Insert anchor test symbol likely seen in read range."},
++{"n": 20, "verdict": "NEEDS_RESULT", "reason": "Filtering output after seeing it was large."},
++{"n": 21, "verdict": "SAME_MESSAGE_OK", "reason": "Memory heading known beforehand; edit result just ok."},
++{"n": 22, "verdict": "SAME_MESSAGE_OK", "reason": "Planned revert-then-next-mutant sequence; arguments all known."},
++{"n": 23, "verdict": "SAME_MESSAGE_OK", "reason": "Git status check after write needs nothing from result."},
++{"n": 24, "verdict": "SAME_MESSAGE_OK", "reason": "Test insertion unrelated to curl output."},
++{"n": 25, "verdict": "NEEDS_RESULT", "reason": "Ack handle id comes from the result."},
++{"n": 26, "verdict": "NEEDS_RESULT", "reason": "Edit old_string built from grep-located code."},
++{"n": 27, "verdict": "NEEDS_RESULT", "reason": "UNSURE: 447 re-expect likely chosen after dry-run output."},
++{"n": 28, "verdict": "NEEDS_RESULT", "reason": "Ack handle id comes from the result."},
++{"n": 29, "verdict": "NEEDS_RESULT", "reason": "Doc-comment old_string copied from returned body."},
++{"n": 30, "verdict": "SAME_MESSAGE_OK", "reason": "Edit then git add/diff of same file; order effect only."}
++]
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/judge_prep.py b/docs/research/data/2026-11-09-parallel-tool-calls/judge_prep.py
+new file mode 100644
+index 000000000..6df893ff0
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/judge_prep.py
+@@ -0,0 +1,26 @@
++import json, random, collections
++random.seed(23)
++P = json.load(open("pairs.json"))
++ind = [r for r in P if r["cat"] == "indep"]
++dep = [r for r in P if r["cat"] == "dep"]
++# stratify indep by (a_cls,b_cls) head classes proportional-ish but cap per stratum
++by = collections.defaultdict(list)
++for r in ind:
++    by[(",".join(r["a_cls"]), ",".join(r["b_cls"]))].append(r)
++pick = []
++for k, v in sorted(by.items(), key=lambda kv: -len(kv[1])):
++    n = max(1, round(90 * len(v) / len(ind)))
++    random.shuffle(v); pick += v[:n]
++random.shuffle(pick); pick = pick[:90]
++random.shuffle(dep)
++dsel = [r for r in dep if (r["why"] or "").split(":")[0] in ("failsig", "data")][:30]
++allp = pick + dsel
++random.shuffle(allp)
++key = []
++for i, r in enumerate(allp):
++    key.append({"n": i + 1, "idx": r["idx"], "heur": r["cat"], "why": r.get("why"), "kind": r["kind"],
++                "a": r["a_cls"], "b": r["b_cls"], "M": r["M"]})
++json.dump(key, open("judge_key.json", "w"))
++for j in range(4):
++    json.dump([dict(r, **{"idx": r["idx"]}) for r in allp[j * 30:(j + 1) * 30]], open(f"judge_in_{j+1}.json", "w"))
++print(len(pick), len(dsel))
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/judge_score.py b/docs/research/data/2026-11-09-parallel-tool-calls/judge_score.py
+new file mode 100644
+index 000000000..bb0d02664
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/judge_score.py
+@@ -0,0 +1,44 @@
++import json, collections, math
++key = json.load(open("judge_key.json"))
++V = {}
++for j in range(1, 5):
++    for o in json.load(open(f"judge_out_{j}.json")):
++        V[(j - 1) * 30 + o["n"]] = o
++assert len(V) == 120, len(V)
++def wilson(k, n, z=1.96):
++    if not n: return (0, 0)
++    p = k / n; d = 1 + z * z / n
++    c = (p + z * z / (2 * n)) / d; h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
++    return (c - h, c + h)
++for heur in ("indep", "dep"):
++    rows = [(k, V[k["n"]]) for k in key if k["heur"] == heur]
++    ok = sum(1 for k, v in rows if v["verdict"] == "SAME_MESSAGE_OK")
++    uns = sum(1 for k, v in rows if "UNSURE" in v["reason"].upper())
++    lo, hi = wilson(ok, len(rows))
++    print(f"heuristic={heur}: n={len(rows)} judged SAME_MESSAGE_OK={ok} ({100*ok/len(rows):.0f}%, 95% CI {100*lo:.0f}-{100*hi:.0f}%) unsure={uns}")
++rows = [(k, V[k["n"]]) for k in key if k["heur"] == "indep"]
++print("\nby (a,b) class, heuristic-independent:")
++by = collections.defaultdict(lambda: [0, 0])
++for k, v in rows:
++    c = ("RO" if k["a"] == ["RO"] else "other") + "->" + ("RO" if k["b"] == ["RO"] else "other")
++    by[c][1] += 1; by[c][0] += v["verdict"] == "SAME_MESSAGE_OK"
++for c, (o, n) in sorted(by.items()): print(f"  {c:12} {o}/{n} = {100*o/n:.0f}%")
++print("\nby heuristic dep reason:")
++by = collections.defaultdict(lambda: [0, 0])
++for k, v in [(k, V[k["n"]]) for k in key if k["heur"] == "dep"]:
++    w = (k["why"] or "").split(":")[0]
++    by[w][1] += 1; by[w][0] += v["verdict"] == "SAME_MESSAGE_OK"
++for c, (o, n) in by.items(): print(f"  {c:8} judged OK anyway {o}/{n}")
++# calibrated estimate
++P = json.load(open("pairs.json"))
++real = [r for r in P if r["cat"] in ("dep", "indep")]
++ni = sum(r["cat"] == "indep" for r in real); nd = len(real) - ni
++pi = sum(1 for k, v in rows if v["verdict"] == "SAME_MESSAGE_OK") / len(rows)
++drows = [(k, V[k["n"]]) for k in key if k["heur"] == "dep"]
++pd = sum(1 for k, v in drows if v["verdict"] == "SAME_MESSAGE_OK") / len(drows)
++est = (ni * pi + nd * pd) / len(real)
++print(f"\ncalibrated share of adjacent pairs collapsible: {100*est:.1f}%  (indep {ni}*{pi:.2f} + dep sample {nd}*{pd:.2f}; dep sample covers only failsig/data reasons)")
++print("print examples of judged-OK among heuristic-indep, by median M:")
++import statistics
++mm = [k["M"] for k, v in rows if v["verdict"] == "SAME_MESSAGE_OK"]
++print("  median M of judged-OK pairs: %.1fs  n=%d" % (statistics.median(mm), len(mm)))
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/judge_view.py b/docs/research/data/2026-11-09-parallel-tool-calls/judge_view.py
+new file mode 100644
+index 000000000..ec8d9bcda
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/judge_view.py
+@@ -0,0 +1,38 @@
++import json, sys, collections
++sample = json.load(open(sys.argv[1]))
++need = collections.defaultdict(list)
++for r in sample:
++    need[r["idx"][0]].append(r["idx"][1])
++rounds_of = {}
++for l in open("out/all.jsonl"):
++    r = json.loads(l)
++    if r["f"] in need:
++        rounds_of.setdefault(r["f"], []).append(r)
++
++def build(evs):
++    rounds = []; pend = True
++    for r in evs:
++        if r["k"] == "bound":
++            pend = True; continue
++        if rounds and rounds[-1]["mid"] == r["mid"] and not pend:
++            rounds[-1]["calls"].append(r)
++        else:
++            rounds.append({"mid": r["mid"], "calls": [r], "bound": pend})
++        pend = False
++    return rounds
++
++def fmt(c, n_in, n_res):
++    s = c["name"].replace("mcp__codescout__", "") + " " + c["inp"][:n_in].replace("\n", " ")
++    if n_res:
++        s += "\n      RESULT: " + (c["res"] or "")[:n_res].replace("\n", " ")
++    return s
++
++cache = {f: build(e) for f, e in rounds_of.items()}
++for n, r in enumerate(sample, 1):
++    f, k = r["idx"]
++    a, b = cache[f][k], cache[f][k + 1]
++    print(f"=== PAIR {n}")
++    for c in a["calls"]:
++        print("  FIRST:", fmt(c, 450, 450))
++    for c in b["calls"]:
++        print("  NEXT :", fmt(c, 450, 0))
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/overlap_by_day.py b/docs/research/data/2026-11-09-parallel-tool-calls/overlap_by_day.py
+new file mode 100644
+index 000000000..22eb89469
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/overlap_by_day.py
+@@ -0,0 +1,46 @@
++"""Stage 2b: overlap rate over time for read-only pairs (to separate server/harness change from tool behaviour)."""
++import json, sqlite3, collections, datetime
++
++db = sqlite3.connect("file:/home/marius/work/claude/codescout/.codescout/usage.db?mode=ro", uri=True)
++U = {}
++for tid, name, st, lat, sha in db.execute(
++        "select tool_use_id, tool_name, started_at, latency_ms, codescout_sha from tool_calls "
++        "where tool_use_id is not null and started_at is not null"):
++    try:
++        t0 = datetime.datetime.fromisoformat(st.replace("Z", "")).replace(
++            tzinfo=datetime.timezone.utc).timestamp()
++    except Exception:
++        continue
++    U[tid] = (name, t0, t0 + lat / 1000.0, st[:10], sha)
++
++rounds = collections.defaultdict(list)
++for l in open("out/all.jsonl"):
++    r = json.loads(l)
++    if r["k"] == "call" and r["id"] in U:
++        rounds[(r["f"], r["mid"])].append(r)
++
++want = {("grep", "grep"), ("symbols", "symbols"), ("read_file", "read_file"), ("grep", "symbols"),
++        ("symbols", "grep"), ("grep", "read_file")}
++by_day = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0]))
++by_sha = collections.defaultdict(lambda: [0, 0])
++for calls in rounds.values():
++    js = sorted(((c["name"].replace("mcp__codescout__", ""), *U[c["id"]][1:]) for c in calls),
++                key=lambda x: x[1])
++    for a, b in zip(js, js[1:]):
++        k = (a[0], b[0])
++        if k not in want:
++            continue
++        ov = b[1] < a[2] - 0.05
++        by_day[b[3]][k][0 if ov else 1] += 1
++        if k == ("grep", "grep"):
++            by_sha[b[4]][0 if ov else 1] += 1
++days = sorted(by_day)
++print("day         grep>grep   sym>sym   read>read   grep>sym   sym>grep   grep>read   (overlap/serial)")
++for d in days:
++    row = by_day[d]
++    f = lambda k: "%d/%d" % tuple(row[k]) if k in row else "-"
++    print(d, f(("grep","grep")).rjust(9), f(("symbols","symbols")).rjust(9), f(("read_file","read_file")).rjust(10),
++          f(("grep","symbols")).rjust(9), f(("symbols","grep")).rjust(9), f(("grep","read_file")).rjust(10))
++print("\ngrep>grep by codescout_sha (top):")
++for s, (o, ss) in sorted(by_sha.items(), key=lambda kv: -sum(kv[1]))[:12]:
++    print(s, o, ss)
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/stage3.py b/docs/research/data/2026-11-09-parallel-tool-calls/stage3.py
+new file mode 100644
+index 000000000..c9fd843de
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/stage3.py
+@@ -0,0 +1,211 @@
++"""Stage 3: which sequential rounds could have been one round?
++
++Round  = the tool calls of ONE assistant message (same message id).
++A later round R2 "depends" on an earlier call a when
++  (data)    a novel token of a's RESULT (not seen anywhere earlier in the file) is in R2's INPUT, or
++  (control) a is an error / a verification command / a knowledge loader (Skill, ToolSearch) whose
++            outcome decides what comes next.
++Effect order needs no test: inside one message the harness runs calls in order and only runs
++adjacent read-only calls concurrently (measured in usage_times.py), so a write -> build chain is fine.
++Output: summary on stdout, samples in samples.txt, per-pair rows in pairs.jsonl.
++"""
++import json, re, sys, collections, datetime, random, statistics
++
++random.seed(7)
++TOK = re.compile(r"[A-Za-z_][A-Za-z0-9_]{5,}|[\w.\-]+/[\w./\-]+|@[a-z]+_[0-9a-f]{6,}|\b[0-9a-f]{7,40}\b|\b\d{3,6}\b")
++FAIL = re.compile(r'"ok":\s*false|\bBLOCKED\b|\brefused\b|\bFAILED\b|\bfailed\b|\berror\b|\bviolation\b|'
++                  r'\b0 matches|\bNo matches|not found|no such|did not match|Outline only|showing 0 of', re.I)
++
++
++def ts(s):
++    return datetime.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
++
++
++def short(n):
++    return n.replace("mcp__codescout__", "")
++
++
++def jin(rec):
++    try:
++        return json.loads(rec["inp"])
++    except Exception:
++        return {}
++
++
++RO_NAMES = {"symbols", "grep", "read_file", "tree", "references", "symbol_at", "call_graph", "semantic_search",
++            "get_guide", "Read", "Grep", "Glob", "WebFetch", "WebSearch", "research"}
++RO_ACTIONS = {"doc": {"find", "read", "list", "get", "search", "links", "query", "stats", "check", "preview"},
++              "memory": {"read", "list", "recall", "search"},
++              "workspace": {"status", "list", "info"},
++              "librarian": {"find", "list", "read", "stats"}}
++BARRIER = {"Agent", "SendMessage", "Monitor", "ScheduleWakeup", "AskUserQuestion", "SubagentHandback",
++           "StructuredOutput", "TaskStop", "ListAgents", "TaskUpdate", "approve_write"}
++LOADER = {"Skill", "ToolSearch"}
++VERIFY = re.compile(r"\b(cargo\s+(test|nextest|clippy|build|check|fmt|doc)|gate\.sh|pytest|npm\s+(test|run)|"
++                    r"with-slot\.sh|rb\.sh|fmt-mine|mutation-probe|make\b|go\s+test|mvn|gradle)")
++RO_CMD = re.compile(r"^\s*(git\s+(status|log|diff|show|branch|rev-parse|rev-list|ls-files|blame|stash\s+list|"
++                    r"remote|config\s+--get|merge-base|describe|cat-file|worktree\s+list|grep|reflog)|ls|cat|head|"
++                    r"tail|wc|grep|rg|find|stat|pwd|date|echo|sqlite3|file|du|df|which|ps|python3?\s+-I\s+-c|"
++                    r"jq|sort|uniq|awk|sed\s+-n|readlink|realpath|test|\[)\b")
++IRREV = re.compile(r"\bgit\s+(commit|push|reset|checkout|switch|rebase|merge|cherry-pick|stash\s+(push|pop|drop)|"
++                   r"clean|pull|tag|branch\s+-[dD])|\brm\s|\bmv\s|--force|-f\b.*push|\bkill\b|\bdrop\s+table",
++                   re.I)
++
++
++def klass(name, inp):
++    """RO | MUT | VERIFY | BARRIER | LOADER"""
++    n = short(name)
++    if n in BARRIER:
++        return "BARRIER"
++    if n in LOADER:
++        return "LOADER"
++    if n in RO_NAMES:
++        return "RO"
++    a = inp.get("action") if isinstance(inp, dict) else None
++    if n in RO_ACTIONS:
++        return "RO" if a in RO_ACTIONS[n] else "MUT"
++    if n in ("run_command", "Bash"):
++        c = inp.get("command", "") if isinstance(inp, dict) else ""
++        if VERIFY.search(c):
++            return "VERIFY"
++        if RO_CMD.match(c) and not re.search(r"[^|&]>|>>|\bsed\s+-i|\btee\b", c) and not IRREV.search(c):
++            return "RO"
++        return "MUT"
++    return "MUT"
++
++
++def irreversible(name, inp):
++    n = short(name)
++    if n in ("run_command", "Bash"):
++        return bool(IRREV.search(inp.get("command", "") if isinstance(inp, dict) else ""))
++    return False
++
++
++# ---- load -----------------------------------------------------------------
++files = collections.defaultdict(list)     # f -> events in order
++for l in open("out/all.jsonl"):
++    r = json.loads(l)
++    files[r["f"]].append(r)
++
++# document frequency of tokens over calls' inputs -> stoplist of generic tokens
++df = collections.Counter()
++for evs in files.values():
++    seen = set()
++    for r in evs:
++        if r["k"] == "call":
++            seen.update(TOK.findall(r["inp"]))
++    df.update(seen)
++STOP = {t for t, c in df.items() if c >= 0.04 * len(files)}
++print("files", len(files), "stop tokens", len(STOP))
++
++rows = []                    # adjacent-round pairs
++seg_stats = []               # per segment ideal vs actual
++M_all = []
++
++for f, evs in files.items():
++    kind = None
++    # build rounds with boundaries
++    rounds = []              # list of dict(calls=[], bound_before=bool)
++    pending_bound = True
++    for r in evs:
++        if r["k"] == "bound":
++            pending_bound = True
++            continue
++        kind = r["kind"]
++        if rounds and rounds[-1]["mid"] == r["mid"] and not pending_bound:
++            rounds[-1]["calls"].append(r)
++        else:
++            rounds.append({"mid": r["mid"], "calls": [r], "bound": pending_bound})
++        pending_bound = False
++    seen = set()
++    # per call novel tokens (relative to everything before its round)
++    for rd in rounds:
++        for c in rd["calls"]:
++            c["_inp"] = jin(c)
++            c["_cls"] = klass(c["name"], c["_inp"])
++            c["_in_tok"] = {t for t in TOK.findall(c["inp"]) if t not in STOP}
++        rd["novel"] = []
++        for c in rd["calls"]:
++            res_tok = {t for t in TOK.findall(c["res"] or "") if t not in STOP}
++            nov = res_tok - seen - c["_in_tok"]
++            rd["novel"].append(nov)
++        for c in rd["calls"]:
++            seen.update(TOK.findall(c["inp"]))
++            seen.update(TOK.findall(c["res"] or ""))
++        rd["t_issue"] = max(ts(c["tu"]) for c in rd["calls"])
++        rd["t_first"] = min(ts(c["tu"]) for c in rd["calls"])
++        rd["t_done"] = max(ts(c["tr"]) for c in rd["calls"] if c["tr"])
++
++    def depends(rd_b, rd_a, ia_list):
++        """does round b depend on any call of round a? returns reason or None"""
++        for c, nov in zip(rd_a["calls"], rd_a["novel"]):
++            if c["_cls"] in ("VERIFY", "LOADER"):
++                return c["_cls"].lower()
++            if c["err"] or re.search(r'"exit_code":\s*[1-9]', c["res"] or ""):
++                return "error"
++            if FAIL.search((c["res"] or "")[:300]):
++                return "failsig"
++        b_tok = set()
++        for c in rd_b["calls"]:
++            b_tok |= c["_in_tok"]
++        for c, nov in zip(rd_a["calls"], rd_a["novel"]):
++            hit = nov & b_tok
++            if hit:
++                return "data:" + sorted(hit, key=len, reverse=True)[0][:40]
++        return None
++
++    # adjacent pairs
++    for k in range(len(rounds) - 1):
++        a, b = rounds[k], rounds[k + 1]
++        if b["bound"]:
++            continue
++        ca = {c["_cls"] for c in a["calls"]}
++        cb = {c["_cls"] for c in b["calls"]}
++        if "BARRIER" in ca or "BARRIER" in cb:
++            rows.append({"f": f, "kind": kind, "cat": "barrier"})
++            continue
++        why = depends(b, a, None)
++        M = b["t_first"] - a["t_done"]
++        if M < 0:
++            M = 0.0
++        a_ro = ca == {"RO"}
++        b_ro = cb == {"RO"}
++        rows.append({"f": f, "kind": kind, "cat": "dep" if why else "indep", "why": why,
++                     "M": M, "a_names": [short(c["name"]) for c in a["calls"]],
++                     "b_names": [short(c["name"]) for c in b["calls"]],
++                     "a_cls": sorted(ca), "b_cls": sorted(cb), "a_n": len(a["calls"]), "b_n": len(b["calls"]),
++                     "ro_ro": a_ro and b_ro, "b_irrev": any(irreversible(c["name"], c["_inp"]) for c in b["calls"]),
++                     "Da": a["t_done"] - a["t_issue"], "Db": b["t_done"] - b["t_issue"],
++                     "idx": (f, k)})
++
++    # segment leveling: ideal rounds vs actual, over runs of rounds with no boundary
++    seg = []
++    def flush(seg):
++        if len(seg) < 2:
++            return
++        lvl = []
++        for j, rd in enumerate(seg):
++            L = 1
++            if any(c["_cls"] == "BARRIER" for c in rd["calls"]):
++                L = max(lvl[:j], default=0) + 1
++            else:
++                for i in range(max(0, j - 40), j):
++                    if any(c["_cls"] == "BARRIER" for c in seg[i]["calls"]):
++                        L = max(L, lvl[i] + 1)
++                        continue
++                    if depends(rd, seg[i], None):
++                        L = max(L, lvl[i] + 1)
++            lvl.append(L)
++        wall = seg[-1]["t_done"] - seg[0]["t_first"]
++        seg_stats.append({"f": f, "kind": kind, "actual": len(seg), "ideal": max(lvl), "wall": wall,
++                          "calls": sum(len(r["calls"]) for r in seg)})
++    for rd in rounds:
++        if rd["bound"] and seg:
++            flush(seg)
++            seg = []
++        seg.append(rd)
++    flush(seg)
++
++json.dump(rows, open("pairs.json", "w"))
++json.dump(seg_stats, open("segs.json", "w"))
++print("pairs", len(rows), "segments", len(seg_stats))
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/stage4.py b/docs/research/data/2026-11-09-parallel-tool-calls/stage4.py
+new file mode 100644
+index 000000000..ec7d9ae8e
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/stage4.py
+@@ -0,0 +1,69 @@
++import json, collections, statistics, random
++random.seed(11)
++P = json.load(open("pairs.json")); S = json.load(open("segs.json"))
++CAP = 120.0
++
++def pct(a, b): return "%.1f%%" % (100.0 * a / b) if b else "-"
++def q(xs, p):
++    xs = sorted(xs); return xs[min(len(xs) - 1, int(p * len(xs)))] if xs else 0
++
++print("adjacent round pairs:", len(P))
++c = collections.Counter(r["cat"] for r in P)
++print(dict(c))
++real = [r for r in P if r["cat"] in ("dep", "indep")]
++print("excl. barrier:", len(real), " independent:", c["indep"], pct(c["indep"], len(real)))
++for kind in ("main", "sub"):
++    rr = [r for r in real if r["kind"] == kind]
++    ind = [r for r in rr if r["cat"] == "indep"]
++    print(f"  {kind}: pairs {len(rr)} indep {len(ind)} {pct(len(ind), len(rr))}")
++
++print("\nwhy dependent:")
++w = collections.Counter((r["why"] or "").split(":")[0] for r in real if r["cat"] == "dep")
++for k, v in w.most_common(): print("  ", k, v, pct(v, c["dep"]))
++
++ind = [r for r in real if r["cat"] == "indep"]
++M = [min(r["M"], CAP) for r in ind]
++allM = [min(r["M"], CAP) for r in real]
++print("\nmodel latency M between result and next call (s), capped at %ds" % CAP)
++print("  independent: n=%d median %.1f mean %.1f p90 %.1f sum %.0fs (%.1f h)" % (
++    len(M), statistics.median(M), statistics.mean(M), q(M, .9), sum(M), sum(M) / 3600))
++print("  all pairs  : median %.1f mean %.1f   sum %.0fs (%.1f h)" % (
++    statistics.median(allM), statistics.mean(allM), sum(allM), sum(allM) / 3600))
++print("  share of all inter-round time that is an independent pair's M:", pct(sum(M), sum(allM)))
++
++print("\nindependent pairs by class (a -> b):")
++cc = collections.Counter((",".join(r["a_cls"]), ",".join(r["b_cls"])) for r in ind)
++for k, v in cc.most_common(14):
++    mm = [min(r["M"], CAP) for r in ind if (",".join(r["a_cls"]), ",".join(r["b_cls"])) == k]
++    print("  %-18s -> %-18s %6d  %5s  median M %.1fs" % (k[0], k[1], v, pct(v, len(ind)), statistics.median(mm)))
++print("  read-only -> read-only (also execute concurrently):", sum(r["ro_ro"] for r in ind), pct(sum(r["ro_ro"] for r in ind), len(ind)))
++print("  next round irreversible (git commit/push/rm...):", sum(r["b_irrev"] for r in ind))
++
++print("\nindependent pairs by tool (a -> b), top 20:")
++tt = collections.Counter((r["a_names"][-1], r["b_names"][0]) for r in ind)
++for k, v in tt.most_common(20): print("  %-14s -> %-14s %5d" % (k[0], k[1], v))
++
++print("\nsingle-call rounds followed by single-call round, independent:",
++      sum(1 for r in ind if r["a_n"] == 1 and r["b_n"] == 1))
++
++print("\nsegment leveling (rounds with no user prompt between):")
++A = sum(s["actual"] for s in S); I = sum(s["ideal"] for s in S)
++print("  segments", len(S), " actual rounds", A, " ideal rounds", I, " removable", A - I, pct(A - I, A))
++med = statistics.median(allM)
++print("  removable rounds x median M (%.1fs) = %.0fs = %.1f h" % (
++    statistics.median(M), (A - I) * statistics.median(M), (A - I) * statistics.median(M) / 3600))
++wall = sum(min(s["wall"], 3600 * 3) for s in S)
++print("  total segment wall time (each segment capped 3 h): %.0f h" % (wall / 3600))
++print("  estimated saving as share of wall: %s" % pct((A - I) * statistics.median(M), wall))
++for kind in ("main", "sub"):
++    ss = [s for s in S if s["kind"] == kind]
++    a = sum(s["actual"] for s in ss); i = sum(s["ideal"] for s in ss)
++    wl = sum(min(s["wall"], 3600 * 3) for s in ss)
++    print(f"  {kind}: segments {len(ss)} actual {a} ideal {i} removable {pct(a - i, a)}  wall {wl/3600:.0f} h  saving/wall {pct((a-i)*statistics.median(M), wl)}")
++
++# sample for manual verification
++random.shuffle(ind)
++json.dump(ind[:60], open("indep_sample.json", "w"))
++dep = [r for r in real if r["cat"] == "dep" and (r["why"] or "").startswith("data")]
++random.shuffle(dep)
++json.dump(dep[:40], open("dep_sample.json", "w"))
+diff --git a/docs/research/data/2026-11-09-parallel-tool-calls/usage_times.py b/docs/research/data/2026-11-09-parallel-tool-calls/usage_times.py
+new file mode 100644
+index 000000000..9c4a90458
+--- /dev/null
++++ b/docs/research/data/2026-11-09-parallel-tool-calls/usage_times.py
+@@ -0,0 +1,56 @@
++"""Stage 2a: do calls issued in ONE assistant message overlap in time?
++Source of truth for timing: usage.db (started_at + latency_ms per tool_use_id)."""
++import json, sqlite3, collections, datetime
++
++db = sqlite3.connect("file:/home/marius/work/claude/codescout/.codescout/usage.db?mode=ro", uri=True)
++U = {}
++for tid, name, st, lat in db.execute(
++        "select tool_use_id, tool_name, started_at, latency_ms from tool_calls "
++        "where tool_use_id is not null and started_at is not null"):
++    try:
++        t0 = datetime.datetime.fromisoformat(st.replace("Z", "")).replace(
++            tzinfo=datetime.timezone.utc).timestamp()
++    except Exception:
++        continue
++    U[tid] = (name, t0, t0 + lat / 1000.0)
++print("usage rows joinable:", len(U))
++
++rounds = collections.defaultdict(list)
++joined = 0
++total_calls = 0
++for l in open("out/all.jsonl"):
++    r = json.loads(l)
++    if r["k"] != "call":
++        continue
++    total_calls += 1
++    rounds[(r["f"], r["mid"])].append(r)
++    if r["id"] in U:
++        joined += 1
++print("transcript calls:", total_calls, " joined to usage.db:", joined)
++
++size = collections.Counter(len(v) for v in rounds.values())
++print("round sizes:", sorted(size.items())[:12])
++multi_rounds = sum(c for s, c in size.items() if s > 1)
++print("rounds with >=2 calls:", multi_rounds, "of", len(rounds))
++
++# overlap analysis on rounds with >=2 usage-joined calls
++stats = collections.defaultdict(lambda: [0, 0])   # key -> [overlap, serial]
++ex = []
++for key, calls in rounds.items():
++    js = [(c["name"], *U[c["id"]][1:]) for c in calls if c["id"] in U]
++    if len(js) < 2:
++        continue
++    js.sort(key=lambda x: x[1])
++    for a, b in zip(js, js[1:]):
++        if a[2] - a[1] < 0.3:       # first call too short to tell serial from parallel
++            continue
++        overlap = b[1] < a[2] - 0.05      # b started before a ended (50 ms slack)
++        k = (a[0].replace("mcp__codescout__", ""), b[0].replace("mcp__codescout__", ""))
++        stats[k][0 if overlap else 1] += 1
++        if len(ex) < 3 and not overlap:
++            ex.append((k, round(b[1] - a[2], 3)))
++print("\npair (first,second): overlapped / serial   [consecutive calls inside one message]")
++for k, (o, s) in sorted(stats.items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:30]:
++    print(f"{k[0]:>12} -> {k[1]:<12} {o:>5} / {s:<5}")
++tot_o = sum(v[0] for v in stats.values()); tot_s = sum(v[1] for v in stats.values())
++print("TOTAL overlapped", tot_o, "serial", tot_s)
+diff --git a/docs/trackers/local-embed-opt-in-session-log.md b/docs/trackers/local-embed-opt-in-session-log.md
+index 2cbe43bf3..e031a19dc 100644
+--- a/docs/trackers/local-embed-opt-in-session-log.md
++++ b/docs/trackers/local-embed-opt-in-session-log.md
+@@ -94,7 +94,7 @@ entry_high_water_W: 2
+ | ID | Date | Severity | Category | Status | Title |
+ |----|------|---------:|----------|--------|-------|
+ | F-<n> | YYYY-MM-DD | low/med/high | <category> | open | <one-line title> |
+-| F-10 | 2026-11-09 | med | instrument-blindness | open | **A new untracked file escaped a `git ls-files` guard, so the gate was green before the commit and red after** — `every_cap_constant_is_classified` never saw `holders.rs` until it was tracked |
++| F-10 | 2026-11-09 | med | instrument-blindness | mitigated | **A new untracked file escaped a `git ls-files` guard, so the gate was green before the commit and red after** — `every_cap_constant_is_classified` never saw `holders.rs` until it was tracked |
+ | W-2 | 2026-11-09 | — | pattern | validated | **Read the gate before filing the bug** — the root's leniency in `doc` is deliberate; the filed bug is the narrow `dry_run` hazard |
+ | F-9 | 2026-11-09 | low | self-friction | mitigated | **I put an invented timestamp in a message to a peer** — corrected by a follow-up message |
+ | F-8 | 2026-11-09 | low | tooling | promoted-to-bug-tracker | **`fmt-mine.sh` was refused five times by a provenance lock** — the rust-analyzer mux holds an inherited shared copy for hours; bug `312cde2f4698874b` |
+@@ -479,15 +479,15 @@ Codified so the Index column means the same thing across sessions.
+ 
+ **Observed:** 2026-11-09. I added a new file, `src/tools/native_provenance_fence/holders.rs`, with `const MAX_LISTED: usize = 12;`. The full gate before I committed it was green. The gate after the commit was red: `result_caps::every_cap_constant_is_classified` named the constant as an unclassified cap. HEAD (`4eceee5e7`) carried a red guard test until the fix commit (`0d47f5898`).
+ 
+-**Cause:** the guard reads its population from `git ls-files src`, so it sees tracked files only. A new file is untracked until its first commit, and every gate run before that commit passes over it. This is a property of the guard's selector, the class `IC-18` (selector narrower than its population), and it applies to every `git ls-files`-based guard in `tests/`, not only this one. I have not listed the others.
++**Cause:** the guard reads its population from `git ls-files src`, so it sees tracked files only. A new file is untracked until its first commit, and every gate run before that commit passes over it. This is a property of the guard's selector, the class `IC-18` (selector narrower than its population), and it applies to every `git ls-files`-based guard in `tests/`, not only this one. Listed 2026-11-09 by `grep` for `ls-files` in `tests/`: `result_caps.rs`, `issue_clusters.rs`, `committed_paths.rs`, `inline_gates.rs`, `issue_frontmatter.rs`, `buffer_stream_policy.rs` and `e2e/eval_common/proc.rs`. I read the selector's rationale only in `result_caps.rs:644`, not in the other six.
+ 
+ **Cost here:** HEAD red for one commit, caught by the very next gate. I also nearly relied on a focused test run (the fence tests) that did not include `result_caps`.
+ 
+ **Rule I am applying:** after the first commit that adds a file under `src/`, run `result_caps` again, or the whole gate, before treating the change as verified; and run the gate once with the new file staged (`git add -N`) so that `git ls-files` lists it. I did not test that `git add -N` makes the guard see the file.
+ 
+-**Not fixed:** the guard itself. A fix would read `git ls-files --cached --others --exclude-standard`. I did not check what that does to the guard's fixtures.
++**Not fixed, and probably should not be.** `tests/result_caps.rs:644` says the selector is deliberate: "an untracked file is a peer's in-flight work and gating on it lets one session red another's build". Reading `--others` would remove that protection, so the earlier idea of changing the guard is withdrawn. What stays is a rule for the author of a new file: stage the file by explicit path before the gate. That has a price, because the staged file is then visible to a peer's gate too. The rule is now recorded in `docs/conventions/gate-ordering.md`, section "What the gate cannot see", with the `git add -N` check run in a scratch repository (`git ls-files` lists the file after `add -N`; the guards themselves were not run against it).
+ 
+-**Status:** open.
++**Status:** mitigated.
+ 
+ ## Template for new entries
+ 
+diff --git a/src/librarian/tools/create.rs b/src/librarian/tools/create.rs
+index 509f5a158..278a17808 100644
+--- a/src/librarian/tools/create.rs
++++ b/src/librarian/tools/create.rs
+@@ -547,7 +547,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+     // and a refusal that had already made the directory left it behind, empty. The symlink guards
+     // stay ahead of everything because they judge the path, not the directory.
+     // docs/issues/archive/2026-10-31-a-refused-doc-create-leaves-the-empty-parent-directory-it-already-made.md
+-    // A failed write takes the catalog row back (`undo_failed_create`): the row was written above,
++    // A failed write attempts to take the catalog row back (`undo_failed_create`): it was written above,
+     // so without this a full disk or a quota error leaves a row for a missing or empty file, and
+     // the next create of the path is refused as "path exists".
+     // docs/issues/2026-10-29-artifact-create-partial-filesystem-failure.md
+@@ -560,7 +560,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+     if let Err(e) = written {
+         undo_failed_create(&ctx.catalog.lock(), &id, &full);
+         return Err(anyhow::Error::from(e).context(format!(
+-            "could not write {}; the catalog row was taken back",
++            "could not write {}; cleanup was attempted, but the catalog row or a partial file may remain",
+             full.display()
+         )));
+     }
+@@ -1363,6 +1363,72 @@ mod tests {
+         undo_failed_create(&cat, "partial-1", &full);
+     }
+ 
++    #[tokio::test]
++    async fn failed_disk_write_reports_best_effort_cleanup_without_promising_rollback() {
++        for delete_fails in [true, false] {
++            let tmp = TempDir::new().unwrap();
++            let ctx = mk_ctx(tmp.path().to_path_buf());
++            // A regular file cannot be a parent directory, even for root. The
++            // path validators admit this in-root spelling; create_dir_all fails
++            // only after the artifact and augmentation have been inserted.
++            let blocker = tmp.path().join("blocked");
++            std::fs::write(&blocker, "keep me").unwrap();
++            if delete_fails {
++                ctx.catalog
++                    .lock()
++                    .conn
++                    .execute_batch(
++                        "CREATE TRIGGER fail_cleanup BEFORE DELETE ON artifact \
++                     BEGIN SELECT RAISE(ABORT, 'simulated cleanup failure'); END;",
++                    )
++                    .unwrap();
++            }
++
++            let err = call(
++                &ctx,
++                json!({
++                    "repo": "r", "rel_path": "blocked/new.md",
++                    "kind": "tracker", "title": "X", "body": "hi",
++                    "augment": { "prompt": "p", "params": {} }
++                }),
++            )
++            .await
++            .unwrap_err();
++
++            assert!(
++                err.downcast_ref::<std::io::Error>().is_some(),
++                "the original disk error must remain the cause, not a preflight or cleanup error: {err:#}"
++            );
++            let count = |table: &str| -> i64 {
++                ctx.catalog
++                    .lock()
++                    .conn
++                    .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
++                    .unwrap()
++            };
++            let expected_rows = if delete_fails { 1 } else { 0 };
++            assert_eq!(
++                count("artifact"),
++                expected_rows,
++                "delete_fails={delete_fails}"
++            );
++            assert_eq!(
++                count("artifact_augmentation"),
++                expected_rows,
++                "delete_fails={delete_fails}"
++            );
++            assert_eq!(std::fs::read_to_string(&blocker).unwrap(), "keep me");
++
++            // Fatal MCP rendering exposes this outer Display, not its sources.
++            let message = err.to_string();
++            assert!(
++                message.contains("cleanup was attempted") && message.contains("may remain")
++                    && !message.contains("catalog row was taken back"),
++                "failed create must warn about uncertain cleanup rather than promise rollback: {message}"
++            );
++        }
++    }
++
+     #[tokio::test]
+     async fn rejects_parent_dir_traversal() {
+         let tmp = TempDir::new().unwrap();
+diff --git a/src/prompts/builders.rs b/src/prompts/builders.rs
+index 2465e4e9a..0270d3aa1 100644
+--- a/src/prompts/builders.rs
++++ b/src/prompts/builders.rs
+@@ -321,10 +321,8 @@ pub(crate) fn build_system_prompt_draft(
+     // Retrieval stack — semantic_search routes through Qdrant
+     draft.push_str("## Retrieval Stack\n");
+     draft.push_str(
+-        "`semantic_search` runs through the Qdrant + TEI hybrid stack. \
+-         Start it once per machine with `./scripts/retrieval-stack.sh up`. \
+-         Build or refresh the index with `index(action=\"build\")`. \
+-         If a call returns `retrieval stack offline`, the stack isn't running.\n\n",
++        "`semantic_search` queries the index built by `index(action=\"build\")`. \
++         If a call returns `retrieval stack offline`, follow the hint in the error: it names the fix for the active backend.\n\n",
+     );
+ 
+     // MCP resource pointers — always included so agents know where to get extended docs
+diff --git a/src/prompts/source.md b/src/prompts/source.md
+index 5453c32a5..6d20f643b 100644
+--- a/src/prompts/source.md
++++ b/src/prompts/source.md
+@@ -75,9 +75,9 @@ These gates are non-negotiable. There are no exceptions.
+ 
+ The `onboarding` tool has already written a recommended model to `.codescout/project.toml`
+ based on your system hardware. This model is used by **memory storage / recall only** —
+-code search runs through the Qdrant retrieval stack and configures embeddings via
+-`.env` (see `docs/research/2026-05-06-retrieval-stack-benchmark.md`). If the user has
+-the stack running, you can skip Phase 0/1 unless they want semantic memories.
++code search uses the retrieval stack, configured through environment variables
++(`CODESCOUT_VECTOR_BACKEND`, `CODESCOUT_EMBEDDER_URL`). If `semantic_search` already
++works, you can skip Phase 0/1 unless they want semantic memories.
+ 
+ Use the `model_options` array from the Gathered Project Data below to build the menu.
+ Use the `hardware` field for the one-line system summary.
+diff --git a/src/retrieval/code_store.rs b/src/retrieval/code_store.rs
+index 5064e1ad1..7e2478e5d 100644
+--- a/src/retrieval/code_store.rs
++++ b/src/retrieval/code_store.rs
+@@ -267,6 +267,20 @@ impl VectorBackend {
+             }
+         }
+     }
++
++    /// What to do when this backend's retrieval stack or embedder cannot be reached.
++    ///
++    /// The lite stack has no local daemon: its failure mode is an unreachable remote embedding
++    /// endpoint. Only the Qdrant stack is started with `./scripts/retrieval-stack.sh up`.
++    pub fn offline_hint(self) -> &'static str {
++        match self {
++            Self::SqliteVec => {
++                "Lite stack: verify CODESCOUT_EMBEDDER_URL and EMBED_API_KEY — \
++                 the remote embedding endpoint is unreachable (no local daemon to start)."
++            }
++            Self::Qdrant => "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
++        }
++    }
+ }
+ 
+ #[cfg(feature = "server-stack")]
+diff --git a/src/tools/memory/mod.rs b/src/tools/memory/mod.rs
+index 00a580c8d..93c2347f6 100644
+--- a/src/tools/memory/mod.rs
++++ b/src/tools/memory/mod.rs
+@@ -225,6 +225,15 @@ fn topic_not_found_error(topic: &str, available: Vec<String>) -> RecoverableErro
+     err
+ }
+ 
++/// The refusal for a memory call whose embedder could not be built. The hint is the active
++/// backend's own: only the Qdrant stack is started with `retrieval-stack.sh`.
++fn embedder_unavailable(
++    e: anyhow::Error,
++    backend: crate::retrieval::code_store::VectorBackend,
++) -> anyhow::Error {
++    RecoverableError::with_hint(format!("embedder unavailable: {e}"), backend.offline_hint()).into()
++}
++
+ /// The chunk budget for memory content, from the RESOLVED model — never
+ /// `p.config.embeddings.model_or_default()`, which is the raw project.toml-only
+ /// copy that can diverge from what the shared embedder (`ctx.agent.memory_embedder_for`)
+@@ -1391,10 +1400,7 @@ impl Tool for Memory {
+                     .memory_embedder_for(ctx.workspace_override.as_deref())
+                     .await
+                     .map_err(|e| {
+-                    super::RecoverableError::with_hint(
+-                        format!("embedder unavailable: {e}"),
+-                        "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
+-                    )
++                    embedder_unavailable(e, crate::retrieval::code_store::VectorBackend::resolve())
+                 })?.embed(content).await?;
+ 
+                 let now = now_epoch_string();
+@@ -1431,10 +1437,7 @@ impl Tool for Memory {
+                     .memory_embedder_for(ctx.workspace_override.as_deref())
+                     .await
+                     .map_err(|e| {
+-                    super::RecoverableError::with_hint(
+-                        format!("embedder unavailable: {e}"),
+-                        "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
+-                    )
++                    embedder_unavailable(e, crate::retrieval::code_store::VectorBackend::resolve())
+                 })?.embed(query).await?;
+ 
+                 let store = ctx
+diff --git a/src/tools/memory/tests.rs b/src/tools/memory/tests.rs
+index 320f37f5a..573fce056 100644
+--- a/src/tools/memory/tests.rs
++++ b/src/tools/memory/tests.rs
+@@ -984,6 +984,54 @@ async fn an_unpinned_cross_embed_pins_every_resolution_to_one_default_root() {
+         "the embedder and the store must each receive the one root resolved at the top of the call"
+     );
+ }
++
++fn guidance_text_of(e: &anyhow::Error) -> String {
++    let r = e
++        .downcast_ref::<RecoverableError>()
++        .expect("must stay a RecoverableError so sibling calls survive");
++    format!("{:?}", r.guidance)
++}
++
++#[test]
++fn a_lite_stack_memory_call_is_not_sent_to_the_qdrant_script() {
++    let e = embedder_unavailable(
++        anyhow::anyhow!("connection refused"),
++        crate::retrieval::code_store::VectorBackend::SqliteVec,
++    );
++    let g = guidance_text_of(&e);
++    assert!(
++        g.contains("CODESCOUT_EMBEDDER_URL"),
++        "the lite stack's fix is its embedding endpoint: {g}"
++    );
++    assert!(
++        !g.contains("retrieval-stack.sh"),
++        "the lite stack has no script to start: {g}"
++    );
++}
++
++#[test]
++fn a_qdrant_memory_call_is_told_to_start_the_stack() {
++    let e = embedder_unavailable(
++        anyhow::anyhow!("connection refused"),
++        crate::retrieval::code_store::VectorBackend::Qdrant,
++    );
++    let g = guidance_text_of(&e);
++    assert!(g.contains("retrieval-stack.sh up"), "hint: {g}");
++}
++
++#[test]
++fn the_embedder_cause_stays_in_the_message() {
++    let e = embedder_unavailable(
++        anyhow::anyhow!("connection refused"),
++        crate::retrieval::code_store::VectorBackend::SqliteVec,
++    );
++    assert!(
++        e.to_string()
++            .starts_with("embedder unavailable: connection refused"),
++        "the cause must lead the message: {e}"
++    );
++}
++
+ /// A markdown `write` embeds the content once and upserts the point once, anchors included.
+ /// `cross_embed_memory` and the old `create_semantic_anchors` each used to embed the same content and
+ /// each upsert it, one after the other (two embeds and two upserts per write).
+diff --git a/src/tools/onboarding.rs b/src/tools/onboarding.rs
+index 155ea4db3..99a17d642 100644
+--- a/src/tools/onboarding.rs
++++ b/src/tools/onboarding.rs
+@@ -43,7 +43,7 @@ use super::{parse_bool_param, Tool, ToolContext};
+ // call-form pass now closes that. Same reasoning as the 2026-09-03 bump: already-onboarded
+ // projects cache the rendered prompt, so the fix does not reach them without this.
+ // docs/issues/2026-09-05-the-prompt-surface-gate-misses-a-backticked-tool-name-in-call-form.md
+-pub(crate) const ONBOARDING_VERSION: u32 = 32;
++pub(crate) const ONBOARDING_VERSION: u32 = 33;
+ 
+ /// Returns true if the stored onboarding version is stale (needs refresh).
+ /// `None` means pre-versioning project — always stale.
+diff --git a/src/tools/run_command/tests.rs b/src/tools/run_command/tests.rs
+index 0463bc2cc..7a03b8bf7 100644
+--- a/src/tools/run_command/tests.rs
++++ b/src/tools/run_command/tests.rs
+@@ -4577,7 +4577,7 @@ fn system_prompt_points_to_tool_guide_resource() {
+     // onboarded projects cache the rendered prompt; see src/prompts/README.md. Last moved
+     // to 32 when the surface's `call_graph` calls gained `path` and the draft's Iron Law
+     // citation was corrected.
+-    assert_eq!(ONBOARDING_VERSION, 32);
++    assert_eq!(ONBOARDING_VERSION, 33);
+ }
+ 
+ #[test]
+diff --git a/src/tools/semantic/semantic_search.rs b/src/tools/semantic/semantic_search.rs
+index e80d6ce17..dcb74d5da 100644
+--- a/src/tools/semantic/semantic_search.rs
++++ b/src/tools/semantic/semantic_search.rs
+@@ -23,15 +23,7 @@ pub(crate) fn map_from_env_error(
+     if e.downcast_ref::<crate::tools::RecoverableError>().is_some() {
+         return e;
+     }
+-    let hint = match backend {
+-        crate::retrieval::code_store::VectorBackend::SqliteVec => {
+-            "Lite stack: verify CODESCOUT_EMBEDDER_URL and EMBED_API_KEY — \
+-             the remote embedding endpoint is unreachable (no local daemon to start)."
+-        }
+-        crate::retrieval::code_store::VectorBackend::Qdrant => {
+-            "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack."
+-        }
+-    };
++    let hint = backend.offline_hint();
+     crate::tools::RecoverableError::with_hint(format!("retrieval stack offline: {e}"), hint).into()
+ }
+ 
+diff --git a/tests/fixtures/prompt_surfaces/build_system_prompt_draft_empty.md b/tests/fixtures/prompt_surfaces/build_system_prompt_draft_empty.md
+index b4110fa98..d93273cff 100644
+--- a/tests/fixtures/prompt_surfaces/build_system_prompt_draft_empty.md
++++ b/tests/fixtures/prompt_surfaces/build_system_prompt_draft_empty.md
+@@ -24,7 +24,7 @@
+ 7. `read_file("path/to/file.md")` — heading-addressed by default, returns heading map + `@file_ref` for large files. **Iron Law 4:** subsequent reads MUST use `@file_ref` (not the original path): `read_file("@file_ref", heading="## Section")` or `start_line=/end_line=`.
+ 
+ ## Retrieval Stack
+-`semantic_search` runs through the Qdrant + TEI hybrid stack. Start it once per machine with `./scripts/retrieval-stack.sh up`. Build or refresh the index with `index(action="build")`. If a call returns `retrieval stack offline`, the stack isn't running.
++`semantic_search` queries the index built by `index(action="build")`. If a call returns `retrieval stack offline`, follow the hint in the error: it names the fix for the active backend.
+ 
+ ## MCP Resources
+ Extended docs and project context are available via MCP resources (`resources/read <uri>`):
+diff --git a/tests/fixtures/prompt_surfaces/onboarding_prompt.md b/tests/fixtures/prompt_surfaces/onboarding_prompt.md
+index fcc659614..b11712829 100644
+--- a/tests/fixtures/prompt_surfaces/onboarding_prompt.md
++++ b/tests/fixtures/prompt_surfaces/onboarding_prompt.md
+@@ -35,9 +35,9 @@ These gates are non-negotiable. There are no exceptions.
+ 
+ The `onboarding` tool has already written a recommended model to `.codescout/project.toml`
+ based on your system hardware. This model is used by **memory storage / recall only** —
+-code search runs through the Qdrant retrieval stack and configures embeddings via
+-`.env` (see `docs/research/2026-05-06-retrieval-stack-benchmark.md`). If the user has
+-the stack running, you can skip Phase 0/1 unless they want semantic memories.
++code search uses the retrieval stack, configured through environment variables
++(`CODESCOUT_VECTOR_BACKEND`, `CODESCOUT_EMBEDDER_URL`). If `semantic_search` already
++works, you can skip Phase 0/1 unless they want semantic memories.
+ 
+ Use the `model_options` array from the Gathered Project Data below to build the menu.
+ Use the `hardware` field for the one-line system summary.

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000030",
+  "command": "./scripts/with-slot.sh cargo test --lib librarian::tools::create::tests::failed_disk_write_reports_best_effort_cleanup_without_promising_rollback -- --exact --nocapture",
+  "server_pid": 1520813,
+  "job_pid": 633259,
+  "state": "exited",
+  "exit_code": 101,
+  "error": null,
+  "started_at": "2026-11-09T11:41:46.735392628+00:00",
+  "finished_at": "2026-11-09T11:42:47.358283732+00:00",
+  "log_path": "/tmp/codescout-bg-cDmK1W.log"
+}

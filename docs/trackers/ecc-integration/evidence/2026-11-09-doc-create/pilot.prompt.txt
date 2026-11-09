@@ -1,0 +1,21 @@
+Use $ecc-codescout:ecc-spec-miner for the spec and $ecc-codescout:ecc-silent-failure-review for the review. Read and apply both installed skill bodies.
+Inspect the real codescout checkout /home/marius/work/claude/codescout.
+Scope: doc(action="create") at src/librarian/tools/create.rs::call, including
+src/librarian/tools/temp_write_guard.rs, the nearest dispatcher/error conversion,
+and directly relevant test assertions. Stay within this boundary; do not review
+unrelated doc actions except the nearest caller boundary needed for a claim.
+Deliver (1) a bounded observed-behavior spec draft, especially temporary workspace
+admission/refusal and create error outcomes, and (2) a silent-failure review of this
+same boundary. This is a static, chat-only evaluation: do not write files,
+artifacts, memory, bug records or source, do not apply mutations, and do not run
+builds, gates or behavior tests. The controller will persist adjudicated results
+and perform required repository verification separately. Read repository
+instructions. Use the existing codescout MCP for source navigation and evidence.
+Pin calls to the absolute source workspace. Use references/call_graph where useful,
+and distinguish returned navigation coverage from absence of dynamic callers.
+Inspect real test assertions; do not call test inspection an executed pass.
+Separate observed implementation from intended contract, confirmed defects from
+permitted fallbacks/open questions, and name uninspected scope. Do not force a
+finding. Do not read evaluation results, pilot worktree evidence or other run
+outputs. Return both deliverables in one final Markdown response with file/symbol
+anchors, evidence state and limitations.

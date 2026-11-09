@@ -1,0 +1,11 @@
+{
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-navigation-truth",
+  "commit_before": "b3d02d482eaeb3cabf329f4f37a2d3649a6057b7",
+  "commit_after": "b3d02d482eaeb3cabf329f4f37a2d3649a6057b7",
+  "command": "./scripts/gate.sh --check",
+  "scratch": "/home/marius/.cache/codescout-ecc-tmp",
+  "started": "2026-11-09T12:27:22.674091+00:00",
+  "finished": "2026-11-09T12:37:36.917263+00:00",
+  "exit_code": 1,
+  "log": "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-doc-create-dogfood/integration-gate.log"
+}

@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/affaan-m/ECC",
+  "commit": "d2ef2680594f9a17526a6e1a2e18b3d242c5d17b",
+  "version": "2.2.3",
+  "license": "MIT",
+  "files": {
+    "agents/spec-miner.md": "a9270c2012e2dc979f153a481cdfdc7c5413e8774f579ada0319c00ea8903ba2",
+    "agents/silent-failure-hunter.md": "e5e2094c6f50cc515a77376331c78e4955d5ff16c7a0e5d8f6edec692b7ebd8d",
+    "LICENSE": "326146379f01bb137c0a5d3c54770c1aa31076705c8b88a7f6b26a460f6221b2"
+  },
+  "adaptations": [
+    "Native-tool agent prompts ported to Codex skills using existing codescout MCP tools.",
+    "Specifications use the target repository's librarian artifacts, not a new document backend.",
+    "Separate code observations, test execution evidence, uncertainty and intended requirements.",
+    "No hooks, bundled MCP servers, model policy or automatic agent dispatch."
+  ]
+}

@@ -1,0 +1,909 @@
+{
+  "comparison": "Explicit adapter use versus non-use; metadata enabled in both arms",
+  "source": "/home/marius/work/claude/codescout",
+  "profile": "/home/marius/.codex",
+  "preflight": {
+    "baseline": {
+      "skills": [
+        {
+          "name": "ecc-codescout:ecc-silent-failure-review",
+          "enabled": true,
+          "path": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-silent-failure-review/SKILL.md"
+        },
+        {
+          "name": "ecc-codescout:ecc-spec-miner",
+          "enabled": true,
+          "path": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-spec-miner/SKILL.md"
+        }
+      ],
+      "errors": []
+    },
+    "pilot": {
+      "skills": [
+        {
+          "name": "ecc-codescout:ecc-silent-failure-review",
+          "enabled": true,
+          "path": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-silent-failure-review/SKILL.md"
+        },
+        {
+          "name": "ecc-codescout:ecc-spec-miner",
+          "enabled": true,
+          "path": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-spec-miner/SKILL.md"
+        }
+      ],
+      "errors": []
+    }
+  },
+  "runs": {
+    "baseline": {
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 245.551,
+      "turn_completed_usage_records": [
+        {
+          "input_tokens": 700012,
+          "cached_input_tokens": 625664,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 5934,
+          "reasoning_output_tokens": 486
+        }
+      ],
+      "completed_mcp_calls": [
+        {
+          "server": "codescout",
+          "tool": "workspace",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "get_guide",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "memory",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "read_file",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "read_file",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "references",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "read_file",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "read_file",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "call_graph",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "call_graph",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "read_file",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "references",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "read_file",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "final_message_present": true
+    },
+    "pilot": {
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 329.08,
+      "turn_completed_usage_records": [
+        {
+          "input_tokens": 1071452,
+          "cached_input_tokens": 989184,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 7871,
+          "reasoning_output_tokens": 1213
+        }
+      ],
+      "completed_mcp_calls": [
+        {
+          "server": "codescout",
+          "tool": "workspace",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "workspace",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "run_command",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "memory",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "get_guide",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "run_command",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "run_command",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "run_command",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "memory",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "get_guide",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "read_file",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "references",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "memory",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "read_file",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "call_graph",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "read_file",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "run_command",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "references",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "read_file",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "run_command",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "grep",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "server": "codescout",
+          "tool": "symbols",
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "final_message_present": true
+    }
+  },
+  "source_head": "6043fb27aeb21eb03c52238f2af3c189a97c16e9",
+  "config_sha256_before": "023d66f32a0f2e7f898403ee2829e1683275cc48f8cbbe476da4ca0a0d34a3d9",
+  "changed_source_paths": [
+    "src/tools/core/cap_probe.rs",
+    "src/tools/native_provenance_fence/holders.rs"
+  ],
+  "config_sha256_after": "023d66f32a0f2e7f898403ee2829e1683275cc48f8cbbe476da4ca0a0d34a3d9",
+  "config_unchanged": true
+}

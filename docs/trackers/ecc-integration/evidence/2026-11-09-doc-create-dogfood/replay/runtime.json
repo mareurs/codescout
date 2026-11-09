@@ -1,0 +1,405 @@
+{
+  "session_metadata": [
+    {
+      "id": "01a1bf68-e650-7f20-911e-b53f86597c27",
+      "timestamp": "2026-11-09T08:24:45.468Z",
+      "cwd": "/home/marius/work/claude/codescout",
+      "originator": "codex-tui",
+      "cli_version": "0.160.0",
+      "source": "vscode",
+      "model_provider": "openai",
+      "git": {
+        "commit_hash": "a52d68284f486cd9607f4449242dc92b769e6007",
+        "branch": "experiments",
+        "repository_url": "git@github.com:mareurs/codescout.git"
+      }
+    }
+  ],
+  "turn_contexts": [
+    {
+      "timestamp": "2026-11-09T08:25:07.737Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T08:40:54.724Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T09:42:45.347Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T10:01:42.234Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T10:22:16.058Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T10:40:26.850Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T10:43:40.172Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T10:44:27.323Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T10:45:54.853Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T10:57:56.774Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T11:30:18.136Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T11:34:52.609Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    },
+    {
+      "timestamp": "2026-11-09T11:36:00.274Z",
+      "fields": {
+        "cwd": "/home/marius/work/claude/codescout",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "approval_policy": "on-request",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "collaboration_mode": {
+          "mode": "default",
+          "settings": {
+            "model": "gpt-6.1-sol",
+            "reasoning_effort": "high"
+          }
+        },
+        "summary": "none"
+      }
+    }
+  ],
+  "local_versions": {
+    "codex": {
+      "exit_code": 0,
+      "stdout": "codex-cli 0.167.0",
+      "stderr": ""
+    },
+    "rustc": {
+      "exit_code": 0,
+      "stdout": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "stderr": ""
+    },
+    "cargo": {
+      "exit_code": 0,
+      "stdout": "cargo 1.99.1 (5f94df478 2026-08-27)",
+      "stderr": ""
+    },
+    "python": {
+      "exit_code": 0,
+      "stdout": "Python 3.14.9",
+      "stderr": ""
+    },
+    "git": {
+      "exit_code": 0,
+      "stdout": "git version 2.56.0",
+      "stderr": ""
+    }
+  },
+  "sanitized_config": {
+    "model": "gpt-6.1-sol",
+    "model_reasoning_effort": "medium",
+    "service_tier": "default",
+    "approval_policy": "on-request",
+    "plugins": {
+      "buddy@sdd-misc-plugins": {
+        "enabled": true
+      },
+      "codescout-companion@sdd-misc-plugins": {
+        "enabled": true
+      },
+      "superpowers@superpowers-marketplace": {
+        "enabled": true
+      },
+      "frontend-design-director@frontend-god": {
+        "enabled": true
+      },
+      "codex-app-tools@openai-bundled": {
+        "enabled": true
+      },
+      "browser@openai-bundled": {
+        "enabled": true
+      },
+      "unified-computer-use@openai-bundled": {
+        "enabled": true
+      },
+      "visualize@openai-bundled": {
+        "enabled": true
+      },
+      "documents@openai-primary-runtime": {
+        "enabled": true
+      },
+      "pdf@openai-primary-runtime": {
+        "enabled": true
+      },
+      "spreadsheets@openai-primary-runtime": {
+        "enabled": true
+      },
+      "presentations@openai-primary-runtime": {
+        "enabled": true
+      },
+      "template-creator@openai-primary-runtime": {
+        "enabled": true
+      },
+      "ecc-codescout@ecc-codescout-pilot": {
+        "enabled": true
+      }
+    },
+    "codescout": {
+      "command": "/home/marius/.cargo/bin/codescout",
+      "args": [
+        "start"
+      ],
+      "env_names": []
+    }
+  },
+  "original_config_sha256": "023d66f32a0f2e7f898403ee2829e1683275cc48f8cbbe476da4ca0a0d34a3d9",
+  "note": "Session metadata initial Git commit and CLI version describe session creation, not this dogfood worktree baseline or necessarily current executable. Native context model/effort override config defaults."
+}

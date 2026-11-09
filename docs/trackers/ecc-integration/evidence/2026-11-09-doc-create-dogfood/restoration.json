@@ -1,0 +1,9 @@
+{
+  "source_sha256": "6614bf9b1184f12398181b7a35d2c2625f8a073159f57ea690a7e2e4ac4c9132",
+  "mutation_source_sha256": "6614bf9b1184f12398181b7a35d2c2625f8a073159f57ea690a7e2e4ac4c9132",
+  "source_matches_review": true,
+  "mutation_restored": true,
+  "marker_files": [],
+  "own_scratch_removed": true,
+  "git_diff_check_exit": 0
+}

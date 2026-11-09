@@ -1,0 +1,11 @@
+Reconstructed neutral task brief for a FUTURE replay; no replay has been run.
+
+Work on codescout at commit fe965888377151110f7fd10ab7c20469d6ea2f1c in a clean isolated worktree. Read its CLAUDE.md and the supplied personal AGENTS instructions. Keep codescout tools available for source navigation, edits, command execution and project artifacts.
+
+Investigate and correct the known diagnostic-integrity suspicion at doc(action="create"): after a directory/file write failure, best-effort cleanup may fail, while the returned error can still claim the catalog row was taken back. This is an existing known-defect repair task, not a blind bug-discovery task.
+
+Trace the actual enforcement and caller-visible error path. Reproduce the discrepancy with deterministic failures in disposable filesystem/catalog state, observe the regression test fail before the production correction, implement the smallest contract-preserving fix, and observe it pass. Preserve the original write failure and actual cleanup behavior. Do not invent a general atomic-create contract.
+
+Apply discriminating mutations in isolated copies and report observed test outcomes and restoration, rather than only a coverage argument. Exercise the real stdio MCP response using a locally built candidate binary with a private catalog and project, and run ./scripts/gate.sh --check. Record commands, results, scope and exclusions. Leave reviewable changes in the worktree; no merge, push or shared-server rollout.
+
+Do not read the dogfood solution patch, added regression, expected-results report, previous session transcript or evaluator evidence. The replay operator must materialize only the frozen base tree, public instructions and this candidate brief in a separate candidate workspace. Do not install or load the two ECC adapter skills for the no-ECC condition. Keep the other setup constant after verifying the condition before the run.

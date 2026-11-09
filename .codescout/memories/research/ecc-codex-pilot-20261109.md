@@ -1,0 +1,7 @@
+# ECC Codex pilot — evaluation index
+
+Canonical ongoing evaluation: docs/trackers/ecc-integration/README.md (artifact 9f27965f08caa909), with plans/, reports/, notes/, evidence.md and issues.md. Read it before continuing. Prior setup history: notes/2026-11-09-pilot-setup-history.md; new experiment journals belong in the tracker folder.
+
+State 2026-11-09: ecc-codescout 0.1.0 contains ecc-spec-miner and ecc-silent-failure-review, enabled in default /home/marius/.codex. Backup/revert: /home/marius/.codex/backups/ecc-codescout-20261109T105201Z/README.md. Adapter source remains in feat/ecc-codex-codescout at /home/marius/work/claude/claude-plugins.worktrees/ecc-codex-codescout. Full ECC rollout remains separate.
+
+First comparison: both arms identified the same conditional doc(create) cleanup assurance defect; no incremental ECC finding or general benefit established. Compare explicit body use vs non-use, not installed vs absent. Later dogfood reproduced and fixed it; archived bug d5a3e9b6e9801fcc, source commit 561c945d72a3997c972d5ef055e2c9d38e922e67, integrated locally on experiments as b3d02d482eaeb3cabf329f4f37a2d3649a6057b7, stable patch-id 3e8ba9084781d79228efe0f163c04ce19ffdd203. Full post-integration gate passed. No push/shared-server rollout. Original replay base fe965888 and inputs preserved; no replay run. Next navigation-completeness cycle starts at b3d02d482; see its plan for current evidence/limits.

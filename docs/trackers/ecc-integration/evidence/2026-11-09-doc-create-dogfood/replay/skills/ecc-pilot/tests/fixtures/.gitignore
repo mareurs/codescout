@@ -1,0 +1,4 @@
+# Keep only the intentional fixture language configuration in version control.
+!.codescout/
+.codescout/*
+!.codescout/project.toml

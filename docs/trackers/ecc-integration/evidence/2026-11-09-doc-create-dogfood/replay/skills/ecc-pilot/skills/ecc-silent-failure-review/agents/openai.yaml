@@ -1,0 +1,6 @@
+interface:
+  display_name: "ECC Silent Failure Review"
+  short_description: "Trace hidden failures and contractual fallbacks"
+  default_prompt: "Use $ecc-codescout:ecc-silent-failure-review to review this scope for silent failures with codescout."
+policy:
+  products: ["CODEX"]

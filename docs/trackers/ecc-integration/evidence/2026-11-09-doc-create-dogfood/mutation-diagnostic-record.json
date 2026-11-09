@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000008",
+  "command": "CODEX_SESSION_ID=01a1bf68-e650-7f20-911e-b53f86597c27 ./scripts/with-slot.sh ./scripts/mutation-probe.sh --strict --file src/librarian/tools/create.rs --find '\"could not write {}; cleanup was attempted, but the catalog row or a partial file may remain\"' --replace '\"could not write {}; the catalog row was taken back\"' -- cargo test --lib librarian::tools::create::tests",
+  "server_pid": 807865,
+  "job_pid": 996089,
+  "state": "exited",
+  "exit_code": 101,
+  "error": null,
+  "started_at": "2026-11-09T11:50:07.121785749+00:00",
+  "finished_at": "2026-11-09T11:52:02.405689306+00:00",
+  "log_path": "/tmp/codescout-bg-lljftp.log"
+}

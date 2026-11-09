@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_0000003f",
+  "command": "./scripts/gate.sh --check",
+  "server_pid": 1520813,
+  "job_pid": 2683201,
+  "state": "exited",
+  "exit_code": 1,
+  "error": null,
+  "started_at": "2026-11-09T12:21:14.163345408+00:00",
+  "finished_at": "2026-11-09T12:24:21.111245723+00:00",
+  "log_path": "/tmp/codescout-bg-7XQSTr.log"
+}

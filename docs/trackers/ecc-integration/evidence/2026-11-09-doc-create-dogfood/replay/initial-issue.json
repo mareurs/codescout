@@ -1,0 +1,51 @@
+{
+  "note": "Issue body captured before dogfood outcome edits; metadata already includes this session's claim. Contains historical report links: evaluator should not give candidate access to the solution/evaluation checkout.",
+  "artifact": {
+    "id": "0b05b89ff27d890f",
+    "abs_path": "docs/issues/2026-11-09-doc-create-claims-rollback-after-best-effort-cleanup.md",
+    "kind": "bug",
+    "status": "taken",
+    "title": "doc(create) claims catalog rollback after best-effort cleanup can fail",
+    "owners": [],
+    "tags": [
+      "cluster/unclassified",
+      "librarian",
+      "diagnostics"
+    ],
+    "topic": "ecc-integration",
+    "time_scope": null,
+    "created_at": 1794223281209,
+    "updated_at": 1794224282467,
+    "freshness": "unknown",
+    "latest_event": null,
+    "provenance": {
+      "refreshed_at_commit": null,
+      "commits_behind_head": null,
+      "head_commit": "6043fb27aeb21eb03c52238f2af3c189a97c16e9"
+    },
+    "augmentation": null,
+    "extra": {
+      "claimed_at": "2026-11-09",
+      "claimed_by": "01a1bf68-e650-7f20-911e-b53f86597c27",
+      "opened": "2026-11-09",
+      "related": [
+        "22ae2baefdfdd73a"
+      ],
+      "severity": "medium",
+      "unverified": "Static conditional diagnostic defect; no cleanup-delete failure was injected and no runtime occurrence frequency was measured."
+    },
+    "frontmatter_lines": 19,
+    "body": "# BUG: doc(create) claims catalog rollback after best-effort cleanup can fail\n\n## Summary\n\nWhen the directory/file write fails, create invokes best-effort cleanup and then unconditionally returns an error context saying the catalog row was taken back. If the delete fails, that assurance is false. Create still returns failure; this is inaccurate recovery reporting, not a successful operation hiding its original failure.\n\n## Class fit\n\nUnclassified diagnostic-integrity defect at a recovery boundary: the error response claims a cleanup effect that its callee does not guarantee. Unlike the related partial-filesystem-create incident, this record concerns truthful reporting when the attempted mitigation itself fails, rather than adding the mitigation.\n\n## Symptom (Effect)\n\nConditional path: disk operation fails → artifact deletion fails → undo_failed_create logs a warning and returns unit → create returns “could not write …; the catalog row was taken back”. The main MCP fatal renderer exposes the outermost context, while the delete warning remains server-side.\n\n## Reproduction\n\nStatic inspection only. Inspect create::undo_failed_create and create::call in src/librarian/tools/create.rs, artifact::delete in src/librarian/catalog/artifact.rs, and select_error_render in src/server.rs. A future isolated probe should force a disk-write failure plus an SQL delete failure, assert the residual row, and inspect the returned message. No such injection was performed; never induce disk/quota exhaustion against the real catalog.\n\n## Environment\n\nObserved during the 2026-11-09 ECC pilot comparison in the codescout checkout. The run recorded HEAD 6043fb27aeb21eb03c52238f2af3c189a97c16e9 and a dirty shared checkout. Exact source hashes and native outputs are retained by the linked report; concurrent changes elsewhere prevent treating HEAD alone as a full snapshot.\n\n## Root cause\n\nundo_failed_create returns no cleanup result. artifact::delete propagates SQL errors; the helper logs such an error and proceeds. The caller constructs an unconditional past-tense rollback assurance after the helper returns. The helper's comment explicitly calls cleanup best effort, so no stronger atomic-create contract is needed to establish this message mismatch.\n\n## Evidence\n\nBoth the existing-workflow baseline and explicit ECC review independently reported this same conditional defect. Controller inspection confirmed the relevant bodies and fatal-rendering policy. The existing cleanup assertions cover successful removal, not delete failure. The related issue 22ae2baefdfdd73a records the earlier filesystem-failure mitigation; it does not verify truthful reporting when rollback fails.\n\n## Hypotheses tried\n\n- False successful create: rejected; the primary write failure remains an error.\n- Guaranteed row deletion: rejected by the helper's inspected error branch.\n- General all-or-nothing create guarantee: unnecessary for this finding and otherwise unresolved.\n\n## Fix\n\nNot applied. Either return cleanup outcomes while preserving the primary I/O failure, or change the assurance to state that rollback was attempted and warn that residual state may remain.\n\n## Tests added\n\nNone. The evaluation was read-only; no source or mutation writes were performed. A passing general gate does not reproduce this conditional branch.\n\n## Workarounds\n\nAfter a create write failure, inspect catalog/file state rather than relying on the rollback assurance alone. Do not assume a retry is safe solely from that message.\n\n## Resume\n\nOpen for a separately authorized implementation and discriminating failure-injection test. No code fix is part of the ECC evaluation.\n\n## References\n\n- [Related partial-filesystem incident](2026-10-29-artifact-create-partial-filesystem-failure.md)\n- [ECC comparison](../trackers/ecc-integration/reports/2026-11-09-doc-create-comparison.md)\n- [Create implementation](../../src/librarian/tools/create.rs)\n- [Fatal error rendering](../../src/server.rs)\n",
+    "body_meta": {
+      "line_count": 58,
+      "source_line_count": 58,
+      "bytes": 3984
+    },
+    "preview": {
+      "shape": "default",
+      "headings": "omitted (body selector present) — call doc(get, id=…) with no body selector for the map",
+      "line_count": 58,
+      "total_headings": 14
+    }
+  }
+}

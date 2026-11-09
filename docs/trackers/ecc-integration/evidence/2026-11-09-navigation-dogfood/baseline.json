@@ -1,0 +1,14 @@
+{
+  "base_commit": "b3d02d482eaeb3cabf329f4f37a2d3649a6057b7",
+  "base_tree": "34977f2047694714e5f852ee427c2dfca435d9e8",
+  "prior_full_archive": "../2026-11-09-doc-create-dogfood/replay/base-source.tar.gz",
+  "prior_archive_base_commit": "fe965888377151110f7fd10ab7c20469d6ea2f1c",
+  "delta_sha256": "e3464f05aae28b9b3d1b777605e798cd90e59ba8d8f8a8c22d3169acebe280fa",
+  "note": "The prior full archive plus this binary Git diff preserve the next starting source; prefer git checkout at exact base with history. No replay run.",
+  "source_files": {
+    "src/tools/symbol/call_graph/mod.rs": "ef95dfb32ecf6602106b331bde2ffada84bf335e835f35e65abb07da5be0add4",
+    "src/tools/symbol/call_graph/traversal.rs": "bc473130a657df26e1f5c93b4f236a0cda95074f71c52c66b890b993af3dfdcb",
+    "src/tools/symbol/call_edges/resolver.rs": "85fe251ed75644426089a7aaeb4c8aa4b767217403820a4ce83259e0c93d6e68",
+    "src/tools/symbol/references.rs": "fd76c52b0f086b99e4b762c48a81b6f9c0c91ff22f8e438d83866dc0e762bfdc"
+  }
+}
