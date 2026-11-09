@@ -64,6 +64,30 @@ impl WalkClock {
     }
 }
 
+/// How many leading bytes decide "looks binary": a NUL inside this window marks the file binary,
+/// a NUL at this offset or later does not. A contract, not a tuning knob — see
+/// `binary_sniff_window_is_exactly_the_first_8192_bytes`.
+const BINARY_SNIFF_BYTES: usize = 8192;
+
+/// Read a whole file unless it looks binary. `None` means binary: the caller counts it as skipped.
+fn read_unless_binary<R: std::io::Read>(mut r: R) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::Read as _;
+    // Sniff first: a binary file then costs one window, not its whole size.
+    let mut bytes = Vec::new();
+    (&mut r)
+        .take(BINARY_SNIFF_BYTES as u64)
+        .read_to_end(&mut bytes)?;
+    if bytes.contains(&0) {
+        return Ok(None);
+    }
+    r.read_to_end(&mut bytes)?;
+    Ok(Some(bytes))
+}
+
+fn read_path_unless_binary(path: &std::path::Path) -> std::io::Result<Option<Vec<u8>>> {
+    read_unless_binary(std::fs::File::open(path)?)
+}
+
 pub struct Grep;
 
 #[async_trait::async_trait]
@@ -274,14 +298,17 @@ impl Tool for Grep {
                 // Counted here, before the read: this is the point the override has
                 // admitted the file, which is what a starved glob is the absence of.
                 audit.accepted += 1;
-                let Ok(bytes) = std::fs::read(entry.path()) else {
-                    audit.errors += 1;
-                    continue;
+                let bytes = match read_path_unless_binary(entry.path()) {
+                    Ok(Some(b)) => b,
+                    Ok(None) => {
+                        skipped_binary += 1;
+                        continue;
+                    }
+                    Err(_) => {
+                        audit.errors += 1;
+                        continue;
+                    }
                 };
-                if bytes.iter().take(8192).any(|&b| b == 0) {
-                    skipped_binary += 1;
-                    continue;
-                }
                 let text = String::from_utf8_lossy(&bytes);
                 let n = text.lines().filter(|l| re.is_match(l)).count();
                 if n > 0 {
@@ -331,14 +358,17 @@ impl Tool for Grep {
             // Counted here, before the read: this is the point the override has
             // admitted the file, which is what a starved glob is the absence of.
             audit.accepted += 1;
-            let Ok(bytes) = std::fs::read(entry.path()) else {
-                audit.errors += 1;
-                continue;
+            let bytes = match read_path_unless_binary(entry.path()) {
+                Ok(Some(b)) => b,
+                Ok(None) => {
+                    skipped_binary += 1; // looks binary (NUL byte) — skip
+                    continue;
+                }
+                Err(_) => {
+                    audit.errors += 1;
+                    continue;
+                }
             };
-            if bytes.iter().take(8192).any(|&b| b == 0) {
-                skipped_binary += 1; // looks binary (NUL byte) — skip
-                continue;
-            }
             let text = String::from_utf8_lossy(&bytes);
 
             if context_lines == 0 {
@@ -1696,6 +1726,83 @@ mod tests {
             miss.get("suggestion").is_some(),
             "suggestion expected on zero matches for an identifier"
         );
+    }
+
+    /// `BINARY_SNIFF_BYTES` is a contract: a NUL inside the first 8192 bytes marks the file binary,
+    /// a NUL at byte 8192 or later does not. Pins both sides of the edge so a change to how the
+    /// file is read cannot move it.
+    #[tokio::test]
+    async fn binary_sniff_window_is_exactly_the_first_8192_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut inside = b"TARGET\n".to_vec();
+        inside.resize(8191, b'a');
+        inside.push(0); // index 8191: the last byte of the window
+        std::fs::write(dir.path().join("inside.bin"), &inside).unwrap();
+        let mut outside = b"TARGET\n".to_vec();
+        outside.resize(8192, b'a');
+        outside.push(0); // index 8192: the first byte past the window
+        std::fs::write(dir.path().join("outside.dat"), &outside).unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "TARGET", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r["total"].as_u64().unwrap(),
+            1,
+            "only outside.dat is text: {r}"
+        );
+        assert_eq!(
+            r["skipped_binary"].as_u64().unwrap(),
+            1,
+            "inside.bin is binary: {r}"
+        );
+    }
+
+    /// Serves zeros and counts what was asked of it: stands in for a multi-GB binary without
+    /// touching the disk.
+    struct CountingZeros {
+        left: usize,
+        served: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl std::io::Read for CountingZeros {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let n = buf.len().min(self.left);
+            buf[..n].fill(0);
+            self.left -= n;
+            self.served.set(self.served.get() + n);
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn a_file_that_opens_with_a_nul_is_not_read_past_the_sniff_window() {
+        let served = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let reader = CountingZeros {
+            left: 64 * 1024 * 1024,
+            served: served.clone(),
+        };
+        let out = read_unless_binary(reader).unwrap();
+        assert!(out.is_none(), "a leading NUL is binary");
+        assert!(
+            served.get() <= BINARY_SNIFF_BYTES,
+            "a binary file must cost at most the sniff window, but {} bytes were read",
+            served.get()
+        );
+    }
+
+    #[test]
+    fn a_text_file_is_returned_whole_whatever_its_size() {
+        let mut text = vec![b'x'; 100_000];
+        text[50_000] = b'\n';
+        for len in [0usize, 1, 8191, 8192, 8193, 100_000] {
+            let out = read_unless_binary(&text[..len]).unwrap();
+            assert_eq!(out.as_deref(), Some(&text[..len]), "len {len}");
+        }
     }
 
     #[tokio::test]
