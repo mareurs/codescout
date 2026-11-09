@@ -481,9 +481,9 @@ mod tests {
     fn a_path_no_root_contains_is_resolved_once_not_once_per_root() {
         let outside = tempfile::tempdir().unwrap();
         let file = outside.path().join("a/b/c/d/f.md");
-        let roots: Vec<std::path::PathBuf> = (0..4)
-            .map(|_| tempfile::tempdir().unwrap().keep())
-            .collect();
+        let guards: Vec<tempfile::TempDir> = (0..4).map(|_| tempfile::tempdir().unwrap()).collect();
+        let roots: Vec<std::path::PathBuf> =
+            guards.iter().map(|d| d.path().to_path_buf()).collect();
         let ancestors = file.ancestors().skip(1).count();
 
         let before = CANONICALIZES.with(|n| n.get());
