@@ -358,6 +358,17 @@ def check_go(data, plan, budget, registration_sha256):
     return go
 
 
+def registered_arm_profile(reg):
+    """The arm profile a registration pins: its `arm_profile` key, "v1" for a registration that has
+    none (every one frozen before profiles existed), `Refused` for a name `arms.PROFILES` lacks.
+    The key is part of the hashed body, so a swapped profile no longer matches the digest."""
+    profile = reg.get("arm_profile", "v1")
+    if profile not in arms.PROFILES:
+        raise Refused(f"the registration pins arm profile {profile!r}; expected one of {arms.PROFILES}")
+    return profile
+
+
+
 def registration_digest(body):
     """sha256 of the canonical JSON of a registration body (freeze_stage1._digest's form)."""
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"),
@@ -1139,7 +1150,7 @@ def _run_one(ctx, spec):
             if got != urls["CODESCOUT_QDRANT_URL"]:
                 raise RuntimeError(f"per-run Qdrant URL {got} != {urls['CODESCOUT_QDRANT_URL']}")
         arm_spec = arms.arm_invocation(spec.arm, spec.model, info.prompt, ctx.manifest, urls,
-                                       run_dir, session_id=session)
+                                       run_dir, session_id=session, profile=ctx.profile)
         argv = cli_argv(arm_spec.cli_args, ctx.budget.per_call_usd)
         record["argv_flags"] = argv[:argv.index("--")]
         env_file = run_dir / "private.env"
@@ -1381,6 +1392,7 @@ def run_batch(plan, budget, data, dry_run, *, registration=None, docker=None, ex
     if registration is None:
         raise Refused("a batch that spends runs under a registration: pass --registration")
     reg = load_registration(registration, plan)  # before any side effect
+    profile = registered_arm_profile(reg)  # a name the arms do not know is refused before docker
     check_registered_budget(reg, plan, budget)  # N-2
     if plan_reps(plan) == "stage3" or reg.get("stage") == 2:
         # Task 11 rounds 1-2 (I-1, I-2, I-3, N-1a, m-2, m-4..m-6): for every Stage 3 plan,
@@ -1444,7 +1456,7 @@ def run_batch(plan, budget, data, dry_run, *, registration=None, docker=None, ex
                     urls, _ = _infra_up(docker, owned, data, manifest,
                                         any(s.arm != "bare" for s in plan))
                     ctx = _Ctx(docker, exec_cli, load_task, manifest, token, data, budget, owned,
-                               urls, timeout, clock)
+                               urls, timeout, clock, profile)
                 row, stop = _run_one(ctx, spec)
                 _event(data, "row", runId=rid, outcome=row["outcome"], costUsd=row["costUsd"])
                 validity = task_validity(read_rows(data))
@@ -1480,7 +1492,7 @@ class _Ctx(NamedTuple):
     retrieval_urls: dict
     timeout: float
     clock: Callable
-
+    profile: str = "v1"  # the registration's arm profile (registered_arm_profile)
 
 def load_plan(path):
     """A plan file: JSON [[task, model, arm, rep], ...] (stage3.py writes them)."""

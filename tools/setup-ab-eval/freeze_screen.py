@@ -28,6 +28,7 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
+import arms
 import freeze_stage1
 import frozen
 import multilang_tasks as mt
@@ -367,9 +368,11 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
                   inspect: Callable = tasks._inspect_image,
                   run_cli: Callable = freeze_stage1.default_run_cli,
                   python=sys.executable, runner_tasks_root=None, current_pool=None,
-                  dropped=None) -> dict:
+                  dropped=None, arm_profile="v1") -> dict:
     tool_dir, data, run_data = Path(tool_dir), Path(data), Path(run_data)
     pool_path, plan_path, out = Path(pool_path), Path(plan_path), Path(out)
+    if arm_profile not in arms.PROFILES:
+        raise Refused(f"arm profile {arm_profile!r}: expected one of {arms.PROFILES}")
     if out.exists() and not replace:
         raise Refused(f"{out} exists: a registration is replaced only with --replace")
     if (run_data / "GO.json").exists():
@@ -430,6 +433,7 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
         "budget": dict(BUDGET),
         "models": list(MODELS),
         "reps": [["bare", REPS]],
+        "arm_profile": arm_profile,
         "data": str(data.resolve()),
         "run_data": str(run_data.resolve()),
         "runner_tasks_root": str(_runner_root(runner_tasks_root).resolve()),
@@ -569,6 +573,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, default=None, help=f"default <tool-dir>/{REGISTRATION}")
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--replace", action="store_true")
+    ap.add_argument("--arm-profile", choices=arms.PROFILES, default="v1",
+                    help="arm profile pinned in the registration (arms.PROFILES); default v1")
     ap.add_argument("--records", type=Path, default=mt.RECORDS)
     a = ap.parse_args(argv)
     run_data = a.run_data or a.data / "live-screen"
@@ -605,7 +611,7 @@ def main(argv=None) -> int:
         elif a.action == "freeze":
             reg = freeze_screen(tool_dir=a.tool_dir, data=a.data, run_data=run_data,
                                 pool_path=pool_path, plan_path=plan_path, out=out,
-                                replace=a.replace, seed=a.seed)
+                                replace=a.replace, seed=a.seed, arm_profile=a.arm_profile)
             print(json.dumps({"registration": str(out), "registration_sha256": reg["registration_sha256"],
                               "plan_sha256": reg["plan_sha256"], "runs": len(run.load_plan(plan_path)),
                               "go_template": str(run_data / GO_TEMPLATE)}))

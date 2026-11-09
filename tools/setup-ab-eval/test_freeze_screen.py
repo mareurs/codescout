@@ -472,6 +472,18 @@ class PoolV4Tests(unittest.TestCase):
 
 
 class FreezeTests(Case):
+    def test_freeze_pins_the_arm_profile_in_the_hashed_registration(self):
+        reg = self.env.freeze()
+        self.assertEqual(reg["arm_profile"], "v1")  # the default is written, not left implicit
+        plan = run.load_plan(self.env.plan_path)
+        v2 = self.env.freeze(replace=True, arm_profile="v2")
+        loaded = run.load_registration(self.env.out, plan)
+        self.assertEqual(run.registered_arm_profile(loaded), "v2")
+        self.assertNotEqual(v2["registration_sha256"], reg["registration_sha256"])
+        with self.assertRaisesRegex(fs.Refused, "arm profile"):
+            self.env.freeze(replace=True, arm_profile="v9")
+
+
     def test_freeze_writes_a_registration_run_py_accepts(self):
         reg = self.env.freeze()
         plan = run.load_plan(self.env.plan_path)

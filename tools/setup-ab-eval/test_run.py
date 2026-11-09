@@ -268,6 +268,7 @@ class Grader:
 
 
 class RunnerCase(unittest.TestCase):
+    arm_profile = None  # a subclass sets the `arm_profile` its registration pins
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="sab-run-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
@@ -328,6 +329,8 @@ class RunnerCase(unittest.TestCase):
                 "frozen": {"root": str(self.frozen_root), "trees": self.frozen_trees},
                 "plans": {f"p{i}": {"plan_sha256": h, "budget": self.registered[h]}
                           for i, h in enumerate(sorted(self.registered))}}
+        if self.arm_profile is not None:
+            body["arm_profile"] = self.arm_profile
         reg = dict(body, registration_sha256=run.registration_digest(body))
         self.registration.write_text(json.dumps(reg) + "\n")
 
@@ -363,6 +366,53 @@ class RunnerCase(unittest.TestCase):
     def events(self):
         p = self.data / "batch.jsonl"
         return [json.loads(l) for l in p.read_text().splitlines()] if p.exists() else []
+
+
+class RegisteredArmProfileTest(RunnerCase):
+    """The arm profile is pinned by the registration (hashed with it), never by a free CLI flag."""
+
+    arm_profile = "v2"
+
+    def tools_and_sources(self, plan_arm):
+        cli = self.batch([spec("t1", plan_arm)], BUDGET)
+        argv = cli.calls[0][1]
+        return argv[argv.index("--tools") + 1], argv[argv.index("--setting-sources") + 1]
+
+    def test_a_registration_naming_v2_runs_cs_without_bash_edit_write(self):
+        tools, sources = self.tools_and_sources("cs")
+        self.assertEqual(tools, "Read,Glob,Grep")
+        self.assertEqual(sources, "project,local")
+
+    def test_a_registration_naming_v2_keeps_bare_native_and_loads_the_project_source(self):
+        tools, sources = self.tools_and_sources("bare")
+        self.assertEqual(tools, "Bash,Read,Write,Edit,Glob,Grep")
+        self.assertEqual(sources, "project,local")
+
+    def test_the_profile_is_part_of_the_hashed_registration(self):
+        self.go([spec("t1", "cs")], BUDGET)
+        reg = json.loads(self.registration.read_text())
+        self.assertEqual(reg["arm_profile"], "v2")
+        self.assertEqual(run.registered_arm_profile(reg), "v2")
+        body = {k: v for k, v in reg.items() if k != "registration_sha256"}
+        self.assertEqual(reg["registration_sha256"], run.registration_digest(body))
+        body["arm_profile"] = "v1"  # a swapped profile no longer matches the digest
+        self.assertNotEqual(reg["registration_sha256"], run.registration_digest(body))
+
+    def test_an_unknown_profile_in_the_registration_is_refused_before_docker(self):
+        self.arm_profile = "v9"
+        with self.assertRaisesRegex(run.Refused, "arm profile"):
+            self.batch([spec("t1", "cs")], BUDGET)
+        self.assertEqual(self.world.calls, [])
+
+
+class UnpinnedRegistrationTest(RunnerCase):
+    def test_a_registration_without_arm_profile_runs_the_v1_arms(self):
+        cli = self.batch([spec("t1", "cs")], BUDGET)
+        argv = cli.calls[0][1]
+        self.assertEqual(argv[argv.index("--tools") + 1], "Bash,Read,Write,Edit,Glob,Grep")
+        self.assertEqual(argv[argv.index("--setting-sources") + 1], "local")
+        self.assertEqual(run.registered_arm_profile({"stage": "test"}), "v1")
+
 
 
 BUDGET = run.Budget(cap_usd=25.0, spent_usd=0.0, per_call_usd=1.25, reserve_usd=1.0)
