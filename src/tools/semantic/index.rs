@@ -692,15 +692,16 @@ impl Tool for IndexStatus {
                     Err(e) => json!({
                         "indexed": false,
                         "project_id": project_id,
-                        "message": format!("Qdrant scroll failed: {e}"),
+                        "message": format!("Index status query failed: {e}"),
                     }),
                 }
             }
             Err(e) => json!({
                 "indexed": false,
                 "project_id": project_id,
-                "message": format!(
-                    "Retrieval stack offline: {e}. Run scripts/retrieval-stack.sh up."
+                "message": status_offline_message(
+                    &e,
+                    crate::retrieval::code_store::VectorBackend::resolve(),
                 ),
             }),
         };
@@ -1427,6 +1428,15 @@ pub(crate) fn running_elsewhere_indexing_block(holder_pid: Option<u32>) -> Value
         "holder_pid": holder_pid,
     })
 }
+/// The `index(action="status")` message when the retrieval client cannot be built.
+///
+/// The remedy depends on the backend: only the Qdrant stack is started with a script.
+fn status_offline_message(
+    e: &dyn std::fmt::Display,
+    backend: crate::retrieval::code_store::VectorBackend,
+) -> String {
+    format!("Retrieval stack offline: {e}. {}", backend.offline_hint())
+}
 
 #[cfg(test)]
 mod integrity_verdict_tests {
@@ -1689,5 +1699,33 @@ mod written_by_report_tests {
                 "differing shas, build id missing on a side ({w_id:?}, {r_id:?}): still reports"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod status_offline_message_tests {
+    use super::status_offline_message;
+    use crate::retrieval::code_store::VectorBackend;
+
+    #[test]
+    fn a_lite_stack_status_is_not_sent_to_the_qdrant_script() {
+        let msg = status_offline_message(&"connection refused", VectorBackend::SqliteVec);
+        assert!(!msg.contains("retrieval-stack.sh"), "{msg}");
+        assert!(msg.contains("CODESCOUT_EMBEDDER_URL"), "{msg}");
+    }
+
+    #[test]
+    fn a_qdrant_status_is_told_to_start_the_stack() {
+        let msg = status_offline_message(&"connection refused", VectorBackend::Qdrant);
+        assert!(msg.contains("retrieval-stack.sh up"), "{msg}");
+    }
+
+    #[test]
+    fn the_cause_stays_in_the_message() {
+        let msg = status_offline_message(&"connection refused", VectorBackend::SqliteVec);
+        assert!(
+            msg.starts_with("Retrieval stack offline: connection refused."),
+            "{msg}"
+        );
     }
 }

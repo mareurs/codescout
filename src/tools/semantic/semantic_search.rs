@@ -38,6 +38,10 @@ pub(crate) fn map_from_env_error(
 /// `embedder_url` configured), then transport (stack went away), then a
 /// generic fallback.
 ///
+/// `backend` picks the remedy text for the arms that name a restart script or a
+/// container: the Qdrant stack is started with `./scripts/retrieval-stack.sh`, the lite
+/// stack has nothing to start and names its embedding endpoint settings instead.
+///
 /// The embedder-connect bucket must precede transport: a client-side connect
 /// failure's message carries reqwest's "Connection refused", which would
 /// otherwise be misrouted to the qdrant-oriented transport hint.
@@ -48,7 +52,20 @@ pub(crate) fn map_from_env_error(
 /// `EmbedderHttp`-specific bucket's "embed connect failed"/"openai send"/
 /// "embed sparse" wording, and would otherwise fall all the way to the
 /// generic qdrant-oriented fallback — the identical misrouting class.
-pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
+pub(crate) fn classify_search_error(
+    err_str: &str,
+    project_id: &str,
+    backend: crate::retrieval::code_store::VectorBackend,
+) -> String {
+    // The lite stack has no daemon, no containers and no script: its only remote part is the
+    // embedding endpoint. Arms that would send the operator to `retrieval-stack.sh` name that
+    // endpoint's settings instead.
+    const LITE_ENDPOINT: &str = "CODESCOUT_EMBEDDER_URL and EMBED_API_KEY";
+    let lite = matches!(
+        backend,
+        crate::retrieval::code_store::VectorBackend::SqliteVec
+    );
+
     // These two arms come FIRST, ahead of the collection bucket, for two reasons.
     //
     // (1) `dense openai status` matched NO bucket before this. The embedder arm below
@@ -122,11 +139,22 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
         // regression.
         || err_str.contains(crate::retrieval::embedder::SPARSE_STATUS_MARKER)
     {
-        "The embedder returned an error status. This is an embedder problem, \
-         NOT a Qdrant issue (don't check qdrant logs). The embedder's own response \
-         body is included in the error above — read it first; it usually names the \
-         cause exactly. Then `./scripts/retrieval-stack.sh ps`."
-            .to_string()
+        let verdict = if lite {
+            "The embedder returned an error status."
+        } else {
+            "The embedder returned an error status. This is an embedder problem, \
+             NOT a Qdrant issue (don't check qdrant logs)."
+        };
+        let next = if lite {
+            format!("Then verify {LITE_ENDPOINT}.")
+        } else {
+            "Then `./scripts/retrieval-stack.sh ps`.".to_string()
+        };
+        format!(
+            "{verdict} The embedder's own response \
+             body is included in the error above — read it first; it usually names the \
+             cause exactly. {next}"
+        )
     } else if err_str.contains("doesn't exist")
         || err_str.contains("not found")
         || err_str.contains("Collection")
@@ -145,14 +173,21 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
         || err_str.contains("sparse tei")
         || err_str.contains("tei status")
     {
-        "Embedding service (TEI) is unhealthy. Most common cause: dense \
-         or sparse TEI container OOM'd or returned non-200. \
-         Check: `docker logs codescout-tei-dense` and \
-         `docker logs codescout-tei-sparse`. \
-         Restart: `./scripts/retrieval-stack.sh up`. \
-         If persistent, inspect container memory limits + model file. \
-         Workaround: fall back to `grep` / `symbols` for this query while TEI recovers."
-            .to_string()
+        if lite {
+            format!(
+                "The embedding endpoint is unhealthy. Verify {LITE_ENDPOINT}, then retry. \
+                 Workaround: fall back to `grep` / `symbols` for this query meanwhile."
+            )
+        } else {
+            "Embedding service (TEI) is unhealthy. Most common cause: dense \
+             or sparse TEI container OOM'd or returned non-200. \
+             Check: `docker logs codescout-tei-dense` and \
+             `docker logs codescout-tei-sparse`. \
+             Restart: `./scripts/retrieval-stack.sh up`. \
+             If persistent, inspect container memory limits + model file. \
+             Workaround: fall back to `grep` / `symbols` for this query while TEI recovers."
+                .to_string()
+        }
     // The marker comes from the crate that PRODUCES it, not from a literal here.
     // Once the dense leg moves to `codescout_embed::RemoteEmbedder` the producer is
     // across a crate boundary, where nothing would make a drifted literal and its
@@ -166,12 +201,19 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
         // Client-side: the query could not be embedded because the embedder
         // endpoint is unreachable/erroring. Distinct from a Qdrant fault —
         // must NOT send the operator to qdrant logs (the 2026-07-13 bug).
-        "Query could not be embedded — the dense/sparse embedder is unreachable \
-         or returned an error. This is an embedder problem, NOT a Qdrant issue \
-         (don't check qdrant logs). Verify CODESCOUT_EMBEDDER_URL / \
-         CODESCOUT_SPARSE_EMBEDDER_URL point at the running embedder, then \
-         `./scripts/retrieval-stack.sh ps`."
-            .to_string()
+        if lite {
+            format!(
+                "Query could not be embedded — the embedder is unreachable or returned \
+                 an error. Verify {LITE_ENDPOINT}."
+            )
+        } else {
+            "Query could not be embedded — the dense/sparse embedder is unreachable \
+             or returned an error. This is an embedder problem, NOT a Qdrant issue \
+             (don't check qdrant logs). Verify CODESCOUT_EMBEDDER_URL / \
+             CODESCOUT_SPARSE_EMBEDDER_URL point at the running embedder, then \
+             `./scripts/retrieval-stack.sh ps`."
+                .to_string()
+        }
     } else if err_str.contains("embedding server") {
         // The no-url resolver path (`ollama:`/`openai:`, wired in
         // src/retrieval/client.rs::build_embedder) constructs a
@@ -189,9 +231,18 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
         || err_str.contains("transport error")
         || err_str.contains("tonic")
     {
-        "Stack went offline mid-query. \
-         Restart with `./scripts/retrieval-stack.sh up` and retry."
-            .to_string()
+        if lite {
+            format!("The embedding endpoint went offline mid-query. Verify {LITE_ENDPOINT}, then retry.")
+        } else {
+            "Stack went offline mid-query. \
+             Restart with `./scripts/retrieval-stack.sh up` and retry."
+                .to_string()
+        }
+    } else if lite {
+        format!(
+            "Query failed. The lite stack has no daemon or container to check: the error \
+             above names the cause. If it names the embedder, verify {LITE_ENDPOINT}."
+        )
     } else {
         "Stack reachable but query failed. \
          Check `./scripts/retrieval-stack.sh ps` and qdrant logs \
@@ -689,11 +740,10 @@ impl Tool for SemanticSearch {
             .agent
             .project_root_for(ctx.workspace_override.as_deref())
             .await;
+        let backend = crate::retrieval::code_store::VectorBackend::resolve();
         let client = crate::retrieval::client::RetrievalClient::from_env(root.as_deref())
             .await
-            .map_err(|e| {
-                map_from_env_error(e, crate::retrieval::code_store::VectorBackend::resolve())
-            })?;
+            .map_err(|e| map_from_env_error(e, backend))?;
         let opts = crate::retrieval::search::SearchOpts {
             limit,
             overfetch: limit * 2,
@@ -751,7 +801,7 @@ impl Tool for SemanticSearch {
                         .project_has_chunks(&collection, &delta_id)
                         .await
                         .map_err(|e| {
-                            let hint = classify_search_error(&e.to_string(), &delta_id);
+                            let hint = classify_search_error(&e.to_string(), &delta_id, backend);
                             crate::tools::RecoverableError::with_hint(
                                 format!("stack search failed: {e}"),
                                 hint,
@@ -785,7 +835,7 @@ impl Tool for SemanticSearch {
                     .project_has_chunks(&collection, &main_project_id)
                     .await
                     .map_err(|e| {
-                        let hint = classify_search_error(&e.to_string(), &main_project_id);
+                        let hint = classify_search_error(&e.to_string(), &main_project_id, backend);
                         crate::tools::RecoverableError::with_hint(
                             format!("stack search failed: {e}"),
                             hint,
@@ -820,7 +870,8 @@ impl Tool for SemanticSearch {
                         .search_code_overlay(&main_project_id, &delta_id, query, main_opts)
                         .await
                         .map_err(|e| {
-                            let hint = classify_search_error(&e.to_string(), &main_project_id);
+                            let hint =
+                                classify_search_error(&e.to_string(), &main_project_id, backend);
                             crate::tools::RecoverableError::with_hint(
                                 format!("stack search failed: {e}"),
                                 hint,
@@ -831,7 +882,7 @@ impl Tool for SemanticSearch {
                         .search_code(&delta_id, query, delta_opts)
                         .await
                         .map_err(|e| {
-                            let hint = classify_search_error(&e.to_string(), &delta_id);
+                            let hint = classify_search_error(&e.to_string(), &delta_id, backend);
                             crate::tools::RecoverableError::with_hint(
                                 format!("stack search failed: {e}"),
                                 hint,
@@ -852,7 +903,7 @@ impl Tool for SemanticSearch {
             .search_code(&project_id, query, opts)
             .await
             .map_err(|e| {
-                let hint = classify_search_error(&e.to_string(), &project_id);
+                let hint = classify_search_error(&e.to_string(), &project_id, backend);
                 crate::tools::RecoverableError::with_hint(format!("stack search failed: {e}"), hint)
             })?;
         // A member's chunks are stored relative to the member directory; every other tool
@@ -1225,11 +1276,12 @@ pub(crate) fn format_semantic_search(val: &Value) -> String {
 #[cfg(test)]
 mod classify_search_error_tests {
     use super::classify_search_error;
+    use crate::retrieval::code_store::VectorBackend;
 
     #[test]
     fn missing_collection_routes_to_index_build_hint() {
         let err = "hybrid_query: Collection `code_chunks` doesn't exist!";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(hint.contains("index(action=\"build\")"), "hint: {hint}");
         assert!(hint.contains("codescout"), "hint must name project: {hint}");
     }
@@ -1237,7 +1289,7 @@ mod classify_search_error_tests {
     #[test]
     fn dim_mismatch_routes_to_drop_and_reindex_hint() {
         let err = "upsert_points: Vector dimension error: expected dim: 512, got 768";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(hint.contains("dim mismatch"), "hint: {hint}");
         assert!(
             hint.contains("DELETE"),
@@ -1252,7 +1304,7 @@ mod classify_search_error_tests {
     #[test]
     fn transport_error_routes_to_restart_hint() {
         let err = "tonic::transport::Error: Connection refused (os error 111)";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(hint.contains("offline"), "hint: {hint}");
         assert!(
             hint.contains("retrieval-stack.sh up"),
@@ -1263,7 +1315,7 @@ mod classify_search_error_tests {
     #[test]
     fn unknown_error_routes_to_diagnostic_hint() {
         let err = "some weird unrelated failure";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(hint.contains("ps"), "fallback must check stack: {hint}");
         assert!(
             hint.contains("docker logs"),
@@ -1275,7 +1327,7 @@ mod classify_search_error_tests {
     fn collection_missing_takes_priority_over_transport() {
         // If both signals present, collection-missing wins (more actionable).
         let err = "Collection `code_chunks` not found via tonic transport";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(
             hint.contains("index(action=\"build\")"),
             "specificity ordering: {hint}"
@@ -1288,7 +1340,7 @@ mod classify_search_error_tests {
         // analysis fell into the generic bucket because TEI didn't have its
         // own classification. New TEI bucket gives a concrete recovery path.
         let err = "stack search failed: dense tei status: HTTP 503";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(
             hint.contains("TEI") || hint.contains("tei"),
             "hint must name TEI explicitly: {hint}"
@@ -1308,7 +1360,7 @@ mod classify_search_error_tests {
         // A bare TEI error string that doesn't also match collection/dim/
         // transport should resolve to the new TEI hint, not the generic one.
         let err = "search_code: dense tei status (HTTP 504, upstream timeout)";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(
             !hint.contains("Stack reachable but query failed"),
             "must not hit generic fallback: {hint}"
@@ -1322,7 +1374,7 @@ mod classify_search_error_tests {
         // logs" fallback, sending operators to debug a healthy stack.
         let err = "stack search failed: dense embed connect failed: \
                    http://127.0.0.1:8081/v1/embeddings — the dense embedder is unreachable";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(
             hint.contains("CODESCOUT_EMBEDDER_URL"),
             "hint must point at the embedder URL env var: {hint}"
@@ -1360,12 +1412,16 @@ mod classify_search_error_tests {
         }
         .to_string();
 
-        let from_crate =
-            classify_search_error(&format!("stack search failed: {produced}"), "codescout");
+        let from_crate = classify_search_error(
+            &format!("stack search failed: {produced}"),
+            "codescout",
+            VectorBackend::Qdrant,
+        );
         let from_root = classify_search_error(
             "stack search failed: dense embed connect failed: \
              http://127.0.0.1:48081/v1/embeddings — the dense embedder is unreachable",
             "codescout",
+            VectorBackend::Qdrant,
         );
 
         assert_eq!(
@@ -1398,11 +1454,15 @@ mod classify_search_error_tests {
         }
         .to_string();
 
-        let from_crate =
-            classify_search_error(&format!("stack search failed: {produced}"), "codescout");
+        let from_crate = classify_search_error(
+            &format!("stack search failed: {produced}"),
+            "codescout",
+            VectorBackend::Qdrant,
+        );
         let from_root = classify_search_error(
             "stack search failed: dense openai status 500: something went wrong",
             "codescout",
+            VectorBackend::Qdrant,
         );
 
         assert_eq!(
@@ -1433,7 +1493,11 @@ mod classify_search_error_tests {
         }
         .to_string();
 
-        let hint = classify_search_error(&format!("stack search failed: {produced}"), "codescout");
+        let hint = classify_search_error(
+            &format!("stack search failed: {produced}"),
+            "codescout",
+            VectorBackend::Qdrant,
+        );
 
         assert!(
             !hint.contains("collection is missing"),
@@ -1464,7 +1528,7 @@ mod classify_search_error_tests {
             crate::retrieval::embedder::SPARSE_STATUS_MARKER
         );
 
-        let hint = classify_search_error(&err, "codescout");
+        let hint = classify_search_error(&err, "codescout", VectorBackend::Qdrant);
 
         assert!(
             !hint.contains("collection is missing"),
@@ -1531,7 +1595,7 @@ mod classify_search_error_tests {
             .expect_err("a 400 from the sparse server cannot produce an embedding")
             .to_string();
 
-        let hint = classify_search_error(&err, "codescout");
+        let hint = classify_search_error(&err, "codescout", VectorBackend::Qdrant);
 
         assert!(
             hint.contains("embedder"),
@@ -1551,7 +1615,7 @@ mod classify_search_error_tests {
     #[test]
     fn openai_send_does_not_hit_generic_qdrant_fallback() {
         let err = "stack search failed: dense openai send";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(
             !hint.contains("Stack reachable but query failed"),
             "a dense send failure must route to the embedder bucket, not the generic fallback: {hint}"
@@ -1569,7 +1633,7 @@ mod classify_search_error_tests {
     #[test]
     fn openai_status_does_not_hit_generic_qdrant_fallback() {
         let err = "stack search failed: dense openai status 500: upstream unavailable";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(
             !hint.contains("Stack reachable but query failed")
                 && !hint.contains("docker logs codescout-qdrant"),
@@ -1588,7 +1652,7 @@ mod classify_search_error_tests {
         let err = "dense openai status 400: {\"error\":{\"code\":400,\"message\":\"input \
                    (1682 tokens) is larger than the max context size (1024 tokens). \
                    skipping\",\"type\":\"exceed_context_size_error\"}}";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(
             hint.contains("PAYLOAD SIZE"),
             "must name the cause as size, not reachability: {hint}"
@@ -1616,7 +1680,7 @@ mod classify_search_error_tests {
         let err = "dense openai status 500: {\"error\":{\"code\":500,\"message\":\"input is \
                    too large to process. increase the physical batch size\",\"type\":\
                    \"server_error\"}}";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(
             hint.contains("PAYLOAD SIZE"),
             "the n_batch refusal is a size problem too, not an outage: {hint}"
@@ -1643,7 +1707,7 @@ mod classify_search_error_tests {
     #[test]
     fn an_embedder_body_mentioning_not_found_does_not_hijack_the_collection_bucket() {
         let err = "dense openai status 404: {\"error\":\"model not found\"}";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(
             !hint.contains("Qdrant collection is missing"),
             "an embedder error carrying 'not found' in its BODY must stay in the \
@@ -1665,7 +1729,7 @@ mod classify_search_error_tests {
         // fallback — same misrouting class as the 2026-07-13 bug.
         let err = "could not build the 'ollama:nomic-embed-text' embedder: \
                    embedding server unavailable after 3 attempts";
-        let hint = classify_search_error(err, "codescout");
+        let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
         assert!(
             hint.contains("[embeddings].model") || hint.contains("CODESCOUT_EMBEDDER_MODEL"),
             "hint must point at the model config: {hint}"
@@ -1697,12 +1761,52 @@ mod classify_search_error_tests {
         .to_string();
         let err =
             format!("could not build the 'openai:text-embedding-3-small' embedder: {produced}");
-        let hint = classify_search_error(&err, "codescout");
+        let hint = classify_search_error(&err, "codescout", VectorBackend::Qdrant);
         assert!(
             !hint.contains("Stack reachable but query failed"),
             "an embedding-server HTTP failure must route to the resolver-path \
              embedder bucket, not the generic fallback: {hint}"
         );
+    }
+    /// One error string per arm that names a restart script or a container, so a hint
+    /// that ignores the backend fails on the arm it forgot.
+    const SCRIPT_ARM_ERRORS: [&str; 5] = [
+        "stack search failed: dense openai status 500: something went wrong",
+        "search_code: dense tei status (HTTP 504, upstream timeout)",
+        "stack search failed: dense embed connect failed: \
+         http://127.0.0.1:8081/v1/embeddings — the dense embedder is unreachable",
+        "tonic::transport::Error: Connection refused (os error 111)",
+        "some weird unrelated failure",
+    ];
+
+    #[test]
+    fn a_lite_stack_search_failure_is_not_sent_to_the_qdrant_script() {
+        for err in SCRIPT_ARM_ERRORS {
+            let hint = classify_search_error(err, "codescout", VectorBackend::SqliteVec);
+            assert!(
+                !hint.contains("retrieval-stack.sh"),
+                "the lite stack has no script to run: {err:?} -> {hint}"
+            );
+            assert!(
+                !hint.contains("docker"),
+                "the lite stack has no container to inspect: {err:?} -> {hint}"
+            );
+            assert!(
+                hint.contains("CODESCOUT_EMBEDDER_URL"),
+                "the lite hint must name the endpoint setting: {err:?} -> {hint}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_qdrant_stack_search_failure_still_names_the_script() {
+        for err in SCRIPT_ARM_ERRORS {
+            let hint = classify_search_error(err, "codescout", VectorBackend::Qdrant);
+            assert!(
+                hint.contains("retrieval-stack.sh"),
+                "the Qdrant hint must name the script: {err:?} -> {hint}"
+            );
+        }
     }
 }
 

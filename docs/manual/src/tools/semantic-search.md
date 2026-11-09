@@ -284,13 +284,15 @@ versions of this page documented `threshold` and `path`, and neither exists.
 {
   "indexed": false,
   "project_id": "codescout",
-  "message": "Retrieval stack offline: <error>. Run scripts/retrieval-stack.sh up."
+  "message": "Retrieval stack offline: <error>. <fix for the active backend>"
 }
 ```
 
 `indexed: false` therefore has two distinct causes — an empty index and an
-unreachable Qdrant. The `message` is what tells them apart, so read it rather than
-branching on the boolean alone.
+unreachable retrieval stack. The `message` is what tells them apart, so read it rather than
+branching on the boolean alone. The sentence after `<error>` is the fix for the active
+backend: `Run \`./scripts/retrieval-stack.sh up\` to start the retrieval stack.` on Qdrant, and
+`verify CODESCOUT_EMBEDDER_URL and EMBED_API_KEY` on the lite stack, which has no daemon to start.
 
 **Optional blocks.** When a build is running or has finished this session, an
 `indexing` block is attached:
