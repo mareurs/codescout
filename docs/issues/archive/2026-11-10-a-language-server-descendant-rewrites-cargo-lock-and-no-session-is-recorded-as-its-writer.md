@@ -1,10 +1,11 @@
 ---
-id: '427cace6a7ea5cb5'
+id: 84309b77e4614a1b
 kind: bug
-status: open
+status: wontfix
 title: 'BUG: a language-server descendant rewrites the tracked Cargo.lock with no tool call, so no session is recorded as its writer'
 tags:
 - cluster/authorship-unrecoverable-after-the-fact
+closed: 2026-11-10
 opened: 2026-11-10
 owner: marius
 related:
@@ -68,16 +69,22 @@ None yet.
 
 ## Fix
 
-Unknown. Options, none evaluated:
+Not fixed, by decision on 2026-11-10: wontfix.
 
-1. Leave it. `UNKNOWN` is the honest verdict, and nothing acts on it.
-2. Name the manifests that a session edited in the window, in the `UNKNOWN` output for `Cargo.lock`, without changing the verdict.
-3. Pass `--locked` to the cargo commands that rust-analyzer starts. This stops the write, but rust-analyzer then reports an error after each dependency edit until someone updates the lock file.
-4. Attribute `Cargo.lock` to the writers of the manifest. This infers ownership, which `file-provenance.py` refuses to do elsewhere.
+Reason, from M3: `scripts/file-provenance.py` already gives the honest answer. A lock file that no session wrote reads `UNKNOWN`, and its text says that absence of a record is a statement about coverage and must not be read as "not mine". The manifest the session did write reads `MINE`. No mechanical consequence was found: `scripts/fmt-mine.sh` receives only `.rs` files, and no convention acts on `UNKNOWN` for `Cargo.lock`.
+
+The options that were open, and why none was taken:
+
+1. Leave it. This is the decision.
+2. A line naming the manifests written in the window. It adds a cargo-specific case to a generic attribution tool and changes no verdict and no action.
+3. `--locked` for the cargo commands that rust-analyzer starts. It stops the write, but rust-analyzer then reports a stale lock file after every dependency edit and loses workspace data until someone runs cargo. That cost falls on every user of the mux, for a problem with no measured harm.
+4. Attribute `Cargo.lock` to the writers of the manifest. This infers ownership, which the tool refuses to do elsewhere.
+
+Reopen if a session or a script acts wrongly on an `UNKNOWN` `Cargo.lock`: for example a commit that includes a peer's dependency change in the lock file because the lock file read as nobody's.
 
 ## Tests added
 
-N/A — not fixed.
+N/A — wontfix. Nothing in the product changed. The measurement (M3) used a throwaway test that is not part of the repository. The existing `test_mixed_native_ownership_and_same_id_cross_host` (`tests/test_harness_provenance.py:122-129`) already pins the behaviour M3 relies on: a path with no recorded writer reads `UNKNOWN` while its neighbours read `MINE`, `PEER` and `SHARED`.
 
 ## Workarounds
 
@@ -85,7 +92,7 @@ Before committing a manifest change, read `git diff Cargo.lock`. If the change o
 
 ## Resume
 
-The verdict is measured (M3, below). The remaining question is whether this record should be fixed or closed, because M3 shows the tool already gives an honest answer and no consequence was found.
+CLOSED 2026-11-10 as wontfix. Read § Fix for the reason and the reopen trigger. Everything below is the historical record.
 
 M3, 2026-11-10: a throwaway test in the session scratchpad (`test_m3_cargo_lock.py`) used the fixtures of `tests/test_harness_provenance.py`. It committed `Cargo.toml` and `Cargo.lock`, then wrote both on disk. One recorded `Write` named `Cargo.toml`. Nothing recorded the lock file. The real `scripts/file-provenance.py` printed `MINE      Cargo.toml` and `UNKNOWN   Cargo.lock`. Its text for `Cargo.lock` says that absence of a record is a statement about coverage and must not be read as "not mine".
 
