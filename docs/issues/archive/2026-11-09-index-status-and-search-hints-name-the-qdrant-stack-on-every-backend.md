@@ -1,11 +1,13 @@
 ---
-id: '8906e05d97b175e5'
+id: 28d4f0268e7b1a2e
 kind: bug
-status: open
+status: fixed
 title: 'BUG: index status and semantic_search failure hints send a lite-stack user to retrieval-stack.sh'
 tags:
 - cluster/hint-composed-without-the-request
+closed: 2026-11-09
 opened: 2026-11-09
+unverified: The five production call sites of classify_search_error and the index status arm pass VectorBackend::resolve() to code the tests cover, and no test drives a failing embedder through semantic_search or index(action=status). The mapping is tested per backend; the call-site wiring is read from the diff and compile-checked, not exercised.
 ---
 
 # BUG: index status and semantic_search failure hints send a lite-stack user to retrieval-stack.sh
@@ -42,7 +44,26 @@ inferred from the source on 2026-11-09 — not measured at runtime.
 None.
 
 ## Fix
-Not yet.
+
+Fixed on `experiments` in `2f37a8167`.
+
+- `classify_search_error` (`src/tools/semantic/semantic_search.rs`) takes the `VectorBackend`. On the lite stack the five arms that named `retrieval-stack.sh` or `docker` (embedder status, TEI, embedder connect, transport, generic fallback) name `CODESCOUT_EMBEDDER_URL` and `EMBED_API_KEY`. The Qdrant text is unchanged. The five production call sites pass the backend resolved once per call.
+- `status_offline_message` (`src/tools/semantic/index.rs`) builds the `index(action="status")` offline message from `VectorBackend::offline_hint()`. The `project_index_stats` error arm says "Index status query failed" on every backend.
+- `docs/manual/src/tools/semantic-search.md` shows the per-backend message.
+
+Gate green before the commit: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
+
+## Fix provenance
+
+- **SHA:** `2f37a81679b07cd70ce7279763028bb65964f19f` (`experiments`)
+- **patch-id:** `b62a5d95fd08ed260f3b11a848f11b49ccbf7695`
+
+## Tests added
+
+- `classify_search_error_tests::a_lite_stack_search_failure_is_not_sent_to_the_qdrant_script` and `a_qdrant_stack_search_failure_still_names_the_script` (`semantic_search.rs`): the same five error strings, one per script arm, on each backend.
+- `status_offline_message_tests` (`index.rs`): three tests on the message per backend and on the cause staying in it.
+
+Limit: see `unverified` in the frontmatter.
 
 ## Workarounds
 Read the error text before the hint: it names the real cause.
