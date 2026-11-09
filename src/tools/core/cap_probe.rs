@@ -1512,4 +1512,21 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             cited_test: "an_oversized_output_is_a_marked_prefix_and_the_response_says_so",
         },
     },
+    // -- src/tools/native_provenance_fence/holders.rs --
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test
+        // starts `MAX_LISTED + 2` (14) real processes that hold the lock file open as their stdin,
+        // then calls `describe`, the function that builds the text of a refused fence lock. The
+        // text must say "and more". The same flag is also set when the 400 ms scan limit cuts the
+        // search, so on a very busy machine the test can pass through that bound; it cannot pass
+        // with the flag missing.
+        // MUTATION (2026-11-09): making the cap branch of `processes_with_open` return `false`
+        // for "cut" turned the cited test red, with twelve sleepers listed and no marker.
+        id: "provenance_fence.holders_listed",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("and more"),
+            mutation: Mutation::Killed,
+            cited_test: "describe_says_and_more_when_more_processes_hold_the_file_than_it_lists",
+        },
+    },
 ];
