@@ -109,3 +109,103 @@ async fn an_overwrite_ack_cannot_be_replayed_through_another_tool() {
     );
     assert_eq!(std::fs::read_to_string(&target).unwrap(), "old");
 }
+/// The shrink guard refuses an overwrite that cuts a file by more than half. That refusal keeps
+/// the input too, so agreeing to the reduction does not mean sending the payload again, and the
+/// replay carries `force=true` that the caller never sent.
+/// docs/issues/2026-11-08-create-file-shrink-guard-refusal-makes-the-agent-resend-the-whole-write.md
+#[tokio::test]
+async fn a_shrink_guard_refusal_keeps_the_write_and_an_ack_applies_it_with_force() {
+    let (dir, server) = make_server().await;
+    let target = dir.path().join("big.txt");
+    let original = "a".repeat(400);
+    std::fs::write(&target, &original).unwrap();
+
+    let (_e, text) = call(
+        &server,
+        "create_file",
+        json!({ "path": target.to_string_lossy(), "content": "tiny", "overwrite": true }),
+    )
+    .await;
+    assert!(
+        text.contains("shrink guard"),
+        "precondition: the shrink guard must refuse the cut: {text}"
+    );
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), original);
+    assert!(
+        text.contains("create_file(ack=") && text.contains("@ack_"),
+        "the refusal must name a handle: {text}"
+    );
+    let handle = handle_in(&text);
+
+    // The replay carries NOTHING but the handle: no path, no content, no overwrite, no force.
+    let (replay_err, replay) = call(&server, "create_file", json!({ "ack": handle })).await;
+    assert!(!replay_err, "the replay must succeed: {replay}");
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "tiny",
+        "the replay must write the input the refusal kept, past the shrink guard"
+    );
+}
+
+/// An `ack` replay of the existing-path refusal over a file that the content would cut by more
+/// than half meets the shrink guard. That second refusal mints its own handle, so the caller never
+/// has to send the payload again, however many refusals stand between it and the write.
+#[tokio::test]
+async fn an_existing_path_ack_that_meets_the_shrink_guard_mints_a_second_handle() {
+    let (dir, server) = make_server().await;
+    let target = dir.path().join("big.txt");
+    let original = "a".repeat(400);
+    std::fs::write(&target, &original).unwrap();
+
+    let (_e, first) = call(
+        &server,
+        "create_file",
+        json!({ "path": target.to_string_lossy(), "content": "tiny" }),
+    )
+    .await;
+    assert!(
+        first.contains("file already exists"),
+        "precondition: the first refusal is the existing path's: {first}"
+    );
+    let (_e, second) = call(&server, "create_file", json!({ "ack": handle_in(&first) })).await;
+    assert!(
+        second.contains("shrink guard") && second.contains("@ack_"),
+        "the replay meets the shrink guard, and that refusal must offer a handle: {second}"
+    );
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), original);
+
+    let (err, done) = call(&server, "create_file", json!({ "ack": handle_in(&second) })).await;
+    assert!(!err, "the second replay must succeed: {done}");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "tiny");
+}
+
+/// A shrink-guard handle is bound to the file it saw, like the existing-path one.
+#[tokio::test]
+async fn a_shrink_guard_ack_does_not_apply_to_a_file_that_changed_since_the_refusal() {
+    let (dir, server) = make_server().await;
+    let target = dir.path().join("big.txt");
+    std::fs::write(&target, "a".repeat(400)).unwrap();
+
+    let (_e, text) = call(
+        &server,
+        "create_file",
+        json!({ "path": target.to_string_lossy(), "content": "tiny", "overwrite": true }),
+    )
+    .await;
+    assert!(text.contains("shrink guard"), "precondition: {text}");
+    let handle = handle_in(&text);
+
+    let changed = "b".repeat(500);
+    std::fs::write(&target, &changed).unwrap();
+
+    let (_e, replay) = call(&server, "create_file", json!({ "ack": handle })).await;
+    assert!(
+        replay.contains("changed since"),
+        "the replay must be refused: {replay}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        changed,
+        "the file written by someone else must be left alone"
+    );
+}

@@ -462,6 +462,11 @@ pub struct OverwriteGuard {
     pub path: PathBuf,
     pub len: u64,
     pub modified: Option<std::time::SystemTime>,
+    /// `true` when the refusal was the shrink guard's: the replay then adds `force=true` as well
+    /// as `overwrite=true`, because the caller is told how much the replacement would cut and
+    /// the handle is how they agree to it.
+    /// docs/issues/2026-11-08-create-file-shrink-guard-refusal-makes-the-agent-resend-the-whole-write.md
+    pub force: bool,
 }
 
 impl OverwriteGuard {
@@ -472,6 +477,7 @@ impl OverwriteGuard {
             path: path.to_path_buf(),
             len: meta.len(),
             modified: meta.modified().ok(),
+            force: false,
         })
     }
 

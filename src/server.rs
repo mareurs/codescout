@@ -779,8 +779,9 @@ impl CodeScoutServer {
                     );
                 }
             }
-            // `create_file` refused an existing path: replay with `overwrite=true`, but only
-            // over the file the caller was told about.
+            // `create_file` refused to overwrite a file: replay with `overwrite=true` (and
+            // `force=true` when the shrink guard refused), but only over the file the caller was
+            // told about.
             (None, Some(guard)) => {
                 if !guard.still_holds() {
                     return Err(crate::tools::RecoverableError::with_hint(
@@ -793,6 +794,9 @@ impl CodeScoutServer {
                 }
                 if let Some(map) = replayed.as_object_mut() {
                     map.insert("overwrite".to_string(), Value::Bool(true));
+                    if guard.force {
+                        map.insert("force".to_string(), Value::Bool(true));
+                    }
                 }
             }
             (None, None) => {

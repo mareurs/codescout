@@ -110,12 +110,30 @@ impl Tool for CreateFile {
         if overwrite && resolved.exists() && !super::parse_bool_param(&input["force"]) {
             let original = std::fs::read_to_string(&resolved)?;
             if let Some(report) = crate::util::shrink_guard::check(&original, content) {
-                return Err(super::RecoverableError::with_hint(
-                    format!("shrink guard: overwriting '{}' {}", path, report.describe()),
+                let message = format!("shrink guard: overwriting '{}' {}", path, report.describe());
+                let mut hint = String::from(
                     "Read the existing file before replacing it. If the reduction is intentional, \
                  repeat create_file(path=..., content=..., overwrite=true, force=true).",
-                )
-                .into());
+                );
+                // Like the existing-path refusal, this one keeps the input under a handle, so
+                // agreeing to the reduction does not mean sending `content` a second time. The
+                // replay adds `force=true` and is refused if the file changed since.
+                // docs/issues/2026-11-08-create-file-shrink-guard-refusal-makes-the-agent-resend-the-whole-write.md
+                if let Some(mut guard) = crate::tools::output_buffer::OverwriteGuard::of(&resolved)
+                {
+                    guard.force = true;
+                    let handle = ctx.output_buffer.store_overwrite_replayable_write(
+                        "create_file".to_string(),
+                        input.clone(),
+                        guard,
+                    );
+                    hint.push_str(&format!(
+                        " Or, to apply the content you just sent as it is, call \
+                         create_file(ack=\"{handle}\") and send nothing else; the replay is \
+                         refused if the file changes before then."
+                    ));
+                }
+                return Err(super::RecoverableError::with_hint(message, hint).into());
             }
         }
         crate::util::fs::write_utf8(&resolved, content)?;
