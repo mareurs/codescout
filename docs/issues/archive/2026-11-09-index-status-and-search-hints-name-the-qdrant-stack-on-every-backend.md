@@ -62,6 +62,7 @@ Gate green before the commit: `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`.
 
 - `classify_search_error_tests::a_lite_stack_search_failure_is_not_sent_to_the_qdrant_script` and `a_qdrant_stack_search_failure_still_names_the_script` (`semantic_search.rs`): the same five error strings, one per script arm, on each backend.
 - `status_offline_message_tests` (`index.rs`): three tests on the message per backend and on the cause staying in it.
+- `classify_search_error_tests::a_lite_query_at_another_width_is_told_to_rebuild` (`204508f53`): produces the real error from `SqliteVecCodeStore` (3-wide index, 5-wide query) and routes it through the classifier. `a_lite_error_that_says_not_found_is_not_a_missing_qdrant_collection`: the same function, a lite error containing "not found". Mutation probe: with the dimension constant misspelled and the `!lite` guard removed, exactly these two tests failed and the other 22 passed; the file was restored.
 
 Limit: see `unverified` in the frontmatter.
 
@@ -69,7 +70,8 @@ Limit: see `unverified` in the frontmatter.
 Read the error text before the hint: it names the real cause.
 
 ## Not covered
-- `classify_search_error` arms "Qdrant collection is missing" and "Vector dimension" (curl against Qdrant) are Qdrant-specific too. What a lite store reports for those cases is not verified.
+- None open for the two Qdrant-specific arms: fixed in `204508f53`. The lite store has no collection to miss (`query` returns no hits for an unindexed project), so that arm is Qdrant-only. For a query at another width, sqlite-vec says `Dimension mismatch for query vector for the "embedding" column. Expected 3 dimensions but received 5.`; the Qdrant arm matched neither "Vector dimension" nor "expected dim", so the lite fallback answered. A lite arm now names `index(action="build", force=true)`. Measured by running the lite store, not read from source.
+- The lite message was not run against a real lite stack end to end: the test calls the real `SqliteVecCodeStore` and the classifier, not `semantic_search`.
 - `src/dashboard/api/index.rs` carried the same "Qdrant scroll failed" label; it says "Index status query failed" since `d01f0c0e8`.
 
 ## References
