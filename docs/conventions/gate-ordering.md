@@ -266,6 +266,18 @@ one arrangement and silently wrong after any reorder — the same defect a bare 
 this project pairs one with a patch-id. A paragraph that tells you its own order is load-bearing
 must not then refer to its commands by number.
 
+## What the gate cannot see — a file that is not tracked yet
+
+Six guards under `tests/` read their population from `git ls-files`: `result_caps.rs`, `inline_gates.rs` and `buffer_stream_policy.rs` (all `src`), `issue_clusters.rs` and `issue_frontmatter.rs` (`docs/issues`), and `committed_paths.rs` (`scripts`). The selector is deliberate. `tests/result_caps.rs` (`tracked_src_files`) says an untracked file is a peer's in-flight work, and gating on it lets one session turn another session's build red.
+
+The consequence is that a new file is invisible to those guards until it is tracked. The gate can be green before the commit that adds the file and red after it. Measured 2026-11-09: commit `4eceee5e7` added `src/tools/native_provenance_fence/holders.rs` with a cap constant nobody had classified. The full gate had passed before the commit. `every_cap_constant_is_classified` was red at HEAD until `0d47f5898`.
+
+**The rule for the author of a new file.** Stage the file by explicit path before the gate run you will cite as evidence. `git add -N <file>` is enough to make `git ls-files` list it. Checked 2026-11-09 in a scratch repository: `git ls-files src` did not list an untracked file, and listed it after `git add -N`. That check did not run the guards themselves.
+
+**The price.** A staged file is visible in the shared index, so a peer's gate reads it too, and a red guard on your file is then red for them as well. Stage a new file only when you are ready for that, and name it in the commit by pathspec as [the commit sequence](shared-checkout-commit-sequence.md) says.
+
+**What this does not do.** It does not change the selector. Reading untracked files (`--others`) would remove the protection the selector gives.
+
 ## Related
 
 - The executable copy: [`CLAUDE.md`](../../CLAUDE.md) § *Development Commands*.

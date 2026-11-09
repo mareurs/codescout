@@ -94,7 +94,7 @@ entry_high_water_W: 2
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-<n> | YYYY-MM-DD | low/med/high | <category> | open | <one-line title> |
-| F-10 | 2026-11-09 | med | instrument-blindness | open | **A new untracked file escaped a `git ls-files` guard, so the gate was green before the commit and red after** — `every_cap_constant_is_classified` never saw `holders.rs` until it was tracked |
+| F-10 | 2026-11-09 | med | instrument-blindness | mitigated | **A new untracked file escaped a `git ls-files` guard, so the gate was green before the commit and red after** — `every_cap_constant_is_classified` never saw `holders.rs` until it was tracked |
 | W-2 | 2026-11-09 | — | pattern | validated | **Read the gate before filing the bug** — the root's leniency in `doc` is deliberate; the filed bug is the narrow `dry_run` hazard |
 | F-9 | 2026-11-09 | low | self-friction | mitigated | **I put an invented timestamp in a message to a peer** — corrected by a follow-up message |
 | F-8 | 2026-11-09 | low | tooling | promoted-to-bug-tracker | **`fmt-mine.sh` was refused five times by a provenance lock** — the rust-analyzer mux holds an inherited shared copy for hours; bug `312cde2f4698874b` |
@@ -485,9 +485,9 @@ Codified so the Index column means the same thing across sessions.
 
 **Rule I am applying:** after the first commit that adds a file under `src/`, run `result_caps` again, or the whole gate, before treating the change as verified; and run the gate once with the new file staged (`git add -N`) so that `git ls-files` lists it. I did not test that `git add -N` makes the guard see the file.
 
-**Not fixed, and probably should not be.** `tests/result_caps.rs:644` says the selector is deliberate: "an untracked file is a peer's in-flight work and gating on it lets one session red another's build". Reading `--others` would remove that protection, so the earlier idea of changing the guard is withdrawn. What stays is a rule for the author of a new file: stage the file by explicit path before the gate. That has a price, because the staged file is then visible to a peer's gate too. No convention in `docs/conventions/` records this rule; a `grep` for "new file", "intent-to-add" and "add -N" there found nothing relevant.
+**Not fixed, and probably should not be.** `tests/result_caps.rs:644` says the selector is deliberate: "an untracked file is a peer's in-flight work and gating on it lets one session red another's build". Reading `--others` would remove that protection, so the earlier idea of changing the guard is withdrawn. What stays is a rule for the author of a new file: stage the file by explicit path before the gate. That has a price, because the staged file is then visible to a peer's gate too. The rule is now recorded in `docs/conventions/gate-ordering.md`, section "What the gate cannot see", with the `git add -N` check run in a scratch repository (`git ls-files` lists the file after `add -N`; the guards themselves were not run against it).
 
-**Status:** open.
+**Status:** mitigated.
 
 ## Template for new entries
 
