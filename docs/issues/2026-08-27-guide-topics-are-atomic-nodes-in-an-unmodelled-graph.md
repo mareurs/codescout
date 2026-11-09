@@ -952,3 +952,21 @@ Operator chose option 3 (trim first, then the split by overflowing tool). Commit
 - Gate green in one run on the committed tree: Python 1,816, lean 6,366, default 9,266, clippy and fmt clean.
 
 **Next:** step 2, the split by overflowing tool. It needs a design first: how a topic that declares sections interacts with the `overflowing` gate in `emit_guide_sections`, and a `serves:` shape for "any overflow".
+
+## Pilot, step 2 built 2026-11-10 — `progressive-disclosure` ships the sections for the overflowing tool
+
+Commit `281ff16b3`. Spec `docs/superpowers/specs/2026-11-09-progressive-disclosure-split-by-tool-design.md`, plan `docs/superpowers/plans/2026-11-09-progressive-disclosure-split-by-tool.md`, builder check done before the plan.
+
+**What shipped.** The topic declares `serves:` on eight tools (`run_command`, `grep`, `read_file`, `tree`, `semantic_search`, `symbols`, `references`, `call_graph`). Sections: `Output budgets` and `Reading a buffer` (core, 1,003 and 2,200 B); the `.err` suffix section (1,018 B), `Background jobs: start...` (1,229 B) and `Background jobs: when no wake arrives...` (1,750 B), served to `run_command` only. Pull-only, each with a `SECTION_WAIVERS` row: `Buffer internals` (2,155 B), `Path-relative annotation` (2,068 B, still cited by three places), `Anti-patterns` (2,046 B), `Related` (84 B). The preamble (395 B) now carries the minimum for an overflow whose shape no section serves (`doc`, `librarian`): the 643 B wrapped block names the `output_id` handle and the read forms. The guide text itself changed only by added headings and comments.
+
+**Measured delivery (wrapped, with markers):** `grep` and the other six core tools 3,703 B; `run_command` 8,730 B; `doc` and `librarian` preamble 643 B. The spec's 3.6 KB and 8 KB targets were estimates that left out about 250 B of markers per section; the byte-budget test pins 3,900 B and 9,200 B (measured plus 5%).
+
+**Saving over the census, with real sizes.** `scratchpad/census-30d.jsonl`, 1,250 deliveries, 13.7 MB: subagents 9.93 to 6.49 MB (3.44 MB, 35%); parents 3.78 to 2.11 MB (1.66 MB, 44%). Total 5.1 MB, 37% of this topic and 16.7% of the 30.5 MB the census holds. That is below the 7.4 MB first estimated, because a `run_command` overflow (842 of the 1,250 deliveries) still ships 8.7 KB against a median delivered block of 10 KB. Counted as min(old block, new block), so older shorter versions are not credited. The 70 `doc` and 8 `librarian` overflows get the preamble only.
+
+**Verification.** Eight delivery tests, three emitter and index tests, one `get_guide` test and one end-to-end `run_command` test. Gates 2, 5, 6 and 7, the collision test and the size-cap test pass. A test that passed before the change (`a_later_grep_overflow_after_run_command_ships_nothing`) was strengthened so that it fails on the old behaviour. `./scripts/gate.sh` was green in one run on `281ff16b3`: Python 1,816, lean 6,377, default 9,279, clippy and fmt clean.
+
+**Not measured.** Whether an agent that overflows via `grep` or `doc` behaves differently without the background-job recipe and the buffer internals: no control group exists for this topic. Revisit when buffer-read errors rise (a `json_path` on a `@cmd_*` handle, a `.err` on a `@bg_*` handle, a re-run instead of a buffer query) against the 30 days before deployment. The change ships with `./scripts/rb.sh` and `/mcp`.
+
+**Accepted costs.** A persisted ledger that holds the bare topic key from before the split receives the core sections once (pinned by a test). An explicit `get_guide` stamps only the bare key, so a later overflow can deliver sections the agent just read, as for `librarian`.
+
+**Open lever, a decision for the operator.** `run_command` overflows are 842 of 1,250 deliveries and each ships 8.7 KB. The `.err` and `Background jobs` sections (4 KB of that) are served to every `run_command` overflow, because a shape cannot see whether the call was a background job. Layer 1 found the `.err` suffix used within 30 calls in 2% of cases and background jobs in 16% (subagents) and 39% (parents). Making those three sections pull-only would cut a `run_command` overflow to the 3.7 KB core, about 4.2 MB more over the census, at the cost of the recipe not arriving unprompted. Not done.

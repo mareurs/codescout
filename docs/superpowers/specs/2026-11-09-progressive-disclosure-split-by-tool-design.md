@@ -1,6 +1,6 @@
 # progressive-disclosure split by overflowing tool (design)
 
-**Status:** proposed 2026-11-09, awaiting operator approval. Step 2 of the pilot in bug `7579b32b1cd2362f` (`docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-an-unmodelled-graph.md`, § Pilot). Step 1, the trim of the pipe-capture bullet, is done (`f34fbc8b3`).
+**Status:** approved by the operator 2026-11-09; built in `281ff16b3` (2026-11-10). Step 2 of the pilot in bug `7579b32b1cd2362f` (`docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-an-unmodelled-graph.md`, § Pilot, step 2). Measured result: grep 3,703 B, run_command 8,730 B, doc preamble 643 B wrapped; 5.1 MB saved over the census. The byte targets in Goals below were estimates and are superseded by those numbers. Step 1, the trim of the pipe-capture bullet, is done (`f34fbc8b3`).
 
 ## Intent
 
