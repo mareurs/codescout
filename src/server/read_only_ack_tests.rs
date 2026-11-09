@@ -171,7 +171,7 @@ async fn a_refusal_that_a_pin_cannot_lift_offers_no_ack() {
 ///
 /// The control is the half that guards: a real write action is still refused by the same gate in
 /// the same session, so the fix narrowed the classification and did not open the gate.
-/// docs/issues/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
+/// docs/issues/archive/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
 #[cfg(feature = "librarian")]
 #[tokio::test]
 async fn an_unknown_doc_action_under_a_read_only_activation_names_the_action_not_the_gate() {

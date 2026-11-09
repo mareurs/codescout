@@ -122,7 +122,7 @@ fn advertised_actions() -> &'static [String] {
 ///
 /// An arm that is not in the schema enum is therefore unreachable, not unguarded: adding a
 /// mutating action means advertising it, and the write guard then applies to it.
-/// docs/issues/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
+/// docs/issues/archive/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
 pub(crate) fn is_unknown_action(action: &str) -> bool {
     let known = advertised_actions();
     !known.is_empty() && !known.iter().any(|a| a == action)
@@ -1075,7 +1075,7 @@ mod tests {
     /// so it must say "known" for every advertised action (else a write loses its guard) and
     /// "unknown" for what is not advertised. The answer to an unknown action lists the schema's
     /// own enum, so the text cannot drift from the schema as a typed-out copy once did.
-    /// docs/issues/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
+    /// docs/issues/archive/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
     #[test]
     fn an_unknown_action_is_told_apart_from_every_advertised_one_and_the_answer_lists_them() {
         let schema = Artifact.input_schema();

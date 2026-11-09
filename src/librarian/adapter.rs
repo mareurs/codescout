@@ -447,7 +447,7 @@ impl crate::tools::Tool for LibrarianAdapter {
             // `doc(action="read")` with "File writes are disabled" instead of naming the
             // action, and took the write lock for nothing. The default above still holds
             // for every ADVERTISED action, which is where a new mutating one appears.
-            // docs/issues/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
+            // docs/issues/archive/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
             "doc" => {
                 action.is_some_and(|a| !crate::librarian::tools::artifact::is_unknown_action(a))
                     && !matches!(
@@ -1307,7 +1307,7 @@ mod tests {
     /// read for the seven reads and a write for the rest. The oracle for "advertised" is the schema
     /// enum, as in `every_mutating_doc_action_has_a_preflight_arm`, so a mutating action added to
     /// the enum is a write on the day it is added, whatever this test lists.
-    /// docs/issues/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
+    /// docs/issues/archive/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
     #[test]
     fn an_unadvertised_or_missing_doc_action_is_not_a_write_and_every_advertised_one_keeps_its_answer(
     ) {

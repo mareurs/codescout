@@ -1,12 +1,13 @@
 ---
-id: '4cd3b177e891a966'
+id: d1785d7bbc37a127
 kind: bug
-status: open
+status: fixed
 title: An unknown doc action is classed as a write, so a read-only session refuses it as "File writes are disabled"
 owners:
 - marius
 tags:
 - cluster/hint-composed-without-the-request
+closed: 2026-11-09
 opened: 2026-11-08
 severity: low
 ---
@@ -54,16 +55,32 @@ Scale: `unknown_enum_value` accounts for 57 recoverable errors lifetime and 49 i
 1. **Hypothesis:** the gate runs after validation and the refusal comes from somewhere else. **Test:** called `doc(action="read")` read-only. **Verdict:** rejected — the write refusal fires, so validation did not run first. **Evidence link:** Symptom.
 
 ## Fix
-Not started. Options: validate `action` against the schema enum before the access gate; or classify an unknown action as a non-write so the handler's own unknown-action error is returned. The first keeps the "unknown means write" safety default for the gate and changes only the order.
+
+Fixed in `3ef97cb42` on `experiments` (patch-id `50a4750051cf`). The second option of this section was taken, narrowed so that the safety default stays.
+
+`LibrarianAdapter::is_write` now says that a `doc` action the schema does not advertise, or none, is not a write. `artifact::is_unknown_action` reads the schema enum once, and `Artifact::call` refuses such an action before any dispatch arm runs, so an arm that is not advertised is unreachable and not unguarded. Every advertised action keeps its old answer: the seven reads are non-writes and all others are writes. The unknown-action text is built from the same enum, so it cannot drift from the schema.
+
+Verified live on a rebuilt server on 2026-11-09, with the session activated read-only: `doc(action="read")` answered `unknown action 'read' — expected one of: find, get, create, …`, with no "File writes are disabled" and no `@ack_` handle. `doc(action="create")` in the same session was still refused by the gate.
 
 ## Tests added
-None yet.
+
+- `an_unadvertised_or_missing_doc_action_is_not_a_write_and_every_advertised_one_keeps_its_answer` (`src/librarian/adapter.rs`)
+- `an_unknown_action_is_told_apart_from_every_advertised_one_and_the_answer_lists_them` (`src/librarian/tools/artifact.rs`)
+- `an_unknown_doc_action_under_a_read_only_activation_names_the_action_not_the_gate` (`src/server/read_only_ack_tests.rs`), with a control that `doc(create)` is still refused.
+
+With `is_unknown_action` forced to `true`, 23 tests fail, these three among them. The opposite direction (restore the old `is_write`) was not run as a mutation; the adapter test asserts `!is_write` for `read` directly. Gate green on 2026-11-09: LEAN 6293, DEFAULT 9172, Python 1764 passed, clippy clean.
 
 ## Workarounds
 Use `get`, not `read`, to read a document: `doc(action="get", id=…, full=true)`.
 
 ## Resume
-Read the access-gate call site in `src/server.rs` (`check_tool_access`) and decide whether `action` validation can run before it for `doc`. Add a test next to `doc_call_can_write_is_keyed_on_the_effect_not_the_action_name` in `src/librarian/adapter.rs`.
+
+Nothing left to do for `doc`. The same shape may exist for `librarian(action=...)`, whose last `is_write` arm is `_ => true`; it was not checked.
+
+## Fix provenance
+
+- **SHA:** `3ef97cb42` (`experiments`)
+- **patch-id:** `50a4750051cf`
 
 ## References
 - `src/librarian/adapter.rs:436-448`
