@@ -109,6 +109,11 @@ pub struct Agent {
     /// docs/issues/2026-10-24-a-memory-call-resolves-its-root-three-times-so-a-concurrent-activate-can-split-the-row-from-its-database.md
     #[cfg(test)]
     pub(crate) memory_pin_log: Arc<std::sync::Mutex<Vec<Option<PathBuf>>>>,
+    /// Test-only: when set, `memory_embedder_for` fails with this message instead of building
+    /// an embedder, so a test can drive the "embedder could not be built" refusal through a
+    /// real memory call without touching the process environment.
+    #[cfg(test)]
+    memory_embedder_build_error: Arc<std::sync::Mutex<Option<String>>>,
     /// Test-only capture of the `RetrievalClient.embedder` seen by the single
     /// `RetrievalClient::from_env()` call inside `memory_embedder()`, taken at
     /// the exact point that `Arc` is about to be moved into `CodeDenseAdapter`.
@@ -1128,6 +1133,8 @@ impl Agent {
             memory_embedders_by_config: Arc::new(std::sync::Mutex::new(HashMap::new())),
             #[cfg(test)]
             memory_pin_log: Arc::new(std::sync::Mutex::new(Vec::new())),
+            #[cfg(test)]
+            memory_embedder_build_error: Arc::new(std::sync::Mutex::new(None)),
             #[cfg(test)]
             test_seen_client_embedder: Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(test)]
@@ -3017,6 +3024,15 @@ impl Agent {
         if let Some(installed) = self.memory_embedder.get() {
             return Ok(installed.clone());
         }
+        #[cfg(test)]
+        if let Some(msg) = self
+            .memory_embedder_build_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+        {
+            return Err(anyhow::anyhow!(msg));
+        }
         self.memory_embedder_for_with(
             crate::retrieval::code_store::VectorBackend::resolve(),
             workspace_override,
@@ -3106,6 +3122,15 @@ impl Agent {
         tokio::sync::SetError<Arc<dyn crate::retrieval::embedder::DenseEmbedder>>,
     > {
         self.memory_embedder.set(embedder)
+    }
+    /// Test seam: make [`Agent::memory_embedder_for`] fail with `message` rather than build an
+    /// embedder. A test double installed with [`Agent::set_memory_embedder_for_test`] still wins.
+    #[cfg(test)]
+    pub fn set_memory_embedder_build_error_for_test(&self, message: &str) {
+        *self
+            .memory_embedder_build_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(message.to_string());
     }
 
     /// Resolve the code-chunk search used by memory anchor creation.

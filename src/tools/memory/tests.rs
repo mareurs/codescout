@@ -1032,6 +1032,60 @@ fn the_embedder_cause_stays_in_the_message() {
     );
 }
 
+/// What the helper tests cannot see: the two real call sites. A `memory` call whose embedder
+/// cannot be built must refuse with the fix of the backend this process resolves, so a call
+/// site that hard-codes one backend's text fails here on the other backend's builds.
+///
+/// Uses the RAW context: the default one pre-installs a working embedder, which wins over the
+/// build error. Nothing here reaches ambient resolution or the store — the call refuses first.
+async fn refusal_of_a_memory_call_with_an_unbuildable_embedder(
+    input: serde_json::Value,
+) -> anyhow::Error {
+    let (_dir, ctx) = test_ctx_with_project_raw().await;
+    ctx.agent
+        .set_memory_embedder_build_error_for_test("connection refused");
+    Memory
+        .call(input, &ctx)
+        .await
+        .expect_err("an embedder that cannot be built must refuse the call")
+}
+
+fn assert_names_the_resolved_backends_fix(e: &anyhow::Error) {
+    let backend = crate::retrieval::code_store::VectorBackend::resolve();
+    let g = guidance_text_of(e);
+    assert!(
+        g.contains(backend.offline_hint()),
+        "the hint must be the resolved backend's own ({backend:?}): {g}"
+    );
+    assert!(
+        e.to_string()
+            .starts_with("embedder unavailable: connection refused"),
+        "the embedder's own cause must lead the message: {e}"
+    );
+}
+
+#[tokio::test]
+async fn remember_with_an_unbuildable_embedder_names_the_resolved_backends_fix() {
+    let e = refusal_of_a_memory_call_with_an_unbuildable_embedder(json!({
+        "action": "remember",
+        "content": "a note",
+        "title": "t",
+        "bucket": "unstructured",
+    }))
+    .await;
+    assert_names_the_resolved_backends_fix(&e);
+}
+
+#[tokio::test]
+async fn recall_with_an_unbuildable_embedder_names_the_resolved_backends_fix() {
+    let e = refusal_of_a_memory_call_with_an_unbuildable_embedder(json!({
+        "action": "recall",
+        "query": "a note",
+    }))
+    .await;
+    assert_names_the_resolved_backends_fix(&e);
+}
+
 /// A markdown `write` embeds the content once and upserts the point once, anchors included.
 /// `cross_embed_memory` and the old `create_semantic_anchors` each used to embed the same content and
 /// each upsert it, one after the other (two embeds and two upserts per write).

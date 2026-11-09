@@ -43,7 +43,7 @@ pub async fn get_index(State(state): State<DashboardState>) -> Json<Value> {
         })),
         Err(e) => Json(json!({
             "available": false,
-            "reason": format!("Qdrant scroll failed: {e}"),
+            "reason": format!("Index status query failed: {e}"),
         })),
     }
 }
