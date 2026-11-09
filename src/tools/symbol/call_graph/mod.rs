@@ -69,6 +69,8 @@ struct CachedResolver {
     scan_incomplete: Mutex<std::collections::BTreeSet<String>>,
     /// What those walks failed to cover (see [`ScanCoverage::merge`]).
     scan_coverage: Mutex<ScanCoverage>,
+    /// Recoverable failures after locating a node: empty edges do not prove absence.
+    analysis_failures: Mutex<std::collections::BTreeSet<String>>,
 }
 
 /// Hard cap on files the Phase B workspace walk examines before giving up. Set so a
@@ -146,6 +148,35 @@ fn attach_scan_incomplete(
         .take(SCAN_INCOMPLETE_LISTED)
         .collect::<Vec<_>>());
     out["scan_incomplete_total"] = json!(incomplete.len());
+}
+/// Merge analysis failures with any definition-walk disclosure through the consumer's
+/// existing warning field. Limit the displayed list while retaining its actual total.
+fn attach_analysis_failures(out: &mut Value, failures: &std::collections::BTreeSet<String>) {
+    if failures.is_empty() {
+        return;
+    }
+    const SHOWN: usize = 5;
+    let details = failures
+        .iter()
+        .take(SHOWN)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("; ");
+    let more = failures.len().saturating_sub(SHOWN);
+    let suffix = if more > 0 {
+        format!(" (+{more} more)")
+    } else {
+        String::new()
+    };
+    let warning = format!(
+        "call_graph could not analyze {} hop(s) — {details}{suffix} — so this graph may be incomplete; missing edges in those scopes do not establish absence.",
+        failures.len()
+    );
+    let combined = match out["completeness_warning"].as_str() {
+        Some(existing) => format!("{existing}\n{warning}"),
+        None => warning,
+    };
+    out["completeness_warning"] = json!(combined);
 }
 
 impl CachedResolver {
@@ -421,6 +452,10 @@ impl OneHopResolver for CachedResolver {
             crate::ast::detect_language(&path)
                 .unwrap_or_else(|| crate::lsp::servers::ast_language_for_lsp_id(&self.lang)),
         );
+        let direction_label = match direction {
+            Direction::Callers => "callers",
+            Direction::Callees => "callees",
+        };
         let edges = match resolve_one_hop(
             self.client.as_ref(),
             symbol,
@@ -434,9 +469,11 @@ impl OneHopResolver for CachedResolver {
         {
             Ok(e) => e,
             Err(e) if e.downcast_ref::<crate::tools::RecoverableError>().is_some() => {
-                // Non-seed node's resolver hit a recoverable limit (e.g. tree-sitter
-                // callee LIMIT-001). Skip this hop so BFS can continue for the rest
-                // of the graph, matching the existing lookup_pos behavior.
+                // Keep useful edges from other hops, but disclose this unanalysed scope.
+                self.analysis_failures
+                    .lock()
+                    .unwrap()
+                    .insert(format!("`{symbol}` direction={direction_label}: {e}"));
                 vec![]
             }
             Err(e) => return Err(e),
@@ -641,6 +678,7 @@ impl Tool for CallGraph {
         // GIVEN (`resolver.incomplete()`), not a constant restated here.
         let mut incomplete: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         let mut coverage = ScanCoverage::default();
+        let mut analysis_failures = std::collections::BTreeSet::new();
 
         for direction in &directions {
             let mut positions: HashMap<String, (PathBuf, u32, u32)> = HashMap::new();
@@ -657,6 +695,7 @@ impl Tool for CallGraph {
                 workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
                 scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
                 scan_coverage: Mutex::new(ScanCoverage::default()),
+                analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
             };
 
             let result = bfs(&resolver, symbol, direction.clone(), cfg.clone()).await?;
@@ -664,6 +703,7 @@ impl Tool for CallGraph {
                 coverage.merge(walked_coverage);
                 incomplete.extend(walked);
             }
+            analysis_failures.extend(resolver.analysis_failures.lock().unwrap().iter().cloned());
             let key = match direction {
                 Direction::Callers => "callers",
                 Direction::Callees => "callees",
@@ -677,6 +717,7 @@ impl Tool for CallGraph {
 
         let mut out = format_output(symbol, &by_dir, render_full, auto_promote);
         attach_scan_incomplete(&mut out, &incomplete, &coverage);
+        attach_analysis_failures(&mut out, &analysis_failures);
         Ok(out)
     }
 
@@ -1048,6 +1089,7 @@ mod tests {
             workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
             scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
             scan_coverage: Mutex::new(ScanCoverage::default()),
+            analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
         };
 
         let pos = resolver.lookup_pos("b").await;
@@ -1098,6 +1140,7 @@ mod tests {
             workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
             scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
             scan_coverage: Mutex::new(ScanCoverage::default()),
+            analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
         };
 
         let pos = resolver.lookup_pos("b").await;
@@ -1140,6 +1183,7 @@ mod tests {
             workspace_scan_cap: cap,
             scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
             scan_coverage: Mutex::new(ScanCoverage::default()),
+            analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
         }
     }
 
@@ -1249,6 +1293,156 @@ mod tests {
             "{compact}"
         );
     }
+    /// Pin the two gaps observed as surviving applied mutations: warning coexistence
+    /// and bounded analysis details, through the same raw/compact consumer fields.
+    #[test]
+    fn analysis_warnings_preserve_scan_scope_and_bound_details_without_losing_total() {
+        let mut out = json!({
+            "symbol": "seed",
+            "callees": [],
+            "max_depth_reached": 0,
+        });
+        let incomplete = std::collections::BTreeSet::from(["unplaced".to_string()]);
+        let coverage = ScanCoverage {
+            cut_short_at: Some(3),
+            ..Default::default()
+        };
+        attach_scan_incomplete(&mut out, &incomplete, &coverage);
+        let scan_warning = out["completeness_warning"].as_str().unwrap().to_owned();
+        let before = out.clone();
+        attach_analysis_failures(&mut out, &std::collections::BTreeSet::new());
+        assert_eq!(
+            out, before,
+            "no analysis failure must leave existing disclosure intact"
+        );
+
+        let failures = (0..7)
+            .map(|i| format!("hop_{i} direction=callees: unavailable_{i}"))
+            .collect();
+        attach_analysis_failures(&mut out, &failures);
+        let warning = out["completeness_warning"].as_str().unwrap();
+        assert!(warning.starts_with(&scan_warning), "{warning}");
+        assert!(warning.contains("could not analyze 7 hop(s)"), "{warning}");
+        for i in 0..5 {
+            assert!(
+                warning.contains(&format!("hop_{i} direction=callees: unavailable_{i}")),
+                "{warning}"
+            );
+        }
+        for i in 5..7 {
+            assert!(!warning.contains(&format!("hop_{i}")), "{warning}");
+        }
+        assert!(warning.contains("(+2 more)"), "{warning}");
+        assert_eq!(out["scan_incomplete_symbols"], json!(["unplaced"]));
+        assert_eq!(out["scan_incomplete_total"], 1);
+        let compact = CallGraph.format_compact(&out).unwrap();
+        assert!(compact.starts_with("warning: "), "{compact}");
+        assert!(compact.contains(warning), "{compact}");
+    }
+
+    /// Exercise the outer tool with a real parser/cache and an LSP without call hierarchy.
+    /// A class is not a function the callees fallback can analyze; an actual leaf is.
+    #[tokio::test]
+    async fn recoverable_hop_failure_is_disclosed_without_losing_edges_or_warning_on_a_leaf() {
+        use crate::lsp::{SymbolInfo, SymbolKind};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let file = std::fs::canonicalize(dir.path()).unwrap().join("sample.py");
+        std::fs::write(
+            &file,
+            "class Marker:\n    pass\n\ndef build():\n    return Marker()\n\ndef leaf():\n    return 1\n",
+        )
+        .unwrap();
+        let sym = |name: &str, kind, line, col| SymbolInfo {
+            name: name.to_owned(),
+            name_path: name.to_owned(),
+            kind,
+            file: file.clone(),
+            start_line: line,
+            end_line: line + 1,
+            start_col: col,
+            children: vec![],
+            range_start_line: None,
+            detail: None,
+        };
+        let mock = MockLspClient::new().with_symbols(
+            &file,
+            vec![
+                sym("Marker", SymbolKind::Class, 0, 6),
+                sym("build", SymbolKind::Function, 3, 4),
+                sym("leaf", SymbolKind::Function, 6, 4),
+            ],
+        );
+        mock.references_results.lock().unwrap().insert(
+            file.clone(),
+            vec![lsp_types::Location {
+                uri: url::Url::from_file_path(&file)
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .unwrap(),
+                range: lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: 4,
+                        character: 11,
+                    },
+                    end: lsp_types::Position {
+                        line: 4,
+                        character: 17,
+                    },
+                },
+            }],
+        );
+        // Default prepare_call_hierarchy=None forces the actual tree-sitter fallback.
+        let mut ctx = ctx_with_lsp(mock_lsp_provider(mock)).await;
+        ctx.agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+
+        let leaf = CallGraph
+            .call(
+                json!({"symbol": "leaf", "path": "sample.py",
+                         "direction": "callees", "max_depth": 1}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(leaf["callees"], json!([]));
+        assert!(leaf.get("completeness_warning").is_none(), "{leaf}");
+
+        let out = CallGraph
+            .call(
+                json!({"symbol": "Marker", "path": "sample.py",
+                         "direction": "both", "max_depth": 1}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out["callers"].as_array().unwrap().len(), 1, "{out}");
+        assert_eq!(out["callers"][0]["caller"], "build");
+        assert_eq!(out["callers"][0]["callee"], "Marker");
+        assert_eq!(out["callers"][0]["source"], "ts");
+        assert_eq!(out["callees"], json!([]));
+        let warning = out["completeness_warning"]
+            .as_str()
+            .expect("failed analysis must not look like a trustworthy empty graph");
+        assert!(
+            warning.contains("Marker") && warning.contains("callees"),
+            "{warning}"
+        );
+        assert!(
+            warning.contains("could not locate enclosing function"),
+            "{warning}"
+        );
+        assert!(!warning.contains("file cap"), "{warning}");
+        let compact = CallGraph.format_compact(&out).unwrap();
+        assert!(
+            compact.starts_with(&format!("warning: {warning}\n")),
+            "{compact}"
+        );
+    }
+
     /// A project for driving `CallGraph::call` end to end past the Phase B file cap: a seed
     /// `seed` (src/lib.rs, line 0) with one incoming caller `ghost` that workspace/symbol
     /// cannot place — so BFS depth 2 sends it to the Phase B walk — plus `placed_callers`
