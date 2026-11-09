@@ -446,3 +446,56 @@ def test_unsupported_mcp_writer_preserves_coverage_gap(checkout, name):
                    codex_call(name, {"path": str(root / "own.rs"), "content": "peer bytes"})])
     result = invoke(root, env | {"CLAUDE_CODE_SESSION_ID": "me"}, "own.rs")
     assert verdicts(result) == {"own.rs": "UNKNOWN"}, result.stdout
+
+def test_stock_foreign_fact_restricts_known_own_without_content_authority(checkout):
+    from test_operation_observations import record, store, target
+    root, env = checkout
+    env.update(CODEX_SESSION_ID="mine",CODEX_THREAD_ID="mine")
+    add_writes(root,env,"codex","mine",["own.rs"])
+    baseline=invoke(root,env,"--all","own.rs")
+    assert verdicts(baseline)["own.rs"]=="MINE",baseline.stdout+baseline.stderr
+    t=target(root);t["path"]=str(root/"own.rs")
+    caller=dict(harness="codex",principal="codex:observed-peer",thread_id="other",agent_id=None)
+    store(root,[record(root,caller=caller,targets=[t])])
+    result=invoke(root,env,"--all","own.rs")
+    assert verdicts(result)["own.rs"]=="SHARED",result.stdout+result.stderr
+    assert "observed-peer" in result.stdout
+    assert (root/"own.rs").read_text()=="fn modified(){}\n"
+
+def test_deleting_a_producer_shard_cannot_restore_formatter_clearance(checkout):
+    from test_operation_observations import record,store,target
+    root,env=checkout;env.update(CODEX_SESSION_ID="mine",CODEX_THREAD_ID="mine")
+    add_writes(root,env,"codex","mine",["own.rs"])
+    t=target(root);t["path"]=str(root/"own.rs")
+    foreign=record(root,caller=dict(harness="codex",principal="codex:foreign",thread_id="foreign",agent_id=None),targets=[t])
+    _,shard,_=store(root,[foreign])
+    before=invoke(root,env,"--all","own.rs")
+    assert verdicts(before)["own.rs"]=="SHARED"
+    shard.unlink()
+    after=invoke(root,env,"--all","own.rs")
+    assert verdicts(after)["own.rs"]=="UNKNOWN",after.stdout+after.stderr
+
+
+@pytest.mark.parametrize("kind",["own","unknown","opaque","reset"])
+def test_stock_capture_cannot_upgrade_formatter_refusal(checkout,kind):
+    from test_operation_observations import record, store, target
+    root,env=checkout
+    env.update(CODEX_SESSION_ID="mine",CODEX_THREAD_ID="mine")
+    # No rich history: the baseline has no authority, even when the observation names me.
+    baseline=invoke(root,env,"own.rs")
+    assert verdicts(baseline)["own.rs"]=="UNKNOWN"
+    t=target(root);t["path"]=str(root/"own.rs")
+    r=record(root,targets=[t],caller=dict(harness="codex",principal=None if kind=="unknown" else "codex:mine",thread_id="mine",agent_id=None))
+    if kind=="opaque":r.update(tool="run_command",targets=[],outcome="returned-success")
+    directory,_,_=store(root,[r])
+    if kind=="reset":
+        import shutil
+        shutil.rmtree(directory.parent)
+    result=invoke(root,env,"own.rs")
+    assert verdicts(result)["own.rs"]=="UNKNOWN",result.stdout+result.stderr
+    (root/"Cargo.toml").write_text('[package]\nname="stock-observation-fixture"\nversion="0.1.0"\nedition="2021"\n[lib]\npath="own.rs"\n')
+    before=(root/"own.rs").read_bytes()
+    fmt=subprocess.run(["bash",str(SCRIPTS/"fmt-mine.sh")],cwd=root,env=env | {"FMT_MINE_PROVENANCE":str(SCRIPTS/"file-provenance.py"),"RUSTUP_HOME":os.environ.get("RUSTUP_HOME",str(Path.home()/".rustup")),"CARGO_HOME":os.environ.get("CARGO_HOME",str(Path.home()/".cargo"))},capture_output=True,text=True)
+    assert fmt.returncode!=0,fmt.stdout+fmt.stderr
+    assert (root/"own.rs").read_bytes()==before
+    assert "UNKNOWN" in fmt.stdout+fmt.stderr,fmt.stdout+fmt.stderr

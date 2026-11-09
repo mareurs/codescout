@@ -23,6 +23,10 @@ class Operation:
     # "not computed": the scan derives them itself, so an entry written without them still reads
     # right. The doc tool's catalog-id targets are never stored here: they follow a live catalog.
     targets: tuple[str, ...] | None = None
+    # Optional native fields permit aliases only when the history actually supplies them.
+    native_thread_id: str | None = None
+    native_turn_id: str | None = None
+    native_workspace: str | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +53,9 @@ class ProvenanceScan:
     # what lets a reader see that more than one writer lies behind one session's name. Defaulted so
     # every consumer that builds or unpacks a scan without it is unaffected.
     streams: dict[str, dict[str, set[str | None]]] = field(default_factory=dict)
+    observed_writes: list = field(default_factory=list)
+    observation_diagnostics: list[str] = field(default_factory=list)
+    observation_aliases: dict[str, list[str]] = field(default_factory=dict)
 
 
 def result_refused(block: dict) -> bool:

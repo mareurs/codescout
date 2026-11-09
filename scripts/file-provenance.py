@@ -93,6 +93,8 @@ from claude_history import discover_claude_histories, read_claude_history
 from provenance_records import CoverageGap, HistoryBatch, Operation, ProvenanceScan
 from codex_history import discover_codex_histories, read_codex_history
 from native_provenance_history import apply_checkpoint
+from observation_store import read_observations
+from operation_observations import reconcile_observations, merge_scan_observations, observed_foreign_principals
 from typing import Iterable
 from session_context import principal_key, resolve_context
 from history_cache import cache_dir as history_cache_dir, caching as caching_reader
@@ -881,7 +883,11 @@ def scan_provenance(root: Path, environ: dict[str, str], modified_since: float |
                 else:
                     evidence.setdefault(key, []).extend(texts)
         active_by_stream[stream] = activated_tree(op.name, op.input, active)
-    return ProvenanceScan(owners, evidence, gaps, streams)
+    baseline = ProvenanceScan(owners, evidence, gaps, streams)
+    observation_batch = read_observations(root)
+    observations = reconcile_observations(observation_batch.records, operations)
+    # Apply stock uncertainty after the richer checkpoint path; it cannot discharge a gap.
+    return merge_scan_observations(baseline, observations, root, observation_batch.diagnostics)
 
 
 def relevant_gaps(scan: ProvenanceScan, rel: str, root: Path) -> list[CoverageGap]:
@@ -1242,6 +1248,11 @@ def main(argv: list[str]) -> int:
         # `CLEAN` is a NEW first-column token; scripts/fmt-mine.sh partitions on that column.
         if verdict in ("SHARED", "PEER") and dirty is False:
             verdict = "CLEAN"
+        observed_peers = observed_foreign_principals(scan_result, rel, root, me)
+        if mine and observed_peers and worktree_is_dirty(rel, root) is not False:
+            verdict = "SHARED"
+            peers = sorted(set(peers) | set(observed_peers))
+            who_set.update(observed_peers)
         if gaps and dirty is not False and verdict != "SHARED":
             verdict = "UNKNOWN"
             unknown += 1
