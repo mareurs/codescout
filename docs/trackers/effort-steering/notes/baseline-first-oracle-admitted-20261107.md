@@ -1,0 +1,42 @@
+---
+id: '85bcd2f26e9ccf44'
+kind: research-note
+status: archived
+title: Baseline-first oracle ADMITTED/RUNNING — 2026-11-07
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/baseline-first-oracle-admitted-20261107
+original_sha256: a4993b52a8d8c750d66318890c81f569839b548c8cabdb6b7eeb606b2d8d4544
+---
+
+# Baseline-first oracle ADMITTED/RUNNING — 2026-11-07
+LATEST ACTUAL CHECKPOINT: job51state running/exitnull. low/verifier/started.json EXISTS; lowclosed/frozenFALSE, xhighstartedFALSE. No all-authors-frozen, pair-results orpair-stopped yet. Thisstatesphaseonly, notactualproviderrequestcount/finalcost. DoNOTduplicate/restart. MAINreport bf3e845faf0b862a docs/research/2026-11-07-baseline-first-oracle.md active. Closedcontrollerqualificationarchive77payloads+manifest296876bytes SHAb4bbef977fa7799afc81d2b7de2dacafb678bdf14068cf3ae57d7fa25e32ab12 ALLreopenedverified; excludesactiveauthordata/debug/authhomes. ReconF-217actualoneinstallperprocesslessonlogged/counterbumped. Source/testbindingsunchangedafteradmission. Awaitjobwake, thenreadactualcost/closures/allfrozen/evalmetadata beforeconclusions.
+
+AUTHORITATIVELATEST. ROOT=/home/marius/.cache/codescout-resident/codescout/baseline-first-oracle-20261107. Oneactualbackgroundlaunch @bg_00000051 /tmp/codescout-bg/2674124-d9ea3495-bg_00000051.json commandpython3-BROOT/run_pair.py. Initiallyawaiting3x24GiBhostadmission/<=900sec; native32GiB4CPU/continuous16GiB2sec, offline8GiB4CPUhost24. No outcomeobservedyet; don'trestart/poll-loop. FixedlowthenxhighSonnet5.5authors, samepublicBASELINE-onlyprompt/cache/rules, no proposal/observations/privategold/witness/oldtranscript. BOTHcapturedfrozen BEFOREanyhostreferenceeval. Plan a51a67de9332e33a/spec c40495db60f87d27, earliermemorybaseline-first-oracle-live-20261107 preparationdetails. Knownprior62.410596299999999054 + original3a unresolved4hold; standing200/pair4reserve3CLIeach. CurrentnewcostUNOBSERVED, neverclaimzeroafterlaunchwithoutreceipts.
+
+## Review closed and verified fixes
+
+Independentagent /root/baseline_oracle_review FINISHEDsinglepass gpt6astra/high. /tmp/baseline-oracle-review-20261107/report.md SHAec5b2dddce2223de55c1da6621adc649ccde5a115b90e58c3bc92552cc0562d7. Original22tests16actualmutants7killed9survived. Fourconfirmedbugsfiledimmediately MAIN e5cf80dbc72c9c5e nestednonidempotentcompatwrapper(secondauthorFileExists); ddb8f2ff73715acc equalsmountbypassesinventory; edb5251ae4c707ff nullclauseAttributeError; cbebc4ff51aa256a undeclarednoncontrasttestignored. Groupb81dd8ba3e1b4464 coveragelimits. AllnowMITIGATEDresident-only/no productfixcommit/unverifiedlivepair/fixesNOTindependentlyrereviewed. readROOT/review-closeout.md forfullrulingsanddeclineditems.
+
+Oneparentfixpass: run_pair.author invokesunchangedqualifiedrunnerinseparatePythonprocesswithNEWROOTsys.path andROOT=arm, preservingoneinstallperprocess. Hostparentimportsqualifiedonlyforhost_sample. Realmainfixtureusesactualcompatinstaller/fakeexternalboundary: oldsecondFileExists observedRED, newbothisolatedsuccessGREEN; finalcostsynthetic0.2+0.4countonce+latefailurecostpreserved. No provider/Docker/tokenfixture. parse_captureclauseisdictguard; testinventoryallcanonical#[test]fnsbeforecontrastprefix/setcheck;unmatchedtestmarkersrejectunsupportedcanonicalformat. validate_authorrejects--mount= andallcompact/splitvolumealiases. Expectednative/promptcacheunchanged. PreparerACTOR_PARENTconfigdefault/tmp sameactualpaths; fixtureinjectsfakeparent, exercisespristinesnapshotorigin/copyandphysicalstates.
+
+FinalWHOLEresident36testsPASS. Firstpostfix20mutants18killed2survived, M19 actuallysurvivedbeforeaddinginline-declarationtest. Finalrepeat20applied19killed1survivedM11 ONLY. M11removesredundantsecondvalidatecall; initialvalidate+registeredfilehashesstillguardimmutableargv. Acceptedexplicitruling, notclaimedindependentsecuritytest. M12eagermainblockedbycompletepairguardandnowfailscompletiontest, notprivateleak. M14wrongsnapshotoriginfailsactualpreparerfixture, notprovedprior-stateadmission. FinalsourceboundreceiptROOT/review-fix-verification/final-results.json, allrawlogs retained. Original review survivors/sourcecapturedROOT/source-before-review-fixes. No secondreviewpassneededafterONEfixpassperpolicy.
+
+## Registration/admission
+
+OriginalROOT/pair-registration.json retained. NEWpair-registration-v2.json changesONLYsourcehashesbaseline_pair.py/prepare_pair.py afterprepaidreview; allotheractualpreparedclone/nativeCLIguidancepromptbytes rehashedunchanged. run_pair.main readsV2explicitly (twofilenameconfigliterals); fixturesuseV2too. No clonedstate reprepare/onboardingLLM. review-admission.json SHA23af7d0acd1d0fe8bd1e509af0ee59b85118433ad29d1db861eb067d518b11e3 admittedtrueunderstandingauthority, originalreviewnotreadybeforefix, parent36tests20/19/1, fixes_independently_rereviewedfalse, source_bindingsALLcurrentpyfiles. Nativebaseimageactualcheckedbeforeauthgitdiff0HEAD5ec462.../proposalabsent. Qualifiedexternal.validate_preparedactualbothpass(no credentialread). Sourceca35fe8cleanunchanged, originalsourcegate0reused. No productcode/nativehelpermodification/mergepush/sourcecommit.
+
+## Where to read on wake
+
+ROOT/execution-registration.json andattempt.json writtenonceBEFOREhostwait. Hostsamplesfile append only. low thenxhigh/registration.json writtenONCEatadmissionwithcurrentknownpriorcost, actualqualifiedsubprocesslogs+author-process.json; perarmverifier/{started,launch,receipt,supervision-final,cleanup,candidate.patch}; perarmverifier-closed.json, cost-accounting.json. Finalcumulativecostfromreceiptcountonce; costfinallypreservesbeforepropagatinglatererror/unknownreserveifnofinal. NeedALLlifecycle/context/capture/runtime/cleanup/actualrequesteffortproof, notsyntheticfixtureamounts.
+
+freeze_capturewritesarm/frozen/{generated-tests.patch,oracle_contract.json,freeze.json}; rowstatusfrozen/abstained/protocol_invalid. Protocolviolationisretainedmodeloutput, noresample. BOTHrowsneeded ROOT/all-authors-frozen.json beforecallbackloadshostreference. Eachfrozenpayload/receipt rehashedbeforecells. OfflineoldBASE/blind-contrast-verifier-followup-20261107/evaluate_v3.py reused unchanged; arm/oracle-evaluation-registration.json andoracle-evaluation/evaluation-v3-{baseline,low-control,reference}/{0.log,1.log,resource-samples,absence,result}; arm/oracle-evaluation-results.json. FinalROOT/pair-results.json ifclosed; pair-stopped.jsoniferror. No automaticmodelretry; readcostfirstandpreserverawreceipts. Actualrecordprivateparser/referencebytesonlyafterbothauthorsfrozen.
+
+## Decision afterclosure
+
+Independentread-onlyauditrawnamedstatuses/logbindings/allsavedsamples/finals/freshownedabsence/costandwireefforts. Requirequalifiedreferenceallpass, wrongrejectionbyjustifiedpreservation, baseline-to-reference requirementdistinction; allpass/emptyassertionsnotdetector. Reportexactlow/xhighmatricesnot1/2aggregate; oneexposeddevelopmenttasknotheldout. Genericgoalstillopen. Archivecompactallowlist(no rawdebug/tokenhomes),updateMAINissuesandtrackers. Sourcecommitguardadd2fourplus? sixstagedoldgraderpaths4b4fac5682a4303b separate,neverbypass. Original3aunknown4hold retained evennewpaidcostknown. No task-specificprivatehintfedtoactors.

@@ -1,0 +1,64 @@
+---
+id: e35443a2e850f355
+kind: research-note
+status: archived
+title: Reusable native semantic preparation verified; effort-steering quality goal OPEN — 2026-11-04
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/semantic-reuse-20261104
+original_sha256: 7b92393f84b1ab33d6d63e1c3da26b84092d60a9701a394f0f0e23f0dcca376d
+---
+
+# Reusable native semantic preparation verified; effort-steering quality goal OPEN — 2026-11-04
+
+M=/home/marius/work/claude/codescout; V=/home/marius/.codex/worktrees/615e/codescout, branch research/fixed-acceptance-population-20261101. Root SID01a15ca9-f939-7603-acb5-01c6b02f68e2. Autonomous inline work and local exact-path commits authorised. Total40USD; approved token ~/.config/s5/token-claude-stef persists. NO push/merge. No active experiment/probe jobs at checkpoint. Keep V and sealed old roots; no repeated budget/token/onboarding questions.
+
+## Actual outcome, cost and whole picture
+
+Full native/paid-worker admission FALSE. No fresh native low/xhigh quality comparison or generic mechanism promotion. End goal is lower whole-workflow client cost preserving xhigh-quality behavior; current evidence qualifies reusable preparation only. This continuation invoked no experiment model/onboarding author. Client cumulative29.221154299999999834/40, remaining10.778845700000000166; root/review/CPU/provider invoice unmeasured. Local0.01USD fixture is NOT spend.
+
+E=/home/marius/.cache/codescout-resident/codescout/native-env-admission-20261104 ACTIVE/unsealed; Q=E/qualification-20261104; S=E/semantic-minimal-20261104. Report dc11d4da5ddc49aa docs/research/2026-11-04-native-environment-admission.md, latest Semantic control and reusable index progress; current tracker ae571a0abfaf9e7f; mechanism ledger7728cf1b9c13a59b. Do not repeat onboarding: one source-only canonical corpus per project, immutable common versions, separate writable arms, targeted updates. Never share task diagnoses/patches/feedback as onboarding.
+
+## Current measured preparation
+
+Real0.25s GNU-timeout child control returns124 preserving BOTH exact stdout/stderr markers. Actual subsequent CLI streams are durable before wait; save container state/exit/OOMKilled/running before exact owned cleanup. Old async timeout helper remains broken/quarantined,89e532f32a503b66 mitigated only by alternate path.
+
+Tiny actual source index exits0,3eligiblefiles/5chunks; native verify complete3/3/0missingvectors. Query intended counting function first, returned path/line slice matches full source. Separate byte-identical no-index clone yields empty results and3missing. First query replay failed duplicate mount because substring home replacement touched nested cache; original query_controls.py retained, exact-token query_controls_v2.py runs both opposite controls.483cf729df9beffd mitigated private diagnostic only. Shared Q/jina-cache mounted READ-ONLY, not copied1.3GB per probe.
+
+Old stopped batch8 metadata audit:10520code_chunk rows/534distinctpaths;10109rows/521paths under generated expectations,0implementation bindgen/paths. Metadata is NOT vectors; hostSQLite cannot query vec0 extension and that failure is not zero. Copy old stopped DB directory byte-exact into fresh corrected-v2 actor; preserve oldfailedactor. Same config/model, noforce/noexclusions/newauthor. First180s continuation timeout124, actualnative658stored/749expectedpaths,13576chunks/0missingvectors. Second120s deadline reaches695paths/15384metadata rows/49bindgen implementation paths. Third180scap completes exit0 in41.6919s, added485/updated0/deleted0/elapsed37962ms. Original timeout CLIexit/streams remain unknown, no OOMcause inferred.
+
+Canonical root memory migrate completes0/4.4688s, read8/upserted8/skipped0. Actual canonical semantic recall succeeds. Scope8rootcommonmemories, NOT all40physical workspace memories. Root architecture/projectoverview were fully read and substantive; compact recall headings are not proof of empty content.
+
+Private actor S/resumed-project clean Gitbaseline898002898161832a7c718527d8a75bf8b73428a7,1398trackedsourcepaths. NEW immutable E/snapshots/rust-lang__rust-bindgen-3390-git idc3b559399714f35b65383540f617eaa7ea84db608be80a6a93b41088ade561d4 has identical1450-entry source/knowledge inventory to corrected-v2268e40c59f2a70747b7b52f6262b98ec9e528efb53a525328097c304753be9f0; baseline/provenance alone differ. Both inventories/actualactor fully verified, private common-git-baseline.bundle verified. Newcommit did not trigger author.
+
+Actual noforce/no-op index completes0/4.8286405s with added0/updated0/deleted0/elapsed930ms. This measures zero codechunkwrites, NOT zero localmodelinference or paid workflow speedup. Final actual MCP status:745storedpaths/15869chunks/0missingvectors, Git up_to_date at89800289, indexed/queryabletrue. Finalverify raw incomplete749expected/745stored, missing4/orphan0, rootmemories8/8. Entire missing population byte-audited empty/whitespace-only (0or1byte):
+bindgen-tests/src/lib.rs;
+bindgen-tests/tests/expectations/lib.rs;
+bindgen-tests/tests/expectations/src/lib.rs;
+bindgen-tests/tests/expectations/struct_with_anon_struct_array_float.rs.
+Opencc61bf08099dac2d; rawverdict retained, no productfix.
+
+## Remaining context defects and next bounded work
+
+Partial658-file index query top3 returns testhelper +2chunks exactly closingbrace (bindgen/clang.rs:2449,:2401). Opencacb70051158b3ca. SAME finalquery now substantive options/mod.rs and Builder::generate. No corpusfrequency, complete-indexrankingdefect, causal lowfailure or xhighparity. Generatedcorpus prioritization and meaningful enclosing context are generic candidates only.
+
+Final POST-GIT MCP response3 says indexed/queryable/up_to_date but appended bootstrap says Semantic index: Not built; followupqueryworks. Open56a9630d26ddbb2d and F-19 retain fullactualresponse. Cause/backend-readiness selection NOT traced; no evaluatedworker followedinstruction, so no wastedworkercost measured. Need reconcile actualworker-facing readiness, not blindly rerunindex/onboarding.
+
+NEXT: inspect both readiness producers using actual selected backend/project, model-free populated/empty controls; then prove actual evaluated-Claude global/project/system instructions, requested skills, native MCP, context/oracle/source isolation on independent clone. No protocol from recorder exit0/completed_wire alone; nested ok:false still needs actualinspection. Qualify task-specific checks before fresh cases/freshxhigh. No paid campaign merely from backend/runtime success. Existing generated memories contain historical capability remarks; targeted source/capability refresh may be needed, never repeat full author by default.
+
+## Pinned runtime, verification and preserved proof
+
+Pinned bindgen image sha256911fb163bff53a3cf755fd472526e1195d1c1df6c6e6b57e10e41b869b0875bd. Original E/bin/codescout SHAe1b5ca35c549faedd361fda78004e593bac4bd7eb812bdd55bb81afef271021d; sourcebuild3a10aca591869689850ea370b852d4af394b8147 dirty, NOT VHEAD/liveMserver. Private Q/patched-bin/codescout58c33c3064c3e08b19ff26a2b84d96f447746a09ca1547ad4867445a77dd8028; RAab47252a37bbff31be54febac59bac99466853bbb56a7d82934a5cc9c710a887. Interpreter/forceRPATH per executable; no globalLD_LIBRARY_PATH or imageloader replacement. Prior globalworkaround brokecompiler. LocalJinaEmbeddingsV2BaseCode, sqlite-vec, sparseoff,batch8; no network; same private runtime. Pinned tools/weights privatelyretained.
+
+Prior packaging evidence in native-runtime-20261104 remains unchanged: actual recursive refs and31namedoffline libpasses, independent3distinctappliedcontrols/0survivors/4applications/2positivebaselines, nofindings; packaging/M1 scope only. Prior fullVgate0/950s PYTHON_LIGHT/FMT/CLIPPY/LEAN/DEFAULT0, exclusionsheavyPython/server-stack/localONNXweights, librarianonlyDEFAULT. E20helpertests0; fakecostnotspend. Productsource unchanged; no repeatedproductgate/newreview claimed for latestdiagnostic/docs. Freshactualsemanticcontrols, source/archivechecks and all applicablecommithooks observedpass.
+
+NEW docs/research/data/2026-11-04-native-semantic-control.tar.gz SHA5fc677c9bfcf4d0850c836882d713201fb49fa968cf60b6112f1f1f4bb27aac9,5363769bytes/1601verifiedentries (1600payload+manifest),2literal links. Fullactualwire/responses/logs/launch/state/cleanup/scripts/source snapshot/privateGitbundle/manifests; allentrycontents rereadverified. Excludescredentials/profiles/liveDB/models/tools/duplicateactors/Gitadmin. S/stopped-cache-manifest.json pins exactstoppedcodeDB67162112bytes, rootmemoryDB3223552bytes and model/runtime/config/image/source/Git identity. Scope actualstoppeddirectoryreuse under pinnedLinux/runtime/guest/testbed/projectidtestbed, NOT liveDB/crossOS/arbitrarypath/paidcontrollerportability. Exact12attemptednames from thiscontrol's launchpopulation independentlyabsent; not12successfullycreatedcontainers or globalDocker census. Initialabsenceaudit rejectedlowercase no-such-object; failure retained then correctedliteralinspection.
+
+Parent runtimebundlea12bb2ae08842d53d7fc63a81b961753b573dc00affc96edd3aa59fe55291f78 and onboardingbundlecf6e6ba67ec28732dd72022bcbd4753414b0b31ba824174041ab54c46a6b0bf4 unchanged. Complete previousnativecheckpoint remains in native-runtime-20261104 (MHEADblob148f806d2d46ddfce11ce691ea7c4d48cf9d8141 beforethiswrite). Originalauthor35requesthistories,34incompletepayloads,1.2556907recoveredcost/lostCLIexit retained in onboarding-reuse-20261104; do not regenerate. AllolderC/D/closedroots strictlypreserve,no ordinaryhelpers/LSP/tests/move/retarget. Authorcleanupc72677e6f431a333 fixedoldhelper; attributionPythonimportaed9f32239a6c42a remainsopen; M19743bf860c0f4c8f andruntimea6c234621990da9e mitigatedresearchscope.
+
+LatestVcommit2a83170f381dc192b1f8deadbba51d816a94169b; stablepatch-id394d042a0973de10585fea540da1f95fe474934f. Exactly10ownreport/tracker/bug/bundlepaths, allapplicablehookspass, Vcleanobserved. Localonly,nopush/merge. Mpeerstaged .codescout/memories/bug-triage-2026-10-27.md blobf4ad12b9cf7b8b830ac35cc341afcde702d0a56c must remainuntouched; cachedrawreadconfirmsit. Do not re-add oldpeerpartial-filesystemissue absentfromcurrentindex. Commitmemorybyexactpaths, Session-Id trailer, inspectcachednames/content and immediateworking-vs-indexquietcheck.

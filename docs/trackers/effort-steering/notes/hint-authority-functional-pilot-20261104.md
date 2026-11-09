@@ -1,0 +1,61 @@
+---
+id: '6519c2ffdf0e887c'
+kind: research-note
+status: archived
+title: Hint authority functional pilot — 2026-11-04
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/hint-authority-functional-pilot-20261104
+original_sha256: a63da875bb7c395f27b0f45a5aa44db276c7baf0287ce6ef75181ccb5c42a823
+---
+
+# Hint authority functional pilot — 2026-11-04
+
+Session01a15ca9-f939-7603-acb5-01c6b02f68e2. Operator explicitly said launch. Plan c3836cf55c7b4b87; current report f789fec3ea4737ba at docs/research/2026-11-04-hint-authority-functional-pilot.md. Preserve standing autonomy; do not ask launch authorization again.
+
+Worktree /home/marius/.codex/worktrees/615e/codescout, branch research/fixed-acceptance-population-20261101. New uncommitted controller tools/hint_authority_pilot/. Scratch L=/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1. Main checkout has new own report and issues, plus preexisting staged own documents and a foreign staged bug-triage memory; never stage/commit the foreign path or use add-A.
+
+Scope: first4cell diagnostic on hce-07-build_chunks frozen source with reused common onboarding, full global/project instructions, same native Codescout and pinned companion1.20.29 skills plus research PostToolUse hint. Only authority clause and effort vary. This task population was exposed in a separate process-only study; NOT external validation. Private functional oracle tests chunk offset/metadata and actual initial+forced indexing, then existing chunk/indexer regressions. No oracle/reference patch mounted to worker. No new onboarding model calls.
+
+Costs: total authorized40USD. Prior campaign client cost29.221154299999999834. Pilot ceiling4USD. First low/absent compatibility attempt paid-0 completed4 provider requests, no edit, then conservative reserve aborted: CLI0.16765020000000003, no unknown provider cost, charged in full and excluded from model quality. All later originalcells stopped. Raw receipt/stdout/usage retained L/paid-0 and old controller fingerprintff2eeebee1c33db32f1795edec47a4aa848de4e5453c5299007de88da2c4c5b4.
+
+Fix separated input/cache-write/cache-read/output debits. Actual4usage calibration corrected conservative debit0.18441522 equals1.1×independent CLI cost; L/budget-calibration.json. Worst-case next-request reservation unchanged. prior_spend() verifies exact prior terminal identity/cost and initializes restarted campaign spend from paid-0; prior-attempts.json records it. Restart labels paid-v2-0..3; SAME4USD cap includes first cost. Do not reset that ledger.
+
+Current reviewed bytes fingerprint e5215deb2a8f1d40de467cbc78f89c48d47c8cdff30d89c59b4328bec63d3954;17Python tests pass. Fresh independent delta review accepted: /tmp/hfa-review-budget-delta-final-20261104.md. Two delta mutations actually applied and killed (old cache read rate, ignore prior spend),0survivors. Prior review:13tests,3of4former survivors killed by unit suite; zero-tests filter mutation survived unit tests but actual grader wrapper rejects98. /tmp/hfa-review-final-20261104.md; /tmp/hfa-rereview-p4zlfirp/results.json. Fingerprint hashes source/controller/actual CLI/native runtime/LSP/model cache/plugin/global inputs plus reference patch and prior-spend ledger.
+
+Current final controls job @bg_0000001a exited0: behavioral baseline101, referencepositive0 with both acceptance assertions and both regression groups. It stamps functional-controls-v2.json with current fingerprint. Current final4client qualification job @bg_0000001b (external L/resume_qualification.py) is still running; first2cells succeeded. Earlier @bg19 hit conservative cleanup failure when exact rm returned1 although later inspect proved exactID absent; no paid call. Failedfixture retained L/failed-qualify-cleanup-0; issue2db5e6fbda0834c2. Source stayed frozen; repeat fixtures only. After all4: run audit.py to prove actual hint on wire+hostcanary unavailable, then update review-accepted.json to current accepted fingerprint and run run.py paid. Its preflight rejects old markers/qualifiers. No paid restart until these match. Paidfirst marker/firstresults retained and charged.
+
+Other own MAIN issues: e74e1f5360a6b2d4 stale paid qualification (working fix+tests); f5264c997974a7fd zero acceptance execution (exactnames/count fix+wrapper test);96a60491203bc120 cachedusage reserve inflation (fixedpendingnewblock);870623b7243ebaae conservative substring0passed also matches10passed, parked;2db5e6fbda0834c2 Docker auto-removal falsefailure, parked. Any further observed issues must be logged immediately in MAIN docs/issues.
+
+Full isolated-worktree ./scripts/gate.sh --check running @bg_00000016; Python1311 passed+442subtests observed, Rust suites continue. Do not claim fullgategreen yet. No source integration or push. Credential authorized /home/marius/.config/s5/token-claude-stef, read only inside qualified paid launch, never print/store secret. Actual request proxy captures JSON bodies but never headers. CLI host token is not forwarded to native containers.
+
+
+## Latest state — corrected paid block launched
+
+The final four corrected-client fixtures all passed @bg1b, audit.py verified each actual hint on wire and unmounted-canary failure. Final controls @bg1a exited0 with current e5215deb fingerprint. Review marker now matches the delta review. Corrected paid run is ACTIVE @bg_0000001c (record /tmp/codescout-bg/455879-a720241d-bg_0000001c.json). It uses paid-v2-* labels and prior_spend includes .16765020000000003 from paid-0 inside SAME4USD ceiling. Actual provider responses and post-hint edit-tool events observed in paid-v2-0; quality/functional acceptance still pending. Read paid-v2-results.json as cells finish; never restart run.py paid blindly because attempt directories are exclusive. It automatically grades and advances each eligible cell, stops on failure/unknowncost. Full worktree gate @bg16 exited0: Python-light,fmt,clippy,lean,default all0;17targeted pilot tests pass. Source files remain uncommitted in V; main report and new issues/memory also uncommitted, no push. Current report f789fec3ea4737ba has this live status. Earlier preparation paragraphs above are historical where they name pending jobs.
+
+
+## Latest state — first patch accepted, remaining cells resumed
+
+@bg1c ended0 after low/absent v2: modelcost.36428510000000003, hostreserve interrupted terminal after14completedprovider calls, but private functional assertions AND both regression groups all passed grade_exit_code0. Do not label normal workflow completion. Cumulative completed-attempt cost.53193530000000006 inclv1abort. Other3 cells not resampled. To advance only known-cost reserve censors (independent of grade) without changing any worker byte/guard, added separately hashed orchestration tools/hint_authority_resume/{driver.py,test_resume.py}.3/3 tests and2actuallyappliedmutations killed; independentreview /tmp/hfa-review-resume-final-20261104.md. DriverSHA2608d8fe299359c4dbe4656247c78c66d70dadd6143b04c4fdff3f56119bc6bb; original workerfpe521unchanged and originalqualifiers/controls remainvalid. resume-review.json binds both hashes, resume-ruling.json recordsscope. Resume driver NOW ACTIVE @bg_0000001e, record /tmp/codescout-bg/455879-a720241d-bg_0000001e.json. It terminalverifies priorv1+existingrow0,total.5319353, then runs cells1..3 sameorder withsamepercellone(), same1USDreservenextrun and4USDpilotcap. No qualitydependent continuation and no newlowresampling. Results autoappend paid-v2-results.json and gradeeachprivatecopy. Unknowncost/othertransporterrors stop; do not blindlyrestart. Activeinflightconsumption notyetincludedinthe.5319353 completedtotal. Second fullVgate after newresumedriver started@bg_0000001d (firstfullgate alreadyall0). Source/core17tests+resume3testsgreen, no sourcecommits/push yet. Currentmainreportf789fec3ea4737ba updated. Read thatreport+paid-v2-results.json afterjobsfinish, reportcohortquality withcensoring andn1/populationexposurelimits.
+
+
+## Final checked outcome — pilot ended
+
+Status check: @bg1e exited0; ALL4cells complete and no more model jobs in this pilot. Independent reconstruction via driver.validate_existing + prior_spend matched terminal-verified total1.60655589999999997USD including.16765020000000003v1abort. Comparable modelcosts: low/absent.36428510000000003 grade0; low/present.35197569999999995 grade101; xhigh/absent.35570720000000006 grade101; xhigh/present.3669376999999999 grade101. Onlylowabsent passes both privateassertions+bothregressiongroups. Other3failedCOMPILATION (remaining3argbuild_chunks callers), so no semantic assertion outcome for them. ALL4wereinterruptedbysame per-requestreserve,zero normalworkflowcompletions. Thus no low>xhigh or clauseharm causalclaim;oneprocess-exposedtask,onesample/cell,budgetcensoring. Lowacceptedpatchvalidbutnotcompletionproof. Sameworkerfpe521throughout, noresampling. Exact generatedworker cleanupreceipts allabsent. @bg1d secondfullVgate exited0 all5lanes0. Reportf789fec3ea4737ba marked done with fulltable+limits; planc3836cf55c7b4b87 checkpointupdated,noautosecondtaskspend. Nextprerequisite fixpremature requestreserve/transportclassification and qualifyfinite normalcompletion beforeanothercomparison, retainingfullcontext/runtime/onboarding. No newpaidcalls duringcheck. Source/helpers17+3testspassandindependentreviewsaccepted,butstilluncommitted, nointegration/pushclaimed. Earlier ACTIVE/pending paragraphs above are historical.
+
+
+## Controller correction — verified and committed locally
+
+Operator said «ok, corecteaza». In V (/home/marius/.codex/worktrees/615e/codescout), replaced the unrelated $1 within-run proxy cap with explicit verified campaign_remaining=4-spent in ordinary and resume loops. Paid one() and server() cannot default to an implicit balance; missing balance rejects before TOKEN access. CLI target.65, output8192, worst-case reservation, actual usage categories, pending/unknown-cost blocking and $1 before-start admission unchanged. BudgetExhausted records budget_stop separately from transport_errors and makes workflow_completed false. No provider calls or real credential reads in this correction; closed pilot artifacts unchanged.
+
+Offline replay: all4 captured cutoffs fail cap1 yet fit their start-of-cell campaign balances (debit+requestreserve:1.02039201,1.00947627,1.02290287,1.00693472). This establishes admission, not real model completion. Current suites observed28/28 pilot+3/3 resume. New tests execute real one→proxy→HTTP→receipt with local CLI/provider/token fixtures, both admission/exhaustion, and30 cached exchanges. Reviewer first actually applied8mutations:5killed/3survived; after adding test_one_budget.py all3 observed survivors were reapplied and killed, zero survivors in recheck. Scoped review approved. Durable proof JSONs in MAIN docs/research/data/2026-11-04-hint-authority-budget-mutations-{initial,recheck}.json.
+
+MAIN bug4b4e9c353cea58c5 marked fixed, reportf789fec3ea4737ba and planc3836cf55c7b4b87 updated with correction and limits. Full Vgate@bg_00000020 exited0, PYTHON_LIGHT/FMT/CLIPPY/LEAN/DEFAULT all0; heavy-Python/server-stack/ONNX exclusions remain. Archived log MAIN docs/research/data/2026-11-04-hint-authority-budget-fix-gate.log.gz.
+
+Source locally committed as979fffc586616890f61cf1b6ec498253169f8697, stable patch-id1045bcc95e696a1c0d9cbd2ff5de2ba480a98c34, Session-Id codex:01a15ca9-f939-7603-acb5-01c6b02f68e2. All20Pythonfiles tracked; Vworktree clean. No integration/push. MAIN issue/report/evidence/memory updates remain local; known doc-provenance issue421ed73df25f795d was not bypassed. Foreign staged bug-triage blob rechecked unchangedf4ad12b9cf7b8b830ac35cc341afcde702d0a56c. Before another paid comparison: fresh isolated block and zero-cost qualification of modified controller/client/context/oracle bytes, then assess authorized remaining ledger; old e521qualifiers do not qualify changed code. Existing launch/autonomy/budget instructions persist; do not reset the closed pilot cap or ledger. No paid runs as part of this controller-only correction.

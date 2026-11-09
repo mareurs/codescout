@@ -1,0 +1,37 @@
+---
+id: cf6b611d060c1a0e
+kind: research-note
+status: archived
+title: Fixed checker transfer — ACTIVE, no model calls yet
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/fixed-checker-transfer-20261101
+original_sha256: 8f2edabb5c2aeb54ce0629b0fb08bb62fa7f2616b6a69d5cd31f476b8be0adaa
+---
+
+# Fixed checker transfer — ACTIVE, no model calls yet
+
+2026-11-01 continuation from closed fixed-checker-loop. Main private R=/home/marius/.cache/codescout-resident/codescout/fixed-checker-transfer-20261101. U=/home/marius/.codex/worktrees/9369/codescout retained branch research/author-cargo-artifacts-20261031 HEAD e3daa380d87dcf663cc0f32e099afe199eba2bee. New prospective uncommitted docs U/docs/superpowers/specs/2026-11-01-fixed-checker-transfer-design.md and plans/2026-11-01-fixed-checker-transfer.md. Read them plus R/progress.md before work. No previous sealed files modified. M CLAUDE read.
+
+Standing user autonomy, native inline execution, one fresh strongest review before payment. Global cap40, latest sealed prior22.631681199999999770, remaining17.368318800000000230. Anchor fixed-checker-loop-20261031/final-outcome.json SHAb923d2c185f55a6e670bb7abc7ae7a606e9b90c06e54670801ec4a79be786e44. Authorized token FILE /home/marius/.config/s5/token-claude-stef; never display contents/change shared auth. No paid calls pending/started, no registration yet. Paid worker explicit workflow.py run only. Fresh prospective phase reservation8.80:fourlow1.00/twoxhigh2.00 +.80reserve, within existing global40, not new money.
+
+Tasks chosen before controls: tokio-rs__axum-1730 and tokio-rs__tokio-4867. Three arms per task from clean base: ordinarylow/fixedlow/fixedxhigh. A/B/C=Axum; D/E/F=Tokio. OrderA-L,B-L,C-L,F-L,E-L,D-L. New /tmp/fct01-author- roots. All6 setup successfully, no started.json. CLI/model inherited frozen2.1.309/claude-sonnet-5-5. Fixed checker.py copied byte-identical closed R checker; same generic authority/standalone-command paragraph, only command substituted; from clean base instead of saved failure. Whole-session cost includes model investigation/tests/internalrepair, no external repair/retry/replacement. Finite criterionT2/2 and>=Xaccepted and totalT<X; contrast separateT>G. Taskdisjoint under limited exposure instrument, not repository/training holdout.
+
+selection-evidence.json records actual prior task-ID directory census (no symlink traversal/source/buildtrees) + exact other-study selection selected/failed. Chosen not found. Excluded priorRuff15309/Axum1119 (previous agent exposures found). Both chosen48gold-addedlines under previousmetadatahardness rule; metadata only, actors nevergiven gold productionpatch.
+
+Technicalcontrols COMPLETEvalid: Axum basecompileE0277, gold7/7 twice; Tokio base24/25, gold25/25 twice. Actual phase setup standalone shimB-L/E-L source-bound matches thesefailures, actualoutput/status, no model. setup.log and shim-controls.json. technical-controls-final.json source/receipt hashes. All actual captures/logs preserved.
+
+Prospective amendment/deviations BEFORE payment: originalTokio datasetnames23 but actualcommand25; strictparserrejected. Preserveall23 and add2 (no task/command replacement or testremoval). Full report parser calibrates expectedpopulation; samefullset atbase/gold/repeat. Initial preparation.py aggregate a.save(create-only) attemptedsecondwrite and masked originalerror; initial technical-controls.json and logs retained, new record_result per-task createsonly. Finalizer first passed original23-name row to validator after calibrating25 and rejected actualgold25/25; corrected consumingcall usesfullcalibratedP2Pset, sameexistingreceiptsreused; only previouslymissinggoldrepeat executed. Firstfailedlogs technical-controls.log and technical-controls-final.log preserved, finalv2exit0. Axum config-initial retained. Explicit specamendment/rulings, not silentpreregretune; no agent outcomes.
+
+Scripts: preparation.py imports matchedprep and oldadapter sourcecontrolhelpers, finish_controls.py completed preservedreceipts; workflow.py imports closedfixed R module then reconfigures moduleobject (neverdisk), overridesmixedvalidity/admit/setup/states/frozen/prompt/admission/summary and re-wires originalworker; prepare.py setup/register and actual transitive runtimecollector plus Node mjs; checker identical old. Alloldruntime paths pinnedunchanged. Tests16pass complete-tests.log: preparation5, newpolicy/setup5, freeze1, copied/adaptedoldboundary5. ObservedRED initialmissingcontracts, workflow3missinggates, populationreceipt2missing, freeze1missing thenGREEN. CopiedboundaryG1→A-L, initialG→A, runtimepathsnew wrapper; no oldtest edited. Setupfixture patches bothw.R/e.R (priorleakmitigation fixed in newtest). Workflowmixedvalidity actualEFFORT perlabel. Setuprealinitial inventories all6match. No registration untilfreshreviewfixes/readiness.
+
+REVIEW RUNNING: /root/fixed_transfer_review gpt-6-astra/high fork none, brief R/review-brief.md. Single fresh review, six actuallyapplied loadbearingmutants, observedkill/survivor/invalid, exactsurvivordiffs BEFORE parenttests; no reviewerfixes. WritesONLYR/review/copies, nooldroots/actors/token/Docker/paid/peermessages. Requested actualcopymodulepathbindingtoavoidpastinvalid importedoldoriginalmutants. Mustinspect report/results thenoneRED/GREENfixpass; no re-review. Do not spawnanotherreview.
+
+FULLGATE RUNNING U via native bg_000000a8 server1745637-bb3fcc89, record /tmp/codescout-bg/1745637-bb3fcc89-bg_000000a8.json; log R/gate.log. Command uses freshshort TMPDIR /var/tmp/fct1XXXXXX and ./scripts/gate.sh --check. No polling; wakehook. Earlier bgA4initialcontrolsexit1, A5firstfinalizerexit1, A6finalizerv2exit0, A7setup exit0. Allterminalexceptgate/reviewer. Do notreusehandlesifserverrestart.
+
+Need next: freshreviewreturn, inspect/fiximportantwithobservedmutants, completefocusedtests and necessaryprepaymentnotes. Bugrecords required for population/config drift +create-onlycaller +finalizerwrongexpectedrow (can reference existing writerbug but owncallsite evidence mandatory); template readfully. No publicissuefiles yet. Needcatalogregister newdocs/reports/LMCnextentry carefully preserveoldsealedLEM. Afterreview readyevidencewrite R/prepayment-review.json ready/surviving0/evidence_files, prepare.py register→frozen preflight, thenrun6once inordereachsource-boundsemreviewbeforenext. Review source+wholecost faithfully; independentaccountcalibration. Gate terminal/scopednewdocchecks; normalexactcommit/nativeSID01a15ca9-f939-7603-acb5-01c6b02f68e2, no merge/push. Sealnewphase plus committedobjects; update latestbudgetmemory. U .superpowers/sdd/2026-11-01-fixed-checker-transfer/task-1-brief.md created/read, task1BASEe3. R/progress is authoritative audit; Uskillledger stillneeds synchronizedrulings. Preserveallresearchledgers.

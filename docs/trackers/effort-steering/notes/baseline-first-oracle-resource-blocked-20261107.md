@@ -1,0 +1,45 @@
+---
+id: baa8a33be5b34f97
+kind: research-note
+status: archived
+title: Baseline-first oracle — resource BLOCKED, no active run — 2026-11-07
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/baseline-first-oracle-resource-blocked-20261107
+original_sha256: a1a668bf5f425e7b4c8b168220fe247fa90ec62a1a02b8cde2e681688084973e
+---
+
+# Baseline-first oracle — resource BLOCKED, no active run — 2026-11-07
+
+AUTHORITATIVELATEST. ROOT=/home/marius/.cache/codescout-resident/codescout/baseline-first-oracle-20261107. Plan a51a67de9332e33a nowstatusBLOCKED(resourceheadroom), report bf3e845faf0b862a ACTIVEpartialcurrent. Overallgenericlowquality/costgoalOPEN; scientificstageincomplete, NOTachieved. No activeauthor/evaluator/waitjob. NOmoreautomaticretry. Standingautonomy/200USD/no mergepush remains, knownmodelsubtotal64.106761199999998654 + original3a unresolved4USDhold. No newspendafterbothactualauthors1.6961648999999996.
+
+## Completed evidence unchanged
+
+Bothoriginalpaidbaseline-onlyauthorsVALIDandfrozenbeforeprivate/referenceeval; low0.2914831/16actualwirelowrequests,high1.4046817999999996/54wirexhigh. Fullcapture/lifecycle/runtime/cleanup/knowncost. Low3evaluatorcellsVALID:basef/f/p,wrongp/p/p,referencep/p/p =>wrongrejectFALSE/refkeepTRUE, insufficientdetector. Highoriginalbaselinebuild0/testcompile137/HOSTfloor22.375<24 INVALID/noassertions/OOM0;wrong/refunstarted. Nevercountasxhighqualityfailure. Allsources/patchesfrozenall-authorsreceiptSHA6c888893ef33ffa062d5af3d7811c7873f009ed19729ce9548538982a00bbf02. Highpatchc7fd020f5c911ce058b1181a55dcfe22942a400d91c6f5b3ee34e93e10d0a44a. PartialauditMAINdocs/research/data/2026-11-07-baseline-first-partial-audit.jsonSHA897c4af153c2c70fd201bb0e9c23023e8421e7d2bc8d5542101f94dbdf8c0eaa closesbothauthors+9lowstatuses/resources/6freshabsencewithoutnative/modelreruns. Seepriorpartialtopicforfullproof.
+
+## All jobs CLOSED; neither recovery actually tested
+
+51record/tmp/codescout-bg/2674124-d9ea3495-bg_00000051.json exit1after1388s onlyhighofflineinfra;authorsvalid.
+52record...bg_00000052.json exit1after901s ROOT/offline-continuation-1/stopped.jsonBoundedadmissionbeforebaseline,rows0/provider0/noevaluationfolders. 90hostsamples13.2856–31.610GiB,threshold32nevermet.
+54record...bg_00000054.json exit1after907s ROOT/offline-single-job-1/stopped.jsonsamebeforebaseline,rows0/provider0/NOCOMPILE/NOnativefolders/NOcompile-environmentproof. 88admissionsamplesmin8.763679504394531/max26.45146942138672GiB,last19.944812774658203<threshold28. DoNOTclaimsingle-jobnativequalificationorqualityoutcomes; its39unitgreens/3actualmutantskilledcoveronlywrapperinput/proofboundary. No activejob.
+
+Single-jobamendmentoffline_single_job.py sourceSHA091840606011bc39dd00b949dc680c3768065eced74b0530443583817a10f0d6 wouldinsertCARGO_BUILD_JOBS1onlydockerRun;expectedactualENVproofrequiredaftercellcleanup. Nativehard8GiB4CPU/networknone/exectmpfs4 andcontinuoushost24floorunchanged,prelaunch28x3at10sec<=900percell. Original52prelaunch32. Neitherlaunchedcell, originalassertions/lowvalidsunchanged. DoNOTlowerguardsagainorqueueanother900waitwithoutnewheadroomevidence.
+
+## Scoped resource check; nothing deleted/killed
+
+Hostfreeexample125GiBphysical95used29available/swap47full, laterhostavailable~20. Dockerstatslistedservices/no oursleft; owned6CIDabsencealreadyaudited. LargeexaminedRApid3233672(~7GiBRSS)parent3233585codescoutMUXmainprojecthasCLAUDE_CODE_SESSION_ID6821c9b3-d613-4fb6-ac7f-ebdfb38e3cdd; RA1045532parent1045467MUXotherworktreeCLAUDE6d3d3879-4f3b-4053-a266-2d7635119035. TheyareSHAREDmuxworkersnotowneddisposableours. No peerprocessstopped/no externalmessage/peerlistingcount. Ourtoolserver2674124childofCodex646545RSS~60MiB; directchildPythonLSP1592309~123MiBRSS; Codex646545hasmanythreads/MCPchildrenandisNOTallours. Neverinferallitschildrenours. Readreaching-peer-sessionsskill+codexreferenceforfutureidentity/coordination; no registry/peer-censusclaimsfromthisscopedcheck.
+
+/tmpactualtmpfs32GiB(rw,suidnodev,no noexec). MeasuredOWNKNOWNtemporarydirectorypopulation: /tmp/codescout-tmp-exec-01a15ca9=792MiB; /tmp/baseline-oracle-review-20261107=888KiB; threeactorcontextdirseach8KiB. Less1GiBinthismeasuredpopulation, notalltmpfilesorallownmemory. Deletingoldworktree/traceevidencewouldnotfillneededheadroom. None deleted,moved,cleared. OtherlargeRAMownersnotours; no safeidentifiedownallocationlargeenoughestablished. Readonlyps/cgroup/data censusnotfullPSS/hostownershipattribution, doNOTsumRSSasphysicalmemory.
+
+## Scientific insight with limits
+
+Bothfrozenbaseline-onlycontractslabelpartial/mixedsuccessstreamclauseunresolved andassignNOtesttoit. LowactualpreservationtestcoversWHOLLYsuccessfultransformandpassesbase/wrong/ref. Lowfailureisnowmissingregressioncoverage, notearlieroracleinversion. Highdoesmorepublicsource/rendertracebutmatrixUNKNOWN. No general low=xhighquality/capabilityclaim. Futureuncertainty-handlingmechanismneedsseparateregistration+correct-referencecontrol, notretrofitknownprivatewitnessintoprompt. No newmechanismchosen/admitted, no additionalmodelplannednow.
+
+## Resume when external headroom changes
+
+Firstreadactualmemoryoneshot; onlyonce>=registered28GiBstablewithmarginconsiderfreshversionedofflineoutputpath(sinceout1exists) preservingoldwaits andexactfrozenhighpatch/source/variants/Cargojobs1/8GiB4CPU/continuous24. NEVERrestart51/52/54oroverwriteoutdirs. AuthoroutputsALREADYvalid, don'tpayagain/recloneonboarding/repeatlowcells/gates. Alternativeindependentexecutionenvironmentwouldneedexplicitversionedconfig/provenance, notsilentresourcechange. Ifnoheadroomstateasblocked; currentstepcannotcompletewithoutsuitableexternalresources. After3validhighcells auditactual4namedteststatusespervariant/rawlogs/fullresources/finals/envproof/cleanup, combineexistinglowcostmatrixanddecideGO/NO-GO. Archiveboundedallowlist(no rawcli-debug/authhomes),closeplanonlyaftermeasurementcompleteoroperatorchangesobjective. No commit/push/merge/sourceguardbypass; add2sixstagedgraderpaths/ca35frozenfe8unchanged.

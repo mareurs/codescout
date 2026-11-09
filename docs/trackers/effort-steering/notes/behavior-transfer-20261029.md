@@ -1,0 +1,41 @@
+---
+id: '21266af523532da8'
+kind: research-note
+status: archived
+title: Behavioral transfer — completed and sealed 2026-10-29
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/behavior-transfer-20261029
+original_sha256: eb50e212ab047a8c85a26e3d576e3b9169f569ef70fce36abe7015ce6ca241fd
+---
+
+# Behavioral transfer — completed and sealed 2026-10-29
+
+Owner Codex SID01a15ca9-f939-7603-acb5-01c6b02f68e2. Worktree /tmp/codescout-real-task-20261024, branch research/checked-real-task-20261024, local commit36f3c3e32f54b767bd68292e6ebea77c19bc8bd0 (parent6b70fbb1bd3676d7708253b672622d2857fdeda4). Exactly20 owned research/docs files committed; production src/crates/scripts/Cargo paths unchanged. Worktree/index clean. No merge/push/global installs or configuration changes.
+
+CANONICAL NEW BUDGET ANCHOR: /home/marius/.cache/codescout-resident/codescout/behavior-transfer-20261029/final-outcome.json SHA256cc8e9598540095a68d9677fb521084474dab8c3bef1e619c1905afa8d9ea52ee. decision completed_bounded_diagnostic. Prior15.217205099999999865, new0.52423239999999997, cumulative15.741437499999999835, remaining4.258562500000000165 of authorized20 Claude CLI client-estimate dollars. Native orchestration/review cost unknown. Three valid paid calls; no paid retries/replacements/protocol restarts. Do not resume this closed pilot or rescan historical journals for an older lower anchor. Future distinct phase must freeze a new protocol against this latest closure byte hash.
+
+RESULT: ordinary low L, gated-low G, fixed-xhigh X each independently accepted31/31. Every first Stop2/2passed, feedback_blocks0, first/final patch and inventory identical. L client0.08377870000000001, G0.0804468, X0.36000689999999996. CLI wall488721/180199/352810ms includes unequal cache/build overhead, not a latency comparison. Both low patches use existing read_regular_config_text and add no tests. X uses same reader, adds debug-reason logging and eight tests, targeted16pass. No new behavioral feedback→edit→pass chain. The gate's correction effect is unproven; this repeats inactive-gate limits LEM7/8/9 and must not be counted as another causal success beside LEM13. Detailed prompt/context and shared infrastructure were not ablated.
+
+Task selected prospectively from prior frozen last40src window: base96306d8ecaebaa4b9931e9e439eb8385c032acfa/reference8dee39068931a30991e020f8cf1766949c73b979. Runtime project.toml reads for peer+librarian; only src/server.rs author edits. New task within already represented bounded-filesystem area, NOT externalrepo or independent-family validation. Finite parent contract2protecteddeveloper+6originalpeer+20independent+3child-local librarian envprobes (on/0/banana with opposite file values). Complete calibrated base26pass5fail/reference31pass, both all-target compiler stages0. Other librarian env spellings/whitespace and concurrent path swaps remain outside31.
+
+Independent prepayment review actually applied10 distinct code-mutation candidates. Eight killed on first application,2original survivors subsequently observed killed; current0survivors. Anchor digest removal survived until same-amount/tampered-bytes regression. Librarian env-branch deletion survived initial28; new3childprobes2fail1pass, baseline/restored3pass. Librarian-only unbounded mutation passesdeveloper2/original6 but hidden17pass3fail. New wrapper launcher/parent pin removals each fail1 of10 private tests; restored10pass. Public3/private10 tests pass. Separate closure artifact controls are NOT extra code-mutation candidates.
+
+Protocol registration at16:17:00Z binds139inputs; prepayment approval276reviewed files. PrivateCLI2.1.309 SHA4d704a8aecbe038affa3000f498ae17c1b4f753add8facb8764120affc99b658, modelclaude-sonnet-5-5. Finalpreflight-v5 actualworkerPATH101→101→0/block→allow→allow,0modelcalls. R/controller imports old sealed primitives in memory, new root/anchor/observer/preparer; old phase files untouched. All raw receipts, transcripts, exact source inventories/patches, scope reviews, Stop/Cargo traces and31-function grades retained.
+
+WIDER FAILURE QUALIFIED: X wider server group348pass1fail and exactfilter101; literaltranscript supplement contains3requests,2actualCargoexecutions and1deniedgitstash baseline request. Piped tail tool is_error=false does not mean Cargo passed. Unpaid baseline-v3 ran exact test on unchanged historical source and also exited101 with workspace_pin_tests.rs:283 .fastembed_cache sibling-file assertion; source inventory matches initial before/after. This establishes observed baseline failure under tested env, not full embedding-side-effect cause or production remediation. Earlier free baseline probes v1wrongalias/v2doublecargo ran0tests and are explicitly invalid. Historical bug0b5635054b8b133b remains investigating.
+
+Environment failures preserved: one known historical absolute skill link excluded after full archive inspection; /tmpquota invalidated earlycal/preflight/gate and one reviewbuild; owned temp snapshots byte/link-verified before retirement. Rustfmt recursively rewrote initiallyraw protected fixture; normalize onlydeveloper beforepayment and rerun full31controls. Executed exactRust bytes R/inputs, public files measured formatterviews. Long disk TMP caused6LSPmux failures each fullgate-v2lane, exactdefaultbinary6/6shortTMP replaypassed. Actual final TMPDIR=/var/tmp/bt29p; sources/privatecache socket under /var/tmp/codescout-bt29-20261029. ~/.cargo/bin/sccache0.15 vs private/usr/bin0.19 mismatch invalidated gate-v3; all final launchers/parent/fullgate force RUSTC_WRAPPER=/usr/bin/sccache. Actual rustup payload hashes pinned, not just shims. No shared daemon terminated.
+
+FINAL VERIFICATION: repository-gate-v4 exit0 in2243.917s; Python1311pass+442subtests; FMT/CLIPPY/LEAN/DEFAULT0. Primary Rust suites5240pass0fail11ignore /7882pass0fail14ignore plus integrations/docs. Printed exclusions:3heavyPython suites, server-stack compile, librarianoffinLEAN,2locallyskippedONNXweights. This gate covers research worktree revision, not historical Xwide suite. Scoped docs audit15Markdown44refs33resolved0broken11outsideunknown; all11existlocally, existence only not freshness/portability. All13 previous tracker rows+definitionsections preserved, LEM14 appended outcomeunproven. Sidecar shapeunchanged; paramscatalog-only byconvention. Two quota-restored bugheaders initially lackedmetadata: repaired exactcatalogidentities through frontmattereditor afterdocAPI/doctorcouldnotrepair; all10bugheaders parsedvalid, bodiespreserved. R/bug-frontmatter-proof-v2.json is complete; firstproofJSON is partialserialization failure and not evidence.
+
+Final result review R/result-review.json SHA cc2c5de105643132403e775911c9357dd378e76a0c1613aca09b87ad24c8fae2 approvedtrue/Important0, includes final20ownedhashes. Commit pathspec guarded against both reviewed working bytes and shared index; exact staged treee57c13bd5a846bcdeaf322b9c5aa7899bf3aeea3 verified aftercommit. close-behavior.py seal+separate verify completed583physical evidence hashes and20recorded Git publication objects. Owned published outputs verify from recorded commit, allowing future legitimate working-tree updates; privateevidence remains byte-bound. Do not modify sealed R files. See final-outcome exclusions for retained snapshots/cache/bytecode outsidemanifest.
+
+PUBLIC POINTERS: docs/research/2026-10-29-behavior-transfer.md; docs/trackers/low-effort-quality-mechanisms.md artifact1bb3627787fac50a LEM14; tools/reliable-agent-eval/behavior_transfer; frozen spec+plan2026-10-29-behavior-transfer. Plan checkboxes intentionally remain unchanged after registration; outcomes live in report/private closure.
+
+NEXT INFORMATIVE DIRECTION: stop repeating this same-area acceptance ceiling to claim repair. Separate naturally failing behavioral calibration tasks from a frozen validator/selection rule, then evaluate disjoint external-repository holdouts. No such external validation occurred here; no general low/xhigh equivalence, superiority or workflow-cost advantage established.

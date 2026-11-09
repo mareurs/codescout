@@ -1,0 +1,64 @@
+---
+id: '776883219241e9a1'
+kind: research-note
+status: archived
+title: Matched Cargo completion pilot — CLOSED, 2026-11-03
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/matched-cargo-task-admission-20261103
+original_sha256: cc109af6a55a414f665087d7ff09dfb5e71ac05f03ca14525024c9510a8435f3
+---
+
+# Matched Cargo completion pilot — CLOSED, 2026-11-03
+
+RootSID01a15ca9-f939-7603-acb5-01c6b02f68e2. M=/home/marius/work/claude/codescout active; pin V=/home/marius/.codex/worktrees/615e/codescout, branch research/fixed-acceptance-population-20261101. Report99d2737fa874c55f docs/research/2026-11-03-matched-cargo-task-admission.md. Specbac3854925642a0b stopped-protocol; plan8c8c658f4a94ce6b done, native ledger .superpowers/sdd/2026-11-03-matched-cargo-task-admission. User authorized autonomous work/local exact-path commits, cumulative40USD, token~/.config/s5/token-claude-stef reuse; no push/merge.
+
+## Decision and actual paid outcomes
+
+HOLD-stopped-protocol; broader end goal unmet. Campaign @bg_000001e0 exited1 after4chargedRA22804calls.3valid completed,1invalid repair. Fixed order A-low/A-high/B-high/B-low was not completed: all4bindgen slots unstarted, no retry/replacement/newseed or retrospective rule change.
+
+A-L-I sessionb5864e5b-4196-4ac2-be3c-6be6e897e463:0.0379301client, publicfails1/2; original1006ok/1fail/3upstreamignored; hiddenfails renamed malformed1/4. Onlyproductionchange replaces downstream panic withreturn.
+A-L-R session326f3fac-08f7-4d72-a254-03c1ae460cf2:0.0934725; publicstillfails, original1005ok/2fail/3ignored (array_repeat_closure plus newly failing rustc_test_issue_52437), hiddenrenamedmalformedfails. Adds skip ofarrayrepeatcount traversal. Lowworkflow0.1314026, rejected.
+A-X-I sessionaa1902ca-d684-4620-acbb-eb82c8021743:0.5259125; public/original/hiddenfail sameinitialdefect. Larger anonconst-aware traversal change plus candidate test; canonical evaluator restores framework so candidate test cannot substitute for original acceptance.
+A-X-R sessionf6af6414-a5c2-49a5-a8c1-bc849435549c:0.48464910000000005rawcost. Rawsubtypesuccess/is_errorfalse/modelclaude-sonnet-5-5, actualwire+assistant effortxhigh verified. ONEdeniedGlob pattern **/la-arena*/src/map.rs at/home/marius/.cargo/registry/src. Exacttool_use_idtoolu_01CJkyH3nGqNs7g9EMuhJUsD correlates with permissiondenied result; duplicated persistence isnot2requests. engine.settled_raw rejected under predeclaredzero-permission-denial rule BEFOREvalidity/outcome/grade/receiptseal. No preservedchild-exit receipt; rawsuccessisnotmeasuredchildexit. Enclosingcampaignexit1.
+
+Highallcharged1.01056160000000005, including invalidrepair. No valid high terminal endpoint or matched pair, no valid2taskacceptance/cost superiority estimate. Lowterminalfailure already fails preregisteredboth-low-accepted gate.
+
+## Separate posthalt diagnostic
+
+@bg_000001e3 exited0, no model/token access or paid request. Only already-produced A-X-R patch evaluated through frozen source-bound grader in B/posthalt-diagnostic, separate from registered arm files. Public2pass; original1010named=1007ok/same3ignored; hidden4pass. Finalpatchhashc62693d304cd2136ce81cb0d5ebee771c5706bf64e726eda9fe0584c6548cf19. Patch resolves parentplaceholder/type conflict during anonconst merge and retains earlier traversal change. Reference instead avoids the inappropriate typewrite in create_body_anon_const; textmatching isnotrequired. This is independent offline patch acceptance, NOTregistered workflow rehabilitation/causal efficacy estimate.
+
+## Cost and evidence audit
+
+All4startedslots/rawspend/session/hash/modelcosts reconciled byB/paid_audit.py. Phase1.14196420000000005; prior25.340899699999999810; cumulative26.482863899999999860/40, remaining13.517136100000000140. Clientlistbasisreport, invoices/native/review/CPU/globalprovider/networkcosts/countsunmeasured. No unknown rawcharge among4calls, no extra paid diagnostic.
+
+Audit verifies actual outgoing/assistant effort/toolshape, exactprompt regeneration/parentcapture, fullsourcebindings and12grade receipts (9registered+3posthalt). Complete raw stdout is reparsed with calibrated parser and exact named population/ignoredsets matched, cargo.log SHA/byte lengths reconciled with referenced command stdout+stderr. Intentional16384byte output tail checked separately. Firstaudit's false untruncated assumption stopped beforepublishing; full raw logs retained (F-14). NewauditDecimalverification serialization mismatch observed actualTypeError, before-fixscript retained, minimaldefault=str fix thenactualverify0 bugcb24648f65b4f641. Doesnotchangegrade/cost/frozenruntime.
+
+## Closure and recovery
+
+B=/home/marius/.cache/codescout-resident/codescout/matched-cargo-task-admission-20261103 CLOSED/IMMUTABLE, onlyrepeat-verification.logmutable. Canonical python3 -B B/close.py verify. Seal364010aa416fa07002493d5290d697f79a59bc492433f1261285559ea6a9e273,21636physicalregularpaths/13literal symlinks, excluding onlytop-levelseal.json/repeat-verification.log. FullnofollowPythonlstat/readlink matchesGNUfind-typef/l, sha256sum--zero, readlink--zero. Actual2regular/2linkfixturedoesnotfollow externaldirectory; linktargetmutationdetects andexactrestorationpasses. Firstregular-onlyclosure rejectedactualAGENTSlink beforeseal; priorclose/helper/publicationbytes retainedclosure-revisions/1-regular-only. Verifiedsealabsent/pubpresent, explicitfinish, no retargeting/dereference/blindrecordretry. F-15.
+
+Freshcanonicalverify0 validateshistoricalGit, fullsealedbytes/linktargets and40recordedcontainerIDs/fourretainedimages. LiveindependentpaidauditpassedBEFOREsealing. Fiveoutside-frozenfiles archivedbyteexactdependency-snapshots; canonicalfutureverifydoesnotneed/tmpactors orcurrentrepositoryruntimebytes. No ordinarycampaign/CLI/tests/LSP/mutationwriters inB oroldersealedroots. B/native-ledger isdatedcopy; beforeclosecurrent/detailedmemorybytes preservedrecovery-*-before-close.md, alsoGit9f62d8325. No data lost by replacing this live recovery topic.
+
+Admissiondocs b2516d9384a3af5685cd7f797e490c66496fb53d patche000c429c1f584bf88b7cd3dfde0cbfb2847683e; Mrecovery9f62d83259f1c9f3bbe611d80d1fda7b6483c5cc patchf0fa4288be419f656b940cde57e74a04fcf5283f. Result2947aab55de050aff7d7f790e8c2d1a3ab023465 patchc1fbeaaadf5ecf69de6f2a94df0b479efa0a4535,6ownedpaths. Completioncdaa1c4da115b5a3e7c8ad8fb7fe991913b7040c patch770d174d45d5afd300c2e3028c1436260364729e,3ownedpaths. Completionmetadata doesnotchange historicalpublicationseal. Private runtimehelpers preserved/frozen/sealed, NOTGittracked. Peer mainstagedbugtriageblobf4ad12b9cf7b8b830ac35cc341afcde702d0a56c untouched. No push/merge.
+
+## Preserved admission and review facts
+
+F-10excluded all5oldcachedtasks whose S5outcomes were alreadydisplayed inTHISroot; olddraft53868af314244607 stoppedbeforepayment. Frozen171recorddatasetSHA bf2dd8252a07d0f275663ef8f6ab87571dd9bc4ce386abf9ec98d3cd6bb51a81;6strictpositiveunscreenedcandidates fixedbefore newoutcomes, SHA256cargo-matched-v2|ID order/max1repo selectsRA22804/bindgen3390. Boundedtrace/patchidentityscope, notglobalunseenclaim. Originalcontractcases frozenbeforegold; bindgencastmacrovariantsunsupportedretained, explicitpre-goldv2staticconstaliasamendment plusgenuinenewtypecompat. Contractcasesv2SHA b82898945e5fd0885b68146eddf74dd8a092bd744f66ead2434f177d56309d2b.
+
+Both6contractcases showbase defect/goldpass. OriginalRA1010named base1006ok/1fail/3ignored ->gold1007ok/same3ignored; bindgen622 base621ok/1fail ->gold622ok. Sameexactnames/ignoredsets; notwholebenchmark. F-11correctspartialinlineparser byfullsummary/exit reconciliation; ignored3arenotnewsuccesses. Source/preparedimages retained: cachedRA9ca002fb..., bindgensourcee7c4c8f..., preparedRA2c6010a3..., preparedbindgen911fb163... (fullidentitiesfinal-resources.json). RAcanonicalbase3061c4d11509546ed2250f0dda6d66aa60b0a18d fromboundedshallowGit; rejected7.757GBimage>6GB. Bindgensource3.503GBpulled/base4609f3fdd5d4c66ea67a6103a7850989c612273e; DockerIdmanifestnotconfig. Do not prune them.
+
+Mechanism: equalRead/Write/Edit/Glob/Grep, emptyMCP/noBash/noin-turnCargo; completionpublicfailonly ->atmost1sameeffortrepair. Hidden/originalneverinrepairprompt. ActualmockCLIbothwireefforts/toolshape verified, exactinertDeferredToolPlaceholder; forcedplaceholderNoSuchTool rejected; mockusageexcluded. Pure/candidate tree frompinnedarchive+capturedpatch, fullmanifest beforefixture, canonicalframeworkrestore, externalcache, networknone/fixedtmpfs/boundedprocesscleanup. Exactly2declaredbindgenoriginalscratchoutputs archivedremoved, allotherdelta rejected.
+
+ONEfreshstrongreview:15appliedmutants12survive/3assertionkills,0errors/timeouts; authorreproducesALL beforetests. RealterminaloverrunGO andmissing2imports reproduced. ONEfixpassbudget/importclosure/consumerfixtures,37methods/exact15assertion-onlykills. Actualfirstpreflight thenrejects order-onlysettingsdrift(nochangeddenialsets/prompt/0starts); revision1preserved, deterministicorderRED->GREEN; revision2sameexactregistration/tasks/source/sessionIDs. Final38methods/exact15assertion-onlykills/0survivors/errors/timeouts/exactrestores; freshpreflight0. F-12/7bugrecords. No rereview. Projectfull5lanegate0/432s,heavyPython/server-stack/2ONNXlimits; repositoryruntimeunchanged/privatechecksseparate. These guard controls are not efficacy.
+
+## Next mechanism hypothesis
+
+Endgoalnotmet. Detection/feedbackdelivery worked onRA; lowcorrectionfailed. Investigate causaldiagnosisBEFOREediting: trace producer ofwrongvalue/type, stateviolatedinvariant, justifywhy patch restoresit. Untestedgenericprompt/workflowcandidate, notask-specificreferencehint. Freezefreshpopulation/equalcheck-repairaccess/cost/stoppingrules and classify blockeddependencyreads prospectively beforepayment; no retrospectivevalidityrelaxation. Successfulforbiddenaccess remainsdistinct. Reuseprovencontroller, no newgenericruntimeproof/nootherreviewofclosedphase. Do not replayoutcome-exposedRA22804astransfer or resumeunstartedBslots inhaltedregistration. Standingremaining13.5171361USD isceiling, notobligationtospend.
+
+EarlierA/W/P/Q/BR/F/allroots immutable; OLDNoriginalcompatpathunchanged. A sealb91e71ca60af994ec92a91e03b4a0372caa67e4cc9a5600df1fbadf951d6a68a andcurrent-through-Aarchive7ded5d7e0da3306ca314d626cf46e020bc5275c0 preserved. No oldcostdoublecharge.

@@ -1,0 +1,33 @@
+---
+id: e2a772ed526b5450
+kind: research-note
+status: archived
+title: Blind challenger 2026-11-01 — CLOSED, sealed negative diagnostic
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/blind-challenger-20261101
+original_sha256: 3fdabf19a38596aa9df8cdd1426c509e31e7685481482ad2f416e302bbbed353
+---
+
+# Blind challenger 2026-11-01 — CLOSED, sealed negative diagnostic
+
+N=/home/marius/work/claude/codescout/.codescout/resident-private/blind-challenger-20261101 (keep at this original path; compat namespace depends on it). V=/home/marius/.codex/worktrees/615e/codescout branchresearch/fixed-acceptance-population-20261101. Local exact11-document commit441dc53ae545f936e5bba0ca7e3d8f17a639e000 parent871c52c3ef04af4dfc79cc134d032828f92cca31 patch-id42e482b45d584592f1b40231a5767b873a2e789d. NativeSID01a15ca9-f939-7603-acb5-01c6b02f68e2; initial commit omitted automatic trailers, explicitly amended only own unpublished commit with truthful native trailers, unchanged file bytes. Clean index/worktree, no merge/push. Normal hooks passed; initial dead-artifact-ids check skipped for missing runnable binary. Report docs/research/2026-11-01-blind-challenger.md catalogcd91175c4a330445; trackerlow-effort-challenger-mechanisms.md catalog7728cf1b9c13a59b LMC-1. NativeTask1 andTask2 complete, retain ledgers/worktree.
+
+Fresh full project gate @bg_000000f5 exited0: Pythonlight1311passed442subtests; fmt/clippy/lean/default all0. Printed exclusions: heavyPython3suites, server-stack, two localONNX tests; librarian onlydefault. Closure guard suite2/2. Complete seal binds4870physicalregularfiles/0literal links; independently calibrated with GNUfind completepaths+SHA equality after sealing. SealSHA3bfe1347864a7b8420d61a31a95f03a320a426448bffd538d002f661b016abb0. Seal/verify and nativeTask2verification succeeded. Allmodel/evaluatorjobs terminal; DO NOT call/retryB or edit N except excludedanalysis/repeat-verification.log. Canonical verify `python3 -B N/compat.py python3 -B N/analysis/closure.py verify`.
+
+ONE paid A-L, CLI/session valid, normal success, Sonnet5.5 low allowance.40, actual rawclient.06477179999999999. Session9e396057-4992-41a5-9516-76bab39f4be5. Model says no actionable defect, writes a passing public-API probe; exact proposed test passes challenged Axum1934 Q/E-L, referenceQ/F-L and gold in independent containers. source-bound certificate confirmedFALSE. B-L Tokio conditional never started; Bpreflight rejected actual false cert; N/stop.json blocks newcalls. No retry/hint/repair. Accounting independent reader allstarted agrees primary state: phase.06477179999999999, prior24.130401899999999830, cumulative24.195173699999999820, remaining15.804826300000000180 of40. Actual billing/native orchestration/review/CPU unknown.
+
+Insight: first model handler captures Option<MatchedPath> into responsebody, but its assertion takes only HTTPstatus .0 ==200; second tests nested pathconcatenation. No assertion that fallback has no matched path. Parent hidden publicAPI control assertsabsence and failscandidate/passreference+gold. Thus this blind low reviewer did not detect the missing invariant on ONE exposed development case, despite actualsuccessfulsourceboundCargo. Do not infer general failure rate, causalwhy, repair or parity. Ten duplicated top-leveltooluse blocks dedupe to5distinctrequest IDs (identicalinputs checked); one rejected shellwrite thenWrite andactualCargo success. Audit N/author-tool-input-audit.json.
+
+Instrument: realDocker placeholder6rolespass/deliberate6rolesfail/knowncounter3rolescontrast; both actualordinaryshim entrypoints pass. Fresh strongest reviewer /root/blind_challenger_runtime_review gpt6astra max: baseline19,6mutants3killed3survived. Read originals thenONEfixpass three consuming tests + CRLFnormalization; baseline22passes, exactsixsemanticmutations allkilled. Final22readiness after synthetic reviewmarker copy exclusion passes. Revieworiginal/replay byteidentical movedinto deniedN/review/{initial,replay}; old/tmp locationsabsent. No secondreview. Private runtime/source/config/Nodeentry+actuals4rowshelper/CLI/controls/review hashedbeforepayment; no runtime edits afterregistration.
+
+Environment: other session migrated alloldclosedresidentroots to /home/marius/.cache/codescout-resident/codescout during unpaidcontrols. Firstfailedattempt retainedN/failed-controls/before-compat-view. N/compat.py +compat-map.json uses bwrap CHILD mountnamespace only: archives READONLYat originallegacypaths, CACHEalias hidden bytmpfs. Neverhostdirsymlinks/movesback/oldsourceedits. OriginalQseal/outcomehashes unchanged; fullQclosurepasses again insideview. Canonicalprefix `python3 -B N/compat.py python3 -B ...`. Hostoldimportsfail bydesign. Standaloneregisterrequires sys.path N for oldcollector's import workflow; firstunpaidattemptfailedbeforewrite,correctedinvocationregistered.
+
+OBSERVATIONINTERVENTION: aftermodelfinalcapture controllerpinnedCodescoutsymbols/read_file to /tmp/bc01-author-A-L. Workspaceautoinit addedexactgitignorerule .codescout/private-memories/,2inventoriedmetadatafiles and5730targetfiles viaLSP. Strictliveinventorystate/certguards caughtit. StoppedonlyobservedactorRustLSPprocesses, archivedcompleteinventorydelta/metadatagitignore/flychecklogs underN/observer-artifacts, restoredonlyobserverchanges toexactoriginalfinalcapture (hash27f69d82742c929f885ee72635b55a19e0b0c0f18f962e540e3fc677ed1fe1cb), discardedreproducibletargetcache. Originalraw/charge/captureandall3panelgradesnotrewritten/rerun; resumedcertificatefalse andstatevalid. DO NOT callthisuntouchedendtoendworkflow. DO NOT initializeworkspace/LSP onliveactorsagain; useadisposablecopy. Bugb4a999cf03a9457b mitigated.
+
+Next research question: generic contract-to-assertion procedure plus meaningful negative controls/mutations, specified before fresh cases; count whole discovery/repair/escalation cost. No sharper hint rescue or identical generic review on this exposed case. Existing failures may develop a mechanism, never validate it externally. No next phase registered or paid. Remaining authorized global client cap15.804826300000000180; no current unknown charges. Keep all old sealed roots immutable.

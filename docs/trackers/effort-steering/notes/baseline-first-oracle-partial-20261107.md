@@ -1,0 +1,53 @@
+---
+id: f656d7fad1dcd320
+kind: research-note
+status: archived
+title: Baseline-first oracle PARTIAL closure + offline continuation LIVE — 2026-11-07
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/baseline-first-oracle-partial-20261107
+original_sha256: b7bda47557b9b437abbffaa73f705a03fa4971a5ad85c9ea0981a940a9fb0858
+---
+
+# Baseline-first oracle PARTIAL closure + offline continuation LIVE — 2026-11-07
+
+AUTHORITATIVELATEST. ROOT=/home/marius/.cache/codescout-resident/codescout/baseline-first-oracle-20261107. Mainplan a51a67de9332e33a/spec c40495db60f87d27; report bf3e845faf0b862a docs/research/2026-11-07-baseline-first-oracle.md ACTIVEupdatedpartial. Userautonomousgoal genericlowmechanism/standing200USD/no mergepush. No newdesignorpaidmechanism chosen. DoNOTrepeatmodels/onboarding/oldlowcells/oldgate.
+
+## Job51 CLOSED1, both paid authors VALID
+
+Record/tmp/codescout-bg/2674124-d9ea3495-bg_00000051.json exited1after1388s. ErrorONLYofflineevaluatorxhighinfra-invalid; bothfreshprocessauthorsclosed0/capturefrozen BEFOREhostreferenceeval. Lowcost0.2914831, xhigh1.4046817999999996, totalNEW1.6961648999999996; knownseries64.106761199999998654 plus original3a unresolved4USDhold (unknownfinalcostretained). Costsfinal/cumulativeonce, noresampling. low16actualcapturedrequests/forwarded16 allclaude-sonnet5.5effortlow;high54allxhigh/fwd54/terminalcoverageexact; low2CLIturns1continuation,high9turns8cont, lifecycleSETTLED/fullworkflow/context/capture/bgcomplete/noerrors/knowncost. Authormonitor106/335cgroupchecks/OOM0 completehealthy. Singleactualnativeeach pureBASELINE3767f31b...; no /proposal /public-observations args, ownedabsencefreshchecked.
+
+LowcaptureSHA0d3e3a4642f08fd40f4158d91c62a2ff5f181b2ceee1b11237089fa24545fefa; highb68679ec282cbaf9aa7e52cb16d07775977a3097c662c72eec6a9c8ecdfb888b. BothROOT/all-authors-frozen.jsonSHA6c888893ef33ffa062d5af3d7811c7873f009ed19729ce9548538982a00bbf02. Allfrozenbindingsrehashedunchanged. No changesafteroutputs/privateeval.
+
+## Actual low result: reference retained but wrong NOTdetected
+
+3tests in low/frozen/generated-tests.patch: contrast_invalid_op_on_ans_last_keeps_ans_intact, contrast_invalid_op_on_streamed_ans_last_keeps_ans_intact, contrast_valid_transform_of_ans_last_still_stores. Baselinefail/fail/pass; savedwronglowproposalpass/pass/pass; qualifiedreferencepass/pass/pass. All3cellsVALID/build0/actual9namedoutcomes/rawlogsindependentlyparsed. Resource10/10/13rows, minhost46.5885/46.5352/38.944GiB, allfinalsamples/all>=24/OOM0/freshabsence. WrongrejectFALSE/referencekeepTRUE. Lowcontractr1reportedfailurestateintact2tests,p1whollysuccessfultransformpreservation,u1mixedpartialsuccessbehaviorUNRESOLVED/noassertions. Thusnolongerinvertsreferencebutstillnotusablequalitygate. Oneexposedtask—notheldout/generalefficiency.
+
+## High original evaluator INVALID resources, NOTmodel failure
+
+xhigh/oracle-evaluation-results.json containsONLYbaseline row validFALSE. nu build0, cargotestcompileexit137 andno complete named statuses. Monitor11samplerows, firstbelowhostfloor22.375083923339844GiB<24;2belowfloorrows/finalsampleincluded/OOMkill0; runtime.errorshostresourcefloorviolated. OwnedCID57e9a32a425225678ad7924f71a72856623ee4a204cae895530bf0263145ac1b freshlyabsent. DoNOTscoreasassertionfail orretryauthor. wrong/referenceNOTstarted. Originalinvalidfile/logsleftunchanged.
+
+High4frozennames: contrast_failed_last_pipeline_leaves_ans_fetchable;contrast_failed_last_pipeline_stores_no_error_value;contrast_invalid_ops_on_last_still_report_errors;contrast_valid_last_transform_is_still_stored. PatchSHA c7fd020f5c911ce058b1181a55dcfe22942a400d91c6f5b3ee34e93e10d0a44a. Contractr1tracesperitemerror/renderingtable-eviaeval_block vs eval_sourceexit0,r2noerrorANYWHEREafterALLerrorrecordcase,p1operationstillerrors/singlevalueoldstate,p2successfulstreamstores,u1failedpayloadchoiceunresolved,u2othertypes/mixedsuccessunresolved. Modeldidmorepublicsource/rendertrace,butfinalcomparisonUNMEASUREDuntilcellsactuallyvalid. Don'tinferhighqualitygainfromprose.
+
+## ACTIVE model-free continuation52
+
+ONElaunch @bg_00000052 record/tmp/codescout-bg/2674124-d9ea3495-bg_00000052.json commandpython3-BROOT/continue_xhigh_offline.py. No model/provider/tokenpathcalls. Itvalidatesbothfrozen,originalhighresourceinvalid,lowallvalid,executorSHA b8f49bc59d0b1a5e1fbcd94c47f217b6e06ea813b773aa7abb8bab210178cf44,privatefrozenrecordSHA8bb14b9ac8bd98d78f3ae2e3776a523b64d826269a79277058ea2677f5344114,patchandvariants. WritesFRESHROOT/offline-continuation-1/registration.json+generated-tests.patch BEFOREwait/cell. Needactual52outcome; no busyloop/duplicate. Ifpreflightassertfailsbeforeout doNOTinfernative/modelfailure.
+
+Onlyinterruptedhighbaselineandunstartedwrong/reference selected. Same8GiB4CPU/networknone/exectmpfs4/nativeimage/commands/parser/testbytes/continuoushost24. PrelaunchHOSTtightenedto32GiB3samples10sec for8capheadroom; bounded900sec/cell. No guardlowering. Everycellrechecksbindings/allfrozen, unchangedoldqualifiedevaluate_v3.cell. ResultsROOT/offline-continuation-1/results.json(all_three_valid/provider_calls0) orstopped.json; logs/finals/absenceunder.../evaluation-v3-{baseline,low-control,reference}. Originalinvalidplusalllowcellsuntouched. Noautopaidauthorretry. Nextwake read52 actualresult/statuses/resource/costsource; don'trerun51.
+
+## Partial audit CLOSED no reruns
+
+MAIN docs/research/data/2026-11-07-baseline-first-partial-audit.json SHA897c4af153c2c70fd201bb0e9c23023e8421e7d2bc8d5542101f94dbdf8c0eaa. Independentlyverifiesfinalsourcebindings,bothauthorworkflow/cost/capture/requesteffortcounts/singlelaunch,allfrozenpayloads,9actualnamedlowstatuses,alllowresources/finals,6freshabsence (2authors+3low+1invalidhigh). Countsareliteralrecords/notproxiesthoughttokens. No provider/nativeauditcalls. Finaloverallmatrixauditlaterafter52valid.
+
+## Prior qualification/review remains unchanged
+
+36residenttests/20actualmutants19killed1redundantM11survivor, independentoriginalreview16/7/9; oneparentfixpassnopaidatthatpoint. FiveMAINissuesmitigatedresidentcaveat(no productfixcommit/nofixesindependentlyrereviewed). F-217runtimeinstall lifetime lessonrecorded. V2regsourceonlyamendmetadata/publicinputsunchanged. Closedcontrollerarchive77payloads+manifest296876bytesSHAb4bbef977fa7799afc81d2b7de2dacafb678bdf14068cf3ae57d7fa25e32ab12allreopenedverified. DON'Trepeatgate/modelprep/nativecontrols/sourceonboarding.
+
+## Next after52
+
+ReparseRAWnamedhighoutcomes/resources/cleanup andfrozenbindingswithoutnativeaudit. Combinewithvalidlow/actualcostknown. Reportexactclauses/matrixNO-GOorGOonlyregisteredcriterion:wrongrejectbyjustifiedpreservation+referencekeep+baseline-to-reference requirementdistinction. Preserveoriginalinvalidexclusion. Archivecompactexplicitallowlist(no rawcli-debug/authclientnativehomes); updatesreport/plan/memory. Genericgoalstillopen; resistnewmorepromptreplicas. Potentiallaterhypothesisonlynotchosen: uncertaintyclauses+observablecandidatechangedbehavior mayallowcompatibilitygate,butmustregisternewmechanismandvalidateALLuncertaintyclassesagainstreferencebeforeclaiming—notretrofitprivateknownmixedwitness. No futureactorhintthatcontainsprivatecase orposthocchosenpublicprobe.

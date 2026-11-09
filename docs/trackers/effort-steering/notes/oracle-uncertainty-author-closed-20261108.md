@@ -1,0 +1,29 @@
+---
+id: bfd8dbdfe6d27106
+kind: research-note
+status: archived
+title: Uncertainty author VALID/CLOSED; offline comparison active — 2026-11-08
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/oracle-uncertainty-author-closed-20261108
+original_sha256: 7dab7f6d411d94595a97de95a98e5186908f0b516048bd666d7225e1eeb4175b
+---
+
+# Uncertainty author VALID/CLOSED; offline comparison active — 2026-11-08
+
+AUTHORITATIVE LATEST. ROOT=/home/marius/.cache/codescout-resident/codescout/oracle-uncertainty-20261108. Authorjob5c CLOSED exit0, neverrestart. Actual receiptworkflow/context/capture/lifecyclesettledcomplete; one nativeconnection, runtime resource_ok/111cgroupsamples/OOM0/freshabsenceverified.16actualrequest-N.json captured forwarded files all claude-sonnet-5-5/output_config effortlow. Costfinal0.2943323USD. Newreservation1 released; originalunknown4holdunchanged. Knownseries64.401093499999998654; oldlow0.2914831+new0.2943323=0.5858154oracleauthorcost vs priorxhigh1.4046817999999996, NOTfullrepairworkflow/causalefficacy. Standing200USD.
+
+Newfrozen4tests: contrast_invalid_op_on_ans_last_keeps_ans_intact; contrast_invalid_op_on_streamed_ans_last_keeps_ans_intact; contrast_valid_transform_of_ans_last_still_stores; contrast_valid_str_length_on_ans_last_strings_stores. Contract retainsunresolvedu1 (nonans/partlysuccessfulerrorstreams/guardorigin), NOmixedpreservationassertion. Registeredcomplete-contractsuccessunavailablealready, but incidentalwrongrepairdiscriminationUNKNOWNuntilmatrix. DoNOTinferqualityfailurefrombaselineassertions (expectedred) or completionfromtestcount.
+
+CaptureSHA015c0279b34853e37e80bab6ff06ddba1dc46d696e651a311f559bc74225cb92; testpatchSHA98cd26333163fd8ce2f795eb3c0baf337ab1ece59384402268718047a9a84803; contractSHA3f77d05304ba61d8c6cf3b94f66478ba1cce44219b91a445b8eec264398e545b; allfrozenreceiptSHA2e26708cdf6c38c1fea646b58102117d89163bc2dd80904f23f6dc33190a486e. ROOT/author-audit.json actualindependentchecksvalid/wirecostcapturecleanup; no native/modelregrade.
+
+ACTIVEONE model-freejob@bg_0000005d record/tmp/codescout-bg/2674124-d9ea3495-bg_0000005d.json: python3 -B ROOT/evaluate_frozen.py. NEVERrestart. Afterfrozenauthorvalid, fixedfourtests unchangedthreevariants baseline/savedwronglowcontrol/qualifiedreference frompriorregistration. Reuses unchanged reviewedevaluate_v3.cellSHA b8f49bc59d0b1a5e1fbcd94c47f217b6e06ea813b773aa7abb8bab210178cf44 andsingle_job_docker fromoffline_single_job.pySHA091840606011bc39dd00b949dc680c3768065eced74b0530443583817a10f0d6. Native8GiB4CPU/CARGOBUILDJOBS1/networknone; prelaunch3x28GiB, continuous24floor; root80/tmp4floors unchanged. Freshoutput ROOT/offline-evaluation-1; runtimeownCIDcleanup/envproofrequired. Scripts/input/frozen/variantshashesboundbeforecellsandcheckedpercell.0provider callsplanned. No paidfeedback/promptoroutput edits/resampling. EvaluationNOTyetmeasuredfromlaunch.
+
+Specd8be1a58471ad76d/plan89f4456f348addf5 active; tasks1/2complete, task3inprogress. MAINreport docs/research/2026-11-08-oracle-uncertainty-resolution.md ACTIVE created, catalogidobtainifneeded. Prior memory oracle-uncertainty-20261108 retains fullreview/admissionhistory (originalmoduleImportErrorfixed,24tests/postfix16actualmutants14kill2minorremaining). No re-review/productchange/gaterepeat/onboarding/newxhigh. No mergepush/foreignstaging.
+
+Afterjob5dwake audit3cellsall4rawnamedstatuses + requirement/preservationsemantics, input/loghashes, finalresources/actualcompileenv/freshownabsence. Actoractualobservationsshouldbeauditedfromstream.jsonl/publictooltrace, notrawdebug/auth/clienthome; don'ttrustcontractclaimsasexecutedprobes. Thenapplyunchangeddecidepolicy (unresolvedseparateevenifincidentaldiscriminator), archiveallowlistedclosedscientific/controllerreceipts(no rawprovider/debug/authhomes),updateplanreportcurrentmemory/specverdict. Stopthisexposedcase/nofurthersamecaseprompttuning. Generic mechanism goal remainsOPEN; anynewtransferrequiresseparateregistration.

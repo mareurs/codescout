@@ -1,0 +1,35 @@
+---
+id: '4c288ff7ee75aa4a'
+kind: research-note
+status: archived
+title: Grader validity — bounded correction closed, 2026-11-06
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/grader-validity-20261106
+original_sha256: ce3b361a805a7fd2182924dceb1e31dc03ef00fec96e5fcf22a6f32f6469d0f3
+---
+
+# Grader validity — bounded correction closed, 2026-11-06
+
+Sourcecommit a2ffc143266c5e828afd7d8ef2ceb665318df49f, patch-id6d3afca0f9ca24e2ccc9032c5aea79f418b64b7c, branchfix/grader-validity-20261106, cleanworktree/home/marius/work/claude/codescout.worktrees/grader-validity. Eightownsource/test/fixturefiles matchverifiedcommittedhashes. No merge/push. MAIN researchdocs/artifactsuncommitted separately, noforeignindexmanipulation.
+
+Parenttookover afterexplicituserrelaypeeronly205baselinepass/noedits/commits/Task1neverstarted. Plan144495d0b8e0f23e DONEbounded; reportdocs/research/2026-11-06-grader-validity.md. ROOT/home/marius/.cache/codescout-resident/codescout/grader-validity-20261106.
+
+New toolchain_crash anchoredprocessdiagnostics; live_graderinfra=toolchain_crash plus truthyerror ONLYzero parsedstatuses, normalcompilererrors stayfunctional,partialstatusesexistingordinarygrade. Errornamesparserobservations,nocauseclaim. audit_reparse.py retrospectiveONLYunchangedrecordparser, exactexpectedbinary/test/currentphysicalsplitattribution, originalfailprotection. No datasetparserrewrite orprospectiveliveoracleadmission.
+
+Tests205baseline69subtests; initialwrongreason toyparserred correctedbyremovingwiring andobserving intended1fail2pass thenreapply,F-213. Auditmodulemissingred thenno-op4fail4pass. Originalwholechanged220pass79subtests. Onefreshreview12actualfrozenmutations8killed4survived plus2actualfunctionalbugsfiled. Oneofflinefix,newcounterexamples6failfirst, final227pass85subtests. Finalfullgate12aCLOSED0/allfive lanes0, Pythonlight1642pass529subtests SEPARATEscopefromtargeted227; exclusionsheavyPython/server-stack/localONNX/librarianleanretained.
+
+Reapplication11original literals plusM02-v2explicitresite(errorwordingchanged).12appliedcases11killed1survivedM04. FouroriginalauditsurvivorsM06/07/09/10allkilled. M04inertwithanchoredregex verifiedfourtargetedcellsfixedguard/no-guardPASS/PASS, oldregexguard/no-guardPASS/FAIL; doNOTclaim12kills/absentM02killed. Nofurtherreviewloop.
+
+MAIN54fe4b112aa4e423,b1e1f89b7d587cb8,73efe0aa746d30f9,77828ecdbae3b8c2FIXED. Original0a2929ec2a4f688fMITIGATEDonlyhistoricalaudit, liveparserpolicyneedsseparateprospectivequalification. D1–D5rulingsarchivedrulings.md.
+
+Auditv1SHA2221fee48b54ee56e0040be7bbd4676f802494747c6ad41b4b72af6bf70657b4preserved. v2recalibratedsame4rows/17oldprotectedfilesunchanged. NUlow0statuses+SIGBUSinvalid;NUxhigh1P2Precoveredline3725missing1->0/notpassing2->1realregressionremains;RAboth8182selectedexpectedpass. Existingclosedf7NUlowdiagnostic2F2Pfail/8620P2Ppass/missing0NOTrepeated. No model/provider/native regrade.
+
+Archive docs/research/data/2026-11-06-grader-validity-evidence.tar.gz SHA9b992b4d7841f54a42a88323ef9cdbe169a87e9db839c71613720a6018fcf422,1694700bytes,189payloads+manifestallreopenedverified;144reviewmanifestpayloadsrehashed. Allprevioussource/cohorts/runtimepluginstatesunmodified.
+
+Nextcriticalpath: explicitprospectiveLIVEparser/infra policy, fresh2taskempty/gold/repeatcontrols boundtocommittedgrader+runtime; concretepaidadapter/midstage-resourcepolicy; fixedsixpilot. Controller/readinessclosed butactualpaidadapterabsent. GenericsemanticcontracteffectSTILLUNMEASURED, knownseriesprior58.180531399999999104/budget200unchanged.

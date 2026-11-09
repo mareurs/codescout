@@ -1,0 +1,41 @@
+---
+id: c5fe471ff6da8408
+kind: research-note
+status: archived
+title: Prospective plugin binding CLOSED — 2026-11-06
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/semantic-contract-plugin-binding-20261106
+original_sha256: 89810120153f002305eb2ca3007c2e8950edad3b239ba3a3435b6ab97b95c548
+---
+
+# Prospective plugin binding CLOSED — 2026-11-06
+
+Plan dd4f8b4f57d9c59c DONE docs/superpowers/plans/2026-11-06-semantic-contract-plugin-binding.md. Report ecfa1bfc3103c793 docs/research/2026-11-06-semantic-contract-plugin-binding.md. ROOT /home/marius/.cache/codescout-resident/codescout/semantic-contract-plugin-binding-20261106. Approved spec28aab59cb5842630. Actualsource .worktrees/semantic-contract-runtime-01a15ca9 base36fec1201unchanged. Privateanalysisinstrumentonly, no product/sourcecommit/merge/push.
+
+## Single new prospective common-plugin smoke
+
+@bg00000117 CLOSEDexit0 2026-11-06T14:07:41UTC; record/tmp/codescout-bg/455879-a720241d-bg_00000117.json. ExactlyONE NEW disposableNUlowcontrolsyntheticcase,6actualrequestfiles,0provider/credential/onboarding,0USDexperimentcharge. This is futurecommonpluginidentityquestion, NOTa rerun of6historicalwirecases ormodelrepair. Fullfrozenprompt/visibleorderedglobal41/project18lines,lowmodel/effort/19CLI20reserve/userprojectlocalsettings/fullReconbody/exactSkill+nativeguidanceread+symbolsmainargs/successresults confirmed. CompletionONLYsourceguidancepresentfixture;nativecaptureonlystartupgitignore. Native4CPU32GiB/exec4GiBtmpfs/networknone. Both2recordednativeNamesindependentlyabsent. All5886realpreparedfiles STILLunchanged/unstarted.
+
+FullCURRENTplugin /home/marius/.cache/codescout-resident/codescout/complete-workflow-action-budget-20261105/skill-only-plugin staysACTIVE/MUSTKEEP includingnormallymutable.codescout/.buddy. BeforemanifestSHA328bd7f4f80d66e37a773029cf9dc84b46b73511df02bd288b332c7ca64d004f records142regularfiles+38directoriesincludingroot,noexclusions,allbytesSHA/size/modes/directorypopulation. Root/descendantlinks+specialfilesrejected. Everyfilemetadata/lengthstableacrossread;twofullscanmapsmatch. Fullbefore/after/liveinventorysame. SampledboundariesnotOSlock, noowner/ACL/xattr/externaldependencyclaim.
+
+Registration writtenandhashchecked BEFOREexternal.launch, fullpluginverifiedbeforeandafter; registrationmtimeprecedeslaunchmetadata. Existingstarted.jsonhasNOstarted_unix, nopreciseclientstartclaimed. CallerSHA d5439449cb369ad8aa1b7de945f947fb3d5af333386ab97bd4c2951143102b4e, helperSHA9c4e5cf8f4fd5ff1a369ecb926956ee5979e1e0c840d78d1e96682475388e879, registeredoriginaltestSHA1533d89cffa7ec71f2a20ad61f0cb8e3c0670214021e3f73d8de4e6b76d62d59. Original3filesimmutable. Raisingupstream+NoCredential unchangedqualifiedscriptedentry. Source/prompt/physicalcloneinputsunchanged.
+
+## Review, observed mutants and archive
+
+Original12tests first12assertionfailuresno-op thenGREEN. Independentfixed9mutants initial6killed/3survived: M06file-readmetadata guard/M07secondscan maskedbyeachother, M08nestedhashomission maskedbylengthchange. MAINissues5922d988aac4cc96,2e87bf75c6c8af75 filedimmediately; nowFIXEDtest-onlyno_fix_commit. AFTERobservedsurvivorsoneofflineversionedtest_tree_identity_v2.py adds3isolatingtests (samebytesmetadatadrift,newemptydirafterenumeration,nested14to14bytechange). Baseline15PASS; exactsame9mutants9killed0surviving. Noimport/syntaxharnessfailures; registeredhelper/caller/original12testsunchanged. Noactualdatafaultorclientrerun. ROOT/fix-pass-results.json/logpermutant.
+
+Independentstable /tmp/semantic-contract-plugin-review-20261106/review-report.md SHA256e7506d3f5eb61962112cda47716a9109a1c0d9f3cc53a350b33a00d52ae4ceaf. RawfirstauditPASS13newinputs/39sources/5886realprepfiles/4parenthashes,197oldraw/31newrawfilesunchanged,actualfullpluginpath/body. ReviewersavedcleanupreceiptsONLY,noliveDockerquery;parentclosurefreshqueryseparate.
+
+Archive docs/research/data/2026-11-06-semantic-contract-plugin-binding-evidence.tar.gz SHA256b199c56eb21747aa90fe878c792bc319eb19b1093e87f6b0fb0ab83cf39c1192,934156bytes,224payloads+manifest ALLreopened/sizehashverified. Final14:19:33UTCclosure fullpluginand13/39/5886/4hashpopulationsmatch;freshsuccessfuldaemoninventory+inspectbothnamesNoSuch. Excludesnative/db/modelpayloadsandpluginDBbytes,butwholemanifesthashesretained. Alsoincludesfullpriorcurrentmemorybody current-memory-before-checkpoint.md SHA9e878f7aef42c7826a0a43ca573117265ccc9b156e13df641650e259ec6afd17 (copiedbyteequalbeforeintentionalcurrentindexcompaction).
+
+## Readiness and next critical path
+
+fed51e144f55bcf3 MITIGATED FUTUREONLY. Sixhistoricalwirefullpluginprospectiveprovenance remains UNESTABLISHED; those6casesneverrerun/relabelled. Futurecommoninputreuse requiresTHIScompletecurrentmanifest/unchangedqualifiedentrypoint/config revalidation. Anydriftstop/explicitrequalification,notpermanentadmission. Oldwireplan d25 partialremainsaccurateforhistoricalrequirement. No morevariantdeliveryrerunsplanned.
+
+PaidstillUNADMITTED: peer-reviewedcommittedgrader54fe/0a29, prospectiveLIVEparser/infra policy+fresh2taskempty/gold/repeatcontrols, source/inputboundfixedsixpaidcontroller/budgetresourcecleanup. OldNUlowexactpatchdiagnosticCLOSEDdontrepeat. Aslastobservedpeergraderworktreeclean4c90f8fab/nohandback; oursNOtools/setup-ab-evaledits. Oldwrapperchecks error/OOM/cleanupNOTinfra. Mechanismefficacy/COSTSAVINGSUNMEASURED untilnewpilot; exposed2developmenttasksnotgeneralization/freshheldoutlater. Prior58.180531399999999104 +120reserves178.180531399999999104<200. Closedruntime/wirearchivesae333e71.../57a27b5a..., isolatedgate10e0, MAIN109REDunrelated1dfa43ac9834a309. Preserveoldresults/archives. Nextcriticalpathgrader→controls→paidcontroller→sixpilot, notmoreonboarding/deliverychecks.

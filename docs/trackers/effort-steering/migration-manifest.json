@@ -1,0 +1,1516 @@
+{
+  "migrated_on": "2026-11-09",
+  "notes": [
+    {
+      "source": ".codescout/memories/research/effort-steering/action-budget-live-20261105.md",
+      "topic": "research/effort-steering/action-budget-live-20261105",
+      "destination": "docs/trackers/effort-steering/notes/action-budget-live-20261105.md",
+      "sha256": "f43cd21074253dc5b76d5a35f81988cd221463527b1bd19e4951b6247c74a379",
+      "bytes": 8517,
+      "title": "Current checkpoint \u2014 paired calibration CLOSED, corrected interpretation preserved",
+      "artifact_id": "24bbadf3ecd0a57c",
+      "destination_sha256": "1c698e669b0323623a63cdd0b94346572d44a47718d848537239082ca1f4e072",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/agent-lifecycle-20261105.md",
+      "topic": "research/effort-steering/agent-lifecycle-20261105",
+      "destination": "docs/trackers/effort-steering/notes/agent-lifecycle-20261105.md",
+      "sha256": "97f425b0b75b69b678333a2428f8cf128ae05d18cfe0f8d9948f16738ff23695",
+      "bytes": 6904,
+      "title": "Agent lifecycle \u2014 offline component complete, 2026-11-05",
+      "artifact_id": "e7f6ae632852c7d2",
+      "destination_sha256": "c3298aae86681da30f115b8823ada069a2a0f20e252397cc574f044a29318fdd",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/author-artifacts-20261031.md",
+      "topic": "research/effort-steering/author-artifacts-20261031",
+      "destination": "docs/trackers/effort-steering/notes/author-artifacts-20261031.md",
+      "sha256": "d0321d6da7b6acbf9de56b5cb2cb5e9b82a9001bf5399e4ce5fcadaa89f2d4e4",
+      "bytes": 7923,
+      "title": "Author Cargo artifacts fix \u2014 committed 2026-10-31",
+      "artifact_id": "662e7ca96e16dc72",
+      "destination_sha256": "6965ed9d6ceb0398b5e9b61e5442cbde3677cf97c895d14e4c260a2c86e23f0c",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-20261107.md",
+      "topic": "research/effort-steering/baseline-first-oracle-20261107",
+      "destination": "docs/trackers/effort-steering/notes/baseline-first-oracle-20261107.md",
+      "sha256": "3b940ababb18b6d9c73d80262ffb13bccba8b0c138d3542f921acc218d551d47",
+      "bytes": 6324,
+      "title": "Baseline-first oracle \u2014 planned, local guard layer only, 2026-11-07",
+      "artifact_id": "49785771a04d6a6a",
+      "destination_sha256": "b4e0226421ad2d96e8ccbcce63fce66c5e938e7731046c59ef7d0e751f892dd6",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-admitted-20261107.md",
+      "topic": "research/effort-steering/baseline-first-oracle-admitted-20261107",
+      "destination": "docs/trackers/effort-steering/notes/baseline-first-oracle-admitted-20261107.md",
+      "sha256": "a4993b52a8d8c750d66318890c81f569839b548c8cabdb6b7eeb606b2d8d4544",
+      "bytes": 6870,
+      "title": "Baseline-first oracle ADMITTED/RUNNING \u2014 2026-11-07",
+      "artifact_id": "85bcd2f26e9ccf44",
+      "destination_sha256": "f612e7a5f2ad49593c463b83ddb3e2b28478a59b85b312af78092242f9236bc3",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-closed-20261108.md",
+      "topic": "research/effort-steering/baseline-first-oracle-closed-20261108",
+      "destination": "docs/trackers/effort-steering/notes/baseline-first-oracle-closed-20261108.md",
+      "sha256": "28c64aa915b66afa0ff1e0bfdd51bb77597808ed03d6f89b4ec9840ee9b6f033",
+      "bytes": 3752,
+      "title": "Baseline-first oracle pair CLOSED \u2014 NO-GO \u2014 2026-11-08",
+      "artifact_id": "b420b7ed8f378531",
+      "destination_sha256": "fade648b7039fe3013ada95a841914a4944c1a1c8cd2c2858ca4a7eaa95e5283",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-live-20261107.md",
+      "topic": "research/effort-steering/baseline-first-oracle-live-20261107",
+      "destination": "docs/trackers/effort-steering/notes/baseline-first-oracle-live-20261107.md",
+      "sha256": "fb7d5f42cf25f48c491218c0856e53edd8cc765592a9beb36f0f2ff28d576b26",
+      "bytes": 4961,
+      "title": "Baseline-first oracle LIVE preparation/review \u2014 2026-11-07",
+      "artifact_id": "1d128de18873fc0e",
+      "destination_sha256": "d594c103febf6aa0d05623be561385dc6812c66cbaba92056dae425cbc25970a",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-partial-20261107.md",
+      "topic": "research/effort-steering/baseline-first-oracle-partial-20261107",
+      "destination": "docs/trackers/effort-steering/notes/baseline-first-oracle-partial-20261107.md",
+      "sha256": "b7bda47557b9b437abbffaa73f705a03fa4971a5ad85c9ea0981a940a9fb0858",
+      "bytes": 6863,
+      "title": "Baseline-first oracle PARTIAL closure + offline continuation LIVE \u2014 2026-11-07",
+      "artifact_id": "f656d7fad1dcd320",
+      "destination_sha256": "3dff9324a767a872116524740bab8143ef7bce3c8faf9e5743579826ed7a4d57",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-ram-clarification-20261107.md",
+      "topic": "research/effort-steering/baseline-first-oracle-ram-clarification-20261107",
+      "destination": "docs/trackers/effort-steering/notes/baseline-first-oracle-ram-clarification-20261107.md",
+      "sha256": "37debe1e27ff8d84afe1f7e9c2a9b3127a7f557838b2bd1e0e973b15acdc524c",
+      "bytes": 1214,
+      "title": "RAM clarification \u2014 2026-11-07",
+      "artifact_id": "9664b022f3d04aa9",
+      "destination_sha256": "df5ce8ee9836c8b7c93e69168cf0dfd9b0aa576e075969ee786cebf91b649ecb",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-resource-blocked-20261107.md",
+      "topic": "research/effort-steering/baseline-first-oracle-resource-blocked-20261107",
+      "destination": "docs/trackers/effort-steering/notes/baseline-first-oracle-resource-blocked-20261107.md",
+      "sha256": "a1a668bf5f425e7b4c8b168220fe247fa90ec62a1a02b8cde2e681688084973e",
+      "bytes": 5673,
+      "title": "Baseline-first oracle \u2014 resource BLOCKED, no active run \u2014 2026-11-07",
+      "artifact_id": "baa8a33be5b34f97",
+      "destination_sha256": "36bd8e0388168f04de7e94f78874257871968a9205f0c6e9d358cf8d1c27e069",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-resumed-20261108.md",
+      "topic": "research/effort-steering/baseline-first-oracle-resumed-20261108",
+      "destination": "docs/trackers/effort-steering/notes/baseline-first-oracle-resumed-20261108.md",
+      "sha256": "c0c1c27a9b7da0f09577c2730b8111b26a8102142c1657c858e7b14a95703dfa",
+      "bytes": 1351,
+      "title": "Baseline-first oracle offline continuation resumed \u2014 2026-11-08",
+      "artifact_id": "f68f1e58551960b3",
+      "destination_sha256": "74b76715139788264460493e58c1e4134accbeb2b781a787dfd81954a105e15d",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-single-job-20261107.md",
+      "topic": "research/effort-steering/baseline-first-oracle-single-job-20261107",
+      "destination": "docs/trackers/effort-steering/notes/baseline-first-oracle-single-job-20261107.md",
+      "sha256": "1a055e1f0de2bef969ee9161e573d0e9193078e94f10b0643595eedbb5c1576d",
+      "bytes": 5148,
+      "title": "Baseline-first oracle model-free single-job recovery LIVE \u2014 2026-11-07",
+      "artifact_id": "c298a875878833b5",
+      "destination_sha256": "2120079dc1c41951ecb97869b2dc4a51c9cf03174121e96cab813c0a4d428f0a",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/behavior-transfer-20261029.md",
+      "topic": "research/effort-steering/behavior-transfer-20261029",
+      "destination": "docs/trackers/effort-steering/notes/behavior-transfer-20261029.md",
+      "sha256": "eb50e212ab047a8c85a26e3d576e3b9169f569ef70fce36abe7015ce6ca241fd",
+      "bytes": 7733,
+      "title": "Behavioral transfer \u2014 completed and sealed 2026-10-29",
+      "artifact_id": "21266af523532da8",
+      "destination_sha256": "8f29a9b52d73638a1ee89936838880c30d6acce8466239bff0e14e46a9379c2b",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/blind-challenger-20261101.md",
+      "topic": "research/effort-steering/blind-challenger-20261101",
+      "destination": "docs/trackers/effort-steering/notes/blind-challenger-20261101.md",
+      "sha256": "3fdabf19a38596aa9df8cdd1426c509e31e7685481482ad2f416e302bbbed353",
+      "bytes": 5856,
+      "title": "Blind challenger 2026-11-01 \u2014 CLOSED, sealed negative diagnostic",
+      "artifact_id": "e2a772ed526b5450",
+      "destination_sha256": "5fdaa3e89269dce7118d8de822d93dc998fd04e5a98e8417ba9394dc2a224307",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/blind-contrast-verifier-20261107.md",
+      "topic": "research/effort-steering/blind-contrast-verifier-20261107",
+      "destination": "docs/trackers/effort-steering/notes/blind-contrast-verifier-20261107.md",
+      "sha256": "767eee2d7a109eec207996c75fb295704d40378ecd22cf492e30b5ac3bc9cbbb",
+      "bytes": 7793,
+      "title": "Blind contrast verifier \u2014 CLOSED, oracle inverted, 2026-11-07",
+      "artifact_id": "d833ab15ea2a8537",
+      "destination_sha256": "1031f2f3a9f0b0589cf3b34e107fdf39be527dc798aac9bd3639f066714b3ee4",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/byte-reference-repair-20261103.md",
+      "topic": "research/effort-steering/byte-reference-repair-20261103",
+      "destination": "docs/trackers/effort-steering/notes/byte-reference-repair-20261103.md",
+      "sha256": "2531c0f854ac6093cde0ff8b9a01e3fd586904ce92421c59e7f6e94b6fe56ca9",
+      "bytes": 5055,
+      "title": "Byte reference repair \u2014 closed 2026-11-03",
+      "artifact_id": "bc68296495aa8e29",
+      "destination_sha256": "61d0f3400ec96dc00403c1d14f52f38c05d16dcd413e1a087841648ba08dc31a",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/cargo-admission-20261103.md",
+      "topic": "research/effort-steering/cargo-admission-20261103",
+      "destination": "docs/trackers/effort-steering/notes/cargo-admission-20261103.md",
+      "sha256": "d5857421d4bc9d3d39cc3d21e178d77a8e45e9885523a4240756e0ecbbe6a08a",
+      "bytes": 5346,
+      "title": "Cargo operation admission \u2014 CLOSED 2026-11-03",
+      "artifact_id": "565969c8c0429101",
+      "destination_sha256": "ddf00f700e30628525ee812a8d0a2c3ca9d8e24183b93f18262f00c9259303d9",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/cargo-capability-20261103.md",
+      "topic": "research/effort-steering/cargo-capability-20261103",
+      "destination": "docs/trackers/effort-steering/notes/cargo-capability-20261103.md",
+      "sha256": "36a85b5eb3495e5c1ae976a134cb93a14b181756e3f3fcafc0c039f67b665c69",
+      "bytes": 5074,
+      "title": "Cargo capability CLOSED \u2014 2026-11-03",
+      "artifact_id": "65f5b3d16dea6d05",
+      "destination_sha256": "69436a94dd167af39d41fd4195675eaae5ba2478e88481eb96aecb3dc4a63a5e",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/case-simplification-20261102.md",
+      "topic": "research/effort-steering/case-simplification-20261102",
+      "destination": "docs/trackers/effort-steering/notes/case-simplification-20261102.md",
+      "sha256": "c2d650060be3ad946d9b5ca0cdf874040aaf623db05d9073479ada3b89f9789f",
+      "bytes": 5083,
+      "title": "Bounded topology variant \u2014 completed 2026-11-02",
+      "artifact_id": "0589918143d93867",
+      "destination_sha256": "12d20ebdcc4f42299f8cf6d9f3bd7076ec563ba5fda69e561a96467fb07aeb43",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/case-witness-20261102.md",
+      "topic": "research/effort-steering/case-witness-20261102",
+      "destination": "docs/trackers/effort-steering/notes/case-witness-20261102.md",
+      "sha256": "e01cb100d0774cd1631f07c9025078d5faa9020dd4220251c67768dddef01207",
+      "bytes": 5175,
+      "title": "Offline case-selection witness \u2014 closed 2026-11-02",
+      "artifact_id": "c154a181d58572f9",
+      "destination_sha256": "1fd7ed125a0f4153afde8c73ba54b64d1f87dd957b57d08a071390dd22c4cfe9",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/causal-diagnosis-20261103.md",
+      "topic": "research/effort-steering/causal-diagnosis-20261103",
+      "destination": "docs/trackers/effort-steering/notes/causal-diagnosis-20261103.md",
+      "sha256": "c4ead7e3689a447c1c90c5eb29d1641cef576c9a0289eabeb9beeb2cc686590d",
+      "bytes": 8930,
+      "title": "Causal diagnosis pilot CLOSED \u2014 HOLD, 2026-11-03",
+      "artifact_id": "803a8e114c2fc1c0",
+      "destination_sha256": "3aab8505877237283f0afa3256a51431cab618595860ce0a6ebc66b996bf5925",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/cold-workflow-recovery-20261105.md",
+      "topic": "research/effort-steering/cold-workflow-recovery-20261105",
+      "destination": "docs/trackers/effort-steering/notes/cold-workflow-recovery-20261105.md",
+      "sha256": "a6df29cbfb71aff23478de794c16a6a2e8d08066e65def6dcea5bd5c5fca96fc",
+      "bytes": 8127,
+      "title": "Current checkpoint \u2014 closed recovery pair; action-policy qualification pending",
+      "artifact_id": "bdae89533f24b9fa",
+      "destination_sha256": "18018b0c5c5c9c41cc82a40b07a10e036b21772929c298e010b933c0532fc6ed",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/compile-mechanism-20261029.md",
+      "topic": "research/effort-steering/compile-mechanism-20261029",
+      "destination": "docs/trackers/effort-steering/notes/compile-mechanism-20261029.md",
+      "sha256": "aa05ffe14d29f07157622d84557c608883f1a6a7568eace52bbbf38e6acf7d05",
+      "bytes": 4499,
+      "title": "Compiler mechanism diagnostic \u2014 sealed 2026-10-29",
+      "artifact_id": "9053f99f104212c3",
+      "destination_sha256": "a55cfbba53c11ccd3f8b7599a5b171a0237a6611d535bdbb2b53e94c92f16fd7",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/complete-workflow-aborted-20261105.md",
+      "topic": "research/effort-steering/complete-workflow-aborted-20261105",
+      "destination": "docs/trackers/effort-steering/notes/complete-workflow-aborted-20261105.md",
+      "sha256": "1f8f82ee17d0d15215651f9a7cc96bc49a3a3e4a7a3c8aa81155745f67885420",
+      "bytes": 3354,
+      "title": "Latest authoritative state \u2014 aborted cohort, cold control running",
+      "artifact_id": "6d20b530b957c57e",
+      "destination_sha256": "ac2184cf450ec18af7d92fef33ebad6a6d1004663d925de7494f2cd37165f426",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/complete-workflow-calibration-20261105.md",
+      "topic": "research/effort-steering/complete-workflow-calibration-20261105",
+      "destination": "docs/trackers/effort-steering/notes/complete-workflow-calibration-20261105.md",
+      "sha256": "f79383d177d2eaf5b420a5683049086e044a1c753a360696718ad6c2c3a665fa",
+      "bytes": 10362,
+      "title": "Latest \u2014 paid pair ACTIVE, do not relaunch",
+      "artifact_id": "e9d1952544c84291",
+      "destination_sha256": "fc6df99c5832683f1aaed09444443a1f1238c0003d72ba7651372614bf59074c",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/containerd-sab-storage-20261101.md",
+      "topic": "research/effort-steering/containerd-sab-storage-20261101",
+      "destination": "docs/trackers/effort-steering/notes/containerd-sab-storage-20261101.md",
+      "sha256": "7576d81f9ce260ee3e0607268b73435ef17c29b3ba44963a9cdaaeb35454df40",
+      "bytes": 3244,
+      "title": "Containerd/SAB storage \u2014 read-only check 2026-11-01 ~15:53 UTC",
+      "artifact_id": "45d1f6a31cd3f883",
+      "destination_sha256": "d3f172d2d1f9f927b77fbbb2a80af0462280371235e42f5a4c27025fcf5667f5",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/contract-assertion-20261102.md",
+      "topic": "research/effort-steering/contract-assertion-20261102",
+      "destination": "docs/trackers/effort-steering/notes/contract-assertion-20261102.md",
+      "sha256": "42a906abf72cab1c721f743f8398afb52e9a0affbc2967ea4df8a65ae7b193ee",
+      "bytes": 6576,
+      "title": "Contract-to-assertion diagnostic \u2014 CLOSED AND SEALED, negative 2026-11-02",
+      "artifact_id": "25f528aa0a46e475",
+      "destination_sha256": "518c05a456cce547add5f25d416b02f9701082ebdace903d97e5068702c04f86",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/contract-transfer-ripgrep-20261102.md",
+      "topic": "research/effort-steering/contract-transfer-ripgrep-20261102",
+      "destination": "docs/trackers/effort-steering/notes/contract-transfer-ripgrep-20261102.md",
+      "sha256": "d49d54a1c4b3414c2fe451aed645af17a0d6d8f8e7d75dc9d06cd1405e1c9637",
+      "bytes": 5852,
+      "title": "Contract-first ripgrep transfer \u2014 closed 2026-11-02",
+      "artifact_id": "a521379f304a1670",
+      "destination_sha256": "d180e43f2336d17691505b8326327d54134b13aa56d344b622ceb57666a57092",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current-history-through-byte-reference-20261103.md",
+      "topic": "research/effort-steering/current-history-through-byte-reference-20261103",
+      "destination": "docs/trackers/effort-steering/notes/current-history-through-byte-reference-20261103.md",
+      "sha256": "2a199af396f5734000dfc3f40a5fd0c4716831e636fa26e064c2ecf2caf391f9",
+      "bytes": 11927,
+      "title": "Effort steering \u2014 current closed state, 2026-11-03 (byte reference repair)",
+      "artifact_id": "f8db2790ce022640",
+      "destination_sha256": "2e500da16598340f3b1b555f54f826cecec1fd6114c49d0bbbec1fa444d59768",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current-history-through-cargo-admission-20261103.md",
+      "topic": "research/effort-steering/current-history-through-cargo-admission-20261103",
+      "destination": "docs/trackers/effort-steering/notes/current-history-through-cargo-admission-20261103.md",
+      "sha256": "038f3a79f3402f92d5eb6f19a7ccc690a9ce601dd9ede909271b8dcbfc90163c",
+      "bytes": 3956,
+      "title": "Effort steering \u2014 Cargo admission CLOSED, 2026-11-03",
+      "artifact_id": "d09d7ed24208446e",
+      "destination_sha256": "2d87e2c4d780b71f8bea5e11fd7940cc14b193be37bda336fd19fc240dc7dae0",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current-history-through-cargo-capability-20261103.md",
+      "topic": "research/effort-steering/current-history-through-cargo-capability-20261103",
+      "destination": "docs/trackers/effort-steering/notes/current-history-through-cargo-capability-20261103.md",
+      "sha256": "b8e989dc1cf0d86582ed4a4b5b4148c69ddc42f0c4214ec275197862939ec29b",
+      "bytes": 2947,
+      "title": "Effort steering \u2014 Cargo MCP runtime proof CLOSED, 2026-11-03",
+      "artifact_id": "f1c77205a5eb0721",
+      "destination_sha256": "583e1fd408ecb125086299d1a99bd26a6600b548c2c31f465e2ae4ce45ca4d35",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current-history-through-causal-diagnosis-20261103.md",
+      "topic": "research/effort-steering/current-history-through-causal-diagnosis-20261103",
+      "destination": "docs/trackers/effort-steering/notes/current-history-through-causal-diagnosis-20261103.md",
+      "sha256": "c4ead7e3689a447c1c90c5eb29d1641cef576c9a0289eabeb9beeb2cc686590d",
+      "bytes": 8930,
+      "title": "Causal diagnosis pilot CLOSED \u2014 HOLD, 2026-11-03",
+      "artifact_id": "6d83693fdc66298b",
+      "destination_sha256": "81fa37764bdc57b045f00a5f2613ea6294c165aba8e29cd60f3b0f12c749bb52",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current-history-through-external-admission-20261105.md",
+      "topic": "research/effort-steering/current-history-through-external-admission-20261105",
+      "destination": "docs/trackers/effort-steering/notes/current-history-through-external-admission-20261105.md",
+      "sha256": "6abf84b065169206bd4841bf3c9379c3d6dbe6cfadbffaf64c06d396b81eb032",
+      "bytes": 15960,
+      "title": "Controlled build and queued live reload \u2014 2026-11-04",
+      "artifact_id": "f221c947d4eeb801",
+      "destination_sha256": "49e7a9956d0b3ee99f6107beead37eb7a21d79ba8b8772ea5c59bddeaee30a9c",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current-history-through-matched-cargo-20261103.md",
+      "topic": "research/effort-steering/current-history-through-matched-cargo-20261103",
+      "destination": "docs/trackers/effort-steering/notes/current-history-through-matched-cargo-20261103.md",
+      "sha256": "adffba9d1ac768e774729a849c963ba30de31caa843ca418cc2221cfcaf7d815",
+      "bytes": 5344,
+      "title": "Effort steering \u2014 matched pilot CLOSED, 2026-11-03",
+      "artifact_id": "7eb86846058a92df",
+      "destination_sha256": "1a9e4373331aaae138c7d137312ad8d2fe1f7133f57369b203f8d32e31ea0d5a",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current-history-through-native-startup-20261104.md",
+      "topic": "research/effort-steering/current-history-through-native-startup-20261104",
+      "destination": "docs/trackers/effort-steering/notes/current-history-through-native-startup-20261104.md",
+      "sha256": "e85a8c2aa0015d61e4ab942a1dfc5955937718b53826234e4ffe0eaf1058167a",
+      "bytes": 8425,
+      "title": "Corrected target: native Codescout environment admission ACTIVE \u2014 2026-11-04",
+      "artifact_id": "ec42f515ccd7b8da",
+      "destination_sha256": "873bc25c1ab4b0fd2799d55299be41cd77735dd712851fa0eea3a98dc2eb611b",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current-history-through-recon-factorial-20261104.md",
+      "topic": "research/effort-steering/current-history-through-recon-factorial-20261104",
+      "destination": "docs/trackers/effort-steering/notes/current-history-through-recon-factorial-20261104.md",
+      "sha256": "0fa6a50c9e08b688dae77d3b36a9f83369db1524e8ea7fc74bc65c87cf3f2353",
+      "bytes": 8761,
+      "title": "Recon factorial CLOSED \u2014 HOLD-development, 2026-11-04",
+      "artifact_id": "e98731bd5f82e6a6",
+      "destination_sha256": "c86b41424f5eadcc4d6601e1352f3d639f943f022458a846f860663170784f43",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current-history-through-runtime-capability-20261103.md",
+      "topic": "research/effort-steering/current-history-through-runtime-capability-20261103",
+      "destination": "docs/trackers/effort-steering/notes/current-history-through-runtime-capability-20261103.md",
+      "sha256": "da1222e144735604cd5b53be78d739d688727d72198f4c8ee9308a7534657e03",
+      "bytes": 3735,
+      "title": "Effort steering \u2014 runtime inventory gate CLOSED, 2026-11-03",
+      "artifact_id": "4d31112fb48c2f61",
+      "destination_sha256": "dc4c6b864dadcc25bf1daa8f798cd9ef40ea0efb0f042122ea25c838daf91433",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current.md",
+      "topic": "research/effort-steering/current",
+      "destination": "docs/trackers/effort-steering/notes/current.md",
+      "sha256": "47e2bfaa969fd206ab2f35edb813c7de4e8a9bd5321860cb797912264c4295a8",
+      "bytes": 18682,
+      "title": "Current effort-steering \u2014 differential oracle controlled source gate running, 2026-11-07",
+      "distinct_staged_sha256": "25aa68903113775b9401f1e338b84ab0abd5a5f0b283e4b146d99486fa2fcfb0",
+      "artifact_id": "3695638586c20851",
+      "destination_sha256": "9d95df1f4393dec65b6b3c38ffb2bfd7722f28db1dbebc3ad9c60c274288e62a",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/differential-oracle-20261107.md",
+      "topic": "research/effort-steering/differential-oracle-20261107",
+      "destination": "docs/trackers/effort-steering/notes/differential-oracle-20261107.md",
+      "sha256": "ecaa5978d002f76f30ebebd13ee80921f38dc273822f96d54719dde26058f207",
+      "bytes": 12276,
+      "title": "Differential oracle \u2014 observations CLOSED; controlled source gate running, 2026-11-07",
+      "artifact_id": "9dbab34da2686459",
+      "destination_sha256": "fc02afbbbe3bd6bb37a525f496892c52ce33e7c8c865ed2b7f802d36026b54cb",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/differential-oracle-native-startup-20261107.md",
+      "topic": "research/effort-steering/differential-oracle-native-startup-20261107",
+      "destination": "docs/trackers/effort-steering/notes/differential-oracle-native-startup-20261107.md",
+      "sha256": "c60caea303e9d1e9a296cacfd22b17c7a789d8a8a4a1ef392bf39eeb7d8e44d1",
+      "bytes": 6953,
+      "title": "Differential oracle \u2014 native startup blocker, 2026-11-07",
+      "artifact_id": "aa21c6a5243f1d98",
+      "destination_sha256": "1b1014a315601ec8648674807f02d89b9056a610fd2d809fbc10febe9a674c39",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/differential-oracle-recovery-20261107.md",
+      "topic": "research/effort-steering/differential-oracle-recovery-20261107",
+      "destination": "docs/trackers/effort-steering/notes/differential-oracle-recovery-20261107.md",
+      "sha256": "712dd39afb6597fadae56c97a49297da9930d8ecbf05304c6070da764caf1b04",
+      "bytes": 5170,
+      "title": "Differential-oracle recovery CLOSED, negative \u2014 2026-11-07",
+      "artifact_id": "9ae66752fcb4a62a",
+      "destination_sha256": "f69b994b50eae3f9644cdb29161d1890a291d5630a5b63607f5851f35a71a476",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/differential-oracle-resource-calibration-20261107.md",
+      "topic": "research/effort-steering/differential-oracle-resource-calibration-20261107",
+      "destination": "docs/trackers/effort-steering/notes/differential-oracle-resource-calibration-20261107.md",
+      "sha256": "f0c4ed8388d35a8676459bd49a95f8ef08bde77b0421406be855f6094a6ed361",
+      "bytes": 4554,
+      "title": "Differential oracle \u2014 model-free resource calibration, 2026-11-07",
+      "artifact_id": "741d25bc8d5d60f6",
+      "destination_sha256": "98e15236b43ddce83f08b9b14d204f78f450645f6c36dd59b6f12d44df2c4864",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/disk-cleanup-20261106.md",
+      "topic": "research/effort-steering/disk-cleanup-20261106",
+      "destination": "docs/trackers/effort-steering/notes/disk-cleanup-20261106.md",
+      "sha256": "d0a898b7cc1041d13be3fa62dcf7c607d4da6d478858e167084895a8bffa301b",
+      "bytes": 5886,
+      "title": "Safe disk cleanup completed \u2014 2026-11-06",
+      "artifact_id": "ae9b1719e06dc453",
+      "destination_sha256": "af22d7e5a7662bb36fd858b29c7e6dd9e6849db5016ea8013f439060f7ec74bf",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/disk-cleanup-followup-20261106.md",
+      "topic": "research/effort-steering/disk-cleanup-followup-20261106",
+      "destination": "docs/trackers/effort-steering/notes/disk-cleanup-followup-20261106.md",
+      "sha256": "b304dffebb22e8d3bfc4cb46ec743f941664aba7eb497c41673a6b6f1c07b39a",
+      "bytes": 4305,
+      "title": "Own cache cleanup follow-up COMPLETE \u2014 2026-11-06",
+      "artifact_id": "227fa9312702f0fd",
+      "destination_sha256": "31fcd288601b7ae36990402f70103a727e3ad192ef60af3ef5673609ce35fb93",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/docker-cache-cleanup-20261101.md",
+      "topic": "research/effort-steering/docker-cache-cleanup-20261101",
+      "destination": "docs/trackers/effort-steering/notes/docker-cache-cleanup-20261101.md",
+      "sha256": "e3e19b3f2f5f8477af9b7655e6516565494329a676ab4de541374cfcb235e264",
+      "bytes": 4391,
+      "title": "Docker cache cleanup \u2014 2026-11-01 19:37 UTC",
+      "artifact_id": "c1b7f1b0077ea052",
+      "destination_sha256": "ca3d9a94ba3c8e35d06c07fbded2b5a096290a5061a44737e7cf10460b6569e4",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/docker-peer-dependencies-20261106.md",
+      "topic": "research/effort-steering/docker-peer-dependencies-20261106",
+      "destination": "docs/trackers/effort-steering/notes/docker-peer-dependencies-20261106.md",
+      "sha256": "7134d1a5c5120edf9c752662b50bbb2bf06ec92ec32608586d5729d3de052548",
+      "bytes": 1407,
+      "title": "Docker dependencies \u2014 operator-relayed peer response, 2026-11-06",
+      "artifact_id": "b62b6139a3039f83",
+      "destination_sha256": "460401a50f567924e1f71167040d5174ec37e2aa28a544020a822d9fd70b347f",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/executable-native-baseline-20261106.md",
+      "topic": "research/effort-steering/executable-native-baseline-20261106",
+      "destination": "docs/trackers/effort-steering/notes/executable-native-baseline-20261106.md",
+      "sha256": "ecff8b204abc9f04698bbe0bce0a74c1181353ac755116ccdad922a58100f2c9",
+      "bytes": 5010,
+      "title": "Corrected native environment baseline COMPLETE \u2014 2026-11-06",
+      "artifact_id": "c2a0439d5bff8f0d",
+      "destination_sha256": "fc492a3ef671697c1b6ffb7856094ef4a443e3bdb9844e2ca3a815e6dec6c574",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/executable-tmp-fix-live-20261106.md",
+      "topic": "research/effort-steering/executable-tmp-fix-live-20261106",
+      "destination": "docs/trackers/effort-steering/notes/executable-tmp-fix-live-20261106.md",
+      "sha256": "3cbc20a4080667ad348a68d01ce403b383af7879131b0e52684d43e17d6c6e93",
+      "bytes": 5342,
+      "title": "Executable temporary storage fix LIVE \u2014 2026-11-06",
+      "artifact_id": "a037a2d056d7709a",
+      "destination_sha256": "fdf9d58d41c036573c95ae370f4ece8759eeed0da44dc0f14e5c9f62ceed0f3b",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/external-feedback-20261029.md",
+      "topic": "research/effort-steering/external-feedback-20261029",
+      "destination": "docs/trackers/effort-steering/notes/external-feedback-20261029.md",
+      "sha256": "0e06e16966ab4978e4f9fd5bf34159fcc3737a4e60b9df80bf609d19c22a2dec",
+      "bytes": 7630,
+      "title": "External feedback calibration \u2014 2026-10-29",
+      "artifact_id": "9cfcd8747a26c306",
+      "destination_sha256": "401045a5e30015abc16e5fcc159d540187e0283fe51bd3cb491439f6677da36f",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/external-matched-pilot-live-20261105.md",
+      "topic": "research/effort-steering/external-matched-pilot-live-20261105",
+      "destination": "docs/trackers/effort-steering/notes/external-matched-pilot-live-20261105.md",
+      "sha256": "24aac6b1fa5598607868c27f37122bc759d3a86d4d36161dae525ffe97afcced",
+      "bytes": 11827,
+      "title": "External matched pilot is live \u2014 2026-11-05",
+      "artifact_id": "23e208631fdfd097",
+      "destination_sha256": "11172c590749966576df5a442d5b657b0abe8327b519836fa75ad6d44260f5fd",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/external-prepared-entry-20261105.md",
+      "topic": "research/effort-steering/external-prepared-entry-20261105",
+      "destination": "docs/trackers/effort-steering/notes/external-prepared-entry-20261105.md",
+      "sha256": "72452207cad06fa621969ad6215aac40147c147b5f0e28dd005594a6074a137e",
+      "bytes": 13228,
+      "title": "Latest checkpoint \u2014 external adapter committed; source-only setup in flight",
+      "artifact_id": "6cbcb90689a08f18",
+      "destination_sha256": "5c85787c808067ca20e11804044c2883e76fb14110f764aeb4ac36484e1d74c9",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/external-public-verification-check-20261106.md",
+      "topic": "research/effort-steering/external-public-verification-check-20261106",
+      "destination": "docs/trackers/effort-steering/notes/external-public-verification-check-20261106.md",
+      "sha256": "371cb96369c4101fd1b55a3296e06bc6eebd3880929b0924fa38cc745043648e",
+      "bytes": 2328,
+      "title": "External public verification checkpoint \u2014 2026-11-06",
+      "artifact_id": "2b91b4ffb76a7f09",
+      "destination_sha256": "4aae653c6dfb4debbbea1939459ed8028aa944fbe1544729ece95246cc6de7d5",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/external-transfer-admission-20261105.md",
+      "topic": "research/effort-steering/external-transfer-admission-20261105",
+      "destination": "docs/trackers/effort-steering/notes/external-transfer-admission-20261105.md",
+      "sha256": "02785c414b1e7483ce38e28806f8fa4762f5c32a7ebb6ec3bfe26cb8af386b11",
+      "bytes": 10136,
+      "title": "Latest checkpoint \u2014 external control/context admission progressed, repairs NOT started",
+      "artifact_id": "7d8b945241bc71ff",
+      "destination_sha256": "2fc3b4c27f64a0cd8f8f96a7404dd0a12172d30434527a12f025c9154b3c9e34",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/finite-cohort-20261102.md",
+      "topic": "research/effort-steering/finite-cohort-20261102",
+      "destination": "docs/trackers/effort-steering/notes/finite-cohort-20261102.md",
+      "sha256": "672ee5502fa3391edd859aa2b5fd0f3eff521e095997942e64d505c01f46ffc9",
+      "bytes": 4612,
+      "title": "Finite matched cohort \u2014 closed 2026-11-03",
+      "artifact_id": "3b27caa3e70bd492",
+      "destination_sha256": "5ed255487eb4cec53713d68307664fea6235d3f83eb13ece928a00fb6429da7a",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/fixed-acceptance-population-20261101.md",
+      "topic": "research/effort-steering/fixed-acceptance-population-20261101",
+      "destination": "docs/trackers/effort-steering/notes/fixed-acceptance-population-20261101.md",
+      "sha256": "10a2d30eea22327be3910d53347669d5da84ff954753b11d8fcbdae4e986aaed",
+      "bytes": 4857,
+      "title": "Fixed acceptance populations \u2014 CLOSED 2026-11-01",
+      "artifact_id": "08f566eee21306df",
+      "destination_sha256": "b62bb70f3af1dacc00bfbbdb3ba7a28de712125e78d7833c7e723cd857d7be00",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/fixed-checker-loop-20261031.md",
+      "topic": "research/effort-steering/fixed-checker-loop-20261031",
+      "destination": "docs/trackers/effort-steering/notes/fixed-checker-loop-20261031.md",
+      "sha256": "a99cf8b98364698643ebdeef9d435d9b13bb8672c351697c1fdb301122bd1704",
+      "bytes": 12580,
+      "title": "Fixed checker loop diagnostic \u2014 CLOSED 2026-10-31",
+      "artifact_id": "432a3d8e4fddfc1a",
+      "destination_sha256": "a94d673366904a0dd8a15307413e962c256d6a1196db5cac5d30c09414114a7a",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/fixed-checker-loop-verifier.md",
+      "topic": "research/effort-steering/fixed-checker-loop-verifier",
+      "destination": "docs/trackers/effort-steering/notes/fixed-checker-loop-verifier.md",
+      "sha256": "887f66bf7b036229fe8bbdfe9f617b65df1d2e2c429684dbb1dbb71d36f92787",
+      "bytes": 6897,
+      "title": "Fixed checker loop verifier \u2014 2026-10-31",
+      "artifact_id": "4ddfe91d022d5919",
+      "destination_sha256": "48e08dfc6170bafd8ab28d171ba80ab1d53c6d96527a4afaf5fa353031dded5c",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/fixed-checker-transfer-20261101.md",
+      "topic": "research/effort-steering/fixed-checker-transfer-20261101",
+      "destination": "docs/trackers/effort-steering/notes/fixed-checker-transfer-20261101.md",
+      "sha256": "8f2edabb5c2aeb54ce0629b0fb08bb62fa7f2616b6a69d5cd31f476b8be0adaa",
+      "bytes": 6507,
+      "title": "Fixed checker transfer \u2014 ACTIVE, no model calls yet",
+      "artifact_id": "cf6b611d060c1a0e",
+      "destination_sha256": "012bcd083d05477737d27421c038c7f68b0c43455138d36af0b781fdf0aa304b",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/grader-classifier-handoff-20261107.md",
+      "topic": "research/effort-steering/grader-classifier-handoff-20261107",
+      "destination": "docs/trackers/effort-steering/notes/grader-classifier-handoff-20261107.md",
+      "sha256": "5d8964c2b80b5d531fa7ed1e047563178c83cd23816f7d9e089085757a2ba127",
+      "bytes": 5085,
+      "title": "Peer classifier handoff \u2014 2026-11-07",
+      "artifact_id": "03bb3565eb3d6538",
+      "destination_sha256": "9b8210ca8ff24246ae3dc21ab6ead85a83eaefa238aed4c38eecf9556012b8c6",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/grader-validity-20261106.md",
+      "topic": "research/effort-steering/grader-validity-20261106",
+      "destination": "docs/trackers/effort-steering/notes/grader-validity-20261106.md",
+      "sha256": "ce3b361a805a7fd2182924dceb1e31dc03ef00fec96e5fcf22a6f32f6469d0f3",
+      "bytes": 3251,
+      "title": "Grader validity \u2014 bounded correction closed, 2026-11-06",
+      "artifact_id": "4c288ff7ee75aa4a",
+      "destination_sha256": "031d2efb76100ada4eb29f810c1404d72945ac8dabc7f19094cc48cefc538dc6",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/grader-validity-coordination-20261106.md",
+      "topic": "research/effort-steering/grader-validity-coordination-20261106",
+      "destination": "docs/trackers/effort-steering/notes/grader-validity-coordination-20261106.md",
+      "sha256": "b4e8abcabfeff10b45608dd4542e5866e7975ea09d2f9bf47a34d26746c5377e",
+      "bytes": 2655,
+      "title": "Closure supersedes the active checkpoint below",
+      "artifact_id": "4aace4a11cde7d7d",
+      "destination_sha256": "45353b489d4f6d76363250ee222296abf162080cb131d58baf55eaaf1dbaad8e",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/hint-authority-comparison-20261104.md",
+      "topic": "research/effort-steering/hint-authority-comparison-20261104",
+      "destination": "docs/trackers/effort-steering/notes/hint-authority-comparison-20261104.md",
+      "sha256": "e01295e417f341769bd806190d7d8b9da3eeeb834be71e684ac94feb18aa6dc5",
+      "bytes": 4825,
+      "title": "Hint authority and effort \u2014 2026-11-04",
+      "artifact_id": "fcce60072fccb82b",
+      "destination_sha256": "624163221935c2e6dcc657df5158b7a72ea604a7238d09879558f25113d4777b",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/hint-authority-functional-pilot-20261104.md",
+      "topic": "research/effort-steering/hint-authority-functional-pilot-20261104",
+      "destination": "docs/trackers/effort-steering/notes/hint-authority-functional-pilot-20261104.md",
+      "sha256": "a63da875bb7c395f27b0f45a5aa44db276c7baf0287ce6ef75181ccb5c42a823",
+      "bytes": 11767,
+      "title": "Hint authority functional pilot \u2014 2026-11-04",
+      "artifact_id": "6519c2ffdf0e887c",
+      "destination_sha256": "64a18c9fce989b2c9e3ffa55e37e139db907d80286e3e7e21ee0104341f0c3c1",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/hint-authority-requalification-20261104.md",
+      "topic": "research/effort-steering/hint-authority-requalification-20261104",
+      "destination": "docs/trackers/effort-steering/notes/hint-authority-requalification-20261104.md",
+      "sha256": "b8ab579e2850b34de65771ec08d05e85c23ff0d6d93062aca985534effc30888",
+      "bytes": 3618,
+      "title": "Corrected hint-controller requalification \u2014 2026-11-04",
+      "artifact_id": "2c7f78ef05d5b71b",
+      "destination_sha256": "a053d6134591bc4a5645c7da4525d9b322d1e505841a76c3cfe014a79e16712d",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/hint-completion-pair-20261104.md",
+      "topic": "research/effort-steering/hint-completion-pair-20261104",
+      "destination": "docs/trackers/effort-steering/notes/hint-completion-pair-20261104.md",
+      "sha256": "d04b91b52da5705c8d87d86695dd90480c84c1db1a0fc1aea595083625c9c38e",
+      "bytes": 5721,
+      "title": "Matched completion pair \u2014 checked outcome, 2026-11-04",
+      "artifact_id": "eb79d3cf1ac1a96e",
+      "destination_sha256": "fe5d0c4562b80724602ef4c602aa18d66310b458f64249a786b6ac9bbe552d46",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/low-recon-gap-analysis-20261104.md",
+      "topic": "research/effort-steering/low-recon-gap-analysis-20261104",
+      "destination": "docs/trackers/effort-steering/notes/low-recon-gap-analysis-20261104.md",
+      "sha256": "610cc2336b3c34b8df0561b3e972493851890cf25b77a1fd49c9e358d17e0a90",
+      "bytes": 7437,
+      "title": "Low/Recon gap analysis \u2014 2026-11-04",
+      "artifact_id": "841bd65f93e02b1d",
+      "destination_sha256": "04cf434bad739c0aaca8187bd5ba82bd7730156cd49ec87e29ac7d1b73477c70",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/matched-cargo-task-admission-20261103.md",
+      "topic": "research/effort-steering/matched-cargo-task-admission-20261103",
+      "destination": "docs/trackers/effort-steering/notes/matched-cargo-task-admission-20261103.md",
+      "sha256": "cc109af6a55a414f665087d7ff09dfb5e71ac05f03ca14525024c9510a8435f3",
+      "bytes": 9991,
+      "title": "Matched Cargo completion pilot \u2014 CLOSED, 2026-11-03",
+      "artifact_id": "776883219241e9a1",
+      "destination_sha256": "4d4a207f1d8a163b48cbf34db1795e8217d494efb2acddb9fe3ced6a259b522d",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/matched-workflow-20261031.md",
+      "topic": "research/effort-steering/matched-workflow-20261031",
+      "destination": "docs/trackers/effort-steering/notes/matched-workflow-20261031.md",
+      "sha256": "c4a27e5a605a6bc142675f8be739757733086064f37c0837ce7e888f4058b08c",
+      "bytes": 12993,
+      "title": "Matched low/xhigh checked workflow \u2014 closed 2026-10-31",
+      "artifact_id": "a44af7806b273376",
+      "destination_sha256": "8a0e41d4fda89fd5f55f7ca4fb21255aea8a2a5398a8d63293e90afff58021f6",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/native-build-provenance-20261104.md",
+      "topic": "research/effort-steering/native-build-provenance-20261104",
+      "destination": "docs/trackers/effort-steering/notes/native-build-provenance-20261104.md",
+      "sha256": "a6126aac55fe1b38d0a814fdd5950af82be6cc910e249106f482e29c971e6b40",
+      "bytes": 2694,
+      "title": "Controlled build and queued live reload \u2014 2026-11-04",
+      "artifact_id": "859e492a9a1342b1",
+      "destination_sha256": "55636a69be6ec8d58e27eede3007e3fbaf21deada025da6f9d76fa620ca83354",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/native-env-admission-20261104.md",
+      "topic": "research/effort-steering/native-env-admission-20261104",
+      "destination": "docs/trackers/effort-steering/notes/native-env-admission-20261104.md",
+      "sha256": "25aa68903113775b9401f1e338b84ab0abd5a5f0b283e4b146d99486fa2fcfb0",
+      "bytes": 15961,
+      "title": "Controlled build and queued live reload \u2014 2026-11-04",
+      "artifact_id": "2a3fac0208b4e875",
+      "destination_sha256": "9da4191f738aedce51a9b33850f75ee09076e1bee000c7a7a93b0b9417cb52ac",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/native-readiness-recheck-20261104.md",
+      "topic": "research/effort-steering/native-readiness-recheck-20261104",
+      "destination": "docs/trackers/effort-steering/notes/native-readiness-recheck-20261104.md",
+      "sha256": "c8d365ef5a9f150b2c5264982332921c32f71d9f3656cdab975e84326cac530f",
+      "bytes": 2141,
+      "title": "Native readiness follow-up \u2014 2026-11-04",
+      "artifact_id": "71c9dbd7c08d6c22",
+      "destination_sha256": "796880b8a99297f4b4236b6b8c742143d192a7a89a6e34b5df655054e46bf6a4",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/native-runtime-20261104.md",
+      "topic": "research/effort-steering/native-runtime-20261104",
+      "destination": "docs/trackers/effort-steering/notes/native-runtime-20261104.md",
+      "sha256": "a3ce8e741e3ac6d2d1b812b3ab4675f016a8db784b9e70b84ca2ad403af063fc",
+      "bytes": 8062,
+      "title": "Native runtime verified; semantic index blocked; effort-steering end goal OPEN \u2014 2026-11-04",
+      "artifact_id": "b46d09a70f4dddd1",
+      "destination_sha256": "acd915a770853703fa72460a44880cbe04720f32ce4b6cf988d2f6e00dce79ad",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/natural-failure-feedback-20261029.md",
+      "topic": "research/effort-steering/natural-failure-feedback-20261029",
+      "destination": "docs/trackers/effort-steering/notes/natural-failure-feedback-20261029.md",
+      "sha256": "b3d39dec392c40b3936097997dafbf5f2551b71b287dacd6390f7b8ab73b4fb4",
+      "bytes": 9742,
+      "title": "Natural failure feedback diagnostic \u2014 2026-10-29/30",
+      "artifact_id": "e99e3e33d6725fd6",
+      "destination_sha256": "c7f7884b85e619aa18518b391b5f846b7dfbd0f42e309e9c9f8da1020aaa1e7b",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/onboarding-reuse-20261104.md",
+      "topic": "research/effort-steering/onboarding-reuse-20261104",
+      "destination": "docs/trackers/effort-steering/notes/onboarding-reuse-20261104.md",
+      "sha256": "b62d0504b4c6e2a53c6bff97fa54965c45fa13c9994d21b324eac903b3e9bab9",
+      "bytes": 9986,
+      "title": "Native onboarding reuse demonstrated; effort-steering end goal OPEN \u2014 2026-11-04",
+      "artifact_id": "d34ead997cee34f8",
+      "destination_sha256": "674de9127feb811ae1f46f3ceb755394268e9e0ef6b7c8cd34fd4fbdfa639da9",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/oracle-uncertainty-20261108.md",
+      "topic": "research/effort-steering/oracle-uncertainty-20261108",
+      "destination": "docs/trackers/effort-steering/notes/oracle-uncertainty-20261108.md",
+      "sha256": "1d43c6d2bfd3ffa8195928cfd0685b69a0c168a45b9abaaf3ede89dc67bd4f8e",
+      "bytes": 4049,
+      "title": "Oracle uncertainty follow-up \u2014 controller launched ONCE \u2014 2026-11-08",
+      "artifact_id": "6b2da9b428961c07",
+      "destination_sha256": "2e33cc3d7f8012d80ea64f13538732293379bc2a870d4bc4bda96ffe399e19e5",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/oracle-uncertainty-author-closed-20261108.md",
+      "topic": "research/effort-steering/oracle-uncertainty-author-closed-20261108",
+      "destination": "docs/trackers/effort-steering/notes/oracle-uncertainty-author-closed-20261108.md",
+      "sha256": "7dab7f6d411d94595a97de95a98e5186908f0b516048bd666d7225e1eeb4175b",
+      "bytes": 3638,
+      "title": "Uncertainty author VALID/CLOSED; offline comparison active \u2014 2026-11-08",
+      "artifact_id": "bfd8dbdfe6d27106",
+      "destination_sha256": "621798be1caa1a5f2009cd3559f03910d85925e149c3e2aea89632faeaf0ca70",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/oracle-uncertainty-closed-20261108.md",
+      "topic": "research/effort-steering/oracle-uncertainty-closed-20261108",
+      "destination": "docs/trackers/effort-steering/notes/oracle-uncertainty-closed-20261108.md",
+      "sha256": "6b59f1fb5342db815b25ba93b738399106fa6f245a238889b88e345385167707",
+      "bytes": 3816,
+      "title": "Uncertainty follow-up CLOSED \u2014 measured NO-GO \u2014 2026-11-08",
+      "artifact_id": "44867fcfabc6650d",
+      "destination_sha256": "61862cb35b24b9e29d1126482c8249dad2035bb4aa0950f131c4b1b4d0d6fd99",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/population-transfer-20261101.md",
+      "topic": "research/effort-steering/population-transfer-20261101",
+      "destination": "docs/trackers/effort-steering/notes/population-transfer-20261101.md",
+      "sha256": "fa306be0e84b9800067f12ddeaba25619864d25b6fb9476ae360c5006eed195c",
+      "bytes": 6018,
+      "title": "Population transfer \u2014 CLOSED / DO NOT PROMOTE equal quality, 2026-11-01",
+      "artifact_id": "b8ca8f48773826fa",
+      "destination_sha256": "0390e953a6fb1ac96649c501c4c67dd00a25ca94723107fbf6376095813763d9",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/prechecked-repair-20261030.md",
+      "topic": "research/effort-steering/prechecked-repair-20261030",
+      "destination": "docs/trackers/effort-steering/notes/prechecked-repair-20261030.md",
+      "sha256": "2a76ef384b98149ae3577546d9bc03a8554ca8934bd1f67fde046b9d3a7ec84d",
+      "bytes": 9221,
+      "title": "Prechecked repair diagnostic \u2014 2026-10-30",
+      "artifact_id": "393a063fb4b066d5",
+      "destination_sha256": "ff4a9aaeae17254c8506962447e699680b37a311e66ac4d50fdcca53b7251cca",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/private-grade-audit-20261106.md",
+      "topic": "research/effort-steering/private-grade-audit-20261106",
+      "destination": "docs/trackers/effort-steering/notes/private-grade-audit-20261106.md",
+      "sha256": "97f59701d328e6c9e7355458acc1c3121dea6bd1ad0057c688f5bd70391b014d",
+      "bytes": 5003,
+      "title": "Private grade disk-pressure audit COMPLETE \u2014 2026-11-06",
+      "artifact_id": "3e3b4ce598318fa1",
+      "destination_sha256": "70c71114dc4e68364bbc74fda9b235d02144c6c310903677e48818c8a2e21696",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/prospective-grader-policy-20261106.md",
+      "topic": "research/effort-steering/prospective-grader-policy-20261106",
+      "destination": "docs/trackers/effort-steering/notes/prospective-grader-policy-20261106.md",
+      "sha256": "641c5454971d0d04d7eade172ce0b2ff684931b2c504da1f0f1eedcc64ddc281",
+      "bytes": 8851,
+      "title": "Prospective grader policy \u2014 QUALIFIED and CLOSED, 2026-11-06",
+      "artifact_id": "cd4d78176211273b",
+      "destination_sha256": "b92ef62c551e2085ecc1ad52558b20dae71bd558f19c80f2d1759c34fd92fd7e",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/public-oracle-transfer-20261103.md",
+      "topic": "research/effort-steering/public-oracle-transfer-20261103",
+      "destination": "docs/trackers/effort-steering/notes/public-oracle-transfer-20261103.md",
+      "sha256": "768c0b887deff04c7ad017a1227c1e624b25dd269e8eaf0af16289cd089ef39a",
+      "bytes": 9191,
+      "title": "CLOSED AS STOPPED \u2014 2026-11-03",
+      "artifact_id": "8160967d5f5e3c20",
+      "destination_sha256": "277f5d538d7d7a60a4e0ef21786a432de029e719382450fd4a8b7334e7ef2987",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/public-profile-20261105.md",
+      "topic": "research/effort-steering/public-profile-20261105",
+      "destination": "docs/trackers/effort-steering/notes/public-profile-20261105.md",
+      "sha256": "bf83c55aa077abcdd688037836294db2651c9fc933b962130486c489fe9b3bc7",
+      "bytes": 10934,
+      "title": "Latest runtime integration \u2014 complete 2026-11-05",
+      "artifact_id": "5fbd8875eeb4c05e",
+      "destination_sha256": "c23ccddfe5e77219943bdecf6f1cbdf7ce66aae316a7ef28755dc14a5b1f4077",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/recon-factorial-20261103.md",
+      "topic": "research/effort-steering/recon-factorial-20261103",
+      "destination": "docs/trackers/effort-steering/notes/recon-factorial-20261103.md",
+      "sha256": "0fa6a50c9e08b688dae77d3b36a9f83369db1524e8ea7fc74bc65c87cf3f2353",
+      "bytes": 8761,
+      "title": "Recon factorial CLOSED \u2014 HOLD-development, 2026-11-04",
+      "artifact_id": "3a81dd78fa213fd6",
+      "destination_sha256": "ef637830a5d626497308d349969074b985af3c6cca4e66e3a82f6f55830d986c",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/run-storage-cleanup-20261101.md",
+      "topic": "research/effort-steering/run-storage-cleanup-20261101",
+      "destination": "docs/trackers/effort-steering/notes/run-storage-cleanup-20261101.md",
+      "sha256": "9121691647e536dcea5ec68955c66b844b97aebda8f00030e56715ce4f93e728",
+      "bytes": 3634,
+      "title": "Run storage cleanup 2026-11-01 \u2014 complete",
+      "artifact_id": "59dee85d2adf9414",
+      "destination_sha256": "d89f4b5d61b7800a9538df86b2a337c909f104f52de638ace499f850d9f54fcc",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/runtime-capability-20261103.md",
+      "topic": "research/effort-steering/runtime-capability-20261103",
+      "destination": "docs/trackers/effort-steering/notes/runtime-capability-20261103.md",
+      "sha256": "63944c3da5f702db9755480fc79758e0c28390d7a531ee4662674641794ea238",
+      "bytes": 3274,
+      "title": "Runtime inventory proof CLOSED \u2014 2026-11-03",
+      "artifact_id": "4a8d75b30ce7b35b",
+      "destination_sha256": "c96f60b7a469e004d0d49d5aef1eb1105f97e72570a0807c2255469c4431c6d6",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/runtime-integration-20261105.md",
+      "topic": "research/effort-steering/runtime-integration-20261105",
+      "destination": "docs/trackers/effort-steering/notes/runtime-integration-20261105.md",
+      "sha256": "72705a4b1b93c6cd28be3504aad5ed64055beac91a914e42566bf0639a5bf8a0",
+      "bytes": 6340,
+      "title": "Verified worker runtime integration \u2014 COMPLETE checkpoint 2026-11-05",
+      "artifact_id": "9b5a8fbe37a48c72",
+      "destination_sha256": "b7f2c1153c1624da903f7e75393f0fdcc33b8319ca466408c1a31b0d3654027c",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-adapter-20261106.md",
+      "topic": "research/effort-steering/semantic-contract-adapter-20261106",
+      "destination": "docs/trackers/effort-steering/notes/semantic-contract-adapter-20261106.md",
+      "sha256": "bac84d3c4bf827d88bb6d08e0f9671ea592c2251029524f7545a8fee779ce92d",
+      "bytes": 8409,
+      "title": "Semantic-contract adapter \u2014 ACTIVE post-fix qualification, 2026-11-06",
+      "artifact_id": "133a599b7790e9f0",
+      "destination_sha256": "92caf5464c03647e33c0ffa3d841246a0ba0df7c4380bca50605f85146745137",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-controller-20261106.md",
+      "topic": "research/effort-steering/semantic-contract-controller-20261106",
+      "destination": "docs/trackers/effort-steering/notes/semantic-contract-controller-20261106.md",
+      "sha256": "9b9983c9fbc507cf4d60df309347c238b4e49d5263156861384924e2b20249ad",
+      "bytes": 6218,
+      "title": "Closure 2026-11-06",
+      "artifact_id": "a5b01a67bb96c0cb",
+      "destination_sha256": "e9992eb3d7df526e8ad40e7c349a6d8fecd83a61a01e83352af6db91bc6572b4",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-diagnosis-20261107.md",
+      "topic": "research/effort-steering/semantic-contract-diagnosis-20261107",
+      "destination": "docs/trackers/effort-steering/notes/semantic-contract-diagnosis-20261107.md",
+      "sha256": "5cbe48a0c9f44632e959d6e50baa6d36817b546be6b483d87d9445c74228c40d",
+      "bytes": 3599,
+      "title": "Closed offline diagnosis of repeated 1/2 outcome \u2014 2026-11-07",
+      "artifact_id": "970f6c50ac589e32",
+      "destination_sha256": "6a7ba74dc9dda243e31ccb8bbb40cb15d7145c9e95f316f99b86e8fbe8a0168a",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-paid-20261107.md",
+      "topic": "research/effort-steering/semantic-contract-paid-20261107",
+      "destination": "docs/trackers/effort-steering/notes/semantic-contract-paid-20261107.md",
+      "sha256": "32aaea1b1d01d6efe6be6d67bb31fe9497fff6dea9ee39793a93248c016fa7ba",
+      "bytes": 7041,
+      "title": "Semantic-contract fixed-six paid pilot \u2014 STARTED 2026-11-07",
+      "artifact_id": "19e6fb44c3600eb1",
+      "destination_sha256": "4e41adf6b7c5f59d388a4879a65352dd2e76e3a3663c157adad49eba2dd14839",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-pilot-20261106.md",
+      "topic": "research/effort-steering/semantic-contract-pilot-20261106",
+      "destination": "docs/trackers/effort-steering/notes/semantic-contract-pilot-20261106.md",
+      "sha256": "9ac19e4e1f171e7a87c6e0314850ac49f9bedfa6b5a4b6358371bbdd1f43cb0e",
+      "bytes": 7398,
+      "title": "Semantic contract development preparation \u2014 2026-11-06",
+      "artifact_id": "b8a2722ef8376011",
+      "destination_sha256": "b2454393c7ea25ab2d040567416e0339d9b85c89add6a83330cc9b5259756453",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-plugin-binding-20261106.md",
+      "topic": "research/effort-steering/semantic-contract-plugin-binding-20261106",
+      "destination": "docs/trackers/effort-steering/notes/semantic-contract-plugin-binding-20261106.md",
+      "sha256": "89810120153f002305eb2ca3007c2e8950edad3b239ba3a3435b6ab97b95c548",
+      "bytes": 5427,
+      "title": "Prospective plugin binding CLOSED \u2014 2026-11-06",
+      "artifact_id": "c5fe471ff6da8408",
+      "destination_sha256": "47357d005a5da9da2f58c57fdc6dca42697edbe097c9394c09a7929c1d19d27a",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-policy-review-20261107.md",
+      "topic": "research/effort-steering/semantic-contract-policy-review-20261107",
+      "destination": "docs/trackers/effort-steering/notes/semantic-contract-policy-review-20261107.md",
+      "sha256": "3b8a46c41bbe46eb9056f1d9db896b4b993d0a645b09395b16147611118cfdda",
+      "bytes": 5157,
+      "title": "Policy review counterexamples and paid admission revocation \u2014 2026-11-07",
+      "artifact_id": "4d174c02fd4cac98",
+      "destination_sha256": "ce18ad860a726060f20704ab71280160849dc32c1e0116d490315c3ab9969198",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-policy-v2-20261107.md",
+      "topic": "research/effort-steering/semantic-contract-policy-v2-20261107",
+      "destination": "docs/trackers/effort-steering/notes/semantic-contract-policy-v2-20261107.md",
+      "sha256": "adb66b01ea5d97a050b82a6fd0f418c9a6ea65ed09151638b3ced62dd21ebb57",
+      "bytes": 7691,
+      "title": "Semantic-contract-v2 CLOSED, negative result \u2014 2026-11-07",
+      "artifact_id": "d09b97869796bb4d",
+      "destination_sha256": "6406c2bfc237df9a1b17d193c09ca976c1989380c986f729786a6a0353d740de",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-runtime-20261106.md",
+      "topic": "research/effort-steering/semantic-contract-runtime-20261106",
+      "destination": "docs/trackers/effort-steering/notes/semantic-contract-runtime-20261106.md",
+      "sha256": "2c31e40b8cf9f49eb4b1c7406b05590d32e18abf2258307886a45a3a21b304e0",
+      "bytes": 2593,
+      "title": "Semantic-contract runtimes CLOSED \u2014 2026-11-06",
+      "artifact_id": "ecc77d0720581ac9",
+      "destination_sha256": "582ee6f0312486655296a85269fb1ffb6980b3956785da906e96330a8488ab2f",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-wire-20261106.md",
+      "topic": "research/effort-steering/semantic-contract-wire-20261106",
+      "destination": "docs/trackers/effort-steering/notes/semantic-contract-wire-20261106.md",
+      "sha256": "a5644e45595a47558280a60d5e4e9d8937f4a0029d0a73616d5ae19cda52784f",
+      "bytes": 4792,
+      "title": "Semantic-contract actual CLI delivery CLOSED with provenance limit \u2014 2026-11-06",
+      "artifact_id": "adcebf96edce7c42",
+      "destination_sha256": "0e59ae57388fa32e8223c6bf74918403cc80462e16e8949d3e6f1cb06b7cf716",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-reuse-20261104.md",
+      "topic": "research/effort-steering/semantic-reuse-20261104",
+      "destination": "docs/trackers/effort-steering/notes/semantic-reuse-20261104.md",
+      "sha256": "7b92393f84b1ab33d6d63e1c3da26b84092d60a9701a394f0f0e23f0dcca376d",
+      "bytes": 9892,
+      "title": "Reusable native semantic preparation verified; effort-steering quality goal OPEN \u2014 2026-11-04",
+      "artifact_id": "e35443a2e850f355",
+      "destination_sha256": "da7b8b843cb931d30bd09feee0eaae1b14ca713939858f9e48a8cf5b5c6a8089",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/situation-20261105.md",
+      "topic": "research/effort-steering/situation-20261105",
+      "destination": "docs/trackers/effort-steering/notes/situation-20261105.md",
+      "sha256": "cbc0227f15180042967fdbce843ff77db53441aa1dd01facd3352ca375b4eb73",
+      "bytes": 4774,
+      "title": "Latest runtime integration checkpoint \u2014 2026-11-05",
+      "artifact_id": "0cf16673a84f8c69",
+      "destination_sha256": "ca0538e31c562b7a7f80a39214ff419f684bd10ce144240b5849837e49462662",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/snapshot-workflow-20261031.md",
+      "topic": "research/effort-steering/snapshot-workflow-20261031",
+      "destination": "docs/trackers/effort-steering/notes/snapshot-workflow-20261031.md",
+      "sha256": "a2feedf2e95801d985c17f5399472a0adf9457cb54b7d916e4dfb812d580b1cc",
+      "bytes": 12428,
+      "title": "Snapshot-visible workflow replication \u2014 preparing2026-10-31",
+      "artifact_id": "1a104ec7d05f4c9b",
+      "destination_sha256": "d3e80ba20f72a3fca508b7f6192edd63f8f1cebcaa8e81d08a0c3b55d2e1bcb1",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/snapshot-workflow-live.md",
+      "topic": "research/effort-steering/snapshot-workflow-live",
+      "destination": "docs/trackers/effort-steering/notes/snapshot-workflow-live.md",
+      "sha256": "49eca826df17889394def95359fc0ea66d45e467febc0137e7c76a652f5f6349",
+      "bytes": 5881,
+      "title": "LIVE \u2014 blind challenger CLOSED; mechanism still unproven (2026-11-01)",
+      "artifact_id": "4f94aa7f8062bb3d",
+      "destination_sha256": "4984b5ce2cb68a06059b2d26147c9b6a0044608fae8ffcb2019d1e54055fe28d",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/tmp-exec-diagnosis-20261106.md",
+      "topic": "research/effort-steering/tmp-exec-diagnosis-20261106",
+      "destination": "docs/trackers/effort-steering/notes/tmp-exec-diagnosis-20261106.md",
+      "sha256": "84fd0565e5bb38c7787bf4f55df890249352a23585290032efe74b08eb73c93e",
+      "bytes": 1918,
+      "title": "Temporary execution diagnosis \u2014 2026-11-06",
+      "artifact_id": "ebf03d9ed7c7e3c6",
+      "destination_sha256": "472388cc3b01f95d791253eea8ddaa5c55cedbcd61543cc2dc6e6567e6524d09",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/verified-worker-20261105.md",
+      "topic": "research/effort-steering/verified-worker-20261105",
+      "destination": "docs/trackers/effort-steering/notes/verified-worker-20261105.md",
+      "sha256": "54629d2e696de276380036cb07783d7166fc8f6575177416e24376581a73092d",
+      "bytes": 6504,
+      "title": "Verified worker composition \u2014 2026-11-05",
+      "artifact_id": "02497b40701faf22",
+      "destination_sha256": "1f212017f2e298fb78195212087806cd35a38af664d73e330d0d5d36b1459b1a",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/worker-context-20261104.md",
+      "topic": "research/effort-steering/worker-context-20261104",
+      "destination": "docs/trackers/effort-steering/notes/worker-context-20261104.md",
+      "sha256": "c73a16d2c0100a49ad732fb867f09293f4a6c4f693c61496a1babce6795ead91",
+      "bytes": 11123,
+      "title": "Actual worker context transport verified; quality goal remains open \u2014 2026-11-04",
+      "artifact_id": "c5001843863e8aa1",
+      "destination_sha256": "8526bd86ee90677eab33df410b857a0472cbb7dc49ff9f02c8384152a91e15b2",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/workflow-transfer-20261030.md",
+      "topic": "research/effort-steering/workflow-transfer-20261030",
+      "destination": "docs/trackers/effort-steering/notes/workflow-transfer-20261030.md",
+      "sha256": "757c75cacb522d554715ee89d998fee6c65c110684323827e69019d303014fdd",
+      "bytes": 9692,
+      "title": "Workflow transfer \u2014 2026-10-30",
+      "artifact_id": "3f3a75bc0143eb92",
+      "destination_sha256": "71eb7b99b79320b491657d1463a784bdbc0aab6ade64757c9b64f981b91986dd",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering.md",
+      "topic": "research/effort-steering",
+      "destination": "docs/trackers/effort-steering/notes/overview-before-migration.md",
+      "sha256": "9c0414fc2ed45acc9a227f6d128b50449f58f347ac9ba4d57de9aaeaba0704a8",
+      "bytes": 77582,
+      "title": "Effort steering: verified findings and instrument rules (as of 2026-10-07)",
+      "artifact_id": "cf9cd5baccf5a4a7",
+      "destination_sha256": "65638923274296e3525046410202a2199d573e629542f933ffb1959c0dca0d41",
+      "original_bytes_preserved": true
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering-plan-limit.md",
+      "topic": "research/effort-steering-plan-limit",
+      "destination": "docs/trackers/effort-steering/notes/plan-limit.md",
+      "sha256": "b68db54cc92100e83ddbca324ef1d137bf7918e89a38b03d886fc3c372b09bbe",
+      "bytes": 4708,
+      "title": "Plan-limit hazard in subscription `claude -p` trials (built 2026-10-11)",
+      "artifact_id": "970b0de1fc3001e7",
+      "destination_sha256": "f9af76c391b6789f70295f58a91905fafb7683f32fb17612ed827522dbe39008",
+      "original_bytes_preserved": true
+    }
+  ],
+  "anchor_sidecars": [
+    {
+      "source": ".codescout/memories/research/effort-steering/agent-lifecycle-20261105.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/agent-lifecycle-20261105.anchors.toml",
+      "sha256": "6d427a47d3c290d76350d0e5b7405224c7aa4def54647a35d624afd017819eb6",
+      "bytes": 288
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-20261107.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/baseline-first-oracle-20261107.anchors.toml",
+      "sha256": "79bd1dfd6a0d9941aaf90c816c22eea63f32a7a327b20aa6e3b150d5951d173e",
+      "bytes": 451
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-closed-20261108.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/baseline-first-oracle-closed-20261108.anchors.toml",
+      "sha256": "7e0223c16ad9804a7f3cee43bd040f2af60ebd4ea14d5adc0864ce64c8dbe946",
+      "bytes": 643
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-partial-20261107.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/baseline-first-oracle-partial-20261107.anchors.toml",
+      "sha256": "16b0bd119bb41bdef90b96377459a33ecaa6c46d19dfe23ab9d306613268c375",
+      "bytes": 440
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/baseline-first-oracle-single-job-20261107.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/baseline-first-oracle-single-job-20261107.anchors.toml",
+      "sha256": "6e828ded20b18efee94d517af4729dae282614d97ccbfb158dd26c57bfa28542",
+      "bytes": 280
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/behavior-transfer-20261029.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/behavior-transfer-20261029.anchors.toml",
+      "sha256": "fb93b19943cc1c576abde06e9f1d4a43f4cbe3e8e8f3c9356fbf499abb686e88",
+      "bytes": 244
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/blind-contrast-verifier-20261107.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/blind-contrast-verifier-20261107.anchors.toml",
+      "sha256": "d8cd7f56045e2004318e9eee3aae4ef4989ed92faa360324f1887e35e4b65a71",
+      "bytes": 934
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/complete-workflow-calibration-20261105.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/complete-workflow-calibration-20261105.anchors.toml",
+      "sha256": "09806b1ab59f053783294d76b43b153800f22942917e56f62c6cbcd6653768ee",
+      "bytes": 297
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current-history-through-external-admission-20261105.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/current-history-through-external-admission-20261105.anchors.toml",
+      "sha256": "de6033935f2bf8a3311059dbbbf3eb8eb4a10598dd06af568a0a5bc3bf386fad",
+      "bytes": 1482
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current-history-through-native-startup-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/current-history-through-native-startup-20261104.anchors.toml",
+      "sha256": "a9cf9e77b44cf07ebf148c9fb946c9481c0411cd70a165ea34d6e556e604f241",
+      "bytes": 240
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/current.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/current.anchors.toml",
+      "sha256": "a334cd9c1a622d516c7185c1c79f5589ec115be7b775868f9e801c5325f221b4",
+      "bytes": 4504
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/differential-oracle-20261107.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/differential-oracle-20261107.anchors.toml",
+      "sha256": "55fb60049503ee0852a52fc5838f7d94c6e86a424b4df8f609eac24c25da5f2a",
+      "bytes": 1072
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/differential-oracle-recovery-20261107.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/differential-oracle-recovery-20261107.anchors.toml",
+      "sha256": "1d80937d25fe33c04f86cfa4ec5ac0926a9370c5de1d96cf1b1918d6f0c92273",
+      "bytes": 435
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/disk-cleanup-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/disk-cleanup-20261106.anchors.toml",
+      "sha256": "8b0fe29029a611f1d4ef6dbfc70cf15c155ab0848edb40e83f83b50ec2c410aa",
+      "bytes": 289
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/disk-cleanup-followup-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/disk-cleanup-followup-20261106.anchors.toml",
+      "sha256": "38977c67107d18b483ab68e13eee87c74ce2df8baa82ce8637549d2fd5aac737",
+      "bytes": 635
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/executable-native-baseline-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/executable-native-baseline-20261106.anchors.toml",
+      "sha256": "2c9a72cd7e72864bb53afd6b06fe7b3b607d93ef8398f553c46e443a596ae8ee",
+      "bytes": 452
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/executable-tmp-fix-live-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/executable-tmp-fix-live-20261106.anchors.toml",
+      "sha256": "30005893eec20368379f400cdd047d7c93c16f5197ac213d744f62103452214c",
+      "bytes": 776
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/external-matched-pilot-live-20261105.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/external-matched-pilot-live-20261105.anchors.toml",
+      "sha256": "eac8140e564b2f4358652570c176176f6173b574a7bd6ffaa34886267158bb61",
+      "bytes": 304
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/external-prepared-entry-20261105.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/external-prepared-entry-20261105.anchors.toml",
+      "sha256": "6d82af8726544a802c7b9ea6a919f6f92dd3b82ac10991eedfb313fd00129564",
+      "bytes": 470
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/external-public-verification-check-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/external-public-verification-check-20261106.anchors.toml",
+      "sha256": "2339ee40d392c4e08ceb255271642c75859cb0136023488aae23ad7ae56919a5",
+      "bytes": 314
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/grader-validity-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/grader-validity-20261106.anchors.toml",
+      "sha256": "c0932fcb4ce34fbbac50b378262685576f66be74ea34724e626ce82f54a30c34",
+      "bytes": 292
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/grader-validity-coordination-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/grader-validity-coordination-20261106.anchors.toml",
+      "sha256": "4ad9efeee03283fc205e571c9a5d2b27ae0bccd36eea0fcfc0ddd2f3620b9291",
+      "bytes": 451
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/hint-authority-comparison-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/hint-authority-comparison-20261104.anchors.toml",
+      "sha256": "c5e15b8611fc0a07810181cca905b35cd397e51159d3fff77b340cb7c7d7240b",
+      "bytes": 1044
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/hint-authority-functional-pilot-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/hint-authority-functional-pilot-20261104.anchors.toml",
+      "sha256": "7a2852a700a7b775fa579b9b244127ae19d6eb5adfa35383572d507950d372a8",
+      "bytes": 454
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/hint-authority-requalification-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/hint-authority-requalification-20261104.anchors.toml",
+      "sha256": "c12cff20482c8d42dc7c6d9e093cd838233534e34e64636ec8d471ad14e3a541",
+      "bytes": 629
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/hint-completion-pair-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/hint-completion-pair-20261104.anchors.toml",
+      "sha256": "776de209971b041acd5c21c1559c70c0c73a853dee2ac1eb0144047891a984a3",
+      "bytes": 781
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/native-build-provenance-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/native-build-provenance-20261104.anchors.toml",
+      "sha256": "96bc51fda6f75002d2a8649982bdfcf20545b80e96bea33bbe41110e68316186",
+      "bytes": 291
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/native-env-admission-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/native-env-admission-20261104.anchors.toml",
+      "sha256": "716be79f1ae9923b2bba36f5ff15458c7bc87875845174eb796f2cb9307f85ee",
+      "bytes": 1647
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/native-readiness-recheck-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/native-readiness-recheck-20261104.anchors.toml",
+      "sha256": "b02b85fa409761a281d9554536c9346d9391b4544ef922fb124df4fd9ac42959",
+      "bytes": 292
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/native-runtime-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/native-runtime-20261104.anchors.toml",
+      "sha256": "dca3aa55b41e4b4159be1c2ee2f92ad6ad0910769be45ee1ab00e091b0f10b56",
+      "bytes": 440
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/onboarding-reuse-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/onboarding-reuse-20261104.anchors.toml",
+      "sha256": "6f279e1a733c99c65bb6baa027790dcc6c92e78385c159a6a76d19188a8cf086",
+      "bytes": 254
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/oracle-uncertainty-author-closed-20261108.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/oracle-uncertainty-author-closed-20261108.anchors.toml",
+      "sha256": "b7b87c4923e8204976a7d380c6cfba77ca7098747cfb2083f56b17e3dfae2ab9",
+      "bytes": 288
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/oracle-uncertainty-closed-20261108.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/oracle-uncertainty-closed-20261108.anchors.toml",
+      "sha256": "6ceb5ac1d23da733d8ff85e62650b271bc7241207b9fa82849f58527892a66a8",
+      "bytes": 605
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/private-grade-audit-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/private-grade-audit-20261106.anchors.toml",
+      "sha256": "b753d2d9007911c2f07c8ffb44b37cb5112befa2296c38d389b6cee7f4f7c24d",
+      "bytes": 450
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/prospective-grader-policy-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/prospective-grader-policy-20261106.anchors.toml",
+      "sha256": "fb32532172a906bbe3f0eb9d433f4f73d5a295bedbb2de15fdaf83da5ebf80b8",
+      "bytes": 452
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/public-profile-20261105.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/public-profile-20261105.anchors.toml",
+      "sha256": "ef0e53523169b623eda0c08b199222f1becc3014866fd0a332d73f076ea87de3",
+      "bytes": 934
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/runtime-integration-20261105.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/runtime-integration-20261105.anchors.toml",
+      "sha256": "fd063997a7c6f101e672e28ba9fb4e18fbb87a8805d1952c8b33b93516a5daaf",
+      "bytes": 443
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-adapter-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/semantic-contract-adapter-20261106.anchors.toml",
+      "sha256": "73ea43ddf51a79372b2e15983b31217a988a95da224321f0605fca71dc176ebb",
+      "bytes": 628
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-controller-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/semantic-contract-controller-20261106.anchors.toml",
+      "sha256": "3d1337b520e96117795b2b786358fd3ddf901efe8e881d9401559aa318934de0",
+      "bytes": 449
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-diagnosis-20261107.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/semantic-contract-diagnosis-20261107.anchors.toml",
+      "sha256": "7f034f72c97117788d7572296856370bc824561a4c239238f84f7d5e01b45a77",
+      "bytes": 286
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-paid-20261107.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/semantic-contract-paid-20261107.anchors.toml",
+      "sha256": "3d03395b009bb2ae5b9acc48164d42e03cf10af66918901e7b9331c4c24fd179",
+      "bytes": 297
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-pilot-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/semantic-contract-pilot-20261106.anchors.toml",
+      "sha256": "949630d3daefbeff4fedd8d0595ef759ac76cd197d118cf498e953ffb84298b5",
+      "bytes": 781
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-plugin-binding-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/semantic-contract-plugin-binding-20261106.anchors.toml",
+      "sha256": "bafa557fa6f5e6a5d87041e5656c87df040d402ef3f63adbbeaf1bf8441849e2",
+      "bytes": 632
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-policy-review-20261107.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/semantic-contract-policy-review-20261107.anchors.toml",
+      "sha256": "3d03395b009bb2ae5b9acc48164d42e03cf10af66918901e7b9331c4c24fd179",
+      "bytes": 297
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-policy-v2-20261107.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/semantic-contract-policy-v2-20261107.anchors.toml",
+      "sha256": "a5cde3f0f6c2d92dd38b5710a1652a14b29d83365237326b8f175b8143b63daa",
+      "bytes": 290
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-runtime-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/semantic-contract-runtime-20261106.anchors.toml",
+      "sha256": "c86619da7b29be151ab9f59ed4d557e5060620e5325175af4ac72141fd0e65b8",
+      "bytes": 758
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-contract-wire-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/semantic-contract-wire-20261106.anchors.toml",
+      "sha256": "c4aa811926fa990b71a7d6302ad6109d373ed12cd70e1ecc1edbf26d8a553700",
+      "bytes": 726
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/semantic-reuse-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/semantic-reuse-20261104.anchors.toml",
+      "sha256": "4e095e26e5daf1a3be0e6e046ffee9bd2bbd403e7cb4a9e12be2f05568ffe470",
+      "bytes": 275
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/situation-20261105.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/situation-20261105.anchors.toml",
+      "sha256": "01c375920a55ae7e1c3464b476f3f12c242c08bb088c7b588ba57304e6fb2995",
+      "bytes": 446
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/tmp-exec-diagnosis-20261106.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/tmp-exec-diagnosis-20261106.anchors.toml",
+      "sha256": "ac8779e3b1baa79ec27f2bdad987363814517bdbbd5d9ceada8e4bdd9ee2518a",
+      "bytes": 464
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/verified-worker-20261105.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/verified-worker-20261105.anchors.toml",
+      "sha256": "251f58d2043d256e5129388f639e1e8193a0a07f9bcc2cd158bfbaf6ada0a4fe",
+      "bytes": 288
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering/worker-context-20261104.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/worker-context-20261104.anchors.toml",
+      "sha256": "e2352fdfa75507bacf8d749a43e49162e1d21f135643de33fcc96b439ca17af2",
+      "bytes": 1167
+    },
+    {
+      "source": ".codescout/memories/research/effort-steering.anchors.toml",
+      "destination": "docs/trackers/effort-steering/legacy-anchors/overview-before-migration.anchors.toml",
+      "sha256": "63b03a1460d9e718a54b4ef39fd83bf896cab675e1c247814bc5adc099100bb7",
+      "bytes": 290
+    }
+  ],
+  "scope": "research/effort-steering/** and root effort-steering/plan-limit topics only",
+  "original_bytes_preserved": true,
+  "old_memory_deletion": "complete",
+  "remaining_memory_pointer": "research/effort-steering",
+  "index_artifact_id": "cba97c1270405493",
+  "memory_topics_before": 160,
+  "memory_topics_after": 54,
+  "unrelated_memory_topics_preserved": 53,
+  "git_index_cleanup": {
+    "unstaged_obsolete_source": ".codescout/memories/research/effort-steering/hint-authority-comparison-20261104.md",
+    "staged_bytes_preserved_in_destination": true,
+    "other_staged_entries_unchanged": true
+  }
+}

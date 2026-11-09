@@ -1,0 +1,35 @@
+---
+id: '7eb86846058a92df'
+kind: research-note
+status: archived
+title: Effort steering — matched pilot CLOSED, 2026-11-03
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/current-history-through-matched-cargo-20261103
+original_sha256: adffba9d1ac768e774729a849c963ba30de31caa843ca418cc2221cfcaf7d815
+---
+
+# Effort steering — matched pilot CLOSED, 2026-11-03
+
+Goal remains open: find a reproducible automatic workflow preserving independently accepted xhigh quality at lower whole model-client cost, including discovery, failed attempts, repair and escalation. General promotion HOLD. Latest candidate (completion feedback + at most one same-effort repair) failed low correction on the tested RA case; matched comparison stopped under its frozen protocol. Do not describe this as demonstrated low/xhigh parity.
+
+READ research/effort-steering/matched-cargo-task-admission-20261103 first. Report99d2737fa874c55f at V=/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-matched-cargo-task-admission.md; specbac3854925642a0b stopped-protocol, plan8c8c658f4a94ce6b done. M=/home/marius/work/claude/codescout stays active; pin V. RootSID01a15ca9-f939-7603-acb5-01c6b02f68e2, autonomous inline execution authorized, no push/merge.
+
+B=/home/marius/.cache/codescout-resident/codescout/matched-cargo-task-admission-20261103 CLOSED/IMMUTABLE. Canonical python3 -B B/close.py verify, only repeat-verification.log mutable. Seal364010aa416fa07002493d5290d697f79a59bc492433f1261285559ea6a9e273 binds21636regular paths/13literal symlinks, GNU-calibrated nofollow. Preserve link targets. NO ordinary campaign, CLI, tests, LSP or mutation writers in B or earlier sealed roots. Five external frozen dependencies archived byte-exact; future canonical verification does not need temporary actors/current repository runtime bytes. Historical result2947aab55de050aff7d7f790e8c2d1a3ab023465 patchc1fbeaaadf5ecf69de6f2a94df0b479efa0a4535; completioncdaa1c4da115b5a3e7c8ad8fb7fe991913b7040c patch770d174d45d5afd300c2e3028c1436260364729e. Prior admissionb2516d938/recovery9f62d8325 retained. Fresh close verify0.
+
+Actual paid population:4RA22804calls,3valid completed/1invalid, no bindgen3390 call. Lowinitial0.0379301 fails public/original/hidden; solelowrepair0.0934725 still fails and adds original rustc_test_issue_52437 beside array_repeat_closure. Low full0.1314026. Highinitial0.5259125 also fails. Highrepair0.48464910000000005 attempted ONE blocked Glob /home/marius/.cargo/registry/src and is invalid under the fixed zero-denial rule. Correlated denied tool result, not successful access; duplicate persisted records are not two requests. No retries/replacements/permission relaxation. Campaign @bg_000001e0 exited1. Four B slots remain unstarted. Do not resume or launch them from this stopped registration.
+
+Separate model-free @bg_000001e3 evaluated already-produced invalidhighpatch: public2pass/original1007pass+same3upstreamignored/hidden4pass. Source-bound offline diagnostic ONLY, not valid high endpoint or completed matched pair. paid_audit.py reconciled4rawcharges, actual efforts/tools/prompts/parent sources and12grade receipts (9registered+3diagnostic), full raw named populations; no count from truncated feedback. Invalid last call has no preserved child exit receipt; raw reports success, enclosing campaign exits1.
+
+Budget cumulative authorized40USD, phase client1.14196420000000005 INCLUDING invalidrepair; cumulative26.482863899999999860, remaining13.517136100000000140. Client list-basis reported charges, not invoices. Native/review/CPU/global provider/network costs/counts unmeasured. Token~/.config/s5/token-claude-stef reuse explicitly authorized; do not ask again. No new paid phase registered for execution.
+
+NEXT: a fresh prospective mechanism targeting causal diagnosis BEFORE editing: trace producer of wrong value/type, state violated invariant, justify narrow repair. This is an untested hypothesis, not an established fix for low. Specify treatment of blocked dependency reads before payment and keep successful forbidden access distinct; never change old rule retrospectively. Equal checker/repair access, fixed fresh population/order/stopping/cost rules and independent endpoints remain required. Reuse proven Cargo/controller route; no extra generic runtime proof or another review of the finished pilot. RA22804 is now outcome-exposed and cannot validate transfer; unstarted bindgen is not a completed result. Overall end goal not met.
+
+Retain sources and4source/preparedimages, V worktree.40distinct IDs from declared8priorcontroller roots +paid/diagnostic receipts absent, NOTglobal/allhistorical Docker claim. F-10exposure, F-11parser, F-12review, F-13stop/correction, F-14raw-vs-tail audit, F-15link-aware closure documented. Fullproject5lanegate0/432s with heavyPython/server-stack/2ONNX exclusions; repositoryruntimeunchanged. Final38private methods/exact15assertion-only mutationkills cover recorded guards, not efficacy. PrivateauditorDecimalroundtrip actualRED->GREEN bugcb24648f65b4f641; no paid input changed.
+
+All A/W/P/Q/BR/F/older seals/helpers/images retained. A cargo-admission sealb91e71ca60af994ec92a91e03b4a0372caa67e4cc9a5600df1fbadf951d6a68a, publicationbd8f83b524e8b111f0ab1c4d6aebc4dc71c1b2d5. OLDNoriginalcompatroot stays in-tree. Current-through-A memory archived byte-exact current-history-through-cargo-admission-20261103 (oldblob7ded5d7e0da3306ca314d626cf46e020bc5275c0). Before-close current/detailed recovery bytes retained inside sealed B/recovery-*-before-close.md and Git9f62d8325. Peer main stagedbug-triage blobf4ad12b9cf7b8b830ac35cc341afcde702d0a56c must remain untouched.

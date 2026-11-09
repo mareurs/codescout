@@ -1,0 +1,71 @@
+---
+id: f8db2790ce022640
+kind: research-note
+status: archived
+title: Effort steering — current closed state, 2026-11-03 (byte reference repair)
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/current-history-through-byte-reference-20261103
+original_sha256: 2a199af396f5734000dfc3f40a5fd0c4716831e636fa26e064c2ecf2caf391f9
+---
+
+# Effort steering — current closed state, 2026-11-03 (byte reference repair)
+
+Latest: report docs/research/2026-11-03-byte-reference-repair.md catalog70c3e752b24e843d in V=/home/marius/.codex/worktrees/615e/codescout. Read research/effort-steering/byte-reference-repair-20261103 for exact recovery. RootSID01a15ca9-f939-7603-acb5-01c6b02f68e2. Local commits only; preserve branch/worktree/native ledgers, no merge/push.
+
+One public native-byte GNU mismatch plus ONE low repair succeeds on the known U-L artifact: original65/65, prior private1/1, public+six actor-hidden byte cases7/7. Full model path initial+repair0.23240219999999999 versus recorded single xhigh0.2708099,14.18% cheaper; CLI338170 versus144782ms, slower. This is EXPOSED and xhigh lacks equal extra repair/reference access. Earlier six-slot pilot remains unchanged; general mechanism/promotion remains open/HOLD.
+
+Latest phase0.12803399999999998. Cumulative25.231075399999999820/40; remaining14.768924600000000180. No unknown charge/retry/replacement, no model job or next paid phase registered. Native/review/CPU/invoices unmeasured. Next: NEW prospective tasks, public-oracle/case-selection bounds, equal reference/repair access, independent acceptance and full costs. Do not replay exposed U as fresh transfer.
+
+R=/home/marius/.cache/codescout-resident/codescout/byte-reference-repair-20261103 SEALED SHA6ed6ce32e28d06c53dd7abedc74add35c06be8e74bd1b7b7c668ba6dbfd1fee1;131 physical regular files/0 symlinks. Publication899109bd65ad950f8e3a5b727fdde02d5d3148e9 patch-id8d9a7a459835555ab202cd83b25c7bee309b85d4. Canonical python3 -B R/close.py verify, replace R with literal path. Only repeat-verification.log mutable. Never LSP in sealed roots/live actors. Keep dependencies in R/freeze.json and all prior roots, V, old3940 pilot, pinned CLI, T/S helpers and OLDN original compat path. Eight phase-recorded adapter containers absent; new actor retained. Prior F closure unchanged. Full gate fresh0 (783s) with declared coverage limits; new12+existing20+budget9 focused tests pass. Actual reviewer5 mutants2kill3survive; original3 survivors reapplied all killed/restored; no separate Minor. Full details/rulings in report.
+
+## Historical current entries retained verbatim — superseded for budget and latest state
+
+# Effort steering — current closed state, 2026-11-03
+
+Read docs/trackers/effort-steering-current.md catalogae571a0abfaf9e7f in retained V=/home/marius/.codex/worktrees/615e/codescout. Latest result docs/research/2026-11-02-finite-cohort-results.md catalogadf7fc6b1e7b3067. Detailed recovery: research/effort-steering/finite-cohort-20261102. RootSID01a15ca9-f939-7603-acb5-01c6b02f68e2; no merge/push.
+
+Finite pilot CLOSED:6valid fixed Sonnet5.5sessions, no retry/replacement/unknowncharge. All three arms1/2 endpoints: Tokio89full/85required+3private pass; Uoriginal64/65 raw-filename-output fail despiteprivatechecksum/status1/1pass. BothS actuallyapplyassertionnegativecontrols, butUSexpectswrongU+FFFD filename; GNUbytecapturepreservesFF. A failing mutant doesnotestablishoraclecorrectness. HOLDstructuredbundle. MeanclientL0.0830851,S0.11657665,X0.21693635: S46.3%less thanX and40.3%MORE thanL, no endpointgain. Generalmechanismgoalopen.
+
+Phaseclient0.83319620000000003; cumulative25.103041399999999840/40; remaining14.896958600000000160. Native/review/CPU/invoicesunmeasured. No modeljob or nextpaidphase. Neverreplayoldslots. Next: publicnative-representationreferencecheck+ONEboundedlowrepair, independentholdout/fullcosts; knownUrepair mustbeSEPARATE EXPOSEDdiagnostic, notfreshtransferorrescuedpilot.
+
+F=/home/marius/.cache/codescout-research/codescout/finite-cohort-20261102 SEALED SHAdc05a954c9e944166e230cf4bb03bece3a252405606ee43e4d532195cc59bfc3,806regular/0physicallinks. 16314controlsourcefiles/420literal-linktargets preservedinverifiedarchivebeforegeneratedsourcecleanup. All67recordedadaptercontainersgone; no broadprune. Publicationb4956d5f9bb8c3d9eeb5ab58dc176f4786fc637f patch-id73d6b6a992092fdce2cd4ab3bfe0ac446f8d1c0a binds7historicalfiles; laterplancompletionmetadata doesnotalterpublication. NeverLSPinseal; onlyrepeat-verification.logmutable. Read-only: python3 -B F/close.py verify, replaceFwithliteralpath. PreserveV/nativeledger anddependencies namedinF/freeze.json, priorTclose/Shelper/3940pilot/CLI/S5readers; keepOLDNoriginalpath.
+
+Bothfreshfullprojectgates0 PYTHON_LIGHT/FMT/CLIPPY/LEAN/DEFAULT; declaredheavy/server-stack/ONNXlimitsremain. Focused9+12+8pass. Finalfullgatewall31181s, notkilled, no causaldiagnosis. Strongreview4ImportantfixedRED/GREEN;4reappliedsurvivingcall-sitemutantsallkilled0errors/exactrestores; nodeferredseparateMinor. Earlierclosedentrybelow is historical, superseded forcurrentbudget/gate/state.
+
+## Historical closed state retained verbatim
+
+# Effort steering — current entry point (2026-11-02)
+
+Start at docs/trackers/effort-steering-current.md, catalog ae571a0abfaf9e7f, in retained V=/home/marius/.codex/worktrees/615e/codescout. Branch research/fixed-acceptance-population-20261101; local commits only, no merge/push. Historical reports/seals retain original verdicts and budgets. Closures bind dated Git snapshots, not future mutable hub bytes.
+
+Latest completed gate is OFFLINE contract-first ripgrep transfer, report docs/research/2026-11-02-contract-transfer-ripgrep.md catalog3e9ec5ee507b8b79. Exact report+hub commit58ae4c05b31f710472a769004dafc722d392f5f9, patch-id21b1102afbc9f63f20597a3e8f0b47744533ac3d. RootSID01a15ca9-f939-7603-acb5-01c6b02f68e2. V clean after commit; no merge/push.
+
+Nine cases and literal+metamorphic oracle fixed from public statement BEFORE solution/score inspection. Registered roles base/gold/recorded Sonnet5.5 bare seed0/cs seed0. Specs do NOT establish low/xhigh effort. Actual36case-role evaluations/72CLIprocesses: base8pass1fail, gold9/9, both agent artifacts9/9. Detects public base bug but no residual agent defect. Acceptance ceiling/calibration only; no general detector-efficacy, low improvement, effort parity or cost superiority claim. No replacement seed/arm/cases after outcomes.
+
+T=/home/marius/.cache/codescout-research/codescout/contract-transfer-ripgrep-20261102 SEALED SHA542e942d8fe200256cab6a648c4e0a4b5b0e46ed2e9ebf211a8abb61857c645e,454regularfiles/0links, calibrated with GNUfind+sha256sum. Runtime/source/binary/patch/process receipts and public-input/code fingerprints retained. Python3 -B T/run.py verify, T/audit.py, T/close.py verify from M; replace T with literal path. Never initialize LSP in sealed roots. Only repeat-verification.log mutable. Detailed handback in research/effort-steering/contract-transfer-ripgrep-20261102.
+
+Attempt-1 retains4invalidsource preparations: SAB arm image lacks original base commit, so no build or CLI occurred; runner tried all4 instead of stopping at archive failure. All4removed. Corrected to original source-image digest from bundle, actual base HEAD/tree verified before CLI outcomes, cases/patches unchanged. Second attempt all4sourcebound roles valid/all4containersremoved. Four focused oracle tests pass, independent receipt audit0, source/code/contract hashes0. Zero new model call or paid phase. Repo runtime/test unchanged; prior known full gate limitation still applies.
+
+Prior Axum topology spike remains an EXPOSED detector: existing structured low seed plus one registered wrapper-removal variant fails candidate/pass fixed xhigh+gold; generic status-only seed still misses. Sixvalidgrades/threeguardtests, requests/assertions unchanged, no new modelcall. Selection followed diagnosis; not general automatic transfer. Report0d84d5a6c7506430, commit85cf94584fbca9f002b537438f34e1083255a68c, patch-id987bd0c2686c2e227ba849f2c18da2c173d3c42b. S=/home/marius/.cache/codescout-research/codescout/case-simplification-20261102 seal0b4cd275b99a4a1df2f4b999a023d52ab8715df514178573dde0657019829614,127regularfiles/0links unchanged. See case-simplification memory for full commands/provenance.
+
+Prior witness diagnostic remains valid: 18evaluations/nine outcome-preserving pairs showed nested paths clear erroneous MatchedPath before observation. A generic probe visits all selected sites of the detecting direct control plus one; selected site counts alone are insufficient. D=/home/marius/.cache/codescout-research/codescout/case-witness-20261102 seal SHA754fc9dea5622e94c2072413dd4ae8dfbbd83814a00c9cfd985aeaede745de34,376regularfiles/0links, unchanged. Report c0ec0fd9cd569d01, commit99beae062a63a15d702f26426aed00dd74301e9c, patch-id6b2d99f9328ec8074101a8d909434b5906f97bc1. New session log5542fe1045178bf8:F-1 retains setup failures. Witness memory has full details.
+
+Latest full project gate is still NOT green: known old timeout test failed lean at190245 vs200000; isolated with-slot rerun passed. FMT/CLIPPY/PYTHON_LIGHT/DEFAULT0, LEAN101. Known bug78f30eb614d3fba3 fixed elsewhere by1910afb125440aebb993f8170ae99532b4533bd7, not ancestor of V. No runtime/test source changed. Normal report hooks pass except missing-runnable-binary dead-artifact-id skip. No broad rerun merely to hide known failure. Narrow new docs audit25found/20resolved/0broken/5outside paths already exist-verified.
+
+Prior paid contract-to-assertion diagnostic remains CLOSED: one valid low call0.07467149999999999; exact test passes candidate/reference/gold, discoveryFALSE. C2 body assertion was actually mutated to fail/restored/pass, C1 status not separately mutated; partial adherence counted. No retry/repair/hint/second task. Report be921dd4e41d331b. V resultcommit5d6fa2af47cd48dec5690c02ffd89bafe1ab6a39, patch-id75580bee6a47b445244437e5afb85080ccb1fd6b; prepaymentcommit5b2418a45497d3d6b56440207549e0650f709d57, patch-id77efdd216f03cf498b19dc8124c91c1f1233e04a. Native ledgers and both completed Tasks retained.
+
+C=/home/marius/.cache/codescout-research/codescout/contract-assertion-20261102 SEALED SHA363715736433de66b3c77dad4677166d4386e0f48f2170b4c3163d22e6bec8a6,1570regularfiles/0links. Its closure plus N/Q nested closures revalidated unchanged after this hub update. Canonical:
+python3 -B /home/marius/work/claude/codescout/.codescout/resident-private/blind-challenger-20261101/compat.py python3 -B /home/marius/.cache/codescout-research/codescout/contract-assertion-20261102/analysis/closure.py verify
+Keep OLDN at its original in-repo path; compatibility namespace depends on it. Never host aliases/moves or LSP into sealed roots. Prior instrumentation had26tests/9realrolecontrols/6appliedmutations0survivors; deferred minor7eb706aefae94bf5 remains outside frozen phase. See contract-assertion memory for full history.
+
+Cumulative model-client estimate24.269845199999999810 of40, remaining15.730154800000000190. No new model call, credential read or paid phase in witness spike; no campaign job pending. Actual invoice/native orchestration/CPU dollars unknown. Prior raw charge reader calibrated on overlap; all started calls counted.
+
+Overall: executable feedback supports bounded low correction, and structured assertions plus one composition variant supplied one exposed Axum detector. Ripgrep contract-first transfer calibrates on base/gold but finds no residual agent defect. Next useful step is a FINITE outcome-unseen task population frozen before new solutions, common independent acceptance, generic detector/variant/repair bounds, false-positive handling and total discovery/repair/escalation costs. Include ceiling/unsupported/invalid tasks; do not select replacement seeds or expand cases after outcomes and call them fresh. No additional paid retry on exposed Axum/ripgrep. General mechanism-efficacy goal remains open.
+
+Preserve all old worktrees/evidence/native ledgers. Cleanup context remains research/effort-steering/run-storage-cleanup-20261101. New scratch via scripts/resident-scratch.sh outside checkout; codescout-research root avoids old compat hiding normal cache alias. Inspect captured copies from M, never sealed roots or live actors.

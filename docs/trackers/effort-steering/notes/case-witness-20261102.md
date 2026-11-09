@@ -1,0 +1,41 @@
+---
+id: c154a181d58572f9
+kind: research-note
+status: archived
+title: Offline case-selection witness — closed 2026-11-02
+tags:
+- effort-steering
+- migrated-memory
+- historical
+topic: effort-steering
+interpretation: Historical snapshot; consult the experiment index for current state.
+migrated_on: 2026-11-09
+original_memory_topic: research/effort-steering/case-witness-20261102
+original_sha256: e01cb100d0774cd1631f07c9025078d5faa9020dd4220251c67768dddef01207
+---
+
+# Offline case-selection witness — closed 2026-11-02
+
+Private D=/home/marius/.cache/codescout-research/codescout/case-witness-20261102 is SEALED. No model call or new paid phase. Report docs/research/2026-11-02-case-witness.md, catalog c0ec0fd9cd569d01, in retained V=/home/marius/.codex/worktrees/615e/codescout. Hub ae571a0abfaf9e7f updated, new session log 5542fe1045178bf8 records F-1 setup errors. Local exact-three-path commit 99beae062a63a15d702f26426aed00dd74301e9c, patch-id 6b2d99f9328ec8074101a8d909434b5906f97bc1. Root SID 01a15ca9-f939-7603-acb5-01c6b02f68e2. V clean after commit; no merge/push.
+
+Question and result: compare exact generic challenger, structured contract/assertion challenger, and known direct fallback control on Axum1934 low candidate, fixed xhigh reference and gold. Quiet and instrumented source copies produce 18 valid evaluations, nine unchanged-outcome pairs. Each lists/executes exactly one test, none ignored. Both generated probes pass all roles; direct control fails candidate and passes reference/gold in both variants. Existing evaluator/source binding unchanged; separate read-only verifier rechecks full matrix, logs/fixture hashes/config identities and paired outcomes.
+
+Ten explicit logging sites in Router dispatch, route matching, MatchedPath update/state and extraction. Unique candidate event labels: generic9, structured8, direct8. Direct's set is a proper subset of generic's, whose sole additional label is matched.tail. These are SELECTED INSERTION SITE LABELS, never full branch/contract coverage. No percentages or general parity inference.
+
+Ordered candidate traces: both generated probes transiently set MatchedPath to internal fallback route, then nested-tail processing removes it before observation. Generic extractor reads None; structured unchanged fixture reads the raw extension at service boundary and its body assertion ends false. Reference/gold skip the bad fallback write and also observe absence. Direct control consumes Some("/*__private__axum_fallback") at extractor and asserts absence, thus detects the defect; reference/gold consume None and pass. Mere execution/site count does not establish relevant terminal observation. This diagnoses one already exposed case, not blind discovery/general automatic selection.
+
+Six focused instrument tests passed after observed red. Setup failures retained: overbroad anchor matched another method; preservation test incorrectly assumed candidate removal syntax in siblings; runner used read on adapter instead of wrapper and stopped before evaluator. No model retries. Paired executions validated observer equivalence for these fixtures/outcomes only.
+
+Fresh project gate exits FMT0/CLIPPY0/PYTHON_LIGHT0/DEFAULT0/LEAN101, sole lean failure old a_timed_out_filter_with_output_over_the_limit_stays_inline:190245 versus200000 after1sec. Exact isolated with-slot no-default-features rerun passes. KNOWN bug78f30eb614d3fba3; fixed elsewhere by1910afb125440aebb993f8170ae99532b4533bd7, patch-id e8912e70e20ceaf872eb8872457a7e48014efb34, not ancestor of retained V. No runtime/test source changed; do not call full gate green. Raw gate and rerun logs in D. Normal commit hooks passed except disclosed no-runnable-binary dead-artifact-id skip. Narrow doc reference audit:26found/21resolved/0broken/5outside independently exist.
+
+D seal SHA754fc9dea5622e94c2072413dd4ae8dfbbd83814a00c9cfd985aeaede745de34,376regularfiles/0literal links, inventory/content hashes independently calibrated against GNU find+sha256sum. Excludes seal itself and declared repeat-verification.log. Scripts/row captures/grade/source inventories/probes/raw logs/publication are retained. publication.json binds historical Git bytes including mutable hub snapshot, never future hub bytes.
+
+Verify from M, never pin D or a live actor:
+python3 -B /home/marius/work/claude/codescout/.codescout/resident-private/blind-challenger-20261101/compat.py python3 -B /home/marius/.cache/codescout-research/codescout/case-witness-20261102/verify.py
+python3 -B D/publication.py verify
+python3 -B D/seal.py verify
+Substitute literal D for shorthand. Use -B, do not create pycache. Only repeat-verification.log may change. Inspection copies live under D/inspection; do not initialize LSP there after seal. Disposable /tmp/cw02-{candidate,reference,gold} remain, not worktrees; all replayable source patches in D.
+
+Prior C contract/assertion and nested N/Q closures revalidated after hub update, unchanged. Budget remains24.269845199999999810 of40, remaining15.730154800000000190 model-client estimate. CPU/native orchestration dollars unmeasured. No campaign jobs pending.
+
+Next gate OFFLINE: bounded reusable contract → distinct direct/composed public-API paths → terminal observation matrix, followed by assertion sensitivity. Test selection on further development cases, avoid another paid wording retry on exposed Axum. General selector still unbuilt/unvalidated. Only then freeze bounded repair/escalation and prospective outcome-unseen ordinary-low/structured-low/xhigh with common independent acceptance and whole-workflow costs. Keep all negative/invalid evidence, worktrees and native ledgers.
