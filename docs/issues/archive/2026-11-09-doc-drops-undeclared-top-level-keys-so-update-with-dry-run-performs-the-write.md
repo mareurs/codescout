@@ -1,5 +1,5 @@
 ---
-id: '6285dd9e300a7876'
+id: b284cd70c19eee0f
 kind: bug
 status: fixed
 title: 'BUG: doc drops undeclared top-level keys, so update with dry_run=true performs the write'
@@ -13,7 +13,7 @@ owner: marius
 related:
 - docs/trackers/issue-clusters/IC-15-accepted-parameter-silently-dropped.md
 severity: medium
-unverified: The refusal was tested by calling Artifact::call directly, not through the MCP adapter on a rebuilt server, so it is not shown that the key reaches Artifact::call unchanged over the wire. The earlier attempt at deny_unknown_fields on the root (per the comment at src/librarian/tools/artifact.rs) was not re-run, so option 2 is neither tried nor ruled out. Only this session sent dry_run to doc update in usage.db.
+unverified: 'RESOLVED 2026-11-09. Was: the refusal was tested only by calling Artifact::call directly, so the wire path was unseen. It is now shown on the rebuilt server: dry_run=true on doc update is refused and the file is unchanged. Not covered by this fix and neither tried nor ruled out: option 2, refusing any root key declared in no action''s schema.'
 ---
 
 ## Summary
@@ -87,8 +87,9 @@ Do not send `dry_run` to `doc`. To preview an `update`, read the record with `do
 
 ## Resume
 
-1. After the next rebuild and `/mcp`, send `doc(action="update", dry_run=true, ...)` to a throwaway document and confirm the refusal arrives over the wire and the file is unchanged. The tests call `Artifact::call` directly; whether the MCP adapter in front of it passes the key through unchanged was not tested. Then archive this record.
-2. Option 2 stays open as a separate decision: it needs a check on the schema's declared `properties`, and a trial against the update call that broke the earlier `deny_unknown_fields` attempt.
+Nothing outstanding for this fix. The wire check was done on the rebuilt server on 2026-11-09: `doc(action="update", dry_run=true, ...)` on a throwaway document returned `'dry_run' is not a parameter of doc — doc(action="update") was not run` with the hint, and the file still held its original body. The throwaway was deleted.
+
+Option 2 (refuse any root key declared in no action's schema) is not part of this fix. It stays a separate decision: it needs a check on the schema's declared `properties`, and a trial against the update call that broke the earlier `deny_unknown_fields` attempt.
 
 
 ## Fix provenance

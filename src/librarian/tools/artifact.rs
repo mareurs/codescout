@@ -148,7 +148,7 @@ fn unknown_action_error(action: &str) -> anyhow::Error {
 /// the caller believe something that is false.
 ///
 /// Only `true` is refused: `false` asks for what `doc` does anyway. Bug
-/// `6285dd9e300a7876`.
+/// `b284cd70c19eee0f`.
 fn refuse_dry_run(action: &str, args: &Value) -> Result<()> {
     let asked = match args.get("dry_run") {
         Some(Value::Bool(b)) => *b,
@@ -886,7 +886,7 @@ mod tests {
     /// `doc(action="update", dry_run=true, ...)` wrote the file while the caller believed it was
     /// previewing. The refusal must come before the write: the file stays byte-identical, and a
     /// test that only checked the response would pass on the old behaviour. Bug
-    /// `6285dd9e300a7876`.
+    /// `b284cd70c19eee0f`.
     #[tokio::test]
     async fn dry_run_true_on_update_is_refused_and_leaves_the_file_unchanged() {
         let tmp = tempfile::TempDir::new().unwrap();

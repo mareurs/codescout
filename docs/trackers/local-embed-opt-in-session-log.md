@@ -97,7 +97,7 @@ entry_high_water_W: 2
 | W-2 | 2026-11-09 | — | pattern | validated | **Read the gate before filing the bug** — the root's leniency in `doc` is deliberate; the filed bug is the narrow `dry_run` hazard |
 | F-9 | 2026-11-09 | low | self-friction | mitigated | **I put an invented timestamp in a message to a peer** — corrected by a follow-up message |
 | F-8 | 2026-11-09 | low | tooling | open | **`fmt-mine.sh` was refused three times by a provenance lock** — cause not found; worked around with `rustfmt` on named files |
-| F-7 | 2026-11-09 | med | tool-surface | promoted-to-bug-tracker | **`doc update` accepted `dry_run=true` and wrote** — a parameter of a sibling tool, read by nothing here; bug `6285dd9e300a7876` |
+| F-7 | 2026-11-09 | med | tool-surface | fixed-verified | **`doc update` accepted `dry_run=true` and wrote** — a parameter of a sibling tool, read by nothing here; bug `b284cd70c19eee0f`, fixed in `53a7d8ec6` |
 | F-6 | 2026-11-09 | low | stale-doc | fixed-verified | **The legacy-retrieval tracker says memory queries use `search_memories`, and nothing calls it** — deleted; memory recall uses `SemanticMemoryStore`; tracker corrected |
 | F-5 | 2026-11-09 | med | stale-plan | fixed-verified | **The tracker's plan for L-12 named a method over a collection nothing writes to** — `search_libraries` reads `library_chunks`; the library index writes `code_chunks` under `lib:<name>` |
 | F-4 | 2026-11-08 | low | plan-prose | fixed-verified | **The manual contradicted itself about whether local-embed is a default** — two pages disagreed with each other and with Cargo.toml |
@@ -430,7 +430,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Reading before filing paid off:** the first framing was "unknown top-level keys are ignored". The gate `every_schema_object_promising_to_refuse_unknown_keys_actually_refuses` says the root is excluded on purpose, so the filed bug is the narrow one (`dry_run` on an action that does not implement it). See W-2.
 
-**Status:** promoted-to-bug-tracker. Bug `6285dd9e300a7876`, fixed in `53a7d8ec6` (the narrow refusal). Tested by calling `Artifact::call` directly; the refusal over the MCP wire is not yet seen, so the bug is `fixed` with `unverified:` open and is not archived.
+**Status:** fixed-verified. Bug `b284cd70c19eee0f` (archived; the archive move re-minted its id), fixed in `53a7d8ec6` with the narrow refusal. Wire check done on the rebuilt server 2026-11-09: `dry_run=true` on `doc update` is refused and the file is unchanged.
 
 ## F-8 — fmt-mine.sh was refused three times by a provenance lock
 
