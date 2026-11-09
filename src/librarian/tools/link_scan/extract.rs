@@ -615,28 +615,35 @@ fn scan_tokens(
     line: u32,
 ) {
     let mut masked: Vec<(usize, usize)> = Vec::new();
-    for m in double_qualified_re().find_iter(chunk) {
-        masked.push((m.start(), m.end()));
-        push_citation(
-            out,
-            seen,
-            m.as_str().to_string(),
-            CitationKind::MalformedQualifier,
-            line,
-        );
-    }
-    for m in cross_repo_re().find_iter(chunk) {
-        if masked.iter().any(|&(s, e)| m.start() >= s && m.end() <= e) {
-            continue;
+    // Both qualified shapes end in an entry token (`:<TOKEN>`), and a `\b` holds between
+    // the `:` and the token, so a chunk where `entry_re` finds nothing cannot match either
+    // (pinned by `a_chunk_without_an_entry_token_matches_neither_qualified_pattern`).
+    // Their qualifier stem starts at every word boundary and reads up to 119 bytes, so on
+    // prose they are the dearest patterns here and the ones with nothing to find.
+    if entry_re().is_match(chunk) {
+        for m in double_qualified_re().find_iter(chunk) {
+            masked.push((m.start(), m.end()));
+            push_citation(
+                out,
+                seen,
+                m.as_str().to_string(),
+                CitationKind::MalformedQualifier,
+                line,
+            );
         }
-        masked.push((m.start(), m.end()));
-        push_citation(
-            out,
-            seen,
-            m.as_str().to_string(),
-            CitationKind::CrossRepoToken,
-            line,
-        );
+        for m in cross_repo_re().find_iter(chunk) {
+            if masked.iter().any(|&(s, e)| m.start() >= s && m.end() <= e) {
+                continue;
+            }
+            masked.push((m.start(), m.end()));
+            push_citation(
+                out,
+                seen,
+                m.as_str().to_string(),
+                CitationKind::CrossRepoToken,
+                line,
+            );
+        }
     }
     for m in entry_re().find_iter(chunk) {
         if masked.iter().any(|&(s, e)| m.start() >= s && m.end() <= e) {
@@ -879,6 +886,42 @@ mod tests {
         let mut got = tokens(&ex, CitationKind::EntryToken);
         got.sort();
         assert_eq!(got, vec!["SHA-256", "UTF-8"]);
+    }
+    /// `scan_tokens` runs the two qualified-citation patterns only on a chunk where
+    /// `entry_re` matches. That skip is sound only if neither pattern can match a chunk
+    /// without an entry token: both end in `:<TOKEN>`, and a `\b` holds between the `:`
+    /// and the token. This pins that, so a change to any of the three patterns that
+    /// breaks it fails here and not as a citation `doctor` silently stops reporting.
+    #[test]
+    fn a_chunk_without_an_entry_token_matches_neither_qualified_pattern() {
+        let chunks = [
+            "plain prose with no token at all",
+            "codescout:A-11",
+            "a:B-2 and x:y:F-2 in one line",
+            "foo:ABCD-1 has four capitals, which is not an entry token",
+            "foo:A-b has no digits after the dash",
+            "foo:a-1 has a lowercase token",
+            "see https://example.org:8080/path and a-b-c:d",
+            "prompt-engineering:L-14, codescout:statement-validity-session-log:F-2",
+            "a:\nA-1 across a line break",
+            "",
+        ];
+        for chunk in chunks {
+            if entry_re().is_match(chunk) {
+                continue;
+            }
+            assert!(
+                !double_qualified_re().is_match(chunk),
+                "double-qualified matched a chunk with no entry token: {chunk:?}"
+            );
+            assert!(
+                !cross_repo_re().is_match(chunk),
+                "cross-repo matched a chunk with no entry token: {chunk:?}"
+            );
+        }
+        // The chunks that DO hold an entry token are the ones the patterns still run on.
+        assert!(entry_re().is_match("codescout:A-11"));
+        assert!(entry_re().is_match("x:y:F-2"));
     }
 
     #[test]
