@@ -1,0 +1,17 @@
+{
+  "label": "final-build-and-gate",
+  "command": [
+    "./scripts/with-slot.sh",
+    "--slot",
+    "0",
+    "/usr/bin/python3",
+    "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-create-finalization-dogfood/verify_final_build.py"
+  ],
+  "exit_code": 0,
+  "started": "2026-11-09T16:15:13.155487+00:00",
+  "finished": "2026-11-09T16:20:39.225142+00:00",
+  "source_before": "a6febbcb5bada021e0384cfeda9ccd4e527e840c35c9639ed9d043389af27e49",
+  "source_after": "a6febbcb5bada021e0384cfeda9ccd4e527e840c35c9639ed9d043389af27e49",
+  "summaries": [],
+  "verdicts": []
+}

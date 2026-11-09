@@ -1,0 +1,16 @@
+{
+  "name": "M7-diagnostic",
+  "started": "2026-11-09T16:05:43.147644+00:00",
+  "finished": "2026-11-09T16:09:07.477267+00:00",
+  "exit_code": 101,
+  "summaries": [
+    "test result: FAILED. 49 passed; 2 failed; 0 ignored; 0 measured; 8590 filtered out; finished in 1.86s"
+  ],
+  "verdicts": [
+    "mutation-probe: KILLED (rc=101, 51 test(s) ran) \u2014 a test caught it."
+  ],
+  "source_restored": true,
+  "mutation_tree": "/home/marius/work/claude/codescout/.worktrees/ecc-create-finalization-review.worktrees/mutation-slot-0",
+  "isolated_source_restored": true,
+  "isolated_restored_sha256": "68f4fdaa9030bd0bd78939ee7debb37c6dd5b30917db07e43278505fee27d3bd"
+}

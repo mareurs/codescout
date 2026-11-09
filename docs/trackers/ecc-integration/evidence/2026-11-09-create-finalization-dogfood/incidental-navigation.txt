@@ -1,0 +1,18 @@
+Observed in the shared running MCP (build_id9e4db9b94323fb5bc65e3af403904f883459979206077488e448a362291620dc; source provenance differs from frozen branch):
+
+Request: call_graph(symbol="call", path="src/librarian/tools/create.rs", direction="callees", max_depth=2, detail_level="full", workspace="/home/marius/work/claude/codescout")
+
+Response:
+call_graph for `call`
+  callees: 4 edges across 3 files
+    src/librarian/tools/artifact.rs (1)
+        548: call → call (depth=1, lsp)
+    src/tools/run_command/inner.rs (1)
+        870: run_command_inner → handle_successful_output_with (depth=2, lsp)
+    src/tools/run_command/mod.rs (2)
+        468: call → run_command_inner (depth=1, lsp)
+        512: call → run_command_inner (depth=1, lsp)
+  (auto-promoted to full detail — small result)
+  max_depth_reached: 2
+
+The inspected create::call body does not establish this returned outgoing chain. Treat as an untrusted navigation result; source symbols and exact references were used instead. Duplicate short name, stale coordinates and runtime/source drift are unverified possible explanations, not established causes. No production correctness conclusion rests on this graph. Needs a current-source isolated reproduction before attributing a current-code defect.

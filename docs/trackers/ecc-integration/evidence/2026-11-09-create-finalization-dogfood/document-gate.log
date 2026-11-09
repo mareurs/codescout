@@ -1,0 +1,29 @@
+with-slot.sh: evicted 225 compiled units of workspace crates from /home/marius/.cache/codescout-gate/slot-0: it was last leased for /home/marius/work/claude/codescout/.worktrees/ecc-navigation-gate, not for /home/marius/work/claude/codescout
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-0 (leased until this command exits)
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout)
+   Compiling codescout-embed v0.2.0 (/home/marius/work/claude/codescout/crates/codescout-embed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 41.38s
+     Running tests/issue_frontmatter.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/issue_frontmatter-8ad601fae81d7b11)
+
+running 18 tests
+test a_block_closed_by_a_final_fence_with_no_trailing_newline_is_read ... ok
+test a_date_glued_to_letters_is_refused_even_without_a_colon ... ok
+test a_duplicate_top_level_key_is_refused ... ok
+test a_date_with_the_wrong_separator_is_not_a_date ... ok
+test a_file_without_a_frontmatter_block_is_refused ... ok
+test a_fixed_file_needs_a_dated_closed_and_a_mitigated_one_does_not ... ok
+test a_key_with_no_space_after_the_colon_is_refused ... ok
+test a_line_that_is_none_of_the_allowed_shapes_is_refused ... ok
+test a_missing_opened_is_refused_only_from_the_cutoff ... ok
+test indented_continuations_comments_and_blank_lines_are_allowed ... ok
+test a_quoted_value_that_does_not_close_or_has_a_lone_quote_is_refused ... ok
+test a_plain_value_that_yaml_cannot_read_is_refused_but_a_quoted_one_is_not ... ok
+test kind_and_status_are_required ... ok
+test the_pre_fix_glued_blob_is_rejected_and_the_repair_passes ... ok
+test the_archive_scope_applies_the_syntax_rules_but_not_the_closed_and_opened_policy ... ok
+test the_walk_names_each_broken_file_by_path_and_passes_a_clean_one ... ok
+test every_tracked_issue_file_has_wellformed_frontmatter ... ok
+test every_archived_issue_file_has_wellformed_syntax ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+

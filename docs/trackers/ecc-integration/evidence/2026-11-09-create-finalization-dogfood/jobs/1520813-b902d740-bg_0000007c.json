@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_0000007c",
+  "command": "./scripts/with-slot.sh --slot 0 python3 /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-create-finalization-dogfood/verify_phase.py baseline",
+  "server_pid": 1520813,
+  "job_pid": 3074098,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T15:29:47.768574938+00:00",
+  "finished_at": "2026-11-09T15:30:27.974581914+00:00",
+  "log_path": "/tmp/codescout-bg-FenArB.log"
+}

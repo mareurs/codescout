@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_0000008a",
+  "command": "env TMPDIR=/home/marius/.cache/codescout-ecc-tmp CODESCOUT_GATE_TMPFS_BASE=off ./scripts/with-slot.sh --slot 0 cargo test --test issue_frontmatter > docs/trackers/ecc-integration/evidence/2026-11-09-create-finalization-dogfood/document-gate.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 3932685,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T16:37:03.108674017+00:00",
+  "finished_at": "2026-11-09T16:37:46.983033079+00:00",
+  "log_path": "/tmp/codescout-bg-zCexcO.log"
+}

@@ -1,0 +1,12 @@
+{
+  "source": "/home/marius/.codex/sessions/2026/11/09/rollout-2026-11-09T10-24-45-01a1bf68-e650-7f20-911e-b53f86597c27.jsonl",
+  "private_snapshot": "/home/marius/work/claude/codescout/.codescout/ecc-create-finalization-private-20261109/pre-action-controller-input.jsonl",
+  "sha256": "479ce8dcf44397380f43da17de6287fa7fcdb59e5edd820e2623362e681ed05d",
+  "bytes": 17214502,
+  "cutoff": "before the first assistant response to the latest exact user event 'ok, continua'",
+  "user_event_timestamp": "2026-11-09T15:22:36.900Z",
+  "configured_model": "gpt-6.1-sol",
+  "configured_effort": "high",
+  "cwd": "/home/marius/work/claude/codescout",
+  "scope": "Exact local host transcript prefix retained privately; includes personal policy and prior conversation, never candidate-public input. No backend attestation. Neutral brief and frozen Git tree are separate; any future replay must preregister conditioning/skill-removal and contamination controls. No replay ran."
+}

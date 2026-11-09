@@ -1,0 +1,11 @@
+--- a/src/librarian/tools/create.rs
++++ b/src/librarian/tools/create.rs
+@@ -546,7 +546,7 @@
+         // A worktree-born artifact has no main-checkout twin to fork — just make
+         // sure the worktree session itself is durably registered.
+         if let Some(cp) = ctx.current_project.as_deref() {
+-            super::worktree::ensure_registration(&cat, cp)?;
++            let _ = cp;
+         }
+         tx.commit()?;
+     }

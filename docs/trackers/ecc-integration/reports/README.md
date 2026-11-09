@@ -12,6 +12,9 @@ topic: ecc-integration
 
 # ECC evaluation reports
 
+- [Create finalization dogfood — 2026-11-09](2026-11-09-create-finalization-dogfood.md): catalog failure atomicity, real SQLite RED→GREEN and private MCP controls; review/integration state in report.
+- [Create finalization observed draft](2026-11-09-create-finalization-observed.md): bounded enforcement/contract/evidence inventory.
+
 - [call_graph prompt surface — 2026-11-09](2026-11-09-callgraph-prompt-surface.md): current delivery, satisfactory native Codex base, no routing edit, factual write-response correction and verification.
 
 - [Navigation dogfood — 2026-11-09](2026-11-09-navigation-dogfood.md): recoverable-hop disclosure correction, real MCP controls, applied mutations and passing full gate; locally integrated at3fe613bdd.

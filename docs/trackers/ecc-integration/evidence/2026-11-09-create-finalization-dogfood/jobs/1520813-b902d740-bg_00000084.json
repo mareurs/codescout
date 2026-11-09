@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000084",
+  "command": "python3 docs/trackers/ecc-integration/evidence/2026-11-09-create-finalization-dogfood/probe_mcp_final.py",
+  "server_pid": 1520813,
+  "job_pid": 3682062,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T16:17:00.542986964+00:00",
+  "finished_at": "2026-11-09T16:18:10.138326657+00:00",
+  "log_path": "/tmp/codescout-bg-aIQY58.log"
+}

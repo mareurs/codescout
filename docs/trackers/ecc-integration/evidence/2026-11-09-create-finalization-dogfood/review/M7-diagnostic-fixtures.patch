@@ -1,0 +1,20 @@
+--- a/src/librarian/tools/create.rs
++++ b/src/librarian/tools/create.rs
+@@ -743,7 +743,7 @@
+             "CREATE TRIGGER fail_finalization BEFORE UPDATE OF slug ON artifact
+          BEGIN SELECT RAISE(ABORT, 'simulated slug failure'); END;",
+             "simulated slug failure",
+-            false,
++            true,
+         )
+         .await;
+     }
+@@ -754,7 +754,7 @@
+             "CREATE TRIGGER fail_finalization BEFORE INSERT ON artifact_augmentation
+          BEGIN SELECT RAISE(ABORT, 'simulated augmentation failure'); END;",
+             "simulated augmentation failure",
+-            false,
++            true,
+         )
+         .await;
+     }

@@ -1,0 +1,8 @@
+{
+  "sha256": "a6febbcb5bada021e0384cfeda9ccd4e527e840c35c9639ed9d043389af27e49",
+  "production_prefix_unchanged": true,
+  "production_prefix_sha256": "4c4e174bbca615c04abe3569799f77becede94f1f103f2038b7872c2277aafd0",
+  "initial_survivor": "review/M7-result.json",
+  "rerun": "final-M7-result.json",
+  "module": "final-module-result.json"
+}

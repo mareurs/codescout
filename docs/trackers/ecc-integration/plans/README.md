@@ -12,6 +12,8 @@ topic: ecc-integration
 
 # ECC evaluation plans
 
+- [Create finalization dogfood — 2026-11-09](2026-11-09-create-finalization-dogfood.md): completed and integrated; exact038fffb3 baseline, observed SQLite failures, catalog transaction, applied-mutation follow-up and final verification.
+
 - [call_graph active prompt surface audit](2026-11-09-callgraph-prompt-surface.md): actual delivery, current-only wording and preregistered Codex routing evidence (prompt-hamsa-audit-log:A-47).
 
 - [Navigation completeness dogfood — 2026-11-09](2026-11-09-navigation-dogfood.md): next cycle, starting at exact commit b3d02d482; audit references/call_graph negatives and reproduce the recoverable-hop reporting gap before correction.

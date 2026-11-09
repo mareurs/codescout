@@ -1,0 +1,122 @@
+[
+  {
+    "name": "baseline",
+    "exit_code": 0,
+    "started": "2026-11-09T15:48:37.852902+00:00",
+    "finished": "2026-11-09T15:52:27.613416+00:00",
+    "summaries": [
+      "test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 8590 filtered out; finished in 1.76s"
+    ],
+    "verdicts": [],
+    "source_restored": true,
+    "mutation_tree": null
+  },
+  {
+    "name": "M1-drop-commit",
+    "exit_code": 101,
+    "started": "2026-11-09T15:52:27.633984+00:00",
+    "finished": "2026-11-09T15:55:24.136286+00:00",
+    "summaries": [
+      "test result: FAILED. 38 passed; 13 failed; 0 ignored; 0 measured; 8590 filtered out; finished in 1.58s"
+    ],
+    "verdicts": [
+      "mutation-probe: KILLED (rc=101, 51 test(s) ran) \u2014 a test caught it."
+    ],
+    "source_restored": true,
+    "mutation_tree": "/home/marius/work/claude/codescout/.worktrees/ecc-create-finalization-review.worktrees/mutation-slot-0",
+    "isolated_source_restored": true,
+    "isolated_restored_sha256": "68f4fdaa9030bd0bd78939ee7debb37c6dd5b30917db07e43278505fee27d3bd"
+  },
+  {
+    "name": "M2-commit-after-row",
+    "exit_code": 101,
+    "started": "2026-11-09T15:55:24.149882+00:00",
+    "finished": "2026-11-09T15:56:37.111143+00:00",
+    "summaries": [
+      "test result: FAILED. 49 passed; 2 failed; 0 ignored; 0 measured; 8590 filtered out; finished in 1.60s"
+    ],
+    "verdicts": [
+      "mutation-probe: KILLED (rc=101, 51 test(s) ran) \u2014 a test caught it."
+    ],
+    "source_restored": true,
+    "mutation_tree": "/home/marius/work/claude/codescout/.worktrees/ecc-create-finalization-review.worktrees/mutation-slot-0",
+    "isolated_source_restored": true,
+    "isolated_restored_sha256": "68f4fdaa9030bd0bd78939ee7debb37c6dd5b30917db07e43278505fee27d3bd"
+  },
+  {
+    "name": "M3-omit-registration",
+    "exit_code": 101,
+    "started": "2026-11-09T15:56:37.122578+00:00",
+    "finished": "2026-11-09T15:57:44.792943+00:00",
+    "summaries": [
+      "test result: FAILED. 50 passed; 1 failed; 0 ignored; 0 measured; 8590 filtered out; finished in 1.78s"
+    ],
+    "verdicts": [
+      "mutation-probe: KILLED (rc=101, 51 test(s) ran) \u2014 a test caught it."
+    ],
+    "source_restored": true,
+    "mutation_tree": "/home/marius/work/claude/codescout/.worktrees/ecc-create-finalization-review.worktrees/mutation-slot-0",
+    "isolated_source_restored": true,
+    "isolated_restored_sha256": "68f4fdaa9030bd0bd78939ee7debb37c6dd5b30917db07e43278505fee27d3bd"
+  },
+  {
+    "name": "M4-commit-before-registration",
+    "exit_code": 101,
+    "started": "2026-11-09T15:57:44.806760+00:00",
+    "finished": "2026-11-09T15:58:57.918006+00:00",
+    "summaries": [
+      "test result: FAILED. 50 passed; 1 failed; 0 ignored; 0 measured; 8590 filtered out; finished in 1.79s"
+    ],
+    "verdicts": [
+      "mutation-probe: KILLED (rc=101, 51 test(s) ran) \u2014 a test caught it."
+    ],
+    "source_restored": true,
+    "mutation_tree": "/home/marius/work/claude/codescout/.worktrees/ecc-create-finalization-review.worktrees/mutation-slot-0",
+    "isolated_source_restored": true,
+    "isolated_restored_sha256": "68f4fdaa9030bd0bd78939ee7debb37c6dd5b30917db07e43278505fee27d3bd"
+  },
+  {
+    "name": "M5-omit-disk-cleanup",
+    "exit_code": 101,
+    "started": "2026-11-09T15:58:57.932143+00:00",
+    "finished": "2026-11-09T16:00:12.008163+00:00",
+    "summaries": [
+      "test result: FAILED. 49 passed; 2 failed; 0 ignored; 0 measured; 8590 filtered out; finished in 1.51s"
+    ],
+    "verdicts": [
+      "mutation-probe: KILLED (rc=101, 51 test(s) ran) \u2014 a test caught it."
+    ],
+    "source_restored": true,
+    "mutation_tree": "/home/marius/work/claude/codescout/.worktrees/ecc-create-finalization-review.worktrees/mutation-slot-0",
+    "isolated_source_restored": true,
+    "isolated_restored_sha256": "68f4fdaa9030bd0bd78939ee7debb37c6dd5b30917db07e43278505fee27d3bd"
+  },
+  {
+    "name": "M6-drop-uncertainty-warning",
+    "exit_code": 101,
+    "started": "2026-11-09T16:00:12.016527+00:00",
+    "finished": "2026-11-09T16:01:22.170913+00:00",
+    "summaries": [
+      "test result: FAILED. 50 passed; 1 failed; 0 ignored; 0 measured; 8590 filtered out; finished in 1.47s"
+    ],
+    "verdicts": [
+      "mutation-probe: KILLED (rc=101, 51 test(s) ran) \u2014 a test caught it."
+    ],
+    "source_restored": true,
+    "mutation_tree": "/home/marius/work/claude/codescout/.worktrees/ecc-create-finalization-review.worktrees/mutation-slot-0",
+    "isolated_source_restored": true,
+    "isolated_restored_sha256": "68f4fdaa9030bd0bd78939ee7debb37c6dd5b30917db07e43278505fee27d3bd"
+  },
+  {
+    "name": "restored-control",
+    "exit_code": 101,
+    "started": "2026-11-09T16:01:22.174213+00:00",
+    "finished": "2026-11-09T16:01:25.320757+00:00",
+    "summaries": [
+      "test result: FAILED. 50 passed; 1 failed; 0 ignored; 0 measured; 8590 filtered out; finished in 1.58s"
+    ],
+    "verdicts": [],
+    "source_restored": true,
+    "mutation_tree": null
+  }
+]

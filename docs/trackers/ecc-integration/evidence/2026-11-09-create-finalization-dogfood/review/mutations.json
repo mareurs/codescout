@@ -1,0 +1,32 @@
+[
+  [
+    "M1-drop-commit",
+    "        tx.commit()?;",
+    "        drop(tx);"
+  ],
+  [
+    "M2-commit-after-row",
+    "        artifact::upsert_and_mint_slug(&cat, &row)?;\n        if let Some(aug_spec) = &a.augment {",
+    "        artifact::upsert_and_mint_slug(&cat, &row)?;\n        cat.conn.execute_batch(\"COMMIT; BEGIN\")?;\n        if let Some(aug_spec) = &a.augment {"
+  ],
+  [
+    "M3-omit-registration",
+    "            super::worktree::ensure_registration(&cat, cp)?;",
+    "            let _ = cp;"
+  ],
+  [
+    "M4-commit-before-registration",
+    "        if let Some(cp) = ctx.current_project.as_deref() {\n            super::worktree::ensure_registration(&cat, cp)?;",
+    "        if let Some(cp) = ctx.current_project.as_deref() {\n            cat.conn.execute_batch(\"COMMIT; BEGIN\")?;\n            super::worktree::ensure_registration(&cat, cp)?;"
+  ],
+  [
+    "M5-omit-disk-cleanup",
+    "        undo_failed_create(&ctx.catalog.lock(), &id, &full);",
+    "        // mutation: cleanup omitted"
+  ],
+  [
+    "M6-drop-uncertainty-warning",
+    "could not write {}; cleanup was attempted, but the catalog row or a partial file may remain",
+    "could not write {}"
+  ]
+]

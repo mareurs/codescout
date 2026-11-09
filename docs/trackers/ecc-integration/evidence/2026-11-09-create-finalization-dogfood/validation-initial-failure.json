@@ -1,0 +1,8 @@
+{
+  "phase": "document-id-check",
+  "outcome": "validator-false-negative",
+  "path": "docs/issues/2026-11-09-call-graph-generic-call-returns-unrelated-callees.md",
+  "observed_frontmatter": "id: '84029483d2895d9b'",
+  "initial_predicate": "Exact unquoted id line regex",
+  "correction": "Parse YAML and compare its id value; do not change the valid artifact representation."
+}

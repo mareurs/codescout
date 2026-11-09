@@ -1,0 +1,18 @@
+{
+  "installed_cache": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0",
+  "skills": [
+    {
+      "name": "ecc-spec-miner",
+      "source_snapshot_sha256": "f5badffe1d0cecc4e5aa34cf9ba13cac719c1c5c569aad6ef24ab3a44304121c",
+      "installed_sha256": "f5badffe1d0cecc4e5aa34cf9ba13cac719c1c5c569aad6ef24ab3a44304121c",
+      "same_bytes": true
+    },
+    {
+      "name": "ecc-silent-failure-review",
+      "source_snapshot_sha256": "3011675999b3fc361e208d4b624cedba24468051315faae1c954643676c6b84d",
+      "installed_sha256": "3011675999b3fc361e208d4b624cedba24468051315faae1c954643676c6b84d",
+      "same_bytes": true
+    }
+  ],
+  "scope": "Explicit body reads from adapter source match installed0.1.0 bytes; does not independently prove automatic residency/activation in the main turn."
+}

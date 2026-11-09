@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 221
+entry_high_water_F: 225
 entry_high_water_W: 158
 ---
 
@@ -67,6 +67,10 @@ entry_high_water_W: 158
 | F-207 | 2026-11-01 | med | test-design | fixed-verified | **A diagnostic hint passed its tests and did not fire on the one tree it was built for** — a 50,000-entry bound taken from a count of directories met 311,890 entries; found only by reading the live warning. |
 | F-220 | 2026-11-09 | med | tool-behavior | mitigated | **A symbol label and its returned body disagreed after integrating shifted source** — cache flush and fresh pinned-worktree read restored agreement before auditing the description. |
 | F-221 | 2026-11-09 | med | eval-design | fixed-verified | **The routing scorer counted endpoint words without verifying graph edges or the MCP server** — 2 observed false positives before hardening, 0 afterward; current13 raw traces independently verified. |
+| F-222 | 2026-11-09 | med | tool-behavior | promoted-to-bug-tracker | **A pinned generic call_graph lookup returned a chain the requested source body did not support** — older shared runtime, current-source reproduction still open in84029483d2895d9b; excluded from finalization evidence. |
+| F-223 | 2026-11-09 | med | testing | fixed-verified | **Registration ordering survived the initial finalization tests** — observed M7 survivor; both worktree branches now exercised and exact M7 killed. |
+| F-224 | 2026-11-09 | med | measurement | mitigated | **A build lease spanning source roots reused a mutant artifact in a restored control** — retained false red and rebuilt control; lease inside actual mutation source root. |
+| F-225 | 2026-11-09 | med | tool-usage | mitigated | **Buffer and document patch grammar assumptions caused refused calls** — five refusals; corrected against actual tool responses, with no refused write applied. |
 | F-213 | 2026-11-06 | med | test-design | fixed-verified | **A crash fixture failed in its toy parser before reaching the classifier** — wrong-reason red replaced by observed intended red before reapplying production wiring. |
 | F-214 | 2026-11-06 | med | test-design | promoted-to-bug-tracker | **Stripping log indentation promoted a debug field to compiler evidence** — real four-log overlap exposed the false provenance; three observed RED variants before fix. |
 | F-210 | 2026-11-01 | med | process | mitigated | **A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path** — `fmt-mine` named three of my files UNKNOWN after a 19-minute gate; `rustfmt --check` on the diff's files beforehand takes seconds. |
@@ -18105,6 +18109,64 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Evidence:** [Review](ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/review.txt), [observed re-score](ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/rescored.json), [runner](ecc-integration/evidence/2026-11-09-callgraph-prompt-surface/rescore.py).
 
 **Lesson:** A pass control made only from endpoint words can license the same false positive the scorer is supposed to exclude. Perturb actual completed traces and check identity plus returned graph structure.
+
+## F-222 — A pinned generic call_graph lookup returned a chain the requested source body did not support
+
+**Valid:** dated 2026-11-09
+
+**Observed:** During ECC create-finalization reconnaissance, the older shared MCP returned artifact-router and run_command outgoing chains for call_graph(call, path=src/librarian/tools/create.rs, direction=callees, max_depth=2). The inspected create::call body did not establish that chain. Exact returned edges and runtime identity are retained; no conclusion about create relies on it.
+
+**Expected:** A path-pinned outgoing graph describes the requested declaration's callees.
+
+**Severity:** med — would have sent unrelated enforcement paths into the review; controller rejected the graph and used inspected bodies plus exact references.
+
+**Status:** promoted-to-bug-tracker
+
+**Recorded in:** [follow-up bug](../issues/2026-11-09-call-graph-generic-call-returns-unrelated-callees.md), artifact84029483d2895d9b. Current-source isolated reproduction and cause remain open; duplicate short names, cache positions and older-runtime/source drift are hypotheses only.
+
+**Rests on:** [exact observation](ecc-integration/evidence/2026-11-09-create-finalization-dogfood/incidental-navigation.txt). The earlier unique-Python routing fixture does not test this duplicated Rust short-name case.
+
+## F-223 — Registration ordering survived the initial finalization tests
+
+**Valid:** dated 2026-11-09
+
+**Observed:** The independent review applied registration-before-transaction M7 to the initial candidate. All51 create tests passed. After observing that survivor, the reviewer enabled worktree context in the existing slug/augmentation failure fixtures:49 passed,2 failed, each observing one registration instead of zero. Parent then expanded both fixtures across false/true contexts. Exact M7 was rerun with a source-bound build lease:49 passed,2 failed, KILLED; restored final module51/0. Production prefix was unchanged.
+
+**Severity:** med — the controller absorbed a missing regression guard before integration.
+
+**Status:** fixed-verified
+
+**Rests on:** [initial survivor and applied descriptor](ecc-integration/evidence/2026-11-09-create-finalization-dogfood/review/M7-result.json), [independent review](ecc-integration/evidence/2026-11-09-create-finalization-dogfood/review/review.md), [exact final recheck](ecc-integration/evidence/2026-11-09-create-finalization-dogfood/final-M7-result.json), [restored module](ecc-integration/evidence/2026-11-09-create-finalization-dogfood/final-module-result.json).
+
+**Lesson:** A successful registration-failure fixture does not pin registration ordering at downstream slug/augmentation failures. Apply the mutation before adding the guard; exercise linked and regular contexts.
+
+## F-224 — A build lease spanning source roots reused a mutant artifact in a restored control
+
+**Valid:** dated 2026-11-09
+
+**Observed:** The reviewer held an outer build-slot lease while mutation-probe switched from review root to isolated mutation roots. The first restored control had original source SHA but ran M6's shortened warning and failed50/1. The preserved rebuilt control passed51/0 after source-root rebinding and cache clearing. All initial mutant runs compiled their armed source; the false red belongs to the restored control, not a source regression.
+
+**Severity:** med — one control retry and a misleading failure required investigation.
+
+**Status:** mitigated
+
+**Rests on:** [review and retained controls](ecc-integration/evidence/2026-11-09-create-finalization-dogfood/review/review.md), [rebuilt control](ecc-integration/evidence/2026-11-09-create-finalization-dogfood/review/restored-control-rebuilt-result.json), [source-bound final M7 and restored control](ecc-integration/evidence/2026-11-09-create-finalization-dogfood/final-source.json).
+
+**Workaround:** Put with-slot.sh inside mutation-probe's test command so the lease records the actual isolated source root; reacquire from the restored candidate for its normal control. Do not carry CARGO_TARGET_DIR or a held outer lease across those roots. The shared build-cache implementation was not changed by this dogfood case.
+
+## F-225 — Buffer and document patch grammar assumptions caused refused calls
+
+**Valid:** dated 2026-11-09
+
+**Observed:** Three read_file calls incorrectly applied json_path to a raw @cmd buffer; the tool refused each and named raw line slicing. One doc body_edits replace used body instead of content and was refused. One doc patch placed claimed_by at top level instead of extra and was refused. No refused mutation changed the artifact. Corrected calls used raw ranges, content inside edits and extra for frontmatter metadata; readback confirmed the intended content. The archive first-use guide interlock was separately read and retried as designed.
+
+**Severity:** med — five refused tool calls added avoidable retries during evidence finalization.
+
+**Status:** mitigated
+
+**Rests on:** Native controller transcript for this session and the executed tool responses; resulting final report, source integration record and archived bug44160e1378b2e3f5 were read back. This is controller misuse, not a diagnosed product defect.
+
+**Lesson:** Treat @cmd refs as raw text; only @tool refs support json_path. Use the actual doc patch grammar: body_edits[].content and patch.extra. Inspect semantic ok:false even when transport succeeded.
 
 ## Template for new entries
 

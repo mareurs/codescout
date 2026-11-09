@@ -1,0 +1,258 @@
+diff --git a/src/librarian/tools/create.rs b/src/librarian/tools/create.rs
+index 278a17808..56929d4fc 100644
+--- a/src/librarian/tools/create.rs
++++ b/src/librarian/tools/create.rs
+@@ -503,41 +503,52 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+         file_sha256: crate::librarian::util::sha_of_bytes(content.as_bytes()),
+         confidence: 1.0,
+     };
+-    artifact::upsert_and_mint_slug(&ctx.catalog.lock(), &row)?;
+-    if let Some(aug_spec) = &a.augment {
+-        let params_str = aug_spec
+-            .params
+-            .as_ref()
+-            .map(serde_json::to_string)
+-            .transpose()?
+-            .unwrap_or_else(|| "{}".to_string());
+-        let now_ts = chrono::Utc::now()
+-            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+-            .to_string();
++    // Finalize the catalog atomically before creating a directory or file.
++    // A slug, augmentation or registration failure must not leave earlier writes.
++    {
+         let cat = ctx.catalog.lock();
+-        crate::librarian::catalog::augmentation::upsert(
+-            &cat,
+-            &crate::librarian::catalog::augmentation::AugmentationRow {
+-                artifact_id: id.clone(),
+-                prompt: aug_spec.prompt.clone(),
+-                params: params_str,
+-                last_refreshed_at: None,
+-                refresh_count: 0,
+-                created_at: now_ts.clone(),
+-                updated_at: now_ts,
+-                render_template: aug_spec.render_template.clone(),
+-                params_schema: aug_spec
+-                    .params_schema
+-                    .as_ref()
+-                    .map(serde_json::to_string)
+-                    .transpose()?,
+-                append_mode: aug_spec.append_mode,
+-                history_cap: aug_spec.history_cap,
+-                entry_collection: aug_spec.entry_collection.clone(),
+-                // Server-computed provenance: never caller-supplied.
+-                refreshed_at_commit: None,
+-            },
+-        )?;
++        let tx = cat.conn.unchecked_transaction()?;
++        artifact::upsert_and_mint_slug(&cat, &row)?;
++        if let Some(aug_spec) = &a.augment {
++            let params_str = aug_spec
++                .params
++                .as_ref()
++                .map(serde_json::to_string)
++                .transpose()?
++                .unwrap_or_else(|| "{}".to_string());
++            let now_ts = chrono::Utc::now()
++                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
++                .to_string();
++            crate::librarian::catalog::augmentation::upsert(
++                &cat,
++                &crate::librarian::catalog::augmentation::AugmentationRow {
++                    artifact_id: id.clone(),
++                    prompt: aug_spec.prompt.clone(),
++                    params: params_str,
++                    last_refreshed_at: None,
++                    refresh_count: 0,
++                    created_at: now_ts.clone(),
++                    updated_at: now_ts,
++                    render_template: aug_spec.render_template.clone(),
++                    params_schema: aug_spec
++                        .params_schema
++                        .as_ref()
++                        .map(serde_json::to_string)
++                        .transpose()?,
++                    append_mode: aug_spec.append_mode,
++                    history_cap: aug_spec.history_cap,
++                    entry_collection: aug_spec.entry_collection.clone(),
++                    // Server-computed provenance: never caller-supplied.
++                    refreshed_at_commit: None,
++                },
++            )?;
++        }
++        // A worktree-born artifact has no main-checkout twin to fork — just make
++        // sure the worktree session itself is durably registered.
++        if let Some(cp) = ctx.current_project.as_deref() {
++            super::worktree::ensure_registration(&cat, cp)?;
++        }
++        tx.commit()?;
+     }
+     // Disk write last — the file is the user-visible side effect; the DB row
+     // is the durable record. If a catalog upsert above fails, no orphan file
+@@ -565,13 +576,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+         )));
+     }
+ 
+-    // A worktree-born artifact has no main-checkout twin to fork — just make
+-    // sure the worktree session itself is durably registered.
+-    if let Some(cp) = ctx.current_project.as_deref() {
+-        let cat = ctx.catalog.lock();
+-        super::worktree::ensure_registration(&cat, cp)?;
+-    }
+-
+     let mut result =
+         json!({"id": id, "abs_path": crate::util::fs::to_forward_slash(&row.abs_path)});
+     if a.kind == "tracker" && a.augment.is_none() {
+@@ -624,6 +628,152 @@ mod tests {
+         let id = v["id"].as_str().unwrap();
+         assert!(artifact::get(&ctx.catalog.lock(), id).unwrap().is_some());
+     }
++
++    async fn assert_failed_catalog_finalization_is_atomic(
++        trigger: &str,
++        marker: &str,
++        worktree: bool,
++    ) {
++        let tmp = TempDir::new().unwrap();
++        let root = tmp.path().join("project");
++        std::fs::create_dir_all(&root).unwrap();
++        let mut ctx = mk_ctx(root.clone());
++        let keeper = call(
++            &ctx,
++            json!({
++                "repo": "r", "rel_path": "existing/keeper.md", "kind": "spec",
++                "title": "Keeper", "body": "preserve this existing document"
++            }),
++        )
++        .await
++        .unwrap();
++        let keeper_path = root.join("existing/keeper.md");
++        let keeper_bytes = std::fs::read(&keeper_path).unwrap();
++        if worktree {
++            ctx.current_project = Some(std::sync::Arc::new(
++                crate::librarian::current_project::CurrentProject {
++                    abs_path: root.clone(),
++                    git_root: root.clone(),
++                    main_root: Some(tmp.path().join("main")),
++                    umbrella: None,
++                },
++            ));
++        }
++        ctx.catalog.lock().conn.execute_batch(trigger).unwrap();
++        let args = json!({
++            "repo": "r", "rel_path": "pending/new.md", "kind": "tracker",
++            "title": "New tracker", "body": "new body",
++            "augment": {"prompt": "maintain this tracker", "params": {"entries": []}}
++        });
++        let err = call(&ctx, args.clone()).await.unwrap_err();
++        assert!(
++            err.downcast_ref::<rusqlite::Error>().is_some(),
++            "must reach the injected database failure, not a guard or fixture error: {err:#}"
++        );
++        assert!(format!("{err:#}").contains(marker), "{err:#}");
++        let count = |table: &str| -> i64 {
++            ctx.catalog
++                .lock()
++                .conn
++                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
++                    row.get(0)
++                })
++                .unwrap()
++        };
++        assert_eq!(
++            count("artifact"),
++            1,
++            "only the existing artifact may remain after {marker}"
++        );
++        assert_eq!(
++            count("artifact_augmentation"),
++            0,
++            "no half-created augmentation after {marker}"
++        );
++        assert_eq!(
++            count("worktree_registration"),
++            0,
++            "failed admission must not register a worktree"
++        );
++        assert!(
++            !root.join("pending").exists(),
++            "failure must precede directory/file creation"
++        );
++        assert_eq!(std::fs::read(&keeper_path).unwrap(), keeper_bytes);
++        assert!(
++            artifact::get(&ctx.catalog.lock(), keeper["id"].as_str().unwrap())
++                .unwrap()
++                .is_some()
++        );
++
++        ctx.catalog
++            .lock()
++            .conn
++            .execute_batch("DROP TRIGGER fail_finalization")
++            .unwrap();
++        let result = call(&ctx, args).await.unwrap();
++        assert!(root.join("pending/new.md").is_file());
++        assert_eq!(count("artifact"), 2);
++        assert_eq!(count("artifact_augmentation"), 1);
++        assert_eq!(count("worktree_registration"), i64::from(worktree));
++        let id = result["id"].as_str().unwrap();
++        let slug: Option<String> = ctx
++            .catalog
++            .lock()
++            .conn
++            .query_row("SELECT slug FROM artifact WHERE id = ?1", [id], |row| {
++                row.get(0)
++            })
++            .unwrap();
++        assert_eq!(slug.as_deref(), Some("new-tracker"));
++        let augmentation = crate::librarian::catalog::augmentation::get(&ctx.catalog.lock(), id)
++            .unwrap()
++            .unwrap();
++        assert_eq!(augmentation.prompt, "maintain this tracker");
++        assert_eq!(
++            serde_json::from_str::<Value>(&augmentation.params).unwrap(),
++            json!({"entries": []})
++        );
++        assert_eq!(std::fs::read(&keeper_path).unwrap(), keeper_bytes);
++    }
++
++    #[tokio::test]
++    async fn failed_slug_finalization_leaves_no_partial_create() {
++        for worktree in [false, true] {
++            assert_failed_catalog_finalization_is_atomic(
++                "CREATE TRIGGER fail_finalization BEFORE UPDATE OF slug ON artifact
++             BEGIN SELECT RAISE(ABORT, 'simulated slug failure'); END;",
++                "simulated slug failure",
++                worktree,
++            )
++            .await;
++        }
++    }
++
++    #[tokio::test]
++    async fn failed_augmentation_finalization_leaves_no_partial_create() {
++        for worktree in [false, true] {
++            assert_failed_catalog_finalization_is_atomic(
++                "CREATE TRIGGER fail_finalization BEFORE INSERT ON artifact_augmentation
++             BEGIN SELECT RAISE(ABORT, 'simulated augmentation failure'); END;",
++                "simulated augmentation failure",
++                worktree,
++            )
++            .await;
++        }
++    }
++
++    #[tokio::test]
++    async fn failed_registration_finalization_leaves_no_partial_create() {
++        assert_failed_catalog_finalization_is_atomic(
++            "CREATE TRIGGER fail_finalization BEFORE INSERT ON worktree_registration
++         BEGIN SELECT RAISE(ABORT, 'simulated registration failure'); END;",
++            "simulated registration failure",
++            true,
++        )
++        .await;
++    }
++
+     /// The frontmatter value of `key` in a created file, or `None` when the key is absent.
+     fn frontmatter_value(content: &str, key: &str) -> Option<String> {
+         let prefix = format!("{key}: ");

@@ -1,0 +1,88 @@
+mutation-probe: carried the working tree into the isolated worktree —
+  1 tracked change(s), 2 untracked file(s).
+mutation-probe: ARMED  mode=isolated  file=src/librarian/tools/create.rs  tree=/home/marius/work/claude/codescout/.worktrees/ecc-create-finalization-review.worktrees/mutation-slot-0
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout/.worktrees/ecc-create-finalization-review.worktrees/mutation-slot-0)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 08s
+     Running unittests src/lib.rs (/home/marius/.cache/codescout-gate/slot-1/debug/deps/codescout-1bd12142968308e9)
+
+running 51 tests
+test librarian::tools::create::tests::a_bug_created_without_opened_is_stamped_with_todays_date ... ok
+test librarian::tools::create::tests::a_bug_that_breaks_the_project_requirements_is_refused_before_anything_is_written ... ok
+test librarian::tools::create::tests::a_failed_disk_write_leaves_neither_a_catalog_row_nor_an_augmentation ... ok
+test librarian::tools::create::tests::a_non_bug_kind_is_not_stamped_with_opened ... ok
+test librarian::tools::create::tests::a_non_date_opened_on_a_non_bug_kind_is_not_refused ... ok
+test librarian::tools::create::tests::a_supplied_opened_on_a_bug_is_kept ... ok
+test librarian::tools::create::tests::an_unresolved_dotdot_below_an_existing_ancestor_is_refused_not_trusted ... ok
+test librarian::tools::create::tests::a_refused_create_does_not_leave_the_parent_directory_it_would_have_made ... ok
+test librarian::tools::create::tests::an_out_of_vocabulary_bug_status_is_refused ... ok
+test librarian::tools::create::tests::create_accepts_a_body_whose_dashes_are_not_a_leading_block ... ok
+test librarian::tools::create::tests::create_augment_accepts_the_full_augmentation_shape ... ok
+test librarian::tools::create::tests::a_malformed_opened_on_a_bug_is_refused_and_writes_no_file ... ok
+test librarian::tools::create::tests::create_augment_rejects_an_unknown_field ... ok
+test librarian::tools::create::tests::create_augment_rejects_params_path_with_a_recoverable_hint ... ok
+test librarian::tools::create::tests::create_refuses_a_body_that_opens_its_own_frontmatter_block ... ok
+test librarian::tools::create::tests::create_does_not_leave_orphan_file_when_upsert_fails ... ok
+test librarian::tools::create::tests::create_refuses_a_dangling_leaf_link_instead_of_creating_its_target_outside_the_root ... ok
+test librarian::tools::create::tests::create_mints_a_slug_for_the_new_artifact ... ok
+test librarian::tools::create::tests::create_refuses_a_path_through_a_symlinked_directory_that_leaves_the_root ... ok
+test librarian::tools::create::tests::create_refuses_a_ledger_whose_prefix_cannot_be_cited ... ok
+test librarian::tools::create::tests::create_refuses_a_missing_subdirectory_below_a_symlinked_ancestor_before_building_it ... ok
+test librarian::tools::create::tests::create_refuses_a_ledger_whose_prefix_is_already_taken ... ok
+test librarian::tools::create::tests::create_rejects_an_extra_key_that_names_a_frontmatter_field ... ok
+test librarian::tools::create::tests::create_still_refuses_a_link_to_an_existing_file_and_still_creates_a_fresh_path ... ok
+test librarian::tools::create::tests::create_still_works_under_real_directories_and_under_a_link_that_stays_inside ... ok
+test librarian::tools::create::tests::create_still_works_when_the_repo_root_is_itself_a_symlink ... ok
+test librarian::tools::create::tests::create_validates_the_rel_path_it_will_actually_use ... ok
+test librarian::tools::create::tests::create_with_augment_writes_augmentation_row ... ok
+test librarian::tools::create::tests::create_with_extra_writes_custom_frontmatter ... ok
+test librarian::tools::create::tests::create_with_explicit_status_active ... ok
+test librarian::tools::create::tests::create_with_time_scope_persists_to_row_and_frontmatter ... ok
+test librarian::tools::create::tests::create_with_topic_persists_to_row_and_frontmatter ... ok
+test librarian::tools::create::tests::creates_file_and_row ... ok
+test librarian::tools::create::tests::creates_with_inferred_repo ... ok
+test librarian::tools::create::tests::creates_with_subdir_prepend ... ok
+test librarian::tools::create::tests::create_refuses_temp_workspace_into_real_catalog ... ok
+test librarian::tools::create::tests::failed_augmentation_finalization_leaves_no_partial_create ... FAILED
+test librarian::tools::create::tests::failed_registration_finalization_leaves_no_partial_create ... FAILED
+test librarian::tools::create::tests::new_bug_defaults_to_open_and_a_new_tracker_still_defaults_to_draft ... ok
+test librarian::tools::create::tests::failed_slug_finalization_leaves_no_partial_create ... ok
+test librarian::tools::create::tests::non_tracker_kind_no_hint ... ok
+test librarian::tools::create::tests::failed_disk_write_reports_best_effort_cleanup_without_promising_rollback ... ok
+test librarian::tools::create::tests::reserved_key_hint_names_a_remedy_that_exists_on_the_calling_surface ... ok
+test librarian::tools::create::tests::taken_is_an_accepted_bug_status ... ok
+test librarian::tools::create::tests::refuses_if_file_exists ... ok
+test librarian::tools::create::tests::rejects_absolute_path ... ok
+test librarian::tools::create::tests::rejects_parent_dir_traversal ... ok
+test librarian::tools::create::tests::tracker_with_augment_no_hint ... ok
+test librarian::tools::create::tests::tracker_without_augment_returns_hint ... ok
+test librarian::tools::create::tests::undoing_a_failed_create_removes_the_row_and_the_partial_file ... ok
+test librarian::tools::create::tests::wrong_repo_error_lists_valid_names ... ok
+
+failures:
+
+---- librarian::tools::create::tests::failed_augmentation_finalization_leaves_no_partial_create stdout ----
+
+thread 'librarian::tools::create::tests::failed_augmentation_finalization_leaves_no_partial_create' (3462052) panicked at src/librarian/tools/create.rs:684:9:
+assertion `left == right` failed: only the existing artifact may remain after simulated augmentation failure
+  left: 2
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- librarian::tools::create::tests::failed_registration_finalization_leaves_no_partial_create stdout ----
+
+thread 'librarian::tools::create::tests::failed_registration_finalization_leaves_no_partial_create' (3462054) panicked at src/librarian/tools/create.rs:684:9:
+assertion `left == right` failed: only the existing artifact may remain after simulated registration failure
+  left: 2
+ right: 1
+
+
+failures:
+    librarian::tools::create::tests::failed_augmentation_finalization_leaves_no_partial_create
+    librarian::tools::create::tests::failed_registration_finalization_leaves_no_partial_create
+
+test result: FAILED. 49 passed; 2 failed; 0 ignored; 0 measured; 8590 filtered out; finished in 1.60s
+
+error: test failed, to rerun pass `--lib`
+mutation-probe: KILLED (rc=101, 51 test(s) ran) — a test caught it.
+  Applied-ness needs no further audit: a red cannot be produced by a mutation that
+  never applied, and the count above rules out a compile failure wearing this verdict.

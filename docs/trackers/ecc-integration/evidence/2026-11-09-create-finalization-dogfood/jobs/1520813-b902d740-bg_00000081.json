@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000081",
+  "command": "./scripts/with-slot.sh --slot 0 python3 /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-09-create-finalization-dogfood/verify_all.py",
+  "server_pid": 1520813,
+  "job_pid": 3164970,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T15:40:18.062113197+00:00",
+  "finished_at": "2026-11-09T15:47:06.441031191+00:00",
+  "log_path": "/tmp/codescout-bg-CXPP8p.log"
+}

@@ -12,6 +12,8 @@ topic: ecc-integration
 
 # ECC integration notes
 
+[Create finalization replay provenance — 2026-11-09](2026-11-09-create-finalization-replay.md): exact038fffb3 Git pin, neutral brief/source hashes, private pre-action host history and conditioning/runtime limits. No replay ran.
+
 [doc(create) replay capture — 2026-11-09](2026-11-09-doc-create-replay.md): exact base commit/tree, validated source archive, task inputs, runtime/skills/server snapshots and checklist for a future no-ECC condition. No replay executed.
 
 ## Pilot provenance — 2026-11-09

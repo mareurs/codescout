@@ -1,0 +1,23 @@
+{
+  "label": "final-module",
+  "command": [
+    "./scripts/with-slot.sh",
+    "--slot",
+    "0",
+    "cargo",
+    "test",
+    "--lib",
+    "librarian::tools::create::tests::",
+    "--",
+    "--test-threads=4"
+  ],
+  "exit_code": 0,
+  "started": "2026-11-09T16:12:43.360187+00:00",
+  "finished": "2026-11-09T16:15:13.153564+00:00",
+  "source_before": "a6febbcb5bada021e0384cfeda9ccd4e527e840c35c9639ed9d043389af27e49",
+  "source_after": "a6febbcb5bada021e0384cfeda9ccd4e527e840c35c9639ed9d043389af27e49",
+  "summaries": [
+    "test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 8590 filtered out; finished in 1.69s"
+  ],
+  "verdicts": []
+}

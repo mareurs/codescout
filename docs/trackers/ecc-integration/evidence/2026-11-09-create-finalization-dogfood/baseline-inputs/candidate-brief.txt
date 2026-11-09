@@ -1,0 +1,1 @@
+Inspect doc(create) finalization when a catalog/augmentation/worktree operation fails. Reproduce any user-visible contract violation using isolated state, preserve normal behavior and existing disk-failure error handling, and correct only a demonstrated defect. Do not change shared catalogs, profiles or running MCP services. Record exact evidence and verification.

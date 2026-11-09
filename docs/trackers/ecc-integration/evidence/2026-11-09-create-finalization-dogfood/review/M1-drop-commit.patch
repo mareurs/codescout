@@ -1,0 +1,11 @@
+--- a/src/librarian/tools/create.rs
++++ b/src/librarian/tools/create.rs
+@@ -548,7 +548,7 @@
+         if let Some(cp) = ctx.current_project.as_deref() {
+             super::worktree::ensure_registration(&cat, cp)?;
+         }
+-        tx.commit()?;
++        drop(tx);
+     }
+     // Disk write last — the file is the user-visible side effect; the DB row
+     // is the durable record. If a catalog upsert above fails, no orphan file

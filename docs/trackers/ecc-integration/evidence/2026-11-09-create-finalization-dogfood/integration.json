@@ -1,0 +1,35 @@
+{
+  "source": {
+    "commit": "6377002c1111fc05c7fb708f68341c0f1293e271",
+    "tree": "74f4462b41ee95e06cff10a168fc12ea5eae6f1e",
+    "parent": "038fffb3447b55900e617a251b6472486259e07c",
+    "stable_patch_id": "ba636938caee459b5457133127e8d919038a6758",
+    "paths": [
+      "src/librarian/tools/create.rs"
+    ]
+  },
+  "integration": {
+    "commit": "6b2befb1eb9344e7a37f1fe660ec7de501276028",
+    "tree": "74f4462b41ee95e06cff10a168fc12ea5eae6f1e",
+    "parent": "038fffb3447b55900e617a251b6472486259e07c",
+    "stable_patch_id": "ba636938caee459b5457133127e8d919038a6758",
+    "paths": [
+      "src/librarian/tools/create.rs"
+    ]
+  },
+  "source_sha256": "a6febbcb5bada021e0384cfeda9ccd4e527e840c35c9639ed9d043389af27e49",
+  "identical_committed_trees": true,
+  "gate_binding": "Exact source and full committed tree equal the gated isolated candidate; no integration-source delta.",
+  "foreign_staged_paths_unchanged": [
+    ".codescout/memories/bug-triage-2026-10-27.md",
+    "docs/issues/2026-11-04-shared-checkout-gate-red-during-hint-authority-audit.md",
+    "docs/research/2026-11-04-claude-instructions-comparison.md",
+    "docs/research/data/2026-11-04-hint-authority-gate.log.gz",
+    "docs/research/data/2026-11-04-hint-authority-inputs.tar.gz",
+    "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md"
+  ],
+  "private_mcp_cases": 5,
+  "replay_base_ref": "refs/ecc-replay/create-finalization-20261109",
+  "replay_base": "038fffb3447b55900e617a251b6472486259e07c",
+  "limits": "No no-ECC replay, push, release or shared-MCP rollout. Uncommitted peer documents are outside the committed source tree."
+}

@@ -1,0 +1,16 @@
+{
+  "phase": "gate",
+  "command": [
+    "./scripts/gate.sh",
+    "--check"
+  ],
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-navigation-gate",
+  "head": "038fffb3447b55900e617a251b6472486259e07c",
+  "source_before": "68f4fdaa9030bd0bd78939ee7debb37c6dd5b30917db07e43278505fee27d3bd",
+  "source_after": "68f4fdaa9030bd0bd78939ee7debb37c6dd5b30917db07e43278505fee27d3bd",
+  "target": "/home/marius/.cache/codescout-gate/slot-0",
+  "scratch": "/home/marius/.cache/codescout-ecc-tmp",
+  "started": "2026-11-09T15:41:26.271127+00:00",
+  "finished": "2026-11-09T15:47:06.398103+00:00",
+  "exit_code": 0
+}

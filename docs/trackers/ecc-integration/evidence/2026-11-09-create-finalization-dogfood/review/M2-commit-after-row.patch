@@ -1,0 +1,10 @@
+--- a/src/librarian/tools/create.rs
++++ b/src/librarian/tools/create.rs
+@@ -509,6 +509,7 @@
+         let cat = ctx.catalog.lock();
+         let tx = cat.conn.unchecked_transaction()?;
+         artifact::upsert_and_mint_slug(&cat, &row)?;
++        cat.conn.execute_batch("COMMIT; BEGIN")?;
+         if let Some(aug_spec) = &a.augment {
+             let params_str = aug_spec
+                 .params

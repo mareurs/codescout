@@ -1,0 +1,20 @@
+{
+  "phase": "green",
+  "command": [
+    "cargo",
+    "test",
+    "--lib",
+    "librarian::tools::create::tests",
+    "--",
+    "--nocapture"
+  ],
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-navigation-gate",
+  "head": "038fffb3447b55900e617a251b6472486259e07c",
+  "source_before": "7b27f5043607efa05ab32134e9a02103a6fcebf966f37ec3c7814ec7297ff24d",
+  "source_after": "7b27f5043607efa05ab32134e9a02103a6fcebf966f37ec3c7814ec7297ff24d",
+  "target": "/home/marius/.cache/codescout-gate/slot-0",
+  "scratch": "/home/marius/.cache/codescout-ecc-tmp",
+  "started": "2026-11-09T15:37:05.440180+00:00",
+  "finished": "2026-11-09T15:38:01.023517+00:00",
+  "exit_code": 0
+}

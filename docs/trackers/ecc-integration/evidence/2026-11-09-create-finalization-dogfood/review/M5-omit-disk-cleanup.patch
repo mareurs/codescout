@@ -1,0 +1,11 @@
+--- a/src/librarian/tools/create.rs
++++ b/src/librarian/tools/create.rs
+@@ -569,7 +569,7 @@
+         std::fs::write(&full, &content)
+     })();
+     if let Err(e) = written {
+-        undo_failed_create(&ctx.catalog.lock(), &id, &full);
++        // mutation: cleanup omitted
+         return Err(anyhow::Error::from(e).context(format!(
+             "could not write {}; cleanup was attempted, but the catalog row or a partial file may remain",
+             full.display()

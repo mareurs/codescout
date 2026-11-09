@@ -1,0 +1,6 @@
+{
+  "ref": "refs/ecc-replay/create-finalization-20261109",
+  "commit": "038fffb3447b55900e617a251b6472486259e07c",
+  "tree": "4a0f76c8e8a0068974c2ba95afc872c309a43435",
+  "scope": "Local immutable base pin; no push, branch switch or replay. Never overwrite a conflicting existing ref."
+}

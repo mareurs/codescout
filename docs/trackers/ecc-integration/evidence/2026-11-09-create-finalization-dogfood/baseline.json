@@ -1,0 +1,80 @@
+{
+  "base": "038fffb3447b55900e617a251b6472486259e07c",
+  "tree": "4a0f76c8e8a0068974c2ba95afc872c309a43435",
+  "branch": "feat/ecc-create-finalization-20261109",
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-navigation-gate",
+  "baseline_inputs": [
+    {
+      "path": "CLAUDE.md",
+      "git_blob": "3433e70f5ae5976271d9a846bbdb13d2e60a8d3c",
+      "sha256": "8f099e3919cee612d3bf1f77cf14f9452b47b32ae896332c26df9caad7a911e3"
+    },
+    {
+      "path": "AGENTS.md",
+      "git_blob": "0b64938217094a3d9ee94ef81570b4957c6b83ab",
+      "sha256": "57746f4d46dd836736298ac4fa071303d996d10d81702e1ebf60ca0f905473ab"
+    },
+    {
+      "path": "Cargo.toml",
+      "git_blob": "fcee79d0fdc21e629c481c79340406e924f54baf",
+      "sha256": "3d54320f0ba189f6b555367c3cd0a3cac67635d3137f8d18cbfbcba8098f6ac8"
+    },
+    {
+      "path": "Cargo.lock",
+      "git_blob": "016a9fbfe73b10f59d26c5f2c4a3700d4c1a5e0b",
+      "sha256": "0a2aa91a947c4a5a76e7c18b0c5ab9cea5692dc5acfd8dfd1e8fe88007bb5be2"
+    },
+    {
+      "path": "src/librarian/tools/create.rs",
+      "git_blob": "278a17808fedba50860c06b117410a614130b38a",
+      "sha256": "6614bf9b1184f12398181b7a35d2c2625f8a073159f57ea690a7e2e4ac4c9132"
+    },
+    {
+      "path": "src/librarian/tools/worktree.rs",
+      "git_blob": "999fb65fb4fb9537a988cb1c841d91761a4e044f",
+      "sha256": "4bf197851cf3b5cdc58f41fb97e0b9683b43eb6145eb8b1e33a224794d99a54c"
+    },
+    {
+      "path": "src/librarian/catalog/artifact.rs",
+      "git_blob": "f3c3ea58bc0edf9482fdeceaa50910d608847dcc",
+      "sha256": "e7d31d534c01c949ba2dc22afa62a2eca380db6b459073ff719c81c846d4b001"
+    },
+    {
+      "path": "src/librarian/catalog/augmentation.rs",
+      "git_blob": "9ffc8d1f1be4e544d4609169772c5780e3e49095",
+      "sha256": "9320b13fe917d747f5ff5e272d3de139c12b458a1bd2b29719524aa478045be2"
+    },
+    {
+      "path": "src/librarian/catalog/worktree.rs",
+      "git_blob": "9ff670a870763e3c70925e79de78126d11ffb6a7",
+      "sha256": "e43ce8270c30af676b838cbb6987981687822a97fb3e3e938fe9b548c6d82a87"
+    },
+    {
+      "path": "src/librarian/current_project.rs",
+      "git_blob": "cc57f0bbed37ca6524d25d0df1e4b27695ebd28c",
+      "sha256": "83406cce209f990c8d95ab6c627a91b9ee4f020379657372c0d463ddec9c26d1"
+    }
+  ],
+  "skills": [
+    {
+      "name": "ecc-spec-miner",
+      "source": "/home/marius/work/claude/claude-plugins.worktrees/ecc-codex-codescout/ecc-codescout/skills/ecc-spec-miner/SKILL.md",
+      "sha256": "f5badffe1d0cecc4e5aa34cf9ba13cac719c1c5c569aad6ef24ab3a44304121c"
+    },
+    {
+      "name": "ecc-silent-failure-review",
+      "source": "/home/marius/work/claude/claude-plugins.worktrees/ecc-codex-codescout/ecc-codescout/skills/ecc-silent-failure-review/SKILL.md",
+      "sha256": "3011675999b3fc361e208d4b624cedba24468051315faae1c954643676c6b84d"
+    }
+  ],
+  "user_request_context": "Continue the established ECC dogfood workflow; retain exact baseline and inputs for a future no-skill repair replay, but do not run that replay now.",
+  "brief_note": "Neutral replay brief authored before failure tests or fixes; not a full host transcript. Candidate input excludes controller-only, new solutions/tests/reports/evaluator artifacts.",
+  "dirty_source": "",
+  "shared_mcp_runtime": {
+    "pid": 1520813,
+    "build_id": "9e4db9b94323fb5bc65e3af403904f883459979206077488e448a362291620dc",
+    "git_sha": "a52d68284",
+    "dirty": true,
+    "note": "Observed workspace(status); running shared binary differs from frozen source. Use separately built private binary for current-source runtime probes."
+  }
+}
