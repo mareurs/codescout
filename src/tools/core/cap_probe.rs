@@ -924,6 +924,17 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // BOUND: the cited test makes a sparse file one byte over `MAX_FILE_BYTES` (64 MiB) whose
+        // leading text carries the pattern, so a search that opened it would list it. Marker
+        // written by `format_grep` from the `skipped_large` count.
+        id: "grep.max_file_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("not searched"),
+            mutation: Mutation::Killed,
+            cited_test: "a_file_over_the_cap_is_skipped_and_named_in_both_modes",
+        },
+    },
+    ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
         // test seeds a 50,013 B SINGLE line against `MAX_MATCH_BYTES` 2,000. Marker
         // written by production at `src/tools/grep.rs:825`.

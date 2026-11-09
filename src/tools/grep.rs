@@ -69,8 +69,36 @@ impl WalkClock {
 /// `binary_sniff_window_is_exactly_the_first_8192_bytes`.
 const BINARY_SNIFF_BYTES: usize = 8192;
 
-/// Read a whole file unless it looks binary. `None` means binary: the caller counts it as skipped.
-fn read_unless_binary<R: std::io::Read>(mut r: R) -> std::io::Result<Option<Vec<u8>>> {
+/// The largest file `grep` reads, in bytes. A text file was read whole with no bound, so one
+/// huge log held its whole size in memory and spent its whole read time past the walk's
+/// wall-clock check, which fires once per file (docs/issues/2026-11-09-grep-time-budget-is-
+/// polled-per-file-so-one-large-text-file-overruns-it.md). A file over this is not searched:
+/// it is counted in `skipped_large` and the rendered text names the count, so a missing match
+/// is never read as "searched and absent". The value is a judgment, not a measurement: it is
+/// far above any source file, and a read of it takes about 0.1 s (600 MB measured at 0.5 s).
+// cap-class: RESULT_CAP grep.max_file_bytes — probed
+const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// What reading one candidate file produced.
+#[derive(Debug, PartialEq, Eq)]
+enum FileRead {
+    /// The whole file, which looked like text and was within `MAX_FILE_BYTES`.
+    Text(Vec<u8>),
+    /// A NUL inside the sniff window: the caller counts it in `skipped_binary`.
+    Binary,
+    /// Over `MAX_FILE_BYTES`: the caller counts it in `skipped_large`.
+    TooLarge,
+}
+
+/// Read a whole file unless it looks binary or is over `max_bytes`. The sniff comes first, so a
+/// large binary still counts as binary and costs one window. `declared_len` is the length the
+/// file system reports; the read is bounded by `max_bytes` too, because a growing file or a
+/// `/proc` entry can report less than it holds.
+fn read_unless_binary<R: std::io::Read>(
+    mut r: R,
+    declared_len: Option<u64>,
+    max_bytes: u64,
+) -> std::io::Result<FileRead> {
     use std::io::Read as _;
     // Sniff first: a binary file then costs one window, not its whole size.
     let mut bytes = Vec::new();
@@ -78,14 +106,24 @@ fn read_unless_binary<R: std::io::Read>(mut r: R) -> std::io::Result<Option<Vec<
         .take(BINARY_SNIFF_BYTES as u64)
         .read_to_end(&mut bytes)?;
     if bytes.contains(&0) {
-        return Ok(None);
+        return Ok(FileRead::Binary);
     }
-    r.read_to_end(&mut bytes)?;
-    Ok(Some(bytes))
+    if declared_len.is_some_and(|n| n > max_bytes) {
+        return Ok(FileRead::TooLarge);
+    }
+    // One byte past the cap is enough to know the file is over it, and it bounds the memory.
+    let room = (max_bytes + 1).saturating_sub(bytes.len() as u64);
+    r.take(room).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max_bytes {
+        return Ok(FileRead::TooLarge);
+    }
+    Ok(FileRead::Text(bytes))
 }
 
-fn read_path_unless_binary(path: &std::path::Path) -> std::io::Result<Option<Vec<u8>>> {
-    read_unless_binary(std::fs::File::open(path)?)
+fn read_path_unless_binary(path: &std::path::Path) -> std::io::Result<FileRead> {
+    let file = std::fs::File::open(path)?;
+    let declared_len = file.metadata().ok().map(|m| m.len());
+    read_unless_binary(file, declared_len, MAX_FILE_BYTES)
 }
 
 pub struct Grep;
@@ -250,6 +288,7 @@ impl Tool for Grep {
         let mut emitted_bytes = 0usize;
         let mut byte_capped = false;
         let mut skipped_binary = 0usize;
+        let mut skipped_large = 0usize;
 
         let mut wb = ignore::WalkBuilder::new(&search_path);
         wb.hidden(!include_hidden).git_ignore(true);
@@ -280,6 +319,7 @@ impl Tool for Grep {
             let mut counts: BTreeMap<String, usize> = BTreeMap::new();
             let mut total = 0usize;
             let mut skipped_binary = 0usize;
+            let mut skipped_large = 0usize;
             for entry in walker {
                 let entry = match entry {
                     Ok(e) => e,
@@ -299,9 +339,13 @@ impl Tool for Grep {
                 // admitted the file, which is what a starved glob is the absence of.
                 audit.accepted += 1;
                 let bytes = match read_path_unless_binary(entry.path()) {
-                    Ok(Some(b)) => b,
-                    Ok(None) => {
+                    Ok(FileRead::Text(b)) => b,
+                    Ok(FileRead::Binary) => {
                         skipped_binary += 1;
+                        continue;
+                    }
+                    Ok(FileRead::TooLarge) => {
+                        skipped_large += 1;
                         continue;
                     }
                     Err(_) => {
@@ -325,6 +369,9 @@ impl Tool for Grep {
             let mut r = json!({ "files": files, "total": total, "files_count": ranked.len() });
             if skipped_binary > 0 {
                 r["skipped_binary"] = json!(skipped_binary);
+            }
+            if skipped_large > 0 {
+                r["skipped_large"] = json!(skipped_large);
             }
             if let Some(cut) = &clock.cut_notice {
                 r["walk_cut"] = json!(cut);
@@ -359,9 +406,13 @@ impl Tool for Grep {
             // admitted the file, which is what a starved glob is the absence of.
             audit.accepted += 1;
             let bytes = match read_path_unless_binary(entry.path()) {
-                Ok(Some(b)) => b,
-                Ok(None) => {
+                Ok(FileRead::Text(b)) => b,
+                Ok(FileRead::Binary) => {
                     skipped_binary += 1; // looks binary (NUL byte) — skip
+                    continue;
+                }
+                Ok(FileRead::TooLarge) => {
+                    skipped_large += 1; // over MAX_FILE_BYTES — skip, and say so
                     continue;
                 }
                 Err(_) => {
@@ -691,6 +742,9 @@ impl Tool for Grep {
         if skipped_binary > 0 {
             result["skipped_binary"] = json!(skipped_binary);
         }
+        if skipped_large > 0 {
+            result["skipped_large"] = json!(skipped_large);
+        }
         if let Some(cut) = &clock.cut_notice {
             result["walk_cut"] = json!(cut);
         }
@@ -780,6 +834,21 @@ pub(super) fn format_grep(val: &Value) -> String {
     // that did not finish must not read as a zero about the whole tree.
     if let Some(cut) = val.get("walk_cut").and_then(|v| v.as_str()) {
         cut_notices.push(cut);
+    }
+    // Files over `MAX_FILE_BYTES` were not searched: same placement, same reason — a zero must
+    // not read as "searched and absent" for a file that was never opened past its length.
+    let large_notice = val
+        .get("skipped_large")
+        .and_then(|v| v.as_u64())
+        .filter(|n| *n > 0)
+        .map(|n| {
+            format!(
+                "{n} file(s) over {} MiB were not searched; a missing match proves nothing about them. To search one, run `rg` on it through `run_command`, which streams the file.",
+                MAX_FILE_BYTES / (1024 * 1024)
+            )
+        });
+    if let Some(note) = large_notice.as_deref() {
+        cut_notices.push(note);
     }
 
     if total == 0 {
@@ -1786,8 +1855,8 @@ mod tests {
             left: 64 * 1024 * 1024,
             served: served.clone(),
         };
-        let out = read_unless_binary(reader).unwrap();
-        assert!(out.is_none(), "a leading NUL is binary");
+        let out = read_unless_binary(reader, None, MAX_FILE_BYTES).unwrap();
+        assert_eq!(out, FileRead::Binary, "a leading NUL is binary");
         assert!(
             served.get() <= BINARY_SNIFF_BYTES,
             "a binary file must cost at most the sniff window, but {} bytes were read",
@@ -1796,13 +1865,90 @@ mod tests {
     }
 
     #[test]
-    fn a_text_file_is_returned_whole_whatever_its_size() {
+    fn a_text_file_within_the_cap_is_returned_whole() {
         let mut text = vec![b'x'; 100_000];
         text[50_000] = b'\n';
         for len in [0usize, 1, 8191, 8192, 8193, 100_000] {
-            let out = read_unless_binary(&text[..len]).unwrap();
-            assert_eq!(out.as_deref(), Some(&text[..len]), "len {len}");
+            let out = read_unless_binary(&text[..len], Some(len as u64), MAX_FILE_BYTES).unwrap();
+            assert_eq!(out, FileRead::Text(text[..len].to_vec()), "len {len}");
         }
+    }
+    /// An endless run of text bytes that counts what it served: the stand-in for a huge log whose
+    /// length the file system under-reports, or that grows while it is read.
+    struct CountingText {
+        served: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl std::io::Read for CountingText {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            buf.fill(b'x');
+            self.served.set(self.served.get() + buf.len());
+            Ok(buf.len())
+        }
+    }
+
+    #[test]
+    fn a_text_stream_past_the_cap_is_too_large_and_never_held_past_it() {
+        let served = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let reader = CountingText {
+            served: served.clone(),
+        };
+        let cap = 50_000u64;
+        let out = read_unless_binary(reader, None, cap).unwrap();
+        assert_eq!(out, FileRead::TooLarge);
+        assert!(
+            served.get() as u64 <= cap + 1,
+            "reading must stop one byte past the cap, but {} bytes were read",
+            served.get()
+        );
+    }
+
+    #[test]
+    fn a_declared_length_past_the_cap_costs_one_sniff_window() {
+        let served = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let reader = CountingText {
+            served: served.clone(),
+        };
+        let out = read_unless_binary(reader, Some(MAX_FILE_BYTES + 1), MAX_FILE_BYTES).unwrap();
+        assert_eq!(out, FileRead::TooLarge);
+        assert!(
+            served.get() <= BINARY_SNIFF_BYTES,
+            "a file declared too large must cost at most the sniff window, but {} bytes were read",
+            served.get()
+        );
+    }
+
+    #[test]
+    fn a_large_binary_is_binary_not_too_large() {
+        let served = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let reader = CountingZeros {
+            left: 64 * 1024 * 1024,
+            served: served.clone(),
+        };
+        let out = read_unless_binary(reader, Some(u64::MAX), MAX_FILE_BYTES).unwrap();
+        assert_eq!(
+            out,
+            FileRead::Binary,
+            "the sniff decides binary before size is considered, so skipped_binary stays honest"
+        );
+    }
+
+    #[test]
+    fn the_cap_is_inclusive_a_file_of_exactly_the_cap_is_read() {
+        let text = vec![b'x'; 1_000];
+        assert_eq!(
+            read_unless_binary(&text[..], Some(1_000), 1_000).unwrap(),
+            FileRead::Text(text.clone())
+        );
+        assert_eq!(
+            read_unless_binary(&text[..], Some(1_000), 999).unwrap(),
+            FileRead::TooLarge
+        );
+        assert_eq!(
+            read_unless_binary(&text[..], None, 999).unwrap(),
+            FileRead::TooLarge,
+            "an unreported length is bounded by the read itself"
+        );
     }
 
     #[tokio::test]
@@ -3807,6 +3953,73 @@ mod tests {
                 format_grep(&res)
             );
         }
+    }
+    /// A text file over `MAX_FILE_BYTES` is not read, and the result must SAY so in both modes: a
+    /// zero or a short list that reads as "searched everything" is the failure. The file is
+    /// sparse, so the test writes a few KiB, not 64 MiB; its leading text carries the pattern, so
+    /// a search that did open it would match and list it. Bug 569b13c182dda64f.
+    #[tokio::test]
+    async fn a_file_over_the_cap_is_skipped_and_named_in_both_modes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("small.txt"), "NEEDLE\n").unwrap();
+        let big = std::fs::File::create(dir.path().join("big.log")).unwrap();
+        {
+            use std::io::Write as _;
+            let mut w = &big;
+            let mut head = b"NEEDLE\n".to_vec();
+            head.resize(9_000, b'x');
+            w.write_all(&head).unwrap();
+        }
+        big.set_len(MAX_FILE_BYTES + 1).unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        for mode in ["lines", "files"] {
+            let res = Grep
+                .call(
+                    json!({
+                        "pattern": "NEEDLE",
+                        "path": dir.path().to_str().unwrap(),
+                        "mode": mode
+                    }),
+                    &ctx,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                res["skipped_large"].as_u64(),
+                Some(1),
+                "{mode}: the over-cap file must be counted: {res}"
+            );
+            let text = format_grep(&res);
+            assert!(
+                text.contains("not searched"),
+                "{mode}: the rendered text must name the files it did not search: {text}"
+            );
+            assert!(
+                text.contains("small.txt"),
+                "{mode}: the file within the cap must still be searched: {text}"
+            );
+            assert!(
+                !text.contains("big.log"),
+                "{mode}: the over-cap file must not have been read: {text}"
+            );
+        }
+    }
+
+    /// A tree with no file over the cap carries no `skipped_large` key at all.
+    #[tokio::test]
+    async fn a_search_with_no_file_over_the_cap_reports_no_skipped_large() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("f.txt"), "NEEDLE\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let res = Grep
+            .call(
+                json!({"pattern": "NEEDLE", "path": dir.path().to_str().unwrap()}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(res.get("skipped_large").is_none(), "{res}");
+        assert!(!format_grep(&res).contains("not searched"));
     }
 
     /// The default budget must not cut an ordinary search: no `walk_cut` key at all.

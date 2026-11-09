@@ -44,6 +44,16 @@ All notable changes to codescout are documented here.
   dead-code audit of 2026-11-09 (the commit message lists them). `LspClient::did_close` and
   `RetrievalClient::search_memories` were examined and kept.
 
+### Fixed — `grep` bounds the size of a file it reads
+
+- **`grep` no longer reads a text file of any size whole.** A file over 64 MiB is not searched.
+  It is counted in a new `skipped_large` field, and the rendered result says "N file(s) over
+  64 MiB were not searched; a missing match proves nothing about them", also over a zero. Before,
+  one huge log was read in full into memory, and the wall-clock budget (checked once per file)
+  could not stop that read. A large binary still counts as `skipped_binary`, because the 8 KiB
+  sniff runs first. The 64 MiB value is a judgment, not a measurement. To search a larger file,
+  run `rg` on it through `run_command`.
+
 ### Changed — tool surface collapse (26 → 21 tools)
 
 - **`artifact` is now `doc`.** `artifact_event`, `artifact_augment` and `artifact_refresh`
