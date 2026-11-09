@@ -149,6 +149,18 @@ TMP_LOCK_REMOVAL = ("rm -f /tmp/codescout-*/codescout-index-*.lock; "
 SETTING_SOURCES = "local"
 FULL_SETTING_SOURCES = "user,local"
 
+# Arm profiles. "v1" is what every registered study and screen ran with and stays the default, so
+# their runs stay reproducible. "v2" (2026-11-09) answers two bugs found by the usage audit:
+# ba34b0fc327743ca (cs listed Bash/Edit/Write, which the daily setup denies through the user
+# settings' `permissions.deny`, so the companion hook blocked them call by call) and
+# b8c35dc28bd3e8dd (`--setting-sources local` keeps the task's CLAUDE.md out of every arm).
+# v2: cs lists only Read, Glob and Grep; every arm also loads the `project` source. bare keeps its
+# native tools and full keeps FULL_TOOLS (its deny list comes from the user settings).
+PROFILES = ("v1", "v2")
+CS_TOOLS_V2 = "Read,Glob,Grep"
+SETTING_SOURCES_V2 = "project,local"
+FULL_SETTING_SOURCES_V2 = "user,project,local"
+
 # C2 ruling: these user-settings keys are kept whatever their values hold.
 USER_SETTINGS_KEPT_BY_NAME = ("outputStyle", "enabledPlugins", "permissions")
 # Dropped by name, with the reason recorded in each full run's arm-record.json.
@@ -394,17 +406,22 @@ def _check_frozen_paths(arm, manifest):
     if outside:
         raise ValueError(f"{arm} arm would read {outside} outside the frozen inputs {root}")
 
-def arm_invocation(arm, model, task_prompt, manifest, urls, run_dir, *, session_id=None):
+def arm_invocation(arm, model, task_prompt, manifest, urls, run_dir, *, session_id=None, profile="v1"):
     """Write the run's config files under `run_dir` and return the arm's CLI args and mounts.
 
     `session_id` is keyword-only (an addition to the brief's signature): the Codex list carries
     `--session-id`, and the runner must know it to find the transcript. A fresh UUID otherwise.
 
-    Also writes `run_dir/arm-record.json`: the arm, its setting sources, the files put in its
-    config dir and every user-settings key dropped with its reason (C2 ruling).
+    `profile` (keyword-only, one of `PROFILES`, default "v1" = the arms every registered study ran):
+    "v2" gives cs only Read, Glob and Grep and makes every arm load the `project` setting source.
+
+    Also writes `run_dir/arm-record.json`: the arm, its profile, its setting sources, the files put
+    in its config dir and every user-settings key dropped with its reason (C2 ruling).
     """
     if arm not in ARMS:
         raise ValueError(f"unknown arm {arm!r}; expected one of {ARMS}")
+    if profile not in PROFILES:
+        raise ValueError(f"unknown profile {profile!r}; expected one of {PROFILES}")
     session_id = session_id or str(uuid.uuid4())
     # Validate before writing anything, so a refused env leaves no half-made run dir.
     mcp_env = study_mcp_env(manifest["mcp_env"], urls) if arm != "bare" else None
@@ -449,15 +466,19 @@ def arm_invocation(arm, model, task_prompt, manifest, urls, run_dir, *, session_
                 (config / "settings.json").write_text(json.dumps(kept, indent=2) + "\n")
             else:
                 shutil.copyfile(src, config / Path(src).name)
-    sources = FULL_SETTING_SOURCES if arm == "full" else SETTING_SOURCES
-    tools = FULL_TOOLS if arm == "full" else NATIVE_TOOLS
+    if profile == "v2":
+        sources = FULL_SETTING_SOURCES_V2 if arm == "full" else SETTING_SOURCES_V2
+        tools = FULL_TOOLS if arm == "full" else CS_TOOLS_V2 if arm == "cs" else NATIVE_TOOLS
+    else:
+        sources = FULL_SETTING_SOURCES if arm == "full" else SETTING_SOURCES
+        tools = FULL_TOOLS if arm == "full" else NATIVE_TOOLS
     kept_effects = {}
     if arm == "full":
         kept_settings = json.loads((config / "settings.json").read_text())
         kept_effects = {k: KEPT_SETTING_EFFECTS.get(k, KEPT_SETTING_DEFAULT_EFFECT)
                         for k in kept_settings}
     (run_dir / "arm-record.json").write_text(json.dumps({
-        "arm": arm, "setting_sources": sources, "tools": tools,
+        "arm": arm, "profile": profile, "setting_sources": sources, "tools": tools,
         "frozen_root": manifest.get("frozen_root"),
         "config_files": sorted(p.name for p in config.iterdir()),
         "expected_mcp_tools": expected_mcp_tools(arm),

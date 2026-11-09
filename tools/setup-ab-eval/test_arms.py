@@ -446,6 +446,70 @@ class ArmsTest(unittest.TestCase):
             argvs[arm] = rest
         self.assertEqual(argvs["bare"], argvs["cs"])
         self.assertEqual(argvs["cs"], argvs["full"])
+
+    # --- arm profile v2 (bugs ba34b0fc327743ca and b8c35dc28bd3e8dd): default stays v1 ----------------
+
+    def arg_after(self, spec, flag):
+        return spec.cli_args[spec.cli_args.index(flag) + 1]
+
+    def v2(self, arm):
+        run_dir = self.root / "runs" / f"v2-{arm}"
+        return arms.arm_invocation(arm, MODEL, PROMPT, self.manifest, self.urls, run_dir,
+                                   session_id=SESSION, profile="v2")
+
+    def test_the_default_profile_is_v1_and_changes_nothing(self):
+        self.assertEqual(arms.PROFILES, ("v1", "v2"))
+        defaults = {}
+        for arm in arms.ARMS:
+            defaults[arm] = self.spec(arm)
+            explicit = arms.arm_invocation(arm, MODEL, PROMPT, self.manifest, self.urls,
+                                           self.root / "runs" / f"explicit-{arm}",
+                                           session_id=SESSION, profile="v1")
+            self.assertEqual(defaults[arm].cli_args, explicit.cli_args, arm)
+        self.assertEqual(self.arg_after(defaults["cs"], "--tools"), arms.NATIVE_TOOLS)
+        self.assertEqual(self.arg_after(defaults["cs"], "--setting-sources"), "local")
+        self.assertEqual(self.arg_after(defaults["full"], "--setting-sources"), "user,local")
+
+    def test_v2_cs_lists_no_tool_the_daily_setup_denies(self):
+        tools = self.arg_after(self.v2("cs"), "--tools").split(",")
+        self.assertEqual(tools, ["Read", "Glob", "Grep"])
+        for denied in ("Bash", "Edit", "Write", "NotebookEdit"):
+            self.assertNotIn(denied, tools)
+
+    def test_v2_leaves_the_bare_and_full_tool_lists_alone(self):
+        self.assertEqual(self.arg_after(self.v2("bare"), "--tools"), arms.NATIVE_TOOLS)
+        self.assertEqual(self.arg_after(self.v2("full"), "--tools"), arms.FULL_TOOLS)
+
+    def test_v2_loads_the_project_source_in_every_arm(self):
+        self.assertEqual(self.arg_after(self.v2("bare"), "--setting-sources"), "project,local")
+        self.assertEqual(self.arg_after(self.v2("cs"), "--setting-sources"), "project,local")
+        self.assertEqual(self.arg_after(self.v2("full"), "--setting-sources"), "user,project,local")
+
+    def test_v2_only_changes_tools_and_setting_sources(self):
+        for arm in arms.ARMS:
+            v1, v2 = self.spec(arm), self.v2(arm)
+            changed = {flag for flag in ("--tools", "--setting-sources")
+                       if self.arg_after(v1, flag) != self.arg_after(v2, flag)}
+            rest1 = [a for p in pairs(v1.cli_args) if p[0] not in ("--tools", "--setting-sources") for a in p]
+            rest2 = [a for p in pairs(v2.cli_args) if p[0] not in ("--tools", "--setting-sources") for a in p]
+            self.assertEqual(rest1, rest2, arm)
+            self.assertEqual(targets(v1), targets(v2), arm)
+            self.assertTrue(changed <= {"--tools", "--setting-sources"})
+
+    def test_the_arm_record_names_the_profile(self):
+        self.v2("cs")
+        self.spec("cs")
+        v2 = json.loads((self.root / "runs" / "v2-cs" / "arm-record.json").read_text())
+        v1 = json.loads((self.root / "runs" / "cs" / "arm-record.json").read_text())
+        self.assertEqual((v1["profile"], v2["profile"]), ("v1", "v2"))
+        self.assertEqual(v2["tools"], "Read,Glob,Grep")
+
+    def test_an_unknown_profile_is_refused_before_anything_is_written(self):
+        with self.assertRaisesRegex(ValueError, "unknown profile"):
+            arms.arm_invocation("cs", MODEL, PROMPT, self.manifest, self.urls,
+                                self.root / "runs" / "p3", session_id=SESSION, profile="v3")
+        self.assertFalse((self.root / "runs" / "p3").exists())
+
 # The project.toml codescout's own onboarding() wrote in the ruff task container (measured
 # 2026-10-27, controls/round4/onboarding-probe/project.toml), embeddings as the hardware
 # recommendation gave them: the shape prepare_index then edits.
