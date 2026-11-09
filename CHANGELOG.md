@@ -30,6 +30,16 @@ All notable changes to codescout are documented here.
 - `docs/adrs/2026-11-08-local-embed-is-opt-in.md` has the full account and the alternative
   that was rejected.
 
+### Fixed — `doc` refuses `dry_run=true`
+
+- **`doc(action="update", dry_run=true, …)` used to perform the write.** `dry_run` is a parameter
+  of `librarian(action="merge_worktree")`, not of `doc`; `doc` dropped it without a word, so a
+  caller who expected a preview got an applied edit. `doc` now refuses `dry_run=true` for every
+  action, before anything runs, and the refusal says what to do instead (`delete`, `graft` and
+  `rekey_prefix` already preview until `force=true`; read the target with `doc(action="get")` to
+  preview an `update`). `dry_run=false` is not refused. Other undeclared top-level keys are still
+  dropped: that is deliberate, because `doc` passes one argument blob to every action.
+
 ### Fixed — `semantic_search` searches a library again
 
 - **`semantic_search(scope="lib:<name>")` now searches the library.** It had returned "library

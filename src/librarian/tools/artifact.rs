@@ -136,6 +136,36 @@ fn unknown_action_error(action: &str) -> anyhow::Error {
         advertised_actions().join(", ")
     ))
 }
+/// Refuse `dry_run=true`, which `doc` does not implement and would otherwise drop.
+///
+/// `doc`'s root object is lenient about undeclared keys on purpose: the dispatcher hands one
+/// argument blob to every action, so the root type cannot be `deny_unknown_fields` (see
+/// `every_schema_object_promising_to_refuse_unknown_keys_actually_refuses`). Most dropped keys
+/// are harmless. This one is not: `dry_run` is a real parameter of
+/// `librarian(action="merge_worktree")`, a caller who knows it has every reason to send it, and
+/// on `doc(action="update")` it was ignored and the write happened. Same shape as `grep`'s
+/// `refuse_native_keys_that_change_the_result`: refuse the one named key whose silent drop makes
+/// the caller believe something that is false.
+///
+/// Only `true` is refused: `false` asks for what `doc` does anyway. Bug
+/// `6285dd9e300a7876`.
+fn refuse_dry_run(action: &str, args: &Value) -> Result<()> {
+    let asked = match args.get("dry_run") {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => s.eq_ignore_ascii_case("true"),
+        _ => false,
+    };
+    if !asked {
+        return Ok(());
+    }
+    Err(LibrarianRecoverableError::with_hint(
+        format!("'dry_run' is not a parameter of doc — doc(action=\"{action}\") was not run"),
+        "doc has no dry-run mode. `delete`, `graft` and `rekey_prefix` preview by default and apply \
+         only with force=true; `move` applies at once; `update` applies at once and refuses a body \
+         shrink of more than half unless force=true. To preview an update, read the target with \
+         doc(action=\"get\") first. Nothing was changed.",
+    ))
+}
 
 /// The artifact a `doc` write acts on, for the writes whose RESULT says nothing about where
 /// they wrote. `None` for every other call.
@@ -527,6 +557,8 @@ impl Tool for Artifact {
         if is_unknown_action(action) {
             return Err(unknown_action_error(action));
         }
+        // Before anything is stamped or dispatched: a refused call must leave no trace.
+        refuse_dry_run(action, &args)?;
         // Best-effort: identity enrichment must never fail a tool call; a failed
         // stamp degrades the row to verb=NULL, which audit_log surfaces honestly.
         if let Err(e) = ctx.catalog.lock().set_audit_verb(&format!("doc.{action}")) {
@@ -837,6 +869,143 @@ mod tests {
         assert!(
             err.downcast_ref::<LibrarianRecoverableError>().is_some(),
             "expected RecoverableError, got: {err}"
+        );
+    }
+    /// A context with a real root, so a test can create a document, send a call that must be
+    /// refused, and read the file back.
+    fn rooted_ctx(root: std::path::PathBuf) -> ToolContext {
+        TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(crate::librarian::workspace::Root {
+                name: "r".into(),
+                path: root,
+            })
+            .build()
+    }
+
+    /// `dry_run` is a parameter of `librarian(merge_worktree)`, not of `doc`. `doc` dropped it, so
+    /// `doc(action="update", dry_run=true, ...)` wrote the file while the caller believed it was
+    /// previewing. The refusal must come before the write: the file stays byte-identical, and a
+    /// test that only checked the response would pass on the old behaviour. Bug
+    /// `6285dd9e300a7876`.
+    #[tokio::test]
+    async fn dry_run_true_on_update_is_refused_and_leaves_the_file_unchanged() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ctx = rooted_ctx(tmp.path().to_path_buf());
+        let made = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "probe.md",
+                "kind": "note", "title": "probe", "body": "## Probe\n\noriginal\n"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = made["id"].as_str().unwrap().to_string();
+        let path = tmp.path().join("probe.md");
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        for asked in [
+            serde_json::json!(true),
+            serde_json::json!("true"),
+            serde_json::json!("TRUE"),
+        ] {
+            let err = Artifact
+                .call(
+                    &ctx,
+                    serde_json::json!({
+                        "action": "update", "dry_run": asked, "id": id,
+                        "patch": {"body_edits": [
+                            {"action": "replace", "heading": "## Probe", "content": "CHANGED"}
+                        ]}
+                    }),
+                )
+                .await
+                .expect_err("dry_run on update must be refused");
+            let rec = err
+                .downcast_ref::<LibrarianRecoverableError>()
+                .expect("a recoverable refusal, not a plain failure");
+            assert!(
+                rec.message.contains("'dry_run' is not a parameter of doc"),
+                "unexpected message for {asked}: {}",
+                rec.message
+            );
+            assert!(
+                rec.hint
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("Nothing was changed"),
+                "the hint must say nothing was changed: {:?}",
+                rec.hint
+            );
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                before,
+                "a refused update changed the file (dry_run {asked})"
+            );
+        }
+    }
+
+    /// The check sits before the action `match`, so it holds for every action, reads included:
+    /// `doc` has no dry-run mode anywhere, and one rule is easier to state than a per-action list.
+    #[tokio::test]
+    async fn dry_run_true_is_refused_before_any_action_runs() {
+        let ctx = mk_ctx();
+        for action in [
+            "find",
+            "get",
+            "update",
+            "move",
+            "delete",
+            "graft",
+            "append_entry",
+        ] {
+            let err = Artifact
+                .call(&ctx, serde_json::json!({"action": action, "dry_run": true}))
+                .await
+                .expect_err("dry_run must be refused before the action is dispatched");
+            let rec = err
+                .downcast_ref::<LibrarianRecoverableError>()
+                .expect("a recoverable refusal");
+            assert!(
+                rec.message.contains("'dry_run' is not a parameter of doc"),
+                "{action}: {}",
+                rec.message
+            );
+        }
+    }
+
+    /// Only `true` is refused: `false` asks for what `doc` does anyway, and refusing it would
+    /// break a caller that sends the flag defensively.
+    #[tokio::test]
+    async fn dry_run_false_is_not_refused() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ctx = rooted_ctx(tmp.path().to_path_buf());
+        let made = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "probe.md",
+                "kind": "note", "title": "probe", "body": "## Probe\n\noriginal\n"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = made["id"].as_str().unwrap().to_string();
+        Artifact
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "action": "update", "dry_run": false, "id": id,
+                    "patch": {"body_edits": [
+                        {"action": "replace", "heading": "## Probe", "content": "CHANGED"}
+                    ]}
+                }),
+            )
+            .await
+            .expect("dry_run=false must not be refused");
+        let after = std::fs::read_to_string(tmp.path().join("probe.md")).unwrap();
+        assert!(
+            after.contains("CHANGED"),
+            "the update must have applied: {after}"
         );
     }
 
