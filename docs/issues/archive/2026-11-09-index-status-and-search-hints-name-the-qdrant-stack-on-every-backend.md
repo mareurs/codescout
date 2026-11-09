@@ -1,5 +1,5 @@
 ---
-id: 28d4f0268e7b1a2e
+id: '28d4f0268e7b1a2e'
 kind: bug
 status: fixed
 title: 'BUG: index status and semantic_search failure hints send a lite-stack user to retrieval-stack.sh'
@@ -7,7 +7,7 @@ tags:
 - cluster/hint-composed-without-the-request
 closed: 2026-11-09
 opened: 2026-11-09
-unverified: The five production call sites of classify_search_error and the index status arm pass VectorBackend::resolve() to code the tests cover, and no test drives a failing embedder through semantic_search or index(action=status). The mapping is tested per backend; the call-site wiring is read from the diff and compile-checked, not exercised.
+unverified: 'The five production call sites of classify_search_error in semantic_search and the index status offline arm pass VectorBackend::resolve() to code the tests cover, and no test drives a failing embedder through semantic_search or index(action=status). The mapping is tested per backend; the call-site wiring is read from the diff and compile-checked, not exercised. A real from_env failure that is not a RecoverableError needs either process environment or a build-dependent config; no deterministic seam was found (the memory call sites have one: d01f0c0e8).'
 ---
 
 # BUG: index status and semantic_search failure hints send a lite-stack user to retrieval-stack.sh
@@ -70,7 +70,7 @@ Read the error text before the hint: it names the real cause.
 
 ## Not covered
 - `classify_search_error` arms "Qdrant collection is missing" and "Vector dimension" (curl against Qdrant) are Qdrant-specific too. What a lite store reports for those cases is not verified.
-- `src/dashboard/api/index.rs` carries the same "Qdrant scroll failed" label.
+- `src/dashboard/api/index.rs` carried the same "Qdrant scroll failed" label; it says "Index status query failed" since `d01f0c0e8`.
 
 ## References
 - `docs/issues/archive/2026-11-09-memory-embedder-hint-names-the-qdrant-stack-on-every-backend.md`

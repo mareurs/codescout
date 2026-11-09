@@ -7,7 +7,6 @@ tags:
 - cluster/hint-composed-without-the-request
 closed: 2026-11-09
 opened: 2026-11-09
-unverified: The two call sites in src/tools/memory/mod.rs delegate to embedder_unavailable in one line each, and no test drives a failing embedder through memory(remember/recall). The helper is tested per backend; the call-site wiring is read from the diff, not exercised.
 ---
 
 # BUG: memory embedder failure tells a lite-stack user to run retrieval-stack.sh up
@@ -65,14 +64,14 @@ In `src/tools/memory/tests.rs`:
 - `a_qdrant_memory_call_is_told_to_start_the_stack`
 - `the_embedder_cause_stays_in_the_message`
 
-They pin `embedder_unavailable` per backend. Limit: no test drives a failing embedder through the two call sites, so reverting one site to the literal would not fail them (see `unverified` in the frontmatter).
+Two more in `src/tools/memory/tests.rs` (`d01f0c0e8`) call `Memory` `remember` and `recall` on a context whose embedder cannot be built (`Agent::set_memory_embedder_build_error_for_test`) and assert the refusal carries `VectorBackend::resolve().offline_hint()`. With both call sites changed to `VectorBackend::Qdrant`, both tests fail on a default build (probe run 2026-11-09).
 
 ## Workarounds
 Read the `embedder unavailable: <error>` text, which names the real cause.
 
 ## Resume
 
-The call-site limit in `unverified` is the only open item. To close it, build a memory call whose embedder fails at construction and assert its hint.
+No open item. The call sites are exercised by `d01f0c0e8`.
 
 ## References
 - `docs/issues/archive/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md` (same class)
