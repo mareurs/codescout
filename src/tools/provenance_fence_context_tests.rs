@@ -579,24 +579,17 @@ async fn a_terminal_shell_result_does_not_certify_detached_descendants() {
         }
     });
     let ran = AtomicBool::new(false);
-    let result = scope_root(
-        dir.path(),
-        true,
-        "run_command",
-        &json!({"command":"bash scripts/fmt-mine.sh"}),
-        meta.as_object(),
-        Some(&client),
-        async {
-            ran.store(true, Ordering::SeqCst);
-            Ok(vec![])
-        },
-    )
+    // Through the retrying helper: the generation reads above take the leases exclusively, and a
+    // fork in a parallel test can carry that exclusive copy past the read, which refused this call
+    // at the lease ("would block") instead of at the marker (15 of 200 stress runs, 2026-11-10).
+    let result = quiescent_formatter_call(dir.path(), &meta, &client, || async {
+        ran.store(true, Ordering::SeqCst);
+        Ok(vec![])
+    })
     .await;
     assert!(!ran.load(Ordering::SeqCst));
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("uncertified shell"));
+    let error = result.unwrap_err().to_string();
+    assert!(error.contains("uncertified shell"), "{error}");
 }
 
 #[tokio::test]
