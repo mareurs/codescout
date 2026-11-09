@@ -75,9 +75,9 @@ These gates are non-negotiable. There are no exceptions.
 
 The `onboarding` tool has already written a recommended model to `.codescout/project.toml`
 based on your system hardware. This model is used by **memory storage / recall only** —
-code search runs through the Qdrant retrieval stack and configures embeddings via
-`.env` (see `docs/research/2026-05-06-retrieval-stack-benchmark.md`). If the user has
-the stack running, you can skip Phase 0/1 unless they want semantic memories.
+code search uses the retrieval stack, configured through environment variables
+(`CODESCOUT_VECTOR_BACKEND`, `CODESCOUT_EMBEDDER_URL`). If `semantic_search` already
+works, you can skip Phase 0/1 unless they want semantic memories.
 
 Use the `model_options` array from the Gathered Project Data below to build the menu.
 Use the `hardware` field for the one-line system summary.

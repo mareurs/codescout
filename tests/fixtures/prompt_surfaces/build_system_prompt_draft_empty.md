@@ -24,7 +24,7 @@
 7. `read_file("path/to/file.md")` — heading-addressed by default, returns heading map + `@file_ref` for large files. **Iron Law 4:** subsequent reads MUST use `@file_ref` (not the original path): `read_file("@file_ref", heading="## Section")` or `start_line=/end_line=`.
 
 ## Retrieval Stack
-`semantic_search` runs through the Qdrant + TEI hybrid stack. Start it once per machine with `./scripts/retrieval-stack.sh up`. Build or refresh the index with `index(action="build")`. If a call returns `retrieval stack offline`, the stack isn't running.
+`semantic_search` queries the index built by `index(action="build")`. If a call returns `retrieval stack offline`, follow the hint in the error: it names the fix for the active backend.
 
 ## MCP Resources
 Extended docs and project context are available via MCP resources (`resources/read <uri>`):

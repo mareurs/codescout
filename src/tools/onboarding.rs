@@ -43,7 +43,7 @@ use super::{parse_bool_param, Tool, ToolContext};
 // call-form pass now closes that. Same reasoning as the 2026-09-03 bump: already-onboarded
 // projects cache the rendered prompt, so the fix does not reach them without this.
 // docs/issues/2026-09-05-the-prompt-surface-gate-misses-a-backticked-tool-name-in-call-form.md
-pub(crate) const ONBOARDING_VERSION: u32 = 32;
+pub(crate) const ONBOARDING_VERSION: u32 = 33;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.

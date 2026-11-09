@@ -4577,7 +4577,7 @@ fn system_prompt_points_to_tool_guide_resource() {
     // onboarded projects cache the rendered prompt; see src/prompts/README.md. Last moved
     // to 32 when the surface's `call_graph` calls gained `path` and the draft's Iron Law
     // citation was corrected.
-    assert_eq!(ONBOARDING_VERSION, 32);
+    assert_eq!(ONBOARDING_VERSION, 33);
 }
 
 #[test]

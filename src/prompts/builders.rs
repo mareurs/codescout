@@ -321,10 +321,8 @@ pub(crate) fn build_system_prompt_draft(
     // Retrieval stack — semantic_search routes through Qdrant
     draft.push_str("## Retrieval Stack\n");
     draft.push_str(
-        "`semantic_search` runs through the Qdrant + TEI hybrid stack. \
-         Start it once per machine with `./scripts/retrieval-stack.sh up`. \
-         Build or refresh the index with `index(action=\"build\")`. \
-         If a call returns `retrieval stack offline`, the stack isn't running.\n\n",
+        "`semantic_search` queries the index built by `index(action=\"build\")`. \
+         If a call returns `retrieval stack offline`, follow the hint in the error: it names the fix for the active backend.\n\n",
     );
 
     // MCP resource pointers — always included so agents know where to get extended docs
