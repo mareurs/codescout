@@ -1,0 +1,5 @@
+{
+  "outcome": "timeout-no-terminal-result",
+  "tool_timeout_seconds": 30,
+  "scope": "First new-API compile-red command; no test verdict inferred. Re-run uses a background recorder with log opened before execution. Main behavioral RED remains separately observed77pass/2fail."
+}

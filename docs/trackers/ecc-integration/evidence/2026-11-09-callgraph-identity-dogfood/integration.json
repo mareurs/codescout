@@ -1,0 +1,39 @@
+{
+  "source": {
+    "commit": "555f2817cbb790bcbd5de118e6194f45bbbdc15b",
+    "tree": "c33da0ab4d7a8ebb5d14e89a35ec2f0ec574a90a",
+    "parent": "69ffdd12e6d51f4884c0190a1a6c4edeca4289e4",
+    "stable_patch_id": "82470b4a164f780eab0ce409ca01dfafc29f0d7a",
+    "paths": [
+      "src/tools/symbol/call_edges/cache.rs",
+      "src/tools/symbol/call_graph/mod.rs"
+    ]
+  },
+  "integration": {
+    "commit": "4776e44bd49347da8b7c962f72bbed44b6f2fe99",
+    "tree": "7ddf5acae4c8193bbe13313fc68c711ea6803439",
+    "parent": "d124e7738f78b220f64080b5ea2c612daa5631ba",
+    "stable_patch_id": "82470b4a164f780eab0ce409ca01dfafc29f0d7a",
+    "paths": [
+      "src/tools/symbol/call_edges/cache.rs",
+      "src/tools/symbol/call_graph/mod.rs"
+    ]
+  },
+  "source_hashes": {
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "src/tools/symbol/call_graph/mod.rs": "906e3c34b06312d2d4e5e8128edd7df2f428d0ffd31e8505eafa314fb9b7ecf5"
+  },
+  "identical_committed_trees": false,
+  "gate_binding": "Final candidate gate covers isolated base plus patch. Separate integration gate covers exact4776e44bd committed tree including peer changes. Only owned source files and stable patch-id are identical across source and integration.",
+  "foreign_staged_blobs_unchanged": {
+    ".codescout/memories/bug-triage-2026-10-27.md": "100644 f4ad12b9cf7b8b830ac35cc341afcde702d0a56c 0\t.codescout/memories/bug-triage-2026-10-27.md",
+    "docs/issues/2026-11-04-shared-checkout-gate-red-during-hint-authority-audit.md": "100644 c1257d772a5ac947357954c13a02f726a0e4dac8 0\tdocs/issues/2026-11-04-shared-checkout-gate-red-during-hint-authority-audit.md",
+    "docs/research/2026-11-04-claude-instructions-comparison.md": "100644 f0e96d2f9f979d67701da2a9f7f6a162b92c7923 0\tdocs/research/2026-11-04-claude-instructions-comparison.md",
+    "docs/research/data/2026-11-04-hint-authority-gate.log.gz": "100644 2d449edb2ad7459ee5730ffcd8f4219fe866d6ae 0\tdocs/research/data/2026-11-04-hint-authority-gate.log.gz",
+    "docs/research/data/2026-11-04-hint-authority-inputs.tar.gz": "100644 24afd4b900798459db6520defdcf77bf9931f069 0\tdocs/research/data/2026-11-04-hint-authority-inputs.tar.gz",
+    "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md": "100644 034de84c4fdb710ce4a9f4cf4bc10afbe21458bd 0\tdocs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md"
+  },
+  "replay_base": "69ffdd12e6d51f4884c0190a1a6c4edeca4289e4",
+  "home_head_at_capture": "e7eff4c7677f1b41b180b5c25c6fa978fdd5da39",
+  "limits": "No repair replay, push, release, profile change or shared-MCP rollout."
+}

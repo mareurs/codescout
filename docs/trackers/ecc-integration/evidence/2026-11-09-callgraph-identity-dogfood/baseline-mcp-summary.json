@@ -1,0 +1,9 @@
+{
+  "cases": 6,
+  "matching": 3,
+  "mismatches": [
+    "warm-b-after-a",
+    "restart-b-after-a",
+    "incoming-leaf-a"
+  ]
+}

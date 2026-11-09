@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_edges/cache.rs
++++ src/tools/symbol/call_edges/cache.rs
+@@ -117,7 +117,7 @@
+         key: &ResolutionKey<'_>,
+         edges: &[Edge],
+     ) -> rusqlite::Result<()> {
+-        if edges.is_empty() {
++        if false {
+             return Ok(());
+         }
+         let direction = match key.direction {

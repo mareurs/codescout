@@ -1,0 +1,6 @@
+{
+  "id": "M08-corrupt-empty",
+  "file": "src/tools/symbol/call_edges/cache.rs",
+  "find": "                serde_json::from_str(&json).map_err(|error| {\n                    rusqlite::Error::FromSqlConversionFailure(\n                        0,\n                        rusqlite::types::Type::Text,\n                        Box::new(error),\n                    )\n                })",
+  "replace": "                Ok::<Vec<Edge>, rusqlite::Error>(serde_json::from_str(&json).unwrap_or_default())"
+}

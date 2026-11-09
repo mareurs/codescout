@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000093",
+  "command": "python3 -c 'import pathlib,subprocess,os,json,datetime; root=pathlib.Path(\".worktrees/ecc-callgraph-identity\").resolve(); e=pathlib.Path(\"docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-identity-dogfood\"); (e/\"red-tests.patch\").write_bytes(subprocess.check_output([\"git\",\"diff\",\"--\",\"src/tools/symbol/call_graph/mod.rs\"],cwd=root)); env=dict(os.environ,TMPDIR=\"/home/marius/.cache/codescout-ecc-tmp\",CODESCOUT_GATE_TMPFS_BASE=\"off\"); env.pop(\"CARGO_TARGET_DIR\",None); start=datetime.datetime.now(datetime.timezone.utc).isoformat(); log=(e/\"red.log\").open(\"w\"); result=subprocess.run([\"./scripts/with-slot.sh\",\"--slot\",\"0\",\"cargo\",\"test\",\"--lib\",\"tools::symbol::call_\",\"--\",\"--test-threads=4\"],cwd=root,env=env,stdout=log,stderr=subprocess.STDOUT); log.close(); record=dict(exit_code=result.returncode,started=start,finished=datetime.datetime.now(datetime.timezone.utc).isoformat()); (e/\"red-result.json\").write_text(json.dumps(record,indent=2)+\"\\n\"); print(json.dumps(record)); print(\"\\n\".join((e/\"red.log\").read_text().splitlines()[-28:]))'",
+  "server_pid": 1520813,
+  "job_pid": 778823,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T18:49:20.808475812+00:00",
+  "finished_at": "2026-11-09T18:49:59.388188337+00:00",
+  "log_path": "/tmp/codescout-bg-rhhuSw.log"
+}

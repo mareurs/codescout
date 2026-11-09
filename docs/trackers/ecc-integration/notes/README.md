@@ -11,6 +11,8 @@ topic: ecc-integration
 ---
 
 # ECC integration notes
+[Call graph identity replay provenance — 2026-11-09](2026-11-09-callgraph-identity-replay.md): frozen69ffdd12e tree, neutral brief, exact source/skill hashes and private host-history metadata. No replay ran.
+
 
 [Create finalization replay provenance — 2026-11-09](2026-11-09-create-finalization-replay.md): exact038fffb3 Git pin, neutral brief/source hashes, private pre-action host history and conditioning/runtime limits. No replay ran.
 

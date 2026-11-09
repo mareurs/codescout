@@ -1,0 +1,6 @@
+{
+  "id": "M03-column",
+  "file": "src/tools/symbol/call_graph/mod.rs",
+  "find": "            file: &path,\n            line,\n            col,\n            direction: &direction,",
+  "replace": "            file: &path,\n            line,\n            col: 0,\n            direction: &direction,"
+}

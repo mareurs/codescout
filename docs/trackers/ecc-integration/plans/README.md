@@ -11,6 +11,8 @@ topic: ecc-integration
 ---
 
 # ECC evaluation plans
+- [Call graph identity dogfood — 2026-11-09](2026-11-09-callgraph-identity-dogfood.md): current-source cold/warm/restart reproduction and scoped completed-resolution cache correction.
+
 
 - [Create finalization dogfood — 2026-11-09](2026-11-09-create-finalization-dogfood.md): completed and integrated; exact038fffb3 baseline, observed SQLite failures, catalog transaction, applied-mutation follow-up and final verification.
 

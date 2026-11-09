@@ -1,0 +1,17 @@
+{
+  "docs/issues/archive/2026-11-09-call-graph-generic-call-returns-unrelated-callees.md": "e5016b19fb0f75da",
+  "docs/issues/2026-11-09-call-graph-resolver-doc-denies-outgoing-ts-fallback.md": "81436f2c48ad8c74",
+  "docs/trackers/ecc-integration/README.md": "9f27965f08caa909",
+  "docs/trackers/ecc-integration/evidence.md": "99fb56409faba3a2",
+  "docs/trackers/ecc-integration/issues.md": "d28f5200f736af9c",
+  "docs/trackers/ecc-integration/plans/README.md": "103e7a3b0cf03cf6",
+  "docs/trackers/ecc-integration/reports/README.md": "4cf48cb6b2600db1",
+  "docs/trackers/ecc-integration/notes/README.md": "e0c447b3e19f2fba",
+  "docs/trackers/ecc-integration/plans/2026-11-09-callgraph-identity-dogfood.md": "0e002d054f03768a",
+  "docs/trackers/ecc-integration/reports/2026-11-09-callgraph-identity-dogfood.md": "b7951b533f8ee457",
+  "docs/trackers/ecc-integration/reports/2026-11-09-callgraph-identity-observed.md": "ddb5d7d4145391a5",
+  "docs/trackers/ecc-integration/notes/2026-11-09-callgraph-identity-replay.md": "f1798d9b81e7cb4c",
+  "docs/trackers/ecc-integration/reports/2026-11-09-create-finalization-dogfood.md": "2ba861100ce80249",
+  "docs/trackers/ecc-integration/reports/2026-11-09-create-finalization-observed.md": "ed2a2e472dba693d",
+  "docs/trackers/ecc-integration/plans/2026-11-09-create-finalization-dogfood.md": "31b7eabea0a3688c"
+}

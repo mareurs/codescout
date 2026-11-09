@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/mod.rs
++++ src/tools/symbol/call_graph/mod.rs
+@@ -427,7 +427,7 @@
+         let key = ResolutionKey {
+             symbol,
+             file: &path,
+-            line,
++            line: 0,
+             col,
+             direction: &direction,
+         };

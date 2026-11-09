@@ -1,0 +1,90 @@
+{
+  "population": "ten original-candidate mutations; parent follow-up excluded",
+  "mutations": [
+    {
+      "id": "M01-file",
+      "verdict": "KILLED",
+      "passed": 82,
+      "failed": 1,
+      "restored_exactly": true,
+      "returncode": 101
+    },
+    {
+      "id": "M02-line",
+      "verdict": "SURVIVED",
+      "passed": 83,
+      "failed": 0,
+      "restored_exactly": true,
+      "returncode": 0
+    },
+    {
+      "id": "M03-column",
+      "verdict": "SURVIVED",
+      "passed": 83,
+      "failed": 0,
+      "restored_exactly": true,
+      "returncode": 0
+    },
+    {
+      "id": "M04-direction",
+      "verdict": "KILLED",
+      "passed": 82,
+      "failed": 1,
+      "restored_exactly": true,
+      "returncode": 101
+    },
+    {
+      "id": "M05-sql-project",
+      "verdict": "KILLED",
+      "passed": 81,
+      "failed": 2,
+      "restored_exactly": true,
+      "returncode": 101
+    },
+    {
+      "id": "M06-invalidation-omission",
+      "verdict": "KILLED",
+      "passed": 82,
+      "failed": 1,
+      "restored_exactly": true,
+      "returncode": 101
+    },
+    {
+      "id": "M07-cache-empty",
+      "verdict": "KILLED",
+      "passed": 82,
+      "failed": 1,
+      "restored_exactly": true,
+      "returncode": 101
+    },
+    {
+      "id": "M08-corrupt-empty",
+      "verdict": "KILLED",
+      "passed": 82,
+      "failed": 1,
+      "restored_exactly": true,
+      "returncode": 101
+    },
+    {
+      "id": "M09-bypass-read",
+      "verdict": "KILLED",
+      "passed": 82,
+      "failed": 1,
+      "restored_exactly": true,
+      "returncode": 101
+    },
+    {
+      "id": "M10-bypass-write",
+      "verdict": "KILLED",
+      "passed": 82,
+      "failed": 1,
+      "restored_exactly": true,
+      "returncode": 101
+    }
+  ],
+  "counts": {
+    "KILLED": 8,
+    "SURVIVED": 2,
+    "INCONCLUSIVE": 0
+  }
+}

@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 225
+entry_high_water_F: 227
 entry_high_water_W: 158
 ---
 
@@ -67,10 +67,12 @@ entry_high_water_W: 158
 | F-207 | 2026-11-01 | med | test-design | fixed-verified | **A diagnostic hint passed its tests and did not fire on the one tree it was built for** — a 50,000-entry bound taken from a count of directories met 311,890 entries; found only by reading the live warning. |
 | F-220 | 2026-11-09 | med | tool-behavior | mitigated | **A symbol label and its returned body disagreed after integrating shifted source** — cache flush and fresh pinned-worktree read restored agreement before auditing the description. |
 | F-221 | 2026-11-09 | med | eval-design | fixed-verified | **The routing scorer counted endpoint words without verifying graph edges or the MCP server** — 2 observed false positives before hardening, 0 afterward; current13 raw traces independently verified. |
-| F-222 | 2026-11-09 | med | tool-behavior | promoted-to-bug-tracker | **A pinned generic call_graph lookup returned a chain the requested source body did not support** — older shared runtime, current-source reproduction still open in84029483d2895d9b; excluded from finalization evidence. |
+| F-222 | 2026-11-09 | med | tool-behavior | promoted-to-bug-tracker | **A pinned generic call_graph lookup returned a chain the requested source body did not support** — historical graph excluded; subsequent current-source defect corrected at4776e44bd, archived buge5016b19fb0f75da. |
 | F-223 | 2026-11-09 | med | testing | fixed-verified | **Registration ordering survived the initial finalization tests** — observed M7 survivor; both worktree branches now exercised and exact M7 killed. |
 | F-224 | 2026-11-09 | med | measurement | mitigated | **A build lease spanning source roots reused a mutant artifact in a restored control** — retained false red and rebuilt control; lease inside actual mutation source root. |
 | F-225 | 2026-11-09 | med | tool-usage | mitigated | **Buffer and document patch grammar assumptions caused refused calls** — five refusals; corrected against actual tool responses, with no refused write applied. |
+| F-226 | 2026-11-09 | med | testing | fixed-verified | **Consumer coordinate fields escaped API-only identity coverage** — two actual83/0 survivors closed with same-file consumer guards and exact killed rechecks. |
+| F-227 | 2026-11-09 | med | tool-usage | mitigated | **Repeated staging cannot re-add an already staged deletion by its old path** — restage existing paths while retaining D+A in the commit scope. |
 | F-213 | 2026-11-06 | med | test-design | fixed-verified | **A crash fixture failed in its toy parser before reaching the classifier** — wrong-reason red replaced by observed intended red before reapplying production wiring. |
 | F-214 | 2026-11-06 | med | test-design | promoted-to-bug-tracker | **Stripping log indentation promoted a debug field to compiler evidence** — real four-log overlap exposed the false provenance; three observed RED variants before fix. |
 | F-210 | 2026-11-01 | med | process | mitigated | **A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path** — `fmt-mine` named three of my files UNKNOWN after a 19-minute gate; `rustfmt --check` on the diff's files beforehand takes seconds. |
@@ -18122,7 +18124,7 @@ Also seen, not a gap: background children run in their own process group (`proce
 
 **Status:** promoted-to-bug-tracker
 
-**Recorded in:** [follow-up bug](../issues/2026-11-09-call-graph-generic-call-returns-unrelated-callees.md), artifact84029483d2895d9b. Current-source isolated reproduction and cause remain open; duplicate short names, cache positions and older-runtime/source drift are hypotheses only.
+**Recorded in:** [archived follow-up bug](../issues/archive/2026-11-09-call-graph-generic-call-returns-unrelated-callees.md), artifacte5016b19fb0f75da. At this original observation, cause and current-source reproduction were open. Subsequent identity dogfood reproduced a current-source completed-cache identity defect and integrated the verified bounded correction at4776e44bd. The old shared cache's individual rows remain uninspected; the historical graph stays excluded from finalization evidence.
 
 **Rests on:** [exact observation](ecc-integration/evidence/2026-11-09-create-finalization-dogfood/incidental-navigation.txt). The earlier unique-Python routing fixture does not test this duplicated Rust short-name case.
 
@@ -18167,6 +18169,38 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Rests on:** Native controller transcript for this session and the executed tool responses; resulting final report, source integration record and archived bug44160e1378b2e3f5 were read back. This is controller misuse, not a diagnosed product defect.
 
 **Lesson:** Treat @cmd refs as raw text; only @tool refs support json_path. Use the actual doc patch grammar: body_edits[].content and patch.extra. Inspect semantic ok:false even when transport succeeded.
+
+## F-226 — Consumer coordinate fields escaped API-only identity coverage
+
+**Valid:** dated 2026-11-09
+
+**Severity:** med
+**Category:** testing
+**Status:** fixed-verified
+
+**Observed:** Independent review actually forced ResolutionKey.line=0 and col=0 at CachedResolver::one_hop. Each applied mutation survived all83 related tests, while direct cache API tests already covered both dimensions. The same-name consumer fixture varied files and did not discriminate coordinate forwarding.
+
+**Correction:** After reading the applied descriptors, hashes, restoration checks and actual83/0 results, added one same-file consumer test with different-line/same-column and same-line/different-column definitions. Exact rechecks each now fail at returned wrong-definition adjacency (83pass/1fail); restored source passes84/0. Production code is unchanged from the reviewed candidate. Initial independent10-mutation population remains8killed/2survived/0inconclusive; the two later kills are a separate population.
+
+**Rests on:** docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-identity-dogfood/review/mutation-summary.json; final-M02-line-result.json; final-M03-column-result.json; final-module-result.json.
+
+**Cost:** One test-strengthening pass and two exact rechecks before integration.
+
+## F-227 — Repeated staging cannot re-add an already staged deletion by its old path
+
+**Valid:** dated 2026-11-09
+
+**Severity:** med
+**Category:** tool-usage
+**Status:** mitigated
+
+**Observed:** First explicit git add staged both halves of the managed bug move (D+A). Repeating the full owned-path list later failed with pathspec did not match for the old path: it now exists only in HEAD, not in the index or working tree. The repeat failed before the expected restaging outcome; no reset/unstage occurred.
+
+**Correction:** Retain both old and new paths in the review/commit ownership list, but restage only paths currently present. Leave the already staged deletion intact; verify it explicitly against HEAD and verify staged bytes before the pathspec commit.
+
+**Rests on:** [Actual retained refusal](ecc-integration/evidence/2026-11-09-callgraph-identity-dogfood/staging-refusal.log); initial staged D+A observation; this cycle's owned-paths.json and archived bug.
+
+**Limit:** This is Git pathspec behavior and a controller orchestration correction, not a codescout production defect.
 
 ## Template for new entries
 

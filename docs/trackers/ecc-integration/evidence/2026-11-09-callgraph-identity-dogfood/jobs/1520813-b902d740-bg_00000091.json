@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000091",
+  "command": "python3 docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-identity-dogfood/probe_identity.py baseline",
+  "server_pid": 1520813,
+  "job_pid": 715024,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T18:44:01.950811311+00:00",
+  "finished_at": "2026-11-09T18:44:52.073167526+00:00",
+  "log_path": "/tmp/codescout-bg-JJ3jpL.log"
+}

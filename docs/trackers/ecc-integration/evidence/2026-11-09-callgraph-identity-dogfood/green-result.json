@@ -1,0 +1,29 @@
+{
+  "label": "green",
+  "command": [
+    "./scripts/with-slot.sh",
+    "--slot",
+    "0",
+    "cargo",
+    "test",
+    "--lib",
+    "tools::symbol::call_",
+    "--",
+    "--test-threads=4"
+  ],
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity",
+  "started": "2026-11-09T18:57:26.627220+00:00",
+  "finished": "2026-11-09T18:58:49.533793+00:00",
+  "exit_code": 0,
+  "source_before": {
+    "src/tools/symbol/call_graph/mod.rs": "2450c1523f743f85a68cc3b09d045a9db6f0ed832ef008818408f0a60d4a853d",
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6"
+  },
+  "source_after": {
+    "src/tools/symbol/call_graph/mod.rs": "2450c1523f743f85a68cc3b09d045a9db6f0ed832ef008818408f0a60d4a853d",
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6"
+  },
+  "summaries": [
+    "test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 8564 filtered out; finished in 0.85s"
+  ]
+}

@@ -1,0 +1,409 @@
+{
+  "binary": {
+    "snapshot": "/home/marius/work/claude/codescout/.codescout/ecc-callgraph-identity-private-20261109/baseline-codescout",
+    "sha256": "c606d743c71d9f53b6f6a834fc15d5a2a4696b76ce07152ca625afcdef3e1720",
+    "head": "69ffdd12e6d51f4884c0190a1a6c4edeca4289e4",
+    "source": "/home/marius/.cache/codescout-gate/slot-0/debug/codescout"
+  },
+  "fixture": {
+    "Cargo.toml": "[package]\nname=\"identity_fixture\"\nversion=\"0.1.0\"\nedition=\"2021\"\n",
+    "src/lib.rs": "pub mod a;\npub mod b;\npub fn entry() { a::call(); b::call(); }\n",
+    "src/a.rs": "pub fn call() { leaf_a(); other_a(); }\npub fn leaf_a() {}\npub fn other_a() {}\n",
+    "src/b.rs": "pub fn call() { leaf_b(); other_b(); }\npub fn leaf_b() {}\npub fn other_b() {}\n",
+    ".codescout/project.toml": "[project]\nname=\"identity-fixture\"\nlanguages=[\"rust\"]\n"
+  },
+  "fixture_sha256": {
+    "Cargo.toml": "14928723f069604b13c26c4acbbbd6caae021e8c6051bf879354f5058beba1eb",
+    "src/lib.rs": "27671a3467f0ef68c88ec54cac13698cecbfb95e8011171f94de2a1451d6f5d4",
+    "src/a.rs": "6cf608782bd7eb9709020b89d4a6f31d2b444e99e39117b775a002af41c09ae7",
+    "src/b.rs": "adb861953694e3771b121e2b190526e04993d32e394a51bfed1fd0e5f6d1481b",
+    ".codescout/project.toml": "db3ff8ba094f295c2577ab53303253701037a8f4b8c68623e165da47c6a76f7b"
+  },
+  "cases": [
+    {
+      "label": "cold-a",
+      "arguments": {
+        "path": "src/a.rs",
+        "symbol": "call",
+        "direction": "callees",
+        "max_depth": 1,
+        "detail_level": "full"
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "call_graph for `call`\n  callees: 2 edges across 1 files\n    src/a.rs (2)\n          1: call \u2192 other_a (depth=1, ts)\n          1: call \u2192 leaf_a (depth=1, ts)\n  (auto-promoted to full detail \u2014 small result)\n  max_depth_reached: 1"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('project-activation-bootstrap') \u2014 first call this session that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\n# Project Activation Bootstrap\n\nYou just activated a project. Orient before you explore or edit \u2014 the cheapest\nbug is the one you never re-investigate because the project already documented it.\n\n## Phase 0 \u2014 load what the project already knows (do FIRST)\n\n- `memory(action=\"list\")`, then read the topics matching your task.\n  `architecture`, `gotchas`, and `conventions` usually pay off.\n- Bug or regression work:\n  `doc(action=\"find\", kind=\"bug\", filter={\"status\": {\"in\": [\"open\", \"taken\", \"investigating\", \"zombie\"]}})` \u2014\n  `status=\"open\"` alone hides `taken` (a live session holds it \u2014 check before starting),\n  `investigating` (worked, no live owner) and\n  `zombie` (recurring-but-unconfirmed \u2014 a \"has this come back?\" check, not a\n  task to pick up) \u2014\n  the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery\n  KNOWN and cite the ledger path.\n- If a `get_guide` topic matches your area (`error-handling`,\n  `progressive-disclosure`, `workspace-state`, `librarian`,\n  `tracker-conventions`, `untrusted-content`), read it \u2014 it states the contract whose violations you\n  hunt.\n\n## Phase 1 \u2014 route each lookup by what you know\n\n- symbol name \u2192 `symbols(name=X)`\n- concept \u2192 `semantic_search(query)`\n- exact string \u2192 `grep(pattern)`\n- who calls X \u2192 `references(symbol, path)` \u2014 never grep for callers\n\n## Phase 2 \u2014 verify at the bytes, not from belief\n\n**Do not hypothesise but ALWAYS VERIFY. Do not state what a doc, a memory, or a\nprior belief says the code does \u2014 open the artifact or run the command, and ALWAYS\nVERIFY.**\n\n- A finding needs lines you actually read (`symbols include_body` / `read_file`),\n  not a grep hit alone.\n- A claim about how a TOOL behaves needs the call run once and the real output\n  read \u2014 reading the source alone misses runtime shape.\n- A comment, doc, or README the code contradicts is itself a finding\n  (doc-vs-code drift).\n\n## Before you plan or touch a contract \u2014 run reconnaissance\n\nIf you will write a plan, change a struct / function signature / API contract,\nor verify claims against `docs/trackers`, invoke the reconnaissance skill FIRST.\n\n- Claude Code: `/codescout-companion:reconnaissance`.\n- Other harnesses: follow `docs/templates/session-log.md` (any agent that reads\n  markdown can use the template \u2014 no plugin required).\n\nIt forces the doc-vs-code reconciliation and logs frictions (F-N) and wins (W-N)\nso the next session inherits them.\n\n## When you dispatch subagents \u2014 brief them\n\nPass what you already loaded: memories read, open bugs, prior results. For\nguides, pass the *instruction to fetch*, not a \"these are loaded\" note \u2014 your\ncontext is not theirs, and unless the companion hook gives each subagent its\nown guide ledger, a topic you triggered will not auto-inject for them. Name\nthe topics and tell them to call `get_guide` on the ones their task needs; an\nexplicit fetch always\nreturns the full body. A subagent re-discovering what you already knew is a\ndispatch defect (Iron Law 6), not the subagent's fault \u2014 but a subagent fetching\nits own guide is doing exactly what it should.\n\n\n<!-- end auto-injected get_guide('project-activation-bootstrap') -->"
+          },
+          {
+            "type": "text",
+            "text": "\n[codescout] paths are relative to /home/marius/work/claude/codescout/.codescout/ecc-callgraph-identity-private-20261109/baseline-a-then-b/project"
+          },
+          {
+            "type": "text",
+            "text": "\n## Project Status (details)\n- **Languages:** rust\n- **Memories:** None yet \u2014 run `onboarding` to create project memories\n- **Semantic index:** Not built \u2014 run `index(action='build')` to enable `semantic_search`\n"
+          }
+        ],
+        "isError": false
+      },
+      "edges": [
+        {
+          "line": 1,
+          "caller": "call",
+          "callee": "other_a",
+          "depth": 1,
+          "source": "ts"
+        },
+        {
+          "line": 1,
+          "caller": "call",
+          "callee": "leaf_a",
+          "depth": 1,
+          "source": "ts"
+        }
+      ],
+      "expected": [
+        [
+          "call",
+          "leaf_a",
+          1
+        ],
+        [
+          "call",
+          "other_a",
+          1
+        ]
+      ],
+      "actual": [
+        [
+          "call",
+          "leaf_a",
+          1
+        ],
+        [
+          "call",
+          "other_a",
+          1
+        ]
+      ],
+      "matches_expected": true
+    },
+    {
+      "label": "warm-b-after-a",
+      "arguments": {
+        "path": "src/b.rs",
+        "symbol": "call",
+        "direction": "callees",
+        "max_depth": 1,
+        "detail_level": "full"
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "call_graph for `call`\n  callees: 2 edges across 1 files\n    src/a.rs (2)\n          1: call \u2192 other_a (depth=1, ts)\n          1: call \u2192 leaf_a (depth=1, ts)\n  (auto-promoted to full detail \u2014 small result)\n  max_depth_reached: 1"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('symbol-navigation') \u2014 first call this session that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\n# Symbol Navigation\n\nPer-language tips for codescout's symbol tools \u2014 `symbols`, `symbol_at`,\n`references`, `call_graph`. When you know a name, navigate structurally\ninstead of grepping: `symbols` reads the AST/LSP index, so it finds\ndefinitions and bodies precisely, where `grep` also matches comments,\nstrings, and unrelated identifiers.\n\n## Generic patterns (any language)\n\n- **Hierarchical nav** \u2014 a method on a class/struct/object, all languages:\n  `symbols(name=\"Container/member\", include_body=true)`. The `/` is what\n  makes it an exact name-path lookup; a bare name is a substring search,\n  and `exact=true` forces an exact lookup on one.\n- **Find across the project, then read the body:**\n  `symbols(name=\"edit_code\")` to locate it, then\n  `symbols(name=\"ToolName/edit_code\", include_body=true)` for the body.\n- **Kind filter on a name search:** `symbols(name=\"X\", path=\"src/tools/\", kind=\"struct\")`.\n  `kind` filters name searches only: a file or directory overview ignores it. `kind` is one of\n  `function`, `class`, `struct`, `interface`, `type`, `enum`, `module`, `constant`; which one your\n  language's symbols carry varies (see table below).\n  Run `symbols(path)` once on a representative file to see which kinds your LSP emits.\n- **Who calls X?** `references(symbol, path)` \u2014 structured call sites, not\n  `grep`.\n- **Impact analysis before any structural change:**\n  `call_graph(symbol, path, direction=\"callers\")` traces blast radius;\n  `direction=\"callees\"` traces outbound flow (`max_depth` defaults to 3,\n  capped at 10).\n- **Name unknown?** Start with `semantic_search(\"what it does\")`, then drill\n  down with `symbols(name=...)`.\n\n## Per-language quick reference\n\nThe generic patterns above already cover finding a method\n(`symbols(name=\"Container/member\", include_body=true)`), callers, and\nimpact analysis (`call_graph(symbol, path, direction=\"callers\")` before any\nstructural change) \u2014 those are identical across languages. Only three things\nvary per language: the name-path form `name` takes, the `kind` to pass to\n`symbols(path=..., kind=...)`, and a per-language gotcha.\n\n| Language | `name` name-path form | `kind` for a name search | Gotcha |\n|---|---|---|---|\n| **Rust** | `Type/method`, `impl Trait for Type/method` | `struct` | rust-analyzer reports traits as `kind=\"interface\"`; trait impls use the `impl Trait for Type/method` form |\n| **Python** | `Class/method`, `module_func` | `class` | decorators aren't part of the symbol \u2014 search by the decorated function's name |\n| **TS / JS** | `Class/method`, `exportedFunction` | `class`; `function` for arrow fns | React function components are `kind=\"function\"`, not `class` |\n| **Kotlin / Java** | `Class/method`, `Object.companion/method` | `class` (covers classes, objects, annotations) | annotations aren't part of the symbol \u2014 search by method name |\n| **Go** | `Type/Method`, `PackageFunc` | `function` (covers funcs + methods) | interfaces use `kind=\"interface\"`; receiver methods stay `Type/Method` |\n| **C#** | `Class/Method`, `Namespace.Class/Method` (nested) | `class`, `interface` | properties surface as `function` getters/setters in some LSPs |\n\nIn every language `kind=\"function\"` matches functions, methods and constructors, and `kind=\"type\"`\nmatches only type parameters.\n\n## Related\n\n- `get_guide(\"progressive-disclosure\")` \u2014 what to do when `symbols` output\n  overflows to a `@tool_*` buffer.\n- Iron Law 1 (`server_instructions`) \u2014 never `read_file` source; use\n  `symbols(path)` for an overview, `symbols(name=..., include_body=true)` for\n  bodies.\n\n\n<!-- end auto-injected get_guide('symbol-navigation') -->"
+          }
+        ],
+        "isError": false
+      },
+      "edges": [
+        {
+          "line": 1,
+          "caller": "call",
+          "callee": "other_a",
+          "depth": 1,
+          "source": "ts"
+        },
+        {
+          "line": 1,
+          "caller": "call",
+          "callee": "leaf_a",
+          "depth": 1,
+          "source": "ts"
+        }
+      ],
+      "expected": [
+        [
+          "call",
+          "leaf_b",
+          1
+        ],
+        [
+          "call",
+          "other_b",
+          1
+        ]
+      ],
+      "actual": [
+        [
+          "call",
+          "leaf_a",
+          1
+        ],
+        [
+          "call",
+          "other_a",
+          1
+        ]
+      ],
+      "matches_expected": false
+    },
+    {
+      "label": "restart-b-after-a",
+      "arguments": {
+        "path": "src/b.rs",
+        "symbol": "call",
+        "direction": "callees",
+        "max_depth": 1,
+        "detail_level": "full"
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "call_graph for `call`\n  callees: 2 edges across 1 files\n    src/a.rs (2)\n          1: call \u2192 other_a (depth=1, ts)\n          1: call \u2192 leaf_a (depth=1, ts)\n  (auto-promoted to full detail \u2014 small result)\n  max_depth_reached: 1"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('project-activation-bootstrap') \u2014 first call this session that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\n# Project Activation Bootstrap\n\nYou just activated a project. Orient before you explore or edit \u2014 the cheapest\nbug is the one you never re-investigate because the project already documented it.\n\n## Phase 0 \u2014 load what the project already knows (do FIRST)\n\n- `memory(action=\"list\")`, then read the topics matching your task.\n  `architecture`, `gotchas`, and `conventions` usually pay off.\n- Bug or regression work:\n  `doc(action=\"find\", kind=\"bug\", filter={\"status\": {\"in\": [\"open\", \"taken\", \"investigating\", \"zombie\"]}})` \u2014\n  `status=\"open\"` alone hides `taken` (a live session holds it \u2014 check before starting),\n  `investigating` (worked, no live owner) and\n  `zombie` (recurring-but-unconfirmed \u2014 a \"has this come back?\" check, not a\n  task to pick up) \u2014\n  the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery\n  KNOWN and cite the ledger path.\n- If a `get_guide` topic matches your area (`error-handling`,\n  `progressive-disclosure`, `workspace-state`, `librarian`,\n  `tracker-conventions`, `untrusted-content`), read it \u2014 it states the contract whose violations you\n  hunt.\n\n## Phase 1 \u2014 route each lookup by what you know\n\n- symbol name \u2192 `symbols(name=X)`\n- concept \u2192 `semantic_search(query)`\n- exact string \u2192 `grep(pattern)`\n- who calls X \u2192 `references(symbol, path)` \u2014 never grep for callers\n\n## Phase 2 \u2014 verify at the bytes, not from belief\n\n**Do not hypothesise but ALWAYS VERIFY. Do not state what a doc, a memory, or a\nprior belief says the code does \u2014 open the artifact or run the command, and ALWAYS\nVERIFY.**\n\n- A finding needs lines you actually read (`symbols include_body` / `read_file`),\n  not a grep hit alone.\n- A claim about how a TOOL behaves needs the call run once and the real output\n  read \u2014 reading the source alone misses runtime shape.\n- A comment, doc, or README the code contradicts is itself a finding\n  (doc-vs-code drift).\n\n## Before you plan or touch a contract \u2014 run reconnaissance\n\nIf you will write a plan, change a struct / function signature / API contract,\nor verify claims against `docs/trackers`, invoke the reconnaissance skill FIRST.\n\n- Claude Code: `/codescout-companion:reconnaissance`.\n- Other harnesses: follow `docs/templates/session-log.md` (any agent that reads\n  markdown can use the template \u2014 no plugin required).\n\nIt forces the doc-vs-code reconciliation and logs frictions (F-N) and wins (W-N)\nso the next session inherits them.\n\n## When you dispatch subagents \u2014 brief them\n\nPass what you already loaded: memories read, open bugs, prior results. For\nguides, pass the *instruction to fetch*, not a \"these are loaded\" note \u2014 your\ncontext is not theirs, and unless the companion hook gives each subagent its\nown guide ledger, a topic you triggered will not auto-inject for them. Name\nthe topics and tell them to call `get_guide` on the ones their task needs; an\nexplicit fetch always\nreturns the full body. A subagent re-discovering what you already knew is a\ndispatch defect (Iron Law 6), not the subagent's fault \u2014 but a subagent fetching\nits own guide is doing exactly what it should.\n\n\n<!-- end auto-injected get_guide('project-activation-bootstrap') -->"
+          },
+          {
+            "type": "text",
+            "text": "\n[codescout] paths are relative to /home/marius/work/claude/codescout/.codescout/ecc-callgraph-identity-private-20261109/baseline-a-then-b/project"
+          },
+          {
+            "type": "text",
+            "text": "\n## Project Status (details)\n- **Languages:** rust\n- **Memories:** None yet \u2014 run `onboarding` to create project memories\n- **Semantic index:** Not built \u2014 run `index(action='build')` to enable `semantic_search`\n"
+          }
+        ],
+        "isError": false
+      },
+      "edges": [
+        {
+          "line": 1,
+          "caller": "call",
+          "callee": "other_a",
+          "depth": 1,
+          "source": "ts"
+        },
+        {
+          "line": 1,
+          "caller": "call",
+          "callee": "leaf_a",
+          "depth": 1,
+          "source": "ts"
+        }
+      ],
+      "expected": [
+        [
+          "call",
+          "leaf_b",
+          1
+        ],
+        [
+          "call",
+          "other_b",
+          1
+        ]
+      ],
+      "actual": [
+        [
+          "call",
+          "leaf_a",
+          1
+        ],
+        [
+          "call",
+          "other_a",
+          1
+        ]
+      ],
+      "matches_expected": false
+    },
+    {
+      "label": "cold-b",
+      "arguments": {
+        "path": "src/b.rs",
+        "symbol": "call",
+        "direction": "callees",
+        "max_depth": 1,
+        "detail_level": "full"
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "call_graph for `call`\n  callees: 2 edges across 1 files\n    src/b.rs (2)\n          1: call \u2192 other_b (depth=1, ts)\n          1: call \u2192 leaf_b (depth=1, ts)\n  (auto-promoted to full detail \u2014 small result)\n  max_depth_reached: 1"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('project-activation-bootstrap') \u2014 first call this session that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\n# Project Activation Bootstrap\n\nYou just activated a project. Orient before you explore or edit \u2014 the cheapest\nbug is the one you never re-investigate because the project already documented it.\n\n## Phase 0 \u2014 load what the project already knows (do FIRST)\n\n- `memory(action=\"list\")`, then read the topics matching your task.\n  `architecture`, `gotchas`, and `conventions` usually pay off.\n- Bug or regression work:\n  `doc(action=\"find\", kind=\"bug\", filter={\"status\": {\"in\": [\"open\", \"taken\", \"investigating\", \"zombie\"]}})` \u2014\n  `status=\"open\"` alone hides `taken` (a live session holds it \u2014 check before starting),\n  `investigating` (worked, no live owner) and\n  `zombie` (recurring-but-unconfirmed \u2014 a \"has this come back?\" check, not a\n  task to pick up) \u2014\n  the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery\n  KNOWN and cite the ledger path.\n- If a `get_guide` topic matches your area (`error-handling`,\n  `progressive-disclosure`, `workspace-state`, `librarian`,\n  `tracker-conventions`, `untrusted-content`), read it \u2014 it states the contract whose violations you\n  hunt.\n\n## Phase 1 \u2014 route each lookup by what you know\n\n- symbol name \u2192 `symbols(name=X)`\n- concept \u2192 `semantic_search(query)`\n- exact string \u2192 `grep(pattern)`\n- who calls X \u2192 `references(symbol, path)` \u2014 never grep for callers\n\n## Phase 2 \u2014 verify at the bytes, not from belief\n\n**Do not hypothesise but ALWAYS VERIFY. Do not state what a doc, a memory, or a\nprior belief says the code does \u2014 open the artifact or run the command, and ALWAYS\nVERIFY.**\n\n- A finding needs lines you actually read (`symbols include_body` / `read_file`),\n  not a grep hit alone.\n- A claim about how a TOOL behaves needs the call run once and the real output\n  read \u2014 reading the source alone misses runtime shape.\n- A comment, doc, or README the code contradicts is itself a finding\n  (doc-vs-code drift).\n\n## Before you plan or touch a contract \u2014 run reconnaissance\n\nIf you will write a plan, change a struct / function signature / API contract,\nor verify claims against `docs/trackers`, invoke the reconnaissance skill FIRST.\n\n- Claude Code: `/codescout-companion:reconnaissance`.\n- Other harnesses: follow `docs/templates/session-log.md` (any agent that reads\n  markdown can use the template \u2014 no plugin required).\n\nIt forces the doc-vs-code reconciliation and logs frictions (F-N) and wins (W-N)\nso the next session inherits them.\n\n## When you dispatch subagents \u2014 brief them\n\nPass what you already loaded: memories read, open bugs, prior results. For\nguides, pass the *instruction to fetch*, not a \"these are loaded\" note \u2014 your\ncontext is not theirs, and unless the companion hook gives each subagent its\nown guide ledger, a topic you triggered will not auto-inject for them. Name\nthe topics and tell them to call `get_guide` on the ones their task needs; an\nexplicit fetch always\nreturns the full body. A subagent re-discovering what you already knew is a\ndispatch defect (Iron Law 6), not the subagent's fault \u2014 but a subagent fetching\nits own guide is doing exactly what it should.\n\n\n<!-- end auto-injected get_guide('project-activation-bootstrap') -->"
+          },
+          {
+            "type": "text",
+            "text": "\n[codescout] paths are relative to /home/marius/work/claude/codescout/.codescout/ecc-callgraph-identity-private-20261109/baseline-cold-b/project"
+          },
+          {
+            "type": "text",
+            "text": "\n## Project Status (details)\n- **Languages:** rust\n- **Memories:** None yet \u2014 run `onboarding` to create project memories\n- **Semantic index:** Not built \u2014 run `index(action='build')` to enable `semantic_search`\n"
+          }
+        ],
+        "isError": false
+      },
+      "edges": [
+        {
+          "line": 1,
+          "caller": "call",
+          "callee": "other_b",
+          "depth": 1,
+          "source": "ts"
+        },
+        {
+          "line": 1,
+          "caller": "call",
+          "callee": "leaf_b",
+          "depth": 1,
+          "source": "ts"
+        }
+      ],
+      "expected": [
+        [
+          "call",
+          "leaf_b",
+          1
+        ],
+        [
+          "call",
+          "other_b",
+          1
+        ]
+      ],
+      "actual": [
+        [
+          "call",
+          "leaf_b",
+          1
+        ],
+        [
+          "call",
+          "other_b",
+          1
+        ]
+      ],
+      "matches_expected": true
+    },
+    {
+      "label": "incoming-leaf-a",
+      "arguments": {
+        "path": "src/a.rs",
+        "symbol": "leaf_a",
+        "direction": "callers",
+        "max_depth": 1,
+        "detail_level": "full"
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "call_graph for `leaf_a`\n  callers: 0 edges across 0 files\n  (auto-promoted to full detail \u2014 small result)\n  max_depth_reached: 1"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('project-activation-bootstrap') \u2014 first call this session that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\n# Project Activation Bootstrap\n\nYou just activated a project. Orient before you explore or edit \u2014 the cheapest\nbug is the one you never re-investigate because the project already documented it.\n\n## Phase 0 \u2014 load what the project already knows (do FIRST)\n\n- `memory(action=\"list\")`, then read the topics matching your task.\n  `architecture`, `gotchas`, and `conventions` usually pay off.\n- Bug or regression work:\n  `doc(action=\"find\", kind=\"bug\", filter={\"status\": {\"in\": [\"open\", \"taken\", \"investigating\", \"zombie\"]}})` \u2014\n  `status=\"open\"` alone hides `taken` (a live session holds it \u2014 check before starting),\n  `investigating` (worked, no live owner) and\n  `zombie` (recurring-but-unconfirmed \u2014 a \"has this come back?\" check, not a\n  task to pick up) \u2014\n  the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery\n  KNOWN and cite the ledger path.\n- If a `get_guide` topic matches your area (`error-handling`,\n  `progressive-disclosure`, `workspace-state`, `librarian`,\n  `tracker-conventions`, `untrusted-content`), read it \u2014 it states the contract whose violations you\n  hunt.\n\n## Phase 1 \u2014 route each lookup by what you know\n\n- symbol name \u2192 `symbols(name=X)`\n- concept \u2192 `semantic_search(query)`\n- exact string \u2192 `grep(pattern)`\n- who calls X \u2192 `references(symbol, path)` \u2014 never grep for callers\n\n## Phase 2 \u2014 verify at the bytes, not from belief\n\n**Do not hypothesise but ALWAYS VERIFY. Do not state what a doc, a memory, or a\nprior belief says the code does \u2014 open the artifact or run the command, and ALWAYS\nVERIFY.**\n\n- A finding needs lines you actually read (`symbols include_body` / `read_file`),\n  not a grep hit alone.\n- A claim about how a TOOL behaves needs the call run once and the real output\n  read \u2014 reading the source alone misses runtime shape.\n- A comment, doc, or README the code contradicts is itself a finding\n  (doc-vs-code drift).\n\n## Before you plan or touch a contract \u2014 run reconnaissance\n\nIf you will write a plan, change a struct / function signature / API contract,\nor verify claims against `docs/trackers`, invoke the reconnaissance skill FIRST.\n\n- Claude Code: `/codescout-companion:reconnaissance`.\n- Other harnesses: follow `docs/templates/session-log.md` (any agent that reads\n  markdown can use the template \u2014 no plugin required).\n\nIt forces the doc-vs-code reconciliation and logs frictions (F-N) and wins (W-N)\nso the next session inherits them.\n\n## When you dispatch subagents \u2014 brief them\n\nPass what you already loaded: memories read, open bugs, prior results. For\nguides, pass the *instruction to fetch*, not a \"these are loaded\" note \u2014 your\ncontext is not theirs, and unless the companion hook gives each subagent its\nown guide ledger, a topic you triggered will not auto-inject for them. Name\nthe topics and tell them to call `get_guide` on the ones their task needs; an\nexplicit fetch always\nreturns the full body. A subagent re-discovering what you already knew is a\ndispatch defect (Iron Law 6), not the subagent's fault \u2014 but a subagent fetching\nits own guide is doing exactly what it should.\n\n\n<!-- end auto-injected get_guide('project-activation-bootstrap') -->"
+          },
+          {
+            "type": "text",
+            "text": "\n[codescout] paths are relative to /home/marius/work/claude/codescout/.codescout/ecc-callgraph-identity-private-20261109/baseline-incoming-then-outgoing/project"
+          },
+          {
+            "type": "text",
+            "text": "\n## Project Status (details)\n- **Languages:** rust\n- **Memories:** None yet \u2014 run `onboarding` to create project memories\n- **Semantic index:** Not built \u2014 run `index(action='build')` to enable `semantic_search`\n"
+          }
+        ],
+        "isError": false
+      },
+      "edges": [],
+      "expected": [
+        [
+          "call",
+          "leaf_a",
+          1
+        ]
+      ],
+      "actual": [],
+      "matches_expected": false
+    },
+    {
+      "label": "outgoing-a-after-incoming-leaf",
+      "arguments": {
+        "path": "src/a.rs",
+        "symbol": "call",
+        "direction": "callees",
+        "max_depth": 1,
+        "detail_level": "full"
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "call_graph for `call`\n  callees: 2 edges across 1 files\n    src/a.rs (2)\n          1: call \u2192 other_a (depth=1, ts)\n          1: call \u2192 leaf_a (depth=1, ts)\n  (auto-promoted to full detail \u2014 small result)\n  max_depth_reached: 1"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('symbol-navigation') \u2014 first call this session that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\n# Symbol Navigation\n\nPer-language tips for codescout's symbol tools \u2014 `symbols`, `symbol_at`,\n`references`, `call_graph`. When you know a name, navigate structurally\ninstead of grepping: `symbols` reads the AST/LSP index, so it finds\ndefinitions and bodies precisely, where `grep` also matches comments,\nstrings, and unrelated identifiers.\n\n## Generic patterns (any language)\n\n- **Hierarchical nav** \u2014 a method on a class/struct/object, all languages:\n  `symbols(name=\"Container/member\", include_body=true)`. The `/` is what\n  makes it an exact name-path lookup; a bare name is a substring search,\n  and `exact=true` forces an exact lookup on one.\n- **Find across the project, then read the body:**\n  `symbols(name=\"edit_code\")` to locate it, then\n  `symbols(name=\"ToolName/edit_code\", include_body=true)` for the body.\n- **Kind filter on a name search:** `symbols(name=\"X\", path=\"src/tools/\", kind=\"struct\")`.\n  `kind` filters name searches only: a file or directory overview ignores it. `kind` is one of\n  `function`, `class`, `struct`, `interface`, `type`, `enum`, `module`, `constant`; which one your\n  language's symbols carry varies (see table below).\n  Run `symbols(path)` once on a representative file to see which kinds your LSP emits.\n- **Who calls X?** `references(symbol, path)` \u2014 structured call sites, not\n  `grep`.\n- **Impact analysis before any structural change:**\n  `call_graph(symbol, path, direction=\"callers\")` traces blast radius;\n  `direction=\"callees\"` traces outbound flow (`max_depth` defaults to 3,\n  capped at 10).\n- **Name unknown?** Start with `semantic_search(\"what it does\")`, then drill\n  down with `symbols(name=...)`.\n\n## Per-language quick reference\n\nThe generic patterns above already cover finding a method\n(`symbols(name=\"Container/member\", include_body=true)`), callers, and\nimpact analysis (`call_graph(symbol, path, direction=\"callers\")` before any\nstructural change) \u2014 those are identical across languages. Only three things\nvary per language: the name-path form `name` takes, the `kind` to pass to\n`symbols(path=..., kind=...)`, and a per-language gotcha.\n\n| Language | `name` name-path form | `kind` for a name search | Gotcha |\n|---|---|---|---|\n| **Rust** | `Type/method`, `impl Trait for Type/method` | `struct` | rust-analyzer reports traits as `kind=\"interface\"`; trait impls use the `impl Trait for Type/method` form |\n| **Python** | `Class/method`, `module_func` | `class` | decorators aren't part of the symbol \u2014 search by the decorated function's name |\n| **TS / JS** | `Class/method`, `exportedFunction` | `class`; `function` for arrow fns | React function components are `kind=\"function\"`, not `class` |\n| **Kotlin / Java** | `Class/method`, `Object.companion/method` | `class` (covers classes, objects, annotations) | annotations aren't part of the symbol \u2014 search by method name |\n| **Go** | `Type/Method`, `PackageFunc` | `function` (covers funcs + methods) | interfaces use `kind=\"interface\"`; receiver methods stay `Type/Method` |\n| **C#** | `Class/Method`, `Namespace.Class/Method` (nested) | `class`, `interface` | properties surface as `function` getters/setters in some LSPs |\n\nIn every language `kind=\"function\"` matches functions, methods and constructors, and `kind=\"type\"`\nmatches only type parameters.\n\n## Related\n\n- `get_guide(\"progressive-disclosure\")` \u2014 what to do when `symbols` output\n  overflows to a `@tool_*` buffer.\n- Iron Law 1 (`server_instructions`) \u2014 never `read_file` source; use\n  `symbols(path)` for an overview, `symbols(name=..., include_body=true)` for\n  bodies.\n\n\n<!-- end auto-injected get_guide('symbol-navigation') -->"
+          }
+        ],
+        "isError": false
+      },
+      "edges": [
+        {
+          "line": 1,
+          "caller": "call",
+          "callee": "other_a",
+          "depth": 1,
+          "source": "ts"
+        },
+        {
+          "line": 1,
+          "caller": "call",
+          "callee": "leaf_a",
+          "depth": 1,
+          "source": "ts"
+        }
+      ],
+      "expected": [
+        [
+          "call",
+          "leaf_a",
+          1
+        ],
+        [
+          "call",
+          "other_a",
+          1
+        ]
+      ],
+      "actual": [
+        [
+          "call",
+          "leaf_a",
+          1
+        ],
+        [
+          "call",
+          "other_a",
+          1
+        ]
+      ],
+      "matches_expected": true
+    }
+  ]
+}

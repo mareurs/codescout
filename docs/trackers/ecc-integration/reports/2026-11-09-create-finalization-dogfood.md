@@ -60,7 +60,7 @@ The initial validator assumed an unquoted id line and rejected a valid YAML-quot
 
 ## Incidental navigation limit
 
-A shared running older MCP returned unrelated outgoing chains for call_graph(call,src/librarian/tools/create.rs). Its build9e4db9b9 differs from current source. That graph was excluded; source symbols and exact references established the inspected chain. [Follow-up bug](../../../issues/2026-11-09-call-graph-generic-call-returns-unrelated-callees.md), [exact response](../evidence/2026-11-09-create-finalization-dogfood/incidental-navigation.txt). The earlier unique-Python-symbol routing result does not establish duplicated-Rust-name correctness. Fresh current-source reproduction and cause remain open.
+A shared running older MCP returned unrelated outgoing chains for call_graph(call,src/librarian/tools/create.rs). Its build9e4db9b9 differs from that cycle's source. That graph was excluded; source symbols and exact references established the inspected chain. [Archived follow-up bug](../../../issues/archive/2026-11-09-call-graph-generic-call-returns-unrelated-callees.md), [exact historical response](../evidence/2026-11-09-create-finalization-dogfood/incidental-navigation.txt). The earlier unique-Python routing result does not establish duplicated-Rust-name correctness. The later [identity cycle](2026-11-09-callgraph-identity-dogfood.md) reproduced a current-source cache identity defect and integrated the bounded correction at4776e44bd. Its fresh reproduction does not retrospectively instrument the old shared cache's individual rows.
 
 ## Boundaries
 

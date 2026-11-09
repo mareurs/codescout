@@ -1,0 +1,16 @@
+{
+  "label": "baseline-module",
+  "command": [
+    "cargo",
+    "test",
+    "--lib",
+    "tools::symbol::call_",
+    "--",
+    "--test-threads=4"
+  ],
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity",
+  "head": "69ffdd12e6d51f4884c0190a1a6c4edeca4289e4",
+  "started": "2026-11-09T18:42:54.838727+00:00",
+  "finished": "2026-11-09T18:45:12.961269+00:00",
+  "exit_code": 0
+}

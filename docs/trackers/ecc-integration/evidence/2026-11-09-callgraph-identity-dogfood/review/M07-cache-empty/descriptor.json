@@ -1,0 +1,6 @@
+{
+  "id": "M07-cache-empty",
+  "file": "src/tools/symbol/call_edges/cache.rs",
+  "find": "        if edges.is_empty() {\n            return Ok(());\n        }\n        let direction",
+  "replace": "        if false {\n            return Ok(());\n        }\n        let direction"
+}

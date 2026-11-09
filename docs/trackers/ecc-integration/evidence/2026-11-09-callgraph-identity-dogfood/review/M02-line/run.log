@@ -1,0 +1,98 @@
+mutation-probe: carried the working tree into the isolated worktree —
+  2 tracked change(s), 2 untracked file(s).
+mutation-probe: ARMED  mode=isolated  file=src/tools/symbol/call_graph/mod.rs  tree=/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity-review.worktrees/mutation-slot-0
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-1 (leased until this command exits)
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity-review.worktrees/mutation-slot-0)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 32.84s
+     Running unittests src/lib.rs (/home/marius/.cache/codescout-gate/slot-1/debug/deps/codescout-1bd12142968308e9)
+
+running 83 tests
+test tools::symbol::call_edges::cache::tests::completed_resolution_reports_corrupt_payload_as_an_error ... ok
+test tools::symbol::call_edges::cache::tests::completed_resolution_does_not_persist_an_empty_analysis ... ok
+test tools::symbol::call_edges::cache::tests::completed_resolution_replaces_and_invalidates_only_its_project ... ok
+test tools::symbol::call_edges::cache::tests::completed_resolution_keys_discriminate_every_identity_dimension ... ok
+test tools::symbol::call_edges::cache::tests::invalidate_file_removes_only_that_files_edges ... ok
+test tools::symbol::call_edges::cache::tests::project_isolation ... ok
+test tools::symbol::call_edges::cache::tests::invalidate_file_clears_stale_entries_three_query_sandwich ... ok
+test tools::symbol::call_edges::resolver::tests::classifies_calls_is_true_only_for_a_language_with_call_kinds ... ok
+test tools::symbol::call_edges::cache::tests::lookup_callees_returns_correct_edges ... ok
+test tools::symbol::call_edges::resolver::tests::count_calls_named_counts_calls_in_python ... ok
+test tools::symbol::call_edges::resolver::tests::count_calls_named_counts_calls_in_typescript ... ok
+test tools::symbol::call_edges::resolver::tests::count_calls_named_counts_function_and_method_calls_in_rust ... ok
+test tools::symbol::call_edges::resolver::tests::count_calls_named_is_none_for_a_language_without_call_kinds ... ok
+test tools::symbol::call_edges::resolver::tests::count_calls_named_ignores_rust_macro_invocations ... ok
+test tools::symbol::call_edges::resolver::tests::enclosing_function_name_rust ... ok
+test tools::symbol::call_edges::resolver::tests::position_to_byte_first_line ... ok
+test tools::symbol::call_edges::resolver::tests::lsp_uri_to_path_round_trips ... ok
+test tools::symbol::call_edges::resolver::tests::position_to_byte_second_line ... ok
+test tools::symbol::call_edges::cache::tests::upsert_then_lookup_round_trip ... ok
+test tools::symbol::call_edges::cache::tests::upsert_is_idempotent ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_callees_via_ts_function_valued_consts ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_callees_via_ts_kotlin_finds_direct_calls ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_callees_via_ts_java_finds_direct_calls ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_callees_via_ts_python_finds_direct_calls ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_callees_via_ts_rust_finds_direct_calls ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_callees_via_ts_typescript_finds_direct_calls ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_callees_via_ts_accepts_the_lsp_language_id_of_react_files ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_one_hop_callees_without_lsp_returns_recoverable_error ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_callers_via_ts_accepts_the_lsp_language_id_of_react_files ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_callers_via_ts_uses_the_grammar_of_the_references_own_file ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_callees_via_ts_uses_the_grammar_of_the_symbols_own_file ... ok
+test tools::symbol::call_edges::ts_classifier::tests::python_call_classifies ... ok
+test tools::symbol::call_edges::ts_classifier::tests::python_identifier_not_in_call_does_not_classify ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_one_hop_uses_lsp_when_available ... ok
+test tools::symbol::call_edges::ts_classifier::tests::rust_call_expression_classifies ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_one_hop_ts_fallback_callers ... ok
+test tools::symbol::call_edges::ts_classifier::tests::rust_type_ref_does_not_classify_as_call ... ok
+test tools::symbol::call_edges::ts_classifier::tests::typescript_call_classifies ... ok
+test tools::symbol::call_edges::ts_classifier::tests::typescript_type_annotation_does_not_classify ... ok
+test tools::symbol::call_edges::resolver::tests::resolve_one_hop_ts_fallback_callers_skips_self_edge ... ok
+test tools::symbol::call_graph::tests::a_cache_error_names_the_store_and_the_step ... ok
+test tools::symbol::call_graph::tests::a_definition_found_within_the_cap_is_not_flagged ... ok
+test tools::symbol::call_graph::tests::a_compiled_twin_of_a_typescript_file_is_not_a_candidate ... ok
+test tools::symbol::call_graph::tests::a_react_seed_walk_examines_react_files ... ok
+test tools::symbol::call_graph::tests::a_rust_walk_does_not_examine_typescript_files ... ok
+test tools::symbol::call_graph::tests::a_seed_language_with_no_definition_parser_is_refused_before_walking ... ok
+test tools::symbol::call_graph::tests::a_seed_language_with_a_grammar_but_no_extractor_is_refused_too ... ok
+test tools::symbol::call_graph::tests::a_symlinked_candidate_outside_the_project_is_counted_not_followed ... ok
+test tools::symbol::call_graph::tests::a_walk_that_admitted_no_candidate_at_all_is_incomplete ... ok
+test tools::symbol::call_graph::tests::a_workspace_walk_stopped_by_its_cap_is_reported_not_passed_off_as_no_such_symbol ... ok
+test tools::symbol::call_graph::tests::a_workspace_walk_that_ends_exactly_on_its_cap_is_a_real_miss ... ok
+test tools::symbol::call_graph::tests::analysis_warnings_preserve_scan_scope_and_bound_details_without_losing_total ... ok
+test tools::symbol::call_graph::tests::call_graph_declares_output_form_text ... ok
+test tools::symbol::call_graph::tests::call_graph_invalid_direction_returns_recoverable_error ... ok
+test tools::symbol::call_graph::tests::a_definition_living_in_a_build_directory_is_found ... ok
+test tools::symbol::call_graph::tests::an_unenterable_directory_makes_a_miss_incomplete ... ok
+test tools::symbol::call_graph::tests::an_unreadable_candidate_file_makes_a_miss_incomplete ... ok
+test tools::symbol::call_graph::tests::call_graph_names_the_files_it_could_not_read_when_it_cannot_place_a_caller ... ok
+test tools::symbol::call_graph::tests::completed_resolutions_do_not_trust_accumulated_partial_edges ... ok
+test tools::symbol::call_graph::tests::completed_resolutions_keep_same_name_definitions_separate ... ok
+test tools::symbol::call_graph::tests::format_compact_carries_the_completeness_warning ... ok
+test tools::symbol::call_graph::tests::format_compact_renders_count_and_files ... ok
+test tools::symbol::call_graph::tests::format_compact_renders_full_mode_edges ... ok
+test tools::symbol::call_graph::tests::format_output_auto_promotes_small_results ... ok
+test tools::symbol::call_graph::tests::format_output_compact_summary_for_large_results ... ok
+test tools::symbol::call_graph::tests::lookup_pos_falls_back_to_ts_same_file_when_ws_symbols_empty ... ok
+test tools::symbol::call_graph::tests::lookup_pos_falls_back_to_ts_workspace_when_def_in_sibling_file ... ok
+test tools::symbol::call_graph::tests::one_hop_parses_each_node_with_its_own_files_grammar_and_caches_the_full_set ... ok
+test tools::symbol::call_graph::tests::call_graph_stays_bare_when_the_walk_for_an_unplaced_caller_finished ... ok
+test tools::symbol::call_graph::tests::only_a_symlink_that_leads_outside_the_project_is_a_gap_for_the_walk ... ok
+test tools::symbol::call_graph::tests::opening_the_cache_in_a_broken_project_names_the_store ... ok
+test tools::symbol::call_graph::tests::the_cap_stops_the_walk_instead_of_only_reporting_it ... ok
+test tools::symbol::call_graph::tests::the_typescript_family_is_one_population_for_the_walk ... ok
+test tools::symbol::call_graph::tests::the_walk_does_not_spend_its_budget_on_vendored_directories ... ok
+test tools::symbol::call_graph::tests::the_walk_prunes_below_the_project_root_not_above_it ... ok
+test tools::symbol::call_graph::traversal::tests::bfs_dedupes_parallel_paths ... ok
+test tools::symbol::call_graph::traversal::tests::bfs_depth_coherent_cap_preserves_full_levels ... ok
+test tools::symbol::call_graph::traversal::tests::bfs_handles_cycle_without_infinite_loop ... ok
+test tools::symbol::call_graph::traversal::tests::bfs_parallelizes_one_hop_within_level ... ok
+test tools::symbol::call_graph::traversal::tests::bfs_reaches_max_depth_then_stops ... ok
+test tools::symbol::call_graph::tests::recoverable_hop_failure_is_disclosed_without_losing_edges_or_warning_on_a_leaf ... ok
+test tools::symbol::call_graph::tests::call_graph_reports_a_caller_it_could_not_place_because_the_walk_hit_its_cap ... ok
+test tools::symbol::call_graph::tests::call_graph_warning_survives_the_overflow_summary_of_a_large_result ... ok
+
+test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 8564 filtered out; finished in 1.10s
+
+mutation-probe: SURVIVED (rc=0, 83 test(s) ran) — no test caught the mutation.
+  Two readings, and they take opposite repairs: the line is UNTESTED (write the test),
+  or it is UNREACHABLE by any test you could write (the code needs a seam first).

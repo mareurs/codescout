@@ -1,0 +1,27 @@
+[
+  {
+    "name": "actual-cold-a",
+    "expected": true,
+    "actual": true
+  },
+  {
+    "name": "wrong-file",
+    "expected": false,
+    "actual": false
+  },
+  {
+    "name": "wrong-callee",
+    "expected": false,
+    "actual": false
+  },
+  {
+    "name": "wrong-depth",
+    "expected": false,
+    "actual": false
+  },
+  {
+    "name": "guide-only-edges",
+    "expected": false,
+    "actual": false
+  }
+]

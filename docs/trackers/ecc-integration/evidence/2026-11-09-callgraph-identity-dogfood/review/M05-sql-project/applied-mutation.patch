@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_edges/cache.rs
++++ src/tools/symbol/call_edges/cache.rs
+@@ -93,7 +93,7 @@
+             Direction::Callees => "callees",
+         };
+         let payload: Option<String> = self.conn.query_row(
+-            "SELECT edges_json FROM call_edge_resolutions WHERE project_id = ?1 AND symbol = ?2 \
++            "SELECT edges_json FROM call_edge_resolutions WHERE ?1 = ?1 AND symbol = ?2 \
+              AND definition_file = ?3 AND definition_line = ?4 AND definition_col = ?5 AND direction = ?6",
+             params![self.project_id, key.symbol, key.file.to_string_lossy(), key.line, key.col, direction],
+             |row| row.get(0),

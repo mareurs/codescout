@@ -1,0 +1,14 @@
+{
+  "managed_documents_checked": 15,
+  "local_markdown_targets_checked": 137,
+  "ledger_entries_checked": [
+    "F-226"
+  ],
+  "foreign_index_blobs_unchanged": 6,
+  "privacy_files_scanned": 172,
+  "privacy_positive_controls": 5,
+  "privacy_hits": 0,
+  "privacy_limits": "Selected credential/private-policy patterns; not universal secret detection. Scanner excludes its deliberate positive literals.",
+  "private_history_ignored_and_untracked": true,
+  "tracked_old_bug_path_absent": true
+}

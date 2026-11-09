@@ -1,0 +1,44 @@
+{
+  "mutation": "M02-line",
+  "descriptor": {
+    "id": "M02-line",
+    "file": "src/tools/symbol/call_graph/mod.rs",
+    "find": "            file: &path,\n            line,\n            col,\n            direction: &direction,",
+    "replace": "            file: &path,\n            line: 0,\n            col,\n            direction: &direction,"
+  },
+  "command": [
+    "./scripts/mutation-probe.sh",
+    "--strict",
+    "--file",
+    "src/tools/symbol/call_graph/mod.rs",
+    "--find",
+    "            file: &path,\n            line,\n            col,\n            direction: &direction,",
+    "--replace",
+    "            file: &path,\n            line: 0,\n            col,\n            direction: &direction,",
+    "--",
+    "./scripts/with-slot.sh",
+    "--slot",
+    "0",
+    "cargo",
+    "test",
+    "--lib",
+    "tools::symbol::call_",
+    "--",
+    "--test-threads=4"
+  ],
+  "started": "2026-11-09T19:14:42.591983+00:00",
+  "finished": "2026-11-09T19:17:18.243377+00:00",
+  "exit_code": 101,
+  "source_before": {
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "src/tools/symbol/call_graph/mod.rs": "906e3c34b06312d2d4e5e8128edd7df2f428d0ffd31e8505eafa314fb9b7ecf5"
+  },
+  "source_after": {
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "src/tools/symbol/call_graph/mod.rs": "906e3c34b06312d2d4e5e8128edd7df2f428d0ffd31e8505eafa314fb9b7ecf5"
+  },
+  "summaries": [
+    "test result: FAILED. 83 passed; 1 failed; 0 ignored; 0 measured; 8564 filtered out; finished in 1.26s",
+    "mutation-probe: KILLED (rc=101, 84 test(s) ran) \u2014 a test caught it."
+  ]
+}

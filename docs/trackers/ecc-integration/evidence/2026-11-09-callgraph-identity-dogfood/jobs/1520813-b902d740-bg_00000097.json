@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000097",
+  "command": "python3 docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-identity-dogfood/recheck_survivors.py",
+  "server_pid": 1520813,
+  "job_pid": 1525048,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T19:14:42.499131741+00:00",
+  "finished_at": "2026-11-09T19:20:59.809032628+00:00",
+  "log_path": "/tmp/codescout-bg-ebOnJQ.log"
+}

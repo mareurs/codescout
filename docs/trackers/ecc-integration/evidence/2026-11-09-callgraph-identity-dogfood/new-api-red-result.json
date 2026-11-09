@@ -1,0 +1,54 @@
+{
+  "label": "new-api-red",
+  "command": [
+    "./scripts/with-slot.sh",
+    "--slot",
+    "0",
+    "cargo",
+    "test",
+    "--lib",
+    "tools::symbol::call_edges::cache::tests::completed_",
+    "--",
+    "--test-threads=4"
+  ],
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity",
+  "started": "2026-11-09T18:54:46.495265+00:00",
+  "finished": "2026-11-09T18:55:41.815477+00:00",
+  "exit_code": 101,
+  "source_before": {
+    "src/tools/symbol/call_graph/mod.rs": "c965415f97186609049069e0519d8aeb3f42540268cbcceba2b218834c69df75",
+    "src/tools/symbol/call_edges/cache.rs": "da3169764c0684e54029034ed0f65d7a05117e3563ef9f7980c17411cc7210d5"
+  },
+  "source_after": {
+    "src/tools/symbol/call_graph/mod.rs": "c965415f97186609049069e0519d8aeb3f42540268cbcceba2b218834c69df75",
+    "src/tools/symbol/call_edges/cache.rs": "da3169764c0684e54029034ed0f65d7a05117e3563ef9f7980c17411cc7210d5"
+  },
+  "summaries": [
+    "error[E0425]: cannot find type `ResolutionKey` in this scope",
+    "error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope",
+    "error[E0433]: cannot find type `Direction` in this scope",
+    "error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope",
+    "error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope",
+    "error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope",
+    "error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope",
+    "error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope",
+    "error[E0433]: cannot find type `Direction` in this scope",
+    "error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope",
+    "error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope"
+  ]
+}

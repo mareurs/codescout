@@ -1,0 +1,222 @@
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-0 (leased until this command exits)
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity)
+error[E0425]: cannot find type `ResolutionKey` in this scope
+   --> src/tools/symbol/call_edges/cache.rs:312:28
+    |
+312 |     fn resolution_key() -> ResolutionKey<'static> {
+    |                            ^^^^^^^^^^^^^ not found in this scope
+
+error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope
+   --> src/tools/symbol/call_edges/cache.rs:313:9
+    |
+313 |         ResolutionKey { symbol: "call", file: Path::new("/project/a.rs"), line: 7, col: 3, direction: &Direction::Callees }
+    |         ^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: cannot find type `Direction` in this scope
+   --> src/tools/symbol/call_edges/cache.rs:313:104
+    |
+313 |         ResolutionKey { symbol: "call", file: Path::new("/project/a.rs"), line: 7, col: 3, direction: &Direction::Callees }
+    |                                                                                                        ^^^^^^^^^ use of undeclared type `Direction`
+    |
+help: consider importing this enum through its public re-export
+    |
+146 +     use crate::tools::symbol::call_edges::Direction;
+    |
+
+error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope
+   --> src/tools/symbol/call_edges/cache.rs:330:13
+    |
+330 |             ResolutionKey { symbol: "other", ..key },
+    |             ^^^^^^^^^^^^^ not found in this scope
+
+error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope
+   --> src/tools/symbol/call_edges/cache.rs:331:13
+    |
+331 |             ResolutionKey { file: Path::new("/project/b.rs"), ..key },
+    |             ^^^^^^^^^^^^^ not found in this scope
+
+error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope
+   --> src/tools/symbol/call_edges/cache.rs:332:13
+    |
+332 |             ResolutionKey { line: 8, ..key },
+    |             ^^^^^^^^^^^^^ not found in this scope
+
+error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope
+   --> src/tools/symbol/call_edges/cache.rs:333:13
+    |
+333 |             ResolutionKey { col: 4, ..key },
+    |             ^^^^^^^^^^^^^ not found in this scope
+
+error[E0422]: cannot find struct, variant or union type `ResolutionKey` in this scope
+   --> src/tools/symbol/call_edges/cache.rs:334:13
+    |
+334 |             ResolutionKey { direction: &Direction::Callers, ..key },
+    |             ^^^^^^^^^^^^^ not found in this scope
+
+error[E0433]: cannot find type `Direction` in this scope
+   --> src/tools/symbol/call_edges/cache.rs:334:41
+    |
+334 |             ResolutionKey { direction: &Direction::Callers, ..key },
+    |                                         ^^^^^^^^^ use of undeclared type `Direction`
+    |
+help: consider importing this enum through its public re-export
+    |
+146 +     use crate::tools::symbol::call_edges::Direction;
+    |
+
+error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:326:26
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `lookup_resolution` not found for this struct
+...
+326 |         assert_eq!(cache.lookup_resolution(&key).unwrap(), None);
+    |                          ^^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:327:15
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `store_resolution` not found for this struct
+...
+327 |         cache.store_resolution(&key, &edges).unwrap();
+    |               ^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:328:26
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `lookup_resolution` not found for this struct
+...
+328 |         assert_eq!(cache.lookup_resolution(&key).unwrap(), Some(edges));
+    |                          ^^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:336:30
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `lookup_resolution` not found for this struct
+...
+336 |             assert_eq!(cache.lookup_resolution(&other).unwrap(), None, "{other:?}");
+    |                              ^^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:338:55
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `lookup_resolution` not found for this struct
+...
+338 |         assert_eq!(EdgeCache::new(&conn, "project-b").lookup_resolution(&key).unwrap(), None);
+    |                                                       ^^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:349:11
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `store_resolution` not found for this struct
+...
+349 |         a.store_resolution(&key, &first).unwrap();
+    |           ^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:350:11
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `store_resolution` not found for this struct
+...
+350 |         a.store_resolution(&key, &replacement).unwrap();
+    |           ^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:351:11
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `store_resolution` not found for this struct
+...
+351 |         b.store_resolution(&key, &first).unwrap();
+    |           ^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:352:22
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `lookup_resolution` not found for this struct
+...
+352 |         assert_eq!(a.lookup_resolution(&key).unwrap(), Some(replacement));
+    |                      ^^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:355:22
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `lookup_resolution` not found for this struct
+...
+355 |         assert_eq!(a.lookup_resolution(&key).unwrap(), None);
+    |                      ^^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:356:22
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `lookup_resolution` not found for this struct
+...
+356 |         assert_eq!(b.lookup_resolution(&key).unwrap(), Some(first));
+    |                      ^^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:364:15
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `store_resolution` not found for this struct
+...
+364 |         cache.store_resolution(&key, &[]).unwrap();
+    |               ^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:365:26
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `lookup_resolution` not found for this struct
+...
+365 |         assert_eq!(cache.lookup_resolution(&key).unwrap(), None);
+    |                          ^^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:367:15
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `store_resolution` not found for this struct
+...
+367 |         cache.store_resolution(&key, &edges).unwrap();
+    |               ^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:368:26
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `lookup_resolution` not found for this struct
+...
+368 |         assert_eq!(cache.lookup_resolution(&key).unwrap(), Some(edges));
+    |                          ^^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `store_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:376:15
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `store_resolution` not found for this struct
+...
+376 |         cache.store_resolution(&key, &[resolution_edge("leaf")]).unwrap();
+    |               ^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+error[E0599]: no method named `lookup_resolution` found for struct `cache::EdgeCache<'a>` in the current scope
+   --> src/tools/symbol/call_edges/cache.rs:378:23
+    |
+ 57 | pub struct EdgeCache<'a> {
+    | ------------------------ method `lookup_resolution` not found for this struct
+...
+378 |         assert!(cache.lookup_resolution(&key).is_err(), "corruption must not become an empty or missing graph");
+    |                       ^^^^^^^^^^^^^^^^^ method not found in `cache::EdgeCache<'_>`
+
+Some errors have detailed explanations: E0422, E0425, E0433, E0599.
+For more information about an error, try `rustc --explain E0422`.
+error: could not compile `codescout` (lib test) due to 26 previous errors

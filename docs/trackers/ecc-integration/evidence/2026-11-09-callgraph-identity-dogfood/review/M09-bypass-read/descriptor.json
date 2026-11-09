@@ -1,0 +1,6 @@
+{
+  "id": "M09-bypass-read",
+  "file": "src/tools/symbol/call_graph/mod.rs",
+  "find": "        if let Some(edges) = cached {\n            return Ok(edges);\n        }",
+  "replace": "        if let Some(_edges) = cached {\n            // mutation: ignore cached completed adjacency\n        }"
+}

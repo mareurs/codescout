@@ -1,0 +1,12 @@
+{
+  "source": "/home/marius/.codex/sessions/2026/11/09/rollout-2026-11-09T10-24-45-01a1bf68-e650-7f20-911e-b53f86597c27.jsonl",
+  "private_snapshot": "/home/marius/work/claude/codescout/.codescout/ecc-callgraph-identity-private-20261109/pre-action-controller-input.jsonl",
+  "bytes": 21439569,
+  "sha256": "e54a90bafa24cb165df3496ded25c91d219fa7fad904a8e2b05dd8dd1367dbc3",
+  "mode": "0600",
+  "cutoff": "before first assistant response to latest exact ok, go user event",
+  "user_event_timestamp": "2026-11-09T18:37:11.893Z",
+  "configured_model": "gpt-6.1-sol",
+  "configured_effort": "high",
+  "limits": "Host transcript history, not a byte-exact provider request or claim that all history was resident. Contains earlier ECC conditioning and solution history; retain privately, exclude solutions/evaluators/skill bodies from future repair candidate input. Future skill-free protocol remains to be specified; no replay ran."
+}

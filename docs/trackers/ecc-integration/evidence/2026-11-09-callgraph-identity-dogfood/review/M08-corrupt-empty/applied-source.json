@@ -1,0 +1,7 @@
+{
+  "root": "/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity-review.worktrees/mutation-slot-0",
+  "hashes": {
+    "src/tools/symbol/call_edges/cache.rs": "f84204f7701b9489f0010c5e3e7f261abc6df941c021941dfa009e83b02334b5",
+    "src/tools/symbol/call_graph/mod.rs": "0f393cac5e562b93eb5e3093424689a9611e771792cf54e8d8f1318274cb9c37"
+  }
+}

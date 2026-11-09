@@ -1,0 +1,101 @@
+{
+  "reviewed_base": "69ffdd12e6d51f4884c0190a1a6c4edeca4289e4",
+  "review_tree": "/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity-review",
+  "candidate_source": {
+    "cache_rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "call_graph_mod_rs": "0f393cac5e562b93eb5e3093424689a9611e771792cf54e8d8f1318274cb9c37"
+  },
+  "baseline": {
+    "passed": 83,
+    "failed": 0,
+    "exit": 0,
+    "evidence": "baseline.log"
+  },
+  "restored_control": {
+    "passed": 83,
+    "failed": 0,
+    "exit": 0,
+    "evidence": "restored-control.log",
+    "source_root_rebound": true
+  },
+  "mutation_population": {
+    "total": 10,
+    "killed": 8,
+    "survived": 2,
+    "inconclusive": 0,
+    "summary": "mutation-summary.json",
+    "followup_parent_population_excluded": true
+  },
+  "strengths": [
+    {
+      "location": "src/tools/symbol/call_graph/mod.rs:423",
+      "text": "Definition lookup precedes completed-cache lookup. The consumer file-key mutation was killed by returned wrong adjacency."
+    },
+    {
+      "location": "src/tools/symbol/call_edges/cache.rs:97",
+      "text": "Completed lookup uses project, symbol, file, line, column and direction; raw projection rows are not imported. SQL project scope and consumer direction mutations were killed."
+    },
+    {
+      "location": "src/tools/symbol/call_edges/cache.rs:191",
+      "text": "Conservative invalidation clears completed snapshots for the current project while preserving raw-row count; omission was killed."
+    },
+    {
+      "location": "src/tools/symbol/call_graph/mod.rs:462",
+      "text": "Recoverable results retain warnings, while fatal resolver errors propagate; empty-cache and corrupt-payload mutations were killed."
+    },
+    {
+      "location": "src/tools/symbol/call_graph/mod.rs:440",
+      "text": "Completed cache reuse remains observable: bypassing read or write was killed by analysis-call count."
+    }
+  ],
+  "findings": [
+    {
+      "id": "R1",
+      "priority": "Important verification gap",
+      "locations": [
+        "src/tools/symbol/call_graph/mod.rs:430",
+        "src/tools/symbol/call_graph/mod.rs:431",
+        "src/tools/symbol/call_graph/mod.rs:2061"
+      ],
+      "text": "Setting ResolutionKey.line=0 or col=0 at the consumer each survived83/0. The existing same-name consumer fixture varies file while keeping coordinates fixed, so API dimension tests do not pin consumer forwarding. This is an observed surviving-mutation result, not an independent claim of a public-tool failure. Parent owns a single same-file coordinate-discrimination strengthening pass and exact mutation rechecks.",
+      "evidence": [
+        "M02-line/descriptor.json",
+        "M02-line/applied-mutation.patch",
+        "M02-line/run.log",
+        "M02-line/restoration.json",
+        "M03-column/descriptor.json",
+        "M03-column/applied-mutation.patch",
+        "M03-column/run.log",
+        "M03-column/restoration.json"
+      ]
+    },
+    {
+      "id": "R2",
+      "priority": "Low; pre-existing; nonblocking for bounded patch",
+      "locations": [
+        "src/tools/symbol/call_edges/resolver.rs:44",
+        "src/tools/symbol/call_edges/resolver.rs:170"
+      ],
+      "text": "resolve_one_hop documentation says outgoing tree-sitter fallback is not viable and returns RecoverableError; resolve_via_ts actually invokes resolve_callees_via_ts. Outside the two changed files; reported to parent without broadening source changes."
+    }
+  ],
+  "declined_to_judge": [
+    "Full declaration-identity BFS: later hops remain keyed by names, and lookup_pos accepts a first workspace-symbol match (call_graph/mod.rs:213); this review does not claim disambiguated deeper traversal.",
+    "External edits outside existing invalidation protocol and mutation/analysis concurrency linearizability.",
+    "LSP index readiness, exhaustive LSP/reference completeness, or performance across large production graphs.",
+    "Independent real MCP cold/warm/restart reproduction or full gate: parent owns those evidence runs. This reviewer directly ran the targeted Rust suite and ten mutations.",
+    "Parent's later84-test candidate: this report is bound to the original83-test hashes and does not merge later rechecks into its ten-mutation population."
+  ],
+  "verdict": "Original reviewed candidate: no additional production defect established in the bounded completed-cache implementation. Integration remains conditional on closing R1 with discriminating red/green evidence and the parent's final source-bound gate/native verification. No second independent review requested.",
+  "ledger_checked": {
+    "relevant_known_bug": "84029483d2895d9b",
+    "path": "docs/issues/2026-11-09-call-graph-generic-call-returns-unrelated-callees.md",
+    "phase0_skipped": false
+  },
+  "artifacts_kept": true,
+  "commits_or_pushes": false,
+  "final_source_hashes": {
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "src/tools/symbol/call_graph/mod.rs": "0f393cac5e562b93eb5e3093424689a9611e771792cf54e8d8f1318274cb9c37"
+  }
+}

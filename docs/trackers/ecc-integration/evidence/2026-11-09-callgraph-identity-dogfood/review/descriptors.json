@@ -1,0 +1,62 @@
+[
+  {
+    "id": "M01-file",
+    "file": "src/tools/symbol/call_graph/mod.rs",
+    "find": "            file: &path,\n            line,\n            col,\n            direction: &direction,",
+    "replace": "            file: &self.root,\n            line,\n            col,\n            direction: &direction,"
+  },
+  {
+    "id": "M02-line",
+    "file": "src/tools/symbol/call_graph/mod.rs",
+    "find": "            file: &path,\n            line,\n            col,\n            direction: &direction,",
+    "replace": "            file: &path,\n            line: 0,\n            col,\n            direction: &direction,"
+  },
+  {
+    "id": "M03-column",
+    "file": "src/tools/symbol/call_graph/mod.rs",
+    "find": "            file: &path,\n            line,\n            col,\n            direction: &direction,",
+    "replace": "            file: &path,\n            line,\n            col: 0,\n            direction: &direction,"
+  },
+  {
+    "id": "M04-direction",
+    "file": "src/tools/symbol/call_graph/mod.rs",
+    "find": "            file: &path,\n            line,\n            col,\n            direction: &direction,",
+    "replace": "            file: &path,\n            line,\n            col,\n            direction: &Direction::Callees,"
+  },
+  {
+    "id": "M05-sql-project",
+    "file": "src/tools/symbol/call_edges/cache.rs",
+    "find": "WHERE project_id = ?1 AND symbol = ?2",
+    "replace": "WHERE ?1 = ?1 AND symbol = ?2"
+  },
+  {
+    "id": "M06-invalidation-omission",
+    "file": "src/tools/symbol/call_edges/cache.rs",
+    "find": "\"DELETE FROM call_edge_resolutions WHERE project_id = ?1\"",
+    "replace": "\"DELETE FROM call_edge_resolutions WHERE project_id = ?1 AND 0\""
+  },
+  {
+    "id": "M07-cache-empty",
+    "file": "src/tools/symbol/call_edges/cache.rs",
+    "find": "        if edges.is_empty() {\n            return Ok(());\n        }\n        let direction",
+    "replace": "        if false {\n            return Ok(());\n        }\n        let direction"
+  },
+  {
+    "id": "M08-corrupt-empty",
+    "file": "src/tools/symbol/call_edges/cache.rs",
+    "find": "                serde_json::from_str(&json).map_err(|error| {\n                    rusqlite::Error::FromSqlConversionFailure(\n                        0,\n                        rusqlite::types::Type::Text,\n                        Box::new(error),\n                    )\n                })",
+    "replace": "                Ok::<Vec<Edge>, rusqlite::Error>(serde_json::from_str(&json).unwrap_or_default())"
+  },
+  {
+    "id": "M09-bypass-read",
+    "file": "src/tools/symbol/call_graph/mod.rs",
+    "find": "        if let Some(edges) = cached {\n            return Ok(edges);\n        }",
+    "replace": "        if let Some(_edges) = cached {\n            // mutation: ignore cached completed adjacency\n        }"
+  },
+  {
+    "id": "M10-bypass-write",
+    "file": "src/tools/symbol/call_graph/mod.rs",
+    "find": ".store_resolution(&key, &edges)",
+    "replace": ".store_resolution(&key, &[])"
+  }
+]

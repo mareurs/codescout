@@ -16,7 +16,7 @@ topic: ecc-integration
 
 ## Scope and provenance
 
-Owned feat/ecc-create-finalization-20261109 branch; only src/librarian/tools/create.rs changes. Inspected create::call, AugmentSpec, artifact::upsert_and_mint_slug/ensure_slug, augmentation::upsert, worktree::ensure_registration and upsert_active. Exact references establish registration consumers; the sibling resolve_write_target transaction was read as a working pattern. A shared older-runtime call_graph on duplicated Rust call names contradicted the inspected body and was excluded as evidence; follow-up84029483d2895d9b is separate.
+Owned feat/ecc-create-finalization-20261109 branch; only src/librarian/tools/create.rs changes. Inspected create::call, AugmentSpec, artifact::upsert_and_mint_slug/ensure_slug, augmentation::upsert, worktree::ensure_registration and upsert_active. Exact references establish registration consumers; the sibling resolve_write_target transaction was read as a working pattern. A shared older-runtime call_graph on duplicated Rust call names contradicted the inspected body and was excluded as evidence; follow-upe5016b19fb0f75da is separate and now archived after the later identity correction.
 
 ### Requirement: successful augmented create persists the requested artifact
 

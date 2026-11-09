@@ -1,0 +1,422 @@
+diff --git a/src/tools/symbol/call_edges/cache.rs b/src/tools/symbol/call_edges/cache.rs
+index ab6d73d6c..51390b7b1 100644
+--- a/src/tools/symbol/call_edges/cache.rs
++++ b/src/tools/symbol/call_edges/cache.rs
+@@ -1,8 +1,8 @@
+ use std::path::Path;
+ 
+-use rusqlite::{params, Connection};
++use rusqlite::{params, Connection, OptionalExtension};
+ 
+-use crate::tools::symbol::call_edges::resolver::{Edge, EdgeSource};
++use crate::tools::symbol::call_edges::resolver::{Direction, Edge, EdgeSource};
+ 
+ /// Applies the `call_edges` DDL to an in-memory (or any) connection.
+ /// Used by tests that need a bare DB without the full `open_db` setup.
+@@ -21,7 +21,17 @@ pub fn apply_schema(conn: &Connection) {
+         );
+         CREATE INDEX IF NOT EXISTS call_edges_caller ON call_edges(project_id, caller_sym);
+         CREATE INDEX IF NOT EXISTS call_edges_callee ON call_edges(project_id, callee_sym);
+-        CREATE INDEX IF NOT EXISTS call_edges_file   ON call_edges(project_id, file);",
++        CREATE INDEX IF NOT EXISTS call_edges_file   ON call_edges(project_id, file);
++        CREATE TABLE IF NOT EXISTS call_edge_resolutions (
++            project_id      TEXT NOT NULL,
++            symbol          TEXT NOT NULL,
++            definition_file TEXT NOT NULL,
++            definition_line INTEGER NOT NULL,
++            definition_col  INTEGER NOT NULL,
++            direction       TEXT NOT NULL,
++            edges_json      TEXT NOT NULL,
++            PRIMARY KEY (project_id, symbol, definition_file, definition_line, definition_col, direction)
++        );",
+     )
+     .expect("apply_schema: DDL failed");
+ }
+@@ -54,6 +64,16 @@ pub fn open_db(project_root: &std::path::Path) -> rusqlite::Result<Connection> {
+     Ok(conn)
+ }
+ 
++/// Identity of one completed analysis, independent of its returned call-site edges.
++#[derive(Clone, Copy, Debug)]
++pub struct ResolutionKey<'a> {
++    pub symbol: &'a str,
++    pub file: &'a Path,
++    pub line: u32,
++    pub col: u32,
++    pub direction: &'a Direction,
++}
++
+ pub struct EdgeCache<'a> {
+     conn: &'a Connection,
+     project_id: &'a str,
+@@ -63,6 +83,57 @@ impl<'a> EdgeCache<'a> {
+     pub fn new(conn: &'a Connection, project_id: &'a str) -> Self {
+         Self { conn, project_id }
+     }
++    /// Only completed results for this exact definition and direction are cache hits.
++    pub fn lookup_resolution(
++        &self,
++        key: &ResolutionKey<'_>,
++    ) -> rusqlite::Result<Option<Vec<Edge>>> {
++        let direction = match key.direction {
++            Direction::Callers => "callers",
++            Direction::Callees => "callees",
++        };
++        let payload: Option<String> = self.conn.query_row(
++            "SELECT edges_json FROM call_edge_resolutions WHERE ?1 = ?1 AND symbol = ?2 \
++             AND definition_file = ?3 AND definition_line = ?4 AND definition_col = ?5 AND direction = ?6",
++            params![self.project_id, key.symbol, key.file.to_string_lossy(), key.line, key.col, direction],
++            |row| row.get(0),
++        ).optional()?;
++        payload
++            .map(|json| {
++                serde_json::from_str(&json).map_err(|error| {
++                    rusqlite::Error::FromSqlConversionFailure(
++                        0,
++                        rusqlite::types::Type::Text,
++                        Box::new(error),
++                    )
++                })
++            })
++            .transpose()
++    }
++
++    /// Replace a successful adjacency; empty/recoverable analyses remain retryable.
++    pub fn store_resolution(
++        &self,
++        key: &ResolutionKey<'_>,
++        edges: &[Edge],
++    ) -> rusqlite::Result<()> {
++        if edges.is_empty() {
++            return Ok(());
++        }
++        let direction = match key.direction {
++            Direction::Callers => "callers",
++            Direction::Callees => "callees",
++        };
++        let payload = serde_json::to_string(edges)
++            .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
++        self.conn.execute(
++            "INSERT OR REPLACE INTO call_edge_resolutions \
++             (project_id, symbol, definition_file, definition_line, definition_col, direction, edges_json) \
++             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
++            params![self.project_id, key.symbol, key.file.to_string_lossy(), key.line, key.col, direction, payload],
++        )?;
++        Ok(())
++    }
+ 
+     pub fn lookup_callers(&self, callee_sym: &str) -> rusqlite::Result<Vec<Edge>> {
+         let mut stmt = self.conn.prepare(
+@@ -118,10 +189,17 @@ impl<'a> EdgeCache<'a> {
+     }
+ 
+     pub fn invalidate_file(&self, file: &Path) -> rusqlite::Result<usize> {
+-        self.conn.execute(
++        let removed = self.conn.execute(
+             "DELETE FROM call_edges WHERE project_id = ?1 AND file = ?2",
+             params![self.project_id, file.to_string_lossy()],
+-        )
++        )?;
++        // A changed caller can affect an incoming result owned by a different file.
++        self.conn.execute(
++            "DELETE FROM call_edge_resolutions WHERE project_id = ?1",
++            params![self.project_id],
++        )?;
++        // Preserve the raw-edge count returned to existing invalidation consumers.
++        Ok(removed)
+     }
+ }
+ 
+@@ -309,4 +387,112 @@ mod tests {
+             "fresh: edge must be absent after invalidation"
+         );
+     }
++    fn resolution_key() -> ResolutionKey<'static> {
++        ResolutionKey {
++            symbol: "call",
++            file: Path::new("/project/a.rs"),
++            line: 7,
++            col: 3,
++            direction: &Direction::Callees,
++        }
++    }
++
++    fn resolution_edge(callee: &str) -> Edge {
++        Edge {
++            caller_sym: "call".into(),
++            callee_sym: callee.into(),
++            file: PathBuf::from("/project/target.rs"),
++            line: 11,
++            col: 9,
++            source: EdgeSource::Lsp,
++        }
++    }
++
++    #[test]
++    fn completed_resolution_keys_discriminate_every_identity_dimension() {
++        let conn = setup_db();
++        let cache = EdgeCache::new(&conn, "project-a");
++        let key = resolution_key();
++        let edges = vec![resolution_edge("leaf")];
++        assert_eq!(cache.lookup_resolution(&key).unwrap(), None);
++        cache.store_resolution(&key, &edges).unwrap();
++        assert_eq!(cache.lookup_resolution(&key).unwrap(), Some(edges));
++        for other in [
++            ResolutionKey {
++                symbol: "other",
++                ..key
++            },
++            ResolutionKey {
++                file: Path::new("/project/b.rs"),
++                ..key
++            },
++            ResolutionKey { line: 8, ..key },
++            ResolutionKey { col: 4, ..key },
++            ResolutionKey {
++                direction: &Direction::Callers,
++                ..key
++            },
++        ] {
++            assert_eq!(cache.lookup_resolution(&other).unwrap(), None, "{other:?}");
++        }
++        assert_eq!(
++            EdgeCache::new(&conn, "project-b")
++                .lookup_resolution(&key)
++                .unwrap(),
++            None
++        );
++    }
++
++    #[test]
++    fn completed_resolution_replaces_and_invalidates_only_its_project() {
++        let conn = setup_db();
++        let a = EdgeCache::new(&conn, "project-a");
++        let b = EdgeCache::new(&conn, "project-b");
++        let key = resolution_key();
++        let first = vec![resolution_edge("first"), resolution_edge("second")];
++        let replacement = vec![resolution_edge("replacement")];
++        a.store_resolution(&key, &first).unwrap();
++        a.store_resolution(&key, &replacement).unwrap();
++        b.store_resolution(&key, &first).unwrap();
++        assert_eq!(a.lookup_resolution(&key).unwrap(), Some(replacement));
++        // A changed caller can affect a cached incoming graph owned by another file.
++        assert_eq!(
++            a.invalidate_file(Path::new("/project/unrelated-caller.rs"))
++                .unwrap(),
++            0
++        );
++        assert_eq!(a.lookup_resolution(&key).unwrap(), None);
++        assert_eq!(b.lookup_resolution(&key).unwrap(), Some(first));
++    }
++
++    #[test]
++    fn completed_resolution_does_not_persist_an_empty_analysis() {
++        let conn = setup_db();
++        let cache = EdgeCache::new(&conn, "project");
++        let key = resolution_key();
++        cache.store_resolution(&key, &[]).unwrap();
++        assert_eq!(cache.lookup_resolution(&key).unwrap(), None);
++        let edges = vec![resolution_edge("later")];
++        cache.store_resolution(&key, &edges).unwrap();
++        assert_eq!(cache.lookup_resolution(&key).unwrap(), Some(edges));
++    }
++
++    #[test]
++    fn completed_resolution_reports_corrupt_payload_as_an_error() {
++        let conn = setup_db();
++        let cache = EdgeCache::new(&conn, "project");
++        let key = resolution_key();
++        cache
++            .store_resolution(&key, &[resolution_edge("leaf")])
++            .unwrap();
++        conn.execute(
++            "UPDATE call_edge_resolutions SET edges_json = 'invalid-json'",
++            [],
++        )
++        .unwrap();
++        assert!(
++            cache.lookup_resolution(&key).is_err(),
++            "corruption must not become an empty or missing graph"
++        );
++    }
+ }
+diff --git a/src/tools/symbol/call_graph/mod.rs b/src/tools/symbol/call_graph/mod.rs
+index 58f02b23b..b120db5bb 100644
+--- a/src/tools/symbol/call_graph/mod.rs
++++ b/src/tools/symbol/call_graph/mod.rs
+@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
+ use async_trait::async_trait;
+ use serde_json::{json, Value};
+ 
+-use crate::tools::symbol::call_edges::cache::EdgeCache;
++use crate::tools::symbol::call_edges::cache::{EdgeCache, ResolutionKey};
+ use crate::tools::symbol::call_edges::resolver::{resolve_one_hop, Direction, Edge, EdgeSource};
+ use crate::tools::symbol::call_graph::traversal::{EdgeWithDepth, OneHopResolver, TraversalResult};
+ use crate::tools::symbol::scan_budget::{is_compiled_twin, scan_walk, ScanBudget, ScanCoverage};
+@@ -35,10 +35,10 @@ async fn open_cache(root: PathBuf) -> anyhow::Result<rusqlite::Connection> {
+         .map_err(|e| cache_error("opening", &for_error, e))
+ }
+ 
+-/// Cache-checking one-hop resolver.
++/// Definition-scoped one-hop resolver.
+ ///
+-/// Checks the SQLite edge cache before calling LSP/ts. On a miss, calls
+-/// `resolve_one_hop`, upserts the results, and returns them.
++/// Resolves the definition before checking its completed SQLite adjacency.
++/// On a miss, calls `resolve_one_hop` and stores successful nonempty results.
+ ///
+ /// `positions` maps symbol names to their definition (path, line, col) so
+ /// that non-seed symbols discovered during BFS traversal can be resolved.
+@@ -419,35 +419,29 @@ fn find_named_def<'a>(
+ #[async_trait]
+ impl OneHopResolver for CachedResolver {
+     async fn one_hop(&self, symbol: &str, direction: Direction) -> anyhow::Result<Vec<Edge>> {
+-        // Cache hit? Lock conn briefly to query, then drop the lock.
++        // Resolve identity before reading completed adjacency, including for the pinned seed.
++        let (path, line, col) = match self.lookup_pos(symbol).await {
++            Some(p) => p,
++            None => return Ok(vec![]),
++        };
++        let key = ResolutionKey {
++            symbol,
++            file: &path,
++            line,
++            col,
++            direction: &direction,
++        };
+         let cached = {
+             let conn = self.conn.lock().unwrap();
+-            let cache = EdgeCache::new(&conn, &self.project_id);
+-            match direction {
+-                Direction::Callers => cache.lookup_callers(symbol),
+-                Direction::Callees => cache.lookup_callees(symbol),
+-            }
+-            .map_err(|e| cache_error("reading", &self.root, e))?
++            EdgeCache::new(&conn, &self.project_id)
++                .lookup_resolution(&key)
++                .map_err(|e| cache_error("reading", &self.root, e))?
+         };
+-        if !cached.is_empty() {
+-            return Ok(cached);
++        if let Some(edges) = cached {
++            return Ok(edges);
+         }
+ 
+-        // Cache miss: resolve the symbol's definition location
+-        let (path, line, col) = match self.lookup_pos(symbol).await {
+-            Some(p) => p,
+-            None => {
+-                // Can't locate the symbol — skip rather than error so BFS
+-                // can continue for the rest of the graph
+-                return Ok(vec![]);
+-            }
+-        };
+-
+-        // Each node is parsed, and its file opened by the language server, with the language
+-        // of ITS OWN file, not the seed's: Phase B places a `.tsx` seed's callee in a `.ts`
+-        // module and the reverse, and the seed's grammar mis-parses the other one (a type
+-        // assertion `<string>x` is a JSX tag to the TSX grammar, JSX is no TypeScript at all),
+-        // silently yielding a partial edge set that `upsert` below would then persist.
++        // Each node is parsed and opened under the language of its own file.
+         let node_language_id = crate::lsp::servers::lsp_language_id(
+             crate::ast::detect_language(&path)
+                 .unwrap_or_else(|| crate::lsp::servers::ast_language_for_lsp_id(&self.lang)),
+@@ -463,13 +457,12 @@ impl OneHopResolver for CachedResolver {
+             line,
+             col,
+             node_language_id,
+-            direction,
++            direction.clone(),
+         )
+         .await
+         {
+             Ok(e) => e,
+             Err(e) if e.downcast_ref::<crate::tools::RecoverableError>().is_some() => {
+-                // Keep useful edges from other hops, but disclose this unanalysed scope.
+                 self.analysis_failures
+                     .lock()
+                     .unwrap()
+@@ -484,6 +477,9 @@ impl OneHopResolver for CachedResolver {
+             cache
+                 .upsert(&edges)
+                 .map_err(|e| cache_error("writing to", &self.root, e))?;
++            cache
++                .store_resolution(&key, &edges)
++                .map_err(|e| cache_error("writing to", &self.root, e))?;
+         }
+         Ok(edges)
+     }
+@@ -2061,6 +2057,73 @@ mod tests {
+             );
+         }
+     }
++    #[tokio::test]
++    async fn completed_resolutions_keep_same_name_definitions_separate() {
++        let dir = tempfile::tempdir().unwrap();
++        let a = dir.path().join("a.rs");
++        let b = dir.path().join("b.rs");
++        std::fs::write(&a, "fn call() { leaf_a(); }\nfn leaf_a() {}\n").unwrap();
++        std::fs::write(&b, "fn call() { leaf_b(); }\nfn leaf_b() {}\n").unwrap();
++        let mut resolver = resolver_over(dir.path(), 100);
++        let mock = Arc::new(MockLspClient::new());
++        resolver.client = mock.clone();
++        for (path, expected) in [(&a, "leaf_a"), (&b, "leaf_b"), (&a, "leaf_a")] {
++            resolver
++                .positions
++                .lock()
++                .unwrap()
++                .insert("call".to_string(), (path.clone(), 0, 3));
++            let edges = resolver.one_hop("call", Direction::Callees).await.unwrap();
++            assert_eq!(edges.len(), 1);
++            assert_eq!(edges[0].caller_sym, "call");
++            assert_eq!(
++                edges[0].callee_sym, expected,
++                "must resolve the requested definition"
++            );
++            assert_eq!(&edges[0].file, path);
++        }
++        assert_eq!(
++            *mock.prepare_call_hierarchy_calls.lock().unwrap(),
++            vec![(a, "rust".to_string()), (b, "rust".to_string())],
++            "each completed definition should be analysed once and reused independently"
++        );
++    }
++
++    #[tokio::test]
++    async fn completed_resolutions_do_not_trust_accumulated_partial_edges() {
++        let dir = tempfile::tempdir().unwrap();
++        let path = dir.path().join("fixture.rs");
++        std::fs::write(
++            &path,
++            "fn call() { leaf_a(); other_a(); }\nfn leaf_a() {}\nfn other_a() {}\n",
++        )
++        .unwrap();
++        let resolver = resolver_over(dir.path(), 100);
++        resolver
++            .positions
++            .lock()
++            .unwrap()
++            .insert("call".to_string(), (path.clone(), 0, 3));
++        // An incoming query for leaf_a (or a legacy cache) can contribute only this edge.
++        EdgeCache::new(&resolver.conn.lock().unwrap(), &resolver.project_id)
++            .upsert(&[crate::tools::symbol::call_edges::resolver::Edge {
++                caller_sym: "call".to_string(),
++                callee_sym: "leaf_a".to_string(),
++                file: path.clone(),
++                line: 0,
++                col: 12,
++                source: crate::tools::symbol::call_edges::resolver::EdgeSource::Ts,
++            }])
++            .unwrap();
++        let edges = resolver.one_hop("call", Direction::Callees).await.unwrap();
++        let mut names: Vec<_> = edges.iter().map(|edge| edge.callee_sym.as_str()).collect();
++        names.sort_unstable();
++        assert_eq!(
++            names,
++            ["leaf_a", "other_a"],
++            "a stored subset is not complete outgoing adjacency"
++        );
++    }
+ } // mod tests
+ 
+ pub mod traversal;

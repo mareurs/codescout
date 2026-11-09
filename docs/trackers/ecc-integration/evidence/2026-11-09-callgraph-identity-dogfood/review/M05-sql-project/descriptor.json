@@ -1,0 +1,6 @@
+{
+  "id": "M05-sql-project",
+  "file": "src/tools/symbol/call_edges/cache.rs",
+  "find": "WHERE project_id = ?1 AND symbol = ?2",
+  "replace": "WHERE ?1 = ?1 AND symbol = ?2"
+}

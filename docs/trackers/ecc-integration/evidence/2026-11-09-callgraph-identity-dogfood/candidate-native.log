@@ -1,0 +1,7 @@
+{"label": "cold-a", "edges": [["call", "other_a", "src/a.rs", 1], ["call", "leaf_a", "src/a.rs", 1]], "matches_expected": true}
+{"label": "warm-b-after-a", "edges": [["call", "other_b", "src/b.rs", 1], ["call", "leaf_b", "src/b.rs", 1]], "matches_expected": true}
+{"label": "restart-b-after-a", "edges": [["call", "other_b", "src/b.rs", 1], ["call", "leaf_b", "src/b.rs", 1]], "matches_expected": true}
+{"label": "cold-b", "edges": [["call", "other_b", "src/b.rs", 1], ["call", "leaf_b", "src/b.rs", 1]], "matches_expected": true}
+{"label": "quiet-leaf", "edges": [], "matches_expected": true}
+{"label": "persisted-legacy-cache-b", "edges": [["call", "other_b", "src/b.rs", 1], ["call", "leaf_b", "src/b.rs", 1]], "matches_expected": true}
+{"cases": 6, "matching": 6, "scorer_controls": 5, "empty_leaf_snapshots": 0}

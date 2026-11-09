@@ -1,0 +1,4 @@
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-0 (leased until this command exits)
+   Compiling codescout-embed v0.2.0 (/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity/crates/codescout-embed)
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.96s

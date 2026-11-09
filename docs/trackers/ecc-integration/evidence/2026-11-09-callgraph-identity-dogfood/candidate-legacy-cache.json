@@ -1,0 +1,29 @@
+{
+  "raw_rows_before": [
+    [
+      "call",
+      "leaf_a",
+      "/home/marius/work/claude/codescout/.codescout/ecc-callgraph-identity-private-20261109/baseline-a-then-b/project/src/a.rs",
+      0,
+      16
+    ],
+    [
+      "call",
+      "other_a",
+      "/home/marius/work/claude/codescout/.codescout/ecc-callgraph-identity-private-20261109/baseline-a-then-b/project/src/a.rs",
+      0,
+      26
+    ]
+  ],
+  "had_snapshot_table_before": false,
+  "completed_resolution_keys_after": [
+    [
+      "call",
+      "/home/marius/work/claude/codescout/.codescout/ecc-callgraph-identity-private-20261109/baseline-a-then-b/project/src/b.rs",
+      0,
+      7,
+      "callees"
+    ]
+  ],
+  "fixture_bytes_unchanged": true
+}

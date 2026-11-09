@@ -1,0 +1,6 @@
+{
+  "id": "M06-invalidation-omission",
+  "file": "src/tools/symbol/call_edges/cache.rs",
+  "find": "\"DELETE FROM call_edge_resolutions WHERE project_id = ?1\"",
+  "replace": "\"DELETE FROM call_edge_resolutions WHERE project_id = ?1 AND 0\""
+}

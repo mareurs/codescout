@@ -1,0 +1,10 @@
+{
+  "head": "4776e44bd49347da8b7c962f72bbed44b6f2fe99",
+  "tree": "7ddf5acae4c8193bbe13313fc68c711ea6803439",
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity-integration-gate",
+  "exit_code": 0,
+  "started": "2026-11-09T19:33:43.270484+00:00",
+  "finished": "2026-11-09T19:41:58.873699+00:00",
+  "head_unchanged": true,
+  "source_clean": true
+}

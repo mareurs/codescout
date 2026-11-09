@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/mod.rs
++++ src/tools/symbol/call_graph/mod.rs
+@@ -478,7 +478,7 @@
+                 .upsert(&edges)
+                 .map_err(|e| cache_error("writing to", &self.root, e))?;
+             cache
+-                .store_resolution(&key, &edges)
++                .store_resolution(&key, &[])
+                 .map_err(|e| cache_error("writing to", &self.root, e))?;
+         }
+         Ok(edges)

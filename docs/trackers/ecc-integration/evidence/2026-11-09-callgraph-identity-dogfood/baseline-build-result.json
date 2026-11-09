@@ -1,0 +1,14 @@
+{
+  "label": "baseline-build",
+  "command": [
+    "cargo",
+    "build",
+    "--bin",
+    "codescout"
+  ],
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity",
+  "head": "69ffdd12e6d51f4884c0190a1a6c4edeca4289e4",
+  "started": "2026-11-09T18:42:15.624824+00:00",
+  "finished": "2026-11-09T18:42:53.933131+00:00",
+  "exit_code": 0
+}

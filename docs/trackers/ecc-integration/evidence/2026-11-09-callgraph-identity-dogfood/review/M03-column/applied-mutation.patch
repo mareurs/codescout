@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/mod.rs
++++ src/tools/symbol/call_graph/mod.rs
+@@ -428,7 +428,7 @@
+             symbol,
+             file: &path,
+             line,
+-            col,
++            col: 0,
+             direction: &direction,
+         };
+         let cached = {

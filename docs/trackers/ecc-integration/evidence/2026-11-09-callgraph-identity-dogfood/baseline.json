@@ -1,0 +1,101 @@
+{
+  "base_commit": "69ffdd12e6d51f4884c0190a1a6c4edeca4289e4",
+  "base_tree": "f1c0f44c76cc02ec677466b6b73320cb989d1e34",
+  "replay_ref": "refs/ecc-replay/callgraph-identity-20261109",
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity",
+  "branch": "feat/ecc-callgraph-identity-20261109",
+  "source_clean_before_edits": true,
+  "inputs": [
+    {
+      "path": "CLAUDE.md",
+      "snapshot": "baseline-inputs/CLAUDE.md.txt",
+      "git_blob": "3433e70f5ae5976271d9a846bbdb13d2e60a8d3c",
+      "sha256": "8f099e3919cee612d3bf1f77cf14f9452b47b32ae896332c26df9caad7a911e3"
+    },
+    {
+      "path": "AGENTS.md",
+      "snapshot": "baseline-inputs/AGENTS.md.txt",
+      "git_blob": "0b64938217094a3d9ee94ef81570b4957c6b83ab",
+      "sha256": "57746f4d46dd836736298ac4fa071303d996d10d81702e1ebf60ca0f905473ab"
+    },
+    {
+      "path": "Cargo.toml",
+      "snapshot": "baseline-inputs/Cargo.toml.txt",
+      "git_blob": "fcee79d0fdc21e629c481c79340406e924f54baf",
+      "sha256": "3d54320f0ba189f6b555367c3cd0a3cac67635d3137f8d18cbfbcba8098f6ac8"
+    },
+    {
+      "path": "Cargo.lock",
+      "snapshot": "baseline-inputs/Cargo.lock.txt",
+      "git_blob": "016a9fbfe73b10f59d26c5f2c4a3700d4c1a5e0b",
+      "sha256": "0a2aa91a947c4a5a76e7c18b0c5ab9cea5692dc5acfd8dfd1e8fe88007bb5be2"
+    },
+    {
+      "path": "src/tools/symbol/call_graph/mod.rs",
+      "snapshot": "baseline-inputs/src__tools__symbol__call_graph__mod.rs.txt",
+      "git_blob": "58f02b23baa0bd255f9194c8601338e86e12dd36",
+      "sha256": "d5b158f5e38d67119e0abb4ffa077e65b083f9dc8d2c439b965c04af713693c8"
+    },
+    {
+      "path": "src/tools/symbol/call_graph/traversal.rs",
+      "snapshot": "baseline-inputs/src__tools__symbol__call_graph__traversal.rs.txt",
+      "git_blob": "f21a4a8c51237dcf0a053a2fc12f13122318f410",
+      "sha256": "bc473130a657df26e1f5c93b4f236a0cda95074f71c52c66b890b993af3dfdcb"
+    },
+    {
+      "path": "src/tools/symbol/call_edges/cache.rs",
+      "snapshot": "baseline-inputs/src__tools__symbol__call_edges__cache.rs.txt",
+      "git_blob": "ab6d73d6c494ba5387e138e0fd00623d69e0feee",
+      "sha256": "56ebf2df660e53d3e99b8a823190c7945ece7f48e2f57eee1e38a2797b65f9ce"
+    },
+    {
+      "path": "src/tools/symbol/call_edges/resolver.rs",
+      "snapshot": "baseline-inputs/src__tools__symbol__call_edges__resolver.rs.txt",
+      "git_blob": "68beee81f0eaaff93c81c60ba012577219be6f13",
+      "sha256": "85fe251ed75644426089a7aaeb4c8aa4b767217403820a4ce83259e0c93d6e68"
+    },
+    {
+      "path": "src/lsp/ops.rs",
+      "snapshot": "baseline-inputs/src__lsp__ops.rs.txt",
+      "git_blob": "a2602e67ff8820f3387d73d77ce576a997e98b23",
+      "sha256": "0e9a5bcf948baf17fc3dc10ac55a3f2bb2d6d78037505d1684f11fae969c532f"
+    },
+    {
+      "path": "src/lsp/mock.rs",
+      "snapshot": "baseline-inputs/src__lsp__mock.rs.txt",
+      "git_blob": "3bbe5d07d3ea00d33a96fdf3ab63e9a70d493877",
+      "sha256": "88901c276d41c02c45a80b59f9290cb785b1a8df1b921a19a164d2cfdee71428"
+    },
+    {
+      "path": "src/symbol/query.rs",
+      "snapshot": "baseline-inputs/src__symbol__query.rs.txt",
+      "git_blob": "5c7a9ddf1cedc42d52f7f4db2d13e179b2d72fa4",
+      "sha256": "806b8e06000a3e9282d66afc4c41357d5598222445798c01520d00d80abb3678"
+    }
+  ],
+  "skills": [
+    {
+      "name": "ecc-spec-miner",
+      "source": "/home/marius/work/claude/claude-plugins.worktrees/ecc-codex-codescout/ecc-codescout/skills/ecc-spec-miner/SKILL.md",
+      "installed": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-spec-miner/SKILL.md",
+      "installed_bytes_match": true,
+      "sha256": "f5badffe1d0cecc4e5aa34cf9ba13cac719c1c5c569aad6ef24ab3a44304121c",
+      "use": "explicit body use; no automatic residency claim"
+    },
+    {
+      "name": "ecc-silent-failure-review",
+      "source": "/home/marius/work/claude/claude-plugins.worktrees/ecc-codex-codescout/ecc-codescout/skills/ecc-silent-failure-review/SKILL.md",
+      "installed": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-silent-failure-review/SKILL.md",
+      "installed_bytes_match": true,
+      "sha256": "3011675999b3fc361e208d4b624cedba24468051315faae1c954643676c6b84d",
+      "use": "explicit body use; no automatic residency claim"
+    }
+  ],
+  "shared_runtime": {
+    "build_id": "9e4db9b94323fb5bc65e3af403904f883459979206077488e448a362291620dc",
+    "pid": 1520813,
+    "exe_deleted": true,
+    "current_source_oracle": false
+  },
+  "scope": "Fresh current-source private-server dogfood. Not causal ECC A/B or no-ECC replay."
+}

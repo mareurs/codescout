@@ -1,0 +1,18 @@
+{
+  "mutation": "M10-bypass-write",
+  "returncode": 101,
+  "before": {
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "src/tools/symbol/call_graph/mod.rs": "0f393cac5e562b93eb5e3093424689a9611e771792cf54e8d8f1318274cb9c37"
+  },
+  "review_after": {
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "src/tools/symbol/call_graph/mod.rs": "0f393cac5e562b93eb5e3093424689a9611e771792cf54e8d8f1318274cb9c37"
+  },
+  "mutation_tree": "/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity-review.worktrees/mutation-slot-0",
+  "mutation_tree_restored": {
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "src/tools/symbol/call_graph/mod.rs": "0f393cac5e562b93eb5e3093424689a9611e771792cf54e8d8f1318274cb9c37"
+  },
+  "restored_exactly": true
+}

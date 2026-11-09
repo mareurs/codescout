@@ -1,0 +1,17 @@
+{
+  "files": {
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "src/tools/symbol/call_graph/mod.rs": "906e3c34b06312d2d4e5e8128edd7df2f428d0ffd31e8505eafa314fb9b7ecf5"
+  },
+  "production_prefix_unchanged": true,
+  "initial_candidate": "candidate-source.json",
+  "observed_initial_survivors": [
+    "review/M02-line/restoration.json",
+    "review/M03-column/restoration.json"
+  ],
+  "exact_rechecks": [
+    "final-M02-line-result.json",
+    "final-M03-column-result.json"
+  ],
+  "module": "final-module-result.json"
+}

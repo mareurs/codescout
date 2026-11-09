@@ -1,0 +1,6 @@
+{
+  "id": "M10-bypass-write",
+  "file": "src/tools/symbol/call_graph/mod.rs",
+  "find": ".store_resolution(&key, &edges)",
+  "replace": ".store_resolution(&key, &[])"
+}

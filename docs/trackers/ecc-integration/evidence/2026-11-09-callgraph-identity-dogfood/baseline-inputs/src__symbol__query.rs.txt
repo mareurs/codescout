@@ -1,0 +1,1154 @@
+//! AST/LSP symbol lookup, classification, validation, and JSON shaping.
+//!
+//! Extracted from `mod.rs` during refactor Phase 1b.2 — no behavior changes.
+//! Read-path only: no file mutation lives here.
+
+use serde_json::{json, Value};
+
+use crate::lsp::SymbolInfo;
+use crate::tools::RecoverableError;
+use crate::util::fs::display_path;
+
+use crate::tools::ToolContext;
+
+/// Returns true if the symbol's kind matches the given filter string.
+/// Unknown filter values return true (no filtering).
+pub fn matches_kind_filter(kind: &crate::lsp::SymbolKind, filter: &str) -> bool {
+    use crate::lsp::SymbolKind as K;
+    match filter {
+        "function" => matches!(kind, K::Function | K::Method | K::Constructor),
+        "class" => matches!(kind, K::Class),
+        "struct" => matches!(kind, K::Struct),
+        "interface" => matches!(kind, K::Interface),
+        "type" => matches!(kind, K::TypeParameter),
+        "enum" => matches!(kind, K::Enum | K::EnumMember),
+        "module" => matches!(kind, K::Module | K::Namespace | K::Package),
+        "constant" => matches!(kind, K::Constant),
+        _ => true,
+    }
+}
+
+/// Remove `Variable`-kind symbols at every level of the tree.
+/// bash-language-server reports all local variables as children of their enclosing
+/// function, flooding the output with low-signal noise. Stripping them leaves only
+/// functions and other structural symbols.
+pub fn filter_variable_symbols(symbols: Vec<Value>) -> Vec<Value> {
+    symbols
+        .into_iter()
+        .filter(|s| s["kind"].as_str() != Some("Variable"))
+        .map(|mut s| {
+            if let Some(children) = s["children"].as_array().cloned() {
+                let filtered = filter_variable_symbols(children);
+                if filtered.is_empty() {
+                    s.as_object_mut().unwrap().remove("children");
+                } else {
+                    s["children"] = json!(filtered);
+                }
+            }
+            s
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn collect_matching(
+    symbols: &[SymbolInfo],
+    name_ok: &dyn Fn(&SymbolInfo) -> bool,
+    include_body: bool,
+    source_code: Option<&str>,
+    depth: usize,
+    show_file: bool,
+    out: &mut Vec<Value>,
+    kind_filter: Option<&str>,
+) {
+    for sym in symbols {
+        let kind_ok = kind_filter.is_none_or(|f| matches_kind_filter(&sym.kind, f));
+        let pushed = name_ok(sym) && kind_ok;
+        if pushed {
+            out.push(symbol_to_json(
+                sym,
+                include_body,
+                source_code,
+                depth,
+                show_file,
+            ));
+        }
+        // Skip recursion into a matched functional unit: its children are
+        // parameters / locals already textually present in the parent body.
+        // Class/Struct/Module/Interface still recurse — their methods are
+        // independent navigation targets.
+        let suppress = pushed
+            && matches!(
+                sym.kind,
+                crate::lsp::SymbolKind::Function
+                    | crate::lsp::SymbolKind::Method
+                    | crate::lsp::SymbolKind::Constructor
+            );
+        if !suppress {
+            // Always recurse so nested matches inside filtered-out parents are still found.
+            collect_matching(
+                &sym.children,
+                name_ok,
+                include_body,
+                source_code,
+                depth,
+                show_file,
+                out,
+                kind_filter,
+            );
+        }
+    }
+}
+
+pub fn symbol_to_json(
+    sym: &SymbolInfo,
+    include_body: bool,
+    source_code: Option<&str>,
+    depth: usize,
+    show_file: bool,
+) -> Value {
+    // Build fields in a reader-friendly order:
+    //   identity  → name, name_path, kind
+    //   location  → file (optional)
+    //   detail    → signature, body (optional)
+    //   structure → children (optional)
+    //   metadata  → start_line, end_line (last — positional info, not primary identity)
+    let mut map = serde_json::Map::new();
+
+    map.insert("name".into(), json!(sym.name));
+    map.insert("symbol".into(), json!(sym.name_path));
+    map.insert("kind".into(), json!(format!("{:?}", sym.kind)));
+
+    if show_file {
+        map.insert("file".into(), json!(display_path(&sym.file)));
+    }
+
+    if let Some(sig) = &sym.detail {
+        map.insert("signature".into(), json!(sig));
+    }
+
+    if include_body {
+        if let Some(src) = source_code {
+            let lines: Vec<&str> = src.lines().collect();
+            // Use the full range (including attributes and doc comments) so
+            // the body matches what replace_symbol would replace.
+            let body_start = crate::symbol::edit::editing_start_line(sym, &lines);
+            let end = (sym.end_line as usize + 1).min(lines.len());
+            if body_start < lines.len() {
+                map.insert("body".into(), json!(lines[body_start..end].join("\n")));
+                // 1-indexed line where body begins — may differ from start_line
+                // when attributes or doc comments precede the declaration.
+                map.insert("body_start_line".into(), json!(body_start + 1));
+            }
+        }
+    }
+
+    if depth > 0 && !sym.children.is_empty() {
+        map.insert(
+            "children".into(),
+            json!(sym
+                .children
+                .iter()
+                .map(|c| symbol_to_json(c, include_body, source_code, depth - 1, show_file))
+                .collect::<Vec<_>>()),
+        );
+    }
+
+    // Line numbers last — positional metadata, not primary identity.
+    map.insert("start_line".into(), json!(sym.start_line + 1));
+    map.insert("end_line".into(), json!(sym.end_line + 1));
+
+    Value::Object(map)
+}
+
+/// Detect degenerate LSP ranges where start_line == end_line but tree-sitter
+/// shows the symbol spans multiple lines. Returns RecoverableError instead of
+/// silently fixing — consistent with "trust LSP, validate, fail loudly".
+///
+/// Skips validation when tree-sitter reports syntax errors (a broken parse
+/// tree under-reports spans) so we don't false-positive on files the user is
+/// mid-edit on.
+pub fn validate_symbol_range(sym: &SymbolInfo) -> anyhow::Result<()> {
+    let Ok(source) = std::fs::read_to_string(&sym.file) else {
+        return Ok(());
+    };
+    let lang = crate::ast::detect_language(&sym.file);
+    if let Some(lang) = lang {
+        if crate::ast::has_syntax_errors(&source, lang) {
+            return Ok(());
+        }
+    }
+    let Ok(ast_syms) = crate::ast::parser::extract_symbols_from_source(&source, lang, &sym.file)
+    else {
+        return Ok(());
+    };
+    if let Some(ast_end) =
+        find_ast_end_line_in(&ast_syms, &sym.name, sym.start_line, Some(&sym.name_path))
+    {
+        if ast_end > sym.end_line {
+            anyhow::bail!(RecoverableError::with_hint(
+                format!(
+                    "LSP returned suspicious range for '{}' (lines {}-{}, but AST shows it spans to line {})",
+                    sym.name,
+                    sym.start_line + 1,
+                    sym.end_line + 1,
+                    ast_end + 1,
+                ),
+                "The LSP server may have returned a selection range instead of the full symbol range. \
+                 Try edit_file for this symbol, or check symbols(path) to verify the range.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// A truncated LSP range that was widened to the tree-sitter AST extent.
+#[derive(Debug, Clone, Copy)]
+pub struct RangeRepair {
+    /// The (too-small) end line the LSP reported. 0-indexed.
+    pub lsp_end_line: u32,
+    /// The end line tree-sitter resolved. 0-indexed, always > `lsp_end_line`.
+    pub ast_end_line: u32,
+}
+
+impl RangeRepair {
+    /// Human-facing note for the tool response. Lines are 1-indexed for display.
+    pub fn warning(&self, name: &str) -> String {
+        format!(
+            "LSP returned a truncated range for '{}' (ended at line {}); repaired from the AST \
+             to line {}. The edit used the AST extent — verify the result.",
+            name,
+            self.lsp_end_line + 1,
+            self.ast_end_line + 1,
+        )
+    }
+}
+
+/// Repair a truncated LSP `end_line` from the tree-sitter AST extent.
+///
+/// Counterpart to [`validate_symbol_range`], which *refuses* a truncated range.
+/// Refusing is right for read paths, but on an EDIT it makes the tool unusable
+/// for the symbol and pushes callers to `edit_file` on a definition body — a
+/// strictly worse corruption risk (BUG-027). So the edit path repairs instead,
+/// and reports the repair; it is never applied silently.
+///
+/// Callers MUST run [`validate_symbol_position`] first. Once the symbol's start
+/// is confirmed correct, the AST end belongs to that same symbol and is
+/// authoritative for the file as it exists on disk — tree-sitter re-parses the
+/// source, whereas the LSP index may lag or (fb330855) hand back a selection
+/// range for an `impl` method.
+///
+/// Returns `Some` when the range was widened. Returns `None` — trusting the LSP
+/// range as-is — when the file is unreadable, has syntax errors (a broken parse
+/// tree under-reports spans), the AST has no matching symbol, or the LSP range
+/// was already correct.
+///
+/// Regression: docs/issues/archive/2026-07-10-edit-code-impl-method-selection-range-refusal.md
+pub fn repair_symbol_range(sym: &mut SymbolInfo) -> Option<RangeRepair> {
+    let source = std::fs::read_to_string(&sym.file).ok()?;
+    let lang = crate::ast::detect_language(&sym.file);
+    if let Some(lang) = lang {
+        if crate::ast::has_syntax_errors(&source, lang) {
+            return None;
+        }
+    }
+    let ast_syms =
+        crate::ast::parser::extract_symbols_from_source(&source, lang, &sym.file).ok()?;
+    let ast_end = find_ast_end_line_in(&ast_syms, &sym.name, sym.start_line, Some(&sym.name_path))?;
+    if ast_end <= sym.end_line {
+        return None;
+    }
+    let repair = RangeRepair {
+        lsp_end_line: sym.end_line,
+        ast_end_line: ast_end,
+    };
+    sym.end_line = ast_end;
+    Some(repair)
+}
+
+/// Validate that the LSP symbol position matches the actual file content.
+///
+/// LSP `start_line` (selectionRange.start) should point at the line containing
+/// the symbol's identifier. Two acceptable cases:
+///
+/// 1. **Happy path** — the name appears on `start_line` directly.
+/// 2. **Lead-in** — `start_line` is on whitespace, closing brackets, comments,
+///    or decorators/attributes (common when an LSP returns a range that begins
+///    a few lines before the actual declaration — see `replace_symbol_trusts_
+///    lsp_start_line` and `…with_paren_close` regression tests). The name must
+///    then appear within a small window below.
+///
+/// **Stale signal (BUG-036):** real code on `start_line` that doesn't contain
+/// the name. Returns `RecoverableError` so `fetch_validated_symbol` retries with
+/// a fresh `did_change`. The old check searched the entire `[range_start..end_line]`
+/// window, which masked staleness when the true declaration appeared later in
+/// the same range.
+///
+/// **I7 (phase-4 2026-04-24):** when `start_line` is a bare `*` block-comment
+/// continuation (a BUG-027-shape position), we additionally require a `/**`
+/// or `/*` opener within a small window *above* it. Without this check, a
+/// failed BUG-027 walk-back leaves the write starting inside the comment,
+/// orphaning the `/**` opener above the newly-written symbol.
+pub fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Result<()> {
+    let sl = sym.start_line as usize;
+    if sl >= lines.len() {
+        return Err(RecoverableError::with_hint(
+            format!(
+                "symbol '{}' at line {} is beyond file end ({} lines)",
+                sym.name,
+                sl + 1,
+                lines.len(),
+            ),
+            "The LSP may have stale data after a prior edit. \
+             Call symbols(path) to refresh, then retry.",
+        )
+        .into());
+    }
+    let start_text = lines[sl];
+    if start_text.contains(&*sym.name) {
+        return Ok(());
+    }
+    // No name on start_line. Acceptable only if start_line is "lead-in" content
+    // (the LSP range began a few lines above the real declaration). Real code
+    // here without the name indicates stale positions.
+    if !is_lead_in_line(start_text) {
+        return Err(RecoverableError::with_hint(
+            format!(
+                "symbol '{}' expected near line {} but that line is unrelated code — \
+                 LSP positions are likely stale after a prior edit",
+                sym.name,
+                sl + 1,
+            ),
+            "The file was recently modified and the LSP hasn't re-indexed yet. \
+             Call symbols(path) to refresh, then retry the operation.",
+        )
+        .into());
+    }
+    // I7: bare `*` block-comment continuation must have a `/**` or `/*` opener
+    // above it. Without one, BUG-027 walk-back will fail, the write will begin
+    // inside the comment, and the opener will be orphaned.
+    let trimmed_start = start_text.trim_start();
+    let is_bare_star_continuation = trimmed_start.starts_with('*')
+        && !trimmed_start.starts_with("/**")
+        && !trimmed_start.starts_with("/*")
+        && trimmed_start != "*/";
+    if is_bare_star_continuation {
+        // Search up to 64 lines above for the opener. Doc comments longer than
+        // that are unrealistic in practice.
+        let lookback_end = sl;
+        let lookback_start = sl.saturating_sub(64);
+        let opener_found = lines[lookback_start..lookback_end]
+            .iter()
+            .rev()
+            .take_while(|l| {
+                // Stop if we leave the comment (any line not starting with `*`,
+                // `/**`, `/*`, or blank inside the comment block).
+                let t = l.trim_start();
+                t.is_empty() || t.starts_with('*') || t.starts_with("/**") || t.starts_with("/*")
+            })
+            .any(|l| {
+                let t = l.trim_start();
+                t.starts_with("/**") || t.starts_with("/*")
+            });
+        if !opener_found {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "symbol '{}' at line {} is on a block-comment continuation ('*') \
+                     with no '/**' or '/*' opener visible above — writing here would \
+                     orphan the comment",
+                    sym.name,
+                    sl + 1,
+                ),
+                "The LSP returned a position inside a comment. Refresh via \
+                 symbols(path) and retry; if this persists, use edit_file \
+                 for this symbol.",
+            )
+            .into());
+        }
+    }
+    // Lead-in: scan a small window below for the name. Six lines covers the
+    // typical `})\n}\n\nfn …` chain plus a comment or blank line of slack.
+    let check_end = (sl + 6).min(lines.len());
+    let found = lines[sl..check_end].iter().any(|l| l.contains(&*sym.name));
+    if !found {
+        return Err(RecoverableError::with_hint(
+            format!(
+                "symbol '{}' expected within 6 lines of line {} but not found — \
+                 LSP positions are likely stale after a prior edit",
+                sym.name,
+                sl + 1,
+            ),
+            "The file was recently modified and the LSP hasn't re-indexed yet. \
+             Call symbols(path) to refresh, then retry the operation.",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// A line is "lead-in" if it cannot reasonably be the declaration site of a symbol —
+/// pure punctuation closers from the preceding symbol, blank lines, comments, or
+/// attributes/decorators above the real keyword line. Used by
+/// `validate_symbol_position` to distinguish acceptable LSP range over-extension
+/// from stale positions pointing at unrelated code.
+pub fn is_lead_in_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    // Comments (line, block, KDoc continuation lines starting with `*`)
+    if trimmed.starts_with("//")
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with('*')
+        || trimmed == "*/"
+    {
+        return true;
+    }
+    // Decorators (Python `@`, Java/Kotlin `@`) and Rust attributes (`#[…]`)
+    if trimmed.starts_with('@') || trimmed.starts_with("#[") || trimmed.starts_with("#!") {
+        return true;
+    }
+    // Pure closing punctuation (`}`, `)`, `]`, `;`, `,`, `?`, `>`) — lead-in from
+    // a preceding declaration's tail (`})`, `});`, `})?;`, `},`, etc.).
+    trimmed
+        .chars()
+        .all(|c| matches!(c, '}' | ')' | ']' | ';' | ',' | '?' | '>' | ' ' | '\t'))
+}
+
+/// Resolve the AST `end_line` for a symbol the LSP reported, keyed primarily on
+/// its unique `name_path` and only secondarily on line proximity.
+///
+/// `name_path` first (no line gate): AST and LSP frequently disagree on a
+/// symbol's *start* line. Kotlin is the sharp case — the AST function node spans
+/// from its first annotation (`@Test`), while kotlin-lsp points at the `fun`
+/// keyword, so a method with N annotation lines shows an N-line start-line gap.
+/// That routinely exceeds any small proximity window, so gating candidate
+/// collection on line proximity *before* consulting `name_path` drops the real
+/// match and makes the caller surface a misleading "AST parse failed". Because
+/// `name_path` encodes the full parent chain it is unique, so when the caller
+/// supplies it and exactly one AST symbol matches (backtick- and suffix-tolerant,
+/// to bridge Kotlin backticks and Rust `impl Type/m` vs `Type/m`), that symbol
+/// wins regardless of line distance.
+///
+/// Line proximity is the *fallback* disambiguator, used only when `name_path` is
+/// absent or matches more than one symbol (e.g. two same-name `fn foo` in
+/// separate `impl` blocks). If proximity can't single out one symbol, returns
+/// `None` rather than guessing.
+///
+/// Regression: docs/issues/archive/2026-06-16-kotlin-edit-code-annotation-line-gap.md
+/// (annotation gap) and docs/issues/archive/2026-05-29-edit-code-kotlin-stale-lsp-range.md
+/// (backtick normalization).
+pub fn find_ast_end_line_in(
+    symbols: &[SymbolInfo],
+    name: &str,
+    lsp_start: u32,
+    name_path: Option<&str>,
+) -> Option<u32> {
+    // All symbols sharing this leaf name, anywhere in the tree — NO line gate.
+    let mut by_name: Vec<&SymbolInfo> = Vec::new();
+    collect_by_name(symbols, name, &mut by_name);
+
+    if by_name.is_empty() {
+        return None;
+    }
+
+    if let Some(np) = name_path {
+        // Exact name_path equality, backtick-tolerant; the suffix branch handles
+        // Rust impl methods where LSP reports `impl Type/m` and AST reports
+        // `Type/m`. Unique match wins immediately, ignoring line proximity.
+        let np_hits: Vec<&&SymbolInfo> = by_name
+            .iter()
+            .filter(|s| {
+                names_match_ignoring_backticks(&s.name_path, np)
+                    || np
+                        .replace('`', "")
+                        .ends_with(&format!("/{}", s.name_path.replace('`', "")))
+            })
+            .collect();
+        if np_hits.len() == 1 {
+            return Some(np_hits[0].end_line);
+        }
+        // 0 hits or ambiguous (>1) → fall through to line-proximity disambiguation.
+    }
+
+    // Fallback: disambiguate same-name siblings by line proximity. Returns the
+    // unique near match, or `None` when proximity can't single one out.
+    let near: Vec<&&SymbolInfo> = by_name
+        .iter()
+        .filter(|s| s.start_line.abs_diff(lsp_start) <= 1)
+        .collect();
+    if near.len() == 1 {
+        Some(near[0].end_line)
+    } else {
+        None
+    }
+}
+
+/// Recursively collect every symbol in the tree whose leaf `name` matches
+/// (backtick-tolerant). No line gate — callers disambiguate via `name_path` or
+/// line proximity. See [`find_ast_end_line_in`] for why the line gate moved out
+/// of collection.
+fn collect_by_name<'a>(symbols: &'a [SymbolInfo], name: &str, out: &mut Vec<&'a SymbolInfo>) {
+    for sym in symbols {
+        if names_match_ignoring_backticks(&sym.name, name) {
+            out.push(sym);
+        }
+        collect_by_name(&sym.children, name, out);
+    }
+}
+
+/// Compare two symbol names, tolerating Kotlin backtick delimiters.
+///
+/// kotlin-language-server strips backtick delimiters from `DocumentSymbol.name`,
+/// so LSP symbols carry `foo bar` while the AST carries `` `foo bar` ``. This
+/// mirrors the normalization in [`symbol_name_matches`] so the AST-end-line and
+/// sibling-guard matchers resolve LSP names the same way the symbol-resolution
+/// path already does. Only pays the allocation cost when a backtick is present.
+///
+/// Regression: docs/issues/archive/2026-05-29-edit-code-kotlin-stale-lsp-range.md.
+pub(crate) fn names_match_ignoring_backticks(a: &str, b: &str) -> bool {
+    a == b || ((a.contains('`') || b.contains('`')) && a.replace('`', "") == b.replace('`', ""))
+}
+
+/// Fetch a symbol by `name_path` with automatic retry on stale LSP positions.
+///
+/// BUG-041: `textDocument/didChange` is a fire-and-forget notification. After
+/// a large write, rust-analyzer (and peers) can take tens of milliseconds to
+/// reindex. The next `documentSymbol` query may return pre-write positions,
+/// and a write based on those offsets corrupts the file.
+///
+/// Strategy: fetch, validate, and retry on failure. Between attempts, fire a
+/// fresh `did_change` (flushes any pending state) and sleep briefly so the
+/// server has a chance to catch up. Caps at `MAX_RETRIES` attempts.
+///
+/// Returns the validated `SymbolInfo` and the full `document_symbols` list it
+/// came from (the caller needs the list for sibling/parent lookups).
+pub async fn fetch_validated_symbol(
+    client: &std::sync::Arc<dyn crate::lsp::LspClientOps>,
+    path: &std::path::Path,
+    lang: &str,
+    name_path: &str,
+    at_line: Option<u32>,
+) -> anyhow::Result<(SymbolInfo, Vec<SymbolInfo>, Option<RangeRepair>)> {
+    // cap-class: NOT_A_CAP — retry ceiling; exhaustion returns the last error rather than a shortened symbol list
+    const MAX_RETRIES: u32 = 3;
+    let mut last_err: Option<anyhow::Error> = None;
+
+    for attempt in 0..MAX_RETRIES {
+        let attempt_result = async {
+            let symbols = client.document_symbols(path, lang).await?;
+            let mut sym = find_unique_symbol_by_name_path_at(&symbols, name_path, at_line)?.clone();
+            let content = std::fs::read_to_string(path)?;
+            let lines: Vec<&str> = content.lines().collect();
+            // Staleness/position check FIRST. A stale LSP range puts `start_line`
+            // on an unrelated line, which validate_symbol_position correctly
+            // diagnoses as staleness and the retry loop can recover from. Running
+            // any range logic before it would surface a misleading range error
+            // ahead of the staleness path. Ordering position first keeps BUG-041's
+            // diagnosis intact. See docs/trackers/bug-fix-session-log.md F-26.
+            validate_symbol_position(&sym, &lines)?;
+            // Position is confirmed, so a too-small `end_line` is a TRUNCATED LSP
+            // range, not staleness — retrying cannot fix it (fb330855: rust-analyzer
+            // can hand back a selection range for an `impl` method, persistently).
+            // Repair from the AST rather than refusing: the old refusal left
+            // edit_code unusable for the symbol and steered callers to `edit_file`
+            // on a definition body, a worse corruption risk (BUG-027). The repair
+            // is returned to the caller and surfaced in the response — never silent.
+            let repair = repair_symbol_range(&mut sym);
+            anyhow::Ok((sym, symbols, repair))
+        }
+        .await;
+
+        match attempt_result {
+            Ok(triple) => return Ok(triple),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt < MAX_RETRIES - 1 {
+                    // Flush any pending state on the server, then wait briefly
+                    // before retrying. Backoff grows so the last attempt has
+                    // the longest window (useful on cold LSPs).
+                    let _ = client.did_change(path).await;
+                    let backoff_ms = 50u64 * (attempt as u64 + 1);
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                }
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("fetch_validated_symbol: no error recorded")))
+}
+
+/// Recursively count how many symbols in `symbols` (walking `children` subtrees)
+/// have the exact `name_path`. Returns 0 or 1 for well-formed source; higher
+/// counts indicate genuine duplicates (e.g. same method in two `impl` blocks).
+pub fn count_symbols_by_name_path(symbols: &[SymbolInfo], name_path: &str) -> usize {
+    symbols
+        .iter()
+        .map(|s| {
+            let self_hit = if s.name_path == name_path { 1 } else { 0 };
+            self_hit + count_symbols_by_name_path(&s.children, name_path)
+        })
+        .sum()
+}
+
+/// When `workspace/symbol` returns a degenerate range, attempt to resolve the
+/// correct range by querying `textDocument/documentSymbol` for the symbol's file.
+/// Returns the corrected SymbolInfo if found, None otherwise.
+pub async fn resolve_range_via_document_symbols(
+    sym: &SymbolInfo,
+    ctx: &ToolContext,
+) -> Option<SymbolInfo> {
+    let lang = crate::ast::detect_language(&sym.file)?;
+    let language_id = crate::lsp::servers::lsp_language_id(lang);
+    let root = ctx
+        .agent
+        .require_project_root_for(ctx.workspace_override.as_deref())
+        .await
+        .ok()?;
+    let mux_override = ctx
+        .agent
+        .lsp_mux_override(ctx.workspace_override.as_deref(), lang)
+        .await;
+    let client = ctx.lsp.get_or_start(lang, &root, mux_override).await.ok()?;
+    let doc_symbols = client.document_symbols(&sym.file, language_id).await.ok()?;
+    find_matching_symbol(&doc_symbols, &sym.name, sym.start_line)
+}
+
+/// Recursively search a document symbol tree for a symbol matching `name`
+/// within ±1 line of `lsp_start`. Returns a clone of the matching SymbolInfo.
+pub fn find_matching_symbol(
+    symbols: &[SymbolInfo],
+    name: &str,
+    lsp_start: u32,
+) -> Option<SymbolInfo> {
+    for sym in symbols {
+        if sym.name == name && sym.start_line.abs_diff(lsp_start) <= 1 {
+            return Some(sym.clone());
+        }
+        if let Some(found) = find_matching_symbol(&sym.children, name, lsp_start) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Check if a symbol matches a query by name or name_path.
+///
+/// Exact match takes priority. Falls back to a prefix check for generic types
+/// so that e.g. `IRepository<T, ID>` matches query `IRepository`, and
+/// `impl Tool for MyStruct<T>` matches query `MyStruct<T>` or `MyStruct`.
+///
+/// Also supports suffix matching at word boundaries (space, `/`, `:`), so
+/// e.g. `SemanticSearch/call` matches `impl Tool for SemanticSearch/call`
+/// and `Book/method` matches `impl Trait for crate::path::Book/method`.
+///
+/// Finally, a segment-wise match (`segments_match_eliding_qualifiers`) covers the
+/// case the whole-string suffix rule structurally cannot: a qualifier elided in a
+/// *middle* segment. See that function.
+///
+/// Kotlin backtick normalization: kotlin-language-server strips backtick
+/// delimiters from `DocumentSymbol.name`, so LSP symbols carry `foo bar`
+/// while the AST (and `symbols()` output) carries `` `foo bar` ``. When
+/// either side contains backticks, both are stripped before comparing so
+/// that a user query copied from `symbols()` resolves correctly in `edit_code`.
+pub fn symbol_name_matches(sym: &SymbolInfo, query: &str) -> bool {
+    if sym.name_path == query || sym.name == query {
+        return true;
+    }
+    // Generic prefix: "Foo<T>" matches query "Foo" when followed by '<', '(', or ' '
+    for candidate in [sym.name.as_str(), sym.name_path.as_str()] {
+        if candidate.starts_with(query) {
+            if let Some(&next) = candidate.as_bytes().get(query.len()) {
+                if matches!(next, b'<' | b'(' | b' ') {
+                    return true;
+                }
+            }
+        }
+    }
+    // Suffix match at word boundary: handles queries like "SemanticSearch/call"
+    // matching "impl Tool for SemanticSearch/call" (boundary = space),
+    // "Book/method" matching "impl Trait for crate::Book/method" (boundary = ':'),
+    // or "Inner/method" matching "Outer/Inner/method" (boundary = '/').
+    for candidate in [sym.name.as_str(), sym.name_path.as_str()] {
+        if candidate.len() > query.len() && candidate.ends_with(query) {
+            let boundary = candidate.as_bytes()[candidate.len() - query.len() - 1];
+            if matches!(boundary, b' ' | b'/' | b':') {
+                return true;
+            }
+        }
+    }
+    // Segment-wise, for a qualifier elided somewhere other than the front.
+    if segments_match_eliding_qualifiers(&sym.name_path, query) {
+        return true;
+    }
+    // Kotlin backtick normalization: strip backtick delimiters and retry exact
+    // match. Only pays the allocation cost when backticks are actually present.
+    if query.contains('`') || sym.name.contains('`') || sym.name_path.contains('`') {
+        let q_norm = query.replace('`', "");
+        for candidate in [sym.name.as_str(), sym.name_path.as_str()] {
+            if candidate.replace('`', "") == q_norm {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Whether `query` matches `candidate` segment-for-segment, tolerating a segment
+/// that elides a qualifier the candidate spells out.
+///
+/// The whole-string suffix rule above cannot reach this case, and the gap is not
+/// hypothetical — it is the reason a name `symbols` printed was not a name
+/// `edit_code` accepted:
+///
+/// ```text
+/// symbols  prints  tests/RecordingStore/project_index_stats
+/// LSP      holds   tests/impl CodeVectorStore for RecordingStore/project_index_stats
+/// ```
+///
+/// The query is not a suffix of the candidate — `tests/` sits in front of the
+/// elided qualifier — so every whole-string rule fails, even though the two name
+/// the same method. Comparing segment by segment puts the elision back inside a
+/// single segment, where the same boundary rule applies.
+///
+/// Two producers disagree here by construction: the AST extractor names an impl
+/// block by its implementing *type* (`src/ast/parser.rs`), while LSP
+/// `documentSymbol` nests methods under an `impl Trait for Type` node. Neither is
+/// wrong; this is where they are reconciled.
+///
+/// Deliberately strict in three ways, each pinned by a test:
+/// * **Same arity.** `A/b` must not match `X/A/b` — that is the suffix rule's job,
+///   and letting arity float here would make `b` match anything ending in `b`.
+/// * **Boundary-anchored.** The elided part must end at a space or `:`, so
+///   `SemanticSearch` matches `impl Tool for SemanticSearch` but not
+///   `FooSemanticSearch`.
+/// * **No generic tolerance.** `Catalog` does not match `impl Catalog<T>` — the
+///   candidate ends in `>`, not the query. That is existing, asserted behaviour.
+fn segments_match_eliding_qualifiers(candidate: &str, query: &str) -> bool {
+    // Single-segment cases are already covered above; requiring a '/' on both
+    // sides also keeps this from re-deciding bare-name matching.
+    if !query.contains('/') || !candidate.contains('/') {
+        return false;
+    }
+    let cand: Vec<&str> = candidate.split('/').collect();
+    let quer: Vec<&str> = query.split('/').collect();
+    if cand.len() != quer.len() {
+        return false;
+    }
+    cand.iter()
+        .zip(quer.iter())
+        .all(|(c, q)| segment_matches_eliding_qualifier(c, q))
+}
+
+/// One segment of `segments_match_eliding_qualifiers`: equal, or the candidate
+/// spells out a qualifier the query dropped (`impl T for Foo` vs `Foo`).
+fn segment_matches_eliding_qualifier(candidate: &str, query: &str) -> bool {
+    if candidate == query {
+        return true;
+    }
+    // `/` is absent by construction (we split on it), so the boundary set is the
+    // two that can precede a type inside one segment: ` ` from `impl T for Foo`
+    // and `:` from `crate::module::Foo`.
+    candidate.len() > query.len()
+        && candidate.ends_with(query)
+        && matches!(
+            candidate.as_bytes()[candidate.len() - query.len() - 1],
+            b' ' | b':'
+        )
+}
+
+#[cfg(test)]
+pub fn find_symbol_by_name_path<'a>(
+    symbols: &'a [SymbolInfo],
+    name_path: &str,
+) -> Option<&'a SymbolInfo> {
+    for sym in symbols {
+        if symbol_name_matches(sym, name_path) {
+            return Some(sym);
+        }
+        if let Some(found) = find_symbol_by_name_path(&sym.children, name_path) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Like [`find_symbol_by_name_path`] but errors on ambiguous matches.
+///
+/// Returns `Ok(&SymbolInfo)` when exactly one symbol matches `name_path`.
+/// Returns `Err(RecoverableError)` when:
+/// - No symbol matches (not found)
+/// - Multiple symbols match (ambiguous bare name) — the error lists all
+///   full `name_path`s so the caller can supply a more specific query.
+///
+/// When multiple candidates match but exactly one has an exact `name_path`
+/// match (e.g. class `Book` vs constructor `Book/Book(...)`), the exact match
+/// wins without raising an ambiguity error.
+///
+/// See [`find_unique_symbol_by_name_path_at`] for the case a more specific
+/// `name_path` cannot resolve: two symbols whose paths are byte-identical.
+pub fn find_unique_symbol_by_name_path<'a>(
+    symbols: &'a [SymbolInfo],
+    name_path: &str,
+) -> anyhow::Result<&'a SymbolInfo> {
+    find_unique_symbol_by_name_path_at(symbols, name_path, None)
+}
+
+/// Whether `line` (1-based, as `symbols` prints it) falls inside `sym`.
+///
+/// `SymbolInfo` line fields are 0-based; the tools print them 1-based. Callers
+/// have the printed form in hand, so that is what `at_line` accepts — converting
+/// here rather than asking every caller to subtract one.
+fn symbol_covers_line(sym: &SymbolInfo, line: u32) -> bool {
+    let (first, last) = (sym.start_line + 1, sym.end_line + 1);
+    (first..=last).contains(&line)
+}
+
+/// [`find_unique_symbol_by_name_path`], plus an optional line to break a tie that
+/// no name can break.
+///
+/// A more specific `name_path` resolves most ambiguity, and that is the first
+/// thing to reach for. It cannot resolve the case this exists for: **two symbols
+/// whose `name_path`s are byte-identical**, which a file gets by holding two
+/// inherent `impl` blocks for one type, or two `#[cfg]`-gated definitions of the
+/// same item. There is no more specific name to give, so `remove` and `replace`
+/// were both unreachable for either one — the only recovery was reverting the
+/// file.
+///
+/// `at_line` is 1-based and matches anywhere inside the symbol's span, not just
+/// its first line. Candidates sharing a `name_path` do not overlap, so a span
+/// match is unambiguous, and being forgiving here matters: the number a caller
+/// has is whatever `symbols` printed, which may be the declaration line, a line
+/// in the body, or the end.
+pub fn find_unique_symbol_by_name_path_at<'a>(
+    symbols: &'a [SymbolInfo],
+    name_path: &str,
+    at_line: Option<u32>,
+) -> anyhow::Result<&'a SymbolInfo> {
+    let mut matches = collect_matching_symbols(symbols, name_path);
+
+    if let Some(line) = at_line {
+        let before: Vec<String> = matches
+            .iter()
+            .map(|s| format!("{} @ {}-{}", s.name_path, s.start_line + 1, s.end_line + 1))
+            .collect();
+        matches.retain(|s| symbol_covers_line(s, line));
+        if matches.is_empty() && !before.is_empty() {
+            // Distinct from plain not-found: the name resolved, the line did not.
+            // Saying so — and listing the spans that DID match — turns a retry into
+            // a copy rather than another search.
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "at_line {line} matched none of the {} symbols named \"{name_path}\": {}",
+                    before.len(),
+                    before.join(", ")
+                ),
+                "Pass a line inside one of the spans listed above, as printed by symbols(). \
+                 Omit at_line to see the ambiguity error instead.",
+            )
+            .into());
+        }
+    }
+
+    match matches.len() {
+        0 => {
+            // Progressive disclosure: when the query contains '/', search by
+            // the leaf segment alone to surface candidates whose parent has
+            // generics or a long impl prefix the caller elided.
+            // e.g. "Catalog/add" → leaf "add" → finds "impl Catalog<T>/add".
+            // Suggestions go in the message (Display only emits message, not hint).
+            let leaf = name_path.rsplit('/').next().unwrap_or(name_path);
+            let message = if leaf != name_path {
+                let suggestions: Vec<String> = collect_matching_symbols(symbols, leaf)
+                    .into_iter()
+                    .take(3)
+                    .map(|s| format!("'{}'", s.name_path))
+                    .collect();
+                if suggestions.is_empty() {
+                    format!("symbol not found: {name_path}")
+                } else {
+                    format!(
+                        "symbol not found: {name_path} — did you mean {}?",
+                        suggestions.join(", ")
+                    )
+                }
+            } else {
+                format!("symbol not found: {name_path}")
+            };
+            Err(RecoverableError::with_hint(
+                message,
+                "Use symbols(path) to list symbols. Trait impl methods use format 'impl Trait for Struct/method'.",
+            )
+            .into())
+        }
+        1 => Ok(matches.into_iter().next().unwrap()),
+        _ => {
+            // Prefer exact name_path match over bare-name match (e.g. class "Book"
+            // vs constructor "Book/Book(...)"). If exactly one candidate has an exact
+            // name_path match, return it without an ambiguity error.
+            let exact: Vec<_> = matches
+                .iter()
+                .copied()
+                .filter(|s| s.name_path == name_path)
+                .collect();
+            if exact.len() == 1 {
+                return Ok(exact.into_iter().next().unwrap());
+            }
+            // Spans are carried in the message because when the paths are identical
+            // they are the ONLY thing that tells the candidates apart — without them
+            // the error lists the same string N times and offers no way forward.
+            let paths: Vec<String> = matches
+                .iter()
+                .map(|s| format!("{} @ {}-{}", s.name_path, s.start_line + 1, s.end_line + 1))
+                .collect();
+            Err(RecoverableError::with_hint(
+                format!(
+                    "ambiguous name_path \"{name_path}\" matches {} symbols: {}",
+                    paths.len(),
+                    paths.join(", ")
+                ),
+                "Re-run with one of the fully-qualified name_paths listed above, copied verbatim — a trait-impl method is addressable as \"impl Trait for Type/method\"; the bare \"Type/method\" form stays ambiguous. If the paths are identical, pass at_line with a line inside the one you mean.",
+            )
+            .into())
+        }
+    }
+}
+
+/// Collect all symbols matching `name_path` (depth-first, including children).
+pub fn collect_matching_symbols<'a>(
+    symbols: &'a [SymbolInfo],
+    name_path: &str,
+) -> Vec<&'a SymbolInfo> {
+    let mut results = Vec::new();
+    for sym in symbols {
+        if symbol_name_matches(sym, name_path) {
+            results.push(sym);
+        }
+        results.extend(collect_matching_symbols(&sym.children, name_path));
+    }
+    results
+}
+#[cfg(test)]
+mod backtick_match_tests {
+    use super::*;
+    use std::path::Path;
+
+    /// Regression for docs/issues/archive/2026-05-29-edit-code-kotlin-stale-lsp-range.md:
+    /// the AST stores Kotlin backtick fn names WITH backticks (pinned by
+    /// `parser::tests::kotlin_backtick_function_names`), while kotlin-lsp reports
+    /// them WITHOUT. `find_ast_end_line_in` must resolve the LSP-style (no-backtick)
+    /// name to the backtick-bearing AST symbol — mirroring the normalization that
+    /// already lives in `symbol_name_matches`.
+    #[test]
+    fn find_ast_end_line_in_resolves_kotlin_lsp_name_without_backticks() {
+        let source =
+            "class MyTest {\n    fun `no penalty when x`() {\n        val a = 1\n    }\n}\n";
+        let ast_syms = crate::ast::parser::extract_symbols_from_source(
+            source,
+            Some("kotlin"),
+            Path::new("Test.kt"),
+        )
+        .unwrap();
+
+        // LSP reports name + name_path WITHOUT backticks; AST has them WITH.
+        let end = find_ast_end_line_in(
+            &ast_syms,
+            "no penalty when x",
+            1, // the `fun` line, 0-based
+            Some("MyTest/no penalty when x"),
+        );
+        assert_eq!(
+            end,
+            Some(3),
+            "LSP name (no backticks) must resolve to AST symbol (backticks); got {end:?}"
+        );
+    }
+
+    /// Regression for docs/issues/archive/2026-06-16-kotlin-edit-code-annotation-line-gap.md:
+    /// a Kotlin test method carrying 2+ annotation lines (`@Test` + `@DisplayName`)
+    /// has an AST start line that points at the FIRST annotation, while kotlin-lsp
+    /// reports the `fun` keyword line. The gap equals the annotation count (here 2),
+    /// which exceeds the ±1 line-proximity tolerance. `find_ast_end_line_in` must
+    /// still resolve the symbol via its unique `name_path`, NOT drop it and surface
+    /// the misleading "AST parse failed".
+    #[test]
+    fn find_ast_end_line_in_bridges_annotation_line_gap() {
+        // fun is 0-based line 3; @Test=1, @DisplayName=2. AST start = 1 (annotation),
+        // kotlin-lsp start = 3 (the `fun` keyword) → gap of 2, beyond ±1.
+        let source = "class MyTest {\n    @Test\n    @DisplayName(\"x\")\n    fun `room conflict fires`() {\n        val a = 1\n    }\n}\n";
+        let ast_syms = crate::ast::parser::extract_symbols_from_source(
+            source,
+            Some("kotlin"),
+            Path::new("Test.kt"),
+        )
+        .unwrap();
+
+        // Sanity: confirm the AST start really is the annotation line (1), not the
+        // `fun` line (3) — i.e. the gap this test exists to bridge is present.
+        fn find<'a>(syms: &'a [SymbolInfo], leaf: &str) -> Option<&'a SymbolInfo> {
+            for s in syms {
+                if s.name.replace('`', "") == leaf {
+                    return Some(s);
+                }
+                if let Some(hit) = find(&s.children, leaf) {
+                    return Some(hit);
+                }
+            }
+            None
+        }
+        let method = find(&ast_syms, "room conflict fires").expect("method in AST");
+        assert_eq!(
+            method.start_line, 1,
+            "AST start should be the first annotation line"
+        );
+
+        // LSP reports start=3 (the `fun` line). Pre-fix this returned None.
+        let end = find_ast_end_line_in(
+            &ast_syms,
+            "room conflict fires",
+            3,
+            Some("MyTest/room conflict fires"),
+        );
+        assert_eq!(
+            end,
+            Some(5),
+            "unique name_path must resolve the symbol despite a 2-line annotation gap; got {end:?}"
+        );
+    }
+
+    /// Regression for docs/issues/archive/2026-06-04-kotlin-ast-drops-nested-classes.md:
+    /// a nested class and a method inside it must resolve to their AST end
+    /// lines. Before the fix the nested class was dropped from the AST tree, so
+    /// `find_ast_end_line_in` returned `None` and `edit_code` refused inserts on
+    /// any nested symbol with the misleading "AST parse failed".
+    #[test]
+    fn find_ast_end_line_in_resolves_nested_kotlin_symbols() {
+        let source =
+                "class Outer {\n    class Inner {\n        fun foo() {\n            val a = 1\n        }\n    }\n}\n";
+        let ast_syms = crate::ast::parser::extract_symbols_from_source(
+            source,
+            Some("kotlin"),
+            Path::new("Test.kt"),
+        )
+        .unwrap();
+
+        // Method inside the nested class: 0-based start line 2, ends at 4 (`}`).
+        let foo_end = find_ast_end_line_in(&ast_syms, "foo", 2, Some("Outer/Inner/foo"));
+        assert_eq!(
+            foo_end,
+            Some(4),
+            "nested method must resolve to its AST end line; got {foo_end:?}"
+        );
+
+        // The nested class itself: start line 1, ends at 5.
+        let inner_end = find_ast_end_line_in(&ast_syms, "Inner", 1, Some("Outer/Inner"));
+        assert_eq!(
+            inner_end,
+            Some(5),
+            "nested class must resolve to its AST end line; got {inner_end:?}"
+        );
+    }
+    /// Audit guard (2026-06-04): the symbol extractor now emits TS `namespace`
+    /// members with `/`-separated name_paths (`Outer/Inner/method`), and the LSP
+    /// path builder (`client.rs`) also joins with `/` — so namespace-nested
+    /// symbols resolve through the name_path tiebreaker. Pins that contract so a
+    /// future separator change can't silently defeat `edit_code` on namespace
+    /// members. (Relates to 2026-06-04-ts-extractor-drops-namespace-abstract-class.)
+    #[test]
+    fn find_ast_end_line_in_resolves_ts_namespace_nested_symbol() {
+        let source = "namespace Outer {\n    export class Inner {\n        method(): void {\n            const a = 1;\n        }\n    }\n}\n";
+        let ast_syms = crate::ast::parser::extract_symbols_from_source(
+            source,
+            Some("typescript"),
+            Path::new("ns.ts"),
+        )
+        .unwrap();
+
+        // method(): 0-based start line 2, body ends at line 4 (`}`).
+        let method_end = find_ast_end_line_in(&ast_syms, "method", 2, Some("Outer/Inner/method"));
+        assert_eq!(
+            method_end,
+            Some(4),
+            "namespace-nested method must resolve to its AST end line; got {method_end:?}"
+        );
+
+        // The namespace itself: start line 0, ends at line 6.
+        let outer_end = find_ast_end_line_in(&ast_syms, "Outer", 0, Some("Outer"));
+        assert_eq!(
+            outer_end,
+            Some(6),
+            "namespace must resolve to its AST end line; got {outer_end:?}"
+        );
+    }
+    /// Regression for the backend-kotlin "separate `*SpanTest.kt` file" convention
+    /// (e.g. `RoomAvailableSpanOverlapTest.kt`, `SchedulingPolicyConstraintsSpanTest.kt`):
+    /// that workaround was born in the pre-fix era when `edit_code` could not splice a
+    /// new method into a top-level Kotlin test class whose `@Test` methods are
+    /// backtick-named. Both `edit_code` insert gates must now handle that shape, so the
+    /// convention is obsolete:
+    ///   1. `find_unique_symbol_by_name_path` (the "symbol not found" gate) resolves the
+    ///      target whether the query carries backticks (as `symbols()` prints them) or
+    ///      not (as kotlin-lsp / a hand-typed query supplies them).
+    ///   2. `find_ast_end_line_in` (the "AST parse failed" insert-after gate) resolves
+    ///      the method's end line from the LSP-style no-backtick name + `fun`-line start.
+    ///
+    /// Targets the LAST method — the natural append point, and the exact operation the
+    /// convention claims is impossible. Live-confirmed fixed on the real project:
+    /// backend-kotlin `usage.db` row 26319 (2026-06-22, sha 46f48231) spliced a new
+    /// `@Test fun` into a backtick test block via `insert`/`after` and returned ok.
+    #[test]
+    fn backtick_test_class_resolves_for_insert_after_last_method() {
+        // Mirrors RoomAvailableConstraintTest: top-level class, single `@Test` per
+        // method, backtick names. 0-based lines: the last method's `@Test` is line 12,
+        // its `fun` line 13, its closing brace line 15.
+        let source = "class RoomAvailableConstraintTest {\n\n    @Test\n    fun `no penalty when room available and lesson within open window`() {\n        val a = 1\n    }\n\n    @Test\n    fun `penalty when room closed all day`() {\n        val b = 2\n    }\n\n    @Test\n    fun `penalty scales with number of unavailable lessons`() {\n        val c = 3\n    }\n}\n";
+        let ast_syms = crate::ast::parser::extract_symbols_from_source(
+            source,
+            Some("kotlin"),
+            Path::new("RoomAvailableConstraintTest.kt"),
+        )
+        .unwrap();
+
+        // Gate 1 (resolution): the backtick query — as copied verbatim from symbols() —
+        // resolves to the last method.
+        let with_ticks = find_unique_symbol_by_name_path(
+            &ast_syms,
+            "RoomAvailableConstraintTest/`penalty scales with number of unavailable lessons`",
+        )
+        .expect("backtick name_path must resolve");
+        // The AST function node spans from its `@Test` annotation (line 12), not the
+        // `fun` line — this is the start-line gap kotlin-lsp's `fun`-line start bridges.
+        assert_eq!(
+            with_ticks.start_line, 12,
+            "AST start should be the @Test line"
+        );
+        assert_eq!(
+            with_ticks.end_line, 15,
+            "AST end should be the method's closing brace"
+        );
+
+        // Gate 1 (resolution): the SAME query WITHOUT backticks (the kotlin-lsp form, or
+        // a hand-typed query) must resolve to the same symbol via backtick normalization.
+        let no_ticks = find_unique_symbol_by_name_path(
+            &ast_syms,
+            "RoomAvailableConstraintTest/penalty scales with number of unavailable lessons",
+        )
+        .expect("no-backtick name_path must resolve to the backtick AST symbol");
+        assert_eq!(no_ticks.start_line, with_ticks.start_line);
+
+        // Gate 2 (insert-after end line): kotlin-lsp reports the `fun` line (13) and a
+        // no-backtick name; find_ast_end_line_in must still return the method's end (15),
+        // not None — None is what do_insert surfaces as the misleading "AST parse failed".
+        let end = find_ast_end_line_in(
+            &ast_syms,
+            "penalty scales with number of unavailable lessons",
+            13,
+            Some("RoomAvailableConstraintTest/penalty scales with number of unavailable lessons"),
+        );
+        assert_eq!(
+            end,
+            Some(15),
+            "insert-after the LAST backtick method must resolve its end line; got {end:?}"
+        );
+    }
+}

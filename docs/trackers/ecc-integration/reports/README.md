@@ -11,6 +11,9 @@ topic: ecc-integration
 ---
 
 # ECC evaluation reports
+- [Call graph identity dogfood — 2026-11-09](2026-11-09-callgraph-identity-dogfood.md): reproduced persisted cross-definition contamination; definition-scoped correction, applied survivor rechecks and local integration.
+- [Call graph identity observed contract](2026-11-09-callgraph-identity-observed.md): bounded completed-adjacency criteria and explicit traversal limits.
+
 
 - [Create finalization dogfood — 2026-11-09](2026-11-09-create-finalization-dogfood.md): catalog failure atomicity, real SQLite RED→GREEN and private MCP controls; review/integration state in report.
 - [Create finalization observed draft](2026-11-09-create-finalization-observed.md): bounded enforcement/contract/evidence inventory.

@@ -1,0 +1,9 @@
+{
+  "base": "69ffdd12e6d51f4884c0190a1a6c4edeca4289e4",
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity",
+  "files": {
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "src/tools/symbol/call_graph/mod.rs": "0f393cac5e562b93eb5e3093424689a9611e771792cf54e8d8f1318274cb9c37"
+  },
+  "patch_sha256": "c44322739e8255c71e306524f6fc9e2b24a235a259997e28af5917c1b641ee9d"
+}

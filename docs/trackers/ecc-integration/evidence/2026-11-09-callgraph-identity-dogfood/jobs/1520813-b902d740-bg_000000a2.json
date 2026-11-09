@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000a2",
+  "command": "env -u CARGO_TARGET_DIR TMPDIR=/home/marius/.cache/codescout-ecc-tmp CODESCOUT_GATE_TMPFS_BASE=off ./scripts/with-slot.sh --slot 0 cargo test --test issue_frontmatter > docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-identity-dogfood/issue-frontmatter.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 3017392,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T19:48:00.603724086+00:00",
+  "finished_at": "2026-11-09T19:49:14.995561387+00:00",
+  "log_path": "/tmp/codescout-bg-GZSKuv.log"
+}

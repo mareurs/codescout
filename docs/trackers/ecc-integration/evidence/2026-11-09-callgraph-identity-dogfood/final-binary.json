@@ -1,0 +1,10 @@
+{
+  "sha256": "d1c064c219c2ad468adf8e5b4644f7dfa45900ae7a5ed711c8601784f41fd944",
+  "snapshot": "/home/marius/work/claude/codescout/.codescout/ecc-callgraph-identity-private-20261109/final-codescout",
+  "source_hashes": {
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "src/tools/symbol/call_graph/mod.rs": "906e3c34b06312d2d4e5e8128edd7df2f428d0ffd31e8505eafa314fb9b7ecf5"
+  },
+  "identical_to_candidate": true,
+  "native_evidence": "candidate-mcp-summary.json"
+}

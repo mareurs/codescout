@@ -1,0 +1,19 @@
+{
+  "label": "candidate-build",
+  "command": [
+    "cargo",
+    "build",
+    "--bin",
+    "codescout"
+  ],
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity",
+  "head": "69ffdd12e6d51f4884c0190a1a6c4edeca4289e4",
+  "source_hashes": {
+    "src/tools/symbol/call_edges/cache.rs": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+    "src/tools/symbol/call_graph/mod.rs": "0f393cac5e562b93eb5e3093424689a9611e771792cf54e8d8f1318274cb9c37"
+  },
+  "source_unchanged": true,
+  "started": "2026-11-09T19:02:38.333812+00:00",
+  "finished": "2026-11-09T19:03:24.001060+00:00",
+  "exit_code": 0
+}

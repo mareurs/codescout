@@ -1,0 +1,328 @@
+[workspace]
+members = [".", "crates/codescout-embed"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+authors = ["Marius Ailinca"]
+repository = "https://github.com/mareurs/codescout"
+homepage = "https://mareurs.github.io/codescout/"
+documentation = "https://mareurs.github.io/codescout/"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+rusqlite = { version = "0.39", features = ["bundled"] }
+sqlite-vec = "0.1"
+
+[package]
+name = "codescout"
+version = "0.15.0"
+edition = "2021"
+description = "High-performance coding agent toolkit MCP server"
+repository = "https://github.com/mareurs/codescout"
+homepage = "https://mareurs.github.io/codescout/"
+documentation = "https://mareurs.github.io/codescout/"
+license = "MIT"
+rust-version = "1.99"
+build = "build.rs"
+exclude = [".codescout/", "docs/", "!docs/PROGRESSIVE_DISCOVERABILITY.md", "!docs/trackers/operator-rules.md", "scripts/", ".github/", "CLAUDE.md"]
+
+[lib]
+name = "codescout"
+path = "src/lib.rs"
+
+[[bin]]
+name = "codescout"
+path = "src/main.rs"
+
+[dependencies]
+fs4 = "0.12"
+same-file = "1.0.6"
+strsim = "0.11"
+# Startup dotenv self-load (non-overriding)
+dotenvy = "0.15"
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# MCP protocol (Rust SDK)
+rmcp = { version = "1.3", features = ["server", "macros", "transport-io", "elicitation", "schemars"] }
+schemars = "1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+toml = "1"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+async-trait = "0.1"
+
+# Sibling crates
+codescout-embed = { path = "crates/codescout-embed", version = "0.2.0" }
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Git integration
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
+
+# Database — SQLite with bundled libsqlite3 (used by call_edges cache +
+# migrate-memories legacy reader).
+rusqlite = { version = "0.39", features = ["bundled"] }
+sqlite-vec = "0.1"
+
+# Retrieval stack client (Qdrant gRPC). Default features drop:
+#  - download_snapshots (pulls reqwest, snapshot API unused)
+#  - generate-snippets  (codegen helper, unused)
+qdrant-client = { version = "1.13", default-features = false, features = ["serde"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "charset", "rustls-no-provider"], optional = true }
+# rustls with ring provider (smaller than default aws-lc-rs ~1.3 MiB). Provider
+# is installed once at process start via rustls::crypto::ring::default_provider().
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std", "logging"], optional = true }
+
+# File system traversal (respects .gitignore)
+walkdir = "2"
+ignore = "0.4"
+globset = "0.4"
+
+# Text / regex
+regex = "1"
+
+# Content hashing (incremental indexing)
+sha2 = "0.10"
+hex = "0.4"
+
+# LSP protocol types
+lsp-types = "0.97"
+
+# URI handling (file:// ↔ path conversion, handles Windows drive letters + percent-encoding)
+url = "2"
+
+# AST parsing (tree-sitter)
+tree-sitter = "0.26"
+
+# HTTP client and local ONNX embeddings are now provided by the codescout-embed crate.
+tree-sitter-rust = "0.24.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-go = "0.25.0"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-java = "0.23.5"
+tree-sitter-kotlin-ng = "1.1.0"
+tree-sitter-html = "0.23"
+tree-sitter-css = "0.23"
+tree-sitter-bash = "0.23"
+libc = "0.2.182"
+
+chrono = { version = "0.4", features = ["serde"] }
+tempfile = "3"
+
+# Dashboard web server (behind "dashboard" feature) and HTTP transport (behind "http" feature)
+axum = { version = "0.8", features = ["json"], optional = true }
+tower-http = { version = "0.6", features = ["cors", "limit", "timeout"], optional = true }
+open = { version = "5", optional = true }
+tokio-util = "0.7"
+uuid = { version = "1.20.0", features = ["v4", "v5"] }
+
+# Poison-free, faster synchronization primitives for short-held locks in async
+# hot paths where std::sync poisoning is a correctness footgun.
+parking_lot = "0.12"
+
+# Librarian dependencies (formerly in crates/librarian-mcp, now dissolved into src/librarian/).
+# All marked optional — they are only used by src/librarian/** which is
+# cfg(feature = "librarian")-gated. When building --no-default-features these
+# crates do not resolve, keeping the lean-build promise documented in [features].
+serde_yml      = { version = "0.0.12", optional = true }
+dirs           = { version = "5",      optional = true }
+pulldown-cmark = { version = "0.13",   optional = true }
+futures        = "0.3"
+ulid           = { version = "1",      optional = true }
+minijinja      = { version = "2", default-features = false, features = ["builtins", "serde"], optional = true }
+jsonschema     = { version = "0.30", default-features = false, optional = true }
+
+# jemalloc is a unix-only C library — autoconf-based build script fails on
+# Windows MSVC. Gated so cargo only resolves it on unix targets; Windows
+# falls back to the default system allocator (see #[cfg(unix)] on GLOBAL in
+# src/main.rs).
+[target.'cfg(unix)'.dependencies]
+tikv-jemallocator = "0.6"
+
+# Windows: direct Win32 process control (OpenProcess/TerminateProcess/
+# GetExitCodeProcess) so terminate_process/process_alive never spawn
+# taskkill/tasklist — process creation is the operation EDR/AV injects into
+# and stalls on this VDI. windows-sys 0.61 is already resolved transitively.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    # Job Objects: used to reap the whole process tree on cancel/timeout.
+    # Killing only the direct child leaves grandchildren (e.g. `sleep` under
+    # `bash -c`) running, which is how a cancelled run_command kept going.
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    # ToolHelp snapshot walk: Windows has no getppid(), so parent_pid() (used
+    # by the rendezvous hook match) finds this process's PROCESSENTRY32W entry
+    # in a full-system snapshot and reads th32ParentProcessID off it.
+    "Win32_System_Diagnostics_ToolHelp",
+    # GetLongPathNameW: the read door expands 8.3 short names (`RUNNER~1`) before it
+    # compares a spelling with its canonical form (`32d5b6837da926fc`).
+    "Win32_Storage_FileSystem",
+] }
+
+[features]
+# `local-embed` is deliberately NOT in `default`. It is opt-in: build with
+# `--features local-embed` to get in-process ONNX embeddings (see below).
+#
+# WHY. `local-embed` statically links ONNX Runtime (`ort-sys`) and the fastembed stack.
+# Measured 2026-11-08 with `cargo build --release -p codescout --bin codescout` (stripped,
+# per `[profile.release]`): 40.3 MiB without `local-embed`, 61.9 MiB with it. That is
+# 21.6 MiB, or 53%, larger. `cargo bloat --release --crates` attributes the largest single
+# share, 12.3 MiB of `.text`, to `ort_sys`. `ort` also publishes no prebuilt for
+# `x86_64-pc-windows-gnu`, so a default that includes it cannot build there
+# (`local-embed-dynamic` exists for that reason), and its native build script is what
+# EDR-managed machines block. Most deployments reach the embedder over HTTP
+# (`remote-embed`, always on) and never load the ONNX code that was being linked in.
+#
+# WHAT THIS COSTS, stated because it is real. `default_embed_model()` still returns
+# `local:AllMiniLML6V2Q`, so a default build indexing a project with no `[embeddings]`
+# config and no `CODESCOUT_EMBEDDER_URL` cannot construct its embedder. It fails at
+# index time with a recoverable error whose hint names both ways out: set
+# `[embeddings].url`, or rebuild with `--features local-embed`
+# (`RetrievalClient::build_embedder`, src/retrieval/client.rs; pinned by
+# `a_default_build_fails_on_the_default_model_with_both_remedies` there). That is the
+# failure 2026-09-17 fixed by putting `local-embed` into `default`; this reverses that
+# ruling on purpose, with the failure now actionable instead of misleading.
+# docs/adrs/2026-11-08-local-embed-is-opt-in.md has the full account.
+#
+# TO ACTIVATE: `cargo build --release --features local-embed`, or
+# `cargo install --path . --features local-embed`. For a Windows host that blocks the
+# ONNX build script use `--features local-embed-dynamic` instead (runtime-loaded
+# onnxruntime.dll). The two are mutually exclusive: pick one, never both
+# (crates/codescout-embed/src/lib.rs `compile_error!`).
+default = ["remote-embed", "http", "librarian"]
+# Embedded librarian (workspace doc/spec/plan index). Compiled in by
+# default for dev; turn off for production publishes via `--no-default-features`.
+# Runtime registration is **enabled by default** when compiled in.
+# Opt out via `LIBRARIAN_ENABLED=0` env or
+# `[librarian] enabled = false` in `<project>/.codescout/project.toml`.
+librarian = [
+    "dep:serde_yml",
+    "dep:dirs",
+    "dep:pulldown-cmark",
+    "dep:ulid",
+    "dep:minijinja",
+    "dep:jsonschema",
+]
+dashboard = ["dep:axum", "dep:tower-http", "dep:open"]
+http = ["dep:axum", "dep:tower-http", "rmcp/transport-streamable-http-server"]
+# Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
+remote-embed = ["codescout-embed/remote-embed", "dep:reqwest", "dep:rustls"]
+# Server retrieval stack: the Qdrant gRPC client (the heavy dep — tonic/prost/
+# gRPC) plus the hybrid sparse + reranker query path. With this OFF, the lean
+# lite stack (in-process sqlite-vec + remote OpenAI dense) is the only code/memory
+# backend and the binary drops qdrant-client entirely. See
+# docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md.
+# `remote-embed` is not decoration here: this stack's own reranker leg is HTTP
+# over reqwest, and `from_config_only` (server-stack-gated) constructs both
+# `EmbedderHttp` and `RerankerHttp`. Without it, `--no-default-features
+# --features server-stack` compiles those call sites against configured-out types.
+server-stack = ["dep:qdrant-client", "remote-embed"]
+# Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
+# OPT-IN: not in `default` (see the comment on `default` for why and how to turn it on).
+# First use downloads the chosen model (~20-300MB) to <user cache dir>/codescout/fastembed
+# (FASTEMBED_CACHE_DIR overrides; HF_HOME, when set, replaces both).
+local-embed = ["codescout-embed/local-embed"]
+# Same, but via runtime-loaded onnxruntime.dll (windows-gnu / custom ONNX). The
+# caller supplies the DLL at runtime (ORT_DYLIB_PATH); see codescout-embed.
+local-embed-dynamic = ["codescout-embed/local-embed-dynamic"]
+# Local embedding via candle (HuggingFace Rust ML — adds significant compile time)
+# candle-embed = ["dep:candle-core", "dep:candle-transformers", "dep:candle-nn", "dep:hf-hub", "dep:tokenizers"]
+
+# E2E tests — require real LSP servers installed
+e2e = ["e2e-rust", "e2e-python", "e2e-typescript", "e2e-kotlin", "e2e-java"]
+e2e-rust = []       # needs: rust-analyzer
+e2e-python = []     # needs: pyright-langserver
+e2e-typescript = [] # needs: typescript-language-server
+e2e-kotlin = []     # needs: kotlin-lsp
+e2e-java = []       # needs: jdtls
+# Retrieval stack E2E tests — require live Qdrant + TEI/Ollama (see docker-compose.yml)
+retrieval-e2e = []
+
+[profile.dev]
+opt-level = 0
+debug = 1
+
+[profile.dev.build-override]
+opt-level = 3
+
+# `build_id_of` (src/retrieval/index_state.rs) hashes the whole running test binary, ~402 MB,
+# once per process. At opt-level 0 that cost 11.8 s in every test that reaches it under nextest.
+# Measured 2026-11-01 on tools::config::tests::project_status_compact_shape: 11.815 s -> 0.564 s.
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+# LTO off: measured 2026-07-02 (W-1, docs/trackers/perf-windows-session-log.md) —
+# thin-LTO cost ~33% of every dev-loop rebuild (18.3s -> 12.3s without it) and the
+# MCP server is I/O/LSP-bound, not codegen-bound. Re-run the W-1 gate before
+# restoring thin-LTO (e.g. behind a pre-ship-only alias).
+lto = false
+codegen-units = 16
+strip = true
+# Abort on panic rather than unwind — prevents a future panic from leaving the
+# MCP server in a half-alive state where the process runs but no responses are
+# sent. With abort, any panic kills the process immediately and Claude Code
+# triggers a clean reconnect via `/mcp`. (BUG-021 investigation, 2026-03-03)
+panic = "abort"
+
+[dev-dependencies]
+tempfile = "3"
+temp-env = { version = "0.3", features = ["async_closure"] }
+tower = "0.5"
+filetime = "0.2"
+mockito = "1"
+tokio = { version = "1", features = ["test-util"] }
+assert_cmd = "2"
+predicates = "3"
+serial_test = "3.4.0"
+
+# Integration tests that depend on the librarian feature. cargo skips these
+# binaries entirely when --no-default-features is used.
+[[test]]
+name = "audit_doc_refs"
+path = "tests/audit_doc_refs.rs"
+required-features = ["librarian"]
+
+[[test]]
+name = "cli_doc"
+path = "tests/cli_doc.rs"
+required-features = ["librarian"]
+
+# The harness for tests/librarian/. Declared rather than auto-discovered because
+# cargo only auto-discovers tests/*.rs -- these files were real targets at
+# crates/librarian-mcp/tests/*.rs until d48bf992 (2026-05-16) moved them one
+# directory deeper, and cargo silently stopped compiling them. See
+# tests/librarian/main.rs, which is also where new modules must be declared.
+[[test]]
+name = "librarian"
+path = "tests/librarian/main.rs"
+required-features = ["librarian"]
+
+# Spawns the real binary against a scratch librarian runtime and observes the two hooks the
+# server installs. Needs the librarian feature on BOTH sides: the binary must register the
+# `doc` tool, and the test reads the catalog schema.
+[[test]]
+name = "server_installs_librarian_hooks"
+path = "tests/server_installs_librarian_hooks.rs"
+required-features = ["librarian"]

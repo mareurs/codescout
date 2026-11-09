@@ -1,0 +1,6 @@
+{
+  "id": "M04-direction",
+  "file": "src/tools/symbol/call_graph/mod.rs",
+  "find": "            file: &path,\n            line,\n            col,\n            direction: &direction,",
+  "replace": "            file: &path,\n            line,\n            col,\n            direction: &Direction::Callees,"
+}

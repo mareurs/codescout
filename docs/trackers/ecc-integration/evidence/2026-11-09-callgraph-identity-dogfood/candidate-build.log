@@ -1,0 +1,20 @@
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-0 (leased until this command exits)
+   Compiling tokio v1.50.0
+   Compiling bstr v1.12.1
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity)
+   Compiling globset v0.4.18
+   Compiling ignore v0.4.25
+   Compiling tokio-util v0.7.18
+   Compiling tower v0.5.3
+   Compiling tokio-rustls v0.26.4
+   Compiling tokio-stream v0.1.18
+   Compiling h2 v0.4.13
+   Compiling rmcp v1.3.0
+   Compiling tower-http v0.6.8
+   Compiling hyper v1.8.1
+   Compiling hyper-util v0.1.20
+   Compiling hyper-rustls v0.27.7
+   Compiling axum v0.8.8
+   Compiling reqwest v0.13.2
+   Compiling codescout-embed v0.2.0 (/home/marius/work/claude/codescout/.worktrees/ecc-callgraph-identity/crates/codescout-embed)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 45.28s

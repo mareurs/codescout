@@ -1,0 +1,13 @@
+--- src/tools/symbol/call_graph/mod.rs
++++ src/tools/symbol/call_graph/mod.rs
+@@ -437,8 +437,8 @@
+                 .lookup_resolution(&key)
+                 .map_err(|e| cache_error("reading", &self.root, e))?
+         };
+-        if let Some(edges) = cached {
+-            return Ok(edges);
++        if let Some(_edges) = cached {
++            // mutation: ignore cached completed adjacency
+         }
+ 
+         // Each node is parsed and opened under the language of its own file.

@@ -1,0 +1,2066 @@
+//! `call_graph` — transitive call graph for a symbol.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use serde_json::{json, Value};
+
+use crate::tools::symbol::call_edges::cache::EdgeCache;
+use crate::tools::symbol::call_edges::resolver::{resolve_one_hop, Direction, Edge, EdgeSource};
+use crate::tools::symbol::call_graph::traversal::{EdgeWithDepth, OneHopResolver, TraversalResult};
+use crate::tools::symbol::scan_budget::{is_compiled_twin, scan_walk, ScanBudget, ScanCoverage};
+use crate::tools::{OutputForm, Tool, ToolContext};
+
+/// A SQLite failure such as "disk I/O error" names neither the store nor the step. This puts both
+/// in the message and keeps the cause, so the caller can tell which file failed (bug
+/// `cd85dbae70c76670`). The path is joined one segment at a time so that every separator is the
+/// platform's own; a joined `".codescout/call_edges.db"` kept its `/` on Windows (bug
+/// `1ca433a98628cd17`).
+fn cache_error(step: &str, root: &std::path::Path, e: rusqlite::Error) -> anyhow::Error {
+    anyhow::anyhow!(
+        "call_graph: {step} the call-edge cache at {} failed: {e}",
+        root.join(".codescout").join("call_edges.db").display()
+    )
+}
+
+/// Opens the call-edge cache on a blocking thread: `open_db` does filesystem I/O (mkdir, the
+/// SQLite open, PRAGMA and DDL migrations) that must not run on the async executor.
+async fn open_cache(root: PathBuf) -> anyhow::Result<rusqlite::Connection> {
+    let for_error = root.clone();
+    tokio::task::spawn_blocking(move || crate::tools::symbol::call_edges::cache::open_db(&root))
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {e}"))?
+        .map_err(|e| cache_error("opening", &for_error, e))
+}
+
+/// Cache-checking one-hop resolver.
+///
+/// Checks the SQLite edge cache before calling LSP/ts. On a miss, calls
+/// `resolve_one_hop`, upserts the results, and returns them.
+///
+/// `positions` maps symbol names to their definition (path, line, col) so
+/// that non-seed symbols discovered during BFS traversal can be resolved.
+/// The seed position is pre-populated by the caller; subsequent positions are
+/// discovered lazily via `workspace_symbols`.
+struct CachedResolver {
+    conn: Arc<Mutex<rusqlite::Connection>>,
+    project_id: String,
+    client: Arc<dyn crate::lsp::ops::LspClientOps>,
+    lang: String,
+    /// Project root for the workspace-wide tree-sitter fallback (Phase B).
+    root: PathBuf,
+    /// sym_name → (definition path, line, col)
+    positions: Mutex<HashMap<String, (PathBuf, u32, u32)>>,
+    /// Symbols whose definition could not be resolved via LSP or any
+    /// tree-sitter fallback. Cached so BFS doesn't re-scan the workspace
+    /// for the same unresolvable identifier on every hop.
+    not_found: Mutex<std::collections::HashSet<String>>,
+    /// File cap for the Phase B workspace walk. [`MAX_WORKSPACE_FILES_SCAN`] in
+    /// production; a field so the boundary can be driven without thousands of files.
+    workspace_scan_cap: usize,
+    /// Symbols whose Phase B walk did not cover the project: the cap stopped it with
+    /// candidate files left, or a candidate file could not be read or parsed, or a
+    /// directory could not be entered. Such a symbol is also in `not_found`, but that set
+    /// means "no file defines it" only for symbols NOT listed here: for these the
+    /// definition may exist where the walk did not look, and the edges beyond them are
+    /// missing from the graph, not absent.
+    scan_incomplete: Mutex<std::collections::BTreeSet<String>>,
+    /// What those walks failed to cover (see [`ScanCoverage::merge`]).
+    scan_coverage: Mutex<ScanCoverage>,
+    /// Recoverable failures after locating a node: empty edges do not prove absence.
+    analysis_failures: Mutex<std::collections::BTreeSet<String>>,
+}
+
+/// Hard cap on files the Phase B workspace walk examines before giving up. Set so a
+/// typical project (1k–10k files) completes well under the MCP 60 s ceiling while a
+/// monorepo stops short instead of stalling the call. The cap is a performance guard and
+/// stays; what a walk it stops must do is say so ([`WorkspaceScan::Incomplete`]).
+// cap-class: RESULT_CAP call_graph.workspace_files_scan — probed
+const MAX_WORKSPACE_FILES_SCAN: usize = 5_000;
+
+/// Outcome of the Phase B workspace walk. The walk used to return `Option`, whose `None`
+/// carried both "no file defines it" and "the walk did not look everywhere".
+enum WorkspaceScan {
+    Found((PathBuf, u32, u32)),
+    /// The walk covered every candidate (see [`ScanCoverage::is_complete`]) and no file
+    /// defines the symbol: a trustworthy miss.
+    NotFound,
+    /// The walk did not cover the project — the cap stopped it, a candidate could not be
+    /// read or parsed, or a directory could not be entered — so a miss is unconfirmed.
+    Incomplete(ScanCoverage),
+}
+
+/// The `completeness_warning` for a graph in which some node's definition could not be
+/// located because the fallback source walk did not cover the project: the cap stopped it,
+/// a candidate file could not be read or parsed, or a directory could not be entered.
+/// `None` when no walk fell short (a trustworthy "unresolvable" stays unremarked — ADR
+/// 2026-08-27 clause 2).
+///
+/// States what is proven: for these symbols the walk fell short in the stated way and
+/// their edges were not followed — not that the symbols are defined where it did not look.
+fn scan_incomplete_warning(
+    symbols: &std::collections::BTreeSet<String>,
+    coverage: &ScanCoverage,
+) -> Option<String> {
+    if symbols.is_empty() {
+        return None;
+    }
+    let gap = coverage.describe()?;
+    const SHOWN: usize = 5;
+    let named: Vec<String> = symbols
+        .iter()
+        .take(SHOWN)
+        .map(|s| format!("`{s}`"))
+        .collect();
+    let more = symbols.len().saturating_sub(SHOWN);
+    let more = if more > 0 {
+        format!(" (+{more} more)")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "the language server could not place {} symbol(s) — {}{more} — and the fallback source walk {gap}, so their edges were not followed and this graph may be incomplete. Corroborate with `references` or grep before treating a missing caller/callee as absent.",
+        symbols.len(),
+        named.join(", "),
+    ))
+}
+/// How many unplaced symbols the result lists by name. The full set can be as large as
+/// the graph and counts toward the size that decides whether the result is buffered, so
+/// the list is bounded and the total travels beside it.
+const SCAN_INCOMPLETE_LISTED: usize = 20;
+
+/// Put the walk-fell-short disclosure into a `call_graph` result: the
+/// `completeness_warning` (when any walk fell short), a bounded list of the symbols, and
+/// their total. Leaves `out` untouched when every walk covered the project.
+fn attach_scan_incomplete(
+    out: &mut Value,
+    incomplete: &std::collections::BTreeSet<String>,
+    coverage: &ScanCoverage,
+) {
+    let Some(warning) = scan_incomplete_warning(incomplete, coverage) else {
+        return;
+    };
+    out["completeness_warning"] = json!(warning);
+    out["scan_incomplete_symbols"] = json!(incomplete
+        .iter()
+        .take(SCAN_INCOMPLETE_LISTED)
+        .collect::<Vec<_>>());
+    out["scan_incomplete_total"] = json!(incomplete.len());
+}
+/// Merge analysis failures with any definition-walk disclosure through the consumer's
+/// existing warning field. Limit the displayed list while retaining its actual total.
+fn attach_analysis_failures(out: &mut Value, failures: &std::collections::BTreeSet<String>) {
+    if failures.is_empty() {
+        return;
+    }
+    const SHOWN: usize = 5;
+    let details = failures
+        .iter()
+        .take(SHOWN)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("; ");
+    let more = failures.len().saturating_sub(SHOWN);
+    let suffix = if more > 0 {
+        format!(" (+{more} more)")
+    } else {
+        String::new()
+    };
+    let warning = format!(
+        "call_graph could not analyze {} hop(s) — {details}{suffix} — so this graph may be incomplete; missing edges in those scopes do not establish absence.",
+        failures.len()
+    );
+    let combined = match out["completeness_warning"].as_str() {
+        Some(existing) => format!("{existing}\n{warning}"),
+        None => warning,
+    };
+    out["completeness_warning"] = json!(combined);
+}
+
+impl CachedResolver {
+    /// Look up the definition location of `symbol`.
+    ///
+    /// Resolution order:
+    /// 1. Positions map (cache from earlier hops or pre-seeded callsite).
+    /// 2. LSP `workspace_symbols`.
+    /// 3. Tree-sitter scan of files already in `positions` (Phase A —
+    ///    `lookup_pos_via_ts_in_seed_files`).
+    /// 4. Tree-sitter scan of project source files matching `lang`
+    ///    (Phase B — `lookup_pos_via_ts_workspace`), bounded by file count.
+    ///
+    /// Returns `None` when the symbol cannot be located; the miss is
+    /// remembered in `not_found` so BFS doesn't re-scan the workspace for
+    /// the same identifier on subsequent hops.
+    async fn lookup_pos(&self, symbol: &str) -> Option<(PathBuf, u32, u32)> {
+        // Fast path: already known
+        if let Some(pos) = self.positions.lock().unwrap().get(symbol).cloned() {
+            return Some(pos);
+        }
+
+        // Negative cache: already tried and failed
+        if self.not_found.lock().unwrap().contains(symbol) {
+            return None;
+        }
+
+        // Slow path: ask the LSP
+        if let Ok(ws_syms) = self.client.workspace_symbols(symbol).await {
+            if let Some(found) = ws_syms
+                .into_iter()
+                .find(|s| s.name == symbol || s.name_path == symbol)
+            {
+                let pos = (found.file, found.start_line, found.start_col);
+                self.positions
+                    .lock()
+                    .unwrap()
+                    .insert(symbol.to_string(), pos.clone());
+                return Some(pos);
+            }
+        }
+
+        // Phase A fallback: tree-sitter scan of the seed file(s) already in
+        // `positions`. Rescues depth-≥2 BFS in LSP-down scenarios when the
+        // callee shares a file with a known caller.
+        if let Some(pos) = self.lookup_pos_via_ts_in_seed_files(symbol) {
+            self.positions
+                .lock()
+                .unwrap()
+                .insert(symbol.to_string(), pos.clone());
+            return Some(pos);
+        }
+
+        // Phase B fallback: bounded tree-sitter walk of the project root.
+        // Picks up cross-file definitions when LSP is down. The not_found
+        // cache below ensures we pay the walk cost at most once per missing
+        // symbol per resolver lifetime. A walk that did not cover the project is
+        // recorded in `scan_incomplete` so the result can say "not reached" instead of
+        // letting the miss pass for "no such symbol".
+        match self.lookup_pos_via_ts_workspace(symbol) {
+            WorkspaceScan::Found(pos) => {
+                self.positions
+                    .lock()
+                    .unwrap()
+                    .insert(symbol.to_string(), pos.clone());
+                return Some(pos);
+            }
+            WorkspaceScan::Incomplete(coverage) => {
+                self.scan_incomplete
+                    .lock()
+                    .unwrap()
+                    .insert(symbol.to_string());
+                self.scan_coverage.lock().unwrap().merge(coverage);
+            }
+            WorkspaceScan::NotFound => {}
+        }
+
+        self.not_found.lock().unwrap().insert(symbol.to_string());
+        None
+    }
+
+    /// Tree-sitter same-file fallback: scan each unique file already present
+    /// in `positions` for a top-level definition (or impl-method) whose name
+    /// matches `symbol`. Returns the first match.
+    ///
+    /// Scope is intentionally narrow — workspace-wide search is Phase B.
+    fn lookup_pos_via_ts_in_seed_files(&self, symbol: &str) -> Option<(PathBuf, u32, u32)> {
+        // Collect unique candidate files. In practice all positions share a
+        // file (BFS pre-seeds the seed only) but we iterate defensively.
+        let files: Vec<PathBuf> = {
+            let guard = self.positions.lock().unwrap();
+            let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+            let mut out = Vec::new();
+            for (p, _, _) in guard.values() {
+                if seen.insert(p.clone()) {
+                    out.push(p.clone());
+                }
+            }
+            out
+        };
+
+        for file in files {
+            let lang = crate::ast::detect_language(&file)?;
+            // Only languages with a tree-sitter grammar.
+            if crate::ast::get_ts_language(lang).is_none() {
+                continue;
+            }
+            let source = match std::fs::read_to_string(&file) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let syms =
+                match crate::ast::parser::extract_symbols_from_source(&source, Some(lang), &file) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+            if let Some(found) = find_named_def(&syms, symbol) {
+                return Some((found.file.clone(), found.start_line, found.start_col));
+            }
+        }
+        None
+    }
+
+    /// Phase B fallback: bounded workspace walk.
+    ///
+    /// Scans `self.root` for source files of the seed's language family, parses each
+    /// with tree-sitter (`extract_symbols_from_source`), and returns the first
+    /// top-level / impl-method definition whose name matches `symbol`.
+    ///
+    /// `self.lang` is the LSP languageId (`get_lsp_client`), so it is converted to the AST
+    /// vocabulary before it is compared with `detect_language`'s answer for each file;
+    /// compared as-is a `typescriptreact`/`javascriptreact` seed matched no file. The
+    /// comparison is by family (`ast::language_family`): TypeScript, TSX, JavaScript and
+    /// JSX are one population (BUG 2026-10-17
+    /// call-graph-phase-b-compares-the-lsp-language-id-to-the-ast-language).
+    ///
+    /// A seed language with no definition parser (`ast::parser::supports_symbol_extraction`:
+    /// C, C++, Ruby, HTML, CSS, ...) is refused BEFORE walking: the walk could open every
+    /// file of that language and read a definition out of none, and would then name an I/O
+    /// cause for a gap that has none. The refusal returns [`WorkspaceScan::Incomplete`]
+    /// with [`ScanCoverage::no_parser`], which says so once and touches no file.
+    ///
+    /// Caps file count at `self.workspace_scan_cap` ([`MAX_WORKSPACE_FILES_SCAN`]
+    /// in production) so a monorepo with 100k source files doesn't burn the BFS
+    /// budget on one missing symbol. The caller's `not_found` cache ensures this
+    /// walk runs at most once per missing symbol per resolver lifetime.
+    ///
+    /// A walk that did not cover the project returns [`WorkspaceScan::Incomplete`], never
+    /// `NotFound`: the cap stopped it with candidates left (BUG 2026-10-16
+    /// call-graph-workspace-scan-cap-returns-a-false-no-callers), a candidate could not be
+    /// read or parsed, a symlink to outside the project was not followed, or a directory
+    /// could not be entered (BUG 2026-10-17
+    /// scan-walks-skip-unreadable-files-and-report-a-clean-miss). The seed's own file is a
+    /// candidate, so a walk that admitted none is incomplete too: it did not look where it
+    /// believes it did. `node_modules/` is pruned and a compiled twin of a TypeScript file
+    /// is not a candidate (see `scan_budget`).
+    fn lookup_pos_via_ts_workspace(&self, symbol: &str) -> WorkspaceScan {
+        let seed_lang = crate::lsp::servers::ast_language_for_lsp_id(&self.lang);
+        if !crate::ast::parser::supports_symbol_extraction(seed_lang) {
+            return WorkspaceScan::Incomplete(ScanCoverage::no_parser(seed_lang));
+        }
+        let mut budget = ScanBudget::new(self.workspace_scan_cap);
+        let family = crate::ast::language_family(seed_lang);
+        let in_family = |p: &std::path::Path| {
+            crate::ast::detect_language(p)
+                .is_some_and(|file_lang| crate::ast::language_family(file_lang) == family)
+        };
+        for item in scan_walk(&self.root) {
+            let Some(entry) = budget.entry(item) else {
+                continue;
+            };
+            let path = entry.path();
+            if entry.file_type().is_some_and(|t| t.is_symlink()) {
+                budget.note_symlink(path, &self.root, in_family);
+                continue;
+            }
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let Some(file_lang) = crate::ast::detect_language(path) else {
+                continue;
+            };
+            if crate::ast::language_family(file_lang) != family || is_compiled_twin(path) {
+                continue;
+            }
+            if !budget.admit() {
+                break;
+            }
+            // Read and parse share one skip site: tree-sitter's `parse` returns `None`
+            // only on a timeout or cancellation, which no fixture can provoke, so the
+            // unreadable-file test is what exercises it.
+            let Some(syms) = std::fs::read_to_string(path).ok().and_then(|source| {
+                crate::ast::parser::extract_symbols_from_source(&source, Some(file_lang), path).ok()
+            }) else {
+                budget.record_unexamined();
+                continue;
+            };
+            if let Some(found) = find_named_def(&syms, symbol) {
+                return WorkspaceScan::Found((
+                    found.file.clone(),
+                    found.start_line,
+                    found.start_col,
+                ));
+            }
+        }
+        let coverage = budget.coverage_requiring_a_candidate();
+        if coverage.is_complete() {
+            WorkspaceScan::NotFound
+        } else {
+            WorkspaceScan::Incomplete(coverage)
+        }
+    }
+
+    /// The symbols whose Phase B walk did not cover the project, with what those walks
+    /// failed to cover (including the cap they were GIVEN, not the production constant).
+    /// `None` when every walk was complete.
+    fn incomplete(&self) -> Option<(std::collections::BTreeSet<String>, ScanCoverage)> {
+        let symbols = self.scan_incomplete.lock().unwrap().clone();
+        (!symbols.is_empty()).then(|| (symbols, self.scan_coverage.lock().unwrap().clone()))
+    }
+}
+
+/// Recursively search a `SymbolInfo` tree for a definition whose `name` or
+/// `name_path` matches `symbol`. Returns the first hit found in DFS order.
+fn find_named_def<'a>(
+    syms: &'a [crate::lsp::SymbolInfo],
+    symbol: &str,
+) -> Option<&'a crate::lsp::SymbolInfo> {
+    for s in syms {
+        if s.name == symbol || s.name_path == symbol {
+            return Some(s);
+        }
+        if let Some(found) = find_named_def(&s.children, symbol) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+#[async_trait]
+impl OneHopResolver for CachedResolver {
+    async fn one_hop(&self, symbol: &str, direction: Direction) -> anyhow::Result<Vec<Edge>> {
+        // Cache hit? Lock conn briefly to query, then drop the lock.
+        let cached = {
+            let conn = self.conn.lock().unwrap();
+            let cache = EdgeCache::new(&conn, &self.project_id);
+            match direction {
+                Direction::Callers => cache.lookup_callers(symbol),
+                Direction::Callees => cache.lookup_callees(symbol),
+            }
+            .map_err(|e| cache_error("reading", &self.root, e))?
+        };
+        if !cached.is_empty() {
+            return Ok(cached);
+        }
+
+        // Cache miss: resolve the symbol's definition location
+        let (path, line, col) = match self.lookup_pos(symbol).await {
+            Some(p) => p,
+            None => {
+                // Can't locate the symbol — skip rather than error so BFS
+                // can continue for the rest of the graph
+                return Ok(vec![]);
+            }
+        };
+
+        // Each node is parsed, and its file opened by the language server, with the language
+        // of ITS OWN file, not the seed's: Phase B places a `.tsx` seed's callee in a `.ts`
+        // module and the reverse, and the seed's grammar mis-parses the other one (a type
+        // assertion `<string>x` is a JSX tag to the TSX grammar, JSX is no TypeScript at all),
+        // silently yielding a partial edge set that `upsert` below would then persist.
+        let node_language_id = crate::lsp::servers::lsp_language_id(
+            crate::ast::detect_language(&path)
+                .unwrap_or_else(|| crate::lsp::servers::ast_language_for_lsp_id(&self.lang)),
+        );
+        let direction_label = match direction {
+            Direction::Callers => "callers",
+            Direction::Callees => "callees",
+        };
+        let edges = match resolve_one_hop(
+            self.client.as_ref(),
+            symbol,
+            &path,
+            line,
+            col,
+            node_language_id,
+            direction,
+        )
+        .await
+        {
+            Ok(e) => e,
+            Err(e) if e.downcast_ref::<crate::tools::RecoverableError>().is_some() => {
+                // Keep useful edges from other hops, but disclose this unanalysed scope.
+                self.analysis_failures
+                    .lock()
+                    .unwrap()
+                    .insert(format!("`{symbol}` direction={direction_label}: {e}"));
+                vec![]
+            }
+            Err(e) => return Err(e),
+        };
+        {
+            let conn = self.conn.lock().unwrap();
+            let cache = EdgeCache::new(&conn, &self.project_id);
+            cache
+                .upsert(&edges)
+                .map_err(|e| cache_error("writing to", &self.root, e))?;
+        }
+        Ok(edges)
+    }
+}
+
+/// Format BFS results for tool output.
+fn format_output(
+    symbol: &str,
+    by_dir: &HashMap<&str, TraversalResult>,
+    render_full: bool,
+    auto_promote: bool,
+) -> Value {
+    let mut out = json!({ "symbol": symbol });
+
+    for (key, res) in by_dir {
+        if render_full {
+            let edges_json: Vec<Value> = res
+                .edges
+                .iter()
+                .map(|e: &EdgeWithDepth| {
+                    json!({
+                        "caller": e.edge.caller_sym,
+                        "callee": e.edge.callee_sym,
+                        "file":   e.edge.file.to_string_lossy(),
+                        "line":   e.edge.line + 1,
+                        "depth":  e.depth,
+                        "source": match e.edge.source {
+                            EdgeSource::Lsp => "lsp",
+                            EdgeSource::Ts  => "ts",
+                        },
+                        "paths":  e.paths,
+                    })
+                })
+                .collect();
+            out[key] = json!(edges_json);
+        } else {
+            let mut by_file: std::collections::BTreeMap<String, usize> =
+                std::collections::BTreeMap::new();
+            let mut by_depth: std::collections::BTreeMap<u32, usize> =
+                std::collections::BTreeMap::new();
+            for e in &res.edges {
+                *by_file
+                    .entry(e.edge.file.to_string_lossy().into_owned())
+                    .or_default() += 1;
+                *by_depth.entry(e.depth).or_default() += 1;
+            }
+            out[*key] = json!({
+                "count":    res.edges.len(),
+                "by_file":  by_file,
+                "by_depth": by_depth,
+            });
+        }
+        if res.truncated {
+            out[format!("{}_truncated_at_depth", key)] = json!(res.truncated_at_depth);
+        }
+    }
+
+    if auto_promote {
+        out["auto_promoted"] = json!(true);
+    }
+    let max_d = by_dir
+        .values()
+        .map(|r| r.max_depth_reached)
+        .max()
+        .unwrap_or(0);
+    out["max_depth_reached"] = json!(max_d);
+    out
+}
+
+pub struct CallGraph;
+
+#[async_trait::async_trait]
+impl Tool for CallGraph {
+    fn name(&self) -> &str {
+        "call_graph"
+    }
+
+    fn annotations(&self) -> Option<rmcp::model::ToolAnnotations> {
+        crate::tools::annot::read_only_closed()
+    }
+
+    fn description(&self) -> &str {
+        "Transitive call graph for a symbol. `direction`: callers (blast radius), \
+         callees (outbound), both. `max_depth=3` default. Edges tagged \
+         `source=\"lsp\"` (authoritative) or `\"ts\"` (best-effort). For all refs \
+         (not call-filtered) use `references`."
+    }
+
+    fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
+        // Same split as `symbols`: overflow → the buffer guide, otherwise the navigation
+        // guide, which `call_content` would have dropped anyway on a result that fits.
+        // See `Symbols::relevant_guide_topic` for the full rationale and BL-25.
+        if result.get("overflow").is_some() || result.get("output_id").is_some() {
+            Some("progressive-disclosure")
+        } else {
+            Some("symbol-navigation")
+        }
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "symbol":       { "type": "string", "description": "Symbol identifier. Plain method: 'MyStruct/method'. Trait impl method: 'impl Trait for Struct/method'." },
+                "path":         { "type": "string", "description": "File containing the symbol (required for seed resolution)" },
+                "direction":    { "type": "string", "enum": ["callers", "callees", "both"], "default": "callers", "description": "Which edges to walk: functions that call the symbol, functions it calls, or both." },
+                "max_depth":    { "type": "integer", "default": 3, "description": "Max BFS depth (capped at 10)" },
+                "detail_level": { "type": "string", "enum": ["exploring", "full"], "default": "exploring", "description": "exploring: counts, auto-promotes full at <=30 edges. full: every edge; cap 200->500." }
+            },
+            // NO top-level anyOf/oneOf/allOf — the Anthropic Messages API rejects them
+            // and Claude Code drops the whole tool client-side. The path alternation is
+            // enforced in call() below, not here. See
+            // no_tool_schema_declares_a_top_level_combinator (src/server.rs).
+            "required": ["symbol"]
+        })
+    }
+
+    fn param_aliases(&self) -> crate::tools::param_alias::AliasMap {
+        crate::fs::PATH_PARAM_ALIAS_MAP
+    }
+
+    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        use crate::fs::{get_lsp_client, require_path_param, resolve_read_path_for};
+        use crate::symbol::query::find_unique_symbol_by_name_path;
+        use crate::tools::symbol::call_graph::traversal::{bfs, TraversalConfig};
+        use crate::tools::{require_str_param, RecoverableError};
+
+        let symbol = require_str_param(&input, "symbol")?;
+        let rel_path = require_path_param(&input)?;
+        let direction_str = input["direction"].as_str().unwrap_or("callers");
+        let max_depth = input["max_depth"].as_u64().unwrap_or(3).min(10) as u32;
+        let detail_full = input["detail_level"].as_str() == Some("full");
+
+        let directions: Vec<Direction> = match direction_str {
+            "callers" => vec![Direction::Callers],
+            "callees" => vec![Direction::Callees],
+            "both" => vec![Direction::Callers, Direction::Callees],
+            other => {
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "invalid direction '{}'; use callers, callees, or both",
+                        other
+                    ),
+                    "direction must be one of: callers, callees, both",
+                )
+                .into())
+            }
+        };
+
+        // Resolve seed path and language
+        let seed_path =
+            resolve_read_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
+        let (client, lang) = get_lsp_client(
+            &ctx.agent,
+            &*ctx.lsp,
+            &seed_path,
+            ctx.workspace_override.as_deref(),
+        )
+        .await?;
+
+        // Find the seed symbol's position in the file
+        let doc_symbols = client.document_symbols(&seed_path, &lang).await?;
+        let sym_info = find_unique_symbol_by_name_path(&doc_symbols, symbol)?;
+        let seed_line = sym_info.start_line;
+        let seed_col = sym_info.start_col;
+
+        // Get project root and project_id for the edge cache.
+        // project_id must be derived via the shared helper so it matches what
+        // invalidate_call_edges uses — they must write and delete with the same key.
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
+        let project_id = ctx
+            .agent
+            .call_edges_project_id_for(ctx.workspace_override.as_deref())
+            .await;
+
+        // Open the DB on a blocking thread (see `open_cache`).
+        let conn = open_cache(root.clone()).await?;
+        let conn = Arc::new(Mutex::new(conn));
+
+        let cap = if detail_full { 500 } else { 200 };
+        let cfg = TraversalConfig {
+            max_depth,
+            max_edges: cap,
+        };
+
+        let mut by_dir: HashMap<&str, TraversalResult> = HashMap::new();
+        // Symbols whose definition the fallback walk did not look everywhere for, and
+        // what those walks failed to cover. The cap it reports is the one the walk was
+        // GIVEN (`resolver.incomplete()`), not a constant restated here.
+        let mut incomplete: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut coverage = ScanCoverage::default();
+        let mut analysis_failures = std::collections::BTreeSet::new();
+
+        for direction in &directions {
+            let mut positions: HashMap<String, (PathBuf, u32, u32)> = HashMap::new();
+            positions.insert(symbol.to_string(), (seed_path.clone(), seed_line, seed_col));
+
+            let resolver = CachedResolver {
+                conn: Arc::clone(&conn),
+                project_id: project_id.clone(),
+                client: Arc::clone(&client),
+                lang: lang.clone(),
+                root: root.clone(),
+                positions: Mutex::new(positions),
+                not_found: Mutex::new(std::collections::HashSet::new()),
+                workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
+                scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
+                scan_coverage: Mutex::new(ScanCoverage::default()),
+                analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
+            };
+
+            let result = bfs(&resolver, symbol, direction.clone(), cfg.clone()).await?;
+            if let Some((walked, walked_coverage)) = resolver.incomplete() {
+                coverage.merge(walked_coverage);
+                incomplete.extend(walked);
+            }
+            analysis_failures.extend(resolver.analysis_failures.lock().unwrap().iter().cloned());
+            let key = match direction {
+                Direction::Callers => "callers",
+                Direction::Callees => "callees",
+            };
+            by_dir.insert(key, result);
+        }
+
+        let total_edges: usize = by_dir.values().map(|r| r.edges.len()).sum();
+        let auto_promote = total_edges <= 30;
+        let render_full = detail_full || auto_promote;
+
+        let mut out = format_output(symbol, &by_dir, render_full, auto_promote);
+        attach_scan_incomplete(&mut out, &incomplete, &coverage);
+        attach_analysis_failures(&mut out, &analysis_failures);
+        Ok(out)
+    }
+
+    fn format_compact(&self, result: &Value) -> Option<String> {
+        let sym = result.get("symbol")?.as_str()?;
+        // The warning goes FIRST. When this text is the summary of a buffered result,
+        // `truncate_compact` cuts at the last newline within its byte budget, so a line
+        // appended last is exactly the line a large result loses; the workspace notice
+        // is prefixed for the same reason (`Tool::call_content`).
+        let mut out = String::new();
+        if let Some(w) = result.get("completeness_warning").and_then(|v| v.as_str()) {
+            out.push_str(&format!("warning: {w}\n\n"));
+        }
+        out.push_str(&format!("call_graph for `{sym}`"));
+
+        for key in &["callers", "callees"] {
+            let v = match result.get(*key) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            if let Some(edges) = v.as_array() {
+                // Full mode: edges[]. Group by file → ripgrep-style listing.
+                use std::collections::BTreeMap;
+                let mut by_file: BTreeMap<&str, Vec<&Value>> = BTreeMap::new();
+                for e in edges {
+                    let file = e.get("file").and_then(|f| f.as_str()).unwrap_or("?");
+                    by_file.entry(file).or_default().push(e);
+                }
+                out.push_str(&format!(
+                    "\n  {}: {} edges across {} files",
+                    key,
+                    edges.len(),
+                    by_file.len()
+                ));
+                for (file, file_edges) in &by_file {
+                    out.push_str(&format!("\n    {} ({})", file, file_edges.len()));
+                    for e in file_edges {
+                        let line = e.get("line").and_then(|l| l.as_u64()).unwrap_or(0);
+                        let caller = e.get("caller").and_then(|c| c.as_str()).unwrap_or("?");
+                        let callee = e.get("callee").and_then(|c| c.as_str()).unwrap_or("?");
+                        let depth = e.get("depth").and_then(|d| d.as_u64()).unwrap_or(0);
+                        let source = e.get("source").and_then(|s| s.as_str()).unwrap_or("?");
+                        out.push_str(&format!(
+                            "\n      {line:>5}: {caller} → {callee} (depth={depth}, {source})"
+                        ));
+                    }
+                }
+            } else if let Some(obj) = v.as_object() {
+                // Compact aggregate: count + by_file + by_depth.
+                let count = obj.get("count").and_then(|c| c.as_u64()).unwrap_or(0);
+                let by_file = obj.get("by_file").and_then(|f| f.as_object());
+                let n_files = by_file.map(|m| m.len()).unwrap_or(0);
+                out.push_str(&format!("\n  {key}: {count} across {n_files} files"));
+                if let Some(map) = by_file {
+                    let mut entries: Vec<_> = map
+                        .iter()
+                        .filter_map(|(p, c)| c.as_u64().map(|n| (p.as_str(), n)))
+                        .collect();
+                    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+                    for (path, n) in entries.iter().take(20) {
+                        out.push_str(&format!("\n    {path}: {n}"));
+                    }
+                    if entries.len() > 20 {
+                        out.push_str(&format!("\n    … {} more files", entries.len() - 20));
+                    }
+                }
+                if let Some(by_depth) = obj.get("by_depth").and_then(|d| d.as_object()) {
+                    let parts: Vec<String> = by_depth
+                        .iter()
+                        .filter_map(|(d, c)| c.as_u64().map(|n| format!("{d}={n}")))
+                        .collect();
+                    if !parts.is_empty() {
+                        out.push_str(&format!("\n    by_depth: {}", parts.join(" ")));
+                    }
+                }
+            }
+
+            let truncated_key = format!("{key}_truncated_at_depth");
+            if let Some(d) = result.get(&truncated_key).and_then(|x| x.as_u64()) {
+                out.push_str(&format!("\n    (truncated at depth {d})"));
+            }
+        }
+
+        if result
+            .get("auto_promoted")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            out.push_str("\n  (auto-promoted to full detail — small result)");
+        }
+        if let Some(d) = result.get("max_depth_reached").and_then(|v| v.as_u64()) {
+            out.push_str(&format!("\n  max_depth_reached: {d}"));
+        }
+        Some(out)
+    }
+
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
+    }
+
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::RequiresLsp
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lsp::{MockLspClient, MockLspProvider};
+
+    // ── helpers ──────────────────────────────────────────────────────────────────
+
+    fn mock_lsp_provider(client: MockLspClient) -> std::sync::Arc<dyn crate::lsp::LspProvider> {
+        MockLspProvider::with_client(client)
+    }
+
+    fn test_buf() -> std::sync::Arc<crate::tools::output_buffer::OutputBuffer> {
+        std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20))
+    }
+
+    async fn ctx_with_lsp(lsp: std::sync::Arc<dyn crate::lsp::LspProvider>) -> ToolContext {
+        use std::sync::Arc;
+        let agent = crate::agent::Agent::new(None).await.unwrap();
+        ToolContext {
+            agent,
+            lsp,
+            output_buffer: test_buf(),
+            progress: None,
+            peer: None,
+            section_coverage: Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        }
+    }
+
+    // ── tests ─────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn call_graph_invalid_direction_returns_recoverable_error() {
+        let ctx = ctx_with_lsp(mock_lsp_provider(MockLspClient::new())).await;
+        let err = CallGraph
+            .call(
+                json!({ "symbol": "foo", "path": "src/lib.rs", "direction": "sideways" }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("invalid direction"),
+            "expected 'invalid direction' in: {msg}"
+        );
+        assert!(msg.contains("sideways"), "expected bad value in: {msg}");
+    }
+    /// A SQLite failure such as "disk I/O error" names neither the store nor the step. Three rows in
+    /// the usage database carried exactly that text and nothing else (bug
+    /// `cd85dbae70c76670`), so a caller could not tell which file failed or whether to retry.
+    ///
+    /// The store is named with the platform's own separator throughout. On Windows the message
+    /// once read `/proj\.codescout/call_edges.db` (bug `1ca433a98628cd17`).
+    #[test]
+    fn a_cache_error_names_the_store_and_the_step() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // No schema: the lookup fails the way a broken store does.
+        let e = crate::tools::symbol::call_edges::cache::EdgeCache::new(&conn, "p")
+            .lookup_callers("f")
+            .unwrap_err();
+        let shown = cache_error("reading", std::path::Path::new("/proj"), e).to_string();
+        let store = format!(
+            "/proj{s}.codescout{s}call_edges.db",
+            s = std::path::MAIN_SEPARATOR
+        );
+        assert!(shown.contains(&store), "expected {store} in: {shown}");
+        assert!(shown.contains("reading the call-edge cache"), "{shown}");
+        assert!(
+            shown.contains("no such table"),
+            "the cause is kept: {shown}"
+        );
+    }
+
+    /// Opening the store is where `mkdir`, the SQLite open and the DDL all happen, so a failure
+    /// there must say it was the open and which path.
+    #[tokio::test]
+    async fn opening_the_cache_in_a_broken_project_names_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        // `.codescout` is a regular file, so the cache directory cannot be created.
+        std::fs::write(dir.path().join(".codescout"), "not a directory").unwrap();
+        let err = open_cache(dir.path().to_path_buf()).await.unwrap_err();
+        let shown = err.to_string();
+        assert!(shown.contains("opening the call-edge cache"), "{shown}");
+        assert!(shown.contains("call_edges.db"), "{shown}");
+    }
+
+    /// ≤30 edges → `auto_promoted=true`, full edge list rendered without `detail_level=full`.
+    #[test]
+    fn format_output_auto_promotes_small_results() {
+        use crate::tools::symbol::call_edges::resolver::{Edge, EdgeSource};
+        use crate::tools::symbol::call_graph::traversal::{EdgeWithDepth, TraversalResult};
+        use std::path::PathBuf;
+
+        let edge = EdgeWithDepth {
+            edge: Edge {
+                caller_sym: "b".to_string(),
+                callee_sym: "a".to_string(),
+                file: PathBuf::from("src/lib.rs"),
+                line: 5,
+                col: 0,
+                source: EdgeSource::Lsp,
+            },
+            depth: 1,
+            paths: 1,
+        };
+
+        let mut by_dir = HashMap::new();
+        by_dir.insert(
+            "callers",
+            TraversalResult {
+                edges: vec![edge],
+                truncated: false,
+                truncated_at_depth: None,
+                max_depth_reached: 1,
+            },
+        );
+
+        // render_full=true (auto_promote triggers this in call()), auto_promote=true
+        let result = format_output("a", &by_dir, true, true);
+        assert_eq!(result["auto_promoted"], json!(true));
+        let callers = result["callers"].as_array().unwrap();
+        assert_eq!(callers.len(), 1);
+        assert_eq!(callers[0]["caller"], json!("b"));
+        assert_eq!(callers[0]["callee"], json!("a"));
+        assert_eq!(callers[0]["line"], json!(6)); // 0-indexed line + 1 for display
+        assert_eq!(callers[0]["source"], json!("lsp"));
+        assert_eq!(result["max_depth_reached"], json!(1));
+    }
+
+    /// >30 edges → compact summary with count/by_file/by_depth, no auto-promote.
+    #[test]
+    fn format_output_compact_summary_for_large_results() {
+        use crate::tools::symbol::call_edges::resolver::{Edge, EdgeSource};
+        use crate::tools::symbol::call_graph::traversal::{EdgeWithDepth, TraversalResult};
+        use std::path::PathBuf;
+
+        let edges: Vec<EdgeWithDepth> = (0u32..31)
+            .map(|i| EdgeWithDepth {
+                edge: Edge {
+                    caller_sym: format!("caller_{}", i),
+                    callee_sym: "target".to_string(),
+                    file: PathBuf::from(format!("src/file_{}.rs", i % 3)),
+                    line: i,
+                    col: 0,
+                    source: EdgeSource::Ts,
+                },
+                depth: 1,
+                paths: 1,
+            })
+            .collect();
+
+        let mut by_dir = HashMap::new();
+        by_dir.insert(
+            "callers",
+            TraversalResult {
+                edges,
+                truncated: false,
+                truncated_at_depth: None,
+                max_depth_reached: 1,
+            },
+        );
+
+        let result = format_output("target", &by_dir, false, false);
+        assert!(
+            result.get("auto_promoted").is_none(),
+            "should not auto-promote"
+        );
+        let callers = &result["callers"];
+        assert_eq!(callers["count"], json!(31));
+        let by_file = callers["by_file"].as_object().unwrap();
+        assert_eq!(by_file.len(), 3, "expected 3 distinct files");
+        let by_depth = callers["by_depth"].as_object().unwrap();
+        assert!(by_depth.contains_key("1"), "depth 1 should appear");
+    }
+
+    /// `format_compact` produces a readable one-liner with count and file count.
+    #[test]
+    fn format_compact_renders_count_and_files() {
+        let result = json!({
+            "symbol": "my_fn",
+            "callers": {
+                "count": 7,
+                "by_file": { "a.rs": 4, "b.rs": 3 },
+                "by_depth": { "1": 7 }
+            },
+            "max_depth_reached": 1
+        });
+        let compact = CallGraph.format_compact(&result).unwrap();
+        assert!(compact.contains("my_fn"), "missing symbol: {compact}");
+        assert!(compact.contains("callers"), "missing key: {compact}");
+        assert!(compact.contains("7"), "missing count: {compact}");
+        assert!(compact.contains("2 files"), "missing file count: {compact}");
+    }
+
+    /// `format_compact` renders the full-mode (edges array) shape as a
+    /// ripgrep-style listing: `file (count)\n  L: caller → callee (depth=D, source)`.
+    #[test]
+    fn format_compact_renders_full_mode_edges() {
+        let result = json!({
+            "symbol": "my_fn",
+            "callers": [
+                { "caller": "a::caller_one", "callee": "my_fn",
+                  "file": "src/a.rs", "line": 12, "depth": 1, "source": "lsp", "paths": [] },
+                { "caller": "a::caller_two", "callee": "my_fn",
+                  "file": "src/a.rs", "line": 30, "depth": 2, "source": "ts",  "paths": [] },
+                { "caller": "b::caller_three", "callee": "my_fn",
+                  "file": "src/b.rs", "line": 7,  "depth": 1, "source": "lsp", "paths": [] }
+            ],
+            "max_depth_reached": 2
+        });
+        let compact = CallGraph.format_compact(&result).unwrap();
+        assert!(compact.contains("call_graph for `my_fn`"));
+        assert!(compact.contains("callers: 3 edges across 2 files"));
+        assert!(compact.contains("src/a.rs (2)"));
+        assert!(compact.contains("src/b.rs (1)"));
+        assert!(compact.contains("12: a::caller_one → my_fn (depth=1, lsp)"));
+        assert!(compact.contains("30: a::caller_two → my_fn (depth=2, ts)"));
+        assert!(compact.contains("max_depth_reached: 2"));
+    }
+
+    #[test]
+    fn call_graph_declares_output_form_text() {
+        use crate::tools::OutputForm;
+        assert_eq!(CallGraph.output_form(), OutputForm::Text);
+    }
+
+    /// LIMIT-001 Phase A: when LSP `workspace_symbols` returns empty (no LSP, or
+    /// LSP doesn't know the symbol), `lookup_pos` should fall back to a
+    /// tree-sitter scan of the seed's file to find a same-file definition.
+    #[tokio::test]
+    async fn lookup_pos_falls_back_to_ts_same_file_when_ws_symbols_empty() {
+        // Rust fixture with three top-level fns: a, b, c.
+        let src = "fn a() { b(); }\nfn b() { c(); }\nfn c() { a(); }\n";
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("cycle.rs");
+        std::fs::write(&fixture, src).unwrap();
+
+        // Mock LSP: workspace_symbols returns empty (default).
+        let client = MockLspClient::new();
+        let client_arc: Arc<dyn crate::lsp::ops::LspClientOps> = Arc::new(client);
+
+        // In-memory sqlite for the edge cache (unused by lookup_pos, but the
+        // struct requires a Connection).
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::tools::symbol::call_edges::cache::apply_schema(&conn);
+
+        // Pre-seed `a` only — `b` must be discovered via the TS fallback.
+        let mut positions: HashMap<String, (PathBuf, u32, u32)> = HashMap::new();
+        positions.insert("a".to_string(), (fixture.clone(), 0, 3));
+
+        let resolver = CachedResolver {
+            conn: Arc::new(Mutex::new(conn)),
+            project_id: "test".to_string(),
+            client: client_arc,
+            lang: "rust".to_string(),
+            root: dir.path().to_path_buf(),
+            positions: Mutex::new(positions),
+            not_found: Mutex::new(std::collections::HashSet::new()),
+            workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
+            scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
+            scan_coverage: Mutex::new(ScanCoverage::default()),
+            analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
+        };
+
+        let pos = resolver.lookup_pos("b").await;
+        assert!(
+            pos.is_some(),
+            "lookup_pos should fall back to TS same-file scan when LSP returns empty"
+        );
+        let (path, line, _col) = pos.unwrap();
+        assert_eq!(path, fixture);
+        // `fn b()` is on the second line (0-indexed line 1).
+        assert_eq!(line, 1, "expected line 1 for `fn b`");
+    }
+
+    /// LIMIT-001 Phase B: when LSP `workspace_symbols` is empty AND the
+    /// callee is defined in a sibling file, `lookup_pos` must fall back to a
+    /// bounded workspace tree-sitter walk to find it. Closes the cross-file
+    /// edge-drop residual called out in
+    /// `docs/issues/archive/2026-05-01-call-graph-callees-ts-fallback.md`.
+    #[tokio::test]
+    async fn lookup_pos_falls_back_to_ts_workspace_when_def_in_sibling_file() {
+        // Two-file fixture: `a()` in caller.rs references `b()` defined in
+        // sibling.rs. BFS pre-seeds `a`; `b` must be discovered via the
+        // workspace walk.
+        let dir = tempfile::tempdir().unwrap();
+        let caller = dir.path().join("caller.rs");
+        let sibling = dir.path().join("sibling.rs");
+        std::fs::write(&caller, "fn a() { b(); }\n").unwrap();
+        std::fs::write(&sibling, "fn b() { /* lives here */ }\n").unwrap();
+
+        // Mock LSP returns empty for workspace_symbols.
+        let client = MockLspClient::new();
+        let client_arc: Arc<dyn crate::lsp::ops::LspClientOps> = Arc::new(client);
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::tools::symbol::call_edges::cache::apply_schema(&conn);
+
+        let mut positions: HashMap<String, (PathBuf, u32, u32)> = HashMap::new();
+        positions.insert("a".to_string(), (caller.clone(), 0, 3));
+
+        let resolver = CachedResolver {
+            conn: Arc::new(Mutex::new(conn)),
+            project_id: "test".to_string(),
+            client: client_arc,
+            lang: "rust".to_string(),
+            root: dir.path().to_path_buf(),
+            positions: Mutex::new(positions),
+            not_found: Mutex::new(std::collections::HashSet::new()),
+            workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
+            scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
+            scan_coverage: Mutex::new(ScanCoverage::default()),
+            analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
+        };
+
+        let pos = resolver.lookup_pos("b").await;
+        assert!(
+            pos.is_some(),
+            "lookup_pos should walk the workspace and resolve `b` from sibling.rs"
+        );
+        let (path, line, _col) = pos.unwrap();
+        assert_eq!(path, sibling, "expected sibling.rs as the definition file");
+        assert_eq!(line, 0, "fn b is on the first line of sibling.rs");
+
+        // Negative-cache invariant: looking up a symbol that exists nowhere
+        // must cache the miss so a subsequent call short-circuits without
+        // re-walking the workspace.
+        let miss = resolver.lookup_pos("nonexistent_symbol_xyz").await;
+        assert!(miss.is_none());
+        assert!(
+            resolver
+                .not_found
+                .lock()
+                .unwrap()
+                .contains("nonexistent_symbol_xyz"),
+            "missing symbol must be recorded in the not_found cache"
+        );
+    }
+    /// A resolver with no LSP knowledge and no seeded positions, so every lookup reaches
+    /// the Phase B workspace walk, with its file cap set to `cap`.
+    fn resolver_over(root: &std::path::Path, cap: usize) -> CachedResolver {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::tools::symbol::call_edges::cache::apply_schema(&conn);
+        let client: Arc<dyn crate::lsp::ops::LspClientOps> = Arc::new(MockLspClient::new());
+        CachedResolver {
+            conn: Arc::new(Mutex::new(conn)),
+            project_id: "test".to_string(),
+            client,
+            lang: "rust".to_string(),
+            root: root.to_path_buf(),
+            positions: Mutex::new(HashMap::new()),
+            not_found: Mutex::new(std::collections::HashSet::new()),
+            workspace_scan_cap: cap,
+            scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
+            scan_coverage: Mutex::new(ScanCoverage::default()),
+            analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
+        }
+    }
+
+    /// BUG 2026-10-16 call-graph-workspace-scan-cap-returns-a-false-no-callers: a Phase B walk
+    /// the file cap stopped early used to return the same `None` as one that examined every
+    /// file, and the caller cached either as "no such symbol". Three same-language files, none
+    /// defining `ghost`, cap 2: one candidate is left unexamined, so the miss must be recorded
+    /// as cut short, together with the cap THIS walk was given (the warning names it). The
+    /// emission into the tool's result is covered end to end by
+    /// `call_graph_reports_a_caller_it_could_not_place_because_the_walk_hit_its_cap`.
+    #[tokio::test]
+    async fn a_workspace_walk_stopped_by_its_cap_is_reported_not_passed_off_as_no_such_symbol() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.rs", "b.rs", "c.rs"] {
+            std::fs::write(dir.path().join(name), "fn x() {}\n").unwrap();
+        }
+        let resolver = resolver_over(dir.path(), 2);
+
+        assert!(resolver.lookup_pos("ghost").await.is_none());
+
+        let (incomplete, coverage) = resolver
+            .incomplete()
+            .expect("a walk stopped at its cap must be recorded, not left as a plain miss");
+        assert!(incomplete.contains("ghost"), "{incomplete:?}");
+        assert_eq!(
+            coverage.cut_short_at,
+            Some(2),
+            "the cap the walk was given, not the production constant"
+        );
+        let warning =
+            scan_incomplete_warning(&incomplete, &coverage).expect("a cut-short walk must warn");
+        assert!(warning.contains("stopped after 2"), "{warning}");
+    }
+
+    /// The cap is a performance guard and must still BOUND the work, not merely disclose that
+    /// it bit. The disclosure lives in `ScanBudget::admit`, so a walk that ignored `admit`'s
+    /// refusal — by reading on (`let _ = admit()`) or by `continue`-ing past each refused
+    /// file instead of `break`-ing — would keep reporting a cut-short walk while pulling every
+    /// entry of the tree. Six candidates, cap 2: once the third is refused the walk stops, so
+    /// it pulls at most the root entry and three files; a walk that kept going pulls all seven.
+    #[tokio::test]
+    async fn the_cap_stops_the_walk_instead_of_only_reporting_it() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs"] {
+            std::fs::write(dir.path().join(name), "fn x() {}\n").unwrap();
+        }
+        let r = resolver_over(dir.path(), 2);
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+
+        let (_, coverage) = r.incomplete().expect("the cap bit");
+        assert_eq!(coverage.cut_short_at, Some(2));
+        assert_eq!(
+            coverage.entries_visited, 4,
+            "the walk pulls the root and exactly the three candidates up to the refusal, then \
+             stops; more means it kept going after the cap, fewer that the counter is dead"
+        );
+    }
+
+    /// ADR 2026-08-27 clause 2: a walk that examined every file and found nothing is a
+    /// trustworthy "no such symbol" and stays unremarked. Three candidates and a cap of
+    /// three leave nothing unexamined.
+    #[tokio::test]
+    async fn a_workspace_walk_that_ends_exactly_on_its_cap_is_a_real_miss() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.rs", "b.rs", "c.rs"] {
+            std::fs::write(dir.path().join(name), "fn x() {}\n").unwrap();
+        }
+        let resolver = resolver_over(dir.path(), 3);
+
+        assert!(resolver.lookup_pos("ghost").await.is_none());
+
+        assert!(
+            resolver.incomplete().is_none(),
+            "every file was examined: {:?}",
+            resolver.incomplete()
+        );
+        assert!(scan_incomplete_warning(&Default::default(), &Default::default()).is_none());
+        assert!(resolver.not_found.lock().unwrap().contains("ghost"));
+    }
+
+    /// A definition found inside the cap is an answer, not a cut-short walk.
+    #[tokio::test]
+    async fn a_definition_found_within_the_cap_is_not_flagged() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn x() {}\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn target() {}\n").unwrap();
+        let resolver = resolver_over(dir.path(), 2);
+
+        assert!(resolver.lookup_pos("target").await.is_some());
+        assert!(resolver.incomplete().is_none());
+    }
+
+    /// `call_graph` is `OutputForm::Text`, so `format_compact` is what the caller reads: the
+    /// warning must survive it.
+    #[test]
+    fn format_compact_carries_the_completeness_warning() {
+        let result = json!({
+            "symbol": "my_fn",
+            "callers": { "count": 0, "by_file": {}, "by_depth": {} },
+            "max_depth_reached": 0,
+            "completeness_warning": "the fallback source walk stopped after 5000 same-language files",
+        });
+        let compact = CallGraph.format_compact(&result).unwrap();
+        assert!(
+            compact.contains("warning: the fallback source walk stopped after 5000"),
+            "{compact}"
+        );
+    }
+    /// Pin the two gaps observed as surviving applied mutations: warning coexistence
+    /// and bounded analysis details, through the same raw/compact consumer fields.
+    #[test]
+    fn analysis_warnings_preserve_scan_scope_and_bound_details_without_losing_total() {
+        let mut out = json!({
+            "symbol": "seed",
+            "callees": [],
+            "max_depth_reached": 0,
+        });
+        let incomplete = std::collections::BTreeSet::from(["unplaced".to_string()]);
+        let coverage = ScanCoverage {
+            cut_short_at: Some(3),
+            ..Default::default()
+        };
+        attach_scan_incomplete(&mut out, &incomplete, &coverage);
+        let scan_warning = out["completeness_warning"].as_str().unwrap().to_owned();
+        let before = out.clone();
+        attach_analysis_failures(&mut out, &std::collections::BTreeSet::new());
+        assert_eq!(
+            out, before,
+            "no analysis failure must leave existing disclosure intact"
+        );
+
+        let failures = (0..7)
+            .map(|i| format!("hop_{i} direction=callees: unavailable_{i}"))
+            .collect();
+        attach_analysis_failures(&mut out, &failures);
+        let warning = out["completeness_warning"].as_str().unwrap();
+        assert!(warning.starts_with(&scan_warning), "{warning}");
+        assert!(warning.contains("could not analyze 7 hop(s)"), "{warning}");
+        for i in 0..5 {
+            assert!(
+                warning.contains(&format!("hop_{i} direction=callees: unavailable_{i}")),
+                "{warning}"
+            );
+        }
+        for i in 5..7 {
+            assert!(!warning.contains(&format!("hop_{i}")), "{warning}");
+        }
+        assert!(warning.contains("(+2 more)"), "{warning}");
+        assert_eq!(out["scan_incomplete_symbols"], json!(["unplaced"]));
+        assert_eq!(out["scan_incomplete_total"], 1);
+        let compact = CallGraph.format_compact(&out).unwrap();
+        assert!(compact.starts_with("warning: "), "{compact}");
+        assert!(compact.contains(warning), "{compact}");
+    }
+
+    /// Exercise the outer tool with a real parser/cache and an LSP without call hierarchy.
+    /// A class is not a function the callees fallback can analyze; an actual leaf is.
+    #[tokio::test]
+    async fn recoverable_hop_failure_is_disclosed_without_losing_edges_or_warning_on_a_leaf() {
+        use crate::lsp::{SymbolInfo, SymbolKind};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let file = std::fs::canonicalize(dir.path()).unwrap().join("sample.py");
+        std::fs::write(
+            &file,
+            "class Marker:\n    pass\n\ndef build():\n    return Marker()\n\ndef leaf():\n    return 1\n",
+        )
+        .unwrap();
+        let sym = |name: &str, kind, line, col| SymbolInfo {
+            name: name.to_owned(),
+            name_path: name.to_owned(),
+            kind,
+            file: file.clone(),
+            start_line: line,
+            end_line: line + 1,
+            start_col: col,
+            children: vec![],
+            range_start_line: None,
+            detail: None,
+        };
+        let mock = MockLspClient::new().with_symbols(
+            &file,
+            vec![
+                sym("Marker", SymbolKind::Class, 0, 6),
+                sym("build", SymbolKind::Function, 3, 4),
+                sym("leaf", SymbolKind::Function, 6, 4),
+            ],
+        );
+        mock.references_results.lock().unwrap().insert(
+            file.clone(),
+            vec![lsp_types::Location {
+                uri: url::Url::from_file_path(&file)
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .unwrap(),
+                range: lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: 4,
+                        character: 11,
+                    },
+                    end: lsp_types::Position {
+                        line: 4,
+                        character: 17,
+                    },
+                },
+            }],
+        );
+        // Default prepare_call_hierarchy=None forces the actual tree-sitter fallback.
+        let mut ctx = ctx_with_lsp(mock_lsp_provider(mock)).await;
+        ctx.agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+
+        let leaf = CallGraph
+            .call(
+                json!({"symbol": "leaf", "path": "sample.py",
+                         "direction": "callees", "max_depth": 1}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(leaf["callees"], json!([]));
+        assert!(leaf.get("completeness_warning").is_none(), "{leaf}");
+
+        let out = CallGraph
+            .call(
+                json!({"symbol": "Marker", "path": "sample.py",
+                         "direction": "both", "max_depth": 1}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out["callers"].as_array().unwrap().len(), 1, "{out}");
+        assert_eq!(out["callers"][0]["caller"], "build");
+        assert_eq!(out["callers"][0]["callee"], "Marker");
+        assert_eq!(out["callers"][0]["source"], "ts");
+        assert_eq!(out["callees"], json!([]));
+        let warning = out["completeness_warning"]
+            .as_str()
+            .expect("failed analysis must not look like a trustworthy empty graph");
+        assert!(
+            warning.contains("Marker") && warning.contains("callees"),
+            "{warning}"
+        );
+        assert!(
+            warning.contains("could not locate enclosing function"),
+            "{warning}"
+        );
+        assert!(!warning.contains("file cap"), "{warning}");
+        let compact = CallGraph.format_compact(&out).unwrap();
+        assert!(
+            compact.starts_with(&format!("warning: {warning}\n")),
+            "{compact}"
+        );
+    }
+
+    /// A project for driving `CallGraph::call` end to end past the Phase B file cap: a seed
+    /// `seed` (src/lib.rs, line 0) with one incoming caller `ghost` that workspace/symbol
+    /// cannot place — so BFS depth 2 sends it to the Phase B walk — plus `placed_callers`
+    /// further callers that workspace/symbol CAN place (they cost no walk and only widen the
+    /// result), over `filler` same-language files none of which defines `ghost`.
+    async fn ghost_project(
+        filler: usize,
+        placed_callers: usize,
+    ) -> (tempfile::TempDir, ToolContext) {
+        use crate::lsp::{SymbolInfo, SymbolKind};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let src = std::fs::canonicalize(dir.path()).unwrap().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let file = src.join("lib.rs");
+        std::fs::write(&file, "fn seed() {}\n").unwrap();
+        for i in 0..filler {
+            std::fs::write(src.join(format!("filler_{i}.rs")), "fn other() {}\n").unwrap();
+        }
+
+        let sym = |name: &str, line: u32| SymbolInfo {
+            name: name.to_string(),
+            name_path: name.to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: line,
+            end_line: line,
+            start_col: 3,
+            children: vec![],
+            range_start_line: None,
+            detail: None,
+        };
+        let uri: lsp_types::Uri = url::Url::from_file_path(&file)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap();
+        let item = |name: &str| lsp_types::CallHierarchyItem {
+            name: name.to_string(),
+            kind: lsp_types::SymbolKind::FUNCTION,
+            tags: None,
+            detail: None,
+            uri: uri.clone(),
+            range: lsp_types::Range::default(),
+            selection_range: lsp_types::Range::default(),
+            data: None,
+        };
+        let call_from = |name: &str, line: u32| lsp_types::CallHierarchyIncomingCall {
+            from: item(name),
+            from_ranges: vec![lsp_types::Range {
+                start: lsp_types::Position { line, character: 0 },
+                end: lsp_types::Position { line, character: 1 },
+            }],
+        };
+
+        let mut incoming = vec![call_from("ghost", 0)];
+        let mut placed = Vec::new();
+        for i in 0..placed_callers {
+            let name = format!("placed_{i}");
+            incoming.push(call_from(&name, i as u32 + 1));
+            // Line 5+: no `prepare_call_hierarchy` entry there, so these end at depth 2.
+            placed.push(sym(&name, 5 + i as u32));
+        }
+        let mock = MockLspClient::new()
+            .with_symbols(&file, vec![sym("seed", 0)])
+            .with_workspace_symbols(placed);
+        mock.prepare_call_hierarchy_results
+            .lock()
+            .unwrap()
+            .insert((file.clone(), 0, 3), Some(item("seed")));
+        mock.incoming_calls_results
+            .lock()
+            .unwrap()
+            .insert("seed".to_string(), incoming);
+
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: mock_lsp_provider(mock),
+            output_buffer: test_buf(),
+            progress: None,
+            peer: None,
+            section_coverage: Arc::new(Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        };
+        (dir, ctx)
+    }
+
+    /// BUG 2026-10-16 call-graph-workspace-scan-cap-returns-a-false-no-callers, through the
+    /// tool's real call surface. `ghost` is a caller the language server reported but could
+    /// not place; the walk that looks for it stops at the 5,000-file cap with candidates
+    /// left, so its edges were never followed. The result must say so — in the JSON and in the
+    /// compact text the caller reads — and name the cap the walk was actually given.
+    #[tokio::test]
+    async fn call_graph_reports_a_caller_it_could_not_place_because_the_walk_hit_its_cap() {
+        let (_dir, ctx) = ghost_project(5_001, 0).await;
+
+        let result = CallGraph
+            .call(json!({ "symbol": "seed", "path": "src/lib.rs" }), &ctx)
+            .await
+            .unwrap();
+
+        let warning = result["completeness_warning"].as_str().unwrap_or_default();
+        assert!(
+            warning.contains("stopped after 5000") && warning.contains("`ghost`"),
+            "a caller the walk never reached must be named in the result: {result}"
+        );
+        assert_eq!(result["scan_incomplete_total"], json!(1), "{result}");
+        assert_eq!(
+            result["scan_incomplete_symbols"],
+            json!(["ghost"]),
+            "{result}"
+        );
+        let compact = CallGraph.format_compact(&result).unwrap();
+        assert!(
+            compact.contains("stopped after 5000") && compact.contains("`ghost`"),
+            "the compact text is what the caller reads: {compact}"
+        );
+    }
+
+    /// ADR 2026-08-27 clause 2, end to end: the same unplaceable caller over a project the
+    /// walk covers completely is a real "no definition found" and the result stays bare.
+    #[tokio::test]
+    async fn call_graph_stays_bare_when_the_walk_for_an_unplaced_caller_finished() {
+        let (_dir, ctx) = ghost_project(3, 0).await;
+
+        let result = CallGraph
+            .call(json!({ "symbol": "seed", "path": "src/lib.rs" }), &ctx)
+            .await
+            .unwrap();
+
+        assert!(
+            result.get("completeness_warning").is_none(),
+            "a finished walk that found nothing is not a cut-short one: {result}"
+        );
+        assert!(result.get("scan_incomplete_symbols").is_none(), "{result}");
+    }
+
+    /// The warning must survive the overflow path. A result over the inline budget is stored
+    /// in a buffer and the caller reads `truncate_compact(format_compact(..), 2000, 3000)`,
+    /// which cuts at the last newline in range — so a warning that is the last line of
+    /// `format_compact` is exactly the line a big result loses.
+    #[tokio::test]
+    async fn call_graph_warning_survives_the_overflow_summary_of_a_large_result() {
+        let (_dir, ctx) = ghost_project(5_001, 120).await;
+
+        let blocks = CallGraph
+            .call_content(
+                json!({ "symbol": "seed", "path": "src/lib.rs", "detail_level": "full" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let text = blocks[0].as_text().expect("a text block").text.clone();
+        let envelope: Value = serde_json::from_str(&text).expect("the buffered envelope is JSON");
+
+        assert!(
+            envelope.get("output_id").is_some(),
+            "fixture check: the result must be big enough to be buffered, or this test proves \
+         nothing about the overflow path: {text}"
+        );
+        let summary = envelope["summary"].as_str().unwrap_or_default();
+        assert!(
+            summary.contains("(truncated)"),
+            "fixture check: the summary must actually have been truncated: {summary}"
+        );
+        assert!(
+            summary.contains("stopped after 5000") && summary.contains("`ghost`"),
+            "the warning must be in what the caller reads, not only in the buffer: {summary}"
+        );
+    }
+    /// Phase B compares the language of each file on disk with the language of the SEED. The
+    /// seed's language arrives as the LSP languageId (`get_lsp_client`), the files' as the AST
+    /// language, and those vocabularies differ for React files: `typescriptreact` is not `tsx`.
+    /// Compared as-is, a React seed examined no file at all. Each case here hands the resolver
+    /// the id `get_lsp_client` really produces for that seed.
+    #[tokio::test]
+    async fn a_react_seed_walk_examines_react_files() {
+        for (file, ast_lang) in [("a.tsx", "tsx"), ("a.jsx", "jsx")] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(
+                dir.path().join(file),
+                "export function ghost() { return 1; }\n",
+            )
+            .unwrap();
+            let mut r = resolver_over(dir.path(), 100);
+            r.lang = crate::lsp::servers::lsp_language_id(ast_lang).to_string();
+
+            let found = r.lookup_pos("ghost").await;
+
+            assert_eq!(
+                found.map(|(p, _, _)| p),
+                Some(dir.path().join(file)),
+                "a {ast_lang} seed (languageId {}) must examine {file}",
+                r.lang
+            );
+        }
+    }
+
+    /// TypeScript, TSX, JavaScript and JSX are one population for this walk: one language
+    /// server (`typescript-language-server`) serves all four, and `.tsx` components import
+    /// functions from `.ts` modules and the reverse, so the definition of a symbol one file
+    /// calls routinely lives in a file of the sibling extension.
+    #[tokio::test]
+    async fn the_typescript_family_is_one_population_for_the_walk() {
+        for (seed_ast_lang, def_file) in [
+            ("typescript", "view.tsx"),
+            ("tsx", "util.ts"),
+            ("javascript", "view.jsx"),
+            ("jsx", "util.js"),
+            ("tsx", "util.js"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(
+                dir.path().join(def_file),
+                "export function ghost() { return 1; }\n",
+            )
+            .unwrap();
+            let mut r = resolver_over(dir.path(), 100);
+            r.lang = crate::lsp::servers::lsp_language_id(seed_ast_lang).to_string();
+
+            assert!(
+                r.lookup_pos("ghost").await.is_some(),
+                "a {seed_ast_lang} seed must find a definition in {def_file}"
+            );
+        }
+    }
+
+    /// The family is not "every language": a Rust walk does not look in TypeScript files, and
+    /// those files are not counted as unexamined candidates either (they were never
+    /// candidates). `a.rs` is there because the seed's own file is always a candidate — a walk
+    /// that admitted none would be reported as such.
+    #[tokio::test]
+    async fn a_rust_walk_does_not_examine_typescript_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn other() {}\n").unwrap();
+        std::fs::write(
+            dir.path().join("x.ts"),
+            "export function ghost() { return 1; }\n",
+        )
+        .unwrap();
+        let r = resolver_over(dir.path(), 100);
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+        assert!(
+            r.incomplete().is_none(),
+            "files of another language are not unexamined candidates: {:?}",
+            r.incomplete()
+        );
+    }
+
+    /// ADR 2026-08-27, "ran and examined nothing": a candidate that is admitted but cannot be
+    /// read must not leave a clean miss. `latin1.rs` is not valid UTF-8, so
+    /// `read_to_string` rejects it; it is the only file that could define `ghost`.
+    #[tokio::test]
+    async fn an_unreadable_candidate_file_makes_a_miss_incomplete() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("latin1.rs"),
+            b"// caf\xe9\nfn ghost() {}\n".as_slice(),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn x() {}\n").unwrap();
+        let r = resolver_over(dir.path(), 100);
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+
+        assert!(
+            r.incomplete().is_some(),
+            "a file that could not be read went unexamined; the miss is not a clean one"
+        );
+    }
+
+    /// A seed language with no definition parser (C++ here: LSP config, no tree-sitter grammar)
+    /// has same-language files the walk can never read a definition from. The first fix counted
+    /// each of them as "could not read or parse" — a cause that was never checked (no file was
+    /// opened), a count that is every file of the language, and an uncapped walk per unplaced
+    /// symbol. The pre-flight refusal says the one true thing, once, and walks nothing.
+    #[tokio::test]
+    async fn a_seed_language_with_no_definition_parser_is_refused_before_walking() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["x.cpp", "y.cpp", "z.cpp"] {
+            std::fs::write(dir.path().join(name), "int ghost() { return 1; }\n").unwrap();
+        }
+        let mut r = resolver_over(dir.path(), 100);
+        r.lang = "cpp".to_string();
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+
+        let (symbols, coverage) = r.incomplete().expect("a refused walk is incomplete");
+        assert_eq!(coverage.no_parser.as_deref(), Some("cpp"), "{coverage:?}");
+        assert_eq!(
+            coverage.entries_visited, 0,
+            "the walk must not start: {coverage:?}"
+        );
+        assert_eq!(coverage.unexamined, 0, "no file was opened: {coverage:?}");
+        let warning = scan_incomplete_warning(&symbols, &coverage).unwrap();
+        assert!(
+            warning.contains("has no definition parser for cpp, so it looked in no file"),
+            "{warning}"
+        );
+        assert!(
+            !warning.contains("read or parse") && !warning.contains("same-language file"),
+            "no I/O cause and no file count for a walk that never opened a file: {warning}"
+        );
+    }
+
+    /// A project whose `node_modules/` is not gitignored must not spend the file budget on
+    /// dependencies — the `references` walk and this one burned their whole cap there. Cap 2
+    /// over three vendored files and one real file (the seed's own file is always a candidate).
+    #[tokio::test]
+    async fn the_walk_does_not_spend_its_budget_on_vendored_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn x() {}\n").unwrap();
+        let vendored = dir.path().join("node_modules").join("pkg");
+        std::fs::create_dir_all(&vendored).unwrap();
+        for name in ["a.rs", "b.rs", "c.rs"] {
+            std::fs::write(vendored.join(name), "fn x() {}\n").unwrap();
+        }
+        let r = resolver_over(dir.path(), 2);
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+        assert!(
+            r.incomplete().is_none(),
+            "vendored files are not candidates, so nothing was left unexamined: {:?}",
+            r.incomplete()
+        );
+    }
+
+    /// The prune applies to the path BELOW the project root: a project that merely lives under
+    /// a directory called `node_modules` must still be walked.
+    #[tokio::test]
+    async fn the_walk_prunes_below_the_project_root_not_above_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("node_modules").join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.rs"), "fn ghost() {}\n").unwrap();
+        let r = resolver_over(&root, 100);
+
+        assert!(
+            r.lookup_pos("ghost").await.is_some(),
+            "a project under a `node_modules/` parent directory must still be walked"
+        );
+    }
+
+    /// The prune is deliberately short: `build/`, `out/`, `dist/`, `vendor/` and `target/` are
+    /// legitimate source directories in some ecosystems (go-ethereum's `build/ci.go`, Go's
+    /// `go/build`), and a pruned directory is invisible to the coverage, so a definition living
+    /// only there would be a clean miss. Before the prune was narrowed this was `NotFound`.
+    #[tokio::test]
+    async fn a_definition_living_in_a_build_directory_is_found() {
+        for dir_name in ["build", "out", "dist", "vendor", "target"] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("a.rs"), "fn other() {}\n").unwrap();
+            std::fs::create_dir(dir.path().join(dir_name)).unwrap();
+            std::fs::write(dir.path().join(dir_name).join("ci.rs"), "fn ghost() {}\n").unwrap();
+            let r = resolver_over(dir.path(), 100);
+
+            assert!(
+                r.lookup_pos("ghost").await.is_some(),
+                "a definition under {dir_name}/ must be found"
+            );
+        }
+    }
+
+    /// A directory the walker cannot enter is a part of the tree nobody looked at. Reports a
+    /// skip on stderr, and restores the mode even when an assertion fails, when the process can
+    /// read a `chmod 000` directory anyway (root).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unenterable_directory_makes_a_miss_incomplete() {
+        let dir = tempfile::tempdir().unwrap();
+        let locked = dir.path().join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::write(locked.join("hidden.rs"), "fn ghost() {}\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn x() {}\n").unwrap();
+        let Some(_guard) = crate::tools::symbol::scan_budget::test_support::lock(
+            &locked,
+            "an_unenterable_directory_makes_a_miss_incomplete",
+        ) else {
+            return;
+        };
+        let r = resolver_over(dir.path(), 100);
+
+        let found = r.lookup_pos("ghost").await;
+
+        assert!(found.is_none());
+        assert!(
+            r.incomplete().is_some(),
+            "a directory that could not be entered is unexamined, not empty"
+        );
+    }
+
+    /// Through the tool: the unplaceable caller `ghost` is looked for in a tree that holds one
+    /// file the walk cannot read. The result must name that, in the JSON and the compact text.
+    #[tokio::test]
+    async fn call_graph_names_the_files_it_could_not_read_when_it_cannot_place_a_caller() {
+        let (dir, ctx) = ghost_project(3, 0).await;
+        std::fs::write(
+            dir.path().join("src").join("latin1.rs"),
+            b"// caf\xe9\nfn x() {}\n".as_slice(),
+        )
+        .unwrap();
+
+        let result = CallGraph
+            .call(json!({ "symbol": "seed", "path": "src/lib.rs" }), &ctx)
+            .await
+            .unwrap();
+
+        let warning = result["completeness_warning"].as_str().unwrap_or_default();
+        assert!(
+            warning.contains("could not read or parse 1 same-language file")
+                && warning.contains("`ghost`"),
+            "an unreadable file must be named, not turned into a clean miss: {result}"
+        );
+        let compact = CallGraph.format_compact(&result).unwrap();
+        assert!(
+            compact.contains("could not read or parse 1 same-language file"),
+            "{compact}"
+        );
+    }
+
+    /// HTML and CSS have a tree-sitter grammar but no definition extractor
+    /// (`ast::parser::supports_symbol_extraction`): the walk parses every file and can never
+    /// find a definition in one. Same pre-flight refusal as a language with no grammar at all.
+    #[tokio::test]
+    async fn a_seed_language_with_a_grammar_but_no_extractor_is_refused_too() {
+        for (ast_lang, file) in [("html", "a.html"), ("css", "a.css"), ("scss", "a.scss")] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join(file), "x\n").unwrap();
+            let mut r = resolver_over(dir.path(), 100);
+            r.lang = crate::lsp::servers::lsp_language_id(ast_lang).to_string();
+
+            assert!(r.lookup_pos("ghost").await.is_none());
+
+            let (_, coverage) = r
+                .incomplete()
+                .unwrap_or_else(|| panic!("{ast_lang} walked"));
+            assert_eq!(coverage.no_parser.as_deref(), Some(ast_lang));
+            assert_eq!(coverage.entries_visited, 0, "{ast_lang} must not be walked");
+        }
+    }
+
+    /// The seed's own file is a candidate, so a walk that admitted none did not look where it
+    /// believes it did: it is incomplete, not a complete empty one. This is the check that
+    /// would have caught the original vocabulary mismatch, where a React seed matched no file.
+    #[tokio::test]
+    async fn a_walk_that_admitted_no_candidate_at_all_is_incomplete() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "fn ghost() {}\n").unwrap();
+        std::fs::write(dir.path().join("x.ts"), "export function ghost() {}\n").unwrap();
+        let r = resolver_over(dir.path(), 100); // a Rust seed over a tree with no Rust file
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+
+        let (symbols, coverage) = r.incomplete().expect("zero candidates is not a clean miss");
+        assert!(coverage.empty_walk, "{coverage:?}");
+        let warning = scan_incomplete_warning(&symbols, &coverage).unwrap();
+        assert!(
+            warning.contains("found no same-language file to look in"),
+            "{warning}"
+        );
+    }
+
+    /// A symlink to a file outside the project is not followed (the repo's other walkers do
+    /// not either) and not silent: the definition behind it is a clean miss otherwise.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlinked_candidate_outside_the_project_is_counted_not_followed() {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("ext.rs"), "fn ghost() {}\n").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn x() {}\n").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("ext.rs"), dir.path().join("def.rs"))
+            .unwrap();
+        let r = resolver_over(dir.path(), 100);
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+
+        let (symbols, coverage) = r
+            .incomplete()
+            .expect("a followed-nothing miss is not clean");
+        assert_eq!(coverage.symlinks, 1, "{coverage:?}");
+        let warning = scan_incomplete_warning(&symbols, &coverage).unwrap();
+        assert!(
+            warning.contains("did not follow 1 symlink(s) that lead outside the project"),
+            "{warning}"
+        );
+    }
+
+    /// A symlinked directory is a subtree nobody entered; a link whose target is inside the
+    /// project costs nothing, because the walk reaches the target by its own path.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn only_a_symlink_that_leads_outside_the_project_is_a_gap_for_the_walk() {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("ext.rs"), "fn x() {}\n").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn x() {}\n").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("a.rs"), dir.path().join("alias.rs")).unwrap();
+        let inward = resolver_over(dir.path(), 100);
+        assert!(inward.lookup_pos("ghost").await.is_none());
+        assert!(
+            inward.incomplete().is_none(),
+            "an inward link is reached by its own path: {:?}",
+            inward.incomplete()
+        );
+
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("extdir")).unwrap();
+        let outward = resolver_over(dir.path(), 100);
+        assert!(outward.lookup_pos("ghost").await.is_none());
+        let (_, coverage) = outward
+            .incomplete()
+            .expect("an unentered directory is a gap");
+        assert_eq!(coverage.symlinks, 1, "{coverage:?}");
+    }
+
+    /// `tsc` writes `util.js` next to `util.ts` and nothing gitignores it. The twin carries the
+    /// same definitions, so as a candidate it would place a symbol in build output and spend the
+    /// file budget twice. Only the twin defines `inner` here, so a walk that reads it finds
+    /// `inner` and one that skips it does not — deterministic whatever order the walker uses.
+    #[tokio::test]
+    async fn a_compiled_twin_of_a_typescript_file_is_not_a_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("util.ts"), "export {};\n").unwrap();
+        std::fs::write(
+            dir.path().join("util.js"),
+            "function inner() { return 1; }\nexports.inner = inner;\n",
+        )
+        .unwrap();
+        let mut r = resolver_over(dir.path(), 100);
+        r.lang = "typescript".to_string();
+        assert!(
+            r.lookup_pos("inner").await.is_none(),
+            "the compiled twin must not place a symbol"
+        );
+
+        // A `.js` with no `.ts` source is real source and stays a candidate.
+        let lone = tempfile::tempdir().unwrap();
+        std::fs::write(
+            lone.path().join("lib.js"),
+            "function inner() { return 1; }\n",
+        )
+        .unwrap();
+        let mut r = resolver_over(lone.path(), 100);
+        r.lang = "javascript".to_string();
+        assert!(r.lookup_pos("inner").await.is_some());
+    }
+
+    /// `one_hop` resolves each node with the language of the node's OWN file. A `.tsx` seed's
+    /// callee lives in a `.ts` module and the reverse; parsed with the seed's grammar the
+    /// call after `<string>x` (or inside the JSX) is lost, and `upsert` persists the partial
+    /// set so every later query is served it. Asserts the returned edges, the cache, and the
+    /// languageId the language server was asked under: `did_open` keeps the first id a file was
+    /// opened with for the whole session, and typescript-language-server maps it to a script
+    /// kind, so opening `util.ts` as `typescriptreact` is a lasting mis-parse on that side too.
+    #[tokio::test]
+    async fn one_hop_parses_each_node_with_its_own_files_grammar_and_caches_the_full_set() {
+        for (file, seed_ast_lang, src, symbol, expected, expected_id) in [
+            (
+                "util.ts",
+                "tsx",
+                "export function outer() { const y = <string>x; return inner(y); }\nfunction inner(a: string) { return a; }\n",
+                "outer",
+                vec!["inner"],
+                "typescript",
+            ),
+            (
+                "view.tsx",
+                "typescript",
+                "export function view() { return <div onClick={() => track()}>{format(1)}</div>; }\n",
+                "view",
+                vec!["format", "track"],
+                "typescriptreact",
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(file);
+            std::fs::write(&path, src).unwrap();
+            let mut r = resolver_over(dir.path(), 100);
+            let mock = Arc::new(MockLspClient::new());
+            r.client = mock.clone();
+            r.lang = crate::lsp::servers::lsp_language_id(seed_ast_lang).to_string();
+            r.positions
+                .lock()
+                .unwrap()
+                .insert(symbol.to_string(), (path.clone(), 0, 16));
+
+            let edges = r.one_hop(symbol, Direction::Callees).await.unwrap();
+
+            let mut callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+            callees.sort_unstable();
+            assert_eq!(
+                callees, expected,
+                "{file} resolved under a {seed_ast_lang} seed lost calls"
+            );
+            let cached = {
+                let conn = r.conn.lock().unwrap();
+                EdgeCache::new(&conn, &r.project_id)
+                    .lookup_callees(symbol)
+                    .unwrap()
+            };
+            let mut cached: Vec<&str> = cached.iter().map(|e| e.callee_sym.as_str()).collect();
+            cached.sort_unstable();
+            assert_eq!(cached, expected, "the cache must hold the full edge set");
+            assert_eq!(
+                *mock.prepare_call_hierarchy_calls.lock().unwrap(),
+                vec![(path.clone(), expected_id.to_string())],
+                "{file} must be opened under its own languageId, not the {seed_ast_lang} seed's"
+            );
+        }
+    }
+} // mod tests
+
+pub mod traversal;

@@ -49,7 +49,7 @@ Files: modify/test src/librarian/tools/create.rs only if a defect is reproduced;
 
 - [x] Capture frozen baseline/replay inputs and run the existing create test module (48/0).
 - [x] Add actual SQLite-trigger failure tests through create::call for slug, augmentation and registration; all3 observed RED on residual artifact count2 vs expected1; original48 remain green.
-- [x] Record confirmed bug44160e1378b2e3f5 and AugmentSpec atomic-create contract; incidental older-runtime navigation mismatch tracked separately as84029483d2895d9b.
+- [x] Record confirmed bug44160e1378b2e3f5 and AugmentSpec atomic-create contract; incidental older-runtime navigation mismatch tracked separately ase5016b19fb0f75da.
 - [x] Implement the catalog transaction/moved admission; module51/0 and real private-MCP3 failure+retry+read controls passed.
 - [x] Independent stronger-model review with actual applied call-site mutations and observed outcomes; close any observed survivors.
 - [x] Full required gate on a frozen source tree, then authorized commit/integration with explicit pathspecs preserving peer index entries.
@@ -74,4 +74,4 @@ Review M7 actually SURVIVED51/0; original6 variants KILLED. Parent read M7-resul
 
 Final source `a6febbcb5bada021e0384cfeda9ccd4e527e840c35c9639ed9d043389af27e49`. Initial review:7 mutations,6 KILLED/1 SURVIVED/0 inconclusive. The observed M7 survivor led to both slug/augmentation fixtures exercising regular and worktree contexts. Exact M7 then KILLED49/2; restored module51/0; production prefix unchanged. Full final gate and5 actual private-MCP failure/retry/read cases passed. See [final report](../reports/2026-11-09-create-finalization-dogfood.md) for limits and retained false controls.
 
-Source `6377002c1111fc05c7fb708f68341c0f1293e271`; integrated on experiments `6b2befb1eb9344e7a37f1fe660ec7de501276028`; stable patch-id `ba636938caee459b5457133127e8d919038a6758`. [Identity checks](../evidence/2026-11-09-create-finalization-dogfood/integration.json) establish identical committed trees and preserved peer index blobs. Fixed bug archived as44160e1378b2e3f5 through the managed move. Historical progress entries above describe their recorded stages. No replay, push, release or shared-MCP rollout. The separate older-runtime call_graph follow-up84029483d2895d9b remains open.
+Source `6377002c1111fc05c7fb708f68341c0f1293e271`; integrated on experiments `6b2befb1eb9344e7a37f1fe660ec7de501276028`; stable patch-id `ba636938caee459b5457133127e8d919038a6758`. [Identity checks](../evidence/2026-11-09-create-finalization-dogfood/integration.json) establish identical committed trees and preserved peer index blobs. Fixed bug archived as44160e1378b2e3f5 through the managed move. Historical progress entries above describe their recorded stages. No replay, push, release or shared-MCP rollout. The separate call_graph follow-upe5016b19fb0f75da was subsequently reproduced and corrected by the identity cycle at4776e44bd.

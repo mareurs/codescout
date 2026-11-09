@@ -30,9 +30,11 @@ The subsequent [create-finalization dogfood](reports/2026-11-09-create-finalizat
 
 The [prompt audit](reports/2026-11-09-callgraph-prompt-surface.md) uncovered two scorer false positives through actual trace perturbations, recorded as bug-fix-session-log:F-221. Hardened fixture-specific scoring rejects both (0/2 survive), passes16 controls and preserves the independently verified13 original results. Actual tool evidence is completed Codex events; wire capture contains initialization/list only. Requested model/effort and generated-config hash are retained, without backend attestation or immutable profile inventory. The satisfactory base supports no routing edit in this fixture; it does not establish effectiveness of the default ECC/plugin profile or replay the repair tasks.
 
-## Incidental navigation — open 2026-11-09
+## Incidental navigation — fixed 2026-11-09
 
-[Duplicated Rust call-name callee lookup](../../issues/2026-11-09-call-graph-generic-call-returns-unrelated-callees.md), artifact84029483d2895d9b, bug-fix-session-log:F-222. Observed on the older shared MCP, excluded from finalization evidence. Fresh current-source isolated reproduction and cause are still open; the earlier unique-Python fixture does not establish correctness for this case.
+[Duplicated Rust call-name callee lookup — fixed](../../issues/archive/2026-11-09-call-graph-generic-call-returns-unrelated-callees.md), artifacte5016b19fb0f75da, original observation F-222. The [identity dogfood cycle](reports/2026-11-09-callgraph-identity-dogfood.md) reproduced current-source warm/restart cross-definition contamination and integrated the completed-resolution cache correction as4776e44bd, patch-id82470b4a164f780eab0ce409ca01dfafc29f0d7a. Final84 related tests, qualified native6/6, initial independent review8killed/2survived followed by two exact killed rechecks after test strengthening, and both source/integration full gates passed. Baseline incoming0 runtime control remains nonqualifying; full declaration-identity BFS is outside scope.
+
+[Resolver doc-comment contradiction](../../issues/2026-11-09-call-graph-resolver-doc-denies-outgoing-ts-fallback.md), artifact81436f2c48ad8c74: pre-existing, open and nonblocking. The internal strategy comment still denies the implemented outgoing AST fallback; no source edit for it in this patch.
 
 ## Scope boundary
 

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000094",
+  "command": "python3 docs/trackers/ecc-integration/evidence/2026-11-09-callgraph-identity-dogfood/run_module.py new-api-red tools::symbol::call_edges::cache::tests::completed_",
+  "server_pid": 1520813,
+  "job_pid": 850589,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T18:54:46.416798013+00:00",
+  "finished_at": "2026-11-09T18:55:41.829911171+00:00",
+  "log_path": "/tmp/codescout-bg-JH6DSM.log"
+}

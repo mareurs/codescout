@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/mod.rs
++++ src/tools/symbol/call_graph/mod.rs
+@@ -429,7 +429,7 @@
+             file: &path,
+             line,
+             col,
+-            direction: &direction,
++            direction: &Direction::Callees,
+         };
+         let cached = {
+             let conn = self.conn.lock().unwrap();

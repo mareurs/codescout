@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_edges/cache.rs
++++ src/tools/symbol/call_edges/cache.rs
+@@ -195,7 +195,7 @@
+         )?;
+         // A changed caller can affect an incoming result owned by a different file.
+         self.conn.execute(
+-            "DELETE FROM call_edge_resolutions WHERE project_id = ?1",
++            "DELETE FROM call_edge_resolutions WHERE project_id = ?1 AND 0",
+             params![self.project_id],
+         )?;
+         // Preserve the raw-edge count returned to existing invalidation consumers.
