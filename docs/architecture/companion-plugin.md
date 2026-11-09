@@ -16,6 +16,12 @@ hook inventory lives here. Source of truth is the plugin's own `hooks/hooks.json
 
 The Claude-style completion hook and an external host adapter are different mechanisms. The [2026-10-29 Codex/Copilot measurements](../research/2026-10-29-background-wake-codex-copilot.md) establish real Codex continuation through the existing daemon and synthetic-provider Copilot SDK continuation, including deduplication and client-cleanup limits. They do not represent an installed companion feature.
 
+## `[cs-hint]` advisories and other harnesses
+
+Most `[cs-hint]` text comes from the `buddy` plugin's PostToolUse hook (`buddy/scripts/hook_helpers.py` `handle_cs_tool_use`, heuristics in `buddy/scripts/cs_heuristics.py`); a few come from companion hooks (`pre-edit-dirty-check.mjs`, `suspicious-zero-hint.mjs`). Claude Code runs a plugin's hooks as soon as it is installed.
+
+Codex runs a plugin hook only after the user approves it, and the approval is bound to a hash of the whole plugin root: a new user gets no hook at all, with no error, and any edit inside the installed plugin cancels the approval. For Codex install `cs-hint-codex` (`../claude-plugins/cs-hint-codex/`): one PostToolUse hook in a five-file root, byte copies of the buddy heuristics, one approval in Codex's hooks review. Do not install `buddy` beside it in Codex, the advisories would appear twice. Measurements and source facts: memory `research/hint-visibility-channels-20261109`; design: `claude-plugins:docs/superpowers/specs/2026-11-09-cs-hint-codex-bundle-design.md`.
+
 ## Full hook inventory (per `hooks/hooks.json`)
 
 Re-derived from the installed `hooks/hooks.json` on 2026-08-18 at companion **1.16.9**, because

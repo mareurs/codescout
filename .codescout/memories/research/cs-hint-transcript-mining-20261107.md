@@ -39,5 +39,5 @@ Scope: 21 transcript files, 203,591,767 bytes. Counted: `hook_additional_context
 - Wrong claim made and corrected in the session: that the structural-edit hint fires on any `edit_file`. It fires by the rule above.
 
 ## Open
-- The grep heuristic lives in the claude-plugins repo. The bug file with the 17 cases is committed there as `c5113d4` (`docs/issues/2026-11-07-grep-for-concept-heuristic-fires-on-literal-phrase-searches.md`). Not pushed.
+- The grep heuristic lives in the claude-plugins repo. The bug file with the 17 cases (`c5113d4`, `docs/issues/2026-11-07-grep-for-concept-heuristic-fires-on-literal-phrase-searches.md`) is on `origin/main`. A peer narrowed the rule on 2026-11-09 (claude-plugins `46dbed6`, `0002145`: quiet on quoted prose and identifiers) and the issue is `mitigated`. Re-run 2026-11-09 on the 15 distinct recorded patterns with the current rule: 12 quiet, 3 still fire (`substrate fact`, `verify callers`, `matches text literally`); two concept-shaped controls (`how are retries scheduled`, `retry backoff scheduling`) fire. The deliveries counted above are from before the change.
 - Not done: subagent coverage for sessions in other working directories, a sensitivity check on the windows.
