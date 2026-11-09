@@ -5873,6 +5873,99 @@ async fn a_restricted_search_starts_a_failing_server_once_per_language_not_once_
     );
 }
 
+/// A client that answers every file with no symbols and counts the requests, behind a provider
+/// that always starts. `n` Rust files are written under `src/`.
+async fn restricted_search_fixture(
+    n: usize,
+) -> (
+    tempfile::TempDir,
+    Arc<crate::lsp::mock::MockLspClient>,
+    ToolContext,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    for i in 0..n {
+        std::fs::write(src.join(format!("f{i}.rs")), "fn f() {}\n").unwrap();
+    }
+    let client = Arc::new(crate::lsp::mock::MockLspClient::new());
+    let lsp = crate::lsp::mock::MockLspProvider::with_shared_client(client.clone());
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+    (dir, client, ctx)
+}
+
+/// Branch A of `symbols` had no wall-clock budget: it sent one `documentSymbol` per file until the
+/// directory ran out, so a directory search ran 104.6 s on 2026-11-03 and 61.9 s on
+/// 2026-11-07 (usage.db, backend-kotlin). A spent budget must stop the search AND say so, because a
+/// partial result that reads as complete is the failure. Budget 0 is the deterministic stand-in for
+/// a directory too slow to finish: the first file is always searched, the clock starts once it is
+/// done, so a cold server's first answer is never charged to the budget.
+#[tokio::test]
+async fn a_spent_search_budget_cuts_a_path_search_and_names_it() {
+    use crate::tools::symbol::Symbols;
+
+    let (_dir, client, ctx) = restricted_search_fixture(3).await;
+    let result = Symbols
+        .call(
+            json!({"name": "Foo", "path": "src", "time_budget_ms": 0}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let warning = result["completeness_warning"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a cut search must say so: {result}"));
+    assert!(warning.contains("search cut"), "{warning}");
+    assert!(warning.contains("1 of 3"), "{warning}");
+    assert!(warning.contains("time_budget_ms"), "{warning}");
+    assert_eq!(
+        client
+            .document_symbols_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the first file is searched, the rest are cut"
+    );
+    let text = Symbols.format_compact(&result).unwrap();
+    assert!(text.contains("search cut"), "{text}");
+}
+
+#[tokio::test]
+async fn an_ordinary_path_search_carries_no_search_cut() {
+    use crate::tools::symbol::Symbols;
+
+    let (_dir, client, ctx) = restricted_search_fixture(3).await;
+    let result = Symbols
+        .call(json!({"name": "Foo", "path": "src"}), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        client
+            .document_symbols_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        3,
+        "every file is searched when the budget is not spent"
+    );
+    assert!(
+        result.get("completeness_warning").is_none(),
+        "a complete search must not carry a cut notice: {result}"
+    );
+}
+
 #[test]
 fn symbols_overview_with_overflow() {
     let val = serde_json::json!({

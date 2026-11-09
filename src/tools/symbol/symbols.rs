@@ -32,6 +32,15 @@ pub struct Symbols;
 const FIND_SYMBOL_MAX_RESULTS: usize = 50;
 // cap-class: RESULT_CAP symbols.by_file — probed
 const BY_FILE_CAP: usize = 15;
+/// Wall-clock ceiling for one path-restricted search (`symbols` with `path` and `name`), in
+/// milliseconds. That branch sends one `documentSymbol` per file and had no bound, so a directory
+/// search ran 104.6 s and 61.9 s (usage.db, backend-kotlin, 2026-11-03 and 2026-11-07);
+/// 13 of 4,259 `symbols` calls in the week to 2026-11-08 took over 10 s. The 20 s default mirrors
+/// `grep`'s walk budget and is a candidate, not derived from a measurement of path-search cost: a
+/// caller who needs more passes `time_budget_ms`. The clock starts once the first source file has
+/// been searched, so a cold server's first answer is not charged to it.
+// cap-class: RESULT_CAP symbols.restricted_search_budget — probed
+const DEFAULT_RESTRICTED_SEARCH_BUDGET_MS: u64 = 20_000;
 
 /// Build a per-file distribution from a list of symbol JSON objects.
 /// Returns (entries sorted by count desc, number of files omitted by cap).
@@ -118,6 +127,7 @@ impl Tool for Symbols {
              - `include_body=true`: returns full source of each match. Even without it, a search resolving to exactly ONE symbol auto-shows its code (a leaf's body, or a large container's direct-member shape).\n\
              - `path`: file, directory, or glob. Without a name argument, returns an overview of that path.\n\
              - `depth`: children depth (overview default 1, search default 0).\n\
+             - `time_budget_ms`: wall-clock budget of a `path` + `name` search (default 20000). When it is spent the search stops and the response says how many files it covered; narrow `path` or raise it.\n\
              - `include_docs=true`: attach each symbol's own docstring (works in both overview and search modes).\n\
              \n\
              ## Output and pagination\n\
@@ -156,6 +166,7 @@ impl Tool for Symbols {
                 "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "limit": { "type": "integer", "description": "Max results (default 50)" },
+                "time_budget_ms": { "type": "integer", "description": "Path-search wall-clock ms (default 20000)." },
                 "scope": {
                     "description": "'project' (default), 'libraries', 'all', or 'lib:<name>' — a different axis from doc/librarian's scope (project|repo|umbrella|all).",
                     "default": "project",
@@ -318,8 +329,14 @@ impl Tool for Symbols {
         let mut audit: Option<WalkAudit> = None;
         // Branch A's counterpart to `audit`: the files it could not read symbols from.
         let mut unread_by_lsp: Vec<(PathBuf, String)> = Vec::new();
+        // Branch A's cut notice, when its wall-clock budget ran out.
+        let mut search_cut: Option<String> = None;
         if let Some(rel) = get_path_param(&input, false)? {
-            unread_by_lsp = search_files_restricted(
+            let budget = std::time::Duration::from_millis(
+                optional_u64_param(&input, "time_budget_ms")
+                    .unwrap_or(DEFAULT_RESTRICTED_SEARCH_BUDGET_MS),
+            );
+            let outcome = search_files_restricted(
                 rel,
                 ctx,
                 &root,
@@ -327,9 +344,12 @@ impl Tool for Symbols {
                 include_body,
                 depth,
                 kind_filter,
+                budget,
                 &mut matches,
             )
             .await?;
+            unread_by_lsp = outcome.unread;
+            search_cut = outcome.cut;
         } else {
             if scope.includes_project() {
                 let mut project_audit = WalkAudit::default();
@@ -375,15 +395,23 @@ impl Tool for Symbols {
         // A zero that cannot be trusted has to say so in the RESPONSE, not only in
         // `tracing`. The harm in the originating bug was never the retry — it was an
         // agent concluding "this symbol does not exist" from an answer that actually
-        // meant "the walk never saw the file".
-        if result["total"].as_u64() == Some(0) {
-            let warning = audit
+        // meant "the walk never saw the file". A search cut by its budget says so with or
+        // without matches: a partial result that reads as complete is the same failure.
+        let zero_warning = if result["total"].as_u64() == Some(0) {
+            audit
                 .as_ref()
                 .and_then(|a| a.completeness_warning(&root))
-                .or_else(|| unread_files_warning(&unread_by_lsp, &root));
-            if let Some(w) = warning {
-                result["completeness_warning"] = json!(w);
-            }
+                .or_else(|| unread_files_warning(&unread_by_lsp, &root))
+        } else {
+            None
+        };
+        let warning = match (search_cut, zero_warning) {
+            (Some(cut), Some(zero)) => Some(format!("{cut} {zero}")),
+            (Some(cut), None) => Some(cut),
+            (None, zero) => zero,
+        };
+        if let Some(w) = warning {
+            result["completeness_warning"] = json!(w);
         }
         Ok(result)
     }
@@ -453,6 +481,15 @@ impl Tool for Symbols {
     }
 }
 
+/// What a path-restricted search did not cover: the files the language server gave no symbols
+/// for, each with the reason, and the notice of a search cut by its wall-clock budget.
+struct RestrictedSearch {
+    unread: Vec<(PathBuf, String)>,
+    /// `Some` once the budget ran out: names how many files were searched and that a missing
+    /// match proves nothing about the rest.
+    cut: Option<String>,
+}
+
 /// Restricted search (branch A of `Symbols::call`): a `path`/glob was supplied,
 /// so run `textDocument/documentSymbol` per file and collect the matches.
 ///
@@ -471,8 +508,9 @@ async fn search_files_restricted(
     include_body: bool,
     depth: usize,
     kind_filter: Option<&str>,
+    budget: std::time::Duration,
     matches: &mut Vec<Value>,
-) -> anyhow::Result<Vec<(PathBuf, String)>> {
+) -> anyhow::Result<RestrictedSearch> {
     // Restricted search: per-file textDocument/documentSymbol
     let files: Vec<PathBuf> = if is_glob(rel) {
         resolve_glob_for(&ctx.agent, ctx.workspace_override.as_deref(), rel).await?
@@ -495,6 +533,12 @@ async fn search_files_restricted(
     };
 
     let mut unread = Vec::new();
+    // The budget's clock starts once the FIRST source file has been searched, so a cold server's
+    // first answer (a Gradle import can take a minute) is never charged to it, and a budget of 0
+    // searches exactly one file.
+    let mut searched = 0usize;
+    let mut clock: Option<std::time::Instant> = None;
+    let mut cut: Option<String> = None;
     // A language whose server failed to start is not asked again inside this call: this loop runs
     // once per file, so every retry was a full failed start (about 1.8 s for Kotlin). The rest of
     // that language's files are still listed as unread, with the same reason.
@@ -504,6 +548,25 @@ async fn search_files_restricted(
         let Some(lang) = ast::detect_language(file_path) else {
             continue;
         };
+        if searched > 0 {
+            let started = *clock.get_or_insert_with(std::time::Instant::now);
+            if started.elapsed() >= budget {
+                let total = files
+                    .iter()
+                    .filter(|f| ast::detect_language(f).is_some())
+                    .count();
+                cut = Some(format!(
+                    "search cut: the {} ms wall-clock budget ran out after {searched} of {total} \
+                     source files; the remaining {} were not searched. Results cover only the part \
+                     already searched; a missing match proves nothing about the rest. Narrow \
+                     `path` or raise `time_budget_ms`.",
+                    budget.as_millis(),
+                    total - searched,
+                ));
+                break;
+            }
+        }
+        searched += 1;
         if let Some(reason) = failed_start.get(lang) {
             unread.push((file_path.clone(), reason.clone()));
             continue;
@@ -547,7 +610,7 @@ async fn search_files_restricted(
             kind_filter,
         );
     }
-    Ok(unread)
+    Ok(RestrictedSearch { unread, cut })
 }
 
 /// The warning a zero from branch A carries when some files went unread. `None`

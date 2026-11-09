@@ -404,6 +404,19 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // The cited test drives a zero budget (the deterministic stand-in for a directory too slow
+        // to finish) through `Symbols::call` and asserts the rendered text carries `search cut`.
+        id: "symbols.restricted_search_budget",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("search cut"),
+            mutation: Mutation::NotYet(
+                "the test was watched fail before the emission existed; the emission was not \
+                 deleted afterwards and the row observed red",
+            ),
+            cited_test: "a_spent_search_budget_cuts_a_path_search_and_names_it",
+        },
+    },
+    ProbeRow {
         id: "symbols.short_lang_budget",
         coverage: Coverage::Untested(
             "the shortened per-language budget applied after a recent timeout is the same bound \

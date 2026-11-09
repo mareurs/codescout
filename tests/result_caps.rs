@@ -1462,7 +1462,7 @@ fn truncation_sites_reach_the_real_corpus() {
     // `symbols.rs`, which drifts with unrelated edits to that file — if this
     // assertion starts failing after such an edit, re-check the current line
     // of its `.truncate(` call before assuming the instrument regressed.
-    let (real_file, real_line, real_op) = ("src/tools/symbol/symbols.rs", 48usize, ".truncate(");
+    let (real_file, real_line, real_op) = ("src/tools/symbol/symbols.rs", 57usize, ".truncate(");
     assert!(
         all_sites
             .iter()
