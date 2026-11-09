@@ -233,7 +233,7 @@ CLIPPY=$?
 # The lean set (`--no-default-features`) is linted in the same lane. The librarian is off there, so an
 # item that only `src/librarian/` uses is dead code, and `-D warnings` makes that an error. Until
 # 2026-11-09 no clippy command anywhere ran this set, and it was red on `ReadDenyList`
-# (docs/issues/2026-11-09-no-lane-runs-clippy-on-the-lean-feature-set-and-it-is-red-on-readdenylist.md).
+# (docs/issues/archive/2026-11-09-no-lane-runs-clippy-on-the-lean-feature-set-and-it-is-red-on-readdenylist.md).
 # The lane is red when EITHER command is, and `;` and `||` only, never `&&`: both always run.
 cargo clippy --workspace --all-targets --no-default-features -- -D warnings
 CLIPPY_LEAN=$?

@@ -1,19 +1,19 @@
 ---
-id: '7e6ef8070d1aeb27'
+id: ae68ea4cc817cc52
 kind: bug
-status: open
+status: fixed
 title: 'BUG: no lane runs clippy on the lean feature set, and it is red on ReadDenyList'
 owners:
 - marius
 tags:
 - cluster/unclassified
-closed: null
+closed: 2026-11-09
 opened: 2026-11-09
 owner: marius
 related:
 - docs/issues/archive/2026-09-06-the-documented-gate-never-compiles-the-feature-set-that-ships.md
 severity: low
-unverified: The clippy run stopped at the lib target (two errors). Errors in the lib-test and integration targets of the lean set, if any, are not known. The list of lanes was read from scripts/gate.sh and ci.yml on 2026-11-09, not from a CI run.
+unverified: 'RESOLVED 2026-11-09. Was: the clippy run stopped at the lib target, so lib-test and integration errors of the lean set were unknown. Re-run after the fix over all targets: exit 0, 0 warnings. The CI step itself has not run on a CI runner yet; the gate lane has.'
 ---
 
 ## Summary
@@ -61,16 +61,18 @@ None needed.
 
 ## Fix
 
-Not fixed. Two parts, both for the owner to choose:
+Fixed in two parts, both in `678f34bed`:
 
-1. Make the lean build clean: gate `ReadDenyList` (and its `RESOLVES` thread-local) with `#[cfg(any(feature = "librarian", test))]`, or `#[cfg_attr(not(feature = "librarian"), allow(dead_code))]`.
-2. Make it stay clean: add `cargo clippy --workspace --all-targets --no-default-features -- -D warnings` to `scripts/gate.sh` and to the CI `clippy` job. The failing run took 35 seconds.
+1. `ReadDenyList` and its `impl` in `src/util/path_security.rs` are gated with `#[cfg(any(feature = "librarian", test))]`. Tests build the type in every feature set, so the lean test targets still compile it.
+2. `scripts/gate.sh` runs `cargo clippy --workspace --all-targets --no-default-features -- -D warnings` in the same CLIPPY lane, after the first clippy call (the first non-zero exit wins). The CI `clippy` job runs the same command as a new step.
 
-Part 2 matters more than part 1. Fixing the two errors without the lane leaves the same hole.
+The `RESOLVES` thread-local named in the first draft of this record needed no change: it is a separate item and is already gated `#[cfg(test)]`.
+
+Verified 2026-11-09: the lean clippy command over all targets exits 0 with 0 warnings, and a full `./scripts/gate.sh` run is green on every lane (Python 1764 passed, lean 6282 passed, default 9156 passed).
 
 ## Tests added
 
-N/A — not fixed. The regression check is the lane itself, once it exists.
+The regression check is the lane. `tests/test_python_runner.py` pins the gate's command order: `assert_gate_calls` now expects the lean clippy call after the first clippy call, and its fake `cargo` classifies that call as clippy, not as the `lean` test lane. A gate script that drops the lean clippy call fails that test.
 
 ## Workarounds
 
@@ -78,9 +80,13 @@ None needed for users: this is a lint, not a behavior.
 
 ## Resume
 
-1. Decide gating or allow for `ReadDenyList`.
-2. Add the lean clippy lane to the gate and CI.
-3. Re-run the command above. The run stopped at the lib target, so errors in the lib-test and integration targets, if any, only appear once the lib compiles.
+Nothing outstanding. The new CI step has not run on a CI runner: check the first CI run of `experiments` after a push.
+
+
+## Fix provenance
+
+- **SHA:** `678f34bed90464c3ddf1216b9a208601d0a9bcad` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `c544653042d98c2ee9cc13f060046e3ef3ae2e09` — content hash of the diff; survives rebase and cherry-pick.
 
 ## References
 
