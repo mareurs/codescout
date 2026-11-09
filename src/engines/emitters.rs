@@ -87,19 +87,43 @@ pub(crate) fn emit_session_opener(_ctx: &PostCtx<'_>, ledger: &mut GuideLedger) 
 /// this call's shape and is a fallthrough. Letting declarations win outright
 /// would starve `tracker-conventions` as thoroughly as the old order starved
 /// the sections — the same defect with the sign flipped.
+///
+/// One exception to "the first candidate goes first": a declaring topic that no
+/// section serves for this call's shape would ship only its preamble, a pointer
+/// and a minimum, while a later candidate has a section written for exactly this
+/// shape. That topic is set aside while another candidate remains, and used only
+/// if nothing else ships. Without it, `progressive-disclosure` (named first by the
+/// adapter on a `doc` overflow, and declaring nothing for `doc.*`) would take the
+/// call and the librarian section would wait for the next one.
 pub(crate) fn emit_guide_sections(ctx: &PostCtx<'_>, ledger: &mut GuideLedger) -> Emitted {
+    use crate::prompts::guide_index::GUIDE_INDEX;
+
+    /// Ship `topic` for this call, or `None` when `guide_blocks_for` ships nothing.
+    fn deliver(topic: &str, ctx: &PostCtx<'_>, ledger: &mut GuideLedger) -> Option<Emitted> {
+        let (blocks, shape) = guide_blocks_for(topic, ctx.selector, ctx.value, ledger);
+        // `shape.is_none()` iff `blocks.is_empty()` — every return path in
+        // `guide_blocks_for` keeps the two in lockstep.
+        shape.map(|shape| {
+            Emitted::Claimed(Emission {
+                hint: Some((topic.to_string(), shape)),
+                blocks,
+                ..Default::default()
+            })
+        })
+    }
+
     let Some(content_topic) = ctx.content_topic else {
         return Emitted::Declined;
     };
     let mut candidates: Vec<&str> = vec![content_topic];
-    if let Some(t) =
-        crate::prompts::guide_index::GUIDE_INDEX.topic_declaring(ctx.selector, ctx.value)
-    {
+    if let Some(t) = GUIDE_INDEX.topic_declaring(ctx.selector, ctx.value) {
         if t != content_topic {
             candidates.push(t);
         }
     }
-    for topic in candidates {
+    let last = candidates.len() - 1;
+    let mut preamble_only: Vec<&str> = Vec::new();
+    for (i, topic) in candidates.into_iter().enumerate() {
         // `progressive-disclosure` is the one topic conditional on the
         // response actually overflowing — either the default path buffered a
         // large JSON, or the tool pre-buffered and returned an `output_id`.
@@ -110,15 +134,22 @@ pub(crate) fn emit_guide_sections(ctx: &PostCtx<'_>, ledger: &mut GuideLedger) -
         if !should {
             continue;
         }
-        let (blocks, shape) = guide_blocks_for(topic, ctx.selector, ctx.value, ledger);
-        // `shape.is_none()` iff `blocks.is_empty()` — every return path in
-        // `guide_blocks_for` keeps the two in lockstep.
-        if let Some(shape) = shape {
-            return Emitted::Claimed(Emission {
-                hint: Some((topic.to_string(), shape)),
-                blocks,
-                ..Default::default()
-            });
+        if i < last
+            && GUIDE_INDEX.declares(topic)
+            && GUIDE_INDEX
+                .match_sections(topic, ctx.selector, ctx.value)
+                .is_empty()
+        {
+            preamble_only.push(topic);
+            continue;
+        }
+        if let Some(emitted) = deliver(topic, ctx, ledger) {
+            return emitted;
+        }
+    }
+    for topic in preamble_only {
+        if let Some(emitted) = deliver(topic, ctx, ledger) {
+            return emitted;
         }
     }
     Emitted::Claimed(Emission::default())
@@ -305,6 +336,42 @@ mod tests {
             "progressive-disclosure declares sections, and no section serves `t.a`, so an \
              overflow from it ships the preamble"
         );
+    }
+
+    /// Review of 281ff16b3, Important 2. A `doc` or `librarian` overflow names this topic first
+    /// (the adapter routes there on overflow) while the librarian topic declares the call's
+    /// shape. `progressive-disclosure` declares nothing for `doc.get`, so on its own it would
+    /// ship only the preamble, and a later candidate's section would wait for the next call.
+    /// A topic that would ship only its preamble yields to a candidate that ships a section;
+    /// the preamble still ships once nothing else will.
+    #[test]
+    fn a_doc_overflow_ships_its_librarian_section_before_the_overflow_preamble() {
+        let v = json!({});
+        let mut c = ctx(&v, Some("doc.get"));
+        c.content_topic = Some("progressive-disclosure");
+        c.overflowing = true;
+        let mut ledger = GuideLedger::default();
+
+        let Emitted::Claimed(first) = emit_guide_sections(&c, &mut ledger) else {
+            panic!("an overflow with a named content topic must claim");
+        };
+        let (topic, shape) = first.hint.expect("the first overflow must ship something");
+        assert_eq!(topic, "librarian", "the declared section comes first");
+        assert!(matches!(shape, GuideDeliveryShape::Section));
+
+        let Emitted::Claimed(second) = emit_guide_sections(&c, &mut ledger) else {
+            panic!("an overflow with a named content topic must claim");
+        };
+        let (topic, shape) = second
+            .hint
+            .expect("with the section spent, the overflow preamble ships");
+        assert_eq!(topic, "progressive-disclosure");
+        assert!(matches!(shape, GuideDeliveryShape::Preamble));
+
+        let Emitted::Claimed(third) = emit_guide_sections(&c, &mut ledger) else {
+            panic!("an overflow with a named content topic must claim");
+        };
+        assert!(third.is_empty(), "both are spent: nothing more ships");
     }
 
     /// An overflow from a tool the topic names ships its sections, not the whole guide.

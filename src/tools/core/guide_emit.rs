@@ -644,7 +644,7 @@ mod tests {
                 "the preamble must carry {needle:?}: {t}"
             );
         }
-        assert!(t.len() < 900, "the preamble block is {} B", t.len());
+        assert!(t.len() < 700, "the preamble block is {} B", t.len());
     }
 
     #[test]

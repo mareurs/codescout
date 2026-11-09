@@ -315,8 +315,8 @@ pub struct CodeScoutServer {
     /// responses are rendered relative to it. This banner is the only surface that says so
     /// in push form, and `/compact` discards it with the rest of the conversation.
     /// `get_guide("progressive-disclosure")` § Path-relative annotation states the
-    /// convention in pull form and re-arms on compaction too, but only for an agent that
-    /// re-triggers the topic. See
+    /// convention in pull form. An overflow does not deliver that section (it is pull-only),
+    /// so an agent reads it only by fetching the guide. See
     /// `docs/issues/archive/2026-08-21-path-relative-banner-not-rearmed-after-compaction.md`.
     path_note_emitted_since_activation: Arc<std::sync::atomic::AtomicBool>,
     /// Tracks whether the `## Project Status (details)` block has been emitted since the
@@ -9930,8 +9930,10 @@ mod tests {
     /// content regression. That premise has since changed: since `30b6fc41` the default
     /// `selector_key` is the tool name, or `tool.action` (`action_selector_key`), and
     /// nothing overrides it. `progressive-disclosure` now declares sections, served to the
-    /// eight tools that route to it, and this gate is what verifies that route is live.
-    /// `project-activation-bootstrap` still has no `relevant_guide_topic` at all — it is the
+    /// eight tools it names, and this gate is what verifies that route is live. (Ten tools
+    /// route an overflow to it; `doc` and `librarian` are the two it must not declare,
+    /// because the librarian topics own their shapes.) `project-activation-bootstrap` still
+    /// has no `relevant_guide_topic` at all — it is the
     /// session-opening special case.
     ///
     /// The inputs are derived from each tool's own `input_schema()` action enum — the
@@ -9940,10 +9942,11 @@ mod tests {
     ///
     /// **Two caveats a reader of this gate needs, both from peer sessions on 2026-09-01.**
     ///
-    /// Its live population is **two files**: `grep -l 'serves:' src/prompts/guides/*.md`
-    /// returns `librarian.md` and, since the `tracker-conventions` decomposition,
-    /// `tracker-conventions.md` — so the configuration this gate refuses is still
-    /// unreachable on eight of the ten topics. Cheap to hold, and *thinly exercised*: a
+    /// Its live population is **three files**: `grep -l 'serves:' src/prompts/guides/*.md`
+    /// returns `librarian.md`, since the `tracker-conventions` decomposition
+    /// `tracker-conventions.md`, and since 2026-11-10 `progressive-disclosure.md` — so the
+    /// configuration this gate refuses is still
+    /// unreachable on seven of the ten topics. Cheap to hold, and *thinly exercised*: a
     /// bug in the declaring path has little testing it, and a further declaring member is a
     /// deliberate act rather than something the corpus will supply. The `verified >= 1`
     /// floor below is honest about that; it is not a claim of coverage.
@@ -9963,15 +9966,13 @@ mod tests {
         // Result shapes, not inputs: `relevant_guide_topic` reads the RESULT to pick a
         // topic. Mirrors Gate 2's probe set, including the doctor-shaped one.
         //
-        // The `output_id` / `overflow` probe is deliberately INERT today, and says so here
-        // rather than reading as coverage. `symbols`, `references` and `call_graph` branch
-        // on those keys to route overflowing results to `progressive-disclosure` — but this
-        // gate only evaluates topics that DECLARE, which is `librarian` alone, and the
-        // librarian adapter's router reads `abs_path` / `violations` and never looks at
-        // either key. So removing this row changes no outcome now; it is here for the case
-        // where a topic reached via the overflow branch first declares a section, which is
-        // exactly when a missing probe would make this gate pass without having looked.
-        // Keep it, and do not cite it as evidence that overflow routing is covered.
+        // The `output_id` / `overflow` probe was INERT until 2026-11-10, when
+        // `progressive-disclosure` first declared sections. `symbols`, `references` and
+        // `call_graph` branch on those keys to route overflowing results to it, so this row is
+        // what lets the gate see their route. The librarian adapter's router reads `abs_path` /
+        // `violations`, and routes `doc` and `librarian` overflows here on `output_id` too, but
+        // this topic declares no `doc.*` or `librarian.*` shape (the librarian topics own them).
+        // Keep the row: a topic reached only through the overflow branch needs it to be judged.
         let result_probes = [
             serde_json::json!({}),
             serde_json::json!({"output_id": "@x", "overflow": true}),
@@ -17420,6 +17421,74 @@ mod guide_hint_tests {
             render_content(&second)
         );
     }
+    /// Review of 281ff16b3, Minor 7. The eight tools that `progressive-disclosure` serves are
+    /// derived from the registry, not hand-listed: a tool added later that routes an overflow
+    /// here but is not in a `serves:` line would get only the preamble while every other test
+    /// stayed green (Gate 7 needs one live route, Gate 2 reads a frozen census).
+    ///
+    /// `doc` and `librarian` route here on overflow through the adapter, and are the two this
+    /// topic must NOT declare: `librarian` and `tracker-conventions` own every `doc.*` and
+    /// `librarian.*` shape, and `no_two_topics_declare_an_overlapping_shape` enforces it. Their
+    /// overflow gets the preamble, or the librarian section first
+    /// (`a_doc_overflow_ships_its_librarian_section_before_the_overflow_preamble`).
+    #[cfg(feature = "librarian")]
+    #[tokio::test]
+    async fn every_tool_that_routes_an_overflow_to_progressive_disclosure_is_served_a_core_section()
+    {
+        use crate::prompts::guide_index::GUIDE_INDEX;
+        let (_dir, server) = make_server().await;
+        const TOPIC: &str = "progressive-disclosure";
+        const OWNED_ELSEWHERE: [&str; 2] = ["doc", "librarian"];
+        let probes = [
+            serde_json::json!({}),
+            serde_json::json!({"output_id": "@x", "overflow": true}),
+        ];
+        let mut routed: std::collections::BTreeSet<String> = Default::default();
+        for tool in &server.tools {
+            for probe in &probes {
+                if tool.relevant_guide_topic(probe) != Some(TOPIC) {
+                    continue;
+                }
+                routed.insert(tool.name().to_string());
+                if OWNED_ELSEWHERE.contains(&tool.name()) {
+                    continue;
+                }
+                let sel = tool.selector_key(&serde_json::json!({}));
+                let hit: Vec<&str> = GUIDE_INDEX
+                    .match_sections(TOPIC, sel.as_deref(), probe)
+                    .iter()
+                    .map(|s| s.heading.as_str())
+                    .collect();
+                assert!(
+                    hit.contains(&"Output budgets") && hit.contains(&"Reading a buffer"),
+                    "`{}` routes an overflow to {TOPIC} but no core section serves it \
+                     (selector {sel:?}, matched {hit:?}): add it to the `serves:` lines of \
+                     `## Output budgets` and `## Reading a buffer`",
+                    tool.name()
+                );
+            }
+        }
+        let routed_here: Vec<&str> = routed
+            .iter()
+            .map(String::as_str)
+            .filter(|t| !OWNED_ELSEWHERE.contains(t))
+            .collect();
+        assert_eq!(
+            routed_here,
+            vec![
+                "call_graph",
+                "grep",
+                "read_file",
+                "references",
+                "run_command",
+                "semantic_search",
+                "symbols",
+                "tree"
+            ],
+            "the tools that route an overflow to {TOPIC} changed; check each is served"
+        );
+    }
+
     /// End to end: an overflowing `run_command` ships the sections written for it, with the
     /// section markers, and not the whole guide (bug 7579b32b1cd2362f).
     #[tokio::test]
@@ -17442,17 +17511,24 @@ mod guide_hint_tests {
         for marker in [
             "auto-injected get_guide('progressive-disclosure') § Output budgets",
             "auto-injected get_guide('progressive-disclosure') § Reading a buffer",
-            "auto-injected get_guide('progressive-disclosure') § Background jobs",
+            "auto-injected get_guide('progressive-disclosure') § Background jobs: start",
+            "auto-injected get_guide('progressive-disclosure') § Background jobs: when no wake arrives",
         ] {
             assert!(
                 rendered.contains(marker),
                 "an overflowing run_command must ship {marker:?}; got: {rendered}"
             );
         }
-        assert!(
-            !rendered.contains("## Path-relative annotation"),
-            "the pull-only parts must not ship on an overflow"
-        );
+        for pull_only in [
+            "## Path-relative annotation",
+            "## Buffer internals",
+            "## Anti-patterns",
+        ] {
+            assert!(
+                !rendered.contains(pull_only),
+                "the pull-only part {pull_only:?} must not ship on an overflow"
+            );
+        }
         assert!(
             !rendered.contains("auto-injected get_guide('progressive-disclosure') — first call"),
             "the whole-topic block must not ship for a declaring topic"

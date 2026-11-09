@@ -84,9 +84,8 @@ resolve against.
 That is the whole workspace-facing consequence. The canonical statement — the
 `PATH_KEYS` / `ROOT_KEYS` allowlists, what is never rewritten (file content,
 shell output, prose, error text), and how to read a path against catalog state —
-is `get_guide("progressive-disclosure")` § Path-relative annotation, which
-auto-injects the first time a call overflows into a buffer and so is usually
-already in context.
+is `get_guide("progressive-disclosure")` § Path-relative annotation, which an overflow
+does not deliver: fetch the guide when you need the allowlists.
 ## Cross-project workflow pattern
 
 When you need to work in a sibling project briefly:

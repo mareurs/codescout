@@ -526,8 +526,10 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
         "Anti-patterns",
         "Pull-only by design (bug 7579b32b1cd2362f): general misuse notes (re-running a \
          tool instead of querying its buffer, passing a handle to a non-codescout reader) \
-         that no single tool's overflow calls for. The envelope's `hint` and the core \
-         section carry the correct pattern; `get_guide` returns this list on request.",
+         and one `run_command` note on foreground pipe capture, which `iron-laws-detail` \
+         owns. An overflow reader no longer receives them unprompted: the envelope's `hint` \
+         and the core section carry the correct pattern, and `get_guide` returns this list \
+         on request. The loss is accepted, not absent.",
     ),
     (
         "progressive-disclosure",
