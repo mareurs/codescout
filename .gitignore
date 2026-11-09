@@ -223,3 +223,7 @@ __pycache__/
 # runtime state (usage.db with its -wal/-shm files and the write lock), which
 # is per-process and never belongs in git.
 /x/
+
+# Private, opt-in operation observations (never shared evidence).
+/.codescout/observations/
+crates/*/.codescout/observations/

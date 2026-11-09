@@ -115,7 +115,7 @@ use crate::util::private_dir::DirRefusal;
 /// `the_materialized_set_is_closed_under_its_own_local_imports` derives the required set
 /// from the imports of what is actually written, so a module added to the engine without
 /// being added here reds a test instead of a user's red.
-const EMBEDDED_SCRIPTS: [(&str, &str); 12] = [
+const EMBEDDED_SCRIPTS: [(&str, &str); 16] = [
     (
         "attribute-red.py",
         include_str!(concat!(
@@ -198,6 +198,34 @@ const EMBEDDED_SCRIPTS: [(&str, &str); 12] = [
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/scripts/native_provenance_history.py"
+        )),
+    ),
+    (
+        "observation_contract.py",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/observation_contract.py"
+        )),
+    ),
+    (
+        "observation_store.py",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/observation_store.py"
+        )),
+    ),
+    (
+        "operation_observations.py",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/operation_observations.py"
+        )),
+    ),
+    (
+        "inspect-observations.py",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/inspect-observations.py"
         )),
     ),
 ];
@@ -784,6 +812,37 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{rel} must exist: {e}"));
             assert_eq!(disk, embedded, "{rel} embedded copy diverged from disk");
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn observation_inspector_runs_from_materialized_bundle() {
+        let base = tempfile::tempdir().unwrap();
+        let entry = materialize_into(base.path()).unwrap();
+        let inspector = entry.parent().unwrap().join("inspect-observations.py");
+        assert!(
+            inspector.is_file(),
+            "the inspector must ship, not rely on the source checkout"
+        );
+        let workspace = tempfile::tempdir().unwrap();
+        git2::Repository::init(workspace.path()).unwrap();
+        let output = std::process::Command::new("python3")
+            .arg("-I")
+            .arg(&inspector)
+            .arg("--workspace")
+            .arg(workspace.path())
+            .arg("--json")
+            .current_dir(base.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["coverage"], "unknown");
+        assert_eq!(value["diagnostics"], serde_json::json!(["disabled"]));
     }
 
     /// The engine imports its sibling by name from its own directory, so materializing

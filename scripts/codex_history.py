@@ -178,7 +178,10 @@ def _native_mcp_operation(payload, timestamp, sid, thread, agent, is_child, cwd)
         outcome = ("no-write-refused" if atomic else "partial-error") if refused else (
             "partial-error" if failed else "possible-write")
     op = Operation(f"codex:{sid}/{thread}/{call}", call, principal_key("codex", sid), agent,
-                   timestamp, cwd, "mcp__codescout__" + tool, inp, outcome, atomic, is_child, None)
+                   timestamp, cwd, "mcp__codescout__" + tool, inp, outcome, atomic, is_child, None,
+                   native_thread_id=thread,
+                   native_turn_id=payload.get("turn_id") if isinstance(payload.get("turn_id"),str) and payload["turn_id"] else None,
+                   native_workspace=inp.get("workspace") if isinstance(inp.get("workspace"),str) and Path(inp["workspace"]).is_absolute() else None)
     return op, ""
 
 def read_codex_history(path: Path) -> HistoryBatch:

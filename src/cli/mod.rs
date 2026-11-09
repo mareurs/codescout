@@ -5,6 +5,7 @@
 //! routes the response through `format::print`.
 
 pub mod format;
+pub mod observations;
 
 #[cfg(feature = "librarian")]
 pub mod audit_doc_refs;

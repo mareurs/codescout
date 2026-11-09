@@ -426,17 +426,31 @@ fn create_staging_file(
 /// Not fsynced, as before: atomic against a concurrent reader and a failed write, not
 /// durable across power loss. Two writers to the *same* target still race (last rename wins).
 pub fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
-    // Before anything is created: a refused write leaves no staging file behind. This is the
-    // funnel `create_file`, `edit_file` and `edit_code` all write through, which is why the
-    // guard on codescout's own config files lives here and not in each tool.
     crate::config::protected_files::check_write(path, content)
         .map_err(|msg| std::io::Error::new(std::io::ErrorKind::PermissionDenied, msg))?;
-    atomic_write_with(
+    #[cfg(target_os = "linux")]
+    crate::observations::server::observe_write(
+        path,
+        content.as_bytes(),
+        crate::observations::server::WritePhase::Attempted,
+    );
+    let result = atomic_write_with(
         path,
         content,
         &mut || staging_path(path, &fresh_staging_nonce()),
         &mut |file, bytes| std::io::Write::write_all(file, bytes),
-    )
+    );
+    #[cfg(target_os = "linux")]
+    crate::observations::server::observe_write(
+        path,
+        content.as_bytes(),
+        if result.is_ok() {
+            crate::observations::server::WritePhase::Committed
+        } else {
+            crate::observations::server::WritePhase::Uncertain
+        },
+    );
+    result
 }
 
 /// The body of [`atomic_write`], with the two things a test cannot otherwise steer as

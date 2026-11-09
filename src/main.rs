@@ -173,6 +173,11 @@ enum Commands {
     /// Print the codescout git SHA, full SHA, and dirty status baked into this
     /// binary at build time. JSON output for use by the bench harness.
     Version,
+    /// Control local stock-Codex observations (capture is opt-in per checkout).
+    Observations {
+        #[command(subcommand)]
+        verb: codescout::cli::observations::Verb,
+    },
 
     /// Read and mutate artifacts (find, get, graph, state-at, create, event,
     /// augment, refresh, …).
@@ -477,6 +482,7 @@ async fn main() -> Result<()> {
             };
             println!("{}", serde_json::to_string(&report)?);
         }
+        Commands::Observations { verb } => codescout::cli::observations::run(verb)?,
         Commands::Version => {
             let info = serde_json::json!({
                 "version": env!("CARGO_PKG_VERSION"),

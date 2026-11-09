@@ -7,12 +7,87 @@
 use super::{ClientIdentity, RecoverableError};
 use std::future::Future;
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CodexFields {
+    pub session_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub call_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub version: Option<String>,
+}
+
+/// One native validation policy for command context and stock observations.
+/// A nested turn root never substitutes for a missing top-level sessionId.
+pub(crate) fn codex_fields(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+    client: Option<&ClientIdentity>,
+) -> Result<Option<CodexFields>, &'static str> {
+    let Some(client) = client.filter(|c| c.name == "codex-mcp-client") else {
+        return Ok(None);
+    };
+    let empty = serde_json::Map::new();
+    let meta = meta.unwrap_or(&empty);
+    fn id(
+        map: &serde_json::Map<String, serde_json::Value>,
+        key: &'static str,
+    ) -> Result<Option<String>, &'static str> {
+        match map.get(key) {
+            None => Ok(None),
+            Some(serde_json::Value::String(s))
+                if !s.trim().is_empty() && s.len() <= 1024 && !s.chars().any(|c| c < ' ') =>
+            {
+                Ok(Some(s.clone()))
+            }
+            _ => Err(key),
+        }
+    }
+    let turn = match meta.get("x-codex-turn-metadata") {
+        None => &empty,
+        Some(serde_json::Value::Object(map)) => map,
+        _ => return Err("x-codex-turn-metadata"),
+    };
+    let session_id = id(meta, "sessionId")?;
+    let thread_id = id(meta, "threadId")?;
+    let call_id = id(meta, "callId")?;
+    let turn_id = id(meta, "turnId")?;
+    let nested_root = id(turn, "session_id")?;
+    let nested_thread = id(turn, "thread_id")?;
+    let nested_call = id(turn, "call_id")?;
+    let nested_turn = id(turn, "turn_id")?;
+    for (a, b) in [
+        (&session_id, &nested_root),
+        (&thread_id, &nested_thread),
+        (&call_id, &nested_call),
+        (&turn_id, &nested_turn),
+    ] {
+        if a.as_ref().zip(b.as_ref()).is_some_and(|(a, b)| a != b) {
+            return Err("context-conflict");
+        }
+    }
+    let version = client.version.clone();
+    if version
+        .as_ref()
+        .is_some_and(|v| v.trim().is_empty() || v.len() > 1024 || v.chars().any(|c| c < ' '))
+    {
+        return Err("version");
+    }
+    Ok(Some(CodexFields {
+        session_id,
+        thread_id: thread_id.or(nested_thread),
+        call_id: call_id.or(nested_call),
+        turn_id: turn_id.or(nested_turn),
+        version,
+    }))
+}
+
 #[derive(Debug)]
 pub(crate) enum NativeInvocation {
     Absent,
     Codex {
         session_id: String,
         thread_id: Option<String>,
+        call_id: Option<String>,
+        turn_id: Option<String>,
         version: Option<String>,
     },
     Invalid(&'static str),
@@ -23,36 +98,19 @@ impl NativeInvocation {
         meta: Option<&serde_json::Map<String, serde_json::Value>>,
         client: Option<&ClientIdentity>,
     ) -> Self {
-        let Some(client) = client.filter(|c| c.name == "codex-mcp-client") else {
-            return Self::Absent;
-        };
-        let Some(meta) = meta else {
-            return Self::Absent;
-        };
-        let Some(root) = meta.get("sessionId") else {
-            // A thread alone does not establish the native logical root.
-            return Self::Absent;
-        };
-        let text = |value: &serde_json::Value| {
-            value
-                .as_str()
-                .filter(|s| !s.trim().is_empty() && !s.contains('\0'))
-                .map(str::to_owned)
-        };
-        let Some(session_id) = text(root) else {
-            return Self::Invalid("sessionId");
-        };
-        let thread_id = match meta.get("threadId") {
-            None => None,
-            Some(value) => match text(value) {
-                Some(id) => Some(id),
-                None => return Self::Invalid("threadId"),
+        match codex_fields(meta, client) {
+            Ok(Some(fields)) => match fields.session_id {
+                Some(session_id) => Self::Codex {
+                    session_id,
+                    thread_id: fields.thread_id,
+                    call_id: fields.call_id,
+                    turn_id: fields.turn_id,
+                    version: fields.version,
+                },
+                None => Self::Absent,
             },
-        };
-        Self::Codex {
-            session_id,
-            thread_id,
-            version: client.version.clone(),
+            Ok(None) => Self::Absent,
+            Err(field) => Self::Invalid(field),
         }
     }
 
@@ -69,6 +127,7 @@ impl NativeInvocation {
                 session_id,
                 thread_id,
                 version,
+                ..
             } => {
                 command.env("CODEX_SESSION_ID", session_id);
                 // Missing per-call child/version detail must not borrow a stale
@@ -122,6 +181,8 @@ mod tests {
                 session_id: "actual-root".to_owned(),
                 thread_id: None,
                 version: None,
+                call_id: None,
+                turn_id: None,
             },
             async {
                 apply_to_shell(&mut command).unwrap();
@@ -135,5 +196,28 @@ mod tests {
         );
         assert_eq!(environment[OsStr::new("CODEX_THREAD_ID")], None);
         assert_eq!(environment[OsStr::new("CODEX_VERSION")], None);
+    }
+
+    #[test]
+    fn native_context_rejects_duplicated_identity_conflicts_and_bounds() {
+        let client = ClientIdentity {
+            name: "codex-mcp-client".into(),
+            version: Some("0.167.0".into()),
+        };
+        for meta in [
+            serde_json::json!({"sessionId":"root","x-codex-turn-metadata":{"session_id":"different"}}),
+            serde_json::json!({"sessionId":"root","threadId":"child-a","x-codex-turn-metadata":{"thread_id":"child-b"}}),
+            serde_json::json!({"sessionId":"root","callId":7}),
+            serde_json::json!({"sessionId":"root","turnId":"a","x-codex-turn-metadata":{"turn_id":"b"}}),
+            serde_json::json!({"sessionId":"x".repeat(1025)}),
+        ] {
+            assert!(
+                matches!(
+                    NativeInvocation::from_meta(meta.as_object(), Some(&client)),
+                    NativeInvocation::Invalid(_)
+                ),
+                "{meta}"
+            );
+        }
     }
 }
