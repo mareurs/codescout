@@ -479,13 +479,13 @@ Codified so the Index column means the same thing across sessions.
 
 **Observed:** 2026-11-09. I added a new file, `src/tools/native_provenance_fence/holders.rs`, with `const MAX_LISTED: usize = 12;`. The full gate before I committed it was green. The gate after the commit was red: `result_caps::every_cap_constant_is_classified` named the constant as an unclassified cap. HEAD (`4eceee5e7`) carried a red guard test until the fix commit (`0d47f5898`).
 
-**Cause:** the guard reads its population from `git ls-files src`, so it sees tracked files only. A new file is untracked until its first commit, and every gate run before that commit passes over it. This is a property of the guard's selector, the class `IC-18` (selector narrower than its population), and it applies to every `git ls-files`-based guard in `tests/`, not only this one. I have not listed the others.
+**Cause:** the guard reads its population from `git ls-files src`, so it sees tracked files only. A new file is untracked until its first commit, and every gate run before that commit passes over it. This is a property of the guard's selector, the class `IC-18` (selector narrower than its population), and it applies to every `git ls-files`-based guard in `tests/`, not only this one. Listed 2026-11-09 by `grep` for `ls-files` in `tests/`: `result_caps.rs`, `issue_clusters.rs`, `committed_paths.rs`, `inline_gates.rs`, `issue_frontmatter.rs`, `buffer_stream_policy.rs` and `e2e/eval_common/proc.rs`. I read the selector's rationale only in `result_caps.rs:644`, not in the other six.
 
 **Cost here:** HEAD red for one commit, caught by the very next gate. I also nearly relied on a focused test run (the fence tests) that did not include `result_caps`.
 
 **Rule I am applying:** after the first commit that adds a file under `src/`, run `result_caps` again, or the whole gate, before treating the change as verified; and run the gate once with the new file staged (`git add -N`) so that `git ls-files` lists it. I did not test that `git add -N` makes the guard see the file.
 
-**Not fixed:** the guard itself. A fix would read `git ls-files --cached --others --exclude-standard`. I did not check what that does to the guard's fixtures.
+**Not fixed, and probably should not be.** `tests/result_caps.rs:644` says the selector is deliberate: "an untracked file is a peer's in-flight work and gating on it lets one session red another's build". Reading `--others` would remove that protection, so the earlier idea of changing the guard is withdrawn. What stays is a rule for the author of a new file: stage the file by explicit path before the gate. That has a price, because the staged file is then visible to a peer's gate too. No convention in `docs/conventions/` records this rule; a `grep` for "new file", "intent-to-add" and "add -N" there found nothing relevant.
 
 **Status:** open.
 

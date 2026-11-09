@@ -84,7 +84,9 @@ Partly done. **Option 2 is in; option 1 is not, and this bug stays open.**
 
 - Option 2, `4eceee5e7` and `0d47f5898`: a refused fence lock now names its holders (Linux): the processes that have the lock file open, inherited descriptors included, and the owners the kernel records, each marked "not running" when gone. A list cut by its 12-entry cap or by the 400 ms scan limit ends in "and more". Only the process name and a plain lowercase subcommand are shown, never other arguments.
 - Verified: unit tests on the pure parts; a test that rebuilds the dead-owner case with `flock -s <file> sh -c 'sleep 30 & echo $!'`; a test that starts 14 holders; mutation runs for the holder text and for the cut flag; and live on the rebuilt server. A refused `./scripts/fmt-mine.sh` named the running gate and its children, a dead owner (this session's previous server, whose gate was still running on inherited descriptors, the mechanism of this bug reproduced within minutes), and the dead owner of the mux's lock.
-- Option 1, not done: daemons such as `codescout mux` close the inherited provenance descriptors at startup. The fence is another effort's design, so this stays a decision for its owner.
+- Option 1, drafted and not merged: branch `fix/mux-closes-provenance-leases-20261109`, commit `8f18f6689`, worktree `/home/marius/work/claude/codescout.worktrees/mux-closes-provenance-leases`. The mux closes the inherited leases at startup, only when the descriptor is the lock file the variables name (by device and inode), and strips the seven variables from its language server's environment. The fence is another effort's design, so merging stays a decision for its owner.
+- What the draft gives up: a mux that closed its leases is outside the fence's promise that no process descended from an earlier fenced call is alive when the formatter holds the lock exclusively. The shell's own copy is untouched, so the lock still lasts as long as the shell.
+- Measured 2026-11-09 before the draft: of four real muxes, one (rust, pid 3690455, 3h50m old) held both descriptors, with `FENCE_FD=25` and `COORDINATOR_FD=24` in its environment; the other three held none. So the lock reaches a mux only when a process inside a fenced shell starts it. Which command started that mux is still not known.
 
 What option 2 does and does not change: a caller who is refused can now tell a peer that is mid-call from a lock that no call owns. The refusal itself is unchanged, and the mux can still keep the lock for hours.
 
@@ -98,7 +100,7 @@ Format the files you changed with `rustfmt --edition 2021 <file>` after reading 
 
 ## Resume
 
-1. Decide option 1. Find which `run_command` started the mux, and whether the fence's own tests rely on a daemon holding the lock.
+1. Decide whether to merge the draft (`8f18f6689`). Open points: the call from `mux::process::run` is not tested, only the helper is; `peer::server::run` is a second daemon of the same shape and is not changed; one run of `cargo test --lib provenance` on the branch failed `a_terminal_shell_result_does_not_certify_detached_descendants` (`provenance_fence_context_tests.rs:451`, error text not captured), while 6 of 6 repeated runs on the branch and 6 of 6 on the base passed. That test uses the real account-wide coordination directory; whether live peer locks caused the failure was not measured.
 2. For option 1, add a test that spawns a daemon inside a fenced shell and checks the formatter can still be taken after the shell ends. The existing `a_lock_kept_by_a_child_of_a_dead_owner_is_named_as_such` rebuilds the dead-owner setup and can be extended.
 3. Close this bug when the mux no longer keeps the lock, not when the refusal is more readable.
 
