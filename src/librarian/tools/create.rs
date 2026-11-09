@@ -547,7 +547,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // and a refusal that had already made the directory left it behind, empty. The symlink guards
     // stay ahead of everything because they judge the path, not the directory.
     // docs/issues/archive/2026-10-31-a-refused-doc-create-leaves-the-empty-parent-directory-it-already-made.md
-    // A failed write takes the catalog row back (`undo_failed_create`): the row was written above,
+    // A failed write attempts to take the catalog row back (`undo_failed_create`): it was written above,
     // so without this a full disk or a quota error leaves a row for a missing or empty file, and
     // the next create of the path is refused as "path exists".
     // docs/issues/2026-10-29-artifact-create-partial-filesystem-failure.md
@@ -560,7 +560,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if let Err(e) = written {
         undo_failed_create(&ctx.catalog.lock(), &id, &full);
         return Err(anyhow::Error::from(e).context(format!(
-            "could not write {}; the catalog row was taken back",
+            "could not write {}; cleanup was attempted, but the catalog row or a partial file may remain",
             full.display()
         )));
     }
@@ -1361,6 +1361,72 @@ mod tests {
         assert!(!full.exists(), "the empty file must be removed");
         // Undoing twice, or when nothing was written, must not fail or panic.
         undo_failed_create(&cat, "partial-1", &full);
+    }
+
+    #[tokio::test]
+    async fn failed_disk_write_reports_best_effort_cleanup_without_promising_rollback() {
+        for delete_fails in [true, false] {
+            let tmp = TempDir::new().unwrap();
+            let ctx = mk_ctx(tmp.path().to_path_buf());
+            // A regular file cannot be a parent directory, even for root. The
+            // path validators admit this in-root spelling; create_dir_all fails
+            // only after the artifact and augmentation have been inserted.
+            let blocker = tmp.path().join("blocked");
+            std::fs::write(&blocker, "keep me").unwrap();
+            if delete_fails {
+                ctx.catalog
+                    .lock()
+                    .conn
+                    .execute_batch(
+                        "CREATE TRIGGER fail_cleanup BEFORE DELETE ON artifact \
+                     BEGIN SELECT RAISE(ABORT, 'simulated cleanup failure'); END;",
+                    )
+                    .unwrap();
+            }
+
+            let err = call(
+                &ctx,
+                json!({
+                    "repo": "r", "rel_path": "blocked/new.md",
+                    "kind": "tracker", "title": "X", "body": "hi",
+                    "augment": { "prompt": "p", "params": {} }
+                }),
+            )
+            .await
+            .unwrap_err();
+
+            assert!(
+                err.downcast_ref::<std::io::Error>().is_some(),
+                "the original disk error must remain the cause, not a preflight or cleanup error: {err:#}"
+            );
+            let count = |table: &str| -> i64 {
+                ctx.catalog
+                    .lock()
+                    .conn
+                    .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                    .unwrap()
+            };
+            let expected_rows = if delete_fails { 1 } else { 0 };
+            assert_eq!(
+                count("artifact"),
+                expected_rows,
+                "delete_fails={delete_fails}"
+            );
+            assert_eq!(
+                count("artifact_augmentation"),
+                expected_rows,
+                "delete_fails={delete_fails}"
+            );
+            assert_eq!(std::fs::read_to_string(&blocker).unwrap(), "keep me");
+
+            // Fatal MCP rendering exposes this outer Display, not its sources.
+            let message = err.to_string();
+            assert!(
+                message.contains("cleanup was attempted") && message.contains("may remain")
+                    && !message.contains("catalog row was taken back"),
+                "failed create must warn about uncertain cleanup rather than promise rollback: {message}"
+            );
+        }
     }
 
     #[tokio::test]
