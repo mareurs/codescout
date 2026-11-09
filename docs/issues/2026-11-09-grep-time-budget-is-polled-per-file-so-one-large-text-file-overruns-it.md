@@ -1,19 +1,19 @@
 ---
 id: '569b13c182dda64f'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: grep''s time budget is polled per file, so one large text file overruns it'
 owners:
 - marius
 tags:
 - cluster/unclassified
-closed: null
+closed: 2026-11-09
 opened: 2026-11-09
 owner: marius
 related:
 - docs/issues/archive/2026-08-16-grep-limit-bounds-lines-not-bytes.md
 severity: low
-unverified: 'Mechanism measured on one synthetic 600 MB file. The three real overruns (usage.db ids 210368, 208396, 226057) are NOT attributed to it: the largest files under the 386 s call''s root are binary and are skipped by the sniff. Disk contention or a stalled walker are not ruled out. Memory use was reasoned from the code, not measured.'
+unverified: 'The 600 MB reproduction was not re-run against a rebuilt binary: the bound is shown by tests (a counting reader and a sparse file through the tool call), not by that run. The three real overruns (usage.db ids 210368, 208396, 226057) are NOT attributed to this mechanism and this fix is not known to remove them: the largest files under the 386 s call''s root are binary and were already skipped by the sniff. Disk contention or a stalled walker are not ruled out.'
 ---
 
 ## Summary
@@ -69,11 +69,24 @@ Not established: that this is what happened in the three real calls. The files o
 
 ## Fix
 
-Not fixed. Options for the owner: cap the bytes read per file (and count an over-cap file in `skipped_*` with a notice, as binary files are); and poll the clock between chunks of a read, not only between files. Either keeps the "a partial result never reads as complete" contract that `WalkClock` exists for.
+Fixed in `2b05a80f9`, the first of the two options: a per-file byte cap.
+
+- `MAX_FILE_BYTES` is 64 MiB (`src/tools/grep.rs`). A file over it is not searched. It is counted in `skipped_large`, and `format_grep` renders "N file(s) over 64 MiB were not searched; a missing match proves nothing about them" in both modes, over a zero too.
+- `read_unless_binary` returns `FileRead::{Text, Binary, TooLarge}`. The sniff runs first, so a large binary stays `skipped_binary` and costs one window. A declared length over the cap returns after the sniff. Otherwise the read stops one byte past the cap, which bounds the memory of a file whose length is under-reported.
+- 64 MiB is a judgment, not a measurement.
+
+The second option, polling the clock inside a read, was not done. With the cap, one read costs about 0.1 s, so a poll inside it would not change the budget in a way a caller could see.
+
+This fixes the mechanism. It does not claim to explain the three real overruns (see `unverified`).
 
 ## Tests added
 
-N/A — not fixed.
+In `src/tools/grep.rs`:
+
+- `a_file_over_the_cap_is_skipped_and_named_in_both_modes`: through the tool call, in both modes. A sparse file one byte over the cap, whose leading text carries the pattern, so a search that opened it would list it. Asserts the count, the rendered notice, that the small file still matches and that the big one was not read. It is the cited test of the new probe row `grep.max_file_bytes`; deleting the notice's render made it fail, so the row is `Killed`.
+- `a_text_stream_past_the_cap_is_too_large_and_never_held_past_it`, `a_declared_length_past_the_cap_costs_one_sniff_window`, `a_large_binary_is_binary_not_too_large`, `the_cap_is_inclusive_a_file_of_exactly_the_cap_is_read`: the primitive, with counting readers.
+- `a_search_with_no_file_over_the_cap_reports_no_skipped_large`: no key when nothing was skipped.
+- `a_text_file_within_the_cap_is_returned_whole` replaces `a_text_file_is_returned_whole_whatever_its_size`, whose name no longer held.
 
 ## Workarounds
 
@@ -81,9 +94,14 @@ Callers can narrow `path` or `glob`, and can lower `time_budget_ms`, but a lower
 
 ## Resume
 
-1. Decide a per-file byte cap and whether to poll inside the read.
-2. Re-run the 600 MB reproduction: the call should return in about the budget, not the read time.
-3. If the three real overruns recur, capture the process state during the call, to attribute them.
+1. Rebuild (`./scripts/rb.sh`, then `/mcp`) and re-run the 600 MB reproduction. The call should return in about the budget and report `skipped_large: 1`. Then archive this record.
+2. If the three real overruns recur, capture the process state during the call, to attribute them. This fix is not known to address them.
+
+
+## Fix provenance
+
+- **SHA:** `2b05a80f90eefd2f7ca1219af1dce8eae76a37eb` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `22b0697cf6195ca92469366e0d564aae3005600c` — content hash of the diff; survives rebase and cherry-pick.
 
 ## References
 
