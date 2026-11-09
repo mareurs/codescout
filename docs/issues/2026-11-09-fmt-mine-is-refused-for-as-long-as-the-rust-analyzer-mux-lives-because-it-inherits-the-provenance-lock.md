@@ -100,6 +100,16 @@ What option 2 does and does not change: a caller who is refused can now tell a p
 
 What the two together say about option 1: the owner's concern is real and measured: a mux descendant writes a tracked file without a tool call. For `fmt-mine` itself the observed write is harmless, because `Cargo.lock` is not a `.rs` file, but the fence's claim is "the history is complete", which this write breaks.
 
+**M2 variants (same script, `M2_MODE`, one run each, 20:56–20:59).**
+- Two `cargo check` forms appear in every trace. `cargo check --quiet --workspace --message-format=json …` (rust-analyzer's build-script pass, by its flags) reads a temporary lock copy (`$TMPDIR/rust-analyzer*/Cargo.lock`). `cargo check --workspace --message-format=json --manifest-path <checkout>/Cargo.toml --keep-going --all-targets` works on the checkout's own manifest; in all three runs it is the one that opened `<checkout>/Cargo.lock` `O_RDWR|O_CREAT`.
+- `nosave` (phase B sends only `workspace/didChangeWatchedFiles`, no `didSave`): ` M Cargo.lock` again, written by that second form (pid 894870, 20:57:37, ~42 s after the mux started, i.e. at phase B). So the writer does not need a save; my earlier label "flycheck on save" is refuted as stated. Which rust-analyzer feature issues that form is not established.
+- `buildrs` (`dep/build.rs` writes `OUT_DIR/gen.rs` and appends to `dep/generated.rs`): `?? dep/generated.rs` after phase A. The project's `build-script-build` ran at 20:58:33.6, 2.1 s after the mux started, under the `--quiet` pass (pid 904544, started 20:58:32.96), before the first non-`--quiet` run (20:58:38.98, which matches the session's phase A save). So rust-analyzer runs the project's build scripts when it loads the workspace, with nothing asked of it; whatever they write is a mux-descendant write. The location `dep/` was this script's choice.
+- This repository's `build.rs` writes only `OUT_DIR`, but it runs `git status --porcelain --untracked-files=all -- <DIRTY_SCOPE>` without `--no-optional-locks`, which git documents may refresh `.git/index`. Not measured.
+
+**M1 follow-up (20:55).** The `ie-pal-engine` server's worker restarts and each new worker inherits both leases: workers started at 20:52:37 (pid 825888) and 20:53:08 (pid 833697), the second 2 s after the session wrote `table_metadata.py`, `index_metadata.py` and `test_table_measurement.py` (20:53:06.90), consistent with a dev-server reloader (two restarts observed). The owning session `be7356ea` is alive (`claude` pid 3448215, `ie-pal-engine-47`, 3 h old); the server is ~6 h old, so an earlier process of that session started it. The server writes `logs/app.log`, ignored by `.gitignore:93`; other writes not measurable without ptrace.
+
+**Census running.** `census_sampler.py` (scratchpad), every 300 s for 24 h from 2026-11-09T20:52 local, into `census.jsonl` in this session's scratchpad; it closes its own inherited leases at start and does not appear as a holder. It is a child of this session's codescout server and may stop with it.
+
 ## Tests added
 
 N/A — not fixed.
