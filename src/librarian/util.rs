@@ -255,17 +255,24 @@ pub(crate) fn managed_base(
     roots: &[std::path::PathBuf],
     path: &std::path::Path,
 ) -> Option<std::path::PathBuf> {
+    // The ancestors' resolutions do not depend on the root, so they are made at most once per call,
+    // and only when some root fails the lexical test: the same answers as resolving them per root.
+    let mut resolved_ancestors: Option<Vec<(&std::path::Path, Option<std::path::PathBuf>)>> = None;
     for root in roots {
         if crate::librarian::tools::containing_root(std::slice::from_ref(root), path).is_some() {
             return Some(root.clone());
         }
         let resolved_root = resolve_through_existing_ancestor(root);
-        let shallowest = path
-            .ancestors()
-            .skip(1)
-            .filter(|a| std::fs::canonicalize(a).is_ok_and(|c| c == resolved_root))
-            .last();
-        if let Some(a) = shallowest {
+        let ancestors = resolved_ancestors.get_or_insert_with(|| {
+            path.ancestors()
+                .skip(1)
+                .map(|a| (a, canonicalize_counted(a).ok()))
+                .collect()
+        });
+        let shallowest = ancestors
+            .iter()
+            .rfind(|(_, resolved)| resolved.as_ref() == Some(&resolved_root));
+        if let Some((a, _)) = shallowest {
             return Some(a.to_path_buf());
         }
     }
@@ -366,7 +373,7 @@ pub(crate) fn resolve_through_existing_ancestor(path: &std::path::Path) -> std::
     let mut below: Vec<std::ffi::OsString> = Vec::new();
     let mut cur = path;
     loop {
-        if let Ok(canon) = std::fs::canonicalize(cur) {
+        if let Ok(canon) = canonicalize_counted(cur) {
             return below.iter().rev().fold(canon, |acc, c| acc.join(c));
         }
         let Some(up) = cur.parent() else {
@@ -379,6 +386,21 @@ pub(crate) fn resolve_through_existing_ancestor(path: &std::path::Path) -> std::
         }
         cur = up;
     }
+}
+// Test-only tally of the path resolutions `managed_base` asks the OS for. Thread-local, so a test
+// counts its own resolutions while others run in parallel (the same shape as
+// `path_security::RESOLVES`).
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CANONICALIZES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// `fs::canonicalize`, counted under test. Each call costs one `readlink` per path component, which
+/// is why the callers below resolve a path once per call, not once per root.
+fn canonicalize_counted(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    #[cfg(test)]
+    CANONICALIZES.with(|n| n.set(n.get() + 1));
+    std::fs::canonicalize(path)
 }
 
 /// Where the relative symlink target `target` lands when the link sits in directory `dir`:
@@ -449,6 +471,33 @@ pub(crate) fn descendant_path_like(root_expr: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `doctor` judges every catalogued file, and each judgement asks `managed_base` for its
+    /// confinement root. A path that no root contains used to be resolved once PER ROOT (the
+    /// root, then every ancestor of the path), so one run over 7,294 rows made about 1.24 million
+    /// `readlink` calls. The ancestors' resolutions do not depend on the root: one call must
+    /// resolve each root once and each ancestor once.
+    #[test]
+    fn a_path_no_root_contains_is_resolved_once_not_once_per_root() {
+        let outside = tempfile::tempdir().unwrap();
+        let file = outside.path().join("a/b/c/d/f.md");
+        let roots: Vec<std::path::PathBuf> = (0..4)
+            .map(|_| tempfile::tempdir().unwrap().keep())
+            .collect();
+        let ancestors = file.ancestors().skip(1).count();
+
+        let before = CANONICALIZES.with(|n| n.get());
+        let base = managed_base(&roots, &file);
+        let resolved = CANONICALIZES.with(|n| n.get()) - before;
+
+        assert_eq!(base, None, "no root contains or resolves to this path");
+        assert!(
+            resolved <= roots.len() + ancestors,
+            "{resolved} resolutions for {} roots and {ancestors} ancestors: each root and each \
+         ancestor may be resolved once per call, not once per root",
+            roots.len()
+        );
+    }
 
     #[test]
     fn escape_like_pattern_escapes_percent() {
