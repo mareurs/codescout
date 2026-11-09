@@ -1,0 +1,34 @@
+{
+  "pool": "setup-ab fresh v2 rep2",
+  "registered": "2026-11-09",
+  "gate": "pool v2 gate (strict builder + spec verdicts + gold x2 / empty replay); sub-pool of the two tasks that discriminated in the v2 rep-0 screen, chosen after seeing it",
+  "amends": "setup-ab fresh v2",
+  "dropped": [
+    {
+      "id": "nushell__nushell-19052",
+      "reason": "not repeated: both models passed in the v2 rep-0 screen"
+    },
+    {
+      "id": "nushell__nushell-19283",
+      "reason": "not repeated: both models passed in the v2 rep-0 screen"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "rust-lang__rust-analyzer-22992",
+      "repo": "rust-lang/rust-analyzer",
+      "control_sha256": "698df486a0c8a500e24e792ab63632dd1ff4544fe41bb4c3831e02d5feb9ed98",
+      "expected_count": 8182,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    },
+    {
+      "id": "nushell__nushell-18863",
+      "repo": "nushell/nushell",
+      "control_sha256": "c07bf514d3d4490c3ae19e60c6e13c1da2b2ec8008c660771ca8bc0a746e6f55",
+      "expected_count": 8622,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    }
+  ]
+}
