@@ -26,7 +26,9 @@
 # manifest, and a suite that de-formats files in the checkout it runs from would be
 # rewriting other sessions' trees to test a script whose whole purpose is not doing
 # that.
+# This suite supplies Claude fixture identities; never inherit a caller's Codex/context identity.
 set -u
+unset CODEX_SESSION_ID CODEX_THREAD_ID CODESCOUT_CONTEXT_FILE
 
 SRC="$(cd "$(dirname "$0")/../scripts" && pwd)"
 TOOL="$SRC/fmt-mine.sh"

@@ -20,7 +20,8 @@
     "fingerprints",
     "targets",
     "outcome",
-    "diagnostics"
+    "diagnostics",
+    "observed_at_unix_ms"
   ],
   "properties": {
     "schema_version": {
@@ -78,7 +79,10 @@
       ],
       "properties": {
         "harness": {
-          "const": "codex"
+          "enum": [
+            "codex",
+            "unknown"
+          ]
         },
         "principal": {
           "anyOf": [
@@ -315,6 +319,76 @@
           "unsupported-fingerprint"
         ]
       }
+    },
+    "observed_at_unix_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Capture wall clock for diagnostics and bounded reads, never causal order or authorization."
+    },
+    "native_cwd": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "producer_kind": {
+            "const": "codex-hook"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "caller": {
+            "properties": {
+              "harness": {
+                "const": "codex"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "caller": {
+            "properties": {
+              "harness": {
+                "const": "unknown"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "caller": {
+            "properties": {
+              "principal": {
+                "type": "null"
+              },
+              "thread_id": {
+                "type": "null"
+              },
+              "agent_id": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

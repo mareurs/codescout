@@ -1843,7 +1843,10 @@ pub trait Tool: Send + Sync {
         // exactly the calls a caller reads hardest — the ones that failed. See
         // `attach_param_corrections_to_error` for the wire-confirmed reproduction, the
         // shape chosen, and why the fatal-error branch is deliberately untouched.
-        let mut val = match self.call(input, ctx).await {
+        let raw_result = self.call(input, ctx).await;
+        #[cfg(target_os = "linux")]
+        crate::observations::server::observe_value_result(&raw_result);
+        let mut val = match raw_result {
             Ok(v) => v,
             Err(e) => {
                 let e = attach_param_corrections_to_error(e, param_corrections.as_ref());

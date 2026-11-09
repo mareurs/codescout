@@ -237,6 +237,9 @@ pub struct CodeScoutServer {
     base_ledger_key: Option<String>,
     /// This MCP server process's own id — a fresh uuid per construction.
     session_id: String,
+    /// Receive sequence within this connection, separate from reusable JSON-RPC IDs.
+    #[cfg(target_os = "linux")]
+    observation_sequence: Arc<std::sync::atomic::AtomicU64>,
     /// The Claude Code session's id, resolved ONCE here (env var, then the
     /// shared file, then a uuid) and handed to every consumer.
     ///
@@ -579,6 +582,8 @@ impl CodeScoutServer {
             parked_ledgers: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
             live_ledger: Arc::new(parking_lot::Mutex::new(guide_hints_emitted)),
             session_id: uuid::Uuid::new_v4().to_string(),
+            #[cfg(target_os = "linux")]
+            observation_sequence: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             cc_session_id,
             session_key,
             rendezvous,
@@ -1184,6 +1189,8 @@ impl CodeScoutServer {
                     // kill_on_drop + PgidKillGuard. Only this task's stack persists
                     // until rmcp drops it when the connection closes.
                     drop(release_on_cancel);
+                    #[cfg(target_os = "linux")]
+                    crate::observations::server::observe_cancelled();
                     std::future::pending::<Result<Vec<Content>, anyhow::Error>>().await
                 }
                 res = tokio::time::timeout(
@@ -1213,6 +1220,8 @@ impl CodeScoutServer {
                     // kill_on_drop + PgidKillGuard. Only this task's stack persists
                     // until rmcp drops it when the connection closes.
                     drop(release_on_cancel);
+                    #[cfg(target_os = "linux")]
+                    crate::observations::server::observe_cancelled();
                     std::future::pending::<Result<Vec<Content>, anyhow::Error>>().await
                 }
                 res = tool_call_fut => res,
@@ -1669,17 +1678,76 @@ impl CodeScoutServer {
         peer: Option<Peer<RoleServer>>,
         cancel_token: tokio_util::sync::CancellationToken,
     ) -> std::result::Result<CallToolResult, McpError> {
-        // Read here because `dispatch_tool_call` consumes `req`.
+        #[cfg(target_os = "linux")]
+        let mut req = req;
         let name = req.name.clone();
-        match self
-            .dispatch_tool_call(req, progress, peer, cancel_token)
-            .await
-        {
-            Exit::Recorded(result) => Ok(result),
-            Exit::Unrecorded(exit) => {
-                self.record_unrecorded(&name, &exit).await;
-                exit.result
+        #[cfg(target_os = "linux")]
+        let observation = {
+            let client = peer.as_ref().and_then(|p| p.peer_info()).map(|info| {
+                crate::tools::ClientIdentity {
+                    name: info.client_info.name.clone(),
+                    version: Some(info.client_info.version.clone()).filter(|v| !v.is_empty()),
+                }
+            });
+            // Inspect a workspace pin without activating or creating a project.
+            let pinned = req
+                .arguments
+                .as_ref()
+                .and_then(|m| m.get("workspace"))
+                .and_then(Value::as_str)
+                .map(std::path::PathBuf::from)
+                .filter(|p| p.is_absolute())
+                .and_then(|p| crate::observations::store::checkout(&p).ok());
+            let root = if pinned.is_some() {
+                pinned
+            } else {
+                self.agent.project_root().await
+            };
+            let context = crate::observations::server::ObservationContext::from_meta(
+                root,
+                req.meta.as_ref().map(|m| &m.0),
+                client.as_ref(),
+            );
+            let invocation = crate::observations::server::LocalInvocationId::new(
+                &self.session_id,
+                self.observation_sequence
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            );
+            // Move the map out and back to fingerprint it without cloning file bodies.
+            let had_arguments = req.arguments.is_some();
+            let arguments = Value::Object(req.arguments.take().unwrap_or_default());
+            let fingerprint = crate::observations::contract::fingerprint(&arguments);
+            if let Value::Object(map) = arguments {
+                req.arguments = had_arguments.then_some(map);
             }
+            (context, invocation, fingerprint)
+        };
+        let dispatch = async {
+            match self
+                .dispatch_tool_call(req, progress, peer, cancel_token)
+                .await
+            {
+                Exit::Recorded(result) => Ok(result),
+                Exit::Unrecorded(exit) => {
+                    self.record_unrecorded(&name, &exit).await;
+                    exit.result
+                }
+            }
+        };
+        #[cfg(target_os = "linux")]
+        {
+            crate::observations::server::observe_call(
+                observation.0,
+                observation.1,
+                &name,
+                observation.2,
+                dispatch,
+            )
+            .await
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            dispatch.await
         }
     }
 
@@ -2122,7 +2190,17 @@ impl CodeScoutServer {
             &req.name,
             &input_for_record,
             ctx.workspace_override.as_deref(),
-            || tool.call_content(input, &ctx),
+            || async {
+                #[cfg(target_os = "linux")]
+                if let Some(root) = ctx
+                    .agent
+                    .project_root_for(ctx.workspace_override.as_deref())
+                    .await
+                {
+                    crate::observations::server::dispatch_at(&root);
+                }
+                tool.call_content(input, &ctx).await
+            },
         );
 
         let tool_call_fut = crate::tools::session_key::scope_caller(caller, tool_call_fut);
@@ -3628,6 +3706,10 @@ pub async fn run(
                 move || {
                     let mut s = server.clone();
                     s.session_id = uuid::Uuid::new_v4().to_string();
+                    #[cfg(target_os = "linux")]
+                    {
+                        s.observation_sequence = Arc::new(std::sync::atomic::AtomicU64::new(0));
+                    }
                     Ok(s)
                 },
                 LocalSessionManager::default().into(),

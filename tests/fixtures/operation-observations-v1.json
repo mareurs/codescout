@@ -46,6 +46,7 @@
     "fingerprints": [],
     "targets": [],
     "outcome": "dispatched",
-    "diagnostics": []
+    "diagnostics": [],
+    "observed_at_unix_ms": 1794210000000
   }
 }

@@ -7,7 +7,7 @@ EVENTS = ["request-observed","dispatch-observed","result-observed","hook-pre","h
 OUTCOMES = ["requested","dispatched","returned-success","refused","error-possible-effects","missing-terminal","unknown"]
 DIAGNOSTICS = ["missing-root","invalid-context","context-conflict","unsupported-tool","unsupported-event","incomplete-input","opaque-effects","missing-terminal","unavailable","disabled","quota","torn-record","checksum","sequence-gap","conflicting-duplicate","ambiguous-pair","incompatible-schema","checkout-mismatch","reset","unsupported-fingerprint"]
 TOOLS = ["create_file","edit_file","edit_code","run_command","read_file","symbols","grep","semantic_search","workspace","doc","memory","find_file","references","call_graph","symbol_at","get_guide","onboarding","index","execute","exec_command","shell","code_mode"]
-FIELDS = ["schema_version","observation_id","producer_instance","sequence","store_epoch","event","producer_kind","workspace","caller","tool","local_invocation","native_call_id","turn_id","fingerprints","targets","outcome","diagnostics"]
+FIELDS = ["schema_version","observed_at_unix_ms","observation_id","producer_instance","sequence","store_epoch","event","producer_kind","workspace","caller","tool","local_invocation","native_call_id","turn_id","fingerprints","targets","outcome","diagnostics"]
 
 def _fail():
     raise ValueError("invalid observation")
@@ -72,18 +72,21 @@ def _fingerprint(v):
         _fail()
 
 def decode_observation(v):
-    _exact(v,FIELDS)
-    if type(v["schema_version"]) is not int or v["schema_version"] != 1 or not _safe(v["sequence"]):
+    _exact(v,FIELDS+["native_cwd"] if "native_cwd" in v else FIELDS)
+    if type(v["schema_version"]) is not int or v["schema_version"] != 1 or not _safe(v["sequence"]) or not _safe(v["observed_at_unix_ms"]):
         _fail()
     _text(v["observation_id"])
     _uuid(v["producer_instance"])
     _uuid(v["store_epoch"])
     _path(v["workspace"])
+    _optional(v.get("native_cwd"),_path)
     if v["event"] not in EVENTS or v["producer_kind"] not in ["codex-hook","codescout-server"] or v["outcome"] not in OUTCOMES:
         _fail()
     c=v["caller"]
     _exact(c,["harness","principal","thread_id","agent_id"])
-    if c["harness"] != "codex":
+    if c["harness"] not in ["codex", "unknown"] or (v["producer_kind"]=="codex-hook" and c["harness"]!="codex"):
+        _fail()
+    if c["harness"]=="unknown" and any(c[k] is not None for k in ["principal","thread_id","agent_id"]):
         _fail()
     if c["principal"] is not None:
         _text(c["principal"])

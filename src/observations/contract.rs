@@ -70,6 +70,7 @@ pub const TOOLS: &[&str] = &[
 ];
 const FIELDS: &[&str] = &[
     "schema_version",
+    "observed_at_unix_ms",
     "observation_id",
     "producer_instance",
     "sequence",
@@ -118,6 +119,7 @@ pub type Diagnostic = String;
 #[serde(deny_unknown_fields)]
 pub struct ObservationV1 {
     pub schema_version: u32,
+    pub observed_at_unix_ms: u64,
     pub observation_id: String,
     pub producer_instance: String,
     pub sequence: u64,
@@ -125,6 +127,8 @@ pub struct ObservationV1 {
     pub event: String,
     pub producer_kind: String,
     pub workspace: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_cwd: Option<String>,
     pub caller: Caller,
     pub tool: Option<String>,
     pub local_invocation: Option<String>,
@@ -141,7 +145,7 @@ fn text(s: &str, max: usize) -> Result<(), &'static str> {
     }
     Ok(())
 }
-fn path(s: &str) -> Result<(), &'static str> {
+pub(crate) fn path(s: &str) -> Result<(), &'static str> {
     text(s, 4096)?;
     if !s.starts_with('/') {
         return Err("invalid-path");
@@ -187,7 +191,11 @@ fn validate_fp(f: &Fingerprint) -> Result<(), &'static str> {
     Ok(())
 }
 pub fn validate_observation(v: Value) -> Result<ObservationV1, &'static str> {
-    exact(&v, FIELDS)?;
+    let mut fields = FIELDS.to_vec();
+    if v.get("native_cwd").is_some() {
+        fields.push("native_cwd");
+    }
+    exact(&v, &fields)?;
     exact(
         &v["caller"],
         &["harness", "principal", "thread_id", "agent_id"],
@@ -198,20 +206,29 @@ pub fn validate_observation(v: Value) -> Result<ObservationV1, &'static str> {
         }
     }
     let r: ObservationV1 = serde_json::from_value(v).map_err(|_| "invalid-types")?;
-    if r.schema_version != 1 || r.sequence > SAFE {
+    if r.schema_version != 1 || r.sequence > SAFE || r.observed_at_unix_ms > SAFE {
         return Err("incompatible-schema");
     }
     text(&r.observation_id, 1024)?;
     uuid(&r.producer_instance)?;
     uuid(&r.store_epoch)?;
     path(&r.workspace)?;
+    if let Some(cwd) = &r.native_cwd {
+        path(cwd)?;
+    }
     if !EVENTS.contains(&r.event.as_str())
         || !["codex-hook", "codescout-server"].contains(&r.producer_kind.as_str())
         || !OUTCOMES.contains(&r.outcome.as_str())
     {
         return Err("invalid-enum");
     }
-    if r.caller.harness != "codex" {
+    if !["codex", "unknown"].contains(&r.caller.harness.as_str())
+        || (r.producer_kind == "codex-hook" && r.caller.harness != "codex")
+        || (r.caller.harness == "unknown"
+            && (r.caller.principal.is_some()
+                || r.caller.thread_id.is_some()
+                || r.caller.agent_id.is_some()))
+    {
         return Err("invalid-harness");
     }
     optional(&r.caller.principal)?;

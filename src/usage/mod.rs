@@ -322,6 +322,11 @@ impl UsageRecorder {
     }
 }
 
+/// The semantic refusal sentinel shared by usage and stock observations.
+pub(crate) fn recoverable_message(value: &Value) -> Option<&str> {
+    value.get("error").and_then(Value::as_str)
+}
+
 /// Classify a tool call's outcome for `usage.db`.
 ///
 /// **The `Err` arm has to downcast, because this runs BEFORE the router that
@@ -343,7 +348,9 @@ impl UsageRecorder {
 /// [`RecoverableError`]: crate::tools::RecoverableError
 ///
 /// docs/issues/archive/2026-09-02-recoverable-error-outcome-is-unreachable-in-production.md
-fn classify_content_result(result: &Result<Vec<Content>>) -> (&'static str, bool, Option<String>) {
+pub(crate) fn classify_content_result(
+    result: &Result<Vec<Content>>,
+) -> (&'static str, bool, Option<String>) {
     match result {
         Err(e) => {
             let outcome = if e.downcast_ref::<crate::tools::RecoverableError>().is_some() {
@@ -372,7 +379,7 @@ fn classify_content_result(result: &Result<Vec<Content>>) -> (&'static str, bool
                 .map(|t| t.text.as_str())
                 .unwrap_or("");
             if let Ok(v) = serde_json::from_str::<Value>(text) {
-                if let Some(msg) = v.get("error").and_then(Value::as_str) {
+                if let Some(msg) = recoverable_message(&v) {
                     return ("recoverable_error", false, Some(msg.to_string()));
                 }
                 if v.get("output_id").is_some() {
