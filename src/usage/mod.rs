@@ -137,8 +137,9 @@ impl UsageRecorder {
                 .await;
         let latency_ms = start.elapsed().as_millis() as i64;
         let deliveries_json = deliveries::to_column(&delivered);
-        // Best-effort — never let recording fail the tool call
-        let _ = self
+        // Best-effort — never let recording fail the tool call. A failed write still leaves a
+        // trace: a silent gap makes every rate over `tool_calls` wrong with no sign of it.
+        if let Err(e) = self
             .write_content(
                 tool_name,
                 &started_at,
@@ -150,7 +151,11 @@ impl UsageRecorder {
                 observed_changed,
                 attribution,
             )
-            .await;
+            .await
+        {
+            self.note_dropped_row(tool_name, &started_at, workspace_override, &e)
+                .await;
+        }
         result
     }
 
@@ -159,8 +164,9 @@ impl UsageRecorder {
     /// because the clock inside `record_content` is in the future that was dropped, and a row
     /// that said 0 ms for a call held for the whole timeout would hide the one fact worth having.
     ///
-    /// Best-effort, like every write here: a failure is swallowed and the answer is untouched.
-    /// No delivery, observed-effect or attribution data exists for an abandoned call, so those
+    /// Best-effort, like every write here: a failure is traced by `note_dropped_row` and never
+    /// raised, and the answer is untouched. No delivery, observed-effect or attribution data
+    /// exists for an abandoned call, so those
     /// columns stay NULL.
     /// docs/issues/archive/2026-11-08-cancelled-and-timed-out-calls-leave-no-usage-row.md
     pub async fn record_abandoned(
@@ -173,7 +179,7 @@ impl UsageRecorder {
         error: anyhow::Error,
     ) {
         let result: Result<Vec<Content>> = Err(error);
-        let _ = self
+        if let Err(e) = self
             .write_content(
                 tool_name,
                 started_at,
@@ -185,7 +191,54 @@ impl UsageRecorder {
                 None,
                 None,
             )
-            .await;
+            .await
+        {
+            self.note_dropped_row(tool_name, started_at, workspace_override, &e)
+                .await;
+        }
+    }
+
+    /// Leave a trace of a row that could not be written. The call itself is untouched.
+    ///
+    /// Two sinks, both best-effort: a `warn!` (stderr, which the MCP client captures) and one
+    /// line in `<home project>/.codescout/usage-dropped-rows.log`, a plain file a person can
+    /// read when the database is the thing that failed. The line is `started_at`, tool, pin
+    /// (`-` when none), then the error chain with its newlines folded.
+    /// docs/issues/2026-11-09-concurrent-pinned-calls-leave-no-usage-row.md
+    async fn note_dropped_row(
+        &self,
+        tool_name: &str,
+        started_at: &str,
+        workspace_override: Option<&std::path::Path>,
+        error: &anyhow::Error,
+    ) {
+        let chain = format!("{error:#}").replace(['\n', '\r', '\t'], " ");
+        tracing::warn!(
+            tool = tool_name,
+            pin = ?workspace_override,
+            error = %chain,
+            "usage row dropped: the call answered but its row was not written"
+        );
+        let Some(root) = self.agent.project_root().await else {
+            return;
+        };
+        let pin = workspace_override.map_or_else(|| "-".to_string(), |p| p.display().to_string());
+        let line = format!("{started_at}\t{tool_name}\t{pin}\t{chain}\n");
+        let Ok(mut file) = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(root.join(".codescout").join("usage-dropped-rows.log"))
+            .await
+        else {
+            return;
+        };
+        // `tokio::fs::File` buffers a write on a blocking thread; dropped unflushed, the line is lost.
+        if tokio::io::AsyncWriteExt::write_all(&mut file, line.as_bytes())
+            .await
+            .is_ok()
+        {
+            let _ = tokio::io::AsyncWriteExt::flush(&mut file).await;
+        }
     }
 
     // Ten parameters since `attribution` joined; `db::write_record`, which
@@ -956,6 +1009,80 @@ mod content_tests {
             "the server-resolved id must win; reading the shared per-project file \
              is what merged concurrent sessions into one"
         );
+    }
+
+    /// A row that cannot be written leaves a line in `usage-dropped-rows.log`, and the call's
+    /// answer is untouched. The control is the same call with a writable database: it leaves
+    /// no log, so the first half cannot pass because the file always exists.
+    /// docs/issues/2026-11-09-concurrent-pinned-calls-leave-no-usage-row.md
+    #[tokio::test]
+    async fn a_row_that_cannot_be_written_leaves_a_line_in_the_dropped_rows_log() {
+        let recorder_for = |dir: &std::path::Path| {
+            let dir = dir.to_path_buf();
+            async move {
+                let agent = crate::agent::Agent::new(Some(dir)).await.unwrap();
+                UsageRecorder::new(
+                    agent,
+                    false,
+                    "mcp-session".to_string(),
+                    "my-cc-session".to_string(),
+                    None,
+                    None,
+                )
+            }
+        };
+
+        // Control: a writable database, no dropped row, no log.
+        let good = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(good.path().join(".codescout")).unwrap();
+        let answer = recorder_for(good.path())
+            .await
+            .record_content(
+                "symbols",
+                &serde_json::json!({"query": "x"}),
+                None,
+                || async { Ok(vec![Content::text("ok")]) },
+            )
+            .await;
+        assert!(answer.is_ok(), "control: the call answers");
+        assert!(
+            !good
+                .path()
+                .join(".codescout")
+                .join("usage-dropped-rows.log")
+                .exists(),
+            "control: a row that was written leaves no dropped-row line"
+        );
+
+        // A directory where the database file belongs: `open_db` cannot open it.
+        let bad = tempfile::tempdir().unwrap();
+        let codescout = bad.path().join(".codescout");
+        std::fs::create_dir_all(codescout.join("usage.db")).unwrap();
+        let answer = recorder_for(bad.path())
+            .await
+            .record_content(
+                "symbols",
+                &serde_json::json!({"query": "x"}),
+                None,
+                || async { Ok(vec![Content::text("ok")]) },
+            )
+            .await;
+        assert!(
+            answer.is_ok(),
+            "the answer is untouched by a failed recording"
+        );
+        let log = std::fs::read_to_string(codescout.join("usage-dropped-rows.log"))
+            .expect("a row that could not be written leaves a line");
+        let cols: Vec<&str> = log.lines().next().unwrap().split('\t').collect();
+        assert_eq!(
+            cols.len(),
+            4,
+            "started_at, tool, pin, error chain; got {log:?}"
+        );
+        assert_eq!(cols[1], "symbols", "the tool is named: {log:?}");
+        assert_eq!(cols[2], "-", "no pin was passed: {log:?}");
+        assert!(!cols[3].is_empty(), "the error chain is not empty: {log:?}");
+        assert_eq!(log.lines().count(), 1, "one dropped row, one line: {log:?}");
     }
 
     #[tokio::test]
