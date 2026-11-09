@@ -71,7 +71,7 @@ New layout of `src/prompts/guides/progressive-disclosure.md`. Each declared sect
 - First overflow from `run_command` delivers the core, `.err` and both background sections; a later overflow from `grep` then delivers nothing new.
 - An overflow result from `doc` delivers the preamble and the `Preamble` shape, not a section.
 - A subagent's ledger (`caller_is_subagent`) behaves the same as a parent's.
-- A byte budget: wrapped delivery for a `grep` overflow at most 3.6 KB; for a `run_command` overflow at most 8 KB. Pinned like `the_subagent_opener_block_is_a_fraction_of_the_whole_one`.
+- A byte budget: wrapped delivery for a `grep` overflow at most 3,900 B and for a `run_command` overflow at most 9,200 B (measured 3,703 B and 8,730 B, plus 5%; the first 3.6 KB and 8 KB targets omitted about 250 B of markers per section). Pinned like `the_subagent_opener_block_is_a_fraction_of_the_whole_one`.
 - `get_guide("progressive-disclosure")` returns a body containing every heading in the table.
 - Gate 2, Gate 5 (with the waiver rows), the collision test and the size-cap test pass.
 
@@ -81,6 +81,7 @@ New layout of `src/prompts/guides/progressive-disclosure.md`. Each declared sect
 - Now harder: an agent whose overflow came from `doc` or `grep` no longer receives the background-job recipe or the buffer internals unless it fetches the guide. Whether that changes behaviour is not measured: no control group exists for this topic.
 - One-time double delivery: a session whose persisted ledger already holds the bare `progressive-disclosure` key from before this change receives the core sections once.
 - An explicit `get_guide` stamps only the bare topic key, so a later overflow can still auto-deliver sections the agent just read. The same already holds for `librarian`.
+- An overflow from `doc` or `librarian` ships the librarian topic's section for the shape first, and this topic's preamble once nothing else will: a declaring topic that would ship only its preamble yields to a later candidate (`emit_guide_sections`, review fix `9bf54db9b`).
 - Absence of the pipe-capture bullet and the Path-relative text from overflow deliveries: that text reached overflow readers only because the whole body shipped. The tool descriptions and `iron-laws-detail` carry the pipe rule.
 
 ## Change scenarios absorbed
