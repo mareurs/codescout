@@ -753,7 +753,7 @@ def _result_record(records):
 
 
 def num_turns(records):
-    """The run's turn count: `num_turns` summed over every result record (bug a9f8671c8f8b4fad).
+    """The run's turn count: `num_turns` summed over every result record (bug 02c3f2630dcd7ae8).
 
     The CLI writes one result record per segment, and a queued task-notification turn after the
     run adds a segment, so the last record alone counts only that turn. None when there is no

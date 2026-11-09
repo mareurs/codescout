@@ -153,7 +153,8 @@ measures, and the reason `rules` exists.
 ## Carried fixes
 
 `numTurns` must sum `num_turns` over all `result` records (bug file
-`docs/issues/2026-11-03-setup-ab-run-row-numturns-reads-only-the-last-result-record.md`); the
+`docs/issues/archive/2026-11-03-setup-ab-run-row-numturns-reads-only-the-last-result-record.md`;
+done 2026-11-09 in `6f769dc55`, before this study's registration freeze); the
 registration freeze for this study is where `run.py` may change.
 
 ## Decisions (controller's choices, pending operator validation)

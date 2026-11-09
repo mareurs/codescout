@@ -1168,7 +1168,7 @@ class CapHitTest(RunnerCase):
 
 
 class NumTurnsTest(RunnerCase):
-    """Bug a9f8671c8f8b4fad: a background task-notification turn emits a second result record.
+    """Bug 02c3f2630dcd7ae8: a background task-notification turn emits a second result record.
 
     `num_turns` counts one segment of the session, so the row sums it over every result record;
     `total_cost_usd` is cumulative, so cost still comes from the last record."""

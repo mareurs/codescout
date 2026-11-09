@@ -1,5 +1,5 @@
 ---
-id: a9f8671c8f8b4fad
+id: 02c3f2630dcd7ae8
 kind: bug
 status: fixed
 title: setup-ab run.py row numTurns reads only the last result record, so a background-task turn overwrites the real turn count
@@ -56,6 +56,11 @@ Not changed: `duration_ms` is also per segment, but no row field reads it. The t
 
 Timing: the setup-ab owner (session `fbe38184-5a8d-4bc3-89dd-fdd3024c909a`) confirmed on 2026-11-09 that no frozen registration was in flight: `fresh-screen-v2/live-screen` and `live-screen-rep2` are finished (16 rows each), and the cs/full registration is not frozen yet, so the new `run.py` hash goes into it.
 
+## Fix provenance
+
+- **SHA:** `6f769dc55` (`experiments`)
+- **patch-id:** `fac1b79e7baa694dc6ed92a937b400ac32c07af8`
+
 ## Tests added
 
 `tools/setup-ab-eval/test_run.py` `NumTurnsTest`:
@@ -72,7 +77,7 @@ For the two rows written before the fix, read them as 47 and 52 turns at analysi
 
 ## Resume
 
-Nothing left in code. Archive this record once the fix commit is cited with its SHA and patch-id.
+Nothing left. Fixed and archived 2026-11-09.
 
 ## References
 - `tools/setup-ab-eval/run.py:739`, `:1233`
