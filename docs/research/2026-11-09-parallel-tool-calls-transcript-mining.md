@@ -85,7 +85,7 @@ A call is read-only when every segment of its `&&`, `;` or `|` chain is a known 
 
 - Timed read-only calls (15,732): median 0.06 s, p90 1.15 s. Their mean is 21 s because a few are waits (`sleep`, `tail --pid`).
 - 5,468 pairs of `run_command` calls sit inside one message; 2,091 of them are both read-only. Overlapping those 1,659 that have timing would hide the shorter call of each pair: 0.03 h, about 2 minutes, in a month.
-- The agent declares `effect` on `run_command`: `read` on 23,282 calls. My text rule disagrees on 11,355 of them (48.8%). I did not inspect which side is right: the rule counts every `python3` script as not read-only, and the declared value may be true for many of them.
+- The agent declares `effect` on `run_command`: `read` on 23,282 calls. My text rule disagrees on 11,355 of them (48.8%), but the rule is the conservative side (it counts every `python3` script as not read-only). The server's own observation says the declaration is honest: `usage.db` `observed_changed` records whether the git-visible tree changed while a declared-read command ran (`effect_check.py`). Of 7,269 declared-read calls with an observation and a parsable command, 117 (1.6%) saw a change; 26 of those 117 are read-only by their text (the change is a peer's, on a shared checkout), 91 are scripts or test runs (`python3 -m pytest`, `strace`, `codescout doctor`). 7,152 left the tree unchanged, and my rule calls 48% of those not read-only. Limits: 2,836 declared-read rows with an observation have no parsable `command` and are not in these counts, and "unchanged" does not rule out a write to a gitignored path or outside the repo.
 
 So a separate read-only tool would buy almost no execution overlap, because these commands finish in tens of milliseconds. The saving that is left is the model turn between two calls, and that comes from putting both calls in one message, which a serial harness still gives (Finding 3).
 
@@ -108,6 +108,9 @@ The reports were read from search excerpts. The Claude Code chapter and the Code
 
 ## Open
 
-- Test a prompt that groups write chains in one message. A refused `edit` does not stop the next call in the same message, so the risk is larger than for reads.
 - Replay a sample of pairs with the second call forced into the first message, to replace the judges' opinion with an outcome.
-- Check what the declared `effect` is worth: sample `effect=read` calls that my rule calls not read-only and see whether they wrote anything.
+
+## Not pursued
+
+- A prompt A/B that tells the model to group write chains in one message. Decided against on 2026-11-09: it pays for model runs, it risks a refused `edit` followed by a dependent call in the same message, and the gain is at most the 3–4% of Finding 3.
+- A separate read-only `run_command` tool with `readOnlyHint` (Finding 4): the read-only commands finish in tens of milliseconds, so there is nothing to overlap.
