@@ -37,7 +37,7 @@
 
 - Run `./scripts/gate.sh`: Python lane, `./scripts/fmt-mine.sh`, clippy, `cargo nextest run --workspace --no-default-features` (lean), `cargo nextest run --workspace` (default), each followed by `cargo test --workspace --doc`, in a leased `target/`. Detail: memory `development-commands`
 - `cargo build` (dev) does not refresh the live MCP binary — only `cargo build --release`/`cargo rb`, then `/mcp`
-- Write tools return `json!("ok")` only — never echo content back
+- Keep write-tool responses compact: acknowledgements or operation metadata, without echoing file contents
 - `RecoverableError` for expected failures, `anyhow::bail!` for genuine bugs
 - Tool rename/addition touches FOUR prompt surfaces (two `source.md` slices, `builders.rs`, this file); bump `ONBOARDING_VERSION` for the `onboarding_prompt` slice or `builders.rs`, never for the server-instructions slice
 - Subagents MUST restore the home project after activating a different workspace project
