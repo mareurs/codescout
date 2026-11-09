@@ -891,3 +891,19 @@ Saving per stamped subagent: 2,060 B. The census counted 1,299 subagents in 30 d
 **Not shipped yet.** The running server binary predates these commits. A stamped subagent in the review session still received the whole guide on `workspace(activate)`. It ships with `./scripts/rb.sh` and `/mcp`.
 
 **Still open from this issue:** the guide-withholding experiment (the only way to separate guide use from generic competence for `symbol-navigation` and `progressive-disclosure`), and a section-split pilot for the whole-topic deliveries (18.9 of 20.0 MB in the census). Also open: the companion's `SubagentStart` hook injects an exploration-protocol block that nearly duplicates the short body, so a stamped subagent now gets both.
+
+## Correction 2026-11-09 — every subagent in the census also received the same protocol from a hook, so "8% used the bootstrap guide" does not isolate the guide
+
+**Found by:** reading the companion hook `claude-plugins/codescout-companion/hooks/subagent-guidance.mjs` after the short opener shipped, then checking the 30-day census transcripts (`scratchpad/census-30d.jsonl`, the same 1,296 own-block bootstrap deliveries to subagents).
+
+**What the hook does.** On `SubagentStart` it injects "codescout EXPLORATION PROTOCOL": the same Phase 0 (memory topics, the exact open-bug `doc(find ...)` query, the `get_guide` topic list), the same Phase 1 routing line, a Phase 2 "verify at the bytes" block, and a report contract. It also names the memory topics available in the project, which the bootstrap guide cannot.
+
+**Measured.** In 1,296 of 1,296 subagent transcripts that received the bootstrap guide, the hook text is present. It is a `hook_success` attachment on transcript line 2 to 6 (318 at line 2, 941 at line 3, 30 at line 4, 3 at line 5, 4 at line 6), so it precedes the guide's delivery in every case. By profile: `.claude` 788/788, `.claude-sdd` 135/135, `.claude-kat` 373/373. The attachment text is 3,020 to 13,456 B, median 7,309 B. It also carries other hook output, so the protocol alone is smaller; that split was not measured.
+
+**What this changes.**
+
+- The layer-2 result "5 of 60 subagents used the bootstrap, 8% (95% CI 4-18%)" measured whether a subagent took a step that BOTH the hook and the guide state. All 5 uses (a memory read of `gotchas` or `onboarding`, the open-bug query, `get_guide("error-handling")`, `references` for callers) are named by the hook text too. The readers judged against the guide's steps and could not tell the two sources apart. So the 8% is an upper bound on the guide's own effect, and its marginal effect over the hook is not measured and may be near zero. The 0/6 shuffled-pairing controls are unaffected.
+- The short opener shipped today (`24cb43ce4`) is, for a stamped subagent, mostly a duplicate of text the same companion plugin delivered a moment earlier. The stamp that selects the short body comes from the companion's `principal-stamp.mjs`, so a stamped call implies the companion is installed and the hook ran (the census shows the hook ran for every delivery). What the short body adds over the hook is the literal `ALWAYS VERIFY` line and a pointer to the full guide.
+- The earlier decision to reject option C (give a subagent nothing) rested on "8% used it". That premise does not hold.
+
+**Not established.** Whether the hook text is read at all: this checks delivery, not use. Whether a subagent without the companion hook would use the guide as its only source: the census cannot show it, because every delivery in it had the hook.
