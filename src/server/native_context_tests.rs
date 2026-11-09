@@ -568,3 +568,187 @@ async fn native_codex_root_is_recorded_for_a_refused_pin() {
         "native-root"
     );
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn stock_observer_wire_records_pinned_effects_and_rootless_api_calls() {
+    use crate::observations::store::{disable, enable, read_store, Limits};
+    let mut wire = NativeContextWire::new("codex-mcp-client").await;
+    // Observe an actual Git checkout, not the server's startup/default project.
+    let pinned = tempfile::tempdir().unwrap();
+    git2::Repository::init(pinned.path()).unwrap();
+    enable(pinned.path()).unwrap();
+    for (id, path, meta) in [
+        (
+            2,
+            "rooted.txt",
+            json!({"sessionId":"native-root","threadId":"native-child","callId":"rooted","x-codex-turn-metadata":{"session_id":"native-root","thread_id":"native-child","turn_id":"turn"}}),
+        ),
+        (3, "api.txt", json!({"threadId":"api-child","callId":"api"})),
+    ] {
+        wire.send(json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{
+            "name":"create_file","arguments":{"workspace":pinned.path(),"path":path,"content":"wire-private-canary"},"_meta":meta
+        }})).await;
+        let result = wire.recv(id).await;
+        assert!(result.get("error").is_none(), "{result}");
+        assert_eq!(
+            std::fs::read_to_string(pinned.path().join(path)).unwrap(),
+            "wire-private-canary"
+        );
+    }
+    let r = read_store(pinned.path(), Limits::default());
+    let committed: Vec<_> = r
+        .records
+        .iter()
+        .filter(|r| r.targets.iter().any(|t| t.phase == "committed"))
+        .collect();
+    // Activating a new project also writes its .gitignore through atomic_write.
+    let paths: std::collections::BTreeSet<_> = committed
+        .iter()
+        .flat_map(|r| {
+            r.targets
+                .iter()
+                .filter(|t| t.phase == "committed")
+                .map(|t| {
+                    std::path::Path::new(&t.path)
+                        .file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                })
+        })
+        .collect();
+    assert_eq!(
+        paths,
+        std::collections::BTreeSet::from([".gitignore", "rooted.txt", "api.txt"])
+    );
+    assert_eq!(committed.len(), 3);
+    let rooted = committed
+        .iter()
+        .find(|r| r.native_call_id.as_deref() == Some("rooted"))
+        .unwrap();
+    assert_eq!(
+        rooted.caller.principal.as_deref(),
+        Some("codex:native-root")
+    );
+    assert_eq!(rooted.caller.thread_id.as_deref(), Some("native-child"));
+    let api = committed
+        .iter()
+        .find(|r| r.native_call_id.as_deref() == Some("api"))
+        .unwrap();
+    assert_eq!(api.caller.principal, None);
+    assert_eq!(api.caller.thread_id.as_deref(), Some("api-child"));
+    assert!(r
+        .records
+        .iter()
+        .all(|r| r.workspace == pinned.path().to_str().unwrap()));
+    assert!(!serde_json::to_string(&r)
+        .unwrap()
+        .contains("wire-private-canary"));
+
+    wire.send(json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
+        "name":"create_file","arguments":{"workspace":pinned.path(),"path":"rooted.txt","content":"refusal-private-canary"},
+        "_meta":{"sessionId":"native-root","threadId":"native-child","callId":"refused"}
+    }})).await;
+    let refused = wire.recv(4).await;
+    assert!(refused.get("error").is_none(), "{refused}");
+    assert_eq!(refused["result"]["isError"], false);
+    let r = read_store(pinned.path(), Limits::default());
+    assert!(r
+        .records
+        .iter()
+        .any(|r| r.native_call_id.as_deref() == Some("refused")
+            && r.event == "result-observed"
+            && r.outcome == "refused"));
+    assert!(!r
+        .records
+        .iter()
+        .any(|r| r.native_call_id.as_deref() == Some("refused")
+            && r.targets.iter().any(|t| t.phase == "committed")));
+
+    let count = r.records.len();
+    disable(pinned.path()).unwrap();
+    wire.send(json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{
+        "name":"create_file","arguments":{"workspace":pinned.path(),"path":"disabled.txt","content":"still works"},
+        "_meta":{"sessionId":"native-root","callId":"disabled"}
+    }})).await;
+    let disabled = wire.recv(5).await;
+    assert!(disabled.get("error").is_none(), "{disabled}");
+    assert_eq!(
+        std::fs::read_to_string(pinned.path().join("disabled.txt")).unwrap(),
+        "still works"
+    );
+    assert_eq!(
+        read_store(pinned.path(), Limits::default()).records.len(),
+        count
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn stock_observer_records_both_cancel_arms_before_connection_close() {
+    use crate::observations::{
+        server::{observe_call, LocalInvocationId, ObservationContext},
+        store::{enable, read_store, Limits},
+    };
+    for timeout in [None, Some(30)] {
+        let root = tempfile::tempdir().unwrap();
+        git2::Repository::init(root.path()).unwrap();
+        enable(root.path()).unwrap();
+        let token = tokio_util::sync::CancellationToken::new();
+        let cancel = token.clone();
+        let path = root.path().to_path_buf();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            observe_call(
+                ObservationContext::from_meta(Some(path), None, None),
+                LocalInvocationId::new("cancel-connection", 0),
+                "run_command",
+                &json!({}),
+                async {
+                    CodeScoutServer::race_against_cancel(
+                        async {
+                            started.send(()).unwrap();
+                            std::future::pending::<Result<Vec<Content>, anyhow::Error>>().await
+                        },
+                        token,
+                        timeout,
+                        "run_command",
+                        (),
+                    )
+                    .await
+                    .map(CallToolResult::success)
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))
+                },
+            )
+            .await
+        });
+        ready.await.unwrap();
+        cancel.cancel();
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !task.is_finished(),
+            "the legacy cancellation response suppression must remain unchanged"
+        );
+        let before_close = read_store(root.path(), Limits::default());
+        assert!(
+            before_close
+                .records
+                .iter()
+                .any(|r| r.outcome == "missing-terminal"),
+            "timeout={timeout:?}: cancellation diagnostics must not wait for connection teardown"
+        );
+        task.abort();
+        let _ = task.await;
+        assert_eq!(
+            read_store(root.path(), Limits::default())
+                .records
+                .iter()
+                .filter(|r| r.outcome == "missing-terminal")
+                .count(),
+            1
+        );
+    }
+}

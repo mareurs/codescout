@@ -11214,6 +11214,70 @@ async fn edit_code_insert_splices_the_body_as_written_when_reindent_is_false() {
     );
 }
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn stock_observer_pins_actual_edit_code_write() {
+    use crate::observations::server::{observe_call, LocalInvocationId, ObservationContext};
+    use crate::observations::store::{enable, read_store, Limits};
+    let (dir, ctx, file) = reindent_fixture().await;
+    git2::Repository::init(dir.path()).unwrap();
+    enable(dir.path()).unwrap();
+    let meta =
+        json!({"sessionId":"writer-root","threadId":"writer-child","callId":"edit_code-call"});
+    let context = ObservationContext::from_meta(
+        Some(dir.path().to_path_buf()),
+        meta.as_object(),
+        Some(&crate::tools::ClientIdentity {
+            name: "codex-mcp-client".into(),
+            version: Some("0.167.0".into()),
+        }),
+    );
+    let arguments = json!({"action":"insert","symbol":"Point/a","path":"src/lib.rs","body":"fn helper() {}","reindent":false});
+    observe_call(
+        context,
+        LocalInvocationId::new("real-tool-connection", 0),
+        "edit_code",
+        &arguments,
+        async {
+            EditCode
+                .call_content(arguments.clone(), &ctx)
+                .await
+                .map(rmcp::model::CallToolResult::success)
+                .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))
+        },
+    )
+    .await
+    .unwrap();
+    assert!(std::fs::read_to_string(&file)
+        .unwrap()
+        .contains("fn helper() {}"));
+    let read = read_store(dir.path(), Limits::default());
+    assert!(read.diagnostics.is_empty(), "{:?}", read.diagnostics);
+    let committed: Vec<_> = read
+        .records
+        .iter()
+        .flat_map(|r| r.targets.iter().map(move |t| (r, t)))
+        .filter(|(_, t)| t.phase == "committed")
+        .collect();
+    assert_eq!(committed.len(), 1);
+    assert_eq!(
+        committed[0].0.caller.principal.as_deref(),
+        Some("codex:writer-root")
+    );
+    assert_eq!(
+        committed[0].0.caller.thread_id.as_deref(),
+        Some("writer-child")
+    );
+    assert_eq!(
+        committed[0].1.path,
+        file.canonicalize().unwrap().to_str().unwrap()
+    );
+    assert_eq!(
+        committed[0].1.fingerprint.as_ref().unwrap(),
+        &crate::observations::contract::bytes_fingerprint(std::fs::read(&file).unwrap().as_slice())
+    );
+}
+
 #[tokio::test]
 async fn edit_code_insert_rebases_by_default_so_the_switch_test_is_not_vacuous() {
     // The control for the test above: the SAME call without the switch. If this did not
