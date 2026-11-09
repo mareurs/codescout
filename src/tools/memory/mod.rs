@@ -225,6 +225,15 @@ fn topic_not_found_error(topic: &str, available: Vec<String>) -> RecoverableErro
     err
 }
 
+/// The refusal for a memory call whose embedder could not be built. The hint is the active
+/// backend's own: only the Qdrant stack is started with `retrieval-stack.sh`.
+fn embedder_unavailable(
+    e: anyhow::Error,
+    backend: crate::retrieval::code_store::VectorBackend,
+) -> anyhow::Error {
+    RecoverableError::with_hint(format!("embedder unavailable: {e}"), backend.offline_hint()).into()
+}
+
 /// The chunk budget for memory content, from the RESOLVED model — never
 /// `p.config.embeddings.model_or_default()`, which is the raw project.toml-only
 /// copy that can diverge from what the shared embedder (`ctx.agent.memory_embedder_for`)
@@ -1391,10 +1400,7 @@ impl Tool for Memory {
                     .memory_embedder_for(ctx.workspace_override.as_deref())
                     .await
                     .map_err(|e| {
-                    super::RecoverableError::with_hint(
-                        format!("embedder unavailable: {e}"),
-                        "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
-                    )
+                    embedder_unavailable(e, crate::retrieval::code_store::VectorBackend::resolve())
                 })?.embed(content).await?;
 
                 let now = now_epoch_string();
@@ -1431,10 +1437,7 @@ impl Tool for Memory {
                     .memory_embedder_for(ctx.workspace_override.as_deref())
                     .await
                     .map_err(|e| {
-                    super::RecoverableError::with_hint(
-                        format!("embedder unavailable: {e}"),
-                        "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
-                    )
+                    embedder_unavailable(e, crate::retrieval::code_store::VectorBackend::resolve())
                 })?.embed(query).await?;
 
                 let store = ctx

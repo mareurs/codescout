@@ -984,6 +984,54 @@ async fn an_unpinned_cross_embed_pins_every_resolution_to_one_default_root() {
         "the embedder and the store must each receive the one root resolved at the top of the call"
     );
 }
+
+fn guidance_text_of(e: &anyhow::Error) -> String {
+    let r = e
+        .downcast_ref::<RecoverableError>()
+        .expect("must stay a RecoverableError so sibling calls survive");
+    format!("{:?}", r.guidance)
+}
+
+#[test]
+fn a_lite_stack_memory_call_is_not_sent_to_the_qdrant_script() {
+    let e = embedder_unavailable(
+        anyhow::anyhow!("connection refused"),
+        crate::retrieval::code_store::VectorBackend::SqliteVec,
+    );
+    let g = guidance_text_of(&e);
+    assert!(
+        g.contains("CODESCOUT_EMBEDDER_URL"),
+        "the lite stack's fix is its embedding endpoint: {g}"
+    );
+    assert!(
+        !g.contains("retrieval-stack.sh"),
+        "the lite stack has no script to start: {g}"
+    );
+}
+
+#[test]
+fn a_qdrant_memory_call_is_told_to_start_the_stack() {
+    let e = embedder_unavailable(
+        anyhow::anyhow!("connection refused"),
+        crate::retrieval::code_store::VectorBackend::Qdrant,
+    );
+    let g = guidance_text_of(&e);
+    assert!(g.contains("retrieval-stack.sh up"), "hint: {g}");
+}
+
+#[test]
+fn the_embedder_cause_stays_in_the_message() {
+    let e = embedder_unavailable(
+        anyhow::anyhow!("connection refused"),
+        crate::retrieval::code_store::VectorBackend::SqliteVec,
+    );
+    assert!(
+        e.to_string()
+            .starts_with("embedder unavailable: connection refused"),
+        "the cause must lead the message: {e}"
+    );
+}
+
 /// A markdown `write` embeds the content once and upserts the point once, anchors included.
 /// `cross_embed_memory` and the old `create_semantic_anchors` each used to embed the same content and
 /// each upsert it, one after the other (two embeds and two upserts per write).

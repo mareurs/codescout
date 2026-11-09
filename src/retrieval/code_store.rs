@@ -267,6 +267,20 @@ impl VectorBackend {
             }
         }
     }
+
+    /// What to do when this backend's retrieval stack or embedder cannot be reached.
+    ///
+    /// The lite stack has no local daemon: its failure mode is an unreachable remote embedding
+    /// endpoint. Only the Qdrant stack is started with `./scripts/retrieval-stack.sh up`.
+    pub fn offline_hint(self) -> &'static str {
+        match self {
+            Self::SqliteVec => {
+                "Lite stack: verify CODESCOUT_EMBEDDER_URL and EMBED_API_KEY — \
+                 the remote embedding endpoint is unreachable (no local daemon to start)."
+            }
+            Self::Qdrant => "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
+        }
+    }
 }
 
 #[cfg(feature = "server-stack")]
