@@ -3763,6 +3763,96 @@ mod tests {
              dimension (384), not the DEFAULT_MODEL_DIM compatibility constant (768)"
         );
     }
+    /// Embeds by keyword: a text that mentions `lunar_flux` is `[1,0,0]`, any other is `[0,1,0]`.
+    /// Real vectors, so a real store can rank by them; a scripted store could not.
+    struct KeywordEmbedder;
+
+    #[async_trait::async_trait]
+    impl codescout_embed::Embedder for KeywordEmbedder {
+        fn dimensions(&self) -> usize {
+            3
+        }
+        async fn embed(&self, texts: &[&str]) -> Result<Vec<codescout_embed::Embedding>> {
+            Ok(texts
+                .iter()
+                .map(|t| {
+                    if t.contains("lunar_flux") {
+                        vec![1.0, 0.0, 0.0]
+                    } else {
+                        vec![0.0, 1.0, 0.0]
+                    }
+                })
+                .collect())
+        }
+    }
+
+    /// What this pins: a library tree synced with `SyncOpts::for_library` under `lib:<name>` is
+    /// searchable under that same id, and a file under `dist/` is NOT dropped. `for_library` exists
+    /// for that case (a library's `dist/` or `build/` is often the package itself, and the project
+    /// default-ignore set would prune it silently), so the file sits under `dist/`.
+    ///
+    /// What this does NOT pin, so nobody leans on it for more: the collection name (the sqlite
+    /// store ignores it and keys by project id) and the id `semantic_search` passes for
+    /// `scope="lib:<name>"` (this calls `search_code` directly, with a fake embedder). The refusal
+    /// tests in `src/tools/semantic/tests.rs` cover the tool's registry checks; the happy path
+    /// through the tool is untested. See F-5 in
+    /// `docs/trackers/local-embed-opt-in-session-log.md` for the mismatch that prompted this.
+    #[tokio::test]
+    async fn a_library_file_under_dist_is_indexed_and_found_by_its_lib_id() {
+        let lib = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(lib.path().join("dist")).unwrap();
+        std::fs::write(
+            lib.path().join("dist/lib.rs"),
+            "pub fn lunar_flux() -> u32 {\n    42\n}\n",
+        )
+        .unwrap();
+        let store_dir = tempfile::tempdir().unwrap();
+        let lock_dir = tempfile::tempdir().unwrap();
+        let store: Arc<dyn CodeVectorStore> =
+            Arc::new(crate::retrieval::sqlite_code_store::SqliteVecCodeStore::at(
+                store_dir.path().to_path_buf(),
+            ));
+        let embedder: Arc<dyn CodeEmbedder> = Arc::new(
+            crate::retrieval::embedder::CodeEmbedderAdapter::new(Box::new(KeywordEmbedder), None)
+                .unwrap(),
+        );
+        let mut client = test_retrieval_client_with_embedder(store, embedder);
+        client.lite = true;
+        client.config.disable_sparse = true;
+
+        let opts = SyncOpts {
+            index_lock_dir: Some(lock_dir.path().to_path_buf()),
+            ..SyncOpts::for_library(false)
+        };
+        client
+            .sync_project("lib:mylib", lib.path(), opts)
+            .await
+            .expect("a library tree must sync under its lib:<name> id");
+
+        let search = crate::retrieval::search::SearchOpts {
+            limit: 5,
+            overfetch: 10,
+            rerank: false,
+            exclude_languages: Vec::new(),
+            exclude_paths: Vec::new(),
+        };
+        let found = client
+            .search_code("lib:mylib", "lunar_flux", search.clone())
+            .await
+            .unwrap();
+        assert!(
+            found.iter().any(|h| h.file_path.ends_with("lib.rs")),
+            "a library file under dist/ must be indexed and found by its lib id: {found:?}"
+        );
+        let elsewhere = client
+            .search_code("lib:other", "lunar_flux", search)
+            .await
+            .unwrap();
+        assert!(
+            elsewhere.is_empty(),
+            "another library's id must not see it: {elsewhere:?}"
+        );
+    }
 
     /// HUMAN RULING (Task 4 Important #2, carried forward into the worktree-sync
     /// design): `sync_project`'s `record_index_state` write must never go through

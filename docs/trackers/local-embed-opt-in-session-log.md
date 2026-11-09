@@ -404,7 +404,7 @@ Codified so the Index column means the same thing across sessions.
 **Resolution:** `ef7fe2ee9` validates the library against the registry and runs `search_code("lib:<name>", …)`; `search_libraries` is deleted. The happy path (an indexed library returning hits) has no test. It needs a populated vector store.
 
 
-**Status:** fixed-verified for the refusals (tests pass); the happy path is untested. Fix commit `ef7fe2ee9`.
+**Status:** fixed-verified for the refusals (tests pass). The happy path is covered only below the tool: `a_library_file_under_dist_is_indexed_and_found_by_its_lib_id` (`src/retrieval/sync.rs`) syncs a library with `SyncOpts::for_library` and searches its `lib:<name>` id on a real sqlite store. Mutating `for_library` to ignore `dist` turns it red. It does not pin the collection name (the sqlite store ignores it) or the id that `semantic_search` passes; that wiring has no test. A first version of this test passed under a wrong-collection mutation, which is how I learned it could not see that. Fix commit `ef7fe2ee9`.
 
 ## F-6 — The legacy-retrieval tracker says memory queries use search_memories, and nothing calls it
 
