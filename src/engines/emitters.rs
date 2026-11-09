@@ -37,16 +37,31 @@
 //! and corpus exclusivity belong to [`super::coordinator`].
 
 use super::coordinator::{Emission, Emitted, PostCtx};
-use crate::tools::guide_emit::{guide_block, guide_blocks_for, GuideDeliveryShape};
+use crate::tools::guide_emit::{
+    guide_block, guide_blocks_for, subagent_opener_block, GuideDeliveryShape,
+};
 use crate::tools::guide_ledger::GuideLedger;
 
 /// Engine `session-opener`. Fires whenever the bootstrap topic specifically is
 /// absent from the ledger — not merely whenever the ledger is empty, which
 /// diverges the moment `GuideLedger::re_arm` removes just that topic.
+///
+/// A SUBAGENT's call (`GuideLedger::caller_is_subagent`) gets the short body under its
+/// own marker and `GuideDeliveryShape::Short`; every other call gets the whole guide,
+/// unchanged. Both stamp the same bare topic key, so an explicit
+/// `get_guide("project-activation-bootstrap")` is unaffected by which one shipped.
 pub(crate) fn emit_session_opener(_ctx: &PostCtx<'_>, ledger: &mut GuideLedger) -> Emitted {
     let topic = crate::prompts::SESSION_OPENING_GUIDE;
     if ledger.contains(topic) {
         return Emitted::Declined;
+    }
+    if ledger.caller_is_subagent() {
+        ledger.insert(topic.to_string());
+        return Emitted::Claimed(Emission {
+            hint: Some((topic.to_string(), GuideDeliveryShape::Short)),
+            blocks: vec![subagent_opener_block(topic)],
+            ..Default::default()
+        });
     }
     match guide_block(topic) {
         Some(block) => {

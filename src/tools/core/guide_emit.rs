@@ -43,6 +43,11 @@ pub(crate) enum GuideDeliveryShape {
     /// [`MAX_AUTO_INJECT_GUIDE_BYTES`]: NO body shipped, only a one-line
     /// pointer to `get_guide(topic)`. The topic is not stamped delivered.
     Pointer,
+    /// The session opener's SHORT body, shipped to a subagent in place of the whole
+    /// guide. The topic IS stamped delivered; the hint must point at the full guide,
+    /// because `Whole`'s "do not re-call" would forbid the fetch the short body
+    /// recommends (context-injection-session-log F-20).
+    Short,
 }
 
 /// Largest guide block (wrapper included) the server will auto-inject whole.
@@ -110,6 +115,10 @@ pub(crate) fn inject_hint(val: &mut Value, topic: &str, shape: GuideDeliveryShap
             "Guide '{topic}' is too large to auto-inject and was NOT \
              delivered. Call `get_guide(\"{topic}\")` to read it."
         ),
+        GuideDeliveryShape::Short => format!(
+            "First call this session for topic '{topic}'. Its short subagent form \
+             is below; call `get_guide(\"{topic}\")` for the full guide."
+        ),
     };
     if let Some(obj) = val.as_object_mut() {
         obj.insert("_guide_hint".to_string(), Value::String(text));
@@ -145,6 +154,23 @@ pub(crate) fn guide_block(topic: &str) -> Option<Content> {
          <!-- end auto-injected get_guide('{topic}') -->"
     );
     Some(trailing_block(wrapped))
+}
+/// The session opener's short block for a SUBAGENT: [`crate::prompts::SUBAGENT_OPENING_BODY`]
+/// under its own marker. The open marker keeps the `auto-injected get_guide('{topic}')`
+/// prefix every transcript parser matches on; the word `subagent` after the topic is what
+/// tells the short form from the whole one. Built here, with the other markers, because
+/// `tests/test_census_guide_deliveries.py::test_markers_match_the_emitter` reads this file.
+pub(crate) fn subagent_opener_block(topic: &str) -> Content {
+    let body = crate::prompts::SUBAGENT_OPENING_BODY;
+    let wrapped = format!(
+        "<!-- auto-injected get_guide('{topic}') subagent — first call this session \
+         that triggers the topic, short form. get_guide('{topic}') returns the full guide. -->\n\
+         \n\
+         {body}\n\
+         \n\
+         <!-- end auto-injected get_guide('{topic}') subagent -->"
+    );
+    trailing_block(wrapped)
 }
 
 /// The non-declaring (whole-topic) branch of [`guide_blocks_for`], with the
@@ -880,6 +906,16 @@ mod tests {
         );
         assert!(pointer.contains("NOT delivered"), "got: {pointer}");
         assert!(!pointer.contains("do not re-call"), "got: {pointer}");
+    }
+    #[test]
+    fn the_short_hint_points_at_the_full_guide_and_never_forbids_the_fetch() {
+        // `Whole` says "do not re-call". A short subagent body must say the opposite:
+        // the full guide is one `get_guide` away (context-injection-session-log F-20).
+        let mut v = json!({});
+        inject_hint(&mut v, "t", GuideDeliveryShape::Short);
+        let short = v["_guide_hint"].as_str().unwrap().to_string();
+        assert!(short.contains("get_guide(\"t\")"), "got: {short}");
+        assert!(!short.contains("do not re-call"), "got: {short}");
     }
 
     /// A ledger that belongs to a conversation, as every MCP session's does.

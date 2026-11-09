@@ -126,6 +126,12 @@ pub struct GuideLedger {
     /// conversation, and `usage.db` groups repeats by conversation, so a session
     /// change cannot produce a repeat to explain.
     rearm_causes: Vec<RearmCause>,
+    /// Whether the call being served is a SUBAGENT's: the companion stamped a principal
+    /// carrying an `agent_id`. Set per call by `dispatch_tool_call`, beside
+    /// `session_start_source`, and never persisted — it says who is calling now, not
+    /// something the model was taught. Read by `engines::emitters::emit_session_opener`,
+    /// which ships a subagent the short bootstrap body.
+    caller_is_subagent: bool,
 }
 
 /// What made a ledger forget keys it held. One variant per path that removes keys
@@ -191,6 +197,7 @@ impl GuideLedger {
             rendezvous_active: false,
             session_start_source: None,
             rearm_causes: Vec::new(),
+            caller_is_subagent: false,
         }
     }
 
@@ -207,6 +214,7 @@ impl GuideLedger {
             rendezvous_active: false,
             session_start_source: None,
             rearm_causes: Vec::new(),
+            caller_is_subagent: false,
         }
     }
 
@@ -285,6 +293,15 @@ impl GuideLedger {
     /// The source of this conversation's latest `SessionStart`, if known.
     pub fn session_start_source(&self) -> Option<&str> {
         self.session_start_source.as_deref()
+    }
+    /// Record whether THIS call's caller is a subagent. See the field's docs.
+    pub fn set_caller_is_subagent(&mut self, is: bool) {
+        self.caller_is_subagent = is;
+    }
+
+    /// Whether the call being served is a subagent's.
+    pub fn caller_is_subagent(&self) -> bool {
+        self.caller_is_subagent
     }
 
     /// A ledger that behaves as if the session has already opened.

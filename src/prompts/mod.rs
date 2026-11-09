@@ -799,6 +799,13 @@ pub fn shape_is_waived(topic: &str, shape: &str) -> bool {
 /// fetched — its failure mode is "never fetched", not "fetched then forgotten".
 /// So the fix is the trigger, not the text.
 pub const SESSION_OPENING_GUIDE: &str = "project-activation-bootstrap";
+/// The short body a SUBAGENT's session opener ships in place of the whole
+/// [`SESSION_OPENING_GUIDE`]. Not a topic: it has no entry in [`GUIDE_TOPICS`] and no
+/// `get_guide` name, and the topic key stamped in the ledger is the same bare one, so an
+/// explicit `get_guide("project-activation-bootstrap")` still returns the full guide.
+/// docs/superpowers/specs/2026-11-09-subagent-bootstrap-short-variant-design.md
+pub const SUBAGENT_OPENING_BODY: &str =
+    include_str!("guides/project-activation-bootstrap-subagent.md");
 
 /// Return the compiled-in markdown body for a `get_guide(topic)` topic.
 /// `None` for unknown topics — callers that need a hard-fail should match
@@ -2001,6 +2008,16 @@ mod tests {
             });
             assert!(!body.is_empty(), "topic '{topic}' has an empty body");
         }
+    }
+    #[test]
+    fn subagent_opening_body_is_short_and_keeps_the_used_steps() {
+        let b = SUBAGENT_OPENING_BODY;
+        assert!(b.len() <= 1024, "short body is {} B", b.len());
+        assert!(b.contains("ALWAYS VERIFY"));
+        assert!(b.contains(
+            r#"filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}}"#
+        ));
+        assert!(b.contains(r#"get_guide("project-activation-bootstrap")"#));
     }
 
     /// Iron Law 3 was retired for foreground pipes ending in a terminal filter; the

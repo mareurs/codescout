@@ -2047,6 +2047,12 @@ impl CodeScoutServer {
             .lock()
             .session_start_source()
             .map(str::to_string);
+        // Per call, and set where `asserted_agent` is still in hand: the opener ships a
+        // subagent the short bootstrap body. Not derived from the ledger key's shape — a
+        // `_meta` conversation id or a Codex root could contain `/` without being a subagent.
+        ledger
+            .lock()
+            .set_caller_is_subagent(asserted_agent.is_some());
         ledger.lock().set_session_start_source(session_start);
         self.poll_guide_rearm(asserted_agent.as_deref(), &ledger);
 
@@ -15986,6 +15992,137 @@ mod guide_hint_tests {
             !request_path.exists(),
             "the request file must be consumed (deleted) once acted on"
         );
+    }
+    // The subagent short opener (docs/superpowers/specs/2026-11-09-subagent-bootstrap-short-variant-design.md).
+    // The three literals below separate the two bodies: the short block's own marker, the whole
+    // block's marker, and a heading that exists only in the full guide.
+    const OPEN_SHORT: &str =
+        "<!-- auto-injected get_guide('project-activation-bootstrap') subagent";
+    const OPEN_WHOLE: &str =
+        "<!-- auto-injected get_guide('project-activation-bootstrap') — first call";
+    const FULL_ONLY: &str = "## Phase 2";
+
+    async fn first_call_text(server: &CodeScoutServer, principal: Option<&str>) -> String {
+        dispatch_text(
+            server,
+            "run_command",
+            json!({"command": "echo hi"}),
+            principal,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_subagent_opener_ships_the_short_body() {
+        let (_dir, server) = make_server().await;
+        let text = first_call_text(&server, Some("conv-A/testagent")).await;
+        assert!(text.contains(OPEN_SHORT), "no short marker in: {text}");
+        assert!(text.contains("ALWAYS VERIFY"));
+        assert!(!text.contains(OPEN_WHOLE), "the whole guide also shipped");
+        assert!(
+            !text.contains(FULL_ONLY),
+            "full-guide content leaked into the short body"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_parent_opener_still_ships_the_whole_guide() {
+        let (_dir, server) = make_server().await;
+        let text = first_call_text(&server, None).await;
+        assert!(text.contains(OPEN_WHOLE), "no whole marker in: {text}");
+        assert!(text.contains(FULL_ONLY));
+        assert!(!text.contains(OPEN_SHORT));
+    }
+
+    #[tokio::test]
+    async fn the_subagent_flag_does_not_leak_to_the_parent() {
+        // One server, one process: the flag is per call, never per server.
+        let (_dir, server) = make_server().await;
+        let sub = first_call_text(&server, Some("conv-A/testagent")).await;
+        assert!(
+            sub.contains(OPEN_SHORT),
+            "precondition: the subagent got the short form"
+        );
+        let parent = first_call_text(&server, None).await;
+        assert!(
+            parent.contains(OPEN_WHOLE),
+            "the parent inherited the subagent's flag: {parent}"
+        );
+        assert!(!parent.contains(OPEN_SHORT));
+    }
+
+    #[tokio::test]
+    async fn an_explicit_fetch_after_the_short_opener_returns_the_full_guide() {
+        let (_dir, server) = make_server().await;
+        first_call_text(&server, Some("conv-A/testagent")).await;
+        let fetched = dispatch_text(
+            &server,
+            "get_guide",
+            json!({"topic": "project-activation-bootstrap"}),
+            Some("conv-A/testagent"),
+        )
+        .await;
+        assert!(
+            fetched.contains(FULL_ONLY),
+            "get_guide did not return the full body: {fetched}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_re_armed_subagent_gets_the_short_form_again() {
+        // A resumed subagent has a non-empty ledger with the bootstrap key removed: the
+        // path `a_tool_call_polls_the_guide_rearm_inbox_and_re_arms_named_topics` proves
+        // reaches the opener. It must come back short, not whole.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let rearm_dir = tempfile::tempdir().unwrap();
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
+            librarian: crate::server::test_support::librarian_env(dir.path()),
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+        let as_subagent = |mut args: Value| {
+            args[crate::tools::session_key::PRINCIPAL_ARG_KEY] = json!("conv-A/testagent");
+            args
+        };
+
+        let first = server
+            .call_tool_by_name("tree", as_subagent(json!({ "path": "." })))
+            .await
+            .expect("first dispatch ok");
+        assert!(
+            all_text(&first).contains(OPEN_SHORT),
+            "precondition: short on first call"
+        );
+        server.live_ledger().lock().insert("librarian".to_string());
+
+        let request_path = rearm_dir.path().join(format!(
+            "{}-{}.json",
+            std::process::id(),
+            crate::tools::guide_rearm::request_hash("testagent")
+        ));
+        std::fs::write(
+            &request_path,
+            serde_json::json!({ "topics": [crate::prompts::SESSION_OPENING_GUIDE] }).to_string(),
+        )
+        .unwrap();
+
+        let again = server
+            .call_tool_by_name("tree", as_subagent(json!({ "path": "." })))
+            .await
+            .expect("second dispatch ok");
+        let text = all_text(&again);
+        assert!(
+            text.contains(OPEN_SHORT),
+            "the re-armed opener was not short: {text}"
+        );
+        assert!(!text.contains(OPEN_WHOLE));
     }
 
     #[tokio::test]
