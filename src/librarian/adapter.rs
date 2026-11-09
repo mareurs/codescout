@@ -440,12 +440,29 @@ impl crate::tools::Tool for LibrarianAdapter {
             // the only reads; create, update, move, delete, link, graft,
             // append_entry, update_entry, event_create and augment all mutate, as
             // does any action added after this line.
-            "doc" => !matches!(
-                action,
-                Some(
-                    "find" | "get" | "graph" | "state_at" | "event_list" | "gather" | "list_stale"
-                )
-            ),
+            //
+            // The exception is an action `doc` does not advertise, or none: the handler
+            // refuses it before any arm runs (`artifact::is_unknown_action`), so it cannot
+            // write. Calling it a write made a read-only activation answer
+            // `doc(action="read")` with "File writes are disabled" instead of naming the
+            // action, and took the write lock for nothing. The default above still holds
+            // for every ADVERTISED action, which is where a new mutating one appears.
+            // docs/issues/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
+            "doc" => {
+                action.is_some_and(|a| !crate::librarian::tools::artifact::is_unknown_action(a))
+                    && !matches!(
+                        action,
+                        Some(
+                            "find"
+                                | "get"
+                                | "graph"
+                                | "state_at"
+                                | "event_list"
+                                | "gather"
+                                | "list_stale"
+                        )
+                    )
+            }
             "librarian" => match action {
                 // Unconditional reads.
                 //
@@ -1282,6 +1299,72 @@ mod tests {
             );
         }
     }
+    /// An action `doc` does not advertise, or none, is refused by the handler before any arm runs,
+    /// so it cannot write and must not be classed as a write. If it is, a read-only activation
+    /// answers `doc(action="read")` with "File writes are disabled" instead of naming the action.
+    ///
+    /// The other half is the one that guards: EVERY advertised action keeps the answer it had, a
+    /// read for the seven reads and a write for the rest. The oracle for "advertised" is the schema
+    /// enum, as in `every_mutating_doc_action_has_a_preflight_arm`, so a mutating action added to
+    /// the enum is a write on the day it is added, whatever this test lists.
+    /// docs/issues/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
+    #[test]
+    fn an_unadvertised_or_missing_doc_action_is_not_a_write_and_every_advertised_one_keeps_its_answer(
+    ) {
+        use crate::librarian::tools::Tool as _;
+        let ctx = Arc::new(
+            crate::librarian::tools::TestToolContextBuilder::new(
+                crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
+            )
+            .build(),
+        );
+        let inner = lib_all_tools()
+            .into_iter()
+            .find(|t| t.name() == "doc")
+            .expect("the `doc` tool must be registered");
+        let adapter = LibrarianAdapter { inner, ctx };
+
+        for input in [
+            json!({ "action": "read" }),
+            json!({ "action": "frobnicate" }),
+            json!({ "action": "" }),
+            json!({ "action": null }),
+            json!({}),
+        ] {
+            assert!(
+                !adapter.is_write(&input),
+                "{input}: the handler refuses it before any arm runs, so it cannot write"
+            );
+        }
+
+        let schema = crate::librarian::tools::artifact::Artifact.input_schema();
+        let advertised: Vec<&str> = schema["properties"]["action"]["enum"]
+            .as_array()
+            .expect("the action enum is this test's oracle")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(
+            advertised.len() >= 18,
+            "anti-vacuity floor: the advertised set should not shrink; got {advertised:?}"
+        );
+        let mut writes = 0usize;
+        for action in advertised {
+            let is_read = matches!(
+                action,
+                "find" | "get" | "graph" | "state_at" | "event_list" | "gather" | "list_stale"
+            );
+            let is_write = adapter.is_write(&json!({ "action": action }));
+            assert_eq!(
+                is_write, !is_read,
+                "doc(action={action:?}) must keep its answer: an advertised action that is not a \
+                 read is a write"
+            );
+            writes += usize::from(is_write);
+        }
+        assert!(writes >= 11, "anti-vacuity floor: the writes are {writes}");
+    }
+
     /// The pre-call gate's coverage, decided on the EFFECT of the call. The
     /// discriminators are the rows that must hold: a dry-run `merge_worktree` and every
     /// UNFORCED dry-run-by-default `doc` action are NOT held (a stall with no

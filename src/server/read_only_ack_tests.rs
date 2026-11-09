@@ -165,3 +165,33 @@ async fn a_refusal_that_a_pin_cannot_lift_offers_no_ack() {
         "a handle that cannot work must not be offered: {text}"
     );
 }
+/// An action `doc` does not advertise cannot write, so a read-only activation must not refuse it
+/// as a write: the caller typed a wrong verb and must be told which verbs exist, not told to lift
+/// read-only (and offered a handle that replays into the same unknown-action answer).
+///
+/// The control is the half that guards: a real write action is still refused by the same gate in
+/// the same session, so the fix narrowed the classification and did not open the gate.
+/// docs/issues/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
+#[cfg(feature = "librarian")]
+#[tokio::test]
+async fn an_unknown_doc_action_under_a_read_only_activation_names_the_action_not_the_gate() {
+    let (_home, server) = make_server().await;
+    let dir = tempfile::tempdir().unwrap();
+    read_only_root(&server, &dir).await;
+
+    let (_e, text) = call(&server, "doc", json!({ "action": "read" })).await;
+    assert!(
+        text.contains("unknown action 'read'") && text.contains("find, get, create"),
+        "the caller must be told the action is unknown, with the valid ones: {text}"
+    );
+    assert!(
+        !text.contains("File writes are disabled") && !text.contains("@ack_"),
+        "an action that cannot write must not meet the write gate or be offered a replay: {text}"
+    );
+
+    let (refused, control) = call(&server, "doc", json!({ "action": "create" })).await;
+    assert!(
+        refused && control.contains("File writes are disabled"),
+        "control: a real write action must still be refused under read-only: {control}"
+    );
+}

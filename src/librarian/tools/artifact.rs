@@ -93,6 +93,49 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
         _ => Ok(()),
     }
 }
+/// The actions `doc` advertises, read once from its own schema enum.
+///
+/// The schema enum is the one list of valid `doc` actions that a test already holds against the
+/// dispatch arms (`every_advertised_action_reaches_a_dispatch_arm`), so this reads it rather than
+/// keeping a third copy. The list is empty only if that shape moved; [`is_unknown_action`] then
+/// calls every action known, which is the side on which a write stays guarded.
+fn advertised_actions() -> &'static [String] {
+    static ACTIONS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    ACTIONS.get_or_init(|| {
+        Artifact.input_schema()["properties"]["action"]["enum"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+}
+
+/// True when `action` is not one of the actions `doc` advertises.
+///
+/// `call` refuses such an action before any dispatch arm runs ([`unknown_action_error`]), so it
+/// cannot write, and `LibrarianAdapter::is_write` says so. Without that, the access gate saw an
+/// unknown verb as a write and a read-only activation answered `doc(action="read")` with "File
+/// writes are disabled" instead of naming the action.
+///
+/// An arm that is not in the schema enum is therefore unreachable, not unguarded: adding a
+/// mutating action means advertising it, and the write guard then applies to it.
+/// docs/issues/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
+pub(crate) fn is_unknown_action(action: &str) -> bool {
+    let known = advertised_actions();
+    !known.is_empty() && !known.iter().any(|a| a == action)
+}
+
+/// The answer to an action `doc` does not advertise. The list is the schema enum's, so it
+/// cannot drift from what the schema says.
+fn unknown_action_error(action: &str) -> anyhow::Error {
+    LibrarianRecoverableError::new(format!(
+        "unknown action '{action}' — expected one of: {}",
+        advertised_actions().join(", ")
+    ))
+}
 
 /// The artifact a `doc` write acts on, for the writes whose RESULT says nothing about where
 /// they wrote. `None` for every other call.
@@ -481,6 +524,9 @@ impl Tool for Artifact {
                     "action required — one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, rekey_prefix, event_create, event_list, augment, gather, list_stale",
                 )
             })?;
+        if is_unknown_action(action) {
+            return Err(unknown_action_error(action));
+        }
         // Best-effort: identity enrichment must never fail a tool call; a failed
         // stamp degrades the row to verb=NULL, which audit_log surfaces honestly.
         if let Err(e) = ctx.catalog.lock().set_audit_verb(&format!("doc.{action}")) {
@@ -489,28 +535,26 @@ impl Tool for Artifact {
         // Taken before `args` moves into an arm: which artifact will this call write?
         let target = write_target_id(action, &args);
         let out = match action {
-                "find"     => super::find::call(ctx, args).await,
-                "get"      => super::get::call(ctx, args).await,
-                "create"   => super::create::call(ctx, args).await,
-                "update"   => super::update::call(ctx, args).await,
-                "move"     => super::mv::call(ctx, args).await,
-                "delete"   => super::delete::call(ctx, args).await,
-                "graft"    => super::graft::call(ctx, args).await,
-                "link"     => super::link::call(ctx, args).await,
-                "graph"    => super::graph::call(ctx, args).await,
-                "state_at" => super::state_at::call(ctx, args).await,
-                "append_entry" => super::append_entry::call(ctx, args).await,
-                "update_entry" => super::update_entry::call(ctx, args).await,
-                "rekey_prefix" => super::rekey_prefix::call(ctx, args).await,
-                "event_create" => super::event_create::call(ctx, flatten_event_args(&args)?).await,
-                "event_list"   => super::timeline::call(ctx, id_as_artifact_id(&args)).await,
-                "augment"      => super::augment::call(ctx, flatten_augment_args(&args)?).await,
-                "gather"       => super::refresh::call(ctx, args).await,
-                "list_stale"   => super::refresh_stale::call(ctx, args).await,
-                other => Err(LibrarianRecoverableError::new(format!(
-                    "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, rekey_prefix, event_create, event_list, augment, gather, list_stale"
-                ))),
-            };
+            "find" => super::find::call(ctx, args).await,
+            "get" => super::get::call(ctx, args).await,
+            "create" => super::create::call(ctx, args).await,
+            "update" => super::update::call(ctx, args).await,
+            "move" => super::mv::call(ctx, args).await,
+            "delete" => super::delete::call(ctx, args).await,
+            "graft" => super::graft::call(ctx, args).await,
+            "link" => super::link::call(ctx, args).await,
+            "graph" => super::graph::call(ctx, args).await,
+            "state_at" => super::state_at::call(ctx, args).await,
+            "append_entry" => super::append_entry::call(ctx, args).await,
+            "update_entry" => super::update_entry::call(ctx, args).await,
+            "rekey_prefix" => super::rekey_prefix::call(ctx, args).await,
+            "event_create" => super::event_create::call(ctx, flatten_event_args(&args)?).await,
+            "event_list" => super::timeline::call(ctx, id_as_artifact_id(&args)).await,
+            "augment" => super::augment::call(ctx, flatten_augment_args(&args)?).await,
+            "gather" => super::refresh::call(ctx, args).await,
+            "list_stale" => super::refresh_stale::call(ctx, args).await,
+            other => Err(unknown_action_error(other)),
+        };
         out.map(|v| name_the_target(ctx, target.as_ref(), v))
     }
 }
@@ -1026,6 +1070,43 @@ mod tests {
             "advertised but not dispatched — these fall to the `other =>` arm at runtime \
              while the whole suite stays green: {fell_through:?}"
         );
+    }
+    /// `is_unknown_action` is what lets `LibrarianAdapter::is_write` call an unknown verb a non-write,
+    /// so it must say "known" for every advertised action (else a write loses its guard) and
+    /// "unknown" for what is not advertised. The answer to an unknown action lists the schema's
+    /// own enum, so the text cannot drift from the schema as a typed-out copy once did.
+    /// docs/issues/2026-11-08-unknown-doc-action-is-refused-as-a-read-only-write.md
+    #[test]
+    fn an_unknown_action_is_told_apart_from_every_advertised_one_and_the_answer_lists_them() {
+        let schema = Artifact.input_schema();
+        let advertised: Vec<&str> = schema["properties"]["action"]["enum"]
+            .as_array()
+            .expect("the action enum is this test's oracle — if that shape moved, fix this")
+            .iter()
+            .map(|v| v.as_str().expect("enum entries are strings"))
+            .collect();
+        assert!(
+            advertised.len() >= 18,
+            "anti-vacuity floor: got {advertised:?}"
+        );
+        for action in &advertised {
+            assert!(
+                !is_unknown_action(action),
+                "`{action}` is advertised, so it is not unknown: it would lose its write guard"
+            );
+        }
+        for action in ["read", "write", "frobnicate", ""] {
+            assert!(is_unknown_action(action), "`{action}` is not advertised");
+        }
+
+        let text = format!("{:#}", unknown_action_error("read"));
+        assert!(text.contains("unknown action 'read'"), "{text}");
+        for action in &advertised {
+            assert!(
+                text.contains(action),
+                "the answer must list `{action}`: {text}"
+            );
+        }
     }
 
     const PROBE_ACTIONS: [&str; 18] = [
