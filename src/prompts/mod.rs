@@ -2047,6 +2047,35 @@ mod tests {
              foreground pipe ending in a terminal filter"
         );
     }
+    /// The pipe-capture mechanics (the capture's limits, `capture_incomplete`, `filter_not_run`,
+    /// the full list of refused forms) are owned by `iron-laws-detail`. The overflow guide states the
+    /// part a reader of an overflow needs, the `unfiltered_output` handle and that a pipe the capture
+    /// cannot serve is refused, and points there. Restating the rest cost 831 B on every
+    /// delivery of this guide (bug 7579b32b1cd2362f: 1,250 deliveries in 30 days).
+    #[test]
+    fn progressive_disclosure_guide_points_at_iron_laws_detail_for_the_pipe_capture_mechanics() {
+        let pd = crate::prompts::topic_body("progressive-disclosure").expect("guide body");
+        let owner = crate::prompts::topic_body("iron-laws-detail").expect("guide body");
+        for key in [
+            "capture_incomplete",
+            "filter_not_run",
+            "unfiltered_truncated",
+        ] {
+            assert!(
+                owner.contains(key),
+                "`{key}` must stay documented where the pipe mechanics are owned"
+            );
+            assert!(
+                !pd.contains(key),
+                "`{key}` is restated in progressive-disclosure; it belongs to iron-laws-detail"
+            );
+        }
+        assert!(
+            pd.contains(r#"get_guide("iron-laws-detail")"#),
+            "the overflow guide must point at the owner of the capture mechanics"
+        );
+    }
+
     /// The guide must carry the background-job recipe: the handle and record a spawn returns, the
     /// wake the companion hook sends, and the warning not to read a handle whose server has ended.
     /// The strings are the ones `wake-on-job-end.mjs` emits (`wakeMessage`) and the spawn response
