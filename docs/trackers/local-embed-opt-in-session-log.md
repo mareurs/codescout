@@ -430,7 +430,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Reading before filing paid off:** the first framing was "unknown top-level keys are ignored". The gate `every_schema_object_promising_to_refuse_unknown_keys_actually_refuses` says the root is excluded on purpose, so the filed bug is the narrow one (`dry_run` on an action that does not implement it). See W-2.
 
-**Status:** promoted-to-bug-tracker. Bug `6285dd9e300a7876`.
+**Status:** promoted-to-bug-tracker. Bug `6285dd9e300a7876`, fixed in `53a7d8ec6` (the narrow refusal). Tested by calling `Artifact::call` directly; the refusal over the MCP wire is not yet seen, so the bug is `fixed` with `unverified:` open and is not archived.
 
 ## F-8 — fmt-mine.sh was refused three times by a provenance lock
 

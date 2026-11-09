@@ -1,18 +1,19 @@
 ---
 id: '6285dd9e300a7876'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: doc drops undeclared top-level keys, so update with dry_run=true performs the write'
 owners:
 - marius
 tags:
 - cluster/accepted-parameter-silently-dropped
+closed: 2026-11-09
 opened: 2026-11-09
 owner: marius
 related:
 - docs/trackers/issue-clusters/IC-15-accepted-parameter-silently-dropped.md
 severity: medium
-unverified: The earlier attempt at deny_unknown_fields on the root, which per the comment at src/librarian/tools/artifact.rs:1723 broke every doc(update) call, was not re-run. Whether a check on the schema's declared properties would avoid that breakage is not established. Only this session sent dry_run to doc update in usage.db.
+unverified: The refusal was tested by calling Artifact::call directly, not through the MCP adapter on a rebuilt server, so it is not shown that the key reaches Artifact::call unchanged over the wire. The earlier attempt at deny_unknown_fields on the root (per the comment at src/librarian/tools/artifact.rs) was not re-run, so option 2 is neither tried nor ruled out. Only this session sent dry_run to doc update in usage.db.
 ---
 
 ## Summary
@@ -64,16 +65,21 @@ None needed for the symptom.
 
 ## Fix
 
-Not fixed. Two options, in order of size:
+Fixed in `53a7d8ec6` with option 1, the narrow refusal.
 
-1. Narrow: refuse `dry_run` on every `doc` action that does not implement it, with a hint naming what to use instead (`force` is the guard for `update`). The `grep` precedent applies.
-2. Wide: refuse any root key declared in no action's schema. This needs the check to run on `properties`, not on serde, and it must be tried against the update call that broke the earlier attempt.
-
-Option 1 removes the observed hazard and cannot hit that earlier breakage.
+- `Artifact::call` (`src/librarian/tools/artifact.rs`) runs `refuse_dry_run` right after the unknown-action check, before the audit stamp and the dispatch. `dry_run` true (the boolean, `"true"` or `"TRUE"`) is refused for every action with a recoverable error: `'dry_run' is not a parameter of doc`. The hint says what to do instead, and ends with "Nothing was changed."
+- `dry_run` false is not refused.
+- Other undeclared top-level keys are still dropped. That is the deliberate root leniency described under Root cause. Option 2 (refuse any root key declared in no action's schema) is not done and not ruled out.
 
 ## Tests added
 
-N/A — not fixed.
+In `src/librarian/tools/artifact.rs`:
+
+- `dry_run_true_on_update_is_refused_and_leaves_the_file_unchanged`: three spellings; asserts the refusal, the hint, and that the file is byte-identical afterwards. A test that only checked the response would have passed on the old behaviour.
+- `dry_run_true_is_refused_before_any_action_runs`: `find`, `get`, `update`, `move`, `delete`, `graft`, `append_entry`.
+- `dry_run_false_is_not_refused`: pins how narrow the rule is.
+
+Mutation, run: commenting out the call made the first two fail, and the update test failed with `dry_run on update must be refused: {"id": ..., "updated": true}`, which is this bug as filed. Reverted.
 
 ## Workarounds
 
@@ -81,8 +87,14 @@ Do not send `dry_run` to `doc`. To preview an `update`, read the record with `do
 
 ## Resume
 
-1. Decide option 1 or option 2.
-2. Add a test that sends `dry_run=true` to `update` and asserts the call is refused and the file is unchanged. A test that only checks the response would pass on the current behaviour.
+1. After the next rebuild and `/mcp`, send `doc(action="update", dry_run=true, ...)` to a throwaway document and confirm the refusal arrives over the wire and the file is unchanged. The tests call `Artifact::call` directly; whether the MCP adapter in front of it passes the key through unchanged was not tested. Then archive this record.
+2. Option 2 stays open as a separate decision: it needs a check on the schema's declared `properties`, and a trial against the update call that broke the earlier `deny_unknown_fields` attempt.
+
+
+## Fix provenance
+
+- **SHA:** `53a7d8ec6eae4ba12c291d52a0f8ca50adc51b77` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `8c9f770c48df0c29fe6c47a9c4b7fe42ffc893c5` — content hash of the diff; survives rebase and cherry-pick.
 
 ## References
 
