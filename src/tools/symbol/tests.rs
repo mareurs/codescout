@@ -5792,6 +5792,87 @@ async fn symbols_overview_glob_marks_grammarless_language_warming_instead_of_dro
     );
 }
 
+/// A provider whose server never starts. It records every language it was asked to start, so a
+/// test can count start attempts.
+struct FailingStartRecorder {
+    asked: std::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl crate::lsp::LspProvider for FailingStartRecorder {
+    async fn get_or_start(
+        &self,
+        language: &str,
+        _workspace_root: &std::path::Path,
+        _mux_override: Option<bool>,
+    ) -> anyhow::Result<Arc<dyn crate::lsp::LspClientOps>> {
+        self.asked.lock().unwrap().push(language.to_string());
+        Err(anyhow::anyhow!("server failed to start"))
+    }
+    async fn notify_file_changed(&self, _path: &std::path::Path) {}
+    async fn shutdown_all(&self) {}
+}
+
+/// Branch A of `symbols` asked the manager for a client once per FILE. A server that cannot start
+/// then paid a failed start for every file in the directory: one `symbols` call on a Kotlin
+/// directory ran 104.6 s, with about 58 failed starts recorded in `lsp_events`
+/// (docs/issues/2026-11-08-expired-kotlin-lsp-build-retried-until-the-call-times-out.md).
+/// A language whose start failed once must not be started again inside the same call, and the
+/// files it could not read must still be listed, so a zero is not read as an absence.
+#[tokio::test]
+async fn a_restricted_search_starts_a_failing_server_once_per_language_not_once_per_file() {
+    use crate::lsp::LspProvider;
+    use crate::tools::symbol::Symbols;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    for i in 0..3 {
+        std::fs::write(src.join(format!("a{i}.rs")), "fn f() {}\n").unwrap();
+    }
+    for i in 0..2 {
+        std::fs::write(src.join(format!("b{i}.py")), "def f():\n    pass\n").unwrap();
+    }
+
+    let provider = Arc::new(FailingStartRecorder {
+        asked: std::sync::Mutex::new(Vec::new()),
+    });
+    let lsp: Arc<dyn LspProvider> = provider.clone();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = Symbols
+        .call(json!({"name": "Foo", "path": "src"}), &ctx)
+        .await
+        .unwrap();
+
+    // The files that were not attempted are still reported as unread: 5 files, 1 named, 4 more.
+    let warning = result["completeness_warning"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a zero with unread files must carry a warning: {result}"));
+    assert!(warning.contains("and 4 more files"), "{warning}");
+
+    let mut asked = provider.asked.lock().unwrap().clone();
+    asked.sort();
+    assert_eq!(
+        asked,
+        vec!["python".to_string(), "rust".to_string()],
+        "one start attempt per language, not one per file"
+    );
+}
+
 #[test]
 fn symbols_overview_with_overflow() {
     let val = serde_json::json!({

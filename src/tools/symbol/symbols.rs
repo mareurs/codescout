@@ -495,10 +495,19 @@ async fn search_files_restricted(
     };
 
     let mut unread = Vec::new();
+    // A language whose server failed to start is not asked again inside this call: this loop runs
+    // once per file, so every retry was a full failed start (about 1.8 s for Kotlin). The rest of
+    // that language's files are still listed as unread, with the same reason.
+    let mut failed_start: std::collections::HashMap<&'static str, String> =
+        std::collections::HashMap::new();
     for file_path in &files {
         let Some(lang) = ast::detect_language(file_path) else {
             continue;
         };
+        if let Some(reason) = failed_start.get(lang) {
+            unread.push((file_path.clone(), reason.clone()));
+            continue;
+        }
         let language_id = crate::lsp::servers::lsp_language_id(lang);
         let mux_override = ctx
             .agent
@@ -507,7 +516,9 @@ async fn search_files_restricted(
         let client = match ctx.lsp.get_or_start(lang, root, mux_override).await {
             Ok(client) => client,
             Err(e) => {
-                unread.push((file_path.clone(), format!("{e:#}")));
+                let reason = format!("{e:#}");
+                failed_start.insert(lang, reason.clone());
+                unread.push((file_path.clone(), reason));
                 continue;
             }
         };
