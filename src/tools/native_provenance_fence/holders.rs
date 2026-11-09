@@ -4,7 +4,7 @@
 //! process started inside a fenced shell inherits the descriptor, and a `flock` lasts while any
 //! descriptor on its open file description lives. So "a peer is mid-call" and "a daemon started
 //! hours ago still holds it" read the same, and only the first clears by itself. Bug
-//! `312cde2f4698874b`.
+//! `91b5ffce06ede31a`.
 //!
 //! Best effort, Linux only (it reads `/proc`). Every failure leaves the message shorter; none
 //! turns into an error of its own. It never prints a command line beyond the process name and a

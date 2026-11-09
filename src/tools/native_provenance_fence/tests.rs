@@ -104,7 +104,7 @@ fn ordinary_participants_coexist_but_exclude_a_formatter() {
     assert_eq!(acquire_after_release(dir.path()).generation(), 2);
 }
 /// A refused acquisition names who holds the lock instead of saying only "would block".
-/// Bug `312cde2f4698874b`.
+/// Bug `91b5ffce06ede31a`.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_refused_acquisition_names_the_process_holding_the_lock() {

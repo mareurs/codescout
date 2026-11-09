@@ -30,6 +30,24 @@ All notable changes to codescout are documented here.
 - `docs/adrs/2026-11-08-local-embed-is-opt-in.md` has the full account and the alternative
   that was rejected.
 
+### Changed — `fmt-mine` is no longer refused by a process that keeps an inherited lease
+
+- **Only a formatter with a native proof takes the provenance leases exclusively.** Before,
+  every foreground `bash scripts/fmt-mine.sh` / `./scripts/fmt-mine.sh` call did, from the
+  command text alone. Any process that had inherited a lease and outlived its call (a dev
+  server, a detached script, an `adb` server, the rust-analyzer mux) then refused it, often
+  for hours, on every checkout of the account. A 160-minute census found such a holder in
+  33 of 33 samples. Now the exclusive leases are taken only for a foreground `fmt-mine` call
+  from `codex-mcp-client` with `fence_capability`, the one case that can use a native
+  checkpoint. Every other formatter call shares the leases like any other command.
+- **What this gives up.** A formatter without a native proof may now run while another
+  session writes. The approved design states no such guarantee for those clients, but that
+  does not show that nothing relies on it. A native formatter still holds both leases
+  exclusively, and the unverified-shell marker and the certificate checks are unchanged.
+- **Guards.** `a_formatter_without_a_native_proof_shares_the_leases` and
+  `only_the_codex_client_with_the_fence_capability_takes_the_leases_exclusively`
+  (src/tools/provenance_fence_context_tests.rs). Commit `1ccf33e7b`, bug `91b5ffce06ede31a`.
+
 ### Changed — a refused provenance lock names its holders (Linux)
 
 - **"…refused dispatch: lock acquisition failed because the operation would block" now says who
@@ -38,7 +56,8 @@ All notable changes to codescout are documented here.
   process is gone. Before, a peer that was mid-call and a lock kept for hours by a daemon read
   the same. The text before the new part is unchanged, and nothing else about the lock changed:
   a process started inside a fenced call, such as the shared rust-analyzer mux, can still keep
-  the lock after the call ends. That root cause is open (bug `312cde2f4698874b`).
+  the lock after the call ends. That still holds; since the change above, such a holder no
+  longer refuses a formatter that has no native proof (bug `91b5ffce06ede31a`).
 
 ### Fixed — `doc` refuses `dry_run=true`
 

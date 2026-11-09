@@ -411,7 +411,7 @@ async fn ordinary_edits_coexist_with_commands_but_native_formatting_requires_qui
 }
 
 /// A formatter call that cannot use a native checkpoint shares the leases: a live participant
-/// does not refuse it, and it does not refuse a participant. Before bug 312cde2f4698874b such a
+/// does not refuse it, and it does not refuse a participant. Before bug 91b5ffce06ede31a such a
 /// call took the leases exclusively too; that is removed on purpose, so this pins the new scope.
 #[tokio::test]
 async fn a_formatter_without_a_native_proof_shares_the_leases() {

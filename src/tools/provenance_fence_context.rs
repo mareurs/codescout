@@ -147,7 +147,7 @@ where
                 .and_then(|proof| proof.get("fence_capability"))
                 == Some(&Value::Bool(true));
         let trusted_formatter = formatter && native_proof;
-        // Scope decision (bug 312cde2f4698874b): the approved design motivates exclusivity by
+        // Scope decision (bug 91b5ffce06ede31a): the approved design motivates exclusivity by
         // native checkpoint validity through the formatter's last write, so only a formatter
         // that can use a checkpoint takes the leases exclusively. Before this change every
         // foreground formatter did, which also kept concurrent writers away from formatters

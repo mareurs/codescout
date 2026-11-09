@@ -244,7 +244,7 @@ impl Fence {
             };
             locked.map_err(|error| match error {
                 // The text before the holders is the error's own, unchanged; the holders say
-                // whether this is a peer mid-call or a lock no call owns (bug 312cde2f4698874b).
+                // whether this is a peer mid-call or a lock no call owns (bug 91b5ffce06ede31a).
                 std::fs::TryLockError::WouldBlock => {
                     io::Error::other(format!("{error}{}", holders_of(&path)))
                 }

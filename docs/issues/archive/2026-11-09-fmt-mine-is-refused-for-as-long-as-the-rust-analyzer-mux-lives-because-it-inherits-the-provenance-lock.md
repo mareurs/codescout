@@ -1,12 +1,13 @@
 ---
-id: '312cde2f4698874b'
+id: 91b5ffce06ede31a
 kind: bug
-status: open
+status: fixed
 title: 'BUG: fmt-mine is refused for as long as the rust-analyzer mux lives, because the mux inherits the provenance lock'
 owners:
 - marius
 tags:
 - cluster/transient-shared-state-lies-to-readers
+closed: 2026-11-10
 opened: 2026-11-09
 owner: marius
 related:
@@ -80,7 +81,7 @@ Re-measured a few minutes later in the same session: `/proc/locks` listed FIVE s
 
 ## Fix
 
-Partly done. **Option 2 is in; option 1 is not, and this bug stays open.**
+Fixed by option 3 (`1ccf33e7b`), verified live on 2026-11-10. Option 2 is in as well; option 1 is not merged and not recommended.
 
 - Option 2, `4eceee5e7` and `0d47f5898`: a refused fence lock now names its holders (Linux): the processes that have the lock file open, inherited descriptors included, and the owners the kernel records, each marked "not running" when gone. A list cut by its 12-entry cap or by the 400 ms scan limit ends in "and more". Only the process name and a plain lowercase subcommand are shown, never other arguments.
 - Verified: unit tests on the pure parts; a test that rebuilds the dead-owner case with `flock -s <file> sh -c 'sleep 30 & echo $!'`; a test that starts 14 holders; mutation runs for the holder text and for the cut flag; and live on the rebuilt server. A refused `./scripts/fmt-mine.sh` named the running gate and its children, a dead owner (this session's previous server, whose gate was still running on inherited descriptors, the mechanism of this bug reproduced within minutes), and the dead owner of the mux's lock.
@@ -93,6 +94,11 @@ What option 2 does and does not change: a caller who is refused can now tell a p
 - Option 3, proposed after the measurements and the owner's answers, **merged into `experiments` as `1ccf33e7b` on 2026-11-10 by the operator's decision** (patch-id `79165fcf9a767623d01633f763a6bf602ab5ff62`; branch commits rebased onto `29341e494` as `c58bc3ea4` and `0e6df455e`, first written as `8a3738b28` and `a119095e6`; `./scripts/gate.sh --check` green on the rebased branch). Not released and not pushed: the running server keeps the old behavior until `./scripts/rb.sh` and `/mcp`. Draft details: branch `fix/formatter-exclusive-only-with-proof-20261109`, commit `8a3738b28`, worktree `/home/marius/work/claude/codescout.worktrees/formatter-exclusive-with-proof`. `scope_root` takes the exclusive leases only for a trusted formatter (a foreground `fmt-mine` call from `codex-mcp-client` with `fence_capability`); every other formatter call shares the leases. The marker, the certificate and the trusted-closure check are unchanged. Tests: the two exclusion tests now use a native formatter, and `a_formatter_without_a_native_proof_shares_the_leases` is new; mutation `if formatter` fails only the new test, `if false` fails only the two exclusion tests; `cargo test --lib provenance` 37 passed; `./scripts/gate.sh --check` green. Given up: a formatter without a proof may run beside a concurrent writer, a protection the owner found undocumented for those clients but nobody has shown unused. Not covered: the real MCP dispatch path and a Codex native formatter end to end. The fence is the owner's design, so merging is the owner's and the operator's decision.
   - Owner's review of `8a3738b28` (2026-11-09T22:16:06Z, static, not an approval): no new ordering defect in `scope_root`. Option 3 fits a capability-scoped reading of the spec, but the Builder ruling's literal sentence ("a foreground formatter owns it exclusively") is broader, and the base implementation and tests followed it. So the change deliberately narrows protected behavior (the two base tests used formatters without a proof as exclusive holders). The scope decision must be stated, not presented as following from the old wording. An absent rationale is not proof that nothing relies on the old exclusion. Formatters without a proof still cannot run beside a native formatter, because the native one holds the exclusive coordinator.
   - Follow-up `a119095e6`: the code comment states the scope decision and the deliberate removal; the test comment no longer says "nothing else"; new `only_the_codex_client_with_the_fence_capability_takes_the_leases_exclusively` covers five near misses (mutations that drop the client check or the capability check each fail it); a race this branch had introduced (an exclusive generation read just before a test's own lease) is removed by construction, and 10 of 10 runs passed afterwards. `cargo test --lib provenance` 38 passed; clippy `-D warnings` clean; the full gate was not re-run for this tests-and-comments commit.
+
+## Fix provenance
+
+- **SHA:** `1ccf33e7b` (`experiments`)
+- **patch-id:** `79165fcf9a767623d01633f763a6bf602ab5ff62`
 
 ## Measured before the option 1 decision (2026-11-09)
 
@@ -130,13 +136,20 @@ What the two together say about option 1: the owner's concern is real and measur
 
 ## Tests added
 
-N/A — not fixed.
+- `a_formatter_without_a_native_proof_shares_the_leases` (`src/tools/provenance_fence_context_tests.rs:417`): with a live participant, a `fmt-mine` call without a native proof runs, and it does not refuse a participant. Mutation `if formatter` (the old predicate) fails it.
+- `only_the_codex_client_with_the_fence_capability_takes_the_leases_exclusively` (`src/tools/provenance_fence_context_tests.rs:464`): five near misses of eligibility each share the leases. Dropping the client check or the capability check fails it.
+- Kept for the native formatter: `ordinary_edits_coexist_with_commands_but_native_formatting_requires_quiescence` (`:369`) and `formatter_excludes_a_foreign_workspace_shell_targeting_its_checkout` (`:514`); mutation `if false` (never exclusive) fails both.
+- Live verification, 2026-11-10T01:06 local, on the server built from `ea44079c4` (which contains `1ccf33e7b`; the baked SHA was read from the binary): `./scripts/fmt-mine.sh` through `run_command`, foreground, while the `adb` server (146 min) and the `ie-pal-engine` `engine.py` (604 min) held shared coordinator leases. It was not refused at dispatch (no `refused dispatch` in its stderr) and ended with `fmt-mine`'s own verdict: `REFUSED` for three files this session does not own (`src/engines/emitters.rs`, `src/lsp/manager.rs`, `src/server.rs`), exit 1. Before `1ccf33e7b`, the same call was refused at dispatch whenever any holder existed.
 
 ## Workarounds
 
 Format the files you changed with `rustfmt --edition 2021 <file>` after reading `git diff` for each, then `rustfmt --check`. Used five times in this session. The commit hook runs `rustfmt --check` on the committed bytes either way.
 
 ## Resume
+
+N/A — fixed by `1ccf33e7b` (patch-id `79165fcf9a767623d01633f763a6bf602ab5ff62`) and verified live on 2026-11-10; see `## Tests added`. What stays true and is by design: a leftover holder still refuses a native Codex formatter, and the mux and other descendants of fenced shells still keep their inherited leases. Option 1 (`8f18f6689`, `9a9c1959f`) stays unmerged and not recommended.
+
+### Review trail (history from the open period; these are no longer tasks)
 
 0. Review requested 2026-11-09T11:47Z from Codex thread `01a1b59b-676f-7881-b7eb-4d8e1687c3f8` (app-server pid 646545, title "Verifica starea repo-ului"), read only, with three questions: is the mux's exclusion acceptable, does any fence test or proof rely on a daemon keeping the lock, and should `peer::server::run` change too. The send is attributed by one fact, the `Session-Id` trailer of `9cab1095e`; nobody confirmed that thread owns the fence today. The rollout file grew, so a turn ran; the request was sent again at the operator's request at 2026-11-09T11:58:02Z. The thread answered at 2026-11-09T13:49:48Z (static, read-only review; it states it is not an approval and cannot be answered by address, so reply through the operator). Its findings:
    - It does not recommend integrating the draft yet. The exclusion is acceptable only if the whole descendant tree of the daemon never writes the checkout. `mux::process::run` starts an arbitrary server command with `current_dir(workspace_root)`, so that precondition is not enforced. It calls this a contract concern, not a reproduced formatter bypass, because the persistent `unverified-shell-v1` marker still prevents certification.
