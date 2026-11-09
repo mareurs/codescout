@@ -89,6 +89,19 @@ fn repo_root() -> PathBuf {
 /// for a reason that has nothing to do with building it. A guard that passes by accident is
 /// the failure mode this whole test exists to prevent.
 ///
+/// **Comment lines never count.** A YAML `#` line that quotes a command (the test job's
+/// comment about `cargo test --features local-embed --no-default-features`) is prose about
+/// a lane, not a lane. Until 2026-11-08 such a line was scanned like any other, and it was
+/// the only text that named `local-embed` on a test-running line: the feature was vouched
+/// for by a comment, invisibly, because `default` covered it anyway. Removing it from
+/// `default` made that load-bearing, so comments are skipped.
+///
+/// **Matrix `flags:` entries count when a test line consumes them.** The `test` job runs
+/// `cargo nextest run … ${{ matrix.config.flags }}`, so the literal `--features` sits on a
+/// separate `flags:` line from the verb. A `flags:` line contributes only when some line in
+/// the same text both runs tests and names `matrix.config.flags`; with `only_cargo_test`
+/// off it always contributes, being a build either way.
+///
 /// **Per-line, and that is a stated limitation rather than an oversight.** A command split
 /// across lines with a trailing `\` would put `cargo test` and `--features` on different
 /// lines, and this would read the flag as untested. No workflow here does that; if one
@@ -96,16 +109,14 @@ fn repo_root() -> PathBuf {
 /// lane that exists rather than passing one that does not. That is the safe direction, and
 /// the refusal names the file so the author can see why.
 fn features_from_text(text: &str, only_cargo_test: bool) -> BTreeSet<String> {
-    let mut found = BTreeSet::new();
-    for line in text.lines() {
+    fn runs_tests(line: &str) -> bool {
         // `cargo test --doc` runs doctests only, never the feature's tests, so it does not count:
         // a job that has both a nextest step and a doctest step must lose its coverage when the
         // nextest step is deleted.
-        let runs_tests = (line.contains("cargo test") && !line.contains("--doc"))
-            || line.contains("cargo nextest run");
-        if only_cargo_test && !runs_tests {
-            continue;
-        }
+        (line.contains("cargo test") && !line.contains("--doc"))
+            || line.contains("cargo nextest run")
+    }
+    fn collect(line: &str, found: &mut BTreeSet<String>) {
         let mut rest = line;
         while let Some(idx) = rest.find("--features") {
             rest = &rest[idx + "--features".len()..];
@@ -120,6 +131,27 @@ fn features_from_text(text: &str, only_cargo_test: bool) -> BTreeSet<String> {
                 }
             }
         }
+    }
+
+    let mut found = BTreeSet::new();
+    let matrix_flags_are_run = text
+        .lines()
+        .any(|l| runs_tests(l) && l.contains("matrix.config.flags"));
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed.starts_with("flags:") {
+            if !only_cargo_test || matrix_flags_are_run {
+                collect(line, &mut found);
+            }
+            continue;
+        }
+        if only_cargo_test && !runs_tests(line) {
+            continue;
+        }
+        collect(line, &mut found);
     }
     found
 }
@@ -352,6 +384,54 @@ fn the_workflow_scan_distinguishes_check_from_test() {
         "a step NAME is not a lane; the scan has widened past --features: {tested:?}"
     );
 }
+
+/// The scan ignores comments and reads matrix `flags:` — proved against fixtures, because the
+/// live workflow can no longer be trusted to exercise either arm.
+///
+/// Both arms exist because of one accident. The `test` job's only literal mention of
+/// `cargo test --features local-embed` was a *comment*, and its real lane is a matrix entry
+/// (`flags: "--features local-embed --no-default-features"`) consumed by a line that has the
+/// verb but not the flag. While `default` covered `local-embed` nobody could tell the guard
+/// was passing on the comment. Each assertion below fails on the scanner as it was.
+#[test]
+fn the_workflow_scan_ignores_comments_and_reads_matrix_flags() {
+    const CONSUMED: &str = "\
+          - name: lean\n\
+            flags: \"--features via-matrix --no-default-features\"\n\
+          # `cargo test --features only-commented` shows the crate in the Running lines\n\
+          - run: cargo nextest run --workspace ${{ matrix.config.flags }}\n";
+    const UNCONSUMED: &str = "\
+          - name: orphan\n\
+            flags: \"--features orphan-matrix\"\n\
+          - run: cargo check --workspace ${{ matrix.config.flags }}\n";
+
+    let tested = features_from_text(CONSUMED, true);
+    assert!(
+        tested.contains("via-matrix"),
+        "a matrix entry consumed by a `cargo nextest run` line is a test lane and must \
+         count: {tested:?}"
+    );
+    assert!(
+        !tested.contains("only-commented"),
+        "a comment that quotes a command is prose, not a lane; the scan counted it: {tested:?}"
+    );
+    assert!(
+        features_from_text(CONSUMED, false).contains("via-matrix"),
+        "the any-line scan feeds the compile question and must see the matrix flag too"
+    );
+
+    let tested = features_from_text(UNCONSUMED, true);
+    assert!(
+        !tested.contains("orphan-matrix"),
+        "a matrix entry that only a `cargo check` line consumes builds the feature and runs \
+         nothing; it must NOT count as a test lane: {tested:?}"
+    );
+    assert!(
+        features_from_text(UNCONSUMED, false).contains("orphan-matrix"),
+        "it is still a build, so the compile question must see it"
+    );
+}
+
 /// The `run:` steps in one workflow's text that run `cargo nextest run` without `--no-fail-fast`.
 ///
 /// nextest stops at the first failed TEST by default; the old `cargo test` stopped only after
@@ -569,69 +649,61 @@ fn every_exempt_feature_is_still_compiled_somewhere() {
     );
 }
 
-/// The **default feature set** must be able to construct the **default embedding
-/// model**.
+/// The ONNX backends must stay **out of the default feature set**: `local-embed` is opt-in.
 ///
-/// Two decisions made independently and never checked against each other: `default`
-/// in `Cargo.toml`, and `default_embed_model()` in `src/config/project.rs`. Until
-/// 2026-09-17 they disagreed — `default` omitted `local-embed` while the default
-/// model was `local:AllMiniLML6V2Q` — so `cargo build` produced a binary that could
-/// not construct its own default configuration.
+/// This pins a decision, so it is allowed to be inconvenient. `local-embed` was in `default`
+/// from 2026-09-17 to 2026-11-08, put there because `default_embed_model()` names a `local:`
+/// model and a lean default could not construct it. It left again because a stripped release
+/// binary was 61.9 MiB with it and 40.3 MiB without (2026-11-08, +53%) for deployments that
+/// embed over HTTP, and because `ort` ships no prebuilt for `x86_64-pc-windows-gnu`. The cost
+/// was accepted knowingly: a default build with no `[embeddings]` config now fails at index
+/// time
+/// with a hint naming both ways out, which
+/// `a_default_build_fails_on_the_default_model_with_both_remedies` (src/retrieval/client.rs)
+/// pins. `docs/adrs/2026-11-08-local-embed-is-opt-in.md` has the account.
 ///
-/// Measured rather than reasoned: a default-feature build indexing a fresh project
-/// with no `[embeddings]` and no ambient env aborted with *"Local embedding requires
-/// the 'local-embed' feature"*, and offered as its remedy the very model that had
-/// just failed. Neither decision was wrong alone — `local-embed` was omitted for a
-/// real reason (ONNX Runtime; `local-embed-dynamic` exists for EDR-constrained
-/// Windows) and `local:AllMiniLML6V2Q` is the right default — they were simply never
-/// reconciled.
-/// `docs/issues/archive/2026-09-17-the-default-build-cannot-run-the-default-embedding-model.md`
+/// Without this, re-adding `local-embed` to `default` is a one-word edit that turns every
+/// lean lane's coverage of the failure contract off (that test is `cfg`-gated to builds with
+/// no local backend) and breaks `scripts/build-windows.sh`'s windows-gnu spelling. This
+/// reds instead.
 ///
-/// **Why this reads the MANIFEST rather than calling the constructor.** The natural
-/// form — call `create_embedder_with_config(default_embed_model(), …)` and assert it
-/// is not the unsupported-feature bail — must be `#[cfg(feature = "local-embed")]`
-/// to survive the lean lane, and that cfg switches the test OFF in precisely the
-/// configuration whose breakage it exists to catch: deleting `local-embed` from
-/// `default` would silently disable the guard instead of redding it. Monotone under
-/// the exact change it guards, which is the failure mode `CLAUDE.md` § *Testing
-/// Discipline* names first. Reading the manifest is not cfg-dependent, so this test
-/// runs, and means the same thing, in every lane.
+/// It reads the MANIFEST rather than a cfg, for the reason its predecessor did: a cfg-gated
+/// form switches itself off under exactly the change it guards.
+///
+/// To reverse the decision on purpose, change `default` in `Cargo.toml`, supersede the ADR,
+/// reconcile `.cargo/config.toml`, `scripts/build-windows.sh` and `scripts/gate.sh`, and
+/// replace this test with the guard the old reasoning needs (a default feature set that can
+/// construct `default_embed_model()`; see `git log -S the_default_feature_set_can_construct`).
 #[test]
-fn the_default_feature_set_can_construct_the_default_embedding_model() {
+fn the_onnx_backends_are_opt_in_not_default() {
     let features = declared_features();
-    let defaults = default_closure(&features);
 
-    // Non-vacuity control, inline because it is one line: the closure must contain
-    // its own seed. If it does not, `declared_features()` parsed something that is
-    // not the `[features]` table and this guard is standing in front of nothing.
+    // Non-vacuity controls: the two features must still be declared, and the closure must
+    // contain its own seed. A rename of either, or a parse of something that is not the
+    // `[features]` table, would make the loop below pass by checking nothing.
+    for f in ["local-embed", "local-embed-dynamic"] {
+        assert!(
+            features.contains_key(f),
+            "`{f}` is no longer declared in [features], so this guard is standing in front \
+             of nothing. If it was renamed, update this test; if it was removed, delete it."
+        );
+    }
+    let defaults = default_closure(&features);
     assert!(
         defaults.contains("default"),
         "the default closure must contain its own seed; got {defaults:?}"
     );
 
-    let model = codescout::config::project::default_embed_model();
-    assert!(
-        !model.trim().is_empty(),
-        "a blank default model would make the check below trivially satisfiable"
-    );
-
-    // Mirrors `create_embedder_with_config`'s resolution ladder
-    // (`crates/codescout-embed/src/lib.rs`). A bare name falls through to arm 6,
-    // which is also a local backend, so it carries the local requirement too.
-    let acceptable: &[&str] = if model.starts_with("ollama:") || model.starts_with("openai:") {
-        &["remote-embed"]
-    } else {
-        &["local-embed", "local-embed-dynamic"]
-    };
-
-    assert!(
-        acceptable.iter().any(|f| defaults.contains(*f)),
-        "the default embedding model is {model:?}, which needs one of {acceptable:?}, \
-         but the default feature closure is {defaults:?}.\n\
-         Either add that feature to `default` in Cargo.toml, or change \
-         `default_embed_model()` — the two are set independently and nothing else \
-         compares them. Otherwise a plain `cargo build` ships a binary that cannot \
-         construct its own default configuration, and the failure names the model it \
-         just refused as the recommended fix."
-    );
+    for f in ["local-embed", "local-embed-dynamic"] {
+        assert!(
+            !defaults.contains(f),
+            "`{f}` is in the default feature closure {defaults:?}.\n\
+             The ONNX backends are opt-in on purpose: a stripped release binary was 21.6 MiB \
+             (53%) larger with `local-embed` (2026-11-08) and `ort` has no prebuilt for \
+             x86_64-pc-windows-gnu. See the comment on `default` in Cargo.toml and \
+             docs/adrs/2026-11-08-local-embed-is-opt-in.md.\n\
+             If you are reversing that decision, the doc comment on this test lists what \
+             must change with it."
+        );
+    }
 }

@@ -4,6 +4,32 @@ All notable changes to codescout are documented here.
 
 ## [Unreleased]
 
+### Changed — `local-embed` is opt-in again
+
+- **`local-embed` leaves the default Cargo features.** It joined `default` on 2026-09-17 and
+  leaves it now. A plain `cargo build` / `cargo install` no longer links ONNX Runtime and the
+  fastembed stack. A stripped release binary measured 40.3 MiB without `local-embed` and
+  61.9 MiB with it (2026-11-08): 21.6 MiB, or 53%, larger. `ort` also publishes no prebuilt
+  for `x86_64-pc-windows-gnu`. To get the
+  in-process backend, build with `--features local-embed` (or `local-embed-dynamic` where the
+  ONNX build script is blocked; the two are mutually exclusive).
+- **What this costs, stated plainly.** The built-in default model is still
+  `local:AllMiniLML6V2Q`. A default build in a project with no `[embeddings]` config and no
+  `CODESCOUT_EMBEDDER_URL` fails at index time. The error names both ways out: set
+  `[embeddings].url` to an OpenAI-compatible endpoint, or rebuild with `--features
+  local-embed`. This is the failure the 2026-09-17 change removed; it comes back on purpose,
+  with an actionable hint.
+- **`cargo rb` is lean again** (it passes no `--no-default-features`, so it follows
+  `default`). The live MCP binary cannot resolve a `local:` model unless you add the feature.
+- **Guards.** `the_default_feature_set_can_construct_the_default_embedding_model` is replaced
+  by `the_onnx_backends_are_opt_in_not_default` (tests/feature_lanes.rs), which keeps both ONNX
+  backends out of `default`, and `a_default_build_fails_on_the_default_model_with_both_remedies`
+  (src/retrieval/client.rs), which pins the failure's hint. The CI lane guard now reads matrix
+  `flags:` entries and ignores YAML comments; before, a comment was what vouched for the
+  `local-embed` test lane.
+- `docs/adrs/2026-11-08-local-embed-is-opt-in.md` has the full account and the alternative
+  that was rejected.
+
 ### Changed — tool surface collapse (26 → 21 tools)
 
 - **`artifact` is now `doc`.** `artifact_event`, `artifact_augment` and `artifact_refresh`

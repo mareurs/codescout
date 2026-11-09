@@ -30,10 +30,12 @@ How the script behaves, so you read its output right:
   (`FMT_STATE=context-blocked`) and every other lane still runs.
   `docs/conventions/harness-neutral-session-context.md` has the modes and numeric outcomes.
 - `fmt-mine.sh` exit codes: 0 clean/formatted, 1 differences or ownership refusal, 2 context/tool/usage error.
-- It sets `CODESCOUT_SKIP_ONNX_TESTS=1` for the whole script (the two ONNX weight tests in
-  `crates/codescout-embed/src/local.rs` panic without weights on disk; CI's `local-embed` job
-  runs them) and prints what a green run does NOT cover (heavy Python suites, `server-stack`,
-  librarian code in the lean lane, the ONNX tests).
+- The ONNX path (`local-embed`) is opt-in and in no test lane here: clippy compiles it, neither
+  nextest lane builds it. The two ONNX weight tests in `crates/codescout-embed/src/local.rs` (they
+  panic without weights on disk) run only in CI's `local-embed` job. Until 2026-11-08 `local-embed`
+  was in `default` and the gate exported `CODESCOUT_SKIP_ONNX_TESTS=1`; that export is gone. The
+  gate prints what a green run does NOT cover (heavy Python suites, `server-stack`, librarian code
+  in the lean lane, the ONNX path).
 - For a targeted run lease your own slot: `scripts/with-slot.sh cargo test --lib -- <filter>`
   (`--slot N` leases exactly slot-N). Do not reuse the path gate.sh printed by hand: it was
   leased for that run only.
@@ -87,8 +89,8 @@ cargo rb                     # ALIAS (.cargo/config.toml) = build --release --fe
                              # OUR STACK's live-MCP release build: with server-stack on, VectorBackend::resolve()
                              # defaults to Qdrant — the full hybrid retrieval path against the running
                              # llm-infra stack (.env.amd). This is what we run locally for live MCP testing.
-                             # It does NOT pass --no-default-features, so it also builds `local-embed`
-                             # (in `default` since 2026-09-17).
+                             # It passes no --no-default-features, so it follows `default`, which no longer
+                             # holds `local-embed` (left 2026-11-08; add `--features local-embed` for it).
 cargo build --release        # sqlite-vec lite, no Qdrant — the daemon-free default repo
                              # cloners get; NOT what we run locally. Used as the crates.io publish-verification build.
 

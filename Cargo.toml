@@ -180,17 +180,36 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [features]
-# `local-embed` is in `default` since 2026-09-17, and it is not decoration: the
-# default model is `local:AllMiniLML6V2Q` (`default_embed_model()`), so without it
-# a plain `cargo build` produces a binary that cannot construct its own default
-# configuration. Measured before the change — a default build indexing a fresh
-# project with no `[embeddings]` aborted with "Local embedding requires the
-# 'local-embed' feature" and offered, as its remedy, the model it had just
-# refused. `the_default_feature_set_can_construct_the_default_embedding_model`
-# (tests/feature_lanes.rs) reds if the two ever disagree again; it reads the
-# manifest rather than calling the constructor, because the cfg-gated form would
-# switch itself off under exactly the change it guards.
-default = ["remote-embed", "http", "librarian", "local-embed"]
+# `local-embed` is deliberately NOT in `default`. It is opt-in: build with
+# `--features local-embed` to get in-process ONNX embeddings (see below).
+#
+# WHY. `local-embed` statically links ONNX Runtime (`ort-sys`) and the fastembed stack.
+# Measured 2026-11-08 with `cargo build --release -p codescout --bin codescout` (stripped,
+# per `[profile.release]`): 40.3 MiB without `local-embed`, 61.9 MiB with it. That is
+# 21.6 MiB, or 53%, larger. `cargo bloat --release --crates` attributes the largest single
+# share, 12.3 MiB of `.text`, to `ort_sys`. `ort` also publishes no prebuilt for
+# `x86_64-pc-windows-gnu`, so a default that includes it cannot build there
+# (`local-embed-dynamic` exists for that reason), and its native build script is what
+# EDR-managed machines block. Most deployments reach the embedder over HTTP
+# (`remote-embed`, always on) and never load the ONNX code that was being linked in.
+#
+# WHAT THIS COSTS, stated because it is real. `default_embed_model()` still returns
+# `local:AllMiniLML6V2Q`, so a default build indexing a project with no `[embeddings]`
+# config and no `CODESCOUT_EMBEDDER_URL` cannot construct its embedder. It fails at
+# index time with a recoverable error whose hint names both ways out: set
+# `[embeddings].url`, or rebuild with `--features local-embed`
+# (`RetrievalClient::build_embedder`, src/retrieval/client.rs; pinned by
+# `a_default_build_fails_on_the_default_model_with_both_remedies` there). That is the
+# failure 2026-09-17 fixed by putting `local-embed` into `default`; this reverses that
+# ruling on purpose, with the failure now actionable instead of misleading.
+# docs/adrs/2026-11-08-local-embed-is-opt-in.md has the full account.
+#
+# TO ACTIVATE: `cargo build --release --features local-embed`, or
+# `cargo install --path . --features local-embed`. For a Windows host that blocks the
+# ONNX build script use `--features local-embed-dynamic` instead (runtime-loaded
+# onnxruntime.dll). The two are mutually exclusive: pick one, never both
+# (crates/codescout-embed/src/lib.rs `compile_error!`).
+default = ["remote-embed", "http", "librarian"]
 # Embedded librarian (workspace doc/spec/plan index). Compiled in by
 # default for dev; turn off for production publishes via `--no-default-features`.
 # Runtime registration is **enabled by default** when compiled in.
@@ -219,6 +238,7 @@ remote-embed = ["codescout-embed/remote-embed", "dep:reqwest", "dep:rustls"]
 # --features server-stack` compiles those call sites against configured-out types.
 server-stack = ["dep:qdrant-client", "remote-embed"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
+# OPT-IN: not in `default` (see the comment on `default` for why and how to turn it on).
 # First use downloads the chosen model (~20-300MB) to <user cache dir>/codescout/fastembed
 # (FASTEMBED_CACHE_DIR overrides; HF_HOME, when set, replaces both).
 local-embed = ["codescout-embed/local-embed"]

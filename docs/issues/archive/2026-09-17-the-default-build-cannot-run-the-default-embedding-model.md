@@ -14,6 +14,11 @@ claimed_by: 458a8a26-c380-4f5b-b967-2181f592917e
 
 ## Summary
 
+> **Superseded 2026-11-08.** The fix recorded below, putting `local-embed` into `default`,
+> was reversed on purpose: `docs/adrs/2026-11-08-local-embed-is-opt-in.md`. A default build
+> again cannot construct the default model, and now fails with a hint that names both ways
+> out. The reasoning below is the history of that decision, not the current state.
+
 `default = ["remote-embed", "http", "librarian"]` does not include
 `local-embed`, but the default embedding model is `local:AllMiniLML6V2Q`. A
 binary built with `cargo build` therefore cannot run its own default

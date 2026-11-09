@@ -85,24 +85,30 @@ rustup target list --installed | grep -qx "$TARGET" || {
 CMD="${1:-build}"
 shift || true
 
-# Feature set for the windows-gnu target.
+# FEATURES for the windows-gnu target: cargo's default set PLUS `local-embed-dynamic`.
 #
-# `local-embed` entered Cargo's `default` on 2026-09-17, and it CANNOT build for this
-# target: `ort` publishes no prebuilt binary for `x86_64-pc-windows-gnu`, which is the
-# reason `local-embed-dynamic` (runtime-loaded onnxruntime.dll) exists at all. Taking
-# cargo's default here therefore fails in the build script, not the compiler:
+# `ort` publishes no prebuilt binary for `x86_64-pc-windows-gnu`, so the static ONNX
+# backend (`local-embed`) cannot build for this target, and that is why
+# `local-embed-dynamic` (runtime-loaded onnxruntime.dll) exists. `local-embed` is NOT in
+# cargo's `default` (it left on 2026-11-08; it was there from 2026-09-17, when this
+# script had to hand-list the default set with `local-embed` swapped out, because
+# taking cargo's default here failed inside the ort build script:
 #
 #   error: ort-sys@2.0.0-rc.11: ort does not provide prebuilt binaries for the
 #          target `x86_64-pc-windows-gnu` with feature set (no features).
+# ).
 #
-# Measured 2026-09-17 by running `scripts/build-windows.sh check` with the new default
-# before changing this line. CI runs this script at three steps (`build`, `clippy`,
-# `test`), so leaving it would have redded all three.
+# So this is now a plain `--features`, with no `--no-default-features` and no hand-copied
+# default list: the two ONNX backends are mutually exclusive, and with `local-embed` out of
+# `default` adding `local-embed-dynamic` on top cannot enable both. It also picks up
+# features added to `default` later, which the hand-written list did not.
 #
-# So the DEFAULT here is now the windows-gnu spelling of cargo's default: the same
-# feature set with `local-embed` swapped for `local-embed-dynamic`. This is not an
-# opt-in shape any more — it is the only one this target has.
-FEATURES=(--no-default-features --features "remote-embed,http,librarian,local-embed-dynamic")
+# The set is unchanged by this: `remote-embed,http,librarian,local-embed-dynamic`. It is
+# kept as the DEFAULT here, not behind `--edr`, so CI's three calls (`build`, `clippy`,
+# `test`) keep compiling the windows-gnu dlopen path that no Linux lane can see.
+# `tests/feature_lanes.rs::the_onnx_backends_are_opt_in_not_default` is what keeps cargo's
+# own default from regaining the static backend and breaking this target again.
+FEATURES=(--features "local-embed-dynamic")
 ARGS=()
 for a in "$@"; do
   case "$a" in

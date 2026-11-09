@@ -19,7 +19,7 @@ your machine into this field automatically. You rarely need to set it manually �
 
 | Backend | Speed | Quality | Cost | Privacy | Setup |
 |---|---|---|---|---|---|
-| Local (fastembed, **default**) | Fast (CPU) | Good–Excellent | Free | Fully local | Bundled — no setup needed |
+| Local (fastembed, **opt-in build**) | Fast (CPU) | Good–Excellent | Free | Fully local | Build with `--features local-embed` — see [Local (fastembed)](#local-fastembed) |
 | Ollama | Medium | Good | Free | Local | Install Ollama + pull model |
 | OpenAI | Fast (network) | Excellent | Pay-per-token | Data sent to OpenAI | Set `OPENAI_API_KEY` |
 | Custom endpoint | Varies | Varies | Varies | Depends on host | Point at any compatible server |
@@ -220,6 +220,16 @@ download.
 **not available in the published `cargo install codescout` binary** because ONNX Runtime is
 a native system library that cannot be bundled through crates.io.
 
+> **`local-embed` is opt-in, not a default feature (since 2026-11-08).** It statically links
+> ONNX Runtime and the fastembed stack. A stripped release binary measured 40.3 MiB without
+> it and 61.9 MiB with it (2026-11-08): 21.6 MiB, or 53%, larger. Most setups embed over
+> HTTP and never load that code. The catch: codescout's built-in default model is still
+> `local:AllMiniLML6V2Q`. A default build in a project with **no `[embeddings]` config and no
+> `CODESCOUT_EMBEDDER_URL`** therefore cannot construct its embedder, and indexing fails with
+> an error that names both ways out: set `[embeddings].url` to an OpenAI-compatible endpoint,
+> or rebuild with `--features local-embed`. See
+> [Error When Feature Is Missing](#error-when-feature-is-missing).
+
 > **Looking for free local embeddings without building from source?** Use [Ollama](#ollama-default)
 > instead — it is the recommended path for most users.
 
@@ -264,13 +274,22 @@ on code is the priority and the larger download is acceptable.
 
 ### Error When Feature Is Missing
 
-If you try to use a `local:` model without the `local-embed` feature compiled in, you will
-see an error like:
+If you try to use a `local:` model without the `local-embed` feature compiled in — which
+includes the built-in default model on a default build with no `[embeddings]` config —
+`index(action="build")` fails with an error like this:
 
 ```
-Local embedding requires the 'local-embed' feature.
+could not build the 'local:AllMiniLML6V2Q' embedder: Local embedding requires the 'local-embed' feature.
 Rebuild with: cargo build --features local-embed
+
+Once the feature is on, local:AllMiniLML6V2Q (384d, quantized, 22MB) is a good model.
+Or embed over HTTP instead: set [embeddings].url, or model = "ollama:<name>".
+Offline hosts: local-dir:/path/to/weights (no network at all)
+ — hint: Set [embeddings].url (or CODESCOUT_EMBEDDER_URL) to an OpenAI-compatible endpoint,
+   or rebuild with --features local-embed for in-process ONNX. …
 ```
+
+Either fix works: configure an HTTP embedder (no rebuild), or rebuild with the feature.
 
 ---
 

@@ -733,6 +733,52 @@ mod selection_tests {
         assert!(RetrievalClient::guard_sparse(&c, /* lite */ false).is_ok());
     }
 
+    /// The price of keeping `local-embed` out of `default` (Cargo.toml, ADR
+    /// `docs/adrs/2026-11-08-local-embed-is-opt-in.md`): `default_embed_model()` still names
+    /// a `local:` model, so a build with no local backend, no `[embeddings].url` and no
+    /// configured model cannot construct its embedder. That is acceptable only if the failure
+    /// tells the operator how to get out of it. On 2026-09-17 it did not: the bail
+    /// recommended the very model it had just refused, which is why `local-embed` entered
+    /// `default` at all.
+    ///
+    /// Asserted on the hint, which is where `build_embedder` puts the remedies, and on the
+    /// error class: this is operator-fixable config, so it must be a `RecoverableError`
+    /// (`isError: false`) and not an `anyhow::bail!`.
+    ///
+    /// Compiled only where it is true. Under `local-embed` the default model builds and
+    /// there is no failure to describe; `the_onnx_backends_are_opt_in_not_default`
+    /// (tests/feature_lanes.rs) is the guard that keeps the lean lanes the ones that run it.
+    #[cfg(not(any(feature = "local-embed", feature = "local-embed-dynamic")))]
+    #[tokio::test]
+    async fn a_default_build_fails_on_the_default_model_with_both_remedies() {
+        let c = cfg_with(None, &crate::config::project::default_embed_model());
+        let err = match RetrievalClient::build_embedder(&c, /* lite */ true).await {
+            Ok(_) => panic!(
+                "a build with no local backend constructed {:?}, so this test no longer \
+                 describes the failure it exists to pin",
+                c.model
+            ),
+            Err(e) => e,
+        };
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap_or_else(|| {
+                panic!("must be RecoverableError (isError: false), not anyhow::bail!; got: {err}")
+            });
+        assert!(
+            rec.message.contains(&c.model),
+            "the message must name the model that could not be built, got: {}",
+            rec.message
+        );
+        let hint = rec.hint().expect("the failure must carry a hint");
+        for remedy in ["[embeddings].url", "--features local-embed"] {
+            assert!(
+                hint.contains(remedy),
+                "the hint must name {remedy:?} as a way out, got: {hint}"
+            );
+        }
+    }
+
     /// Pins the deliberate non-fix: a remote-prefixed model with no url is never
     /// classified local, whatever is compiled. On a `--no-default-features` build
     /// nothing can be built for it and `create_embedder_with_config` bails with

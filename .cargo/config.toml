@@ -23,23 +23,23 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 # target/release/codescout) cannot resolve a `local:` / `local-dir:` model at all,
 # and the failure arrives at embed time, not at build time.
 #
-# ⚠ SUPERSEDED 2026-09-17 — READ THIS BEFORE ACTING ON THE PARAGRAPH ABOVE.
-# `local-embed` is now in `default` (Cargo.toml), and this alias does NOT pass
-# `--no-default-features`, so it inherits it: `cargo rb` builds WITH local-embed
-# again, and the ~21MB / ort+fastembed saving described below is no longer being
-# taken. The reasoning below was not wrong — it was scoped to THIS machine, whose
-# embedder config is entirely HTTP. What changed is the population being optimised
-# for: a default build must work for someone with no server at all, and
-# `default_embed_model()` names a `local:` model, so a lean default shipped a
-# binary that could not construct its own default config (measured; see
-# `docs/issues/archive/2026-09-17-the-default-build-cannot-run-the-default-embedding-model.md`).
+# HISTORY, because this paragraph flipped twice. On 2026-09-17 `local-embed` entered
+# `default` and this alias, which passes no `--no-default-features`, inherited it: `cargo
+# rb` built WITH local-embed and the ~21MB / ort+fastembed saving described below was not
+# being taken. On 2026-11-08 `local-embed` LEFT `default` again (Cargo.toml has why;
+# docs/adrs/2026-11-08-local-embed-is-opt-in.md has the account), so the alias is lean
+# again and everything above and below holds as written.
 #
-# The text below is kept rather than deleted because it records a check worth not
-# repeating — that no config file on this machine names a `local:` model — and
-# because a future reader weighing the ~21MB back off should see what was already
-# verified. To go lean again, this alias must opt out EXPLICITLY:
-# `build --release --no-default-features --features server-stack,remote-embed,http,librarian`,
-# which then hand-lists the default set and will not pick up features added to it.
+# What the 2026-09-17 reversal turned on is still worth knowing before flipping it a third
+# time: `default_embed_model()` names a `local:` model, so a lean build cannot construct its
+# own default config. That is now a failure with a hint naming both ways out, not a silent
+# dead end (`a_default_build_fails_on_the_default_model_with_both_remedies`,
+# src/retrieval/client.rs). The original failure, measured then, is in
+# `docs/issues/archive/2026-09-17-the-default-build-cannot-run-the-default-embedding-model.md`.
+#
+# The check below is kept because it records something worth not repeating — that no
+# config file on this machine names a `local:` model — so a reader weighing the ~21MB back
+# on can see what was already verified.
 #
 # It was dropped 2026-09-15 after checking rather than assuming: `.env` and
 # `.env.amd` configure the embedder entirely over HTTP —

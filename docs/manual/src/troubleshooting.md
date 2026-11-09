@@ -264,6 +264,26 @@ Embedding large codebases with Ollama on CPU can take minutes or longer.
 - **Use GPU.** If Ollama has GPU access, embedding is much faster. Check
   `ollama ps` to verify the model is loaded on GPU.
 
+### "Local embedding requires the 'local-embed' feature"
+
+`index(action="build")` stopped with `could not build the 'local:AllMiniLML6V2Q'
+embedder`. The binary has no local ONNX backend: `local-embed` is opt-in and is not in
+the default features. The project has no `[embeddings]` config and no
+`CODESCOUT_EMBEDDER_URL`, so codescout fell back to its built-in default model, which is a
+`local:` model.
+
+**Fix (pick one):**
+
+- **Embed over HTTP with Ollama.** `ollama pull nomic-embed-text`, then set
+  `model = "ollama:nomic-embed-text"` under `[embeddings]` in `.codescout/project.toml`. No
+  rebuild needed. For another OpenAI-compatible server, set `url` **and** `model` there (or
+  `CODESCOUT_EMBEDDER_URL`): with `url` alone, codescout sends the default model's bare name
+  to the server, which only a server that ignores the name will accept.
+- **Embed in-process.** Rebuild from source with the feature on:
+  `cargo install --path . --features local-embed`. On a Windows host where EDR blocks the
+  ONNX build script, use `--features local-embed-dynamic` and supply `onnxruntime.dll` at
+  runtime via `ORT_DYLIB_PATH`.
+
 ### "No embedding backend compiled in"
 
 The binary was built with `--no-default-features` and no embedding feature

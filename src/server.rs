@@ -1311,7 +1311,7 @@ impl CodeScoutServer {
             .unwrap_or(false);
 
         // has_embeddings: compile-time guard — true whenever at least one embedding backend
-        // is compiled in. Both local-embed and remote-embed are in the default feature set.
+        // is compiled in. `remote-embed` is in the default feature set; `local-embed` is opt-in.
         // No runtime "model loaded?" check exists without actually attempting a connection,
         // so we rely on the feature flags alone.
         let has_embeddings = cfg!(any(

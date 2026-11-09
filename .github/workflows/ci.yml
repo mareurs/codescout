@@ -599,12 +599,16 @@ jobs:
           tool: cargo-nextest@0.9.149
       # `--all-targets` never included doctests, so moving this step to nextest drops nothing.
       - run: cargo nextest run --features dashboard --all-targets --no-fail-fast
-      # `--no-default-features --features local-embed-dynamic`, never the bare
-      # `--features local-embed-dynamic`. The two ONNX backends are mutually exclusive
-      # (crates/codescout-embed/src/lib.rs `compile_error!`), and `local-embed` joined
-      # `default` on 2026-09-17 — so from then on the bare form enabled BOTH and could not
-      # compile at all. It redded this job on every push from a31ed03a onward, with a
-      # compile_error! that read as a backend regression rather than a lane misconfiguration.
+      # `--no-default-features --features local-embed-dynamic`, kept in this spelling. The
+      # two ONNX backends are mutually exclusive (crates/codescout-embed/src/lib.rs
+      # `compile_error!`). While `local-embed` was in `default` (2026-09-17 to 2026-11-08) the
+      # bare `--features local-embed-dynamic` enabled BOTH and could not compile at all: it
+      # redded this job on every push from a31ed03a onward, with a compile_error! that read as
+      # a backend regression rather than a lane misconfiguration. `local-embed` is out of
+      # `default` again, so the bare form would compile now, but this spelling stays: it does
+      # not depend on what `default` holds, and
+      # tests/feature_lanes.rs `the_onnx_backends_are_opt_in_not_default` is what keeps the
+      # static backend out of it.
       # Dropping the rest of `default` costs nothing here: every root-crate site gated on
       # this feature (retrieval/client.rs, hardware.rs, server.rs, tools/config) compiles
       # without `librarian`, which is what the lean lane already proves. Do NOT restore the

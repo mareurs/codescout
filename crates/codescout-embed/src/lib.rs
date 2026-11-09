@@ -334,7 +334,8 @@ pub async fn create_embedder_with_config(
         anyhow::bail!(
             "Local embedding requires the 'local-embed' feature.\n\
              Rebuild with: cargo build --features local-embed\n\n\
-             Recommended: local:AllMiniLML6V2Q (384d, quantized, 22MB)\n\
+             Once the feature is on, local:AllMiniLML6V2Q (384d, quantized, 22MB) is a good model.\n\
+             Or embed over HTTP instead: set [embeddings].url, or model = \"ollama:<name>\".\n\
              Offline hosts: local-dir:/path/to/weights (no network at all)"
         );
     }

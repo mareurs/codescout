@@ -3346,8 +3346,8 @@ mod tests {
                 printed.iter().any(|l| l.contains(needle)),
                 "scripts/gate.sh no longer PRINTS {needle:?}.\n\n\
              Green from the four lanes says nothing about server-stack (cargo rb ships it, \
-             no lane compiles it), about librarian code in LEAN, or about the two local \
-             ONNX weight tests (they print `ok` while skipped). The gate's own output is \
+             no lane compiles it), about librarian code in LEAN, or about the local ONNX \
+             path (clippy compiles it, no test lane runs it). The gate's own output is \
              where a session reads \"green\", so that is where the bound must stay. If you \
              move it, move it somewhere a session running the gate sees, and update this \
              test."

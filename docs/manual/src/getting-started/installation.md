@@ -160,7 +160,7 @@ even without `local-embed`, the binary always speaks HTTP to the stack via
 |---|---|---|
 | `remote-embed` (default) | HTTP client for the dense embedder service (OpenAI-compatible protocol) | Always — required for both stacks and for Ollama / OpenAI / llama.cpp endpoints |
 | `server-stack` | Compiles in the Qdrant client + hybrid sparse/rerank query path (the [server stack](../concepts/retrieval-stack.md)) | Only if you run Qdrant; omit for the default daemon-free [lite stack](../concepts/lite-stack.md) |
-| `local-embed` | In-process CPU embeddings via fastembed-rs + ONNX Runtime | Air-gapped machines; **requires building from source** and skips the network rerank/sparse pipeline |
+| `local-embed` | In-process CPU embeddings via fastembed-rs + ONNX Runtime | **Opt-in — not in the default features.** Air-gapped machines, or any host with no embedding endpoint. **Requires building from source** and skips the network rerank/sparse pipeline. Without it, a project with no `[embeddings].url` cannot use the built-in default model |
 | `http` (default) | HTTP/SSE MCP transport (vs stdio-only) | Always — used by `codescout dashboard` and remote MCP clients |
 | `librarian` (default) | Embeds the librarian doc/spec/plan indexer (formerly librarian-mcp, now dissolved into `src/librarian/`) | Always — runtime-enabled by default; opt out via `LIBRARIAN_ENABLED=0` |
 
@@ -188,6 +188,17 @@ git clone https://github.com/mareurs/codescout.git
 cd codescout
 cargo install --path . --no-default-features --features local-embed,http,librarian
 ```
+
+**Why this is opt-in, and what you see if you skip it.** With `local-embed` a stripped
+release binary measured 61.9 MiB; without it, 40.3 MiB (2026-11-08), a 53% difference. Also,
+`ort` publishes no prebuilt for `x86_64-pc-windows-gnu`. So `local-embed` is not in the default
+features. The built-in default model is still `local:AllMiniLML6V2Q`, so a default build with
+no `[embeddings]` section and no `CODESCOUT_EMBEDDER_URL` fails when you first index, with an
+error that names both fixes: point `[embeddings].url` at an OpenAI-compatible endpoint (for
+Ollama, set `model = "ollama:nomic-embed-text"` instead), or rebuild with `--features
+local-embed`. If you build with the feature on
+Windows and the ONNX build script is blocked, use `local-embed-dynamic` instead — the two
+are mutually exclusive.
 
 The first time you build a semantic search index, the local backend model downloads
 automatically to `<user cache dir>/codescout/fastembed` (`$XDG_CACHE_HOME` or `~/.cache` on
