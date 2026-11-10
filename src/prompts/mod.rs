@@ -169,7 +169,7 @@ fn build_project_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
 
     segs.push(StatusSegment {
         text: if status.has_index {
-            "- **Semantic index:** Built — `semantic_search` is ready to use\n".to_string()
+            "- **Semantic index:** Built — `semantic_search` also needs a working embedder\n".to_string()
         } else {
             "- **Semantic index:** Not built — run `index(action='build')` to enable `semantic_search`\n"
                 .to_string()
@@ -1298,6 +1298,36 @@ mod tests {
         assert!(block.contains("rust, python"), "{block}");
         assert!(block.contains("architecture, conventions"), "{block}");
         assert!(block.contains("Semantic index:** Built"), "{block}");
+    }
+    /// A complete stored index does not establish that a query embedding can be produced
+    /// when the query runs, so the banner must not promise a working `semantic_search`.
+    /// (docs/issues/2026-11-10-semantic-ready-banner-unreachable-embedder.md)
+    #[test]
+    fn built_index_banner_does_not_promise_semantic_search_works() {
+        let status = ProjectStatus {
+            name: "my-project".into(),
+            path: "/home/user/my-project".into(),
+            languages: vec!["rust".into()],
+            memories: vec![],
+            has_index: true,
+            system_prompt: None,
+            workspace: None,
+            worktree: None,
+        };
+        let block = build_status_response_block(&status).expect("substitutable block");
+        let line = block
+            .lines()
+            .find(|l| l.contains("Semantic index:"))
+            .unwrap_or_else(|| panic!("no `Semantic index:` line in:\n{block}"));
+        assert!(line.contains("Built"), "the stored index is built: {line}");
+        assert!(
+            !line.contains("ready"),
+            "a stored index does not make semantic_search ready: {line}"
+        );
+        assert!(
+            line.contains("embedder"),
+            "the line must name the embedder as the other prerequisite: {line}"
+        );
     }
 
     /// The onboarding and index nudges are `Substitutable`, so they moved with their tier.
