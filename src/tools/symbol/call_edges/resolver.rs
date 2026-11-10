@@ -1338,6 +1338,89 @@ mod tests {
         assert!(callees.contains(&"b"), "missing b in {:?}", callees);
         assert!(callees.contains(&"c"), "missing c in {:?}", callees);
     }
+    /// Write `src` to a fixture file, run the tree-sitter callee fallback for the
+    /// function at `(line, col)` and return the callee names, sorted.
+    async fn ts_callee_names(
+        file_name: &str,
+        src: &str,
+        sym: &str,
+        line: u32,
+        col: u32,
+        language_id: &str,
+    ) -> Vec<String> {
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join(file_name);
+        std::fs::write(&fixture, src).unwrap();
+
+        let mock = MockLspClient::new();
+        let edges = resolve_one_hop(
+            &mock,
+            sym,
+            &fixture,
+            line,
+            col,
+            language_id,
+            Direction::Callees,
+        )
+        .await
+        .unwrap();
+
+        let mut names: Vec<String> = edges.iter().map(|e| e.callee_sym.clone()).collect();
+        names.sort_unstable();
+        names
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_python_excludes_calls_inside_a_nested_def() {
+        let src =
+            "def a():\n    def inner():\n        right()\n    inner()\n\ndef right():\n    pass\n";
+        let names = ts_callee_names("fixture.py", src, "a", 0, 4, "python").await;
+        assert_eq!(names, vec!["inner"]);
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_python_keeps_calls_inside_a_lambda() {
+        let src = "def a():\n    f = lambda: right()\n    f()\n\ndef right():\n    pass\n";
+        let names = ts_callee_names("fixture.py", src, "a", 0, 4, "python").await;
+        assert_eq!(names, vec!["f", "right"]);
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_typescript_excludes_calls_inside_a_nested_function() {
+        let src = "function a() {\n    function inner() {\n        right();\n    }\n    inner();\n}\nfunction right() {}\n";
+        let names = ts_callee_names("fixture.ts", src, "a", 0, 9, "typescript").await;
+        assert_eq!(names, vec!["inner"]);
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_typescript_excludes_calls_inside_a_nested_class_method() {
+        // `method_definition` is a callable of its own: `right()` belongs to `K.m`.
+        let src = "function a() {\n    class K {\n        m() {\n            right();\n        }\n    }\n    other();\n}\nfunction right() {}\n";
+        let names = ts_callee_names("fixture.ts", src, "a", 0, 9, "typescript").await;
+        assert_eq!(names, vec!["other"]);
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_typescript_keeps_calls_inside_an_arrow_function() {
+        let src =
+            "function a() {\n    const f = () => right();\n    f();\n}\nfunction right() {}\n";
+        let names = ts_callee_names("fixture.ts", src, "a", 0, 9, "typescript").await;
+        assert_eq!(names, vec!["f", "right"]);
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_kotlin_excludes_calls_inside_a_local_fun() {
+        let src = "fun a() {\n    fun inner() {\n        right()\n    }\n    inner()\n}\nfun right() {}\n";
+        let names = ts_callee_names("fixture.kt", src, "a", 0, 4, "kotlin").await;
+        assert_eq!(names, vec!["inner"]);
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_java_excludes_calls_inside_a_local_class_method() {
+        let src = "class X {\n    void a() {\n        class L {\n            void m() {\n                right();\n            }\n        }\n        inner();\n    }\n    void right() {}\n}\n";
+        let names = ts_callee_names("Fixture.java", src, "a", 1, 9, "java").await;
+        assert_eq!(names, vec!["inner"]);
+    }
 
     // ── Helper unit tests ────────────────────────────────────────────────────
 
