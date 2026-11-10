@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000a9",
+  "command": "env -u CARGO_TARGET_DIR TMPDIR=/home/marius/.cache/codescout-ecc-tmp CODESCOUT_GATE_TMPFS_BASE=off ./scripts/with-slot.sh --slot 0 cargo test --lib tools::symbol::call_ -- --test-threads=4 > /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-resolver-followup/baseline-module.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 2746212,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-10T10:55:05.068600659+00:00",
+  "finished_at": "2026-11-10T10:58:03.484558439+00:00",
+  "log_path": "/tmp/codescout-bg-9UfP5F.log"
+}

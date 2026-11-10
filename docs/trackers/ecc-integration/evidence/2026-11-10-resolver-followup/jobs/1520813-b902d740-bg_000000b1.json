@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000b1",
+  "command": "env -u CARGO_TARGET_DIR TMPDIR=/home/marius/.cache/codescout-ecc-tmp CODESCOUT_GATE_TMPFS_BASE=off ./scripts/with-slot.sh --slot 0 cargo nextest run --workspace --no-default-features > /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-resolver-followup/diagnostic-lean.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 3792797,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-10T11:24:23.379264231+00:00",
+  "finished_at": "2026-11-10T11:26:42.777575037+00:00",
+  "log_path": "/tmp/codescout-bg-Zf8VRa.log"
+}

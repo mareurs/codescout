@@ -44,7 +44,7 @@ Baseline actual MCP has6 records: cold A and B match, warm B and restarted B ret
 
 [Final source](../evidence/2026-11-09-callgraph-identity-dogfood/final-source.json) records unchanged production prefixes and the test-only strengthening. [Final executable](../evidence/2026-11-09-callgraph-identity-dogfood/final-binary.json) is byte-identical to the qualified candidate executable (SHA256 d1c064c219c2ad468adf8e5b4644f7dfa45900ae7a5ed711c8601784f41fd944). The native6/6 and scorer5/5 results therefore bind to that same executable; they were not rerun after the test-only change.
 
-Review also found [pre-existing contradictory resolver documentation](../../../issues/2026-11-09-call-graph-resolver-doc-denies-outgoing-ts-fallback.md), open and nonblocking. It is outside this source patch.
+Review also found [pre-existing contradictory resolver documentation](../../../issues/archive/2026-11-09-call-graph-resolver-doc-denies-outgoing-ts-fallback.md), outside that source patch. The [2026-11-10 follow-up](2026-11-10-resolver-followup.md) subsequently corrected it and archived the verified bug.
 
 ## Final candidate gate
 
@@ -56,7 +56,7 @@ The source worktree remains at the frozen base plus only the two changed files. 
 
 [Integration identities](../evidence/2026-11-09-callgraph-identity-dogfood/integration.json) bind the exact same two owned source hashes and stable patch-id across source/integration. Whole trees differ because peer source changes landed. The [separate integrated-tree gate](../evidence/2026-11-09-callgraph-identity-dogfood/integration-gate-result.json) passed on4776e44bd/tree7ddf5acae4c8193bbe13313fc68c711ea6803439: lean6325passed/48skipped; default9222passed/62skipped; Python1765passed/1skipped/554subtests. Fmt/clippy/doc-test lanes passed with printed coverage exclusions. Later peer commits on experiments are not silently included in this exact-tree claim.
 
-The six pre-existing foreign staged blobs were preserved exactly at source integration/provenance capture; peer dirty files remain outside the owned commits. Fixed bug archived through the catalog as e5016b19fb0f75da. Open pre-existing resolver-doc issue remains separate. Baseline ref, eleven input snapshots, exact private host prefix and all review worktrees/evidence remain available for a future explicitly designed replay; none ran.
+The six pre-existing foreign staged blobs were preserved exactly at source integration/provenance capture; peer dirty files remain outside the owned commits. Fixed bug archived through the catalog as e5016b19fb0f75da. The resolver-doc follow-up was separate from this integration and is now corrected and archived through the2026-11-10 cycle. Baseline ref, eleven input snapshots, exact private host prefix and all review worktrees/evidence remain available for a future explicitly designed replay; none ran.
 
 ## Evidence finalization
 

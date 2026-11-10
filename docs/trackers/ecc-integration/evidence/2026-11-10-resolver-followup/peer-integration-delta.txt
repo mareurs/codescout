@@ -1,0 +1,9 @@
+M	.codescout/memories/bug-triage-2026-11-09.md
+M	.codescout/memories/research/wake-hook-promotion-20261110.md
+M	docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-an-unmodelled-graph.md
+M	docs/issues/2026-11-09-concurrent-pinned-calls-leave-no-usage-row.md
+A	docs/issues/2026-11-10-user-version-restamp-loop-between-binaries-of-different-fingerprints.md
+M	src/prompts/guides/progressive-disclosure.md
+M	src/prompts/mod.rs
+M	src/server.rs
+M	src/tools/core/guide_emit.rs

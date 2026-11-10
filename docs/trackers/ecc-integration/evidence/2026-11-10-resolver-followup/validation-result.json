@@ -1,0 +1,11 @@
+{
+  "managed_documents_checked": 15,
+  "local_markdown_targets_checked": 163,
+  "foreign_staged_blobs_unchanged": 6,
+  "private_prefix_hash_size_mode_verified": true,
+  "private_ignored_and_untracked": true,
+  "privacy_files_scanned": 101,
+  "privacy_positive_controls": 5,
+  "privacy_hits": 0,
+  "privacy_limits": "Selected patterns only. Scanner excludes two validators containing deliberate positive literals. Hot ledger checks only owned sections; historical links are outside this change."
+}

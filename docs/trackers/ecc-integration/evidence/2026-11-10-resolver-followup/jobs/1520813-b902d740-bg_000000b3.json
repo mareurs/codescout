@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000b3",
+  "command": "env -u CARGO_TARGET_DIR TMPDIR=/home/marius/.cache/codescout-ecc-tmp CODESCOUT_GATE_TMPFS_BASE=off ./scripts/with-slot.sh --slot 0 cargo test --no-default-features --test observation_store subprocess_fixture_ -- --test-threads=1 > /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-resolver-followup/fixture-red.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 3987075,
+  "state": "exited",
+  "exit_code": 101,
+  "error": null,
+  "started_at": "2026-11-10T11:33:06.345516404+00:00",
+  "finished_at": "2026-11-10T11:33:47.123123128+00:00",
+  "log_path": "/tmp/codescout-bg-5nbn7Q.log"
+}

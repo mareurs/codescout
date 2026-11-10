@@ -14,6 +14,14 @@ topic: ecc-integration
 
 Evaluate whether the Codex ECC adapter adds useful behavior to the existing codescout setup.
 
+## Current state — 2026-11-10
+
+**Resolver follow-up completed:** [report](reports/2026-11-10-resolver-followup.md), [plan](plans/2026-11-10-resolver-followup.md), [replay provenance](notes/2026-11-10-resolver-followup-replay.md). Resolver strategy documentation and subprocess fixture corrections integrated ascb7d13ff3, patch-idd2258dc0bcbe010b39e15f2a84680d4cb7036f09. Source and exact integrated-tree gates passed;3 actual fixture mutations killed,0 survived, restored19-test suite (1 ignored). Production store unchanged.
+
+**Next behavioral candidate:** [multi-hop same-name identity](../../issues/2026-11-10-call-graph-multihop-collapses-same-name-definitions.md). Four qualifying native controls match; three duplicate-depth2 cases omit a branch without warning. Its correction remains open. The [mutation-count instrument follow-up](../../issues/2026-11-10-mutation-probe-counts-nested-and-ignored-tests-as-executed.md) is separate and open. No repair replay or shared-runtime/profile rollout.
+
+The dated section below records completed earlier cycles.
+
 ## Current state — 2026-11-09
 **Call graph identity dogfood completed and integrated:** [report](reports/2026-11-09-callgraph-identity-dogfood.md), [plan](plans/2026-11-09-callgraph-identity-dogfood.md), [replay inputs](notes/2026-11-09-callgraph-identity-replay.md). Definition-scoped completed adjacency corrects persisted same-name cross-file contamination; integration4776e44bd, patch-id82470b4a164f780eab0ce409ca01dfafc29f0d7a. Final84 related tests, native6/6 and separate source/integration full gates passed. Initial review8killed/2survived; exact two survivors killed after consumer-test strengthening. Full declaration-identity BFS remains outside scope. No repair replay or shared-server rollout.
 

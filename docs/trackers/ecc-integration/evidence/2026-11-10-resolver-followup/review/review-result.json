@@ -1,0 +1,461 @@
+{
+  "reviewer": "/root/ecc_resolver_followup_review",
+  "date": "2026-11-10",
+  "base": "5b40efc48d31ccdcebbf9a9a2429c768d7aa6ca3",
+  "worktree": "/home/marius/work/claude/codescout/.worktrees/ecc-resolver-followup-20261110",
+  "scope": "Resolver strategy doc comment; independent source and retained native-response review, plus isolated scorer calibration. No source/index/HEAD mutations or builds by reviewer.",
+  "phase0": {
+    "claude_md_read": true,
+    "guides": [
+      "librarian",
+      "workspace-state",
+      "symbol-navigation"
+    ],
+    "memories": [
+      "architecture (module structure)",
+      "gotchas (symbol navigation and fixture indexing)",
+      "research/ecc-integration-20261109"
+    ],
+    "ledger_checked": [
+      "81436f2c48ad8c74",
+      "fed27cae5971c526"
+    ],
+    "ledger_scope": "All 119 catalog entries from active-status query paginated as 100 + 19; relevant ids listed. Catalog itself reported unindexed files, so not exhaustive filesystem audit."
+  },
+  "source_hashes": {
+    "src/tools/symbol/call_edges/resolver.rs": {
+      "base_sha256": "85fe251ed75644426089a7aaeb4c8aa4b767217403820a4ce83259e0c93d6e68",
+      "candidate_sha256": "642c841caff0e7d094002bc644d4da004d1bfbe4aaaecf5da5edf58d2ea98ef7",
+      "bytes_equal": false,
+      "non_doc_lines_equal": true
+    },
+    "src/tools/symbol/call_graph/traversal.rs": {
+      "base_sha256": "bc473130a657df26e1f5c93b4f236a0cda95074f71c52c66b890b993af3dfdcb",
+      "candidate_sha256": "bc473130a657df26e1f5c93b4f236a0cda95074f71c52c66b890b993af3dfdcb",
+      "bytes_equal": true,
+      "non_doc_lines_equal": true
+    },
+    "src/tools/symbol/call_graph/mod.rs": {
+      "base_sha256": "906e3c34b06312d2d4e5e8128edd7df2f428d0ffd31e8505eafa314fb9b7ecf5",
+      "candidate_sha256": "906e3c34b06312d2d4e5e8128edd7df2f428d0ffd31e8505eafa314fb9b7ecf5",
+      "bytes_equal": true,
+      "non_doc_lines_equal": true
+    }
+  },
+  "evidence_hashes": {
+    "candidate.patch": "978b76d847882a68cce8016a925679d460997b379d91e579e04addceed108887",
+    "bfs-cases.json": "255a51e8c01a0aea4ce6c9b0509eeb818efa1f74acd638a2e3c09db3f5afd3f9",
+    "bfs-summary.json": "b0afe074c4d18b109ad486c6b4c4f846ef11cd227797af56d5a7f8da9d70a458",
+    "bfs-fixtures.json": "89de998babade9e54d46be9a0de4cdef9735212f3f9e3ae84d847264e5c89adb",
+    "bfs-scorer-controls.json": "defeb1cff76f05d3bf9ed4f86a08cf36d7be86f337d0b8ac7539975c3477b920",
+    "probe_bfs.py": "62e8b3a9f2745a0ed2f5e0e51d6029d9683681c4acf51b59399d42099386ae7b",
+    "binary.json": "b5c46a60e98e56c36a586bde6519c5c92ba1324bfd66722249216673bb8a43aa",
+    "build-result.json": "25bc383708dabdd1817a5ea8101d7e334532950f8482656e862fb60875bbfd1b"
+  },
+  "strengths": [
+    {
+      "claim": "Changed comment matches actual outgoing fallback selection, own-file grammar, AST extraction and recoverable failure conditions.",
+      "citations": [
+        "src/tools/symbol/call_edges/resolver.rs:41",
+        "src/tools/symbol/call_edges/resolver.rs:57",
+        "src/tools/symbol/call_edges/resolver.rs:168",
+        "src/tools/symbol/call_edges/resolver.rs:274",
+        "src/tools/symbol/call_edges/resolver.rs:536"
+      ]
+    },
+    {
+      "claim": "Candidate production diff is one doc-comment hunk; non-doc lines identical to baseline. Traversal and resolver wrapper bytes unchanged.",
+      "citations": [
+        "src/tools/symbol/call_edges/resolver.rs:44"
+      ]
+    },
+    {
+      "claim": "Native control topology distinguishes cross-file expansion from duplicate-name collapse; separate pinned helper calls show both leaf branches are available individually.",
+      "citations": [
+        "docs/trackers/ecc-integration/evidence/2026-11-10-resolver-followup/probe_bfs.py:65",
+        "docs/trackers/ecc-integration/evidence/2026-11-10-resolver-followup/bfs-cases.json:1"
+      ]
+    }
+  ],
+  "findings": {
+    "Critical": [],
+    "Important": [
+      {
+        "origin": "pre-existing behavioral defect, separately filed during parent run; not caused by doc patch",
+        "known_bug": "fed27cae5971c526",
+        "title": "Duplicate short-name next hops collapse distinct declarations and silently omit leaf_b",
+        "evidence": "All three recorded duplicate depth2 responses contain both entry call sites and only helper\u2192leaf_a; helper\u2192leaf_b is absent, with no rendered warning. Unique depth2 and both pinned helper depth1 controls succeed.",
+        "mechanism": "Rust callee extraction descends to final identifier; BFS frontier and visited keys are strings; lookup_pos chooses one matching declaration. Completed adjacency is keyed after this choice, so separate cache identity cannot restore lost next-hop identity.",
+        "citations": [
+          "src/tools/symbol/call_edges/resolver.rs:414",
+          "src/tools/symbol/call_edges/resolver.rs:452",
+          "src/tools/symbol/call_graph/traversal.rs:39",
+          "src/tools/symbol/call_graph/traversal.rs:63",
+          "src/tools/symbol/call_graph/mod.rs:196",
+          "src/tools/symbol/call_graph/mod.rs:374",
+          "src/tools/symbol/call_graph/mod.rs:421"
+        ],
+        "blocks_documentation_patch": false
+      }
+    ],
+    "Minor": [
+      {
+        "origin": "review report drift, not source patch",
+        "title": "Inspected-boundaries paragraph still calls the observations not yet a fresh runtime reproduction",
+        "citations": [
+          "docs/trackers/ecc-integration/reports/2026-11-10-resolver-followup.md:28"
+        ],
+        "requested_action": "Remove or date the superseded sentence; Native observations now records completed reproduction.",
+        "status": "sent to parent for correction"
+      }
+    ]
+  },
+  "independent_raw_response_assessment": {
+    "method": "Read each actual primary content block; separately parsed its file-grouped edge rows, compared full tuples including multiplicity against fixture-derived expectations, and inspected warning/error and ts labels. Did not count guidance blocks as graph data.",
+    "qualifying_controls_matched": 4,
+    "qualifying_controls_total": 4,
+    "duplicate_depth2_mismatches": 3,
+    "duplicate_depth2_total": 3,
+    "observations": [
+      {
+        "label": "unique-names-depth2",
+        "arguments": {
+          "path": "src/lib.rs",
+          "symbol": "entry",
+          "direction": "callees",
+          "max_depth": 2,
+          "detail_level": "full"
+        },
+        "observed_edges": [
+          [
+            "call_a",
+            "leaf_a",
+            "src/a.rs",
+            1,
+            2
+          ],
+          [
+            "call_b",
+            "leaf_b",
+            "src/b.rs",
+            1,
+            2
+          ],
+          [
+            "entry",
+            "call_b",
+            "src/lib.rs",
+            5,
+            1
+          ],
+          [
+            "entry",
+            "call_a",
+            "src/lib.rs",
+            4,
+            1
+          ]
+        ],
+        "matches_expected": true,
+        "missing_edges": [],
+        "unexpected_edges": [],
+        "declared_totals_line": "  callees: 4 edges across 3 files",
+        "all_rendered_edges_ts": true,
+        "rendered_warning": false,
+        "is_error": false
+      },
+      {
+        "label": "duplicate-cold-depth2",
+        "arguments": {
+          "path": "src/lib.rs",
+          "symbol": "entry",
+          "direction": "callees",
+          "max_depth": 2,
+          "detail_level": "full"
+        },
+        "observed_edges": [
+          [
+            "helper",
+            "leaf_a",
+            "src/a.rs",
+            1,
+            2
+          ],
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            5,
+            1
+          ],
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            4,
+            1
+          ]
+        ],
+        "matches_expected": false,
+        "missing_edges": [
+          [
+            "helper",
+            "leaf_b",
+            "src/b.rs",
+            1,
+            2
+          ]
+        ],
+        "unexpected_edges": [],
+        "declared_totals_line": "  callees: 3 edges across 2 files",
+        "all_rendered_edges_ts": true,
+        "rendered_warning": false,
+        "is_error": false
+      },
+      {
+        "label": "duplicate-restart-depth2",
+        "arguments": {
+          "path": "src/lib.rs",
+          "symbol": "entry",
+          "direction": "callees",
+          "max_depth": 2,
+          "detail_level": "full"
+        },
+        "observed_edges": [
+          [
+            "helper",
+            "leaf_a",
+            "src/a.rs",
+            1,
+            2
+          ],
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            5,
+            1
+          ],
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            4,
+            1
+          ]
+        ],
+        "matches_expected": false,
+        "missing_edges": [
+          [
+            "helper",
+            "leaf_b",
+            "src/b.rs",
+            1,
+            2
+          ]
+        ],
+        "unexpected_edges": [],
+        "declared_totals_line": "  callees: 3 edges across 2 files",
+        "all_rendered_edges_ts": true,
+        "rendered_warning": false,
+        "is_error": false
+      },
+      {
+        "label": "duplicate-seed-depth1",
+        "arguments": {
+          "path": "src/lib.rs",
+          "symbol": "entry",
+          "direction": "callees",
+          "max_depth": 1,
+          "detail_level": "full"
+        },
+        "observed_edges": [
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            5,
+            1
+          ],
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            4,
+            1
+          ]
+        ],
+        "matches_expected": true,
+        "missing_edges": [],
+        "unexpected_edges": [],
+        "declared_totals_line": "  callees: 2 edges across 1 files",
+        "all_rendered_edges_ts": true,
+        "rendered_warning": false,
+        "is_error": false
+      },
+      {
+        "label": "pinned-helper-a-depth1",
+        "arguments": {
+          "path": "src/a.rs",
+          "symbol": "helper",
+          "direction": "callees",
+          "max_depth": 1,
+          "detail_level": "full"
+        },
+        "observed_edges": [
+          [
+            "helper",
+            "leaf_a",
+            "src/a.rs",
+            1,
+            1
+          ]
+        ],
+        "matches_expected": true,
+        "missing_edges": [],
+        "unexpected_edges": [],
+        "declared_totals_line": "  callees: 1 edges across 1 files",
+        "all_rendered_edges_ts": true,
+        "rendered_warning": false,
+        "is_error": false
+      },
+      {
+        "label": "pinned-helper-b-depth1",
+        "arguments": {
+          "path": "src/b.rs",
+          "symbol": "helper",
+          "direction": "callees",
+          "max_depth": 1,
+          "detail_level": "full"
+        },
+        "observed_edges": [
+          [
+            "helper",
+            "leaf_b",
+            "src/b.rs",
+            1,
+            1
+          ]
+        ],
+        "matches_expected": true,
+        "missing_edges": [],
+        "unexpected_edges": [],
+        "declared_totals_line": "  callees: 1 edges across 1 files",
+        "all_rendered_edges_ts": true,
+        "rendered_warning": false,
+        "is_error": false
+      },
+      {
+        "label": "duplicate-after-both-pinned-helpers",
+        "arguments": {
+          "path": "src/lib.rs",
+          "symbol": "entry",
+          "direction": "callees",
+          "max_depth": 2,
+          "detail_level": "full"
+        },
+        "observed_edges": [
+          [
+            "helper",
+            "leaf_a",
+            "src/a.rs",
+            1,
+            2
+          ],
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            5,
+            1
+          ],
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            4,
+            1
+          ]
+        ],
+        "matches_expected": false,
+        "missing_edges": [
+          [
+            "helper",
+            "leaf_b",
+            "src/b.rs",
+            1,
+            2
+          ]
+        ],
+        "unexpected_edges": [],
+        "declared_totals_line": "  callees: 3 edges across 2 files",
+        "all_rendered_edges_ts": true,
+        "rendered_warning": false,
+        "is_error": false
+      }
+    ],
+    "qualification": "One tiny Rust topology, one binary; repeated observations are not independent statistical trials."
+  },
+  "mutation_review": {
+    "production": {
+      "changed_executable_logic_population": 0,
+      "applied": 0,
+      "killed": 0,
+      "survived": 0,
+      "inconclusive": 0,
+      "reason": "Only /// documentation changed; no production runtime mutation coverage claimed."
+    },
+    "scorer": {
+      "applied": 3,
+      "killed": 3,
+      "survived": 0,
+      "inconclusive": 0,
+      "baseline_controls_passed": 5,
+      "baseline_controls_total": 5,
+      "per_mutation": [
+        {
+          "name": "omit-file-line",
+          "classification": "killed",
+          "controls_passed": 4,
+          "controls_failed": 1,
+          "sha256": "9908bde1937c0e0615860705297667c4ba78474369088026455744089edfb840"
+        },
+        {
+          "name": "omit-depth",
+          "classification": "killed",
+          "controls_passed": 4,
+          "controls_failed": 1,
+          "sha256": "9683c202dc2898e650eb58e2ce1bbabee3e5831c21647b15de0a9ecec961b200"
+        },
+        {
+          "name": "last-content-block",
+          "classification": "killed",
+          "controls_passed": 3,
+          "controls_failed": 2,
+          "sha256": "fc487e3731d72b30dd2edb555bee9a0295454149150eb20bb0085f5e7136e3fe"
+        }
+      ],
+      "exact_diffs_and_controls": "scorer-mutation-log.json",
+      "restoration": {
+        "original_probe_unchanged": true,
+        "original_recompiled_controls_passed": 5,
+        "scratch_original_unchanged": true
+      },
+      "limits": "Mutations omit file+line together, omit depth, and select final content block. The file+line mutant is killed by wrong-file; it does not establish independent line-only discrimination. No exhaustive scorer correctness claim."
+    }
+  },
+  "declined_to_judge": [
+    "Full parent gate outcome: still pending at assessment; no independent build or test gate was run by reviewer.",
+    "All LSP paths or languages: recorded fixture edges are tree-sitter only.",
+    "Universal deterministic branch selection or failure rate: three runs of one fixture are not a population.",
+    "General source parse validity: tree-sitter can return error-recovered trees; new comment only describes parse failure as implemented.",
+    "Global completeness of call_graph, all cache invalidation paths, performance, ECC efficacy/cost, or repair replay.",
+    "Cold/restart labels reflect recorded probe sequence; no claim of reconstructing the complete provider request/history."
+  ],
+  "verdict": {
+    "documentation_patch": "approve conditional on parent required full gate passing for this source hash",
+    "bfs_behavior": "known Important defect remains open; no behavioral fix in this patch",
+    "evidence": "qualified native conclusion supported; correct stale report sentence before finalization"
+  },
+  "ledger_footer": "Ledger checked: 81436f2c48ad8c74, fed27cae5971c526"
+}

@@ -1,0 +1,313 @@
+{
+  "reviewer": "/root/ecc_resolver_followup_review",
+  "date": "2026-11-10",
+  "scope": "Scope extension: tests/observation_store.rs retry fixture and two regression controls. Earlier resolver comment review remains separate.",
+  "base": "5b40efc48d31ccdcebbf9a9a2429c768d7aa6ca3",
+  "candidate": "/home/marius/work/claude/codescout/.worktrees/ecc-resolver-followup-20261110",
+  "review_worktree": "/tmp/ecc-fixture-review-lrg9v32z/source",
+  "retained_mutation_worktree": "/tmp/ecc-fixture-review-lrg9v32z/source.worktrees/mutation-slot-0",
+  "final_source_manifest_sha256": "132578180dbfc91df7e6bf70513421872cc1902002f69248458c5d32efeec138",
+  "source_hashes": {
+    "src/tools/symbol/call_edges/resolver.rs": "642c841caff0e7d094002bc644d4da004d1bfbe4aaaecf5da5edf58d2ea98ef7",
+    "tests/observation_store.rs": "e6af6dea29da1011796f2ae2665955a97fa6b4a5b6df010f39f6f9383b0dc18c"
+  },
+  "unchanged_production_store_sha256": "50189e706f604aa266808b35184a731765c8e7fcf0e3a0d685f7bbab5cd076ce",
+  "findings": {
+    "Critical": [],
+    "Important": [],
+    "Minor": []
+  },
+  "strengths": [
+    {
+      "claim": "Retry branch handles only unavailable; every other append error still panics. Fixture retry has an elapsed-time guard.",
+      "citation": "tests/observation_store.rs:452"
+    },
+    {
+      "claim": "Real held-lock control waits for the unavailable retry marker before releasing the lock and then checks all eight contiguous records. This observes recovery, not merely marker existence.",
+      "citation": "tests/observation_store.rs:522"
+    },
+    {
+      "claim": "Disabled-store control observes fatal exit, absence of retry marker, original disabled error and zero records. The retry-all mutation fails its no-marker assertion.",
+      "citation": "tests/observation_store.rs:581"
+    },
+    {
+      "claim": "Original two-process test retains exit9/success, 16 records, no diagnostics, exactly two producers and 0..7 sequence per producer.",
+      "citation": "tests/observation_store.rs:503"
+    },
+    {
+      "claim": "Production quota lock timeout precedes append sequence mutation; production bytes unchanged.",
+      "citations": [
+        "src/observations/store.rs:294",
+        "src/observations/store.rs:535",
+        "src/observations/store.rs:624"
+      ]
+    }
+  ],
+  "execution": {
+    "command": [
+      "./scripts/with-slot.sh",
+      "--slot",
+      "1",
+      "cargo",
+      "test",
+      "--no-default-features",
+      "--test",
+      "observation_store",
+      "--",
+      "--test-threads=4"
+    ],
+    "environment": {
+      "CARGO_TARGET_DIR": "unset at launch; inner with-slot supplies leased slot1",
+      "TMPDIR": "/home/marius/.cache/codescout-ecc-tmp",
+      "CODESCOUT_GATE_TMPFS_BASE": "off"
+    },
+    "baseline": {
+      "exit_code": 0,
+      "passed": 19,
+      "failed": 0,
+      "ignored": 1,
+      "log": "fixture-review-baseline.log"
+    },
+    "mutations": [
+      {
+        "label": "fixture-mutation-disable-unavailable-retry",
+        "exit_code": 101,
+        "seconds": 38.98692321777344,
+        "command": [
+          "./scripts/mutation-probe.sh",
+          "--strict",
+          "--file",
+          "tests/observation_store.rs",
+          "--find",
+          "Err(error) if error == \"unavailable\" => {",
+          "--replace",
+          "Err(error) if error == \"unavailable\" && false => {",
+          "--",
+          "./scripts/with-slot.sh",
+          "--slot",
+          "1",
+          "cargo",
+          "test",
+          "--no-default-features",
+          "--test",
+          "observation_store",
+          "--",
+          "--test-threads=4"
+        ],
+        "log": "fixture-mutation-disable-unavailable-retry.log",
+        "find": "Err(error) if error == \"unavailable\" => {",
+        "replace": "Err(error) if error == \"unavailable\" && false => {",
+        "mutant_sha256": "ba6a357be4b48e5cd6f1e4f5b352150615e8988942629b90eeacf64764fd5ae0",
+        "diff": "--- original\n+++ disable-unavailable-retry\n@@ -449,7 +449,7 @@\n         loop {\n             match s.append(event(&root)) {\n                 Ok(_) => break,\n-                Err(error) if error == \"unavailable\" => {\n+                Err(error) if error == \"unavailable\" && false => {\n                     assert!(\n                         started.elapsed() < std::time::Duration::from_secs(5),\n                         \"producer could not append within its fixture budget\"\n",
+        "review_source_restored": true,
+        "top_level_result": "test result: FAILED. 17 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 6.79s",
+        "classification": "killed",
+        "log_sha256": "2111c2fa70bc06de1680ea3ab391f44bd79607c67f7cc324083ec77c52b9f70e",
+        "log_sha256_basis": "SHA256 of retained file read_bytes(), without newline translation",
+        "normalized_text_sha256": "a38538ba9be12377a67ebe6c730d49be118fb1b3328fc9e7b2e2399384e5cd97",
+        "retained_raw_log_bytes": 5080
+      },
+      {
+        "label": "fixture-mutation-retry-all-errors",
+        "exit_code": 101,
+        "seconds": 15.72689175605774,
+        "command": [
+          "./scripts/mutation-probe.sh",
+          "--strict",
+          "--file",
+          "tests/observation_store.rs",
+          "--find",
+          "Err(error) if error == \"unavailable\" => {",
+          "--replace",
+          "Err(_error) if true => {",
+          "--",
+          "./scripts/with-slot.sh",
+          "--slot",
+          "1",
+          "cargo",
+          "test",
+          "--no-default-features",
+          "--test",
+          "observation_store",
+          "--",
+          "--test-threads=4"
+        ],
+        "log": "fixture-mutation-retry-all-errors.log",
+        "find": "Err(error) if error == \"unavailable\" => {",
+        "replace": "Err(_error) if true => {",
+        "mutant_sha256": "2327e6024912c93f9be80f1dd4823d9fc135c863047f7c8e827c6e30a2a4c6f0",
+        "diff": "--- original\n+++ retry-all-errors\n@@ -449,7 +449,7 @@\n         loop {\n             match s.append(event(&root)) {\n                 Ok(_) => break,\n-                Err(error) if error == \"unavailable\" => {\n+                Err(_error) if true => {\n                     assert!(\n                         started.elapsed() < std::time::Duration::from_secs(5),\n                         \"producer could not append within its fixture budget\"\n",
+        "review_source_restored": true,
+        "top_level_result": "test result: FAILED. 18 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 6.92s",
+        "classification": "killed",
+        "log_sha256": "be43b4e64a1865657305e973aafa16ba799ec15e54c027d9792757dc1ac87db0",
+        "log_sha256_basis": "SHA256 of retained file read_bytes(), without newline translation",
+        "normalized_text_sha256": "be43b4e64a1865657305e973aafa16ba799ec15e54c027d9792757dc1ac87db0",
+        "retained_raw_log_bytes": 2850
+      },
+      {
+        "label": "fixture-mutation-skip-append-after-marker",
+        "exit_code": 101,
+        "seconds": 13.1394944190979,
+        "command": [
+          "./scripts/mutation-probe.sh",
+          "--strict",
+          "--file",
+          "tests/observation_store.rs",
+          "--find",
+          "if !marker.exists() {\n                        fs::write(marker, b\"unavailable\").unwrap();\n                    }\n                    std::thread::sleep(std::time::Duration::from_millis(2));",
+          "--replace",
+          "if !marker.exists() {\n                        fs::write(marker, b\"unavailable\").unwrap();\n                    }\n                    break;",
+          "--",
+          "./scripts/with-slot.sh",
+          "--slot",
+          "1",
+          "cargo",
+          "test",
+          "--no-default-features",
+          "--test",
+          "observation_store",
+          "--",
+          "--test-threads=4"
+        ],
+        "log": "fixture-mutation-skip-append-after-marker.log",
+        "find": "if !marker.exists() {\n                        fs::write(marker, b\"unavailable\").unwrap();\n                    }\n                    std::thread::sleep(std::time::Duration::from_millis(2));",
+        "replace": "if !marker.exists() {\n                        fs::write(marker, b\"unavailable\").unwrap();\n                    }\n                    break;",
+        "mutant_sha256": "ab4d58a655624e8256d2fbed1f7c07bec55590a98671747003206c8ba5177d47",
+        "diff": "--- original\n+++ skip-append-after-marker\n@@ -458,7 +458,7 @@\n                     if !marker.exists() {\n                         fs::write(marker, b\"unavailable\").unwrap();\n                     }\n-                    std::thread::sleep(std::time::Duration::from_millis(2));\n+                    break;\n                 }\n                 Err(error) => panic!(\"unexpected append error: {error}\"),\n             }\n",
+        "review_source_restored": true,
+        "top_level_result": "test result: FAILED. 17 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.78s",
+        "classification": "killed",
+        "log_sha256": "827f5ac265f5a5f1bbf4cd26f4c899d4819b2f9ccfe4e3475dcb95d7a7264fcf",
+        "log_sha256_basis": "SHA256 of retained file read_bytes(), without newline translation",
+        "normalized_text_sha256": "827f5ac265f5a5f1bbf4cd26f4c899d4819b2f9ccfe4e3475dcb95d7a7264fcf",
+        "retained_raw_log_bytes": 3188
+      }
+    ],
+    "counts": {
+      "fixture_call_site_mutations_applied": 3,
+      "killed": 3,
+      "survived": 0,
+      "inconclusive": 0
+    },
+    "restoration": {
+      "exit_code": 0,
+      "passed": 19,
+      "failed": 0,
+      "ignored": 1,
+      "log": "fixture-review-restoration.log",
+      "review_and_probe_trees_match_final_source": true,
+      "candidate_unchanged": true,
+      "roots": [
+        {
+          "root": "/tmp/ecc-fixture-review-lrg9v32z/source",
+          "hashes": {
+            "src/tools/symbol/call_edges/resolver.rs": "642c841caff0e7d094002bc644d4da004d1bfbe4aaaecf5da5edf58d2ea98ef7",
+            "tests/observation_store.rs": "e6af6dea29da1011796f2ae2665955a97fa6b4a5b6df010f39f6f9383b0dc18c"
+          },
+          "store_sha256": "50189e706f604aa266808b35184a731765c8e7fcf0e3a0d685f7bbab5cd076ce"
+        },
+        {
+          "root": "/tmp/ecc-fixture-review-lrg9v32z/source.worktrees/mutation-slot-0",
+          "hashes": {
+            "src/tools/symbol/call_edges/resolver.rs": "642c841caff0e7d094002bc644d4da004d1bfbe4aaaecf5da5edf58d2ea98ef7",
+            "tests/observation_store.rs": "e6af6dea29da1011796f2ae2665955a97fa6b4a5b6df010f39f6f9383b0dc18c"
+          },
+          "store_sha256": "50189e706f604aa266808b35184a731765c8e7fcf0e3a0d685f7bbab5cd076ce"
+        }
+      ]
+    },
+    "counting_note": "Mutation script says21 tests ran for first mutant because captured child output also contains running1test. Report uses last top-level cargo summary:17passed2failed1ignored,18passed1failed1ignored,17passed2failed1ignored."
+  },
+  "observed_mutation_failures": [
+    {
+      "mutation": "disable-unavailable-retry",
+      "witness": "Held-lock test captures child unexpected append error: unavailable, exit101; original two-process exit assertion also fails.",
+      "citation": "tests/observation_store.rs:544"
+    },
+    {
+      "mutation": "retry-all-errors",
+      "witness": "Disabled control fails only unavailable may be retried because retry-a exists.",
+      "citation": "tests/observation_store.rs:605"
+    },
+    {
+      "mutation": "skip-append-after-marker",
+      "witness": "Held-lock control observes7 stored records rather than8; original two-process control observes14 rather than16.",
+      "citations": [
+        "tests/observation_store.rs:564",
+        "tests/observation_store.rs:506"
+      ]
+    }
+  ],
+  "populations": {
+    "this_review": "3 fixture call-site mutations",
+    "previous_review": "3 scorer mutations, kept separate in scorer-mutation-log.json",
+    "production_store_mutations": 0
+  },
+  "historical_evidence": {
+    "fixture_red_log": "Original append.unwrap observed unavailable and exit101 under explicitly held quota lock.",
+    "earlier_gate_failures": "Individual original child causes remain unobserved; no retrospective attribution.",
+    "bug_documentation_drift": "Parent corrected stale Evidence/Tests added/Resume; sections re-read via doc after correction."
+  },
+  "declined_to_judge": [
+    "Exact causes of the earlier two whole-gate child failures whose panic output was suppressed.",
+    "Mutation coverage of elapsed-time expiry itself; the three requested mutations target retry admission, error discrimination and successful append retention.",
+    "Production retry suitability: unavailable can also reflect sticky storage failure; this change affects test fixture only and its budget eventually fails persistent unavailability.",
+    "General scheduler fairness or universal absence of future timing-related failures.",
+    "Parent integrated-tree gate after peer main changes: separate required check, not exercised by this review."
+  ],
+  "verdict": "APPROVE scope extension at frozen final-source hashes. All three requested actual fixture mutations killed; baseline and restored suite pass. Parent required full candidate gate reported passing; integrated-tree verification remains parent responsibility.",
+  "ledger_checked": [
+    "c052a7c89e3b4a4d",
+    "d0b8e23549eaa576"
+  ],
+  "ledger_footer": "Ledger checked: c052a7c89e3b4a4d, d0b8e23549eaa576",
+  "log_hash_provenance_correction": {
+    "date": "2026-11-10",
+    "cause": "Review report hashed text returned by Path.read_text(), not raw log bytes. Universal-newline decoding replaced bare CR in Git worktree checkout progress with LF.",
+    "capture_path": "run-review.py::run opens each retained review log directly and passes that file descriptor as subprocess stdout/stderr; there was no separate original-to-retained copy.",
+    "original_raw_log_hash": "No independent contemporaneous byte hash of the original capture was recorded. The prior differing digest is verified to be normalized text, not an original raw-byte digest.",
+    "retained_log_hash_definition": "Current retained raw-byte SHA256, computed using read_bytes(); these are the bytes intended for evidence commit. No log was rewritten.",
+    "review_before_sha256": "a596745d6147effde81c5986e93869ca909525868722950bb587ed11a71a491e",
+    "affected_population": "All three fixture mutation log hash fields audited; only the first differed because only it contained carriage returns.",
+    "logs": [
+      {
+        "log": "fixture-mutation-disable-unavailable-retry.log",
+        "previously_recorded_sha256": "a38538ba9be12377a67ebe6c730d49be118fb1b3328fc9e7b2e2399384e5cd97",
+        "previous_digest_basis": "UTF-8 re-encoding of Path.read_text() with universal newline translation",
+        "retained_raw_log_sha256": "2111c2fa70bc06de1680ea3ab391f44bd79607c67f7cc324083ec77c52b9f70e",
+        "normalized_text_sha256": "a38538ba9be12377a67ebe6c730d49be118fb1b3328fc9e7b2e2399384e5cd97",
+        "raw_bytes": 5080,
+        "carriage_return_bytes": 24,
+        "crlf_sequences": 0,
+        "raw_to_normalized_transform": "CRLF -> LF; then CR -> LF",
+        "transform_reproduces_old_hash": true
+      },
+      {
+        "log": "fixture-mutation-retry-all-errors.log",
+        "previously_recorded_sha256": "be43b4e64a1865657305e973aafa16ba799ec15e54c027d9792757dc1ac87db0",
+        "previous_digest_basis": "UTF-8 re-encoding of Path.read_text() with universal newline translation",
+        "retained_raw_log_sha256": "be43b4e64a1865657305e973aafa16ba799ec15e54c027d9792757dc1ac87db0",
+        "normalized_text_sha256": "be43b4e64a1865657305e973aafa16ba799ec15e54c027d9792757dc1ac87db0",
+        "raw_bytes": 2850,
+        "carriage_return_bytes": 0,
+        "crlf_sequences": 0,
+        "raw_to_normalized_transform": "CRLF -> LF; then CR -> LF",
+        "transform_reproduces_old_hash": true
+      },
+      {
+        "log": "fixture-mutation-skip-append-after-marker.log",
+        "previously_recorded_sha256": "827f5ac265f5a5f1bbf4cd26f4c899d4819b2f9ccfe4e3475dcb95d7a7264fcf",
+        "previous_digest_basis": "UTF-8 re-encoding of Path.read_text() with universal newline translation",
+        "retained_raw_log_sha256": "827f5ac265f5a5f1bbf4cd26f4c899d4819b2f9ccfe4e3475dcb95d7a7264fcf",
+        "normalized_text_sha256": "827f5ac265f5a5f1bbf4cd26f4c899d4819b2f9ccfe4e3475dcb95d7a7264fcf",
+        "raw_bytes": 3188,
+        "carriage_return_bytes": 0,
+        "crlf_sequences": 0,
+        "raw_to_normalized_transform": "CRLF -> LF; then CR -> LF",
+        "transform_reproduces_old_hash": true
+      }
+    ],
+    "result_effect": "No change to observed test failures, mutation classifications, source restoration or verdict. All CR bytes in affected log precede running20tests. No mutation rerun."
+  }
+}

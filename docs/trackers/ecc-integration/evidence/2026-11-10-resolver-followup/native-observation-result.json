@@ -1,0 +1,6 @@
+{
+  "process_exit_observed": false,
+  "reason": "Original wrapper exited at failed gate before native.wait; terminal raw cases, summary and independent review retained.",
+  "terminal_native_cases": 7,
+  "qualification_data_validated": true
+}

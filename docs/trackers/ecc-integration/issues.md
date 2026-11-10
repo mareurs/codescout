@@ -34,7 +34,19 @@ The [prompt audit](reports/2026-11-09-callgraph-prompt-surface.md) uncovered two
 
 [Duplicated Rust call-name callee lookup — fixed](../../issues/archive/2026-11-09-call-graph-generic-call-returns-unrelated-callees.md), artifacte5016b19fb0f75da, original observation F-222. The [identity dogfood cycle](reports/2026-11-09-callgraph-identity-dogfood.md) reproduced current-source warm/restart cross-definition contamination and integrated the completed-resolution cache correction as4776e44bd, patch-id82470b4a164f780eab0ce409ca01dfafc29f0d7a. Final84 related tests, qualified native6/6, initial independent review8killed/2survived followed by two exact killed rechecks after test strengthening, and both source/integration full gates passed. Baseline incoming0 runtime control remains nonqualifying; full declaration-identity BFS is outside scope.
 
-[Resolver doc-comment contradiction](../../issues/2026-11-09-call-graph-resolver-doc-denies-outgoing-ts-fallback.md), artifact81436f2c48ad8c74: pre-existing, open and nonblocking. The internal strategy comment still denies the implemented outgoing AST fallback; no source edit for it in this patch.
+[Resolver doc-comment contradiction](../../issues/archive/2026-11-09-call-graph-resolver-doc-denies-outgoing-ts-fallback.md), artifactf8799aadf848d078: corrected and archived by the2026-11-10 follow-up, integrationcb7d13ff3, patch-idd2258dc0bcbe010b39e15f2a84680d4cb7036f09. Source and exact integrated-tree gates and independent review passed.
+
+## Multi-hop identity — open 2026-11-10
+
+[Same-name declaration collapse](../../issues/2026-11-10-call-graph-multihop-collapses-same-name-definitions.md), artifactfed27cae5971c526. Fresh native Rust topology has two qualified helper targets, but cold/restart/warmed depth2 results each omit helper→leaf_b without warning; four unique/pinned/depth1 controls pass. This is a separate traversal/position identity defect, not a regression of the prior completed-cache correction. [Resolver follow-up](reports/2026-11-10-resolver-followup.md) preserves exact source/binary/fixture/response/oracle identities. Behavioral correction remains open.
+
+## Incidental gate failure — fixed 2026-11-10
+
+[Observation-store fixture — fixed and archived](../../issues/archive/2026-11-10-observation-store-subprocess-writer-lean-gate-failure.md), artifact255f71914a9174e4. Two initial full gates failed; historical child panic details were not captured. A separate deterministic held-lock RED confirmed the fixture's unconditional-success assumption at the intentional unavailable boundary. The correction retries only unavailable with a bounded budget; original16-record/sequence/abrupt-exit assertions and fatal other errors remain. Full fixture target19passed/1ignored,3actual fixture mutations killed/0survived/0inconclusive, source and exact integrated-tree full gates passed. Integrationcb7d13ff3, patch-idd2258dc0bcbe010b39e15f2a84680d4cb7036f09. Production store unchanged. The individual original gate panic's exact cause remains unobserved.
+
+## Mutation count instrument — open 2026-11-10
+
+[Selected/nested test counts rendered as executed](../../issues/2026-11-10-mutation-probe-counts-nested-and-ignored-tests-as-executed.md), artifacte4b663a4f2145663. Actual fixture mutation output labels21 tests as ran; final top-level cargo summary is17passed/2failed/1ignored. The shell predicate sums every visible running N tests line, including a child and ignored selection. Review used the final top-level summaries and observed assertion failures; no false kill verdict is established. Script correction remains outside this cycle.
 
 ## Scope boundary
 

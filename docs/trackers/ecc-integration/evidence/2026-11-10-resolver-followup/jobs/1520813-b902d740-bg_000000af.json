@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000af",
+  "command": "python3 docs/trackers/ecc-integration/evidence/2026-11-10-resolver-followup/retry_gate.py",
+  "server_pid": 1520813,
+  "job_pid": 3201708,
+  "state": "exited",
+  "exit_code": 1,
+  "error": null,
+  "started_at": "2026-11-10T11:14:40.102274638+00:00",
+  "finished_at": "2026-11-10T11:18:49.186390287+00:00",
+  "log_path": "/tmp/codescout-bg-uZwx0S.log"
+}

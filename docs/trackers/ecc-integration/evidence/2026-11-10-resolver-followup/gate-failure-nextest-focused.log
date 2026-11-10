@@ -1,0 +1,8 @@
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-0 (leased until this command exits)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+────────────
+ Nextest run ID 179fbdc0-089d-4ce2-a67d-d94b3f862406 with nextest profile: default
+    Starting 1 test across 1 binary (17 tests skipped)
+        PASS [   0.517s] (1/1) codescout::observation_store two_process_writers_and_abrupt_exit
+────────────
+     Summary [   0.517s] 1 test run: 1 passed, 17 skipped

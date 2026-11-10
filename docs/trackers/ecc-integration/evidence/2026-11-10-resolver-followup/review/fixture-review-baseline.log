@@ -1,0 +1,76 @@
+with-slot.sh: evicted 4 compiled units of workspace crates from /home/marius/.cache/codescout-gate/slot-1: it was last leased for /home/marius/work/claude/codescout, not for /tmp/ecc-fixture-review-lrg9v32z/source
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-1 (leased until this command exits)
+   Compiling serde_core v1.0.228
+   Compiling regex-automata v0.4.14
+   Compiling num-traits v0.2.19
+   Compiling serde_json v1.0.149
+   Compiling percent-encoding v2.3.2
+   Compiling getrandom v0.4.2
+   Compiling tracing v0.1.44
+   Compiling futures-util v0.3.32
+   Compiling rmcp v1.3.0
+   Compiling codescout v0.15.0 (/tmp/ecc-fixture-review-lrg9v32z/source)
+   Compiling idna v1.1.0
+   Compiling tower v0.5.3
+   Compiling form_urlencoded v1.2.2
+   Compiling h2 v0.4.13
+   Compiling url v2.5.8
+   Compiling git2 v0.20.4
+   Compiling regex v1.12.3
+   Compiling bstr v1.12.1
+   Compiling matchers v0.2.0
+   Compiling hyper v1.8.1
+   Compiling tracing-subscriber v0.3.23
+   Compiling futures-executor v0.3.32
+   Compiling tree-sitter v0.26.7
+   Compiling futures v0.3.32
+   Compiling serial_test v3.4.0
+   Compiling globset v0.4.18
+   Compiling temp-env v0.3.6
+   Compiling ignore v0.4.25
+   Compiling hyper-util v0.1.20
+   Compiling tracing-appender v0.2.4
+   Compiling tempfile v3.27.0
+   Compiling uuid v1.23.0
+   Compiling float-cmp v0.10.0
+   Compiling predicates v3.1.4
+   Compiling serde v1.0.228
+   Compiling toml_datetime v1.1.0+spec-1.1.0
+   Compiling serde_spanned v1.1.0
+   Compiling toml v1.1.0+spec-1.1.0
+   Compiling assert_cmd v2.2.1
+   Compiling chrono v0.4.44
+   Compiling serde_urlencoded v0.7.1
+   Compiling codescout-embed v0.2.0 (/tmp/ecc-fixture-review-lrg9v32z/source/crates/codescout-embed)
+   Compiling lsp-types v0.97.0
+   Compiling assert-json-diff v2.0.2
+   Compiling mockito v1.7.2
+   Compiling schemars v1.2.1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 33.53s
+     Running tests/observation_store.rs (/home/marius/.cache/codescout-gate/slot-1/debug/deps/observation_store-bc13c46e6d9a03f4)
+
+running 20 tests
+test activation_keeps_private_state_out_of_git_status ... ok
+test activation_does_not_let_cached_store_write_after_directory_swap ... ok
+test a_held_quota_lock_times_out_as_unavailable_and_leaves_no_trace ... ok
+test deleting_a_whole_producer_shard_keeps_a_sequence_gap ... ok
+test bounded_rotation_and_quota_never_delete_old_evidence ... ok
+test deleting_capture_state_remains_unavailable_instead_of_fresh_disabled ... ok
+test empty_shard_from_dead_writer_is_not_empty_coverage ... ok
+test disabled_does_not_create_state_and_enable_is_idempotent ... ok
+test exact_record_limit_and_control_binding ... ok
+test linked_checkout_capture_and_reset_state_are_independent ... ok
+Error: observation capture: incomplete-input
+test local_cli_stays_disabled_and_rejects_unfiltered_ingress ... ok
+test private_modes_and_actual_checkout_binding ... ok
+test concurrent_producers_have_untorn_distinct_records ... ok
+test record_limit_rejects_without_losing_existing_records ... ok
+test subprocess_fixture_does_not_retry_disabled_store ... ok
+test subprocess_producer ... ignored, subprocess fixture; exercised by two_process_writers_and_abrupt_exit
+test refuses_symlinked_ancestors_leaves_and_non_regular_entries ... ok
+test subprocess_fixture_retries_bounded_lock_unavailability ... ok
+test reader_reports_torn_checksum_sequence_and_duplicate_damage ... ok
+test two_process_writers_and_abrupt_exit ... ok
+
+test result: ok. 19 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.13s
+

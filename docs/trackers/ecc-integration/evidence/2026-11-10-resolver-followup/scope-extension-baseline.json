@@ -1,0 +1,19 @@
+{
+  "base": "5b40efc48d31ccdcebbf9a9a2429c768d7aa6ca3",
+  "inputs": [
+    {
+      "path": "tests/observation_store.rs",
+      "git_blob": "d451b14d773feb123aefae146384e500036837d4",
+      "sha256": "386e52471bc354a1049396427123f9fb0cfd46aca3aa428f9f4acc8be9fe2e04",
+      "snapshot": "scope-extension-inputs/tests__observation_store.rs.txt"
+    },
+    {
+      "path": "src/observations/store.rs",
+      "git_blob": "9585a73d7c6653c4ad1aaf1b482350d5e3a85735",
+      "sha256": "50189e706f604aa266808b35184a731765c8e7fcf0e3a0d685f7bbab5cd076ce",
+      "snapshot": "scope-extension-inputs/src__observations__store.rs.txt"
+    }
+  ],
+  "trigger": "Repeated whole-suite observation-store subprocess failure; held-lock consumer regression before fixture correction.",
+  "historical_gate_child_cause": "unobserved; do not infer from timing"
+}

@@ -1,0 +1,32 @@
+with-slot.sh: evicted 7 compiled units of workspace crates from /home/marius/.cache/codescout-gate/slot-1: it was last leased for /tmp/ecc-fixture-review-lrg9v32z/source.worktrees/mutation-slot-0, not for /tmp/ecc-fixture-review-lrg9v32z/source
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-1 (leased until this command exits)
+   Compiling codescout v0.15.0 (/tmp/ecc-fixture-review-lrg9v32z/source)
+   Compiling codescout-embed v0.2.0 (/tmp/ecc-fixture-review-lrg9v32z/source/crates/codescout-embed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 29.01s
+     Running tests/observation_store.rs (/home/marius/.cache/codescout-gate/slot-1/debug/deps/observation_store-bc13c46e6d9a03f4)
+
+running 20 tests
+test activation_keeps_private_state_out_of_git_status ... ok
+test activation_does_not_let_cached_store_write_after_directory_swap ... ok
+test a_held_quota_lock_times_out_as_unavailable_and_leaves_no_trace ... ok
+test bounded_rotation_and_quota_never_delete_old_evidence ... ok
+test deleting_a_whole_producer_shard_keeps_a_sequence_gap ... ok
+test empty_shard_from_dead_writer_is_not_empty_coverage ... ok
+test deleting_capture_state_remains_unavailable_instead_of_fresh_disabled ... ok
+test disabled_does_not_create_state_and_enable_is_idempotent ... ok
+Error: observation capture: incomplete-input
+test local_cli_stays_disabled_and_rejects_unfiltered_ingress ... ok
+test exact_record_limit_and_control_binding ... ok
+test linked_checkout_capture_and_reset_state_are_independent ... ok
+test private_modes_and_actual_checkout_binding ... ok
+test record_limit_rejects_without_losing_existing_records ... ok
+test subprocess_fixture_does_not_retry_disabled_store ... ok
+test concurrent_producers_have_untorn_distinct_records ... ok
+test subprocess_producer ... ignored, subprocess fixture; exercised by two_process_writers_and_abrupt_exit
+test refuses_symlinked_ancestors_leaves_and_non_regular_entries ... ok
+test reader_reports_torn_checksum_sequence_and_duplicate_damage ... ok
+test subprocess_fixture_retries_bounded_lock_unavailability ... ok
+test two_process_writers_and_abrupt_exit ... ok
+
+test result: ok. 19 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.03s
+

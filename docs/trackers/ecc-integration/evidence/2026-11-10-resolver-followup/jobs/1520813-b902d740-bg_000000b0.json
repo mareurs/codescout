@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000b0",
+  "command": "env -u CARGO_TARGET_DIR TMPDIR=/home/marius/.cache/codescout-ecc-tmp CODESCOUT_GATE_TMPFS_BASE=off ./scripts/with-slot.sh --slot 0 cargo nextest run --no-default-features --test observation_store -E 'test(=two_process_writers_and_abrupt_exit)' --failure-output immediate > /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-resolver-followup/gate-failure-nextest-focused.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 3709203,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-10T11:21:26.142153973+00:00",
+  "finished_at": "2026-11-10T11:21:28.650805749+00:00",
+  "log_path": "/tmp/codescout-bg-4yMrQb.log"
+}

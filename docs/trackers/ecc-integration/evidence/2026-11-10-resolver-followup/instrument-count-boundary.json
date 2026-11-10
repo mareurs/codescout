@@ -1,0 +1,19 @@
+{
+  "source_path": "scripts/mutation-probe.sh",
+  "source_sha256": "a3952979ed37d14071bfdaea26f56652ac312808094cfaaff72bba658ec290a6",
+  "unchanged_from_base": true,
+  "inspection": "Post-observation snapshot, not a pre-action input",
+  "literal_predicate": "Sum of all visible anchored running N tests lines",
+  "visible_selected_counts": [
+    20,
+    1
+  ],
+  "rendered_count": 21,
+  "final_top_level": {
+    "passed": 17,
+    "failed": 2,
+    "ignored": 1
+  },
+  "log_sha256": "2111c2fa70bc06de1680ea3ab391f44bd79607c67f7cc324083ec77c52b9f70e",
+  "scope": "Not a count of completed top-level tests; no universal count of hidden child execution; no false kill verdict demonstrated."
+}

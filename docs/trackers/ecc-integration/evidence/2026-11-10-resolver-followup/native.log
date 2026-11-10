@@ -1,0 +1,8 @@
+{"label": "unique-names-depth2", "edges": [["call_a", "leaf_a", "src/a.rs", 1, 2], ["call_b", "leaf_b", "src/b.rs", 1, 2], ["entry", "call_b", "src/lib.rs", 5, 1], ["entry", "call_a", "src/lib.rs", 4, 1]], "clean_render": true, "matches_expected": true}
+{"label": "duplicate-cold-depth2", "edges": [["helper", "leaf_a", "src/a.rs", 1, 2], ["entry", "helper", "src/lib.rs", 5, 1], ["entry", "helper", "src/lib.rs", 4, 1]], "clean_render": true, "matches_expected": false}
+{"label": "duplicate-restart-depth2", "edges": [["helper", "leaf_a", "src/a.rs", 1, 2], ["entry", "helper", "src/lib.rs", 5, 1], ["entry", "helper", "src/lib.rs", 4, 1]], "clean_render": true, "matches_expected": false}
+{"label": "duplicate-seed-depth1", "edges": [["entry", "helper", "src/lib.rs", 5, 1], ["entry", "helper", "src/lib.rs", 4, 1]], "clean_render": true, "matches_expected": true}
+{"label": "pinned-helper-a-depth1", "edges": [["helper", "leaf_a", "src/a.rs", 1, 1]], "clean_render": true, "matches_expected": true}
+{"label": "pinned-helper-b-depth1", "edges": [["helper", "leaf_b", "src/b.rs", 1, 1]], "clean_render": true, "matches_expected": true}
+{"label": "duplicate-after-both-pinned-helpers", "edges": [["helper", "leaf_a", "src/a.rs", 1, 2], ["entry", "helper", "src/lib.rs", 5, 1], ["entry", "helper", "src/lib.rs", 4, 1]], "clean_render": true, "matches_expected": false}
+{"native_cases": 7, "qualifying_controls": 4, "qualifying_controls_matched": 4, "duplicate_depth2_cases": 3, "duplicate_depth2_mismatches": 3, "duplicate_clean_renders": 3, "scorer_controls": 5, "scorer_controls_as_expected": 5, "limits": "One tiny Rust topology and one current-source executable; no general LSP completeness, performance or ECC causality claim."}

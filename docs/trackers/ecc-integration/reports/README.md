@@ -11,6 +11,7 @@ topic: ecc-integration
 ---
 
 # ECC evaluation reports
+- [Resolver follow-up — 2026-11-10](2026-11-10-resolver-followup.md): current documentation correction and actual multi-hop identity evidence, with limits and review state.
 - [Call graph identity dogfood — 2026-11-09](2026-11-09-callgraph-identity-dogfood.md): reproduced persisted cross-definition contamination; definition-scoped correction, applied survivor rechecks and local integration.
 - [Call graph identity observed contract](2026-11-09-callgraph-identity-observed.md): bounded completed-adjacency criteria and explicit traversal limits.
 

@@ -1,0 +1,17 @@
+{
+  "commit": "cb7d13ff360f8fb2464a8a2b52f0f87342c00391",
+  "tree": "d563673b185d884dbbfe215d39cad286d32dada0",
+  "command": [
+    "./scripts/with-slot.sh",
+    "--slot",
+    "0",
+    "./scripts/gate.sh",
+    "--check"
+  ],
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-resolver-followup-integration-20261110",
+  "exit_code": 0,
+  "source_unchanged": true,
+  "started": "2026-11-10T11:53:39.390111+00:00",
+  "finished": "2026-11-10T12:00:54.581028+00:00",
+  "scope": "Exact retained integrated commit, not later experiments HEAD; peer dirty files excluded."
+}

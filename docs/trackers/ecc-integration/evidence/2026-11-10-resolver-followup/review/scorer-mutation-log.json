@@ -1,0 +1,169 @@
+{
+  "scope": "Instrument calibration only; no production source mutations.",
+  "scratch": "/tmp/ecc-followup-review-fq1gtnoc",
+  "probe_before_sha256": "62e8b3a9f2745a0ed2f5e0e51d6029d9683681c4acf51b59399d42099386ae7b",
+  "probe_after_sha256": "62e8b3a9f2745a0ed2f5e0e51d6029d9683681c4acf51b59399d42099386ae7b",
+  "original_inspect_sha256": "366589634c64b3ce9378fa31b2d2ef21b339fd20e27637b0ed4ed5d0e7aeaf18",
+  "baseline_controls": [
+    {
+      "name": "actual-unique-positive",
+      "actual": true,
+      "expected": true,
+      "passed": true
+    },
+    {
+      "name": "wrong-file",
+      "actual": false,
+      "expected": false,
+      "passed": true
+    },
+    {
+      "name": "wrong-depth",
+      "actual": false,
+      "expected": false,
+      "passed": true
+    },
+    {
+      "name": "wrong-callee",
+      "actual": false,
+      "expected": false,
+      "passed": true
+    },
+    {
+      "name": "guide-only-edges",
+      "actual": false,
+      "expected": false,
+      "passed": true
+    }
+  ],
+  "mutations": [
+    {
+      "name": "omit-file-line",
+      "sha256": "9908bde1937c0e0615860705297667c4ba78474369088026455744089edfb840",
+      "diff": "--- inspect.original.py\n+++ omit-file-line.py\n@@ -13,4 +13,4 @@\n            and int(totals[2])==len({e[2] for e in edges})\n            and 'warning:' not in text.lower() and 'completeness_warning' not in text\n            and 'truncated: true' not in text)\n-    return dict(edges=edges,clean_render=bool(clean),matches_expected=bool(clean and Counter(edges)==Counter(wanted)))\n+    return dict(edges=edges,clean_render=bool(clean),matches_expected=bool(clean and Counter((e[0],e[1],e[4]) for e in edges)==Counter((e[0],e[1],e[4]) for e in wanted)))\n",
+      "controls": [
+        {
+          "name": "actual-unique-positive",
+          "actual": true,
+          "expected": true,
+          "passed": true
+        },
+        {
+          "name": "wrong-file",
+          "actual": true,
+          "expected": false,
+          "passed": false
+        },
+        {
+          "name": "wrong-depth",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        },
+        {
+          "name": "wrong-callee",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        },
+        {
+          "name": "guide-only-edges",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        }
+      ],
+      "controls_passed": 4,
+      "controls_failed": 1,
+      "classification": "killed"
+    },
+    {
+      "name": "omit-depth",
+      "sha256": "9683c202dc2898e650eb58e2ce1bbabee3e5831c21647b15de0a9ecec961b200",
+      "diff": "--- inspect.original.py\n+++ omit-depth.py\n@@ -13,4 +13,4 @@\n            and int(totals[2])==len({e[2] for e in edges})\n            and 'warning:' not in text.lower() and 'completeness_warning' not in text\n            and 'truncated: true' not in text)\n-    return dict(edges=edges,clean_render=bool(clean),matches_expected=bool(clean and Counter(edges)==Counter(wanted)))\n+    return dict(edges=edges,clean_render=bool(clean),matches_expected=bool(clean and Counter(e[:4] for e in edges)==Counter(e[:4] for e in wanted)))\n",
+      "controls": [
+        {
+          "name": "actual-unique-positive",
+          "actual": true,
+          "expected": true,
+          "passed": true
+        },
+        {
+          "name": "wrong-file",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        },
+        {
+          "name": "wrong-depth",
+          "actual": true,
+          "expected": false,
+          "passed": false
+        },
+        {
+          "name": "wrong-callee",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        },
+        {
+          "name": "guide-only-edges",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        }
+      ],
+      "controls_passed": 4,
+      "controls_failed": 1,
+      "classification": "killed"
+    },
+    {
+      "name": "last-content-block",
+      "sha256": "fc487e3731d72b30dd2edb555bee9a0295454149150eb20bb0085f5e7136e3fe",
+      "diff": "--- inspect.original.py\n+++ last-content-block.py\n@@ -1,5 +1,5 @@\n def inspect(response,symbol,wanted):\n-    text=response.get('content',[{}])[0].get('text','')\n+    text=response.get('content',[{}])[-1].get('text','')\n     edges=[]\n     file=None\n     for line in text.splitlines():\n",
+      "controls": [
+        {
+          "name": "actual-unique-positive",
+          "actual": false,
+          "expected": true,
+          "passed": false
+        },
+        {
+          "name": "wrong-file",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        },
+        {
+          "name": "wrong-depth",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        },
+        {
+          "name": "wrong-callee",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        },
+        {
+          "name": "guide-only-edges",
+          "actual": true,
+          "expected": false,
+          "passed": false
+        }
+      ],
+      "controls_passed": 3,
+      "controls_failed": 2,
+      "classification": "killed"
+    }
+  ],
+  "counts": {
+    "killed": 3
+  },
+  "restoration": {
+    "original_probe_unchanged": true,
+    "original_recompiled_controls_passed": 5,
+    "scratch_original_unchanged": true
+  }
+}

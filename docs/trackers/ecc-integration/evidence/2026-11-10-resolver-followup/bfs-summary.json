@@ -1,0 +1,11 @@
+{
+  "native_cases": 7,
+  "qualifying_controls": 4,
+  "qualifying_controls_matched": 4,
+  "duplicate_depth2_cases": 3,
+  "duplicate_depth2_mismatches": 3,
+  "duplicate_clean_renders": 3,
+  "scorer_controls": 5,
+  "scorer_controls_as_expected": 5,
+  "limits": "One tiny Rust topology and one current-source executable; no general LSP completeness, performance or ECC causality claim."
+}

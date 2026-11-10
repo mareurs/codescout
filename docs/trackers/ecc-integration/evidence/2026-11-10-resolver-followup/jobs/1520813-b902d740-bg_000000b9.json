@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000b9",
+  "command": "python3 docs/trackers/ecc-integration/evidence/2026-11-10-resolver-followup/integration_gate.py",
+  "server_pid": 1520813,
+  "job_pid": 446663,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-10T11:53:37.489568257+00:00",
+  "finished_at": "2026-11-10T12:00:54.586713427+00:00",
+  "log_path": "/tmp/codescout-bg-ffe4Vr.log"
+}

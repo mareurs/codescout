@@ -1,0 +1,59 @@
+mutation-probe: carried the working tree into the isolated worktree —
+  2 tracked change(s), 0 untracked file(s).
+mutation-probe: ARMED  mode=isolated  file=tests/observation_store.rs  tree=/tmp/ecc-fixture-review-lrg9v32z/source.worktrees/mutation-slot-0
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-1 (leased until this command exits)
+   Compiling codescout v0.15.0 (/tmp/ecc-fixture-review-lrg9v32z/source.worktrees/mutation-slot-0)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.91s
+     Running tests/observation_store.rs (/home/marius/.cache/codescout-gate/slot-1/debug/deps/observation_store-bc13c46e6d9a03f4)
+
+running 20 tests
+test activation_keeps_private_state_out_of_git_status ... ok
+test activation_does_not_let_cached_store_write_after_directory_swap ... ok
+test a_held_quota_lock_times_out_as_unavailable_and_leaves_no_trace ... ok
+test bounded_rotation_and_quota_never_delete_old_evidence ... ok
+test deleting_a_whole_producer_shard_keeps_a_sequence_gap ... ok
+test deleting_capture_state_remains_unavailable_instead_of_fresh_disabled ... ok
+test empty_shard_from_dead_writer_is_not_empty_coverage ... ok
+test disabled_does_not_create_state_and_enable_is_idempotent ... ok
+Error: observation capture: incomplete-input
+test local_cli_stays_disabled_and_rejects_unfiltered_ingress ... ok
+test exact_record_limit_and_control_binding ... ok
+test linked_checkout_capture_and_reset_state_are_independent ... ok
+test private_modes_and_actual_checkout_binding ... ok
+test concurrent_producers_have_untorn_distinct_records ... ok
+test record_limit_rejects_without_losing_existing_records ... ok
+test subprocess_fixture_does_not_retry_disabled_store ... ok
+test subprocess_producer ... ignored, subprocess fixture; exercised by two_process_writers_and_abrupt_exit
+test refuses_symlinked_ancestors_leaves_and_non_regular_entries ... ok
+test subprocess_fixture_retries_bounded_lock_unavailability ... FAILED
+test reader_reports_torn_checksum_sequence_and_duplicate_damage ... ok
+test two_process_writers_and_abrupt_exit ... FAILED
+
+failures:
+
+---- subprocess_fixture_retries_bounded_lock_unavailability stdout ----
+
+thread 'subprocess_fixture_retries_bounded_lock_unavailability' (263094) panicked at tests/observation_store.rs:564:5:
+assertion `left == right` failed: retry must retain every acknowledged append
+  left: 7
+ right: 8
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- two_process_writers_and_abrupt_exit stdout ----
+
+thread 'two_process_writers_and_abrupt_exit' (263185) panicked at tests/observation_store.rs:506:5:
+assertion `left == right` failed
+  left: 14
+ right: 16
+
+
+failures:
+    subprocess_fixture_retries_bounded_lock_unavailability
+    two_process_writers_and_abrupt_exit
+
+test result: FAILED. 17 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.78s
+
+error: test failed, to rerun pass `--test observation_store`
+mutation-probe: KILLED (rc=101, 20 test(s) ran) — a test caught it.
+  Applied-ness needs no further audit: a red cannot be produced by a mutation that
+  never applied, and the count above rules out a compile failure wearing this verdict.

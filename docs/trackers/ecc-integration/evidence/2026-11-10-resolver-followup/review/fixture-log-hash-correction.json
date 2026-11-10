@@ -1,0 +1,48 @@
+{
+  "date": "2026-11-10",
+  "cause": "Review report hashed text returned by Path.read_text(), not raw log bytes. Universal-newline decoding replaced bare CR in Git worktree checkout progress with LF.",
+  "capture_path": "run-review.py::run opens each retained review log directly and passes that file descriptor as subprocess stdout/stderr; there was no separate original-to-retained copy.",
+  "original_raw_log_hash": "No independent contemporaneous byte hash of the original capture was recorded. The prior differing digest is verified to be normalized text, not an original raw-byte digest.",
+  "retained_log_hash_definition": "Current retained raw-byte SHA256, computed using read_bytes(); these are the bytes intended for evidence commit. No log was rewritten.",
+  "review_before_sha256": "a596745d6147effde81c5986e93869ca909525868722950bb587ed11a71a491e",
+  "affected_population": "All three fixture mutation log hash fields audited; only the first differed because only it contained carriage returns.",
+  "logs": [
+    {
+      "log": "fixture-mutation-disable-unavailable-retry.log",
+      "previously_recorded_sha256": "a38538ba9be12377a67ebe6c730d49be118fb1b3328fc9e7b2e2399384e5cd97",
+      "previous_digest_basis": "UTF-8 re-encoding of Path.read_text() with universal newline translation",
+      "retained_raw_log_sha256": "2111c2fa70bc06de1680ea3ab391f44bd79607c67f7cc324083ec77c52b9f70e",
+      "normalized_text_sha256": "a38538ba9be12377a67ebe6c730d49be118fb1b3328fc9e7b2e2399384e5cd97",
+      "raw_bytes": 5080,
+      "carriage_return_bytes": 24,
+      "crlf_sequences": 0,
+      "raw_to_normalized_transform": "CRLF -> LF; then CR -> LF",
+      "transform_reproduces_old_hash": true
+    },
+    {
+      "log": "fixture-mutation-retry-all-errors.log",
+      "previously_recorded_sha256": "be43b4e64a1865657305e973aafa16ba799ec15e54c027d9792757dc1ac87db0",
+      "previous_digest_basis": "UTF-8 re-encoding of Path.read_text() with universal newline translation",
+      "retained_raw_log_sha256": "be43b4e64a1865657305e973aafa16ba799ec15e54c027d9792757dc1ac87db0",
+      "normalized_text_sha256": "be43b4e64a1865657305e973aafa16ba799ec15e54c027d9792757dc1ac87db0",
+      "raw_bytes": 2850,
+      "carriage_return_bytes": 0,
+      "crlf_sequences": 0,
+      "raw_to_normalized_transform": "CRLF -> LF; then CR -> LF",
+      "transform_reproduces_old_hash": true
+    },
+    {
+      "log": "fixture-mutation-skip-append-after-marker.log",
+      "previously_recorded_sha256": "827f5ac265f5a5f1bbf4cd26f4c899d4819b2f9ccfe4e3475dcb95d7a7264fcf",
+      "previous_digest_basis": "UTF-8 re-encoding of Path.read_text() with universal newline translation",
+      "retained_raw_log_sha256": "827f5ac265f5a5f1bbf4cd26f4c899d4819b2f9ccfe4e3475dcb95d7a7264fcf",
+      "normalized_text_sha256": "827f5ac265f5a5f1bbf4cd26f4c899d4819b2f9ccfe4e3475dcb95d7a7264fcf",
+      "raw_bytes": 3188,
+      "carriage_return_bytes": 0,
+      "crlf_sequences": 0,
+      "raw_to_normalized_transform": "CRLF -> LF; then CR -> LF",
+      "transform_reproduces_old_hash": true
+    }
+  ],
+  "result_effect": "No change to observed test failures, mutation classifications, source restoration or verdict. All CR bytes in affected log precede running20tests. No mutation rerun."
+}

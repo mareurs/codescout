@@ -1,0 +1,18 @@
+{
+  "label": "fixture-review-baseline",
+  "exit_code": 0,
+  "seconds": 37.7937171459198,
+  "command": [
+    "./scripts/with-slot.sh",
+    "--slot",
+    "1",
+    "cargo",
+    "test",
+    "--no-default-features",
+    "--test",
+    "observation_store",
+    "--",
+    "--test-threads=4"
+  ],
+  "log": "fixture-review-baseline.log"
+}

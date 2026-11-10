@@ -1,0 +1,39 @@
+{
+  "source": {
+    "commit": "9aee4be48e446c15a441397f877c662f265f56ac",
+    "tree": "b68f8cd1af1a0e7f4405c12565c1aff03f366006",
+    "parent": "5b40efc48d31ccdcebbf9a9a2429c768d7aa6ca3",
+    "stable_patch_id": "d2258dc0bcbe010b39e15f2a84680d4cb7036f09",
+    "paths": [
+      "src/tools/symbol/call_edges/resolver.rs",
+      "tests/observation_store.rs"
+    ]
+  },
+  "integration": {
+    "commit": "cb7d13ff360f8fb2464a8a2b52f0f87342c00391",
+    "tree": "d563673b185d884dbbfe215d39cad286d32dada0",
+    "parent": "7231f33e22404188046d902ba98e28822de4e0a7",
+    "stable_patch_id": "d2258dc0bcbe010b39e15f2a84680d4cb7036f09",
+    "paths": [
+      "src/tools/symbol/call_edges/resolver.rs",
+      "tests/observation_store.rs"
+    ]
+  },
+  "source_sha256": {
+    "src/tools/symbol/call_edges/resolver.rs": "642c841caff0e7d094002bc644d4da004d1bfbe4aaaecf5da5edf58d2ea98ef7",
+    "tests/observation_store.rs": "e6af6dea29da1011796f2ae2665955a97fa6b4a5b6df010f39f6f9383b0dc18c"
+  },
+  "gate_binding": "Frozen two-file candidate full gate; exact owned source and patch-id preserved at integration. Peer delta separately recorded; no blanket whole-tree equality claim.",
+  "identical_committed_trees": false,
+  "foreign_index_blobs_unchanged": {
+    ".codescout/memories/bug-triage-2026-10-27.md": "100644 f4ad12b9cf7b8b830ac35cc341afcde702d0a56c 0\t.codescout/memories/bug-triage-2026-10-27.md",
+    "docs/issues/2026-11-04-shared-checkout-gate-red-during-hint-authority-audit.md": "100644 c1257d772a5ac947357954c13a02f726a0e4dac8 0\tdocs/issues/2026-11-04-shared-checkout-gate-red-during-hint-authority-audit.md",
+    "docs/research/2026-11-04-claude-instructions-comparison.md": "100644 f0e96d2f9f979d67701da2a9f7f6a162b92c7923 0\tdocs/research/2026-11-04-claude-instructions-comparison.md",
+    "docs/research/data/2026-11-04-hint-authority-gate.log.gz": "100644 2d449edb2ad7459ee5730ffcd8f4219fe866d6ae 0\tdocs/research/data/2026-11-04-hint-authority-gate.log.gz",
+    "docs/research/data/2026-11-04-hint-authority-inputs.tar.gz": "100644 24afd4b900798459db6520defdcf77bf9931f069 0\tdocs/research/data/2026-11-04-hint-authority-inputs.tar.gz",
+    "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md": "100644 034de84c4fdb710ce4a9f4cf4bc10afbe21458bd 0\tdocs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md"
+  },
+  "peer_delta": "peer-integration-delta.txt",
+  "replay_ref": "refs/ecc-replay/resolver-followup-20261110",
+  "limits": "Resolver documentation and observation-store fixture only; production store unchanged; BFS defect remains open. No repair replay, push, shared runtime/profile change."
+}

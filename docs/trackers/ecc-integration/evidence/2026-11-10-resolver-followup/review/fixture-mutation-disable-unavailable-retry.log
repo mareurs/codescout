@@ -1,0 +1,81 @@
+mutation-probe: creating isolated worktree (one-off, ~87 s + 2.8 G on this repo)
+Preparing worktree (detached HEAD 5b40efc48)
+Updating files:  77% (4636/6009)Updating files:  78% (4688/6009)Updating files:  79% (4748/6009)Updating files:  80% (4808/6009)Updating files:  81% (4868/6009)Updating files:  82% (4928/6009)Updating files:  83% (4988/6009)Updating files:  84% (5048/6009)Updating files:  85% (5108/6009)Updating files:  86% (5168/6009)Updating files:  87% (5228/6009)Updating files:  88% (5288/6009)Updating files:  89% (5349/6009)Updating files:  90% (5409/6009)Updating files:  91% (5469/6009)Updating files:  92% (5529/6009)Updating files:  93% (5589/6009)Updating files:  94% (5649/6009)Updating files:  95% (5709/6009)Updating files:  96% (5769/6009)Updating files:  97% (5829/6009)Updating files:  98% (5889/6009)Updating files:  99% (5949/6009)Updating files: 100% (6009/6009)Updating files: 100% (6009/6009), done.
+HEAD is now at 5b40efc48 docs(issues): file the open measurement of the wake-hook promotion (bug 08f1bb0cb68ec514)
+mutation-probe: carried the working tree into the isolated worktree —
+  2 tracked change(s), 0 untracked file(s).
+mutation-probe: ARMED  mode=isolated  file=tests/observation_store.rs  tree=/tmp/ecc-fixture-review-lrg9v32z/source.worktrees/mutation-slot-0
+with-slot.sh: evicted 7 compiled units of workspace crates from /home/marius/.cache/codescout-gate/slot-1: it was last leased for /tmp/ecc-fixture-review-lrg9v32z/source, not for /tmp/ecc-fixture-review-lrg9v32z/source.worktrees/mutation-slot-0
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-1 (leased until this command exits)
+   Compiling codescout v0.15.0 (/tmp/ecc-fixture-review-lrg9v32z/source.worktrees/mutation-slot-0)
+   Compiling codescout-embed v0.2.0 (/tmp/ecc-fixture-review-lrg9v32z/source.worktrees/mutation-slot-0/crates/codescout-embed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.83s
+     Running tests/observation_store.rs (/home/marius/.cache/codescout-gate/slot-1/debug/deps/observation_store-bc13c46e6d9a03f4)
+
+running 20 tests
+test activation_keeps_private_state_out_of_git_status ... ok
+test activation_does_not_let_cached_store_write_after_directory_swap ... ok
+test bounded_rotation_and_quota_never_delete_old_evidence ... ok
+test a_held_quota_lock_times_out_as_unavailable_and_leaves_no_trace ... ok
+test deleting_a_whole_producer_shard_keeps_a_sequence_gap ... ok
+test empty_shard_from_dead_writer_is_not_empty_coverage ... ok
+test deleting_capture_state_remains_unavailable_instead_of_fresh_disabled ... ok
+test disabled_does_not_create_state_and_enable_is_idempotent ... ok
+Error: observation capture: incomplete-input
+test local_cli_stays_disabled_and_rejects_unfiltered_ingress ... ok
+test exact_record_limit_and_control_binding ... ok
+test linked_checkout_capture_and_reset_state_are_independent ... ok
+test private_modes_and_actual_checkout_binding ... ok
+test record_limit_rejects_without_losing_existing_records ... ok
+test concurrent_producers_have_untorn_distinct_records ... ok
+test subprocess_fixture_does_not_retry_disabled_store ... ok
+test subprocess_producer ... ignored, subprocess fixture; exercised by two_process_writers_and_abrupt_exit
+test refuses_symlinked_ancestors_leaves_and_non_regular_entries ... ok
+test subprocess_fixture_retries_bounded_lock_unavailability ... FAILED
+test reader_reports_torn_checksum_sequence_and_duplicate_damage ... ok
+test two_process_writers_and_abrupt_exit ... FAILED
+
+failures:
+
+---- subprocess_fixture_retries_bounded_lock_unavailability stdout ----
+
+thread 'subprocess_fixture_retries_bounded_lock_unavailability' (252191) panicked at tests/observation_store.rs:544:13:
+producer exited before retrying a real contended append: status=Some(101), stdout=
+running 1 test
+test subprocess_producer ... FAILED
+
+failures:
+
+---- subprocess_producer stdout ----
+
+thread 'subprocess_producer' (252214) panicked at tests/observation_store.rs:463:31:
+unexpected append error: unavailable
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    subprocess_producer
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 19 filtered out; finished in 0.10s
+
+, stderr=
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- two_process_writers_and_abrupt_exit stdout ----
+
+thread 'two_process_writers_and_abrupt_exit' (252194) panicked at tests/observation_store.rs:503:5:
+assertion `left == right` failed
+  left: Some(101)
+ right: Some(9)
+
+
+failures:
+    subprocess_fixture_retries_bounded_lock_unavailability
+    two_process_writers_and_abrupt_exit
+
+test result: FAILED. 17 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 6.79s
+
+error: test failed, to rerun pass `--test observation_store`
+mutation-probe: KILLED (rc=101, 21 test(s) ran) — a test caught it.
+  Applied-ness needs no further audit: a red cannot be produced by a mutation that
+  never applied, and the count above rules out a compile failure wearing this verdict.

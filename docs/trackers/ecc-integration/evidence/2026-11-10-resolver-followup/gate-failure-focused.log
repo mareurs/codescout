@@ -1,0 +1,10 @@
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-0 (leased until this command exits)
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout/.worktrees/ecc-resolver-followup-20261110)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.36s
+     Running tests/observation_store.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/observation_store-f5b9e73eea83c6e3)
+
+running 1 test
+test two_process_writers_and_abrupt_exit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.54s
+

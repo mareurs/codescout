@@ -11,6 +11,7 @@ topic: ecc-integration
 ---
 
 # ECC integration notes
+[Resolver follow-up replay provenance — 2026-11-10](2026-11-10-resolver-followup-replay.md): exact5b40efc48 base, eight inspected snapshots, installed skill hashes and private pre-action host-prefix metadata. No replay ran.
 [Call graph identity replay provenance — 2026-11-09](2026-11-09-callgraph-identity-replay.md): frozen69ffdd12e tree, neutral brief, exact source/skill hashes and private host-history metadata. No replay ran.
 
 

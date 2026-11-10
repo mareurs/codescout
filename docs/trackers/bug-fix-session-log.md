@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 227
+entry_high_water_F: 230
 entry_high_water_W: 158
 ---
 
@@ -73,6 +73,9 @@ entry_high_water_W: 158
 | F-225 | 2026-11-09 | med | tool-usage | mitigated | **Buffer and document patch grammar assumptions caused refused calls** — five refusals; corrected against actual tool responses, with no refused write applied. |
 | F-226 | 2026-11-09 | med | testing | fixed-verified | **Consumer coordinate fields escaped API-only identity coverage** — two actual83/0 survivors closed with same-file consumer guards and exact killed rechecks. |
 | F-227 | 2026-11-09 | med | tool-usage | mitigated | **Repeated staging cannot re-add an already staged deletion by its old path** — restage existing paths while retaining D+A in the commit scope. |
+| F-228 | 2026-11-10 | med | tool-usage | mitigated | **A red gate prevented the verification wrapper from observing the native child exit** — preserve the red and terminal native data; do not invent a child exit code. |
+| F-229 | 2026-11-10 | med | tool-usage | fixed-verified | **Quoted heading names were mistaken for structural headings during skill-block extraction** — anchored sections and explicit stdin handoff returned actual rows; no peer count inferred. |
+| F-230 | 2026-11-10 | med | tool-usage | fixed-verified | **Text-mode hashing normalized raw mutation-log carriage returns** — recompute byte hashes, preserve normalized digests, no source/log/result change. |
 | F-213 | 2026-11-06 | med | test-design | fixed-verified | **A crash fixture failed in its toy parser before reaching the classifier** — wrong-reason red replaced by observed intended red before reapplying production wiring. |
 | F-214 | 2026-11-06 | med | test-design | promoted-to-bug-tracker | **Stripping log indentation promoted a debug field to compiler evidence** — real four-log overlap exposed the false provenance; three observed RED variants before fix. |
 | F-210 | 2026-11-01 | med | process | mitigated | **A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path** — `fmt-mine` named three of my files UNKNOWN after a 19-minute gate; `rustfmt --check` on the diff's files beforehand takes seconds. |
@@ -18201,6 +18204,54 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Rests on:** [Actual retained refusal](ecc-integration/evidence/2026-11-09-callgraph-identity-dogfood/staging-refusal.log); initial staged D+A observation; this cycle's owned-paths.json and archived bug.
 
 **Limit:** This is Git pathspec behavior and a controller orchestration correction, not a codescout production defect.
+
+## F-228 — A red gate prevented the verification wrapper from observing the native child exit
+
+**Valid:** dated 2026-11-10
+
+**Severity:** med
+**Category:** tool-usage
+**Status:** mitigated
+
+**Observed:** The resolver follow-up wrapper launched a private native probe, then ran the full gate. The gate was red in observation_store; its assert ran before native.wait(), so no child exit-code record was written. Seven terminal native responses, the summary and independent review still exist, but they do not establish an observed process exit code.
+
+**Correction:** Preserve the original wrapper/red gate. The retry runner records the native result as qualified terminal data with process_exit_observed=false, then reruns the unchanged-source full gate separately. Do not invent a native exit_code=0 or mix the first red with a later green. Source documentation patch remains unchanged.
+
+**Rests on:** [original wrapper](ecc-integration/evidence/2026-11-10-resolver-followup/verify.py), [initial gate result](ecc-integration/evidence/2026-11-10-resolver-followup/gate-result.json), [qualified native status](ecc-integration/evidence/2026-11-10-resolver-followup/native-observation-result.json).
+
+**Lesson:** Independent child status collection needs a finalization path even when another check fails; terminal result data and process completion are different propositions.
+
+## F-229 — Quoted heading names were mistaken for structural headings during skill-block extraction
+
+**Valid:** dated 2026-11-10
+
+**Severity:** med
+**Category:** tool-usage
+**Status:** fixed-verified
+
+**Observed:** A helper split the peer-session reference on the first substring ## Enumerate, which occurred inside the opening Read by heading sentence. Its supposed section contained no fenced command block, causing NoneType failure. An initial combined shell pipeline also yielded empty rows/BrokenPipe instead of an inventory. Neither output was used to claim absence of sessions.
+
+**Correction:** Match anchored Markdown headings, extract only each actual Enumerate section, execute both reference blocks read-only with stdout captured in-process, then pass concatenated rows as stdin to the merge block in the same command. Actual rows were returned. Codex self-identification is explicitly unsupported by the skill, so no peer-count claim follows from that inventory.
+
+**Rests on:** Current codescout-companion1.21.0 reaching-peer-sessions references, whose opening prose quotes heading names; actual failed and corrected run_command responses in this session. This is controller orchestration, not a product code change.
+
+**Lesson:** A heading mention is not a heading boundary. Keep an inventory failure distinct from an empty population.
+
+## F-230 — Text-mode hashing normalized raw mutation-log carriage returns
+
+**Valid:** dated 2026-11-10
+
+**Severity:** med
+**Category:** tool-usage
+**Status:** fixed-verified
+
+**Observed:** Parent full-byte hashing of the retained first fixture mutation log returned2111c2fa...52b9f70e, while the independent review recordeda38538ba...e5cd97. A reviewer follow-up verified the retained log had not changed: read_text() had normalized24 carriage returns before hashing. The original digest identified normalized text rather than retained raw bytes.
+
+**Correction:** Reviewer recomputed all three log digests with read_bytes(), retained prior values as normalized_text_sha256, and wrote a [provenance correction](ecc-integration/evidence/2026-11-10-resolver-followup/review/fixture-log-hash-correction.json). No log, source or observed mutation outcome changed; no mutation reran.
+
+**Rests on:** Full-byte parent capture in instrument-count-boundary.json and independently verified raw/normalized pairs in the review correction. The final evidence manifest hashes file bytes.
+
+**Lesson:** A raw-artifact hash must consume raw bytes; text-mode normalization measures a different artifact even when the visible log looks identical.
 
 ## Template for new entries
 

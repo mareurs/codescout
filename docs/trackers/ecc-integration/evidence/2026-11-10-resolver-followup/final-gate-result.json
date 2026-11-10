@@ -1,0 +1,20 @@
+{
+  "command": [
+    "./scripts/with-slot.sh",
+    "--slot",
+    "0",
+    "./scripts/gate.sh",
+    "--check"
+  ],
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-resolver-followup-20261110",
+  "head": "5b40efc48d31ccdcebbf9a9a2429c768d7aa6ca3",
+  "paths": {
+    "src/tools/symbol/call_edges/resolver.rs": "642c841caff0e7d094002bc644d4da004d1bfbe4aaaecf5da5edf58d2ea98ef7",
+    "tests/observation_store.rs": "e6af6dea29da1011796f2ae2665955a97fa6b4a5b6df010f39f6f9383b0dc18c"
+  },
+  "production_store_unchanged": true,
+  "source_unchanged": true,
+  "exit_code": 0,
+  "started": "2026-11-10T11:41:23.760888+00:00",
+  "finished": "2026-11-10T11:46:23.815402+00:00"
+}
