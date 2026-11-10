@@ -14,6 +14,7 @@ fi
 
 ln -sf "$SRC/mcp.json" "$AGENT_DIR/mcp.json"
 ln -sf "$SRC/codescout-mode.ts" "$AGENT_DIR/extensions/codescout-mode.ts"
+ln -sf "$SRC/secret-guard.ts" "$AGENT_DIR/extensions/secret-guard.ts"
 
 if [ -e "$AGENT_DIR/AGENTS.md" ] && [ ! -L "$AGENT_DIR/AGENTS.md" ]; then
   mv "$AGENT_DIR/AGENTS.md" "$AGENT_DIR/AGENTS.md.bak"
