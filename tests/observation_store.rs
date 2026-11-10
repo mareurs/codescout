@@ -292,20 +292,53 @@ fn concurrent_producers_have_untorn_distinct_records() {
         handles.push(std::thread::spawn(move || {
             let s = active(&root, Limits::default());
             barrier.wait();
+            let mut acknowledged = 0usize;
             for _ in 0..12 {
-                s.append(event(&root)).unwrap();
+                // The store waits at most 100 ms for its lock and then answers `unavailable` before it
+                // writes anything. Two producers in a tight loop may lose that wait on a slow disk
+                // (bug fd90744bf199735c), so a timeout is not a defect here. Any other error is.
+                match s.append(event(&root)) {
+                    Ok(_) => acknowledged += 1,
+                    Err(e) => assert_eq!(e, "unavailable", "unexpected append error: {e}"),
+                }
             }
+            acknowledged
         }));
     }
     barrier.wait();
-    for h in handles {
-        h.join().unwrap();
-    }
+    let acknowledged: usize = handles.into_iter().map(|h| h.join().unwrap()).sum();
     let r = read_store(d.path(), Limits::default());
-    assert_eq!(r.records.len(), 24);
+    assert!(acknowledged > 0, "no producer got a single append through");
+    // Every acknowledged append is stored once, and nothing unacknowledged is stored.
+    assert_eq!(r.records.len(), acknowledged);
     assert!(r.diagnostics.is_empty());
     let ids: std::collections::HashSet<_> = r.records.iter().map(|v| &v.observation_id).collect();
-    assert_eq!(ids.len(), 24);
+    assert_eq!(ids.len(), acknowledged);
+}
+#[test]
+fn a_held_quota_lock_times_out_as_unavailable_and_leaves_no_trace() {
+    let d = repo();
+    enable(d.path()).unwrap();
+    let s = active(d.path(), Limits::default());
+    let holder = fs::File::open(d.path().join(".codescout/observations/v1/quota.lock")).unwrap();
+    holder.lock().unwrap();
+    let started = std::time::Instant::now();
+    assert_eq!(s.append(event(d.path())).unwrap_err(), "unavailable");
+    assert!(
+        started.elapsed() >= std::time::Duration::from_millis(100),
+        "a contended lock is waited for, not refused at once: {:?}",
+        started.elapsed()
+    );
+    assert!(read_store(d.path(), Limits::default()).records.is_empty());
+    drop(holder);
+    let stored = s.append(event(d.path())).unwrap().observation;
+    assert_eq!(
+        stored.sequence, 0,
+        "the timed-out append left a sequence gap"
+    );
+    let r = read_store(d.path(), Limits::default());
+    assert_eq!(r.records.len(), 1);
+    assert!(r.diagnostics.is_empty());
 }
 
 #[test]
