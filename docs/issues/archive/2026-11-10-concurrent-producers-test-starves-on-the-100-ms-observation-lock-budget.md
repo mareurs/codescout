@@ -1,5 +1,5 @@
 ---
-id: fd90744bf199735c
+id: c052a7c89e3b4a4d
 kind: bug
 status: fixed
 title: concurrent_producers_have_untorn_distinct_records fails when two producers contend for the 100 ms lock budget
@@ -9,7 +9,6 @@ tags:
 - cluster/unclassified
 closed: 2026-11-10
 opened: 2026-11-10
-unverified: 'TRACKED the product question is open: a contended append loses its observation after 100 ms, and a fair wait was not evaluated. The fix is uncommitted, so no SHA exists yet.'
 ---
 
 # BUG: `concurrent_producers_have_untorn_distinct_records` fails when two producers contend for the 100 ms lock budget
@@ -75,9 +74,14 @@ The store is unchanged, so the 100 ms bounded wait stays as designed. Whether th
 
 Run the test with `TMPDIR` on tmpfs.
 
+## Fix provenance
+
+- **SHA:** `7a8a07b09` (`experiments`)
+- **patch-id:** `3f0f7898dcd970b24015c530b2418497e915c2d1`
+
 ## Resume
 
-The fix is in the working tree and is not committed. After the commit: record the fix SHA labelled `experiments` with its patch-id (`git show <sha> | git patch-id --stable`), then archive with `doc(action="move")`. Open question for the owner of `src/observations/`: should the lock wait be fair under contention?
+Closed. The fix is committed on `experiments` (see Fix provenance), the full gate was green before the commit, and the file is archived. One question stays open and is recorded only in the Fix section: should the 100 ms lock wait in `secure::lock` be fair under contention? Nothing in the repository decides it. Reopen this bug if a contended `append` is seen to lose observations in real use.
 
 ## References
 

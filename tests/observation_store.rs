@@ -296,7 +296,7 @@ fn concurrent_producers_have_untorn_distinct_records() {
             for _ in 0..12 {
                 // The store waits at most 100 ms for its lock and then answers `unavailable` before it
                 // writes anything. Two producers in a tight loop may lose that wait on a slow disk
-                // (bug fd90744bf199735c), so a timeout is not a defect here. Any other error is.
+                // (bug c052a7c89e3b4a4d), so a timeout is not a defect here. Any other error is.
                 match s.append(event(&root)) {
                     Ok(_) => acknowledged += 1,
                     Err(e) => assert_eq!(e, "unavailable", "unexpected append error: {e}"),
