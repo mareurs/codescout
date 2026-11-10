@@ -18,6 +18,14 @@ pub enum EdgeSource {
     Ts,
 }
 
+/// Concrete declaration identity, distinct from a displayed call-site location.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Definition {
+    pub file: PathBuf,
+    pub line: u32,
+    pub col: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Edge {
     pub caller_sym: String,
@@ -26,6 +34,9 @@ pub struct Edge {
     pub line: u32,
     pub col: u32,
     pub source: EdgeSource,
+    /// Next-hop declaration supplied by semantic resolution; absent for legacy or AST edges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<Definition>,
 }
 
 // ── Main entry point ─────────────────────────────────────────────────────────
@@ -79,6 +90,22 @@ pub async fn resolve_one_hop(
 
 // ── LSP path ─────────────────────────────────────────────────────────────────
 
+/// Use a valid hierarchy item's selection, not its call site's ranges, for the next hop.
+fn hierarchy_target(item: &lsp_types::CallHierarchyItem) -> Option<Definition> {
+    if item.range.start >= item.range.end
+        || item.selection_range.start < item.range.start
+        || item.selection_range.end > item.range.end
+        || item.selection_range.start >= item.selection_range.end
+    {
+        return None;
+    }
+    Some(Definition {
+        file: lsp_uri_to_path(&item.uri)?,
+        line: item.selection_range.start.line,
+        col: item.selection_range.start.character,
+    })
+}
+
 async fn resolve_via_lsp(
     client: &dyn crate::lsp::ops::LspClientOps,
     sym_name: &str,
@@ -101,6 +128,7 @@ async fn resolve_via_lsp(
                         line: range.start.line,
                         col: range.start.character,
                         source: EdgeSource::Lsp,
+                        target: hierarchy_target(&c.from),
                     });
                 }
                 // If from_ranges is empty, emit one edge at the symbol's own position.
@@ -112,6 +140,7 @@ async fn resolve_via_lsp(
                         line: c.from.range.start.line,
                         col: c.from.range.start.character,
                         source: EdgeSource::Lsp,
+                        target: hierarchy_target(&c.from),
                     });
                 }
             }
@@ -131,6 +160,7 @@ async fn resolve_via_lsp(
                         line: range.start.line,
                         col: range.start.character,
                         source: EdgeSource::Lsp,
+                        target: hierarchy_target(&c.to),
                     });
                 }
                 // If from_ranges is empty, emit one edge at the callee's own position.
@@ -142,6 +172,7 @@ async fn resolve_via_lsp(
                         line: c.to.range.start.line,
                         col: c.to.range.start.character,
                         source: EdgeSource::Lsp,
+                        target: hierarchy_target(&c.to),
                     });
                 }
             }
@@ -226,6 +257,7 @@ async fn resolve_via_ts(
                     line: loc.range.start.line,
                     col: loc.range.start.character,
                     source: EdgeSource::Ts,
+                    target: None,
                 });
             }
 
@@ -585,6 +617,7 @@ fn resolve_callees_via_ts(
                     line: start.row as u32,
                     col: start.column as u32,
                     source: EdgeSource::Ts,
+                    target: None,
                 });
             }
         }

@@ -401,11 +401,17 @@ impl LspClientOps for MockLspClient {
         if !self.call_hierarchy_delay.is_zero() {
             tokio::time::sleep(self.call_hierarchy_delay).await;
         }
+        // Opaque string item data can scope replies for identical display names.
+        let key = item
+            .data
+            .as_ref()
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(item.name.as_str());
         Ok(self
             .incoming_calls_results
             .lock()
             .unwrap()
-            .get(&item.name)
+            .get(key)
             .cloned()
             .unwrap_or_default())
     }
@@ -415,11 +421,17 @@ impl LspClientOps for MockLspClient {
         item: &lsp_types::CallHierarchyItem,
         _language_id: &str,
     ) -> anyhow::Result<Vec<lsp_types::CallHierarchyOutgoingCall>> {
+        // Opaque string item data can scope replies for identical display names.
+        let key = item
+            .data
+            .as_ref()
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(item.name.as_str());
         Ok(self
             .outgoing_calls_results
             .lock()
             .unwrap()
-            .get(&item.name)
+            .get(key)
             .cloned()
             .unwrap_or_default())
     }

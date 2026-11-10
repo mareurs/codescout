@@ -1,9 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use async_trait::async_trait;
 use futures::future::try_join_all;
 
-use crate::tools::symbol::call_edges::resolver::{Direction, Edge};
+use crate::tools::symbol::call_edges::resolver::{Definition, Direction, Edge};
 
 #[derive(Clone)]
 pub struct TraversalConfig {
@@ -25,9 +24,69 @@ pub struct EdgeWithDepth {
     pub paths: u32,
 }
 
-#[async_trait]
+/// A queue key carries the actual declaration once semantic resolution placed it.
+#[derive(Clone, Debug)]
+pub struct TraversalNode {
+    pub symbol: String,
+    /// The provider's query position; do not replace it with an AST range start.
+    pub definition: Option<Definition>,
+    identity: Option<Definition>,
+}
+
+impl TraversalNode {
+    pub fn named(symbol: &str) -> Self {
+        Self {
+            symbol: symbol.to_owned(),
+            definition: None,
+            identity: None,
+        }
+    }
+
+    pub fn at(symbol: &str, definition: Definition) -> Self {
+        Self {
+            symbol: symbol.to_owned(),
+            identity: Some(definition.clone()),
+            definition: Some(definition),
+        }
+    }
+
+    pub fn with_identity(mut self, identity: Definition) -> Self {
+        self.identity = Some(identity);
+        self
+    }
+
+    fn key(&self) -> (String, Option<Definition>) {
+        (self.symbol.clone(), self.identity.clone())
+    }
+}
+
+#[async_trait::async_trait]
 pub trait OneHopResolver: Send + Sync {
     async fn one_hop(&self, symbol: &str, direction: Direction) -> anyhow::Result<Vec<Edge>>;
+
+    async fn seed_node(&self, symbol: &str) -> anyhow::Result<TraversalNode> {
+        Ok(TraversalNode::named(symbol))
+    }
+
+    async fn one_hop_at(
+        &self,
+        node: &TraversalNode,
+        direction: Direction,
+    ) -> anyhow::Result<Vec<Edge>> {
+        self.one_hop(&node.symbol, direction).await
+    }
+
+    async fn next_node(
+        &self,
+        edge: &Edge,
+        direction: Direction,
+    ) -> anyhow::Result<Option<TraversalNode>> {
+        let symbol = match direction {
+            Direction::Callers => &edge.caller_sym,
+            Direction::Callees => &edge.callee_sym,
+        };
+        Ok(Some(TraversalNode::named(symbol)))
+    }
 }
 
 pub async fn bfs<R: OneHopResolver>(
@@ -36,59 +95,62 @@ pub async fn bfs<R: OneHopResolver>(
     direction: Direction,
     cfg: TraversalConfig,
 ) -> anyhow::Result<TraversalResult> {
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut current_level: VecDeque<String> = VecDeque::new();
-    current_level.push_back(seed_symbol.to_string());
-    visited.insert(seed_symbol.to_string());
+    let seed = resolver.seed_node(seed_symbol).await?;
+    let mut visited: HashSet<(String, Option<Definition>)> = HashSet::new();
+    let mut current_level: VecDeque<TraversalNode> = VecDeque::new();
+    current_level.push_back(seed.clone());
+    visited.insert(seed.key());
 
     let mut all_edges: Vec<EdgeWithDepth> = Vec::new();
     let mut max_depth_reached = 0u32;
     let mut truncated = false;
-    let mut truncated_at_depth: Option<u32> = None;
+    let mut truncated_at_depth = None;
 
     for depth in 1..=cfg.max_depth {
-        let mut next_symbols: HashSet<String> = HashSet::new();
-        let mut level_raw: Vec<EdgeWithDepth> = Vec::new();
-
-        let symbols_at_level: Vec<String> = current_level.drain(..).collect();
+        let nodes: Vec<_> = current_level.drain(..).collect();
         let hop_results = try_join_all(
-            symbols_at_level
+            nodes
                 .iter()
-                .map(|sym| resolver.one_hop(sym, direction.clone())),
+                .map(|node| resolver.one_hop_at(node, direction.clone())),
         )
         .await?;
+        let level_raw: Vec<_> = hop_results
+            .into_iter()
+            .flatten()
+            .map(|edge| EdgeWithDepth {
+                edge,
+                depth,
+                paths: 1,
+            })
+            .collect();
+        let level_edges = dedupe_with_paths(level_raw.clone());
 
-        for hops in hop_results {
-            for edge in hops {
-                let neighbor = match direction {
-                    Direction::Callers => edge.caller_sym.clone(),
-                    Direction::Callees => edge.callee_sym.clone(),
-                };
-                if visited.insert(neighbor.clone()) {
-                    next_symbols.insert(neighbor);
-                }
-                level_raw.push(EdgeWithDepth {
-                    edge,
-                    depth,
-                    paths: 1,
-                });
-            }
-        }
-
-        let level_edges = dedupe_with_paths(level_raw);
-
-        // Depth-coherent cap: if this level would push us over max_edges, truncate the ENTIRE
-        // level (not a partial slice) — but always accept depth==1.
+        // Preserve full-level caps, and do not resolve neighbors of a discarded level.
         if depth > 1 && !all_edges.is_empty() && all_edges.len() + level_edges.len() > cfg.max_edges
         {
             truncated = true;
             truncated_at_depth = Some(depth);
             break;
         }
+
+        // A requested depth boundary needs no next-hop analysis or uncertainty warning.
+        let next = if depth < cfg.max_depth {
+            try_join_all(
+                level_raw
+                    .iter()
+                    .map(|hop| resolver.next_node(&hop.edge, direction.clone())),
+            )
+            .await?
+        } else {
+            Vec::new()
+        };
         all_edges.extend(level_edges);
         max_depth_reached = depth;
-
-        current_level.extend(next_symbols);
+        for node in next.into_iter().flatten() {
+            if visited.insert(node.key()) {
+                current_level.push_back(node);
+            }
+        }
         if current_level.is_empty() {
             break;
         }
@@ -165,6 +227,7 @@ mod tests {
             line: 0,
             col: 0,
             source: EdgeSource::Lsp,
+            target: None,
         }
     }
 

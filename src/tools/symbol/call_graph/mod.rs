@@ -8,10 +8,18 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use crate::tools::symbol::call_edges::cache::{EdgeCache, ResolutionKey};
-use crate::tools::symbol::call_edges::resolver::{resolve_one_hop, Direction, Edge, EdgeSource};
-use crate::tools::symbol::call_graph::traversal::{EdgeWithDepth, OneHopResolver, TraversalResult};
+use crate::tools::symbol::call_edges::resolver::{
+    resolve_one_hop, Definition, Direction, Edge, EdgeSource,
+};
+use crate::tools::symbol::call_graph::traversal::{
+    EdgeWithDepth, OneHopResolver, TraversalNode, TraversalResult,
+};
 use crate::tools::symbol::scan_budget::{is_compiled_twin, scan_walk, ScanBudget, ScanCoverage};
 use crate::tools::{OutputForm, Tool, ToolContext};
+
+mod identity;
+mod rust_lexical;
+mod rust_target;
 
 /// A SQLite failure such as "disk I/O error" names neither the store nor the step. This puts both
 /// in the message and keeps the cause, so the caller can tell which file failed (bug
@@ -419,10 +427,34 @@ fn find_named_def<'a>(
 #[async_trait]
 impl OneHopResolver for CachedResolver {
     async fn one_hop(&self, symbol: &str, direction: Direction) -> anyhow::Result<Vec<Edge>> {
+        let node = self.seed_node(symbol).await?;
+        self.one_hop_at(&node, direction).await
+    }
+
+    async fn seed_node(&self, symbol: &str) -> anyhow::Result<TraversalNode> {
+        Ok(match self.lookup_pos(symbol).await {
+            Some((file, line, col)) => {
+                let definition = Definition { file, line, col };
+                let identity = identity::canonical(symbol, definition.clone());
+                TraversalNode::at(symbol, definition).with_identity(identity)
+            }
+            None => TraversalNode::named(symbol),
+        })
+    }
+
+    async fn one_hop_at(
+        &self,
+        node: &TraversalNode,
+        direction: Direction,
+    ) -> anyhow::Result<Vec<Edge>> {
         // Resolve identity before reading completed adjacency, including for the pinned seed.
-        let (path, line, col) = match self.lookup_pos(symbol).await {
-            Some(p) => p,
-            None => return Ok(vec![]),
+        let symbol = node.symbol.as_str();
+        let (path, line, col) = match &node.definition {
+            Some(definition) => (definition.file.clone(), definition.line, definition.col),
+            None => match self.lookup_pos(symbol).await {
+                Some(position) => position,
+                None => return Ok(vec![]),
+            },
         };
         let key = ResolutionKey {
             symbol,
@@ -438,7 +470,13 @@ impl OneHopResolver for CachedResolver {
                 .map_err(|e| cache_error("reading", &self.root, e))?
         };
         if let Some(edges) = cached {
-            return Ok(edges);
+            // Old LSP payloads lack endpoint identity; recompute instead of guessing by name.
+            if !edges
+                .iter()
+                .any(|edge| edge.source == EdgeSource::Lsp && edge.target.is_none())
+            {
+                return Ok(edges);
+            }
         }
 
         // Each node is parsed and opened under the language of its own file.
@@ -482,6 +520,56 @@ impl OneHopResolver for CachedResolver {
                 .map_err(|e| cache_error("writing to", &self.root, e))?;
         }
         Ok(edges)
+    }
+
+    async fn next_node(
+        &self,
+        edge: &Edge,
+        direction: Direction,
+    ) -> anyhow::Result<Option<TraversalNode>> {
+        let symbol = match direction {
+            Direction::Callers => &edge.caller_sym,
+            Direction::Callees => &edge.callee_sym,
+        };
+        let placement = identity::next(
+            self.client.as_ref(),
+            &self.root,
+            &self.lang,
+            self.workspace_scan_cap,
+            edge,
+            direction.clone(),
+        )
+        .await;
+        let reason = match placement {
+            identity::Placement::Found(definition) => {
+                let key = identity::canonical(symbol, definition.clone());
+                return Ok(Some(
+                    TraversalNode::at(symbol, definition).with_identity(key),
+                ));
+            }
+            identity::Placement::Missing => return Ok(None),
+            identity::Placement::Incomplete(coverage) => {
+                self.scan_incomplete
+                    .lock()
+                    .unwrap()
+                    .insert(symbol.to_owned());
+                self.scan_coverage.lock().unwrap().merge(coverage);
+                return Ok(None);
+            }
+            identity::Placement::Ambiguous => "ambiguous declaration identity".to_owned(),
+            identity::Placement::Unresolved(reason) => reason,
+        };
+        let label = match direction {
+            Direction::Callers => "callers",
+            Direction::Callees => "callees",
+        };
+        self.analysis_failures.lock().unwrap().insert(format!(
+            "`{symbol}` direction={label} from {}:{}:{}: {reason}",
+            edge.file.display(),
+            edge.line + 1,
+            edge.col + 1
+        ));
+        Ok(None)
     }
 }
 
@@ -925,6 +1013,7 @@ mod tests {
                 line: 5,
                 col: 0,
                 source: EdgeSource::Lsp,
+                target: None,
             },
             depth: 1,
             paths: 1,
@@ -969,6 +1058,7 @@ mod tests {
                     line: i,
                     col: 0,
                     source: EdgeSource::Ts,
+                    target: None,
                 },
                 depth: 1,
                 paths: 1,
@@ -2113,6 +2203,7 @@ mod tests {
                 line: 0,
                 col: 12,
                 source: crate::tools::symbol::call_edges::resolver::EdgeSource::Ts,
+                target: None,
             }])
             .unwrap();
         let edges = resolver.one_hop("call", Direction::Callees).await.unwrap();
@@ -2160,5 +2251,8 @@ mod tests {
         }
     }
 } // mod tests
+
+#[cfg(test)]
+mod identity_tests;
 
 pub mod traversal;

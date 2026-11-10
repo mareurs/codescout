@@ -216,6 +216,7 @@ fn row_to_edge(row: &rusqlite::Row<'_>) -> rusqlite::Result<Edge> {
         } else {
             EdgeSource::Ts
         },
+        target: None,
     })
 }
 
@@ -245,6 +246,7 @@ mod tests {
             line: 3,
             col: 0,
             source: EdgeSource::Lsp,
+            target: None,
         };
         cache.upsert(std::slice::from_ref(&edge)).unwrap();
         let got = cache.lookup_callers("a").unwrap();
@@ -262,6 +264,7 @@ mod tests {
             line: 5,
             col: 4,
             source: EdgeSource::Ts,
+            target: None,
         };
         cache.upsert(std::slice::from_ref(&edge)).unwrap();
         let got = cache.lookup_callees("a").unwrap();
@@ -279,6 +282,7 @@ mod tests {
             line: 3,
             col: 0,
             source: EdgeSource::Lsp,
+            target: None,
         };
         let e2 = Edge {
             caller_sym: "c".into(),
@@ -287,6 +291,7 @@ mod tests {
             line: 7,
             col: 2,
             source: EdgeSource::Ts,
+            target: None,
         };
         cache.upsert(&[e1.clone(), e2.clone()]).unwrap();
         let removed = cache.invalidate_file(Path::new("a.rs")).unwrap();
@@ -307,6 +312,7 @@ mod tests {
             line: 3,
             col: 0,
             source: EdgeSource::Lsp,
+            target: None,
         };
         cache.upsert(std::slice::from_ref(&edge)).unwrap();
         cache.upsert(std::slice::from_ref(&edge)).unwrap(); // second upsert
@@ -326,6 +332,7 @@ mod tests {
             line: 1,
             col: 0,
             source: EdgeSource::Lsp,
+            target: None,
         };
         cache_a.upsert(std::slice::from_ref(&edge)).unwrap();
         // project-b should not see project-a's edges
@@ -354,6 +361,7 @@ mod tests {
             line: 3,
             col: 0,
             source: EdgeSource::Lsp,
+            target: None,
         };
 
         // Step 1: seed.
@@ -405,6 +413,7 @@ mod tests {
             line: 11,
             col: 9,
             source: EdgeSource::Lsp,
+            target: None,
         }
     }
 
