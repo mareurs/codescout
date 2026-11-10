@@ -1185,7 +1185,7 @@ pub fn build_onboarding_prompt(ctx: &OnboardingContext) -> String {
 
     if ctx.index_ready {
         prompt.push_str(&format!(
-            "**Semantic index:** ready ({} files, {} chunks)\n\n",
+            "**Semantic index:** built ({} files, {} chunks)\n\n",
             ctx.index_files, ctx.index_chunks
         ));
     } else {
@@ -1822,7 +1822,7 @@ mod tests {
     }
 
     #[test]
-    fn build_onboarding_shows_index_ready() {
+    fn build_onboarding_shows_index_built() {
         let result = build_onboarding_prompt(&OnboardingContext {
             languages: &["rust".into()],
             top_level: &[],
@@ -1836,7 +1836,17 @@ mod tests {
             projects: &[],
             is_workspace: false,
         });
-        assert!(result.contains("Semantic index:** ready (42 files, 350 chunks)"));
+        assert!(result.contains("Semantic index:** built (42 files, 350 chunks)"));
+        // The instruction that tells the agent what to announce must not call a stored
+        // index ready: stored chunks say nothing about the embedder answering a query.
+        assert!(
+            !result.contains("Semantic index is ready"),
+            "the Phase 1 announcement must not promise a working index"
+        );
+        assert!(
+            result.contains("Semantic index is built"),
+            "the Phase 1 announcement must state the stored fact"
+        );
     }
 
     #[test]

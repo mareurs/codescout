@@ -43,7 +43,12 @@ use super::{parse_bool_param, Tool, ToolContext};
 // call-form pass now closes that. Same reasoning as the 2026-09-03 bump: already-onboarded
 // projects cache the rendered prompt, so the fix does not reach them without this.
 // docs/issues/2026-09-05-the-prompt-surface-gate-misses-a-backticked-tool-name-in-call-form.md
-pub(crate) const ONBOARDING_VERSION: u32 = 33;
+// Bumped 2026-11-11 (index banner): Phase 1 of the onboarding slice told the agent to announce
+// "Semantic index is ready" whenever stored chunks exist. Stored chunks do not show that the
+// embedder can answer a query, so the slice now says "built" and names the `grep` fallback.
+// Already-onboarded projects cache the rendered prompt, so they need this bump to get it.
+// docs/issues/2026-11-10-semantic-ready-banner-unreachable-embedder.md
+pub(crate) const ONBOARDING_VERSION: u32 = 34;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.

@@ -117,12 +117,13 @@ Then proceed to Phase 1 (Semantic Index Check).
 
 Check the **Semantic index** line in the Gathered Project Data below.
 
-### If the index is READY:
+### If the index is BUILT:
 
 Announce to the user:
 
-> "Semantic index is ready ({files} files, {chunks} chunks). I'll use
-> `semantic_search` for concept-level exploration in Phase 2."
+> "Semantic index is built ({files} files, {chunks} chunks). I'll try
+> `semantic_search` for concept-level exploration in Phase 2, and fall back to
+> `grep` if a query fails because the embedder is unavailable."
 
 Proceed to Phase 2.
 

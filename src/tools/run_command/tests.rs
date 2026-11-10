@@ -4575,9 +4575,8 @@ fn system_prompt_points_to_tool_guide_resource() {
     // ONBOARDING_VERSION so a bump cannot be silent — it must be paired with an edit here.
     // Bumping is required when the `onboarding_prompt` surface changes, because already-
     // onboarded projects cache the rendered prompt; see src/prompts/README.md. Last moved
-    // to 32 when the surface's `call_graph` calls gained `path` and the draft's Iron Law
-    // citation was corrected.
-    assert_eq!(ONBOARDING_VERSION, 33);
+    // to 34 when the Phase 1 announcement stopped calling a stored index "ready".
+    assert_eq!(ONBOARDING_VERSION, 34);
 }
 
 #[test]
