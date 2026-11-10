@@ -36,7 +36,12 @@ Live codescout MCP server, current Codex session, Rust source changed through st
 
 ## Root cause
 
-Unknown — the source lookup and range cache have not been traced. Do not infer which cache owns this from the symptom alone.
+Still unknown. Checked 2026-11-10 (session a3eb869d), HEAD ba103456c:
+
+- NOT reproduced. In the retained worktree `.worktrees/ecc-bfs-identity-20261110` (HEAD now 537fa820d, moved since the report), `symbols(name="call_site", path="src/tools/symbol/call_graph/identity.rs", include_body=true, workspace=<worktree>)` returns lines 170-261 with the correct body, and `grep -n` confirms `fn call_site` at line 170.
+- NOT reproduced by an external rewrite in the main checkout. After `rustfmt` moved lines in `src/tools/symbol/call_edges/resolver.rs`, `symbols(name="nested_callable_kinds_for")` returned 392-403 and `grep -n` confirmed line 392.
+- Verified (via `references`): outside tests, `validate_symbol_position` (`src/symbol/query.rs:292`) has one caller, `fetch_validated_symbol` (`query.rs:549`), and only the three `edit_code` sites in `src/tools/symbol/edit_code.rs` call that. The read path of `symbols` has no position check and no retry with a fresh `did_change`. So a stale LSP range that an edit would catch and retry reaches a `symbols` read unchecked.
+- NOT established: why the LSP answered with a stale range at all. Hypothesis, untested: the language server did not receive the file change. The prior instance `docs/issues/archive/2026-07-28-edit-code-target-base-from-stale-lsp-range.md` also never confirmed a mechanism; its lesson applies: a single non-reproducing instance is not a mechanism.
 
 ## Evidence
 
@@ -52,4 +57,4 @@ None — no navigation fix attempted. Runtime counterexample captured before any
 
 ## Resume — 2026-11-10
 
-Open, outside the current bounded call-graph task. No exhaustive duplicate audit; targeted catalog title and semantic searches did not return an existing active record.
+Open. No fix attempted, by design: there is no reproduction on current bytes. Next step if it recurs: capture, BEFORE any flush or edit, the raw `symbols` response, the file's mtime, and the language server's own `textDocument/documentSymbol` answer for the same file, then compare with the bytes. A candidate hardening, only after a mechanism is shown: validate the start line on the `symbols` read path as the edit path does.
