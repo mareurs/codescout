@@ -1,15 +1,16 @@
 ---
 id: '0f9e7f9b87799265'
 kind: bug
-status: open
+status: fixed
 title: Call graph AST collector attributes nested function calls to the enclosing function
 tags:
 - call-graph
 - cluster/unclassified
-closed: null
+closed: 2026-11-10
 opened: 2026-11-10
 owner: marius
 severity: medium
+unverified: Only Rust has a regression test. The Python, TS/JS, Kotlin and Java entries in nested_callable_kinds_for are untested, and no run exercised them against a real nested declaration. Not pushed yet.
 ---
 
 # BUG: nested function calls are attributed to the outer function
@@ -44,7 +45,7 @@ Case2 response first content block declares three edges, including `4: entry →
 
 ## Fix
 
-Uncommitted in the working tree at the time of writing (cite the SHA and patch-id when it lands). New `nested_callable_kinds_for(language_id)` lists the declaration kinds that own a callable: Rust `function_item`, Python `function_definition`, TS/JS `function_declaration` and `method_definition`, Kotlin `function_declaration`, Java `method_declaration`. The walk skips a child of those kinds. Closures, lambdas, arrow functions and function expressions are NOT skipped, so their calls stay with the enclosing function.
+Fixed in `af2557ef247157ca1a3865fef5e29ad8a291e9a7` on `experiments` (patch-id `04f9e1178bad322a2be14b4443ce23fde07ff55f`). Full `./scripts/gate.sh` was green before the commit. New `nested_callable_kinds_for(language_id)` lists the declaration kinds that own a callable: Rust `function_item`, Python `function_definition`, TS/JS `function_declaration` and `method_definition`, Kotlin `function_declaration`, Java `method_declaration`. The walk skips a child of those kinds. Closures, lambdas, arrow functions and function expressions are NOT skipped, so their calls stay with the enclosing function.
 
 ## Tests added
 
@@ -52,4 +53,10 @@ Uncommitted in the working tree at the time of writing (cite the SHA and patch-i
 
 ## Resume — 2026-11-10
 
-Open, outside the current identity pass. Targeted catalog title searches found no existing record; unindexed files and all semantic variants were not exhaustively audited.
+Fixed 2026-11-10 (see Fix provenance). Was open, outside the current identity pass. Targeted catalog title searches found no existing record; unindexed files and all semantic variants were not exhaustively audited.
+
+
+## Fix provenance
+
+- **SHA:** `af2557ef247157ca1a3865fef5e29ad8a291e9a7` (`experiments`)
+- **patch-id:** `04f9e1178bad322a2be14b4443ce23fde07ff55f`
