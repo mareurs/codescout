@@ -1421,6 +1421,30 @@ mod tests {
         let names = ts_callee_names("Fixture.java", src, "a", 1, 9, "java").await;
         assert_eq!(names, vec!["inner"]);
     }
+    #[tokio::test]
+    async fn resolve_callees_via_ts_js_family_excludes_calls_inside_a_nested_function() {
+        // `javascript`, `tsx` and `jsx` share one match arm with `typescript` in
+        // `nested_callable_kinds_for`; each id must skip a nested declaration. All
+        // three results are collected before the assertion, so a failure names every
+        // id that is wrong and not only the first.
+        let src = "function a() {\n    function inner() {\n        right();\n    }\n    inner();\n}\nfunction right() {}\n";
+        let mut got = Vec::new();
+        for (language_id, file_name) in [
+            ("javascript", "fixture.js"),
+            ("tsx", "fixture.tsx"),
+            ("jsx", "fixture.jsx"),
+        ] {
+            got.push((
+                language_id,
+                ts_callee_names(file_name, src, "a", 0, 9, language_id).await,
+            ));
+        }
+        let inner = || vec!["inner".to_owned()];
+        assert_eq!(
+            got,
+            vec![("javascript", inner()), ("tsx", inner()), ("jsx", inner())]
+        );
+    }
 
     // ── Helper unit tests ────────────────────────────────────────────────────
 

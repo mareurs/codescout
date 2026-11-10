@@ -10,7 +10,6 @@ closed: 2026-11-10
 opened: 2026-11-10
 owner: marius
 severity: medium
-unverified: The TS/JS arm of nested_callable_kinds_for is tested only through the language id `typescript`; `javascript`, `tsx` and `jsx` share that match arm and have no test of their own.
 ---
 
 # BUG: nested function calls are attributed to the outer function
@@ -51,7 +50,7 @@ Fixed in `af2557ef247157ca1a3865fef5e29ad8a291e9a7` on `experiments` (patch-id `
 
 Rust, in `af2557ef2`: `resolve_callees_via_ts_rust_excludes_calls_inside_a_nested_fn` (watched RED: returned `[helper, right]`, expected `[helper]`; GREEN after the fix) and `resolve_callees_via_ts_rust_keeps_calls_inside_a_closure`. Other languages, each calling the callee fallback through the shared helper `ts_callee_names`: `..._python_excludes_calls_inside_a_nested_def`, `..._python_keeps_calls_inside_a_lambda`, `..._typescript_excludes_calls_inside_a_nested_function`, `..._typescript_excludes_calls_inside_a_nested_class_method` (covers `method_definition`), `..._typescript_keeps_calls_inside_an_arrow_function`, `..._kotlin_excludes_calls_inside_a_local_fun`, `..._java_excludes_calls_inside_a_local_class_method`.
 
-Measured 2026-11-10: `cargo test --lib call_edges::resolver` 33 passed; `cargo clippy --lib --tests -- -D warnings` clean. Mutation check: with the skip disabled (`if false && nested.contains(&child.kind())`) exactly the six exclusion tests fail, each with the extra edge (`right` or `other`), and the three keep guards (Rust closure, Python lambda, TS arrow) still pass; reverted afterwards. The full `./scripts/gate.sh` was green before `af2557ef2`; it was NOT re-run for the test-only commit that added the non-Rust tests.
+Measured 2026-11-10: `cargo test --lib call_edges::resolver` 33 passed; `cargo clippy --lib --tests -- -D warnings` clean. Mutation check: with the skip disabled (`if false && nested.contains(&child.kind())`) exactly the six exclusion tests fail, each with the extra edge (`right` or `other`), and the three keep guards (Rust closure, Python lambda, TS arrow) still pass; reverted afterwards. JS family (2026-11-11): `..._js_family_excludes_calls_inside_a_nested_function` runs the ids `javascript`, `tsx` and `jsx` through one assertion. With the helper's arm narrowed to `"typescript"` it failed for all three ids, each returning `[inner, right]`; reverted afterwards. On the final bytes `cargo test --lib call_edges::resolver` is 34 passed and `cargo clippy --lib --tests -- -D warnings` is clean. The full `./scripts/gate.sh` was green before `af2557ef2`; it was NOT re-run for the test-only commits that followed.
 
 ## Resume — 2026-11-10
 
