@@ -1,0 +1,22 @@
+{
+  "post_compact_flush_performed": true,
+  "symbols": {
+    "content": [
+      {
+        "type": "text",
+        "text": "src/tools/symbol/call_graph/identity.rs (1)\n  Function  136-186  call_site\n          let coverage = budget.coverage_requiring_a_candidate();\n          if !coverage.is_complete() {\n              Placement::Incomplete(coverage)\n          } else {\n              candidate\n                  .map(Placement::Found)\n                  .unwrap_or(Placement::Missing)\n          }\n      }\n      \n      struct CallSite {\n          expression: Option<String>,\n          line: u32,\n          col: u32,\n          modules: Vec<String>,\n      }\n      \n      fn rust_path(node: tree_sitter::Node<'_>, source: &[u8]) -> Option<String> {\n          match node.kind() {\n              \"identifier\" | \"type_identifier\" | \"self\" | \"super\" | \"crate\" => {\n                  node.utf8_text(source).ok().map(str::to_owned)\n              }\n              \"generic_function\" => rust_path(node.child_by_field_name(\"function\")?, source),\n              \"generic_type\" => rust_path(node.child_by_field_name(\"type\")?, source),\n              \"scoped_identifier\" | \"scoped_type_identifier\" => Some(format!(\n                  \"{}::{}\",\n                  rust_path(node.child_by_field_name(\"path\")?, source)?,\n                  rust_path(node.child_by_field_name(\"name\")?, source)?\n              )),\n              _ => None,\n          }\n      }\n      \n      fn call_site(edge: &Edge) -> Option<CallSite> {\n          let lang = crate::ast::detect_language(&edge.file)?;\n          let source = std::fs::read_to_string(&edge.file).ok()?;\n          let mut parser = tree_sitter::Parser::new();\n          parser\n              .set_language(&crate::ast::get_ts_language(lang)?)\n              .ok()?;\n          let tree = parser.parse(&source, None)?;\n          let base: usize = source\n              .split_inclusive('\\n')\n              .take(edge.line as usize)\n              .map(str::len)\n              .sum();\n          let byte = (base + edge.col as usize).min(source.len());\n          let mut node = tree.root_node().descendant_for_byte_range(byte, byte)?;\n          while !matches!(\n              node.kind(),\n              \"call_expression\""
+      }
+    ],
+    "isError": false
+  },
+  "forced_lines_169_185": {
+    "content": [
+      {
+        "type": "text",
+        "text": "17 lines\n\nfn call_site(edge: &Edge) -> Option<CallSite> {\n    let lang = crate::ast::detect_language(&edge.file)?;\n    let source = std::fs::read_to_string(&edge.file).ok()?;\n    let mut parser = tree_sitter::Parser::new();\n    parser\n        .set_language(&crate::ast::get_ts_language(lang)?)\n        .ok()?;\n    let tree = parser.parse(&source, None)?;\n    let base: usize = source\n        .split_inclusive('\\n')\n        .take(edge.line as usize)\n        .map(str::len)\n        .sum();\n    let byte = (base + edge.col as usize).min(source.len());\n    let mut node = tree.root_node().descendant_for_byte_range(byte, byte)?;\n    while !matches!(\n        node.kind(),"
+      }
+    ],
+    "isError": false
+  },
+  "source_manifest": "candidate-source.json"
+}

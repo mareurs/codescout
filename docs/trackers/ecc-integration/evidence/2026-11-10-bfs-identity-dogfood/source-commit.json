@@ -1,0 +1,17 @@
+{
+  "sha": "537fa820d95b3298393cc515ab104776a57455c7",
+  "tree": "3fbc66f5921592b339b5866e8b9e0baf38bb5184",
+  "patch_id": "52c9b1d039bbdd7de6183eefca168f32318d8cd8",
+  "paths": [
+    "src/lsp/mock.rs",
+    "src/tools/symbol/call_edges/cache.rs",
+    "src/tools/symbol/call_edges/resolver.rs",
+    "src/tools/symbol/call_graph/identity.rs",
+    "src/tools/symbol/call_graph/identity_tests.rs",
+    "src/tools/symbol/call_graph/identity_tests/review.rs",
+    "src/tools/symbol/call_graph/mod.rs",
+    "src/tools/symbol/call_graph/rust_lexical.rs",
+    "src/tools/symbol/call_graph/rust_target.rs",
+    "src/tools/symbol/call_graph/traversal.rs"
+  ]
+}

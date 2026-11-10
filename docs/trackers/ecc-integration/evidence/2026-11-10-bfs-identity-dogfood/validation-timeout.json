@@ -1,0 +1,6 @@
+{
+  "command": "python3 finalize_evidence.py stage > validation-stage.log 2>&1",
+  "observed": "foreground tool timed_out=true after30seconds, exit_code=null; output log remained empty",
+  "classification": "nonqualifying controller validation attempt, not a product/test failure",
+  "correction": "replace eager whole-file tracked-population reads with git grep -I and run validation in background; retain initial empty log and this timeout observation"
+}

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000cd",
+  "command": "env -u CARGO_TARGET_DIR TMPDIR=/home/marius/.cache/codescout-ecc-tmp CODESCOUT_GATE_TMPFS_BASE=off ./scripts/with-slot.sh --slot 2 cargo test --no-default-features --lib tools::symbol::call_ > /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/lsp-target-green.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 3594843,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-10T16:33:00.910149646+00:00",
+  "finished_at": "2026-11-10T16:33:23.257292212+00:00",
+  "log_path": "/tmp/codescout-bg-DgR9mt.log"
+}

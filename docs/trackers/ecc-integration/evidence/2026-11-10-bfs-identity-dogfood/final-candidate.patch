@@ -1,0 +1,1859 @@
+diff --git a/src/lsp/mock.rs b/src/lsp/mock.rs
+index 3bbe5d07d..0a6d06fd1 100644
+--- a/src/lsp/mock.rs
++++ b/src/lsp/mock.rs
+@@ -401,11 +401,17 @@ impl LspClientOps for MockLspClient {
+         if !self.call_hierarchy_delay.is_zero() {
+             tokio::time::sleep(self.call_hierarchy_delay).await;
+         }
++        // Opaque string item data can scope replies for identical display names.
++        let key = item
++            .data
++            .as_ref()
++            .and_then(serde_json::Value::as_str)
++            .unwrap_or(item.name.as_str());
+         Ok(self
+             .incoming_calls_results
+             .lock()
+             .unwrap()
+-            .get(&item.name)
++            .get(key)
+             .cloned()
+             .unwrap_or_default())
+     }
+@@ -415,11 +421,17 @@ impl LspClientOps for MockLspClient {
+         item: &lsp_types::CallHierarchyItem,
+         _language_id: &str,
+     ) -> anyhow::Result<Vec<lsp_types::CallHierarchyOutgoingCall>> {
++        // Opaque string item data can scope replies for identical display names.
++        let key = item
++            .data
++            .as_ref()
++            .and_then(serde_json::Value::as_str)
++            .unwrap_or(item.name.as_str());
+         Ok(self
+             .outgoing_calls_results
+             .lock()
+             .unwrap()
+-            .get(&item.name)
++            .get(key)
+             .cloned()
+             .unwrap_or_default())
+     }
+diff --git a/src/tools/symbol/call_edges/cache.rs b/src/tools/symbol/call_edges/cache.rs
+index 2ab1c573b..0b739e86c 100644
+--- a/src/tools/symbol/call_edges/cache.rs
++++ b/src/tools/symbol/call_edges/cache.rs
+@@ -216,6 +216,7 @@ fn row_to_edge(row: &rusqlite::Row<'_>) -> rusqlite::Result<Edge> {
+         } else {
+             EdgeSource::Ts
+         },
++        target: None,
+     })
+ }
+ 
+@@ -245,6 +246,7 @@ mod tests {
+             line: 3,
+             col: 0,
+             source: EdgeSource::Lsp,
++            target: None,
+         };
+         cache.upsert(std::slice::from_ref(&edge)).unwrap();
+         let got = cache.lookup_callers("a").unwrap();
+@@ -262,6 +264,7 @@ mod tests {
+             line: 5,
+             col: 4,
+             source: EdgeSource::Ts,
++            target: None,
+         };
+         cache.upsert(std::slice::from_ref(&edge)).unwrap();
+         let got = cache.lookup_callees("a").unwrap();
+@@ -279,6 +282,7 @@ mod tests {
+             line: 3,
+             col: 0,
+             source: EdgeSource::Lsp,
++            target: None,
+         };
+         let e2 = Edge {
+             caller_sym: "c".into(),
+@@ -287,6 +291,7 @@ mod tests {
+             line: 7,
+             col: 2,
+             source: EdgeSource::Ts,
++            target: None,
+         };
+         cache.upsert(&[e1.clone(), e2.clone()]).unwrap();
+         let removed = cache.invalidate_file(Path::new("a.rs")).unwrap();
+@@ -307,6 +312,7 @@ mod tests {
+             line: 3,
+             col: 0,
+             source: EdgeSource::Lsp,
++            target: None,
+         };
+         cache.upsert(std::slice::from_ref(&edge)).unwrap();
+         cache.upsert(std::slice::from_ref(&edge)).unwrap(); // second upsert
+@@ -326,6 +332,7 @@ mod tests {
+             line: 1,
+             col: 0,
+             source: EdgeSource::Lsp,
++            target: None,
+         };
+         cache_a.upsert(std::slice::from_ref(&edge)).unwrap();
+         // project-b should not see project-a's edges
+@@ -354,6 +361,7 @@ mod tests {
+             line: 3,
+             col: 0,
+             source: EdgeSource::Lsp,
++            target: None,
+         };
+ 
+         // Step 1: seed.
+@@ -405,6 +413,7 @@ mod tests {
+             line: 11,
+             col: 9,
+             source: EdgeSource::Lsp,
++            target: None,
+         }
+     }
+ 
+diff --git a/src/tools/symbol/call_edges/resolver.rs b/src/tools/symbol/call_edges/resolver.rs
+index 0b606e9ab..71faa9c98 100644
+--- a/src/tools/symbol/call_edges/resolver.rs
++++ b/src/tools/symbol/call_edges/resolver.rs
+@@ -18,6 +18,14 @@ pub enum EdgeSource {
+     Ts,
+ }
+ 
++/// Concrete declaration identity, distinct from a displayed call-site location.
++#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
++pub struct Definition {
++    pub file: PathBuf,
++    pub line: u32,
++    pub col: u32,
++}
++
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+ pub struct Edge {
+     pub caller_sym: String,
+@@ -26,6 +34,9 @@ pub struct Edge {
+     pub line: u32,
+     pub col: u32,
+     pub source: EdgeSource,
++    /// Next-hop declaration supplied by semantic resolution; absent for legacy or AST edges.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub target: Option<Definition>,
+ }
+ 
+ // ── Main entry point ─────────────────────────────────────────────────────────
+@@ -79,6 +90,22 @@ pub async fn resolve_one_hop(
+ 
+ // ── LSP path ─────────────────────────────────────────────────────────────────
+ 
++/// Use a valid hierarchy item's selection, not its call site's ranges, for the next hop.
++fn hierarchy_target(item: &lsp_types::CallHierarchyItem) -> Option<Definition> {
++    if item.range.start >= item.range.end
++        || item.selection_range.start < item.range.start
++        || item.selection_range.end > item.range.end
++        || item.selection_range.start >= item.selection_range.end
++    {
++        return None;
++    }
++    Some(Definition {
++        file: lsp_uri_to_path(&item.uri)?,
++        line: item.selection_range.start.line,
++        col: item.selection_range.start.character,
++    })
++}
++
+ async fn resolve_via_lsp(
+     client: &dyn crate::lsp::ops::LspClientOps,
+     sym_name: &str,
+@@ -101,6 +128,7 @@ async fn resolve_via_lsp(
+                         line: range.start.line,
+                         col: range.start.character,
+                         source: EdgeSource::Lsp,
++                        target: hierarchy_target(&c.from),
+                     });
+                 }
+                 // If from_ranges is empty, emit one edge at the symbol's own position.
+@@ -112,6 +140,7 @@ async fn resolve_via_lsp(
+                         line: c.from.range.start.line,
+                         col: c.from.range.start.character,
+                         source: EdgeSource::Lsp,
++                        target: hierarchy_target(&c.from),
+                     });
+                 }
+             }
+@@ -131,6 +160,7 @@ async fn resolve_via_lsp(
+                         line: range.start.line,
+                         col: range.start.character,
+                         source: EdgeSource::Lsp,
++                        target: hierarchy_target(&c.to),
+                     });
+                 }
+                 // If from_ranges is empty, emit one edge at the callee's own position.
+@@ -142,6 +172,7 @@ async fn resolve_via_lsp(
+                         line: c.to.range.start.line,
+                         col: c.to.range.start.character,
+                         source: EdgeSource::Lsp,
++                        target: hierarchy_target(&c.to),
+                     });
+                 }
+             }
+@@ -226,6 +257,7 @@ async fn resolve_via_ts(
+                     line: loc.range.start.line,
+                     col: loc.range.start.character,
+                     source: EdgeSource::Ts,
++                    target: None,
+                 });
+             }
+ 
+@@ -585,6 +617,7 @@ fn resolve_callees_via_ts(
+                     line: start.row as u32,
+                     col: start.column as u32,
+                     source: EdgeSource::Ts,
++                    target: None,
+                 });
+             }
+         }
+diff --git a/src/tools/symbol/call_graph/mod.rs b/src/tools/symbol/call_graph/mod.rs
+index 47f4cf3e9..0ec9161cf 100644
+--- a/src/tools/symbol/call_graph/mod.rs
++++ b/src/tools/symbol/call_graph/mod.rs
+@@ -8,11 +8,19 @@ use async_trait::async_trait;
+ use serde_json::{json, Value};
+ 
+ use crate::tools::symbol::call_edges::cache::{EdgeCache, ResolutionKey};
+-use crate::tools::symbol::call_edges::resolver::{resolve_one_hop, Direction, Edge, EdgeSource};
+-use crate::tools::symbol::call_graph::traversal::{EdgeWithDepth, OneHopResolver, TraversalResult};
++use crate::tools::symbol::call_edges::resolver::{
++    resolve_one_hop, Definition, Direction, Edge, EdgeSource,
++};
++use crate::tools::symbol::call_graph::traversal::{
++    EdgeWithDepth, OneHopResolver, TraversalNode, TraversalResult,
++};
+ use crate::tools::symbol::scan_budget::{is_compiled_twin, scan_walk, ScanBudget, ScanCoverage};
+ use crate::tools::{OutputForm, Tool, ToolContext};
+ 
++mod identity;
++mod rust_lexical;
++mod rust_target;
++
+ /// A SQLite failure such as "disk I/O error" names neither the store nor the step. This puts both
+ /// in the message and keeps the cause, so the caller can tell which file failed (bug
+ /// `cd85dbae70c76670`). The path is joined one segment at a time so that every separator is the
+@@ -419,10 +427,34 @@ fn find_named_def<'a>(
+ #[async_trait]
+ impl OneHopResolver for CachedResolver {
+     async fn one_hop(&self, symbol: &str, direction: Direction) -> anyhow::Result<Vec<Edge>> {
++        let node = self.seed_node(symbol).await?;
++        self.one_hop_at(&node, direction).await
++    }
++
++    async fn seed_node(&self, symbol: &str) -> anyhow::Result<TraversalNode> {
++        Ok(match self.lookup_pos(symbol).await {
++            Some((file, line, col)) => {
++                let definition = Definition { file, line, col };
++                let identity = identity::canonical(symbol, definition.clone());
++                TraversalNode::at(symbol, definition).with_identity(identity)
++            }
++            None => TraversalNode::named(symbol),
++        })
++    }
++
++    async fn one_hop_at(
++        &self,
++        node: &TraversalNode,
++        direction: Direction,
++    ) -> anyhow::Result<Vec<Edge>> {
+         // Resolve identity before reading completed adjacency, including for the pinned seed.
+-        let (path, line, col) = match self.lookup_pos(symbol).await {
+-            Some(p) => p,
+-            None => return Ok(vec![]),
++        let symbol = node.symbol.as_str();
++        let (path, line, col) = match &node.definition {
++            Some(definition) => (definition.file.clone(), definition.line, definition.col),
++            None => match self.lookup_pos(symbol).await {
++                Some(position) => position,
++                None => return Ok(vec![]),
++            },
+         };
+         let key = ResolutionKey {
+             symbol,
+@@ -438,7 +470,13 @@ impl OneHopResolver for CachedResolver {
+                 .map_err(|e| cache_error("reading", &self.root, e))?
+         };
+         if let Some(edges) = cached {
+-            return Ok(edges);
++            // Old LSP payloads lack endpoint identity; recompute instead of guessing by name.
++            if !edges
++                .iter()
++                .any(|edge| edge.source == EdgeSource::Lsp && edge.target.is_none())
++            {
++                return Ok(edges);
++            }
+         }
+ 
+         // Each node is parsed and opened under the language of its own file.
+@@ -483,6 +521,56 @@ impl OneHopResolver for CachedResolver {
+         }
+         Ok(edges)
+     }
++
++    async fn next_node(
++        &self,
++        edge: &Edge,
++        direction: Direction,
++    ) -> anyhow::Result<Option<TraversalNode>> {
++        let symbol = match direction {
++            Direction::Callers => &edge.caller_sym,
++            Direction::Callees => &edge.callee_sym,
++        };
++        let placement = identity::next(
++            self.client.as_ref(),
++            &self.root,
++            &self.lang,
++            self.workspace_scan_cap,
++            edge,
++            direction.clone(),
++        )
++        .await;
++        let reason = match placement {
++            identity::Placement::Found(definition) => {
++                let key = identity::canonical(symbol, definition.clone());
++                return Ok(Some(
++                    TraversalNode::at(symbol, definition).with_identity(key),
++                ));
++            }
++            identity::Placement::Missing => return Ok(None),
++            identity::Placement::Incomplete(coverage) => {
++                self.scan_incomplete
++                    .lock()
++                    .unwrap()
++                    .insert(symbol.to_owned());
++                self.scan_coverage.lock().unwrap().merge(coverage);
++                return Ok(None);
++            }
++            identity::Placement::Ambiguous => "ambiguous declaration identity".to_owned(),
++            identity::Placement::Unresolved(reason) => reason,
++        };
++        let label = match direction {
++            Direction::Callers => "callers",
++            Direction::Callees => "callees",
++        };
++        self.analysis_failures.lock().unwrap().insert(format!(
++            "`{symbol}` direction={label} from {}:{}:{}: {reason}",
++            edge.file.display(),
++            edge.line + 1,
++            edge.col + 1
++        ));
++        Ok(None)
++    }
+ }
+ 
+ /// Format BFS results for tool output.
+@@ -925,6 +1013,7 @@ mod tests {
+                 line: 5,
+                 col: 0,
+                 source: EdgeSource::Lsp,
++                target: None,
+             },
+             depth: 1,
+             paths: 1,
+@@ -969,6 +1058,7 @@ mod tests {
+                     line: i,
+                     col: 0,
+                     source: EdgeSource::Ts,
++                    target: None,
+                 },
+                 depth: 1,
+                 paths: 1,
+@@ -2113,6 +2203,7 @@ mod tests {
+                 line: 0,
+                 col: 12,
+                 source: crate::tools::symbol::call_edges::resolver::EdgeSource::Ts,
++                target: None,
+             }])
+             .unwrap();
+         let edges = resolver.one_hop("call", Direction::Callees).await.unwrap();
+@@ -2161,4 +2252,7 @@ mod tests {
+     }
+ } // mod tests
+ 
++#[cfg(test)]
++mod identity_tests;
++
+ pub mod traversal;
+diff --git a/src/tools/symbol/call_graph/traversal.rs b/src/tools/symbol/call_graph/traversal.rs
+index f21a4a8c5..1ed27124d 100644
+--- a/src/tools/symbol/call_graph/traversal.rs
++++ b/src/tools/symbol/call_graph/traversal.rs
+@@ -1,9 +1,8 @@
+ use std::collections::{HashMap, HashSet, VecDeque};
+ 
+-use async_trait::async_trait;
+ use futures::future::try_join_all;
+ 
+-use crate::tools::symbol::call_edges::resolver::{Direction, Edge};
++use crate::tools::symbol::call_edges::resolver::{Definition, Direction, Edge};
+ 
+ #[derive(Clone)]
+ pub struct TraversalConfig {
+@@ -25,9 +24,69 @@ pub struct EdgeWithDepth {
+     pub paths: u32,
+ }
+ 
+-#[async_trait]
++/// A queue key carries the actual declaration once semantic resolution placed it.
++#[derive(Clone, Debug)]
++pub struct TraversalNode {
++    pub symbol: String,
++    /// The provider's query position; do not replace it with an AST range start.
++    pub definition: Option<Definition>,
++    identity: Option<Definition>,
++}
++
++impl TraversalNode {
++    pub fn named(symbol: &str) -> Self {
++        Self {
++            symbol: symbol.to_owned(),
++            definition: None,
++            identity: None,
++        }
++    }
++
++    pub fn at(symbol: &str, definition: Definition) -> Self {
++        Self {
++            symbol: symbol.to_owned(),
++            identity: Some(definition.clone()),
++            definition: Some(definition),
++        }
++    }
++
++    pub fn with_identity(mut self, identity: Definition) -> Self {
++        self.identity = Some(identity);
++        self
++    }
++
++    fn key(&self) -> (String, Option<Definition>) {
++        (self.symbol.clone(), self.identity.clone())
++    }
++}
++
++#[async_trait::async_trait]
+ pub trait OneHopResolver: Send + Sync {
+     async fn one_hop(&self, symbol: &str, direction: Direction) -> anyhow::Result<Vec<Edge>>;
++
++    async fn seed_node(&self, symbol: &str) -> anyhow::Result<TraversalNode> {
++        Ok(TraversalNode::named(symbol))
++    }
++
++    async fn one_hop_at(
++        &self,
++        node: &TraversalNode,
++        direction: Direction,
++    ) -> anyhow::Result<Vec<Edge>> {
++        self.one_hop(&node.symbol, direction).await
++    }
++
++    async fn next_node(
++        &self,
++        edge: &Edge,
++        direction: Direction,
++    ) -> anyhow::Result<Option<TraversalNode>> {
++        let symbol = match direction {
++            Direction::Callers => &edge.caller_sym,
++            Direction::Callees => &edge.callee_sym,
++        };
++        Ok(Some(TraversalNode::named(symbol)))
++    }
+ }
+ 
+ pub async fn bfs<R: OneHopResolver>(
+@@ -36,59 +95,62 @@ pub async fn bfs<R: OneHopResolver>(
+     direction: Direction,
+     cfg: TraversalConfig,
+ ) -> anyhow::Result<TraversalResult> {
+-    let mut visited: HashSet<String> = HashSet::new();
+-    let mut current_level: VecDeque<String> = VecDeque::new();
+-    current_level.push_back(seed_symbol.to_string());
+-    visited.insert(seed_symbol.to_string());
++    let seed = resolver.seed_node(seed_symbol).await?;
++    let mut visited: HashSet<(String, Option<Definition>)> = HashSet::new();
++    let mut current_level: VecDeque<TraversalNode> = VecDeque::new();
++    current_level.push_back(seed.clone());
++    visited.insert(seed.key());
+ 
+     let mut all_edges: Vec<EdgeWithDepth> = Vec::new();
+     let mut max_depth_reached = 0u32;
+     let mut truncated = false;
+-    let mut truncated_at_depth: Option<u32> = None;
++    let mut truncated_at_depth = None;
+ 
+     for depth in 1..=cfg.max_depth {
+-        let mut next_symbols: HashSet<String> = HashSet::new();
+-        let mut level_raw: Vec<EdgeWithDepth> = Vec::new();
+-
+-        let symbols_at_level: Vec<String> = current_level.drain(..).collect();
++        let nodes: Vec<_> = current_level.drain(..).collect();
+         let hop_results = try_join_all(
+-            symbols_at_level
++            nodes
+                 .iter()
+-                .map(|sym| resolver.one_hop(sym, direction.clone())),
++                .map(|node| resolver.one_hop_at(node, direction.clone())),
+         )
+         .await?;
++        let level_raw: Vec<_> = hop_results
++            .into_iter()
++            .flatten()
++            .map(|edge| EdgeWithDepth {
++                edge,
++                depth,
++                paths: 1,
++            })
++            .collect();
++        let level_edges = dedupe_with_paths(level_raw.clone());
+ 
+-        for hops in hop_results {
+-            for edge in hops {
+-                let neighbor = match direction {
+-                    Direction::Callers => edge.caller_sym.clone(),
+-                    Direction::Callees => edge.callee_sym.clone(),
+-                };
+-                if visited.insert(neighbor.clone()) {
+-                    next_symbols.insert(neighbor);
+-                }
+-                level_raw.push(EdgeWithDepth {
+-                    edge,
+-                    depth,
+-                    paths: 1,
+-                });
+-            }
+-        }
+-
+-        let level_edges = dedupe_with_paths(level_raw);
+-
+-        // Depth-coherent cap: if this level would push us over max_edges, truncate the ENTIRE
+-        // level (not a partial slice) — but always accept depth==1.
++        // Preserve full-level caps, and do not resolve neighbors of a discarded level.
+         if depth > 1 && !all_edges.is_empty() && all_edges.len() + level_edges.len() > cfg.max_edges
+         {
+             truncated = true;
+             truncated_at_depth = Some(depth);
+             break;
+         }
++
++        // A requested depth boundary needs no next-hop analysis or uncertainty warning.
++        let next = if depth < cfg.max_depth {
++            try_join_all(
++                level_raw
++                    .iter()
++                    .map(|hop| resolver.next_node(&hop.edge, direction.clone())),
++            )
++            .await?
++        } else {
++            Vec::new()
++        };
+         all_edges.extend(level_edges);
+         max_depth_reached = depth;
+-
+-        current_level.extend(next_symbols);
++        for node in next.into_iter().flatten() {
++            if visited.insert(node.key()) {
++                current_level.push_back(node);
++            }
++        }
+         if current_level.is_empty() {
+             break;
+         }
+@@ -165,6 +227,7 @@ mod tests {
+             line: 0,
+             col: 0,
+             source: EdgeSource::Lsp,
++            target: None,
+         }
+     }
+ 
+diff --git a/src/tools/symbol/call_graph/identity.rs b/src/tools/symbol/call_graph/identity.rs
+new file mode 100644
+index 000000000..5adae304d
+--- /dev/null
++++ b/src/tools/symbol/call_graph/identity.rs
+@@ -0,0 +1,363 @@
++//! Placement of a next hop; a display name alone is never a concrete queue key.
++use std::path::Path;
++
++use crate::lsp::{ops::LspClientOps, SymbolInfo};
++use crate::tools::symbol::call_edges::resolver::{Definition, Direction, Edge, EdgeSource};
++use crate::tools::symbol::scan_budget::{is_compiled_twin, scan_walk, ScanBudget, ScanCoverage};
++
++pub(super) enum Placement {
++    Found(Definition),
++    Missing,
++    Ambiguous,
++    Incomplete(ScanCoverage),
++    Unresolved(String),
++}
++
++pub(super) fn matching<'a>(symbols: &'a [SymbolInfo], name: &str) -> Vec<&'a SymbolInfo> {
++    let mut found = Vec::new();
++    for symbol in symbols {
++        if symbol.name == name || symbol.name_path == name {
++            found.push(symbol);
++        }
++        found.extend(matching(&symbol.children, name));
++    }
++    found
++}
++
++pub(super) fn symbols_in(file: &Path) -> anyhow::Result<Vec<SymbolInfo>> {
++    let lang = crate::ast::detect_language(file)
++        .ok_or_else(|| anyhow::anyhow!("no definition grammar for {}", file.display()))?;
++    let source = std::fs::read_to_string(file)?;
++    crate::ast::parser::extract_symbols_from_source(&source, Some(lang), file)
++}
++
++fn position(symbol: &SymbolInfo) -> Definition {
++    Definition {
++        file: symbol.file.clone(),
++        line: symbol.start_line,
++        col: symbol.start_col,
++    }
++}
++
++/// Normalize AST/LSP selection positions to the same declaration start when source permits.
++pub(super) fn canonical(name: &str, original: Definition) -> Definition {
++    let Ok(symbols) = symbols_in(&original.file) else {
++        return original;
++    };
++    matching(&symbols, name)
++        .into_iter()
++        .filter(|s| {
++            s.start_line <= original.line
++                && s.end_line >= original.line
++                && (s.start_line != original.line || s.start_col <= original.col)
++        })
++        .max_by_key(|s| (s.start_line, s.start_col))
++        .map(position)
++        .unwrap_or(original)
++}
++
++fn unique(symbols: &[SymbolInfo], name: &str) -> Placement {
++    let mut positions = matching(symbols, name)
++        .into_iter()
++        .map(position)
++        .collect::<Vec<_>>();
++    positions.sort_by(|a, b| (&a.file, a.line, a.col).cmp(&(&b.file, b.line, b.col)));
++    positions.dedup();
++    match positions.as_slice() {
++        [] => Placement::Missing,
++        [one] => Placement::Found(one.clone()),
++        _ => Placement::Ambiguous,
++    }
++}
++
++pub(super) fn exact_in_file(file: &Path, name_path: &str) -> anyhow::Result<Option<Definition>> {
++    let symbols = symbols_in(file)?;
++    let mut found = matching(&symbols, name_path)
++        .into_iter()
++        .filter(|s| s.name_path == name_path)
++        .map(position)
++        .collect::<Vec<_>>();
++    found.sort_by_key(|a| (a.line, a.col));
++    found.dedup();
++    match found.as_slice() {
++        [] => Ok(None),
++        [one] => Ok(Some(one.clone())),
++        _ => anyhow::bail!("ambiguous declaration {name_path} in {}", file.display()),
++    }
++}
++
++pub(super) fn workspace(root: &Path, lang: &str, name: &str, cap: usize) -> Placement {
++    let ast_lang = crate::lsp::servers::ast_language_for_lsp_id(lang);
++    if !crate::ast::parser::supports_symbol_extraction(ast_lang) {
++        return Placement::Incomplete(ScanCoverage::no_parser(ast_lang));
++    }
++    let family = crate::ast::language_family(ast_lang);
++    let in_family = |p: &Path| {
++        crate::ast::detect_language(p).is_some_and(|l| crate::ast::language_family(l) == family)
++    };
++    let mut budget = ScanBudget::new(cap);
++    let mut candidate: Option<Definition> = None;
++    for item in scan_walk(root) {
++        let Some(entry) = budget.entry(item) else {
++            continue;
++        };
++        let path = entry.path();
++        if entry.file_type().is_some_and(|t| t.is_symlink()) {
++            budget.note_symlink(path, root, in_family);
++            continue;
++        }
++        if !entry.file_type().is_some_and(|t| t.is_file())
++            || !in_family(path)
++            || is_compiled_twin(path)
++        {
++            continue;
++        }
++        if !budget.admit() {
++            break;
++        }
++        let Ok(symbols) = symbols_in(path) else {
++            budget.record_unexamined();
++            continue;
++        };
++        match unique(&symbols, name) {
++            Placement::Found(found) => {
++                if candidate
++                    .as_ref()
++                    .is_some_and(|previous| previous != &found)
++                {
++                    return Placement::Ambiguous;
++                }
++                candidate = Some(found);
++            }
++            Placement::Ambiguous => return Placement::Ambiguous,
++            _ => {}
++        }
++    }
++    let coverage = budget.coverage_requiring_a_candidate();
++    if !coverage.is_complete() {
++        Placement::Incomplete(coverage)
++    } else {
++        candidate
++            .map(Placement::Found)
++            .unwrap_or(Placement::Missing)
++    }
++}
++
++struct CallSite {
++    expression: Option<String>,
++    line: u32,
++    col: u32,
++    modules: Vec<String>,
++    lexical_binding: bool,
++}
++
++fn rust_path(node: tree_sitter::Node<'_>, source: &[u8]) -> Option<String> {
++    match node.kind() {
++        "identifier" | "type_identifier" | "self" | "super" | "crate" => {
++            node.utf8_text(source).ok().map(str::to_owned)
++        }
++        "generic_function" => rust_path(node.child_by_field_name("function")?, source),
++        "generic_type" => rust_path(node.child_by_field_name("type")?, source),
++        "scoped_identifier" | "scoped_type_identifier" => Some(format!(
++            "{}::{}",
++            rust_path(node.child_by_field_name("path")?, source)?,
++            rust_path(node.child_by_field_name("name")?, source)?
++        )),
++        _ => None,
++    }
++}
++
++fn call_site(edge: &Edge) -> Option<CallSite> {
++    let lang = crate::ast::detect_language(&edge.file)?;
++    let source = std::fs::read_to_string(&edge.file).ok()?;
++    let mut parser = tree_sitter::Parser::new();
++    parser
++        .set_language(&crate::ast::get_ts_language(lang)?)
++        .ok()?;
++    let tree = parser.parse(&source, None)?;
++    let base: usize = source
++        .split_inclusive('\n')
++        .take(edge.line as usize)
++        .map(str::len)
++        .sum();
++    let byte = (base + edge.col as usize).min(source.len());
++    let mut node = tree.root_node().descendant_for_byte_range(byte, byte)?;
++    while !matches!(
++        node.kind(),
++        "call_expression"
++            | "method_call_expression"
++            | "call"
++            | "new_expression"
++            | "method_invocation"
++            | "object_creation_expression"
++            | "macro_invocation"
++    ) {
++        node = node.parent()?;
++    }
++    let function = node
++        .child_by_field_name("function")
++        .or_else(|| node.child_by_field_name("method"))
++        .or_else(|| node.child_by_field_name("name"))
++        .or_else(|| node.child_by_field_name("constructor"))
++        .or_else(|| node.child_by_field_name("type"))
++        .or_else(|| node.named_child(0))?;
++    let expression = if lang == "rust" {
++        rust_path(function, source.as_bytes())
++    } else if matches!(
++        function.kind(),
++        "identifier" | "simple_identifier" | "type_identifier"
++    ) {
++        function
++            .utf8_text(source.as_bytes())
++            .ok()
++            .map(str::to_owned)
++    } else {
++        None
++    };
++    let mut stack = vec![function];
++    let mut identifier = None;
++    while let Some(n) = stack.pop() {
++        if n.kind() == "type_arguments" {
++            continue;
++        }
++        if n.named_child_count() == 0
++            && n.utf8_text(source.as_bytes()).ok() == Some(&edge.callee_sym)
++        {
++            identifier = Some(n);
++        }
++        let mut cursor = n.walk();
++        stack.extend(n.named_children(&mut cursor));
++    }
++    let identifier = identifier.unwrap_or(function);
++    let start = identifier.start_position();
++    let line_text = source.split('\n').nth(start.row)?;
++    let col = line_text.get(..start.column)?.encode_utf16().count() as u32;
++    let mut modules = Vec::new();
++    let mut ancestor = node.parent();
++    while let Some(parent) = ancestor {
++        if parent.kind() == "mod_item" {
++            modules.push(
++                parent
++                    .child_by_field_name("name")?
++                    .utf8_text(source.as_bytes())
++                    .ok()?
++                    .to_owned(),
++            );
++        }
++        ancestor = parent.parent();
++    }
++    modules.reverse();
++    let lexical_binding = lang == "rust"
++        && expression.as_deref().is_some_and(|expression| {
++            super::rust_lexical::uncertain(node, source.as_bytes(), expression)
++        });
++    Some(CallSite {
++        expression,
++        line: start.row as u32,
++        col,
++        modules,
++        lexical_binding,
++    })
++}
++
++pub(super) async fn next(
++    client: &dyn LspClientOps,
++    root: &Path,
++    lang: &str,
++    cap: usize,
++    edge: &Edge,
++    direction: Direction,
++) -> Placement {
++    let name = match direction {
++        Direction::Callers => &edge.caller_sym,
++        Direction::Callees => &edge.callee_sym,
++    };
++    if let Some(target) = &edge.target {
++        return Placement::Found(target.clone());
++    }
++    if direction == Direction::Callers || edge.source == EdgeSource::Lsp {
++        // Legacy/incomplete hierarchy metadata: a unique declaration in its actual file is safe.
++        if let Ok(symbols) = symbols_in(&edge.file) {
++            let candidates = matching(&symbols, name);
++            if direction == Direction::Callers {
++                if let Some(found) = candidates
++                    .iter()
++                    .filter(|s| {
++                        s.start_line <= edge.line
++                            && s.end_line >= edge.line
++                            && (s.start_line != edge.line || s.start_col <= edge.col)
++                    })
++                    .max_by_key(|s| (s.start_line, s.start_col))
++                {
++                    return Placement::Found(position(found));
++                }
++            }
++            match unique(&symbols, name) {
++                Placement::Missing => {}
++                placed => return placed,
++            }
++        }
++        if let Ok(symbols) = client.workspace_symbols(name).await {
++            match unique(&symbols, name) {
++                Placement::Missing => {}
++                placed => return placed,
++            }
++        }
++        return workspace(root, lang, name, cap);
++    }
++    let Some(site) = call_site(edge) else {
++        return Placement::Unresolved(format!(
++            "could not locate call-site context in {}:{}",
++            edge.file.display(),
++            edge.line + 1
++        ));
++    };
++    let language = crate::lsp::servers::lsp_language_id(
++        crate::ast::detect_language(&edge.file)
++            .unwrap_or(crate::lsp::servers::ast_language_for_lsp_id(lang)),
++    );
++    if let Ok(locations) = client
++        .goto_definition(&edge.file, site.line, site.col, language)
++        .await
++    {
++        let mut targets = locations
++            .into_iter()
++            .filter_map(|loc| {
++                let path = url::Url::parse(loc.uri.as_str())
++                    .ok()?
++                    .to_file_path()
++                    .ok()?;
++                Some(Definition {
++                    file: path,
++                    line: loc.range.start.line,
++                    col: loc.range.start.character,
++                })
++            })
++            .collect::<Vec<_>>();
++        targets.sort_by(|a, b| (&a.file, a.line, a.col).cmp(&(&b.file, b.line, b.col)));
++        targets.dedup();
++        match targets.as_slice() {
++            [one] => return Placement::Found(one.clone()),
++            [] => {}
++            _ => return Placement::Ambiguous,
++        }
++    }
++    if site.lexical_binding {
++        return Placement::Unresolved(
++            "lexical binding needs semantic target resolution".to_owned(),
++        );
++    }
++    let Some(expression) = site.expression else {
++        return Placement::Unresolved(
++            "receiver or callable expression needs semantic target resolution".to_owned(),
++        );
++    };
++    if crate::ast::detect_language(&edge.file) == Some("rust") {
++        match super::rust_target::resolve(root, &edge.file, &site.modules, &expression) {
++            Ok(Some(target)) => return Placement::Found(target),
++            Ok(None) => {}
++            Err(reason) => return Placement::Unresolved(reason),
++        }
++    }
++    workspace(root, lang, name, cap)
++}
+diff --git a/src/tools/symbol/call_graph/identity_tests.rs b/src/tools/symbol/call_graph/identity_tests.rs
+new file mode 100644
+index 000000000..e6117c806
+--- /dev/null
++++ b/src/tools/symbol/call_graph/identity_tests.rs
+@@ -0,0 +1,283 @@
++//! Real parser/cache/Tool regressions; only the external LSP wire is substituted.
++use super::CallGraph;
++use crate::tools::{Tool, ToolContext};
++use serde_json::{json, Value};
++
++async fn context(root: &std::path::Path, files: &[&str]) -> ToolContext {
++    use std::sync::{Arc, Mutex};
++    let mut client = crate::lsp::mock::MockLspClient::new();
++    for file in files {
++        let path = root.join(file);
++        let source = std::fs::read_to_string(&path).unwrap();
++        let syms = crate::ast::parser::extract_symbols_from_source(
++            &source,
++            crate::ast::detect_language(&path),
++            &path,
++        )
++        .unwrap();
++        client = client.with_symbols(path, syms);
++    }
++    ToolContext {
++        agent: crate::agent::Agent::new(Some(root.to_path_buf()))
++            .await
++            .unwrap(),
++        lsp: crate::lsp::mock::MockLspProvider::with_client(client),
++        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(0)),
++        progress: None,
++        peer: None,
++        section_coverage: Arc::new(Mutex::new(
++            crate::tools::section_coverage::SectionCoverage::new(),
++        )),
++        guide_hints_emitted: Arc::new(parking_lot::Mutex::new(Default::default())),
++        workspace_override: None,
++    }
++}
++
++fn write_project(files: &[(&str, &str)]) -> tempfile::TempDir {
++    let dir = tempfile::tempdir().unwrap();
++    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
++    for (file, content) in files {
++        let path = dir.path().join(file);
++        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
++        std::fs::write(path, content).unwrap();
++    }
++    dir
++}
++
++fn rows(out: &Value, root: &std::path::Path) -> Vec<String> {
++    let mut result = out["callees"]
++        .as_array()
++        .unwrap()
++        .iter()
++        .map(|e| {
++            let path = std::path::Path::new(e["file"].as_str().unwrap());
++            format!(
++                "{}>{}@{}:{}#{}",
++                e["caller"].as_str().unwrap(),
++                e["callee"].as_str().unwrap(),
++                path.strip_prefix(root)
++                    .unwrap()
++                    .to_string_lossy()
++                    .replace('\\', "/"),
++                e["line"].as_u64().unwrap(),
++                e["depth"].as_u64().unwrap()
++            )
++        })
++        .collect::<Vec<_>>();
++    result.sort();
++    result
++}
++
++#[tokio::test]
++async fn qualified_rust_helpers_keep_both_definition_branches_on_cold_and_cached_calls() {
++    // A name-only visited set or first-match lookup drops helper>leaf_b.
++    let dir = write_project(&[
++        (
++            "src/lib.rs",
++            "pub mod a;\npub mod b;\npub fn entry() {\n    a::helper();\n    b::helper();\n}\n",
++        ),
++        (
++            "src/a.rs",
++            "pub fn helper() { leaf_a(); }\npub fn leaf_a() {}\n",
++        ),
++        (
++            "src/b.rs",
++            "pub fn helper() { leaf_b(); }\npub fn leaf_b() {}\n",
++        ),
++    ]);
++    let root = std::fs::canonicalize(dir.path()).unwrap();
++    let ctx = context(&root, &["src/lib.rs", "src/a.rs", "src/b.rs"]).await;
++    let expected = vec![
++        "entry>helper@src/lib.rs:4#1",
++        "entry>helper@src/lib.rs:5#1",
++        "helper>leaf_a@src/a.rs:1#2",
++        "helper>leaf_b@src/b.rs:1#2",
++    ];
++    for _ in 0..2 {
++        let out = CallGraph
++            .call(
++                json!({"symbol":"entry","path":"src/lib.rs",
++            "direction":"callees","max_depth":2,"detail_level":"full"}),
++                &ctx,
++            )
++            .await
++            .unwrap();
++        assert_eq!(rows(&out, &root), expected, "{out}");
++        assert!(out.get("completeness_warning").is_none(), "{out}");
++    }
++    // New resolver/provider lifetime, same completed cache.
++    let ctx = context(&root, &["src/lib.rs", "src/a.rs", "src/b.rs"]).await;
++    let out = CallGraph
++        .call(
++            json!({"symbol":"entry","path":"src/lib.rs",
++        "direction":"callees","max_depth":2,"detail_level":"full"}),
++            &ctx,
++        )
++        .await
++        .unwrap();
++    assert_eq!(rows(&out, &root), expected, "{out}");
++    assert!(out.get("completeness_warning").is_none(), "{out}");
++}
++
++#[tokio::test]
++async fn ambiguous_unqualified_hop_is_disclosed_without_an_arbitrary_leaf() {
++    // Returning the first helper must neither invent a leaf branch nor look complete.
++    let dir = write_project(&[
++        (
++            "src/lib.rs",
++            "pub mod a;\npub mod b;\npub fn entry() { helper(); }\n",
++        ),
++        (
++            "src/a.rs",
++            "pub fn helper() { leaf_a(); }\npub fn leaf_a() {}\n",
++        ),
++        (
++            "src/b.rs",
++            "pub fn helper() { leaf_b(); }\npub fn leaf_b() {}\n",
++        ),
++    ]);
++    let root = std::fs::canonicalize(dir.path()).unwrap();
++    let ctx = context(&root, &["src/lib.rs", "src/a.rs", "src/b.rs"]).await;
++    let args = json!({"symbol":"entry","path":"src/lib.rs","direction":"callees",
++        "max_depth":2,"detail_level":"full"});
++    let out = CallGraph.call(args, &ctx).await.unwrap();
++    assert_eq!(
++        rows(&out, &root),
++        vec!["entry>helper@src/lib.rs:3#1"],
++        "{out}"
++    );
++    let warning = out["completeness_warning"].as_str().unwrap_or_default();
++    assert!(
++        warning.contains("helper") && warning.contains("ambiguous"),
++        "{out}"
++    );
++    assert!(
++        CallGraph.format_compact(&out).unwrap().contains(warning),
++        "{out}"
++    );
++    let one = CallGraph
++        .call(
++            json!({"symbol":"entry","path":"src/lib.rs",
++        "direction":"callees","max_depth":1}),
++            &ctx,
++        )
++        .await
++        .unwrap();
++    assert_eq!(rows(&one, &root), vec!["entry>helper@src/lib.rs:3#1"]);
++    assert!(one.get("completeness_warning").is_none(), "{one}");
++}
++
++#[tokio::test]
++async fn lsp_same_file_same_line_helpers_preserve_columns_and_cached_target_metadata() {
++    use lsp_types::{CallHierarchyItem, CallHierarchyOutgoingCall, Position, Range};
++    use std::sync::Arc;
++    // A name/file/line-only key collapses these two helper declarations.
++    let first = "struct A; impl A { fn helper() { leaf_a(); } } struct B; impl B { fn helper() { leaf_b(); } }";
++    let source = format!(
++        "{first}\nfn leaf_a() {{}}\nfn leaf_b() {{}}\nfn entry() {{ A::helper(); B::helper(); }}\n"
++    );
++    let dir = write_project(&[("fixture.rs", &source)]);
++    let root = std::fs::canonicalize(dir.path()).unwrap();
++    let file = root.join("fixture.rs");
++    let uri: lsp_types::Uri = url::Url::from_file_path(&file)
++        .unwrap()
++        .as_str()
++        .parse()
++        .unwrap();
++    let point = |line, character| Position { line, character };
++    let item = |name: &str, line, column, key: &str| CallHierarchyItem {
++        name: name.to_owned(),
++        kind: lsp_types::SymbolKind::FUNCTION,
++        tags: None,
++        detail: None,
++        uri: uri.clone(),
++        range: Range {
++            start: point(line, 0),
++            end: point(line + 1, 0),
++        },
++        selection_range: Range {
++            start: point(line, column),
++            end: point(line, column + name.len() as u32),
++        },
++        data: Some(json!(key)),
++    };
++    let columns = first
++        .match_indices("fn helper")
++        .map(|(p, _)| p as u32 + 3)
++        .collect::<Vec<_>>();
++    assert_eq!(
++        columns.len(),
++        2,
++        "fixture must contain two actual same-line definitions"
++    );
++    let seed = item("entry", 3, 3, "entry");
++    let a = item("helper", 0, columns[0], "body-a");
++    let b = item("helper", 0, columns[1], "body-b");
++    let leaf_a = item("leaf_a", 1, 3, "leaf-a");
++    let leaf_b = item("leaf_b", 2, 3, "leaf-b");
++    let symbols =
++        crate::ast::parser::extract_symbols_from_source(&source, Some("rust"), &file).unwrap();
++    let mock = crate::lsp::mock::MockLspClient::new().with_symbols(&file, symbols);
++    {
++        let mut prepare = mock.prepare_call_hierarchy_results.lock().unwrap();
++        prepare.insert((file.clone(), 3, 0), Some(seed));
++        prepare.insert((file.clone(), 0, columns[0]), Some(a.clone()));
++        prepare.insert((file.clone(), 0, columns[1]), Some(b.clone()));
++    }
++    let outgoing = |to, line, col| CallHierarchyOutgoingCall {
++        to,
++        from_ranges: vec![Range {
++            start: point(line, col),
++            end: point(line, col + 1),
++        }],
++    };
++    {
++        let mut answers = mock.outgoing_calls_results.lock().unwrap();
++        answers.insert(
++            "entry".to_owned(),
++            vec![outgoing(a, 3, 13), outgoing(b, 3, 26)],
++        );
++        answers.insert(
++            "body-a".to_owned(),
++            vec![outgoing(leaf_a, 0, first.find("leaf_a()").unwrap() as u32)],
++        );
++        answers.insert(
++            "body-b".to_owned(),
++            vec![outgoing(leaf_b, 0, first.find("leaf_b()").unwrap() as u32)],
++        );
++    }
++    let client = Arc::new(mock);
++    let mut ctx = context(&root, &["fixture.rs"]).await;
++    ctx.lsp = crate::lsp::mock::MockLspProvider::with_shared_client(client.clone());
++    let expected = vec![
++        "entry>helper@fixture.rs:4#1",
++        "entry>helper@fixture.rs:4#1",
++        "helper>leaf_a@fixture.rs:1#2",
++        "helper>leaf_b@fixture.rs:1#2",
++    ];
++    for run in 0..2 {
++        let out = CallGraph
++            .call(
++                json!({"symbol":"entry","path":"fixture.rs",
++            "direction":"callees","max_depth":2,"detail_level":"full"}),
++                &ctx,
++            )
++            .await
++            .unwrap();
++        assert_eq!(rows(&out, &root), expected, "{out}");
++        assert!(out.get("completeness_warning").is_none(), "{out}");
++        assert!(
++            out["callees"]
++                .as_array()
++                .unwrap()
++                .iter()
++                .all(|e| e["source"] == "lsp"),
++            "{out}"
++        );
++        if run == 0 {
++            // A cache that drops endpoint identity cannot reproduce the semantic result now.
++            client.outgoing_calls_results.lock().unwrap().clear();
++        }
++    }
++}
++mod review;
+diff --git a/src/tools/symbol/call_graph/identity_tests/review.rs b/src/tools/symbol/call_graph/identity_tests/review.rs
+new file mode 100644
+index 000000000..07c915009
+--- /dev/null
++++ b/src/tools/symbol/call_graph/identity_tests/review.rs
+@@ -0,0 +1,349 @@
++//! Regressions added only after the independent reviewer observed the failures/survivors.
++use super::*;
++use crate::tools::symbol::call_edges::resolver::{resolve_one_hop, Definition, Direction};
++use lsp_types::{
++    CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Position, Range,
++};
++use std::{path::Path, sync::Arc};
++
++fn item(file: &Path, name: &str, line: u32, col: u32, key: &str) -> CallHierarchyItem {
++    let p = |character| Position { line, character };
++    CallHierarchyItem {
++        name: name.into(),
++        kind: lsp_types::SymbolKind::FUNCTION,
++        tags: None,
++        detail: None,
++        uri: url::Url::from_file_path(file)
++            .unwrap()
++            .as_str()
++            .parse()
++            .unwrap(),
++        range: Range {
++            start: p(0),
++            end: Position {
++                line: line + 1,
++                character: 0,
++            },
++        },
++        selection_range: Range {
++            start: p(col),
++            end: p(col + name.len() as u32),
++        },
++        data: Some(json!(key)),
++    }
++}
++fn call(to: CallHierarchyItem, line: u32, col: u32) -> CallHierarchyOutgoingCall {
++    CallHierarchyOutgoingCall {
++        to,
++        from_ranges: vec![Range {
++            start: Position {
++                line,
++                character: col,
++            },
++            end: Position {
++                line,
++                character: col + 1,
++            },
++        }],
++    }
++}
++
++async fn lsp_pair(shared_site: bool) -> (tempfile::TempDir, std::path::PathBuf, ToolContext) {
++    let first = "struct A; impl A { fn helper() { leaf_a(); } } struct B; impl B { fn helper() { leaf_b(); } }";
++    let source = format!(
++        "{first}\nfn leaf_a() {{}}\nfn leaf_b() {{}}\nfn entry() {{ A::helper(); B::helper(); }}\n"
++    );
++    let dir = write_project(&[("fixture.rs", &source)]);
++    let root = std::fs::canonicalize(dir.path()).unwrap();
++    let file = root.join("fixture.rs");
++    let columns = first
++        .match_indices("fn helper")
++        .map(|(p, _)| p as u32 + 3)
++        .collect::<Vec<_>>();
++    let a = item(&file, "helper", 0, columns[0], "a");
++    let b = item(&file, "helper", 0, columns[1], "b");
++    let mock = crate::lsp::mock::MockLspClient::new().with_symbols(
++        &file,
++        crate::ast::parser::extract_symbols_from_source(
++            &std::fs::read_to_string(&file).unwrap(),
++            Some("rust"),
++            &file,
++        )
++        .unwrap(),
++    );
++    {
++        let mut prepare = mock.prepare_call_hierarchy_results.lock().unwrap();
++        prepare.insert(
++            (file.clone(), 3, 0),
++            Some(item(&file, "entry", 3, 3, "entry")),
++        );
++        prepare.insert((file.clone(), 0, columns[0]), Some(a.clone()));
++        prepare.insert((file.clone(), 0, columns[1]), Some(b.clone()));
++    }
++    {
++        let mut answers = mock.outgoing_calls_results.lock().unwrap();
++        answers.insert(
++            "entry".into(),
++            vec![
++                call(a, 3, 13),
++                call(b, 3, if shared_site { 13 } else { 26 }),
++            ],
++        );
++        answers.insert(
++            "a".into(),
++            vec![call(
++                item(&file, "leaf_a", 1, 3, "la"),
++                0,
++                first.find("leaf_a()").unwrap() as u32,
++            )],
++        );
++        answers.insert(
++            "b".into(),
++            vec![call(
++                item(&file, "leaf_b", 2, 3, "lb"),
++                0,
++                first.find("leaf_b()").unwrap() as u32,
++            )],
++        );
++    }
++    let mut ctx = context(&root, &["fixture.rs"]).await;
++    ctx.lsp = crate::lsp::mock::MockLspProvider::with_shared_client(Arc::new(mock));
++    (dir, root, ctx)
++}
++fn pair_args() -> Value {
++    json!({"symbol":"entry","path":"fixture.rs","direction":"callees","max_depth":2,"detail_level":"full"})
++}
++
++#[tokio::test]
++async fn shared_callsite_keeps_both_targets_and_display_path_count() {
++    let (_dir, root, ctx) = lsp_pair(true).await;
++    let out = CallGraph.call(pair_args(), &ctx).await.unwrap();
++    assert_eq!(
++        rows(&out, &root),
++        vec![
++            "entry>helper@fixture.rs:4#1",
++            "helper>leaf_a@fixture.rs:1#2",
++            "helper>leaf_b@fixture.rs:1#2"
++        ],
++        "{out}"
++    );
++    assert_eq!(out["callees"][0]["paths"], 2, "{out}");
++    assert!(out.get("completeness_warning").is_none(), "{out}");
++}
++
++#[tokio::test]
++async fn legacy_completed_lsp_payload_is_recomputed_before_expansion() {
++    let (_dir, root, ctx) = lsp_pair(false).await;
++    let first = CallGraph.call(pair_args(), &ctx).await.unwrap();
++    assert_eq!(rows(&first, &root).len(), 4, "{first}");
++    let conn = crate::tools::symbol::call_edges::cache::open_db(&root).unwrap();
++    let records = {
++        let mut stmt = conn
++            .prepare("SELECT rowid, edges_json FROM call_edge_resolutions")
++            .unwrap();
++        stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
++            .unwrap()
++            .collect::<Result<Vec<_>, _>>()
++            .unwrap()
++    };
++    assert!(!records.is_empty());
++    for (id, payload) in records {
++        let mut value: Value = serde_json::from_str(&payload).unwrap();
++        for edge in value.as_array_mut().unwrap() {
++            edge.as_object_mut().unwrap().remove("target");
++        }
++        conn.execute(
++            "UPDATE call_edge_resolutions SET edges_json=?1 WHERE rowid=?2",
++            rusqlite::params![value.to_string(), id],
++        )
++        .unwrap();
++    }
++    drop(conn);
++    let out = CallGraph.call(pair_args(), &ctx).await.unwrap();
++    assert_eq!(rows(&out, &root), rows(&first, &root), "{out}");
++    assert!(out.get("completeness_warning").is_none(), "{out}");
++}
++
++#[tokio::test]
++async fn incoming_endpoint_uses_declaration_not_callsite_range() {
++    let dir = write_project(&[("fixture.rs", "fn entry() {}\nfn caller() { entry(); }\n")]);
++    let file = std::fs::canonicalize(dir.path())
++        .unwrap()
++        .join("fixture.rs");
++    let seed = item(&file, "entry", 0, 3, "entry");
++    let caller = item(&file, "caller", 1, 3, "caller");
++    let mock = crate::lsp::mock::MockLspClient::new();
++    mock.prepare_call_hierarchy_results
++        .lock()
++        .unwrap()
++        .insert((file.clone(), 0, 3), Some(seed));
++    mock.incoming_calls_results.lock().unwrap().insert(
++        "entry".into(),
++        vec![CallHierarchyIncomingCall {
++            from: caller,
++            from_ranges: vec![Range {
++                start: Position {
++                    line: 1,
++                    character: 14,
++                },
++                end: Position {
++                    line: 1,
++                    character: 19,
++                },
++            }],
++        }],
++    );
++    let edges = resolve_one_hop(&mock, "entry", &file, 0, 3, "rust", Direction::Callers)
++        .await
++        .unwrap();
++    assert_eq!(edges.len(), 1);
++    assert_eq!(edges[0].col, 14);
++    assert_eq!(
++        edges[0].target,
++        Some(Definition {
++            file,
++            line: 1,
++            col: 3
++        })
++    );
++}
++
++#[tokio::test]
++async fn fallback_workspace_rejects_foreign_language_namesakes() {
++    let dir = write_project(&[
++        ("src/lib.rs", "fn entry() { helper(); }\n"),
++        ("src/other.rs", "fn helper() { leaf(); }\nfn leaf() {}\n"),
++        ("other.py", "def helper():\n    wrong()\n"),
++    ]);
++    let root = std::fs::canonicalize(dir.path()).unwrap();
++    let ctx = context(&root, &["src/lib.rs"]).await;
++    let out = CallGraph.call(json!({"symbol":"entry","path":"src/lib.rs","direction":"callees","max_depth":2,"detail_level":"full"}),&ctx).await.unwrap();
++    assert_eq!(
++        rows(&out, &root),
++        vec![
++            "entry>helper@src/lib.rs:1#1",
++            "helper>leaf@src/other.rs:1#2"
++        ],
++        "{out}"
++    );
++    assert!(out.get("completeness_warning").is_none(), "{out}");
++}
++
++#[tokio::test]
++async fn attributed_module_does_not_follow_the_ordinary_filename() {
++    let dir = write_project(&[
++        (
++            "src/lib.rs",
++            "#[path = \"chosen.rs\"]\nmod a;\nfn entry() { a::helper(); }\n",
++        ),
++        ("src/a.rs", "pub fn helper() { wrong(); }\nfn wrong() {}\n"),
++        (
++            "src/chosen.rs",
++            "pub fn helper() { right(); }\nfn right() {}\n",
++        ),
++    ]);
++    let root = std::fs::canonicalize(dir.path()).unwrap();
++    let ctx = context(&root, &["src/lib.rs"]).await;
++    let out = CallGraph.call(json!({"symbol":"entry","path":"src/lib.rs","direction":"callees","max_depth":2,"detail_level":"full"}),&ctx).await.unwrap();
++    assert_eq!(
++        rows(&out, &root),
++        vec!["entry>helper@src/lib.rs:3#1"],
++        "{out}"
++    );
++    assert!(
++        out["completeness_warning"]
++            .as_str()
++            .unwrap_or_default()
++            .contains("attributed"),
++        "{out}"
++    );
++}
++
++#[tokio::test]
++async fn lexical_shadowing_stops_before_a_coincidentally_named_declaration() {
++    let cases = [
++        "mod a { pub fn helper() { right(); } fn right() {} }\nfn helper() { wrong(); }\nfn wrong() {}\nfn entry() { use a::helper; helper(); }\n",
++        "fn helper() { wrong(); }\nfn wrong() {}\nfn entry<F: Fn()>(helper: F) { helper(); }\n",
++        "fn helper() { wrong(); }\nfn wrong() {}\nfn right() {}\nfn entry() { fn helper() { right(); } helper(); }\n",
++        "struct A; impl A { fn helper() { wrong(); } }\nfn wrong() {}\ntrait T { fn helper(); }\nfn entry<A: T>() { A::helper(); }\n",
++        "fn helper() { wrong(); }\nfn wrong() {}\nfn entry() { let helper = || {}; helper(); }\n",
++        "fn helper() { wrong(); }\nfn wrong() {}\nfn entry() { (|helper: fn()| helper())(|| {}); }\n",
++        "mod a { pub fn helper() {} }\nfn helper() { wrong(); }\nfn wrong() {}\nfn entry() { use a::*; helper(); }\n",
++    ];
++    for source in cases {
++        let dir = write_project(&[("src/lib.rs", source)]);
++        let root = std::fs::canonicalize(dir.path()).unwrap();
++        let ctx = context(&root, &["src/lib.rs"]).await;
++        let out = CallGraph.call(json!({"symbol":"entry","path":"src/lib.rs","direction":"callees","max_depth":2,"detail_level":"full"}),&ctx).await.unwrap();
++        let actual = rows(&out, &root);
++        assert!(
++            !actual.iter().any(|row| row.contains(">wrong@")),
++            "{source}\n{out}"
++        );
++        let warning = out["completeness_warning"].as_str().unwrap_or_default();
++        assert!(
++            warning.contains("lexical") && warning.contains("helper"),
++            "{source}\n{out}"
++        );
++        assert!(
++            CallGraph.format_compact(&out).unwrap().contains(warning),
++            "{out}"
++        );
++    }
++}
++
++#[tokio::test]
++async fn lexical_guard_ignores_unrelated_and_expired_bindings() {
++    let source = "fn helper() { leaf(); }\nfn leaf() {}\nfn entry(other: fn()) { { let helper = || {}; } helper(); let helper = || {}; other(); }\n";
++    let dir = write_project(&[("src/lib.rs", source)]);
++    let root = std::fs::canonicalize(dir.path()).unwrap();
++    let ctx = context(&root, &["src/lib.rs"]).await;
++    let out = CallGraph.call(json!({"symbol":"entry","path":"src/lib.rs","direction":"callees","max_depth":2,"detail_level":"full"}),&ctx).await.unwrap();
++    assert!(
++        rows(&out, &root)
++            .iter()
++            .any(|r| r == "helper>leaf@src/lib.rs:1#2"),
++        "{out}"
++    );
++}
++
++#[tokio::test]
++async fn canonical_cycle_does_not_expand_seed_again_at_a_selection_column() {
++    let dir = write_project(&[(
++        "fixture.rs",
++        "fn entry() { next(); }\nfn next() { entry(); }\n",
++    )]);
++    let root = std::fs::canonicalize(dir.path()).unwrap();
++    let file = root.join("fixture.rs");
++    let mock = crate::lsp::mock::MockLspClient::new().with_symbols(
++        &file,
++        crate::ast::parser::extract_symbols_from_source(
++            &std::fs::read_to_string(&file).unwrap(),
++            Some("rust"),
++            &file,
++        )
++        .unwrap(),
++    );
++    let seed = item(&file, "entry", 0, 3, "entry");
++    let next = item(&file, "next", 1, 3, "next");
++    {
++        let mut prepare = mock.prepare_call_hierarchy_results.lock().unwrap();
++        prepare.insert((file.clone(), 0, 0), Some(seed.clone()));
++        prepare.insert((file.clone(), 0, 3), Some(seed.clone()));
++        prepare.insert((file.clone(), 1, 3), Some(next.clone()));
++    }
++    {
++        let mut answers = mock.outgoing_calls_results.lock().unwrap();
++        answers.insert("entry".into(), vec![call(next, 0, 13)]);
++        answers.insert("next".into(), vec![call(seed, 1, 12)]);
++    }
++    let mut ctx = context(&root, &["fixture.rs"]).await;
++    ctx.lsp = crate::lsp::mock::MockLspProvider::with_shared_client(Arc::new(mock));
++    let out = CallGraph.call(json!({"symbol":"entry","path":"fixture.rs","direction":"callees","max_depth":4,"detail_level":"full"}),&ctx).await.unwrap();
++    assert_eq!(
++        rows(&out, &root),
++        vec!["entry>next@fixture.rs:1#1", "next>entry@fixture.rs:2#2"],
++        "{out}"
++    );
++    assert_eq!(out["max_depth_reached"], 2, "{out}");
++}
+diff --git a/src/tools/symbol/call_graph/rust_lexical.rs b/src/tools/symbol/call_graph/rust_lexical.rs
+new file mode 100644
+index 000000000..194fcb300
+--- /dev/null
++++ b/src/tools/symbol/call_graph/rust_lexical.rs
+@@ -0,0 +1,113 @@
++//! Conservative lexical shadowing checks for the bounded Rust AST target fallback.
++//! Semantic definition results take precedence; unsupported bindings need a warning.
++use tree_sitter::Node;
++
++fn mentions(node: Node<'_>, source: &[u8], name: &str) -> bool {
++    if matches!(node.kind(), "identifier" | "type_identifier") {
++        return node.utf8_text(source).ok() == Some(name);
++    }
++    let mut cursor = node.walk();
++    let found = node
++        .named_children(&mut cursor)
++        .any(|n| mentions(n, source, name));
++    found
++}
++
++fn imported(node: Node<'_>, source: &[u8], name: &str) -> bool {
++    if node.kind() == "use_wildcard" {
++        return true;
++    }
++    let mut cursor = node.walk();
++    node.named_children(&mut cursor)
++        .any(|n| imported(n, source, name))
++        || mentions(node, source, name)
++}
++
++fn pattern_field(node: Node<'_>, field: &str, source: &[u8], name: &str) -> bool {
++    node.child_by_field_name(field)
++        .is_some_and(|n| mentions(n, source, name))
++}
++
++fn parameters(node: Node<'_>, source: &[u8], name: &str) -> bool {
++    let Some(parameters) = node.child_by_field_name("parameters") else {
++        return false;
++    };
++    let mut cursor = parameters.walk();
++    let found = parameters.named_children(&mut cursor).any(|p| {
++        if p.kind() == "parameter" {
++            pattern_field(p, "pattern", source, name)
++        } else {
++            mentions(p, source, name)
++        }
++    });
++    found
++}
++
++fn conditions_bind(node: Node<'_>, source: &[u8], name: &str) -> bool {
++    if matches!(node.kind(), "let_condition" | "let_declaration") {
++        return pattern_field(node, "pattern", source, name);
++    }
++    let mut cursor = node.walk();
++    let found = node
++        .named_children(&mut cursor)
++        .any(|n| conditions_bind(n, source, name));
++    found
++}
++
++/// Whether an enclosing lexical binding may select a target that module lookup cannot prove.
++/// This deliberately does not resolve imports, values, local items or generic types.
++pub(super) fn uncertain(call: Node<'_>, source: &[u8], expression: &str) -> bool {
++    let Some(name) = expression.split("::").next() else {
++        return true;
++    };
++    if matches!(name, "self" | "crate" | "super") {
++        return false;
++    }
++    let origin = call.start_byte();
++    let mut ancestor = call.parent();
++    while let Some(scope) = ancestor {
++        if parameters(scope, source, name) || pattern_field(scope, "type_parameters", source, name)
++        {
++            return true;
++        }
++        if matches!(scope.kind(), "for_expression" | "match_arm")
++            && pattern_field(scope, "pattern", source, name)
++        {
++            return true;
++        }
++        if matches!(scope.kind(), "if_expression" | "while_expression")
++            && scope
++                .child_by_field_name("condition")
++                .is_some_and(|n| conditions_bind(n, source, name))
++        {
++            return true;
++        }
++        if matches!(scope.kind(), "source_file" | "declaration_list" | "block") {
++            let mut cursor = scope.walk();
++            for binding in scope.named_children(&mut cursor) {
++                if binding.kind() == "use_declaration" && imported(binding, source, name) {
++                    return true;
++                }
++                if binding.kind() == "let_declaration"
++                    && binding.end_byte() <= origin
++                    && pattern_field(binding, "pattern", source, name)
++                {
++                    return true;
++                }
++                let local_item = scope.kind() == "block"
++                    && matches!(
++                        binding.kind(),
++                        "function_item" | "struct_item" | "enum_item" | "mod_item"
++                    );
++                if (local_item
++                    || matches!(binding.kind(), "const_item" | "static_item" | "type_item"))
++                    && pattern_field(binding, "name", source, name)
++                {
++                    return true;
++                }
++            }
++        }
++        ancestor = scope.parent();
++    }
++    false
++}
+diff --git a/src/tools/symbol/call_graph/rust_target.rs b/src/tools/symbol/call_graph/rust_target.rs
+new file mode 100644
+index 000000000..941bda19d
+--- /dev/null
++++ b/src/tools/symbol/call_graph/rust_target.rs
+@@ -0,0 +1,144 @@
++//! Resolve ordinary declared Rust modules without treating arbitrary qualifiers as filenames.
++use crate::tools::symbol::call_edges::resolver::Definition;
++use std::path::{Path, PathBuf};
++
++fn module_body<'a>(
++    tree: &'a tree_sitter::Tree,
++    source: &str,
++    modules: &[String],
++) -> Option<tree_sitter::Node<'a>> {
++    let mut body = tree.root_node();
++    for name in modules {
++        let mut cursor = body.walk();
++        let declaration = body.named_children(&mut cursor).find(|n| {
++            n.kind() == "mod_item"
++                && n.child_by_field_name("name")
++                    .and_then(|v| v.utf8_text(source.as_bytes()).ok())
++                    == Some(name.as_str())
++        })?;
++        body = declaration.child_by_field_name("body")?;
++    }
++    Some(body)
++}
++
++pub(super) fn resolve(
++    root: &Path,
++    source_file: &Path,
++    scopes: &[String],
++    expression: &str,
++) -> Result<Option<Definition>, String> {
++    let mut parts = expression.split("::").collect::<Vec<_>>();
++    if parts.first() == Some(&"self") {
++        parts.remove(0);
++    }
++    if parts
++        .iter()
++        .any(|p| matches!(*p, "crate" | "super") || p.is_empty())
++    {
++        return Err(format!(
++            "qualified Rust target `{expression}` needs semantic module resolution"
++        ));
++    }
++    let Some(last) = parts.pop() else {
++        return Ok(None);
++    };
++    let mut file = source_file.to_path_buf();
++    let mut inline = scopes.to_vec();
++    while let Some(part) = parts.first().copied() {
++        let source =
++            std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
++        let mut parser = tree_sitter::Parser::new();
++        parser
++            .set_language(&crate::ast::get_ts_language("rust").unwrap())
++            .map_err(|e| e.to_string())?;
++        let tree = parser
++            .parse(&source, None)
++            .ok_or("could not parse Rust module")?;
++        let body =
++            module_body(&tree, &source, &inline).ok_or("could not locate enclosing Rust module")?;
++        let mut cursor = body.walk();
++        let declarations = body
++            .named_children(&mut cursor)
++            .filter(|n| {
++                n.kind() == "mod_item"
++                    && n.child_by_field_name("name")
++                        .and_then(|v| v.utf8_text(source.as_bytes()).ok())
++                        == Some(part)
++            })
++            .collect::<Vec<_>>();
++        let [declaration] = declarations.as_slice() else {
++            // A type-qualified local method may have an exact name_path; do not infer a file.
++            let path = inline
++                .iter()
++                .map(String::as_str)
++                .chain(parts.iter().copied())
++                .chain([last])
++                .collect::<Vec<_>>()
++                .join("/");
++            return super::identity::exact_in_file(&file, &path)
++                .map_err(|e| e.to_string())?
++                .map(Some)
++                .ok_or_else(|| format!("unresolved qualified Rust target `{expression}`"));
++        };
++        if declaration
++            .prev_named_sibling()
++            .is_some_and(|n| n.kind() == "attribute_item")
++        {
++            return Err(format!(
++                "attributed module in target `{expression}` needs semantic module resolution"
++            ));
++        }
++        parts.remove(0);
++        if declaration.child_by_field_name("body").is_some() {
++            inline.push(part.to_owned());
++            continue;
++        }
++        let parent = file.parent().ok_or("Rust module has no parent directory")?;
++        let stem = file
++            .file_stem()
++            .and_then(|s| s.to_str())
++            .ok_or("invalid module filename")?;
++        let mut directory = if matches!(stem, "lib" | "main" | "mod") {
++            parent.to_path_buf()
++        } else {
++            parent.join(stem)
++        };
++        for name in &inline {
++            directory.push(name);
++        }
++        let candidates = [
++            directory.join(format!("{part}.rs")),
++            directory.join(part).join("mod.rs"),
++        ];
++        let files = candidates
++            .into_iter()
++            .filter(|p| p.is_file())
++            .collect::<Vec<PathBuf>>();
++        let [candidate] = files.as_slice() else {
++            return Err(format!(
++                "unresolved or ambiguous module for Rust target `{expression}`"
++            ));
++        };
++        let canonical = candidate.canonicalize().map_err(|e| e.to_string())?;
++        let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
++        if !canonical.starts_with(canonical_root) {
++            return Err(format!(
++                "Rust module for `{expression}` leaves the project scope"
++            ));
++        }
++        file = canonical;
++        inline.clear();
++    }
++    let path = inline
++        .iter()
++        .map(String::as_str)
++        .chain([last])
++        .collect::<Vec<_>>()
++        .join("/");
++    let found = super::identity::exact_in_file(&file, &path).map_err(|e| e.to_string())?;
++    if found.is_none() && expression.contains("::") {
++        Err(format!("unresolved qualified Rust target `{expression}`"))
++    } else {
++        Ok(found)
++    }
++}

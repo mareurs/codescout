@@ -1,0 +1,14 @@
+refuse a pathspec commit carrying unstaged content                      Passed
+refuse an index commit carrying another session's staged paths          Passed
+refuse a stored count, or a class gaining a member it does not name     Skipped (no files to check)
+rustfmt --check (committed bytes)                                       Passed
+refuse a commit citing an artifact id nothing resolves                  Passed
+warn when a moved path is still cited from outside the commit           Passed
+[fix/ecc-bfs-identity-20261110 537fa820d] fix(call-graph): preserve declaration identity across traversal hops
+ 10 files changed, 1508 insertions(+), 45 deletions(-)
+ create mode 100644 src/tools/symbol/call_graph/identity.rs
+ create mode 100644 src/tools/symbol/call_graph/identity_tests.rs
+ create mode 100644 src/tools/symbol/call_graph/identity_tests/review.rs
+ create mode 100644 src/tools/symbol/call_graph/rust_lexical.rs
+ create mode 100644 src/tools/symbol/call_graph/rust_target.rs
+537fa820d95b3298393cc515ab104776a57455c7 52c9b1d039bbdd7de6183eefca168f32318d8cd8

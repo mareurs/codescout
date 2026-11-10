@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000cb",
+  "command": "env -u CARGO_TARGET_DIR TMPDIR=/home/marius/.cache/codescout-ecc-tmp CODESCOUT_GATE_TMPFS_BASE=off ./scripts/with-slot.sh --slot 2 cargo test --no-default-features --lib tools::symbol::call_ > /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-green-position-separation.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 3472645,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-10T16:25:17.911703278+00:00",
+  "finished_at": "2026-11-10T16:26:03.589241384+00:00",
+  "log_path": "/tmp/codescout-bg-Oo5VHo.log"
+}

@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 230
+entry_high_water_F: 234
 entry_high_water_W: 158
 ---
 
@@ -76,6 +76,10 @@ entry_high_water_W: 158
 | F-228 | 2026-11-10 | med | tool-usage | mitigated | **A red gate prevented the verification wrapper from observing the native child exit** — preserve the red and terminal native data; do not invent a child exit code. |
 | F-229 | 2026-11-10 | med | tool-usage | fixed-verified | **Quoted heading names were mistaken for structural headings during skill-block extraction** — anchored sections and explicit stdin handoff returned actual rows; no peer count inferred. |
 | F-230 | 2026-11-10 | med | tool-usage | fixed-verified | **Text-mode hashing normalized raw mutation-log carriage returns** — recompute byte hashes, preserve normalized digests, no source/log/result change. |
+| F-231 | 2026-11-10 | med | tool-usage | fixed-verified | **Baseline snapshot helper assumed the worktree target instead of the leased target** — preserve failed capture; bind compilation and snapshot under one lease. |
+| F-232 | 2026-11-10 | med | tool-behavior | promoted-to-bug-tracker | **Named symbol ranges stayed stale after a compaction cache flush** — retained counterexample, forced-byte fallback; open navigation bug4e7ec7bfc047ac7b. |
+| F-233 | 2026-11-10 | med | measurement | fixed-verified | **A source-path diff was reported as the whole peer delta** — full scan found four Python harness paths; corrected claim and separately gated exact integration tree. |
+| F-234 | 2026-11-10 | med | test-design | fixed-verified | **Replacement LSP fixture provider omitted document symbols** — retain setup failures, then93/2 intended RED and95/0 final GREEN. |
 | F-213 | 2026-11-06 | med | test-design | fixed-verified | **A crash fixture failed in its toy parser before reaching the classifier** — wrong-reason red replaced by observed intended red before reapplying production wiring. |
 | F-214 | 2026-11-06 | med | test-design | promoted-to-bug-tracker | **Stripping log indentation promoted a debug field to compiler evidence** — real four-log overlap exposed the false provenance; three observed RED variants before fix. |
 | F-210 | 2026-11-01 | med | process | mitigated | **A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path** — `fmt-mine` named three of my files UNKNOWN after a 19-minute gate; `rustfmt --check` on the diff's files beforehand takes seconds. |
@@ -18252,6 +18256,66 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Rests on:** Full-byte parent capture in instrument-count-boundary.json and independently verified raw/normalized pairs in the review correction. The final evidence manifest hashes file bytes.
 
 **Lesson:** A raw-artifact hash must consume raw bytes; text-mode normalization measures a different artifact even when the visible log looks identical.
+
+## F-231 — Baseline snapshot helper assumed the worktree target instead of the leased target
+
+**Valid:** dated 2026-11-10
+
+**Severity:** med
+**Category:** tool-usage
+**Status:** fixed-verified
+
+**Observed:** The first BFS identity baseline helper ran cargo through with-slot, then assumed the binary was under worktree/target/debug. Cargo used the pool's CARGO_TARGET_DIR; the build passed but snapshot capture failed its is_file assertion (job@bg_000000c4 exited1). No binary result/hash was published by that failed helper.
+
+**Correction:** The replacement helper runs itself inside the source-bound lease, reads the actual CARGO_TARGET_DIR and copies/hashes the binary before releasing the lease. The original failed script/log remain retained. Source inputs are checked before/after; no production or test edit preceded the baseline snapshot.
+
+**Rests on:** Inspected scripts/with-slot.sh contract and actual first-job failure; [bound helper](ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/build_baseline_bound.py). Corrected job@bg_000000c5 exited0; exact12 input hashes remained unchanged and the binary was copied under the actual slot-0 lease (baseline-binary.json).
+
+**Lesson:** Artifact capture belongs inside the same lease as compilation. A worktree-local target directory may be created by LSP tooling and is not the leased cargo target.
+
+## F-232 — Named symbol ranges stayed stale after a compaction cache flush
+
+**Valid:** dated 2026-11-10
+
+**Observed:** In the retained BFS worktree, symbols(call_site, include_body=true) labeled range136–186 and returned the tail of workspace scanning; actual call_site starts at169. Repeated after workspace(post_compact=true), with source bytes unchanged. Independent reviewer observed analogous mismatches in its isolated tree.
+
+**Severity:** med — trusting this body/range would misdirect structural reasoning and edits.
+
+**Category:** tool-behavior
+
+**Status:** promoted-to-bug-tracker
+
+**Evidence:** [Exact responses](ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/navigation-range-counterexample.json); bug `4e7ec7bfc047ac7b`, [open record](../issues/2026-11-10-symbols-stale-ranges-after-source-formatting.md). Forced bounded current-byte reads were used when labels contradicted source. The edit_code tool separately repaired/validated ranges; resulting diffs and compiler results were checked. Cache ownership/root cause remains unestablished; this is outside the current graph fix.
+
+## F-233 — A source-path diff was reported as the whole peer delta
+
+**Valid:** dated 2026-11-10
+
+**Observed:** A base-to-HEAD diff restricted to src/scripts/tests/crates/Cargo returned no paths. The controller then stated peer changes were only documentation. The complete unrestricted diff instead returned four tools/setup-ab-eval Python paths at195317920ea2877ead34435c99df0a650f86d7b5. The statement was explicitly corrected to the user as soon as the full population was read.
+
+**Severity:** med — the narrow predicate could have licensed an unsupported integration-equivalence claim.
+
+**Category:** measurement
+
+**Status:** fixed-verified
+
+**Evidence:** [Complete peer paths and environment](ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/preintegration-state.json). The predicate counted changed paths inside supplied directories, not all peer changes or all build/test surfaces. Final integration uses a separate retained tree including the complete observed peer HEAD, with its exact write-tree hash bound before/after the full gate. Source gate success alone is not reported as whole integrated-tree success.
+
+**Rests on:** Personal measurement rule — name the predicate's literal population before extending the claim.
+
+## F-234 — Replacement LSP fixture provider omitted document symbols
+
+**Valid:** dated 2026-11-10
+
+**Observed:** Three newly added review regressions initially failed before exercising their intended behavior because their replacement MockLspClient omitted the fixture document symbols. The first run91passed/4failed included three symbol-not-found errors. Supplying actual parser-extracted fixture symbols restored the intended test seam: corrected RED93passed/2failed exposes the missing shared-callsite branch and lexical wrong expansion. No product kill is inferred from the earlier setup failures.
+
+**Severity:** med — three fixture failures delayed the bounded fix pass and would misstate regression evidence if counted as product RED.
+
+**Category:** test-design
+
+**Status:** fixed-verified
+
+**Evidence:** [Original setup failures](ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-red.log), [corrected intended RED](ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-red-fixture-corrected.log), [final related95/0](ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-green-borrow-corrected.log). Final actual mutations discriminate all five prior survivors; logs preserve every attempt. Fixture document_symbols uses the real parser, keeping only the external wire substituted.
 
 ## Template for new entries
 

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000e1",
+  "command": "python3 docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/verify_integrated.py > docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integrated-gate-driver.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 349378,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-10T17:18:31.954780880+00:00",
+  "finished_at": "2026-11-10T17:26:26.342227192+00:00",
+  "log_path": "/tmp/codescout-bg-VPnaMJ.log"
+}

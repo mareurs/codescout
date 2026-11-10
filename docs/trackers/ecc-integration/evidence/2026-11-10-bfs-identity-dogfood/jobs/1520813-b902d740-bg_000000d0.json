@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000d0",
+  "command": "python3 docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended_native.py > docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended-native.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 3821748,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-10T16:44:30.956561622+00:00",
+  "finished_at": "2026-11-10T16:45:26.363704993+00:00",
+  "log_path": "/tmp/codescout-bg-fSmjXh.log"
+}

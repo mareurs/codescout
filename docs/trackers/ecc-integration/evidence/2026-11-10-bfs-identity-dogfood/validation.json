@@ -1,0 +1,24 @@
+{
+  "managed_documents": 20,
+  "local_markdown_targets": 188,
+  "baseline_snapshots": 12,
+  "initial_mutations": 13,
+  "final_mutations": 15,
+  "all_final_mutants_killed": true,
+  "private_prefix_sha256": "a2e919f8fa2de3140e6a25568396211e0092d7e01e6e4a88448ad0d5062183fa",
+  "private_prefix_bytes": 30031020,
+  "private_prefix_mode": "0600",
+  "private_prefix_gitignored": true,
+  "foreign_index_unchanged": true,
+  "source_hashes_match": true,
+  "exact_integration_tree": "115cd5bb196cd91c7763deede84d3c4e93070059",
+  "old_full_path_live_hits": [],
+  "archive_positive_controls": {
+    "2026-11-10-call-graph-multihop-collapses-same-name-definitions.md": true,
+    "2026-11-10-call-graph-ast-fallback-ignores-lexical-shadowing.md": true,
+    "2026-11-10-call-graph-display-dedupe-erases-endpoints.md": true,
+    "2026-11-10-call-graph-new-identity-guards-unpinned.md": true
+  },
+  "privacy_predicate": "two calibrated high-confidence token shapes on selected evidence bytes only; no exhaustive secret scan claim",
+  "limits": "Managed docs+changed ledger sections, baseline snapshots, selected raw evidence, exact source/integration, private snapshot. Historical raw/archive/audit data excluded from live citation sweep."
+}

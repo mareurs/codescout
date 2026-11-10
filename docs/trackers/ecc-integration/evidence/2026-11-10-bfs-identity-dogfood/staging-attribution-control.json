@@ -1,0 +1,21 @@
+{
+  "path": "docs/trackers/ecc-integration/README.md",
+  "before": [
+    [
+      "theirs",
+      "-",
+      "docs/trackers/ecc-integration/README.md"
+    ]
+  ],
+  "after": [
+    [
+      "mine",
+      "codex:01a1bf68-e650-7f20-911e-b53f86597c27",
+      "docs/trackers/ecc-integration/README.md"
+    ]
+  ],
+  "worktree_sha256": "4c35e18d44a0057618d9cf6e72b9777682a01f1fbd02ba45a6c2a30dacd79b01",
+  "worktree_unchanged": true,
+  "foreign_index_unchanged": true,
+  "mechanism": "Real named git restore --staged then git add on one positively owned reviewed path; no ownership-log edit or hook bypass"
+}

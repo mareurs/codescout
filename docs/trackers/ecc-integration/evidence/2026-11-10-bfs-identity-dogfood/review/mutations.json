@@ -1,0 +1,93 @@
+[
+  {
+    "id": "M01",
+    "file": "src/tools/symbol/call_graph/traversal.rs",
+    "find": "(self.symbol.clone(), self.identity.clone())",
+    "replace": "(self.symbol.clone(), self.identity.clone().map(|mut d| { d.file = std::path::PathBuf::new(); d }))",
+    "axis": "visited drops file"
+  },
+  {
+    "id": "M02",
+    "file": "src/tools/symbol/call_graph/traversal.rs",
+    "find": "(self.symbol.clone(), self.identity.clone())",
+    "replace": "(self.symbol.clone(), self.identity.clone().map(|mut d| { d.col = 0; d }))",
+    "axis": "visited drops column"
+  },
+  {
+    "id": "M03",
+    "file": "src/tools/symbol/call_graph/mod.rs",
+    "find": "Some(definition) => (definition.file.clone(), definition.line, definition.col),",
+    "replace": "Some(definition) => (definition.file.clone(), definition.line, 0),",
+    "axis": "provider query drops column"
+  },
+  {
+    "id": "M04",
+    "file": "src/tools/symbol/call_graph/../call_edges/resolver.rs",
+    "find": "col: item.selection_range.start.character,",
+    "replace": "col: 0,",
+    "axis": "hierarchy target drops column"
+  },
+  {
+    "id": "M05",
+    "file": "src/tools/symbol/call_graph/../call_edges/resolver.rs",
+    "find": "col: range.start.character,\n                        source: EdgeSource::Lsp,\n                        target: hierarchy_target(&c.from),",
+    "replace": "col: range.start.character,\n                        source: EdgeSource::Lsp,\n                        target: None,",
+    "axis": "incoming endpoint omitted"
+  },
+  {
+    "id": "M06",
+    "file": "src/tools/symbol/call_graph/../call_edges/cache.rs",
+    "find": "let payload = serde_json::to_string(edges)",
+    "replace": "let payload = serde_json::to_string(&edges.iter().cloned().map(|mut e| { e.target = None; e }).collect::<Vec<_>>())",
+    "axis": "completed payload drops endpoints"
+  },
+  {
+    "id": "M07",
+    "file": "src/tools/symbol/call_graph/mod.rs",
+    "find": "if !edges\n                .iter()\n                .any(|edge| edge.source == EdgeSource::Lsp && edge.target.is_none())",
+    "replace": "if true",
+    "axis": "legacy LSP guard bypassed"
+  },
+  {
+    "id": "M08",
+    "file": "src/tools/symbol/call_graph/identity.rs",
+    "find": "return Placement::Ambiguous;\n                }\n                candidate = Some(found);",
+    "replace": "return Placement::Found(candidate.unwrap());\n                }\n                candidate = Some(found);",
+    "axis": "workspace ambiguity chooses first"
+  },
+  {
+    "id": "M09",
+    "file": "src/tools/symbol/call_graph/identity.rs",
+    "find": "            || !in_family(path)\n",
+    "replace": "            || false\n",
+    "axis": "new workspace scan includes foreign languages"
+  },
+  {
+    "id": "M10",
+    "file": "src/tools/symbol/call_graph/identity.rs",
+    "find": "            budget.record_unexamined();\n            continue;",
+    "replace": "            continue;",
+    "axis": "new workspace unreadable coverage omitted"
+  },
+  {
+    "id": "M11",
+    "file": "src/tools/symbol/call_graph/traversal.rs",
+    "find": "let next = if depth < cfg.max_depth {",
+    "replace": "let next = if depth <= cfg.max_depth {",
+    "axis": "depth boundary resolves unwanted neighbors"
+  },
+  {
+    "id": "M12",
+    "file": "src/tools/symbol/call_graph/mod.rs",
+    "find": "let key = identity::canonical(symbol, definition.clone());",
+    "replace": "let key = definition.clone();",
+    "axis": "next target canonicalization omitted"
+  },
+  {
+    "id": "M13",
+    "file": "src/tools/symbol/call_graph/rust_target.rs",
+    "find": ".is_some_and(|n| n.kind() == \"attribute_item\")",
+    "replace": ".is_some_and(|_n| false)",
+    "axis": "attributed module safety guard bypassed"
+  }
+]

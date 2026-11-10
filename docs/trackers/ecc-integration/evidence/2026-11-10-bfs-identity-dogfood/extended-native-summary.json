@@ -1,0 +1,7 @@
+{
+  "cases": 4,
+  "matched": 4,
+  "controls": 2,
+  "controls_as_expected": 2,
+  "limits": "Four additional concrete Rust cases; no exhaustive binding, cross-language or latency claim."
+}

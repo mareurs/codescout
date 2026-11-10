@@ -1,0 +1,82 @@
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-2 (leased until this command exits)
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout/.worktrees/ecc-bfs-identity-20261110)
+error[E0597]: `cursor` does not live long enough
+  --> src/tools/symbol/call_graph/rust_lexical.rs:10:25
+   |
+ 9 |     let mut cursor = node.walk();
+   |         ---------- binding `cursor` declared here
+10 |     node.named_children(&mut cursor)
+   |     --------------------^^^^^^^^^^^-
+   |     |                   |
+   |     |                   borrowed value does not live long enough
+   |     a temporary with access to the borrow is created here ...
+11 |         .any(|n| mentions(n, source, name))
+12 | }
+   | -
+   | |
+   | `cursor` dropped here while still borrowed
+   | ... and the borrow might be used here, when that temporary is dropped and runs the destructor for type `impl ExactSizeIterator + std::iter::Iterator<Item = Node<'_>> + '_`
+   |
+   = note: the temporary is part of an expression at the end of a block;
+           consider forcing this temporary to be dropped sooner, before the block's local variables are dropped
+help: for example, you could save the expression's value in a new local variable `x` and then make `x` be the expression at the end of the block
+   |
+10 ~     let x = node.named_children(&mut cursor)
+11 ~         .any(|n| mentions(n, source, name)); x
+   |
+
+error[E0597]: `cursor` does not live long enough
+  --> src/tools/symbol/call_graph/rust_lexical.rs:34:31
+   |
+33 |     let mut cursor = parameters.walk();
+   |         ---------- binding `cursor` declared here
+34 |     parameters.named_children(&mut cursor).any(|p| {
+   |     --------------------------^^^^^^^^^^^-
+   |     |                         |
+   |     |                         borrowed value does not live long enough
+   |     a temporary with access to the borrow is created here ...
+...
+41 | }
+   | -
+   | |
+   | `cursor` dropped here while still borrowed
+   | ... and the borrow might be used here, when that temporary is dropped and runs the destructor for type `impl ExactSizeIterator + std::iter::Iterator<Item = Node<'_>> + '_`
+   |
+   = note: the temporary is part of an expression at the end of a block;
+           consider forcing this temporary to be dropped sooner, before the block's local variables are dropped
+help: for example, you could save the expression's value in a new local variable `x` and then make `x` be the expression at the end of the block
+   |
+34 ~     let x = parameters.named_children(&mut cursor).any(|p| {
+35 |         if p.kind() == "parameter" {
+...
+39 |         }
+40 ~     }); x
+   |
+
+error[E0597]: `cursor` does not live long enough
+  --> src/tools/symbol/call_graph/rust_lexical.rs:48:25
+   |
+47 |     let mut cursor = node.walk();
+   |         ---------- binding `cursor` declared here
+48 |     node.named_children(&mut cursor)
+   |     --------------------^^^^^^^^^^^-
+   |     |                   |
+   |     |                   borrowed value does not live long enough
+   |     a temporary with access to the borrow is created here ...
+49 |         .any(|n| conditions_bind(n, source, name))
+50 | }
+   | -
+   | |
+   | `cursor` dropped here while still borrowed
+   | ... and the borrow might be used here, when that temporary is dropped and runs the destructor for type `impl ExactSizeIterator + std::iter::Iterator<Item = Node<'_>> + '_`
+   |
+   = note: the temporary is part of an expression at the end of a block;
+           consider forcing this temporary to be dropped sooner, before the block's local variables are dropped
+help: for example, you could save the expression's value in a new local variable `x` and then make `x` be the expression at the end of the block
+   |
+48 ~     let x = node.named_children(&mut cursor)
+49 ~         .any(|n| conditions_bind(n, source, name)); x
+   |
+
+For more information about this error, try `rustc --explain E0597`.
+error: could not compile `codescout` (lib test) due to 3 previous errors

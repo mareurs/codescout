@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/identity.rs
++++ src/tools/symbol/call_graph/identity.rs
+@@ -125,7 +125,7 @@
+                     .as_ref()
+                     .is_some_and(|previous| previous != &found)
+                 {
+-                    return Placement::Ambiguous;
++                    return Placement::Found(candidate.unwrap());
+                 }
+                 candidate = Some(found);
+             }

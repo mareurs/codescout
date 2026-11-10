@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/../call_edges/resolver.rs
++++ src/tools/symbol/call_graph/../call_edges/resolver.rs
+@@ -128,7 +128,7 @@
+                         line: range.start.line,
+                         col: range.start.character,
+                         source: EdgeSource::Lsp,
+-                        target: hierarchy_target(&c.from),
++                        target: None,
+                     });
+                 }
+                 // If from_ranges is empty, emit one edge at the symbol's own position.

@@ -1,0 +1,1086 @@
+[
+  {
+    "path": "baseline-binary.json",
+    "bytes": 445
+  },
+  {
+    "path": "baseline-build-bound.log",
+    "bytes": 72
+  },
+  {
+    "path": "baseline-build.log",
+    "bytes": 1136
+  },
+  {
+    "path": "baseline-inputs/AGENTS.md.txt",
+    "bytes": 1450
+  },
+  {
+    "path": "baseline-inputs/CLAUDE.md.txt",
+    "bytes": 5786
+  },
+  {
+    "path": "baseline-inputs/Cargo.lock.txt",
+    "bytes": 144462
+  },
+  {
+    "path": "baseline-inputs/Cargo.toml.txt",
+    "bytes": 13973
+  },
+  {
+    "path": "baseline-inputs/candidate-brief.txt",
+    "bytes": 445
+  },
+  {
+    "path": "baseline-inputs/src__ast__parser.rs.txt",
+    "bytes": 117311
+  },
+  {
+    "path": "baseline-inputs/src__lsp__mock.rs.txt",
+    "bytes": 21498
+  },
+  {
+    "path": "baseline-inputs/src__lsp__ops.rs.txt",
+    "bytes": 7619
+  },
+  {
+    "path": "baseline-inputs/src__lsp__symbols.rs.txt",
+    "bytes": 3110
+  },
+  {
+    "path": "baseline-inputs/src__tools__symbol__call_edges__cache.rs.txt",
+    "bytes": 18331
+  },
+  {
+    "path": "baseline-inputs/src__tools__symbol__call_edges__resolver.rs.txt",
+    "bytes": 50986
+  },
+  {
+    "path": "baseline-inputs/src__tools__symbol__call_graph__mod.rs.txt",
+    "bytes": 96617
+  },
+  {
+    "path": "baseline-inputs/src__tools__symbol__call_graph__traversal.rs.txt",
+    "bytes": 10890
+  },
+  {
+    "path": "baseline-module.log",
+    "bytes": 17076
+  },
+  {
+    "path": "baseline-native/bfs-cases.json",
+    "bytes": 26694
+  },
+  {
+    "path": "baseline-native/bfs-fixtures.json",
+    "bytes": 1904
+  },
+  {
+    "path": "baseline-native/bfs-scorer-controls.json",
+    "bytes": 412
+  },
+  {
+    "path": "baseline-native/bfs-summary.json",
+    "bytes": 385
+  },
+  {
+    "path": "baseline-native/native.log",
+    "bytes": 1733
+  },
+  {
+    "path": "baseline-native/probe.py",
+    "bytes": 6857
+  },
+  {
+    "path": "baseline-native/process-result.json",
+    "bytes": 312
+  },
+  {
+    "path": "baseline.json",
+    "bytes": 4321
+  },
+  {
+    "path": "build_baseline.py",
+    "bytes": 1402
+  },
+  {
+    "path": "build_baseline_bound.py",
+    "bytes": 1575
+  },
+  {
+    "path": "candidate-binary.json",
+    "bytes": 392
+  },
+  {
+    "path": "candidate-build.log",
+    "bytes": 1029
+  },
+  {
+    "path": "candidate-gate-result.json",
+    "bytes": 1319
+  },
+  {
+    "path": "candidate-gate.log",
+    "bytes": 1967969
+  },
+  {
+    "path": "candidate-native/bfs-cases.json",
+    "bytes": 27164
+  },
+  {
+    "path": "candidate-native/bfs-fixtures.json",
+    "bytes": 1904
+  },
+  {
+    "path": "candidate-native/bfs-scorer-controls.json",
+    "bytes": 412
+  },
+  {
+    "path": "candidate-native/bfs-summary.json",
+    "bytes": 385
+  },
+  {
+    "path": "candidate-native/native.log",
+    "bytes": 1850
+  },
+  {
+    "path": "candidate-native/probe.py",
+    "bytes": 6834
+  },
+  {
+    "path": "candidate-native/process-result.json",
+    "bytes": 267
+  },
+  {
+    "path": "candidate-source.json",
+    "bytes": 1117
+  },
+  {
+    "path": "candidate.patch",
+    "bytes": 49326
+  },
+  {
+    "path": "capture.py",
+    "bytes": 4887
+  },
+  {
+    "path": "controller-only/ecc-silent-failure-review.txt",
+    "bytes": 4244
+  },
+  {
+    "path": "controller-only/ecc-spec-miner.txt",
+    "bytes": 3886
+  },
+  {
+    "path": "excluded-runtime-paths.json",
+    "bytes": 90
+  },
+  {
+    "path": "extended-native-cases.json",
+    "bytes": 26577
+  },
+  {
+    "path": "extended-native-controls.json",
+    "bytes": 166
+  },
+  {
+    "path": "extended-native-summary.json",
+    "bytes": 187
+  },
+  {
+    "path": "extended-native.log",
+    "bytes": 888
+  },
+  {
+    "path": "extended_native.py",
+    "bytes": 5464
+  },
+  {
+    "path": "final-binary.json",
+    "bytes": 388
+  },
+  {
+    "path": "final-build.log",
+    "bytes": 178
+  },
+  {
+    "path": "final-candidate.patch",
+    "bytes": 67901
+  },
+  {
+    "path": "final-excluded-runtime-paths.json",
+    "bytes": 90
+  },
+  {
+    "path": "final-extended-native-cases.json",
+    "bytes": 26603
+  },
+  {
+    "path": "final-extended-native-controls.json",
+    "bytes": 166
+  },
+  {
+    "path": "final-extended-native-summary.json",
+    "bytes": 187
+  },
+  {
+    "path": "final-extended-native.log",
+    "bytes": 888
+  },
+  {
+    "path": "final-gate-result.json",
+    "bytes": 1566
+  },
+  {
+    "path": "final-gate.log",
+    "bytes": 1968280
+  },
+  {
+    "path": "final-lexical-native-cases.json",
+    "bytes": 23661
+  },
+  {
+    "path": "final-lexical-native-controls.json",
+    "bytes": 249
+  },
+  {
+    "path": "final-lexical-native-summary.json",
+    "bytes": 378
+  },
+  {
+    "path": "final-lexical-native.log",
+    "bytes": 137
+  },
+  {
+    "path": "final-mutations/M01.log",
+    "bytes": 14026
+  },
+  {
+    "path": "final-mutations/M01.patch",
+    "bytes": 345
+  },
+  {
+    "path": "final-mutations/M02.log",
+    "bytes": 14510
+  },
+  {
+    "path": "final-mutations/M02.patch",
+    "bytes": 320
+  },
+  {
+    "path": "final-mutations/M03.log",
+    "bytes": 17542
+  },
+  {
+    "path": "final-mutations/M03.patch",
+    "bytes": 617
+  },
+  {
+    "path": "final-mutations/M04.log",
+    "bytes": 15659
+  },
+  {
+    "path": "final-mutations/M04.patch",
+    "bytes": 333
+  },
+  {
+    "path": "final-mutations/M05.log",
+    "bytes": 11793
+  },
+  {
+    "path": "final-mutations/M05.patch",
+    "bytes": 520
+  },
+  {
+    "path": "final-mutations/M06.log",
+    "bytes": 11920
+  },
+  {
+    "path": "final-mutations/M06.patch",
+    "bytes": 590
+  },
+  {
+    "path": "final-mutations/M07.log",
+    "bytes": 12665
+  },
+  {
+    "path": "final-mutations/M07.patch",
+    "bytes": 465
+  },
+  {
+    "path": "final-mutations/M08.log",
+    "bytes": 12136
+  },
+  {
+    "path": "final-mutations/M08.patch",
+    "bytes": 415
+  },
+  {
+    "path": "final-mutations/M09.log",
+    "bytes": 555
+  },
+  {
+    "path": "final-mutations/M09.patch",
+    "bytes": 330
+  },
+  {
+    "path": "final-mutations/baseline.log",
+    "bytes": 10918
+  },
+  {
+    "path": "final-mutations/mutations.json",
+    "bytes": 4179
+  },
+  {
+    "path": "final-mutations/results.json",
+    "bytes": 12319
+  },
+  {
+    "path": "final-mutations-driver.log",
+    "bytes": 1073
+  },
+  {
+    "path": "final-native/bfs-cases.json",
+    "bytes": 27148
+  },
+  {
+    "path": "final-native/bfs-fixtures.json",
+    "bytes": 1904
+  },
+  {
+    "path": "final-native/bfs-scorer-controls.json",
+    "bytes": 412
+  },
+  {
+    "path": "final-native/bfs-summary.json",
+    "bytes": 385
+  },
+  {
+    "path": "final-native/native.log",
+    "bytes": 1850
+  },
+  {
+    "path": "final-native/probe.py",
+    "bytes": 6822
+  },
+  {
+    "path": "final-native/process-result.json",
+    "bytes": 267
+  },
+  {
+    "path": "final-source.json",
+    "bytes": 1366
+  },
+  {
+    "path": "final_extended_native.py",
+    "bytes": 5484
+  },
+  {
+    "path": "final_lexical_native.py",
+    "bytes": 3727
+  },
+  {
+    "path": "foreign-index-before.json",
+    "bytes": 1095
+  },
+  {
+    "path": "identity-green-initial.log",
+    "bytes": 11489
+  },
+  {
+    "path": "identity-green-position-separation.log",
+    "bytes": 9730
+  },
+  {
+    "path": "identity-red-attempt2.log",
+    "bytes": 61
+  },
+  {
+    "path": "identity-red-slot2.log",
+    "bytes": 3547
+  },
+  {
+    "path": "identity-red.log",
+    "bytes": 61
+  },
+  {
+    "path": "inspect_state.py",
+    "bytes": 2073
+  },
+  {
+    "path": "lsp-target-green.log",
+    "bytes": 9861
+  },
+  {
+    "path": "lsp-target-red.log",
+    "bytes": 2670
+  },
+  {
+    "path": "navigation-range-counterexample.json",
+    "bytes": 3220
+  },
+  {
+    "path": "preintegration-state.json",
+    "bytes": 4128
+  },
+  {
+    "path": "recheck_mutations.py",
+    "bytes": 4192
+  },
+  {
+    "path": "review/D01-result.json",
+    "bytes": 9591
+  },
+  {
+    "path": "review/D01.log",
+    "bytes": 2280
+  },
+  {
+    "path": "review/D01.patch",
+    "bytes": 787
+  },
+  {
+    "path": "review/M01.log",
+    "bytes": 12147
+  },
+  {
+    "path": "review/M01.patch",
+    "bytes": 345
+  },
+  {
+    "path": "review/M02.log",
+    "bytes": 11465
+  },
+  {
+    "path": "review/M02.patch",
+    "bytes": 320
+  },
+  {
+    "path": "review/M03.log",
+    "bytes": 14196
+  },
+  {
+    "path": "review/M03.patch",
+    "bytes": 617
+  },
+  {
+    "path": "review/M04.log",
+    "bytes": 11615
+  },
+  {
+    "path": "review/M04.patch",
+    "bytes": 333
+  },
+  {
+    "path": "review/M05.log",
+    "bytes": 10128
+  },
+  {
+    "path": "review/M05.patch",
+    "bytes": 520
+  },
+  {
+    "path": "review/M06.log",
+    "bytes": 10933
+  },
+  {
+    "path": "review/M06.patch",
+    "bytes": 590
+  },
+  {
+    "path": "review/M07.log",
+    "bytes": 10057
+  },
+  {
+    "path": "review/M07.patch",
+    "bytes": 465
+  },
+  {
+    "path": "review/M08.log",
+    "bytes": 11149
+  },
+  {
+    "path": "review/M08.patch",
+    "bytes": 415
+  },
+  {
+    "path": "review/M09.log",
+    "bytes": 10062
+  },
+  {
+    "path": "review/M09.patch",
+    "bytes": 330
+  },
+  {
+    "path": "review/M10.log",
+    "bytes": 10912
+  },
+  {
+    "path": "review/M10.patch",
+    "bytes": 306
+  },
+  {
+    "path": "review/M11.log",
+    "bytes": 11147
+  },
+  {
+    "path": "review/M11.patch",
+    "bytes": 393
+  },
+  {
+    "path": "review/M12.log",
+    "bytes": 10057
+  },
+  {
+    "path": "review/M12.patch",
+    "bytes": 468
+  },
+  {
+    "path": "review/M13.log",
+    "bytes": 10065
+  },
+  {
+    "path": "review/M13.patch",
+    "bytes": 420
+  },
+  {
+    "path": "review/baseline-exit.json",
+    "bytes": 393
+  },
+  {
+    "path": "review/baseline.log",
+    "bytes": 11232
+  },
+  {
+    "path": "review/mutation-results.json",
+    "bytes": 19796
+  },
+  {
+    "path": "review/mutations.json",
+    "bytes": 3706
+  },
+  {
+    "path": "review/native/block-import-shadows-root/probe.rmeta",
+    "bytes": 2893
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.codescout/call_edges.db",
+    "bytes": 32768
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.codescout/project.toml",
+    "bytes": 49
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.codescout/usage.db",
+    "bytes": 20480
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.codescout/write.lock",
+    "bytes": 0
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/HEAD",
+    "bytes": 23
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/config",
+    "bytes": 92
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/description",
+    "bytes": 73
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/applypatch-msg.sample",
+    "bytes": 478
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/commit-msg.sample",
+    "bytes": 1972
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/fsmonitor-watchman.sample",
+    "bytes": 4611
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/post-update.sample",
+    "bytes": 189
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-applypatch.sample",
+    "bytes": 424
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-commit.sample",
+    "bytes": 1649
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-merge-commit.sample",
+    "bytes": 416
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-push.sample",
+    "bytes": 1374
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-rebase.sample",
+    "bytes": 4898
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-receive.sample",
+    "bytes": 544
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/prepare-commit-msg.sample",
+    "bytes": 1492
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/push-to-checkout.sample",
+    "bytes": 2783
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/sendemail-validate.sample",
+    "bytes": 2308
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/update.sample",
+    "bytes": 3650
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/info/exclude",
+    "bytes": 240
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.gitignore",
+    "bytes": 29
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/Cargo.toml",
+    "bytes": 61
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/src/lib.rs",
+    "bytes": 132
+  },
+  {
+    "path": "review/native/block-import-shadows-root/rustc.stderr",
+    "bytes": 1526
+  },
+  {
+    "path": "review/native/block-import-shadows-root/state/state/codescout/servers/3941670.json",
+    "bytes": 268
+  },
+  {
+    "path": "review/native/block-import-shadows-root/state/workspace.toml",
+    "bytes": 0
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/probe.rmeta",
+    "bytes": 2747
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.codescout/call_edges.db",
+    "bytes": 32768
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.codescout/project.toml",
+    "bytes": 49
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.codescout/usage.db",
+    "bytes": 20480
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.codescout/write.lock",
+    "bytes": 0
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/HEAD",
+    "bytes": 23
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/config",
+    "bytes": 92
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/description",
+    "bytes": 73
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/applypatch-msg.sample",
+    "bytes": 478
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/commit-msg.sample",
+    "bytes": 1972
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/fsmonitor-watchman.sample",
+    "bytes": 4611
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/post-update.sample",
+    "bytes": 189
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-applypatch.sample",
+    "bytes": 424
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-commit.sample",
+    "bytes": 1649
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-merge-commit.sample",
+    "bytes": 416
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-push.sample",
+    "bytes": 1374
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-rebase.sample",
+    "bytes": 4898
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-receive.sample",
+    "bytes": 544
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/prepare-commit-msg.sample",
+    "bytes": 1492
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/push-to-checkout.sample",
+    "bytes": 2783
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/sendemail-validate.sample",
+    "bytes": 2308
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/update.sample",
+    "bytes": 3650
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/info/exclude",
+    "bytes": 240
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.gitignore",
+    "bytes": 29
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/Cargo.toml",
+    "bytes": 61
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/src/lib.rs",
+    "bytes": 82
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/rustc.stderr",
+    "bytes": 916
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/state/state/codescout/servers/3944581.json",
+    "bytes": 274
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/state/workspace.toml",
+    "bytes": 0
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/probe.rmeta",
+    "bytes": 3439
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.codescout/call_edges.db",
+    "bytes": 32768
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.codescout/project.toml",
+    "bytes": 49
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.codescout/usage.db",
+    "bytes": 20480
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.codescout/write.lock",
+    "bytes": 0
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/HEAD",
+    "bytes": 23
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/config",
+    "bytes": 92
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/description",
+    "bytes": 73
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/applypatch-msg.sample",
+    "bytes": 478
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/commit-msg.sample",
+    "bytes": 1972
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/fsmonitor-watchman.sample",
+    "bytes": 4611
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/post-update.sample",
+    "bytes": 189
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-applypatch.sample",
+    "bytes": 424
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-commit.sample",
+    "bytes": 1649
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-merge-commit.sample",
+    "bytes": 416
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-push.sample",
+    "bytes": 1374
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-rebase.sample",
+    "bytes": 4898
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-receive.sample",
+    "bytes": 544
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/prepare-commit-msg.sample",
+    "bytes": 1492
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/push-to-checkout.sample",
+    "bytes": 2783
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/sendemail-validate.sample",
+    "bytes": 2308
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/update.sample",
+    "bytes": 3650
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/info/exclude",
+    "bytes": 240
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.gitignore",
+    "bytes": 29
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/Cargo.toml",
+    "bytes": 61
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/src/lib.rs",
+    "bytes": 119
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/rustc.stderr",
+    "bytes": 1570
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/state/state/codescout/servers/3948614.json",
+    "bytes": 272
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/state/workspace.toml",
+    "bytes": 0
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/probe.rmeta",
+    "bytes": 2798
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.codescout/call_edges.db",
+    "bytes": 32768
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.codescout/project.toml",
+    "bytes": 49
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.codescout/usage.db",
+    "bytes": 20480
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.codescout/write.lock",
+    "bytes": 0
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/HEAD",
+    "bytes": 23
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/config",
+    "bytes": 92
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/description",
+    "bytes": 73
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/applypatch-msg.sample",
+    "bytes": 478
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/commit-msg.sample",
+    "bytes": 1972
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/fsmonitor-watchman.sample",
+    "bytes": 4611
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/post-update.sample",
+    "bytes": 189
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-applypatch.sample",
+    "bytes": 424
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-commit.sample",
+    "bytes": 1649
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-merge-commit.sample",
+    "bytes": 416
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-push.sample",
+    "bytes": 1374
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-rebase.sample",
+    "bytes": 4898
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-receive.sample",
+    "bytes": 544
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/prepare-commit-msg.sample",
+    "bytes": 1492
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/push-to-checkout.sample",
+    "bytes": 2783
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/sendemail-validate.sample",
+    "bytes": 2308
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/update.sample",
+    "bytes": 3650
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/info/exclude",
+    "bytes": 240
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.gitignore",
+    "bytes": 29
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/Cargo.toml",
+    "bytes": 61
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/src/lib.rs",
+    "bytes": 103
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/rustc.stderr",
+    "bytes": 1167
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/state/state/codescout/servers/3946866.json",
+    "bytes": 271
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/state/workspace.toml",
+    "bytes": 0
+  },
+  {
+    "path": "review/native-diagnostics.py",
+    "bytes": 2488
+  },
+  {
+    "path": "review/native-results.json",
+    "bytes": 22188
+  },
+  {
+    "path": "review/restored-source.json",
+    "bytes": 2967
+  },
+  {
+    "path": "review/review-result.json",
+    "bytes": 31356
+  },
+  {
+    "path": "review/run-diagnostic.py",
+    "bytes": 1748
+  },
+  {
+    "path": "review/run-mutations.py",
+    "bytes": 2678
+  },
+  {
+    "path": "review-fix-green-borrow-corrected.log",
+    "bytes": 10457
+  },
+  {
+    "path": "review-fix-green.log",
+    "bytes": 3999
+  },
+  {
+    "path": "review-fix-red-fixture-corrected.log",
+    "bytes": 12607
+  },
+  {
+    "path": "review-fix-red.log",
+    "bytes": 13522
+  },
+  {
+    "path": "run_baseline_native.py",
+    "bytes": 1889
+  },
+  {
+    "path": "session-input-provenance.json",
+    "bytes": 884
+  },
+  {
+    "path": "verify_candidate-scope-refused.py.txt",
+    "bytes": 5155
+  },
+  {
+    "path": "verify_candidate.py",
+    "bytes": 5443
+  },
+  {
+    "path": "verify_final.py",
+    "bytes": 5510
+  }
+]

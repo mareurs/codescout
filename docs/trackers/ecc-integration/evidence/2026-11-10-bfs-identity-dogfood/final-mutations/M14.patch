@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/identity.rs
++++ src/tools/symbol/call_graph/identity.rs
+@@ -342,7 +342,7 @@
+             _ => return Placement::Ambiguous,
+         }
+     }
+-    if site.lexical_binding {
++    if false {
+         return Placement::Unresolved(
+             "lexical binding needs semantic target resolution".to_owned(),
+         );

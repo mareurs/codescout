@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/../call_edges/cache.rs
++++ src/tools/symbol/call_graph/../call_edges/cache.rs
+@@ -124,7 +124,7 @@
+             Direction::Callers => "callers",
+             Direction::Callees => "callees",
+         };
+-        let payload = serde_json::to_string(edges)
++        let payload = serde_json::to_string(&edges.iter().cloned().map(|mut e| { e.target = None; e }).collect::<Vec<_>>())
+             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+         self.conn.execute(
+             "INSERT OR REPLACE INTO call_edge_resolutions \

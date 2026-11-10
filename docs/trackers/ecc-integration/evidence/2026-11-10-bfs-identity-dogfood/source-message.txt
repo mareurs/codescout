@@ -1,0 +1,7 @@
+fix(call-graph): preserve declaration identity across traversal hops
+
+Keep provider query coordinates separate from visited identity, preserve LSP endpoints through completed adjacency, and resolve bounded Rust call-site context. Schedule semantic endpoints before display aggregation. Disclose unsupported lexical bindings.
+
+Add behavioral guards after observed review survivors; final related95/0, fifteen applied mutations killed, source full gate and native identity probes passed. Baseline snapshot lease correction: bug-fix-session-log:F-231.
+
+Session-Id: codex:01a1bf68-e650-7f20-911e-b53f86597c27

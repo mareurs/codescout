@@ -1,0 +1,17 @@
+[
+  {
+    "name": "actual",
+    "actual": true,
+    "expected": true
+  },
+  {
+    "name": "warning-removed",
+    "actual": false,
+    "expected": false
+  },
+  {
+    "name": "wrong-leaf-reintroduced",
+    "actual": false,
+    "expected": false
+  }
+]

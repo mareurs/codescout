@@ -1,0 +1,22 @@
+warning: function `helper` is never used
+ --> /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/callable-parameter-shadows-root/project/src/lib.rs:1:4
+  |
+1 | fn helper() { wrong(); }
+  |    ^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `wrong` is never used
+ --> /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/callable-parameter-shadows-root/project/src/lib.rs:2:4
+  |
+2 | fn wrong() {}
+  |    ^^^^^
+
+warning: function `entry` is never used
+ --> /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/callable-parameter-shadows-root/project/src/lib.rs:3:4
+  |
+3 | fn entry<F: Fn()>(helper: F) { helper(); }
+  |    ^^^^^
+
+warning: 3 warnings emitted
+

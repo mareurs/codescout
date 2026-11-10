@@ -1,0 +1,96 @@
+{
+  "base_commit": "7f0dbba5fd6ba25e4a50a8aad5c25403a11ae345",
+  "base_tree": "bace4657d3c8f830c5495b97f7b50562b36d4f92",
+  "replay_ref": "refs/ecc-replay/bfs-identity-20261110",
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-bfs-identity-20261110",
+  "source_clean_before_edits": true,
+  "inputs": [
+    {
+      "path": "CLAUDE.md",
+      "git_blob": "3433e70f5ae5976271d9a846bbdb13d2e60a8d3c",
+      "sha256": "8f099e3919cee612d3bf1f77cf14f9452b47b32ae896332c26df9caad7a911e3",
+      "snapshot": "baseline-inputs/CLAUDE.md.txt"
+    },
+    {
+      "path": "AGENTS.md",
+      "git_blob": "0b64938217094a3d9ee94ef81570b4957c6b83ab",
+      "sha256": "57746f4d46dd836736298ac4fa071303d996d10d81702e1ebf60ca0f905473ab",
+      "snapshot": "baseline-inputs/AGENTS.md.txt"
+    },
+    {
+      "path": "Cargo.toml",
+      "git_blob": "fcee79d0fdc21e629c481c79340406e924f54baf",
+      "sha256": "3d54320f0ba189f6b555367c3cd0a3cac67635d3137f8d18cbfbcba8098f6ac8",
+      "snapshot": "baseline-inputs/Cargo.toml.txt"
+    },
+    {
+      "path": "Cargo.lock",
+      "git_blob": "016a9fbfe73b10f59d26c5f2c4a3700d4c1a5e0b",
+      "sha256": "0a2aa91a947c4a5a76e7c18b0c5ab9cea5692dc5acfd8dfd1e8fe88007bb5be2",
+      "snapshot": "baseline-inputs/Cargo.lock.txt"
+    },
+    {
+      "path": "src/tools/symbol/call_graph/mod.rs",
+      "git_blob": "47f4cf3e9c52a6c547bff6e199978e894d8721c0",
+      "sha256": "906e3c34b06312d2d4e5e8128edd7df2f428d0ffd31e8505eafa314fb9b7ecf5",
+      "snapshot": "baseline-inputs/src__tools__symbol__call_graph__mod.rs.txt"
+    },
+    {
+      "path": "src/tools/symbol/call_graph/traversal.rs",
+      "git_blob": "f21a4a8c51237dcf0a053a2fc12f13122318f410",
+      "sha256": "bc473130a657df26e1f5c93b4f236a0cda95074f71c52c66b890b993af3dfdcb",
+      "snapshot": "baseline-inputs/src__tools__symbol__call_graph__traversal.rs.txt"
+    },
+    {
+      "path": "src/tools/symbol/call_edges/resolver.rs",
+      "git_blob": "0b606e9ab23445873c23bfd9d20b7593764529a0",
+      "sha256": "642c841caff0e7d094002bc644d4da004d1bfbe4aaaecf5da5edf58d2ea98ef7",
+      "snapshot": "baseline-inputs/src__tools__symbol__call_edges__resolver.rs.txt"
+    },
+    {
+      "path": "src/tools/symbol/call_edges/cache.rs",
+      "git_blob": "2ab1c573ba3e2ea76a24a281419c885517d4dad4",
+      "sha256": "fefda85955b3443839e259aac82336615ffe4848a4690ef417c497ce3fb058a6",
+      "snapshot": "baseline-inputs/src__tools__symbol__call_edges__cache.rs.txt"
+    },
+    {
+      "path": "src/lsp/ops.rs",
+      "git_blob": "a2602e67ff8820f3387d73d77ce576a997e98b23",
+      "sha256": "0e9a5bcf948baf17fc3dc10ac55a3f2bb2d6d78037505d1684f11fae969c532f",
+      "snapshot": "baseline-inputs/src__lsp__ops.rs.txt"
+    },
+    {
+      "path": "src/lsp/symbols.rs",
+      "git_blob": "07d1eedf585f69b5af37b6d0c380f644a3359c8f",
+      "sha256": "b1dc1389fe4717796de90a6d0208c22808ed443dff0d1212a68fc9435283eaa3",
+      "snapshot": "baseline-inputs/src__lsp__symbols.rs.txt"
+    },
+    {
+      "path": "src/lsp/mock.rs",
+      "git_blob": "3bbe5d07d3ea00d33a96fdf3ab63e9a70d493877",
+      "sha256": "88901c276d41c02c45a80b59f9290cb785b1a8df1b921a19a164d2cfdee71428",
+      "snapshot": "baseline-inputs/src__lsp__mock.rs.txt"
+    },
+    {
+      "path": "src/ast/parser.rs",
+      "git_blob": "885e9166019849771f8b28f2384904457a0efa72",
+      "sha256": "ff4a1127bc944d8b02c016e5e0ecd8a31f451ab31410da3ea038ac376cada085",
+      "snapshot": "baseline-inputs/src__ast__parser.rs.txt"
+    }
+  ],
+  "skills": [
+    {
+      "name": "ecc-spec-miner",
+      "path": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-spec-miner/SKILL.md",
+      "sha256": "f5badffe1d0cecc4e5aa34cf9ba13cac719c1c5c569aad6ef24ab3a44304121c",
+      "use": "explicit installed-body use; not proof of automatic residency"
+    },
+    {
+      "name": "ecc-silent-failure-review",
+      "path": "/home/marius/.codex/plugins/cache/ecc-codescout-pilot/ecc-codescout/0.1.0/skills/ecc-silent-failure-review/SKILL.md",
+      "sha256": "3011675999b3fc361e208d4b624cedba24468051315faae1c954643676c6b84d",
+      "use": "explicit installed-body use; not proof of automatic residency"
+    }
+  ],
+  "scope": "Multi-hop declaration identity correction with explicit uncertainty; no causal ECC claim, repair replay, push or shared runtime/config changes."
+}

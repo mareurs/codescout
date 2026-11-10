@@ -1,0 +1,12 @@
+[
+  {
+    "name": "actual-warning",
+    "actual": true,
+    "expected": true
+  },
+  {
+    "name": "warning-removed",
+    "actual": false,
+    "expected": false
+  }
+]

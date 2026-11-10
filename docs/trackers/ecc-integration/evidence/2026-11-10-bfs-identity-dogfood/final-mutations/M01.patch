@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/traversal.rs
++++ src/tools/symbol/call_graph/traversal.rs
+@@ -56,7 +56,7 @@
+     }
+ 
+     fn key(&self) -> (String, Option<Definition>) {
+-        (self.symbol.clone(), self.identity.clone())
++        (self.symbol.clone(), self.identity.clone().map(|mut d| { d.file = std::path::PathBuf::new(); d }))
+     }
+ }
+ 

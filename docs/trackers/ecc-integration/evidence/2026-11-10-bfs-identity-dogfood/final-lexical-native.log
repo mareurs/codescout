@@ -1,0 +1,4 @@
+block-import-shadows-root True
+callable-parameter-shadows-root True
+nested-function-shadows-root True
+generic-type-shadows-concrete True

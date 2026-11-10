@@ -1,0 +1,7 @@
+fix(call-graph): integrate declaration-aware traversal
+
+Integrate isolated source 537fa820d95b3298393cc515ab104776a57455c7. Preserve separate provider and visited positions, semantic endpoint frontier, completed target metadata and bounded Rust fallback warnings.
+
+Validated final related95/0, fifteen applied mutations killed and separate full gates for source and exact integration tree. No shared runtime rollout or repair replay.
+
+Session-Id: codex:01a1bf68-e650-7f20-911e-b53f86597c27

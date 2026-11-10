@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/mod.rs
++++ src/tools/symbol/call_graph/mod.rs
+@@ -541,7 +541,7 @@
+         .await;
+         let reason = match placement {
+             identity::Placement::Found(definition) => {
+-                let key = identity::canonical(symbol, definition.clone());
++                let key = definition.clone();
+                 return Ok(Some(
+                     TraversalNode::at(symbol, definition).with_identity(key),
+                 ));

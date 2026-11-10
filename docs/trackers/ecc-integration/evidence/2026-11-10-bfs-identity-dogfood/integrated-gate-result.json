@@ -1,0 +1,41 @@
+{
+  "base": "195317920ea2877ead34435c99df0a650f86d7b5",
+  "expected_tree": "115cd5bb196cd91c7763deede84d3c4e93070059",
+  "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-bfs-integrated-20261110",
+  "source": {
+    "base": "7f0dbba5fd6ba25e4a50a8aad5c25403a11ae345",
+    "paths": {
+      "src/lsp/mock.rs": "7e7f1bd1bc85aa30f29912425abe2b36dcc5ce6ee28fc0f67d9c1a89b10633cd",
+      "src/tools/symbol/call_edges/cache.rs": "4bd017545d6f7005a8cb7fc923a57ee9add59ff3ce0ad6bb5961531e8193a00d",
+      "src/tools/symbol/call_edges/resolver.rs": "b9f491a6599a13001b258e7cd6da7755eee0fa226a0c41d3b819a67593109ea9",
+      "src/tools/symbol/call_graph/mod.rs": "d1a9fc61805ba8e8187f10b8850b83a7f83583d01eb200999ae61c88dea385e7",
+      "src/tools/symbol/call_graph/traversal.rs": "e022d581f5dcfb72eb2a76f2fbaa025aa709588d6f681daeccb362e2d6030818",
+      "src/tools/symbol/call_graph/identity.rs": "6d37770f907927db841c38cf49f61d6aab508e6b35a22412c0fdfbed8f4b8592",
+      "src/tools/symbol/call_graph/rust_target.rs": "595f37dc8f77c5fbd743c277179a992fbfc78850edf02e2878859e22d6c5fefb",
+      "src/tools/symbol/call_graph/identity_tests.rs": "8dab52b04bed4759cb17d9583031b1bf2c4fac6b7c4547dddbb09e4b3a223a78",
+      "src/tools/symbol/call_graph/rust_lexical.rs": "1825021cd7b232be5c8b21345dfd6bba29b8541f83e1ff330267e0b2bfa2c55a",
+      "src/tools/symbol/call_graph/identity_tests/review.rs": "51dacd53a82e75cd5465a69d0481fe63e4c44610e1af3f97af0c8188a142737b"
+    },
+    "base_manifest": "baseline.json",
+    "scope": "Frozen formatted ten-file final candidate after bounded review correction; no source commit yet."
+  },
+  "peer_changed_paths": [
+    "tools/setup-ab-eval/freeze_screen.py",
+    "tools/setup-ab-eval/run.py",
+    "tools/setup-ab-eval/test_freeze_screen.py",
+    "tools/setup-ab-eval/test_run.py"
+  ],
+  "started": "2026-11-10T17:18:37.106514+00:00",
+  "exit_code": 0,
+  "finished": "2026-11-10T17:26:26.325890+00:00",
+  "command": [
+    "./scripts/with-slot.sh",
+    "--slot",
+    "2",
+    "./scripts/gate.sh",
+    "--check"
+  ],
+  "source_unchanged": true,
+  "tree_after": "115cd5bb196cd91c7763deede84d3c4e93070059",
+  "unstaged_tracked_paths": []
+}

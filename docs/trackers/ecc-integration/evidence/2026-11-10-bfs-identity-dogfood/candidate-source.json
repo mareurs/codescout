@@ -1,0 +1,15 @@
+{
+  "base": "7f0dbba5fd6ba25e4a50a8aad5c25403a11ae345",
+  "paths": {
+    "src/lsp/mock.rs": "7e7f1bd1bc85aa30f29912425abe2b36dcc5ce6ee28fc0f67d9c1a89b10633cd",
+    "src/tools/symbol/call_edges/cache.rs": "4bd017545d6f7005a8cb7fc923a57ee9add59ff3ce0ad6bb5961531e8193a00d",
+    "src/tools/symbol/call_edges/resolver.rs": "b9f491a6599a13001b258e7cd6da7755eee0fa226a0c41d3b819a67593109ea9",
+    "src/tools/symbol/call_graph/mod.rs": "2de43fa7add3001a230e33515e40efaad324332c2225c06b53858050c48d02a7",
+    "src/tools/symbol/call_graph/traversal.rs": "e2cd2a3a72f5ddeb623350ae856054b835989b99900d4d9d71732d29d1e35ab4",
+    "src/tools/symbol/call_graph/identity.rs": "907ef0885f310b41d4220c3ba3be2cc5e3934a4c30cfba19cc4ab517509d07c3",
+    "src/tools/symbol/call_graph/rust_target.rs": "595f37dc8f77c5fbd743c277179a992fbfc78850edf02e2878859e22d6c5fefb",
+    "src/tools/symbol/call_graph/identity_tests.rs": "be254f76ebc90fb9d378331c74aad458b3702635dde93076a115b3074cf08f41"
+  },
+  "base_manifest": "baseline.json",
+  "scope": "Frozen formatted eight-file initial candidate before independent review; no source commit yet."
+}

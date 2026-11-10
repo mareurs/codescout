@@ -1,0 +1,34 @@
+{
+  "files": {
+    "unique": {
+      "Cargo.toml": "[package]\nname=\"bfs_fixture\"\nversion=\"0.1.0\"\nedition=\"2021\"\n",
+      ".codescout/project.toml": "[project]\nname=\"bfs-fixture\"\nlanguages=[\"rust\"]\n",
+      "src/lib.rs": "pub mod a;\npub mod b;\npub fn entry() {\n    a::call_a();\n    b::call_b();\n}\n",
+      "src/a.rs": "pub fn call_a() { leaf_a(); }\npub fn leaf_a() {}\n",
+      "src/b.rs": "pub fn call_b() { leaf_b(); }\npub fn leaf_b() {}\n"
+    },
+    "duplicate": {
+      "Cargo.toml": "[package]\nname=\"bfs_fixture\"\nversion=\"0.1.0\"\nedition=\"2021\"\n",
+      ".codescout/project.toml": "[project]\nname=\"bfs-fixture\"\nlanguages=[\"rust\"]\n",
+      "src/lib.rs": "pub mod a;\npub mod b;\npub fn entry() {\n    a::helper();\n    b::helper();\n}\n",
+      "src/a.rs": "pub fn helper() { leaf_a(); }\npub fn leaf_a() {}\n",
+      "src/b.rs": "pub fn helper() { leaf_b(); }\npub fn leaf_b() {}\n"
+    }
+  },
+  "sha256": {
+    "unique": {
+      "Cargo.toml": "49bc935709a421845faae0a2c84793e298aa30bdecb7d04e3488c0435cb8e2d9",
+      ".codescout/project.toml": "e16860ce119d2398a22890529f329e16f9c7f5b8bcfe6848ebad48efae1e1fc8",
+      "src/lib.rs": "726b64e2e96f10e2ec3655fdb10d8e99db621643380bfe9c98acd1c232d311ac",
+      "src/a.rs": "a2db9e81db2f979a14e463b82d82ed6625f2ee17baba15c99b9f12c38ef517e9",
+      "src/b.rs": "8701ee41f05b1d32c724fb4ad4c630a7f82fd56baee0b525a2801c12751946f6"
+    },
+    "duplicate": {
+      "Cargo.toml": "49bc935709a421845faae0a2c84793e298aa30bdecb7d04e3488c0435cb8e2d9",
+      ".codescout/project.toml": "e16860ce119d2398a22890529f329e16f9c7f5b8bcfe6848ebad48efae1e1fc8",
+      "src/lib.rs": "522d78c37e6f62badaa58fc1e24506ae800e7c3c4dc0f113423e731ced7aec31",
+      "src/a.rs": "17a16f4bd8aeb86c4214a030e4bc79bea54e042b1b861f5eff780bf35efbbe12",
+      "src/b.rs": "ecb6fe96e8275ff2c9d5344a8df615bfe646a38d1cb908b0ab2f57d8c8a3cad6"
+    }
+  }
+}

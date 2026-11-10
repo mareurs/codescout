@@ -1,0 +1,5 @@
+{"name": "same-file-same-line-ast", "matched": true, "edges": [["entry", "helper", "src/lib.rs", 4, 1], ["entry", "helper", "src/lib.rs", 4, 1], ["helper", "leaf_b", "src/lib.rs", 1, 2], ["helper", "leaf_a", "src/lib.rs", 1, 2]]}
+{"name": "inline-module-ast", "matched": true, "edges": [["entry", "helper", "src/lib.rs", 3, 1], ["entry", "helper", "src/lib.rs", 3, 1], ["helper", "leaf_b", "src/lib.rs", 2, 2], ["helper", "leaf_a", "src/lib.rs", 1, 2]]}
+{"name": "same-name-seed-child-module", "matched": true, "edges": [["helper", "helper", "src/a.rs", 2, 1], ["helper", "leaf_b", "src/a/b.rs", 1, 2]]}
+{"name": "unresolved-receiver-context", "matched": true, "edges": [["entry", "helper", "src/lib.rs", 1, 1]]}
+{"cases": 4, "matched": 4, "controls": 2, "controls_as_expected": 2, "limits": "Four additional concrete Rust cases; no exhaustive binding, cross-language or latency claim."}

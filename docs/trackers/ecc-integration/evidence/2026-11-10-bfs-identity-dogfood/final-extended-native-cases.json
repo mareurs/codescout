@@ -1,0 +1,383 @@
+{
+  "binary": {
+    "snapshot": "/home/marius/work/claude/codescout/.codescout/ecc-bfs-identity-private-20261110/final-codescout",
+    "leased_target": "/home/marius/.cache/codescout-gate/slot-2/debug/codescout",
+    "sha256": "45206b13fc56143003cfe1092cbe1aad3af67db4bd56225a65b0899dab54708e",
+    "bytes": 218426208,
+    "source_unchanged": true,
+    "exit_code": 0,
+    "snapshot_copied_while_lease_held": true
+  },
+  "cases": [
+    {
+      "case": {
+        "name": "same-file-same-line-ast",
+        "symbol": "entry",
+        "path": "src/lib.rs",
+        "files": {
+          "src/lib.rs": "struct A; impl A { fn helper() { leaf_a(); } } struct B; impl B { fn helper() { leaf_b(); } }\nfn leaf_a() {}\nfn leaf_b() {}\nfn entry() { A::helper(); B::helper(); }\n"
+        },
+        "wanted": [
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            4,
+            1
+          ],
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            4,
+            1
+          ],
+          [
+            "helper",
+            "leaf_a",
+            "src/lib.rs",
+            1,
+            2
+          ],
+          [
+            "helper",
+            "leaf_b",
+            "src/lib.rs",
+            1,
+            2
+          ]
+        ],
+        "warning": false
+      },
+      "fixture_sha256": {
+        "src/lib.rs": "06d6a580611c983fca598d6ced3687935880cf9bb157f5f4661b983096bea145",
+        "Cargo.toml": "6ffadd97a112dc776c03348775fd955e4eebd2c1be95be99a4a0cf5f8c465360",
+        ".codescout/project.toml": "fd91ab4903dfc4e1ec5d450815c3bd1a9e6926666d7c8ddf42bf773244695dc8"
+      },
+      "arguments": {
+        "symbol": "entry",
+        "path": "src/lib.rs",
+        "direction": "callees",
+        "max_depth": 2,
+        "detail_level": "full"
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "call_graph for `entry`\n  callees: 4 edges across 1 files\n    src/lib.rs (4)\n          4: entry \u2192 helper (depth=1, ts)\n          4: entry \u2192 helper (depth=1, ts)\n          1: helper \u2192 leaf_b (depth=2, ts)\n          1: helper \u2192 leaf_a (depth=2, ts)\n  (auto-promoted to full detail \u2014 small result)\n  max_depth_reached: 2"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('project-activation-bootstrap') \u2014 first call this session that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\n# Project Activation Bootstrap\n\nYou just activated a project. Orient before you explore or edit \u2014 the cheapest\nbug is the one you never re-investigate because the project already documented it.\n\n## Phase 0 \u2014 load what the project already knows (do FIRST)\n\n- `memory(action=\"list\")`, then read the topics matching your task.\n  `architecture`, `gotchas`, and `conventions` usually pay off.\n- Bug or regression work:\n  `doc(action=\"find\", kind=\"bug\", filter={\"status\": {\"in\": [\"open\", \"taken\", \"investigating\", \"zombie\"]}})` \u2014\n  `status=\"open\"` alone hides `taken` (a live session holds it \u2014 check before starting),\n  `investigating` (worked, no live owner) and\n  `zombie` (recurring-but-unconfirmed \u2014 a \"has this come back?\" check, not a\n  task to pick up) \u2014\n  the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery\n  KNOWN and cite the ledger path.\n- If a `get_guide` topic matches your area (`error-handling`,\n  `progressive-disclosure`, `workspace-state`, `librarian`,\n  `tracker-conventions`, `untrusted-content`), read it \u2014 it states the contract whose violations you\n  hunt.\n- Long task: use `run_in_background=true`, end your turn, and the companion hook wakes you.\n  Do not poll. Subagents get no wake.\n\n## Phase 1 \u2014 route each lookup by what you know\n\n- symbol name \u2192 `symbols(name=X)`\n- concept \u2192 `semantic_search(query)`\n- exact string \u2192 `grep(pattern)`\n- who calls X \u2192 `references(symbol, path)` \u2014 never grep for callers\n\n## Phase 2 \u2014 verify at the bytes, not from belief\n\n**Do not hypothesise but ALWAYS VERIFY. Do not state what a doc, a memory, or a\nprior belief says the code does \u2014 open the artifact or run the command, and ALWAYS\nVERIFY.**\n\n- A finding needs lines you actually read (`symbols include_body` / `read_file`),\n  not a grep hit alone.\n- A claim about how a TOOL behaves needs the call run once and the real output\n  read \u2014 reading the source alone misses runtime shape.\n- A comment, doc, or README the code contradicts is itself a finding\n  (doc-vs-code drift).\n\n## Before you plan or touch a contract \u2014 run reconnaissance\n\nIf you will write a plan, change a struct / function signature / API contract,\nor verify claims against `docs/trackers`, invoke the reconnaissance skill FIRST.\n\n- Claude Code: `/codescout-companion:reconnaissance`.\n- Other harnesses: follow `docs/templates/session-log.md` (any agent that reads\n  markdown can use the template \u2014 no plugin required).\n\nIt forces the doc-vs-code reconciliation and logs frictions (F-N) and wins (W-N)\nso the next session inherits them.\n\n## When you dispatch subagents \u2014 brief them\n\nPass what you already loaded: memories read, open bugs, prior results. For\nguides, pass the *instruction to fetch*, not a \"these are loaded\" note \u2014 your\ncontext is not theirs, and unless the companion hook gives each subagent its\nown guide ledger, a topic you triggered will not auto-inject for them. Name\nthe topics and tell them to call `get_guide` on the ones their task needs; an\nexplicit fetch always\nreturns the full body. A subagent re-discovering what you already knew is a\ndispatch defect (Iron Law 6), not the subagent's fault \u2014 but a subagent fetching\nits own guide is doing exactly what it should.\n\n\n<!-- end auto-injected get_guide('project-activation-bootstrap') -->"
+          },
+          {
+            "type": "text",
+            "text": "\n[codescout] paths are relative to /home/marius/work/claude/codescout/.codescout/ecc-bfs-identity-private-20261110/final-extended-same-file-same-line-ast/project"
+          },
+          {
+            "type": "text",
+            "text": "\n## Project Status (details)\n- **Languages:** rust\n- **Memories:** None yet \u2014 run `onboarding` to create project memories\n- **Semantic index:** Not built \u2014 run `index(action='build')` to enable `semantic_search`\n"
+          }
+        ],
+        "isError": false
+      },
+      "measured": {
+        "edges": [
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            4,
+            1
+          ],
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            4,
+            1
+          ],
+          [
+            "helper",
+            "leaf_b",
+            "src/lib.rs",
+            1,
+            2
+          ],
+          [
+            "helper",
+            "leaf_a",
+            "src/lib.rs",
+            1,
+            2
+          ]
+        ],
+        "clean_render": true,
+        "matches_expected": true
+      },
+      "matched": true
+    },
+    {
+      "case": {
+        "name": "inline-module-ast",
+        "symbol": "entry",
+        "path": "src/lib.rs",
+        "files": {
+          "src/lib.rs": "pub mod a { pub fn helper() { leaf_a(); } fn leaf_a() {} }\npub mod b { pub fn helper() { leaf_b(); } fn leaf_b() {} }\npub fn entry() { a::helper(); b::helper(); }\n"
+        },
+        "wanted": [
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            3,
+            1
+          ],
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            3,
+            1
+          ],
+          [
+            "helper",
+            "leaf_a",
+            "src/lib.rs",
+            1,
+            2
+          ],
+          [
+            "helper",
+            "leaf_b",
+            "src/lib.rs",
+            2,
+            2
+          ]
+        ],
+        "warning": false
+      },
+      "fixture_sha256": {
+        "src/lib.rs": "e024524f4e0c56baddfb417657e300d32a224e8c4904d49eaefc245da4c91cae",
+        "Cargo.toml": "6ffadd97a112dc776c03348775fd955e4eebd2c1be95be99a4a0cf5f8c465360",
+        ".codescout/project.toml": "fd91ab4903dfc4e1ec5d450815c3bd1a9e6926666d7c8ddf42bf773244695dc8"
+      },
+      "arguments": {
+        "symbol": "entry",
+        "path": "src/lib.rs",
+        "direction": "callees",
+        "max_depth": 2,
+        "detail_level": "full"
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "call_graph for `entry`\n  callees: 4 edges across 1 files\n    src/lib.rs (4)\n          3: entry \u2192 helper (depth=1, ts)\n          3: entry \u2192 helper (depth=1, ts)\n          2: helper \u2192 leaf_b (depth=2, ts)\n          1: helper \u2192 leaf_a (depth=2, ts)\n  (auto-promoted to full detail \u2014 small result)\n  max_depth_reached: 2"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('project-activation-bootstrap') \u2014 first call this session that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\n# Project Activation Bootstrap\n\nYou just activated a project. Orient before you explore or edit \u2014 the cheapest\nbug is the one you never re-investigate because the project already documented it.\n\n## Phase 0 \u2014 load what the project already knows (do FIRST)\n\n- `memory(action=\"list\")`, then read the topics matching your task.\n  `architecture`, `gotchas`, and `conventions` usually pay off.\n- Bug or regression work:\n  `doc(action=\"find\", kind=\"bug\", filter={\"status\": {\"in\": [\"open\", \"taken\", \"investigating\", \"zombie\"]}})` \u2014\n  `status=\"open\"` alone hides `taken` (a live session holds it \u2014 check before starting),\n  `investigating` (worked, no live owner) and\n  `zombie` (recurring-but-unconfirmed \u2014 a \"has this come back?\" check, not a\n  task to pick up) \u2014\n  the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery\n  KNOWN and cite the ledger path.\n- If a `get_guide` topic matches your area (`error-handling`,\n  `progressive-disclosure`, `workspace-state`, `librarian`,\n  `tracker-conventions`, `untrusted-content`), read it \u2014 it states the contract whose violations you\n  hunt.\n- Long task: use `run_in_background=true`, end your turn, and the companion hook wakes you.\n  Do not poll. Subagents get no wake.\n\n## Phase 1 \u2014 route each lookup by what you know\n\n- symbol name \u2192 `symbols(name=X)`\n- concept \u2192 `semantic_search(query)`\n- exact string \u2192 `grep(pattern)`\n- who calls X \u2192 `references(symbol, path)` \u2014 never grep for callers\n\n## Phase 2 \u2014 verify at the bytes, not from belief\n\n**Do not hypothesise but ALWAYS VERIFY. Do not state what a doc, a memory, or a\nprior belief says the code does \u2014 open the artifact or run the command, and ALWAYS\nVERIFY.**\n\n- A finding needs lines you actually read (`symbols include_body` / `read_file`),\n  not a grep hit alone.\n- A claim about how a TOOL behaves needs the call run once and the real output\n  read \u2014 reading the source alone misses runtime shape.\n- A comment, doc, or README the code contradicts is itself a finding\n  (doc-vs-code drift).\n\n## Before you plan or touch a contract \u2014 run reconnaissance\n\nIf you will write a plan, change a struct / function signature / API contract,\nor verify claims against `docs/trackers`, invoke the reconnaissance skill FIRST.\n\n- Claude Code: `/codescout-companion:reconnaissance`.\n- Other harnesses: follow `docs/templates/session-log.md` (any agent that reads\n  markdown can use the template \u2014 no plugin required).\n\nIt forces the doc-vs-code reconciliation and logs frictions (F-N) and wins (W-N)\nso the next session inherits them.\n\n## When you dispatch subagents \u2014 brief them\n\nPass what you already loaded: memories read, open bugs, prior results. For\nguides, pass the *instruction to fetch*, not a \"these are loaded\" note \u2014 your\ncontext is not theirs, and unless the companion hook gives each subagent its\nown guide ledger, a topic you triggered will not auto-inject for them. Name\nthe topics and tell them to call `get_guide` on the ones their task needs; an\nexplicit fetch always\nreturns the full body. A subagent re-discovering what you already knew is a\ndispatch defect (Iron Law 6), not the subagent's fault \u2014 but a subagent fetching\nits own guide is doing exactly what it should.\n\n\n<!-- end auto-injected get_guide('project-activation-bootstrap') -->"
+          },
+          {
+            "type": "text",
+            "text": "\n[codescout] paths are relative to /home/marius/work/claude/codescout/.codescout/ecc-bfs-identity-private-20261110/final-extended-inline-module-ast/project"
+          },
+          {
+            "type": "text",
+            "text": "\n## Project Status (details)\n- **Languages:** rust\n- **Memories:** None yet \u2014 run `onboarding` to create project memories\n- **Semantic index:** Not built \u2014 run `index(action='build')` to enable `semantic_search`\n"
+          }
+        ],
+        "isError": false
+      },
+      "measured": {
+        "edges": [
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            3,
+            1
+          ],
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            3,
+            1
+          ],
+          [
+            "helper",
+            "leaf_b",
+            "src/lib.rs",
+            2,
+            2
+          ],
+          [
+            "helper",
+            "leaf_a",
+            "src/lib.rs",
+            1,
+            2
+          ]
+        ],
+        "clean_render": true,
+        "matches_expected": true
+      },
+      "matched": true
+    },
+    {
+      "case": {
+        "name": "same-name-seed-child-module",
+        "symbol": "helper",
+        "path": "src/a.rs",
+        "files": {
+          "src/lib.rs": "pub mod a;\n",
+          "src/a.rs": "pub mod b;\npub fn helper() { b::helper(); }\n",
+          "src/a/b.rs": "pub fn helper() { leaf_b(); }\nfn leaf_b() {}\n"
+        },
+        "wanted": [
+          [
+            "helper",
+            "helper",
+            "src/a.rs",
+            2,
+            1
+          ],
+          [
+            "helper",
+            "leaf_b",
+            "src/a/b.rs",
+            1,
+            2
+          ]
+        ],
+        "warning": false
+      },
+      "fixture_sha256": {
+        "src/lib.rs": "9cdbe6e5302ab6e1300be3b65177c9c55f4f50012b6d1225c19b8c41f3bebfdd",
+        "src/a.rs": "02d7da82db482138cf073b56bc754115d6ccd84d983c8b8e6c776640d08ca91f",
+        "src/a/b.rs": "3aaa5fc2ef83f7f202a07c3cc57b784b79c46902a85c05502ca464bb39e3e826",
+        "Cargo.toml": "6ffadd97a112dc776c03348775fd955e4eebd2c1be95be99a4a0cf5f8c465360",
+        ".codescout/project.toml": "fd91ab4903dfc4e1ec5d450815c3bd1a9e6926666d7c8ddf42bf773244695dc8"
+      },
+      "arguments": {
+        "symbol": "helper",
+        "path": "src/a.rs",
+        "direction": "callees",
+        "max_depth": 2,
+        "detail_level": "full"
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "call_graph for `helper`\n  callees: 2 edges across 2 files\n    src/a.rs (1)\n          2: helper \u2192 helper (depth=1, ts)\n    src/a/b.rs (1)\n          1: helper \u2192 leaf_b (depth=2, ts)\n  (auto-promoted to full detail \u2014 small result)\n  max_depth_reached: 2"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('project-activation-bootstrap') \u2014 first call this session that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\n# Project Activation Bootstrap\n\nYou just activated a project. Orient before you explore or edit \u2014 the cheapest\nbug is the one you never re-investigate because the project already documented it.\n\n## Phase 0 \u2014 load what the project already knows (do FIRST)\n\n- `memory(action=\"list\")`, then read the topics matching your task.\n  `architecture`, `gotchas`, and `conventions` usually pay off.\n- Bug or regression work:\n  `doc(action=\"find\", kind=\"bug\", filter={\"status\": {\"in\": [\"open\", \"taken\", \"investigating\", \"zombie\"]}})` \u2014\n  `status=\"open\"` alone hides `taken` (a live session holds it \u2014 check before starting),\n  `investigating` (worked, no live owner) and\n  `zombie` (recurring-but-unconfirmed \u2014 a \"has this come back?\" check, not a\n  task to pick up) \u2014\n  the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery\n  KNOWN and cite the ledger path.\n- If a `get_guide` topic matches your area (`error-handling`,\n  `progressive-disclosure`, `workspace-state`, `librarian`,\n  `tracker-conventions`, `untrusted-content`), read it \u2014 it states the contract whose violations you\n  hunt.\n- Long task: use `run_in_background=true`, end your turn, and the companion hook wakes you.\n  Do not poll. Subagents get no wake.\n\n## Phase 1 \u2014 route each lookup by what you know\n\n- symbol name \u2192 `symbols(name=X)`\n- concept \u2192 `semantic_search(query)`\n- exact string \u2192 `grep(pattern)`\n- who calls X \u2192 `references(symbol, path)` \u2014 never grep for callers\n\n## Phase 2 \u2014 verify at the bytes, not from belief\n\n**Do not hypothesise but ALWAYS VERIFY. Do not state what a doc, a memory, or a\nprior belief says the code does \u2014 open the artifact or run the command, and ALWAYS\nVERIFY.**\n\n- A finding needs lines you actually read (`symbols include_body` / `read_file`),\n  not a grep hit alone.\n- A claim about how a TOOL behaves needs the call run once and the real output\n  read \u2014 reading the source alone misses runtime shape.\n- A comment, doc, or README the code contradicts is itself a finding\n  (doc-vs-code drift).\n\n## Before you plan or touch a contract \u2014 run reconnaissance\n\nIf you will write a plan, change a struct / function signature / API contract,\nor verify claims against `docs/trackers`, invoke the reconnaissance skill FIRST.\n\n- Claude Code: `/codescout-companion:reconnaissance`.\n- Other harnesses: follow `docs/templates/session-log.md` (any agent that reads\n  markdown can use the template \u2014 no plugin required).\n\nIt forces the doc-vs-code reconciliation and logs frictions (F-N) and wins (W-N)\nso the next session inherits them.\n\n## When you dispatch subagents \u2014 brief them\n\nPass what you already loaded: memories read, open bugs, prior results. For\nguides, pass the *instruction to fetch*, not a \"these are loaded\" note \u2014 your\ncontext is not theirs, and unless the companion hook gives each subagent its\nown guide ledger, a topic you triggered will not auto-inject for them. Name\nthe topics and tell them to call `get_guide` on the ones their task needs; an\nexplicit fetch always\nreturns the full body. A subagent re-discovering what you already knew is a\ndispatch defect (Iron Law 6), not the subagent's fault \u2014 but a subagent fetching\nits own guide is doing exactly what it should.\n\n\n<!-- end auto-injected get_guide('project-activation-bootstrap') -->"
+          },
+          {
+            "type": "text",
+            "text": "\n[codescout] paths are relative to /home/marius/work/claude/codescout/.codescout/ecc-bfs-identity-private-20261110/final-extended-same-name-seed-child-module/project"
+          },
+          {
+            "type": "text",
+            "text": "\n## Project Status (details)\n- **Languages:** rust\n- **Memories:** None yet \u2014 run `onboarding` to create project memories\n- **Semantic index:** Not built \u2014 run `index(action='build')` to enable `semantic_search`\n"
+          }
+        ],
+        "isError": false
+      },
+      "measured": {
+        "edges": [
+          [
+            "helper",
+            "helper",
+            "src/a.rs",
+            2,
+            1
+          ],
+          [
+            "helper",
+            "leaf_b",
+            "src/a/b.rs",
+            1,
+            2
+          ]
+        ],
+        "clean_render": true,
+        "matches_expected": true
+      },
+      "matched": true
+    },
+    {
+      "case": {
+        "name": "unresolved-receiver-context",
+        "symbol": "entry",
+        "path": "src/lib.rs",
+        "files": {
+          "src/lib.rs": "pub fn entry() { unknown.helper(); }\n"
+        },
+        "wanted": [
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            1,
+            1
+          ]
+        ],
+        "warning": true
+      },
+      "fixture_sha256": {
+        "src/lib.rs": "48d16397e3fc5dbcb5f530d19ac953442a9ead16603810132751bd75bf00b390",
+        "Cargo.toml": "6ffadd97a112dc776c03348775fd955e4eebd2c1be95be99a4a0cf5f8c465360",
+        ".codescout/project.toml": "fd91ab4903dfc4e1ec5d450815c3bd1a9e6926666d7c8ddf42bf773244695dc8"
+      },
+      "arguments": {
+        "symbol": "entry",
+        "path": "src/lib.rs",
+        "direction": "callees",
+        "max_depth": 2,
+        "detail_level": "full"
+      },
+      "response": {
+        "content": [
+          {
+            "type": "text",
+            "text": "warning: call_graph could not analyze 1 hop(s) \u2014 `helper` direction=callees from /home/marius/work/claude/codescout/.codescout/ecc-bfs-identity-private-20261110/final-extended-unresolved-receiver-context/project/src/lib.rs:1:18: receiver or callable expression needs semantic target resolution \u2014 so this graph may be incomplete; missing edges in those scopes do not establish absence.\n\ncall_graph for `entry`\n  callees: 1 edges across 1 files\n    src/lib.rs (1)\n          1: entry \u2192 helper (depth=1, ts)\n  (auto-promoted to full detail \u2014 small result)\n  max_depth_reached: 1"
+          },
+          {
+            "type": "text",
+            "text": "\n<!-- auto-injected get_guide('project-activation-bootstrap') \u2014 first call this session that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\n# Project Activation Bootstrap\n\nYou just activated a project. Orient before you explore or edit \u2014 the cheapest\nbug is the one you never re-investigate because the project already documented it.\n\n## Phase 0 \u2014 load what the project already knows (do FIRST)\n\n- `memory(action=\"list\")`, then read the topics matching your task.\n  `architecture`, `gotchas`, and `conventions` usually pay off.\n- Bug or regression work:\n  `doc(action=\"find\", kind=\"bug\", filter={\"status\": {\"in\": [\"open\", \"taken\", \"investigating\", \"zombie\"]}})` \u2014\n  `status=\"open\"` alone hides `taken` (a live session holds it \u2014 check before starting),\n  `investigating` (worked, no live owner) and\n  `zombie` (recurring-but-unconfirmed \u2014 a \"has this come back?\" check, not a\n  task to pick up) \u2014\n  the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery\n  KNOWN and cite the ledger path.\n- If a `get_guide` topic matches your area (`error-handling`,\n  `progressive-disclosure`, `workspace-state`, `librarian`,\n  `tracker-conventions`, `untrusted-content`), read it \u2014 it states the contract whose violations you\n  hunt.\n- Long task: use `run_in_background=true`, end your turn, and the companion hook wakes you.\n  Do not poll. Subagents get no wake.\n\n## Phase 1 \u2014 route each lookup by what you know\n\n- symbol name \u2192 `symbols(name=X)`\n- concept \u2192 `semantic_search(query)`\n- exact string \u2192 `grep(pattern)`\n- who calls X \u2192 `references(symbol, path)` \u2014 never grep for callers\n\n## Phase 2 \u2014 verify at the bytes, not from belief\n\n**Do not hypothesise but ALWAYS VERIFY. Do not state what a doc, a memory, or a\nprior belief says the code does \u2014 open the artifact or run the command, and ALWAYS\nVERIFY.**\n\n- A finding needs lines you actually read (`symbols include_body` / `read_file`),\n  not a grep hit alone.\n- A claim about how a TOOL behaves needs the call run once and the real output\n  read \u2014 reading the source alone misses runtime shape.\n- A comment, doc, or README the code contradicts is itself a finding\n  (doc-vs-code drift).\n\n## Before you plan or touch a contract \u2014 run reconnaissance\n\nIf you will write a plan, change a struct / function signature / API contract,\nor verify claims against `docs/trackers`, invoke the reconnaissance skill FIRST.\n\n- Claude Code: `/codescout-companion:reconnaissance`.\n- Other harnesses: follow `docs/templates/session-log.md` (any agent that reads\n  markdown can use the template \u2014 no plugin required).\n\nIt forces the doc-vs-code reconciliation and logs frictions (F-N) and wins (W-N)\nso the next session inherits them.\n\n## When you dispatch subagents \u2014 brief them\n\nPass what you already loaded: memories read, open bugs, prior results. For\nguides, pass the *instruction to fetch*, not a \"these are loaded\" note \u2014 your\ncontext is not theirs, and unless the companion hook gives each subagent its\nown guide ledger, a topic you triggered will not auto-inject for them. Name\nthe topics and tell them to call `get_guide` on the ones their task needs; an\nexplicit fetch always\nreturns the full body. A subagent re-discovering what you already knew is a\ndispatch defect (Iron Law 6), not the subagent's fault \u2014 but a subagent fetching\nits own guide is doing exactly what it should.\n\n\n<!-- end auto-injected get_guide('project-activation-bootstrap') -->"
+          },
+          {
+            "type": "text",
+            "text": "\n[codescout] paths are relative to /home/marius/work/claude/codescout/.codescout/ecc-bfs-identity-private-20261110/final-extended-unresolved-receiver-context/project"
+          },
+          {
+            "type": "text",
+            "text": "\n## Project Status (details)\n- **Languages:** rust\n- **Memories:** None yet \u2014 run `onboarding` to create project memories\n- **Semantic index:** Not built \u2014 run `index(action='build')` to enable `semantic_search`\n"
+          }
+        ],
+        "isError": false
+      },
+      "measured": {
+        "edges": [
+          [
+            "entry",
+            "helper",
+            "src/lib.rs",
+            1,
+            1
+          ]
+        ],
+        "clean_render": false,
+        "matches_expected": false
+      },
+      "matched": true
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+docs(ecc): record BFS identity repair and replay evidence
+
+Retain exact baseline/input cuts, initial independent counterexamples and survivors, bounded correction, final15 mutation kills, native populations and both source/exact integration gates. Archive four verified bugs and preserve separate collector/navigation/count-instrument follow-ups.
+
+Source537fa820d integrateddc769e430; fix patch-id52c9b1d039bbdd7de6183eefca168f32318d8cd8. Preserve private input snapshots and six foreign staged blobs; no repair replay or runtime rollout.
+
+Session-Id: codex:01a1bf68-e650-7f20-911e-b53f86597c27

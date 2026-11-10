@@ -1,0 +1,28 @@
+mutation-probe: carried the working tree into the isolated worktree —
+  5 tracked change(s), 3 untracked file(s).
+mutation-probe: ARMED  mode=isolated  file=src/tools/symbol/call_graph/identity_tests.rs  tree=/home/marius/work/claude/codescout/.worktrees/ecc-bfs-review-20261110.worktrees/mutation-slot-0
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-1 (leased until this command exits)
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout/.worktrees/ecc-bfs-review-20261110.worktrees/mutation-slot-0)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.10s
+     Running unittests src/lib.rs (/home/marius/.cache/codescout-gate/slot-1/debug/deps/codescout-f5b4a259c0981384)
+
+running 1 test
+
+thread 'tools::symbol::call_graph::identity_tests::lsp_same_file_same_line_helpers_preserve_columns_and_cached_target_metadata' (4000282) panicked at src/tools/symbol/call_graph/identity_tests.rs:266:9:
+assertion `left == right` failed: {"symbol":"entry","callees":[{"caller":"entry","callee":"helper","file":"/home/marius/.cache/codescout-ecc-tmp/.tmpu6u5uU/fixture.rs","line":4,"depth":1,"source":"lsp","paths":2},{"caller":"helper","callee":"leaf_a","file":"/home/marius/.cache/codescout-ecc-tmp/.tmpu6u5uU/fixture.rs","line":1,"depth":2,"source":"lsp","paths":1}],"auto_promoted":true,"max_depth_reached":2}
+  left: ["entry>helper@fixture.rs:4#1", "helper>leaf_a@fixture.rs:1#2"]
+ right: ["entry>helper@fixture.rs:4#1", "helper>leaf_a@fixture.rs:1#2", "helper>leaf_b@fixture.rs:1#2"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test tools::symbol::call_graph::identity_tests::lsp_same_file_same_line_helpers_preserve_columns_and_cached_target_metadata ... FAILED
+
+failures:
+
+failures:
+    tools::symbol::call_graph::identity_tests::lsp_same_file_same_line_helpers_preserve_columns_and_cached_target_metadata
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5907 filtered out; finished in 0.17s
+
+error: test failed, to rerun pass `--lib`
+mutation-probe: KILLED (rc=101, 1 test(s) ran) — a test caught it.
+  Applied-ness needs no further audit: a red cannot be produced by a mutation that
+  never applied, and the count above rules out a compile failure wearing this verdict.

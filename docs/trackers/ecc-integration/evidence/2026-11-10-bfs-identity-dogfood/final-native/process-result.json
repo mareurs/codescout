@@ -1,0 +1,7 @@
+{
+  "exit_code": 0,
+  "driver_exit_observed": true,
+  "timed_out": false,
+  "script_sha256": "4e575c7b441cc518e0a2f04616b04e32ff4bf6686c3394810d73e2a043202be1",
+  "scope": "Native probe driver process exit observed independently of gate outcome; no repair replay."
+}

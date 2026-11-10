@@ -1,0 +1,9 @@
+{
+  "snapshot": "/home/marius/work/claude/codescout/.codescout/ecc-bfs-identity-private-20261110/final-codescout",
+  "leased_target": "/home/marius/.cache/codescout-gate/slot-2/debug/codescout",
+  "sha256": "45206b13fc56143003cfe1092cbe1aad3af67db4bd56225a65b0899dab54708e",
+  "bytes": 218426208,
+  "source_unchanged": true,
+  "exit_code": 0,
+  "snapshot_copied_while_lease_held": true
+}

@@ -11,6 +11,7 @@ topic: ecc-integration
 ---
 
 # ECC evaluation plans
+- [BFS identity dogfood — 2026-11-10](2026-11-10-bfs-identity-dogfood.md): declaration-aware traversal, safe AST placement and explicit uncertainty.
 - [Resolver follow-up — 2026-11-10](2026-11-10-resolver-followup.md): bounded documentation correction, frozen replay input and qualified duplicate-name BFS investigation.
 - [Call graph identity dogfood — 2026-11-09](2026-11-09-callgraph-identity-dogfood.md): current-source cold/warm/restart reproduction and scoped completed-resolution cache correction.
 

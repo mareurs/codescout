@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/mod.rs
++++ src/tools/symbol/call_graph/mod.rs
+@@ -450,7 +450,7 @@
+         // Resolve identity before reading completed adjacency, including for the pinned seed.
+         let symbol = node.symbol.as_str();
+         let (path, line, col) = match &node.definition {
+-            Some(definition) => (definition.file.clone(), definition.line, definition.col),
++            Some(definition) => (definition.file.clone(), definition.line, 0),
+             None => match self.lookup_pos(symbol).await {
+                 Some(position) => position,
+                 None => return Ok(vec![]),

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000f0",
+  "command": "python3 docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/repair_stage_attribution.py > .codescout/ecc-bfs-identity-private-20261110/stage-repair.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 1099561,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-10T18:01:15.124651505+00:00",
+  "finished_at": "2026-11-10T18:01:46.167227245+00:00",
+  "log_path": "/tmp/codescout-bg-Yk5zkw.log"
+}

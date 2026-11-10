@@ -1,0 +1,10 @@
+{
+  "base": "7f0dbba5fd6ba25e4a50a8aad5c25403a11ae345",
+  "snapshot": "/home/marius/work/claude/codescout/.codescout/ecc-bfs-identity-private-20261110/baseline-codescout",
+  "leased_target": "/home/marius/.cache/codescout-gate/slot-0/debug/codescout",
+  "sha256": "957538e6a1cab57dc91d4447307293062c04084818de86a59d0f117db7225f28",
+  "bytes": 216386264,
+  "source_unchanged": true,
+  "exit_code": 0,
+  "snapshot_copied_while_lease_held": true
+}

@@ -1,0 +1,6 @@
+{
+  "initial_validation": "failed before staging at missing literal id in bug-fix-session-log.md",
+  "observed": "legacy ledger frontmatter has no id; doc.get resolves catalog-derived 2dd9d90bc83f9f49 with expected path/high-water234",
+  "correction": "allow this exact verified legacy-ledger exception; all other owned documents require their literal id",
+  "source_changes": false
+}

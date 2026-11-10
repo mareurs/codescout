@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/rust_target.rs
++++ src/tools/symbol/call_graph/rust_target.rs
+@@ -82,7 +82,7 @@
+         };
+         if declaration
+             .prev_named_sibling()
+-            .is_some_and(|n| n.kind() == "attribute_item")
++            .is_some_and(|_n| false)
+         {
+             return Err(format!(
+                 "attributed module in target `{expression}` needs semantic module resolution"

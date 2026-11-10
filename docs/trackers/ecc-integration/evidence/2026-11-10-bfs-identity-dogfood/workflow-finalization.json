@@ -1,0 +1,20 @@
+{
+  "task_done": {
+    "plan": "docs/trackers/ecc-integration/plans/2026-11-10-bfs-identity-dogfood.md",
+    "task": 1,
+    "base": "7f0dbba5fd6ba25e4a50a8aad5c25403a11ae345",
+    "head": "537fa820d95b3298393cc515ab104776a57455c7",
+    "observed_summary": "test result: ok. 95 passed; 0 failed; 0 ignored; 0 measured; 5821 filtered out; finished in 1.45s",
+    "job": "@bg_000000ec",
+    "ledger": "retained source worktree .superpowers/sdd/2026-11-10-bfs-identity-dogfood/progress.md"
+  },
+  "review_package": {
+    "base": "7f0dbba5fd6ba25e4a50a8aad5c25403a11ae345",
+    "head": "537fa820d95b3298393cc515ab104776a57455c7",
+    "observed_commits": 1,
+    "observed_bytes": 81101,
+    "retained_path": ".worktrees/ecc-bfs-identity-20261110/.superpowers/sdd/2026-11-10-bfs-identity-dogfood/review-7f0dbba5f..537fa820d.diff",
+    "scope": "Final diff packaging, not a second independent review"
+  },
+  "retention": "User-authorized replay requirement overrides scratch/worktree cleanup; no repair replay ran"
+}

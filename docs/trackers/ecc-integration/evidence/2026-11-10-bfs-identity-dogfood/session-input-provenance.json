@@ -1,0 +1,13 @@
+{
+  "source": "/home/marius/.codex/sessions/2026/11/09/rollout-2026-11-09T10-24-45-01a1bf68-e650-7f20-911e-b53f86597c27.jsonl",
+  "private_snapshot": "/home/marius/work/claude/codescout/.codescout/ecc-bfs-identity-private-20261110/pre-action-controller-input.jsonl",
+  "bytes": 30031020,
+  "sha256": "a2e919f8fa2de3140e6a25568396211e0092d7e01e6e4a88448ad0d5062183fa",
+  "mode": "0600",
+  "cutoff": "before first assistant message OR function_call after latest exact ok, continue event",
+  "first_excluded_type": "message",
+  "user_event_timestamp": "2026-11-10T15:47:12.087Z",
+  "configured_model": "gpt-6.1-sol",
+  "configured_effort": "high",
+  "limits": "Exact local host prefix, not serialized provider request or all-resident-history attestation. Prior ECC conditioning and solution/evaluator artifacts require explicit exclusion/control for future comparison. No replay ran."
+}

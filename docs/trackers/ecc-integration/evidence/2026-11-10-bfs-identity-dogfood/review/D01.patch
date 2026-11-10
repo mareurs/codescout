@@ -1,0 +1,19 @@
+--- src/tools/symbol/call_graph/identity_tests.rs
++++ src/tools/symbol/call_graph/identity_tests.rs
+@@ -66,7 +66,7 @@
+         let mut answers = mock.outgoing_calls_results.lock().unwrap();
+         answers.insert(
+             "entry".to_owned(),
+-            vec![outgoing(a, 3, 13), outgoing(b, 3, 26)],
++            vec![outgoing(a, 3, 13), outgoing(b, 3, 13)],
+         );
+         answers.insert(
+             "body-a".to_owned(),
+@@ -81,7 +81,6 @@
+     let mut ctx = context(&root, &["fixture.rs"]).await;
+     ctx.lsp = crate::lsp::mock::MockLspProvider::with_shared_client(client.clone());
+     let expected = vec![
+-        "entry>helper@fixture.rs:4#1",
+         "entry>helper@fixture.rs:4#1",
+         "helper>leaf_a@fixture.rs:1#2",
+         "helper>leaf_b@fixture.rs:1#2",

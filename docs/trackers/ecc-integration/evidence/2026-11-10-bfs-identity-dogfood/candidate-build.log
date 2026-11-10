@@ -1,0 +1,26 @@
+   Compiling smallvec v1.15.1
+   Compiling slab v0.4.12
+   Compiling futures-channel v0.3.32
+   Compiling form_urlencoded v1.2.2
+   Compiling bstr v1.12.1
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout/.worktrees/ecc-bfs-identity-20261110)
+   Compiling parking_lot_core v0.9.12
+   Compiling icu_normalizer v2.1.1
+   Compiling tracing-subscriber v0.3.23
+   Compiling rusqlite v0.39.0
+   Compiling futures-util v0.3.32
+   Compiling parking_lot v0.12.5
+   Compiling globset v0.4.18
+   Compiling tokio v1.50.0
+   Compiling idna_adapter v1.2.1
+   Compiling ignore v0.4.25
+   Compiling idna v1.1.0
+   Compiling url v2.5.8
+   Compiling tracing-appender v0.2.4
+   Compiling git2 v0.20.4
+   Compiling futures-executor v0.3.32
+   Compiling futures v0.3.32
+   Compiling tokio-util v0.7.18
+   Compiling codescout-embed v0.2.0 (/home/marius/work/claude/codescout/.worktrees/ecc-bfs-identity-20261110/crates/codescout-embed)
+   Compiling rmcp v1.3.0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 30.13s

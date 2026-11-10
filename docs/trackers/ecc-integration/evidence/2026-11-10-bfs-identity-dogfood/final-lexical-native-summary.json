@@ -1,0 +1,10 @@
+{
+  "cases": 4,
+  "no_wrong_leaf_and_incomplete": 4,
+  "controls": 3,
+  "controls_as_expected": 3,
+  "known_collector_extra_edge_cases": [
+    "nested-function-shadows-root"
+  ],
+  "limits": "Checks only unsupported lexical binding disclosure and removal of arbitrary wrong leaf; does not certify full graph correctness. Nested-body collector defect remains separately open."
+}

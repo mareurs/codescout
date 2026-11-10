@@ -1,0 +1,562 @@
+[
+  {
+    "path": "review/native/block-import-shadows-root/probe.rmeta",
+    "bytes": 2893,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.codescout/call_edges.db",
+    "bytes": 32768,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.codescout/project.toml",
+    "bytes": 49,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.codescout/usage.db",
+    "bytes": 20480,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.codescout/write.lock",
+    "bytes": 0,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/HEAD",
+    "bytes": 23,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/config",
+    "bytes": 92,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/description",
+    "bytes": 73,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/applypatch-msg.sample",
+    "bytes": 478,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/commit-msg.sample",
+    "bytes": 1972,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/fsmonitor-watchman.sample",
+    "bytes": 4611,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/post-update.sample",
+    "bytes": 189,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-applypatch.sample",
+    "bytes": 424,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-commit.sample",
+    "bytes": 1649,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-merge-commit.sample",
+    "bytes": 416,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-push.sample",
+    "bytes": 1374,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-rebase.sample",
+    "bytes": 4898,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/pre-receive.sample",
+    "bytes": 544,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/prepare-commit-msg.sample",
+    "bytes": 1492,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/push-to-checkout.sample",
+    "bytes": 2783,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/sendemail-validate.sample",
+    "bytes": 2308,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/hooks/update.sample",
+    "bytes": 3650,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.git/info/exclude",
+    "bytes": 240,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/.gitignore",
+    "bytes": 29,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/Cargo.toml",
+    "bytes": 61,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/project/src/lib.rs",
+    "bytes": 132,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/state/state/codescout/servers/3941670.json",
+    "bytes": 268,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/block-import-shadows-root/state/workspace.toml",
+    "bytes": 0,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/probe.rmeta",
+    "bytes": 2747,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.codescout/call_edges.db",
+    "bytes": 32768,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.codescout/project.toml",
+    "bytes": 49,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.codescout/usage.db",
+    "bytes": 20480,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.codescout/write.lock",
+    "bytes": 0,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/HEAD",
+    "bytes": 23,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/config",
+    "bytes": 92,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/description",
+    "bytes": 73,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/applypatch-msg.sample",
+    "bytes": 478,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/commit-msg.sample",
+    "bytes": 1972,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/fsmonitor-watchman.sample",
+    "bytes": 4611,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/post-update.sample",
+    "bytes": 189,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-applypatch.sample",
+    "bytes": 424,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-commit.sample",
+    "bytes": 1649,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-merge-commit.sample",
+    "bytes": 416,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-push.sample",
+    "bytes": 1374,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-rebase.sample",
+    "bytes": 4898,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/pre-receive.sample",
+    "bytes": 544,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/prepare-commit-msg.sample",
+    "bytes": 1492,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/push-to-checkout.sample",
+    "bytes": 2783,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/sendemail-validate.sample",
+    "bytes": 2308,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/hooks/update.sample",
+    "bytes": 3650,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.git/info/exclude",
+    "bytes": 240,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/.gitignore",
+    "bytes": 29,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/Cargo.toml",
+    "bytes": 61,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/project/src/lib.rs",
+    "bytes": 82,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/state/state/codescout/servers/3944581.json",
+    "bytes": 274,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/callable-parameter-shadows-root/state/workspace.toml",
+    "bytes": 0,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/probe.rmeta",
+    "bytes": 3439,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.codescout/call_edges.db",
+    "bytes": 32768,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.codescout/project.toml",
+    "bytes": 49,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.codescout/usage.db",
+    "bytes": 20480,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.codescout/write.lock",
+    "bytes": 0,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/HEAD",
+    "bytes": 23,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/config",
+    "bytes": 92,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/description",
+    "bytes": 73,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/applypatch-msg.sample",
+    "bytes": 478,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/commit-msg.sample",
+    "bytes": 1972,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/fsmonitor-watchman.sample",
+    "bytes": 4611,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/post-update.sample",
+    "bytes": 189,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-applypatch.sample",
+    "bytes": 424,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-commit.sample",
+    "bytes": 1649,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-merge-commit.sample",
+    "bytes": 416,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-push.sample",
+    "bytes": 1374,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-rebase.sample",
+    "bytes": 4898,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/pre-receive.sample",
+    "bytes": 544,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/prepare-commit-msg.sample",
+    "bytes": 1492,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/push-to-checkout.sample",
+    "bytes": 2783,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/sendemail-validate.sample",
+    "bytes": 2308,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/hooks/update.sample",
+    "bytes": 3650,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.git/info/exclude",
+    "bytes": 240,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/.gitignore",
+    "bytes": 29,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/Cargo.toml",
+    "bytes": 61,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/project/src/lib.rs",
+    "bytes": 119,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/state/state/codescout/servers/3948614.json",
+    "bytes": 272,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/generic-type-shadows-concrete/state/workspace.toml",
+    "bytes": 0,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/probe.rmeta",
+    "bytes": 2798,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.codescout/call_edges.db",
+    "bytes": 32768,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.codescout/project.toml",
+    "bytes": 49,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.codescout/usage.db",
+    "bytes": 20480,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.codescout/write.lock",
+    "bytes": 0,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/HEAD",
+    "bytes": 23,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/config",
+    "bytes": 92,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/description",
+    "bytes": 73,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/applypatch-msg.sample",
+    "bytes": 478,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/commit-msg.sample",
+    "bytes": 1972,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/fsmonitor-watchman.sample",
+    "bytes": 4611,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/post-update.sample",
+    "bytes": 189,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-applypatch.sample",
+    "bytes": 424,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-commit.sample",
+    "bytes": 1649,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-merge-commit.sample",
+    "bytes": 416,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-push.sample",
+    "bytes": 1374,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-rebase.sample",
+    "bytes": 4898,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/pre-receive.sample",
+    "bytes": 544,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/prepare-commit-msg.sample",
+    "bytes": 1492,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/push-to-checkout.sample",
+    "bytes": 2783,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/sendemail-validate.sample",
+    "bytes": 2308,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/hooks/update.sample",
+    "bytes": 3650,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.git/info/exclude",
+    "bytes": 240,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/.gitignore",
+    "bytes": 29,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/Cargo.toml",
+    "bytes": 61,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/project/src/lib.rs",
+    "bytes": 103,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/state/state/codescout/servers/3946866.json",
+    "bytes": 271,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  },
+  {
+    "path": "review/native/nested-function-shadows-root/state/workspace.toml",
+    "bytes": 0,
+    "reason": "local runtime project/state/compiler output retained, not evidence commit input"
+  }
+]

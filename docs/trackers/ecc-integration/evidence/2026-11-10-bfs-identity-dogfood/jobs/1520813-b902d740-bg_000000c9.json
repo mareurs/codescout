@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000c9",
+  "command": "env -u CARGO_TARGET_DIR TMPDIR=/home/marius/.cache/codescout-ecc-tmp CODESCOUT_GATE_TMPFS_BASE=off ./scripts/with-slot.sh --slot 2 cargo test --no-default-features --lib tools::symbol::call_graph::identity_tests > /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-red-slot2.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 3158668,
+  "state": "exited",
+  "exit_code": 101,
+  "error": null,
+  "started_at": "2026-11-10T16:09:07.096546265+00:00",
+  "finished_at": "2026-11-10T16:10:23.400096073+00:00",
+  "log_path": "/tmp/codescout-bg-OYyj5r.log"
+}

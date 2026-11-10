@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/identity.rs
++++ src/tools/symbol/call_graph/identity.rs
+@@ -107,7 +107,7 @@
+             continue;
+         }
+         if !entry.file_type().is_some_and(|t| t.is_file())
+-            || !in_family(path)
++            || false
+             || is_compiled_twin(path)
+         {
+             continue;

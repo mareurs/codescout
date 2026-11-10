@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000ce",
+  "command": "python3 docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/verify_candidate.py",
+  "server_pid": 1520813,
+  "job_pid": 3661835,
+  "state": "exited",
+  "exit_code": 1,
+  "error": null,
+  "started_at": "2026-11-10T16:37:33.972030754+00:00",
+  "finished_at": "2026-11-10T16:37:34.101334854+00:00",
+  "log_path": "/tmp/codescout-bg-50Yjv2.log"
+}

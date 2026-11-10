@@ -1,0 +1,69 @@
+{
+  "home_head": "195317920ea2877ead34435c99df0a650f86d7b5",
+  "source_head": "7f0dbba5fd6ba25e4a50a8aad5c25403a11ae345",
+  "peer_changed_paths": [
+    "tools/setup-ab-eval/freeze_screen.py",
+    "tools/setup-ab-eval/run.py",
+    "tools/setup-ab-eval/test_freeze_screen.py",
+    "tools/setup-ab-eval/test_run.py"
+  ],
+  "source_paths": {
+    "src/lsp/mock.rs": "7e7f1bd1bc85aa30f29912425abe2b36dcc5ce6ee28fc0f67d9c1a89b10633cd",
+    "src/tools/symbol/call_edges/cache.rs": "4bd017545d6f7005a8cb7fc923a57ee9add59ff3ce0ad6bb5961531e8193a00d",
+    "src/tools/symbol/call_edges/resolver.rs": "b9f491a6599a13001b258e7cd6da7755eee0fa226a0c41d3b819a67593109ea9",
+    "src/tools/symbol/call_graph/mod.rs": "d1a9fc61805ba8e8187f10b8850b83a7f83583d01eb200999ae61c88dea385e7",
+    "src/tools/symbol/call_graph/traversal.rs": "e022d581f5dcfb72eb2a76f2fbaa025aa709588d6f681daeccb362e2d6030818",
+    "src/tools/symbol/call_graph/identity.rs": "6d37770f907927db841c38cf49f61d6aab508e6b35a22412c0fdfbed8f4b8592",
+    "src/tools/symbol/call_graph/rust_target.rs": "595f37dc8f77c5fbd743c277179a992fbfc78850edf02e2878859e22d6c5fefb",
+    "src/tools/symbol/call_graph/identity_tests.rs": "8dab52b04bed4759cb17d9583031b1bf2c4fac6b7c4547dddbb09e4b3a223a78",
+    "src/tools/symbol/call_graph/rust_lexical.rs": "1825021cd7b232be5c8b21345dfd6bba29b8541f83e1ff330267e0b2bfa2c55a",
+    "src/tools/symbol/call_graph/identity_tests/review.rs": "51dacd53a82e75cd5465a69d0481fe63e4c44610e1af3f97af0c8188a142737b"
+  },
+  "gate": {
+    "exit_code": 0,
+    "started": "2026-11-10T17:09:39.925272+00:00",
+    "finished": "2026-11-10T17:15:46.647506+00:00",
+    "workspace": "/home/marius/work/claude/codescout/.worktrees/ecc-bfs-identity-20261110",
+    "base": "7f0dbba5fd6ba25e4a50a8aad5c25403a11ae345",
+    "paths": {
+      "src/lsp/mock.rs": "7e7f1bd1bc85aa30f29912425abe2b36dcc5ce6ee28fc0f67d9c1a89b10633cd",
+      "src/tools/symbol/call_edges/cache.rs": "4bd017545d6f7005a8cb7fc923a57ee9add59ff3ce0ad6bb5961531e8193a00d",
+      "src/tools/symbol/call_edges/resolver.rs": "b9f491a6599a13001b258e7cd6da7755eee0fa226a0c41d3b819a67593109ea9",
+      "src/tools/symbol/call_graph/mod.rs": "d1a9fc61805ba8e8187f10b8850b83a7f83583d01eb200999ae61c88dea385e7",
+      "src/tools/symbol/call_graph/traversal.rs": "e022d581f5dcfb72eb2a76f2fbaa025aa709588d6f681daeccb362e2d6030818",
+      "src/tools/symbol/call_graph/identity.rs": "6d37770f907927db841c38cf49f61d6aab508e6b35a22412c0fdfbed8f4b8592",
+      "src/tools/symbol/call_graph/rust_target.rs": "595f37dc8f77c5fbd743c277179a992fbfc78850edf02e2878859e22d6c5fefb",
+      "src/tools/symbol/call_graph/identity_tests.rs": "8dab52b04bed4759cb17d9583031b1bf2c4fac6b7c4547dddbb09e4b3a223a78",
+      "src/tools/symbol/call_graph/rust_lexical.rs": "1825021cd7b232be5c8b21345dfd6bba29b8541f83e1ff330267e0b2bfa2c55a",
+      "src/tools/symbol/call_graph/identity_tests/review.rs": "51dacd53a82e75cd5465a69d0481fe63e4c44610e1af3f97af0c8188a142737b"
+    },
+    "source_unchanged": true,
+    "command": [
+      "./scripts/with-slot.sh",
+      "--slot",
+      "2",
+      "./scripts/gate.sh",
+      "--check"
+    ]
+  },
+  "gate_summaries": [
+    "     Summary [  57.898s] 6398 tests run: 6398 passed, 49 skipped",
+    "     Summary [  73.050s] 9301 tests run: 9301 passed, 63 skipped",
+    "1827 passed, 7 skipped, 554 subtests passed in 174.87s (0:02:54)",
+    "PYTHON LIGHT EXIT -> PYTHON_LIGHT=0",
+    "GATE EXITS -> FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0 FMT_STATE=passed"
+  ],
+  "native": {
+    "exit_code": 0,
+    "driver_exit_observed": true,
+    "timed_out": false,
+    "script_sha256": "4e575c7b441cc518e0a2f04616b04e32ff4bf6686c3394810d73e2a043202be1",
+    "scope": "Native probe driver process exit observed independently of gate outcome; no repair replay."
+  },
+  "environment": {
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1",
+    "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+    "python": "Python 3.14.9",
+    "kernel": "Linux 7.2.8-zen1-2-zen"
+  }
+}

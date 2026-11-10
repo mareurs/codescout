@@ -1,0 +1,3 @@
+Preparing worktree (detached HEAD 195317920)
+HEAD is now at 195317920 feat(eval): a live task with a template runs the cs and full arms; freeze_screen --arms registers them with the template volumes
+{"base": "195317920ea2877ead34435c99df0a650f86d7b5", "expected_tree": "115cd5bb196cd91c7763deede84d3c4e93070059", "exit_code": 0, "source_unchanged": true, "tree_after": "115cd5bb196cd91c7763deede84d3c4e93070059", "unstaged_tracked_paths": []}

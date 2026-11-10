@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/traversal.rs
++++ src/tools/symbol/call_graph/traversal.rs
+@@ -134,7 +134,7 @@
+         }
+ 
+         // A requested depth boundary needs no next-hop analysis or uncertainty warning.
+-        let next = if depth < cfg.max_depth {
++        let next = if depth <= cfg.max_depth {
+             try_join_all(
+                 level_raw
+                     .iter()

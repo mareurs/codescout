@@ -1,0 +1,27 @@
+[
+  {
+    "name": "actual-unique-positive",
+    "actual": true,
+    "expected": true
+  },
+  {
+    "name": "wrong-file",
+    "actual": false,
+    "expected": false
+  },
+  {
+    "name": "wrong-depth",
+    "actual": false,
+    "expected": false
+  },
+  {
+    "name": "wrong-callee",
+    "actual": false,
+    "expected": false
+  },
+  {
+    "name": "guide-only-edges",
+    "actual": false,
+    "expected": false
+  }
+]

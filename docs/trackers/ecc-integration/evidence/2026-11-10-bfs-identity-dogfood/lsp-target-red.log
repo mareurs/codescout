@@ -1,0 +1,34 @@
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-2 (leased until this command exits)
+   Compiling codescout v0.15.0 (/home/marius/work/claude/codescout/.worktrees/ecc-bfs-identity-20261110)
+warning: unused import: `async_trait::async_trait`
+ --> src/tools/symbol/call_graph/traversal.rs:3:5
+  |
+3 | use async_trait::async_trait;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `codescout` (lib test) generated 1 warning (run `cargo fix --lib -p codescout --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 21.93s
+     Running unittests src/lib.rs (/home/marius/.cache/codescout-gate/slot-2/debug/deps/codescout-f5b4a259c0981384)
+
+running 1 test
+test tools::symbol::call_graph::identity_tests::lsp_same_file_same_line_helpers_preserve_columns_and_cached_target_metadata ... FAILED
+
+failures:
+
+---- tools::symbol::call_graph::identity_tests::lsp_same_file_same_line_helpers_preserve_columns_and_cached_target_metadata stdout ----
+
+thread 'tools::symbol::call_graph::identity_tests::lsp_same_file_same_line_helpers_preserve_columns_and_cached_target_metadata' (3548692) panicked at src/tools/symbol/call_graph/identity_tests.rs:157:9:
+assertion `left == right` failed: {"symbol":"entry","callees":[{"caller":"entry","callee":"helper","file":"/home/marius/.cache/codescout-ecc-tmp/.tmp11g9ar/fixture.rs","line":4,"depth":1,"source":"lsp","paths":1},{"caller":"entry","callee":"helper","file":"/home/marius/.cache/codescout-ecc-tmp/.tmp11g9ar/fixture.rs","line":4,"depth":1,"source":"lsp","paths":1}],"auto_promoted":true,"max_depth_reached":1,"completeness_warning":"call_graph could not analyze 2 hop(s) — `helper` direction=callees from /home/marius/.cache/codescout-ecc-tmp/.tmp11g9ar/fixture.rs:4:14: ambiguous declaration identity; `helper` direction=callees from /home/marius/.cache/codescout-ecc-tmp/.tmp11g9ar/fixture.rs:4:27: ambiguous declaration identity — so this graph may be incomplete; missing edges in those scopes do not establish absence."}
+  left: ["entry>helper@fixture.rs:4#1", "entry>helper@fixture.rs:4#1"]
+ right: ["entry>helper@fixture.rs:4#1", "entry>helper@fixture.rs:4#1", "helper>leaf_a@fixture.rs:1#2", "helper>leaf_b@fixture.rs:1#2"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tools::symbol::call_graph::identity_tests::lsp_same_file_same_line_helpers_preserve_columns_and_cached_target_metadata
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5907 filtered out; finished in 0.09s
+
+error: test failed, to rerun pass `--lib`

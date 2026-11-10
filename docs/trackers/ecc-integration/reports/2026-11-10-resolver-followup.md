@@ -17,7 +17,7 @@ topic: ecc-integration
 
 Completed and integrated locally on experiments: source `9aee4be48e446c15a441397f877c662f265f56ac`, integration `cb7d13ff360f8fb2464a8a2b52f0f87342c00391`, stable patch-id `d2258dc0bcbe010b39e15f2a84680d4cb7036f09`. The resolver strategy comment now describes actual outgoing AST fallback; the subprocess fixture retries only intentional unavailable results. Production store and executable call-graph logic are unchanged. Source and exact integrated-tree full gates passed; independent fixture review approved with3 actual mutations killed/0 survived/0 inconclusive,19-test baseline/restoration (1 ignored). Both corrected bugs are archived.
 
-Fresh source-bound native data separately confirms a multi-hop identity defect: four qualifying controls match; all three duplicate-name depth2 cases omit a branch with a clean render. That behavioral correction remains open and is the next candidate. No repair replay ran.
+Fresh source-bound native data separately confirms a multi-hop identity defect: four qualifying controls match; all three duplicate-name depth2 cases omit a branch with a clean render. The later BFS identity cycle corrected that behavior and integrateddc769e430; its report records the current scope and open incidental collector/navigation findings. No repair replay ran.
 
 ## Method and replay
 
@@ -39,7 +39,7 @@ A private native Rust topology calls both `a::helper()` and `b::helper()` from d
 
 The source-inspected mechanism is loss of declaration identity between hops: AST targets keep the final name segment, BFS visited/frontiers key strings, and lookup_pos chooses one position by name. Completed-cache definition scoping from the prior cycle remains useful but cannot reconstruct the missing traversal identity. This is separate from the corrected one-hop cache boundary.
 
-[Separate confirmed BFS bug](../../../issues/2026-11-10-call-graph-multihop-collapses-same-name-definitions.md), artifactfed27cae5971c526. Its correction is pending and is outside this candidate's resolver documentation and test-fixture changes.
+[Separate confirmed BFS bug](../../../issues/archive/2026-11-10-call-graph-multihop-collapses-same-name-definitions.md), artifact382466d3e15a3d1d. It was outside this candidate's resolver documentation and test-fixture changes; the later BFS identity cycle fixed it in integrationdc769e430.
 
 ## Review and verification limits
 

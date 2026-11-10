@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000ec",
+  "command": "/home/marius/.codex/plugins/cache/superpowers-marketplace/superpowers/7.0.2/skills/executing-plans/scripts/task-done /home/marius/work/claude/codescout/docs/trackers/ecc-integration/plans/2026-11-10-bfs-identity-dogfood.md 1 7f0dbba5fd6ba25e4a50a8aad5c25403a11ae345 -- env -u CARGO_TARGET_DIR TMPDIR=/home/marius/.cache/codescout-ecc-tmp CODESCOUT_GATE_TMPFS_BASE=off ./scripts/with-slot.sh --slot 1 cargo test --no-default-features --lib tools::symbol::call_ > /home/marius/work/claude/codescout/.codescout/ecc-bfs-identity-private-20261110/sdd-task-done.log 2>&1",
+  "server_pid": 1520813,
+  "job_pid": 1036317,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-10T17:52:31.139551977+00:00",
+  "finished_at": "2026-11-10T17:53:43.507757838+00:00",
+  "log_path": "/tmp/codescout-bg-yCh73D.log"
+}

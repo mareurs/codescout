@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_000000ef",
+  "command": "python3 - <<'PY'\nimport hashlib,json,pathlib,subprocess\nroot=pathlib.Path.cwd();e=root/'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood'\npath='docs/trackers/ecc-integration/README.md'\nforeign=json.loads((e/'foreign-index-before.json').read_text())\ndef git(*a):return subprocess.check_output(['git',*a])\ndef foreign_state():return {p:git('ls-files','--stage','--',p).decode().strip() for p in foreign}\ndef classify():return [r.split('\\t',2) for r in subprocess.check_output(['bash','scripts/pre-commit-foreign-index.sh','--classify']).decode().splitlines()]\nassert foreign_state()==foreign\nbefore=hashlib.sha256((root/path).read_bytes()).hexdigest()\nold=[r for r in classify() if r[2]==path];print('BEFORE',old,flush=True)\nsubprocess.run(['git','diff','--quiet','--',path],check=True)\nsubprocess.run(['git','restore','--staged','--',path],check=True)\nassert hashlib.sha256((root/path).read_bytes()).hexdigest()==before\nsubprocess.run(['git','add','--',path],check=True)\nnew=[r for r in classify() if r[2]==path];print('AFTER',new,flush=True)\nassert hashlib.sha256((root/path).read_bytes()).hexdigest()==before\nassert foreign_state()==foreign\nrecord=dict(path=path,before=old,after=new,worktree_sha256=before,worktree_unchanged=True,foreign_index_unchanged=True,mechanism='Real named git restore --staged then git add on one positively owned reviewed path; no ownership-log edit or hook bypass')\n(root/'.codescout/ecc-bfs-identity-private-20261110/stage-control.json').write_text(json.dumps(record,indent=2)+'\\n')\nassert new==[['mine','codex:01a1bf68-e650-7f20-911e-b53f86597c27',path]],new\nPY",
+  "server_pid": 1520813,
+  "job_pid": 1084451,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-10T17:59:09.253957705+00:00",
+  "finished_at": "2026-11-10T17:59:12.681908496+00:00",
+  "log_path": "/tmp/codescout-bg-1jOFq3.log"
+}

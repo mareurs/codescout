@@ -1,0 +1,13 @@
+--- src/tools/symbol/call_graph/mod.rs
++++ src/tools/symbol/call_graph/mod.rs
+@@ -471,9 +471,7 @@
+         };
+         if let Some(edges) = cached {
+             // Old LSP payloads lack endpoint identity; recompute instead of guessing by name.
+-            if !edges
+-                .iter()
+-                .any(|edge| edge.source == EdgeSource::Lsp && edge.target.is_none())
++            if true
+             {
+                 return Ok(edges);
+             }

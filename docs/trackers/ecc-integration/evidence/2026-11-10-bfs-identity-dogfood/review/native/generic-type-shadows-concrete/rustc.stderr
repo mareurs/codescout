@@ -1,0 +1,36 @@
+warning: struct `A` is never constructed
+ --> /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/generic-type-shadows-concrete/project/src/lib.rs:1:8
+  |
+1 | struct A; impl A { fn helper() { wrong(); } }
+  |        ^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: associated function `helper` is never used
+ --> /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/generic-type-shadows-concrete/project/src/lib.rs:1:23
+  |
+1 | struct A; impl A { fn helper() { wrong(); } }
+  |           ------      ^^^^^^
+  |           |
+  |           associated function in this implementation
+
+warning: function `wrong` is never used
+ --> /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/generic-type-shadows-concrete/project/src/lib.rs:2:4
+  |
+2 | fn wrong() {}
+  |    ^^^^^
+
+warning: trait `T` is never used
+ --> /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/generic-type-shadows-concrete/project/src/lib.rs:3:7
+  |
+3 | trait T { fn helper(); }
+  |       ^
+
+warning: function `entry` is never used
+ --> /home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/generic-type-shadows-concrete/project/src/lib.rs:4:4
+  |
+4 | fn entry<A: T>() { A::helper(); }
+  |    ^^^^^
+
+warning: 5 warnings emitted
+

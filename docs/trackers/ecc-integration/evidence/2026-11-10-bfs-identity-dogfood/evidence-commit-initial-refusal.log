@@ -1,0 +1,357 @@
+refuse a pathspec commit carrying unstaged content                      Passed
+
+Refusing this pathspec commit: it captures content another session wrote.
+
+  theirs:
+      docs/issues/2026-11-10-call-graph-collector-includes-nested-function-bodies.md
+      docs/issues/2026-11-10-symbols-stale-ranges-after-source-formatting.md
+      docs/issues/archive/2026-11-10-call-graph-ast-fallback-ignores-lexical-shadowing.md
+      docs/issues/archive/2026-11-10-call-graph-display-dedupe-erases-endpoints.md
+      docs/issues/archive/2026-11-10-call-graph-multihop-collapses-same-name-definitions.md
+      docs/issues/archive/2026-11-10-call-graph-new-identity-guards-unpinned.md
+      docs/trackers/bug-fix-session-log.md
+      docs/trackers/ecc-integration/README.md
+      docs/trackers/ecc-integration/evidence.md
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/archive-moves-final.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/archive-moves.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-binary.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-build-bound.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-build.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/AGENTS.md.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/CLAUDE.md.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/Cargo.lock.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/Cargo.toml.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/candidate-brief.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__ast__parser.rs.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__lsp__mock.rs.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__lsp__ops.rs.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__lsp__symbols.rs.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__tools__symbol__call_edges__cache.rs.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__tools__symbol__call_edges__resolver.rs.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__tools__symbol__call_graph__mod.rs.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__tools__symbol__call_graph__traversal.rs.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-module.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/bfs-cases.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/bfs-fixtures.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/bfs-scorer-controls.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/bfs-summary.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/native.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/probe.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/process-result.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/build_baseline.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/build_baseline_bound.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-binary.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-build.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-gate-result.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-gate.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/bfs-cases.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/bfs-fixtures.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/bfs-scorer-controls.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/bfs-summary.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/native.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/probe.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/process-result.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-source.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/capture.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/controller-only/ecc-silent-failure-review.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/controller-only/ecc-spec-miner.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/evidence-message.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/excluded-local-runtime-artifacts.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/excluded-runtime-paths.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended-native-cases.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended-native-controls.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended-native-summary.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended-native.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended_native.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-binary.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-build.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-candidate.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-excluded-runtime-paths.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-extended-native-cases.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-extended-native-controls.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-extended-native-summary.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-extended-native.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-gate-result.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-gate.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-lexical-native-cases.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-lexical-native-controls.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-lexical-native-summary.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-lexical-native.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations-driver.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M01.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M01.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M02.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M02.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M03.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M03.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M04.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M04.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M05.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M05.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M06.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M06.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M07.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M07.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M08.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M08.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M09.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M09.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M10.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M10.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M11.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M11.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M12.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M12.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M13.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M13.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M14.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M14.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M15.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M15.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/baseline.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/mutations.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/results.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/summary.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/bfs-cases.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/bfs-fixtures.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/bfs-scorer-controls.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/bfs-summary.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/native.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/probe.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/process-result.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-source.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final_extended_native.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final_lexical_native.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/foreign-index-before.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-green-initial.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-green-position-separation.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-red-attempt2.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-red-slot2.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-red.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/inspect_state.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integrate.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integrated-gate-driver.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integrated-gate-result.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integrated-gate.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integrated-tree-before.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integration-commit.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integration-message.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integration-staged.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integration.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c2.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c4.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c5.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c6.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c7.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c8.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c9.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000ca.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000cb.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000cc.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000cd.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000ce.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000cf.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000d0.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000d7.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000d8.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000d9.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000da.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000db.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000dc.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000dd.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000de.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e1.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e3.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e4.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/lsp-target-green.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/lsp-target-red.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/navigation-range-counterexample.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/peer_inventory.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/preintegration-state.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/raw-artifact-inventory.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/recheck_mutations.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-green-borrow-corrected.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-green.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-red-fixture-corrected.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-red.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/D01-result.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/D01.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/D01.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M01.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M01.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M02.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M02.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M03.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M03.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M04.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M04.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M05.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M05.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M06.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M06.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M07.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M07.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M08.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M08.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M09.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M09.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M10.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M10.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M11.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M11.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M12.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M12.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M13.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M13.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/baseline-exit.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/baseline.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/mutation-results.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/mutations.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native-diagnostics.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native-results.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/block-import-shadows-root/rustc.stderr
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/callable-parameter-shadows-root/rustc.stderr
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/generic-type-shadows-concrete/rustc.stderr
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/nested-function-shadows-root/rustc.stderr
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/restored-source.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/review-result.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/run-diagnostic.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/run-mutations.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/run_baseline_native.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/session-input-provenance.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/source-commit.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/source-commit.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/source-message.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/source-staged.patch
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/source_commit.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/validation-frontmatter-assumption.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/validation.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/verify_candidate-scope-refused.py.txt
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/verify_candidate.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/verify_final.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/verify_integrated.py
+      docs/trackers/ecc-integration/issues.md
+      docs/trackers/ecc-integration/notes/2026-11-10-bfs-identity-replay.md
+      docs/trackers/ecc-integration/notes/README.md
+      docs/trackers/ecc-integration/plans/2026-11-10-bfs-identity-dogfood.md
+      docs/trackers/ecc-integration/plans/2026-11-10-resolver-followup.md
+      docs/trackers/ecc-integration/plans/README.md
+      docs/trackers/ecc-integration/reports/2026-11-10-bfs-identity-contract.md
+      docs/trackers/ecc-integration/reports/2026-11-10-bfs-identity-independent-review.md
+      docs/trackers/ecc-integration/reports/2026-11-10-resolver-followup.md
+      docs/trackers/ecc-integration/reports/README.md
+
+  yours:
+      docs/issues/2026-11-10-call-graph-multihop-collapses-same-name-definitions.md
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/collect_evidence.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/commit_evidence.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/finalize_evidence.py
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/issue-frontmatter.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e5.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e8.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e9.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/owned-paths.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/raw-manifest.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/selected-raw-paths.json
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/validation-stage.log
+      docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/validation-timeout.json
+      docs/trackers/ecc-integration/reports/2026-11-10-bfs-identity-dogfood.md
+
+`git commit -- <path>` commits that path's WORKING-TREE content. It bypasses
+the shared index for paths it does not NAME, which is what makes this form the
+right remedy in general — but the content at the path you named is theirs, so
+committing now would file their work under your message, where it is durable
+and no longer theirs to attribute.
+
+You cannot narrow further: the contested path IS one you named.
+
+Drop it and commit the rest:
+
+    git commit -- docs/issues/2026-11-10-call-graph-multihop-collapses-same-name-definitions.md docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/collect_evidence.py docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/commit_evidence.py docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/finalize_evidence.py docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/issue-frontmatter.log docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e5.json docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e8.json docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e9.json docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/owned-paths.json docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/raw-manifest.json docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/selected-raw-paths.json docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/validation-stage.log docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/validation-timeout.json docs/trackers/ecc-integration/reports/2026-11-10-bfs-identity-dogfood.md
+
+Then ask the owner below to commit theirs. Once their change is in HEAD your
+next commit of that path carries only your own, and this guard goes quiet.
+
+Do NOT `git checkout` or `git stash` the path to clear this. Their work is
+in the working tree and is not committed anywhere — discarding it destroys it,
+which is worse than the mislabelling this guard exists to prevent.
+
+Staged by:
+      (unrecorded) — no session id is on these rows. What the recorder
+          logged about why, one line per distinct cause:
+            • not a staging command — the index write came from
+              an unreadable or unrecognised parent, so nothing
+              could be claimed. Ask before assuming it is yours.
+          IF YOU STAGED THIS HUNK YOURSELF with `git update-index --cacheinfo`
+          or `git add -p` (a split of a file a peer is also editing), the
+          recorder does not see those as staging and stamps the row `-`, so
+          none of the causes above is the fix, and re-adding the same content
+          does not claim the row. Stage the snapshot with a real `git add`
+          from a scratch work tree: docs/conventions/shared-checkout-commit-sequence.md
+          § A hunk the recorder can attribute.
+          Unknown ownership stays deliberate: it over-refuses, where
+          claiming would have gone silent.
+
+ASK before assuming. scripts/peer-sessions.sh lists every live session,
+including the ones ListAgents hides from you.
+
+`--no-verify` also works and is the wrong habit.
+
+This is one rule in a sequence, and the rest of it is why this refusal is cheap
+to hit twice. Each step below exists because skipping it cost something measured
+on this checkout — the sequence, not the rules, is what nobody had written down.
+
+  1. Enumerate before assuming you are alone.
+       scripts/peer-sessions.sh — not ListAgents, which is per-profile and once
+       reported 2 peers where 16 sessions existed across 3 profiles.
+  2. Identify your own work POSITIVELY, by the Session-Id trailer or
+       scripts/file-provenance.py — never by a commit range. A range is a proxy
+       for authorship and stops being one the moment anyone else commits.
+  3. Decide the COUPLING before you stage. A count and its member, a citation
+       and its target, a gate and the change that falsifies it, commit together
+       or not at all: every partial state is a red tree for every other session.
+  4. Stage, read the diff, then commit by pathspec — in SEPARATE calls.
+       git add <paths>
+       git diff --cached --name-only   # the index is SHARED: are these all yours?
+       git diff --cached               # read the content; that is the whole point
+       git commit -m "..." -- <paths>
+       SEPARATE is load-bearing, not layout. Chained with && the diff reaches you
+       only AFTER the commit has run — a record of what happened, not a check on
+       whether it should — and the transcript still reads as a review followed by
+       a commit. && chains on EXIT STATUS while this check is you reading content,
+       and `git diff` exits 0 whatever it prints, so && never stops anything.
+       Measured: 21258b4b captured four files that way; 1b40dabd took a peer's
+       whole ledger entry, the check having run and changed nothing.
+       Staging is what satisfies the unreviewed-content check; the pathspec is
+       not. And -m goes BEFORE --, or git reads it as a pathspec.
+       A hunk of a file a peer also edits: `git update-index --cacheinfo` and
+       `git add -p` stage it UNATTRIBUTED (stamped `-`), and re-adding the same
+       content does not fix that. See the page below, § A hunk the recorder can
+       attribute: a real `git add` from a scratch work tree.
+  5. Verify the INDEX, not the exit code. `git add` can fail on a contended
+       lock, and a retry loop that exhausts looks identical to one that worked.
+       The index is shared in the other direction too: never `git restore
+       --staged` or `git reset` a path you did not stage. A peer's staged path
+       vanishes and its commit would land without it; the foreign-index hook
+       refuses that commit ONCE, naming you, and only for a path it attributed.
+  6. If a commit captures another session's file: stop. Do not reset or amend.
+       On a shared tree the repair destroys work the defect only mislabels.
+       Report it instead.
+
+Full sequence, with the measurements each step was paid for:
+  docs/conventions/shared-checkout-commit-sequence.md
+refuse an index commit carrying another session's staged paths          Failed
+refuse a stored count, or a class gaining a member it does not name     Passed
+rustfmt --check (committed bytes)                                       Passed
+refuse a commit citing an artifact id nothing resolves                  Passed
+warn when a moved path is still cited from outside the commit           Passed
+Traceback (most recent call last):
+  File "/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/commit_evidence.py", line 31, in <module>
+    subprocess.run(['git','commit','-F',str(HERE/'evidence-message.txt'),'--',*owned],cwd=ROOT,check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['git', 'commit', '-F', '/home/marius/work/claude/codescout/docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/evidence-message.txt', '--', 'docs/issues/2026-11-10-call-graph-collector-includes-nested-function-bodies.md', 'docs/issues/2026-11-10-call-graph-multihop-collapses-same-name-definitions.md', 'docs/issues/2026-11-10-symbols-stale-ranges-after-source-formatting.md', 'docs/issues/archive/2026-11-10-call-graph-ast-fallback-ignores-lexical-shadowing.md', 'docs/issues/archive/2026-11-10-call-graph-display-dedupe-erases-endpoints.md', 'docs/issues/archive/2026-11-10-call-graph-multihop-collapses-same-name-definitions.md', 'docs/issues/archive/2026-11-10-call-graph-new-identity-guards-unpinned.md', 'docs/trackers/bug-fix-session-log.md', 'docs/trackers/ecc-integration/README.md', 'docs/trackers/ecc-integration/evidence.md', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/archive-moves-final.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/archive-moves.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-binary.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-build-bound.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-build.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/AGENTS.md.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/CLAUDE.md.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/Cargo.lock.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/Cargo.toml.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/candidate-brief.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__ast__parser.rs.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__lsp__mock.rs.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__lsp__ops.rs.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__lsp__symbols.rs.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__tools__symbol__call_edges__cache.rs.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__tools__symbol__call_edges__resolver.rs.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__tools__symbol__call_graph__mod.rs.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-inputs/src__tools__symbol__call_graph__traversal.rs.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-module.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/bfs-cases.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/bfs-fixtures.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/bfs-scorer-controls.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/bfs-summary.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/native.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/probe.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline-native/process-result.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/baseline.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/build_baseline.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/build_baseline_bound.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-binary.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-build.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-gate-result.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-gate.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/bfs-cases.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/bfs-fixtures.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/bfs-scorer-controls.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/bfs-summary.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/native.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/probe.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-native/process-result.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate-source.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/candidate.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/capture.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/collect_evidence.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/commit_evidence.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/controller-only/ecc-silent-failure-review.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/controller-only/ecc-spec-miner.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/evidence-message.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/excluded-local-runtime-artifacts.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/excluded-runtime-paths.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended-native-cases.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended-native-controls.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended-native-summary.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended-native.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/extended_native.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-binary.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-build.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-candidate.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-excluded-runtime-paths.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-extended-native-cases.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-extended-native-controls.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-extended-native-summary.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-extended-native.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-gate-result.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-gate.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-lexical-native-cases.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-lexical-native-controls.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-lexical-native-summary.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-lexical-native.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations-driver.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M01.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M01.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M02.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M02.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M03.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M03.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M04.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M04.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M05.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M05.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M06.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M06.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M07.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M07.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M08.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M08.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M09.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M09.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M10.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M10.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M11.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M11.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M12.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M12.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M13.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M13.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M14.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M14.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M15.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/M15.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/baseline.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/mutations.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/results.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-mutations/summary.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/bfs-cases.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/bfs-fixtures.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/bfs-scorer-controls.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/bfs-summary.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/native.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/probe.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-native/process-result.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final-source.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final_extended_native.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/final_lexical_native.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/finalize_evidence.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/foreign-index-before.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-green-initial.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-green-position-separation.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-red-attempt2.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-red-slot2.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/identity-red.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/inspect_state.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integrate.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integrated-gate-driver.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integrated-gate-result.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integrated-gate.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integrated-tree-before.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integration-commit.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integration-message.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integration-staged.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/integration.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/issue-frontmatter.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c2.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c4.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c5.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c6.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c7.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c8.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000c9.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000ca.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000cb.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000cc.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000cd.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000ce.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000cf.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000d0.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000d7.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000d8.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000d9.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000da.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000db.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000dc.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000dd.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000de.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e1.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e3.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e4.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e5.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e8.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/jobs/1520813-b902d740-bg_000000e9.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/lsp-target-green.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/lsp-target-red.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/navigation-range-counterexample.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/owned-paths.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/peer_inventory.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/preintegration-state.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/raw-artifact-inventory.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/raw-manifest.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/recheck_mutations.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-green-borrow-corrected.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-green.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-red-fixture-corrected.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-red.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/D01-result.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/D01.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/D01.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M01.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M01.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M02.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M02.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M03.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M03.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M04.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M04.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M05.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M05.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M06.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M06.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M07.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M07.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M08.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M08.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M09.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M09.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M10.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M10.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M11.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M11.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M12.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M12.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M13.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/M13.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/baseline-exit.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/baseline.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/mutation-results.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/mutations.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native-diagnostics.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native-results.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/block-import-shadows-root/rustc.stderr', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/callable-parameter-shadows-root/rustc.stderr', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/generic-type-shadows-concrete/rustc.stderr', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/native/nested-function-shadows-root/rustc.stderr', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/restored-source.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/review-result.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/run-diagnostic.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review/run-mutations.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/run_baseline_native.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/selected-raw-paths.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/session-input-provenance.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/source-commit.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/source-commit.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/source-message.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/source-staged.patch', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/source_commit.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/validation-frontmatter-assumption.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/validation-stage.log', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/validation-timeout.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/validation.json', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/verify_candidate-scope-refused.py.txt', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/verify_candidate.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/verify_final.py', 'docs/trackers/ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/verify_integrated.py', 'docs/trackers/ecc-integration/issues.md', 'docs/trackers/ecc-integration/notes/2026-11-10-bfs-identity-replay.md', 'docs/trackers/ecc-integration/notes/README.md', 'docs/trackers/ecc-integration/plans/2026-11-10-bfs-identity-dogfood.md', 'docs/trackers/ecc-integration/plans/2026-11-10-resolver-followup.md', 'docs/trackers/ecc-integration/plans/README.md', 'docs/trackers/ecc-integration/reports/2026-11-10-bfs-identity-contract.md', 'docs/trackers/ecc-integration/reports/2026-11-10-bfs-identity-dogfood.md', 'docs/trackers/ecc-integration/reports/2026-11-10-bfs-identity-independent-review.md', 'docs/trackers/ecc-integration/reports/2026-11-10-resolver-followup.md', 'docs/trackers/ecc-integration/reports/README.md']' returned non-zero exit status 1.

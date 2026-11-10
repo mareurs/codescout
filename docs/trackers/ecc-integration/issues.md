@@ -36,9 +36,11 @@ The [prompt audit](reports/2026-11-09-callgraph-prompt-surface.md) uncovered two
 
 [Resolver doc-comment contradiction](../../issues/archive/2026-11-09-call-graph-resolver-doc-denies-outgoing-ts-fallback.md), artifactf8799aadf848d078: corrected and archived by the2026-11-10 follow-up, integrationcb7d13ff3, patch-idd2258dc0bcbe010b39e15f2a84680d4cb7036f09. Source and exact integrated-tree gates and independent review passed.
 
-## Multi-hop identity — open 2026-11-10
+## Multi-hop identity — fixed 2026-11-10
 
-[Same-name declaration collapse](../../issues/2026-11-10-call-graph-multihop-collapses-same-name-definitions.md), artifactfed27cae5971c526. Fresh native Rust topology has two qualified helper targets, but cold/restart/warmed depth2 results each omit helper→leaf_b without warning; four unique/pinned/depth1 controls pass. This is a separate traversal/position identity defect, not a regression of the prior completed-cache correction. [Resolver follow-up](reports/2026-11-10-resolver-followup.md) preserves exact source/binary/fixture/response/oracle identities. Behavioral correction remains open.
+**Fixed and archived 2026-11-10.** [Same-name declaration collapse](../../issues/archive/2026-11-10-call-graph-multihop-collapses-same-name-definitions.md), artifact382466d3e15a3d1d, integrateddc769e430, patch-id52c9b1d039bbdd7de6183eefca168f32318d8cd8. The [BFS identity cycle](reports/2026-11-10-bfs-identity-dogfood.md) preserves the original4qualifying controls/3clean failures, actual RED history, initial independent8killed/5survived, and final95/0 plus15actual mutation kills. Separate source and exact integrated-tree full gates passed; original7 and extended4 native graph cases match. Review-discovered lexical placement, display frontier and coverage gaps are also fixed and archived asdcecb5f9c3475b38,278ed8254992c41a,09a013c4d59dfc24.
+
+Open incidental findings: [nested-body call collector](../../issues/2026-11-10-call-graph-collector-includes-nested-function-bodies.md), artifact0f9e7f9b87799265; [stale navigation ranges](../../issues/2026-11-10-symbols-stale-ranges-after-source-formatting.md), artifact4e7ec7bfc047ac7b. The lexical native predicate proves warning/no-arbitrary-target behavior, not correctness of the collector's extra depth1 edge.
 
 ## Incidental gate failure — fixed 2026-11-10
 

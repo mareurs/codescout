@@ -1,0 +1,11 @@
+--- src/tools/symbol/call_graph/../call_edges/resolver.rs
++++ src/tools/symbol/call_graph/../call_edges/resolver.rs
+@@ -102,7 +102,7 @@
+     Some(Definition {
+         file: lsp_uri_to_path(&item.uri)?,
+         line: item.selection_range.start.line,
+-        col: item.selection_range.start.character,
++        col: 0,
+     })
+ }
+ 
