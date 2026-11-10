@@ -143,6 +143,7 @@ class Env:
                                runner_tasks_root=over.get("runner_tasks_root", self.runner),
                                dropped=[] if self.ids == IDS else None,
                                pool_path=over.get("pool_path"),
+                               volume_created=over.get("volume_created"),
                                run_cli=lambda p: CLI_VERSION)
 
 
@@ -181,6 +182,76 @@ class PlanTests(Case):
         self.assertEqual(a, fs.screen_plan(self.env.pool, run.MODELS, 2, 11))
         self.assertEqual(run.plan_sha256(a), run.plan_sha256(fs.screen_plan(self.env.pool, run.MODELS, 2, 11)))
         self.assertNotEqual(a, fs.screen_plan(self.env.pool, run.MODELS, 2, 12))
+
+
+class IndexedArmsTests(Case):
+    """A screen of the cs and full arms: every task's bundle must record its template volume."""
+    ARMS = (("cs", 1), ("full", 1))
+    STAMP = "2026-11-09T10:00:00Z"
+
+    def add_templates(self):
+        for tid in self.env.ids:
+            p = self.env.data / "live-tasks" / tid / "bundle.json"
+            b = json.loads(p.read_text())
+            b["template"] = f"sab-tpl-{tid}"
+            p.write_text(json.dumps(b))
+
+    def use_arms(self):
+        self.env.plan = fs.screen_plan(self.env.pool, run.MODELS, 2, fs.SEED, self.ARMS)
+        fs.write_plan(self.env.plan, self.env.plan_path)
+
+    def freeze(self, volume_created=None, **over):
+        return self.env.freeze(screen_arms=self.ARMS, volume_created=volume_created or (lambda n: self.STAMP),
+                               **over)
+
+    def test_parse_arms(self):
+        self.assertEqual(fs.parse_arms("cs:1,full:2"), (("cs", 1), ("full", 2)))
+        for bad in ("x:1", "cs", "cs:0", "cs:1,cs:1"):
+            with self.subTest(bad), self.assertRaises(fs.Refused):
+                fs.parse_arms(bad)
+
+    def test_the_plan_is_every_task_x_model_x_arm(self):
+        plan = fs.screen_plan(self.env.pool, run.MODELS, 2, 7, self.ARMS)
+        self.assertEqual(len(plan), len(IDS) * len(run.MODELS) * 2)
+        self.assertEqual({s.arm for s in plan}, {"cs", "full"})
+        self.assertEqual(fs.plan_problems(plan, self.env.pool, self.ARMS), [])
+        self.assertTrue(any("non-bare" in w for w in fs.plan_problems(plan, self.env.pool)))
+        only_cs = fs.plan_problems(plan, self.env.pool, (("cs", 1),))
+        self.assertTrue(any("outside the screen's arms" in w for w in only_cs), only_cs)
+
+    def test_freeze_registers_the_arms_and_each_template_volume(self):
+        self.add_templates()
+        self.use_arms()
+        reg = self.freeze()
+        self.assertEqual(reg["reps"], [["cs", 1], ["full", 1]])
+        for entry in reg["tasks"]:
+            self.assertEqual(entry["template"],
+                             {"volume": f"sab-tpl-{entry['task_id']}", "created_at": self.STAMP})
+        self.assertEqual(self.env.check(volume_created=lambda n: self.STAMP), [])
+
+    def test_freeze_refuses_an_indexed_arm_when_the_bundle_has_no_template(self):
+        self.use_arms()
+        with self.assertRaisesRegex(fs.Refused, "records no template volume"):
+            self.freeze()
+
+    def test_freeze_refuses_an_indexed_arm_when_the_template_volume_is_missing(self):
+        self.add_templates()
+        self.use_arms()
+        with self.assertRaisesRegex(fs.Refused, "does not exist"):
+            self.freeze(volume_created=lambda n: "")
+
+    def test_check_notices_a_rebuilt_template_volume(self):
+        self.add_templates()
+        self.use_arms()
+        self.freeze()
+        why = self.env.check(volume_created=lambda n: "2026-11-10T01:00:00Z")
+        self.assertTrue(any("bundle or image changed" in w for w in why), why)
+
+    def test_a_bare_freeze_still_refuses_a_bundle_with_a_template(self):
+        self.add_templates()
+        with self.assertRaisesRegex(fs.Refused, "no template"):
+            self.env.freeze()
+
 
 
 class PoolTests(Case):

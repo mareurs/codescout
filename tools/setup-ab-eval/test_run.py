@@ -1057,8 +1057,25 @@ class LiveTaskTest(RunnerCase):
         with self.assertRaisesRegex(RuntimeError, "unknown kind"):
             run.load_task_from_bundle("t1", root, inspect=inspect, grader_for=lambda *a: None)
 
+    def test_load_task_from_bundle_keeps_the_template_of_an_onboarded_live_bundle(self):
+        root, inspect = self.bundle("live", template="sab-tpl-t1")
+        info = run.load_task_from_bundle("t1", root, inspect=inspect, grader_for=lambda *a: "G")
+        self.assertEqual((info.template, info.kind), ("sab-tpl-t1", "live"))
+
+    def test_load_task_from_bundle_drops_a_live_template_that_is_not_a_template_volume(self):
+        root, inspect = self.bundle("live", template="not-a-template")
+        info = run.load_task_from_bundle("t1", root, inspect=inspect, grader_for=lambda *a: "G")
+        self.assertEqual(info.template, "")
+
+    def test_run_one_runs_the_cs_arm_on_a_live_task_that_has_a_template(self):
+        live = lambda t: self.load(t)._replace(kind="live", template="sab-tpl-t1")
+        cli = self.batch([spec(arm="cs")], BUDGET, load_task=live)
+        self.assertTrue(cli.calls)
+        self.assertEqual(len([n for n, *_ in self.world.started if n.startswith(run.AGENT_PREFIX)]), 1)
+
+
     def test_run_one_refuses_cs_arm_on_a_live_task_before_any_container(self):
-        live = lambda t: self.load(t)._replace(kind="live")
+        live = lambda t: self.load(t)._replace(kind="live", template="")
         with self.assertRaisesRegex(RuntimeError, r"t1.*live.*'cs'"):
             self.batch([spec(arm="cs")], BUDGET, load_task=live)
         self.assertEqual([n for n, *_ in self.world.started if n.startswith(run.AGENT_PREFIX)], [])

@@ -236,7 +236,7 @@ class TaskInfo(NamedTuple):
     prompt: str
     template: str              # the task's Qdrant template volume, sab-tpl-<id>
     grader: Callable           # grader(gdir) -> grade(patch, name) -> dict
-    kind: str = ""             # the bundle's kind; `live` tasks run the bare arm only
+    kind: str = ""             # the bundle's kind; a `live` task without a template runs the bare arm only
 
 
 # --- plan, budget, authorization -----------------------------------------------------------------
@@ -991,7 +991,9 @@ def load_task_from_bundle(task_id, tasks_root=None, *, inspect=None, grader_for=
         raise RuntimeError(f"{bundle_json}: unknown kind {rec.get('kind')!r}")
     template = rec.get("template") or ""
     if rec.get("kind") == "live":
-        template = ""  # a Live bundle has no index, so no Qdrant template: bare arm only
+        # A Live bundle has an index only when prepare_index recorded its template volume; without
+        # one it runs the bare arm only.
+        template = template if template.startswith(stack.TEMPLATE_PREFIX) else ""
     elif not template.startswith(stack.TEMPLATE_PREFIX):
         raise RuntimeError(f"{bundle_json}: no Qdrant template recorded")
     make = grader_for or tasks.grader_for
@@ -1138,7 +1140,7 @@ def _run_one(ctx, spec):
     name = AGENT_PREFIX + key
     has_qdrant = spec.arm != "bare"
     info = ctx.load_task(spec.task_id)
-    if info.kind == "live" and spec.arm != "bare":
+    if info.kind == "live" and not info.template and spec.arm != "bare":
         raise RuntimeError(f"task {spec.task_id} is a live task (bare arm only, no index); "
                            f"arm {spec.arm!r} is refused before any container starts")
     run_dir = ctx.data / "runs" / rid

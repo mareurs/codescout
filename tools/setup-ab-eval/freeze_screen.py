@@ -1,7 +1,8 @@
 """Freeze the Live Rust screen: write screen-registration.json, the record the operator's go is bound to.
 
-The screen is the bare arm only, over the tasks of the pool file (default multilang-pool-v4.json: six
-tasks), two models, two reps (24 runs). This script calls no model, reads no token, writes no GO.json (only
+The screen is the bare arm only (unless --arms names others), over the tasks of the pool file (default
+multilang-pool-v4.json: six tasks), two models, two reps (24 runs). This script calls no model, reads no
+token, writes no GO.json (only
 GO.template.json, which the operator turns into GO.json by hand) and starts no container: it
 reads files, runs `git`, `<claude> --version` and `docker image inspect` (through
 tasks._inspect_image, injectable). Stdlib only.
@@ -12,9 +13,11 @@ tasks._inspect_image, injectable). Stdlib only.
     freeze_screen.py freeze  write the registration, GO.template.json (never GO.json)
     freeze_screen.py check   re-hash the tool files, pool, plan, bundles, images and frozen trees
 
-`freeze` and `check` refuse (named reason) a plan that has a task outside the pool, a non-bare arm
-(run._run_one's bare-only guard fires only after run_batch has started its network and proxy and
-latches a stop, so the refusal has to come first), or a bundle whose control is not relaxed ok.
+`freeze` and `check` refuse (named reason) a plan that has a task outside the pool, an arm outside the
+screen's arms (the bare arm unless --arms: run._run_one's guard for a live task without an index fires
+only after run_batch has started its network and proxy and latches a stop, so the refusal has to come
+first), an indexed arm (cs, full) on a bundle that records no template volume, or a bundle whose control
+is not relaxed ok.
 The registration is stage "screen": run.run_batch applies its heavy host re-check only to stage
 3 plans and to `stage == 2`, so a screen registration is verified by `check` here, not by it.
 """
@@ -33,6 +36,7 @@ import freeze_stage1
 import frozen
 import multilang_tasks as mt
 import run
+import stack
 import tasks
 
 REGISTRATION = "screen-registration.json"
@@ -192,30 +196,56 @@ def check_pool(pool, legacy_ok=False) -> dict:
 
 # --- plan -------------------------------------------------------------------------------------
 
-def screen_plan(pool, models=MODELS, reps=REPS, seed=SEED) -> list:
-    """Bare arm only: per task, per model, `reps` runs; the order inside a block is shuffled by
-    one random.Random(seed) (run.make_order), deterministic for a seed."""
+def _arms(arms=None, reps=REPS) -> tuple:
+    """The (arm, reps) pairs of a screen: the bare arm `reps` times unless `arms` names others."""
+    return tuple((a, n) for a, n in arms) if arms else (("bare", reps),)
+
+
+def parse_arms(text) -> tuple:
+    """`cs:1,full:1` -> (("cs", 1), ("full", 1)); Refused for an unknown arm, a repeat or a count < 1."""
+    out = []
+    for part in str(text).split(","):
+        arm, _, n = part.strip().partition(":")
+        if arm not in arms.ARMS:
+            raise Refused(f"arm {arm!r} in --arms {text!r}: expected one of {arms.ARMS}")
+        if not n.isdigit() or int(n) < 1:
+            raise Refused(f"arm {arm!r} in --arms {text!r} needs a count >= 1 (arm:count)")
+        if arm in {a for a, _ in out}:
+            raise Refused(f"arm {arm!r} appears twice in --arms {text!r}")
+        out.append((arm, int(n)))
+    return tuple(out)
+
+
+def screen_plan(pool, models=MODELS, reps=REPS, seed=SEED, arms=None) -> list:
+    """Per task, per model, the runs of `arms` ((arm, reps) pairs; default the bare arm `reps` times);
+    the order inside a block is shuffled by one random.Random(seed) (run.make_order), deterministic
+    for a seed."""
     ids = [t["id"] for t in pool["tasks"]]
-    return run.make_order(ids, tuple(models), seed, (("bare", reps),))
+    return run.make_order(ids, tuple(models), seed, _arms(arms, reps))
 
 
-def plan_problems(plan, pool) -> list:
-    """Reasons a plan is not the screen: a task outside the pool, a non-bare arm, or a shape other
-    than every pool task x both models x reps 0..REPS-1 (24 runs for 6 tasks)."""
+def plan_problems(plan, pool, arms=None) -> list:
+    """Reasons a plan is not the screen: a task outside the pool, an arm outside `arms` ((arm, reps)
+    pairs; default the bare arm), or a shape other than every pool task x both models x the reps of each
+    arm (24 runs for 6 tasks, bare x 2)."""
+    want_arms = _arms(arms)
+    allowed = {a for a, _ in want_arms}
     ids = {t["id"] for t in pool["tasks"]}
     out = []
     outside = sorted({s.task_id for s in plan} - ids)
     if outside:
         out.append(f"the plan has task(s) outside the pool: {outside}")
-    nonbare = sorted({f"{s.task_id}:{s.arm}" for s in plan if s.arm != "bare"})
-    if nonbare:
-        out.append(f"the plan has non-bare arm(s) {nonbare}: a live task runs the bare arm only "
-                   f"(run._run_one would refuse it only after the batch started)")
+    stray = sorted({f"{s.task_id}:{s.arm}" for s in plan if s.arm not in allowed})
+    if stray and allowed == {"bare"}:
+        out.append(f"the plan has non-bare arm(s) {stray}: a live task without an index runs the bare "
+                   f"arm only (run._run_one would refuse it only after the batch started)")
+    elif stray:
+        out.append(f"the plan has arm(s) {stray} outside the screen's arms {sorted(allowed)}")
     if not out:
-        want = sorted((t, m, "bare", r) for t in ids for m in MODELS for r in range(REPS))
+        want = sorted((t, m, a, r) for t in ids for m in MODELS for a, n in want_arms for r in range(n))
         if sorted(tuple(s) for s in plan) != want:
             out.append(f"the plan is not the screen's {len(want)} runs (every pool task x "
-                       f"{list(MODELS)} x {REPS} reps, bare); it has {len(plan)}")
+                       f"{list(MODELS)} x arms {list(want_arms)}); it has {len(plan)}")
     return out
 
 
@@ -246,7 +276,19 @@ def runner_bundle(runner_root, data, tid) -> Path:
     return rp
 
 
-def task_entry(data, entry, inspect, runner_root=None) -> dict:
+def _volume_created(name) -> str:
+    """The docker volume's CreatedAt, or "" when it does not exist (or docker cannot say): a template
+    volume that was removed and rebuilt has another stamp, so the registration notices."""
+    try:
+        got = subprocess.run(["docker", "volume", "inspect", "-f", "{{.CreatedAt}}", name],
+                             capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return got.stdout.strip() if got.returncode == 0 else ""
+
+
+
+def task_entry(data, entry, inspect, runner_root=None, indexed=False, volume_created=None) -> dict:
     """The registered record of one pool task; Refused when its bundle, control or images do not
     fit the pool entry. Every byte the runner reads is read through the runner's own path."""
     tid = entry["id"]
@@ -257,7 +299,15 @@ def task_entry(data, entry, inspect, runner_root=None) -> dict:
         raise Refused(f"{tid}: bundle.json unreadable ({e})")
     if bundle.get("kind") != mt.KIND:
         raise Refused(f"{tid}: bundle kind {bundle.get('kind')!r}, not {mt.KIND!r}")
-    if "template" in bundle:
+    template = bundle.get("template")
+    if indexed:
+        if not (isinstance(template, str) and template.startswith(stack.TEMPLATE_PREFIX)):
+            raise Refused(f"{tid}: the plan runs an indexed arm, but the bundle records no template "
+                          f"volume (prepare_index has not run for it)")
+        created = (volume_created or _volume_created)(template)
+        if not created:
+            raise Refused(f"{tid}: template volume {template} does not exist")
+    elif "template" in bundle:
         raise Refused(f"{tid}: a live bundle has no template")
     cj = _control_path(data, tid)
     try:
@@ -300,6 +350,7 @@ def task_entry(data, entry, inspect, runner_root=None) -> dict:
     except (OSError, KeyError) as e:
         raise Refused(f"{tid}: prompt or record unreadable: {e}")
     return {"task_id": tid, "kind": mt.KIND,
+            **({"template": {"volume": template, "created_at": created}} if indexed else {}),
             "run_image": {"tag": run_tag, "id": inspect(run_tag)[0]},
             "arm_image": {"tag": arm, "id": inspect(arm)[0]},
             "bundle_sha256": sha256_file(bj),
@@ -368,8 +419,10 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
                   inspect: Callable = tasks._inspect_image,
                   run_cli: Callable = freeze_stage1.default_run_cli,
                   python=sys.executable, runner_tasks_root=None, current_pool=None,
-                  dropped=None, arm_profile="v1") -> dict:
+                  dropped=None, arm_profile="v1", screen_arms=None, volume_created=None) -> dict:
     tool_dir, data, run_data = Path(tool_dir), Path(data), Path(run_data)
+    screen_arms = _arms(screen_arms)
+    indexed = any(a != "bare" for a, _ in screen_arms)
     pool_path, plan_path, out = Path(pool_path), Path(plan_path), Path(out)
     if arm_profile not in arms.PROFILES:
         raise Refused(f"arm profile {arm_profile!r}: expected one of {arms.PROFILES}")
@@ -398,14 +451,15 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
     guard = pool_guard(pool, rel_pool, current_pool, dropped)
     if guard:
         raise Refused("; ".join(guard))
-    problems = plan_problems(plan, pool)
+    problems = plan_problems(plan, pool, screen_arms)
     if problems:
         raise Refused("; ".join(problems))
-    if plan != screen_plan(pool, MODELS, REPS, seed):
+    if plan != screen_plan(pool, MODELS, REPS, seed, screen_arms):
         raise Refused(f"the plan is not screen_plan(pool, seed={seed}): same runs, other order or "
                       f"seed")
 
-    entries = [task_entry(data, e, inspect, runner_tasks_root) for e in pool["tasks"]]
+    entries = [task_entry(data, e, inspect, runner_tasks_root, indexed, volume_created)
+               for e in pool["tasks"]]
 
     copy = run_data / "setup-manifest.json"
     if not copy.is_file():
@@ -432,7 +486,7 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
         "plan_sha256": run.plan_sha256(plan),
         "budget": dict(BUDGET),
         "models": list(MODELS),
-        "reps": [["bare", REPS]],
+        "reps": [list(p) for p in screen_arms],
         "arm_profile": arm_profile,
         "data": str(data.resolve()),
         "run_data": str(run_data.resolve()),
@@ -467,7 +521,7 @@ def freeze_screen(*, tool_dir, data, run_data, pool_path, plan_path, out, replac
 
 def check_screen(*, tool_dir, data, run_data, registration, inspect: Callable = tasks._inspect_image,
                  run_cli: Callable = freeze_stage1.default_run_cli, runner_tasks_root=None,
-                 pool_path=None, current_pool=None, dropped=None) -> list:
+                 pool_path=None, current_pool=None, dropped=None, volume_created=None) -> list:
     """Re-hash what the registration froze; the list of reasons it no longer holds ([] = ok)."""
     tool_dir, data, run_data = Path(tool_dir), Path(data), Path(run_data)
     try:
@@ -475,6 +529,8 @@ def check_screen(*, tool_dir, data, run_data, registration, inspect: Callable = 
     except (OSError, ValueError) as e:
         return [f"registration unreadable: {e}"]
     why = []
+    screen_arms = _arms(tuple(tuple(p) for p in reg.get("reps") or []))
+    indexed = any(a != "bare" for a, _ in screen_arms)
     body = {k: v for k, v in reg.items() if k != "registration_sha256"}
     if reg.get("registration_sha256") != run.registration_digest(body):
         why.append("registration_sha256 does not match the registration's content")
@@ -514,8 +570,9 @@ def check_screen(*, tool_dir, data, run_data, registration, inspect: Callable = 
         if run.plan_sha256(plan) != reg.get("plan_sha256"):
             why.append("the plan file changed after the freeze")
         if pool is not None:
-            why += plan_problems(plan, pool)
-            if not plan_problems(plan, pool) and plan != screen_plan(pool, MODELS, REPS, reg.get("seed")):
+            why += plan_problems(plan, pool, screen_arms)
+            if not plan_problems(plan, pool, screen_arms) and plan != screen_plan(
+                    pool, MODELS, REPS, reg.get("seed"), screen_arms):
                 why.append("the plan is not screen_plan(pool, the registered seed)")
     except (OSError, ValueError, KeyError) as e:
         why.append(f"plan: {type(e).__name__}: {e}")
@@ -525,7 +582,7 @@ def check_screen(*, tool_dir, data, run_data, registration, inspect: Callable = 
         by_id = {t["task_id"]: t for t in reg.get("tasks") or []}
         for e in pool["tasks"]:
             try:
-                now_entry = task_entry(data, e, inspect, runner_tasks_root)
+                now_entry = task_entry(data, e, inspect, runner_tasks_root, indexed, volume_created)
             except Refused as ex:
                 why.append(str(ex))
                 continue
@@ -575,6 +632,9 @@ def main(argv=None) -> int:
     ap.add_argument("--replace", action="store_true")
     ap.add_argument("--arm-profile", choices=arms.PROFILES, default="v1",
                     help="arm profile pinned in the registration (arms.PROFILES); default v1")
+    ap.add_argument("--arms", default=None,
+                    help="arm:count pairs of the screen, e.g. cs:1,full:1; default the bare arm x REPS. "
+                         "An indexed arm (cs, full) needs the bundle's template volume (prepare_index)")
     ap.add_argument("--records", type=Path, default=mt.RECORDS)
     a = ap.parse_args(argv)
     run_data = a.run_data or a.data / "live-screen"
@@ -601,7 +661,8 @@ def main(argv=None) -> int:
             print(json.dumps({"ok": not why, "reasons": why}))
             return 1 if why else 0
         elif a.action == "plan":
-            plan = screen_plan(check_pool(json.loads(pool_path.read_text())), seed=a.seed)
+            plan = screen_plan(check_pool(json.loads(pool_path.read_text())), seed=a.seed,
+                               arms=parse_arms(a.arms) if a.arms else None)
             run_data.mkdir(parents=True, exist_ok=True)
             if plan_path.exists() and not a.replace:
                 raise Refused(f"{plan_path} exists; pass --replace")
@@ -611,7 +672,8 @@ def main(argv=None) -> int:
         elif a.action == "freeze":
             reg = freeze_screen(tool_dir=a.tool_dir, data=a.data, run_data=run_data,
                                 pool_path=pool_path, plan_path=plan_path, out=out,
-                                replace=a.replace, seed=a.seed, arm_profile=a.arm_profile)
+                                replace=a.replace, seed=a.seed, arm_profile=a.arm_profile,
+                                screen_arms=parse_arms(a.arms) if a.arms else None)
             print(json.dumps({"registration": str(out), "registration_sha256": reg["registration_sha256"],
                               "plan_sha256": reg["plan_sha256"], "runs": len(run.load_plan(plan_path)),
                               "go_template": str(run_data / GO_TEMPLATE)}))
