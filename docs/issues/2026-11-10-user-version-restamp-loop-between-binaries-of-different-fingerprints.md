@@ -97,3 +97,11 @@ Cost mitigated 2026-11-11 (see Fix); the stamp still flips between builds. Still
 ## References
 - `docs/issues/2026-11-09-concurrent-pinned-calls-leave-no-usage-row.md` (bug f38c0205eaef0829): the dropped rows that coincide with slow statements on this file.
 - `docs/issues/archive/2026-08-16-backfill-gate-not-derived-from-the-taxonomy.md`: the fix that introduced the fingerprint gate and the "one pass" claim.
+
+
+## Fix provenance
+
+- **SHA:** `e31973932cf0bcb78a2136dd377b9821c7638569` (`experiments`)
+- **patch-id:** `84df7758bf66f1d048257619d06ecc6094b9714f`
+
+This commit mitigates the cost of each flip. It does not remove the flips; see Fix.
