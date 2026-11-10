@@ -294,6 +294,22 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN attribution_ms INTEGER;")?;
     }
 
+    // The two statements of `backfill_legacy_rows` look for work that is normally absent: rows
+    // with no `project_root`, and error rows with no family. Builds with different taxonomy
+    // fingerprints share one file and each re-runs the backfill when it finds another build's
+    // stamp, so every flip pays both statements. Without an index each is a full table scan:
+    // about 2.6 s cold on a 295 MB file, and the `UPDATE` holds the write lock for all of it.
+    // A partial index holds only the rows still waiting, so it is empty once the backfill has
+    // run, and new rows (which carry a root) never enter it. Unconditional and `IF NOT EXISTS`
+    // like the index above: a file created by a build without them gets them on the next open,
+    // at the price of one scan to build the first.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_tool_calls_unrooted ON tool_calls(id) \
+             WHERE project_root IS NULL;
+         CREATE INDEX IF NOT EXISTS idx_tool_calls_unclassified ON tool_calls(id) \
+             WHERE err_family IS NULL AND error_msg IS NOT NULL;",
+    )?;
+
     backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
 
     Ok(conn)
@@ -1174,6 +1190,15 @@ fn err_family_fingerprint() -> i64 {
     fingerprint_families(ERR_FAMILIES)
 }
 
+/// The statement of `backfill_legacy_rows` that fills `project_root`. A named constant, so
+/// `the_backfill_scans_are_served_by_partial_indexes` plans exactly the SQL that runs.
+const BACKFILL_FILL_ROOT_SQL: &str =
+    "UPDATE tool_calls SET project_root = ?1 WHERE project_root IS NULL";
+
+/// The statement of `backfill_legacy_rows` that finds rows with no error family.
+const BACKFILL_UNCLASSIFIED_SQL: &str = "SELECT id, tool_name, error_msg FROM tool_calls \
+     WHERE err_family IS NULL AND error_msg IS NOT NULL";
+
 /// One-time, idempotent repair of rows written before the friction columns were
 /// populated. Gated on `PRAGMA user_version` so it runs once per DB and is a
 /// cheap no-op (one pragma read) on every subsequent open.
@@ -1200,17 +1225,11 @@ fn backfill_legacy_rows(conn: &Connection, project_root: &str) -> Result<()> {
     let started_at = now_timestamp();
     let total = std::time::Instant::now();
     let scan = std::time::Instant::now();
-    conn.execute(
-        "UPDATE tool_calls SET project_root = ?1 WHERE project_root IS NULL",
-        params![project_root],
-    )?;
+    conn.execute(BACKFILL_FILL_ROOT_SQL, params![project_root])?;
     let update_scan_ms = scan.elapsed().as_millis();
 
     let unclassified: Vec<(i64, String, String)> = {
-        let mut stmt = conn.prepare(
-            "SELECT id, tool_name, error_msg FROM tool_calls \
-             WHERE err_family IS NULL AND error_msg IS NOT NULL",
-        )?;
+        let mut stmt = conn.prepare(BACKFILL_UNCLASSIFIED_SQL)?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.collect::<std::result::Result<_, _>>()?
     };
@@ -4610,6 +4629,51 @@ mod tests {
             "and must then be stamped with the current fingerprint, so the next open \
              is the cheap no-op this gate exists to be"
         );
+    }
+    /// `backfill_legacy_rows` runs whenever the stored marker differs from this build's fingerprint.
+    /// Builds with different fingerprints share one file, so it re-runs on every flip, and each run
+    /// must find "no work" without reading the table. Measured 2026-11-11 on a copy of a 295 MB,
+    /// 120,562-row `usage.db`, pages evicted: the `UPDATE` took about 2.6 s with a full `SCAN`
+    /// (the same order as the 2.2 to 3.3 s `update_scan_ms` values in `usage-lock-holds.log`) and
+    /// 0.4 ms once a partial index served it.
+    /// (docs/issues/2026-11-10-user-version-restamp-loop-between-binaries-of-different-fingerprints.md)
+    #[test]
+    fn the_backfill_scans_are_served_by_partial_indexes() {
+        fn plan(conn: &Connection, sql: &str, args: &[&str]) -> String {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                    r.get::<_, String>(3)
+                })
+                .unwrap();
+            rows.map(|r| r.unwrap()).collect::<Vec<_>>().join(" | ")
+        }
+        fn assert_both_use_an_index(conn: &Connection, when: &str) {
+            for (label, sql, args) in [
+                ("fill project_root", BACKFILL_FILL_ROOT_SQL, &["/repo"][..]),
+                ("find unclassified rows", BACKFILL_UNCLASSIFIED_SQL, &[][..]),
+            ] {
+                let plan = plan(conn, sql, args);
+                assert!(
+                    plan.contains("USING INDEX") || plan.contains("USING COVERING INDEX"),
+                    "{when}: the backfill statement that does `{label}` must be served by an \
+                 index, so a flip between builds does not scan the whole table; plan: {plan}"
+                );
+            }
+        }
+
+        let dir = TempDir::new().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        assert_both_use_an_index(&conn, "on a fresh database");
+
+        // A file created by a build without these indexes gets them on the next open.
+        conn.execute_batch(
+            "DROP INDEX idx_tool_calls_unrooted; DROP INDEX idx_tool_calls_unclassified;",
+        )
+        .unwrap();
+        drop(conn);
+        let conn = open_db(dir.path()).unwrap();
+        assert_both_use_an_index(&conn, "after re-opening a file that lacks them");
     }
 
     /// BL-4. The classifier's emittable families existed only as return values in

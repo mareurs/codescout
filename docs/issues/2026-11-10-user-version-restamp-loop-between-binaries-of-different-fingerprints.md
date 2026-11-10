@@ -1,13 +1,15 @@
 ---
 id: '1a64131278d421ce'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: binaries of different err_family fingerprints share one usage.db and re-run the backfill on every flip'
 owners:
 - marius
 tags:
 - cluster/unclassified
+closed: 2026-11-11
 opened: 2026-11-10
+unverified: Timings are from a copy of the live usage.db with pages evicted by posix_fadvise, not from a live flip between binaries under contention. The number of flips is unchanged. Whether the cheaper flips remove the dropped rows that coincided with the slow statements (bug f38c0205eaef0829) was not measured.
 ---
 
 # BUG: binaries of different err_family fingerprints share one usage.db and re-run the backfill on every flip
@@ -62,20 +64,35 @@ Same-process repetition: pid 2829334 ran three backfills within 22 ms at 11:04:5
 1. **Hypothesis:** the re-run costs one pass per database, as the design note says. **Verdict:** holds for one binary per file; contradicted by the twelve lines above for a file shared by three fingerprints.
 
 ## Fix
-Not started. Candidates, not chosen:
+Cost mitigated 2026-11-11; the flips are NOT removed. `open_db` (`src/usage/db.rs`) now creates two partial indexes on every open, right before `backfill_legacy_rows`: `idx_tool_calls_unrooted ON tool_calls(id) WHERE project_root IS NULL` and `idx_tool_calls_unclassified ON tool_calls(id) WHERE err_family IS NULL AND error_msg IS NOT NULL`. Each backfill statement now finds "no work" from an empty index and does not read the table. The two statements are named constants (`BACKFILL_FILL_ROOT_SQL`, `BACKFILL_UNCLASSIFIED_SQL`) so the test plans the SQL that runs. A file created by a build without the indexes gets them on its next open, at the price of one scan to build the first.
+
+Measured on a copy of the live `usage.db` (295,079,936 bytes, 120,562 rows, 0 rows with a NULL `project_root`, 172 error rows the classifier cannot classify, stamp 676504337), pages evicted with `posix_fadvise(DONTNEED)`, statements rolled back:
+
+| Statement | Before | After |
+|---|---|---|
+| `UPDATE ... WHERE project_root IS NULL`, cold | 2.696, 2.753, 2.480 s; plan `SCAN tool_calls` | 0.442, 0.434, 0.471 ms; plan `SCAN tool_calls USING INDEX idx_tool_calls_unrooted` |
+| same, warm | 57 and 56 ms | not measured |
+| `SELECT ... err_family IS NULL ...`, cold | `SCAN tool_calls` | 0.03 ms, the same 172 rows, plan `USING INDEX idx_tool_calls_unclassified` |
+| building the indexes, one time | | 2.4 s for the first (one cold scan), 0.07 s for the second |
+
+The cold `UPDATE` matches the 2.2 to 3.3 s `update_scan_ms` values in `usage-lock-holds.log`, which the 55 ms warm figure does not. So the logged stalls are cold-page reads of the whole file, and the `UPDATE` holds the write lock while it reads.
+
+NOT taken, by choice among the candidates below: a stored set of fingerprints, and a once-per-process guard. They would stop the flips; this change only makes each flip cheap. Any change to the gate must keep the property from the archived fix: a changed taxonomy re-classifies old rows.
+
+Candidates (the first two are not taken):
 - Stamp a set of fingerprints that have run, or a taxonomy version that only grows, so a flip back to an older binary does not re-run the backfill.
 - Run the backfill once per process before the first write, not on every `open_db` call, so concurrent writes in one process do not each pay it.
 - Make the scan cheap when it matches no rows (an index, or a one-row `EXISTS` probe before the `UPDATE`).
 Any change to the gate must keep the property from the archived fix: a changed taxonomy re-classifies old rows.
 
 ## Tests added
-None.
+`usage::db::tests::the_backfill_scans_are_served_by_partial_indexes` runs `EXPLAIN QUERY PLAN` on both backfill statements and requires an index in each plan, on a fresh database and again after the two indexes are dropped and the file is re-opened. Watched RED before the indexes (`plan: SCAN tool_calls`), GREEN after. Its second half (drop and re-open) was not run red on its own: the first assertion failed before it was reached. The existing gate tests `backfill_reruns_when_the_stored_marker_does_not_match` and `backfill_fills_project_root_and_err_family_once` pass before and after. `cargo test --lib usage::` 113 passed. The test checks plans, not time.
 
 ## Workarounds
 Run every server on the same build, so the stamp is written once. Restart the servers that run older binaries.
 
 ## Resume
-Measure, not fix: on the next day of work, read `usage-lock-holds.log` for `backfill` lines, count them per day and per pid, and compare with the number of distinct builds in `usage-dropped-rows.log` and `usage-lock-holds.log`. Then pick a candidate above. Cite `src/usage/db.rs` for the gate.
+Cost mitigated 2026-11-11 (see Fix); the stamp still flips between builds. Still open, measure not fix: on the next day of work, read `usage-lock-holds.log` for `backfill` lines, count them per day and per pid, and compare with the number of distinct builds in `usage-dropped-rows.log` and `usage-lock-holds.log`. Then pick a candidate above. Cite `src/usage/db.rs` for the gate.
 
 ## References
 - `docs/issues/2026-11-09-concurrent-pinned-calls-leave-no-usage-row.md` (bug f38c0205eaef0829): the dropped rows that coincide with slow statements on this file.
