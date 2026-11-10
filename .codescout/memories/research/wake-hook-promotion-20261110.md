@@ -1,6 +1,6 @@
 # Promoting the background-job wake hook, and how to measure it later (2026-11-10)
 
-Goal: sessions that start a long `run_command` job should end their turn and wait for the companion hook's wake ("Stop hook feedback", text `codescout background job @bg_N ended: ...`). They should not poll, sleep or schedule a wake. Related: [[cs-hint-transcript-mining-20261107]], [[hint-visibility-channels-20261109]].
+Goal: sessions that start a long `run_command` job should end their turn and wait for the companion hook's wake ("Stop hook feedback", text `codescout background job @bg_N ended: ...`). They should not poll, sleep or schedule a wake. Related: [[cs-hint-transcript-mining-20261107]], [[hint-visibility-channels-20261109]]. Open measurement: bug `08f1bb0cb68ec514` (`docs/issues/2026-11-10-wake-hook-promotion-effect-on-polling-is-unmeasured.md`), which holds the close rule.
 
 ## What was changed (2026-11-10)
 - codescout `22cc87a0f`: `src/tools/run_command/inner.rs` start hint now reads "Started; outcome not yet observed. If the codescout-companion hook is active, end your turn: a wake message arrives when the job ends. Otherwise read the job with run_command("tail -50 @bg_N") — that response carries this job's state." The old hint said only "Read output with run_command(tail -50 ...)". Same commit: one Phase 0 bullet in `src/prompts/guides/project-activation-bootstrap.md`. A longer first bullet put the cold emission 232 B over its ceiling (`a_cold_p50_session_stays_under_the_committed_cold_emission_byte_ceiling`), so the bullet is about 130 B.
