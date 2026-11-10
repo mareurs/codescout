@@ -103,8 +103,9 @@ pub(crate) fn inject_hint(val: &mut Value, topic: &str, shape: GuideDeliveryShap
         ),
         GuideDeliveryShape::Section => format!(
             "Section(s) of '{topic}' auto-injected below, selected for \
-             this call. Other sections may arrive on later calls; \
-             `get_guide(\"{topic}\")` returns the full topic."
+             this call. A later call gets another section only if its tool \
+             matches one; `get_guide(\"{topic}\")` returns the full topic, \
+             including sections no call delivers."
         ),
         GuideDeliveryShape::Preamble => format!(
             "No section of '{topic}' declares this call shape; its \
@@ -1081,6 +1082,27 @@ mod tests {
         assert!(pointer.contains("NOT delivered"), "got: {pointer}");
         assert!(!pointer.contains("do not re-call"), "got: {pointer}");
     }
+
+    #[test]
+    fn the_section_hint_does_not_promise_that_every_other_section_arrives() {
+        // A topic may keep sections that no tool call delivers (the
+        // `progressive-disclosure` pull-only parts). A hint that says "other
+        // sections may arrive on later calls" sends the reader to wait for text
+        // that never comes, so the hint must name the fetch as the only way to it.
+        let mut v = json!({});
+        inject_hint(&mut v, "t", GuideDeliveryShape::Section);
+        let section = v["_guide_hint"].as_str().unwrap().to_string();
+        assert!(!section.contains("may arrive"), "got: {section}");
+        assert!(
+            section.contains("including sections no call delivers"),
+            "got: {section}"
+        );
+        assert!(
+            section.contains("`get_guide(\"t\")`"),
+            "the hint must still name the fetch: {section}"
+        );
+    }
+
     #[test]
     fn the_short_hint_points_at_the_full_guide_and_never_forbids_the_fetch() {
         // `Whole` says "do not re-call". A short subagent body must say the opposite:
