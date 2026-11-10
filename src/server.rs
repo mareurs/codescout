@@ -17511,7 +17511,6 @@ mod guide_hint_tests {
         for marker in [
             "auto-injected get_guide('progressive-disclosure') § Output budgets",
             "auto-injected get_guide('progressive-disclosure') § Reading a buffer",
-            "auto-injected get_guide('progressive-disclosure') § Background jobs: start",
             "auto-injected get_guide('progressive-disclosure') § Background jobs: when no wake arrives",
         ] {
             assert!(
@@ -17523,6 +17522,8 @@ mod guide_hint_tests {
             "## Path-relative annotation",
             "## Buffer internals",
             "## Anti-patterns",
+            "## Background jobs: start, end the turn",
+            "### Reading the stderr of a buffered command",
         ] {
             assert!(
                 !rendered.contains(pull_only),

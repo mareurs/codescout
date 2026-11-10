@@ -590,9 +590,13 @@ mod tests {
         v.into_iter().map(str::to_string).collect()
     }
 
+    /// What an overflowing `run_command` is served: the two core sections and the section
+    /// no envelope repeats (waiting on another process). The `.err` section and the
+    /// background start section are pull-only, because the overflow response and the
+    /// start response already carry what they say.
     fn pd_run_command_headings() -> Vec<String> {
         let mut want = PD_CORE.to_vec();
-        want.extend([PD_STDERR, PD_BG_START, PD_BG_WAKE]);
+        want.push(PD_BG_WAKE);
         sorted(want)
     }
 
@@ -605,11 +609,18 @@ mod tests {
     }
 
     #[test]
-    fn an_overflow_from_run_command_ships_the_core_stderr_and_background_sections() {
+    fn an_overflow_from_run_command_ships_the_core_and_the_no_wake_sections_only() {
         let mut led = ledger();
         let (blocks, shape) = guide_blocks_for(PD, Some("run_command"), &json!({}), &mut led);
         assert!(matches!(shape, Some(GuideDeliveryShape::Section)));
-        assert_eq!(section_headings(&blocks), pd_run_command_headings());
+        let shipped = section_headings(&blocks);
+        assert_eq!(shipped, pd_run_command_headings());
+        for pull_only in [PD_STDERR, PD_BG_START] {
+            assert!(
+                !shipped.iter().any(|h| h == pull_only),
+                "`{pull_only}` is pull-only; the overflow and start responses carry it"
+            );
+        }
     }
 
     #[test]
@@ -692,13 +703,15 @@ mod tests {
     }
 
     /// The point of the split is bytes. Ceilings are the wrapped delivery measured on
-    /// 2026-11-10 (grep 3,703 B, run_command 8,730 B; each section carries about 250 B of
-    /// markers) plus 5%. A section that grows, or a core tool list that widens what a
-    /// `grep` overflow receives, fails here and gets re-measured.
+    /// 2026-11-10 plus 5%: grep 3,703 B; run_command 5,811 B (the two core sections and the
+    /// no-wake section) after the stderr and background-start sections became pull-only,
+    /// down from 8,730 B. Each section carries about 250 B of markers. A section that
+    /// grows, or a core tool list that widens what a `grep` overflow receives, fails here
+    /// and gets re-measured.
     #[test]
     fn the_overflow_deliveries_stay_within_their_byte_budgets() {
         const GREP_CEILING: usize = 3_900;
-        const RUN_COMMAND_CEILING: usize = 9_200;
+        const RUN_COMMAND_CEILING: usize = 6_100;
         let total = |sel: &str| -> usize {
             let (blocks, _) = guide_blocks_for(PD, Some(sel), &json!({}), &mut ledger());
             blocks.iter().map(|c| text(c).len()).sum()

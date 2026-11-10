@@ -539,6 +539,26 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
          a forwarding line on an overflow whose reader needs the core section instead.",
     ),
     (
+        "progressive-disclosure",
+        "Reading the stderr of a buffered command: the `.err` suffix",
+        "Pull-only by design (bug 7579b32b1cd2362f, measured 2026-11-10): an overflowing \
+         `run_command` response already prints `--- stderr: N of M bytes shown; all of it: \
+         output_id.err ---` where the stderr is cut, so the suffix is taught at the moment \
+         it applies. The 37 sessions that used a `.err` handle all had an overflow, so \
+         the measure cannot split the section from that marker; the redundancy is shown \
+         by mechanism, not by data. `get_guide` returns the section on request.",
+    ),
+    (
+        "progressive-disclosure",
+        "Background jobs: start, end the turn, read after the wake",
+        "Pull-only by design (bug 7579b32b1cd2362f, measured 2026-11-10): the start \
+         response's own `hint` says to end the turn and the wake message names the \
+         read, so the section repeats both. Polling fell to about zero on 2026-10-30 \
+         for every session, the day after the wake hook shipped. On the same builds it \
+         was 0.5 per 100 background starts without this section and 0.8 with it. \
+         `get_guide` returns the section on request.",
+    ),
+    (
         "librarian",
         "Common Mistakes",
         "Troubleshooting prose spanning nearly every `doc`/`librarian` shape, not \

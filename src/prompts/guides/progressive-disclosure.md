@@ -97,7 +97,6 @@ activation: re-invoke the tool with the handle to acknowledge and proceed
 (a read-only refusal replays with `ack="@ack_…"` on the refused call, sending nothing else).
 
 ### Reading the stderr of a buffered command: the `.err` suffix
-<!-- serves: run_command -->
 
 A `@cmd_*` handle holds **both streams**, and the bare handle answers from
 **stdout only**. Append `.err` to read the stderr instead:
@@ -123,7 +122,6 @@ finds nothing, because those kinds carry no stderr.
 
 
 ## Background jobs: start, end the turn, read after the wake
-<!-- serves: run_command -->
 
 `run_command(..., run_in_background=true)` returns at once with `output_id` (`@bg_N`), a `record`
 path and a `hint`. The job's outcome is not in that response. Do not poll with sleeps or repeated
