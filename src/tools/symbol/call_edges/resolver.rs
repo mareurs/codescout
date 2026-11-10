@@ -384,6 +384,23 @@ fn call_kinds_for(language_id: &str) -> &'static [&'static str] {
         _ => &[],
     }
 }
+/// Node kinds that declare a callable of their own. The callee walk of
+/// [`resolve_callees_via_ts`] does not descend into one of these nested below the
+/// queried function: a call inside a nested `fn helper` belongs to `helper`.
+/// Closures, lambdas, arrow functions and function expressions are NOT listed — their
+/// calls stay attributed to the function that contains them.
+fn nested_callable_kinds_for(language_id: &str) -> &'static [&'static str] {
+    match language_id {
+        "rust" => &["function_item"],
+        "python" => &["function_definition"],
+        "typescript" | "javascript" | "tsx" | "jsx" => {
+            &["function_declaration", "method_definition"]
+        }
+        "kotlin" => &["function_declaration"],
+        "java" => &["method_declaration"],
+        _ => &[],
+    }
+}
 
 /// Walk up the AST from `byte_offset` to find the innermost enclosing
 /// function/method node. Returns the node itself (rather than just its name
@@ -603,6 +620,7 @@ fn resolve_callees_via_ts(
         )
     })?;
 
+    let nested = nested_callable_kinds_for(language_id);
     let mut edges = Vec::new();
     let mut cursor = fn_node.walk();
     let mut stack: Vec<tree_sitter::Node<'_>> = vec![fn_node];
@@ -622,6 +640,10 @@ fn resolve_callees_via_ts(
             }
         }
         for child in n.children(&mut cursor) {
+            // A nested callable is its own caller: its calls are not ours.
+            if nested.contains(&child.kind()) {
+                continue;
+            }
             stack.push(child);
         }
     }
@@ -963,6 +985,54 @@ mod tests {
             assert_eq!(e.source, EdgeSource::Ts);
         }
         assert_eq!(edges.len(), 3, "unexpected edges: {:?}", edges);
+    }
+    #[tokio::test]
+    async fn resolve_callees_via_ts_rust_excludes_calls_inside_a_nested_fn() {
+        // `right()` is called by the nested `helper`, not by `entry`. The edge
+        // `entry -> right` is wrong; `entry -> helper` is right.
+        // (docs/issues/2026-11-10-call-graph-collector-includes-nested-function-bodies.md)
+        let src = "fn entry() {\n    fn helper() {\n        right();\n    }\n    helper();\n}\nfn right() {}\n";
+
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("fixture.rs");
+        std::fs::write(&fixture, src).unwrap();
+
+        let mock = MockLspClient::new();
+        let edges = resolve_one_hop(
+            &mock,
+            "entry",
+            &fixture,
+            0,
+            4, // inside the identifier `entry`
+            "rust",
+            Direction::Callees,
+        )
+        .await
+        .unwrap();
+
+        let callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+        assert_eq!(callees, vec!["helper"], "unexpected edges: {:?}", edges);
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_rust_keeps_calls_inside_a_closure() {
+        // A closure is not a declaration boundary: its calls still belong to the
+        // function that contains it. Guards the nested-fn exclusion against
+        // over-reach.
+        let src = "fn entry() {\n    let f = || inner();\n    f();\n}\nfn inner() {}\n";
+
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("fixture.rs");
+        std::fs::write(&fixture, src).unwrap();
+
+        let mock = MockLspClient::new();
+        let edges = resolve_one_hop(&mock, "entry", &fixture, 0, 4, "rust", Direction::Callees)
+            .await
+            .unwrap();
+
+        let mut callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+        callees.sort_unstable();
+        assert_eq!(callees, vec!["f", "inner"], "unexpected edges: {:?}", edges);
     }
 
     #[tokio::test]

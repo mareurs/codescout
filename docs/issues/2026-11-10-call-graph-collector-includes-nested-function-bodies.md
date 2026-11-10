@@ -36,7 +36,7 @@ Frozen base `7f0dbba5fd6ba25e4a50a8aad5c25403a11ae345` plus initial candidate pa
 
 ## Root cause
 
-Unknown — scope collector traversal has not been traced in this bounded pass. The raw graph demonstrates the incorrect containing-caller attribution, but does not establish which recursive collector branch owns it.
+Traced 2026-11-10. The tree-sitter callee fallback `resolve_callees_via_ts` (`src/tools/symbol/call_edges/resolver.rs`) walks the queried function's subtree with a stack and pushed EVERY child. It never stopped at a nested callable declaration, so a call inside a nested `fn helper` became an edge of the outer function. `enclosing_function_node` and `callee_identifier` are not involved. `count_calls_named` walks the whole file and has no enclosing-function scope, so it is not affected.
 
 ## Evidence
 
@@ -44,11 +44,11 @@ Case2 response first content block declares three edges, including `4: entry →
 
 ## Fix
 
-Pending. Bound AST call collection to the queried callable and exclude nested callable bodies without dropping calls made by the enclosing function.
+Uncommitted in the working tree at the time of writing (cite the SHA and patch-id when it lands). New `nested_callable_kinds_for(language_id)` lists the declaration kinds that own a callable: Rust `function_item`, Python `function_definition`, TS/JS `function_declaration` and `method_definition`, Kotlin `function_declaration`, Java `method_declaration`. The walk skips a child of those kinds. Closures, lambdas, arrow functions and function expressions are NOT skipped, so their calls stay with the enclosing function.
 
 ## Tests added
 
-None for this collector defect. Current lexical regression checks absence of an invented wrong leaf and presence of an incomplete-binding warning; it does not certify the extra depth1 right edge.
+`resolve_callees_via_ts_rust_excludes_calls_inside_a_nested_fn` (watched RED: returned `[helper, right]`, expected `[helper]`; GREEN after the fix) and `resolve_callees_via_ts_rust_keeps_calls_inside_a_closure` (guards the boundary; passes before and after). Only Rust is covered by a test. The Python, TS/JS, Kotlin and Java entries in `nested_callable_kinds_for` have no regression test. Measured: `cargo test --lib call_edges::resolver` 26 passed; `cargo clippy --lib --tests -- -D warnings` clean. The full `./scripts/gate.sh` was not run.
 
 ## Resume — 2026-11-10
 
