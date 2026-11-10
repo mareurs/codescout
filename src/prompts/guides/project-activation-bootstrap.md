@@ -19,6 +19,8 @@ bug is the one you never re-investigate because the project already documented i
   `progressive-disclosure`, `workspace-state`, `librarian`,
   `tracker-conventions`, `untrusted-content`), read it — it states the contract whose violations you
   hunt.
+- Long task: use `run_in_background=true`, end your turn, and the companion hook wakes you.
+  Do not poll. Subagents get no wake.
 
 ## Phase 1 — route each lookup by what you know
 

@@ -166,8 +166,9 @@ async fn spawn_background_command(
     // "running", which is correct here precisely because this response is
     // emitted at spawn time rather than five seconds later.
     let mut hint = format!(
-        "Started; outcome not yet observed. Read output with run_command(\"tail -50 {}\") \
-         — that response carries this job's state.",
+        "Started; outcome not yet observed. If the codescout-companion hook is active, end your \
+         turn: a wake message arrives when the job ends. Otherwise read the job with \
+         run_command(\"tail -50 {}\") — that response carries this job's state.",
         ref_id
     );
     let mut response = serde_json::json!({ "output_id": ref_id });
