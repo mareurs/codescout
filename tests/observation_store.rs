@@ -445,7 +445,24 @@ fn subprocess_producer() {
         fs::write(root.join(format!("round-{tag}-{n}")), b"ready").unwrap();
         let other = if tag == "a" { "b" } else { "a" };
         wait_file(&root.join(format!("round-{other}-{n}")));
-        s.append(event(&root)).unwrap();
+        let started = std::time::Instant::now();
+        loop {
+            match s.append(event(&root)) {
+                Ok(_) => break,
+                Err(error) if error == "unavailable" => {
+                    assert!(
+                        started.elapsed() < std::time::Duration::from_secs(5),
+                        "producer could not append within its fixture budget"
+                    );
+                    let marker = root.join(format!("retry-{tag}"));
+                    if !marker.exists() {
+                        fs::write(marker, b"unavailable").unwrap();
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(error) => panic!("unexpected append error: {error}"),
+            }
+        }
     }
     // Abrupt process death skips Rust destructors; committed records must remain readable.
     if tag == "a" {
@@ -499,6 +516,104 @@ fn two_process_writers_and_abrupt_exit() {
     for seq in producers.values() {
         assert_eq!(seq, &vec![0, 1, 2, 3, 4, 5, 6, 7]);
     }
+}
+
+#[test]
+fn subprocess_fixture_retries_bounded_lock_unavailability() {
+    use std::process::{Command, Stdio};
+    let d = repo();
+    enable(d.path()).unwrap();
+    let holder = fs::File::open(d.path().join(".codescout/observations/v1/quota.lock")).unwrap();
+    holder.lock().unwrap();
+    fs::write(d.path().join("go"), b"go").unwrap();
+    for n in 0..8 {
+        fs::write(d.path().join(format!("round-b-{n}")), b"ready").unwrap();
+    }
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "subprocess_producer", "--ignored"])
+        .env("OBS_TEST_ROOT", d.path())
+        .env("OBS_TEST_TAG", "a")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let started = std::time::Instant::now();
+    while !d.path().join("retry-a").exists() {
+        if child.try_wait().unwrap().is_some() {
+            let output = child.wait_with_output().unwrap();
+            panic!("producer exited before retrying a real contended append: status={:?}, stdout={}, stderr={}",
+                output.status.code(), String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        }
+        if started.elapsed() >= std::time::Duration::from_secs(5) {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("producer did not report the contended append");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    drop(holder);
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(9),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stored = read_store(d.path(), Limits::default());
+    assert!(stored.diagnostics.is_empty());
+    assert_eq!(
+        stored.records.len(),
+        8,
+        "retry must retain every acknowledged append"
+    );
+    assert_eq!(
+        stored
+            .records
+            .iter()
+            .map(|record| record.sequence)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2, 3, 4, 5, 6, 7],
+        "the timed-out append must not consume a sequence"
+    );
+}
+
+#[test]
+fn subprocess_fixture_does_not_retry_disabled_store() {
+    use std::process::{Command, Stdio};
+    let d = repo();
+    enable(d.path()).unwrap();
+    let child = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "subprocess_producer", "--ignored"])
+        .env("OBS_TEST_ROOT", d.path())
+        .env("OBS_TEST_TAG", "a")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_file(&d.path().join("ready-a"));
+    disable(d.path()).unwrap();
+    for n in 0..8 {
+        fs::write(d.path().join(format!("round-b-{n}")), b"ready").unwrap();
+    }
+    fs::write(d.path().join("go"), b"go").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(101),
+        "disabled is fatal for this fixture"
+    );
+    assert!(
+        !d.path().join("retry-a").exists(),
+        "only unavailable may be retried"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("disabled"),
+        "original child failure must be visible: {stdout}"
+    );
+    let stored = read_store(d.path(), Limits::default());
+    assert!(stored.records.is_empty());
+    assert!(stored.diagnostics.is_empty());
 }
 
 #[test]

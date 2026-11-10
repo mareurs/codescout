@@ -41,9 +41,10 @@ pub struct Edge {
 /// 2. **Tree-sitter fallback** — if `prepare_call_hierarchy` returns `None`:
 ///    - `Direction::Callers`: uses `references()` + tree-sitter to filter real call
 ///      sites and walk up the AST to find the enclosing function name.
-///    - `Direction::Callees`: returns a [`RecoverableError`] — finding callees without
-///      LSP call-hierarchy support is not viable (references() finds refs *to* a symbol,
-///      not calls *from* it).
+///    - `Direction::Callees`: walks call expressions in the enclosing function's AST
+///      using the symbol file's grammar and extracts their callee identifiers.
+///      Returns a [`RecoverableError`] when the grammar is unsupported, the source
+///      cannot be read or parsed, or no enclosing function can be located.
 pub async fn resolve_one_hop(
     client: &dyn crate::lsp::ops::LspClientOps,
     sym_name: &str,
