@@ -14,7 +14,7 @@ related:
 - docs/issues/archive/2026-10-24-the-windows-clippy-lane-fails-on-dead-code-and-an-unused-mut-that-exist-only-on-windows.md
 - docs/issues/archive/2026-10-23-the-windows-lib-test-build-fails-because-a-mux-test-reads-constants-that-exist-only-on-unix.md
 severity: medium
-unverified: CI's windows-gnu clippy step was not read live. Red-at-HEAD is established only by running the CI command locally on a clean extract of HEAD (a37c45d0f). Root cause is verified for one item chain (LOCK_NAME -> path), not for all 19. Nothing was run on Windows.
+unverified: CI's windows-gnu clippy step was not read live. Red at HEAD aec654c7a is established only by running the CI command locally on a clean extract. Item-by-item reachability on Windows was not judged (only the crate-level probe above). Nothing was run on Windows; the build is a cross-compile from Linux.
 ---
 
 ## Summary
@@ -66,6 +66,22 @@ Verified for one chain: `LOCK_NAME` is used only by `path()`, and `path()` is it
 
 - Caused by the `local-embed` change: refuted by the HEAD control, which has none of it.
 - Caused by the feature set the script passes: not supported. The errors are about `cfg(unix)`, not about any Cargo feature.
+
+## Re-measured at HEAD aec654c7a, 2026-11-11
+
+Clean `git archive HEAD` of `aec654c7a0fd1784bb1d0a4ed32a10a5ccb24d59` (207 commits after `a37c45d0f`) extracted to an empty directory, then `scripts/with-slot.sh ./scripts/build-windows.sh clippy --all-targets -- -D warnings` there (`x86_64-pc-windows-gnu`, mingw present, same feature set as the script's default).
+
+- Result: exit 101. `could not compile codescout (lib) due to 20 previous errors` and `(lib test) due to 18 previous errors`. The bug measured 19 and 17 at `a37c45d0f`, so the lane is still red and the count grew by one in each target.
+- Only three lint kinds appear in the output: `unused-imports`, `unused-variables` and `dead-code`, each implied by `-D warnings`. No `clippy::` lint is among them.
+- The Symptom list has drifted. Four commits touched these files since `a37c45d0f` (`4eceee5e7`, `0d47f5898`, `1ccf33e7b`, `193ec23d0`), and the surface is no longer only the three modules:
+  - `is_foreground_formatter` and `certificate` are now reported in `src/tools/provenance_fence_context.rs` (lines 20 and 33), not in `trusted_formatter.rs`. `verify` (line 95) and `SCRIPTS` (line 7) stay in `trusted_formatter.rs`.
+  - New: fields `call_id` and `turn_id` never read, `src/tools/invocation_context.rs:89`. `git log -S"call_id"` on that file names `c7b38be29` (feat(observations): capture stock Codex operations), so `9cab1095e` is no longer the only commit behind the red lane.
+  - Moved: unused import `make_server_in_root` is now at `src/server.rs:3800` (was `:3671`); `provenance_fence_context.rs` unused variables are still at lines 122 to 127.
+  - Lib test target: `fields file and root never read` and `method root is never used` (`native_provenance_fence.rs:12` and `:279`), plus the unused imports.
+
+Probe of completeness, in the extracted copy only (nothing in this checkout was edited): adding `#![cfg_attr(not(unix), allow(dead_code, unused_imports, unused_variables))]` at the top of `src/lib.rs` and re-running the same command gives exit 0 and zero errors (`Finished dev profile in 55.02s`). So the 38 errors are exactly these three lint kinds under `not(unix)`, and no further lint is hidden behind them. This is a probe of the error set, not the recommended fix: a crate-level allow hides real dead code everywhere, which is the caveat the Fix section already names for option 2.
+
+This also upgrades the Root cause: it was verified for one item chain; now the whole set is shown to disappear when exactly dead-on-`not(unix)` code is allowed. Which items are dead because of a missing `cfg(unix)` gate, as opposed to code that should be reachable on Windows, was not judged item by item.
 
 ## Fix
 

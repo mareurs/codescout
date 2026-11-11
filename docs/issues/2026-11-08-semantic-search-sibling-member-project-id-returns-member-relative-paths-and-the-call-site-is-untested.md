@@ -44,7 +44,7 @@ Inferred, not observed: because `read_file` resolves a relative path against the
 
 ## Reproduction
 
-Not reproduced by running in this session (no cargo allowed). The existing pin test is the reproduction at unit level. Plan:
+Partly run 2026-11-11. Step 1: the pin test is green on the current tip (it ran inside `cargo test --lib tools::semantic`, 122 passed). Step 3: run through the mutation probe, SURVIVED. Step 2 (live variant) is not run. The existing pin test is the reproduction at unit level. Plan:
 
 1. Run the pin test: `scripts/with-slot.sh cargo test pins_current_limitation_sibling_member_hits_stay_member_relative` (test name from `src/tools/semantic/tests.rs:1181`). It builds `two_member_workspace()` (members `crates/alpha` with `src/ser.rs`, `crates/beta` with `src/lib.rs`), calls `activate_within_workspace("alpha", None)`, then `lift_explicit_member_hits(&ctx, "beta", Some(&focused), &mut hits)` and expects the path unchanged.
 2. Live variant: in a workspace with two members whose index is built, focus member `alpha` (activate_within_workspace), run `semantic_search(query=..., project_id="beta")`, then `read_file(path=<returned file_path>)`. Expected by the documented contract: it opens `beta`'s file. Expected from the code: not-found, or `alpha`'s same-named file.
@@ -56,7 +56,7 @@ Rust codescout server, branch `experiments` (shared, dirty checkout), read in th
 
 ## Root cause
 
-Gap 1, mechanism read from code, not measured at runtime:
+Gap 1, mechanism read from code, not measured at runtime. The line numbers in this section were read on 2026-11-08. On 2026-11-11 (last commit of this file `204508f53`, no uncommitted change) the call is at `semantic_search.rs:929` and `lift_explicit_member_hits` is at `:1076`:
 
 - `src/tools/semantic/semantic_search.rs:837-839`: `if explicit_project_id { lift_explicit_member_hits(ctx, &project_id, root.as_deref(), &mut hits).await; }`. `root` is the focused root (from `project_root_for(ctx.workspace_override...)`, line 666-667).
 - `src/tools/semantic/semantic_search.rs:985-1017`, `lift_explicit_member_hits`: it finds the member by id among the discovered projects, skipping the root project (`p.relative_root != Path::new(".")`, line 999), builds `member_root = workspace_root.join(relative_root)` and `focused_root`, and only `if let Ok(rel) = member_root.strip_prefix(&focused_root)` (line 1013) calls `lift_member_paths` with `rel`. When `beta` is not under the focused root `crates/alpha`, `strip_prefix` fails, the `if let` has no else, and the hits stay as stored. The doc comment states it: "A root project, an id that names no member, and a member outside `focused_root` are left untouched." (line 984).
@@ -64,7 +64,7 @@ Gap 1, mechanism read from code, not measured at runtime:
 
 The prefix is "the member root expressed relative to the FOCUSED root" (doc comment at lines 977-984); the branch where that expression does not exist (a sibling) is the one left unchanged. Archived fix commit: `41941e75e` ("fix(semantic): an explicit member project_id returns workspace-root-relative file paths ..."; its subject cites bug id `d3a90bec4f8f5ced`, the id the bug carried before it was re-pointed to `25c50e1b512bce92`).
 
-Gap 2, read from code, not measured by deleting the line:
+Gap 2, measured 2026-11-11 with `scripts/mutation-probe.sh` (deleted the call `lift_explicit_member_hits(ctx, &project_id, root.as_deref(), &mut hits).await;`, ran `cargo test --lib tools::semantic` in an isolated worktree): SURVIVED, 122 tests ran, 0 failed. The probe cannot tell "untested" from "unreachable without a seam"; the next bullet reads the seam from code. Mechanism read from code:
 
 - The call site is the single statement at `semantic_search.rs:838`, inside `SemanticSearch::call`.
 - `call` builds its retrieval client at `semantic_search.rs:668` with `crate::retrieval::client::RetrievalClient::from_env(root.as_deref())`, which reads config and the environment and builds the store and embedder (`src/retrieval/client.rs:351-376`). `call` has no parameter or hook through which a test can supply a client. A `RetrievalClient::from_config_only(config)` constructor exists (`client.rs:403`) but `call` does not use it (the only `RetrievalClient` construction in `semantic_search.rs` found by grep is line 668).
@@ -114,7 +114,7 @@ Pin the call to the member that owns the files: pass `workspace=<member root>` (
 
 ## Resume
 
-Run the pin test (plan step 1 under Reproduction) to confirm it is green on the current tip, then take the design decision among the four options in Fix with the owner. After that: edit `lift_explicit_member_hits` at `src/tools/semantic/semantic_search.rs:1013` (the `strip_prefix` branch), update the pin test at `src/tools/semantic/tests.rs:1181`, and update `src/tools/semantic/semantic_search.rs:534-537` and `docs/manual/src/tools/semantic-search.md:57`. Then close Gap 2 with a seam for the call site.
+The pin test is confirmed green on the current tip and the call-site gap is measured (see Reproduction and Root cause). Take the design decision among the four options in Fix with the owner. After that: edit `lift_explicit_member_hits` at `src/tools/semantic/semantic_search.rs:1013` (the `strip_prefix` branch), update the pin test at `src/tools/semantic/tests.rs:1181`, and update `src/tools/semantic/semantic_search.rs:534-537` and `docs/manual/src/tools/semantic-search.md:57`. Then close Gap 2 with a seam for the call site.
 
 ## References
 
