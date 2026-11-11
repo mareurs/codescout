@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 235
+entry_high_water_F: 236
 entry_high_water_W: 158
 ---
 
@@ -81,6 +81,7 @@ entry_high_water_W: 158
 | F-233 | 2026-11-10 | med | measurement | fixed-verified | **A source-path diff was reported as the whole peer delta** — full scan found four Python harness paths; corrected claim and separately gated exact integration tree. |
 | F-234 | 2026-11-10 | med | test-design | fixed-verified | **Replacement LSP fixture provider omitted document symbols** — retain setup failures, then93/2 intended RED and95/0 final GREEN. |
 | F-235 | 2026-11-11 | med | measurement | promoted-to-bug-tracker | **The defect filed as "symbol_at is stale" was wider** — the drift repair covers only the file a documentSymbol call names; references returned a stale location for another open file; bug a73c49456056fb92. |
+| F-236 | 2026-11-11 | med | measurement | promoted-to-bug-tracker | **Signing the files a cached call_graph result names does not catch a caller added in a file it does not name** — implemented the sound part, kept the bug open; bug 489e013ddfd6c3fc. |
 | F-213 | 2026-11-06 | med | test-design | fixed-verified | **A crash fixture failed in its toy parser before reaching the classifier** — wrong-reason red replaced by observed intended red before reapplying production wiring. |
 | F-214 | 2026-11-06 | med | test-design | promoted-to-bug-tracker | **Stripping log indentation promoted a debug field to compiler evidence** — real four-log overlap exposed the false provenance; three observed RED variants before fix. |
 | F-210 | 2026-11-01 | med | process | mitigated | **A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path** — `fmt-mine` named three of my files UNKNOWN after a 19-minute gate; `rustfmt --check` on the diff's files beforehand takes seconds. |
@@ -18343,6 +18344,32 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Limits:** Two tiny crates (one per transport), rust-analyzer, one run per case. Both transports were confirmed in the process tree: the first crate under `codescout mux` (socket), the second under `codescout start` (stdio), and the cross-file `references` staleness reproduced on both. On stdio `symbol_at` on the changed file raised a raw `-32603 Invalid offset … (line index length: 51)`, the old file's byte length. A same-length rewrite of a second file was not run for `references`. `call_graph` never listed `other.rs::use_it` in either state, so it neither shows nor rules out the staleness; that omission was not investigated.
 
 **Fix idea / Pointer:** bug `a73c49456056fb92` (fixed by `43c4ca9df`; `unverified` still set for what the tests do not cover). The same staleness reaches a write: `edit_code rename` overwrote the wrong bytes of a second file and returned `ok` (bug `58a45860b802a477`, measured later the same day on both transports, with a control, fixed by the same commit). Related: `4e7ec7bfc047ac7b`, F-232, archived `2026-08-11-symbols-stale-after-external-git-checkout`.
+
+---
+
+## F-236 — Signing the files a cached call_graph result names does not catch a caller added in a file it does not name
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, session `5f715d8f`, HEAD `78729bfb3`. Implementing candidate (1) of bug `489e013ddfd6c3fc` (call_graph serves cached edges after an external edit): store the `(len, mtime)` of the files a resolution names and treat the entry as a miss when one differs.
+
+**When:** I recommended candidate (1) to the user and wrote that it "also covers `git checkout` between sessions". The user chose it. Before writing code I read the `call_edge_resolutions` schema, `lookup_resolution`, `store_resolution`, `Edge` and `invalidate_file`.
+
+**Expected:** Signing the files that a cached result names is enough to catch the external edits that produce a stale answer.
+
+**Got:** It catches an edit to a file the result names: stale lines, a spurious edge from old lines against new symbol ranges, and a caller added in a file that already has an edge. It does NOT catch a caller added in a file the result does not name (a new file, or a file with no call of the symbol), because no signed file changes. That is the case that started the investigation: `other.rs` did not exist when the entry was written. A `git checkout` that adds such a file is not caught either. The proposition the green tests prove: a named file that changed makes the entry a miss. They do not prove that a callers result is complete. Found by reading the schema and the `files_behind` set, before any test could have shown it.
+
+**Probable cause:** I described the fix from the symptom (stale lines) and not from what a `callers` result depends on, which is every file of the workspace, not only the files in the result.
+
+**Workaround:** I implemented the part that is sound, kept the bug `open`, wrote the residual into `## Fix` and `## Resume`, and noted it in the `files_behind` doc comment. The residual options are a project-level epoch, no reuse of a `callers` resolution across calls, or a file watcher. None is tried.
+
+**Counterfactual:** Had I implemented "signatures of the named files" and closed the bug on the green tests, the `callers` result would still have omitted a caller in a new file, and the record would have said fixed.
+
+**Severity:** med
+
+**Status:** promoted-to-bug-tracker
+
+**Fix idea / Pointer:** bug `489e013ddfd6c3fc` (open). Related: F-235, `a73c49456056fb92`.
 
 ---
 

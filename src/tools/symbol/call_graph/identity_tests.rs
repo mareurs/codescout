@@ -330,7 +330,6 @@ async fn callees_after_a_change_made_outside_codescout(invalidate_like_a_write_t
 }
 
 #[tokio::test]
-#[ignore = "red on purpose: bug 489e013ddfd6c3fc, call_graph serves cached edges after a file changed outside codescout; remove this attribute with the fix"]
 async fn call_graph_does_not_serve_stale_edges_after_a_file_changed_outside_codescout() {
     callees_after_a_change_made_outside_codescout(false).await;
 }

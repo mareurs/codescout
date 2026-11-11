@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -30,10 +30,77 @@ pub fn apply_schema(conn: &Connection) {
             definition_col  INTEGER NOT NULL,
             direction       TEXT NOT NULL,
             edges_json      TEXT NOT NULL,
+            signatures_json TEXT,
             PRIMARY KEY (project_id, symbol, definition_file, definition_line, definition_col, direction)
         );",
     )
     .expect("apply_schema: DDL failed");
+    add_signatures_column_if_missing(conn);
+}
+
+/// A database created before `call_edge_resolutions.signatures_json` existed keeps its table, so
+/// `CREATE TABLE IF NOT EXISTS` does not add the column. Add it once. Two processes can open the
+/// same file at the same time (the MCP server and the dashboard), so "the column is already
+/// there" after our own check is not an error.
+fn add_signatures_column_if_missing(conn: &Connection) {
+    let present: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('call_edge_resolutions') \
+             WHERE name = 'signatures_json'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("apply_schema: reading the table info failed");
+    if present > 0 {
+        return;
+    }
+    match conn.execute(
+        "ALTER TABLE call_edge_resolutions ADD COLUMN signatures_json TEXT",
+        [],
+    ) {
+        Ok(_) => {}
+        Err(e) if e.to_string().contains("duplicate column") => {}
+        Err(e) => panic!("apply_schema: adding signatures_json failed: {e}"),
+    }
+}
+
+/// What the files behind one cached resolution looked like when it was stored: the `(len,
+/// mtime)` pair that the LSP client uses to notice a file that changed behind its back
+/// (`crate::lsp::client::disk_signature`), with the mtime as nanoseconds since the epoch so it
+/// survives a JSON round trip. `None` means the file could not be read then.
+type StoredSignatures = std::collections::BTreeMap<String, Option<(u64, Option<u64>)>>;
+
+fn encode_signature(path: &Path) -> Option<(u64, Option<u64>)> {
+    let (len, modified) = crate::lsp::client::disk_signature(path)?;
+    let nanos = modified
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64);
+    Some((len, nanos))
+}
+
+/// Every file that a resolution names: the definition it started from, the call sites and the
+/// next-hop definitions. A change in any of them can change the result.
+///
+/// It does NOT name a file the result does not mention, so a caller added in such a file (a new
+/// file, or one that had no call of the symbol) does not invalidate the entry. See bug
+/// `489e013ddfd6c3fc`, `## Fix`.
+fn files_behind(key: &ResolutionKey<'_>, edges: &[Edge]) -> std::collections::BTreeSet<PathBuf> {
+    let mut files = std::collections::BTreeSet::new();
+    files.insert(key.file.to_path_buf());
+    for edge in edges {
+        files.insert(edge.file.clone());
+        if let Some(target) = &edge.target {
+            files.insert(target.file.clone());
+        }
+    }
+    files
+}
+
+fn current_signatures(files: &std::collections::BTreeSet<PathBuf>) -> StoredSignatures {
+    files
+        .iter()
+        .map(|f| (f.to_string_lossy().into_owned(), encode_signature(f)))
+        .collect()
 }
 
 /// Open (and create if missing) the call_edges sqlite database at
@@ -83,7 +150,11 @@ impl<'a> EdgeCache<'a> {
     pub fn new(conn: &'a Connection, project_id: &'a str) -> Self {
         Self { conn, project_id }
     }
-    /// Only completed results for this exact definition and direction are cache hits.
+    /// Only completed results for this exact definition and direction are cache hits, and only
+    /// while every file the result names (`files_behind`) still has the `(len, mtime)` it had when
+    /// the result was stored. A file changed by anything but a codescout write tool, which
+    /// invalidates by itself (`invalidate_file`), makes the entry a miss and the caller resolves
+    /// again. An entry stored before the signatures existed has none and is a miss too.
     pub fn lookup_resolution(
         &self,
         key: &ResolutionKey<'_>,
@@ -92,26 +163,44 @@ impl<'a> EdgeCache<'a> {
             Direction::Callers => "callers",
             Direction::Callees => "callees",
         };
-        let payload: Option<String> = self.conn.query_row(
-            "SELECT edges_json FROM call_edge_resolutions WHERE project_id = ?1 AND symbol = ?2 \
+        let row: Option<(String, Option<String>)> = self.conn.query_row(
+            "SELECT edges_json, signatures_json FROM call_edge_resolutions WHERE project_id = ?1 AND symbol = ?2 \
              AND definition_file = ?3 AND definition_line = ?4 AND definition_col = ?5 AND direction = ?6",
             params![self.project_id, key.symbol, key.file.to_string_lossy(), key.line, key.col, direction],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         ).optional()?;
-        payload
-            .map(|json| {
-                serde_json::from_str(&json).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        0,
-                        rusqlite::types::Type::Text,
-                        Box::new(error),
-                    )
-                })
-            })
-            .transpose()
+        let Some((payload, signatures)) = row else {
+            return Ok(None);
+        };
+        let Some(signatures) = signatures else {
+            return Ok(None);
+        };
+        // An unreadable signature record cannot vouch for the entry: resolve again.
+        let Ok(stored) = serde_json::from_str::<StoredSignatures>(&signatures) else {
+            return Ok(None);
+        };
+        if stored
+            .iter()
+            .any(|(file, signature)| encode_signature(Path::new(file)) != *signature)
+        {
+            return Ok(None);
+        }
+        serde_json::from_str(&payload).map(Some).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })
     }
 
     /// Replace a successful adjacency; empty/recoverable analyses remain retryable.
+    ///
+    /// Stores, with the edges, the signature of every file the result names (`files_behind`) as
+    /// they are NOW. They are read after the analysis, so a file that changed while the analysis
+    /// ran is stored with its new signature next to edges computed from its old content; that
+    /// window is the length of one analysis and is accepted, where before the entry was never
+    /// revalidated at all.
     pub fn store_resolution(
         &self,
         key: &ResolutionKey<'_>,
@@ -126,11 +215,13 @@ impl<'a> EdgeCache<'a> {
         };
         let payload = serde_json::to_string(edges)
             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+        let signatures = serde_json::to_string(&current_signatures(&files_behind(key, edges)))
+            .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         self.conn.execute(
             "INSERT OR REPLACE INTO call_edge_resolutions \
-             (project_id, symbol, definition_file, definition_line, definition_col, direction, edges_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![self.project_id, key.symbol, key.file.to_string_lossy(), key.line, key.col, direction, payload],
+             (project_id, symbol, definition_file, definition_line, definition_col, direction, edges_json, signatures_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![self.project_id, key.symbol, key.file.to_string_lossy(), key.line, key.col, direction, payload, signatures],
         )?;
         Ok(())
     }
@@ -502,6 +593,154 @@ mod tests {
         assert!(
             cache.lookup_resolution(&key).is_err(),
             "corruption must not become an empty or missing graph"
+        );
+    }
+
+    // ── A cached resolution is revalidated against the files it names (bug 489e013ddfd6c3fc) ──
+
+    fn key_for(file: &Path) -> ResolutionKey<'_> {
+        ResolutionKey {
+            symbol: "call",
+            file,
+            line: 0,
+            col: 3,
+            direction: &Direction::Callers,
+        }
+    }
+
+    fn call_site_edge(file: &Path) -> Edge {
+        Edge {
+            caller_sym: "caller".into(),
+            callee_sym: "call".into(),
+            file: file.to_path_buf(),
+            line: 1,
+            col: 14,
+            source: EdgeSource::Lsp,
+            target: None,
+        }
+    }
+
+    fn pin_mtime(file: &Path, secs: i64) {
+        filetime::set_file_mtime(file, filetime::FileTime::from_unix_time(secs, 0)).unwrap();
+    }
+
+    /// A temp project with `a.rs` (the definition) and `b.rs` (a call site), and one stored
+    /// resolution that names both. Both mtimes are pinned, so a later change is a change.
+    fn stored_resolution_over_two_real_files() -> (tempfile::TempDir, Connection, PathBuf, PathBuf)
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.rs");
+        let b = dir.path().join("b.rs");
+        std::fs::write(&a, "fn call() {}\n").unwrap();
+        std::fs::write(&b, "fn caller() { call(); }\n").unwrap();
+        pin_mtime(&a, 1_600_000_000);
+        pin_mtime(&b, 1_600_000_000);
+        let conn = setup_db();
+        EdgeCache::new(&conn, "project")
+            .store_resolution(&key_for(&a), &[call_site_edge(&b)])
+            .unwrap();
+        (dir, conn, a, b)
+    }
+
+    #[test]
+    fn a_stored_resolution_is_a_hit_while_every_file_it_names_is_unchanged() {
+        let (_dir, conn, a, b) = stored_resolution_over_two_real_files();
+        let got = EdgeCache::new(&conn, "project")
+            .lookup_resolution(&key_for(&a))
+            .unwrap();
+        assert_eq!(got, Some(vec![call_site_edge(&b)]));
+    }
+
+    #[test]
+    fn a_stored_resolution_is_a_miss_once_the_definition_file_changed() {
+        let (_dir, conn, a, _b) = stored_resolution_over_two_real_files();
+        std::fs::write(&a, "fn call() {}\nfn other() {}\n").unwrap();
+        let got = EdgeCache::new(&conn, "project")
+            .lookup_resolution(&key_for(&a))
+            .unwrap();
+        assert_eq!(got, None, "the file the resolution started from changed");
+    }
+
+    /// The case of the original report: an edit that moves nothing in the target file and keeps
+    /// the size of the call-site file. Only the mtime tells.
+    #[test]
+    fn a_stored_resolution_is_a_miss_once_a_call_site_file_changed_with_the_same_length() {
+        let (_dir, conn, a, b) = stored_resolution_over_two_real_files();
+        std::fs::write(&b, "fn caller() { cell(); }\n").unwrap();
+        pin_mtime(&b, 1_600_000_060);
+        let got = EdgeCache::new(&conn, "project")
+            .lookup_resolution(&key_for(&a))
+            .unwrap();
+        assert_eq!(got, None, "a call-site file changed behind the cache");
+    }
+
+    #[test]
+    fn a_file_that_appears_after_the_resolution_was_stored_makes_it_a_miss() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.rs");
+        let b = dir.path().join("b.rs");
+        std::fs::write(&a, "fn call() {}\n").unwrap();
+        let conn = setup_db();
+        let cache = EdgeCache::new(&conn, "project");
+        cache
+            .store_resolution(&key_for(&a), &[call_site_edge(&b)])
+            .unwrap();
+        assert!(
+            cache.lookup_resolution(&key_for(&a)).unwrap().is_some(),
+            "a file absent when stored and still absent has not changed"
+        );
+        std::fs::write(&b, "fn caller() { call(); }\n").unwrap();
+        assert_eq!(cache.lookup_resolution(&key_for(&a)).unwrap(), None);
+    }
+
+    #[test]
+    fn a_resolution_stored_without_signatures_is_a_miss() {
+        let (_dir, conn, a, _b) = stored_resolution_over_two_real_files();
+        conn.execute(
+            "UPDATE call_edge_resolutions SET signatures_json = NULL",
+            [],
+        )
+        .unwrap();
+        let got = EdgeCache::new(&conn, "project")
+            .lookup_resolution(&key_for(&a))
+            .unwrap();
+        assert_eq!(
+            got, None,
+            "an entry that cannot be revalidated is not served"
+        );
+    }
+
+    #[test]
+    fn an_old_database_gets_the_signatures_column_and_its_rows_are_misses() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE call_edge_resolutions (
+                project_id TEXT NOT NULL, symbol TEXT NOT NULL, definition_file TEXT NOT NULL,
+                definition_line INTEGER NOT NULL, definition_col INTEGER NOT NULL,
+                direction TEXT NOT NULL, edges_json TEXT NOT NULL,
+                PRIMARY KEY (project_id, symbol, definition_file, definition_line, definition_col, direction)
+             );
+             INSERT INTO call_edge_resolutions
+                VALUES ('project', 'call', '/project/a.rs', 7, 3, 'callees', '[]');",
+        )
+        .unwrap();
+        apply_schema(&conn);
+        apply_schema(&conn); // idempotent: the column is added once
+        let present: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('call_edge_resolutions') \
+                 WHERE name = 'signatures_json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(present, 1);
+        assert_eq!(
+            EdgeCache::new(&conn, "project")
+                .lookup_resolution(&resolution_key())
+                .unwrap(),
+            None,
+            "a row stored before the signatures existed must be resolved again"
         );
     }
 }

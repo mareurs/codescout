@@ -13,7 +13,7 @@ related:
 - '58a45860b802a477'
 - '4e7ec7bfc047ac7b'
 severity: medium
-unverified: Measured in one scratch crate (callers direction, mux transport) and, as a test, in the callees direction with tree-sitter edges and a mock LSP. The callers direction has no test. A git checkout, a second session and other languages were not run. The mechanism of the spurious ts edge is inferred, not traced. Whether invalidate_file clears completed-resolution entries was not read (the control test shows the effect for invalidate_call_edges_for, not the mechanism). The link to 4e7ec7bfc047ac7b is a lead, not a finding. No fix designed or tried. Severity is my proposal.
+unverified: Measured by hand in one scratch crate (callers direction, mux transport, before the fix) and by test in the callees direction with tree-sitter edges and a mock LSP, after it. The callers direction was not re-run after the fix and no test covers it. A caller added in a file the cached result does not mention is NOT fixed and has no test. A git checkout, a second session and other languages were not run. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity is my proposal.
 ---
 
 # BUG: call_graph serves cached edges that an edit made outside codescout never invalidates
@@ -60,7 +60,7 @@ Read at the bytes:
 - `invalidate_file` (`call_edges/cache.rs:191`) deletes the rows of one file. Its only callers outside tests are `Agent::invalidate_call_edges` and `invalidate_call_edges_for` (`src/agent/mod.rs`), and those are called from `edit_code` (rename, remove, replace, insert), `edit_file`, `create_file` and `edit_markdown`. Nothing calls it for a change that codescout did not make.
 - The store is a file on disk (`.codescout/call_edges.db`, 32 KB in the run), so a stale entry outlives the session.
 
-NOT established: whether `invalidate_file` also clears the completed-resolution entries (the control in step 6 shows the effect for `edit_file`, not the mechanism); the cross-session persistence was read from the code and not run; the `callees` direction was not run.
+NOT established: the cross-session persistence was read from the code and not run; the `callees` direction was run only as a test, not by hand. (`invalidate_file` does clear the completed resolutions: its second statement deletes every resolution of the project, read 2026-11-11.)
 
 ## Evidence
 
@@ -73,22 +73,26 @@ The tool outputs in the table, copied from the session.
 
 ## Fix
 
-Pending, for the owner. Candidates, none tried: (1) store, with each cached resolution, the `(len, mtime)` signature of every file its edges mention, and treat the entry as a miss when one differs (the same signature the LSP client already uses, `disk_signature` in `src/lsp/client.rs`); (2) invalidate from the point where the LSP client detects drift (`resync_all_drifted`), which couples the client to the cache; (3) stop reusing a completed resolution across calls, at the cost of an LSP round trip per hop. Candidate (1) also covers `git checkout` between sessions, which (2) would not.
+Partly done 2026-11-11, commit pending (see `## Fix provenance` once it lands), by candidate (1): a cached resolution is revalidated against the files it names.
+
+- `call_edge_resolutions` gets a column `signatures_json`. `store_resolution` writes into it the `(len, mtime)` of every file the result names (`files_behind`: the definition it started from, every call-site file, every next-hop definition), using the same `disk_signature` as the LSP client (now `pub(crate)`).
+- `lookup_resolution` returns a miss when any of those files differs from its stored signature, including a file that was absent and now exists. An entry without signatures (stored before this change) is a miss. A corrupt signature record is a miss. A corrupt edge payload is still an error.
+- `apply_schema` adds the column to a database that already has the table (`ALTER TABLE`, tolerating a second process that added it first).
+- Codescout's own write tools keep invalidating through `invalidate_file`; nothing about them changed.
+
+**Residual, not fixed:** an entry is valid while the files it NAMES are unchanged. A caller added in a file that the result does not mention (a new file, or an existing file with no call of the symbol) does not change any signed file, so the entry is still served and the caller is missing. That is the case that first showed the problem (`other.rs` did not exist when the entry was written). It is not covered by a test. Options, none tried: (a) a project-level epoch (for example the newest mtime and the count of the source files, one walk per call), at a cost per call and with unrelated edits invalidating entries; (b) do not reuse a `callers` resolution across calls; (c) a file watcher in codescout, which does not exist today (`mark_file_dirty` marks only codescout's own writes).
+
+Small accepted window: the signatures are read after the analysis, so a file that changes while one analysis runs is stored with its new signature beside edges from its old content.
 
 ## Tests added
 
-Added 2026-11-11 in `src/tools/symbol/call_graph/identity_tests.rs`, after `lsp_same_file_same_line_helpers_preserve_columns_and_cached_target_metadata`. The harness is the file's own: real parser, real edge cache, the real `CallGraph` tool; only the LSP wire is a mock. Direction `callees`, tree-sitter edges, not the `callers` direction of the manual run.
+In `src/tools/symbol/call_graph/identity_tests.rs` (real parser, real edge cache, the real `CallGraph` tool, mock LSP; direction `callees`): `call_graph_does_not_serve_stale_edges_after_a_file_changed_outside_codescout` (was red under `#[ignore]`, now green) and its control `call_graph_is_current_once_a_write_invalidates_the_cached_edges`. The shared body `callees_after_a_change_made_outside_codescout` resolves `entry`, rewrites `src/lib.rs` from the test so that `entry` stays where it was and a second call appears, and resolves again from a new context over the same cache file.
 
-The shared body `callees_after_a_change_made_outside_codescout` resolves the callees of `entry` once, rewrites `src/lib.rs` from the test (outside codescout) so that `entry` stays where it was and a second call is added, then resolves again from a new context over the same cache file. The second answer must hold the added call.
+In `src/tools/symbol/call_edges/cache.rs`, six unit tests on `EdgeCache`: hit while every named file is unchanged; miss when the definition file changed; miss when a call-site file changed with the SAME length (mtime only); miss when a file that was absent appears; miss for a row without signatures; an old database gets the column, the migration is idempotent, and its rows are misses. The existing `completed_resolution_reports_corrupt_payload_as_an_error` still holds.
 
-| Test | State |
-|---|---|
-| `call_graph_does_not_serve_stale_edges_after_a_file_changed_outside_codescout` | `#[ignore]`, red: the second answer is `["entry>first@src/lib.rs:2#1"]` and lacks `entry>second@src/lib.rs:3#1` |
-| `call_graph_is_current_once_a_write_invalidates_the_cached_edges` | control, passes: the same change followed by `Agent::invalidate_call_edges_for`, which the write tools call |
+Verified 2026-11-11: `cargo test --lib -- tools::symbol::call_edges tools::symbol::call_graph` 113 passed, 0 failed, 0 ignored; clippy with `-D warnings` clean; `./scripts/gate.sh` green (9442 tests, FMT, CLIPPY, LEAN, DEFAULT all 0).
 
-The control differs from the red test only by that one call, so the red test fails because nothing invalidates, not because of the fixture. Default run: `tools::symbol::call_graph` 56 passed, 0 failed, 1 ignored. `--ignored` run: the red test fails with the message above. The `#[ignore]` carries this bug's id; remove it with the fix.
-
-Not covered: the `callers` direction (measured by hand), a file edited between two calls of the SAME context, a second session through a real process boundary, a language other than Rust.
+Not covered: the residual above (a caller in an unmentioned file); the `callers` direction (measured by hand only, before the fix; not re-run after it); a second session through a real process boundary; a language other than Rust; the new binary was not run against the scratch crate.
 
 ## Workarounds
 
@@ -96,7 +100,11 @@ Delete `.codescout/call_edges.db`, or write to the changed file with a codescout
 
 ## Resume
 
-Open, measured on the mux transport with the new binary, one crate, callers direction. Severity `medium` is my proposal: a silent wrong answer (stale lines, a missing caller, an invented edge) from the tool that agents use for impact analysis, with no age or warning, and it persists across sessions. Next: write the failing test (a resolution cached, then an external write to a caller file, then a second `call_graph`), then pick the fix with the owner. Check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, which was observed in call-graph work on a retained worktree; I did not establish that. Related: `a73c49456056fb92`, `58a45860b802a477`.
+Partly fixed in the working tree, commit pending. Status stays `open` because the residual case (a caller added in a file the cached result does not mention) is not fixed, and it is the case that started this investigation.
+
+Next: (1) after the commit, add `## Fix provenance` (SHA and patch-id); (2) re-run the manual `callers` sequence of the table with the rebuilt binary (steps 2, 3 and 5 should now show current lines and `late_caller`); (3) with the owner, choose among the residual options and write the red test for it (a mock LSP that reports a caller in a new file on the second call); (4) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established.
+
+Related: `a73c49456056fb92`, `58a45860b802a477`, `bug-fix-session-log` (the entry for this fix).
 
 ## References
 

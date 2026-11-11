@@ -201,7 +201,7 @@ fn detect_fatal_stderr(lines: &[String]) -> Option<RecoverableError> {
 }
 
 /// `(len, mtime)` — the cheap pair used to notice a file changing behind our back.
-type DiskSignature = (u64, Option<std::time::SystemTime>);
+pub(crate) type DiskSignature = (u64, Option<std::time::SystemTime>);
 
 /// Read a file's [`DiskSignature`], or `None` if it cannot be stat'd.
 ///
@@ -219,7 +219,7 @@ type DiskSignature = (u64, Option<std::time::SystemTime>);
 /// So this is a staleness *hint*: a false negative costs one stale answer, a false
 /// positive costs one redundant `didChange`. The asymmetry is why the cheap check
 /// is the right one.
-fn disk_signature(path: &Path) -> Option<DiskSignature> {
+pub(crate) fn disk_signature(path: &Path) -> Option<DiskSignature> {
     let md = std::fs::metadata(path).ok()?;
     Some((md.len(), md.modified().ok()))
 }
