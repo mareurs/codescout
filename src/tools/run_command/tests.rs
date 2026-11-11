@@ -9519,6 +9519,7 @@ async fn onboarding_triggers_refresh_when_version_stale() {
             // No recorded baseline, which is NOT read as a witnessed regeneration:
             // without one there is no evidence either way, so the version decides.
             system_prompt_sha256: None,
+            repo_name_declined: false,
         },
         embeddings: Default::default(),
         ignored_paths: Default::default(),
@@ -9585,6 +9586,7 @@ fn seed_onboarded_project(
             tool_timeout_secs: 60,
             onboarding_version: version,
             system_prompt_sha256: baseline,
+            repo_name_declined: false,
         },
         embeddings: Default::default(),
         ignored_paths: Default::default(),
@@ -9953,6 +9955,7 @@ async fn onboarding_fast_path_when_version_current() {
             // A current version short-circuits the witness entirely, so the baseline
             // is irrelevant here — `None` keeps that explicit rather than incidental.
             system_prompt_sha256: None,
+            repo_name_declined: false,
         },
         embeddings: Default::default(),
         ignored_paths: Default::default(),

@@ -12,6 +12,7 @@ use crate::prompts::builders::{
 };
 use serde_json::{json, Value};
 
+use super::core::types::{ELICIT_CANCELLED_MSG, ELICIT_DECLINED_MSG};
 use super::{parse_bool_param, Tool, ToolContext};
 
 /// Bump when the `onboarding_prompt` surface (in `src/prompts/source.md`) or
@@ -478,16 +479,32 @@ impl Tool for Onboarding {
             .require_project_root_for(ctx.workspace_override.as_deref())
             .await?;
 
-        // A name the caller confirmed is recorded and answered on its own: the call is the
-        // confirmation the earlier response asked for, not a request to onboard again.
         // The name file belongs to the repo, so it lives at the repo root, found once per call.
         let repo_root = repo_root_of(&root);
-        if let Some(raw) = input["repo_name"].as_str() {
-            return set_repo_name(&repo_root, raw);
+        // Everything the name block needs from the machine is resolved here, once: the decline
+        // marker, and (only when a name is being chosen and a client that can ask is connected)
+        // the folders to scan for other checkouts.
+        let requested = input["repo_name"].as_str().map(str::to_owned);
+        let existing = repo_name::read(&repo_root);
+        let choosing = requested.is_some() || matches!(existing, Ok(None));
+        let edge = name_edge(
+            choosing && ctx.peer.is_some(),
+            &root,
+            &repo_root,
+            machine_workspace,
+            dirs::home_dir(),
+        );
+
+        // A name the caller confirmed is recorded and answered on its own: the call is the
+        // confirmation the earlier response asked for, not a request to onboard again.
+        if let Some(raw) = requested {
+            // The scan walks the file system for up to its own deadline: off the async executor.
+            return tokio::task::spawn_blocking(move || set_repo_name(&repo_root, &raw, &edge))
+                .await?;
         }
 
         let mut result = onboarding_branch(&input, ctx, root.clone()).await?;
-        result["repo_name"] = repo_name_block(ctx, &repo_root).await;
+        result["repo_name"] = repo_name_block(ctx, &repo_root, existing, edge).await;
         Ok(result)
     }
 
@@ -759,6 +776,33 @@ struct RepoNameInput {
 }
 rmcp::elicit_safe!(RepoNameInput);
 
+/// What the user did with the repo-name dialog.
+#[derive(Debug, PartialEq, Eq)]
+enum ElicitAnswer {
+    /// The user filled the dialog in (the text is not validated yet).
+    Answer(String),
+    /// The user declined or cancelled the dialog: a decision, remembered in `project.toml`.
+    Declined,
+    /// Nobody answered: no client, no elicitation support, a timeout, an empty form, or a
+    /// failure of the exchange. Not a decision, so nothing is remembered.
+    Unavailable,
+}
+
+/// The [`ElicitAnswer`] for what `elicit_with_timeout` returned. The decline and cancel errors
+/// are told apart from every other failure by the messages [`ToolContext`] builds them with.
+fn elicit_answer(result: anyhow::Result<Option<RepoNameInput>>) -> ElicitAnswer {
+    match result {
+        Ok(Some(input)) => ElicitAnswer::Answer(input.name),
+        Ok(None) => ElicitAnswer::Unavailable,
+        Err(e) => match e.downcast_ref::<super::RecoverableError>() {
+            Some(r) if r.message == ELICIT_DECLINED_MSG || r.message == ELICIT_CANCELLED_MSG => {
+                ElicitAnswer::Declined
+            }
+            _ => ElicitAnswer::Unavailable,
+        },
+    }
+}
+
 /// The decision `repo_name_block` acts on.
 #[derive(Debug)]
 enum RepoNameOutcome {
@@ -768,6 +812,8 @@ enum RepoNameOutcome {
     Write(RepoName),
     /// Nobody supplied a name: offer this suggestion.
     Unconfirmed(RepoName),
+    /// The user declined the dialog: offer this suggestion and remember the decline.
+    Declined(RepoName),
     /// The file exists and cannot be read: report it, write nothing.
     Unreadable(String),
     /// The user supplied a name that is not canonical.
@@ -775,22 +821,27 @@ enum RepoNameOutcome {
 }
 
 /// Pure decision over what `repo_name::read` found and what the user answered. An existing
-/// name always wins over an answer, and an unreadable file is never a licence to write.
+/// name always wins over an answer or a decline, and an unreadable file is never a licence to
+/// write.
 fn repo_name_outcome(
     existing: anyhow::Result<Option<RepoName>>,
-    elicited: Option<String>,
+    elicited: ElicitAnswer,
     suggestion: &RepoName,
 ) -> RepoNameOutcome {
     match existing {
         Err(e) => RepoNameOutcome::Unreadable(names_repo_file(format!("{e:#}"))),
         Ok(Some(name)) => RepoNameOutcome::Confirmed(name),
-        Ok(None) => match elicited.as_deref().map(str::trim) {
-            None | Some("") => RepoNameOutcome::Unconfirmed(suggestion.clone()),
-            Some(answer) => match RepoName::parse(answer) {
-                Ok(name) => RepoNameOutcome::Write(name),
-                Err(error) => RepoNameOutcome::Invalid {
-                    input: answer.to_string(),
-                    error,
+        Ok(None) => match elicited {
+            ElicitAnswer::Declined => RepoNameOutcome::Declined(suggestion.clone()),
+            ElicitAnswer::Unavailable => RepoNameOutcome::Unconfirmed(suggestion.clone()),
+            ElicitAnswer::Answer(answer) => match answer.trim() {
+                "" => RepoNameOutcome::Unconfirmed(suggestion.clone()),
+                answer => match RepoName::parse(answer) {
+                    Ok(name) => RepoNameOutcome::Write(name),
+                    Err(error) => RepoNameOutcome::Invalid {
+                        input: answer.to_string(),
+                        error,
+                    },
                 },
             },
         },
@@ -801,18 +852,244 @@ fn repo_name_outcome(
 /// holding `.git`, a directory or a file, as `CurrentProject` finds it), else `project_root`
 /// itself when no git is above it. Keys are repo-relative paths, so every project in one repo
 /// shares this root and the one name kept there.
-fn repo_root_of(project_root: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn repo_root_of(project_root: &std::path::Path) -> std::path::PathBuf {
     crate::librarian::current_project::lookup_git_root(project_root)
         .unwrap_or_else(|| project_root.to_path_buf())
 }
 
-/// The `repo_name` block of an `onboarding` response. Reads the file once, asks the user
-/// only when it is absent, and writes only a validated answer to an absent file. `root` is the
-/// repo root.
-async fn repo_name_block(ctx: &ToolContext, root: &std::path::Path) -> Value {
-    let existing = repo_name::read(root);
+/// `.codescout/project.toml` under a project root: where a declined dialog is remembered.
+const PROJECT_TOML_REL: &str = ".codescout/project.toml";
+
+/// The `[project]` key that holds the remembered decline (`ProjectSection::repo_name_declined`).
+const REPO_NAME_DECLINED_KEY: &str = "repo_name_declined";
+
+/// What `checkouts` says when nothing was scanned.
+const NOT_SCANNED_NO_CLIENT: &str = "not scanned: no interactive client";
+
+/// What one `onboarding` call learned from the machine, resolved once at `Onboarding::call` and
+/// handed to the pure block builders: they read neither the environment nor the user's config.
+#[derive(Debug, Clone)]
+struct NameEdge {
+    /// `<project root>/.codescout/project.toml`.
+    project_toml: std::path::PathBuf,
+    /// The decline marker is set in `project_toml`.
+    declined: bool,
+    /// Where to look for other checkouts that use the name. `None`: nothing is scanned.
+    scan_roots: Option<Vec<std::path::PathBuf>>,
+    /// The home directory, shortened to `~` in what the caller reads.
+    home: Option<std::path::PathBuf>,
+}
+
+/// `path` with the home directory shortened to `~`, by path component: `/home/ma` does not
+/// shorten `/home/marius`.
+fn tilde(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
+    match home.and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
+/// `text` with every spelling of the home directory shortened to `~`.
+fn scrub_home(text: &str, home: Option<&std::path::Path>) -> String {
+    match home.and_then(|h| h.to_str()) {
+        Some(h) if !h.is_empty() && h != "/" => text.replace(h, "~"),
+        _ => text.to_string(),
+    }
+}
+
+/// The folders to look in for other checkouts: the folder that holds this repository, each
+/// `[[roots]]` path of the librarian's workspace config, and the folder that holds each umbrella
+/// member (a member is itself a checkout, so its siblings are the candidates).
+fn scan_roots_for(
+    repo_root: &std::path::Path,
+    workspace: Option<&crate::librarian::workspace::WorkspaceConfig>,
+) -> Vec<std::path::PathBuf> {
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    let mut add = |p: &std::path::Path| {
+        if !roots.iter().any(|r| r == p) {
+            roots.push(p.to_path_buf());
+        }
+    };
+    if let Some(parent) = repo_root.parent() {
+        add(parent);
+    }
+    if let Some(ws) = workspace {
+        for root in &ws.roots {
+            add(&root.path);
+        }
+        for member in ws.umbrellas.iter().flat_map(|u| &u.members) {
+            if let Some(parent) = member.parent() {
+                add(parent);
+            }
+        }
+    }
+    roots
+}
+
+/// The librarian's global workspace config, or `None` when it is absent or unreadable (the scan
+/// then covers the folder that holds the repository).
+fn machine_workspace() -> Option<crate::librarian::workspace::WorkspaceConfig> {
+    let path = crate::librarian::workspace::default_config_path().ok()?;
+    crate::librarian::workspace::load(&path).ok()
+}
+
+/// Resolve what the pure builders need from the machine. `scan` is true when a name is being
+/// chosen and a client that can ask is connected; only then is `workspace` called.
+fn name_edge(
+    scan: bool,
+    project_root: &std::path::Path,
+    repo_root: &std::path::Path,
+    workspace: impl FnOnce() -> Option<crate::librarian::workspace::WorkspaceConfig>,
+    home: Option<std::path::PathBuf>,
+) -> NameEdge {
+    let project_toml = project_root.join(PROJECT_TOML_REL);
+    NameEdge {
+        declined: read_decline_marker(&project_toml),
+        scan_roots: scan.then(|| scan_roots_for(repo_root, workspace().as_ref())),
+        project_toml,
+        home,
+    }
+}
+
+/// Whether the dialog should open: a name is missing and the user has not declined it.
+fn dialog_wanted(existing: &anyhow::Result<Option<RepoName>>, edge: &NameEdge) -> bool {
+    matches!(existing, Ok(None)) && !edge.declined
+}
+
+/// Whether `project_toml` carries the decline marker. A file that is absent, unreadable or
+/// malformed carries none.
+fn read_decline_marker(project_toml: &std::path::Path) -> bool {
+    let Ok(text) = crate::util::fs::read_regular_config_text(project_toml) else {
+        return false;
+    };
+    toml::from_str::<toml::Table>(&text)
+        .ok()
+        .and_then(|doc| doc.get("project")?.get(REPO_NAME_DECLINED_KEY)?.as_bool())
+        .unwrap_or(false)
+}
+
+/// Remember the decline in `project_toml`. `Ok(false)`: the file does not exist, so nothing is
+/// written and the dialog may ask again.
+fn remember_decline(project_toml: &std::path::Path) -> anyhow::Result<bool> {
+    if !project_toml.is_file() {
+        return Ok(false);
+    }
+    patch_project_table(project_toml, |project| {
+        project.insert(REPO_NAME_DECLINED_KEY.into(), toml::Value::Boolean(true));
+    })?;
+    Ok(true)
+}
+
+/// Remove the decline marker once a name is confirmed. The file is rewritten only when it carries
+/// the marker, because the rewrite drops comments. A failure leaves a marker that no longer
+/// matters (it is consulted only while no name exists), so it is logged, not reported.
+fn forget_decline(project_toml: &std::path::Path) {
+    if !read_decline_marker(project_toml) {
+        return;
+    }
+    if let Err(e) = patch_project_table(project_toml, |project| {
+        project.remove(REPO_NAME_DECLINED_KEY);
+    }) {
+        tracing::warn!("could not clear {REPO_NAME_DECLINED_KEY}: {e:#}");
+    }
+}
+
+/// How many entries of one list the `checkouts` block shows; the rest are counted.
+const CHECKOUTS_LISTED_MAX: usize = 10;
+
+/// `items`, at most [`CHECKOUTS_LISTED_MAX`] of them, then a count of the rest.
+fn capped(mut items: Vec<String>) -> Vec<String> {
+    if items.len() > CHECKOUTS_LISTED_MAX {
+        let more = items.len() - CHECKOUTS_LISTED_MAX;
+        items.truncate(CHECKOUTS_LISTED_MAX);
+        items.push(format!("... and {more} more"));
+    }
+    items
+}
+
+/// The `checkouts` block for a scan of `name`, with the home directory shortened to `~`. A
+/// result of "nothing found" carries the scope that was examined.
+fn render_checkouts(
+    report: &crate::librarian::identity::checkouts::ScanReport,
+    name: &RepoName,
+    home: Option<&std::path::Path>,
+) -> Value {
+    use crate::librarian::identity::checkouts::render_scope;
+    let shown = |paths: &[std::path::PathBuf]| -> Vec<String> {
+        capped(paths.iter().map(|p| tilde(p, home)).collect())
+    };
+    let mut scoped = report.clone();
+    scoped.roots = report
+        .roots
+        .iter()
+        .map(|r| std::path::PathBuf::from(tilde(r, home)))
+        .collect();
+    let mut block = json!({
+        "scope": render_scope(&scoped),
+        "same_repo": shown(&report.same_repo),
+        "collisions": shown(&report.collisions),
+        "unverified": shown(&report.unverified),
+    });
+    if !report.unreadable.is_empty() {
+        block["unreadable"] = json!(capped(
+            report
+                .unreadable
+                .iter()
+                .map(|(p, why)| format!("{}: {}", tilde(p, home), scrub_home(why, home)))
+                .collect()
+        ));
+    }
+    let mut notes = Vec::new();
+    if !report.same_repo.is_empty() {
+        notes.push(
+            "same_repo: checkouts that share a root commit with this repository. They look like \
+             clones of it; a shared root commit is evidence, not proof.",
+        );
+    }
+    if !report.unverified.is_empty() {
+        notes.push(
+            "unverified: checkouts that use this name and whose history could not be compared \
+             with this repository's (shallow, no git history, no commits yet, or the comparison \
+             did not finish in time).",
+        );
+    }
+    if !notes.is_empty() {
+        block["note"] = json!(notes.join(" "));
+    }
+    if !report.collisions.is_empty() {
+        block["instruction"] = json!(format!(
+            "Another repository on this machine already uses the name `{name}` (collisions). \
+             Pick a different name and call onboarding(repo_name=\"<name>\")."
+        ));
+    }
+    block
+}
+
+/// The `checkouts` block for the name being chosen: a scan of `edge.scan_roots`, or the reason
+/// nothing was scanned. `root` is this repository's root.
+fn checkouts_block(root: &std::path::Path, name: &RepoName, edge: &NameEdge) -> Value {
+    use crate::librarian::identity::checkouts::{scan, ScanLimits};
+    match &edge.scan_roots {
+        None => json!({"scope": NOT_SCANNED_NO_CLIENT}),
+        Some(roots) => {
+            let report = scan(name, root, roots, &ScanLimits::default());
+            render_checkouts(&report, name, edge.home.as_deref())
+        }
+    }
+}
+
+/// The `repo_name` block of an `onboarding` response. Asks the user only when no name exists and
+/// the user has not declined, and writes only a validated answer to an absent file. `root` is the
+/// repo root; `existing` is what `repo_name::read` found there.
+async fn repo_name_block(
+    ctx: &ToolContext,
+    root: &std::path::Path,
+    existing: anyhow::Result<Option<RepoName>>,
+    edge: NameEdge,
+) -> Value {
     let suggestion = repo_name::suggest(root);
-    let elicited = if matches!(existing, Ok(None)) {
+    let elicited = if dialog_wanted(&existing, &edge) {
         let prompt = format!(
             "Confirm the name of the repo at {root}. Suggested: `{s}`. Use lowercase letters, \
              digits and single hyphens. The name labels this repo in citations of the form \
@@ -820,27 +1097,38 @@ async fn repo_name_block(ctx: &ToolContext, root: &std::path::Path) -> Value {
             root = root.display(),
             s = suggestion
         );
-        // A declined, cancelled, unanswered or unsupported prompt is the same as no answer.
         // The wait is bounded: this call holds the project's write guard and runs inside the
         // server's tool timeout, and an answer that arrives too late is lost with the response.
-        ctx.elicit_with_timeout::<RepoNameInput>(prompt, ONBOARDING_ELICIT_TIMEOUT)
-            .await
-            .ok()
-            .flatten()
-            .map(|input| input.name)
+        elicit_answer(
+            ctx.elicit_with_timeout::<RepoNameInput>(prompt, ONBOARDING_ELICIT_TIMEOUT)
+                .await,
+        )
     } else {
-        None
+        ElicitAnswer::Unavailable
     };
-    repo_name_block_for(root, existing, elicited, &suggestion)
+    // The scan walks the file system for up to its own deadline: off the async executor.
+    let root = root.to_path_buf();
+    match tokio::task::spawn_blocking(move || {
+        repo_name_block_for(&root, existing, elicited, &suggestion, &edge)
+    })
+    .await
+    {
+        Ok(block) => block,
+        Err(e) => {
+            json!({"error": format!("the repo name check did not finish: {e}"), "confirmed": false})
+        }
+    }
 }
 
 /// The block for what `read` found and what the user answered: writes a valid answer to an
-/// absent file and maps every outcome to its response shape.
+/// absent file, remembers a decline, and maps every outcome to its response shape. While a name
+/// is being chosen the block also reports the other checkouts that use it.
 fn repo_name_block_for(
     root: &std::path::Path,
     existing: anyhow::Result<Option<RepoName>>,
-    elicited: Option<String>,
+    elicited: ElicitAnswer,
     suggestion: &RepoName,
+    edge: &NameEdge,
 ) -> Value {
     let unconfirmed = |s: &RepoName| {
         json!({
@@ -852,24 +1140,60 @@ fn repo_name_block_for(
             ),
         })
     };
-    match repo_name_outcome(existing, elicited, suggestion) {
-        RepoNameOutcome::Confirmed(n) => json!({"name": n.as_str(), "confirmed": true}),
+    // The block, and the name it is about when one is being chosen.
+    let (mut block, chosen) = match repo_name_outcome(existing, elicited, suggestion) {
+        RepoNameOutcome::Confirmed(n) => return json!({"name": n.as_str(), "confirmed": true}),
+        RepoNameOutcome::Unreadable(msg) => return json!({"error": msg, "confirmed": false}),
         RepoNameOutcome::Write(n) => match repo_name::write(root, &n) {
-            Ok(path) => json!({
-                "name": n.as_str(),
-                "confirmed": true,
-                "written": path.display().to_string(),
-            }),
-            Err(e) => json!({"error": names_repo_file(format!("{e:#}")), "confirmed": false}),
+            Ok(path) => {
+                forget_decline(&edge.project_toml);
+                let block = json!({
+                    "name": n.as_str(),
+                    "confirmed": true,
+                    "written": path.display().to_string(),
+                });
+                (block, n)
+            }
+            Err(e) => {
+                return json!({"error": names_repo_file(format!("{e:#}")), "confirmed": false})
+            }
         },
-        RepoNameOutcome::Unconfirmed(s) => unconfirmed(&s),
-        RepoNameOutcome::Unreadable(msg) => json!({"error": msg, "confirmed": false}),
+        RepoNameOutcome::Unconfirmed(s) => {
+            let mut block = unconfirmed(&s);
+            if edge.declined {
+                block["declined"] = json!(true);
+            }
+            (block, s)
+        }
+        RepoNameOutcome::Declined(s) => {
+            let mut block = unconfirmed(&s);
+            block["declined"] = json!(true);
+            match remember_decline(&edge.project_toml) {
+                Ok(remembered) => block["remembered"] = json!(remembered),
+                Err(e) => {
+                    block["remembered"] = json!(false);
+                    block["remember_error"] = json!(format!("{e:#}"));
+                }
+            }
+            (block, s)
+        }
         RepoNameOutcome::Invalid { input, error } => {
             let mut block = unconfirmed(suggestion);
             block["error"] = json!(format!("repo name `{input}` is not canonical: {error}"));
-            block
+            (block, suggestion.clone())
+        }
+    };
+    let checkouts = checkouts_block(root, &chosen, edge);
+    if checkouts.get("collisions").is_some_and(|c| c != &json!([])) {
+        if let Some(text) = block["instruction"].as_str() {
+            block["instruction"] = json!(format!(
+                "{text} Another repository on this machine already uses `{chosen}` (see \
+                 checkouts.collisions): suggest a different name."
+            ));
         }
     }
+    block["checkouts"] = checkouts;
+    block
 }
 
 /// `msg`, prefixed with the file's path when it does not already name `repo.toml`.
@@ -882,9 +1206,10 @@ fn names_repo_file(msg: String) -> String {
 }
 
 /// `onboarding(repo_name=...)`: record the name the user confirmed at the repo root `root`. A
-/// valid name replaces an
-/// existing valid one; a file that cannot be read is reported and left as it is.
-fn set_repo_name(root: &std::path::Path, raw: &str) -> anyhow::Result<Value> {
+/// valid name replaces an existing valid one; a file that cannot be read is reported and left as
+/// it is. A confirmed name removes a remembered decline, and the response reports the other
+/// checkouts that use the name.
+fn set_repo_name(root: &std::path::Path, raw: &str, edge: &NameEdge) -> anyhow::Result<Value> {
     let name = RepoName::parse(raw.trim()).map_err(|e| {
         super::RecoverableError::with_hint(
             format!("repo name {raw} is not canonical: {e} ({REPO_FILE_REL} not written)"),
@@ -908,11 +1233,13 @@ fn set_repo_name(root: &std::path::Path, raw: &str) -> anyhow::Result<Value> {
             ),
         )
     })?;
+    forget_decline(&edge.project_toml);
     Ok(json!({
         "repo_name": {
             "name": name.as_str(),
             "confirmed": true,
             "written": written.display().to_string(),
+            "checkouts": checkouts_block(root, &name, edge),
         }
     }))
 }
@@ -1369,6 +1696,7 @@ async fn perform_full_onboarding(
                 // instead of finding itself already certified.
                 onboarding_version: None,
                 system_prompt_sha256: None,
+                repo_name_declined: false,
             },
             embeddings: recommended_embeddings,
             ignored_paths: Default::default(),
@@ -1763,7 +2091,7 @@ mod tests {
         let s = RepoName::parse("suggested").unwrap();
         let have = RepoName::parse("codescout").unwrap();
         assert!(
-            matches!(repo_name_outcome(Ok(Some(have)), Some("other".into()), &s),
+            matches!(repo_name_outcome(Ok(Some(have)), ElicitAnswer::Answer("other".into()), &s),
             RepoNameOutcome::Confirmed(n) if n.as_str() == "codescout")
         );
     }
@@ -1772,11 +2100,11 @@ mod tests {
     fn outcome_writes_an_elicited_name_and_reports_an_invalid_one() {
         let s = RepoName::parse("suggested").unwrap();
         assert!(
-            matches!(repo_name_outcome(Ok(None), Some(" codescout ".into()), &s),
+            matches!(repo_name_outcome(Ok(None), ElicitAnswer::Answer(" codescout ".into()), &s),
             RepoNameOutcome::Write(n) if n.as_str() == "codescout")
         );
         assert!(matches!(
-            repo_name_outcome(Ok(None), Some("Code Scout".into()), &s),
+            repo_name_outcome(Ok(None), ElicitAnswer::Answer("Code Scout".into()), &s),
             RepoNameOutcome::Invalid { .. }
         ));
     }
@@ -1785,10 +2113,10 @@ mod tests {
     fn outcome_is_unconfirmed_without_elicitation_or_with_an_empty_answer() {
         let s = RepoName::parse("suggested").unwrap();
         assert!(
-            matches!(repo_name_outcome(Ok(None), None, &s), RepoNameOutcome::Unconfirmed(n) if n.as_str() == "suggested")
+            matches!(repo_name_outcome(Ok(None), ElicitAnswer::Unavailable, &s), RepoNameOutcome::Unconfirmed(n) if n.as_str() == "suggested")
         );
         assert!(matches!(
-            repo_name_outcome(Ok(None), Some("  ".into()), &s),
+            repo_name_outcome(Ok(None), ElicitAnswer::Answer("  ".into()), &s),
             RepoNameOutcome::Unconfirmed(_)
         ));
     }
@@ -1798,7 +2126,7 @@ mod tests {
         let s = RepoName::parse("suggested").unwrap();
         let out = repo_name_outcome(
             Err(anyhow::anyhow!("reading .codescout/repo.toml: bad")),
-            Some("x".into()),
+            ElicitAnswer::Answer("x".into()),
             &s,
         );
         assert!(matches!(out, RepoNameOutcome::Unreadable(m) if m.contains("repo.toml")));
@@ -2030,7 +2358,11 @@ mod tests {
 
     fn for_block(dir: &std::path::Path, elicited: Option<&str>) -> Value {
         let suggestion = RepoName::parse("suggested").unwrap();
-        repo_name_block_for(dir, Ok(None), elicited.map(String::from), &suggestion)
+        let answer = match elicited {
+            Some(name) => ElicitAnswer::Answer(name.into()),
+            None => ElicitAnswer::Unavailable,
+        };
+        repo_name_block_for(dir, Ok(None), answer, &suggestion, &edge_for(dir))
     }
 
     #[test]
@@ -2108,6 +2440,513 @@ mod tests {
             .expect("a RecoverableError");
         assert!(rec.message.contains("repo.toml"), "{}", rec.message);
         assert!(rec.hint().is_some());
+    }
+    // ---- the three-state answer, the remembered decline, the checkout scan ----
+
+    type P = std::path::Path;
+
+    fn sname(s: &str) -> RepoName {
+        RepoName::parse(s).unwrap()
+    }
+
+    fn edge_for(dir: &P) -> NameEdge {
+        NameEdge {
+            project_toml: dir.join(PROJECT_TOML_REL),
+            declined: false,
+            scan_roots: None,
+            home: None,
+        }
+    }
+
+    fn write_project_toml(dir: &P, text: &str) {
+        std::fs::create_dir_all(dir.join(".codescout")).unwrap();
+        std::fs::write(dir.join(PROJECT_TOML_REL), text).unwrap();
+    }
+
+    fn recoverable(msg: &str) -> anyhow::Error {
+        crate::tools::RecoverableError::with_hint(msg, "hint").into()
+    }
+
+    fn project_table(dir: &P) -> toml::Table {
+        toml::from_str(&std::fs::read_to_string(dir.join(PROJECT_TOML_REL)).unwrap()).unwrap()
+    }
+
+    /// A git repository at `dir` with a project file, a repo file naming `name` (none when
+    /// `None`) and a `marker.txt`. The marker makes two repositories built in the same second
+    /// differ in their root commit: identical trees would give identical commit ids.
+    fn make_checkout(dir: &P, name: Option<&str>, marker: &str) {
+        std::fs::create_dir_all(dir.join(".codescout")).unwrap();
+        std::fs::write(dir.join(PROJECT_TOML_REL), "").unwrap();
+        std::fs::write(dir.join("marker.txt"), marker).unwrap();
+        let mut files = vec![P::new(PROJECT_TOML_REL), P::new("marker.txt")];
+        if let Some(n) = name {
+            std::fs::write(dir.join(REPO_FILE_REL), format!("name = \"{n}\"\n")).unwrap();
+            files.push(P::new(REPO_FILE_REL));
+        }
+        let repo = git2::Repository::init(dir).unwrap();
+        let mut index = repo.index().unwrap();
+        for f in files {
+            index.add_path(f).unwrap();
+        }
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("t", "t@t").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+    }
+
+    fn scanning(roots: &[&P], home: Option<&P>, dir: &P) -> NameEdge {
+        NameEdge {
+            scan_roots: Some(roots.iter().map(|r| r.to_path_buf()).collect()),
+            home: home.map(P::to_path_buf),
+            ..edge_for(dir)
+        }
+    }
+
+    #[test]
+    fn declined_and_cancelled_and_timeout_are_three_different_answers() {
+        use crate::tools::core::types::{ELICIT_CANCELLED_MSG, ELICIT_DECLINED_MSG};
+        let typed = |name: &str| Ok(Some(RepoNameInput { name: name.into() }));
+        assert!(matches!(elicit_answer(typed("x")), ElicitAnswer::Answer(n) if n == "x"));
+        // The user said no, or closed the dialog: a decision, remembered.
+        assert!(matches!(
+            elicit_answer(Err(recoverable(ELICIT_DECLINED_MSG))),
+            ElicitAnswer::Declined
+        ));
+        assert!(matches!(
+            elicit_answer(Err(recoverable(ELICIT_CANCELLED_MSG))),
+            ElicitAnswer::Declined
+        ));
+        // Nobody answered (timeout, no elicitation support, empty content): not a decision.
+        assert!(matches!(elicit_answer(Ok(None)), ElicitAnswer::Unavailable));
+        // Any other failure is not a decision either, even a recoverable one.
+        assert!(matches!(
+            elicit_answer(Err(recoverable("Could not parse elicitation response: x"))),
+            ElicitAnswer::Unavailable
+        ));
+        assert!(matches!(
+            elicit_answer(Err(anyhow::anyhow!("transport closed"))),
+            ElicitAnswer::Unavailable
+        ));
+    }
+
+    #[test]
+    fn a_declined_dialog_writes_the_marker_and_stops_asking() {
+        let dir = tempfile::tempdir().unwrap();
+        write_project_toml(dir.path(), "[project]\nname = \"t\"\n");
+        let edge = edge_for(dir.path());
+        assert!(dialog_wanted(&Ok(None), &edge));
+
+        let block = repo_name_block_for(
+            dir.path(),
+            Ok(None),
+            ElicitAnswer::Declined,
+            &sname("suggested"),
+            &edge,
+        );
+        assert_eq!(block["declined"], true, "{block}");
+        assert_eq!(block["remembered"], true, "{block}");
+        assert_eq!(block["confirmed"], false, "{block}");
+        assert_eq!(block["suggested"], "suggested", "{block}");
+        assert!(!dir.path().join(REPO_FILE_REL).exists());
+        let table = project_table(dir.path());
+        assert_eq!(table["project"]["repo_name_declined"].as_bool(), Some(true));
+        assert_eq!(table["project"]["name"].as_str(), Some("t"), "kept");
+
+        // The next call reads the marker from disk and does not open the dialog.
+        let next = name_edge(true, dir.path(), dir.path(), || None, None);
+        assert!(next.declined);
+        assert!(!dialog_wanted(&Ok(None), &next));
+        let again = repo_name_block_for(
+            dir.path(),
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &sname("suggested"),
+            &next,
+        );
+        assert_eq!(again["declined"], true, "{again}");
+        assert_eq!(again["confirmed"], false, "{again}");
+        assert!(again["instruction"]
+            .as_str()
+            .unwrap()
+            .contains("`suggested`"));
+    }
+
+    #[test]
+    fn a_confirmed_write_clears_the_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let marked = "[project]\nname = \"t\"\nrepo_name_declined = true\n";
+        write_project_toml(dir.path(), marked);
+        let edge = name_edge(false, dir.path(), dir.path(), || None, None);
+        assert!(edge.declined);
+
+        // An elicited name.
+        let block = repo_name_block_for(
+            dir.path(),
+            Ok(None),
+            ElicitAnswer::Answer("codescout".into()),
+            &sname("suggested"),
+            &edge,
+        );
+        assert_eq!(block["confirmed"], true, "{block}");
+        let table = project_table(dir.path());
+        assert!(table["project"].get("repo_name_declined").is_none());
+        assert_eq!(table["project"]["name"].as_str(), Some("t"), "kept");
+
+        // `onboarding(repo_name=...)`.
+        write_project_toml(dir.path(), marked);
+        set_repo_name(dir.path(), "other-name", &edge).unwrap();
+        let table = project_table(dir.path());
+        assert!(table["project"].get("repo_name_declined").is_none());
+        assert_eq!(table["project"]["name"].as_str(), Some("t"), "kept");
+    }
+
+    #[test]
+    fn a_confirmed_write_leaves_a_project_toml_without_the_marker_byte_for_byte() {
+        let dir = tempfile::tempdir().unwrap();
+        // `patch_project_table` drops comments: it must not run when there is nothing to clear.
+        let text = "# mine\n[project]\nname = \"t\"\n";
+        write_project_toml(dir.path(), text);
+        let edge = edge_for(dir.path());
+        repo_name_block_for(
+            dir.path(),
+            Ok(None),
+            ElicitAnswer::Answer("codescout".into()),
+            &sname("suggested"),
+            &edge,
+        );
+        set_repo_name(dir.path(), "other-name", &edge).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(PROJECT_TOML_REL)).unwrap(),
+            text
+        );
+    }
+
+    #[test]
+    fn no_project_toml_means_the_decline_is_not_remembered_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let edge = edge_for(dir.path());
+        let block = repo_name_block_for(
+            dir.path(),
+            Ok(None),
+            ElicitAnswer::Declined,
+            &sname("suggested"),
+            &edge,
+        );
+        assert_eq!(block["declined"], true, "{block}");
+        assert_eq!(block["remembered"], false, "{block}");
+        assert_eq!(block["confirmed"], false, "{block}");
+        // Nothing was created, so the next call may ask again.
+        assert!(!dir.path().join(PROJECT_TOML_REL).exists());
+        assert!(!dir.path().join(".codescout").exists());
+        let next = name_edge(true, dir.path(), dir.path(), || None, None);
+        assert!(!next.declined);
+        assert!(dialog_wanted(&Ok(None), &next));
+    }
+
+    #[test]
+    fn an_existing_name_is_never_overwritten_by_a_decline() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = "[project]\nname = \"t\"\n";
+        write_project_toml(dir.path(), text);
+        let edge = edge_for(dir.path());
+        let block = repo_name_block_for(
+            dir.path(),
+            Ok(Some(sname("codescout"))),
+            ElicitAnswer::Declined,
+            &sname("suggested"),
+            &edge,
+        );
+        assert_eq!(block, json!({"name": "codescout", "confirmed": true}));
+        // Nothing is remembered either: the name already settles the question.
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(PROJECT_TOML_REL)).unwrap(),
+            text
+        );
+        assert!(!dir.path().join(REPO_FILE_REL).exists());
+    }
+
+    #[test]
+    fn the_marker_key_is_the_serde_name_of_the_field() {
+        let mut config = crate::config::project::ProjectConfig::default_for("x".into());
+        let plain = toml::to_string(&config).unwrap();
+        assert!(!plain.contains(REPO_NAME_DECLINED_KEY), "{plain}");
+        config.project.repo_name_declined = true;
+        let marked: toml::Table = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(
+            marked["project"][REPO_NAME_DECLINED_KEY].as_bool(),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn the_block_names_the_scope_it_scanned_even_when_nothing_was_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_checkout(&this, None, "a");
+        let empty = tmp.path().join("work");
+        std::fs::create_dir_all(&empty).unwrap();
+        // The home directory is shortened to `~` in what the caller reads.
+        let edge = scanning(&[&empty], Some(tmp.path()), &this);
+        let block = repo_name_block_for(
+            &this,
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &sname("alpha"),
+            &edge,
+        );
+        let c = &block["checkouts"];
+        let scope = c["scope"].as_str().expect("a scope");
+        assert!(scope.contains("~/work"), "{scope}");
+        assert!(!scope.contains(tmp.path().to_str().unwrap()), "{scope}");
+        assert!(scope.contains("1 directories visited"), "{scope}");
+        assert!(scope.contains("no bound was hit"), "{scope}");
+        assert_eq!(c["same_repo"], json!([]), "{c}");
+        assert_eq!(c["collisions"], json!([]), "{c}");
+        assert_eq!(c["unverified"], json!([]), "{c}");
+        assert!(c.get("instruction").is_none(), "{c}");
+    }
+
+    #[test]
+    fn a_collision_adds_an_instruction() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_checkout(&this, None, "a");
+        let work = tmp.path().join("work");
+        make_checkout(&work.join("other"), Some("alpha"), "b");
+        make_checkout(&work.join("bystander"), Some("beta"), "c");
+        let edge = scanning(&[&work], Some(tmp.path()), &this);
+
+        let block = repo_name_block_for(
+            &this,
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &sname("alpha"),
+            &edge,
+        );
+        let c = &block["checkouts"];
+        assert_eq!(c["collisions"], json!(["~/work/other"]), "{c}");
+        assert_eq!(c["same_repo"], json!([]), "{c}");
+        let instruction = c["instruction"].as_str().expect("an instruction");
+        assert!(instruction.contains("different name"), "{instruction}");
+        assert!(
+            instruction.contains("onboarding(repo_name="),
+            "{instruction}"
+        );
+        // The suggestion the caller is about to confirm is the colliding name.
+        assert!(
+            block["instruction"]
+                .as_str()
+                .unwrap()
+                .contains("collisions"),
+            "{block}"
+        );
+
+        // A name nobody else uses has none.
+        let free = repo_name_block_for(
+            &this,
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &sname("gamma"),
+            &edge,
+        );
+        assert_eq!(free["checkouts"]["collisions"], json!([]), "{free}");
+        assert!(free["checkouts"].get("instruction").is_none(), "{free}");
+    }
+
+    #[test]
+    fn a_clone_is_listed_as_a_likely_clone_and_is_not_a_collision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_checkout(&this, None, "a");
+        let copy = tmp.path().join("work/copy");
+        std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        git2::Repository::clone(this.to_str().unwrap(), &copy).unwrap();
+        std::fs::create_dir_all(copy.join(".codescout")).unwrap();
+        std::fs::write(copy.join(REPO_FILE_REL), "name = \"alpha\"\n").unwrap();
+        let edge = scanning(&[&tmp.path().join("work")], Some(tmp.path()), &this);
+
+        let block = repo_name_block_for(
+            &this,
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &sname("alpha"),
+            &edge,
+        );
+        let c = &block["checkouts"];
+        assert_eq!(c["same_repo"], json!(["~/work/copy"]), "{c}");
+        assert_eq!(c["collisions"], json!([]), "{c}");
+        assert!(c.get("instruction").is_none(), "{c}");
+        let note = c["note"].as_str().expect("a note");
+        assert!(note.contains("look like clones"), "{note}");
+        assert!(!note.contains("is the same repository"), "{note}");
+    }
+
+    #[test]
+    fn setting_a_name_reports_the_checkouts_that_use_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_checkout(&this, None, "a");
+        let work = tmp.path().join("work");
+        make_checkout(&work.join("other"), Some("alpha"), "b");
+        let edge = scanning(&[&work], Some(tmp.path()), &this);
+        let out = set_repo_name(&this, "alpha", &edge).unwrap();
+        assert_eq!(out["repo_name"]["name"], "alpha", "{out}");
+        assert_eq!(
+            out["repo_name"]["checkouts"]["collisions"],
+            json!(["~/work/other"]),
+            "{out}"
+        );
+        assert!(out["repo_name"]["checkouts"]["instruction"].is_string());
+    }
+
+    #[test]
+    fn a_confirmed_name_read_does_not_scan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_checkout(&this, Some("alpha"), "a");
+        let work = tmp.path().join("work");
+        make_checkout(&work.join("other"), Some("alpha"), "b");
+        let edge = scanning(&[&work], None, &this);
+
+        let confirmed = repo_name_block_for(
+            &this,
+            repo_name::read(&this),
+            ElicitAnswer::Unavailable,
+            &sname("alpha"),
+            &edge,
+        );
+        assert_eq!(confirmed, json!({"name": "alpha", "confirmed": true}));
+
+        // Control: the same roots, with a name still to choose, do find the other checkout.
+        let choosing = repo_name_block_for(
+            &this,
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &sname("alpha"),
+            &edge,
+        );
+        assert_eq!(
+            choosing["checkouts"]["collisions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn no_interactive_client_means_no_scan_and_the_scope_says_so() {
+        // The workspace config is not read without a client to ask.
+        let edge = name_edge(
+            false,
+            P::new("/p"),
+            P::new("/p"),
+            || panic!("read the machine's workspace config without an interactive client"),
+            Some(std::path::PathBuf::from("/home/u")),
+        );
+        assert!(edge.scan_roots.is_none());
+        let dir = tempfile::tempdir().unwrap();
+        let block = repo_name_block_for(
+            dir.path(),
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &sname("suggested"),
+            &edge_for(dir.path()),
+        );
+        assert_eq!(
+            block["checkouts"],
+            json!({"scope": "not scanned: no interactive client"}),
+            "{block}"
+        );
+        // A name chosen through the parameter says the same.
+        let set = set_repo_name(dir.path(), "chosen", &edge_for(dir.path())).unwrap();
+        assert_eq!(
+            set["repo_name"]["checkouts"],
+            json!({"scope": "not scanned: no interactive client"}),
+            "{set}"
+        );
+
+        // Through the tool: the test context has no peer.
+        let (_dir, ctx) = repo_name_ctx().await;
+        assert!(ctx.peer.is_none());
+        let out = Onboarding.call(json!({}), &ctx).await.unwrap();
+        assert_eq!(
+            out["repo_name"]["checkouts"]["scope"], "not scanned: no interactive client",
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_client_that_can_ask_scans_the_repos_parent_the_roots_and_the_umbrella_members_parents() {
+        use crate::librarian::workspace::{Root, Umbrella, WorkspaceConfig};
+        let ws = WorkspaceConfig {
+            roots: vec![Root {
+                name: "r".into(),
+                path: "/srv/code".into(),
+            }],
+            umbrellas: vec![Umbrella {
+                name: "u".into(),
+                members: vec!["/data/one/proj".into(), "/data/two/proj".into()],
+            }],
+            ..WorkspaceConfig::default()
+        };
+        let edge = name_edge(
+            true,
+            P::new("/w/repo"),
+            P::new("/w/repo"),
+            || Some(ws),
+            None,
+        );
+        let roots = edge.scan_roots.expect("scanning");
+        let expected: Vec<std::path::PathBuf> = ["/w", "/srv/code", "/data/one", "/data/two"]
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect();
+        assert_eq!(roots, expected);
+
+        // No workspace config: the repository's own parent is still scanned.
+        let edge = name_edge(true, P::new("/w/repo"), P::new("/w/repo"), || None, None);
+        assert_eq!(edge.scan_roots, Some(vec![std::path::PathBuf::from("/w")]));
+    }
+
+    #[test]
+    fn a_long_list_is_capped_and_says_how_many_are_left_and_unreadable_entries_lose_the_home() {
+        use crate::librarian::identity::checkouts::ScanReport;
+        let report = ScanReport {
+            roots: vec!["/home/ma/work".into()],
+            same_repo: (0..13)
+                .map(|i| std::path::PathBuf::from(format!("/home/ma/work/c{i:02}")))
+                .collect(),
+            unreadable: vec![(
+                "/home/ma/work/locked".into(),
+                "opening the repository at /home/ma/work/locked: denied".into(),
+            )],
+            ..ScanReport::default()
+        };
+        let c = render_checkouts(&report, &sname("alpha"), Some(P::new("/home/ma")));
+        let same = c["same_repo"].as_array().unwrap();
+        assert_eq!(same.len(), CHECKOUTS_LISTED_MAX + 1, "{c}");
+        assert_eq!(same[0], "~/work/c00");
+        assert_eq!(same[CHECKOUTS_LISTED_MAX], "... and 3 more");
+        let unreadable = c["unreadable"][0].as_str().unwrap();
+        assert_eq!(
+            unreadable,
+            "~/work/locked: opening the repository at ~/work/locked: denied"
+        );
+        assert!(!c.to_string().contains("/home/ma"), "{c}");
+    }
+
+    #[test]
+    fn the_home_directory_is_shortened_by_component_not_by_prefix() {
+        let home = P::new("/home/ma");
+        assert_eq!(tilde(P::new("/home/ma/work"), Some(home)), "~/work");
+        assert_eq!(tilde(P::new("/home/ma"), Some(home)), "~");
+        assert_eq!(
+            tilde(P::new("/home/marius/work"), Some(home)),
+            "/home/marius/work"
+        );
+        assert_eq!(tilde(P::new("/home/ma/work"), None), "/home/ma/work");
     }
 }
 

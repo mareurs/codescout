@@ -77,6 +77,11 @@ pub struct ProjectSection {
     /// would report another machine's stale prompt as current.
     #[serde(default)]
     pub system_prompt_sha256: Option<String>,
+    /// The user declined the repo-name dialog `onboarding` opens, and the choice is remembered so
+    /// that it does not ask again. Written by `onboarding` only when it declines; removed when a
+    /// name is confirmed. `project.toml` is gitignored, so the choice is this machine's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub repo_name_declined: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1005,6 +1010,7 @@ impl ProjectConfig {
                 system_prompt: None,
                 onboarding_version: None,
                 system_prompt_sha256: None,
+                repo_name_declined: false,
             },
             embeddings: EmbeddingsSection::default(),
             ignored_paths: IgnoredPathsSection::default(),

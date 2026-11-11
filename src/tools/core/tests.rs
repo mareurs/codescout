@@ -2507,7 +2507,7 @@ fn elicit_user_declined_is_recoverable_error() {
     // not a plain anyhow error (isError: true). We verify this by constructing the
     // error the same way the elicit() match arm does and checking the downcast.
     let e: anyhow::Error = RecoverableError::with_hint(
-        "User declined the elicitation request",
+        ELICIT_DECLINED_MSG,
         "Re-issue the call with a more specific argument to avoid the disambiguation prompt",
     )
     .into();
@@ -2522,7 +2522,7 @@ fn elicit_user_cancelled_is_recoverable_error() {
     // UserCancelled must produce a RecoverableError (isError: false at MCP level),
     // not a plain anyhow error (isError: true).
     let e: anyhow::Error = RecoverableError::with_hint(
-        "User cancelled the elicitation request",
+        ELICIT_CANCELLED_MSG,
         "Re-issue the call with a more specific argument to avoid the disambiguation prompt",
     )
     .into();

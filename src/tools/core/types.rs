@@ -512,6 +512,15 @@ pub(super) async fn displaced_default_notice(
 /// it gives up on rmcp's timeout and cancel notification.
 const ELICIT_BACKSTOP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// The message of the [`RecoverableError`] that [`ToolContext::elicit`] returns when the user
+/// declines the dialog. A caller that tells a decline from other failures matches on this string,
+/// so the producer and the consumer share one.
+pub(crate) const ELICIT_DECLINED_MSG: &str = "User declined the elicitation request";
+
+/// The message of the [`RecoverableError`] that [`ToolContext::elicit`] returns when the user
+/// cancels (closes) the dialog. See [`ELICIT_DECLINED_MSG`].
+pub(crate) const ELICIT_CANCELLED_MSG: &str = "User cancelled the elicitation request";
+
 /// `fut`'s output, or `None` once `limit` has passed without it completing.
 pub(crate) async fn bounded<F: std::future::Future>(
     limit: std::time::Duration,
@@ -1002,13 +1011,13 @@ impl ToolContext {
                 rmcp::service::ServiceError::Timeout { .. },
             )) => Ok(None),
             Err(rmcp::service::ElicitationError::UserDeclined) => Err(RecoverableError::with_hint(
-                "User declined the elicitation request",
+                ELICIT_DECLINED_MSG,
                 "Re-issue the call with a more specific argument to avoid the disambiguation prompt",
             )
             .into()),
             Err(rmcp::service::ElicitationError::UserCancelled) => {
                 Err(RecoverableError::with_hint(
-                    "User cancelled the elicitation request",
+                    ELICIT_CANCELLED_MSG,
                     "Re-issue the call with a more specific argument to avoid the disambiguation prompt",
                 )
                 .into())
