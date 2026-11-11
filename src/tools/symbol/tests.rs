@@ -7646,6 +7646,48 @@ fn the_rename_refusal_stays_in_its_telemetry_family_whatever_the_names_say() {
         "stored text: {stored}"
     );
 }
+/// The hint of the several-symbols refusal is also calls the caller can send as they stand.
+/// It kept `symbol=...` placeholders after the rename refusal's hint lost its own
+/// (`the_rename_refusal_hint_carries_both_calls_ready_to_send`), so one file spoke two styles.
+///
+/// Three calls, in the order the caller needs them: `replace` the target with only its own
+/// declaration, `insert` the other declarations after it, or `rename` it. The data the tool
+/// cannot know (the declaration text, the new name) stays a `<...>` slot; `symbol` and `path`
+/// are this call's own and are filled in.
+#[test]
+fn the_several_symbols_refusal_hint_carries_its_calls_ready_to_send() {
+    use super::edit_code::replace_by_several_reason;
+
+    let names = vec!["a".to_string(), "b".to_string()];
+    let (_message, hint) = replace_by_several_reason("foo", "src/lib.rs", &names);
+    assert!(
+        hint.contains(r#"edit_code(action="replace", symbol="foo", path="src/lib.rs", body="#),
+        "the first call keeps the target's own name; got: {hint}"
+    );
+    assert!(
+        hint.contains(
+            r#"edit_code(action="insert", symbol="foo", path="src/lib.rs", position="after", body="#
+        ),
+        "the other declarations go after the target; got: {hint}"
+    );
+    assert!(
+        hint.contains(r#"edit_code(action="rename", symbol="foo", path="src/lib.rs", new_name="#),
+        "a rename of the target stays reachable; got: {hint}"
+    );
+    assert!(
+        !hint.contains("symbol=..."),
+        "a placeholder left in the hint makes the caller rebuild the call; got: {hint}"
+    );
+
+    // A nested target is addressed as the caller addressed it, in all three calls.
+    let (_message, hint) = replace_by_several_reason("Agent/old", "src/agent.rs", &names);
+    assert_eq!(
+        hint.matches(r#"symbol="Agent/old", path="src/agent.rs""#)
+            .count(),
+        3,
+        "all three calls address the caller's own name path; got: {hint}"
+    );
+}
 
 /// FR-13: one Python METHOD replaced by a body that holds SEVERAL methods, none under the
 /// target's name. Two rows (2026-10-28 and 2026-10-29) were told "dropped the symbol

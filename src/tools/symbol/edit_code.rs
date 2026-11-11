@@ -457,6 +457,39 @@ pub(crate) fn replace_would_rename_reason(
         ),
     )
 }
+/// Rollback message for a `replace` whose body declares SEVERAL symbols and none of them is the
+/// target (`CorruptionVerdict::TargetReplacedBySeveral`).
+///
+/// Wording of the message is load-bearing for telemetry: `usage::db::normalize_err_family` reads
+/// it. The hint is built per call so the caller can send its calls as they stand.
+pub(crate) fn replace_by_several_reason(
+    name_path: &str,
+    rel_path: &str,
+    new_names: &[String],
+) -> (String, String) {
+    (
+        format!(
+            "edit_code replace('{name_path}') was given a body that declares {} \
+             symbols ({}) and none of them is `{name_path}`. `replace` swaps one \
+             symbol for one symbol and keeps its name. File restored.",
+            new_names.len(),
+            new_names
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        format!(
+            "To keep `{name_path}`, send two calls in order: (1) \
+             edit_code(action=\"replace\", symbol=\"{name_path}\", path=\"{rel_path}\", \
+             body=<only the declaration of `{name_path}`, under its own name>), then (2) \
+             edit_code(action=\"insert\", symbol=\"{name_path}\", path=\"{rel_path}\", \
+             position=\"after\", body=<the other declarations>). To rename it instead, \
+             use edit_code(action=\"rename\", symbol=\"{name_path}\", path=\"{rel_path}\", \
+             new_name=<the new name>)."
+        ),
+    )
+}
 
 /// A rollback reason with the hint owned: lets the arms that return a `&'static str` hint
 /// share a `match` with `replace_would_rename_reason`, whose hint is built per call.
@@ -1543,24 +1576,9 @@ impl EditCode {
             CorruptionVerdict::TargetRenamed(appeared) => {
                 Some(replace_would_rename_reason(name_path, rel_path, appeared))
             }
-            CorruptionVerdict::TargetReplacedBySeveral(new_names) => Some((
-                format!(
-                    "edit_code replace('{name_path}') was given a body that declares {} \
-                     symbols ({}) and none of them is `{name_path}`. `replace` swaps one \
-                     symbol for one symbol and keeps its name. File restored.",
-                    new_names.len(),
-                    new_names
-                        .iter()
-                        .map(|n| format!("`{n}`"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                "Replace `symbol` with a body that declares only that symbol, under its own \
-                 name, then add the others with edit_code(action=\"insert\", symbol=..., \
-                 position=\"after\", body=...). To rename it, use edit_code(action=\"rename\", \
-                 symbol=..., new_name=...)."
-                    .to_string(),
-            )),
+            CorruptionVerdict::TargetReplacedBySeveral(new_names) => {
+                Some(replace_by_several_reason(name_path, rel_path, new_names))
+            }
             CorruptionVerdict::TargetDropped => Some((
                 format!(
                     "edit_code replace('{name_path}') dropped the symbol definition — \
