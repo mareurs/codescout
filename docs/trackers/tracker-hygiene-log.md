@@ -7,7 +7,7 @@ tags:
 - hygiene
 - skill-meta
 - lifecycle
-entry_high_water_HY: 33
+entry_high_water_HY: 35
 entry_prefix: HY
 expects_augmentation: docs/augmentations/docs-trackers-tracker-hygiene-log.yaml
 next-sweep-due: 2026-11-29
@@ -2412,6 +2412,127 @@ Sweep committed as this commit.
 - **D9:** ten never-refreshed artifacts, all deferred.
 
 **Next sweep due:** 2026-11-29. Its first moves: HY-29's clock fix, then the deferred D10 logs from the list above, then the 12 deferred D3 findings grouped by stream (HY-30).
+
+## HY-34 — Proposal: measure docs/trackers/temp/ for two sweeps before choosing its cleanup policy
+
+**Valid:** dated 2026-11-11
+
+**Verdict:** proposal — parked decision, measure first.
+**Status:** open — collecting data; first sweep due 2026-11-29.
+
+**Context.** On 2026-11-11 the tracker-organization brainstorm created `docs/trackers/temp/`
+for temporary trackers. Its first file is `docs/trackers/temp/artifact-identity-refactor.md`.
+The owner decided **not** to design the cleanup policy yet ("we can park this decision until
+we measure it"). The sweep measures `temp/` instead, and the policy is decided from that
+data.
+
+**What each sweep records for every file under `docs/trackers/temp/`** (add a dated row to
+the sweep entry; no cleanup action yet):
+
+| Field | How to read it |
+|---|---|
+| created | first commit date of the file (`git log --diff-filter=A --format=%cs -- <path>`), or the `### <date> — created` log line if uncommitted |
+| last touched | last commit date (`git log -1 --format=%cs -- <path>`) |
+| exit stated | does the file name its own exit condition (an `## Exit` section)? yes / no |
+| exit fired | has that condition happened? yes / no / unclear — ask the owner if unclear |
+| outcome | still in `temp/`, moved to a permanent place, archived, or deleted since the last sweep |
+
+**Proposed detector, not yet active:**
+
+| Fires when | Evidence pair | Proposed fix | Confidence | Cost |
+|---|---|---|---|---|
+| a file in `temp/` has an exit that fired, or no commit for N days (N unknown — the measurement sets it) | "declared temporary, exit X; observed X happened / no touch since D" | a question to the owner: move, archive or keep | low, by design, until two sweeps of data exist | one `git log` per file; `temp/` is small |
+
+**Conditions every detector proposal carries:** scope the findings to this repo's
+`docs/trackers/temp/` only, and a finding is not automatically a fix — a temporary tracker
+may stay longer on purpose.
+
+**Decide the policy when:** two sweeps have recorded `temp/` data. The open questions are
+what must be left after cleanup (archive, digest, nothing) and who ends a temporary tracker's
+life (its own exit condition, an age limit, or the owner).
+
+## HY-35 — Miss: 32 trackers untouched since before 2026-10-01 — why each went stale, measured
+
+**Valid:** dated 2026-11-11
+
+**Verdict:** miss — D3 (stale-active) cannot tell *why* a tracker is stale, and its input signal is polluted.
+**Status:** open — input to the tracker-organization design (brainstorm 2026-11-11); no fix applied.
+
+**Method.** Population: every non-archived top-level file in `docs/trackers/` whose last commit is
+before 2026-10-01 — 32 files (script: last commit, later commits that mention the stem via
+`git log -S`, open-status lines, unchecked boxes). Every one of the 32 is mentioned by at least one
+later commit, so mention count does not discriminate. Three read-only agents then read each file
+and classified it; the main session re-checked every cited commit SHA/subject (all 28 exist as
+cited) and spot-checked AC-2 against bug `c77fb370f61fc309` (`fixed`, archived).
+
+**Classes:** a = work ended, tracker not closed · b = work continues elsewhere, tracker lags ·
+c = slow by design, content still correct · d = dormant (not done, nobody on it).
+
+| Class | Pure | Pure + mixed |
+|---|---|---|
+| a | 11 | 18 |
+| b | 2 | 10 |
+| c | 3 | 5 |
+| d | 4 | 13 |
+| mixed | 12 | — |
+
+| Tracker | Class | Key evidence |
+|---|---|---|
+| fable-tuning-index | a | backlog "EMPTY"; work moved to prompt-hamsa-audit-log, no supersedes link |
+| fable-tuning-findings | a | FND-1..18 closed body; last commit `937161bdc` is a sweep |
+| fable-tuning-research | c | frozen evidence base |
+| fable-tuning-tasks | a+d | FT-3/4/5 open with weak prior; FT-6 update only in catalog row |
+| 2026-09-01-fable-system-review | c+b | SR-14 recs 1 and 5 shipped (`1568b777f`, `d34c398e8`), row still open |
+| 2026-08-15-tool-usage-investigation | a | self-declared snapshot, status `active` |
+| 2026-08-16-iron-law-gate-firing-audit | a+b | GF-8 quotes text removed in `b691ab73b` |
+| gate-contract-consolidation | a | landed `bdfd7a629`; handoff never closed |
+| heuristic-code-analysis-2026-04 | d | "deferred … Owner: TBD" |
+| mcp-integration-ideas-2026-04 | a+d | #4 shipped (`1a65bff2f`) unmarked |
+| structural-debt-refactor | a+b+d | SD-7 zombie-open, feature shipped `02a87a832` |
+| release-promotion-session-log | d | #14 merge on maintainer hold; `master` still `5a8b14691` 2026-07-05 |
+| provenance-probe-session-log | a | probe ended; programme moved to provenance-subsystem |
+| architecture-boundary-measurement | a | body says "complete — all four slices resolved", status `active` |
+| architecture-boundary-session-log | a | companion of the above; later entries from another stream |
+| local-onnx-embedding-session-log | a | "CLOSED 2026-08-13", status `done` (non-standard) |
+| retrieval-benchmark | c/d | no run logged after retrieval changes `b565ba72e`, `4bc3dfefe` |
+| sdd-ruling-log | b | SDD runs after 2026-09-29 never appended |
+| 2026-09-29-system1-pilot-walkthrough-handoff | d | blocked on operator; re-homed to CIW-1 without link |
+| 2026-09-20-handoff-overflow-retrieval-discriminator | b/d | half answered in a bug (`df7f47c48`), handoff not updated |
+| doc-ref-audit | c | machine-written; findings live in the catalog |
+| resume-artifact-chunk-grain-retrieval | a+d | AC-2 says bug "still `open`"; bug fixed and archived (`9e20d3ad8` repointed the path, not the Status) |
+| resume-statement-validity-layers-3-5 | d | SV entries still match code; parked |
+| resume-workspace-pinning-phase-4b-5 | b+d | WP-4 decided in `a4becec0b` via bug files |
+| resume-vacation-wrapup-2026-09-04 | a | self-described snapshot, `time_scope: 2026-09-04` |
+| 2026-08-18-guide-ledger-residuals | a | Phases A–C shipped; header still "Status: open" |
+| artifact-augmentation-followups | a+b+d | 13 of 17 unchecked boxes belong to shipped phases |
+| claim-decay | b | new instances filed as bug files (`ce9aa15fb`), not DC rows |
+| archive-cadence-policy | c | policy; a draft spec amends it without a link |
+| tracker-management-redesign | a+b | Stages 1–2 shipped; successor `temp/artifact-identity-refactor.md` cites TMR-4 without a link |
+| promote-when-harvest-worklist | a | "one-time … Not a living tracker", status `draft` |
+| index-scope-default-ignores | d+b | leftovers unchanged; nearby fix `80d4cb49a` unrecorded |
+
+**Mechanisms (each seen independently by at least two of the three readers):**
+
+1. **The last-commit date lies in both directions.** Bulk sweeps (citation repoints, tool-name
+   retirement) were the latest commit on most of the 32, so real staleness is older than D3 sees.
+   Catalog-only writes (`update_entry`) change a tracker with no commit at all.
+2. **Closure is recorded somewhere else.** A bug, spec, guide or newer tracker takes the work or
+   records its end; the tracker's `**Status:**` and frontmatter stay unchanged, and no
+   `supersedes` link is made.
+3. **Closing words never flip the status.** "CLOSED", "complete", "Next action: none" sit beside
+   `active`; non-standard `done` escapes the default archived-hide.
+4. **Snapshots are filed as living trackers.** One-time records (self-described "snapshot",
+   `time_scope`, `Valid: dated`) stay `active`/`draft` forever; the vocabulary has no terminal
+   "snapshot" state.
+5. **Append-on-event logs have no trigger.** `sdd-ruling-log`, `retrieval-benchmark` and
+   `claim-decay` fall behind while their event keeps happening elsewhere.
+6. **Blocked work has no revisit date.** Release promotion and the system1 pilot are blocked on a
+   human, with nothing that resurfaces them.
+7. **Companion logs outlive their parent**, and topic-matched appends make finished logs look alive.
+
+**Not automatically a fix:** each row above is a classification for design input, not an approved
+archive or edit. Scope: this repo's `docs/trackers/` top level only; the five sub-folders were not
+measured.
 
 ## Template for new entries
 
