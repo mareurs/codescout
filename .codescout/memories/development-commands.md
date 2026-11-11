@@ -12,7 +12,7 @@ carries the full evidence for each command; this is the executable summary.
 ```bash
 ./scripts/fmt-mine.sh                           # replaces bare `cargo fmt`: formats only own/CLEAN paths
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
-cargo clippy --workspace --all-targets --no-default-features -- -D warnings   # same CLIPPY lane: lints the lean set (the librarian is off)
+cargo clippy --workspace --all-targets --no-default-features -- -D warnings   # same CLIPPY lane: lints the lean set (no default feature on)
 cargo nextest run --workspace --no-default-features --no-fail-fast   # LEAN lane — runs THIRD
 cargo test --workspace --doc --no-default-features                   # its doctest step (nextest runs none)
 cargo nextest run --workspace --no-fail-fast                         # default lane — runs LAST
@@ -35,31 +35,26 @@ How the script behaves, so you read its output right:
   nextest lane builds it. The two ONNX weight tests in `crates/codescout-embed/src/local.rs` (they
   panic without weights on disk) run only in CI's `local-embed` job. Until 2026-11-08 `local-embed`
   was in `default` and the gate exported `CODESCOUT_SKIP_ONNX_TESTS=1`; that export is gone. The
-  gate prints what a green run does NOT cover (heavy Python suites, `server-stack`, librarian code
-  in the lean lane, the ONNX path).
+  gate prints what a green run does NOT cover (heavy Python suites, `server-stack`, the ONNX
+  path).
 - For a targeted run lease your own slot: `scripts/with-slot.sh cargo test --lib -- <filter>`
   (`--slot N` leases exactly slot-N). Do not reuse the path gate.sh printed by hand: it was
   leased for that run only.
 
 **Why the order matters, not just the commands.** A shared `target/` and
 `tests/cli_doc.rs` resolving `target/debug/codescout` at run time make a terminal lean lane
-leave a librarian-less binary there, reading exactly like a feature-gating regression in
-whatever you just committed, for whichever session runs the default lane next. Ending on the
-default lane rebuilds it, so following the gate cannot arm the trap for anyone else — provided
+leave a binary built without the default features there, for whichever session runs the
+default lane next. The librarian is in every build, so that binary still answers `doc`. Ending
+on the default lane rebuilds it, so following the gate cannot arm the trap for anyone else — provided
 both lanes actually run. Two later layers narrow that exposure, and neither makes the order
 optional for someone who types the commands directly into a shared `target/` (the leased pool is
 a mechanism for whoever runs `gate.sh` and a policy for everyone else): `gate.sh` leases a
 private `target/`, and `tests/cli_doc.rs` now executes a **hardlink of the built binary**
 (`pinned_binary()`, pinned to the inode, so a peer's rebuild-by-rename cannot swap it
 mid-suite — `docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md`).
-An older reproduction, made against the predecessor test file before the `artifact` CLI
-subcommand was collapsed into `doc`, measured a librarian-less binary failing most of that
-file's tests; that specific number is deliberately not restated here — re-deriving it means
-arming the shared trap on purpose while other sessions build against the same `target/`. The
-collapse itself is pinned by `the_old_artifact_subcommand_is_gone` in `tests/cli_doc.rs`, which
+The `artifact` CLI subcommand is gone (collapsed into `doc`); it is pinned by `the_old_artifact_subcommand_is_gone` in `tests/cli_doc.rs`, which
 asserts Clap's own "unrecognized subcommand" error text for `artifact find`. Verified
-2026-10-19: the target is `cli_doc`, it holds **16** tests, and all 16 pass against a
-librarian-bearing binary.
+2026-10-19: the target is `cli_doc`, it holds **16** tests, and all 16 pass.
 
 **Each command is the wide form for a measured reason. Do not narrow any of them:**
 
@@ -70,7 +65,7 @@ librarian-bearing binary.
 - **The lean lane is `test`, not `check`.** A `check` compiles the lean test targets and
   never runs them, so a lean-only *runtime* failure is invisible to it. It is also the only
   gate command that runs *without* default features, so an unconditional module reaching a
-  `#[cfg(feature = "librarian")]` one compiles clean locally and fails only in CI's slow
+  `#[cfg(feature = "http")]` one (any default feature) compiles clean locally and fails only in CI's slow
   3-OS `no-features` test-matrix lane (`ci.yml:394`), never in the fast clippy job.
 - **Both test lanes carry `--workspace`.** Bare `cargo test` builds only the **root
   package's** targets, so every test in a workspace member is invisible to it — not a

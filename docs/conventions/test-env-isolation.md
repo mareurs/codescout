@@ -118,7 +118,7 @@ for that case is a **child process**, in `src/platform/test_child.rs`:
 The race is detectable in production CI as one of:
 
 - Intermittent `"tool '<name>' not registered"` panics in tests that
-  call `tool_by_name(...).unwrap()` — the librarian feature failed to
+  call `tool_by_name(...).unwrap()` — the librarian tools failed to
   register because catalog open / Agent init lost its env race.
 - Intermittent `LIBRARIAN_DB` resolution to a path that was a previous
   test's tempdir (now dropped) — manifests as "no such file or

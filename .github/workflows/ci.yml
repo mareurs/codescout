@@ -618,9 +618,7 @@ jobs:
       # Dropping the rest of `default` costs nothing here: every root-crate site gated on
       # this feature (retrieval/client.rs, hardware.rs, server.rs, tools/config) compiles
       # with only this feature on, which the lean lane also proves. Do NOT restore the
-      # default set by listing it: `librarian` is not a feature, so `--features librarian`
-      # fails in cargo, and tests/feature_lanes.rs `the_guard_is_not_vacuous` pins that no
-      # flag names it.
+      # default set by listing it: this spelling must not depend on what `default` holds.
       - run: cargo check --no-default-features --features local-embed-dynamic --all-targets
       # `retrieval-e2e` is EXEMPT (tests/feature_lanes.rs) from *running* — it needs a
       # live Qdrant + TEI/Ollama stack no CI runner has. That justifies not running

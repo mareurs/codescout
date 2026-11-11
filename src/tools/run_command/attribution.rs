@@ -640,7 +640,7 @@ pub(crate) async fn wip_author_diagnostic_in(
     // last statement's status the whole command's, so `<red> ; echo "LEAN exit=$?"` exits
     // 0 with the real 101 sitting in stdout as text — and CLAUDE.md § *Development
     // Commands* MANDATES that shape, for a good reason unrelated to exits (`&&` would skip
-    // the default-lane rebuild that clears the librarian-less-binary trap). So the one
+    // the default-lane rebuild that restores the default-feature binary). So the one
     // command sequence every session is told to run was the one this hook could not see,
     // while § *Reaching a Peer Session* told readers the attached line replaced going
     // looking. An unnamed ceiling under that instruction converts into a confident wrong

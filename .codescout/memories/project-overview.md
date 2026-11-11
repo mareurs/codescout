@@ -34,9 +34,9 @@ directions before.
   `RunCommand`, `Onboarding`, `ApproveWrite`, `Symbols`, `References`, `SymbolAt`, `CallGraph`,
   `EditCode`, `Memory`, `SemanticSearch`, `Index`, `Workspace`, `Library`, `GetGuide` — plus 2
   from the librarian's `all_tools()` (`src/librarian/tools/mod.rs`, wrapped by `adapters_for` and
-  extended in after the `#[cfg(feature = "librarian")]` gate): `Artifact`, advertised
-  under the name `doc`, and `Librarian`. Both librarian tools require the feature compiled in
-  and enabled at runtime; both are true by default.
+  extended in after the runtime-enabled check): `Artifact`, advertised
+  under the name `doc`, and `Librarian`. Both librarian tools are compiled into every build and
+  registered unless the librarian is opted out at runtime (`LIBRARIAN_ENABLED=0`).
 - **Live handshake** (2026-09-03; re-observed 2026-10-19 as this session's own tool list): an MCP
   `tools/list` against the running binary returned the same 21.
 

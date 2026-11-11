@@ -26,9 +26,8 @@ default = ["remote-embed", "http"]
 # Any build includes the librarian
 cargo build --release
 
-# Lean build — still includes the librarian
-cargo build --release --no-default-features \
-  --features remote-embed,http
+# Without the default features (no `http`, no `remote-embed`) — still includes the librarian
+cargo build --release --no-default-features
 ```
 
 ## Runtime override

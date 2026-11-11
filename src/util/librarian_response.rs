@@ -85,9 +85,9 @@ mod tests {
         assert!(names_path_containing(&viol, "docs/issues/"));
     }
 
-    /// This module must not depend on the librarian tree: it lives in `util` so that `prompts`
-    /// can reach it, and this test is what fails if someone reaches back into `src/librarian/`
-    /// from here.
+    /// The negative half for every documented response shape. Layering note: this module sits
+    /// in `util` and is meant not to import from `src/librarian/`, but no lane enforces that now:
+    /// the librarian is compiled into every build, so a reach-back would compile and pass here.
     #[test]
     fn scans_every_documented_shape_without_a_librarian_dependency() {
         // Absent needle in each shape — the negative half the separators test omits

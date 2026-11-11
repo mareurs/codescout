@@ -156,7 +156,7 @@ all until 2026-11-09. The `clippy` job and the gate's clippy lane now lint it to
 on a dead `ReadDenyList`; the test lane still builds it and still denies no warnings. Four instances of that class in one day (2026-08-27); the one that shipped left `experiments`
 HEAD failing the lean build, so every session that merged inherited the break.
 
-## The lean lane is VACUOUS for librarian code — the same gate, a second consequence
+## Historical: the lean lane was VACUOUS for librarian code when the librarian was a feature
 
 **Current state.** The librarian is compiled into every feature set, so the lean lane compiles
 and runs the librarian's tests, and this section's claim no longer holds. The section stays as the

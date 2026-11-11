@@ -6892,10 +6892,7 @@ mod tests {
                      it to the allowlist in this test if it's a non-tool token"
                 ));
             }
-            // The same hole sits under the bare-form pass above — it simply never trips,
-            // because the surfaces write `doc` and `librarian` only in call form. Left as
-            // it is rather than widened here: nothing is currently wrong there, and a
-            // guard that is only exercised by hypotheticals is worse than the gap.
+            // Call-form pass: an `ident(` written as a tool call must name a registered tool.
             for cap in call_re.captures_iter(body) {
                 let ident = cap.get(1).unwrap().as_str();
                 if real_tools.contains(ident)

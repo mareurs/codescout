@@ -36,10 +36,9 @@ nothing the wide one does not already cover.
 `target/`, and `tests/cli_doc.rs` resolves `target/debug/codescout` by path at run time
 (the CLI's `artifact` subcommand was collapsed into `doc`; `cli_doc.rs` carries
 `the_old_artifact_subcommand_is_gone` as the regression test for that collapse). The lean
-lane leaves a librarian-less binary there, so
-a later default-features run execs it and reds `cli_doc.rs` — reading exactly like a
-feature-gating regression in whatever you just committed. Ending on the default lane
-rebuilds it correctly, so following the gate cannot leave the trap armed for the next
+lane leaves a binary built without the default features there; the librarian is in every build, so
+it still answers `doc`. Ending on the default lane rebuilds it, so following the gate cannot
+leave the trap armed for the next
 session. Do not restate a fresh red/pass count here — CLAUDE.md deliberately declines to
 re-derive one (re-deriving it means overwriting the shared `target/debug/codescout` binary
 and arming the trap for other sessions). `tests/cli_doc.rs` carries **16** `#[test]` functions

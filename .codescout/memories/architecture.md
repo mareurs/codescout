@@ -92,8 +92,8 @@ a path source.
 are always registered** (`ReadFile`, `Tree`, `Grep`, `CreateFile`, `EditFile`, `RunCommand`,
 `Onboarding`, `ApproveWrite`, `Symbols`, `References`, `SymbolAt`, `CallGraph`, `EditCode`,
 `Memory`, `SemanticSearch`, `Index`, `Workspace`, `Library`, `GetGuide`), plus **`doc` and
-`librarian`** from `crate::librarian::adapters_for(lib_ctx)` when the `librarian` feature is
-compiled in (default) and enabled at runtime — bringing the default advertised surface to
+`librarian`** from `crate::librarian::adapters_for(lib_ctx)` when the librarian is enabled at
+runtime (it is compiled into every build) — bringing the default advertised surface to
 **21 tools**. Two more are runtime-conditional and NOT part of the baseline count: `peer`
 (Unix-only, opt-in via `CODESCOUT_PEER_ENABLED`) and the debug-only `__probe_description_cap__`
 (`CODESCOUT_PROBE=1`). Re-verified 2026-10-19 against `src/server.rs:379-597` (the 19-entry `vec!`, then the `peer`, probe and librarian additions).
