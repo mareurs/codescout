@@ -1,377 +1,310 @@
-# Artifact identity: an internal ULID and a portable key (design)
+# Artifact identity and storage: committed files are the only store (design)
 
-**Status:** draft v3, 2026-11-11. Operator decisions recorded in § Decision log. Source
-tracker: `docs/trackers/temp/artifact-identity-refactor.md`. This spec owns the whole
-identity model: the internal id, the portable key and the repo name. The parallel
-tracker-reorganization session (`codescout-37`) owns the archive and move workflows and the
-folder layout. § Moves names the interface between the two.
+**Status:** draft v4, 2026-11-11. The operator accepted the governing principle on
+2026-11-11; § Decision log records every decision. Source tracker:
+`docs/trackers/temp/artifact-identity-refactor.md`. Session log:
+`docs/trackers/artifact-identity-session-log.md`. The parallel tracker-organization session
+(`codescout-37`) owns the folder layout and the ledger formats; this spec owns identity, the
+citation grammar, and the boundary between committed files and the catalog.
+
+**Scope rule from the operator:** the current state of trackers and ledgers does not
+constrain the design. Files may be renamed, rewritten or regenerated. The goal is a correct,
+scalable design, not an easy migration.
 
 ## Intent
 
-The librarian gives one document three identities. The **id** is `sha256(abs_path)[:16]`
-(`src/librarian/ids.rs:17-23`), the catalog's primary key and every foreign key. The
-**slug** is minted from the title with `-2`/`-3` dedup (`src/librarian/catalog/artifact.rs`
-`ensure_slug`) and keys the entry graph. The **file stem** is what prose cites
-(`<stem>:TOKEN`, `src/librarian/tools/link_scan/resolve.rs`). The id changes on every move,
-on every relocation of the checkout, and between a main checkout and its worktree. The slug
-differs between machines. Only the stem is what authors write and what git carries.
+Today the librarian gives one document three identities: a path-hash `id`
+(`src/librarian/ids.rs:17-23`), a title-minted `slug` (`ensure_slug`), and the file stem
+that prose cites. It also keeps durable state that exists only in each machine's catalog:
+events, augmentation params, observations and entry reservations. Most identity machinery
+exists to keep that local state attached when a path changes: graft on move, `fix=rehome`,
+the worktree overlay (shadow rows, fork and merge events, `merge_worktree`, `reseat`),
+frontmatter id repair, and slug dedup.
 
-This design keeps two identities with two separate jobs:
+This design removes the cause instead of managing it:
 
-- an **internal uid**, a random ULID that never leaves the machine's catalog and that every
-  table joins on;
-- a **portable key**, derived from committed files only, that every machine computes the
-  same way and that is the only identity anything outside the catalog may hold.
+> **Committed files are the only store. The catalog is an index derived from a commit.
+> Identity is the key in the filename.**
 
-Moves are done only by agents through codescout tools, never by hand. That is an operating
-constraint, not a goal.
+Two clones at the same commit build the same catalog. A move, a relocation, a fresh clone,
+a worktree and a second machine all reduce to "index this commit".
 
 ## Measurements (2026-11-11, read-only)
 
 | Fact | Number | Source |
 |---|---|---|
 | Renames under `docs/` since January | 1217, of which 1112 into `archive/` | git log |
-| Commits that re-point citations after an archive or move | 144 (127 after bug-file archives) | `git log --format=%s \| grep -ciE 're-?point.*(archiv\|mov)\|(archiv\|mov).*re-?point'`, reproduced |
-| Dangling citations in `link_scan` that are 16-hex ids | 449 of 867 | `codescout-37` census |
-| Bare 16-hex ids in prose | 2435 occurrences; 1843 resolve today, 592 are already stale | citation census |
-| Frontmatter `id:` stamps | 1550 files; 1545 equal the current path hash | citation census |
-| Prose `<stem>:TOKEN` citations | 1027; about 6 genuine slug-form citations | census |
-| `entry_cite` rows | 6953: 6940 `scan`, 13 `write` | catalog |
-| Distinct slugs used by `entry_cite` | 273; 20 equal the stem | catalog |
-| Cross-repo slug suffix race | `tracker-hygiene-log` in 7 repos, slugs `-2`..`-7` | catalog |
-| Rows that carry events or an augmentation (codescout) | 1380 | catalog |
-| Git roots in `commits` | 47, of which 32 hold artifacts; 351 artifacts sit under none | builder check |
-| Entry endpoints whose stem is not `[a-z0-9-]` | 55 of 273 (capitals, `_`, `.`) | builder check |
-| Key collisions among tracked `.md` (folder-index rule, normalized) | 37 keys, 115 files; normalization adds 1 (`docs/SECURITY.md` / `docs/manual/src/concepts/security.md`) | `normkey.py` |
-| Hosts writing audit shards for this repo | 2 (`archlinux`, `ripper`) | `.codescout/audit/` |
-| Stale hex ids recoverable as `sha256(<root>/<old path>)[:16]` from git history | 160 of 335 distinct (309 of 676 occurrences) | `stalehist.py` |
-| Files citing live trackers by path | 908 | `codescout-37`, git grep |
-| `[[…]]` outside code fences and backticks | 243 in 50 files: 67 already name a file key, 122 an entry token, 54 other (`[[arXiv]]`) | `wiki2.py` |
+| Commits that re-point citations after an archive or move | 144 | git log subject grep, reproduced |
+| Dangling `link_scan` citations that are 16-hex ids | 449 of 867 | `codescout-37` census |
+| Bare 16-hex ids in prose (tracked `.md`) | 676 occurrences; 335 distinct already stale | `stalehist.py` |
+| Prose citation forms | about 10,600 path, 2435 bare hex, 1027 `<stem>:TOKEN`, 243 `[[…]]` outside code | census, `wiki2.py` |
+| Ambiguous `link_scan` citations that are bare `F-n`/`W-n` | 700 of 754 | `codescout-37` census |
+| Catalog events | 11,537: 11,346 `field_patch`, 64 `worktree_fork`, 47 `worktree_merge`, 57 `note`, 10 `reviewed`, 6 `superseded_by`, 3 `status_change`, 3 `verdict`, 2 `external_signal`, 1 `intent` | catalog |
+| What a codescout `field_patch` records | 6423 rows, all `field=body`; payload is byte sizes and an edit count only; no content, no commit | catalog |
+| Augmentations (codescout) | 41; 17 declare an entry collection holding 540 entries; 535 KB of params | `augstate.py` |
+| Params entries with no heading or row in the markdown | 38, all in `docs/trackers/provenance-subsystem.md` | `augstate.py` |
+| Hosts writing this repo's audit shards | 2 (`archlinux`, `ripper`) | `.codescout/audit/` |
 | Live sessions on a replaced binary | 17 of 30 on 2026-10-16 | `src/librarian/requirements.rs:8-12` |
+| Reindex deletes a moved file's local history | `indexer.rs:810-854`; 7 tables cascade | bug `99a4d0be1318c3c1` |
 
 ## Goals
 
-- **G1.** Every catalog row has an internal **uid** (ULID). Every table joins on it. It is
-  never written to a committed file and never shown in tool output.
-- **G2.** Every artifact has a portable **key**, computed from its repo-relative path by
-  § Key rule. Two machines that hold the same commit compute the same key for every file.
-- **G3.** Each repo declares a **repo name** in `.codescout/repo.toml`. Onboarding suggests
-  one and the user confirms it.
-- **G4.** A move of the whole checkout to another absolute path changes no uid, no key and
-  no row other than the checkout's own.
-- **G5.** A move of a file through codescout keeps its uid and every row that hangs off it.
-  No graft, no new id, no re-key of edges.
-- **G6.** Tool output shows keys, never uids or path hashes. A key copied from tool output
-  into prose is a citation that resolves on every machine.
-- **G7.** Existing 16-hex citations, and path citations of a file that has moved, keep
-  resolving through a committed alias file, without a prose rewrite.
-- **G8.** A whole file can be cited by key, in a form that survives folder moves, so no
-  author needs a path or a hex id to cite a file.
+- **G1. One store.** Every durable fact about a document lives in committed files. The
+  catalog holds nothing that cannot be rebuilt from a commit.
+- **G2. One identity.** A document's identity is its **key**: its filename stem, or its
+  folder's name for a folder-index file. The key is canonical and unique within its repo.
+- **G3. Location-free.** Moving a file between folders, archiving it, relocating the
+  checkout, opening a worktree, or cloning on another machine changes no key and loses no
+  state.
+- **G4. One citation grammar,** closed and parseable, in which every reference to a
+  document or an entry is written. A rename can therefore rewrite every citation
+  mechanically and completely.
+- **G5. Identical catalogs.** Two clones at the same commit hold catalogs that answer every
+  query the same way.
+- **G6. Tool output shows only keys and grammar forms.** Agents copy what tools show, so
+  tools never show an id, a hash or a path for a document reference.
 
 ## Non-goals
 
-- The archive and move workflows, the folder layout, and rewriting prose citations after a
-  move. These belong to `codescout-37`.
-- Markdown path links. They are the most common citation form (about 10,600) and still break
-  on a folder move. A key-based link form would be a separate addition.
-- Edges across repos. A citation of another repo stays report-only (`Outcome::CrossRepo`).
-- Syncing DB-only state (events, augmentation params, observations) between clones. That
-  state never travels today, whatever the id is.
-- Manual moves and edits by a human.
+- The folder layout, the ledger formats and the entry id scheme (sequential `PREFIX-N` or
+  dated per-entry files). These belong to `codescout-37`; § Contract with ledger formats
+  states what this design requires of them.
+- Edges across repos. A citation of another repo stays report-only.
+- Rendering `[[…]]` as links on a forge. Readers on GitHub see the text form.
+- Manual moves by a human.
 
 ## Anti-goals
 
 The change fails, even if it works, if any of these is true:
 
-- A folder reorganization that keeps the filename changes a key.
-- A key depends on a title, on index order, on the machine, or on other repos.
-- A uid appears in a committed file or in tool output, so that agents start citing it.
-- A collision silently changes an existing key.
-- A user finds a repo name in a committed file that they never saw or confirmed.
-- An older binary and a newer binary sharing the catalog undo each other's schema.
+- Any durable fact exists only in a catalog.
+- A key depends on a title, an index order, a machine, a checkout location or another repo.
+- A move between folders changes a key or breaks a citation.
+- Two clones at the same commit disagree about a document's identity, state or edges.
+- A tool shows an agent a form of reference that does not survive a move.
+- An older binary and a newer binary sharing a catalog damage each other.
 
 ## Constraints
 
-- **One catalog per machine, many repos and binaries.** The catalog is shared by every repo
-  and every running binary. Older binaries rerun their own migrations on open: the v9 block
-  re-adds `artifact.slug` if it is missing, and the audit triggers are recreated whenever
-  their text differs (`src/librarian/catalog/audit/mod.rs:232-238`).
-- **`librarian.toml` is closed.** `classify::RuleFile` is `#[serde(deny_unknown_fields)]`
-  (`src/librarian/classify.rs:5-9`), so a new table there breaks older binaries. This is why
-  the repo name lives in its own file, as `requirements.toml` does.
-- **The qualifier namespace is shared.** `<q>:TOKEN` reads `q` as a file key when it names a
-  file in this repo, and as a repo name otherwise (`resolve.rs:334-350`). CLAUDE.md
-  § Parsers Over a Namespace requires an escape and a disambiguator.
-- **Two checkouts of one repo can share a machine.** `repo.toml` is tracked, so both carry
-  the same repo name. Storage scope is the checkout, not the repo name.
+- **Older binaries share the catalog.** 17 of 30 live sessions ran a replaced binary on
+  2026-10-16. An older binary reruns its own migrations on open.
+- **`librarian.toml` is closed to new tables.** `classify::RuleFile` is
+  `#[serde(deny_unknown_fields)]` (`src/librarian/classify.rs:5-9`).
+- **Concurrent writers.** Several sessions write one checkout at once. Committed files turn
+  their concurrent writes into git merges, so formats must keep merges trivial.
+- **Search needs embeddings.** Vectors are derived data but are expensive to rebuild; they
+  are a cache keyed by content hash, never state.
 
 ## Approaches
 
-For the internal id:
+For where durable state lives:
 
-1. **A random ULID, private to the catalog (chosen).** A move or relocation becomes an
-   `UPDATE` of one row. Cost: every foreign key changes type in one migration, and anything
-   that leaks the id today must stop.
-2. **Keep the path hash.** No migration. Rejected: it is the measured cause of the 144
-   re-point commits and the 449 dangling ids.
-3. **A deterministic hash of the key.** Regenerable on any clone. Rejected: it changes on a
-   rename, so it needs the re-key machinery that option 1 removes, and nothing outside the
-   catalog needs it to be regenerable once the key is the external identity.
+1. **Committed files only; the catalog is a derived index (chosen).** Cost: every write
+   tool writes files, history queries read git, and a one-time export moves today's
+   catalog-only state into files. Gain: every location problem becomes "index this commit",
+   and the worktree overlay, graft, rehome, reseat, the uid and aliases all go.
+2. **v3: an internal ULID per row, durable state in the catalog, aliases for old
+   references.** Rejected: each clone still diverges on catalog-only state, so moves pulled
+   from another machine still need rebind rules, and the worktree overlay stays.
+3. **A committed GUID in frontmatter, state in the catalog.** Rejected: two names per file,
+   and the catalog-only state problem stays.
 
-For the external key:
+For the key: the filename stem, canonical by construction (chosen), over a committed slug
+(two names per file) and the repo-relative path (a folder move changes it).
 
-1. **The normalized stem, scoped by repo (chosen).** It is what authors already write.
-2. **A slug committed to frontmatter.** Rejected: two names per file, about 273 stamps.
-3. **The repo-relative path.** Rejected: a folder reorganization changes it.
-
-For the repo name: a declared name in a tracked file, confirmed at onboarding (chosen), over
-the directory basename (a folder rename changes it) and the git remote (absent for
-local-only repos).
+For the repo name: a declared name in `.codescout/repo.toml`, confirmed at onboarding
+(operator decision), over the directory basename and the git remote.
 
 ## Design
 
-### Identity layers
+### The store boundary
 
-| Layer | Value | Lives in | Changes when |
-|---|---|---|---|
-| uid | ULID | the catalog only | never |
-| key | normalized stem, or folder name for a folder-index file | derived from the committed path | a rename that changes the stem |
-| repo name | declared label | `.codescout/repo.toml`, tracked | the user edits it |
-| checkout | surrogate row with the current absolute root | the catalog only | a relocation updates its root |
-| legacy hex id, prior path | an old `sha256(abs_path)[:16]`, or a former rel_path | `.codescout/aliases.tsv`, committed, append-only | never (frozen) |
+Every state class has one committed home. Nothing in the catalog lacks one.
 
-### Repo name
+| State today | Catalog-only today? | Committed home |
+|---|---|---|
+| Frontmatter (kind, status, title, tags…) | no | the document, unchanged |
+| Ledger entries in augmentation params | yes, partly (38 entries have no markdown at all) | the markdown entries, in the format `codescout-37` defines; params cease to be a store |
+| Augmentation prompt, schema, render template | yes | a committed sidecar per document, extending what `export_augmentations` writes today |
+| `field_patch` events (11,346) | yes | none needed: git history of the file records more (the diff) |
+| `status_change`, `superseded_by` events | yes | the frontmatter field, with git history as its log |
+| `note`, `verdict`, `intent`, `reviewed`, `external_signal` events (73) | yes | text in the document, in a section the event writer appends to |
+| `worktree_fork` / `worktree_merge` events (111) | yes | none: the worktree overlay is removed |
+| Observations (57) | yes | text in the document, as for notes |
+| Entry reservations / high-water marks | partly (frontmatter holds `entry_high_water_*`) | frontmatter, or none if `codescout-37` chooses per-entry files |
+| Write-time `cites` | yes (13 `origin='write'` rows) | grammar text inside the entry |
+| Manual links (`doc(link)`) | yes | grammar text in the source document, under a rel label |
+| Catalog audit trail | yes (shards are exported) | git history with `Session-Id` trailers; the catalog audit tables are retired |
 
-- Stored as `name = "<name>"` in `.codescout/repo.toml`, a new tracked file. Older binaries
-  never read it.
-- Charset `[a-z0-9][a-z0-9-]*`. A name of exactly 16 hex characters is refused.
-- The name is a label. It appears in tool output and in the three-part citation form.
-  Changing it changes no stored row.
-- `link_scan` already treats a repo's git-root folder name and the `[[roots]]` names in
-  `~/.config/librarian/workspace.toml` as names of this repo
-  (`src/librarian/tools/link_scan/mod.rs:564-604`). The declared name joins them; it does
-  not replace them.
+The catalog keeps only derived data: the document index, the parsed entries, the edge
+graph, git-history caches, and embedding vectors keyed by content hash.
 
-### Onboarding confirms the name
+### Identity: the key
 
-When `.codescout/repo.toml` is absent:
+- **The key is the filename stem.** Filenames are canonical keys: `[a-z0-9]+(-[a-z0-9]+)*`.
+  `doc(create)` and `doc(move)` refuse a non-canonical name; existing files are renamed
+  once, during the cutover. There is no normalization layer: key and stem are the same
+  string, byte for byte.
+- **Folder-index files** take their folder's name: one fixed filename (`index.md`; the
+  exact name is `codescout-37`'s to choose) makes a folder a document.
+- **Unique per repo.** Two catalogued documents in one repo never share a key. `doc(create)`
+  and `doc(move)` refuse a collision and name the other file; `doctor` and a pre-commit check
+  catch one that arrives another way. There is no `Ambiguous` outcome for a key.
+- **A key of exactly 16 hex characters is refused,** so no key is mistaken for a legacy id.
+- **Repo name.** `.codescout/repo.toml` holds `name = "<name>"`, same charset as a key. It
+  is a label: it qualifies cross-repo citations and appears in tool output. Onboarding
+  suggests one (the `.codescout/workspace.toml` name if present, else the directory name),
+  says when another checkout in the catalog uses it, and asks the user to confirm: through
+  MCP elicitation when the client supports it
+  (`src/tools/run_command/interactive.rs:36-98`), otherwise through the agent and a new
+  `onboarding` parameter.
 
-1. Onboarding computes a suggestion: the `[workspace] name` from `.codescout/workspace.toml`
-   if present, otherwise the normalized directory basename.
-2. If another checkout in the catalog already uses that name, onboarding names that
-   checkout's root and says it is either a second checkout of this repo (keep the name) or
-   a different repo (choose another). The user decides; onboarding does not refuse.
-3. Onboarding asks the user to confirm or edit the suggestion: through MCP elicitation when
-   the client supports it (as `run_command` interactive mode does,
-   `src/tools/run_command/interactive.rs:36-98`), otherwise by returning the suggestion
-   with an instruction for the agent to ask the user, and accepting the confirmed name
-   through a new `onboarding` parameter.
-4. Onboarding writes `repo.toml`.
+### The citation grammar
 
-Until then, tool output uses the suggestion marked unconfirmed, and activation reminds the
-agent to finish onboarding. Confirmation changes no stored row.
+One closed grammar for every reference to a document or an entry:
 
-### Key rule
+| Form | Means |
+|---|---|
+| `[[key]]` | the document `key` in this repo |
+| `[[key:TOKEN]]` | entry `TOKEN` owned by document `key` |
+| `[[repo/key]]`, `[[repo/key:TOKEN]]` | the same in repo `repo` (report-only across repos) |
+| bare `TOKEN` | an entry of **the same document** only |
 
-- **Normalization:** lowercase, then every run of characters outside `[a-z0-9]` becomes one
-  `-`, trimmed at both ends. `IC-10-authorship-unrecoverable-after-the-fact` becomes
-  `ic-10-authorship-unrecoverable-after-the-fact`. The prose scanner normalizes a
-  qualifier the same way before lookup, so an author may write the filename as it appears.
-  The qualifier regex widens to accept what the filename contains; the builder must keep
-  entry-token masking correct (`RI-001:RI-2`).
-- **Folder-index files** (`README.md`, `index.md`, `SKILL.md`, any case) take the parent
-  folder's name: `docs/trackers/bistriceanu/index.md` → `bistriceanu`.
-- **A folder key owns its folder's tokens.** A qualified citation `<folder-key>:TOKEN`
-  resolves when the token is defined in the folder-index file or in any descendant file
-  whose **nearest** folder-index ancestor is that index. A folder with no index file owns
-  nothing and passes its files up to the next index above it. Two cases this fixes:
-  `ledgers/index.md` (key `ledgers`) does not own the tokens of `ledgers/frictions/`, which
-  has its own index; and `ledgers/frictions/archive/FR-3-<slug>.md` stays owned by
-  `frictions`, because `archive/` has no index, so `frictions:FR-3` keeps resolving after
-  an archive. This serves the per-entry ledger folders that `codescout-37` plans.
-- **Collisions never change a key.** There is no fallback key. A key shared by two files in
-  one checkout is tolerated, and a two-part citation of it resolves as `Ambiguous`, as
-  today. Collisions are refused only where they would hurt: `doc(create)`, `doc(move)` and
-  the first entry definition or entry citation of a file (`append_entry`, `link_scan`
-  write) refuse or report when the file's key is shared, and the refusal names the other
-  file and asks for a rename. The population is the checkout's **catalogued** artifacts
-  whose files are git-tracked and exist on disk. Rows with `missing_since`, untracked files
-  and uncatalogued files (codescout memories, for example) do not count, because the
-  resolver cannot see them either. Keys never depend on the population, so they agree on
-  every machine; an `Ambiguous` verdict can differ only if two machines catalogue different
-  files.
-- A key of exactly 16 hex characters is refused at create and move, and `doctor` reports
-  one found on disk. Measured: none exist.
+- **Scoping.** A bare token resolves only inside its own document, the way a local name
+  resolves in its own scope. Every other reference is qualified. The 700 ambiguous bare
+  `F-n`/`W-n` citations stop being ambiguous by construction.
+- **Ownership.** `[[key:TOKEN]]` resolves when the token is defined in document `key` or in
+  a descendant file whose nearest folder-index ancestor is `key`'s index. A folder without an
+  index owns nothing and passes its files up. This lets per-entry ledgers and their
+  `archive/` subfolders resolve under the ledger's key.
+- **Escape.** Code fences and inline code are never parsed, so TOML `[[rule]]` and regex
+  `[[:space:]]` stay inert.
+- **Paths and hex ids.** A markdown link or a bare path to a catalogued document, and a
+  16-hex id, are not part of the grammar. `link_scan` reports them as lint with the grammar
+  form to use; it never turns them into edges. The cutover rewrites today's resolvable ones.
+- **A rel label** for a manual link is written in the grammar's text, for example
+  `**Supersedes:** [[old-key]]`; the label vocabulary belongs to the link schema, which the
+  builder defines.
 
-### Storage
+### The catalog is derived
 
-- **checkout**: one row per indexed checkout: a uid, the current absolute root, the repo
-  name label. A checkout is the activated project root, which is also where `repo.toml`
-  and `librarian.toml` are read.
-- **artifact**: primary key `uid`; columns `checkout_uid`, `rel_path`, `key` (indexed, not
-  unique), `legacy_id` (the old path hash, nullable). The absolute path is the checkout root
-  joined with `rel_path`.
-- Every table that references `artifact(id)` today references `artifact(uid)`:
-  `artifact_augmentation`, `artifact_chunk`, `artifact_link`, `artifact_observation`,
-  `entry_reservation`, `events`, `event_edges.dst_artifact_id`.
-- **entry_cite** becomes `(src_uid, src_local, dst_uid, dst_local, rel, origin)`. A file-grain
-  edge has a NULL `dst_local`. The two-shape `dst_ref` text column, the 16-hex guard and
-  the shape test in `gc::apply_rehome` go away.
-- Removed: `artifact.slug`, `ensure_slug`, `upsert_and_mint_slug`, `mint_missing_slugs`,
-  `doctor fix=mint_slugs`, `fix=repair_frontmatter_id`, the `frontmatter_id_mismatch`
-  check, `ids::artifact_id_from_abs` as an identity source, and `graft_rows` on the move path.
+- The indexer builds the catalog from the files of one checkout at its current commit:
+  documents by key, entries, edges from the grammar, sidecar-declared augmentation shapes,
+  and caches of git history (status changes, last modification, authors).
+- Storage is scoped by checkout. A checkout row holds its root and repo name; every other
+  row joins on the checkout and the key. Internal row ids may be plain integers and may
+  change on every rebuild, because nothing outside the catalog holds them.
+- A rebuild from scratch is always correct; incremental indexing by content hash is an
+  optimisation whose result must equal a rebuild (a test asserts it).
+- Embedding vectors are a cache keyed by content hash, so a rebuild reuses them.
 
-### Binding a file to its row
+### Writes
 
-The indexer finds a row by `(checkout_uid, rel_path)`. When none exists:
+Every write tool writes files, then reindexes what it wrote:
 
-1. **Fresh clone or new file:** mint a uid.
-2. **A move that arrived by pull** (the old `rel_path` is gone, a new file has the same key
-   and no row): bind the new path to the old row when exactly one missing row in the
-   checkout has that key. Folder moves and archives keep the stem, so they rebind, and the
-   row's local state survives. A move whose alias line arrived in the same pull binds
-   through `aliases.tsv` even when the stem changed.
-3. **A rename that arrived by pull without an alias line** (the key changed): no binding by key is possible. The
-   old row is kept with `missing_since` when it has history, never hard-deleted in the same
-   pass. Git rename detection between the last indexed commit and HEAD is a candidate for
-   binding it; its feasibility is not verified. What happens to unbound rows belongs to
-   the move session.
+- `append_entry` writes the entry into the markdown, including its `cites` as grammar text.
+- `event_create` appends the event's text to the document's event section.
+- `doc(link)` writes the labelled grammar reference into the source document.
+- `doc(update)` writes frontmatter or body; git records the change.
+- `doc(augment)` writes the committed sidecar.
 
-### Citations and tool output
+### Moves and renames
 
-- Tool output shows `<key>:<local>`, or `<repo>:<key>:<local>` where the repo is not
-  obvious: `get`'s `entry_links`, `context` anchors, `doc` results, `append_entry`'s
-  `cites` echo.
-- **File-grain form** `[[key]]`, and `[[repo:key]]` with an explicit repo, cite a whole
-  file. `link_scan` resolves them to the file's uid; a new `CitationKind` carries them
-  (`src/librarian/tools/link_scan/extract.rs:159-172` has none today). Authors already
-  write this form: 67 of the 243 `[[…]]` outside code name a file key. Code fences and
-  backticks are the escape, so TOML `[[rule]]` and regex `[[:space:]]` in code never
-  match. A `[[…]]` that names no key is reported, never turned into an edge. This is the
-  citation a per-entry ledger file and a bug file need, because they have no token.
-- **Three-part form** `<repo>:<key>:TOKEN` becomes valid. With this checkout's repo name it
-  is a within-repo edge; with another repo name it is `CrossRepo`, report-only. Today this
-  shape is `MalformedQualifier`. It is also the escape for bare `F-n`/`W-n` tokens, which
-  are 700 of today's 754 ambiguous citations.
-- **Disambiguator:** in a two-part `<q>:TOKEN`, a `q` that is a key in this checkout
-  resolves as a key. If `q` is also a known repo name, `doctor` reports the shadowing.
-- `append_entry(cites=…)` accepts `<key>:<local>`, `<repo>:<key>:<local>`, a rel_path, and a
-  legacy 16-hex id through `aliases.tsv`. A slug form that is not also a key is refused,
-  and the error names the key to use.
+- **A move that keeps the filename** (any folder change, an archive) is a file rename and a
+  reindex. No key, citation or state changes, so no catalog step and no citation repair
+  exist.
+- **A rename** changes a key. Because every reference is in the closed grammar, the rename
+  tool rewrites every `[[old-key…]]` in the repo in the same change, and the result is
+  complete. That tool is part of `codescout-37`'s move workflow; this spec guarantees that
+  the grammar makes it complete.
 
-### Aliases: legacy hex ids and prior paths
+### Worktrees and machines
 
-- A committed, append-only alias file, `.codescout/aliases.tsv`, maps an old reference to
-  the repo-relative path it named: a 16-hex id, or a prior path. The resolver follows a
-  chain (old path to a later path to today's path). `link_scan` and `audit_doc_refs` both
-  resolve through it, so an old citation becomes an edge to the moved file, not a dangling
-  report.
-- The migration writes one line for every 16-hex id that resolves today (1843 live
-  citations, plus frozen files such as `f2ecdd76a6189efb` in `src/`, `tests/` and
-  `docs/evals/data/`), and one line for every stale id that git history recovers as
-  `sha256(<root>/<old path>)[:16]` (160 of 335 distinct). The other 175 stay unresolved.
-- `doc(move)` appends `old path → new path` in the same change as the move. A reindex that
-  rebinds a pulled move needs no local history, because the line arrives with the pull.
-- Appends from two branches meet at the end of the file, so the file gets `merge=union` in
-  `.gitattributes`.
-- Agents are never shown a hex id again, so no new id lines appear after the migration.
-- Existing frontmatter `id:` stamps stay as they are and resolve through the map. No new
-  file is stamped. `util/librarian_guard.rs` (`is_librarian_id`) uses the stamp to detect a
-  managed file; it needs a signal that works for unstamped files.
-- The 592 hex ids that are already stale stay unresolved, as today.
+- A worktree is a checkout. Its catalog view is built from its own files. Its writes are
+  file writes, and git merges them. The overlay is removed: shadow rows, fork and merge
+  events, `merge_worktree`, `reseat_worktree`, `worktree_registration` and the related
+  `doctor` checks.
+- The `append_entry` refusal in a worktree has no remaining cause once the ledger format
+  merges cleanly (per-entry files, or a format `codescout-37` shows to merge).
+- A second machine or a fresh clone indexes the same commit and gets the same catalog.
 
-### Moves
+### Contract with ledger formats
 
-`doc(move)` becomes: rename the file, `UPDATE artifact SET rel_path, key`, append
-`old path → new path` to `.codescout/aliases.tsv`, refile chunk vectors. The uid and every row that hangs off it stay. A move that changes the key leaves
-every edge in place, because edges hold uids; only prose that cites the old key breaks, and
-the move reports those files. What the move does about them, and every other part of the
-workflow, belongs to `codescout-37`.
+What this design requires of any ledger format `codescout-37` defines:
 
-### Worktrees
+1. Every entry exists as markdown that defines its token; no entry exists only in params.
+2. Two sessions appending entries concurrently produce a trivial git merge.
+3. An entry's citations are written in the grammar.
+4. Archiving an entry keeps it under its ledger's key (an `archive/` subfolder without an
+   index, or the format's own equivalent).
 
-A worktree root is its own checkout row, so worktree rows have their own uids and the same
-keys as their main twins. The `worktree_of` link and the fork and merge flow keep working,
-on uids. The `append_entry` refusal in a worktree has two causes
-(`src/librarian/tools/append_entry.rs:237-246`). Shared identity removes only the first
-(the shadow misses the main reservation): the reservation can resolve through `worktree_of`
-to the main twin. The second (a prose ledger cannot be merged afterwards) remains only for
-ledgers that allocate `PREFIX-N` inside one file. A per-entry ledger adds a new file per
-entry, which git merges, so the refusal can be scoped to single-file ledgers.
+### Removed
 
-### Audit
+`ids::artifact_id_from_abs` as identity, the frontmatter `id:` stamp and its repair and
+mismatch checks, `artifact.slug` and its minting and dedup, `graft_rows` on the move path,
+`fix=rehome`, the worktree overlay (`resolve_write_target`, shadow rows,
+`worktree_registration`, `merge_worktree`, `reseat_worktree`), catalog-held events,
+observations and augmentation params as stores, `entry_reservation`, the catalog audit
+tables, and the two-shape `entry_cite.dst_ref`.
 
-- An audit `row_id` for an artifact-keyed table is the uid, which is host-local. The payload
-  adds the key and repo name, so rows from two hosts can be correlated.
-- The shard exporter decides a row's repo through the checkout, not through a slug join
-  (`src/librarian/catalog/audit/shard.rs:282-346`).
-- Pending audit rows are exported before any old column is dropped. The migration's own
-  bulk rewrite is recorded as one marker row, not as about 14k exported lines.
+### Cutover
 
-### Migration and binary coexistence
-
-The schema change replaces the primary key of `artifact` and every foreign key. An older
-binary cannot run against that schema, and it would try to rebuild its own (constraint
-above). The recommended shape is a **new catalog file** that the new binary builds from the
-old one, so that older binaries keep their file and the two never touch the same schema.
-Writes that older binaries make to the old file after the copy must not be lost; the builder
-must choose between replaying them from `catalog_audit` and a cutover that requires every
-session to restart. This is the largest open question; see § Open for the operator.
-
-Migration content, whatever the shape:
-
-1. Create checkout rows from the indexed roots. A row under no known root is assigned to the
-   nearest ancestor with `.codescout/`, else its git top level, else reported.
-2. Mint uids; fill `rel_path`, `key`, `legacy_id`; rewrite every foreign key.
-3. Convert the 13 `origin='write'` `entry_cite` rows to uids through the old slug and id.
-   Drop the 6940 `scan` rows; the next `link_scan` write pass rebuilds them. Report the edge
-   counts before and after; a large drop is a defect.
-4. Write `.codescout/aliases.tsv` (§ Aliases) and add its `merge=union` line to
-   `.gitattributes`.
-5. Rewrite the about 6 slug-form prose citations to key form by hand, in the same change.
-6. Remove the stale comment at `resolve.rs:272-276`.
+1. **Export.** A one-time, idempotent export writes every catalog-only fact into its
+   committed home (§ The store boundary): params entries without markdown (38 today),
+   augmentation shapes, notes, verdicts, intents, observations and manual links. It is
+   re-runnable, so writes made by an older binary after the first run are picked up by a
+   later one.
+2. **Rename.** Non-canonical filenames and key collisions are renamed, with citations
+   rewritten.
+3. **Rewrite citations.** Resolvable `<stem>:TOKEN`, path links to catalogued documents and
+   16-hex ids become grammar forms. Stale hex ids that git history recovers
+   (`sha256(<root>/<old path>)[:16]`: 160 of 335 distinct) are rewritten too; the rest are
+   reported.
+4. **New catalog file.** The new binary builds a new catalog file from the files, so an
+   older binary keeps its own file and the two never share a schema.
 
 ## Open for the operator
 
-- **Cutover with older binaries running:** replay old-file writes, or require a restart of
-  every session. Measured: most sessions run a replaced binary at any time.
+- **When older binaries stop.** The export is re-runnable, so no write is lost while it is
+  rerun. What remains is the rule for when the old catalog file may be deleted: after every
+  session has restarted onto the new binary, or after a fixed date.
 
 ## Left to the builder
 
-- Exact table and column names, and the migration numbering.
-- The elicitation schema and the new `onboarding` parameter's name.
-- The widened qualifier regex and its entry-token masking.
-- The managed-file signal that replaces the frontmatter stamp in `librarian_guard`.
-- Test design. The minimum is one test per anti-goal: a folder move keeps uid and key; two
-  index orders give the same keys; a relocation changes only the checkout row; a collision
-  never changes a key; tool output contains no uid and no hex id; an older binary cannot
-  damage the new catalog.
-- The full list of `artifact.id`, `artifact.slug` and `src_slug` readers. Surveys found
-  about 14 id mint sites in 11 files and slug readers in `link_scan/mod.rs`, `context.rs`,
-  `get.rs`, `delete.rs`, `augmentation.rs`, `doctor/scope.rs`, `graft.rs`, `rekey.rs`,
-  `audit/shard.rs` and `indexer.rs`. Verify with `references` before planning.
+- The sidecar format for augmentation shapes, and the section format for events and
+  observations inside a document.
+- The rel-label vocabulary for manual links.
+- Table and column names of the derived catalog, and the git-history cache.
+- The pre-commit check for key collisions and non-canonical names.
+- Tests: one per anti-goal, at minimum: a rebuild equals the incremental index; two clones
+  at one commit give identical query results; a folder move changes no key and breaks no
+  citation; a rename leaves no `[[old-key…]]` anywhere; no tool output contains a hex id,
+  a path or a row id as a document reference; a worktree write merges through git alone.
 
 ## Decision log
 
 Operator, 2026-11-11:
 
-- The stem is the key (over a committed slug and over keying on the id).
-- The repo name is declared and confirmed at onboarding; it lives in `.codescout/repo.toml`.
-- Stems are normalized, for keys and for prose qualifiers alike.
-- This spec takes over the id layer: an internal ULID plus the portable key.
-- Moves are agent-only, through codescout tools.
+- The stem is the key (over a committed slug and over keying on an id).
+- The repo name is declared in `.codescout/repo.toml` and confirmed at onboarding.
+- This spec owns the id layer.
+- Moves are made by agents through codescout tools only.
+- The current state of trackers and ledgers does not constrain the design; files may be
+  rewritten.
+- **Committed files are the only store; the catalog is a derived index.**
 
 Designer's calls, open to correction:
 
-- Folder-index files take the folder name; a folder key owns its folder's tokens (from
+- Filenames are canonical keys, so there is no normalization layer (supersedes the earlier
+  operator choice to normalize, which existed only to avoid renaming files).
+- Keys are unique per repo, enforced at write time; there is no collision fallback and no
+  `Ambiguous` key outcome.
+- One closed citation grammar; a bare token is local to its document; paths and hex ids are
+  lint, not edges.
+- A folder key owns its descendants' tokens; the nearest folder-index ancestor wins (from
   `codescout-37`'s review).
-- No collision fallback; collisions are tolerated and reported, and refused only at create,
-  move and first entry use (from `codescout-37`'s review).
-- A checkout is the activated project root.
-- The declared repo name joins the existing self-names in `link_scan`.
-- Legacy hex ids and prior paths resolve through a committed alias file
-  (`.codescout/aliases.tsv`); no prose rewrite (from `codescout-37`'s second review).
-- `[[key]]` is the file-grain citation form (from `codescout-37`'s second review).
-- A folder key owns its descendants' tokens; the nearest folder-index ancestor wins.
-- The collision population is catalogued, tracked, existing files.
-- A new catalog file is the recommended migration shape.
+- The catalog audit tables are retired in favour of git history with `Session-Id` trailers.
+- The cutover builds a new catalog file.
+
+Superseded by v4: the internal ULID, `.codescout/aliases.tsv`, the normalization layer, the
+collision tolerance, the rebind-by-key rules, and the legacy-id alias map (all v3).
