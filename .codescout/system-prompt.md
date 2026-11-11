@@ -40,6 +40,6 @@
 - Keep write-tool responses compact: acknowledgements or operation metadata, without echoing file contents
 - `RecoverableError` for expected failures, `anyhow::bail!` for genuine bugs
 - Tool rename/addition touches FOUR prompt surfaces (two `source.md` slices, `builders.rs`, this file); bump `ONBOARDING_VERSION` for the `onboarding_prompt` slice or `builders.rs`, never for the server-instructions slice
-- A `run_in_background` job's end wake has a 30-minute limit; past it, no wake arrives — use a foreground `timeout_secs` or a Monitor
+- A background job's end wake has a 30-minute limit; past it, no wake arrives — run the job in the foreground with a timeout, or use a Monitor
 - Subagents MUST restore the home project after activating a different workspace project
 - Cite a fix by SHA **and** patch-id — `experiments` is rebased routinely and the SHA alone dies

@@ -2767,6 +2767,9 @@ mod tests {
             "src/server.rs",
             "src/prompts/",
             "sidecar_write_through",
+            "docs/manual/",
+            "docs/RELEASE.md",
+            "resume-*",
             "path_note_emitted_since_activation",
             "code-explorer",
         ];
