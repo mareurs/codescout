@@ -998,6 +998,17 @@ async fn activation_proceeds_after_the_default_root_was_deleted() {
         !text.contains("No such file or directory"),
         "activation must not trip over the removed root; got: {text}"
     );
+    // A recoverable refusal is `Ok` with `ok: false` and is not `is_error`, so the two checks
+    // above cannot tell it from a completed activation: require the success body, and that
+    // the project root it names is the target.
+    let body: serde_json::Value = serde_json::from_str(&result_text(&result))
+        .unwrap_or_else(|_| panic!("activation must answer with a JSON body; got: {text}"));
+    assert_eq!(body["status"], "ok", "activation did not complete: {text}");
+    assert_eq!(
+        body["project_root"],
+        serde_json::json!(target_root.to_string_lossy()),
+        "activation must land on the target; got: {text}"
+    );
 }
 
 /// L3: recording the refusal is best-effort and bounded. With `usage.db` exclusively locked, the
