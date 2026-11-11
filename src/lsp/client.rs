@@ -436,6 +436,50 @@ impl Drop for InFlightRequest {
     }
 }
 
+/// How many `documentSymbol` answers in a row were `null` for each file on this client.
+///
+/// A `null` is a server that has not answered yet, and the hint says to retry. The same advice on
+/// the tenth identical `null` for one file is not advice any more (FR-12: an agent retried one
+/// `edit_code` insert ten times in half an hour, with `sleep 60`/`90`/`120` between tries). The
+/// count lets the hint change once waiting has plainly not been enough. Cleared by any real
+/// answer for the file, so it never grows past the files that are stuck right now.
+#[derive(Default)]
+pub(crate) struct NullRuns(StdMutex<HashMap<PathBuf, u32>>);
+
+impl NullRuns {
+    /// From this many nulls in a row, the hint names a different route.
+    pub(crate) const REPEATED_AT: u32 = 3;
+
+    /// Count one more `null` for `path` and return the run length including it.
+    pub(crate) fn record_null(&self, path: &Path) -> u32 {
+        let mut runs = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let n = runs.entry(path.to_path_buf()).or_insert(0);
+        *n += 1;
+        *n
+    }
+
+    /// The file answered: its run ends.
+    pub(crate) fn clear(&self, path: &Path) {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(path);
+    }
+
+    /// The sentence to add to the hint for a run of `run` nulls, or `None` while a retry is
+    /// still the right advice. Offered as a thing to check, not as a cause (ADR 2026-08-27,
+    /// clause 3): the count says waiting has not helped, not why.
+    pub(crate) fn repeat_advice(run: u32) -> Option<String> {
+        (run >= Self::REPEATED_AT).then(|| {
+            format!(
+                " This is null answer {run} in a row for this file, so waiting has not been enough. \
+                 To check whether the server is ready, run `symbols(path=...)` on a different \
+                 file. For a plain text insert or replacement, `edit_file` does not need the server."
+            )
+        })
+    }
+}
+
 /// A running LSP client session connected to a language server process.
 pub struct LspClient {
     writer: Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>,
@@ -486,6 +530,8 @@ pub struct LspClient {
     /// (settled or deadline hit), so later calls never wait again. Lives on the client because a
     /// client is one language server for one root: a restart builds a new client and a new wait.
     pub(crate) references_warmup_done: AtomicBool,
+    /// Consecutive `null` `documentSymbol` answers per file; see [`NullRuns`].
+    null_runs: NullRuns,
 }
 
 impl LspClient {
@@ -743,6 +789,7 @@ impl LspClient {
             init_completed_at: std::sync::OnceLock::new(),
             progress,
             references_warmup_done: AtomicBool::new(false),
+            null_runs: NullRuns::default(),
         };
 
         // Perform the LSP initialize handshake
@@ -858,6 +905,7 @@ impl LspClient {
             init_completed_at: std::sync::OnceLock::new(),
             progress,
             references_warmup_done: AtomicBool::new(false),
+            null_runs: NullRuns::default(),
         })
     }
 
@@ -1484,8 +1532,24 @@ impl LspClient {
             )
             .await?
         {
-            Ok(result) => result,
+            Ok(result) => {
+                self.null_runs.clear(path);
+                result
+            }
             Err(waited) => {
+                let run = self.null_runs.record_null(path);
+                let mut hint = crate::lsp::watch_fanout::hint_with_fanout(
+                    "null means the server has not answered, not that the file has no symbols \
+                         — rust-analyzer sends it while it reloads its workspace. A repo with many \
+                         nested linked worktrees (for example under `.claude/worktrees`) can keep \
+                         it answering null for about a minute after start-up. Retry shortly.",
+                    crate::lsp::watch_fanout::probe(&self.workspace_root)
+                        .await
+                        .as_ref(),
+                );
+                if let Some(advice) = NullRuns::repeat_advice(run) {
+                    hint.push_str(&advice);
+                }
                 return Err(RecoverableError::with_hint(
                     format!(
                         "the language server answered textDocument/documentSymbol with null \
@@ -1493,15 +1557,7 @@ impl LspClient {
                         path.display(),
                         waited.as_millis()
                     ),
-                    crate::lsp::watch_fanout::hint_with_fanout(
-                        "null means the server has not answered, not that the file has no symbols \
-                         — rust-analyzer sends it while it reloads its workspace. A repo with many \
-                         nested linked worktrees (for example under `.claude/worktrees`) can keep \
-                         it answering null for about a minute after start-up. Retry shortly.",
-                        crate::lsp::watch_fanout::probe(&self.workspace_root)
-                            .await
-                            .as_ref(),
-                    ),
+                    hint,
                 )
                 .into());
             }
@@ -2804,6 +2860,7 @@ struct Point {
             init_completed_at: std::sync::OnceLock::new(),
             progress: Arc::new(ProgressTracker::default()),
             references_warmup_done: AtomicBool::new(false),
+            null_runs: NullRuns::default(),
         }
     }
 
@@ -3401,6 +3458,7 @@ struct Point {
             init_completed_at: std::sync::OnceLock::new(),
             progress: Arc::new(ProgressTracker::default()),
             references_warmup_done: AtomicBool::new(false),
+            null_runs: NullRuns::default(),
         };
 
         assert!(
@@ -4084,6 +4142,74 @@ struct Point {
             served.load(Ordering::SeqCst) > 1,
             "the null answer must have been re-asked before giving up"
         );
+    }
+    /// FR-12: the third identical null for one file stops saying only "Retry shortly". The first two
+    /// calls keep the old hint alone; from the third the hint also names a check and a route that do not
+    /// need the server. A second file's count is its own.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_repeated_null_for_one_file_changes_the_advice_from_the_third_call() {
+        let (dir, sock, _served) = scripted_null_document_symbol_peer(usize::MAX).await;
+        let file = dir.path().join("lib.rs");
+        std::fs::write(&file, "fn alpha() {}\n").unwrap();
+        let mut client = LspClient::connect(&sock, dir.path().to_path_buf())
+            .await
+            .unwrap();
+        client.started_at = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(600))
+            .unwrap();
+
+        let first = hint_of(&client.document_symbols(&file, "rust").await.unwrap_err());
+        let second = hint_of(&client.document_symbols(&file, "rust").await.unwrap_err());
+        let third = hint_of(&client.document_symbols(&file, "rust").await.unwrap_err());
+
+        for early in [&first, &second] {
+            assert!(
+                early.contains("Retry shortly"),
+                "the old advice stays: {early}"
+            );
+            assert!(
+                !early.contains("in a row"),
+                "two nulls are still a server that is starting: {early}"
+            );
+        }
+        assert!(
+            third.contains("null answer 3 in a row")
+                && third.contains("symbols(path=...)")
+                && third.contains("edit_file"),
+            "the third null must name the check and the route that skip the server: {third}"
+        );
+        assert!(
+            third.contains("Retry shortly"),
+            "the old advice is kept, not replaced: {third}"
+        );
+
+        // The control that matters: a different file starts its own count, so the advice is
+        // not a property of the whole client after three failures anywhere.
+        let other = dir.path().join("other.rs");
+        std::fs::write(&other, "fn beta() {}\n").unwrap();
+        let other_first = hint_of(&client.document_symbols(&other, "rust").await.unwrap_err());
+        assert!(
+            !other_first.contains("in a row"),
+            "a different file's first null carries no repeat advice: {other_first}"
+        );
+    }
+
+    /// The counter alone: counts per file, ends a run on an answer, and the advice starts at
+    /// [`NullRuns::REPEATED_AT`] and not before.
+    #[test]
+    fn null_runs_count_per_file_and_an_answer_ends_the_run() {
+        let runs = NullRuns::default();
+        let a = Path::new("/w/a.rs");
+        let b = Path::new("/w/b.rs");
+        assert_eq!(runs.record_null(a), 1);
+        assert_eq!(runs.record_null(a), 2);
+        assert_eq!(runs.record_null(b), 1, "a second file counts on its own");
+        runs.clear(a);
+        assert_eq!(runs.record_null(a), 1, "an answer ends the run");
+
+        assert!(NullRuns::repeat_advice(NullRuns::REPEATED_AT - 1).is_none());
+        assert!(NullRuns::repeat_advice(NullRuns::REPEATED_AT).is_some());
     }
 
     /// A real reference answer: one location. The not-ready replies it follows in the
