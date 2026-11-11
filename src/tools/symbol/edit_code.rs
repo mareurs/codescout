@@ -1174,6 +1174,7 @@ impl EditCode {
             // removal replaces the target with nothing, so no name can appear.
             CorruptionVerdict::TargetDropped
             | CorruptionVerdict::TargetRenamed(_)
+            | CorruptionVerdict::TargetReplacedBySeveral(_)
             | CorruptionVerdict::Clean
             | CorruptionVerdict::Unverified => None,
         };
@@ -1510,6 +1511,23 @@ impl EditCode {
                     "To rename: edit_code(action=\"rename\", symbol=..., new_name=...) — then \
                  replace the body in a second call if it also changed. To replace only the \
                  body, keep the declared name identical to `symbol`.",
+                )),
+                CorruptionVerdict::TargetReplacedBySeveral(new_names) => Some((
+                    format!(
+                        "edit_code replace('{name_path}') was given a body that declares {} \
+                     symbols ({}) and none of them is `{name_path}`. `replace` swaps one \
+                     symbol for one symbol and keeps its name. File restored.",
+                        new_names.len(),
+                        new_names
+                            .iter()
+                            .map(|n| format!("`{n}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    "Replace `symbol` with a body that declares only that symbol, under its own \
+                 name, then add the others with edit_code(action=\"insert\", symbol=..., \
+                 position=\"after\", body=...). To rename it, use edit_code(action=\"rename\", \
+                 symbol=..., new_name=...).",
                 )),
                 CorruptionVerdict::TargetDropped => Some((
                     format!(
