@@ -78,10 +78,22 @@ fn parse_trimmed(raw: &str) -> Option<Reference> {
     })
 }
 
-/// Every citation in `text`, in source order. Frontmatter, code (fenced, indented, inline),
-/// wiki-link labels, URLs and bare tokens in headings are never citations.
+/// Every citation in `text`, in source order. Never citations: YAML frontmatter, code (fenced,
+/// indented, inline), wiki-link labels and embeds, `<...>` autolinks, raw HTML (an HTML block
+/// arrives as `Event::Html`, so `<details>R-91 [[a-doc]]</details>` yields nothing, as in
+/// CommonMark), and bare tokens in headings.
+///
+/// Frontmatter is cut off by `frontmatter::parse` and never handed to the Markdown parser, so
+/// nothing inside it (a fence in a block scalar, say) can leak into the body. When that parse
+/// fails (a BOM before the opening `---`, malformed YAML, a closing `--- ` with trailing
+/// spaces) the whole text is scanned as body, exactly as `link_scan::extract` does.
+///
+/// Inside a table cell the wiki-link label separator must be escaped (`[[key\|label]]`):
+/// GFM splits the cell at an unescaped `|` before the wiki link is seen, so `[[key|label]]`
+/// there is not a link at all. The one trailing `\` the escape leaves on the target is stripped.
 pub fn extract(text: &str) -> Vec<Citation> {
-    let frontmatter_end = frontmatter_end(text);
+    // A suffix start of `text` (`len - body.len()`), so a char boundary.
+    let base = frontmatter_end(text);
     let starts = line_starts(text);
     let cite = |reference, offset: usize| Citation {
         reference,
@@ -89,27 +101,34 @@ pub fn extract(text: &str) -> Vec<Citation> {
     };
 
     let mut out = Vec::new();
-    let (mut in_code, mut in_heading) = (false, false);
+    let (mut in_code, mut in_heading, mut in_cell) = (false, false, false);
     // One flag per open link/image: true when its text is not prose (wiki label, URL, embed).
     let mut opaque: Vec<bool> = Vec::new();
-    let parser = Parser::new_ext(text, Options::ENABLE_WIKILINKS | Options::ENABLE_TABLES);
-    for (event, range) in parser.into_offset_iter() {
-        // State is tracked everywhere; only emission is gated by the frontmatter offset, so a
-        // block opened inside the frontmatter cannot unbalance the state for the body.
-        let in_body = range.start >= frontmatter_end;
+    let opts = Options::ENABLE_WIKILINKS | Options::ENABLE_TABLES;
+    for (event, range) in Parser::new_ext(&text[base..], opts).into_offset_iter() {
+        // Offsets are relative to the body; every offset below is absolute in `text`.
+        let range = range.start + base..range.end + base;
         match event {
             Event::Start(Tag::CodeBlock(_)) => in_code = true,
             Event::End(TagEnd::CodeBlock) => in_code = false,
             Event::Start(Tag::Heading { .. }) => in_heading = true,
             Event::End(TagEnd::Heading(_)) => in_heading = false,
+            Event::Start(Tag::TableCell) => in_cell = true,
+            Event::End(TagEnd::TableCell) => in_cell = false,
             Event::Start(Tag::Link {
                 link_type,
                 dest_url,
                 ..
             }) => {
                 let wiki = matches!(link_type, LinkType::WikiLink { .. });
-                if wiki && in_body {
-                    out.push(cite(parse_target(&dest_url), range.start));
+                if wiki {
+                    let dest: &str = &dest_url;
+                    let dest = if in_cell {
+                        dest.strip_suffix('\\').unwrap_or(dest)
+                    } else {
+                        dest
+                    };
+                    out.push(cite(parse_target(dest), range.start));
                 }
                 opaque.push(wiki || matches!(link_type, LinkType::Autolink | LinkType::Email));
             }
@@ -118,7 +137,7 @@ pub fn extract(text: &str) -> Vec<Citation> {
             Event::End(TagEnd::Link | TagEnd::Image) => {
                 opaque.pop();
             }
-            Event::Text(s) if in_body && !in_code && !in_heading && !opaque.contains(&true) => {
+            Event::Text(s) if !in_code && !in_heading && !opaque.contains(&true) => {
                 for (offset, token) in bare_tokens(text, &s, &range) {
                     out.push(cite(Reference::Bare { token }, offset));
                 }
@@ -151,10 +170,12 @@ fn token_re() -> &'static Regex {
 
 /// The bare tokens of one text event, each with its absolute byte offset in `text`.
 ///
-/// The event string equals its source slice for plain text; an event the parser rewrote
-/// (an entity, an escape) differs from it, and is skipped as it cannot hold a token the
-/// source spells. Word boundaries are judged on the source around the match, because the
-/// parser splits one run of prose into several events at `_`, `*` and the like.
+/// The event string equals its source slice for plain text. Only an entity (`&amp;` arrives as
+/// Text `&` over five source bytes) differs from its slice; such an event is skipped, as it cannot
+/// hold a token the source spells. A backslash escape does not differ: in pulldown-cmark 0.13.3
+/// `R\-91` arrives as Text `R` (0..1) and Text `-91 ...` (2..), so no token spans it. Word
+/// boundaries are judged on the source around the match, because the parser splits one run of
+/// prose into several events at escapes, entities and emphasis markers.
 fn bare_tokens(text: &str, event_text: &str, range: &Range<usize>) -> Vec<(usize, String)> {
     if text.get(range.clone()) != Some(event_text) {
         return Vec::new();
@@ -328,7 +349,8 @@ mod tests {
         assert_eq!(refs("X&amp;R-91"), vec![bare("R-91")]);
     }
 
-    // A URL's text is not prose: an autolink never yields a bare token.
+    // A `<...>` autolink (or email) is a URL, not prose: it never yields a bare token. A bare URL
+    // in prose is plain text (pulldown-cmark has no bare-URL autolinks), so its tokens are scanned.
     #[test]
     fn an_autolink_url_is_not_scanned_for_tokens() {
         assert_eq!(
@@ -409,5 +431,94 @@ mod tests {
             refs("R-1 [[a-doc]] [[a-doc]] R-2"),
             vec![bare("R-1"), file("a-doc"), file("a-doc"), bare("R-2")]
         );
+    }
+    // Table cells: GFM splits a cell at an unescaped `|`, so `[[t-doc|lbl]]` is not a link there
+    // (authors must write `\|`); the escaped form arrives with one trailing `\` on the target.
+    #[test]
+    fn a_labelled_wiki_link_in_a_table_cell_needs_an_escaped_pipe() {
+        assert_eq!(
+            refs("| a | [[t-doc\\|lbl]] |\n|---|---|\n| x | y |\n"),
+            vec![file("t-doc")]
+        );
+        assert_eq!(
+            refs("| a | [[t-doc:B-2\\|lbl]] |\n|---|---|\n| x | y |\n"),
+            vec![Reference::Entry {
+                repo: None,
+                key: k("t-doc"),
+                token: "B-2".into()
+            }]
+        );
+        assert_eq!(
+            refs("| a | b |\n|---|---|\n| x | [[t-doc|lbl]] |\n"),
+            vec![]
+        );
+    }
+
+    // Outside a table cell a trailing backslash on the target is not an escape: it stays malformed.
+    // (`[[t-doc\]]` is no link at all, `\]` being an escape; the pothole form is the live case.)
+    #[test]
+    fn a_trailing_backslash_outside_a_table_stays_malformed() {
+        assert_eq!(refs("[[t-doc\\|lbl]]"), vec![malformed("t-doc\\")]);
+    }
+
+    // The frontmatter is never handed to the parser: an indented fence inside a YAML block scalar
+    // must not open a code block that swallows the closing `---` and the whole body.
+    #[test]
+    fn a_fence_inside_a_frontmatter_block_scalar_does_not_swallow_the_body() {
+        let cs = extract("---\ndescription: |\n  ```rust\n  x\n---\nbody R-1 [[a-doc]]\n");
+        assert_eq!(
+            cs.iter()
+                .map(|c| (c.reference.clone(), c.line))
+                .collect::<Vec<_>>(),
+            vec![(bare("R-1"), 6), (file("a-doc"), 6)]
+        );
+    }
+
+    // When frontmatter::parse fails (here a BOM before the opening `---`) the whole text is scanned
+    // as body: the same as link_scan::extract. This pins that behaviour, it does not endorse it.
+    #[test]
+    fn a_bom_before_the_frontmatter_makes_it_body_as_in_link_scan() {
+        assert_eq!(
+            refs("\u{feff}---\nrests_on: \"[[x-doc]]\"\n---\n"),
+            vec![file("x-doc")]
+        );
+    }
+
+    // An HTML block arrives as Event::Html, not Text: nothing in it is a citation (CommonMark).
+    #[test]
+    fn an_html_block_is_not_scanned() {
+        assert_eq!(refs("<details>\nR-91 [[a-doc]]\n</details>\n"), vec![]);
+    }
+
+    // A bare URL in prose is text (no bare-URL autolinks), so its token is a bare token.
+    #[test]
+    fn a_token_in_a_bare_url_is_scanned() {
+        assert_eq!(refs("see https://x/issues/R-91 now"), vec![bare("R-91")]);
+    }
+
+    // Malformed keeps the trimmed target; repo and token position are validated part by part.
+    #[test]
+    fn parse_target_edge_shapes() {
+        assert_eq!(parse_target(" two words "), malformed("two words"));
+        assert_eq!(
+            parse_target("a/b:C-1"),
+            Reference::Entry {
+                repo: Some(r("a")),
+                key: k("b"),
+                token: "C-1".into()
+            }
+        );
+        for raw in ["a:C-1/b", "/a", "a/", ":F-1", "deadbeefcafe1234/b"] {
+            assert_eq!(parse_target(raw), malformed(raw), "{raw}");
+        }
+    }
+
+    // Token shape edges: ASCII digits only, up to three capitals, and a hyphen continuation is a
+    // boundary (as `\b` would be).
+    #[test]
+    fn token_shape_edges() {
+        assert_eq!(refs("R-\u{669}\u{661}"), vec![]);
+        assert_eq!(refs("R-91-2"), vec![bare("R-91")]);
+        assert_eq!(refs("ABCD-1"), vec![]);
     }
 }
