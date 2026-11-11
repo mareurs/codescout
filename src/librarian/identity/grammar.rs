@@ -1,0 +1,413 @@
+//! The closed citation grammar: what in a document's text is a reference to another
+//! document or to an entry, and nothing else.
+
+use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
+use regex::Regex;
+use std::ops::Range;
+use std::sync::OnceLock;
+
+use super::key::Key;
+use super::repo_name::RepoName;
+
+/// What one citation points at, as written.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Reference {
+    /// `[[key]]` or `[[repo/key]]`: a whole document.
+    File { repo: Option<RepoName>, key: Key },
+    /// `[[key:TOKEN]]` or `[[repo/key:TOKEN]]`: one entry of a document.
+    Entry {
+        repo: Option<RepoName>,
+        key: Key,
+        token: String,
+    },
+    /// A bare `TOKEN`: resolves only inside its own document.
+    Bare { token: String },
+    /// A wiki link whose target is not in the grammar; `raw` is the trimmed target.
+    Malformed { raw: String },
+}
+
+/// One citation and the 1-indexed line of its first byte.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Citation {
+    pub reference: Reference,
+    pub line: u32,
+}
+
+/// An entry token: one to three ASCII capitals, a hyphen, digits (`F-3`, `R-91`).
+fn is_token(s: &str) -> bool {
+    match s.split_once('-') {
+        Some((letters, digits)) => {
+            (1..=3).contains(&letters.len())
+                && letters.bytes().all(|b| b.is_ascii_uppercase())
+                && !digits.is_empty()
+                && digits.bytes().all(|b| b.is_ascii_digit())
+        }
+        None => false,
+    }
+}
+
+/// Parse the target of a wiki link: `[repo/]key[:TOKEN]`, outer ASCII whitespace trimmed.
+/// Every part is validated by its own type; anything else is `Malformed`.
+pub fn parse_target(dest: &str) -> Reference {
+    let raw = dest.trim_matches(|c: char| c.is_ascii_whitespace());
+    parse_trimmed(raw).unwrap_or_else(|| Reference::Malformed {
+        raw: raw.to_string(),
+    })
+}
+
+fn parse_trimmed(raw: &str) -> Option<Reference> {
+    let (doc, token) = match raw.split_once(':') {
+        Some((_, rest)) if rest.contains(':') => return None,
+        Some((doc, token)) if is_token(token) => (doc, Some(token)),
+        Some(_) => return None,
+        None => (raw, None),
+    };
+    let (repo, key) = match doc.split_once('/') {
+        Some((_, rest)) if rest.contains('/') => return None,
+        Some((repo, key)) => (Some(RepoName::parse(repo).ok()?), key),
+        None => (None, doc),
+    };
+    let key = Key::parse(key).ok()?;
+    Some(match token {
+        Some(token) => Reference::Entry {
+            repo,
+            key,
+            token: token.to_string(),
+        },
+        None => Reference::File { repo, key },
+    })
+}
+
+/// Every citation in `text`, in source order. Frontmatter, code (fenced, indented, inline),
+/// wiki-link labels, URLs and bare tokens in headings are never citations.
+pub fn extract(text: &str) -> Vec<Citation> {
+    let frontmatter_end = frontmatter_end(text);
+    let starts = line_starts(text);
+    let cite = |reference, offset: usize| Citation {
+        reference,
+        line: starts.partition_point(|&s| s <= offset) as u32,
+    };
+
+    let mut out = Vec::new();
+    let (mut in_code, mut in_heading) = (false, false);
+    // One flag per open link/image: true when its text is not prose (wiki label, URL, embed).
+    let mut opaque: Vec<bool> = Vec::new();
+    let parser = Parser::new_ext(text, Options::ENABLE_WIKILINKS | Options::ENABLE_TABLES);
+    for (event, range) in parser.into_offset_iter() {
+        // State is tracked everywhere; only emission is gated by the frontmatter offset, so a
+        // block opened inside the frontmatter cannot unbalance the state for the body.
+        let in_body = range.start >= frontmatter_end;
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => in_code = true,
+            Event::End(TagEnd::CodeBlock) => in_code = false,
+            Event::Start(Tag::Heading { .. }) => in_heading = true,
+            Event::End(TagEnd::Heading(_)) => in_heading = false,
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                ..
+            }) => {
+                let wiki = matches!(link_type, LinkType::WikiLink { .. });
+                if wiki && in_body {
+                    out.push(cite(parse_target(&dest_url), range.start));
+                }
+                opaque.push(wiki || matches!(link_type, LinkType::Autolink | LinkType::Email));
+            }
+            // An embed `![[x]]` is an image: not a citation, and its alt text is not prose.
+            Event::Start(Tag::Image { .. }) => opaque.push(true),
+            Event::End(TagEnd::Link | TagEnd::Image) => {
+                opaque.pop();
+            }
+            Event::Text(s) if in_body && !in_code && !in_heading && !opaque.contains(&true) => {
+                for (offset, token) in bare_tokens(text, &s, &range) {
+                    out.push(cite(Reference::Bare { token }, offset));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Byte length of the leading YAML frontmatter block, as `link_scan::extract` computes it.
+fn frontmatter_end(text: &str) -> usize {
+    match crate::librarian::frontmatter::parse(text) {
+        Ok((_, body)) => text.len() - body.len(),
+        Err(_) => 0,
+    }
+}
+
+/// Byte offset of each line start; a lookup is a binary search.
+fn line_starts(text: &str) -> Vec<usize> {
+    std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+        .collect()
+}
+
+fn token_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new("[A-Z]{1,3}-[0-9]+").expect("static regex"))
+}
+
+/// The bare tokens of one text event, each with its absolute byte offset in `text`.
+///
+/// The event string equals its source slice for plain text; an event the parser rewrote
+/// (an entity, an escape) differs from it, and is skipped as it cannot hold a token the
+/// source spells. Word boundaries are judged on the source around the match, because the
+/// parser splits one run of prose into several events at `_`, `*` and the like.
+fn bare_tokens(text: &str, event_text: &str, range: &Range<usize>) -> Vec<(usize, String)> {
+    if text.get(range.clone()) != Some(event_text) {
+        return Vec::new();
+    }
+    token_re()
+        .find_iter(event_text)
+        .filter_map(|m| {
+            let (start, end) = (range.start + m.start(), range.start + m.end());
+            let before = text[..start].chars().next_back();
+            let after = text[end..].chars().next();
+            (!before.is_some_and(is_word_char) && !after.is_some_and(is_word_char))
+                .then(|| (start, m.as_str().to_string()))
+        })
+        .collect()
+}
+
+/// ASCII letters, digits and `_`, plus any non-ASCII alphanumeric (so `R-91é` is not a token).
+fn is_word_char(c: char) -> bool {
+    c == '_' || c.is_alphanumeric()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn refs(text: &str) -> Vec<Reference> {
+        extract(text).into_iter().map(|c| c.reference).collect()
+    }
+    fn k(s: &str) -> Key {
+        Key::parse(s).unwrap()
+    }
+    fn r(s: &str) -> RepoName {
+        RepoName::parse(s).unwrap()
+    }
+    fn file(key: &str) -> Reference {
+        Reference::File {
+            repo: None,
+            key: k(key),
+        }
+    }
+    fn bare(token: &str) -> Reference {
+        Reference::Bare {
+            token: token.into(),
+        }
+    }
+    fn malformed(raw: &str) -> Reference {
+        Reference::Malformed { raw: raw.into() }
+    }
+
+    #[test]
+    fn the_four_forms_and_a_label() {
+        assert_eq!(
+            refs("[[a-doc]] [[a-doc:F-3]] [[other/b-doc]] [[other/b-doc:R-91|see this]]"),
+            vec![
+                Reference::File {
+                    repo: None,
+                    key: k("a-doc")
+                },
+                Reference::Entry {
+                    repo: None,
+                    key: k("a-doc"),
+                    token: "F-3".into()
+                },
+                Reference::File {
+                    repo: Some(r("other")),
+                    key: k("b-doc")
+                },
+                Reference::Entry {
+                    repo: Some(r("other")),
+                    key: k("b-doc"),
+                    token: "R-91".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn malformed_targets_are_reported_not_guessed() {
+        for raw in [
+            "arXiv",
+            "two words",
+            "a:b:c",
+            "a/b/c",
+            "a:f-3",
+            "deadbeefcafe1234",
+            "",
+        ] {
+            assert_eq!(
+                parse_target(raw),
+                Reference::Malformed { raw: raw.into() },
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            parse_target(" tracker-hygiene-log "),
+            Reference::File {
+                repo: None,
+                key: k("tracker-hygiene-log")
+            }
+        );
+    }
+
+    #[test]
+    fn code_frontmatter_headings_and_labels_are_never_citations() {
+        let text = "---\nrests_on: \"[[x-doc]]\"\n---\n# Heading F-1 and [[h-doc]]\n\nInline `[[c-doc]]` and `F-2`.\n\n```toml\n[[rule]]\nF-3\n```\n\n    [[indented-doc]] F-4\n\n[[l-doc|label F-5]] and bare F-6.\n";
+        assert_eq!(
+            refs(text),
+            vec![
+                Reference::File {
+                    repo: None,
+                    key: k("h-doc")
+                },
+                Reference::File {
+                    repo: None,
+                    key: k("l-doc")
+                },
+                Reference::Bare {
+                    token: "F-6".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn bare_tokens_need_word_boundaries_and_lines_are_one_indexed() {
+        let cs = extract("intro\n\nsee R-91, not XR-91a or R-9x.\n");
+        assert_eq!(cs.len(), 1);
+        assert_eq!(
+            cs[0].reference,
+            Reference::Bare {
+                token: "R-91".into()
+            }
+        );
+        assert_eq!(cs[0].line, 3);
+    }
+
+    #[test]
+    fn an_unclosed_fence_hides_what_follows_and_does_not_panic() {
+        assert_eq!(
+            refs("[[a-doc]]\n\n```\n[[b-doc]]\n"),
+            vec![Reference::File {
+                repo: None,
+                key: k("a-doc")
+            }]
+        );
+    }
+
+    #[test]
+    fn a_wiki_link_in_a_table_cell_is_found() {
+        assert_eq!(
+            refs("| a | [[t-doc:B-2]] |\n|---|---|\n| x | y |\n"),
+            vec![Reference::Entry {
+                repo: None,
+                key: k("t-doc"),
+                token: "B-2".into()
+            }]
+        );
+    }
+
+    // Ruling 1: a bare token's boundaries are judged against the source text around the
+    // match, not inside one parser text event (the parser splits events at `_`, `*`, ...).
+    #[test]
+    fn a_bare_token_is_word_bounded_in_the_source_not_in_the_event() {
+        assert_eq!(refs("foo_R-91"), vec![]);
+        assert_eq!(refs("R-91_x"), vec![]);
+        assert_eq!(refs("R-91é"), vec![]);
+        assert_eq!(refs("éR-91"), vec![]);
+        assert_eq!(refs("**R-91**"), vec![bare("R-91")]);
+        assert_eq!(refs("R-91"), vec![bare("R-91")]);
+        // An entity before the token is punctuation in the source (`;`), so the token stands.
+        assert_eq!(refs("X&amp;R-91"), vec![bare("R-91")]);
+    }
+
+    // A URL's text is not prose: an autolink never yields a bare token.
+    #[test]
+    fn an_autolink_url_is_not_scanned_for_tokens() {
+        assert_eq!(
+            refs("<https://example.com/R-91> then R-92"),
+            vec![bare("R-92")]
+        );
+    }
+
+    // Ruling 2: an embed `![[a-doc]]` is an image tag, not a citation; the grammar has no embed form.
+    #[test]
+    fn an_embed_is_not_a_citation() {
+        assert_eq!(refs("![[a-doc]]"), vec![]);
+        assert_eq!(
+            refs("![[a-doc:F-3|alt F-4]] and [[b-doc]]"),
+            vec![file("b-doc")]
+        );
+    }
+
+    // Ruling 3: wherever the parser yields a wiki link tag, it is a citation.
+    #[test]
+    fn a_wiki_link_in_a_blockquote_a_list_item_and_a_link_text_is_found() {
+        assert_eq!(
+            refs("> quote [[q-doc]]\n\n- item [[i-doc]]\n\n[x [[n-doc]] y](https://example.com)\n"),
+            vec![file("q-doc"), file("i-doc"), file("n-doc")]
+        );
+    }
+
+    // Ruling 3: a backslash-escaped opener is text, not a wiki link.
+    #[test]
+    fn an_escaped_wiki_link_is_not_a_citation() {
+        assert_eq!(refs("\\[[a-doc]]"), vec![]);
+    }
+
+    // Review focus 3: outer whitespace is trimmed, inner whitespace is malformed.
+    #[test]
+    fn whitespace_in_a_wiki_link_is_trimmed_outside_and_malformed_inside() {
+        assert_eq!(
+            refs("[[ tracker-hygiene-log ]]"),
+            vec![file("tracker-hygiene-log")]
+        );
+        assert_eq!(refs("[[two words]]"), vec![malformed("two words")]);
+    }
+
+    // Ruling 4: an empty target is malformed with the trimmed target as raw (via parse_target);
+    // an empty label after a valid target is still a file citation. pulldown-cmark yields no
+    // link at all for `[[]]` or `[[|label]]`, so the extractor reports nothing there (pinned).
+    #[test]
+    fn empty_targets_are_malformed_and_an_empty_label_is_not() {
+        assert_eq!(parse_target("  "), malformed(""));
+        assert_eq!(refs("[[]]"), vec![]);
+        assert_eq!(refs("[[|label]]"), vec![]);
+        assert_eq!(refs("[[a-doc|]]"), vec![file("a-doc")]);
+    }
+
+    // Ruling 5: the line is the 1-indexed line of the citation's first byte.
+    #[test]
+    fn lines_count_from_one_across_crlf_and_frontmatter() {
+        assert_eq!(extract("[[a-doc]]")[0].line, 1);
+        let crlf = extract("one\r\ntwo\r\n\r\nsee [[a-doc]] and R-4\r\n");
+        assert_eq!(crlf.iter().map(|c| c.line).collect::<Vec<_>>(), vec![4, 4]);
+        let fm = extract("---\ntitle: x\nrests_on: \"[[x-doc]]\"\n---\nbody\n\n[[a-doc]]\n");
+        assert_eq!(fm.len(), 1);
+        assert_eq!(fm[0].line, 7);
+    }
+
+    // Ruling 6: a token defined by a heading is skipped there; table cells, list items and
+    // blockquote paragraphs are scanned.
+    #[test]
+    fn a_token_in_a_heading_is_a_definition_but_elsewhere_it_is_a_citation() {
+        let text = "## F-1 — title\n\n> quote F-2\n\n- item F-3\n\n| a |\n|---|\n| F-4 |\n";
+        assert_eq!(refs(text), vec![bare("F-2"), bare("F-3"), bare("F-4")]);
+    }
+
+    // Ruling 7: byte order, and the same target twice yields two citations.
+    #[test]
+    fn citations_come_in_source_order_and_repeats_are_kept() {
+        assert_eq!(
+            refs("R-1 [[a-doc]] [[a-doc]] R-2"),
+            vec![bare("R-1"), file("a-doc"), file("a-doc"), bare("R-2")]
+        );
+    }
+}
