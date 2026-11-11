@@ -9,8 +9,8 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 4
-entry_high_water_W: 2
+entry_high_water_F: 8
+entry_high_water_W: 4
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
 
@@ -104,12 +104,18 @@ entry_high_water_W: 2
 | F-2 | 2026-11-11 | med | self-friction | fixed-verified | **Claimed rekey.rs could re-key artifact keys without reading it** — it re-keys entry prefixes |
 | F-3 | 2026-11-11 | med | subagent | fixed-verified | **Slug-drift estimate scoped to one repo; the unique index spans the machine** — suffix depends on other repos' index order |
 | F-4 | 2026-11-11 | high | architectural | promoted-to-bug-tracker | **Reindex deletes a moved file's local history** — has_history guards escaping rows only |
+| F-5 | 2026-11-11 | med | plan-prose | fixed-verified | **Plan A Task 1 missed everything a removed cargo feature drags along** — required-features, install commands, memories; found by scout + review |
+| F-6 | 2026-11-11 | med | self-friction | fixed-verified | **Ran the plan on the shared checkout until the operator asked for a worktree** — 33 files edited, restored from a saved patch |
+| F-7 | 2026-11-11 | med | subagent | open | **The worktree-aware repo-name suggestion mishandles a submodule** — `worktree_main_root` is ungated; found by the re-review, not fixed (no second wave) |
+| F-8 | 2026-11-11 | med | plan-prose | open | **A spec requirement is built by no plan: "onboarding says when another checkout uses the name"** — plus two open spec-level questions |
 
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-2 | 2026-11-11 | high | cross-session design review | path fallback would change keys on folder moves | validated |
+| W-3 | 2026-11-11 | high | per-task review with named risks | a Kelvin-sign key, a write through a dangling link, a 60 s-bound dialog under a write lock — all with a green gate | validated |
+| W-4 | 2026-11-11 | high | census with the real code | Plan E sized from the 895-id estimate; measured 45 renames, 37 duplicate-key groups, 144 `[[F-16]]` rewrites | validated |
 | W-1 | 2026-11-11 | high | builder check against the code | repo name in librarian.toml breaks every older binary | validated |
 
 ---
@@ -420,6 +426,142 @@ Codified so the Index column means the same thing across sessions.
 **Status:** validated
 
 **Rests on:** a design that serves another design must be reviewed by the session that owns the other one.
+
+## F-5 — Plan A Task 1 missed everything a removed cargo feature drags along
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, scouting Plan A Task 1 before the first subagent dispatch.
+
+**When:** executing the plan with subagents; the task said "remove 112 gates in 23 files" and the Cargo.toml feature.
+
+**Expected:** the task text lists what removing the `librarian` feature changes.
+
+**Got:** the task text missed four `required-features = ["librarian"]` lines on test targets, `tests/feature_lanes.rs`, install commands that pass `--features …,librarian` (`cargo install` would reject them), CONTRIBUTING.md, ROADMAP.md, `docs/conventions/gate-ordering.md`, CI comments, a gate test that matched a printed line, and — found only by the task review — six agent-facing codescout memories (`development-commands` is the one CLAUDE.md points every session at), `attribution.rs:643` and `test-env-isolation.md`. A grep for the cfg attribute alone finds 112 sites and none of these.
+
+**Probable cause:** the task was sized from the one grep that measured the code gates; the references to the feature as a name (docs, memories, commands, test targets) were never measured.
+
+**Workaround:** the controller added the scope items to the implementer's dispatch; the review loop found the memories on round 1.
+
+**Severity:** med
+
+**Status:** fixed-verified
+
+**Rests on:** when a plan removes a named switch, measure every spelling of its name (`--features`, `required-features`, prose, memories), not only the attribute.
+
+**Fix idea / Pointer:** commits `f383136a7`, `d03b67e35` on `feat/artifact-identity-plan-a-20261111`.
+
+## F-6 — Ran the plan on the shared checkout until the operator asked for a worktree
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, at the start of executing Plan A.
+
+**When:** I read the project rules about shared-checkout commits, chose to run the plan on the shared `experiments` checkout with pathspec commits, and recorded it as a ruling.
+
+**Expected:** a plan whose first task rewrites Cargo.toml and 23 source files, in a checkout with other live sessions and uncommitted peer edits, runs in an isolated workspace.
+
+**Got:** the first implementer had edited 33 files in the shared tree when the operator said "wait, no! lets do an worktree". I stopped it, saved its diff, restored exactly those 33 paths (verified clean of peer edits first, nothing staged), and created `.worktrees/artifact-identity-plan-a`. A peer's edits to `src/prompts/mod.rs`, `tests/cli_doc.rs` and `attribution.rs` appeared in the main tree meanwhile; the branch overlaps two of them, so the merge now needs that peer to commit first.
+
+**Probable cause:** I weighed the commit rules, which allow a shared tree, and did not weigh the blast radius of a task that changes build configuration for every session.
+
+**Workaround:** worktree; pinned codescout calls (`workspace=<path>`) in every subagent brief; `append_entry` refuses a worktree session, so ledger entries are written from the main checkout.
+
+**Severity:** med
+
+**Status:** fixed-verified
+
+**Rests on:** isolation is the default for a change that every session builds; the commit rules say how to share a tree, not whether to.
+
+**Fix idea / Pointer:** the SDD skill's setup step says to isolate; follow it before the first dispatch.
+
+## F-7 — The worktree-aware repo-name suggestion mishandles a submodule
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, scoped re-review of the final fix wave on Plan A (commit `ae8228b96`).
+
+**When:** the whole-branch review found that `suggest` offered the worktree folder's name inside a linked worktree; the fix called `path_security::worktree_main_root(root)` to use the main checkout.
+
+**Expected:** a fix for the worktree case leaves every non-worktree case as it was (the brief said so).
+
+**Got:** `worktree_main_root` does not distinguish a submodule from a linked worktree (`is_linked_worktree` does, by requiring a `worktrees` path component; every other librarian caller gates on it first). In a submodule `.git` holds `gitdir: ../.git/modules/x`; the helper returns `Some("..")`, so `suggest` offers `repo` instead of the submodule's name and reads `../.codescout/workspace.toml` against the server's working directory. With an absolute gitdir it offers the superproject's name, the very name collision the fix was meant to remove. The same happens for a linked worktree created with relative gitdir pointers.
+
+**Probable cause:** the fix reused a helper whose name says "worktree" without reading its gate; the implementer verified the linked-worktree case and the plain-directory case, not the third `.git`-file shape.
+
+**Workaround:** none applied. The final-review process allows no second fix wave, so the regression is surfaced to the operator with the one-line remedy: call `worktree_main_root` only when `is_linked_worktree(root)`, resolve a relative main root against `root`, and add a submodule-shaped test. `src/agent/mod.rs:794,815` has the same ungated call (older code).
+
+**Severity:** med
+
+**Status:** open
+
+**Rests on:** a fix that reuses a helper inherits its gate; read the callers' guards, not only its signature.
+
+**Fix idea / Pointer:** `src/librarian/identity/repo_name.rs:189-191`; re-review report in the Plan A ledger (final fix wave).
+
+## F-8 — A spec requirement is built by no plan
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, final whole-branch review of Plan A.
+
+**When:** comparing the branch with the spec's § Identity.
+
+**Expected:** every requirement of the spec is built by a task or named in a plan that will build it.
+
+**Got:** the spec (§ Identity, about L170-172) says onboarding "says when another checkout in the catalog uses" the repo name. Task 3 does not build it and no plan file schedules it: Plan A is the only plan written for this spec, and Plans B-E are only named in its header. Two further spec-level questions surfaced with it and are open: whether `.codescout/repo.toml` lives at the codescout project root (a workspace sub-project) or at the git root, and how already-onboarded projects, which rarely call `onboarding`, ever get a confirmed name.
+
+**Probable cause:** the split into five plans moved requirements to later plans in the header only; no check mapped each spec sentence to a task.
+
+**Workaround:** ticketed for Plan B (which has the catalog): the "another checkout uses this name" check, a `doctor` check or prompt for already-onboarded projects, remembering a declined dialog (`declined: true` in the block), and the root-versus-git-root ruling.
+
+**Severity:** med
+
+**Status:** open
+
+**Rests on:** a split plan needs a spec-coverage table across all its parts, written when the split is made.
+
+**Fix idea / Pointer:** write the Plan B requirement list from the spec's requirement sentences before dispatching anything.
+
+## W-3 — Per-task review with named risks caught eight defects a green gate passed
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, executing Plan A with one implementer, one Opus task review and one scoped re-review per task, then a whole-branch review.
+
+**Pattern:** every task review read the diff against named risks (each risk named from what the diff changes), and the reviewer was allowed to probe the parser or the filesystem in a scratch copy, never in the repo.
+
+**Counterfactual:** the reviews found, before any merge: (1) the document key lowercased with Unicode rules, so a Kelvin sign in a filename became `k` and a non-ASCII name got a valid key (Task 4); (2) `repo.toml` read as "absent" when it was a dangling symlink, and written through links, so onboarding's read-then-write could create a file outside the repo from a cloned repository (Task 2); (3) an elicitation with no timeout inside a 60 s tool call that holds the write guard (Task 3; a slow answer would lose the whole onboarding response and refuse peers' writes); (4) a labelled wiki link in a table cell that could never be valid (Task 5); (5) a YAML block scalar containing a fence that swallowed the whole body and gave zero citations (Task 5); (6) a broken folder index silently handing its descendants' tokens to a far ancestor (Task 6, a flaw in my own ruling); (7) `[[text]](url)` read as a citation, 32 times in this repo (final review); (8) the worktree folder's name offered as the repo name (final review). A green gate, which every task had, caught none of these. The re-review of the last fix also caught a regression the fix introduced (F-7).
+
+**Confirming data points:** 7 tasks, 7 task reviews, 7 re-reviews (six fix rounds and the final fix wave); every task but Task 7 needed one fix round; 1 Critical-grade defect class (write through a link) and 2 spec-level corrections (Tasks 4, 6).
+
+**Impact:** high
+
+**Promote-when:** a plan runs without per-task review and ships one of these classes, or the review cost per task exceeds the cost of the defects it finds.
+
+**Status:** validated
+
+**Rests on:** a green gate shows the tests that exist pass; only a reader who names the input that is missing finds the defect.
+
+## W-4 — The census sized Plan E from the corpus: 45 renames, 37 duplicate groups, 144 token links
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, Plan A Task 7: an ignored test (`census_of_this_repo_under_the_new_identity_model`, `src/librarian/identity/census.rs` on the Plan A branch) ran the new key, grammar and index over every tracked `*.md` file at commit `c503c587a`. The repo name it used was the worktree directory name (`artifact-identity-plan-a`, source `suggested`; no `repo.toml` is tracked), so a citation `[[<that-name>/key]]` would resolve locally; none exists. The numbers are comparable only between runs that print the same name.
+
+**Pattern:** measure the corpus under the new rules with the real code before planning the migration, and print the counts by cause, not only the total.
+
+**Counterfactual:** without the census, Plan E would be sized from the old estimate (about 895 stamped ids) and from the idea that few files fail the key rule. Measured: 2704 tracked documents, 0 skipped as non-UTF-8; 45 `InvalidKey`, all `NonCanonical` (19 contain `_`, 25 contain a second `.`, 1 has a double hyphen), so about 45 renames; 82 of 86 uppercase-stem files have valid keys (uppercase alone is not an error); 37 duplicate-key groups covering 127 documents, only 1 involving a folder-index README, mostly fixture and evidence trees (14 `SKILL.md`, 10 `onboarding.md`, 10 `architecture.md` copies) and dated plan/spec pairs, so Plan B needs a key-space scope rule before it enforces uniqueness; 20 folder-index documents, 18 usable (the descendants of the 2 broken ones get no owner); 12,824 citations in total, of which 263 are grammar-form (File 68, Entry 2, CrossRepo 4, UnknownKey 11, Malformed 178), 7,947 are bare tokens not defined locally (`NotLocal`, expected noise) and 4,614 are `Local`. Of the 178 Malformed: 144 are the existing organic `[[F-16]]`-style entry-token links in `docs/trackers` (the largest rewrite for Plan E), 32 are Markdown links whose text starts with `[` (`[[arXiv]](url)`, fixed in the final fix wave by the rule that a wiki link directly followed by `(` is not a citation), and 2 are relative paths. The 4 CrossRepo are memory links `[[research/topic]]` that collide with the `repo/key` form; at least 5 of 10 sampled UnknownKey are TOML names written in prose (`[[roots]]`, `[[slug]]`). The census covers tracked files only; an indexer that walks the filesystem sees more.
+
+**Confirming data points:** one run; the arithmetic was re-summed by the task reviewer (19 + 25 + 1 = 45; 144 + 2 + 32 = 178; 127 documents in 37 groups).
+
+**Impact:** high
+
+**Promote-when:** Plan E sizing is replaced by a measured migration run, or a second census on another repo disagrees with this one.
+
+**Status:** validated
+
+**Rests on:** a migration is sized by running the new rules over the real corpus, never by an estimate made before the rules existed.
 
 ## Template for new entries
 
