@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 236
-entry_high_water_W: 158
+entry_high_water_W: 159
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -313,6 +313,7 @@ entry_high_water_W: 158
 | W-157 | 2026-11-04 | med | **A pre-plan scout of tests that `include_str!` a script found one asserting on the file's TEXT.** Moving `CS_WRITE_TOOLS` out of `file-provenance.py` would red `provenance_probes_reference_only_real_tool_names`. | Inferred: a misleading "instrument is blind" red at gate time after implementation. Observed: the test's `surfaces` list names `scripts/file-provenance.py` only. | validated |
 |----|------|-------:|---------|----------------|--------|
 | W-158 | 2026-11-08 | med | **Send input-shaping fixes to a stronger-model reviewer who runs the new test red against the reverted change.** The first-segment fix for the oversized memory anchor query was rejected for a heading-only query. | `6a89e8366` would have merged and `cross_embed_memory` would have searched with a heading-only query for such memories; the number of such memories was not measured. | validated |
+| W-159 | 2026-11-11 | med | **A pre-edit scout found that `TargetRenamed` carries a name path (`Agent/new`), which the planned `renamed_name_path(name_path, new_name)` hint would have prefixed twice.** Bug `c9abdc5134bebce1`. | Inferred, not run: a hint giving `Agent/Agent/new` as the second call's `symbol=` for every nested target; 17 of 46 measured refusals target a `tests/...` symbol. | validated |
 | W-153 | 2026-10-31 | med | **A scout of the gate pool's test runner found that only CI runs `tests/gate-slot.sh`, through a hit the default grep hid.** Re-running a negative search with `include_hidden=true` before planning on it. | Inferred: a plan that trusted gate-green for the pool tests and read real `/sys/block/zram*` in CI. Observed: 23 files without `.github/workflows/ci.yml`, 27 with it. | validated |
 | W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
 | W-152 | 2026-10-31 | med | **A write-side fix was verified live on a record I could restore byte for byte.** Clean in git, one call, read the diff, restore, clean again; then the `unverified:` caveat was discharged. | Inferred: gate-green read as live-verified on a server that predated the fix, or a real bug left closed by the probe. Observed: `closed: 2026-10-31` written by a status-only call, `git status` empty after the restore. | validated |
@@ -18372,6 +18373,20 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Fix idea / Pointer:** bug `489e013ddfd6c3fc` (open). Related: F-235, `a73c49456056fb92`.
 
 ---
+
+## W-159 — A pre-edit scout found that `TargetRenamed` carries a name path, which the planned hint would have prefixed twice
+
+**Valid:** dated 2026-11-11
+
+**Seam:** `edit_code replace` refusal `TargetRenamed(String)`; bug `c9abdc5134bebce1`. I proposed filling the refusal hint with the exact `rename` and `replace` calls, and I named `renamed_name_path(name_path, new_name)` as the helper that builds the second call.
+
+**Observed:** `corruption_verdict` fills `TargetRenamed` from `collect_all_name_paths(post)`, which inserts each `SymbolInfo.name_path`. The payload is therefore a name path (`Agent/new`) for a nested symbol and a bare name only for a top-level one. `renamed_name_path` replaces the last `/` segment of its first argument with its second argument.
+
+**Counterfactual (inferred, not run):** For `symbol="Agent/old"` and a body that declares `new`, `renamed_name_path("Agent/old", "Agent/new")` gives `Agent/Agent/new`. The hint would then carry a wrong `symbol=` in its second call for every nested target. 17 of the 46 refusals measured in `usage.db` target a `tests/...` symbol, so the nested shape is common.
+
+**Fix direction:** Take the last `/` segment of the payload as `new_name` for the `rename` call. Build the `symbol=` of the `replace` call from the caller's own `name_path` with `renamed_name_path`, so the caller's addressing dialect is kept.
+
+**What this entry does not show:** No test was run. The measured 2.4% rate and the recovery times (0 to 73 s) come from one checkout's `usage.db` and cover all agents.
 
 ## Template for new entries
 
