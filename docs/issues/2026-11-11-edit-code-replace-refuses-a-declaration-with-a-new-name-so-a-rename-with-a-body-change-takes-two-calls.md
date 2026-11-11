@@ -113,7 +113,18 @@ Next action: after a build that carries `3cd876b1c` and `9c96ac3e1` has run for 
 
 Baseline, 2026-10-13 to 2026-11-11: 46 refusals in 38 sessions, 2.4% of 1932 `replace` calls; 18 followed by `edit_code rename` as the next `edit_code` call; 5 followed by an `edit_code` call that ended `recoverable_error` (4 `insert`, 1 `replace`). The hint can change the last number: a caller that has the arguments should send fewer wrong calls. It cannot change the first two.
 
-Move to `fixed` only if the count of next calls that ended `recoverable_error` falls. If it does not, the hint is not what makes agents fail after a refusal. Candidate (2) or (3) in Fix is then the next choice. Other refusals of `replace` in `src/tools/symbol/edit_code.rs` still carry `symbol=...` placeholders, searched for on 2026-11-11: the shrink-guard hint (`edit_code(action="replace", symbol=..., path=..., body=..., force=true)`) and the `TargetDropped` hint (`symbols(symbol=..., include_body=true)`). They name calls whose arguments the tool also holds. They were not changed: neither belongs to the rename refusal this file records, and no count of them was taken.
+Move to `fixed` only if the count of next calls that ended `recoverable_error` falls. If it does not, the hint is not what makes agents fail after a refusal. Candidate (2) or (3) in Fix is then the next choice. Other refusals of `replace` in `src/tools/symbol/edit_code.rs` still carry `symbol=...` placeholders, searched for on 2026-11-11: the shrink-guard hint (`edit_code(action="replace", symbol=..., path=..., body=..., force=true)`) and the `TargetDropped` hint (`symbols(symbol=..., include_body=true)`). They name calls whose arguments the tool also holds. They were not changed: neither belongs to the rename refusal this file records.
+
+Measured on 2026-11-12, same window (2026-10-13 to 2026-11-11) and same method as the baseline above: the next `edit_code` call of the same session and agent after each refused `replace`. Counts are small and cover every agent that ran against this checkout.
+
+| Refusal | Refused | Next call ended `recoverable_error` |
+|---|---|---|
+| rename (baseline above) | 46 | 5 |
+| shrink guard | 37 | 5 |
+| `TargetDropped` ("dropped the symbol definition") | 28 | 5 |
+| `SiblingsDropped` | 8 | 0 |
+
+What the next calls show. After the shrink guard, 18 of 37 refusals were followed by a `replace` with `force=true`, and 16 of those 18 succeeded (15 on the same symbol, 1 on another); the hint's recovery path is followed and works, and its placeholders hold arguments the caller already sent. After `TargetDropped`, 3 of the 5 failing next calls hit a different guard (the rename refusal), 1 hit the sibling check and 1 repeated `TargetDropped`. 9 of the 28 were followed by a `remove` of the same symbol. The rates of a failing next call (11%, 14%, 18%) cannot be told apart at these counts. This gives no evidence that the placeholders in these two hints cost calls, so they stay as they are. It does not show that filling them would not help; none of the four refusals in the table had a hint without placeholders in this window, so there is nothing to compare with. Not counted: 8 shrink-guard rows with no `action` in their input, and the time between a refusal and the next call.
 
 ## References
 
