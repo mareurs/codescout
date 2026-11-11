@@ -1101,6 +1101,13 @@ pub(crate) const FILE_NOT_FOUND_HINT: &str = "Check the path with tree, or use t
      sharing this session's process may have changed the active project — call \
      workspace(action='status') to check, or pass workspace=\"<abs root>\" on this call \
      to pin it.";
+/// [`FILE_NOT_FOUND_HINT`] followed by what exists next to the missing path, when anything does.
+pub(crate) fn not_found_hint(missing: &std::path::Path) -> String {
+    match crate::fs::describe_neighbours_of_missing(missing) {
+        Some(neighbours) => format!("{FILE_NOT_FOUND_HINT} {neighbours}"),
+        None => FILE_NOT_FOUND_HINT.to_string(),
+    }
+}
 
 /// Read file contents with user-friendly error messages.
 fn read_file_text(path: &str, resolved: &std::path::PathBuf) -> Result<String> {
@@ -1111,7 +1118,7 @@ fn read_file_text(path: &str, resolved: &std::path::PathBuf) -> Result<String> {
                 path,
                 resolved.display()
             ),
-            FILE_NOT_FOUND_HINT,
+            not_found_hint(resolved),
         )
         .into(),
         std::io::ErrorKind::InvalidData => RecoverableError::with_hint(

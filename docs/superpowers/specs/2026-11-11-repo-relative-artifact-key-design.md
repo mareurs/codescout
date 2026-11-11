@@ -166,13 +166,24 @@ bodies, never frontmatter, because `[[foo]]` in YAML is a nested list, not text.
   and `doc(move)` refuse a collision and name the other file; `doctor` and a pre-commit check
   catch one that arrives another way. There is no `Ambiguous` outcome for a key.
 - **A key of exactly 16 hex characters is refused,** so no key is mistaken for a legacy id.
-- **Repo name.** `.codescout/repo.toml` holds `name = "<name>"`, same charset as a key. It
-  is a label: it qualifies cross-repo citations and appears in tool output. Onboarding
+- **Repo name.** `.codescout/repo.toml`, at the git root of the project (the nearest enclosing `.git`
+  ancestor; the project root when there is no git), holds `name = "<name>"`, same charset as
+  a key. The git root is where repo-relative paths and keys are measured from, so every
+  project in one repository shares one name. It is a label: it qualifies cross-repo
+  citations and appears in tool output. Onboarding
   suggests one (the `.codescout/workspace.toml` name if present, else the directory name),
-  says when another checkout in the catalog uses it, and asks the user to confirm: through
+  says when another checkout uses it (below), and asks the user to confirm: through
   MCP elicitation when the client supports it
   (`src/tools/run_command/interactive.rs:36-98`), otherwise through the agent and a new
-  `onboarding` parameter.
+  `onboarding` parameter. A project that is already onboarded is asked on its next
+  `onboarding` call, and `workspace(activate)` says when its name is unconfirmed.
+  *Another checkout uses it:* onboarding scans the `.codescout/project.toml` files under the
+  user's folders (bounded depth and time; build and worktree directories skipped) and reads
+  `<git root>/.codescout/repo.toml` next to each. A match whose repository has the same first
+  commit (`git rev-list --max-parents=0 HEAD`) is another checkout of this repository (a
+  worktree or a clone) and is reported as that. A match with a different first commit is a
+  name collision: onboarding warns and the user decides. Once the catalog holds checkouts (its
+  checkout row carries the repo name), the catalog is the source and the scan is the fallback.
 
 ### The citation grammar
 
@@ -311,6 +322,10 @@ None. The cutover question was answered on 2026-11-11 (§ Cutover).
   at one commit give identical query results; a folder move changes no key and breaks no
   citation; a rename leaves no `[[old-key…]]` anywhere; no tool output contains a hex id,
   a path or a row id as a document reference; a worktree write merges through git alone.
+- Plan B owns: the "another checkout uses this name" check above, the `workspace(activate)`
+  nudge for an unconfirmed name, remembering a declined confirmation, and a key-space scope
+  rule (which trees lie outside the key space, for example fixture and evidence trees and
+  dated plan and spec pairs) that must exist before uniqueness is enforced.
 
 ## Decision log
 
@@ -329,6 +344,14 @@ Operator, 2026-11-11:
 - The librarian is an integral part of codescout: the `librarian` cargo feature is removed,
   and the librarian is on even when no semantic search is available (2026-11-11, during
   planning; Plan A Task 1).
+- The repo name file lives at the git root of the project, falling back to the project root
+  when there is no git (2026-11-11, after Plan A's final review; recommended by the
+  executing session, accepted by the operator).
+- Projects that are already onboarded are asked for the name on their next `onboarding`
+  call (2026-11-11).
+- "Another checkout uses this name" is found by scanning the `.codescout/project.toml`
+  files under the user's folders; the same first commit means the same repository
+  (2026-11-11; the first-commit rule is the executing session's proposal).
 
 Designer's calls, open to correction:
 

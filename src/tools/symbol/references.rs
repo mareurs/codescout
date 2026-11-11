@@ -490,7 +490,7 @@ fn signal_warning(
                     .join(", ");
                 let ident = env.ident;
                 Some(format!(
-                    "LSP returned 0 references outside the definition file, but `{ident}` appears as a whole word in {n}+ other source file(s) (e.g. {sample}) — the reference index may still be warming after a reindex.{tail}",
+                    "LSP returned 0 references outside the definition file, but `{ident}` appears as a whole word in {n}+ other source file(s) (e.g. {sample}) — the text scan cannot tell a call site from a same-named local, field or comment, so either the reference index is not complete yet or those hits are not uses.{tail}",
                     n = others.len(),
                     tail = tail("Re-run")
                 ))

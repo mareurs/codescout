@@ -99,10 +99,6 @@ tags:
 | `archived` | Terminal — work-stream wrapped | **hidden by default** |
 | `superseded` | Replaced by a successor artifact | **hidden by default** |
 
-**`draft` means the opposite on a plan:** in `docs/plans/` it means *shipped, deliberately
-unarchived because a named residual is open*. Before reading a `draft` as "not started",
-check whether a `resume-*` tracker names it.
-
 ### Archiving a tracker
 
 **Preferred:** in-place archival through the catalog:
@@ -139,7 +135,7 @@ If an artifact is meant to carry an augmentation, say so in frontmatter and name
 committed sidecar:
 
 ```yaml
-expects_augmentation: docs/augmentations/docs-trackers-tool-usage-patterns.yaml
+expects_augmentation: docs/augmentations/<slug>.yaml
 ```
 
 The sidecar carries the shape (`prompt`, `params_schema`, `render_template`,
@@ -176,8 +172,7 @@ entry_prefix:            #   a session log carries both F-N frictions and W-N wi
 ```
 
 Set it with `doc(action="update", id=…, patch={extra: {"entry_prefix": "R"}})`. A ledger is
-declared, never inferred: a design doc that quotes `## R-4` is not a namespace. Concept pages:
-`docs/manual/src/concepts/entry-citations.md`, `link-scan.md`, `statement-validity.md`.
+declared, never inferred: a design doc that quotes `## R-4` is not a namespace.
 
 ### A prefix has one owner per repository
 <!-- serves: doc.create(path~docs/trackers/) -->
@@ -290,7 +285,7 @@ body. A hand-maintained row table *in addition to* headings is fine.
   harvestable. Update it when a criterion fires.
 - **`**Valid:**` declares a decay class:** `invariant`, `dated YYYY-MM-DD` or
   `conditional — <event>`, no fourth form; a malformed one is refused. Absence means
-  `dated <its last commit>`. Detail: `docs/manual/src/concepts/statement-validity.md`.
+  `dated <its last commit>`.
 
 ### Required fields — Rests on, and detecting the lines
 <!-- serves: doc.append_entry(path~docs/trackers/), doc.update_entry(path~docs/trackers/) -->
@@ -321,7 +316,7 @@ The ladder is **live body → archived section (heading kept) → nothing furthe
 **Declare `entry_prefix`.** That alone guards a ledger, because
 only the server may advance the `PREFIX-N` counter. **Do NOT stamp `id: <16-hex>` into a
 tracker's frontmatter to guard it:** that guards on catalog membership, which would refuse
-`docs/RELEASE.md` and every ADR. An artifact that owns no id namespace needs no guard.
+every plain doc and ADR. An artifact that owns no id namespace needs no guard.
 
 ## Querying with the librarian
 <!-- serves: doc.find(path~docs/trackers/), doc.get(path~docs/trackers/) -->
@@ -352,8 +347,7 @@ Deeper mechanics: `get_guide("librarian")`; trackers that carry cross-session be
   hand-create `cites` edges. **Entry IDs are stable; artifact ids are not** (a 16-hex id changes
   when the file moves), so prefer an entry ID or rel_path for a target likely to be archived.
 - **`link_scan` derives the edges:** `librarian(action="link_scan")` reports, `write=true`
-  applies. It is idempotent and heals what bypasses `doc(action="move")`. Detail:
-  `docs/manual/src/concepts/link-scan.md`.
+  applies. It is idempotent and heals what bypasses `doc(action="move")`.
 - **Manual rels are few and deliberate:** `evidence-for`, `promoted-to`, `refutes`.
   `supersedes` flips the destination's status: archiving a tracker that has a successor
   REQUIRES a `supersedes` edge through `doc(action="link")`, never a bare status edit.

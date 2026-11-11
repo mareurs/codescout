@@ -475,6 +475,13 @@ pub enum CorruptionVerdict {
     /// re-checks a body that was already correct and has no route to the real rule.
     /// Measured 2026-09-13: two sessions hit it, one of them twice in an hour.
     TargetRenamed(String),
+    /// The body is complete declarations, but SEVERAL of them and none keeps the target's
+    /// name: nothing else vanished, two or more names appeared. `rename` would not help (a
+    /// rename is one name for one name) and neither does "not just body statements" —
+    /// the body is not statements. FR-13: two Python rows replaced one test method with a
+    /// body that held several methods and were told the body was incomplete.
+    /// Sorted, so the message is deterministic.
+    TargetReplacedBySeveral(Vec<String>),
     /// The edit overshot and dropped these sibling symbols — caller must roll back.
     /// Sorted, so the resulting error message is deterministic.
     SiblingsDropped(Vec<String>),
@@ -576,6 +583,13 @@ pub fn corruption_verdict(
                 // must keep falling through to the blunter verdicts below.
                 if lost_others == 0 && appeared.len() == 1 {
                     return CorruptionVerdict::TargetRenamed(appeared.remove(0));
+                }
+                // Several names took its place and nothing else vanished: a body of
+                // complete declarations, just more than one. A sibling that is also
+                // gone is still damage, so `lost_others == 0` stays required.
+                if lost_others == 0 && appeared.len() >= 2 {
+                    appeared.sort();
+                    return CorruptionVerdict::TargetReplacedBySeveral(appeared);
                 }
             }
             return CorruptionVerdict::TargetDropped;
@@ -1251,8 +1265,9 @@ mod tests {
         );
 
         // Two names appeared where one symbol stood: the body is not a single
-        // declaration, so `rename` would not have helped and must not be suggested.
-        let two_appeared = vec![sym("bar"), sym("baz"), sym("keeper")];
+        // declaration, so `rename` would not have helped and must not be suggested. It
+        // gets its own verdict (FR-13) because "not just body statements" is false here.
+        let two_appeared = vec![sym("baz"), sym("bar"), sym("keeper")];
         assert_eq!(
             corruption_verdict(
                 1,
@@ -1260,6 +1275,21 @@ mod tests {
                 Some("foo"),
                 "foo",
                 Some(&two_appeared),
+                false
+            ),
+            CorruptionVerdict::TargetReplacedBySeveral(vec!["bar".to_string(), "baz".to_string()]),
+        );
+
+        // The same two names with a sibling also gone is damage, not a multi-declaration body.
+        let pre_with_sibling = set(&["foo", "keeper", "other"]);
+        let two_appeared_and_a_sibling_gone = vec![sym("bar"), sym("baz"), sym("keeper")];
+        assert_eq!(
+            corruption_verdict(
+                1,
+                Some(&pre_with_sibling),
+                Some("foo"),
+                "foo",
+                Some(&two_appeared_and_a_sibling_gone),
                 false
             ),
             CorruptionVerdict::TargetDropped,
