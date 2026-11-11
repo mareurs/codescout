@@ -6,31 +6,35 @@
 # whole (the gate reports PartialFolderExclusion otherwise). The rule and its parser:
 # src/librarian/identity/key_space.rs. The pre-commit check: scripts/pre-commit-key-space.sh.
 #
-# Each entry was chosen by listing the files it excludes (`codescout key-gate` prints them
-# under "outside the key space") and finding every one of them to be fixture, evidence or
-# another project's notes. A problem left in scope is a real document the key migration
-# renames, not something to hide here.
+# Each entry is the narrowest subtree that removes a problem. It was checked by dropping the
+# entry and running `codescout key-gate` in full mode: every entry below, removed alone, adds
+# a key problem (an invalid key, a new duplicate-key group) or, for `.buddy`, adds a file to an
+# existing group, and the files it excludes are fixture, evidence or another project's notes.
+# A problem left in scope is a real document the key migration renames, not something to hide.
 exclude = [
-    # Example integration files shipped for other tools (pi's AGENTS.md and README.md, a
-    # systemd unit's README). Their names are dictated by the tool that reads them.
-    "contrib",
-    # Evaluation write-ups and the raw run data behind them (review transcripts named
-    # `s1-claude-cold-0.review.md`, rule-tell runs, base-rate tables).
-    "docs/evals",
-    # Test inputs: prompt-surface snapshots, and sample repositories the librarian tests index.
+    # pi's AGENTS.md shares the key `agents` with the root AGENTS.md. Its README.md is in the
+    # same folder, so the folder goes whole. contrib/systemd has no problem and keeps its key.
+    "contrib/pi",
+    # Raw review transcripts named `s1-claude-cold-0.review.md` (a dot: an invalid key).
+    # The rest of docs/evals, including the eval write-ups, keeps its keys.
+    "docs/evals/data/2026-09-24-review-model-vs-context/runs",
+    # Test inputs: prompt-surface snapshots (underscore names), a sample repository the
+    # librarian tests index (its README.md is keyed by the invalid folder name `repo_a`), and
+    # two sample repositories each holding a `docs/spec.md` (the key `spec`, twice).
     "tests/fixtures",
     "tests/librarian/fixtures",
     "tests/librarian/audit_doc_refs/fixtures",
-    # Replayed agent instructions and skills captured as evidence of one dogfood run
-    # (AGENTS.md, CLAUDE.md, fourteen SKILL.md files). The sibling `evidence.md` tracker is
-    # not under this folder and keeps its key.
-    "docs/trackers/ecc-integration/evidence",
+    # Agent instructions and skills replayed as evidence of one dogfood run: AGENTS.md and
+    # CLAUDE.md copies (keys `agents`, `claude`) and 21 SKILL.md copies (key `skill`). The rest
+    # of the evidence folder keeps its keys.
+    "docs/trackers/ecc-integration/evidence/2026-11-09-doc-create-dogfood/replay/instructions",
+    "docs/trackers/ecc-integration/evidence/2026-11-09-doc-create-dogfood/replay/skills",
     # Per-project and per-profile memory stores: each project under `.codescout/projects/`
-    # carries its own `architecture.md`, `conventions.md`, ... , and this checkout's own
-    # memories use the same topic names. They are keyed by topic inside their own store.
+    # carries its own `architecture.md`, `conventions.md`, ..., and this checkout's own
+    # memories use the same topic names (`architecture`, `system-prompt`, `effort-steering`
+    # collide with documents elsewhere). They are keyed by topic inside their own store.
     ".codescout/projects",
     ".codescout/memories",
-    # Agent-harness configuration and persona memory, not repository documents.
-    ".claude",
+    # Persona memory: `.buddy/memory/INDEX.md` shares the key `index` with three trackers.
     ".buddy",
 ]
