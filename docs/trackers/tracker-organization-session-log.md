@@ -10,7 +10,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 1
-entry_high_water_W: 1
+entry_high_water_W: 2
 ---
 # Session Log — Tracker Organization
 
@@ -118,6 +118,7 @@ entry_high_water_W: 1
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-11-11 | med | read the gate before writing the surface | guide naming docs/templates/ would fail no_guide_names_a_path_or_field_only_this_repo_has | validated |
+| W-2 | 2026-11-11 | med | measure the repo under the new model with an ignored census test before building tools on it | a migration sized from the estimate of about 76 trackers would have missed 81 flat files plus 261 in subfolders, and the loose temp tracker would surface only at migration time | validated |
 | W-<n> | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
 
 ---
@@ -342,6 +343,28 @@ names their path. A repo-specific procedure goes to the repo's own template.
 **Counterfactual:** A guide section that pointed to `docs/templates/tracker-<kind>.md`, or that
 said "like docs/issues", would fail the gate at the next run. The design would then have to
 be reshaped after the plan was written.
+
+## W-2 — A census of this repo under the new model gave the migration its worklist before any tool existed
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, building Plan L-A (the lifecycle core). Task 7 added an ignored test that walks `git ls-files '*.md'`, builds a `LifecycleTree` and prints counts. Run at tree `d5e6abc96e7a76df9a956b8b27321cc40096396c` on branch `feat/tracker-lifecycle-plan-a-20261111`: 0 collections, 0 entries, 1 placement problem, 81 flat `docs/trackers/*.md` files and 261 files in other `docs/trackers/` subfolders (343 documents in all under `docs/trackers/`).
+
+**Pattern:** measure the repo under the new model with a throwaway test before any tool or migration depends on the model, and keep the test as an `#[ignore]`d census so the figure can be re-taken.
+
+**Counterfactual:** the plan carried the estimate "about 76 legacy trackers"; the census counted 81 flat files plus 261 files in subfolders, so a migration sized from the estimate would have missed more than two thirds of the files. The one placement problem is the first temp tracker (`docs/trackers/temp/artifact-identity-refactor.md`): a loose file in `temp/`, outside any collection folder, which the model refuses. Without the census it would have surfaced at migration time, after the design was frozen.
+
+**Confirming data points:** the same census shape found the identity session's figures (45 invalid keys and 37 duplicate-key groups over 2704 documents), so both migrations are sized from measurement; the final whole-branch review found that the lifecycle checks did not report a loose file in `temp/`, which the census had already shown as the only misplaced file.
+
+**Impact:** med
+
+**Promote-when:** the migration command (plan L-E) exists and reuses the census as its dry run.
+
+**Status:** validated
+
+**Rests on:** a design is checked against the real corpus before tools are built on it.
+
+---
 
 ## Template for new entries
 
