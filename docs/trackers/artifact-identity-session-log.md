@@ -106,7 +106,7 @@ entry_high_water_W: 4
 | F-4 | 2026-11-11 | high | architectural | promoted-to-bug-tracker | **Reindex deletes a moved file's local history** — has_history guards escaping rows only |
 | F-5 | 2026-11-11 | med | plan-prose | fixed-verified | **Plan A Task 1 missed everything a removed cargo feature drags along** — required-features, install commands, memories; found by scout + review |
 | F-6 | 2026-11-11 | med | self-friction | fixed-verified | **Ran the plan on the shared checkout until the operator asked for a worktree** — 33 files edited, restored from a saved patch |
-| F-7 | 2026-11-11 | med | subagent | open | **The worktree-aware repo-name suggestion mishandles a submodule** — `worktree_main_root` is ungated; found by the re-review, not fixed (no second wave) |
+| F-7 | 2026-11-11 | med | subagent | fixed-verified | **The worktree-aware repo-name suggestion mishandles a submodule** — `worktree_main_root` was ungated; found by the re-review, fixed in wave 2 |
 | F-8 | 2026-11-11 | med | plan-prose | open | **A spec requirement is built by no plan: "onboarding says when another checkout uses the name"** — plus two open spec-level questions |
 
 ## Wins Index
@@ -489,11 +489,11 @@ Codified so the Index column means the same thing across sessions.
 
 **Probable cause:** the fix reused a helper whose name says "worktree" without reading its gate; the implementer verified the linked-worktree case and the plain-directory case, not the third `.git`-file shape.
 
-**Workaround:** none applied. The final-review process allows no second fix wave, so the regression is surfaced to the operator with the one-line remedy: call `worktree_main_root` only when `is_linked_worktree(root)`, resolve a relative main root against `root`, and add a submodule-shaped test. `src/agent/mod.rs:794,815` has the same ungated call (older code).
+**Workaround:** none at the time. The final-review process allows no second fix wave, so it was surfaced to the operator, who authorised wave 2 (commit `be094b671`, re-reviewed clean, full gate green): `suggest` calls `worktree_main_root` only when `is_linked_worktree(root)`, resolves a relative main root against the root, and has submodule and relative-pointer tests. call `worktree_main_root` only when `is_linked_worktree(root)`, resolve a relative main root against `root`, and add a submodule-shaped test. `src/agent/mod.rs:794,815` has the same ungated call (older code).
 
 **Severity:** med
 
-**Status:** open
+**Status:** fixed-verified
 
 **Rests on:** a fix that reuses a helper inherits its gate; read the callers' guards, not only its signature.
 
