@@ -183,18 +183,22 @@ kind_rank() {
 
 # list_holders PATH: print one `PID<TAB>KIND<TAB>CMDLINE` row per holder of the worktree.
 # An entry whose cmdline cannot be read, or that has neither a cwd nor a path in its
-# command line, is skipped. The script's own pid, its subshell and its parent are never
-# holders: their command line names the worktree because they were asked about it.
+# command line, is skipped. The script's own pid and its subshell are never holders. Its
+# parent is exempt from the command-line test only (its command line names the worktree
+# because it launched this script), never from the cwd test: a launcher that sits inside
+# the worktree and starts the script from elsewhere holds the worktree like any other.
 list_holders() {
-    local wt=$1 d pid cwd a hit kind cmd
+    local wt=$1 d pid cwd a hit kind cmd argv_exempt
     local -a argv rows=()
     for d in "$PROC"/[0-9]*; do
         [ -d "$d" ] || continue
         pid=${d##*/}
         case $pid in *[!0-9]*) continue ;; esac
-        if [ "$pid" = "$$" ] || [ "$pid" = "$BASHPID" ] || [ "$pid" = "$PPID" ]; then
+        if [ "$pid" = "$$" ] || [ "$pid" = "$BASHPID" ]; then
             continue
         fi
+        argv_exempt=0
+        [ "$pid" = "$PPID" ] && argv_exempt=1
         [ -r "$d/cmdline" ] || continue
         cwd=$(readlink -f -- "$d/cwd" 2>/dev/null) || cwd=""
         argv=()
@@ -204,7 +208,7 @@ list_holders() {
         hit=0
         if [ -n "$cwd" ] && { [ "$cwd" = "$wt" ] || [[ $cwd == "$wt"/* ]]; }; then
             hit=1
-        else
+        elif [ "$argv_exempt" -eq 0 ]; then
             for a in "${argv[@]+"${argv[@]}"}"; do
                 if mentions_path "$a" "$wt"; then
                     hit=1

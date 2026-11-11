@@ -323,6 +323,43 @@ case_bad_arguments_refuse() {
     eq "a valid --wait is accepted" 0 "$RC"
 }
 
+# run_with_fake_parent CWD_OF_PARENT ARG_FOR_PARENT_CMDLINE: run the script as a NON-exec child
+# of a `bash -c` whose own pid is entered in the fixture proc with the given cwd and a
+# command line ending in the given argument, so the script's $PPID is a known fixture pid.
+# The script itself runs from the case dir, outside the worktree. Sets RC, OUT, ERR, PPID_FAKE.
+run_with_fake_parent() {
+    ( cd "$C" && F="$PROCD" PCWD="$1" PARG="$2" WT="$WT" S="$SRC" OUTDIR="$C" \
+        WORKTREE_REMOVE_PROC="$PROCD" bash -c '
+            mkdir -p "$F/$$"
+            ln -s "$PCWD" "$F/$$/cwd"
+            printf "bash\0-c\0%s\0" "$PARG" >"$F/$$/cmdline"
+            echo "$$" >"$OUTDIR/ppid"
+            bash "$S" "$WT"
+            exit $?' ) >"$C/out" 2>"$C/err"
+    RC=$?
+    OUT="$(<"$C/out")"
+    ERR="$(<"$C/err")"
+    PPID_FAKE="$(<"$C/ppid")"
+}
+
+case_a_parent_whose_cwd_is_inside_is_a_holder() {
+    echo "a_parent_whose_cwd_is_inside_is_a_holder"
+    new_case parent
+    # A launcher sitting inside the worktree that starts the script from another directory
+    # holds the worktree through its cwd. Its command line does not name the path.
+    run_with_fake_parent "$WT" x
+    eq "exit 3: the parent is a holder" 3 "$RC"
+    eq "the row is the parent's pid, kind other" "${PPID_FAKE}${TAB}other${TAB}bash -c x" "$OUT"
+    # The skip's original purpose: a parent whose cwd is elsewhere and whose command line
+    # merely names the worktree (because it launched the script) is not a holder.
+    new_case parent_outside
+    mkdir "$C/elsewhere"
+    run_with_fake_parent "$C/elsewhere" "$WT"
+    eq "exit 0: a parent that only names the path is not a holder" 0 "$RC"
+    eq "no rows" "" "$OUT"
+    contains "says so" "no holders under $WT" "$ERR"
+}
+
 case_the_script_does_not_list_itself() {
     echo "the_script_does_not_list_itself"
     new_case self
@@ -349,6 +386,7 @@ case_unreadable_and_non_pid_entries_are_skipped
 case_no_holders_exits_zero
 case_bad_arguments_refuse
 case_the_script_does_not_list_itself
+case_a_parent_whose_cwd_is_inside_is_a_holder
 
 echo
 echo "passed=$PASS failed=$FAIL"
