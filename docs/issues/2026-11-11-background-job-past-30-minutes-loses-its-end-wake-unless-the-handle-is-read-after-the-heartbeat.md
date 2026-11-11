@@ -10,7 +10,7 @@ tags:
 closed: 2026-11-11
 opened: 2026-11-11
 severity: high
-unverified: 'SessionStart of wake-missed-jobs.mjs is not measured through the harness (UserPromptSubmit is, see Safety net through the harness). The cliff is not removed: without a read after the heartbeat the end wake is still lost (measured 2026-11-11, see Live repro). Whether the 125 unarmed ended records are a second defect is still not measured.'
+unverified: 'SessionStart of wake-missed-jobs.mjs is not measured through the harness (UserPromptSubmit is, see Safety net through the harness). The cliff is not removed: without a read after the heartbeat the end wake is still lost (measured 2026-11-11, see Live repro). Whether a Codex session gets an end wake for its background jobs is not measured (Evidence 6 shows only that those records have no legacy .wake-owner.json).'
 ---
 
 # BUG: a background job that runs past 30 minutes loses its end wake unless the session reads its handle after the heartbeat
@@ -135,6 +135,19 @@ For each armed job of 30 min or longer in the transcripts of 11 sessions: was a 
 ### 5. The harness-moved task
 
 L35703 to L35707: the foreground call returned `MCP tool "codescout/run_command" is still running after 120s. It was moved to the background as task kisuqg1j6 and keeps running; you'll receive a notification with the result when it completes.` The completion notice came at L35743 from the harness (`origin.producer` `session-task`, with a `runId`; the text starts `<task-notification><task-id>kisuqg1j6`). By code reading, the codescout hook does nothing for this response: `spawnOf` needs JSON with an `output_id` that starts with `@bg_` (`wake-on-job-end.mjs:41-55`) and `rearmTarget` needs JSON with `exit_code` (`:219`); the response text is plain prose, so both return null and `main()` exits 0 (`:268-269`). Not run. So the two paths are independent: the harness path wakes the session by itself; the codescout path wakes it only as described above.
+
+### 6. The ended records with no `.wake-owner.json` (measured 2026-11-11, resume point 4)
+
+Re-scan on 2026-11-11 (records started since 2026-11-04): 1067 ended, 919 armed, **148 unarmed** (125 at the first scan; the count grows with the live cache). Each unarmed record was searched by file name in the transcripts of the four Claude Code profiles and in `~/.codex`.
+
+| where the spawn is found | records |
+|---|---|
+| a Claude Code subagent transcript (the hook exits 0 for `agent_id`, by design) | 105 |
+| a Codex rollout (`~/.codex/sessions`); 40 of them are jobs of one `codescout start` whose parent is `codex app-server` | 43 |
+| a Claude Code main-session transcript | 0 |
+| nowhere | 0 |
+
+(The first scan of the transcripts gave "no transcript found" for the 43 Codex records, because it did not search `~/.codex`. A sample of 4 was then found there; all 43 were not individually searched there.) None of the 148 has a session map or a `.delivered`. So the unarmed records are not a second defect of the Claude Code main-session path. Whether a Codex session receives an end wake for these jobs (that harness has its own hook, `background-wake/codex-hook.mjs`) is a different question and is not measured here.
 
 ## Hypotheses tried
 
