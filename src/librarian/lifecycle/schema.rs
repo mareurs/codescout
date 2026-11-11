@@ -12,7 +12,8 @@ use super::layout::Lifecycle;
 use crate::librarian::frontmatter::Frontmatter;
 
 /// What a status word means for the lifecycle checks. Exactly four classes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum StatusClass {
     Open,
     Blocked,

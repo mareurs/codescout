@@ -7,6 +7,7 @@ pub mod layout;
 pub mod naming;
 pub mod relations;
 pub mod schema;
+pub mod table;
 #[cfg(test)]
 pub(crate) mod testkit;
 pub mod tree;
