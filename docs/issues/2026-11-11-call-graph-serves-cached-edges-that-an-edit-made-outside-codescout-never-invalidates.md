@@ -143,12 +143,14 @@ Two more observations, not acted on. The epoch is applied to both directions (`o
 
 ## Fix provenance
 
-Fixed in two commits. The limits that remain are listed in `## Fix` and in the `unverified` field.
+Fixed in three commits. The limits that remain are listed in `## Fix` and in the `unverified` field.
 
 - **SHA:** `5a7936984` (`experiments`): the signatures of the files a resolution names.
 - **patch-id:** `ae42b2606d11`
 - **SHA:** `702a0f737` (`experiments`): the project-level epoch; closes the residual case.
 - **patch-id:** `1a8c59aee0d6`
+- **SHA:** `c5da750ac` (`experiments`): the epoch has its own file cap (20000), so a tree above 5000 source files keeps its cache.
+- **patch-id:** `bd9ade2b251a`
 
 ## Tests added
 
