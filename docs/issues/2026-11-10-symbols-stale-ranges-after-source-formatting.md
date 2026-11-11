@@ -1,12 +1,13 @@
 ---
 id: '4e7ec7bfc047ac7b'
 kind: bug
-status: open
+status: zombie
 title: symbols returns stale ranges and mismatched bodies after source formatting
 tags:
 - navigation
 - cluster/unclassified
 closed: null
+last_observed: 2026-11-10
 opened: 2026-11-10
 owner: marius
 severity: medium
@@ -69,3 +70,11 @@ None — no navigation fix attempted. Runtime counterexample captured before any
 ## Resume — 2026-11-10
 
 Open. No fix attempted, by design: there is no reproduction on current bytes. Next step if it recurs: capture, BEFORE any flush or edit, the raw `symbols` response, the file's mtime, and the language server's own `textDocument/documentSymbol` answer for the same file, then compare with the bytes. A candidate hardening, only after a mechanism is shown: validate the start line on the `symbols` read path as the edit path does.
+
+## Status: zombie
+
+Set 2026-11-12 by session `5f715d8f`, on the owner's instruction ("da", to closing it as not reproduced for `symbols`). Not `fixed` and not `wontfix`: the root cause is not confirmed.
+
+- **Last observed:** 2026-11-10, in the retained BFS identity worktrees (the parent and an independent reviewer both saw it).
+- **Why zombie:** 2026-11-10 and 2026-11-11 checks did not reproduce it for `symbols` on current bytes (see `## Root cause` and the measured section). `symbols` resyncs through `document_symbols`; the stale paths found were `symbol_at` and cross-file `references` (`a73c49456056fb92`, `58a45860b802a477`), fixed by `43c4ca9df`. Whether that fix explains the original report is a lead, not a finding: the report used `symbols`, and I did not run `symbols` on stdio or against the original worktree state.
+- **Re-open trigger:** a `symbols` response whose range or body disagrees with the file's bytes, on a binary that contains `43c4ca9df`. Capture, BEFORE any flush or edit, the raw `symbols` response, the file's mtime and the language server's own `textDocument/documentSymbol` answer, as in `## Resume — 2026-11-10`.
