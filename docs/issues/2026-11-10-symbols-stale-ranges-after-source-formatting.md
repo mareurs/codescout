@@ -10,6 +10,7 @@ closed: null
 opened: 2026-11-10
 owner: marius
 severity: medium
+unverified: Not reproduced for symbols on current bytes. Scratch crates only, rust-analyzer, one run per case; the symbols cases ran on the socket transport only (checked in the process tree); the retained worktree from the report was not used.
 ---
 
 # BUG: symbols returns stale ranges after formatting
@@ -46,6 +47,16 @@ Still unknown. Checked 2026-11-10 (session a3eb869d), HEAD ba103456c:
 ## Evidence
 
 The retained JSON contains both tool responses, explicit workspace, source manifest reference and post-compaction flush observation. The earlier similar observation is bug-fix-session-log:F-220; its cache-flush workaround was not sufficient for this current case.
+
+## Measured 2026-11-11: `symbols` resyncs; the stale path is `symbol_at`
+
+Session `5f715d8f`, HEAD `5bccb5bdf`. A scratch crate pinned with `workspace=`, rust-analyzer, file rewritten from a shell outside codescout. Full table in `a73c49456056fb92`.
+
+- **`symbols` after an external edit: not reproduced.** After prepending 4 lines (size change), `symbols(name, path, include_body=true)` returned L9-12 with the correct body, and `symbols(name)` with no path returned L9. After a same-length rewrite that moved the blocks, `symbols(path)` returned the new ranges. `document_symbols` calls `resync_if_drifted` (`src/lsp/client.rs:1512`) and the check works.
+- **The documented same-size blind spot is not reachable on this machine.** 0 of 2000 same-length rewrites had an identical mtime (btrfs, kernel 7.2.15; median gap 48.9 µs). It cannot explain a stale `symbols` range here. It might on a filesystem with coarse mtime; that was not tested.
+- **A stale path exists, but not for `symbols`.** `symbol_at` (hover, goto_definition) does not resync: after the same external edits it returned "no definition resolvable" at the current position, and `hover` text of the old layout at the old position. One `symbols(path)` call repaired it. Filed as `a73c49456056fb92`. This supports the hypothesis above (the server did not receive the change) for position-based calls only.
+
+**What this does not settle.** A second round (in `a73c49456056fb92`) found that `references` returns a stale location for a file that is open, changed on disk and not named in the call (`other.rs:2  // y`, real line 5). That is a candidate path to a label/bytes mismatch in a `call_graph`-style report like this one, because positions inside other files come from the server. I did not run `call_graph` against it in a way that shows it. The original report used `symbols`, and `symbols` resynced in every case I ran. The mismatch in the report may still come from the socket (mux) transport, from a path other than `document_symbols`, or from a call that read ranges through another tool. My first scratch run used the default rust config, `mux: true`; I confirmed in the process tree that its `rust-analyzer` ran under `codescout mux --socket …`, so the `symbols` result above covers the socket transport the archived fix found fragile. A second crate with `[lsp.rust] mux = false` ran under `codescout start` (stdio) and showed the same cross-file `references` staleness (`a73c49456056fb92`, third round). I did not repeat the `symbols` cases on stdio. This bug stays `open` and unreproduced for `symbols`.
 
 ## Fix
 

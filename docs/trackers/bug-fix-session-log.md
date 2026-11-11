@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 234
+entry_high_water_F: 235
 entry_high_water_W: 158
 ---
 
@@ -80,6 +80,7 @@ entry_high_water_W: 158
 | F-232 | 2026-11-10 | med | tool-behavior | promoted-to-bug-tracker | **Named symbol ranges stayed stale after a compaction cache flush** — retained counterexample, forced-byte fallback; open navigation bug4e7ec7bfc047ac7b. |
 | F-233 | 2026-11-10 | med | measurement | fixed-verified | **A source-path diff was reported as the whole peer delta** — full scan found four Python harness paths; corrected claim and separately gated exact integration tree. |
 | F-234 | 2026-11-10 | med | test-design | fixed-verified | **Replacement LSP fixture provider omitted document symbols** — retain setup failures, then93/2 intended RED and95/0 final GREEN. |
+| F-235 | 2026-11-11 | med | measurement | promoted-to-bug-tracker | **The defect filed as "symbol_at is stale" was wider** — the drift repair covers only the file a documentSymbol call names; references returned a stale location for another open file; bug a73c49456056fb92. |
 | F-213 | 2026-11-06 | med | test-design | fixed-verified | **A crash fixture failed in its toy parser before reaching the classifier** — wrong-reason red replaced by observed intended red before reapplying production wiring. |
 | F-214 | 2026-11-06 | med | test-design | promoted-to-bug-tracker | **Stripping log indentation promoted a debug field to compiler evidence** — real four-log overlap exposed the false provenance; three observed RED variants before fix. |
 | F-210 | 2026-11-01 | med | process | mitigated | **A clean-worktree gate cannot pass its format lane for a file that needs formatting, because the write record sits under the shared tree's path** — `fmt-mine` named three of my files UNKNOWN after a 19-minute gate; `rustfmt --check` on the diff's files beforehand takes seconds. |
@@ -18316,6 +18317,34 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Status:** fixed-verified
 
 **Evidence:** [Original setup failures](ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-red.log), [corrected intended RED](ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-red-fixture-corrected.log), [final related95/0](ecc-integration/evidence/2026-11-10-bfs-identity-dogfood/review-fix-green-borrow-corrected.log). Final actual mutations discriminate all five prior survivors; logs preserve every attempt. Fixture document_symbols uses the real parser, keeping only the external wire substituted.
+
+## F-235 — The defect I filed as "symbol_at is stale" was wider: the drift repair covers only the file a documentSymbol call names
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, session `5f715d8f`, HEAD `5bccb5bdf`. Measuring bug `4e7ec7bfc047ac7b` (stale `symbols` ranges) in a scratch crate pinned with `workspace=`, rust-analyzer, default `mux: true`.
+
+**When:** I had measured that `symbols` resyncs after an external edit (L9-12 after +4 lines) and that `symbol_at` does not. I filed `a73c49456056fb92` as "symbol_at (hover and goto_definition) answers from stale LSP content". Before proposing a fix I scouted the tool-level callers of raw positions.
+
+**Expected:** The drift check `resync_if_drifted` (`src/lsp/client.rs:1379`) protects every by-name tool, because they resolve a position through `document_symbols` first. So the defect would be `symbol_at` alone, and a fix would be "resync in `hover` and `goto_definition`".
+
+**Got:** `resync_if_drifted` has one caller, in `document_symbols` (`client.rs:1512`), so it repairs only the file that call names. A by-name `references(target_fn, lib.rs)` returned `other.rs:2  // y` after `other.rs` was rewritten outside codescout: line 2 on disk has no `target_fn`, the real call is on line 5. After `symbols(other.rs)` the same call returned `other.rs:5`. By-name calls on the changed file itself were correct (`references` after a +4-line and new-caller edit; `call_graph` after a same-length rename). The proposition this proves: the server answers from old content for an open file that the call does not name, and one `documentSymbol` on that file repairs it. It does not prove how often a real session hits it.
+
+**Probable cause:** The 2026-08-11 fix put the check "before the `documentSymbol` request goes out" and did not cover other files or the position-based methods. `didChangeWatchedFiles` appears nowhere in `src` (0 matches).
+
+**Workaround:** Call `symbols(path)` on any file changed outside codescout before relying on `symbol_at` or on `references` locations in that file. I retitled and rewrote the bug, and noted the second round in `4e7ec7bfc047ac7b`.
+
+**Counterfactual:** A fix scoped to the filed title, resync in `hover` and `goto_definition`, would pass its own test while `references` kept returning a wrong location for another file. A test that drives only `symbol_at` is green on that fix.
+
+**Severity:** med
+
+**Status:** promoted-to-bug-tracker
+
+**Limits:** Two tiny crates (one per transport), rust-analyzer, one run per case. Both transports were confirmed in the process tree: the first crate under `codescout mux` (socket), the second under `codescout start` (stdio), and the cross-file `references` staleness reproduced on both. On stdio `symbol_at` on the changed file raised a raw `-32603 Invalid offset … (line index length: 51)`, the old file's byte length. A same-length rewrite of a second file was not run for `references`. `call_graph` never listed `other.rs::use_it` in either state, so it neither shows nor rules out the staleness; that omission was not investigated.
+
+**Fix idea / Pointer:** bug `a73c49456056fb92` (open, `unverified` set). The same staleness reaches a write: `edit_code rename` overwrote the wrong bytes of a second file and returned `ok` (bug `58a45860b802a477`, measured later the same day on both transports, with a control). Related: `4e7ec7bfc047ac7b`, F-232, archived `2026-08-11-symbols-stale-after-external-git-checkout`.
+
+---
 
 ## Template for new entries
 

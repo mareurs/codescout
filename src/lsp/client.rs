@@ -223,12 +223,25 @@ fn disk_signature(path: &Path) -> Option<DiskSignature> {
     let md = std::fs::metadata(path).ok()?;
     Some((md.len(), md.modified().ok()))
 }
+
+/// What was last delivered for one file: the disk signature of those bytes, and the path
+/// the server knows the file by.
+#[derive(Debug, Clone)]
+struct Delivered {
+    signature: DiskSignature,
+    /// The path as it was SENT, not canonicalised. The server addresses a document by the URI
+    /// of that path, so a resync must send the same one. Through a symlink the canonical path
+    /// names a document the server never opened (on macOS `tempdir()` lives under `/var`, a
+    /// link to `/private/var`).
+    sent_as: PathBuf,
+}
+
 /// Per-file record of the on-disk signature last **delivered** to the server.
 ///
 /// Its own type rather than a bare map because the `overwrite` rule is the whole
 /// correctness argument and belongs next to the data it governs — see [`Self::record`].
 #[derive(Debug, Default)]
-pub(crate) struct SyncedSignatures(StdMutex<HashMap<PathBuf, DiskSignature>>);
+pub(crate) struct SyncedSignatures(StdMutex<HashMap<PathBuf, Delivered>>);
 
 impl SyncedSignatures {
     /// Note that `canonical`'s current bytes were handed to the server.
@@ -245,19 +258,23 @@ impl SyncedSignatures {
     /// verification caught it.
     ///
     /// `overwrite: true` is for `didChange`, which always sends.
-    fn record(&self, canonical: &Path, overwrite: bool) {
+    fn record(&self, canonical: &Path, sent_as: &Path, overwrite: bool) {
         let Some(sig) = disk_signature(canonical) else {
             return;
+        };
+        let delivered = Delivered {
+            signature: sig,
+            sent_as: sent_as.to_path_buf(),
         };
         let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
         match map.entry(canonical.to_path_buf()) {
             std::collections::hash_map::Entry::Occupied(mut e) => {
                 if overwrite {
-                    e.insert(sig);
+                    e.insert(delivered);
                 }
             }
             std::collections::hash_map::Entry::Vacant(e) => {
-                e.insert(sig);
+                e.insert(delivered);
             }
         }
     }
@@ -270,7 +287,27 @@ impl SyncedSignatures {
             return false;
         };
         let map = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        map.get(canonical).is_some_and(|last| *last != current)
+        map.get(canonical)
+            .is_some_and(|last| last.signature != current)
+    }
+
+    /// Every recorded file that differs on disk from what was last delivered, as the path it
+    /// was SENT under (see [`Delivered::sent_as`]).
+    ///
+    /// One `stat` per recorded file. The record is taken under the lock and the `stat`s run
+    /// after it is released, so a slow filesystem never holds up `record`.
+    fn drifted(&self) -> Vec<PathBuf> {
+        let recorded: Vec<(PathBuf, PathBuf)> = {
+            let map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            map.iter()
+                .map(|(canonical, d)| (canonical.clone(), d.sent_as.clone()))
+                .collect()
+        };
+        recorded
+            .into_iter()
+            .filter(|(canonical, _)| self.has_drifted(canonical))
+            .map(|(_, sent_as)| sent_as)
+            .collect()
     }
 
     #[cfg(test)]
@@ -279,7 +316,7 @@ impl SyncedSignatures {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(canonical)
-            .copied()
+            .map(|d| d.signature)
     }
 }
 
@@ -943,6 +980,14 @@ impl LspClient {
         const MAX_RETRIES_WARM: usize = 3;
         const RETRY_DELAY_WARM_MS: u64 = 300;
 
+        // Bring the server's copy of every file up to date before it is asked anything.
+        // This is the one place every request passes through (all but `initialize`, which
+        // runs before any file is open), so a new LSP operation cannot forget it. See
+        // `resync_all_drifted` for why it covers every file and not only the one named.
+        if method != "initialize" && method != "shutdown" {
+            self.resync_all_drifted().await;
+        }
+
         let in_cold_start = self.in_cold_start_window();
         let (max_retries, retry_delay_ms) = if in_cold_start && uses_cold_start_retry_budget(method)
         {
@@ -1361,28 +1406,33 @@ impl LspClient {
     /// always `true`.
     fn record_synced(&self, path: &Path, overwrite: bool) {
         let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        self.synced_sigs.record(&canonical, overwrite);
+        self.synced_sigs.record(&canonical, path, overwrite);
     }
 
-    /// Re-send a file the server already has if it changed on disk behind our back.
+    /// Re-send every file the server already has that changed on disk behind our back.
     ///
     /// codescout's own writes notify the server. An external `git checkout`, `git
-    /// stash`, a rebase, or a plain editor save does not — and `did_open` returns
-    /// early for an already-open file (stdio) or is deduped by the mux (socket), so
+    /// stash`, a rebase, `cargo fmt`, or a plain editor save does not — and `did_open`
+    /// returns early for an already-open file (stdio) or is deduped by the mux (socket), so
     /// nothing re-syncs it. The server then keeps answering from the old content,
     /// which is the expensive failure: not an error, a confident wrong answer, with
     /// symbol bodies and line numbers describing a version of the file that no longer
     /// exists.
     ///
-    /// Only fires when a signature was previously recorded. A file we have never sent
-    /// is `did_open`'s business, not this function's.
-    async fn resync_if_drifted(&self, path: &Path) {
-        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        if self.synced_sigs.has_drifted(&canonical) {
-            tracing::debug!(path = %canonical.display(), "resyncing file changed outside codescout");
-            // did_change re-reads from disk and records the new signature, so a
-            // failure here simply leaves the drift recorded for the next attempt.
-            let _ = self.did_change(path).await;
+    /// EVERY recorded file, not only the one a request names. A `references` or a rename
+    /// answers about other files too, from the server's copy of each, and a rename edit is
+    /// written to disk at the ranges the server computed. Repairing only the named file
+    /// let a stale range overwrite the wrong bytes of another one
+    /// (`docs/issues/2026-11-11-edit-code-rename-writes-a-stale-lsp-range-into-the-wrong-bytes-and-reports-ok.md`).
+    ///
+    /// Only fires for files with a recorded signature. A file we have never sent is
+    /// `did_open`'s business, not this function's.
+    async fn resync_all_drifted(&self) {
+        for sent_as in self.synced_sigs.drifted() {
+            tracing::debug!(path = %sent_as.display(), "resyncing file changed outside codescout");
+            // did_change re-reads from disk and records the new signature, so a failure
+            // here simply leaves the drift recorded for the next attempt.
+            let _ = self.did_change(&sent_as).await;
         }
     }
 
@@ -1507,9 +1557,9 @@ impl LspClient {
         // content actually delivered.
         //
         // Ordering is also correct for stdio and for a first-time open: a file with no
-        // recorded signature is `did_open`'s business, and `resync_if_drifted` returns
+        // recorded signature is `did_open`'s business, and `resync_all_drifted` returns
         // without doing anything.
-        self.resync_if_drifted(path).await;
+        self.resync_all_drifted().await;
         // Ensure the file is open in the server.
         self.did_open(path, language_id).await?;
 
@@ -3610,7 +3660,7 @@ struct Point {
 
     #[test]
     fn disk_signature_is_none_for_a_missing_file() {
-        // Drives `resync_if_drifted`'s early return — a path that cannot be stat'd
+        // Drives `resync_all_drifted`'s early return — a path that cannot be stat'd
         // must not be treated as "changed" and trigger an endless resync.
         let dir = tempfile::tempdir().unwrap();
         assert!(disk_signature(&dir.path().join("nope.rs")).is_none());
@@ -3638,7 +3688,7 @@ struct Point {
             .unwrap();
 
         let sigs = SyncedSignatures::default();
-        sigs.record(&file, false); // the didOpen that actually delivered
+        sigs.record(&file, &file, false); // the didOpen that actually delivered
         let first = sigs.get(&file).expect("didOpen must record on first sight");
         assert!(!sigs.has_drifted(&file), "nothing changed yet");
 
@@ -3647,7 +3697,7 @@ struct Point {
         std::fs::write(&file, "fn a() {}\nfn b() {}\n").unwrap();
         filetime::set_file_mtime(&file, filetime::FileTime::from_unix_time(1_600_000_060, 0))
             .unwrap();
-        sigs.record(&file, false);
+        sigs.record(&file, &file, false);
 
         assert_eq!(
             sigs.get(&file),
@@ -3662,7 +3712,7 @@ struct Point {
         );
 
         // didChange DOES always send, so it is allowed to move the mark forward.
-        sigs.record(&file, true);
+        sigs.record(&file, &file, true);
         assert!(
             !sigs.has_drifted(&file),
             "didChange always sends, so it must record what it sent"
@@ -3684,6 +3734,49 @@ struct Point {
         assert!(!sigs.has_drifted(&dir.path().join("does_not_exist.rs")));
     }
 
+    /// `drifted` names every changed file by the path it was SENT under.
+    ///
+    /// The map is keyed by the canonical path, but the server knows a document by the URI of
+    /// the path the client sent. Resyncing a file reached through a symlink with its canonical
+    /// path would address a document the server never opened (on macOS `tempdir()` itself is
+    /// under a link). Only the changed file is listed, so a resync costs a `didChange` per
+    /// changed file and nothing for the rest.
+    #[cfg(unix)]
+    #[test]
+    fn drifted_names_a_changed_file_by_the_path_it_was_sent_under() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let via_link = link.join("f.rs");
+        std::fs::write(&via_link, "fn a() {}\n").unwrap();
+        filetime::set_file_mtime(
+            &via_link,
+            filetime::FileTime::from_unix_time(1_600_000_000, 0),
+        )
+        .unwrap();
+        let canonical = std::fs::canonicalize(&via_link).unwrap();
+        assert_ne!(canonical, via_link, "the fixture must go through a link");
+
+        let unchanged = real.join("g.rs");
+        std::fs::write(&unchanged, "fn g() {}\n").unwrap();
+        let unchanged_canonical = std::fs::canonicalize(&unchanged).unwrap();
+
+        let sigs = SyncedSignatures::default();
+        sigs.record(&canonical, &via_link, false);
+        sigs.record(&unchanged_canonical, &unchanged, false);
+        assert!(sigs.drifted().is_empty(), "nothing changed yet");
+
+        std::fs::write(&via_link, "fn a() {}\nfn b() {}\n").unwrap();
+        assert_eq!(
+            sigs.drifted(),
+            vec![via_link],
+            "only the changed file, under the path it was sent as"
+        );
+    }
+
     /// `document_symbols` must reflect a write made outside codescout's edit tools.
     ///
     /// This replaces `did_change_refreshes_stale_symbol_positions`, which asserted
@@ -3691,8 +3784,8 @@ struct Point {
     /// stale positions — as a demonstration of why callers had to flush themselves.
     /// That demonstration WAS the bug: `symbols()` kept serving pre-checkout content
     /// after a `git checkout`, and a caller only escaped it by already knowing to
-    /// call `post_compact`. `resync_if_drifted` now closes it inside
-    /// `document_symbols`, so the old assertion documented a defect rather than a
+    /// call `post_compact`. `resync_all_drifted` now closes it for every request, so
+    /// the old assertion documented a defect rather than a
     /// contract, and was rewritten with it rather than worked around.
     ///
     /// Step 4 keeps the explicit `did_change` path covered: it is still the repair
@@ -3766,6 +3859,308 @@ struct Point {
         );
 
         client.shutdown().await.unwrap();
+    }
+
+    // ── Answers about a file the call does not name, after it changed outside codescout ──
+    //
+    // Before the fix the drift repair ran only inside `document_symbols`, so it repaired only
+    // the file a `documentSymbol` request names. The tests below pin the contract the by-name tools rely
+    // on: after the named file is resynced the way those tools do it, no location and no
+    // rename edit that the client returns may point into stale bytes of ANOTHER file.
+    // Bugs `a73c49456056fb92` (read side) and `58a45860b802a477` (rename writes the stale
+    // range). Each `*_is_resynced` twin is the control: it differs from its red test only by
+    // one `document_symbols` call on the changed file, so a failure of the red test is the
+    // stale view and not the fixture.
+    //
+    // Scope: stdio transport only. The socket (mux) transport shows the same defect in a
+    // manual run; it has no test here because the mux harness is a different shape
+    // (`mux/coherence_rust.rs`).
+
+    /// `lib.rs` defines `target_fn` (line 0, name at column 7) and `helper_fn`; `other.rs`
+    /// calls `target_fn` on line 1. `target_fn` and `helper_fn` have the same length, so the
+    /// swap case below keeps `other.rs` the same size.
+    fn create_two_file_project(dir: &Path) {
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"two-files\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("src/lib.rs"),
+            "pub fn target_fn(x: u32) -> u32 {\n    x + 1\n}\n\npub fn helper_fn(x: u32) -> u32 {\n    x\n}\n\npub mod other;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("src/other.rs"),
+            "pub fn use_it() -> u32 {\n    crate::target_fn(5)\n}\n",
+        )
+        .unwrap();
+    }
+
+    /// Start a stdio client and sync both files, so the server holds both of them open.
+    async fn synced_two_file_client(
+        root: &Path,
+    ) -> (LspClient, std::path::PathBuf, std::path::PathBuf) {
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: root.to_path_buf(),
+            init_timeout: None,
+            mux: false,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let client = LspClient::start(config).await.unwrap();
+        let lib_rs = root.join("src/lib.rs");
+        let other_rs = root.join("src/other.rs");
+        client.document_symbols(&lib_rs, "rust").await.unwrap();
+        client.document_symbols(&other_rs, "rust").await.unwrap();
+        (client, lib_rs, other_rs)
+    }
+
+    /// The text that `range` covers in the file as it is on disk now. The fixtures are ASCII,
+    /// so a UTF-16 column is a character column.
+    fn disk_text_at(path: &Path, range: &lsp_types::Range) -> String {
+        let content = std::fs::read_to_string(path).unwrap();
+        let line = content.lines().nth(range.start.line as usize).unwrap_or("");
+        line.chars()
+            .skip(range.start.character as usize)
+            .take(range.end.character.saturating_sub(range.start.character) as usize)
+            .collect()
+    }
+
+    /// Ranges of the rename edit that fall in the file whose URI ends with `suffix`.
+    fn edit_ranges_in(edit: &lsp_types::WorkspaceEdit, suffix: &str) -> Vec<lsp_types::Range> {
+        let mut out = Vec::new();
+        if let Some(changes) = &edit.changes {
+            for (uri, edits) in changes {
+                if uri.as_str().ends_with(suffix) {
+                    out.extend(edits.iter().map(|e| e.range));
+                }
+            }
+        }
+        if let Some(document_changes) = &edit.document_changes {
+            let docs: Vec<&lsp_types::TextDocumentEdit> = match document_changes {
+                lsp_types::DocumentChanges::Edits(edits) => edits.iter().collect(),
+                lsp_types::DocumentChanges::Operations(ops) => ops
+                    .iter()
+                    .filter_map(|op| match op {
+                        lsp_types::DocumentChangeOperation::Edit(e) => Some(e),
+                        _ => None,
+                    })
+                    .collect(),
+            };
+            for doc in docs {
+                if doc.text_document.uri.as_str().ends_with(suffix) {
+                    for e in &doc.edits {
+                        out.push(match e {
+                            lsp_types::OneOf::Left(te) => te.range,
+                            lsp_types::OneOf::Right(ate) => ate.text_edit.range,
+                        });
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// References of `target_fn`, re-asked for up to 20 s until one lies in `other.rs`. The
+    /// server may answer with the declaration alone while it is still loading the crate.
+    async fn references_until_other_rs_appears(
+        client: &LspClient,
+        lib_rs: &Path,
+    ) -> Vec<lsp_types::Location> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let refs = client.references(lib_rs, 0, 7, "rust").await.unwrap();
+            let found = refs
+                .iter()
+                .any(|l| l.uri.as_str().ends_with("/src/other.rs"));
+            if found || std::time::Instant::now() >= deadline {
+                return refs;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    }
+
+    /// Prepend three lines to `other.rs` outside codescout, then ask for the references of
+    /// `target_fn` the way the by-name `references` tool does: resync the NAMED file
+    /// (`document_symbols`), then ask by position. Every location in `other.rs` must cover
+    /// `target_fn` in the file as it is on disk.
+    async fn references_after_an_external_prepend(resync_other: bool) {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        create_two_file_project(dir.path());
+        let (client, lib_rs, other_rs) = synced_two_file_client(dir.path()).await;
+
+        // Baseline: the call is found on line 1 of `other.rs`, so a failure below is the
+        // stale step and not the fixture.
+        let before = references_until_other_rs_appears(&client, &lib_rs).await;
+        let in_other: Vec<_> = before
+            .iter()
+            .filter(|l| l.uri.as_str().ends_with("/src/other.rs"))
+            .collect();
+        assert_eq!(
+            in_other.len(),
+            1,
+            "baseline: one call in other.rs, got {before:?}"
+        );
+        assert_eq!(
+            in_other[0].range.start.line, 1,
+            "baseline: the call is on line 1"
+        );
+
+        let original = std::fs::read_to_string(&other_rs).unwrap();
+        std::fs::write(&other_rs, format!("// a\n// b\n// c\n{original}")).unwrap();
+
+        client.document_symbols(&lib_rs, "rust").await.unwrap();
+        if resync_other {
+            client.document_symbols(&other_rs, "rust").await.unwrap();
+        }
+        let after = references_until_other_rs_appears(&client, &lib_rs).await;
+        let ranges: Vec<_> = after
+            .iter()
+            .filter(|l| l.uri.as_str().ends_with("/src/other.rs"))
+            .map(|l| l.range)
+            .collect();
+        assert!(
+            !ranges.is_empty(),
+            "the call in other.rs must still be reported: {after:?}"
+        );
+        for range in &ranges {
+            assert_eq!(
+                disk_text_at(&other_rs, range),
+                "target_fn",
+                "a reference into other.rs must cover `target_fn` on disk, range {range:?}"
+            );
+        }
+        client.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn references_into_another_file_reflect_a_write_made_outside_codescout() {
+        references_after_an_external_prepend(false).await;
+    }
+
+    #[tokio::test]
+    async fn references_into_another_file_are_current_once_that_file_is_resynced() {
+        references_after_an_external_prepend(true).await;
+    }
+
+    /// How `other.rs` is changed outside codescout in `rename_after_an_external_write`.
+    #[derive(Clone, Copy)]
+    enum ExternalWrite {
+        /// Three comment lines in front: the call moves from line 1 to line 4.
+        PrependThreeLines,
+        /// The call of `target_fn` becomes a call of `helper_fn`, a name of the same length,
+        /// so the file keeps its size and the stale range lands on another call.
+        SwapForASameLengthCallee,
+    }
+
+    /// `rename` is deliberately not retried by the client (`is_idempotent_lsp_method`), so a
+    /// server that cancels it while it is busy surfaces as a `RecoverableError`. These tests
+    /// check the CONTENT of the edit, so they ask again on exactly that error and on no other.
+    async fn rename_retrying_when_cancelled(
+        client: &LspClient,
+        lib_rs: &Path,
+        new_name: &str,
+    ) -> lsp_types::WorkspaceEdit {
+        for _ in 0..5 {
+            match client.rename(lib_rs, 0, 7, new_name, "rust").await {
+                Ok(edit) => return edit,
+                Err(e) if e.to_string().contains("cancelled non-idempotent request") => {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+                Err(e) => panic!("rename failed: {e:#}"),
+            }
+        }
+        panic!("the server cancelled the rename on every attempt");
+    }
+
+    /// Change `other.rs` outside codescout, resync the NAMED file, ask for a rename of
+    /// `target_fn`. Every edit range in `other.rs` must cover `target_fn` on disk.
+    /// `edit_code rename` writes the ranges the server returns without comparing them with
+    /// the old name (`apply_text_edits`, `symbol/edit.rs`).
+    async fn rename_after_an_external_write(write: ExternalWrite, resync_other: bool) {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        create_two_file_project(dir.path());
+        let (client, lib_rs, other_rs) = synced_two_file_client(dir.path()).await;
+        // Same wait as the references tests: the server must know the call before the write.
+        let before = references_until_other_rs_appears(&client, &lib_rs).await;
+        assert!(
+            before
+                .iter()
+                .any(|l| l.uri.as_str().ends_with("/src/other.rs")),
+            "baseline: the call in other.rs must be known to the server"
+        );
+
+        let original = std::fs::read_to_string(&other_rs).unwrap();
+        let rewritten = match write {
+            ExternalWrite::PrependThreeLines => format!("// a\n// b\n// c\n{original}"),
+            ExternalWrite::SwapForASameLengthCallee => original.replace("target_fn", "helper_fn"),
+        };
+        if let ExternalWrite::SwapForASameLengthCallee = write {
+            assert_eq!(
+                rewritten.len(),
+                original.len(),
+                "the swap must keep the size"
+            );
+        }
+        std::fs::write(&other_rs, rewritten).unwrap();
+
+        client.document_symbols(&lib_rs, "rust").await.unwrap();
+        if resync_other {
+            client.document_symbols(&other_rs, "rust").await.unwrap();
+        }
+        let edit = rename_retrying_when_cancelled(&client, &lib_rs, "renamed_fn").await;
+
+        assert!(
+            !edit_ranges_in(&edit, "/src/lib.rs").is_empty(),
+            "the rename must edit lib.rs, or the check below proves nothing: {edit:?}"
+        );
+        if let ExternalWrite::PrependThreeLines = write {
+            assert!(
+                !edit_ranges_in(&edit, "/src/other.rs").is_empty(),
+                "other.rs still calls target_fn, so the rename must edit it: {edit:?}"
+            );
+        }
+        for range in edit_ranges_in(&edit, "/src/other.rs") {
+            assert_eq!(
+                disk_text_at(&other_rs, &range),
+                "target_fn",
+                "a rename edit for other.rs must cover `target_fn` on disk, range {range:?}"
+            );
+        }
+        client.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rename_edit_for_another_file_reflects_a_prepend_made_outside_codescout() {
+        rename_after_an_external_write(ExternalWrite::PrependThreeLines, false).await;
+    }
+
+    #[tokio::test]
+    async fn rename_edit_for_another_file_is_current_after_a_prepend_once_it_is_resynced() {
+        rename_after_an_external_write(ExternalWrite::PrependThreeLines, true).await;
+    }
+
+    #[tokio::test]
+    async fn rename_edit_does_not_land_on_another_callee_after_a_same_size_write_outside_codescout()
+    {
+        rename_after_an_external_write(ExternalWrite::SwapForASameLengthCallee, false).await;
+    }
+
+    #[tokio::test]
+    async fn rename_edit_does_not_land_on_another_callee_after_a_same_size_write_once_resynced() {
+        rename_after_an_external_write(ExternalWrite::SwapForASameLengthCallee, true).await;
     }
 
     /// Verify that prepare_call_hierarchy returns a CallHierarchyItem for a known function.
