@@ -6672,6 +6672,44 @@ async fn a_failed_producer_with_no_test_verdict_is_not_typed_as_a_test_run() {
     assert_eq!(result["type"], "test", "{result}");
     assert_eq!(result["producer_exit_code"], 0, "{result}");
 }
+/// A `timeout_secs` above 86,400 is read as milliseconds and converted, and the response says so in
+/// `timeout_hint`. A detached job applies no timeout: its supervisor waits on the child with no
+/// deadline, so the hint named a duration nothing used. A background call therefore carries none,
+/// for the oversize value and for `0` ("using default of 30s"); the foreground call keeps both.
+/// BUG docs/issues/2026-11-11-background-command-timeout-hint-is-not-applied.md
+#[cfg(unix)]
+#[tokio::test]
+async fn a_background_job_carries_no_timeout_hint_because_no_timeout_applies() {
+    let (_dir, ctx) = project_ctx().await;
+    for (timeout, wording) in [(172_800_u64, "172s"), (0, "default of 30s")] {
+        let foreground = RunCommand
+            .call(json!({ "command": "true", "timeout_secs": timeout }), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            foreground["timeout_hint"]
+                .as_str()
+                .is_some_and(|h| h.contains(wording)),
+            "timeout_secs {timeout}, foreground: {foreground}"
+        );
+
+        let background = RunCommand
+            .call(
+                json!({ "command": "true", "timeout_secs": timeout, "run_in_background": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            background["output_id"].is_string(),
+            "timeout_secs {timeout}, background: {background}"
+        );
+        assert!(
+            background.get("timeout_hint").is_none(),
+            "timeout_secs {timeout}, background: {background}"
+        );
+    }
+}
 
 /// The status is a bonus and never costs the capture: a producer that cannot be wrapped, or a
 /// compound command whose wrapped text the shell rejects, runs as written with its capture and no
