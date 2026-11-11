@@ -80,11 +80,15 @@ newrepo() { # newrepo <file>... -> echoes a repo path with each file created and
 }
 
 LOG="$WORK/log"
+# PATH is narrowed to the system dirs for every hook run, so the third probe (`command -v
+# codescout`) cannot find a real binary the developer has installed: a case that makes the
+# stub fail its probe would otherwise fall through to that binary and be judged by it. A case
+# that wants `command -v` to succeed puts a stub directory first, as case 12 does.
 run() { # run <repo> [VAR=value ...] -> sets OUT (stdout+stderr) and RC; the stub is CODESCOUT_BIN
     local repo="$1"; shift
     : > "$LOG"
     OUT=$(cd "$repo" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
-        GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+        GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null PATH=/usr/bin:/bin \
         CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" "$@" bash "$CHECK" 2>&1); RC=$?
     CALLS=$(cat "$LOG")
 }
@@ -117,7 +121,7 @@ has  "2 says REFUSED" "$OUT" "REFUSED"
 # front end, and this test reads stderr alone to prove it.
 ERR_ONLY=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-    CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" STUB_RC=1 STUB_OUT="$PROBLEM" \
+    PATH=/usr/bin:/bin CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" STUB_RC=1 STUB_OUT="$PROBLEM" \
     bash "$CHECK" 2>&1 >/dev/null)
 has  "2 the problem lines are on stderr, not only stdout" "$ERR_ONLY" "docs/a/readme.md, docs/b/readme.md"
 
@@ -127,7 +131,7 @@ eq   "3 key-gate exit 2 passes open" "$RC" "0"
 has  "3 prints the NOT CHECKED line" "$OUT" "NOT CHECKED — .codescout/key-space.toml in the index is malformed"
 ERR_ONLY=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-    CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" STUB_RC=2 STUB_OUT="$NOTCHECKED" \
+    PATH=/usr/bin:/bin CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" STUB_RC=2 STUB_OUT="$NOTCHECKED" \
     bash "$CHECK" 2>&1 >/dev/null)
 has  "3 the NOT CHECKED line is on stderr, where a committer sees it" "$ERR_ONLY" "NOT CHECKED"
 lacks "3 a cannot-ask is not a REFUSAL" "$OUT" "REFUSED"
@@ -211,6 +215,28 @@ OUT=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
     STUB_RC=1 STUB_OUT="$PROBLEM" bash "$CHECK" 2>&1); RC=$?
 eq   "11 target/release/codescout is used when CODESCOUT_BIN is dead" "$RC" "1"
 has  "11 and it was the one asked" "$(cat "$LOG")" "key-gate"
+
+# --- 12. Probe order, last step: `codescout` on PATH is used when the other two are dead ----
+# The stub directory goes first on a narrowed PATH, so the case is deterministic whatever the
+# developer has installed.
+R=$(newrepo docs/a/readme.md)
+STUBDIR="$WORK/pathdir"; mkdir -p "$STUBDIR"; cp "$STUB" "$STUBDIR/codescout"
+: > "$LOG"
+OUT=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    PATH="$STUBDIR:/usr/bin:/bin" CODESCOUT_BIN=/nonexistent/codescout STUB_LOG="$LOG" \
+    STUB_RC=1 STUB_OUT="$PROBLEM" bash "$CHECK" 2>&1); RC=$?
+eq   "12 codescout on PATH is used when CODESCOUT_BIN and target/release are dead" "$RC" "1"
+has  "12 and it was the one asked" "$(cat "$LOG")" "key-gate"
+# The same stale-binary rule holds for the PATH candidate: one without `key-gate` is not live.
+: > "$LOG"
+OUT=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    PATH="$STUBDIR:/usr/bin:/bin" CODESCOUT_BIN=/nonexistent/codescout STUB_LOG="$LOG" \
+    STUB_HELP_RC=2 STUB_RC=1 STUB_OUT="$PROBLEM" bash "$CHECK" 2>&1); RC=$?
+eq   "12 a stale codescout on PATH passes open" "$RC" "0"
+has  "12 and says NOT CHECKED" "$OUT" "NOT CHECKED"
+eq   "12 and was never asked" "$(cat "$LOG")" ""
 
 echo
 echo "key-space: $PASS passed, $FAIL failed"

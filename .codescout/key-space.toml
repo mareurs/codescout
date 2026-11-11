@@ -1,38 +1,45 @@
 # Which subtrees of this repo have no artifact key.
 #
 # A document outside the key space has no key (its lowercase filename stem) and takes no part
-# in uniqueness; it also has no key-based identity, so only material that needs neither is
-# listed. Exclusion is by whole subtree: a folder whose `readme.md` is excluded is excluded
-# whole (the gate reports PartialFolderExclusion otherwise). The rule and its parser:
-# src/librarian/identity/key_space.rs. The pre-commit check: scripts/pre-commit-key-space.sh.
+# in uniqueness; it also has no key-based identity. Exclusion is by whole subtree: a folder
+# whose `readme.md` is excluded is excluded whole (the gate reports PartialFolderExclusion
+# otherwise). The rule and its parser: src/librarian/identity/key_space.rs. The pre-commit
+# check: scripts/pre-commit-key-space.sh.
 #
-# Each entry is the narrowest subtree that removes a problem. It was checked by dropping the
-# entry and running `codescout key-gate` in full mode: every entry below, removed alone, adds
-# a key problem (an invalid key, a new duplicate-key group) or, for `.buddy`, adds a file to an
-# existing group, and the files it excludes are fixture, evidence or another project's notes.
-# A problem left in scope is a real document the key migration renames, not something to hide.
+# The principle: exclude a subtree whose file names are dictated from outside this repo or
+# that is recorded evidence or fixture material, because the key migration cannot rename
+# those files and every future sibling would otherwise be refused at commit time. Narrow an
+# entry only where the names are ours. A problem left in scope is a real document the
+# migration renames, not something to hide here. Re-check an entry by dropping it and running
+# `codescout key-gate` in full mode: each entry below except `.claude`, removed alone, adds a
+# key problem (an invalid key, a new duplicate-key group) or enlarges an existing group.
+# `.claude` holds one skill today and is listed on the principle, for the second skill.
 exclude = [
-    # pi's AGENTS.md shares the key `agents` with the root AGENTS.md. Its README.md is in the
-    # same folder, so the folder goes whole. contrib/systemd has no problem and keeps its key.
-    "contrib/pi",
-    # Raw review transcripts named `s1-claude-cold-0.review.md` (a dot: an invalid key).
-    # The rest of docs/evals, including the eval write-ups, keeps its keys.
+    # Names dictated by the tool that reads them: pi's AGENTS.md and README.md, a systemd
+    # unit's README.md. Example integration files for other tools, not repository documents.
+    "contrib",
+    # Names dictated by the agent harness: `.claude/skills/<name>/SKILL.md`. Every skill is
+    # keyed `skill`, so a second skill would collide with the first.
+    ".claude",
+    # Recorded evidence of the ecc-integration dogfood runs: replayed AGENTS.md, CLAUDE.md and
+    # SKILL.md copies (keys `agents`, `claude`, `skill`) beside the run reviews. Evidence is
+    # kept as captured; the sibling `evidence.md` tracker is not under this folder and keeps
+    # its key.
+    "docs/trackers/ecc-integration/evidence",
+    # Recorded evidence: raw review transcripts named `s1-claude-cold-0.review.md`, written by
+    # the eval run and kept as captured (a dot in the name is an invalid key). The rest of
+    # docs/evals, including the eval write-ups, is ours and keeps its keys.
     "docs/evals/data/2026-09-24-review-model-vs-context/runs",
-    # Test inputs: prompt-surface snapshots (underscore names), a sample repository the
+    # Fixture material: prompt-surface snapshots (underscore names), a sample repository the
     # librarian tests index (its README.md is keyed by the invalid folder name `repo_a`), and
     # two sample repositories each holding a `docs/spec.md` (the key `spec`, twice).
     "tests/fixtures",
     "tests/librarian/fixtures",
     "tests/librarian/audit_doc_refs/fixtures",
-    # Agent instructions and skills replayed as evidence of one dogfood run: AGENTS.md and
-    # CLAUDE.md copies (keys `agents`, `claude`) and 21 SKILL.md copies (key `skill`). The rest
-    # of the evidence folder keeps its keys.
-    "docs/trackers/ecc-integration/evidence/2026-11-09-doc-create-dogfood/replay/instructions",
-    "docs/trackers/ecc-integration/evidence/2026-11-09-doc-create-dogfood/replay/skills",
     # Per-project and per-profile memory stores: each project under `.codescout/projects/`
     # carries its own `architecture.md`, `conventions.md`, ..., and this checkout's own
     # memories use the same topic names (`architecture`, `system-prompt`, `effort-steering`
-    # collide with documents elsewhere). They are keyed by topic inside their own store.
+    # collide with documents elsewhere). A memory is keyed by its topic inside its own store.
     ".codescout/projects",
     ".codescout/memories",
     # Persona memory: `.buddy/memory/INDEX.md` shares the key `index` with three trackers.
