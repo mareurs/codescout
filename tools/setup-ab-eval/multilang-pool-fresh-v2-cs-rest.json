@@ -1,0 +1,30 @@
+{
+  "pool": "setup-ab live rust v4",
+  "registered": "2026-11-11",
+  "gate": "pool v2 gate (strict builder + spec verdicts + gold x2 / empty replay); the four cs/full runs of nushell-18863 that the budget stop of the cs/full screen (registration dbab6178ff09) left unrun; fixed by the stop, not by results",
+  "amends": "setup-ab fresh v2",
+  "dropped": [
+    {
+      "id": "rust-lang__rust-analyzer-22992",
+      "reason": "run in the cs/full screen (registration dbab6178ff09, run data live-screen-cs); only the cells it left unrun are in this pool"
+    },
+    {
+      "id": "nushell__nushell-19052",
+      "reason": "run in the cs/full screen (registration dbab6178ff09, run data live-screen-cs); only the cells it left unrun are in this pool"
+    },
+    {
+      "id": "nushell__nushell-19283",
+      "reason": "run in the cs/full screen (registration dbab6178ff09, run data live-screen-cs); only the cells it left unrun are in this pool"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "nushell__nushell-18863",
+      "repo": "nushell/nushell",
+      "control_sha256": "c07bf514d3d4490c3ae19e60c6e13c1da2b2ec8008c660771ca8bc0a746e6f55",
+      "expected_count": 8622,
+      "dropped_count": 0,
+      "f2p_dropped_count": 0
+    }
+  ]
+}
