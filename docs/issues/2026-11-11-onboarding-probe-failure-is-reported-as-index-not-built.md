@@ -1,18 +1,18 @@
 ---
 id: '191a5b00c7ab02b6'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: onboarding reports "not built" when the Qdrant probe fails, and Phase 1 then offers to build an index that exists'
 tags:
 - cluster/unclassified
 - onboarding
 - readiness
 - prompts
-closed: null
+closed: 2026-11-11
 opened: 2026-11-11
 owner: marius
 severity: low
-unverified: 'Found by reading the code at HEAD ab599d204. Not reproduced at runtime: no run with an unreachable Qdrant and an existing index was made.'
+unverified: Not run with an unreachable retrieval store and an existing index; only the no-project arm is tested. Phase 1 of source.md has no branch for the new state and ONBOARDING_VERSION was not bumped, by choice.
 ---
 
 # BUG: onboarding reports "not built" when the Qdrant probe fails
@@ -31,7 +31,7 @@ With an index that exists but a retrieval store the probe cannot reach, the onbo
 
 ## Reproduction
 
-Not run. By reading: `probe_index_status` takes the `Err(_)` arm at `RetrievalClient::from_env` or at `project_index_stats` and returns `ready: false`; `index_ready` is then `false` in `OnboardingContext`, and the `else` branch of `build_onboarding_prompt` prints `not built`. A run needs a project with a stored index and a retrieval store that refuses the stats call.
+Not run end to end with an unreachable store and an existing index. Re-read at the current HEAD on 2026-11-12: `probe_index_status` (`src/tools/onboarding.rs`) had the same three `ready: false` returns, and `build_onboarding_prompt` (`src/prompts/mod.rs`) printed `not built` for all of them. The no-project arm is now reproduced by a test (see § Tests added). The other two arms depend on the retrieval configuration and are not forced in a test.
 
 ## Environment
 
@@ -47,15 +47,30 @@ Read at the bytes this session: `probe_index_status` at `src/tools/onboarding.rs
 
 ## Hypotheses tried
 
-None beyond reading the code.
+Re-read 2026-11-12 on current code: the claims in § Summary hold. The fix choice was made with the owner: code only, no `ONBOARDING_VERSION` bump (see § Fix).
 
 ## Fix
 
-Open. The probe needs a third state, for example `ready: null` or a `probe_failed` flag, and the prompt needs a third line for it, such as "could not check the semantic index". Phase 1 then needs a branch that does not offer to build. This touches the `onboarding_prompt` slice, so it needs an `ONBOARDING_VERSION` bump.
+The three non-answers of `probe_index_status` (no project, no retrieval client, a failed statistics call) now return `ready: false` plus `unchecked`, a reason. An empty index returns `ready: false` without it, which is an answer. `OnboardingContext` gained `index_unchecked: Option<&str>`. `build_onboarding_prompt` prints ``**Semantic index:** could not be checked (<reason>). Run `index(action='status')` before offering to build one, and offer it only if that reports no index.`` The empty index still reads `not built`. The `index_status` field of the onboarding response carries `unchecked` too.
+
+Scope, chosen with the owner on 2026-11-12: code only, as `ad5fbcfc9`. Not done:
+
+- Phase 1 of `src/prompts/source.md` has no branch of its own for this state (it still has `### If the index is NOT BUILT:`). The rendered line carries its own instruction instead.
+- `ONBOARDING_VERSION` was not bumped. Per its comment, already-onboarded projects cache the rendered prompt and need a bump to get new wording, so they keep the old line until the next bump.
+
+## Fix provenance
+
+- **SHA:** `e99718b2c` (`experiments`)
+- **patch-id:** `9af2ecf92d27e4bc579bd445cb713199a4c6cd4c`
 
 ## Tests added
 
-None.
+- `build_onboarding_does_not_call_an_unchecked_index_not_built` (`src/prompts/mod.rs`): red before the change (the prompt said `not built`), green after. It also checks that an empty index keeps `not built` and does not say `could not be checked`.
+- `a_probe_with_no_project_says_it_did_not_check_the_index` (`src/tools/onboarding.rs`): red before, green after. A context with no project takes the probe's first arm.
+
+Not tested: the `no retrieval client` and `statistics call failed` arms. They use the same helper as the tested arm. Forcing them needs the retrieval configuration, which a test cannot change without mutating the environment.
+
+Gate on 2026-11-12: clippy, LEAN and DEFAULT green in one run. The format lane refused a peer's file in that run, and a separate `./scripts/fmt-mine.sh --check` was green afterwards.
 
 ## Workarounds
 
@@ -63,7 +78,7 @@ The agent can run `index(action='status')` before choosing "Build now".
 
 ## Resume
 
-Filed 2026-11-11 while rewording the "ready" wording (bug `db67deedbae5a09e`, commits `ad5fbcfc9` and `ab599d204`). No fix attempted.
+Fixed in code and committed, with the scope above. Open: a Phase 1 branch in `source.md` with a version bump, if the rendered line proves too weak. A live check needs an onboarding run with an unreachable retrieval store and an existing index. Then clear the `unverified` field.
 
 ## References
 
