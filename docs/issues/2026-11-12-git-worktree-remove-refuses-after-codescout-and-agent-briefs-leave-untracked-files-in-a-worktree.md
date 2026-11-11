@@ -42,9 +42,15 @@ Observed three times in one session (2026-11-11 and 2026-11-12); the minimal tri
 
 ## Root cause
 
-Unknown — under investigation. Verified facts:
+Two causes, both verified by the probes in Hypotheses tried.
 
-- `.gitignore` has no rule for `.codescout/native-provenance-v1.counter` or `.codescout/native-provenance-v1.lock`. The lock name is defined in `src/tools/native_provenance_fence.rs` (`LOCK_NAME`). Both files appeared untracked in all three worktrees.
+- **Refusal (fixed):** the first write tool call in a checkout creates `.codescout/native-provenance-v1.counter` and `.lock`, and no `.gitignore` rule covered them. Fix 1 covers them.
+- **Leftover directory (not fixed):** the first `symbols` call on a Rust file starts a `codescout mux … rust-analyzer` process with `--cwd` set to the worktree, and rust-analyzer runs `cargo check` with `target/` inside the worktree. Neither process stops when another project is activated or when the worktree is removed. `git worktree remove` deregisters the worktree and then fails on `Directory not empty` because `cargo check` writes `target/` again.
+- **Second trap (not fixed):** after the active project's worktree is removed, `workspace(action="activate")` fails for every path, the main checkout included, with `No such file or directory (os error 2)`. Creating an empty directory at the old path lets activation succeed again.
+
+Other verified facts:
+
+- Before fix 1, `.gitignore` had no rule for `.codescout/native-provenance-v1.counter` or `.codescout/native-provenance-v1.lock`. The lock name is defined in `src/tools/native_provenance_fence.rs` (`LOCK_NAME`). Both files appeared untracked in all three worktrees.
 - Not a cause: `.superpowers/`, `.codescout/write.lock`, `.codescout/write.lock.holder`, `.codescout/private-memories/`, `scripts/__pycache__/` and `target/` are all ignored, so they do not block removal.
 - `.superpowers-fix-report.md` was untracked and not ignored. A subagent brief written by the controller named that path for the implementer's scratch report. That one is a dispatch defect of the superpowers workflow, not of codescout.
 
@@ -56,7 +62,13 @@ Unknown — under investigation. Verified facts:
 
 ## Hypotheses tried
 
-None yet. To try: which tool call first creates the two `native-provenance-v1` files; whether `.codescout/embeddings` was a symlink; what recreated `.codescout` and `target` inside `tracker-lifecycle-plan-b` while it was being removed (a pinned `workspace=` call, a background job, or a leased build slot).
+Three probes on 2026-11-12, each on a fresh worktree of `experiments`, each followed by `git status --porcelain --ignored -uall`.
+
+1. **Pinned with `workspace=`, never activated.** After `grep` the only file was `.codescout/write.lock`. After `create_file` the files `.codescout/native-provenance-v1.counter`, `.lock`, `write.lock` and `write.lock.holder` existed, so a write tool creates the fence files. `run_command echo` added nothing. With fix 1 in place all four show as ignored (`!!`), and a plain `git worktree remove` (no `--force`) succeeded and left no directory.
+2. **Activated with `read_only=false`.** Activation added the ignored `.codescout/libraries.json`. A plain removal while this worktree was the active project succeeded and left nothing. A later read call did not recreate the directory, and `create_file` failed with `No such file or directory`.
+3. **Activated, then `symbols` on a `.rs` file.** This started `codescout mux --cwd <worktree> --idle-timeout 180 -- rust-analyzer` and a `cargo check --manifest-path <worktree>/Cargo.toml`, and `target/` filled up (52 009 bytes of ignored paths). Both processes were still running after I activated the main checkout. A plain `git worktree remove` then exited 255: `failed to delete '<path>': Directory not empty`. `git worktree list` no longer named it, and the directory held a fresh `target/` that the running `cargo check` had written.
+
+Not reproduced: the untracked `.codescout/embeddings` entry of plan-a, and a recreated `.codescout` in plan-b (probe 3 recreated only `target/`).
 
 ## Fix
 
@@ -72,11 +84,13 @@ N/A — not fixed. A regression check would be a test that creates a worktree, r
 
 ## Workarounds
 
-`git worktree remove --force <path>` after `git status --porcelain --ignored -uall` shows only regenerable files. If git answers "Directory not empty", confirm with `git worktree list` that git deregistered it, then `rm -rf` the exact path and run `git worktree prune`.
+Before removing a worktree that ever served `symbols`, `references` or a cargo run: activate the main checkout, run `pgrep -af <worktree path>`, and stop the listed processes by PID. Then run a plain `git worktree remove <path>`. If you removed the active project's worktree first and activation now fails, `mkdir` the old path, activate the main checkout, and delete the empty directory.
+
+For forced removal: `git worktree remove --force <path>` after `git status --porcelain --ignored -uall` shows only regenerable files. If git answers "Directory not empty", confirm with `git worktree list` that git deregistered it, then `rm -rf` the exact path and run `git worktree prune`.
 
 ## Resume
 
-Fix 1 is done. Next: find what recreates `.codescout` and `target` inside a worktree while it is removed, and whether `.codescout/embeddings` can be a symlink; then fixes 2 and 3.
+Fix 1 is done and the leftover-directory cause is verified. Next: fix 3 as code, not only a recipe. Candidates: a codescout action that stops the mux and its cargo children for a path (or does so when the active project changes away from a worktree), and `workspace(activate)` that no longer fails when the current project's directory is gone. Fix 2 (brief templates, in the superpowers plugin) is still open. Still unexplained: the untracked `.codescout/embeddings` entry in plan-a and the recreated `.codescout` in plan-b.
 
 ## References
 
