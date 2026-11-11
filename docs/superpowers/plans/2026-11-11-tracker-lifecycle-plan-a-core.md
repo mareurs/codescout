@@ -22,7 +22,7 @@ tags:
 
 **Spec:** `docs/superpowers/specs/2026-11-11-tracker-lifecycle-design.md` (approved, `42bc25753`). Read § D1–D4 before starting. Identity spec: `docs/superpowers/specs/2026-11-11-repo-relative-artifact-key-design.md` (v5).
 
-**Precondition:** identity Plan A (`docs/superpowers/plans/2026-11-11-artifact-identity-plan-a-identity-and-grammar.md`) Tasks 1, 2, 4 and 5 are merged. This plan uses `Key`, `KeyError`, `key_of`, `is_folder_index`, `Reference` and `extract` exactly as that plan's Interfaces blocks define them.
+**Precondition:** identity Plan A (`docs/superpowers/plans/2026-11-11-artifact-identity-plan-a-identity-and-grammar.md`) Task 2 (`repo_name`), Task 4 (`key`) and Task 5 (`grammar`) are committed, and this plan's branch is created from the Task 5 commit (which also carries Task 1, the removal of the `librarian` cargo feature). This plan changes none of Task 1's files. It uses `Key`, `KeyError`, `key_of`, `is_folder_index`, `Reference` and `extract` exactly as that plan's Interfaces blocks define them.
 
 ## Global Constraints
 
