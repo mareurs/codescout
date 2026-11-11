@@ -617,16 +617,6 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
     ),
     (
         "tracker-conventions",
-        "Settled caveats — STANDING and TRACKED",
-        TRACKER_SECTION_NEEDS_A_STATUS_UPDATE,
-    ),
-    (
-        "tracker-conventions",
-        "Closing a bug — patch-id and fix provenance",
-        TRACKER_SECTION_NEEDS_A_STATUS_UPDATE,
-    ),
-    (
-        "tracker-conventions",
         "Archiving a tracker",
         TRACKER_SECTION_NEEDS_A_STATUS_UPDATE,
     ),
@@ -699,13 +689,14 @@ const TRACKER_SECTION_IS_A_DOCTOR_REMEDY: &str =
      get_guide(\"tracker-conventions\"). See \
      docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md.";
 
-/// Why three `tracker-conventions` sections carry no `serves:` declaration: the call that needs
-/// each is a `doc.update` that changes `status`, and routing that call here delays the anti-wipe
+/// Why one `tracker-conventions` section carries no `serves:` declaration: the call that needs
+/// it is a `doc.update` that changes `status`, and routing that call here delays the anti-wipe
 /// warnings.
 ///
-/// `Settled caveats`, `Closing a bug` (its fix-provenance half) and `Archiving a tracker` are
-/// written at the moment a bug is closed or a tracker archived, which is an `update` with a
-/// `status`. Naming such an update's result (it was, in the first cut) sends it to this topic,
+/// `Archiving a tracker` is written at the moment a tracker is archived, which is an `update`
+/// with a `status`. (Two more sections shared this reason until 2026-11-11, when the bug-file
+/// sections, `Settled caveats` and `Closing a bug`, moved to the repo's bug template.) Naming
+/// such an update's result (it was, in the first cut) sends it to this topic,
 /// and the engine ships ONE topic per call and stops at the first that ships something
 /// (`emit_guide_sections`), so `librarian` § *Choosing a mode* and § *The shrink guard* arrived
 /// only after the call that needed them had run. Measured 2026-10-17: bug close -> tracker
@@ -717,7 +708,7 @@ const TRACKER_SECTION_IS_A_DOCTOR_REMEDY: &str =
 /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
 const TRACKER_SECTION_NEEDS_A_STATUS_UPDATE: &str =
     "Unreachable by auto-injection, not unimportant: the call that needs this section is an \
-     update that changes status (closing a bug, archiving a tracker), and routing that call \
+     update that changes status (archiving a tracker), and routing that call \
      to this topic delays librarian's anti-wipe sections (Choosing a mode, The shrink guard) \
      until after it has run: measured 2026-10-17, the warning arrived after the THIRD call of a \
      close, archive, body-edit sequence, and in the anonymous tier a forced wholesale body \
@@ -754,13 +745,13 @@ const TRACKER_SECTION_INFORMS_BODY_EDITS: &str =
 /// and `Shape` can only qualify on a path, not on the violation class: serving every
 /// section that names a doctor check would ship them all to a call whose report names
 /// one or two. Each check's home is one section, but the home of
-/// `terminal_status_without_fix_anchor` is the `Closing a bug` section (about 5.5 KB once the
-/// archive flow was split out of it on 2026-10-17; it was 15 KB); the largest section that
-/// names a check is now `Entry ids` (about 6.5 KB). A
+/// `terminal_status_without_fix_anchor` is now the repo's bug template, not this guide (it was
+/// the `Closing a bug` section, about 5.5 KB, until 2026-11-11); the largest section that
+/// names a check is `Entry ids` (about 6.5 KB). A
 /// `check~<name>` predicate is a grammar amendment ("widening it requires amending the
 /// spec", `guide_index::Shape`), so it is left to a decision rather than made here.
 const TRACKER_LIBRARIAN_SHAPES_UNSERVED: &str = "These librarian.* call shapes route to \
-     tracker-conventions when their result names a tracker or bug path, and none has a \
+     tracker-conventions when their result names a tracker path, and none has a \
      section here: librarian.doctor (its violations are remediated by different sections and \
      Shape cannot qualify on the violation class — serving every check-named section would \
      ship them all, the largest being 6.5 KB), librarian.link_scan, librarian.reindex, \
@@ -786,10 +777,12 @@ const TRACKER_LIBRARIAN_SHAPES_UNSERVED: &str = "These librarian.* call shapes r
 /// - `doc.append_entry`, `doc.update_entry`, `doc.augment`: served on a result naming
 ///   `docs/trackers/` (since 2026-10-17 their results name the tracker they LANDED ON,
 ///   `name_the_target` in `src/librarian/tools/artifact.rs`), and NOT on one naming
-///   `docs/issues/` (a bug file carries no ledger and no augmentation), which a shape-level
+///   `docs/issues/` (a bug file carries no ledger and no augmentation; since 2026-11-11 such a
+///   result does not route here at all), which a shape-level
 ///   waiver cannot say: the per-shape table
 ///   `guide_index::tests::tracker_write_shapes_ship_their_sections_and_only_theirs` holds that
-///   half, so the waiver does not hide a lost tracker declaration. `doc.link` is served on both.
+///   half, so the waiver does not hide a lost tracker declaration. `doc.link` is served on a
+///   tracker only.
 /// - `doc.update`: not routed on purpose, see `TRACKER_SECTION_NEEDS_A_STATUS_UPDATE`.
 /// - `doc.delete`: the real result names no path the router reads (2026-10-16).
 /// - `doc.event_create`, `doc.event_list`, `doc.gather`, `doc.graph`: also measured, 2026-10-16
@@ -2660,14 +2653,18 @@ mod tests {
         assert!(claude_md_budget_verdict(&dir.path().join("absent"), 1_000).is_err());
     }
 
-    /// The `tracker-conventions` guide must state every token `doctor`'s fix-anchor check
-    /// enforces, because a session writing a bug record reads the guide and never the check.
+    /// The bug template must state every token `doctor`'s fix-anchor check
+    /// enforces, because a session writing a bug record reads the template and never the check.
+    ///
+    /// Until 2026-11-11 the `tracker-conventions` guide held this grammar. It moved out with the
+    /// rest of the bug-file procedure, because that procedure is the repo's (see
+    /// `tracker_conventions_names_no_repo_specific_artifact_kind`).
     ///
     /// The defect this pins shipped and was measured 2026-09-14: `doctor`'s
     /// `terminal_status_without_fix_anchor` refused records lacking a `## Fix provenance`
-    /// pointer, ~150 bug files already used the format, and the guide `CLAUDE.md` calls the
+    /// pointer, ~150 bug files already used the format, and the document `CLAUDE.md` calls the
     /// controlling convention mentioned **none** of it — 0 occurrences against 50 in
-    /// `doctor.rs`. The guide said to record a SHA and a patch-id, at length, and never said
+    /// `doctor.rs`. It said to record a SHA and a patch-id, at length, and never said
     /// where or in what shape, so a record written to its spec was flagged and the grammar had
     /// to be reverse-engineered from `doctor.rs`'s test fixtures.
     /// docs/issues/archive/2026-09-14-the-fix-anchor-grammar-is-enforced-by-doctor-and-defined-in-no-guide.md
@@ -2688,8 +2685,8 @@ mod tests {
     /// token present beside a wrong explanation passes. That half is unreachable from a string
     /// search and is left to review rather than faked with a stricter-looking assertion.
     #[test]
-    fn tracker_conventions_states_the_fix_anchor_grammar_doctor_enforces() {
-        let guide = include_str!("guides/tracker-conventions.md");
+    fn bug_template_states_the_fix_anchor_grammar_doctor_enforces() {
+        let guide = include_str!("../../docs/issues/_TEMPLATE.md");
         // Every token is a literal the checker or its parser depends on:
         // `structured_fix_pointers` strips exactly the two bullet prefixes, the heading is
         // what the refusal text names, and `no_fix_commit` is the frontmatter escape that
@@ -2702,11 +2699,43 @@ mod tests {
         ] {
             assert!(
                 guide.contains(token),
-                "tracker-conventions guide no longer states `{token}`, which doctor's \
+                "docs/issues/_TEMPLATE.md no longer states `{token}`, which doctor's \
                  terminal_status_without_fix_anchor enforces. A session writing a bug record \
-                 reads this guide and never the check, so dropping the token restores the \
+                 reads the template and never the check, so dropping the token restores the \
                  defect filed at \
                  docs/issues/archive/2026-09-14-the-fix-anchor-grammar-is-enforced-by-doctor-and-defined-in-no-guide.md"
+            );
+        }
+    }
+    /// The `tracker-conventions` guide holds the mechanics every repo shares and names no
+    /// artifact kind that one repo's pattern defines. Its bug-file procedure (where the file
+    /// lives, its frontmatter and status vocabulary, the claim call, the triggers, the fix
+    /// provenance shape, when it archives) belongs to `docs/issues/_TEMPLATE.md`, which the
+    /// repo owns: another repo keeps bugs elsewhere, in another shape, or not at all.
+    ///
+    /// The guide is also fetched whole by a session that has no bug in front of it, so every
+    /// byte of issue procedure there is read by a session that does not need it. It was 55 KB
+    /// on 2026-11-11, and about 8 KB of that was the bug-file procedure.
+    ///
+    /// The needles are tokens a bug-file section cannot avoid, not a word list. A rule that is
+    /// not repo-specific (move an artifact through the catalog, stage both halves, re-point the
+    /// citations) names none of them. To add repo-specific procedure, put it in the repo's own
+    /// template and leave a pointer in `CLAUDE.md`, not here.
+    #[test]
+    fn tracker_conventions_names_no_repo_specific_artifact_kind() {
+        let guide = include_str!("guides/tracker-conventions.md");
+        for needle in [
+            "docs/issues",
+            "_TEMPLATE",
+            "kind: bug",
+            "bug file",
+            "Bug files",
+        ] {
+            assert!(
+                !guide.contains(needle),
+                "tracker-conventions names `{needle}`: a repo-specific artifact kind. Its \
+                 procedure belongs in that repo's own template (codescout: \
+                 docs/issues/_TEMPLATE.md), not in a guide every repo and every session reads"
             );
         }
     }

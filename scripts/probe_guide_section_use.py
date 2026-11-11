@@ -368,17 +368,6 @@ def opening_pattern(topic: str) -> "re.Pattern[str]":
 # its zeros. Each entry names what it misses.
 SECTION_SIGNATURES: dict[str, dict[str, list[tuple[str | None, list[str]]]]] = {
     "tracker-conventions": {
-        # Archive flow, bug-file frontmatter vocabulary, patch-id citation.
-        # MISSES: reading an existing bug file (that is `Querying`), and writing a bug file
-        # via native Write/Edit rather than the artifact tool.
-        "Bug files (docs/issues/)": [
-            (None, ["docs/issues/archive/"]),
-            (None, ["docs/issues/", '"kind": "bug"']),
-            (None, ["patch-id"]),
-            (None, ["unverified"]),
-            (None, ['"status": "fixed"']),
-            (None, ['"status": "mitigated"']),
-        ],
         # Tracker creation and in-place archival.
         # MISSES: appending to a tracker (that is `Entry-level standard`).
         "Tracker artifacts (docs/trackers/)": [

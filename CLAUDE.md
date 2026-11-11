@@ -20,7 +20,7 @@ The laws for reading a green or red result → [`docs/conventions/testing-discip
 
 ## Bug Tracking
 
-Every bug noticed during work gets its own file in `docs/issues/`, copied from [`docs/issues/_TEMPLATE.md`](docs/issues/_TEMPLATE.md), which holds the procedure.
+Every bug noticed during work gets its own file in `docs/issues/`, copied from [`docs/issues/_TEMPLATE.md`](docs/issues/_TEMPLATE.md), which holds the procedure. It alone holds bug-file rules; `get_guide("tracker-conventions")` stays repo-neutral (a test enforces it).
 
 ## Session Intelligence Trackers
 

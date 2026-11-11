@@ -18302,9 +18302,14 @@ mod guide_hint_tests {
     /// Each step asserts body text unique to the section it expects, and the three
     /// steps are chosen so every one finds the previous steps' sections spent — so a
     /// step that passes proves its OWN section arrived, not a repeat:
-    ///   1. `create` under `docs/issues/` → Bug files, Bug frontmatter, Trigger rules
-    ///   2. `get` of that bug             → Claiming, The unverified caveat
-    ///   3. `find` of bugs                → Querying
+    ///   1. `create` under `docs/trackers/` → Tracker artifacts, Declaring a ledger, Make the
+    ///      tracker guarded
+    ///   2. `get` of that tracker            → A `## Resume` states its own currency, Querying
+    ///   3. `find` of trackers               → nothing new (Querying was spent by the get)
+    ///
+    /// A bug file's create, get and find are not among the shapes: its procedure is the
+    /// repo's bug template, so those calls route to `librarian`
+    /// (`a_bug_file_is_not_routed_to_tracker_conventions` below).
     #[tokio::test]
     async fn the_first_call_of_each_routed_shape_ships_a_tracker_conventions_section() {
         let (_dir, server) = make_server().await;
@@ -18315,8 +18320,8 @@ mod guide_hint_tests {
             "doc",
             json!({
                 "action": "create",
-                "rel_path": "docs/issues/2026-10-16-section-grain-probe.md",
-                "kind": "bug",
+                "rel_path": "docs/trackers/section-grain-probe.md",
+                "kind": "tracker",
                 "title": "section grain probe",
                 "body": "probe body"
             }),
@@ -18324,13 +18329,13 @@ mod guide_hint_tests {
         .await;
         let guide = guide_blocks(&created).join("");
         for want in [
-            "One file per bug.",
-            "**Frontmatter:** every bug file has `kind: bug`",
-            "**Trigger rules \u{2014} open a bug file for ANY bug noticed during work:**",
+            "Trackers are living state",
+            "A **ledger** owns an id namespace",
+            "**Declare `entry_prefix`.**",
         ] {
             assert!(
                 guide.contains(want),
-                "create under docs/issues/ must ship `{want}`, got {} B: {}",
+                "create under docs/trackers/ must ship `{want}`, got {} B: {}",
                 guide.len(),
                 guide.chars().take(300).collect::<String>()
             );
@@ -18349,33 +18354,34 @@ mod guide_hint_tests {
         let got = call_tool(&server, "doc", json!({"action": "get", "id": id})).await;
         let guide = guide_blocks(&got).join("");
         for want in [
-            "**Claiming a bug.**",
-            "**`unverified:` \u{2014} the caveat, made queryable.**",
+            "A tracker that accumulates review passes by *appending*",
+            "The canonical",
         ] {
             assert!(
                 guide.contains(want),
-                "get of a bug must ship `{want}`, got {} B: {}",
+                "get of a tracker must ship `{want}`, got {} B: {}",
                 guide.len(),
                 guide.chars().take(300).collect::<String>()
             );
         }
         assert!(
-            !guide.contains("**Frontmatter:** every bug file"),
-            "\u{a7} Bug frontmatter was spent by the create and must not ship again"
+            !guide.contains("Trackers are living state"),
+            "\u{a7} Tracker artifacts was spent by the create and must not ship again"
         );
 
-        let found = call_tool(&server, "doc", json!({"action": "find", "kind": "bug"})).await;
+        // `get` of a tracker served § Querying too (it declares both `doc.get` and `doc.find`
+        // on a tracker), so the `find` finds it spent and ships it no more.
+        let found = call_tool(&server, "doc", json!({"action": "find", "kind": "tracker"})).await;
         let guide = guide_blocks(&found).join("");
         assert!(
-            guide.contains("The canonical"),
-            "find of bugs must ship \u{a7} Querying, got {} B: {}",
-            guide.len(),
-            guide.chars().take(300).collect::<String>()
+            !guide.contains("The canonical"),
+            "\u{a7} Querying was spent by the get and must not ship again"
         );
         assert!(!guide.contains(pointer));
     }
     /// Archiving through `doc(action="move")` ships the `tracker-conventions` sections that
-    /// describe that flow, for a bug file and for a tracker.
+    /// describe that flow, for a tracker. A bug file's move ships none of them: its procedure
+    /// is the repo's bug template, which points at the guide for the sweep.
     ///
     /// `move` answers `old_abs_path`/`new_abs_path` and no `abs_path`, so before the router
     /// scanned those keys the call routed to `librarian` and these sections -- stage both
@@ -18391,7 +18397,7 @@ mod guide_hint_tests {
     /// fresh server, since sections already spent in a session are not served again.
     /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
     #[tokio::test]
-    async fn moving_a_bug_file_or_a_tracker_ships_the_archive_sections() {
+    async fn moving_a_tracker_ships_the_archive_sections_and_a_bug_file_ships_none() {
         /// `(guide text served with the hold, guide text served after the executed move,
         /// text of the create call's guide)`.
         async fn create_then_move(kind: &str, from: &str, to: &str) -> (String, String, String) {
@@ -18468,13 +18474,31 @@ mod guide_hint_tests {
         )
         .await;
         assert_ships(&held, "the hold of a bug move", &[librarian_hold]);
-        assert!(
-            !held.contains(tracker_stage),
-            "the hold is input-derived and cannot carry a path-qualified section"
-        );
+        // A bug file's procedure is the repo's bug template: neither its create nor its move
+        // routes to `tracker-conventions`, so no section of it ships on any of the three calls.
+        for (what, text) in [
+            ("create", &created),
+            ("hold", &held),
+            ("executed move", &after),
+        ] {
+            for marker in [tracker_stage, "Trackers are living state"] {
+                assert!(
+                    !text.contains(marker),
+                    "a bug file's {what} must not ship `{marker}`"
+                );
+            }
+        }
+
+        let (held, after, _) = create_then_move(
+            "tracker",
+            "docs/trackers/archive-probe.md",
+            "docs/trackers/archive/archive-probe.md",
+        )
+        .await;
+        assert_ships(&held, "the hold of a tracker move", &[librarian_hold]);
         assert_ships(
             &after,
-            "the executed move of a bug file",
+            "the executed move of a tracker",
             &[
                 // one distinctive sentence per section, in document order
                 "Archive through the catalog",
@@ -18489,46 +18513,65 @@ mod guide_hint_tests {
             !after.contains(librarian_hold),
             "the librarian section was spent at the hold and must not repeat"
         );
-        assert!(
-            !after.contains("One file per bug."),
-            "the create's sections must not repeat on the move"
-        );
-        assert!(
-            created.contains("One file per bug."),
-            "premise: create ships it"
-        );
-
-        let (held, after, _) = create_then_move(
-            "tracker",
-            "docs/trackers/archive-probe.md",
-            "docs/trackers/archive/archive-probe.md",
-        )
-        .await;
-        assert_ships(&held, "the hold of a tracker move", &[librarian_hold]);
-        assert_ships(
-            &after,
-            "the executed move of a tracker",
-            &[
-                "Archive through the catalog",
-                tracker_stage,
-                "**Then re-point the citations, in the same commit as the move",
-            ],
-        );
         // Its lead instruction is `doc.update`, the call that needs it; it stays pull-only.
         assert!(
             !after.contains("preferred path is in-place archival"),
             "\u{a7} Archiving a tracker is waived and must not ship after a move"
         );
     }
+    /// A bug file's create, get and find ship nothing from `tracker-conventions`. The guide holds
+    /// the mechanics every repo shares; a bug file's procedure is the repo's bug template, so
+    /// these calls route to `librarian`. Driven through real `doc` calls, because what routes is
+    /// the RESULT's content, which a `match_sections` probe bypasses.
+    #[tokio::test]
+    async fn a_bug_file_is_not_routed_to_tracker_conventions() {
+        let (_dir, server) = make_server().await;
+        let created = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/issues/2026-11-11-not-routed-probe.md",
+                "kind": "bug",
+                "title": "not routed probe",
+                "body": "probe body"
+            }),
+        )
+        .await;
+        let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+            .expect("primary block is JSON")["id"]
+            .as_str()
+            .expect("create returns an id")
+            .to_string();
+        let got = call_tool(&server, "doc", json!({"action": "get", "id": id})).await;
+        let found = call_tool(&server, "doc", json!({"action": "find", "kind": "bug"})).await;
+        for (what, blocks) in [("create", &created), ("get", &got), ("find", &found)] {
+            let guide = guide_blocks(blocks).join("");
+            for marker in [
+                "Trackers are living state",
+                "A **ledger** owns an id namespace",
+                "The canonical",
+            ] {
+                assert!(
+                    !guide.contains(marker),
+                    "a bug file's {what} must not ship tracker-conventions text `{marker}`, got {} B: {}",
+                    guide.len(),
+                    guide.chars().take(300).collect::<String>()
+                );
+            }
+        }
+    }
 
     /// The WORST-CASE `doc.move` delivery has its own byte budget, separate from the p50
     /// session's.
     ///
-    /// Archiving a bug file is the largest real draw of any single `doc` call: the hold
+    /// Archiving a tracker is the largest real draw of any single `doc` call: the hold
     /// serves `librarian` § Archiving / Moving Trackers before the move runs, and the
     /// re-issue then ships six `tracker-conventions` sections selected by the result's
-    /// paths. The p50 fixture cannot carry it: its `move` goes `docs/specs/` to
-    /// `docs/specs/`, which names no tracked path, and a p50 session does not archive bugs,
+    /// paths. (A bug file's move ships none of them: see
+    /// `moving_a_tracker_ships_the_archive_sections_and_a_bug_file_ships_none`.) The p50
+    /// fixture cannot carry it: its `move` goes `docs/specs/` to
+    /// `docs/specs/`, which names no tracked path, and a p50 session does not archive trackers,
     /// so folding a rare worst case into it would either raise its derived ceiling (a spec
     /// amendment, and these budgets only move down) or hide a regression in the common
     /// case behind the slack the rare one needs. Two populations, two ceilings.
@@ -18544,7 +18587,7 @@ mod guide_hint_tests {
     /// is a property of the guides and not of this machine's temp path.
     /// docs/issues/2026-10-17-p50-emission-budget-fixture-never-archives-a-bug-file-so-the-largest-doc-move-delivery-is-unbudgeted.md
     #[tokio::test]
-    async fn a_bug_archive_move_stays_under_its_own_emission_byte_ceiling() {
+    async fn a_tracker_archive_move_stays_under_its_own_emission_byte_ceiling() {
         // MEASURED 2026-10-17: 13,758 B (hold 2,271 B + executed 11,487 B), read from this
         // test's own failure message at ceiling 0, plus the same 128 B margin the p50
         // ceiling carries over its measurement. Not derived from section sizes: the six
@@ -18556,7 +18599,12 @@ mod guide_hint_tests {
         // above: 18 B drifted before the block-seam fix, 7 B from it (`trailing_block`;
         // with the prefix reverted the same run read 13,776 B = hold 2,289 + executed
         // 11,487). The ceiling is unchanged.
-        const CEILING: usize = 13_886;
+        // RE-MEASURED 2026-11-11, after the bug-file sections left `tracker-conventions` and a
+        // bug file's move stopped routing to it. The test now archives a TRACKER, the move that
+        // still ships the six sweep sections: 7,060 B (hold 2,336 B + executed 4,724 B), read
+        // from this test's own failure message at ceiling 0, plus the same 128 B margin. Down
+        // from 13,886 B: the sections are shorter and a bug file's move ships none of them.
+        const CEILING: usize = 7_188;
 
         let (dir, server) = make_server().await;
         let created = call_tool(
@@ -18564,8 +18612,8 @@ mod guide_hint_tests {
             "doc",
             json!({
                 "action": "create",
-                "rel_path": "docs/issues/2026-10-17-budget-probe.md",
-                "kind": "bug",
+                "rel_path": "docs/trackers/2026-10-17-budget-probe.md",
+                "kind": "tracker",
                 "title": "archive budget probe",
                 "body": "probe body"
             }),
@@ -18578,7 +18626,7 @@ mod guide_hint_tests {
             .to_string();
         let move_call = json!({
             "action": "move", "id": id,
-            "new_rel_path": "docs/issues/archive/2026-10-17-budget-probe.md"
+            "new_rel_path": "docs/trackers/archive/2026-10-17-budget-probe.md"
         });
 
         let held = call_tool(&server, "doc", move_call.clone()).await;
@@ -18627,7 +18675,7 @@ mod guide_hint_tests {
 
         assert!(
             total <= CEILING,
-            "a bug-archive move emitted {total} B after the primary (hold {held_bytes} B + \
+            "a tracker-archive move emitted {total} B after the primary (hold {held_bytes} B + \
              executed {moved_bytes} B), ceiling {CEILING} B, margin {} B. Raising CEILING is \
              a decision, not a fix: shrink or split a `doc.move` section in \
              tracker-conventions or librarian, or narrow a `serves:` declaration.",

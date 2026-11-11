@@ -4262,7 +4262,7 @@ text
             assert_eq!(v["updated"], serde_json::json!(true));
             let adv = v["fix_anchor_advisory"].as_str().expect("advisory present");
             assert!(
-                adv.contains("no fix anchor") && adv.contains("tracker-conventions"),
+                adv.contains("no fix anchor") && adv.contains("docs/issues/_TEMPLATE.md"),
                 "{adv}"
             );
             let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();

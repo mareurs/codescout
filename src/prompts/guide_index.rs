@@ -274,8 +274,7 @@ pub const MAX_DECLARED_SECTION_BYTES: usize = 2500;
 
 /// Measured delivered bytes (wrapped blocks, as injected) of the FIRST call of each write shape
 /// on a tracker, plus a fixed 128 B (the margin the emission-budget fixtures use): 2026-10-17,
-/// `append_entry` 12,928 B, `update_entry` 9,077 B, `augment` 5,261 B, `link` 2,591 B. `link` is
-/// also bounded on a bug file. Raise one only with a new measurement. They sit under
+/// `append_entry` 12,928 B, `update_entry` 9,077 B, `augment` 5,261 B, `link` 2,591 B. Raise one only with a new measurement. They sit under
 /// `MAX_AUTO_INJECT_GUIDE_BYTES` (16,384 B, wrapper included), which the first cut of
 /// `append_entry` met with 40 B to spare (16,344 B) while a body-summing test read 13.5 KB.
 /// `append_entry`'s is also read by the end-to-end test, so there is one number.
@@ -1097,7 +1096,7 @@ Body Mu.
             "old_abs_path": "/r/docs/trackers/x.md",
             "new_abs_path": "/r/docs/trackers/archive/x.md"
         });
-        let cases: [(&str, &Value, &[&str]); 8] = [
+        let cases: [(&str, &Value, &[&str]); 4] = [
             (
                 "doc.create",
                 &tracker,
@@ -1109,57 +1108,21 @@ Body Mu.
                 ],
             ),
             (
-                "doc.create",
-                &issue,
-                &[
-                    "Bug files (docs/issues/)",
-                    "Bug frontmatter and status vocabulary",
-                    "Trigger rules and capture discipline",
-                ],
-            ),
-            (
                 "doc.get",
                 &tracker,
                 &["A `## Resume` states its own currency"],
             ),
-            (
-                "doc.get",
-                &issue,
-                &[
-                    "Bug frontmatter and status vocabulary",
-                    "Claiming and releasing a bug",
-                    "The unverified caveat, made queryable",
-                ],
-            ),
             ("doc.find", &find_tracker, &["Querying with the librarian"]),
-            (
-                "doc.move",
-                &move_issue,
-                &[
-                    "Archiving a bug or tracker \u{2014} through the catalog, never git mv",
-                    "Archiving a bug or tracker \u{2014} stage both halves of the move",
-                    "Archiving a bug or tracker \u{2014} re-point the citations",
-                    "Verifying the citation sweep",
-                    "Reading move's inbound_path_citations",
-                    "Why a green gate proves nothing about the sweep",
-                ],
-            ),
             (
                 "doc.move",
                 &move_tracker,
                 &[
-                    "Archiving a bug or tracker \u{2014} through the catalog, never git mv",
-                    "Archiving a bug or tracker \u{2014} stage both halves of the move",
-                    "Archiving a bug or tracker \u{2014} re-point the citations",
-                ],
-            ),
-            (
-                "doc.find",
-                &find_issue,
-                &[
-                    "Bug frontmatter and status vocabulary",
-                    "Claiming and releasing a bug",
-                    "Querying with the librarian",
+                    "Archive \u{2014} through the catalog, never git mv",
+                    "Archive \u{2014} stage both halves of the move",
+                    "Archive \u{2014} re-point the citations",
+                    "Verifying the citation sweep",
+                    "Reading move's inbound_path_citations",
+                    "Why a green gate proves nothing about the sweep",
                 ],
             ),
         ];
@@ -1178,8 +1141,24 @@ Body Mu.
                 "`{sel}` on {result} ships {bytes} B of sections — over the auto-inject bound"
             );
             assert!(
-                bytes * 4 < whole,
+                bytes * 2 < whole,
                 "`{sel}` on {result} ships {bytes} B of a {whole} B guide; that is not section grain"
+            );
+        }
+        // A bug file's own procedure is the repo's bug template, not this guide: a read or a
+        // create under `docs/issues/` serves nothing from here, whatever the call.
+        for (sel, result) in [
+            ("doc.create", &issue),
+            ("doc.get", &issue),
+            ("doc.find", &find_issue),
+            ("doc.move", &move_issue),
+            ("doc.append_entry", &issue),
+            ("doc.link", &issue),
+        ] {
+            assert!(
+                idx.match_sections("tracker-conventions", Some(sel), result)
+                    .is_empty(),
+                "`{sel}` on a bug file must serve no tracker-conventions section"
             );
         }
         // `Archiving a tracker` leads with `doc(action="update", patch={status: archived})`,
@@ -1300,8 +1279,8 @@ Body Mu.
             ),
             (
                 "Cross-linking (edges are derived — cite in prose)",
-                vec![lnk_t, lnk_i],
-                vec![app_t, ue_t, aug_t, upd_t],
+                vec![lnk_t],
+                vec![app_t, ue_t, aug_t, upd_t, lnk_i],
             ),
         ];
 
@@ -1384,8 +1363,12 @@ Body Mu.
         calls.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
         for call in calls {
             let bytes = delivered(call);
+            // Half, not a quarter: the guide holds only mechanics every repo shares, so one
+            // call's sections are a larger part of it. 2026-11-11: the guide was 15 KB after
+            // its repo-specific bug sections moved out, and `append_entry` delivers about
+            // 5.4 KB. What the bound proves is that a write never ships the whole guide.
             assert!(
-                bytes * 4 < whole,
+                bytes * 2 < whole,
                 "`{}` on {} delivers {bytes} B of a {whole} B guide; that is not section grain",
                 call.0,
                 call.1
@@ -1420,7 +1403,6 @@ Body Mu.
             (ue_t, WRITE_CEILING_UPDATE_ENTRY),
             (aug_t, WRITE_CEILING_AUGMENT),
             (lnk_t, WRITE_CEILING_LINK),
-            (lnk_i, WRITE_CEILING_LINK),
         ] {
             let bytes = delivered(call);
             assert!(
@@ -1841,10 +1823,12 @@ Body Mu.
             .collect();
         let (checked, dangling) = check_bare_citations(&corpus);
         assert!(
-            checked >= 5,
-            "the bare-citation scan checked {checked}; the guides held 5 when this test was written \
-         (librarian ×2, tracker-conventions ×1, workspace-state ×2). A drop means the scanner lost \
-         a form, or citations were removed on purpose: lower this floor only for the second reason."
+            checked >= 4,
+            "the bare-citation scan checked {checked}; the guides held 4 when this floor was last \
+         set (librarian ×2, workspace-state ×2; it was 5 until 2026-11-11, when the one in \
+         tracker-conventions left with the bug-file query it sat in). A drop means the scanner \
+         lost a form, or citations were removed on purpose: lower this floor only for the second \
+         reason."
         );
         assert!(
             dangling.is_empty(),

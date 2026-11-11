@@ -84,6 +84,7 @@ Audit IDs are `A-N`, monotonic, never reused.
 | A-46 | 2026-11-04 | OP-6, OP-3, OP-4 (all `unmeasured`); instruments `prompt-engineering/scenarios/operator-rules/` | Never measured (spec Phase 3); OP-6's entry names its own test | Measure only, runs=10/cell, child tools fenced off the real profiles | Frozen tables in the section; point: all three WORK | OP-6 medium, OP-3 low, OP-4 medium | **OP-6 redundant here** (bare 0.95, +op6 1.00; single-skill harness, production untested). **OP-3 works** (V 1.0→0.0) but the agent then stores the fact nowhere. **OP-4 works** on wording (F 0→1.0); 5 bare real-profile reads, all denied |
 | A-47 | 2026-11-09 | Current call_graph surfaces; Codex gpt-6.1-sol/high | Current accuracy and transitive routing need verification; old Sonnet proposal result is not current Codex behavior | Inventory actual delivery; preregistered base first; conditional contrastive fold | Base>=9/10 chain +3/3 direct => no routing edit; else entry thresholds | Bounded native-tool fixture | **Satisfactory base:**10/10 completed correct-scope call_graph + exact answer; direct3/3. No routing edit; treatment skipped. Fresh private profile, not default plugins or no-ECC repair replay. One independently probed factual write-response rule corrected |
 | A-49 | 2026-11-11 | `src/prompts/guides/tracker-conventions.md` | A direct `get_guide` returned 56.6 KB; the harness saved it to disk and the model saw a 2 KB preview | Subtract rationale, keep every rule, heading, `serves:` line and test-pinned opener, point to the pages that already state the rest: 55,261 B to 21,928 B in three passes | After a rebuild a direct fetch returns inline; behaviour unchanged (unverified, N=0) | medium | **size held:** after the final rebuild a direct `get_guide` returned the full 21,928 B inline (2026-11-11); behaviour unverified (N=0) |
+| A-50 | 2026-11-11 | `src/prompts/guides/tracker-conventions.md`: its seven bug-file sections and the bug query, plus the routing of `docs/issues/` paths to it | After A-49 the guide still described one repo's bug-file pattern; every session that fetches it reads that, and most of it was already in `docs/issues/_TEMPLATE.md` | Delete the seven sections and the bug query (21,928 B to 16,545 B); move what the template lacked into it; stop routing `docs/issues/` paths to the guide; doctor findings cite the template; a test fails if the guide names a repo-specific kind | Sessions that close or claim a bug still write a valid `## Fix provenance` record; the share of closings with no anchor stays at or below 95 of 165 | low (N=0) | Gate green: 6,412 and 9,316 nextest tests, 1,827 Python tests, `clippy --features local-embed` after an unrelated lock bump. Behaviour unmeasured (N=0) |
 ## Protocol — subtract-and-measure (P-1..P-8)
 
 Codified 2026-07-07 (fable-tuning FT-11) from what A-1..A-14 actually validated. Binding for any change to a codescout prompt surface (the three `source.md`-derived surfaces, `builders.rs`, guides, CLAUDE.md, companion hook text). Worked example: A-14; reusable template: `prompt-engineering/scenarios/fable-tidying/`. P-3's base-arm-first rule is promoted to cross-repo craft as **prompt-hamsa Heuristic 12** (claude-plugins:`5202cca`, 2026-07-07) — the skill now demands it on every snippet-addition audit, in any repo. **P-2a's observable table is cross-repo too, and for a sharper reason: the failure that produced it happened in `claude-plugins`, outside this protocol's stated binding.** A gate only works where the form is filled in, so the table travels with the pre-registration rather than with this repo — mirrored at `claude-plugins:docs/templates/eval-pre-registration.md`.
@@ -116,6 +117,30 @@ Codified 2026-07-07 (fable-tuning FT-11) from what A-1..A-14 actually validated.
 - **P-8 — Ship only on the ship branch; fill the outcome either way.** The A-N row gets its outcome the day evidence lands — ceilings and refutations are recorded with the same care as wins (they are the majority result: 6 of 9 intervention audits to date landed no-ship). A shipped change gets a follow-up measurement window before the row closes.
 
 **Baseline note (P-8a):** "original Fable captures" = the early-Fable JSONL corpus (~130 sessions, Jun 13–Jul 6, `~/.claude-sdd`) — a *stimulus source* (real transcripts → scenario fixtures), not an executable fixture. Executable baselines are prompt-tdd scenarios; `--compare` against `.prompt-tdd/baselines/` tags where regression tracking is needed.
+## A-50 — tracker-conventions guide: bug-file procedure removed, it is one repo's pattern
+
+**Valid:** dated 2026-11-11
+
+**Status:** shipped unverified. Gate green (see the Index row). The behaviour claim is UNVERIFIED (N=0).
+
+**Symptom:** none observed in a failing run. The user read the 21,928 B guide after A-49 and ruled that documentation for issues belongs in `docs/issues/_TEMPLATE.md` only, because other repos use other patterns and a session with no interest in issues should not be shown them.
+
+**Read-as-stranger gap:** the guide named `docs/issues/`, `kind: bug`, `experiments` as the fix-SHA label, a claim call and a trigger list. None of it applies outside this repo, and most of it was already in the template.
+
+**Decoration cut:** seven sections (Bug files, Bug frontmatter and status vocabulary, Claiming and releasing a bug, The unverified caveat, Settled caveats, Trigger rules, Closing a bug) and the bug `find` query with its zombie note. P-4 burden: each deleted rule either had a copy in the template or moved there. New to the template: the `## Fix provenance` block (SHA, patch-id, plural, other repository, fenced quotation, `no_fix_commit`, merge commits), the claim release call, and the pointer to `get_guide("tracker-conventions")` § *Archive — re-point the citations*. The verbatim text is in `docs/conventions/tracker-conventions-derivations.md` § *Moved out: the bug-file procedure*.
+
+**Contract moved:** `names_tracker_path` matches `docs/trackers/` only, so a bug path and a bug move route to `librarian`. Three doctor findings name the repo's bug template instead of a guide heading. The fix-anchor token test now reads the template. The archive headings are `Archive — …`, and `librarian.md` cites the unique prefix `§ *Archive — stage*`. The per-call share test relaxed from a quarter to half of the guide, by decision of the user, because the guide is 15 KB and `append_entry` still delivers 5.4 KB. The worst-case move budget fell from 13,886 B to 7,188 B, because it now archives a tracker.
+
+**Eval status:** behaviour absent (N=0 graded examples). Structure present: tests pin the routing, the sections, the template's tokens and the rule.
+
+**Limit:** a bug file's move no longer injects the sweep sections. The template points at them, so an agent reaches them only if it follows the pointer. That is the cost of the user's choice.
+
+**Recommended next move:** measure the prediction. Count `terminal_status_without_fix_anchor` findings among bugs closed in the 14 days after this ships against the 14 days before. A rise falsifies the claim that the template carries the shape as well as the guide did, and restores the case for a short product-level pointer.
+
+**Prediction:** closings keep a valid `## Fix provenance` record at the same rate or better.
+
+**Confidence:** low. The baseline is the doctor's own figure (95 of 165 closings with no anchor, 2026-10-17 to 2026-11-03), not a graded run.
+
 ## A-49 — tracker-conventions guide: a direct get_guide overflowed the harness, so the guide never arrived
 
 **Valid:** dated 2026-11-11

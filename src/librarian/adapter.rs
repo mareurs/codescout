@@ -581,11 +581,13 @@ impl crate::tools::Tool for LibrarianAdapter {
         // without a cut record, as `call_content` measures its `json`, and `result` here has
         // already had its record stripped by `clip_prebuffered_envelope`.
         //
-        // A response naming a path under `docs/issues/` or `docs/trackers/` is a
-        // bug-file or tracker operation, and `tracker-conventions` (frontmatter, the
-        // status vocabulary, archive-through-the-catalog) is what the caller is about to
-        // need. Nothing fired it before 2026-08-16 — it was authored, pointed at, and
-        // never connected. `librarian` remains the default for everything else.
+        // A response naming a path under `docs/trackers/` is a tracker operation, and
+        // `tracker-conventions` (the ledger rules, entry ids, archive-through-the-catalog) is
+        // what the caller is about to need. A bug file's own procedure is not here: it lives in
+        // the repo's bug template, so a path under `docs/issues/` routes nowhere on its own and
+        // a bug file's move is `librarian`'s. Nothing fired this before 2026-08-16 — it was
+        // authored, pointed at, and never connected. `librarian` remains the default for
+        // everything else.
         //
         // Result-based rather than input-based because `call_content` moves `input` into
         // `call()` before the hint is computed, while the result is in scope and already
@@ -701,7 +703,7 @@ impl LibrarianAdapter {
     }
 }
 
-/// Whether a librarian response names a path under the bug-file or tracker directories.
+/// Whether a librarian response names a path under the tracker directory.
 ///
 /// Scans `abs_path`/`rel_path` at the top level and one level into a `find`-style `items`
 /// array, plus `path` inside a `doctor`-style `violations` array — deliberately shallow. A
@@ -740,7 +742,7 @@ fn names_tracker_path(result: &Value) -> bool {
     if result.get("threshold_hours").is_some() {
         return false;
     }
-    names_path_containing(result, "docs/issues/") || names_path_containing(result, "docs/trackers/")
+    names_path_containing(result, "docs/trackers/")
 }
 
 /// Compact summary shown in place of a buffered librarian response.
@@ -2428,8 +2430,9 @@ mod tests {
         })));
         // `move` (the archive flow) names its file only as `old_abs_path`/`new_abs_path`.
         // `update` still returns `{id, updated}` and names nothing, so it stays on
-        // `librarian`.
-        assert!(names_tracker_path(&json!({
+        // `librarian`. A bug file's path no longer routes here, and neither does its move:
+        // its procedure is the repo's bug template.
+        assert!(!names_tracker_path(&json!({
             "old_abs_path": "/r/docs/issues/2026-10-16-some-bug.md",
             "new_abs_path": "/r/docs/issues/archive/2026-10-16-some-bug.md"
         })));
@@ -2444,7 +2447,7 @@ mod tests {
         assert!(!names_tracker_path(
             &json!({ "id": "0123", "updated": true })
         ));
-        assert!(names_tracker_path(&json!({
+        assert!(!names_tracker_path(&json!({
             "rel_path": "docs/issues/2026-08-16-some-bug.md"
         })));
 
@@ -3162,15 +3165,18 @@ mod tests {
 
     #[test]
     fn names_tracker_path_still_agrees_with_the_generalised_form() {
-        // The existing trigger must not change behaviour in Phase 1.
+        // The trigger names the tracker directory and nothing else: a bug file's path is the
+        // repo's business, so `docs/issues/` must NOT route here.
         for p in ["docs/issues/x.md", "docs/trackers/y.md", "src/main.rs"] {
             let v = json!({"abs_path": p});
             assert_eq!(
                 names_tracker_path(&v),
-                names_path_containing(&v, "docs/issues/")
-                    || names_path_containing(&v, "docs/trackers/")
+                names_path_containing(&v, "docs/trackers/")
             );
         }
+        assert!(!names_tracker_path(
+            &json!({"abs_path": "docs/issues/x.md"})
+        ));
     }
 
     #[test]

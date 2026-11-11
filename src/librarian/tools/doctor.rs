@@ -6986,8 +6986,8 @@ fn scan_terminal_status_with_caveat(
                     "status is `{status}` (terminal) and {problem}. Re-home it — `TRACKED \
                      <id>` of an OPEN artifact carrying the work — or, if the work is done or \
                      can never be, discharge the caveat with a leading CLEARED / REFUTED / \
-                     RESOLVED / WITHDRAWN, or STANDING. See get_guide(\"tracker-conventions\") \
-                     § Bug files."
+                     RESOLVED / WITHDRAWN, or STANDING. See the repo's bug template \
+                     (codescout: docs/issues/_TEMPLATE.md)."
                 ),
                 None => format!(
                     "status is `{status}` (terminal) but `unverified:` is set, so the canonical \
@@ -6996,7 +6996,8 @@ fn scan_terminal_status_with_caveat(
                      clear the field, or leave both: the record stays honest AND findable, which \
                      is the whole point of the field. Remaining WORK can be routed with a leading \
                      `TRACKED <id>` of an open artifact carrying it; a limit no action can settle \
-                     takes a leading STANDING. See get_guide(\"tracker-conventions\") § Bug files."
+                     takes a leading STANDING. See the repo's bug template (codescout: \
+                     docs/issues/_TEMPLATE.md)."
                 ),
             },
         ));
@@ -7577,9 +7578,12 @@ pub(crate) fn fix_anchor_gap(content: &str) -> Option<FixAnchorGap> {
     }
 }
 
-/// The `###` heading of `tracker-conventions` that explains the fix anchor. A test pins it to a
-/// real heading, so a rename cannot leave [`closing_advisory`] pointing at nothing.
-pub(crate) const CLOSING_SECTION: &str = "Closing a bug — patch-id and fix provenance";
+/// Where the fix anchor is explained. It is the repo's bug template, not a shipped guide: the
+/// bug-file procedure is one repo's pattern (until 2026-11-11 `tracker-conventions` § *Closing a
+/// bug* held it). A test pins the template to the tokens this check enforces, so the pointer
+/// cannot outlive the explanation.
+pub(crate) const CLOSING_SECTION: &str =
+    "the repo's bug template (codescout: docs/issues/_TEMPLATE.md)";
 
 /// What to add so the record declares the pair. The archive-only clauses ("archive in the same
 /// call", "Then archive.") are NOT here: [`refuse_unanchored_archive`] appends them.
@@ -7624,7 +7628,7 @@ pub(crate) fn closing_advisory(kind: &str, new_status: &str, content: &str) -> O
         ),
     };
     Some(format!(
-        "{headline} {} See get_guide(\"tracker-conventions\") § {CLOSING_SECTION}.",
+        "{headline} {} See {CLOSING_SECTION}.",
         fix_anchor_remedy(gap)
     ))
 }
@@ -8937,7 +8941,8 @@ fn scan_claim_liveness(
                 abs_path.clone(),
                 "status is `taken` but no readable `claimed_by:` is set, so the claim names \
                  nobody and nothing can check it. Either add the claiming session's id, or \
-                 demote to `investigating`. See get_guide(\"tracker-conventions\") § Bug files."
+                 demote to `investigating`. See the repo's bug template (codescout: \
+                 docs/issues/_TEMPLATE.md)."
                     .to_string(),
             ));
             continue;
@@ -24935,7 +24940,7 @@ body
             "{none}"
         );
         assert!(
-            none.contains(CLOSING_SECTION) && none.contains("tracker-conventions"),
+            none.contains("docs/issues/_TEMPLATE.md") && !none.contains("get_guide"),
             "{none}"
         );
         assert!(none.contains("Archiving it will be refused"), "{none}");
@@ -24973,9 +24978,12 @@ body
     }
 
     #[test]
-    fn closing_section_is_a_real_heading_of_tracker_conventions() {
-        let guide = include_str!("../../prompts/guides/tracker-conventions.md");
-        assert!(guide.contains(&format!("\n### {CLOSING_SECTION}\n")));
+    fn closing_advisory_points_at_a_file_that_states_the_fix_anchor_shape() {
+        // The pointer names a file the repo ships, and the file states the shape this check reads
+        // (the token half is `prompts::tests::bug_template_states_the_fix_anchor_grammar_doctor_enforces`).
+        let template = include_str!("../../../docs/issues/_TEMPLATE.md");
+        assert!(CLOSING_SECTION.contains("docs/issues/_TEMPLATE.md"));
+        assert!(template.contains("## Fix provenance"));
     }
 }
 /// The doctor reads `.codescout/cc_session_id` out of every unregistered `.worktrees/` entry, and

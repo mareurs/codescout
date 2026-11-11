@@ -1856,7 +1856,7 @@ mod tests {
         // anchor, and it cannot drift when a heading or `serves:` comment is added between
         // two paragraphs (which is how the old `**Then re-point` anchor went stale).
         let tracker_conventions = {
-            let heading = "Archiving a bug or tracker \u{2014} stage both halves of the move";
+            let heading = "Archive \u{2014} stage both halves of the move";
             let entry = crate::prompts::guide_index::GUIDE_INDEX
                 .topic("tracker-conventions")
                 .expect("tracker-conventions must be indexed");

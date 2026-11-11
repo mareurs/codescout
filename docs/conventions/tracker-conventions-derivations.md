@@ -17,32 +17,40 @@ Each block has three parts:
 
 ## Editing the guide: what pins it
 
+- **Scope: generic mechanics only.** The guide names no artifact kind that one repo's pattern
+  defines. A bug file's procedure belongs in that repo's template (codescout:
+  `docs/issues/_TEMPLATE.md`), and `CLAUDE.md` § *Bug Tracking* says so.
+  `tracker_conventions_names_no_repo_specific_artifact_kind` fails if the guide names
+  `docs/issues`, `_TEMPLATE`, `kind: bug`, `bug file` or `Bug files`. To document another
+  repo-specific kind, put it in that repo's template and leave a pointer in `CLAUDE.md`.
 - **Headings.** `SECTION_WAIVERS` and the routing tests in `src/prompts/mod.rs`,
   `src/prompts/guide_index.rs` and `src/server.rs` key on the exact heading text, and other pages
-  cite sections as `§ *Heading*`. Rename none.
+  cite sections as `§ *Heading*`. Rename none. The three archive headings start `Archive —`:
+  `librarian.md` cites `§ *Archive — stage*`, a unique prefix, to keep that section short.
 - **`serves:` lines.** They decide which call receives which section. Each declared section must
   stay within `MAX_DECLARED_SECTION_BYTES` (2,500 B).
 - **Section openers.** Server tests use the first words of a section as proof that it was
-  delivered. Keep these strings: `One file per bug.`, `**Frontmatter:** every bug file has \`kind: bug\``,
-  `**Trigger rules — open a bug file for ANY bug noticed during work:**`, `**Claiming a bug.**`,
-  `**\`unverified:\` — the caveat, made queryable.**`, `Archive through the catalog`,
+  delivered. Keep these strings: `Archive through the catalog`,
   `**And stage BOTH halves of the move together`, `**Then re-point the citations, in the same commit as the move`,
   `**Verifying the sweep afterward needs a different pattern`, `sees BOTH forms, and tells you which is`
   (on one line), `Be precise about *why* a green run proves nothing here`,
   `A tracker that accumulates review passes by *appending*`, `If an artifact is meant to carry an augmentation`,
   `**Before you augment:`, `replaces the WHOLE collection`, `Never suffix an id`, `Cite by **bare token**`,
   `**Cite by ID in prose.**`, `The canonical` and `The ladder is **live body`.
-- **Fix-anchor tokens.** `## Fix provenance`, `- **SHA:**`, `- **patch-id:**` and `no_fix_commit` must stay.
+- **Fix-anchor tokens.** They are pinned in `docs/issues/_TEMPLATE.md`, no longer in the guide:
+  `## Fix provenance`, `- **SHA:**`, `- **patch-id:**` and `no_fix_commit` must stay there
+  (`bug_template_states_the_fix_anchor_grammar_doctor_enforces`).
 - **Per-call share.** `tracker_write_shapes_ship_their_sections_and_only_theirs` requires that no call
-  delivers a quarter or more of the whole guide. The `append_entry` group is the largest, so it
-  sets the lower bound on the guide's size. Trimming one without the other turns the test red.
+  delivers half or more of the whole guide. It required a quarter until 2026-11-11, when the guide
+  fell to about 15 KB and `append_entry` still delivered about 5.4 KB. What it proves is that a
+  write never ships the whole guide.
 - **Byte constants.** `WRITE_CEILING_*` and `WRITE_FLOOR_APPEND_ENTRY` in `src/prompts/guide_index.rs`
   hold the delivered sizes. Re-measure after an edit and ratchet them down.
 
 
 ## Claiming and releasing a bug
 
-**Kept in the guide:** Claim `taken` with your own sessionId through the catalog; release to `investigating`.
+**Not in the guide since 2026-11-11:** it moved to `docs/issues/_TEMPLATE.md`. It said: claim `taken` with your own sessionId through the catalog; release to `investigating`.
 
 **Also stated in:**
 - `docs/issues/_TEMPLATE.md` (status semantics and the claim call)
@@ -61,7 +69,7 @@ does not. Not the pid or socket path either; both are derived at read time.
 
 ## The unverified caveat, made queryable / Settled caveats — STANDING and TRACKED
 
-**Kept in the guide:** `unverified:` records what the status overstates; discharge markers settle it; `STANDING` and `TRACKED` are the two non-discharge first words.
+**Not in the guide since 2026-11-11:** it moved to `docs/issues/_TEMPLATE.md`. It said: `unverified:` records what the status overstates; discharge markers settle it; `STANDING` and `TRACKED` are the two non-discharge first words.
 
 **Also stated in:**
 - `docs/issues/_TEMPLATE.md` ("Optional `unverified:`": the markers, the leading-and-uppercase rule, `MEASURED`, `STANDING`, `TRACKED`)
@@ -79,7 +87,7 @@ the caveat. Write it where a query can read it.
 
 ## Trigger rules and capture discipline
 
-**Kept in the guide:** Open a bug file for any bug noticed, at once. Archive once the fix is verified on `experiments`; carry the labelled SHA.
+**Not in the guide since 2026-11-11:** it moved to `docs/issues/_TEMPLATE.md`. It said: open a bug file for any bug noticed, at once; archive once the fix is verified on `experiments`; carry the labelled SHA.
 
 **Also stated in:**
 - `docs/issues/_TEMPLATE.md` (the yes/no cases and the archive trigger)
@@ -102,12 +110,12 @@ rebase and an unlabelled one in `archive/` becomes an untraceable string.
 
 ## Closing a bug — patch-id and fix provenance
 
-**Kept in the guide:** Record a patch-id beside the SHA; write the pair as a `## Fix provenance` section; never cite a merge commit's patch-id.
+**Not in the guide since 2026-11-11:** it moved to `docs/issues/_TEMPLATE.md`, which now states the `## Fix provenance` block. It said: record a patch-id beside the SHA; write the pair as a `## Fix provenance` section; never cite a merge commit's patch-id.
 
 **Also stated in:**
 - `docs/RELEASE.md` § *Citing a fix: SHA + patch-id*
 - `docs/issues/_TEMPLATE.md`
-- test `tracker_conventions_states_the_fix_anchor_grammar_doctor_enforces` (`src/prompts/mod.rs`) pins `## Fix provenance`, `- **SHA:**`, `- **patch-id:**` and `no_fix_commit` in the guide
+- test `bug_template_states_the_fix_anchor_grammar_doctor_enforces` (`src/prompts/mod.rs`) pins `## Fix provenance`, `- **SHA:**`, `- **patch-id:**` and `no_fix_commit` in the template
 
 **Pre-cut text:**
 
@@ -191,7 +199,7 @@ instruction, not open debt — do not sweep it.
 
 When `doc(action="update")` sets a bug to `fixed` or `mitigated` and the file as written has no recoverable pair, the response carries `fix_anchor_advisory` naming what is missing. The write still happens; the advisory informs, and archiving stays refused until the pair or `no_fix_commit:` is present.
 
-## Archiving a bug or tracker — through the catalog, never git mv
+## Archive — through the catalog, never git mv
 
 **Kept in the guide:** Archive with `doc(action="move")`, never `git mv`; the move re-keys the artifact.
 
@@ -209,7 +217,7 @@ observations and augmentation onto the new id in the same call and returns
 response — the old one stops resolving immediately, and a later call with it
 returns `unknown id`.
 
-## Archiving a bug or tracker — stage both halves of the move
+## Archive — stage both halves of the move
 
 **Kept in the guide:** Stage both halves; never confirm on `R` alone.
 
@@ -241,7 +249,7 @@ wrote"*; for the second, check the destination for a token you wrote just before
 move. The `move`
 response carries `stage_together` and `stage_hint` saying exactly this.
 
-## Archiving a bug or tracker — re-point the citations
+## Archive — re-point the citations
 
 **Kept in the guide:** Re-point paths and ids in the same commit; the grep is the check.
 
@@ -1002,6 +1010,152 @@ behavior — including the session-passover pattern — see
   `librarian(action="context", anchor_id=…)` all read the graph — a
   well-cited tracker gets neighborhood packing for free.
 
+## Moved out: the bug-file procedure
+
+On 2026-11-11 the guide stopped describing bug files. A bug file's directory, frontmatter,
+status vocabulary, claim call, triggers, fix-provenance shape and archive timing are one
+repo's pattern, and another repo keeps bugs elsewhere or not at all. They are also read by every
+session that fetches the guide, including a session with no bug in front of it. The procedure
+now lives in `docs/issues/_TEMPLATE.md` only. The guide keeps the mechanics every repo shares
+(move through the catalog, stage both halves, re-point the citations), and the template points
+at them.
+
+What changed with it:
+
+- **Routing.** `names_tracker_path` (`src/librarian/adapter.rs`) matches `docs/trackers/` only.
+  A path under `docs/issues/` routes to `librarian`, and so does a bug file's move.
+- **Doctor findings.** `terminal_status_with_caveat`, `claim_without_claimant` and the closing
+  advisory name the repo's bug template (codescout: `docs/issues/_TEMPLATE.md`) instead of a
+  guide heading. `closing_advisory` already states the shape it wants.
+- **Fix-anchor tokens.** `bug_template_states_the_fix_anchor_grammar_doctor_enforces`
+  (`src/prompts/mod.rs`) pins `## Fix provenance`, `- **SHA:**`, `- **patch-id:**` and `no_fix_commit`
+  in the template.
+- **The rule.** `tracker_conventions_names_no_repo_specific_artifact_kind` (`src/prompts/mod.rs`)
+  fails if the guide names `docs/issues`, `_TEMPLATE`, `kind: bug`, `bug file` or `Bug files`.
+
+The text below is the guide as it was at commit `24904379f`, from `## Bug files (docs/issues/)` up to
+the first archive section. Where the template already says the same thing, the template is the
+copy to edit. `docs/issues/_TEMPLATE.md` did not state the fix-provenance block, the claim release
+call or the sweep pointer before this move: those were added to it.
+
+~~~~~~markdown
+## Bug files (docs/issues/)
+<!-- serves: doc.create(path~docs/issues/) -->
+
+One file per bug.
+
+- **Path:** `docs/issues/YYYY-MM-DD-<slug>.md` while open;
+  `docs/issues/archive/` once the fix is **verified on `experiments`** —
+  reaching `master` is NOT required.
+- **Slug:** short kebab-case noun-phrase (3–6 words), e.g.
+  `edit-code-insert-mid-function`.
+
+### Bug frontmatter and status vocabulary
+<!-- serves: doc.create(path~docs/issues/), doc.get(path~docs/issues/), doc.find(path~docs/issues/) -->
+
+**Frontmatter:** every bug file has `kind: bug` plus a `status:` field.
+The librarian classifier auto-recognizes the file on next reindex.
+
+| Status | Meaning |
+|---|---|
+| `open` | Logged, investigation not started or paused |
+| `taken` | A **live** session holds this right now. Requires `claimed_by: <sessionId>`; `doctor`'s `claim_liveness` resolves it |
+| `investigating` | Worked, but **no live owner** — the residue of a claim whose session ended without concluding |
+| `fixed` | Root cause addressed, regression test added, verified |
+| `mitigated` | Workaround in place; root cause not addressed |
+| `wontfix` | Intentionally not fixing; justification in the file |
+| `zombie` | No longer observed but root cause unconfirmed. Pair with `last_observed:` and a re-open trigger |
+
+### Claiming and releasing a bug
+<!-- serves: doc.get(path~docs/issues/), doc.find(path~docs/issues/) -->
+
+**Claiming a bug.** Set `taken` with your own sessionId through the catalog — a raw
+frontmatter edit does not reach it:
+
+```
+doc(action="update", id=…,
+         patch={"status": "taken",
+                "extra": {"claimed_by": "<sessionId>", "claimed_at": "YYYY-MM-DD"}})
+```
+
+Store the sessionId and nothing else (your scratchpad path carries it). **Release** with
+the same call: `status: "investigating"` and `extra: {"claimed_by": null, "claimed_at": null}`.
+`closed:` stays empty until the bug is `fixed` / `mitigated` / `wontfix`. The procedure
+also lives in `docs/issues/_TEMPLATE.md`.
+
+### The unverified caveat, made queryable
+<!-- serves: doc.get(path~docs/issues/), doc.find(path~docs/issues/) -->
+
+**`unverified:` — the caveat, made queryable.** Add it when `status` overstates what was
+established. Absence means nothing outstanding, so never add it empty. A settled doubt keeps
+its text under a DISCHARGE MARKER as the first word, uppercase: `CLEARED`, `REFUTED`,
+`RESOLVED` or `WITHDRAWN`. Never mark an escalation: a caveat that got worse must keep
+reporting. Examples: `docs/issues/_TEMPLATE.md`.
+
+### Settled caveats — STANDING and TRACKED
+
+`STANDING` marks a limit NO action can settle; it silences the record. `TRACKED <16-hex id>`
+marks remaining WORK moved into an artifact whose status a query reads, and stays silent only
+while that artifact is open. **Never write `STANDING` over work** — it deletes the only
+surface still reporting it.
+
+### Trigger rules and capture discipline
+<!-- serves: doc.create(path~docs/issues/) -->
+
+**Trigger rules — open a bug file for ANY bug noticed during work:** the moment you notice
+it. The cases that do and do not qualify are listed in `docs/issues/_TEMPLATE.md`.
+
+**Archive trigger:** move the file into `docs/issues/archive/` once the fix is verified on
+`experiments` — gate green and a regression test in place. Archived experiments-only, the
+file MUST carry the fix SHA labelled **`experiments`**.
+
+### Closing a bug — patch-id and fix provenance
+
+**Record a `patch-id` beside the SHA:** `git show <sha> | git patch-id --stable` hashes the
+diff, so it survives rebase and cherry-pick. Redirect to a file, not a pipe (Iron Law 3);
+the recipe is in `docs/RELEASE.md` § *Citing a fix: SHA + patch-id*.
+
+**Write the pair as a `## Fix provenance` section.** `doctor`'s
+`terminal_status_without_fix_anchor` reads the SHAPE and refuses a `fixed` or `mitigated`
+record without it. A loose hash in prose is worse than none: the record then reads as
+anchored.
+
+````markdown
+## Fix provenance
+
+- **SHA:** `5a72304c` (`experiments`)
+- **patch-id:** `e9f8df63b911`
+````
+
+- **Plural:** repeat the pair; each `- **patch-id:**` binds to the `- **SHA:**` above it.
+  No tables — no check reads one.
+- **Another repository:** `<repo>:<sha>`; the dead-pointer check skips it.
+- **A fenced example is a quotation, not a declaration.**
+- **No commit at all:** put `no_fix_commit: "<reason>"` in frontmatter. An empty value does
+  not discharge it.
+
+**Never cite a merge commit's patch-id** — it is empty for a clean merge and a hash of only
+the resolution hunks for a conflicted one. Cite the merged branch's commits, and name the
+merge as an event. `doc(action="update")` to `fixed` or `mitigated` without a recoverable
+pair returns `fix_anchor_advisory`; archiving stays refused until the pair or
+`no_fix_commit:` is present.
+~~~~~~
+
+The bug query and its note in `## Querying with the librarian`:
+
+~~~~~~markdown
+For bugs, constrain on all four non-terminal states, not just `open` — `status="open"` alone
+hides `taken`, `investigating` and `zombie`:
+
+```
+doc(action="find", kind="bug",
+         filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})
+```
+
+A `zombie` hit is a "has this recurred?" check, not a task (see § Bug frontmatter and status
+vocabulary). Add `include_archived=true` to surface archived rows. Read a tracker with:
+~~~~~~
+
 ## Size ledger
 
 | Date | Bytes | Measured by |
@@ -1010,6 +1164,7 @@ behavior — including the session-passover pattern — see
 | 2026-11-11, after first pass | 39,246 | `wc -c` |
 | 2026-11-11, after second pass | 29,942 | `wc -c` |
 | 2026-11-11, after third pass (this file's split) | 21,928 | `wc -c` |
+| 2026-11-11, after the bug-file procedure moved to `docs/issues/_TEMPLATE.md` | 16,545 | `wc -c` |
 
 The harness threshold is bracketed: 29,942 B returned inline from a direct `get_guide` call on a
 rebuilt server (2026-11-11), and 56.6 KB was saved to disk. The threshold is not one number across

@@ -67,7 +67,9 @@ Status field semantics:
                   the claim sits on disk while every find() reports the
                   bug unclaimed. Decays to `investigating` when that
                   session exits; run librarian(action="doctor") to find
-                  dead claims.
+                  dead claims. Store the sessionId and nothing else (your
+                  scratchpad path carries it). Release with the same call:
+                  status "investigating" and claimed_by / claimed_at null.
   investigating — Worked, but no live owner. The residue of an
                   unconcluded claim, not a synonym for `taken`.
   fixed         — Root cause addressed, regression test added, verified.
@@ -126,7 +128,35 @@ commits.
 Check where a SHA lives with:
   git branch --contains <fix-sha>
 Archive via doc(action="move", id=..., new_rel_path="docs/issues/archive/...")
-— never a bare git mv, which orphans the catalog row.
+— never a bare git mv, which orphans the catalog row. Then stage both halves
+(`git add -- <old> <new>`) and re-point every citation of the old path and id
+in the same commit: get_guide("tracker-conventions") § Archive — re-point the
+citations. That guide holds the mechanics every repo shares; a bug file's own
+procedure is this template's.
+
+Write the SHA and patch-id as a `## Fix provenance` section. doctor's
+terminal_status_without_fix_anchor reads the SHAPE and refuses a `fixed` or
+`mitigated` record without it; archiving stays refused, and
+doc(action="update") to either status returns `fix_anchor_advisory`, until
+the pair (or no_fix_commit) is there. A loose hash in prose is worse than
+none: the record then reads as anchored.
+
+  ## Fix provenance
+
+  - **SHA:** `5a72304c` (`experiments`)
+  - **patch-id:** `e9f8df63b911`
+
+  Several fixes: repeat the pair; each `- **patch-id:**` binds to the
+  `- **SHA:**` above it. No tables -- no check reads one.
+  Another repository: `<repo>:<sha>`; the dead-pointer check skips it.
+  A fenced example is a quotation, not a declaration.
+  No commit at all: put `no_fix_commit: "<reason>"` in frontmatter. An empty
+  value does not discharge it.
+  Never cite a merge commit's patch-id: it is empty for a clean merge and a
+  hash of only the resolution hunks for a conflicted one. Cite the merged
+  branch's commits and name the merge as an event.
+  Run `git patch-id` on a file, not a pipe, through run_command (Iron Law 3);
+  the recipe is in docs/RELEASE.md § Citing a fix: SHA + patch-id.
 
 Use `N/A` or `Unknown — under investigation` for sections that don't
 yet apply. `N/A` in `Tests added` requires justification — empty Tests

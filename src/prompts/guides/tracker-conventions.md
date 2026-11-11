@@ -1,127 +1,27 @@
 # Tracker Conventions
 
-codescout keeps three long-lived markdown surfaces: **bugs** (`docs/issues/`, one file per
-incident), **trackers** (`docs/trackers/`, multi-entry living state — session logs,
-observation tables, ADR indexes) and **specs / plans / ADRs** (`docs/specs/`,
-`docs/plans/`, `docs/adrs/`). The librarian indexes all three: find with
-`doc(action="find", kind="bug" | "tracker" | …)`, read with `doc(action="get", id=...)`.
-Never edit a tracker file by raw path lookup — go through the catalog.
+codescout keeps long-lived markdown surfaces: **trackers** (`docs/trackers/`, multi-entry
+living state — session logs, observation tables, ADR indexes) and one-file artifacts such as
+specs, plans and ADRs. The librarian indexes them all: find with
+`doc(action="find", kind=…)`, read with `doc(action="get", id=...)`. Never edit a tracker
+file by raw path lookup — go through the catalog.
 
-This guide keeps each rule and its trap. The full wording, the derivations and a pointer to
-every other page that states the same thing are in
-`docs/conventions/tracker-conventions-derivations.md`, under the same headings.
+This guide holds the mechanics every repo shares and keeps each rule with its trap. The full
+wording, the derivations and a pointer to every other page that states the same thing are in
+`docs/conventions/tracker-conventions-derivations.md`, under the same headings. A repo's own
+procedure for one artifact kind (its template, its directory, when it archives) lives in that
+repo, not here.
 
-## Bug files (docs/issues/)
-<!-- serves: doc.create(path~docs/issues/) -->
+## Archive — through the catalog, never git mv
+<!-- serves: doc.move(path~docs/trackers/) -->
 
-One file per bug.
-
-- **Path:** `docs/issues/YYYY-MM-DD-<slug>.md` while open;
-  `docs/issues/archive/` once the fix is **verified on `experiments`** —
-  reaching `master` is NOT required.
-- **Slug:** short kebab-case noun-phrase (3–6 words), e.g.
-  `edit-code-insert-mid-function`.
-
-### Bug frontmatter and status vocabulary
-<!-- serves: doc.create(path~docs/issues/), doc.get(path~docs/issues/), doc.find(path~docs/issues/) -->
-
-**Frontmatter:** every bug file has `kind: bug` plus a `status:` field.
-The librarian classifier auto-recognizes the file on next reindex.
-
-| Status | Meaning |
-|---|---|
-| `open` | Logged, investigation not started or paused |
-| `taken` | A **live** session holds this right now. Requires `claimed_by: <sessionId>`; `doctor`'s `claim_liveness` resolves it |
-| `investigating` | Worked, but **no live owner** — the residue of a claim whose session ended without concluding |
-| `fixed` | Root cause addressed, regression test added, verified |
-| `mitigated` | Workaround in place; root cause not addressed |
-| `wontfix` | Intentionally not fixing; justification in the file |
-| `zombie` | No longer observed but root cause unconfirmed. Pair with `last_observed:` and a re-open trigger |
-
-### Claiming and releasing a bug
-<!-- serves: doc.get(path~docs/issues/), doc.find(path~docs/issues/) -->
-
-**Claiming a bug.** Set `taken` with your own sessionId through the catalog — a raw
-frontmatter edit does not reach it:
-
-```
-doc(action="update", id=…,
-         patch={"status": "taken",
-                "extra": {"claimed_by": "<sessionId>", "claimed_at": "YYYY-MM-DD"}})
-```
-
-Store the sessionId and nothing else (your scratchpad path carries it). **Release** with
-the same call: `status: "investigating"` and `extra: {"claimed_by": null, "claimed_at": null}`.
-`closed:` stays empty until the bug is `fixed` / `mitigated` / `wontfix`. The procedure
-also lives in `docs/issues/_TEMPLATE.md`.
-
-### The unverified caveat, made queryable
-<!-- serves: doc.get(path~docs/issues/), doc.find(path~docs/issues/) -->
-
-**`unverified:` — the caveat, made queryable.** Add it when `status` overstates what was
-established. Absence means nothing outstanding, so never add it empty. A settled doubt keeps
-its text under a DISCHARGE MARKER as the first word, uppercase: `CLEARED`, `REFUTED`,
-`RESOLVED` or `WITHDRAWN`. Never mark an escalation: a caveat that got worse must keep
-reporting. Examples: `docs/issues/_TEMPLATE.md`.
-
-### Settled caveats — STANDING and TRACKED
-
-`STANDING` marks a limit NO action can settle; it silences the record. `TRACKED <16-hex id>`
-marks remaining WORK moved into an artifact whose status a query reads, and stays silent only
-while that artifact is open. **Never write `STANDING` over work** — it deletes the only
-surface still reporting it.
-
-### Trigger rules and capture discipline
-<!-- serves: doc.create(path~docs/issues/) -->
-
-**Trigger rules — open a bug file for ANY bug noticed during work:** the moment you notice
-it. The cases that do and do not qualify are listed in `docs/issues/_TEMPLATE.md`.
-
-**Archive trigger:** move the file into `docs/issues/archive/` once the fix is verified on
-`experiments` — gate green and a regression test in place. Archived experiments-only, the
-file MUST carry the fix SHA labelled **`experiments`**.
-
-### Closing a bug — patch-id and fix provenance
-
-**Record a `patch-id` beside the SHA:** `git show <sha> | git patch-id --stable` hashes the
-diff, so it survives rebase and cherry-pick. Redirect to a file, not a pipe (Iron Law 3);
-the recipe is in `docs/RELEASE.md` § *Citing a fix: SHA + patch-id*.
-
-**Write the pair as a `## Fix provenance` section.** `doctor`'s
-`terminal_status_without_fix_anchor` reads the SHAPE and refuses a `fixed` or `mitigated`
-record without it. A loose hash in prose is worse than none: the record then reads as
-anchored.
-
-````markdown
-## Fix provenance
-
-- **SHA:** `5a72304c` (`experiments`)
-- **patch-id:** `e9f8df63b911`
-````
-
-- **Plural:** repeat the pair; each `- **patch-id:**` binds to the `- **SHA:**` above it.
-  No tables — no check reads one.
-- **Another repository:** `<repo>:<sha>`; the dead-pointer check skips it.
-- **A fenced example is a quotation, not a declaration.**
-- **No commit at all:** put `no_fix_commit: "<reason>"` in frontmatter. An empty value does
-  not discharge it.
-
-**Never cite a merge commit's patch-id** — it is empty for a clean merge and a hash of only
-the resolution hunks for a conflicted one. Cite the merged branch's commits, and name the
-merge as an event. `doc(action="update")` to `fixed` or `mitigated` without a recoverable
-pair returns `fix_anchor_advisory`; archiving stays refused until the pair or
-`no_fix_commit:` is present.
-
-### Archiving a bug or tracker — through the catalog, never git mv
-<!-- serves: doc.move(path~docs/issues/), doc.move(path~docs/trackers/) -->
-
-Archive through the catalog — `doc(action="move", id=…, new_rel_path="docs/issues/archive/…")`
+Archive through the catalog — `doc(action="move", id=…, new_rel_path="<dir>/archive/…")`
 — never a bare `git mv`: the id is `sha256(abs_path)`, so a hand-move orphans the catalog
 row. The move re-keys the artifact. Read the new id from the response (`id`, `previous_id`,
 `id_changed`); the old one stops resolving.
 
-### Archiving a bug or tracker — stage both halves of the move
-<!-- serves: doc.move(path~docs/issues/), doc.move(path~docs/trackers/) -->
+### Archive — stage both halves of the move
+<!-- serves: doc.move(path~docs/trackers/) -->
 
 **And stage BOTH halves of the move together — `git add -- <old> <new>`.** `git add -u` and
 `git commit -a` stage only the deletion and commit an archive that silently un-happened.
@@ -129,33 +29,32 @@ Confirm both halves are lettered in column 1 of `git status --short`: one `R`, o
 an `A`. **Do not confirm on `R` alone** — it is a similarity verdict that can vanish, or pair
 over a stale destination copy. The `move` response carries `stage_hint`.
 
-### Archiving a bug or tracker — re-point the citations
-<!-- serves: doc.move(path~docs/issues/), doc.move(path~docs/trackers/) -->
+### Archive — re-point the citations
+<!-- serves: doc.move(path~docs/trackers/) -->
 
 **Then re-point the citations, in the same commit as the move — paths *and* 16-hex ids.**
-Every citation of `docs/issues/<slug>.md` and of its id is a scheduled break.
+Every citation of the old path and of its id is a scheduled break.
 
 ```
-grep -rn 'docs/issues/<slug>.md' . \
+grep -rn '<old path>' . \
   --include='*.md' --include='*.rs' --include='*.sh' --include='*.py' \
   --include='*.yml' --include='*.toml' --include='.env*'
 ```
 
 A filter that misses a file type returns a clean zero that reads as "none to fix"; when unsure,
-drop the filters. Fix the **live** surfaces. **Leave `docs/issues/archive/**` and superseded
+drop the filters. Fix the **live** surfaces. **Leave the archive directory and superseded
 session-log rounds alone** — they are historical. The grep is the check, not a green CI run.
 
 ### Verifying the citation sweep
-<!-- serves: doc.move(path~docs/issues/) -->
+<!-- serves: doc.move(path~docs/trackers/) -->
 
 **Verifying the sweep afterward needs a different pattern than the sweep — never the slug.**
 A move changes only the directory, so a slug grep returns the same hit either way. Grep the
-full old path `docs/issues/<name>.md`, and pair it with the control
-`git grep -F 'docs/issues/archive/<name>.md'`, which must return non-zero. Move before you
-write a citation, not after.
+full old path, and pair it with the control `git grep -F '<new path>'`, which must return
+non-zero. Move before you write a citation, not after.
 
 ### Reading move's inbound_path_citations
-<!-- serves: doc.move(path~docs/issues/) -->
+<!-- serves: doc.move(path~docs/trackers/) -->
 
 `doc(action="move")`'s `inbound_path_citations` sees BOTH forms, and tells you which is
 which. `inbound_citations_cleared` lists entries that cannot cite the old path: nothing is
@@ -166,11 +65,11 @@ look at those. `citation_stem_preserved: false` clears nothing: the empty list t
 ### Citing an archive path — where the file is, not where it will go
 
 **Cite where the file IS, never where the archive flow will put it.** Archiving is a later,
-manual move, and a partial fix cancels it, so a citation of `docs/issues/archive/<slug>.md`
-for a bug still in `docs/issues/` is never repaired by the sweep.
+manual move, and a partial fix cancels it, so a citation of the archive path for a file still
+in its live directory is never repaired by the sweep.
 
 ### Why a green gate proves nothing about the sweep
-<!-- serves: doc.move(path~docs/issues/) -->
+<!-- serves: doc.move(path~docs/trackers/) -->
 
 Be precise about *why* a green run proves nothing here: `audit_doc_refs` finds the citation,
 but reports it at `Med` on purpose, so `--fail-on high` passes. The gate is silent by design;
@@ -427,7 +326,7 @@ tracker's frontmatter to guard it:** that guards on catalog membership, which wo
 `docs/RELEASE.md` and every ADR. An artifact that owns no id namespace needs no guard.
 
 ## Querying with the librarian
-<!-- serves: doc.find(path~docs/trackers/), doc.find(path~docs/issues/), doc.get(path~docs/trackers/) -->
+<!-- serves: doc.find(path~docs/trackers/), doc.get(path~docs/trackers/) -->
 
 The canonical "what's live right now" query — archived rows are hidden by default:
 
@@ -435,16 +334,7 @@ The canonical "what's live right now" query — archived rows are hidden by defa
 doc(action="find", kind="tracker")
 ```
 
-For bugs, constrain on all four non-terminal states, not just `open` — `status="open"` alone
-hides `taken`, `investigating` and `zombie`:
-
-```
-doc(action="find", kind="bug",
-         filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})
-```
-
-A `zombie` hit is a "has this recurred?" check, not a task (see § Bug frontmatter and status
-vocabulary). Add `include_archived=true` to surface archived rows. Read a tracker with:
+Add `include_archived=true` to surface archived rows. Read a tracker with:
 
 ```
 doc(action="get", id="<id>", full=true)
@@ -457,7 +347,7 @@ Deeper mechanics: `get_guide("librarian")`; the session-passover pattern:
 `get_guide("librarian-runtime")` § *Trackers as cross-session behavior*.
 
 ## Cross-linking (edges are derived — cite in prose)
-<!-- serves: doc.link(path~docs/trackers/), doc.link(path~docs/issues/) -->
+<!-- serves: doc.link(path~docs/trackers/) -->
 
 - **Cite by ID in prose.** Entry IDs (`A-11`, `F-3`, `BUG-40`), artifact ids (16-hex) or
   rel_paths, `<repo>:<ID>` across repos. Prose is the ONLY write surface for citations — never

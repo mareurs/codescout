@@ -86,7 +86,7 @@ pub struct Args {
     pub augment: Option<AugmentSpec>,
 }
 /// The seven statuses a `kind: bug` file may carry, per
-/// `get_guide("tracker-conventions")` § *Bug files*.
+/// `docs/issues/_TEMPLATE.md`.
 ///
 /// `taken` and `investigating` differ by **liveness-backing**: `taken` carries a
 /// `claimed_by` sessionId that `doctor`'s `claim_liveness` check resolves against the
