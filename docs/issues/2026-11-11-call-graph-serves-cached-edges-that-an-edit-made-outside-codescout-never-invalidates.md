@@ -174,7 +174,7 @@ Not done, deliberately: deleting only the resolutions of the written file's lang
 
 ## Fix provenance
 
-Fixed in three commits. The limits that remain are listed in `## Fix` and in the `unverified` field.
+Fixed in four commits. The limits that remain are listed in `## Fix` and in the `unverified` field.
 
 - **SHA:** `5a7936984` (`experiments`): the signatures of the files a resolution names.
 - **patch-id:** `ae42b2606d11`
@@ -182,6 +182,8 @@ Fixed in three commits. The limits that remain are listed in `## Fix` and in the
 - **patch-id:** `1a8c59aee0d6`
 - **SHA:** `c5da750ac` (`experiments`): the epoch has its own file cap (20000), so a tree above 5000 source files keeps its cache.
 - **patch-id:** `bd9ade2b251a`
+- **SHA:** `59e15ae0c` (`experiments`): a codescout write to a file that cannot hold a call no longer clears the cache.
+- **patch-id:** `3540df6c9d06`
 
 ## Tests added
 
