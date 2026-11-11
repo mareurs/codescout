@@ -12,12 +12,42 @@ use crate::librarian::lifecycle::schema::KeyStyle;
 /// The longest slug, in bytes (a slug is ASCII, so bytes are characters).
 pub const SLUG_MAX: usize = 60;
 
+/// The stem of a collection's folder-index file (`readme.md`); no entry may take it, or its
+/// path would place as the collection's readme (identity `is_folder_index`).
+pub const RESERVED_STEM: &str = "readme";
+
+/// Why no entry stem could be built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StemError {
+    /// The stem is not a valid identity key.
+    BadKey(KeyError),
+    /// The stem is [`RESERVED_STEM`].
+    ReservedName(String),
+}
+
+impl std::fmt::Display for StemError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StemError::BadKey(e) => write!(f, "{e}"),
+            StemError::ReservedName(n) => write!(
+                f,
+                "the name {n:?} is reserved for a collection's folder-index file; \
+                 choose another title"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for StemError {}
+
 /// A canonical key fragment from a free-text title.
 ///
 /// The title is ASCII-lowercased, and every run of characters outside `[a-z0-9]` (every
 /// non-ASCII character included) becomes one `-`. Leading and trailing `-` are dropped. A
-/// result over [`SLUG_MAX`] is cut at the last `-` inside the first [`SLUG_MAX`] bytes, or
-/// hard at [`SLUG_MAX`] when there is none. `None` when no letter or digit is left.
+/// result over [`SLUG_MAX`] is cut at a `-` boundary: a `-` at index [`SLUG_MAX`] (the first
+/// byte past the cap) keeps the first [`SLUG_MAX`] bytes whole, otherwise the cut falls at the
+/// last `-` inside the first [`SLUG_MAX`] bytes, or hard at [`SLUG_MAX`] when there is none. A
+/// trailing `-` is dropped again. `None` when no letter or digit is left.
 pub fn slug(title: &str) -> Option<String> {
     let mut out = String::with_capacity(title.len());
     let mut pending_dash = false;
@@ -51,14 +81,24 @@ pub fn slug(title: &str) -> Option<String> {
 /// `Dated` gives `<YYYY-MM-DD>-<slug>`, `Name` gives `<slug>`. The result goes through
 /// [`Key::parse`], so an empty or non-canonical `slug` is an error for both styles: a dated
 /// stem built from an empty slug ends in `-`, and a date prefix cannot make a bad tail valid.
-pub fn entry_stem(style: KeyStyle, created: NaiveDate, slug: &str) -> Result<Key, KeyError> {
-    match style {
+/// A key equal to [`RESERVED_STEM`] is refused: `<collection>/readme.md` is the collection's
+/// folder-index file, not an entry.
+pub fn entry_stem(style: KeyStyle, created: NaiveDate, slug: &str) -> Result<Key, StemError> {
+    let key = match style {
         KeyStyle::Dated => Key::parse(&format!("{}-{slug}", created.format("%Y-%m-%d"))),
         KeyStyle::Name => Key::parse(slug),
     }
+    .map_err(StemError::BadKey)?;
+    if key.as_str() == RESERVED_STEM {
+        return Err(StemError::ReservedName(key.as_str().to_string()));
+    }
+    Ok(key)
 }
 
 /// The repo-relative path of an entry directly in `collection_dir`.
+///
+/// `collection_dir` must be `/`-joined, non-empty and without a trailing `/`, as
+/// [`Placement::collection_dir`] is.
 pub fn entry_rel_path(collection_dir: &str, stem: &Key) -> String {
     format!("{collection_dir}/{}.md", stem.as_str())
 }
@@ -68,6 +108,11 @@ pub fn entry_rel_path(collection_dir: &str, stem: &Key) -> String {
 /// An entry goes to `<collection_dir>/archive/<file name>`: grouping subfolders flatten. A
 /// collection readme stands for its whole folder, which moves to
 /// `docs/trackers/<lifecycle>/archive/<collection>`.
+///
+/// `placement` must be `place(rel_path)`; a mismatched pair gives a meaningless path. Grouping
+/// subfolders flatten into `archive/`, so two entries with the same file name in different
+/// subfolders map to the same target: the caller must check that the target does not exist
+/// before moving.
 pub fn archive_rel_path(rel_path: &str, placement: &Placement) -> Option<String> {
     if placement.archived {
         return None;
@@ -89,6 +134,7 @@ pub fn archive_rel_path(rel_path: &str, placement: &Placement) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::librarian::identity::key::is_folder_index;
     use crate::librarian::lifecycle::layout::place;
     use crate::librarian::lifecycle::schema::KeyStyle;
     use crate::librarian::lifecycle::testkit::d;
@@ -113,9 +159,10 @@ mod tests {
         // No `-` inside the first SLUG_MAX bytes: hard cut.
         let solid = slug(&"a".repeat(100)).unwrap();
         assert_eq!(solid, "a".repeat(SLUG_MAX));
-        // A boundary exactly at the cap keeps every whole word.
-        let exact = format!("{} tail", "b".repeat(SLUG_MAX));
-        assert_eq!(slug(&exact).unwrap(), "b".repeat(SLUG_MAX));
+        // A `-` at index SLUG_MAX is a boundary: all 60 bytes survive. Without that branch the
+        // cut would fall at the last `-` inside the head and leave only `aaaa`.
+        let exact = format!("aaaa {} tail", "b".repeat(55));
+        assert_eq!(slug(&exact).unwrap(), format!("aaaa-{}", "b".repeat(55)));
         // Runs collapse and the ends are trimmed.
         assert_eq!(slug("  --A__b  ").as_deref(), Some("a-b"));
         assert_eq!(slug(""), None);
@@ -147,6 +194,60 @@ mod tests {
                     "{style:?} {bad:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn slugs_edge_cases() {
+        assert_eq!(slug("2026").as_deref(), Some("2026"));
+        assert_eq!(slug("   "), None);
+        let sixty = "c".repeat(SLUG_MAX);
+        assert_eq!(slug(&sixty).as_deref(), Some(sixty.as_str()));
+        let sixty_one = "c".repeat(SLUG_MAX + 1);
+        assert_eq!(slug(&sixty_one).as_deref(), Some(sixty.as_str()));
+    }
+
+    #[test]
+    fn a_name_stem_cannot_be_the_folder_index() {
+        assert!(matches!(
+            entry_stem(KeyStyle::Name, d("2026-11-11"), "readme"),
+            Err(StemError::ReservedName(_))
+        ));
+        assert_eq!(
+            entry_stem(KeyStyle::Dated, d("2026-11-11"), "readme")
+                .unwrap()
+                .as_str(),
+            "2026-11-11-readme"
+        );
+        assert!(matches!(
+            entry_stem(KeyStyle::Name, d("2026-11-11"), ""),
+            Err(StemError::BadKey(_))
+        ));
+        let msg = StemError::ReservedName("readme".into()).to_string();
+        assert!(
+            msg.contains("readme") && msg.contains("choose another"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn the_reserved_stem_is_the_identity_folder_index() {
+        assert!(is_folder_index(&format!("c/{RESERVED_STEM}.md")));
+    }
+
+    #[test]
+    fn an_entry_path_is_never_a_collection_readme() {
+        let dir = "docs/trackers/ledgers/c";
+        let cases = [
+            (KeyStyle::Dated, "readme"),
+            (KeyStyle::Name, "readme-two"),
+            (KeyStyle::Name, "a"),
+        ];
+        for (style, s) in cases {
+            let stem = entry_stem(style, d("2026-11-11"), s).unwrap();
+            let path = entry_rel_path(dir, &stem);
+            let placed = place(&path).unwrap().unwrap();
+            assert_eq!(placed.role, Role::Entry, "{path}");
         }
     }
 
