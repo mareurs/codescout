@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use crate::tools::{
-    guard_worktree_write, optional_bool_param, RecoverableError, Tool, ToolContext,
+    guard_worktree_write_for_target, optional_bool_param, RecoverableError, Tool, ToolContext,
+    WorktreeWriteTarget,
 };
 use crate::util::text::{
     convert_indent_unit, file_indent, indent_unit_conflict, reindent_to, UnitConflict,
@@ -236,7 +237,11 @@ impl Tool for EditCode {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        guard_worktree_write(ctx).await?;
+        // The target decides whether the project-selection guard applies: a path outside
+        // every project, linked worktree and workspace member is not a project-selection
+        // question. Same rule as create_file, edit_file and approve_write.
+        // docs/trackers/frictions/edit-code-worktree-guard-ignores-the-write-target.md
+        guard_worktree_write_for_target(ctx, &input, WorktreeWriteTarget::File).await?;
         // `name_path` is an accepted alias, primarily via `Tool::param_aliases()`
         // below (`("name_path", "symbol")`), which `call_content` rewrites before
         // `call()` runs. This `require_str_param_or_hint` fallback is a SECOND,

@@ -4,6 +4,7 @@ use codescout::lsp::LspManager;
 use codescout::tools::approve_write::ApproveWrite;
 use codescout::tools::create_file::CreateFile;
 use codescout::tools::edit_file::EditFile;
+use codescout::tools::symbol::EditCode;
 use codescout::tools::{Tool, ToolContext};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -159,4 +160,57 @@ async fn edit_keeps_project_and_linked_worktree_protection() {
 #[tokio::test]
 async fn approve_keeps_project_and_linked_worktree_protection() {
     still_protects_projects("approve").await;
+}
+/// `edit_code` shares the rule of the three file tools: the guard looks at the target.
+/// The outcome of the edit itself is not the subject (it needs a language server), so
+/// both tests read only whether the refusal is the worktree-selection one.
+/// docs/trackers/frictions/edit-code-worktree-guard-ignores-the-write-target.md
+async fn edit_code_refusal(target: &Path, context: &ToolContext) -> Option<String> {
+    let result = EditCode
+        .call(
+            json!({"symbol": "absent", "path": target, "action": "remove"}),
+            context,
+        )
+        .await;
+    result.err().map(|e| format!("{e:#}"))
+}
+
+#[tokio::test]
+async fn edit_code_outside_project_is_independent_of_linked_worktrees() {
+    for worktrees in [false, true] {
+        let (_temp, context, outside, _) = fixture(worktrees).await;
+        let target = outside.join("file.rs");
+        std::fs::write(&target, "fn present() {}\n").unwrap();
+        let refusal = edit_code_refusal(&target, &context).await;
+        assert!(
+            !refusal
+                .as_deref()
+                .unwrap_or("")
+                .contains("worktrees detected"),
+            "edit_code outside roots, worktrees={worktrees}: {refusal:?}"
+        );
+        assert!(!context.agent.is_project_chosen_this_session().await);
+    }
+}
+
+#[tokio::test]
+async fn edit_code_keeps_project_and_linked_worktree_protection() {
+    let (temp, context, _, linked) = fixture(true).await;
+    let root = temp.path().join("main");
+    for dir in [root, linked] {
+        let target = dir.join("file.rs");
+        std::fs::write(&target, "fn present() {}\n").unwrap();
+        let refusal = edit_code_refusal(&target, &context)
+            .await
+            .expect("unchosen project path must remain guarded");
+        assert!(
+            refusal.contains("worktrees detected"),
+            "edit_code at {}: {refusal}",
+            target.display()
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "fn present() {}\n"
+        );
+    }
 }
