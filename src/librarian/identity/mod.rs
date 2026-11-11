@@ -1,5 +1,6 @@
 //! Artifact identity: this module holds the repo name and the document key.
 
+pub mod gate;
 pub mod grammar;
 pub mod index;
 pub mod key;
