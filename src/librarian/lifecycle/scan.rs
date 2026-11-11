@@ -348,6 +348,28 @@ mod tests {
     }
 
     #[test]
+    fn a_tracker_entry_moved_to_archive_but_not_staged_is_skipped_not_fatal() {
+        let dir = checkout();
+        let old = "docs/trackers/ledgers/l/2026-10-01-x.md";
+        let new = "docs/trackers/ledgers/l/archive/2026-10-01-x.md";
+        write(dir.path(), LEDGER_README, LEDGER);
+        write(dir.path(), old, &entry("fixed", "closed: 2026-10-02\n", ""));
+        run_git(dir.path(), &["add", LEDGER_README, old]);
+        // A plain `mv` into archive/ before `git add`: the index still lists the old path.
+        std::fs::create_dir_all(dir.path().join(new).parent().unwrap()).unwrap();
+        std::fs::rename(dir.path().join(old), dir.path().join(new)).unwrap();
+        let loaded = load_docs(dir.path()).unwrap();
+        assert_eq!(rel_paths(&loaded), [new, LEDGER_README]);
+        assert_eq!(
+            loaded.skipped,
+            [SkippedDoc {
+                rel_path: old.into(),
+                reason: "not on disk".into()
+            }]
+        );
+    }
+
+    #[test]
     fn a_non_utf8_tracker_file_is_an_error_naming_its_path() {
         let dir = checkout();
         let rel = "docs/trackers/ledgers/l/2026-10-01-bad.md";
