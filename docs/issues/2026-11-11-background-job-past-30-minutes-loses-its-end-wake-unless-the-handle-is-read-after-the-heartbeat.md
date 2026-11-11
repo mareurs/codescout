@@ -10,7 +10,7 @@ tags:
 closed: 2026-11-11
 opened: 2026-11-11
 severity: high
-unverified: 'The safety net was run by hand (node wake-missed-jobs.mjs with this session''s id), not by the harness: whether Claude Code runs it at UserPromptSubmit and SessionStart in a session launched with 1.21.4 is not measured. The cliff is not removed: without a read after the heartbeat the end wake is still lost (measured 2026-11-11, see Live repro). 1.21.4 is committed locally in claude-plugins and not pushed. Whether the 125 unarmed ended records are a second defect is still not measured.'
+unverified: 'SessionStart of wake-missed-jobs.mjs is not measured through the harness (UserPromptSubmit is, see Safety net through the harness). The cliff is not removed: without a read after the heartbeat the end wake is still lost (measured 2026-11-11, see Live repro). Whether the 125 unarmed ended records are a second defect is still not measured.'
 ---
 
 # BUG: a background job that runs past 30 minutes loses its end wake unless the session reads its handle after the heartbeat
@@ -63,6 +63,10 @@ Session `14053904-5577-4ad4-9053-0a7fb3f09d04`, job `@bg_00000014` (`sleep 1860`
 So the mechanism holds: with no read after the heartbeat, the end wake is lost. The safety net, run by hand with this session's id on the real state directory, then reported the job once (`ended: exited 0 after 31m 0s`) and wrote `.delivered`.
 
 Observed, not explained: the heartbeat of this session carried the 1.21.4 text although the session was started before the release. The cache of the profile was replaced in place by `release.sh` at 14:3x local time. Not checked whether a resumed session resolves the plugin root at each call.
+
+### Safety net through the harness, 2026-11-11 (measured)
+
+After `/reload-plugins` (the plugin is a directory source, re-read from `~/work/claude/claude-plugins/codescout-companion`), job `@bg_00000016` (`sleep 45`) was started and its watcher process was killed (pid 1230003), so the job ended with no wake. At the next user prompt the harness ran `wake-missed-jobs.mjs` at `UserPromptSubmit` and injected: `ended: exited 0 after 45s`. The session had not read the job. So the hook is registered and works end to end for `UserPromptSubmit`. `SessionStart` is not measured.
 
 ## Environment
 
