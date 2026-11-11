@@ -1,16 +1,19 @@
 ---
 id: '78a926d62d663912'
 kind: bug
-status: open
+status: fixed
 title: edit_code replace does not refuse a rename or a several-symbols body for a method inside a Rust impl block
 owners:
 - marius
 tags:
 - cluster/guard-narrower-than-its-name
 - edit-code
+closed: 2026-11-12
 opened: 2026-11-12
+related:
+- c9abdc5134bebce1
 severity: medium
-unverified: The cause is read from the source and agrees with one probe and five usage rows; no unit test with a mock LSP path `impl Agent/old` has run it. Whether callers broke after the five rows, and whether each was an intended rename, was not checked. The probe crate had no caller. Only Rust was examined; other languages' LSP paths were not compared with the AST's. Usage figures are from one checkout's usage.db and cover every agent that ran against it.
+unverified: 'No rebuilt server has been probed since the fix: the tests use a mock LSP with the name path `impl Agent/old`, and the original probe (call 2 in Reproduction) was not repeated against a build that carries d88abf658. Whether callers broke after the five usage rows, and whether each was an intended rename, was not checked. Only Rust was examined; other languages'' LSP paths were not compared with the AST''s. A whole `impl` block as the target is unchanged by the fix and was not examined. Usage figures are from one checkout''s usage.db and cover every agent that ran against it.'
 ---
 
 # BUG: edit_code replace does not refuse a rename or a several-symbols body for a method inside a Rust impl block
@@ -100,19 +103,36 @@ Script: `replace-differently-named-fn-v2.py` in the session scratchpad (not in t
 
 ## Fix
 
-Pending, for the owner. A candidate, none tried: count the target in the AST frame, that is `count_symbols_by_name_path(pre_ast, target_ast_name_path.as_deref().unwrap_or(&sym.name_path))`, and pass that same path to `corruption_verdict` as `counted_name_path`, so the pre and post counts use one dialect. A cost: the `corruption_verdict` tests pin its arguments, and `do_remove` passes `pre_count = 0` on purpose.
+Implemented in `d88abf658`. `do_replace` in `src/tools/symbol/edit_code.rs` now counts the target in the re-read AST by its AST name path, `target_ast_name_path` from `find_ast_name_path`, and passes that same path to `corruption_verdict` as the counted name. Both sides of the count then use one dialect. When the AST has no match (a backtick-quoted Kotlin name, a range the AST places elsewhere) the count falls back to the LSP path, which is the old behaviour. `do_remove` is not touched: it passes `pre_count = 0` on purpose.
+
+The verdict's argument matters as much as `pre_count`. With `pre_count` fixed and the old LSP path still passed to `corruption_verdict`, a same-name replace of an impl method is refused as `dropped the symbol definition`, because the post-edit AST holds no symbol under the LSP name. That mutant was run and failed the control test.
+
+## Fix provenance
+
+- **SHA:** `d88abf658` (`experiments`)
+- **patch-id:** `a5aa7c218aee62cc59c1c987db5e61064b977e63`
 
 ## Tests added
 
-None. A red test would use `MockLspClient` with the name path `impl Agent/old` over a real file, in the shape of `a_replace_whose_body_renames_is_told_to_use_rename` in `src/tools/symbol/tests.rs`.
+In `tests/symbol_lsp.rs`, with a mock LSP that reports `impl Agent` and the method `impl Agent/old` over a real file:
+
+- `replace_of_an_impl_method_by_a_differently_named_declaration_is_refused`: red on HEAD (`status: ok`, `also_defined: ["Agent/fresh"]`), green after. It also asserts that the hint's second call addresses `impl Agent/fresh`.
+- `replace_of_an_impl_method_by_several_declarations_is_refused`: red on HEAD (`also_defined: ["Agent/a", "Agent/b"]`), green after.
+- `replace_of_an_impl_method_that_keeps_its_name_still_succeeds`: the allow control. It passed before and after, and it fails when the old LSP path is passed to `corruption_verdict` (mutant, run once).
+
+Gate in one run on 2026-11-12: Python 1836, lean 9524, default 9621 passed; FMT, CLIPPY, LEAN and DEFAULT exited 0.
 
 ## Workarounds
 
-For a method in an impl block, send `rename` first, then `replace` on the new name, and check callers with `references`. Do not rely on the refusal for a Rust method.
+Until a build that carries `d88abf658` runs, for a method in an impl block, send `rename` first, then `replace` on the new name, and check callers with `references`. Do not rely on the refusal for a Rust method.
 
 ## Resume
 
-Open, medium severity. Next action: write the red test described under Tests added, run it on HEAD and watch it go red for the stated reason, then try the candidate in Fix. Not measured: whether callers broke after the five rows, whether each was an intended rename, and whether Kotlin, Java or Python methods show the same gap (their LSP paths were not compared with the AST's). Related: `docs/issues/2026-11-11-edit-code-replace-refuses-a-declaration-with-a-new-name-so-a-rename-with-a-body-change-takes-two-calls.md` (the refusal that this one fails to raise), and the archived bug of 2026-09-13 that added `TargetRenamed`.
+Fixed in code and tests; not yet probed on a rebuilt server. Next action: after `./scripts/rb.sh` and `/mcp`, repeat call 2 of Reproduction on a scratch crate (`replace` on `Agent/old` with a body that declares `fresh`) and expect the refusal with the hint's two calls. Then archive this file with `doc(action="move", ...)` and re-point the citation in `docs/issues/2026-11-11-edit-code-replace-refuses-a-declaration-with-a-new-name-so-a-rename-with-a-body-change-takes-two-calls.md`.
+
+Not measured: whether callers broke after the five usage rows (195606, 280062, 280063, 281762, 314470), and whether Kotlin, Java or Python methods show the same gap. A target that is a whole `impl` block is unchanged by this fix and was not examined: the `gotchas` memory says the AST has no symbol for it, so the count most likely still falls back to the LSP path, but no test ran it.
+
+Related: `docs/issues/2026-11-11-edit-code-replace-refuses-a-declaration-with-a-new-name-so-a-rename-with-a-body-change-takes-two-calls.md` (the refusal that this one failed to raise for impl methods), and the archived bug of 2026-09-13 that added `TargetRenamed`.
 
 ## References
 
