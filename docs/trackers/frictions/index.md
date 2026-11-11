@@ -168,7 +168,7 @@ Not admitted as entries, because the evidence is one sequence, a sample, or cann
 
 **Status:** open
 
-**Fix (instrument, partial):** committed in `71af942f1` (patch-id `15e4b2dcea6d18427202725674902b5ad952c1d8`), 2026-11-11. `scripts/friction-probe.py` now reads `exit_code` and `timed_out` from the stored result (an MCP content list) and reports them beside the error counts. Measured: 2,132 of 36,014 readable `run_command` successes failed (2,033 non-zero exits, 99 timeouts; 5.9%), a floor. `outcome` and the schema are unchanged, so `analyze-usage` and the pika do not see this yet.
+**Fix (instrument, partial):** committed in `71af942f1` (patch-id `15e4b2dcea6d18427202725674902b5ad952c1d8`), 2026-11-11. `scripts/friction-probe.py` now reads `exit_code` and `timed_out` from the stored result (an MCP content list) and reports them beside the error counts. Measured: 2,132 of 36,014 readable `run_command` successes failed (2,033 non-zero exits, 99 timeouts; 5.9%), a floor. `outcome` is unchanged. The schema change that records the facts on every row is in `8b9e1c7f2` (see FR-3), so a server without `--debug` is counted too once it runs that build. `analyze-usage` and the pika do not read the columns yet.
 
 `outcome` records whether the tool delivered a result, not whether the command passed. All 314 `run_command` rows whose output contains `timed_out` have `outcome='success'` (149 of them with `timed_out: true`). A text-pattern match also finds at least 1,734 success rows with a non-zero `exit_code`. Example: row 221568 ran `cargo test`, which exited 101, and the row says `success`. So `scripts/friction-probe.py` cannot see failed builds, failed tests or timeouts.
 
@@ -181,6 +181,8 @@ Not admitted as entries, because the evidence is one sequence, a sample, or cann
 **Kind:** silent-failure (instrument) · **Tool:** `usage.db` · **Severity:** high
 
 **Status:** open
+
+**Fix (one gap, scoped 2026-11-11):** committed in `8b9e1c7f2` (patch-id `aefd69646d344650973f082ca820dea0ea6e8fca`). Every row now records `output_bytes`, `command_exit` and `command_timed_out`, with or without `--debug`; NULL means not recorded. `output_json` stays debug-only (operator decision of 2026-11-02). Measured before the change: in the last 5 days 21,485 of 41,997 rows (51%) had no output, all without an `agent_id`; the four running servers without `--debug` were started by Codex, and the `sdd`, `kat` and `stef` Claude profiles pass `--debug`. Not yet checked on a rebuilt server: no row carries the columns until a server runs that build. Old rows are not backfilled. Still open: hook advisories, `lsp_events` identity (`session_id`, `project_root`), probe-row tagging, and a column that names the harness.
 
 `input_json` is empty on 22,463 of 117,422 rows (19%) and `output_json` on 43,074 (37%). Both gaps sit on parent-session rows; subagent rows are complete. The input gap is 0% from 2026-11-05. The `cs-hint` text in success rows is echoed file content, not advisories: hooks deliver advisories through `additionalContext`, which `usage.db` does not store. Probe stand-in rows ("[cs-hint] stand-in") sit in the corpus. `lsp_events` has no `session_id` or `project_root`, so LSP failures cannot join to sessions. Every rate in this ledger is therefore partial.
 
