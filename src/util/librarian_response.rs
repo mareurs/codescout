@@ -5,10 +5,9 @@
 //! different layers: `librarian::adapter` and `prompts::guide_index`. Keeping it in `util`
 //! lets both reach it without `prompts` depending on the librarian tree.
 //!
-//! Same resolution as [`super::librarian_guard`], which reached this shape first: the
-//! half with no librarian dependency lives in `util`.
-//!
-//! `docs/issues/archive/2026-08-27-experiments-head-fails-the-lean-build-and-the-local-gate-cannot-see-it.md`
+//! Same split as [`super::librarian_guard`]: the half with no librarian dependency lives in
+//! `util`. That is a layering choice, not a feature boundary: the librarian is compiled into
+//! every build, so no lane enforces it.
 
 use serde_json::Value;
 

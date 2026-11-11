@@ -103,7 +103,7 @@ shift || true
 # `default` adding `local-embed-dynamic` on top cannot enable both. It also picks up
 # features added to `default` later, which the hand-written list did not.
 #
-# The set is unchanged by this: `remote-embed,http,librarian,local-embed-dynamic`. It is
+# The set is: cargo's default (`remote-embed`, `http`) plus `local-embed-dynamic`. It is
 # kept as the DEFAULT here, not behind `--edr`, so CI's three calls (`build`, `clippy`,
 # `test`) keep compiling the windows-gnu dlopen path that no Linux lane can see.
 # `tests/feature_lanes.rs::the_onnx_backends_are_opt_in_not_default` is what keeps cargo's

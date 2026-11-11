@@ -321,9 +321,10 @@ fn frontmatter_id(text: &str) -> Option<&str> {
 /// blind to, and its entry headings could be hand-written straight past the
 /// allocator — which is how the R-N ledger came to reuse nine ids.
 ///
-/// **Hand-parsed, not `serde_yml`, on purpose.** `librarian` is a Cargo feature
-/// (`src/lib.rs:32`), and this guard compiles and must keep working under
-/// `--no-default-features`, where `crate::librarian::frontmatter` does not exist.
+/// **Hand-parsed, not `serde_yml`, on purpose.** This guard sits in `util`, which does not
+/// import from `src/librarian/`, so it cannot call `crate::librarian::frontmatter`. The librarian
+/// is compiled into every build, `--no-default-features` included; the split is a layering choice
+/// that no lane enforces.
 /// That is also why [`is_librarian_artifact`] hand-parses `id:`.
 ///
 /// Accepts all three YAML forms `allocate_entry_id` honours
@@ -332,7 +333,7 @@ fn frontmatter_id(text: &str) -> Option<&str> {
 /// emitted the file, never of the artifact. Making protection depend on that accident
 /// is exactly the quoted-id defect (BL-33). That agreement is held by
 /// `both_entry_prefix_readers_agree_on_every_yaml_form`, beside the allocator: two
-/// readers are forced by the feature boundary, so the parity is enforced by a test
+/// readers are forced by the layering, so the parity is enforced by a test
 /// rather than by this sentence.
 pub(crate) fn declared_entry_prefixes(text: &str) -> Vec<String> {
     let Some(rest) = text.strip_prefix("---\n") else {

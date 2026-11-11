@@ -674,6 +674,25 @@ mod tests {
             .any(|p| matches!(p, IndexProblem::DuplicateKey { key, .. } if key.as_str() == "b")));
     }
 
+    // A directory-shaped path (`docs/README.md/`) is an invalid key, but it is not an index
+    // document: it must not turn its folder's real index into a broken one.
+    #[test]
+    fn a_directory_shaped_invalid_path_does_not_break_its_folders_index() {
+        let ix = KeyIndex::build(
+            repo(),
+            [
+                doc("docs/readme.md", ""),
+                doc("docs/README.md/", ""),
+                doc("docs/a.md", "## T-1 — in docs\n"),
+            ],
+        );
+        assert_eq!(ix.owner(&k("a")), Some(&k("docs")));
+        assert!(ix
+            .problems()
+            .iter()
+            .any(|p| matches!(p, IndexProblem::InvalidKey(KeyError::NotMarkdown(_)))));
+    }
+
     // Backslash input paths own exactly as the forward-slash spelling does.
     #[test]
     fn backslash_input_paths_give_the_same_owners() {

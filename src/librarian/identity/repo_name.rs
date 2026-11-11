@@ -92,13 +92,14 @@ impl fmt::Display for RepoName {
     }
 }
 
-/// Fold `s` toward a canonical name: lowercase, every run of characters
-/// outside `[a-z0-9]` becomes one `-`, leading and trailing `-` trimmed.
+/// Fold `s` toward a canonical name: ASCII lowercase, every run of characters
+/// outside `[a-z0-9]` (any non-ASCII character included) becomes one `-`,
+/// leading and trailing `-` trimmed.
 /// `None` when nothing is left or the result is hex16-shaped.
 pub fn canonicalize(s: &str) -> Option<String> {
     let mut out = String::with_capacity(s.len());
     let mut pending_dash = false;
-    for c in s.chars().flat_map(char::to_lowercase) {
+    for c in s.chars().map(|c| c.to_ascii_lowercase()) {
         if c.is_ascii_lowercase() || c.is_ascii_digit() {
             if pending_dash && !out.is_empty() {
                 out.push('-');
@@ -180,7 +181,14 @@ pub fn write(root: &Path, name: &RepoName) -> anyhow::Result<PathBuf> {
 /// A name to offer when the repo has none: the `[workspace] name` of
 /// `.codescout/workspace.toml`, else the root's basename, else `repo`. Each
 /// goes through [`canonicalize`].
+///
+/// A linked worktree offers what its main checkout would: `workspace.toml` is gitignored, so a
+/// worktree never has one, and a worktree's folder name is not the repo's name. Both lookups use
+/// the main checkout's root there.
 pub fn suggest(root: &Path) -> RepoName {
+    let root =
+        crate::util::path_security::worktree_main_root(root).unwrap_or_else(|| root.to_path_buf());
+    let root = root.as_path();
     let workspace_file = root.join(WORKSPACE_FILE_REL);
     let from_workspace = crate::librarian::read_door::for_project(root)
         .text(&workspace_file)
@@ -287,6 +295,80 @@ mod tests {
         )
         .unwrap();
         assert_eq!(suggest(&root).as_str(), "code-scout");
+    }
+    /// Builds `<tmp>/MyRepo` (a `.git` directory) and `<tmp>/wt` (a linked worktree whose `.git`
+    /// file points into `MyRepo/.git/worktrees/wt`). Returns `(tmp, main, worktree)`.
+    fn main_and_linked_worktree() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("MyRepo");
+        let wt = tmp.path().join("wt");
+        let admin = main.join(".git/worktrees/wt");
+        std::fs::create_dir_all(&admin).unwrap();
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", admin.display())).unwrap();
+        (tmp, main, wt)
+    }
+
+    // `.codescout/workspace.toml` is gitignored, so a linked worktree never has one; the name the
+    // main checkout would offer is the one to offer there too (a worktree's folder name is not a
+    // repo name, and committing it would collide with the main checkout's `repo.toml`).
+    #[test]
+    fn suggest_in_a_linked_worktree_uses_the_main_checkouts_workspace_name() {
+        let (_tmp, main, wt) = main_and_linked_worktree();
+        std::fs::create_dir_all(main.join(".codescout")).unwrap();
+        std::fs::write(
+            main.join(".codescout/workspace.toml"),
+            "[workspace]\nname = \"Code Scout\"\n",
+        )
+        .unwrap();
+        assert_eq!(suggest(&wt).as_str(), "code-scout");
+        assert_eq!(suggest(&main).as_str(), "code-scout");
+    }
+
+    #[test]
+    fn suggest_in_a_linked_worktree_falls_back_to_the_main_checkouts_basename() {
+        let (_tmp, main, wt) = main_and_linked_worktree();
+        assert_eq!(suggest(&wt).as_str(), "myrepo");
+        assert_eq!(suggest(&main).as_str(), "myrepo");
+    }
+
+    // A worktree's own workspace.toml still wins over the main checkout's.
+    // The repo's name belongs to the repo, so the main checkout's workspace name is used even when
+    // the worktree has a workspace.toml of its own.
+    #[test]
+    fn a_linked_worktrees_own_workspace_name_is_not_the_repos_name() {
+        let (_tmp, main, wt) = main_and_linked_worktree();
+        for (root, name) in [(&main, "Main Name"), (&wt, "Own Name")] {
+            std::fs::create_dir_all(root.join(".codescout")).unwrap();
+            std::fs::write(
+                root.join(".codescout/workspace.toml"),
+                format!("[workspace]\nname = \"{name}\"\n"),
+            )
+            .unwrap();
+        }
+        assert_eq!(suggest(&wt).as_str(), "main-name");
+    }
+
+    // A directory that is not a linked worktree behaves as before: its own basename.
+    #[test]
+    fn suggest_in_a_plain_or_main_checkout_directory_is_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plain = tmp.path().join("Plain_Dir");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert_eq!(suggest(&plain).as_str(), "plain-dir");
+        // `.git` as a directory is a main checkout, not a pointer.
+        let main = tmp.path().join("Main_Dir");
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        assert_eq!(suggest(&main).as_str(), "main-dir");
+    }
+
+    // ASCII-only, like `key_of`: U+212A KELVIN SIGN lowercases to `k` under Unicode rules, but it
+    // is not in `[a-z0-9]` and so is a separator here.
+    #[test]
+    fn canonicalize_is_ascii_only() {
+        assert_eq!(canonicalize("\u{212A}ey").as_deref(), Some("ey"));
+        assert_eq!(canonicalize("a\u{212A}b").as_deref(), Some("a-b"));
+        assert_eq!(canonicalize("\u{212A}"), None);
     }
 
     #[cfg(unix)]

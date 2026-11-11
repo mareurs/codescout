@@ -91,6 +91,10 @@ fn parse_trimmed(raw: &str) -> Option<Reference> {
 /// Inside a table cell the wiki-link label separator must be escaped (`[[key\|label]]`):
 /// GFM splits the cell at an unescaped `|` before the wiki link is seen, so `[[key|label]]`
 /// there is not a link at all. The one trailing `\` the escape leaves on the target is stripped.
+///
+/// `[[x]](url)` is a Markdown link whose text is `[x]`, not a citation: a `(` right after the
+/// closing `]]` takes the wiki link out of the citations. With a space between them (`[[x]] (y)`),
+/// or a `[` after it, the wiki link is still a citation.
 pub fn extract(text: &str) -> Vec<Citation> {
     // A suffix start of `text` (`len - body.len()`), so a char boundary.
     let base = frontmatter_end(text);
@@ -121,7 +125,13 @@ pub fn extract(text: &str) -> Vec<Citation> {
                 ..
             }) => {
                 let wiki = matches!(link_type, LinkType::WikiLink { .. });
-                if wiki {
+                // CommonMark reads `[[x]](url)` as a link whose text is `[x]`; the wiki-link
+                // extension takes the brackets first. A `(` straight after the closing `]]`
+                // makes it that link, so it is no citation. It stays opaque (its text is not
+                // prose). `get` keeps the check off a non-boundary offset.
+                let is_markdown_link_text =
+                    wiki && text.get(range.end..).is_some_and(|s| s.starts_with('('));
+                if wiki && !is_markdown_link_text {
                     let dest: &str = &dest_url;
                     let dest = if in_cell {
                         dest.strip_suffix('\\').unwrap_or(dest)
@@ -520,5 +530,41 @@ mod tests {
         assert_eq!(refs("R-\u{669}\u{661}"), vec![]);
         assert_eq!(refs("R-91-2"), vec![bare("R-91")]);
         assert_eq!(refs("ABCD-1"), vec![]);
+    }
+
+    // CommonMark reads `[[x]](url)` as an ordinary link whose text is `[x]`; the wiki-link
+    // extension takes the brackets first, so a `(` right after the closing `]]` means the wiki
+    // link is link text, not a citation. A space, or a following `[`, does not change that.
+    #[test]
+    fn a_wiki_link_followed_by_a_paren_is_a_markdown_link_not_a_citation() {
+        assert_eq!(refs("[[a-doc]](https://x)"), vec![]);
+        assert_eq!(refs("[[a-doc|lbl]](x)"), vec![]);
+        assert_eq!(refs("[[a-doc]] (x)"), vec![file("a-doc")]);
+        // The label of such a link is still not prose: no bare token comes out of it.
+        assert_eq!(refs("[[arXiv]](https://x/y)"), vec![]);
+        assert_eq!(refs("[[R-91]](x)"), vec![]);
+        // Reference-style: no rule for a following `[`.
+        assert_eq!(
+            refs("[[a-doc]][[b-doc]]"),
+            vec![file("a-doc"), file("b-doc")]
+        );
+        // A citation that follows on the same line is still found.
+        assert_eq!(refs("[[a-doc]](x) and [[b-doc]]"), vec![file("b-doc")]);
+    }
+
+    #[test]
+    fn a_wiki_link_followed_by_a_paren_in_a_table_cell_is_not_a_citation() {
+        assert_eq!(
+            refs("| a | [[a-doc]](https://x) |\n|---|---|\n| x | y |\n"),
+            vec![]
+        );
+        assert_eq!(
+            refs("| a | [[a-doc\\|lbl]](x) |\n|---|---|\n| x | y |\n"),
+            vec![]
+        );
+        assert_eq!(
+            refs("| a | [[a-doc]] (x) |\n|---|---|\n| x | y |\n"),
+            vec![file("a-doc")]
+        );
     }
 }

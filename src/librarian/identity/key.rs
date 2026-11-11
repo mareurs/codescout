@@ -101,11 +101,13 @@ fn markdown_stem(file_name: &str) -> Option<&str> {
     ext.eq_ignore_ascii_case("md").then_some(stem)
 }
 
-/// True when the file name is `readme.md`, case-insensitive.
+/// True when the file name is `readme.md`, case-insensitive. A path ending in `/` or `\` names a
+/// directory, as in [`key_of`], and is never an index document.
 pub fn is_folder_index(rel_path: &str) -> bool {
-    components(rel_path)
-        .last()
-        .is_some_and(|name| name.eq_ignore_ascii_case("readme.md"))
+    !rel_path.ends_with(['/', '\\'])
+        && components(rel_path)
+            .last()
+            .is_some_and(|name| name.eq_ignore_ascii_case("readme.md"))
 }
 
 /// The key of the markdown document at `rel_path`.
@@ -236,6 +238,17 @@ mod tests {
         for p in ["docs/x.md/", "docs/README.md/", r"docs\x.md\"] {
             assert!(matches!(key_of(p), Err(KeyError::NotMarkdown(_))), "{p:?}");
         }
+    }
+
+    // `is_folder_index` follows `key_of`: a path ending in a separator names a directory, so
+    // `docs/README.md/` is no index document.
+    #[test]
+    fn a_trailing_separator_is_never_a_folder_index() {
+        assert!(!is_folder_index("docs/README.md/"));
+        assert!(!is_folder_index(r"docs\README.md\"));
+        assert!(!is_folder_index("README.md/"));
+        assert!(is_folder_index("docs/README.md"));
+        assert!(is_folder_index(r"docs\readme.md"));
     }
 
     #[test]
