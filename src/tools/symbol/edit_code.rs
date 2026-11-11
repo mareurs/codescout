@@ -1490,7 +1490,7 @@ impl EditCode {
         // `pre_count > 0`: such a method could be renamed or replaced by several declarations
         // under `status: ok`. Falls back to the LSP path when the AST has no match (a
         // backtick-quoted Kotlin name, a range the AST places elsewhere), which is the old
-        // behaviour. Bug 78a926d62d663912.
+        // behaviour. Bug 6c65843c8018bffa.
         let counted_name_path: &str = target_ast_name_path.as_deref().unwrap_or(&sym.name_path);
         let pre_count = pre_ast
             .as_ref()

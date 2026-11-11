@@ -1,5 +1,5 @@
 ---
-id: '78a926d62d663912'
+id: 6c65843c8018bffa
 kind: bug
 status: fixed
 title: edit_code replace does not refuse a rename or a several-symbols body for a method inside a Rust impl block
@@ -13,7 +13,7 @@ opened: 2026-11-12
 related:
 - c9abdc5134bebce1
 severity: medium
-unverified: 'No rebuilt server has been probed since the fix: the tests use a mock LSP with the name path `impl Agent/old`, and the original probe (call 2 in Reproduction) was not repeated against a build that carries d88abf658. Whether callers broke after the five usage rows, and whether each was an intended rename, was not checked. Only Rust was examined; other languages'' LSP paths were not compared with the AST''s. A whole `impl` block as the target is unchanged by the fix and was not examined. Usage figures are from one checkout''s usage.db and cover every agent that ran against it.'
+unverified: Whether callers broke after the five usage rows, and whether each was an intended rename, was not checked. Only Rust was examined; other languages' LSP paths were not compared with the AST's. A whole `impl` block as the target is unchanged by the fix and was not examined. The live probe used a scratch crate with no caller of the replaced method. Usage figures are from one checkout's usage.db and cover every agent that ran against it.
 ---
 
 # BUG: edit_code replace does not refuse a rename or a several-symbols body for a method inside a Rust impl block
@@ -122,15 +122,22 @@ In `tests/symbol_lsp.rs`, with a mock LSP that reports `impl Agent` and the meth
 
 Gate in one run on 2026-11-12: Python 1836, lean 9524, default 9621 passed; FMT, CLIPPY, LEAN and DEFAULT exited 0.
 
+Live probe on 2026-11-12, on `target/release/codescout` (built 00:43:38, after `d88abf658` at 00:27:37) and a fresh scratch crate with the same `lib.rs` as in Reproduction:
+
+- `replace` on `Agent/old` with a body that declares `fresh`: refused, `File restored`, and the hint carried `edit_code(action="rename", symbol="Agent/old", path="src/lib.rs", new_name="fresh")` then `edit_code(action="replace", symbol="Agent/fresh", path="src/lib.rs", body=<...>)`. The same call returned `status: ok` before the fix.
+- `replace` on `Agent/old` with a body that keeps the name `old`: `status: ok`, lines 4-6 replaced.
+- The hint followed as written: `rename` `Agent/old` to `fresh` returned `status: ok`, then `replace` on `Agent/fresh` returned `status: ok`.
+- `replace` on `Agent/fresh` with a body that declares `a` and `b`: refused, naming both, with the three-call hint of the several-symbols refusal.
+
+The probe crate had no caller of `old`, so it did not show a broken caller.
+
 ## Workarounds
 
 Until a build that carries `d88abf658` runs, for a method in an impl block, send `rename` first, then `replace` on the new name, and check callers with `references`. Do not rely on the refusal for a Rust method.
 
 ## Resume
 
-Fixed in code and tests; not yet probed on a rebuilt server. Next action: after `./scripts/rb.sh` and `/mcp`, repeat call 2 of Reproduction on a scratch crate (`replace` on `Agent/old` with a body that declares `fresh`) and expect the refusal with the hint's two calls. Then archive this file with `doc(action="move", ...)` and re-point the citation in `docs/issues/2026-11-11-edit-code-replace-refuses-a-declaration-with-a-new-name-so-a-rename-with-a-body-change-takes-two-calls.md`.
-
-Not measured: whether callers broke after the five usage rows (195606, 280062, 280063, 281762, 314470), and whether Kotlin, Java or Python methods show the same gap. A target that is a whole `impl` block is unchanged by this fix and was not examined: the `gotchas` memory says the AST has no symbol for it, so the count most likely still falls back to the LSP path, but no test ran it.
+N/A, fixed and probed on a rebuilt server (Tests added). Not measured: whether callers broke after the five usage rows (195606, 280062, 280063, 281762, 314470), and whether Kotlin, Java or Python methods show the same gap. A target that is a whole `impl` block is unchanged by this fix and was not examined: the `gotchas` memory says the AST has no symbol for it, so the count most likely still falls back to the LSP path, but no test ran it.
 
 Related: `docs/issues/2026-11-11-edit-code-replace-refuses-a-declaration-with-a-new-name-so-a-rename-with-a-body-change-takes-two-calls.md` (the refusal that this one failed to raise for impl methods), and the archived bug of 2026-09-13 that added `TargetRenamed`.
 

@@ -4226,7 +4226,7 @@ async fn replace_force_never_bypasses_name_or_syntax_checks() {
 /// A Rust `impl` block as rust-analyzer reports it: an `impl Agent` container with the method
 /// as its child, named `impl Agent/old`. The tree-sitter AST that `do_replace` re-reads to
 /// verify the edit names the same method `Agent/old` and emits no impl symbol, so the two
-/// dialects of one method differ. Bug 78a926d62d663912.
+/// dialects of one method differ. Bug 6c65843c8018bffa.
 const IMPL_METHOD_FIXTURE: &str =
     "struct Agent;\n\nimpl Agent {\n    fn old(&self) -> u32 {\n        1\n    }\n}\n\nfn keeper() {}\n";
 
