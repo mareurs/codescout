@@ -1,5 +1,5 @@
 {
-  "pool": "setup-ab live rust v4",
+  "pool": "setup-ab fresh v2 cs rest",
   "registered": "2026-11-11",
   "gate": "pool v2 gate (strict builder + spec verdicts + gold x2 / empty replay); the four cs/full runs of nushell-18863 that the budget stop of the cs/full screen (registration dbab6178ff09) left unrun; fixed by the stop, not by results",
   "amends": "setup-ab fresh v2",
