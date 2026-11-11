@@ -73,7 +73,7 @@ The tool outputs in the table, copied from the session.
 
 ## Fix
 
-Partly done 2026-11-11, commit pending (see `## Fix provenance` once it lands), by candidate (1): a cached resolution is revalidated against the files it names.
+Partly done 2026-11-11, commit `5a7936984` (see `## Fix provenance`), by candidate (1): a cached resolution is revalidated against the files it names.
 
 - `call_edge_resolutions` gets a column `signatures_json`. `store_resolution` writes into it the `(len, mtime)` of every file the result names (`files_behind`: the definition it started from, every call-site file, every next-hop definition), using the same `disk_signature` as the LSP client (now `pub(crate)`).
 - `lookup_resolution` returns a miss when any of those files differs from its stored signature, including a file that was absent and now exists. An entry without signatures (stored before this change) is a miss. A corrupt signature record is a miss. A corrupt edge payload is still an error.
@@ -83,6 +83,13 @@ Partly done 2026-11-11, commit pending (see `## Fix provenance` once it lands), 
 **Residual, not fixed:** an entry is valid while the files it NAMES are unchanged. A caller added in a file that the result does not mention (a new file, or an existing file with no call of the symbol) does not change any signed file, so the entry is still served and the caller is missing. That is the case that first showed the problem (`other.rs` did not exist when the entry was written). It is not covered by a test. Options, none tried: (a) a project-level epoch (for example the newest mtime and the count of the source files, one walk per call), at a cost per call and with unrelated edits invalidating entries; (b) do not reuse a `callers` resolution across calls; (c) a file watcher in codescout, which does not exist today (`mark_file_dirty` marks only codescout's own writes).
 
 Small accepted window: the signatures are read after the analysis, so a file that changes while one analysis runs is stored with its new signature beside edges from its old content.
+
+## Fix provenance
+
+This is a partial fix: the record stays `open` for the residual case in `## Fix`.
+
+- **SHA:** `5a7936984` (`experiments`)
+- **patch-id:** `ae42b2606d11`
 
 ## Tests added
 
@@ -100,11 +107,11 @@ Delete `.codescout/call_edges.db`, or write to the changed file with a codescout
 
 ## Resume
 
-Partly fixed in the working tree, commit pending. Status stays `open` because the residual case (a caller added in a file the cached result does not mention) is not fixed, and it is the case that started this investigation.
+Partly fixed by `5a7936984` (see `## Fix provenance`). Status stays `open` because the residual case (a caller added in a file the cached result does not mention) is not fixed, and it is the case that started this investigation.
 
-Next: (1) after the commit, add `## Fix provenance` (SHA and patch-id); (2) re-run the manual `callers` sequence of the table with the rebuilt binary (steps 2, 3 and 5 should now show current lines and `late_caller`); (3) with the owner, choose among the residual options and write the red test for it (a mock LSP that reports a caller in a new file on the second call); (4) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established.
+Next: (1) re-run the manual `callers` sequence of the table with the rebuilt binary (steps 2, 3 and 5 should now show current lines and `late_caller`); (2) with the owner, choose among the residual options and write the red test for it (a mock LSP that reports a caller in a new file on the second call); (3) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established.
 
-Related: `a73c49456056fb92`, `58a45860b802a477`, `bug-fix-session-log` (the entry for this fix).
+Related: `a73c49456056fb92`, `58a45860b802a477`, `bug-fix-session-log:F-236`.
 
 ## References
 
