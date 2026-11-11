@@ -3,14 +3,6 @@
 You just activated a project. Orient before you explore or edit — the cheapest
 bug is the one you never re-investigate because the project already documented it.
 
-## How to decide — read first
-
-Work from evidence, not from permission-seeking.
-
-- Before you choose, read the data and measure it yourself; if measuring is cheap, do it before you assume.
-- Trackers and memories are your working memory: read them first, record what you learn.
-- Ask the user only before an irreversible or outward-facing action, or when the repo, the trackers and a measurement cannot answer. Say what you checked.
-
 ## Phase 0 — load what the project already knows (do FIRST)
 
 - `memory(action="list")`, then read the topics matching your task.
