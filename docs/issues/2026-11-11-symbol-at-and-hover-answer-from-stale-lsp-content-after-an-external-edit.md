@@ -11,8 +11,10 @@ opened: 2026-11-11
 owner: marius
 related:
 - '4e7ec7bfc047ac7b'
+- '58a45860b802a477'
+- '489e013ddfd6c3fc'
 severity: medium
-unverified: 'Measured on two tiny crates (one per transport), rust-analyzer only, one run per case. The automated tests cover stdio only; the mux transport was verified once end to end with a driver script that is not in the repo. Not done or not measured: hover / goto_definition on the changed file have no client-level test; prepare_call_hierarchy with a raw position was not run; the cost of the per-request stat and how often a rename after a resync is cancelled by the server are not measured; call_graph omitting other.rs::use_it was not investigated; whether the server can notice a changed file by itself was not examined; a language other than Rust.'
+unverified: 'Measured on two tiny crates (one per transport), rust-analyzer only, one run per case. The automated tests cover stdio only; the mux transport was verified once end to end with a driver script that is not in the repo. Not done or not measured: hover / goto_definition on the changed file have no client-level test; prepare_call_hierarchy with a raw position was not run; the cost of the per-request stat and how often a rename after a resync is cancelled by the server are not measured; whether the server can notice a changed file by itself was not examined; a language other than Rust. The call_graph omission of other.rs::use_it that I saw is a different defect (call_graph serves a stale edge cache), filed as 489e013ddfd6c3fc.'
 ---
 
 # BUG: a file changed outside codescout stays stale in the LSP server unless a documentSymbol call resyncs that same file (symbol_at, and references into other open files)
