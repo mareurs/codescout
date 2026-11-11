@@ -1,0 +1,4 @@
+//! Tracker lifecycle: the pure core that places tracker files under
+//! `docs/trackers/<lifecycle>/` and (in later modules) checks their status rules.
+
+pub mod layout;
