@@ -1,12 +1,20 @@
 //! The key index: every document's key, who owns it, and what a reference resolves to.
 //!
 //! Pure: documents arrive as [`DocInput`] and nothing is read from disk. `build` computes
-//! every map once (key to document, path to document, owner to owned documents), so
-//! `resolve` is a handful of lookups and never scans the document set.
+//! its maps once (key to document, path to document, owner and token to owned documents).
+//! `resolve` is then hash lookups plus a sort of the candidates; it never scans the
+//! document set, however many documents one owner holds.
 //!
 //! A document whose key is invalid is excluded and reported. A key held by two or more
 //! documents is reported and resolves to `KeyCollision`; those documents are left out of
-//! the key map and of every candidate set, but still count for a bare token in their own text.
+//! the key map and of every candidate set, but they stay in the path map, so a bare token
+//! defined in their own text still resolves to `Local` there.
+//!
+//! Ownership: the NEAREST ancestor folder that holds a folder-index document (`readme.md`)
+//! owns the document; a folder index starts at its parent's parent. When that nearest index
+//! has an invalid or colliding key the document has no owner: the walk stops there and never
+//! passes the broken index to a farther ancestor. A folder with no index of its own is
+//! skipped, and the walk goes on to the next ancestor.
 
 use std::collections::{HashMap, HashSet};
 
@@ -16,6 +24,10 @@ use super::repo_name::RepoName;
 use crate::librarian::tools::link_scan::extract::entry_sections;
 
 /// One document handed to [`KeyIndex::build`].
+///
+/// Precondition: `rel_path` is a canonical file path relative to the repo root, and each
+/// file is listed once. Two spellings of one file (`./a/x.md` and `a/x.md`) are two
+/// documents with one key, and are reported as a `DuplicateKey`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocInput {
     pub rel_path: String,
@@ -66,6 +78,7 @@ pub enum Resolution {
 }
 
 /// A document with a valid key.
+#[derive(Debug)]
 struct Doc {
     rel_path: String,
     key: Key,
@@ -73,18 +86,20 @@ struct Doc {
     tokens: HashSet<String>,
 }
 
+#[derive(Debug)]
 pub struct KeyIndex {
     this_repo: RepoName,
     docs: Vec<Doc>,
     /// Keys held by exactly one document.
     by_key: HashMap<Key, usize>,
-    /// Normalised path of every valid-key document (colliding ones too).
+    /// Normalised path of every valid-key document, colliding ones included: a document
+    /// with a colliding key still resolves the bare tokens its own text defines.
     by_path: HashMap<String, usize>,
     /// Keys held by two or more documents, with their sorted paths.
     collisions: HashMap<Key, Vec<String>>,
     owners: HashMap<Key, Key>,
-    /// Owner key to the documents it owns (unambiguous keys only).
-    owned: HashMap<Key, Vec<usize>>,
+    /// Owner key, then token, to the owned documents that define it (unambiguous keys only).
+    owned_tokens: HashMap<Key, HashMap<String, Vec<usize>>>,
     problems: Vec<IndexProblem>,
 }
 
@@ -130,19 +145,29 @@ impl KeyIndex {
             .map(|(i, d)| (normalised(&d.rel_path), i))
             .collect();
 
-        // Folder (normalised; "" is the repo root) to the key of its folder-index document.
-        // A folder index with an invalid or colliding key never got this far, so it offers none.
+        // Folder (normalised; "" is the repo root) to what its folder-index document offers:
+        // `Some(key)` for a usable one, `None` for one whose key is invalid or collides.
         let usable = |d: &Doc| by_key.contains_key(&d.key);
-        let mut folder_index: HashMap<String, &Key> = HashMap::new();
-        for d in valid
-            .iter()
-            .filter(|d| usable(d) && is_folder_index(&d.rel_path))
-        {
-            let parts = components(&d.rel_path);
-            folder_index.insert(parts[..parts.len() - 1].join("/"), &d.key);
+        let mut folder_index: HashMap<String, Option<&Key>> = HashMap::new();
+        let folder_of = |rel_path: &str| {
+            let parts = components(rel_path);
+            parts[..parts.len() - 1].join("/")
+        };
+        for d in valid.iter().filter(|d| is_folder_index(&d.rel_path)) {
+            let offered = usable(d).then_some(&d.key);
+            let slot = folder_index
+                .entry(folder_of(&d.rel_path))
+                .or_insert(offered);
+            // Two index documents in one folder (`README.md`, `readme.md`) collide: no owner.
+            if offered.is_none() {
+                *slot = None;
+            }
+        }
+        for (rel_path, _) in invalid.iter().filter(|(p, _)| is_folder_index(p)) {
+            folder_index.insert(folder_of(rel_path), None);
         }
         let mut owners = HashMap::new();
-        let mut owned: HashMap<Key, Vec<usize>> = HashMap::new();
+        let mut owned_tokens: HashMap<Key, HashMap<String, Vec<usize>>> = HashMap::new();
         for (i, d) in valid.iter().enumerate().filter(|(_, d)| usable(d)) {
             let parts = components(&d.rel_path);
             let own_folder_depth = parts.len() - 1;
@@ -152,14 +177,19 @@ impl KeyIndex {
             } else {
                 Some(own_folder_depth)
             };
-            let owner = start.and_then(|s| {
+            // The NEAREST folder with an index document decides. When that index is unusable
+            // the walk stops with no owner: it must not hand the document to a farther index.
+            let nearest = start.and_then(|s| {
                 (0..=s)
                     .rev()
                     .find_map(|depth| folder_index.get(&parts[..depth].join("/")))
             });
-            if let Some(&owner) = owner {
+            if let Some(&Some(owner)) = nearest {
                 owners.insert(d.key.clone(), owner.clone());
-                owned.entry(owner.clone()).or_default().push(i);
+                let by_token = owned_tokens.entry(owner.clone()).or_default();
+                for token in &d.tokens {
+                    by_token.entry(token.clone()).or_default().push(i);
+                }
             }
         }
 
@@ -187,7 +217,7 @@ impl KeyIndex {
             by_path,
             collisions,
             owners,
-            owned,
+            owned_tokens,
             problems,
         }
     }
@@ -236,9 +266,15 @@ impl KeyIndex {
                 let mut candidates: Vec<Key> = self
                     .by_key
                     .get(key)
-                    .into_iter()
-                    .chain(self.owned.get(key).into_iter().flatten())
                     .filter(|&&i| self.docs[i].tokens.contains(token))
+                    .into_iter()
+                    .chain(
+                        self.owned_tokens
+                            .get(key)
+                            .and_then(|by_token| by_token.get(token))
+                            .into_iter()
+                            .flatten(),
+                    )
                     .map(|&i| self.docs[i].key.clone())
                     .collect();
                 candidates.sort();
@@ -585,34 +621,136 @@ mod tests {
         ));
     }
 
-    // Ruling 5: the search continues upward past an index whose key is invalid or colliding;
-    // a folder index never owns itself; a root readme owns what has no nearer index.
+    // Ruling 5 (corrected): the NEAREST folder index decides. When it has an invalid or a
+    // colliding key its descendants have no owner; the walk does not pass it to a farther
+    // index. A folder with no index of its own is skipped. A folder index never owns itself.
     #[test]
-    fn ownership_continues_upward_past_an_unusable_index() {
+    fn a_broken_nearest_index_stops_the_walk_and_a_missing_one_does_not() {
         let ix = KeyIndex::build(
             repo(),
             [
                 doc("README.md", "## R-1 — root\n"),
                 doc("a/readme.md", ""),
-                // key `b` collides with `z/b.md`, so this folder offers no owner.
+                // key `b` collides with `z/b.md`, so this folder's index owns nothing.
                 doc("a/b/readme.md", ""),
                 doc("z/b.md", ""),
-                doc("a/b/c.md", ""),
-                // folder name gives an invalid key, so this folder offers no owner.
+                doc("a/b/c.md", "## T-1 — behind a colliding index\n"),
+                // no index in `deeper`: the walk reaches `a/b`, which is broken, and stops.
+                doc("a/b/deeper/e.md", ""),
+                // a folder index starts at its parent's parent: `a/b`, broken.
+                doc("a/b/sub/readme.md", ""),
+                // folder name gives an invalid key, so this folder's index owns nothing.
                 doc("a/Bad Dir/readme.md", ""),
                 doc("a/Bad Dir/d.md", ""),
+                // no index in `plain`: the walk goes on to `a`.
+                doc("a/plain/f.md", ""),
                 doc("top.md", ""),
                 doc("q/loose.md", ""),
             ],
         );
-        assert_eq!(ix.owner(&k("c")), Some(&k("a")));
-        assert_eq!(ix.owner(&k("d")), Some(&k("a")));
+        for broken in ["c", "e", "sub", "d"] {
+            assert_eq!(ix.owner(&k(broken)), None, "{broken}");
+        }
+        assert_eq!(ix.owner(&k("f")), Some(&k("a")));
         assert_eq!(ix.owner(&k("a")), Some(&k("readme")));
         assert_eq!(ix.owner(&k("top")), Some(&k("readme")));
         assert_eq!(ix.owner(&k("loose")), Some(&k("readme")));
         assert_eq!(ix.owner(&k("readme")), None);
         assert_eq!(ix.rel_path(&k("readme")), Some("README.md"));
         assert_eq!(ix.rel_path(&k("c")), Some("a/b/c.md"));
+        // Failing loudly: no farther index picks up the entry behind the broken one.
+        for owner in ["readme", "a"] {
+            assert!(
+                matches!(
+                    ix.resolve("x.md", &entry(owner, "T-1")),
+                    Resolution::UndefinedToken { .. }
+                ),
+                "{owner}"
+            );
+        }
+        assert!(ix
+            .problems()
+            .iter()
+            .any(|p| matches!(p, IndexProblem::DuplicateKey { key, .. } if key.as_str() == "b")));
+    }
+
+    // Backslash input paths own exactly as the forward-slash spelling does.
+    #[test]
+    fn backslash_input_paths_give_the_same_owners() {
+        let set = |sep: &str| -> Vec<DocInput> {
+            [
+                ("README.md", "## R-1 — root\n"),
+                ("docs/readme.md", ""),
+                ("docs/logs/readme.md", "## F-1 — in the index\n"),
+                ("docs/logs/archive/a-log.md", "## F-2 — archived\n"),
+                ("docs/other/b-doc.md", ""),
+            ]
+            .into_iter()
+            .map(|(p, t)| doc(&p.replace('/', sep), t))
+            .collect()
+        };
+        let forward = KeyIndex::build(repo(), set("/"));
+        let mixed = {
+            let mut docs = set("/");
+            // Every other document spelled with backslashes: a mixed set.
+            for d in docs.iter_mut().step_by(2) {
+                d.rel_path = d.rel_path.replace('/', "\\");
+            }
+            KeyIndex::build(repo(), docs)
+        };
+        let backslashed = KeyIndex::build(repo(), set("\\"));
+        for ix in [&mixed, &backslashed] {
+            for key in ["readme", "docs", "logs", "a-log", "b-doc"] {
+                assert_eq!(ix.owner(&k(key)), forward.owner(&k(key)), "{key}");
+            }
+            assert_eq!(ix.owner(&k("a-log")), Some(&k("logs")));
+            assert_eq!(ix.owner(&k("b-doc")), Some(&k("docs")));
+            assert_eq!(
+                ix.resolve("x.md", &entry("logs", "F-2")),
+                Resolution::Entry {
+                    dst: k("a-log"),
+                    token: "F-2".into()
+                }
+            );
+        }
+    }
+
+    // Documents the DocInput precondition (canonical path, each file once): two spellings of
+    // one file are two documents with one key, so they are reported, not merged.
+    #[test]
+    fn two_spellings_of_one_file_are_reported_as_a_duplicate_key() {
+        let ix = KeyIndex::build(repo(), [doc("a/x.md", ""), doc("./a/x.md", "")]);
+        assert_eq!(
+            ix.problems(),
+            [IndexProblem::DuplicateKey {
+                key: k("x"),
+                rel_paths: vec!["./a/x.md".to_string(), "a/x.md".into()]
+            }]
+        );
+    }
+
+    // Ruling 2 deviation, adjudicated: a colliding-key document stays in the path map, so
+    // the bare tokens its own text defines still resolve to Local; its key still collides.
+    #[test]
+    fn a_colliding_key_document_still_resolves_its_own_bare_tokens() {
+        let ix = KeyIndex::build(
+            repo(),
+            [doc("a/dup.md", "## T-1 — a\n"), doc("b/dup.md", "")],
+        );
+        let bare = Reference::Bare {
+            token: "T-1".into(),
+        };
+        assert_eq!(
+            ix.resolve("a/dup.md", &bare),
+            Resolution::Local {
+                token: "T-1".into()
+            }
+        );
+        assert_eq!(ix.resolve("b/dup.md", &bare), Resolution::NotLocal);
+        assert!(matches!(
+            ix.resolve("a/dup.md", &file("dup")),
+            Resolution::KeyCollision { .. }
+        ));
     }
 
     // Ruling 6: an entry reference needs a known key first, then the candidates decide.
