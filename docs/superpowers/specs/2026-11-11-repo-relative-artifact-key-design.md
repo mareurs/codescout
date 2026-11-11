@@ -1,6 +1,6 @@
 # Artifact identity and storage: committed files are the only store (design)
 
-**Status:** draft v4, 2026-11-11. The operator accepted the governing principle on
+**Status:** draft v5, 2026-11-11. The operator accepted the governing principle on
 2026-11-11; § Decision log records every decision. Source tracker:
 `docs/trackers/temp/artifact-identity-refactor.md`. Session log:
 `docs/trackers/artifact-identity-session-log.md`. The parallel tracker-organization session
@@ -128,9 +128,9 @@ Every state class has one committed home. Nothing in the catalog lacks one.
 | Augmentation prompt, schema, render template | yes | a committed sidecar per document, extending what `export_augmentations` writes today |
 | `field_patch` events (11,346) | yes | none needed: git history of the file records more (the diff) |
 | `status_change`, `superseded_by` events | yes | the frontmatter field, with git history as its log |
-| `note`, `verdict`, `intent`, `reviewed`, `external_signal` events (73) | yes | text in the document, in a section the event writer appends to |
+| `note`, `verdict`, `intent`, `reviewed`, `external_signal` events (73) | yes | in a single-writer document, a section of that document; on a shared document (a collection index, a long ledger), an entry document of its own (`entry_kind: note` in `codescout-37`'s format) |
 | `worktree_fork` / `worktree_merge` events (111) | yes | none: the worktree overlay is removed |
-| Observations (57) | yes | text in the document, as for notes |
+| Observations (57) | yes | as for notes |
 | Entry reservations / high-water marks | partly (frontmatter holds `entry_high_water_*`) | frontmatter, or none if `codescout-37` chooses per-entry files |
 | Write-time `cites` | yes (13 `origin='write'` rows) | grammar text inside the entry |
 | Manual links (`doc(link)`) | yes | grammar text in the source document, under a rel label |
@@ -139,14 +139,28 @@ Every state class has one committed home. Nothing in the catalog lacks one.
 The catalog keeps only derived data: the document index, the parsed entries, the edge
 graph, git-history caches, and embedding vectors keyed by content hash.
 
+**Single-writer rule.** A write tool may append to a section only in a document that one
+writer owns (an entry file, a session's own log). Two sessions appending at the end of the
+same section of a shared document produce an add/add conflict, which breaks contract
+requirement 2. Anything appended to a shared document becomes a document of its own.
+
+**Frontmatter holds scalars only** (status, dates, kind, `entry_kind`). Every relation is a
+labelled grammar line in the body, for example `**Rests on:** [[key]]`. `link_scan` parses
+bodies, never frontmatter, because `[[foo]]` in YAML is a nested list, not text.
+
 ### Identity: the key
 
-- **The key is the filename stem.** Filenames are canonical keys: `[a-z0-9]+(-[a-z0-9]+)*`.
-  `doc(create)` and `doc(move)` refuse a non-canonical name; existing files are renamed
-  once, during the cutover. There is no normalization layer: key and stem are the same
-  string, byte for byte.
-- **Folder-index files** take their folder's name: one fixed filename (`index.md`; the
-  exact name is `codescout-37`'s to choose) makes a folder a document.
+- **The key is the filename stem in lowercase,** and it must match
+  `[a-z0-9]+(-[a-z0-9]+)*`. Every file the librarian creates or moves already has a
+  lowercase canonical name, so for those the key is the stem byte for byte. Files whose
+  names other tools fix (`CLAUDE.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`,
+  `SKILL.md`) keep their names; lowercasing is the only mapping, so `CLAUDE.md` has the key
+  `claude`. `doc(create)` and `doc(move)` refuse a name whose lowercase stem is not
+  canonical; other non-canonical names are renamed once, during the cutover. Lowercasing is
+  deterministic and needs no collision rule beyond uniqueness.
+- **Folder-index files** take their folder's name. The folder-index filename is
+  `readme.md` (`codescout-37`'s choice: a forge renders a readme in the folder view), matched
+  case-insensitively, so an existing `README.md` is also a folder index.
 - **Unique per repo.** Two catalogued documents in one repo never share a key. `doc(create)`
   and `doc(move)` refuse a collision and name the other file; `doctor` and a pre-commit check
   catch one that arrives another way. There is no `Ambiguous` outcome for a key.
@@ -203,7 +217,9 @@ One closed grammar for every reference to a document or an entry:
 Every write tool writes files, then reindexes what it wrote:
 
 - `append_entry` writes the entry into the markdown, including its `cites` as grammar text.
-- `event_create` appends the event's text to the document's event section.
+- `event_create` appends the event's text to the document's event section when one writer
+  owns the document; on a shared document it creates an entry document of its own
+  (single-writer rule).
 - `doc(link)` writes the labelled grammar reference into the source document.
 - `doc(update)` writes frontmatter or body; git records the change.
 - `doc(augment)` writes the committed sidecar.
@@ -232,7 +248,8 @@ Every write tool writes files, then reindexes what it wrote:
 
 What this design requires of any ledger format `codescout-37` defines:
 
-1. Every entry exists as markdown that defines its token; no entry exists only in params.
+1. Every entry exists as markdown: a section that defines its token, or a document of its
+   own (cited `[[key]]`). No entry exists only in params.
 2. Two sessions appending entries concurrently produce a trivial git merge.
 3. An entry's citations are written in the grammar.
 4. Archiving an entry keeps it under its ledger's key (an `archive/` subfolder without an
@@ -256,8 +273,12 @@ tables, and the two-shape `entry_cite.dst_ref`.
    later one.
 2. **Rename.** Non-canonical filenames and key collisions are renamed, with citations
    rewritten.
-3. **Rewrite citations.** Resolvable `<stem>:TOKEN`, path links to catalogued documents and
-   16-hex ids become grammar forms. Stale hex ids that git history recovers
+3. **Rewrite citations.** Resolvable `<stem>:TOKEN`, path links to catalogued documents,
+   16-hex ids, and bare tokens cited outside their own document become grammar forms. A
+   bare cross-document token is rewritten to `[[owner-key:TOKEN]]` when it has exactly one
+   owner today; one with several owners (most bare `F-n`/`W-n`) is reported, not guessed.
+   An entry migrated into its own file keeps its legacy heading under the ledger folder, so
+   `[[ledger-key:TOKEN]]` resolves by ownership in either migration order. Stale hex ids that git history recovers
    (`sha256(<root>/<old path>)[:16]`: 160 of 335 distinct) are rewritten too; the rest are
    reported.
 4. **New catalog file.** The new binary builds a new catalog file from the files, so an
@@ -271,8 +292,11 @@ tables, and the two-shape `entry_cite.dst_ref`.
 
 ## Left to the builder
 
-- The sidecar format for augmentation shapes, and the section format for events and
-  observations inside a document.
+- The sidecar format for augmentation shapes. It only has to carry legacy augmentations: a
+  collection in `codescout-37`'s format keeps its schema in its readme frontmatter, its
+  standing instructions in readme prose, and renders its table on read, so it needs no
+  augmentation at all.
+- The section format for events and observations inside a single-writer document.
 - The rel-label vocabulary for manual links.
 - Table and column names of the derived catalog, and the git-history cache.
 - The pre-commit check for key collisions and non-canonical names.
@@ -295,8 +319,9 @@ Operator, 2026-11-11:
 
 Designer's calls, open to correction:
 
-- Filenames are canonical keys, so there is no normalization layer (supersedes the earlier
-  operator choice to normalize, which existed only to avoid renaming files).
+- Filenames are canonical keys; the only mapping is lowercasing, for names other tools fix
+  (supersedes the earlier operator choice to normalize, which existed only to avoid
+  renaming files).
 - Keys are unique per repo, enforced at write time; there is no collision fallback and no
   `Ambiguous` key outcome.
 - One closed citation grammar; a bare token is local to its document; paths and hex ids are
@@ -304,6 +329,12 @@ Designer's calls, open to correction:
 - A folder key owns its descendants' tokens; the nearest folder-index ancestor wins (from
   `codescout-37`'s review).
 - The catalog audit tables are retired in favour of git history with `Session-Id` trailers.
+- The key is the lowercase stem; names fixed by other tools keep their case (v5, after
+  `codescout-37`'s `readme.md` choice exposed that `CLAUDE.md` cannot be renamed).
+- Append sections only in single-writer documents; frontmatter holds scalars only and
+  relations live in the body (from `codescout-37`'s v4 review).
+- The cutover rewrites bare cross-document tokens that have one owner (from
+  `codescout-37`'s v4 review).
 - The cutover builds a new catalog file.
 
 Superseded by v4: the internal ULID, `.codescout/aliases.tsv`, the normalization layer, the
