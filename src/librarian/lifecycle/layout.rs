@@ -75,9 +75,6 @@ pub enum PlacementError {
     NotMarkdown(String),
     /// The file sits directly under a lifecycle folder (or its `archive/`), in no collection.
     OutsideCollection(String),
-    /// The file sits in a subfolder that holds its own `readme.md`. `place` cannot see
-    /// siblings, so [`has_nested_readme`] is how a caller finds this case.
-    NestedCollection(String),
     /// A name that must be a key is not one: the collection folder name, or an entry file's
     /// stem. `rel_path` is the FILE's repo-relative path in both cases, so a problem names the
     /// file to fix; `error` carries the offending name.
