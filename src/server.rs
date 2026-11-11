@@ -2140,7 +2140,8 @@ impl CodeScoutServer {
             recorded_session,
             asserted_agent,
             asserted_tool_use_id,
-        );
+        )
+        .with_client(client.as_ref().map(|c| c.name.clone()));
         let input_for_record = input.clone();
 
         // Acquire the write guard if this is a mutating call. Read calls skip

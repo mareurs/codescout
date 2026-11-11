@@ -59,6 +59,9 @@ pub struct UsageRecorder {
     /// The `claudecode/toolUseId` the server read from this request's `_meta`, if any.
     /// Record-only — see `db::MeasurementLinkage`.
     tool_use_id: Option<String>,
+    /// The `clientInfo.name` of the MCP client that made the call, set by the server through
+    /// `with_client`. Record-only; `None` when the caller did not set it.
+    client_name: Option<String>,
 }
 
 impl UsageRecorder {
@@ -77,7 +80,16 @@ impl UsageRecorder {
             cc_session_id,
             agent_id,
             tool_use_id,
+            client_name: None,
         }
+    }
+    /// Name the MCP client that made this call (`clientInfo.name` from the `initialize`
+    /// handshake), so the row says which harness produced it. A builder method, not a `new`
+    /// argument: the client is known only at the server's call site, and `new` has many other
+    /// callers that have no handshake.
+    pub fn with_client(mut self, client_name: Option<String>) -> Self {
+        self.client_name = client_name;
+        self
     }
 
     /// Record a tool call's telemetry against the project named by
@@ -401,6 +413,7 @@ impl UsageRecorder {
                 output_bytes: facts.output_bytes,
                 command_exit: facts.command_exit,
                 command_timed_out: facts.command_timed_out,
+                client_name: self.client_name.as_deref(),
             },
         )?;
         Ok(())
@@ -2005,6 +2018,92 @@ mod content_tests {
             tool_use_id.as_deref(),
             Some("toolu_01X"),
             "the tool_use_id must be recorded even though debug is off"
+        );
+    }
+    /// Wiring, not logic (`result_facts` is pinned on its own): through `record_content`, with
+    /// debug OFF, a `run_command` result's exit code and size and the client the server named
+    /// all land in their columns while `output_json` stays NULL. A recorder nobody told about
+    /// a client records NULL, never a stand-in name.
+    #[tokio::test]
+    async fn record_content_records_result_facts_and_the_client_with_debug_off() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let named = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            None,
+        )
+        .with_client(Some("codex".to_string()));
+        let unnamed = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            None,
+        );
+
+        let body = r#"{"exit_code":7,"stdout":"nope"}"#;
+        let input = json!({"command": "false"});
+        let _ = named
+            .record_content("run_command", &input, None, || async {
+                Ok(vec![Content::text(body)])
+            })
+            .await;
+        let _ = unnamed
+            .record_content("grep", &json!({"pattern": "x"}), None, || async {
+                Ok(vec![Content::text("ok")])
+            })
+            .await;
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        type Row = (
+            String,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        );
+        let rows: Vec<Row> = conn
+            .prepare(
+                "SELECT tool_name, client_name, command_exit, command_timed_out, \
+                     output_bytes, output_json FROM tool_calls ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "run_command".to_string(),
+                    Some("codex".to_string()),
+                    Some(7),
+                    None,
+                    Some(body.len() as i64),
+                    None,
+                ),
+                ("grep".to_string(), None, None, None, Some(2), None),
+            ]
         );
     }
 

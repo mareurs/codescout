@@ -308,12 +308,19 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     //   command killed by a signal, whose result says `exit_code: null`.
     // - `command_timed_out` is the `timed_out` of a `run_command` result: 1 or 0 when the result
     //   has the key, NULL when it has none.
+    // - `client_name` is the `clientInfo.name` of the MCP client that made the call (for example
+    //   `claude-code` or `codex`), from the `initialize` handshake. It names the HARNESS, which no
+    //   other column does: a row cannot otherwise be split by client, and whether a server ran
+    //   with `--debug` depends on how its client launched it. NULL on a row written before this
+    //   migration, by an older build, or by an exit that never reached the recorder (a refused
+    //   `workspace=` pin).
     // A command failed when `command_exit` is non-zero or `command_timed_out` is 1. NULL is
     // "not recorded", never "passed".
     for (column, kind) in [
         ("output_bytes", "INTEGER"),
         ("command_exit", "INTEGER"),
         ("command_timed_out", "INTEGER"),
+        ("client_name", "TEXT"),
     ] {
         let present = conn
             .prepare(&format!("SELECT {column} FROM tool_calls LIMIT 0"))
@@ -466,6 +473,9 @@ pub struct MeasurementLinkage<'a> {
     pub command_exit: Option<i64>,
     /// The `timed_out` of a `run_command` result; `None` when the result has no such key.
     pub command_timed_out: Option<bool>,
+    /// The `clientInfo.name` of the MCP client that made the call; `None` when the call did
+    /// not reach the recorder with a handshake. See the `client_name` note in `open_db`.
+    pub client_name: Option<&'a str>,
 }
 
 /// The current UTC instant in the exact textual shape `write_record`'s
@@ -581,8 +591,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
         // lexicographic compare against a `datetime()`-shaped literal, and the shared
         // prefix is fixed-width, so a `.SSS` suffix always sorts after the same second
         // and before the next one.
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class, tool_use_id, deliveries_json, observed_changed, attribution_outcome, attribution_ms, output_bytes, command_exit, command_timed_out)
-                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class, tool_use_id, deliveries_json, observed_changed, attribution_outcome, attribution_ms, output_bytes, command_exit, command_timed_out, client_name)
+                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
         params![
             tool_name,
             latency_ms,
@@ -613,6 +623,7 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             measurement.output_bytes,
             measurement.command_exit,
             measurement.command_timed_out.map(i64::from),
+            measurement.client_name,
             ],
     )?;
     note_lock_hold(
