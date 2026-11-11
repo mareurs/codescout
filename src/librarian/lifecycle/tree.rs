@@ -57,8 +57,10 @@ pub enum TreeProblem {
     /// An entry with no collection readme above it.
     OrphanEntry(String),
     /// A collection readme whose schema fails; the collection and its entries are left out.
+    /// `rel_path` is the readme's repo-relative path.
     Schema {
         collection: Key,
+        rel_path: String,
         errors: Vec<SchemaError>,
     },
     /// An entry whose frontmatter does not parse as an entry; it is left out of `entries`
@@ -175,6 +177,7 @@ impl LifecycleTree {
                     Err(errors) => {
                         problems.push(TreeProblem::Schema {
                             collection: placement.collection,
+                            rel_path: doc.rel_path.clone(),
                             errors,
                         });
                         failed.insert(placement.collection_dir);
@@ -437,6 +440,7 @@ mod tests {
             t.problems,
             [TreeProblem::Schema {
                 collection: k("s"),
+                rel_path: "docs/trackers/streams/s/readme.md".into(),
                 errors: vec![SchemaError::ExitRequired]
             }]
         );

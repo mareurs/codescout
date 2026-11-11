@@ -120,9 +120,9 @@ pub enum Finding {
         #[serde(serialize_with = "key_as_str")]
         collection: Key,
     },
-    /// Something wrong at collection level, not on one entry's fields. `subject` is the
-    /// collection key for `CollectionProblem::Schema`, otherwise the repo-relative path of the
-    /// file at fault.
+    /// Something wrong at collection level, not on one entry's fields. `subject` is always the
+    /// repo-relative path of the file at fault: the collection's readme for a
+    /// `CollectionProblem::Schema`.
     CollectionInvalid {
         subject: String,
         problem: CollectionProblem,
@@ -217,7 +217,7 @@ impl Finding {
 }
 
 /// One line: `<check_name>: <subject> — <detail>`, the subject being the entry key, the collection
-/// key or the path.
+/// key or the path (`CollectionInvalid` and `OrphanEntry` name a file, the others a key).
 ///
 /// The line is one line whatever the finding holds: text that comes from outside the crate (a
 /// YAML status word, a file name git lists) may carry a control character, and each one is
@@ -408,10 +408,12 @@ pub fn check(tree: &LifecycleTree, today: NaiveDate, policy: &CheckPolicy) -> Ve
                 rel_path,
                 CollectionProblem::Frontmatter(detail.clone()),
             )),
-            TreeProblem::Schema { collection, errors } => {
+            TreeProblem::Schema {
+                rel_path, errors, ..
+            } => {
                 for error in errors {
                     out.push(collection_invalid(
-                        collection.as_str(),
+                        rel_path,
                         CollectionProblem::Schema(error.clone()),
                     ));
                 }
@@ -754,7 +756,7 @@ mod tests {
         assert_eq!(
             f,
             [Finding::CollectionInvalid {
-                subject: "s".into(),
+                subject: "docs/trackers/streams/s/readme.md".into(),
                 problem: CollectionProblem::Schema(SchemaError::ExitRequired)
             }]
         );
@@ -769,11 +771,11 @@ mod tests {
             f,
             [
                 Finding::CollectionInvalid {
-                    subject: "s".into(),
+                    subject: "docs/trackers/streams/s/readme.md".into(),
                     problem: CollectionProblem::Schema(SchemaError::MissingKey("initial_status"))
                 },
                 Finding::CollectionInvalid {
-                    subject: "s".into(),
+                    subject: "docs/trackers/streams/s/readme.md".into(),
                     problem: CollectionProblem::Schema(SchemaError::ExitRequired)
                 }
             ]
@@ -798,7 +800,7 @@ mod tests {
             },
             Finding::StreamAllTerminal { collection: k("s") },
             Finding::CollectionInvalid {
-                subject: "s".into(),
+                subject: "docs/trackers/streams/s/readme.md".into(),
                 problem: CollectionProblem::Schema(SchemaError::ExitRequired),
             },
             Finding::LedgerQuiet {
@@ -830,7 +832,7 @@ mod tests {
             "2026-10-01-waits",
             "2026-10-01-cites",
             "s",
-            "s",
+            "docs/trackers/streams/s/readme.md",
             "l",
             "2026-10-01-old",
             "docs/trackers/streams/no-readme/2026-10-01-lost.md",
@@ -1012,12 +1014,12 @@ mod tests {
             r#"{"check":"entry_invalid","entry":"2026-10-01-bad","problem":{"status_undeclared":"x"}}"#
         );
         let collection_invalid = Finding::CollectionInvalid {
-            subject: "s".into(),
+            subject: "docs/trackers/streams/s/readme.md".into(),
             problem: CollectionProblem::Schema(SchemaError::ExitRequired),
         };
         assert_eq!(
             serde_json::to_string(&collection_invalid).unwrap(),
-            r#"{"check":"collection_invalid","subject":"s","problem":{"schema":"exit_required"}}"#
+            r#"{"check":"collection_invalid","subject":"docs/trackers/streams/s/readme.md","problem":{"schema":"exit_required"}}"#
         );
         for finding in one_of_each() {
             let value = serde_json::to_value(&finding).unwrap();
@@ -1076,7 +1078,7 @@ mod tests {
         assert_eq!(
             f,
             [Finding::CollectionInvalid {
-                subject: "l".into(),
+                subject: "docs/trackers/ledgers/l/readme.md".into(),
                 problem: CollectionProblem::Schema(SchemaError::ExitRefused)
             }]
         );
@@ -1157,7 +1159,7 @@ mod tests {
         };
         assert_eq!(
             subjects_of(|p| matches!(p, CollectionProblem::Schema(_))),
-            ["noexit"]
+            ["docs/trackers/streams/noexit/readme.md"]
         );
         assert_eq!(
             subjects_of(|p| matches!(p, CollectionProblem::Frontmatter(_))),
