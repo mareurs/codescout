@@ -32,6 +32,12 @@
 /.codescout/librarian.db
 /.codescout/librarian.db-wal
 /.codescout/librarian.db-shm
+# Native-provenance fence state (counter + lock): runtime files codescout writes into the active
+# project's .codescout/. Unignored they were untracked in every worktree a write tool ran in, and
+# `git worktree remove` refuses a worktree with untracked files. See
+# docs/issues/2026-11-12-git-worktree-remove-refuses-after-codescout-and-agent-briefs-leave-untracked-files-in-a-worktree.md
+/.codescout/native-provenance-v1.counter
+/.codescout/native-provenance-v1.lock
 # The same files again, for any crate with its own .codescout/ (one activated as its own project).
 # Enumerated for the reason the "NOT ignored, deliberately" note above gives, and NOT a blanket
 # rule plus a negation either: git will not descend into an excluded directory to reconsider one.
@@ -58,6 +64,8 @@ crates/*/.codescout/librarian.db-shm
 crates/*/.codescout/librarian.db-wal
 crates/*/.codescout/libraries.json
 crates/*/.codescout/mutations/
+crates/*/.codescout/native-provenance-v1.counter
+crates/*/.codescout/native-provenance-v1.lock
 crates/*/.codescout/peer-audit.jsonl
 crates/*/.codescout/peers.toml
 crates/*/.codescout/private-memories/

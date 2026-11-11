@@ -60,9 +60,9 @@ None yet. To try: which tool call first creates the two `native-provenance-v1` f
 
 ## Fix
 
-Proposals, none applied:
+Proposals; item 1 is applied, items 2 and 3 are not:
 
-1. Add `/.codescout/native-provenance-v1.counter` and `/.codescout/native-provenance-v1.lock` to `.gitignore`, with the crates twin rules that the gate `every_root_codescout_ignore_rule_has_its_crates_twin` requires.
+1. **Applied 2026-11-12:** `/.codescout/native-provenance-v1.counter` and `/.codescout/native-provenance-v1.lock` are in `.gitignore`, with the `crates/*/` twin rules that the gate `every_root_codescout_ignore_rule_has_its_crates_twin` requires (find the commit with `git log -S native-provenance-v1 -- .gitignore`). `git check-ignore -v` matches all three paths, and `tests/hook_config.rs` passes (12 of 12). This removes the refusal caused by those two files. It does not cover `.codescout/embeddings` (untracked in plan-a, cause unverified), a scratch file named outside `.superpowers/`, or the leftover directory after a forced removal, so the bug stays open.
 2. Brief templates for subagents must name scratch files only under `.superpowers/` (git-ignored). Applies to the superpowers workflow, not to this repo.
 3. Consider a documented safe-removal recipe or a helper that checks `git status --porcelain --ignored`, removes only regenerable files, and then runs `git worktree remove`.
 
@@ -76,7 +76,7 @@ N/A — not fixed. A regression check would be a test that creates a worktree, r
 
 ## Resume
 
-Not taken. Start with fix 1, which is one `.gitignore` edit plus its twin rules.
+Fix 1 is done. Next: find what recreates `.codescout` and `target` inside a worktree while it is removed, and whether `.codescout/embeddings` can be a symlink; then fixes 2 and 3.
 
 ## References
 
