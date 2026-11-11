@@ -278,6 +278,34 @@ async fn second_call_after_a_deadline_hit_does_not_wait_again() {
     assert!(!w.contains("waited"), "{w}");
 }
 
+/// FR-1. With a settled server and text hits elsewhere, the warning names what was proven (the
+/// LSP answer, the scan hits) and both explanations the scan cannot tell apart. It must not
+/// assert a cause that nothing checked: 12 of 12 flagged symbols re-read in the 2026-10-12..11-10
+/// window had only same-named locals, comments or tests in the "other files".
+/// docs/trackers/frictions/references-zero-warning-blames-a-warming-index.md
+#[tokio::test]
+async fn the_zero_with_scan_hits_warning_does_not_assert_a_warming_index() {
+    let fx = fixture(true, |d, _| vec![vec![d.clone()]; 10_000]).await;
+    let _ = call(&fx, Duration::from_millis(200)).await;
+
+    let (result, _) = call(&fx, Duration::from_secs(30)).await;
+
+    let w = warning(&result);
+    assert!(w.contains("outside the definition file"), "{w}");
+    assert!(
+        !w.contains("may still be warming"),
+        "a cause nothing checked must not be stated: {w}"
+    );
+    assert!(
+        w.contains("same-named local") && w.contains("not complete yet"),
+        "both explanations the scan cannot separate must be named: {w}"
+    );
+    assert!(
+        w.contains("corroborate with grep"),
+        "the next step stays: {w}"
+    );
+}
+
 /// (d) A genuinely unused symbol: the declaration alone, and no other file names it. Nothing to
 /// wait for, so one attempt, no warning, and the wait is marked spent.
 #[tokio::test]
