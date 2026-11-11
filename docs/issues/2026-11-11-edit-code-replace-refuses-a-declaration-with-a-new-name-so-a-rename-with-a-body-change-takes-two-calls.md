@@ -1,17 +1,18 @@
 ---
 id: c9abdc5134bebce1
 kind: bug
-status: open
+status: mitigated
 title: edit_code replace refuses a declaration with a new name, so a rename that also changes the body takes two calls
 tags:
 - cluster/unclassified
 - edit-code
+closed: 2026-11-11
 opened: 2026-11-11
 owner: marius
 related:
 - be1321a7959b5b23
 severity: low
-unverified: Usage figures are from one checkout's usage.db and cover every agent that ran against it, not one user. The ledger counts 25 sessions where my query gives 18 for the same window; not reconciled. The next-three-calls reading does not prove that each call repaired the refused edit. The time lost per refusal was not measured. rename was not tried in the exact half-edited state of the real case. The reproduction used a function with no callers.
+unverified: 'The effect on agents is not measured: the hint carries the calls, but the refused call and the two that follow it remain, so the cost per refusal is unchanged in calls. A running server shows the new hint only after a rebuild and /mcp. The baseline for a re-measure is in Resume. Usage figures are from one checkout''s usage.db and cover every agent that ran against it, not one user. The ledger counts 25 sessions where my query gives 18 for the same window; not reconciled. The next-three-calls reading does not prove that each call repaired the refused edit. The time lost per refusal was not measured. rename was not tried in the exact half-edited state of the real case. The reproduction used a function with no callers.'
 ---
 
 # BUG: edit_code replace refuses a declaration with a new name, so a rename that also changes the body takes two calls
@@ -51,7 +52,7 @@ By design. Read at the bytes:
 
 - `src/tools/symbol/edit_code.rs:1504`: `CorruptionVerdict::TargetRenamed(new_name)` builds the message above.
 - `src/usage/db.rs:794`: the usage log classifies it as `err_family = "replace_would_rename"`, with a comment that distinguishes it from `replace_dropped_sibling`.
-- `src/symbol/tests.rs:7535` (a test comment): the remedy in the hint is pinned by an assertion on "the callable form", "measured 2026-09-13 by deleting the routing from the hint, which left that assertion GREEN". So the guard and its hint have already been measured once.
+- `src/tools/symbol/tests.rs`, `a_replace_whose_body_renames_is_told_to_use_rename` (a test comment): the remedy in the hint is pinned by an assertion on "the callable form", "measured 2026-09-13 by deleting the routing from the hint, which left that assertion GREEN". So the guard and its hint have already been measured once.
 
 ## Evidence
 
@@ -72,11 +73,33 @@ Script: `usage-replace-would-rename.py` in the session scratchpad (not in the re
 
 ## Fix
 
-Pending, for the owner; the project's current position is (3), because the frictions ledger lists the gate as healthy. Candidates, none tried: (1) let `replace` take an explicit `new_name` and perform `rename` and then the body replacement, in one call (a cost: `replace` is a single-file edit today and `rename` writes to other files); (2) keep the refusal and make the guide for `edit_code` say it before the first use, so the refused call is not needed; (3) accept the cost: 46 refused calls in 29 days across all agents.
+Candidates listed when the bug was opened, none tried then: (1) let `replace` take an explicit `new_name` and perform `rename` and then the body replacement, in one call (a cost: `replace` is a single-file edit today and `rename` writes to other files); (2) keep the refusal and make the guide for `edit_code` say it before the first use, so the refused call is not needed; (3) accept the cost: 46 refused calls in 29 days across all agents.
+
+Before this change the project's position was (3), because the frictions ledger lists the gate as healthy. Chosen on 2026-11-11, after the measurements in Evidence: none of the three candidates as listed. The refusal stays, and its hint carries the calls ready to send.
+
+- `replace_would_rename_reason` in `src/tools/symbol/edit_code.rs` builds the hint for `CorruptionVerdict::TargetRenamed`: a `rename` call with this call's `symbol`, `path` and the last segment of the declared name path as `new_name`, then a `replace` call on the renamed symbol, addressed in the caller's own name-path form. `TargetRenamed` holds a name path (`Agent/new`), not a bare name, so the helper takes the last segment; building the second symbol from the payload would give `Agent/Agent/new` (`bug-fix-session-log` W-159).
+- `replace_by_several_reason`, same file, does the same for `CorruptionVerdict::TargetReplacedBySeveral`: `replace` with only the target's declaration, `insert` after it, or `rename`.
+- The refusal message text is unchanged, so `usage::db::normalize_err_family` still files it under `replace_would_rename`.
+
+What this does not do: it does not remove the extra call. A caller still sends the refused `replace`, then `rename`, then `replace`. It removes the work of rebuilding the arguments of the calls that follow. Candidate (1), a `new_name` on `replace`, was rejected because it joins a single-file edit to a multi-file LSP write and leaves a half-done state if the second step fails. A repair that runs the rename on its own was rejected because the body has two readings (rename `X` to `Y`, or delete `X` and add an unrelated `Y`), and the guard exists for the second.
+
+## Fix provenance
+
+- **SHA:** `3cd876b1c` (`experiments`)
+- **patch-id:** `44f4f399f9cc390dd0ade93131ce08ec14199295`
+- **SHA:** `9c96ac3e1` (`experiments`)
+- **patch-id:** `5884ca8ba391b363ce611c36b3d2b296f2a226a2`
 
 ## Tests added
 
-None.
+In `src/tools/symbol/tests.rs`:
+
+- `the_rename_refusal_hint_carries_both_calls_ready_to_send`: red on the old hint (`symbol=..., new_name=...`), green after.
+- `the_rename_refusal_hint_for_a_nested_symbol_does_not_double_the_parent`: red on the old hint, green after.
+- `the_rename_refusal_stays_in_its_telemetry_family_whatever_the_names_say`: a control. It passed before and after, and guards the `usage.db` family against names that hold another family's phrase.
+- `the_several_symbols_refusal_hint_carries_its_calls_ready_to_send`: red on the old hint, green after.
+
+No mutation was run on these tests.
 
 ## Workarounds
 
@@ -84,7 +107,13 @@ Send `rename` first, then `replace` on the new name. Or change the name on the d
 
 ## Resume
 
-Open, low severity, recorded on request with evidence, and NOT added to the frictions ledger as an `FR-N` entry: the ledger deliberately keeps this gate under "Healthy", and my numbers agree with it. The owner decides between closing this as `wontfix` (the ledger's position) and implementing candidate (1). Not measured: the time lost per refusal, whether the agents that fell back to `edit_file` did so because `rename` looked unsafe, how many of the 46 were followed by a successful repair of the same edit. Related: `docs/trackers/frictions/index.md` (`be1321a7959b5b23`), `docs/research/2026-11-11-usage-stats-baseline.md`, the archived bug of 2026-09-13, and the FR-13 detail file on a Python variant of the same message.
+Open as `mitigated`, low severity. NOT added to the frictions ledger as an `FR-N` entry: the ledger deliberately keeps this gate under "Healthy", and my numbers agree with it. Not measured: the time lost per refusal, whether the agents that fell back to `edit_file` did so because `rename` looked unsafe, how many of the 46 were followed by a successful repair of the same edit. Related: `docs/trackers/frictions/index.md` (`be1321a7959b5b23`), `docs/research/2026-11-11-usage-stats-baseline.md`, the archived bug of 2026-09-13, and the FR-13 detail file on a Python variant of the same message.
+
+Next action: after a build that carries `3cd876b1c` and `9c96ac3e1` has run for about two weeks, re-run the query in Evidence on `.codescout/usage.db` for `err_family = 'replace_would_rename'`, counting only rows whose `codescout_sha` is that build or later.
+
+Baseline, 2026-10-13 to 2026-11-11: 46 refusals in 38 sessions, 2.4% of 1932 `replace` calls; 18 followed by `edit_code rename` as the next `edit_code` call; 5 followed by an `edit_code` call that ended `recoverable_error` (4 `insert`, 1 `replace`). The hint can change the last number: a caller that has the arguments should send fewer wrong calls. It cannot change the first two.
+
+Move to `fixed` only if the count of next calls that ended `recoverable_error` falls. If it does not, the hint is not what makes agents fail after a refusal. Candidate (2) or (3) in Fix is then the next choice. Other refusals of `replace` in `src/tools/symbol/edit_code.rs` still carry `symbol=...` placeholders, searched for on 2026-11-11: the shrink-guard hint (`edit_code(action="replace", symbol=..., path=..., body=..., force=true)`) and the `TargetDropped` hint (`symbols(symbol=..., include_body=true)`). They name calls whose arguments the tool also holds. They were not changed: neither belongs to the rename refusal this file records, and no count of them was taken.
 
 ## References
 
