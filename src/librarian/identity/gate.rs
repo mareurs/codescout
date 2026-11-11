@@ -38,10 +38,11 @@ pub enum GateProblem {
     InvalidKey(KeyError),
     /// Two or more paths inside the key space with one key; `rel_paths` lists them all, sorted.
     DuplicateKey { key: Key, rel_paths: Vec<String> },
-    /// A folder index (`readme.md`) is outside the key space while a sibling in the same
-    /// folder is inside it. `folder` is the folder, relative to the git root and normalised
-    /// (`""` is the git root). The siblings keep the folder-index ownership they would lose
-    /// if the exclusion were honoured silently, so the gate asks for the whole folder instead.
+    /// A folder index (`readme.md`) is outside the key space while a file it would own is
+    /// inside it: a file at any depth under the folder, or, for the repo root, a file beside
+    /// the index. `folder` is the folder, relative to the git root and normalised (`""` is the
+    /// git root). Those files would silently fall to the next index up, so the gate asks for
+    /// the whole folder instead.
     PartialFolderExclusion { folder: String },
 }
 
@@ -86,8 +87,8 @@ impl GateProblem {
                     format!("the folder {folder:?}")
                 };
                 format!(
-                    "the readme.md of {place} is outside the key space while a sibling document is \
-                     inside it; exclude the whole folder in {KEY_SPACE_FILE_REL}, or none of it"
+                    "the readme.md of {place} is outside the key space while files under that folder \
+                     are inside it; exclude the whole folder in {KEY_SPACE_FILE_REL}, or none of it"
                 )
             }
         }
@@ -145,6 +146,28 @@ fn folder_of(rel_path: &str) -> String {
     parts[..parts.len().saturating_sub(1)].join("/")
 }
 
+/// The folders whose folder index is outside the key space while a document the index would
+/// own is inside it. Below the root that is any inside path under the folder, at any depth: a
+/// document in a subfolder with no index of its own would otherwise fall to the next index up
+/// the nearest-index walk. A root index owns every document in the repo, so excluding it is
+/// ordinary; there only a same-directory sibling counts.
+fn partial_exclusions(outside: &[&str], inside: &[&str]) -> BTreeSet<String> {
+    let inside: Vec<String> = inside.iter().map(|p| components(p).join("/")).collect();
+    outside
+        .iter()
+        .filter(|p| is_folder_index(p))
+        .map(|p| folder_of(p))
+        .filter(|folder| {
+            if folder.is_empty() {
+                inside.iter().any(|p| !p.contains('/'))
+            } else {
+                let under = format!("{folder}/");
+                inside.iter().any(|p| p.starts_with(&under))
+            }
+        })
+        .collect()
+}
+
 /// Check the keys of `md_files`, the git-root-relative `.md` paths of one tree.
 ///
 /// The result does not depend on the order of `md_files`, and a path listed twice counts once.
@@ -167,13 +190,7 @@ pub fn check_tree(this_repo: RepoName, space: &KeySpace, md_files: &[String]) ->
         .map(GateProblem::from)
         .collect();
 
-    let inside_folders: HashSet<String> = inside.iter().map(|p| folder_of(p)).collect();
-    let partial: BTreeSet<String> = outside
-        .iter()
-        .filter(|p| is_folder_index(p))
-        .map(|p| folder_of(p))
-        .filter(|folder| inside_folders.contains(folder))
-        .collect();
+    let partial = partial_exclusions(&outside, &inside);
     problems.extend(
         partial
             .into_iter()
@@ -287,6 +304,58 @@ mod tests {
             r.problems,
             vec![GateProblem::PartialFolderExclusion { folder: "".into() }]
         );
+    }
+
+    #[test]
+    fn an_excluded_folder_index_beside_a_deeper_included_file_is_a_partial_exclusion() {
+        // `sub` has no index of its own: `a.md` would fall to `docs/readme.md` by the
+        // nearest-index walk once `docs/x/readme.md` is gone.
+        let paths = [
+            "docs/readme.md",
+            "docs/x/readme.md",
+            "docs/x/sub/a.md",
+            "docs/x/sub/deeper/b.md",
+        ];
+        let r = check(&["docs/x/readme.md"], &paths);
+        assert_eq!(
+            r.problems,
+            vec![GateProblem::PartialFolderExclusion {
+                folder: "docs/x".into()
+            }],
+            "one problem for the folder, not one per file"
+        );
+        // A folder whose name only shares a prefix with the excluded one is not under it.
+        let r = check(
+            &["docs/x/readme.md"],
+            &["docs/x/readme.md", "docs/xylophone/a.md"],
+        );
+        assert_eq!(r.problems, vec![]);
+    }
+
+    #[test]
+    fn an_excluded_folder_index_with_its_whole_subtree_excluded_is_clean() {
+        let paths = [
+            "docs/readme.md",
+            "docs/x/readme.md",
+            "docs/x/a.md",
+            "docs/x/sub/b.md",
+        ];
+        assert_eq!(check(&["docs/x"], &paths).problems, vec![]);
+        // Control: leaving one deeper file inside is a partial exclusion.
+        let r = check(&["docs/x/readme.md", "docs/x/a.md"], &paths);
+        assert_eq!(
+            r.problems,
+            vec![GateProblem::PartialFolderExclusion {
+                folder: "docs/x".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn an_excluded_root_index_with_only_deeper_files_inside_is_not_flagged() {
+        let r = check(&["README.md"], &["README.md", "docs/a.md", "docs/sub/b.md"]);
+        assert_eq!(r.problems, vec![]);
+        assert_eq!(r.outside, files(&["README.md"]));
     }
 
     #[test]
