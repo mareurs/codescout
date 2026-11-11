@@ -132,9 +132,20 @@ pub fn read(root: &Path) -> anyhow::Result<Option<RepoName>> {
     let path = root.join(REPO_FILE_REL);
     // Through the read door, judged against the project: a repo.toml that is a link out of the
     // repository is refused like a malformed one.
-    let text = match for_project(root).text(&path) {
+    let door = for_project(root);
+    let text = match door.text(&path) {
         Ok(t) => t,
-        Err(ReadError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(ReadError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+            // The door reports a dangling leaf link, and a `.codescout` link that leaves the
+            // repository, as "not found". Neither is an absent file: `write` must not follow
+            // them, so they are errors here and the caller never sees `None` for them.
+            return match door.refusal(&path) {
+                Some(refusal) => {
+                    Err(refusal).with_context(|| format!("reading {}", path.display()))
+                }
+                None => Ok(None),
+            };
+        }
         Err(e) => {
             return Err(e.into_anyhow()).with_context(|| format!("reading {}", path.display()));
         }
@@ -150,11 +161,18 @@ pub fn read(root: &Path) -> anyhow::Result<Option<RepoName>> {
 /// Write `.codescout/repo.toml` under `root`, creating `.codescout/` if needed.
 /// Returns the file path.
 pub fn write(root: &Path, name: &RepoName) -> anyhow::Result<PathBuf> {
+    use crate::librarian::util::{refuse_catalogued_path_outside_repo, write_catalogued_file};
+
     let path = root.join(REPO_FILE_REL);
+    let roots = [root.to_path_buf()];
+    // Judge the target before `create_dir_all` builds anything: a leaf link is never written
+    // through, and a `.codescout` link that leaves the repository is refused.
+    crate::librarian::util::refuse_write_through_symlink(&path)?;
+    refuse_catalogued_path_outside_repo(&roots, &path, "write")?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&path, format!("name = \"{name}\"\n"))
+    write_catalogued_file(&roots, &path, format!("name = \"{name}\"\n"))
         .with_context(|| format!("writing {}", path.display()))?;
     Ok(path)
 }
@@ -269,5 +287,45 @@ mod tests {
         )
         .unwrap();
         assert_eq!(suggest(&root).as_str(), "code-scout");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_repo_toml_link_is_refused_not_absent_and_never_written_through() {
+        let repo = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("elsewhere.toml");
+        std::fs::create_dir_all(repo.path().join(".codescout")).unwrap();
+        std::os::unix::fs::symlink(&target, repo.path().join(REPO_FILE_REL)).unwrap();
+
+        let err = format!("{:#}", read(repo.path()).unwrap_err());
+        assert!(err.contains("repo.toml"), "{err}");
+
+        let err = format!(
+            "{:#}",
+            write(repo.path(), &RepoName::parse("codescout").unwrap()).unwrap_err()
+        );
+        assert!(err.contains("repo.toml"), "{err}");
+        assert!(
+            !target.exists(),
+            "write followed the link and created its target"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_codescout_dir_linked_out_of_the_repo_is_refused_for_read_and_write() {
+        let repo = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), repo.path().join(".codescout")).unwrap();
+
+        let err = format!("{:#}", read(repo.path()).unwrap_err());
+        assert!(err.contains("repo.toml"), "{err}");
+
+        assert!(write(repo.path(), &RepoName::parse("codescout").unwrap()).is_err());
+        assert!(
+            !outside.path().join("repo.toml").exists(),
+            "write landed outside the repository"
+        );
     }
 }
