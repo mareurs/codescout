@@ -455,7 +455,6 @@ async fn callers_after_a_caller_appears_in_an_unnamed_file(invalidate_like_a_wri
 }
 
 #[tokio::test]
-#[ignore = "red on purpose: bug 489e013ddfd6c3fc, a caller added in a file the cached result does not name is not reported; remove this attribute with the fix"]
 async fn call_graph_reports_a_caller_added_in_a_file_the_cached_result_does_not_name() {
     callers_after_a_caller_appears_in_an_unnamed_file(false).await;
 }

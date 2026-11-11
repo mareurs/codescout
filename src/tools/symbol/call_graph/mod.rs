@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use crate::tools::symbol::call_edges::cache::{EdgeCache, ResolutionKey};
+use crate::tools::symbol::call_edges::cache::{EdgeCache, EpochCheck, ResolutionKey};
 use crate::tools::symbol::call_edges::resolver::{
     resolve_one_hop, Definition, Direction, Edge, EdgeSource,
 };
@@ -79,6 +79,10 @@ struct CachedResolver {
     scan_coverage: Mutex<ScanCoverage>,
     /// Recoverable failures after locating a node: empty edges do not prove absence.
     analysis_failures: Mutex<std::collections::BTreeSet<String>>,
+    /// The project-level epoch of the seed's language, computed once per tool call (see
+    /// [`EpochCheck`]): a cached resolution is reused only while the tree is the one it was
+    /// stored under.
+    epoch: EpochCheck,
 }
 
 /// Hard cap on files the Phase B workspace walk examines before giving up. Set so a
@@ -466,6 +470,7 @@ impl OneHopResolver for CachedResolver {
         let cached = {
             let conn = self.conn.lock().unwrap();
             EdgeCache::new(&conn, &self.project_id)
+                .with_epoch(self.epoch.clone())
                 .lookup_resolution(&key)
                 .map_err(|e| cache_error("reading", &self.root, e))?
         };
@@ -511,7 +516,7 @@ impl OneHopResolver for CachedResolver {
         };
         {
             let conn = self.conn.lock().unwrap();
-            let cache = EdgeCache::new(&conn, &self.project_id);
+            let cache = EdgeCache::new(&conn, &self.project_id).with_epoch(self.epoch.clone());
             cache
                 .upsert(&edges)
                 .map_err(|e| cache_error("writing to", &self.root, e))?;
@@ -764,6 +769,26 @@ impl Tool for CallGraph {
         let mut coverage = ScanCoverage::default();
         let mut analysis_failures = std::collections::BTreeSet::new();
 
+        // The epoch of the seed's language, once per call and BEFORE any analysis: a cached
+        // resolution is reused only while no source file of that language has changed, which
+        // catches a caller added in a file the resolution does not name (bug
+        // `489e013ddfd6c3fc`). `None` (a walk that could not cover the tree) means nothing is
+        // reused. Computed on a blocking thread: it walks the project.
+        let epoch = {
+            let walk_root = root.clone();
+            let seed_lang = crate::lsp::servers::ast_language_for_lsp_id(&lang).to_string();
+            tokio::task::spawn_blocking(move || {
+                crate::tools::symbol::scan_budget::language_epoch(
+                    &walk_root,
+                    &seed_lang,
+                    MAX_WORKSPACE_FILES_SCAN,
+                )
+            })
+            .await
+            .ok()
+            .flatten()
+            .map_or(EpochCheck::Unknown, EpochCheck::Known)
+        };
         for direction in &directions {
             let mut positions: HashMap<String, (PathBuf, u32, u32)> = HashMap::new();
             positions.insert(symbol.to_string(), (seed_path.clone(), seed_line, seed_col));
@@ -780,6 +805,7 @@ impl Tool for CallGraph {
                 scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
                 scan_coverage: Mutex::new(ScanCoverage::default()),
                 analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
+                epoch: epoch.clone(),
             };
 
             let result = bfs(&resolver, symbol, direction.clone(), cfg.clone()).await?;
@@ -1176,6 +1202,7 @@ mod tests {
             scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
             scan_coverage: Mutex::new(ScanCoverage::default()),
             analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
+            epoch: EpochCheck::Off,
         };
 
         let pos = resolver.lookup_pos("b").await;
@@ -1227,6 +1254,7 @@ mod tests {
             scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
             scan_coverage: Mutex::new(ScanCoverage::default()),
             analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
+            epoch: EpochCheck::Off,
         };
 
         let pos = resolver.lookup_pos("b").await;
@@ -1270,6 +1298,7 @@ mod tests {
             scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
             scan_coverage: Mutex::new(ScanCoverage::default()),
             analysis_failures: Mutex::new(std::collections::BTreeSet::new()),
+            epoch: EpochCheck::Off,
         }
     }
 

@@ -13,7 +13,7 @@ related:
 - '58a45860b802a477'
 - '4e7ec7bfc047ac7b'
 severity: medium
-unverified: 'Measured by hand in two scratch crates (callers direction, rust-analyzer, default transport; before and after the fix) and by test in both directions with a mock LSP. The residual (a caller added in a file the cached result does not name) is NOT fixed; it has a red #[ignore] test and was reproduced by hand. The cost of option (a) is a proxy (git ls-files plus a stat pass), not the real walker. A git checkout, a second session and other languages were not run. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity is my proposal.'
+unverified: Measured by hand in two scratch crates (callers direction, rust-analyzer, default transport) before the first fix, and by test in both directions with a mock LSP. The epoch (second fix) is verified by unit tests and by the mock-LSP callers test only; the manual callers sequence was NOT re-run against a binary that contains the epoch. The epoch cost is a proxy (git ls-files plus a stat pass); the real walker (scan_walk) was not timed on a large repository. A git checkout, a second session and languages other than Rust were not run. The epoch covers only files of the seed's language family, so a caller written in another language family is not detected. A walk cut short by its cap makes the epoch unknown, which turns the cache off for that call; this was tested but its frequency on real repositories was not measured. The shared-tree gate was red because of another session's uncommitted edits to edit_code.rs and tests.rs; the verdict below comes from a clean HEAD extract with my four files overlaid. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity is my proposal.
 ---
 
 # BUG: call_graph serves cached edges that an edit made outside codescout never invalidates
@@ -95,11 +95,19 @@ Partly done 2026-11-11, commit `5a7936984` (see `## Fix provenance`), by candida
 - `apply_schema` adds the column to a database that already has the table (`ALTER TABLE`, tolerating a second process that added it first).
 - Codescout's own write tools keep invalidating through `invalidate_file`; nothing about them changed.
 
-**Residual, not fixed:** an entry is valid while the files it NAMES are unchanged. A caller added in a file that the result does not mention (a new file, or an existing file with no call of the symbol) does not change any signed file, so the entry is still served and the caller is missing. That is the case that first showed the problem (`other.rs` did not exist when the entry was written). It has a red test (see `## Tests added`). Options, none tried: (a) a project-level epoch: a hash of `(relative path, len, mtime)` over the source files of the seed's language, computed once per `call_graph` call and stored with each resolution; (b) do not reuse a `callers` resolution across calls; (c) a file watcher in codescout, which does not exist today (`mark_file_dirty` marks only codescout's own writes).
+**Residual (fixed by the project-level epoch, see below):** an entry is valid while the files it NAMES are unchanged. A caller added in a file that the result does not mention (a new file, or an existing file with no call of the symbol) does not change any signed file, so the entry is still served and the caller is missing. That is the case that first showed the problem (`other.rs` did not exist when the entry was written). It had a red test (see `## Tests added`). Options considered: (a) a project-level epoch (implemented, below): a hash of `(relative path, len, mtime)` over the source files of the seed's language, computed once per `call_graph` call and stored with each resolution; (b) do not reuse a `callers` resolution across calls; (c) a file watcher in codescout, which does not exist today (`mark_file_dirty` marks only codescout's own writes).
 
 Cost of (a), measured 2026-11-11 on this repo (`epoch-cost.py`, tracked plus untracked files minus ignored): 547 `.rs` files; one `stat` pass over them 1.5 ms (warm cache, 5 runs); over 4226 files of four languages 14 ms; `git ls-files` for the 7283 listed files 22 ms. That is a proxy: the real walk would use the same walker as the `callers` fallback and was not timed. Every codescout write already deletes ALL resolutions of the project (`invalidate_file`'s second statement), so an epoch adds invalidation only for edits made outside codescout. A hash, not "newest mtime and count", because a replaced file with an older mtime (`cp -p`, `rsync -t`) would not raise the newest mtime. If the walk hits its scan cap the epoch is unknown and the resolution should not be reused.
 
 Small accepted window: the signatures are read after the analysis, so a file that changes while one analysis runs is stored with its new signature beside edges from its old content.
+
+**Epoch, implemented 2026-11-11 (option (a), second commit, see `## Fix provenance`):**
+
+- `scan_budget::language_epoch(root, seed_lang, cap)` returns a SHA-256 over the sorted `(relative path, len, mtime_ns)` of every source file of the seed's language family (TypeScript includes JavaScript). It walks with `scan_walk` and the same `ScanBudget` as the `callers` fallback. It returns `None` when the walk is cut short by its cap or hits a walk error.
+- `call_edge_resolutions` gets a column `epoch`. `EdgeCache` carries an `EpochCheck`: `Off` (no check, the default), `Unknown` (never a hit, nothing stored) and `Known(hash)` (a hit only when the stored epoch is equal). A row stored without an epoch is a miss under `Known`. `apply_schema` adds the column to an old database the same way as `signatures_json`.
+- `CallGraph::call` computes the epoch once, before the direction loop, on a blocking thread, and passes it to `CachedResolver`.
+
+Limits, all deliberate: any edit to a same-language file invalidates every cached resolution of that language, not only the ones that name it. A caller in another language family is not detected. When the walk is cut short the cache is off for that call, so the answer is correct but slow.
 
 ## Fix provenance
 
@@ -118,7 +126,12 @@ Verified 2026-11-11: `cargo test --lib -- tools::symbol::call_edges tools::symbo
 
 Not covered by an automated test: the `callers` direction against a real language server (re-run by hand after the fix, steps 1 to 5 of the re-run); a second session through a real process boundary; a language other than Rust.
 
-**The residual has a red test**, added 2026-11-11 in the same file, direction `callers`, with a mock whose scripted `references` reports a new caller on the second call (as rust-analyzer does for a file it sees by its own watcher): `call_graph_reports_a_caller_added_in_a_file_the_cached_result_does_not_name` (`#[ignore]`, red: the second answer is `["a_caller"]` and lacks `b_caller`) and its control `call_graph_reports_a_new_caller_once_a_write_invalidates_the_cached_edges` (passes). The test file's `context` helper was split into `symbols_client` and `tool_context` so a test can script `references`; its behavior is unchanged (`tools::symbol::call_graph`: 58 passed, 1 ignored).
+**The residual test is now green.** The text below is how it was added (red, `#[ignore]`); the epoch commit removed the `#[ignore]`. It was added 2026-11-11 in the same file, direction `callers`, with a mock whose scripted `references` reports a new caller on the second call (as rust-analyzer does for a file it sees by its own watcher): `call_graph_reports_a_caller_added_in_a_file_the_cached_result_does_not_name` (was `#[ignore]` and red: the second answer was `["a_caller"]` and lacked `b_caller`; green with the epoch) and its control `call_graph_reports_a_new_caller_once_a_write_invalidates_the_cached_edges` (passes). The test file's `context` helper was split into `symbols_client` and `tool_context` so a test can script `references`; its behavior is unchanged (`tools::symbol::call_graph`: 58 passed, 1 ignored).
+
+
+**Epoch tests, 2026-11-11.** In `src/tools/symbol/scan_budget.rs`, five tests on `language_epoch`: it changes when a source file is added, touched or removed; it changes when a file is replaced by one with an OLDER mtime; it ignores files of other languages; it is `None` when the walk is cut short by its cap; a TypeScript seed covers JavaScript files. In `src/tools/symbol/call_edges/cache.rs`, three tests: a resolution is a hit only under the epoch it was stored under; an unknown epoch is never a hit and stores none; a resolution stored without an epoch is a miss under a known epoch. The migration test now checks both columns.
+
+Verified 2026-11-11: `cargo test --lib -- tools::symbol::scan_budget tools::symbol::call_edges tools::symbol::call_graph` 135 passed, 0 ignored. On a clean `git archive HEAD` extract with my four files overlaid (with a throwaway `git init`, because one test calls `git ls-files`): `cargo clippy --workspace --all-targets` with `--features local-embed -D warnings` and with `--no-default-features -D warnings` both exit 0; `cargo nextest run --workspace --no-default-features --no-fail-fast` 9359 passed, 0 failed; `cargo nextest run --workspace --no-fail-fast` 9453 passed, 0 failed. `./scripts/gate.sh` on the shared tree was NOT green: it stopped at compile because another session's uncommitted edits to `src/tools/symbol/edit_code.rs` and `tests.rs` leave `replace_would_rename_reason` and `owned_hint` unused. I did not touch those files.
 
 ## Workarounds
 
@@ -126,9 +139,9 @@ Delete `.codescout/call_edges.db`, or write to the changed file with a codescout
 
 ## Resume
 
-Partly fixed by `5a7936984` (see `## Fix provenance`). Status stays `open` because the residual case (a caller added in a file the cached result does not mention) is not fixed, and it is the case that started this investigation.
+Fixed in two commits (see `## Fix provenance`): named-file signatures (`5a7936984`) and the project-level epoch for the residual case. The record keeps its limits in `## Fix`: any same-language edit invalidates the language's cache, callers in another language family are not detected, and a capped walk turns the cache off for that call.
 
-Next: (1) choose among the residual options with the owner (my recommendation is (a), cost above), then implement it and remove the `#[ignore]` of the red test in the same commit; (2) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established. The manual `callers` re-run is done (see Reproduction, steps 1 to 6 of the re-run).
+Next, if the owner wants more: (1) time the real `scan_walk` on a large repository, because the cost measured above is a proxy; (2) re-run the manual `callers` sequence against a binary that contains the epoch; (3) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established.
 
 Related: `a73c49456056fb92`, `58a45860b802a477`, `bug-fix-session-log:F-236`.
 
