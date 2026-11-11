@@ -9,8 +9,8 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 8
-entry_high_water_W: 4
+entry_high_water_F: 10
+entry_high_water_W: 5
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
 
@@ -108,6 +108,8 @@ entry_high_water_W: 4
 | F-6 | 2026-11-11 | med | self-friction | fixed-verified | **Ran the plan on the shared checkout until the operator asked for a worktree** — 33 files edited, restored from a saved patch |
 | F-7 | 2026-11-11 | med | subagent | fixed-verified | **The worktree-aware repo-name suggestion mishandles a submodule** — `worktree_main_root` was ungated; found by the re-review, fixed in wave 2 |
 | F-8 | 2026-11-11 | med | plan-prose | open | **A spec requirement is built by no plan: "onboarding says when another checkout uses the name"** — plus two open spec-level questions |
+| F-9 | 2026-11-11 | med | self-friction | fixed-verified | **Told the operator a peer held three dirty files; they were my own stopped implementer's leftovers** — attributed by adjacency; a transcript search found the real author |
+| F-10 | 2026-11-11 | low | plan-prose | fixed-verified | **Task 1 left a stale "librarian feature" message in `tests/cli_doc.rs` and a "librarian-less" comment in `src/prompts/mod.rs`** — passed both reviews; fixed in 6671e2ce8 |
 
 ## Wins Index
 
@@ -117,6 +119,7 @@ entry_high_water_W: 4
 | W-3 | 2026-11-11 | high | per-task review with named risks | a Kelvin-sign key, a write through a dangling link, a 60 s-bound dialog under a write lock — all with a green gate | validated |
 | W-4 | 2026-11-11 | high | census with the real code | Plan E sized from the 895-id estimate; measured 45 renames, 37 duplicate-key groups, 144 `[[F-16]]` rewrites | validated |
 | W-1 | 2026-11-11 | high | builder check against the code | repo name in librarian.toml breaks every older binary | validated |
+| W-5 | 2026-11-11 | med | merge the base into the branch, then ff-only | a merge commit in the shared checkout would capture six other sessions' staged files | validated |
 
 ---
 
@@ -562,6 +565,46 @@ Codified so the Index column means the same thing across sessions.
 **Status:** validated
 
 **Rests on:** a migration is sized by running the new rules over the real corpus, never by an estimate made before the rules existed.
+
+## F-9 — Told the operator a peer held three dirty files; they were my own stopped implementer's leftovers
+
+**Valid:** dated 2026-11-11
+
+**Observed:** For several turns I told the operator that "a peer" held uncommitted edits in `src/prompts/mod.rs`, `src/tools/run_command/attribution.rs` and `tests/cli_doc.rs`, and the merge waited on that peer. I also tried to message a peer name (`codescout-37`) that no longer resolved. The edits were the leftovers of the first Task 1 implementer (agent `ac57719078e6dde19`), which I stopped after it edited the shared checkout (F-6). When I restored its 33 paths I left these three out, because I assumed a peer owned them.
+
+**Evidence:** the new wording in all three diffs appears in that agent's transcript and in no peer's transcript. I searched both account profiles; one transcript over 64 MiB was searched with `rg` and had no match, and three large kat files were over the grep tool's size cap and were not searched, so the absence is strong but not proven. The diff was wording-only and byte-identical across two reads.
+
+**Cost:** several turns waiting for an owner who did not exist, one false statement to the operator, and a real gap (F-10) that stayed hidden until I read the stray diff.
+
+**Fix:** saved the diff, ported the two missing hunks onto the branch (commit `6671e2ce8`, now in `experiments`), then discarded the dirty files. A second dirty file later (`src/util/path_security.rs`) was attributed by the same transcript search and confirmed by asking its owner, who agreed.
+
+**Lesson:** a dirty file in a shared checkout is not evidence of a peer author. Before telling the operator who holds it, search the transcripts for the exact new text, or ask. After any restore of "exactly these paths", list what is still dirty and test each remaining file against your own subagents' transcripts first.
+
+## F-10 — Task 1 left a stale "librarian feature" message in tests/cli_doc.rs and a "librarian-less" comment in src/prompts/mod.rs
+
+**Valid:** dated 2026-11-11
+
+**Observed:** After Task 1 removed the `librarian` cargo feature, `tests/cli_doc.rs:91` still said the binary "was built WITHOUT the librarian feature", and a doc comment at `src/prompts/mod.rs:3390` still described a "librarian-less binary". The per-task review, the final review and the gate all passed with these in place. I found them only by comparing the stray edits of the first Task 1 implementer (F-9), which had already fixed both.
+
+**Cost:** a stale failure message that would have sent a reader to rebuild a binary "with the librarian feature", which no longer exists. Nothing failed.
+
+**Fix:** commit `6671e2ce8` rewrites both texts (the message now says the binary cannot run `doc --help`; the comment says a binary built without the default features). `gate.sh --check` was green, and the commit is in `experiments`.
+
+**Cause:** not established. The two phrasings are "WITHOUT the librarian feature" and "librarian-less". Same class as F-5: prose that names a removed feature's effect, not its name.
+
+**Lesson:** after removing a feature, search string literals and comments for the feature's effect as well as its name, and treat a stray implementer diff as a second opinion worth reading.
+
+## W-5 — Merging the base into the branch in the worktree, then ff-only, kept six peers' staged files out of the merge
+
+**Valid:** dated 2026-11-11
+
+**Pattern:** to land a gated branch on a shared checkout whose base keeps moving, merge the base into the feature branch inside its own worktree, gate that tree, then run `git merge --ff-only <branch>` in the shared checkout.
+
+**Counterfactual:** a real `git merge` in the shared checkout makes a merge commit from the index. The index held six files that other sessions had staged (a bug-triage memory, a 2026-11-04 issue, a research note, two data archives and a plan), so the merge commit would have swept all six in. The merge would also have refused over a peer's uncommitted `src/util/path_security.rs`. `experiments` moved four times while the gates ran. The last three moves were peer commits (`librarian_guard.rs`, a plan file, `path_security.rs`); the worktree absorbed each move without touching a peer's files.
+
+**Evidence:** `git merge --ff-only` updated 59 files with the six staged files still staged afterwards. I checked for an overlap before the fast-forward, found `src/util/path_security.rs` dirty in the shared checkout, and did not run it until its owner had committed. I did not run the fast-forward while the file was dirty, so I did not observe git's refusal; I expect git would have refused.
+
+**Limit:** the fast-forward only works while `experiments` is an ancestor of the branch. Each new peer commit costs another merge and, for Rust changes, another seven-minute gate.
 
 ## Template for new entries
 
