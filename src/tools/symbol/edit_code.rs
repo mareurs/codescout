@@ -158,7 +158,7 @@ impl Tool for EditCode {
                 "body": {
                     "type": "string",
                     "description": format!(
-                        "{} 'replace': the new symbol body. 'insert': the code to insert. Spelled `body`, not code/new_body. \
+                        "{} 'replace': the new symbol body. 'insert': the code to insert. Spelled `body`. \
              Not read by 'rename' or 'remove'.",
                         required_for(BODY_REQUIRED_ACTIONS)
                     )
@@ -197,6 +197,12 @@ impl Tool for EditCode {
             ("file", "path"),
             ("name_path", "symbol"),
             ("content", "body"),
+            // FR-11: the spellings agents sent for the replacement code in 34 failed calls
+            // (29 sessions, 2026-10-12..11-10); the schema text "not code/new_body" did not stop them.
+            ("code", "body"),
+            ("new_body", "body"),
+            ("new_code", "body"),
+            ("new_source", "body"),
         ]
     }
 
