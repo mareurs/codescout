@@ -1866,6 +1866,12 @@ async fn run_in_background_returns_bg_handle() {
         hint.contains(output_id),
         "hint should reference the handle, got: {hint}"
     );
+    // The end wake is not unconditional: the watcher ends at 30 minutes, and the
+    // hint is the one text every caller reads at spawn, so it must say so.
+    assert!(
+        hint.contains("30 minutes") && hint.contains("no end wake arrives"),
+        "the spawn hint must state the 30-minute limit and its consequence, got: {hint}"
+    );
 }
 /// Two background calls started at the same time each get the handle of THEIR OWN command.
 ///
