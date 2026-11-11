@@ -1832,6 +1832,64 @@ pub fn commit_message_backtick_hazard(command: &str) -> Option<String> {
     }
     None
 }
+/// The `pgrep -f` clause of a wait loop that can never end, or `None`.
+///
+/// `run_command` hands its input to `sh -c`, so the shell's own command line carries the whole
+/// command, pattern included. `pgrep -f` matches against full command lines, finds that shell,
+/// and the loop sees a process that never exits (`while pgrep -f X`), or one that was always
+/// there (`until pgrep -f X`). `pgrep` excludes only itself. The documented remedy is to wait on
+/// a pid, or to write one pattern character as a bracket class, which does not match its own
+/// text (`get_guide("progressive-disclosure")`, § waiting on another process).
+///
+/// **Scoped by what is wrong, not by what looks similar:**
+///
+/// - The loop keyword must START a command (`while`/`until` after `;`, `&`, `|`, `(`, `{` or a
+///   newline), so `echo while; pgrep -f x` is not a loop.
+/// - Only a full-command-line match is flagged: `-f`, a flag cluster holding `f` (`-af`), or
+///   `--full`. Plain `pgrep name` matches process names and does not see the shell.
+/// - `-x` / `--exact` is skipped: the shell's line is the whole command, so an exact match
+///   against a shorter pattern cannot hit it.
+/// - A clause with a bracket class, a variable or a substitution is skipped: the pattern text
+///   is then not what the shell's command line holds.
+/// - Heredoc bodies are stripped first: a script written to a file is not run here.
+///
+/// 29 `run_command` calls in `usage.db` ran such a loop; 15 ran 25 s or longer, the mean was
+/// 615 s and the longest 3,000 s (FR-14, `docs/trackers/frictions/`).
+pub fn self_matching_pgrep_loop(command: &str) -> Option<String> {
+    static LOOP_START: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    static PGREP: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let loop_start = LOOP_START.get_or_init(|| {
+        Regex::new(r"(?:^|[;&|({\n])\s*(?:while|until)\s").expect("LOOP_START regex compiles")
+    });
+    let pgrep = PGREP.get_or_init(|| Regex::new(r"\bpgrep\b").expect("PGREP regex compiles"));
+
+    let stripped = strip_heredoc_bodies(command);
+    let s: &str = stripped.as_ref();
+    let loop_at = loop_start.find(s)?.start();
+
+    for found in pgrep.find_iter(s) {
+        if found.start() < loop_at {
+            continue;
+        }
+        let rest = &s[found.start()..];
+        let end = rest.find([';', '&', '|', '\n', ')']).unwrap_or(rest.len());
+        let clause = rest[..end].trim();
+        if clause.contains(['[', '$', '`']) {
+            continue;
+        }
+        let tokens: Vec<&str> = clause.split_whitespace().skip(1).collect();
+        let short = |t: &&str, letter: char| {
+            t.starts_with('-') && !t.starts_with("--") && t.contains(letter)
+        };
+        let full = tokens.iter().any(|t| *t == "--full" || short(t, 'f'));
+        let exact = tokens.iter().any(|t| *t == "--exact" || short(t, 'x'));
+        let has_pattern = tokens.iter().any(|t| !t.starts_with('-'));
+        if full && !exact && has_pattern {
+            return Some(clause.chars().take(60).collect());
+        }
+    }
+    None
+}
 
 /// Split a command into independently-piped segments at top-level `;`, `&&`, `||`.
 ///
@@ -4939,6 +4997,56 @@ mod tests {
     fn a_literal_write_outside_the_project_is_allowed() {
         let root = Path::new("/home/u/work/myproj");
         assert!(check_source_file_access("cat > /tmp/s/opt.sh <<EOF\nx=1\nEOF", root).is_none());
+    }
+    /// FR-14: a `pgrep -f` wait loop finds the shell that carries its own pattern, so it
+    /// never ends (`while`) or never waits (`until`). Each shape is a distinct way to write it.
+    #[test]
+    fn a_wait_loop_on_a_literal_pgrep_f_pattern_is_flagged() {
+        for cmd in [
+            "while pgrep -f \"cargo test --lib\"; do sleep 10; done",
+            "until ! pgrep -af eval_run >/dev/null 2>&1; do sleep 5; done",
+            "while [ -n \"$(pgrep -f foo)\" ]; do sleep 1; done",
+            "sleep 1; while pgrep -fl foo; do sleep 1; done",
+            "while pgrep --full foo; do sleep 1; done",
+            "false && while pgrep -f foo; do sleep 1; done",
+        ] {
+            assert!(
+                self_matching_pgrep_loop(cmd).is_some(),
+                "must be flagged: {cmd:?}"
+            );
+        }
+    }
+
+    /// The controls that make the test above discriminate: each is a loop or a `pgrep` that
+    /// works, and flagging any of them would punish the documented remedy.
+    #[test]
+    fn a_pgrep_loop_that_can_end_or_is_not_run_here_is_not_flagged() {
+        for cmd in [
+            // The documented remedy: a bracket class does not match its own text.
+            "while pgrep -f \"[e]val_run\"; do sleep 1; done",
+            // A variable or substitution: the text in the shell's line is not the pattern.
+            "while pgrep -f \"$PAT\"; do sleep 1; done",
+            // Process-name match, not the full command line.
+            "while pgrep eval_run; do sleep 1; done",
+            // An exact match against the whole line cannot hit the longer shell line.
+            "while pgrep -fx 'eval_run --flag'; do sleep 1; done",
+            // Waiting on a pid.
+            "while kill -0 1234; do sleep 1; done",
+            // `pgrep -f` outside a loop returns at once.
+            "pgrep -f foo",
+            // `while` is an argument here, not a loop.
+            "echo while; pgrep -f foo",
+            // A script written to a file is not run by this call.
+            "cat > w.sh <<'EOF'\nwhile pgrep -f foo; do sleep 1; done\nEOF",
+            // A loop with no `pgrep`.
+            "while true; do sleep 1; done",
+        ] {
+            assert_eq!(
+                self_matching_pgrep_loop(cmd),
+                None,
+                "must not be flagged: {cmd:?}"
+            );
+        }
     }
 
     #[test]
