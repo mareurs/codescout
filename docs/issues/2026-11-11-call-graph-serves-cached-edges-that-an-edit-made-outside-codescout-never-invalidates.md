@@ -14,7 +14,7 @@ related:
 - '58a45860b802a477'
 - '4e7ec7bfc047ac7b'
 severity: medium
-unverified: 'Measured by hand in two scratch crates (callers direction, rust-analyzer, default transport) before the first fix, and by test in both directions with a mock LSP. The epoch (second fix) is verified by unit tests and by the mock-LSP callers test only; the manual callers sequence was NOT re-run against a binary that contains the epoch. The epoch cost is a proxy (git ls-files plus a stat pass); the real walker (scan_walk) was not timed on a large repository. A git checkout, a second session and languages other than Rust were not run. The epoch covers only files of the seed''s language family, so a caller written in another language family is not detected. A walk cut short by its cap makes the epoch unknown, which turns the cache off for that call; this was tested but its frequency on real repositories was not measured. The shared-tree gate was red because of another session''s uncommitted edits to edit_code.rs and tests.rs; the test verdict in ## Tests added comes from a clean HEAD extract with my four source files overlaid. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity and the status fixed are my proposal; the owner may reopen it.'
+unverified: 'Measured by hand in two scratch crates (callers direction, rust-analyzer, default transport) before the first fix, and by test in both directions with a mock LSP. The epoch (second fix) is verified by unit tests, by the mock-LSP callers test and by a manual re-run on the live server (crate stale7: a caller added in an unnamed file and a caller in a file created after the entry was cached are both reported; the schema shows the epoch column). That re-run did not show that an unchanged tree is still served from the cache; only the unit tests show that. The epoch cost is a proxy (git ls-files plus a stat pass); the real walker (scan_walk) was not timed on a large repository. A git checkout, a second session and languages other than Rust were not run. The epoch covers only files of the seed''s language family, so a caller written in another language family is not detected. A walk cut short by its cap makes the epoch unknown, which turns the cache off for that call; this was tested but its frequency on real repositories was not measured. The shared-tree gate was red because of another session''s uncommitted edits to edit_code.rs and tests.rs; the test verdict in ## Tests added comes from a clean HEAD extract with my four source files overlaid. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity and the status fixed are my proposal; the owner may reopen it.'
 ---
 
 # BUG: call_graph serves cached edges that an edit made outside codescout never invalidates
@@ -63,6 +63,18 @@ New scratch crate `stale6` (callers direction, same layout as `stale5`, plus `un
 
 Steps 2, 3 and 6 confirm the fix on a real server. Step 4 against step 5 shows the limit exactly: the entry is invalidated by a change in a file that it names and not by a change in a file that it does not.
 
+### Re-run with the epoch (commit `702a0f737`, release binary of 23:52, live MCP server after `/mcp`)
+
+New scratch crate `stale7` (callers direction, rust-analyzer, default transport, `workspace=<crate>` on every call, every state read from the files). `lib.rs` declares `pub mod other; pub mod unrelated; pub mod later;`; `later.rs` does not exist at first. Proof that the live server has the epoch code: after the first call, `pragma_table_info('call_edge_resolutions')` lists `epoch`, and the one row has both `epoch` and `signatures_json` set.
+
+| # | Step | `call_graph(target_fn, callers, full)` |
+|---|---|---|
+| 1 | Baseline | 3 edges: `lib.rs:6`, `other.rs:4`, `other.rs:8` (`ts`, server starting) |
+| 2 | External rewrite of `unrelated.rs` ONLY, a file the cached result does not name: `sneaky` calls `target_fn` on line 8 | 4 edges, `unrelated.rs:8: sneaky → target_fn` present, now from `lsp`. **The residual is closed** (`stale6` step 4: missing). No named file changed, so only the epoch can have invalidated the entry. |
+| 3 | External creation of `later.rs`, a file that did not exist when the entry was written: `new_file_caller` on line 4 | 5 edges, `later.rs:4: new_file_caller → target_fn` present |
+| 4 | Control: move `.codescout/call_edges.db` away, same call | the same 5 edges |
+
+Not covered by this re-run: that an UNCHANGED tree is still served from the cache (the unit tests cover the hit; the live server gave no observable hit marker), a second session, a git checkout, another language.
 ## Environment
 
 Linux 7.2.15-zen1, codescout HEAD `e922462e9` (fix `43c4ca9df` included, release binary rebuilt 22:24), rust-analyzer. The earlier unexplained omission of `other.rs::use_it` from `call_graph` (noted in `a73c49456056fb92`) fits this cause: that cache entry was written before `other.rs` existed and its key never changed. I did not re-run that sequence.
@@ -144,7 +156,7 @@ Delete `.codescout/call_edges.db`, or write to the changed file with a codescout
 
 Fixed in two commits (see `## Fix provenance`): named-file signatures (`5a7936984`) and the project-level epoch for the residual case. The record keeps its limits in `## Fix`: any same-language edit invalidates the language's cache, callers in another language family are not detected, and a capped walk turns the cache off for that call.
 
-Next, if the owner wants more: (1) time the real `scan_walk` on a large repository, because the cost measured above is a proxy; (2) re-run the manual `callers` sequence against a binary that contains the epoch; (3) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established.
+Next, if the owner wants more: (1) time the real `scan_walk` on a large repository, because the cost measured above is a proxy; (2) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established.
 
 Related: `a73c49456056fb92`, `58a45860b802a477`, `bug-fix-session-log:F-236`.
 
