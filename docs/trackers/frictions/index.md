@@ -152,6 +152,8 @@ Not admitted as entries, because the evidence is one sequence, a sample, or cann
 
 **Status:** open
 
+**Fix:** committed in `5d0ee2421` (patch-id `655d6d953b36bfcec6582a981e21b51229116bdb`), 2026-11-11. The zero-with-scan-hits warning now names what was proven, not a cause. Not yet seen on a rebuilt server.
+
 **Confidence:** code path verified, outcomes sampled
 
 18 of 248 successful `references` calls (2026-10-12 to 2026-11-10 UTC) return this warning: "LSP returned 0 references outside the definition file, but `<sym>` appears as a whole word in N+ other source file(s) … the reference index may still be warming after a reindex." The text is built at `src/tools/symbol/references.rs:493`. In 12 of 12 symbols checked, the other-file hits were same-named locals, doc comments, tests or fields. So the LSP answer was right and the stated cause was false. ADR 2026-08-27 clause 3 says: claim only what is proven.
@@ -165,6 +167,8 @@ Not admitted as entries, because the evidence is one sequence, a sample, or cann
 **Kind:** silent-failure (instrument) · **Tool:** `run_command`, `usage.db` · **Severity:** high
 
 **Status:** open
+
+**Fix (instrument, partial):** committed in `71af942f1` (patch-id `15e4b2dcea6d18427202725674902b5ad952c1d8`), 2026-11-11. `scripts/friction-probe.py` now reads `exit_code` and `timed_out` from the stored result (an MCP content list) and reports them beside the error counts. Measured: 2,132 of 36,014 readable `run_command` successes failed (2,033 non-zero exits, 99 timeouts; 5.9%), a floor. `outcome` and the schema are unchanged, so `analyze-usage` and the pika do not see this yet.
 
 `outcome` records whether the tool delivered a result, not whether the command passed. All 314 `run_command` rows whose output contains `timed_out` have `outcome='success'` (149 of them with `timed_out: true`). A text-pattern match also finds at least 1,734 success rows with a non-zero `exit_code`. Example: row 221568 ran `cargo test`, which exited 101, and the row says `success`. So `scripts/friction-probe.py` cannot see failed builds, failed tests or timeouts.
 
@@ -202,6 +206,8 @@ Not admitted as entries, because the evidence is one sequence, a sample, or cann
 
 **Status:** open
 
+**Checked 2026-11-11, no change:** the zero already carries a warning that says "this 0 is not evidence the symbol is absent" (`src/tools/symbol/symbols.rs`, `display.rs`), so the negative result names its scope. Turning it into an error is a design choice, not a defect fix; it is not made.
+
 71 successful `symbols` calls (2026-10-16 to 2026-11-09) return "0 matches" plus a warning that the language server gave no symbols. 46 say it answered `documentSymbol` with null, 19 say another mux instance holds the lock, 5 say it could not read the file for `didOpen`. The outcome is `success`. In the next 3 calls, 29 of 70 sessions use `run_command`, 25 use `grep` and 24 use `symbols` again. So agents catch the false zero, but they pay calls. The mux-lock cause is a known, mitigated bug.
 
 **Detail:** [symbols-zero-matches-hides-a-failed-language-server.md](symbols-zero-matches-hides-a-failed-language-server.md)
@@ -213,6 +219,8 @@ Not admitted as entries, because the evidence is one sequence, a sample, or cann
 **Kind:** gate-too-strict · **Tool:** `edit_code` · **Severity:** med
 
 **Status:** open
+
+**Fix:** committed in `824ecf61c` (patch-id `c9e15516f2c71db5f935cadeee1503c1da5ff71b`), 2026-11-11. `edit_code` guards the write target, not the session, against the worktree rule. Not yet seen on a rebuilt server.
 
 `edit_code` refuses writes with `worktree_activate_required` even when the target lies outside every worktree. 20 rows, 15 sessions, 2026-10-15 to 2026-11-09. Post-fix examples: row 262016 (2026-11-04, a file under `/tmp/codex-wake-review/`) and row 269790 (2026-11-06). Cause, verified at the source: `edit_code.rs:239` calls `guard_worktree_write(ctx)`, the session-level guard, while `create_file.rs:62`, `edit_file/mod.rs:538` and `approve_write.rs:48` call the target-aware `guard_worktree_write_for_target`. The 2026-10-26 fix covered three of the four write tools. The next call after the 20 refusals was `workspace(activate)` 8 times, `run_command` 4 times (once a `cp` into `/tmp`), and another blocked `edit_code` 4 times.
 
@@ -226,6 +234,8 @@ Not admitted as entries, because the evidence is one sequence, a sample, or cann
 
 **Status:** open
 
+**Fix:** committed in `5bccb5bdf` (patch-id `435d16659a685a781431dbd04c8bdea81a4348d8`), 2026-11-11. The hint of `read_file`, `read_markdown` and the read-path resolver now names the nearest existing directory and the entries beside it. Checked live once on a rebuilt server: a read of `src/tools/run_command.rs` named `run_command/`. Not covered: `edit_file`, `doc` and `run_command` not-found errors, and the removed-worktree twin of a path. Status stays open until `usage.db` shows the effect.
+
 `path_not_found` errors never name an existing neighbour. 309 rows: `read_file` 224, `symbols` 65, `edit_file` 7, `run_command` 7, `doc` 5, `references` 1. The causes are guessed doc slugs (82 `read_file` rows), a file that became a directory (`src/tools/run_command.rs` is now `src/tools/run_command/`), and paths under removed worktrees (17 `read_file` rows). The hint says "Check the path with tree" or "Use tree to explore". Of 7 `symbols` rows with a visible input, 0 show a corrected path next; all 7 went to `read_file`, `grep` or `run_command`. Agents recover, but by routing around, not by following the hint.
 
 **Detail:** [path-not-found-errors-name-no-existing-neighbour.md](path-not-found-errors-name-no-existing-neighbour.md)
@@ -238,6 +248,8 @@ Not admitted as entries, because the evidence is one sequence, a sample, or cann
 
 **Status:** open
 
+**Fix (edit_file half):** committed in `61d06f320` (patch-id `5e64ca01601625ae67bb11b2adf2810f22f315b6`), 2026-11-11. The stamped-file refusal now opens on what is refused and gives the body route before the frontmatter route. The 110 `read_file` refusals and the shell-read route are unchanged: the hint already names `doc(get)`, and the guard cannot see the shell.
+
 Librarian-managed refusals cost 200 rows: `edit_file` 90 (40 sessions) and `read_file` 110 (68 sessions). The `edit_file` message opens with "Reads and BODY edits are allowed directly, but only via a call that can prove it stays in the body", then refuses the plain `old_string`/`new_string` form the agent just used. 14 of the `edit_file` refusals were immediately retried as `edit_file`. For the 110 `read_file` refusals, the next call was `doc(get)` 36 times, the same `read_file` 21 times and a shell read 25 times (for example `sed -n '60,300p' docs/trackers/…`, row 182655). The shell route makes the guard advisory. This session met the same refusal when it read `docs/trackers/frictions/index.md`.
 
 **Detail:** [managed-artifact-refusals-lead-with-what-is-allowed-and-end-in-shell-reads.md](managed-artifact-refusals-lead-with-what-is-allowed-and-end-in-shell-reads.md)
@@ -249,6 +261,8 @@ Librarian-managed refusals cost 200 rows: `edit_file` 90 (40 sessions) and `read
 **Kind:** hint-ineffective · **Tool:** `read_file` · **Severity:** low
 
 **Status:** open
+
+**Checked 2026-11-11, no change:** the idea of this entry already exists. The refusal in `src/tools/read_file.rs` names up to three overlapping symbols and builds a ready `symbols(name=..., include_body=true)` call, and it orders the two escapes by measured thresholds. A comment there records that a stronger always-loaded text was measured and refuted. The 75 repeats are an agent habit, not missing text.
 
 The source-read gate `il1_read_overlaps_symbol` fired 354 times (35% of all `read_file` errors). Of 327 rows with a visible input, 181 (55%) got the content in one call: `symbols` 96, `read_file` with `force=true` 85. The residue is 75 plain `read_file` repeats that failed again, 43 of them on the same file. The gate itself is healthy; the repeat shows that the hint text is not always read.
 
@@ -274,6 +288,8 @@ After 923 of 10,685 successful edits that carry a path (9%; 188 principals, 108 
 
 **Status:** open
 
+**Fix (edit_code part):** committed in `54e9194fa` (patch-id `445e47d5da2926863d220e23341990b56d4637cd`), 2026-11-11. `edit_code` accepts `code`, `new_body`, `new_code` and `new_source` for `body`. Also in `c2b8a572d`: `grep` honours `head_limit` as the result cap when `limit` is absent.
+
 Agents pass the parameter name of a sibling tool, 143 rows in all. `edit_code`: 34 `missing_required_param` rows (29 sessions) with `code`, `new_body`, `new_code` or `new_source` for `body`, and `name` or `name_path` for `symbol`. `edit_file`: 56 rows (26 sessions) with `body` for `new_string` and `old` for `old_string`. `grep`: 38 `param_not_applied` rows with `output_mode` (23 `count`, 9 `files_with_matches`, 6 `files`) for `mode`. `doc(update)`: 15 rows with custom patch keys (`closed`, `unverified`, `heading`, `patch_note`). Recovery is quick: 71% of the `edit_file` rows and 20 of 34 `edit_code` rows were followed by a success. The errors are actionable. The recurrence shows that the name is the agent's default.
 
 **Detail:** [agents-pass-a-sibling-tools-parameter-name.md](agents-pass-a-sibling-tools-parameter-name.md)
@@ -285,6 +301,8 @@ Agents pass the parameter name of a sibling tool, 143 rows in all. `edit_code`: 
 **Kind:** hint-ineffective · **Tool:** `edit_code` · **Severity:** med
 
 **Status:** open
+
+**Fix:** committed in `ae0672af7` (patch-id `8f28b3431acea84317d3d2dd6cac6c78ec9d10e2`), 2026-11-11. A repeated null for one file changes the advice from the third call. Not run against a live rust-analyzer. The hint text is shared by `references`, `symbols` and `edit_code`.
 
 22 `lsp_document_symbol_null` rows (21 insert, 1 replace; 8 sessions; 2026-10-24 to 2026-11-01). One session retried the same `insert` ten times between 12:41 and 13:12 UTC on 2026-10-31 (ids 240585 to 240698), on `src/tools/run_command/attribution.rs`. Between the retries it ran `run_command` sleeps of 60, 90 and 120 seconds and `pgrep`. `edit_file` was used four times to route around and each worked. The error says "Retry shortly" and never changes after repeats. The causes are known and fixed or mitigated (a null window that outlasts the 5 s budget, and a rust-analyzer watcher that walks symlinked directories). The remaining friction is the advice.
 
@@ -298,6 +316,8 @@ Agents pass the parameter name of a sibling tool, 143 rows in all. `edit_code`: 
 
 **Status:** open
 
+**Fix:** committed in `ba299e6bf` (patch-id `70afc992b3b2d4dc4c3bd177475fae5060fcf7f5`), 2026-11-11. The real shape was a body that declares several symbols, not a rename: the refusal now says so and routes the extras to `insert`. The ledger's Python `pre_set` hypothesis did not reproduce.
+
 A rename hidden inside a `replace` body on a Python method is reported as "dropped the symbol definition", not as a rename. Two rows are confirmed (223327 on 2026-10-28 and 232089 on 2026-10-29), inside a family of 30 `replace_dropped_sibling` rows (12 sessions). In row 223327 the body declares `def test_errored_run_with_no_model_work_is_invalid` for the symbol `IntegrityTest/test_errored_run_is_invalid`, which is a pure rename. The same cause on Rust gets the right message ("`replace` cannot rename", row 248940). Of 3 sampled rows, 0 recovered with a `replace` on the same symbol: 2 went to remove plus insert and 1 to `edit_file`. The archived bug of 2026-09-13 fixed the rename message, and this Python shape still falls through. The mechanism is a hypothesis, not reproduced.
 
 **Detail:** [replace-rename-of-a-python-method-is-reported-as-a-dropped-definition.md](replace-rename-of-a-python-method-is-reported-as-a-dropped-definition.md)
@@ -309,6 +329,8 @@ A rename hidden inside a `replace` body on a Python method is reported as "dropp
 **Kind:** latency · **Tool:** `run_command` · **Severity:** med
 
 **Status:** open
+
+**Fix (one shape):** committed in `22e322857` (patch-id `ab32a999bfd43e79b4f4105d129c86b64c0baead`), 2026-11-11. `run_command` refuses a `pgrep -f` wait loop, which can never end. 29 calls ran one (15 of them 25 s or longer). Other wait shapes (`while kill -0`, `until` on a file, plain `sleep`) are not covered, and the 344 slow loops of this entry are probably mostly those.
 
 344 of the 512 slowest `run_command` rows (the slowest 1%) are wait loops that use `until`, `while`, `sleep` or `pgrep`. 166 of them ended at their timeout, and all 344 are recorded as `success` (FR-2). Build and test rows are 125 of the 512 and show no errors. Example: row 197597, 3,000,065 ms, `while pgrep -f "cargo test --lib$" …; do sleep 10; done`. Two timed-out rows poll with `pgrep -f "cargo test --lib symlinked_temp_dir"`, which matches its own command line (a trap the progressive-disclosure guide already records). Overall latency: p50 94 ms, p90 10,897 ms, p99 291,621 ms. The wake-hook guidance says to start long jobs with `run_in_background` and to end the turn, not to poll.
 
@@ -322,6 +344,8 @@ A rename hidden inside a `replace` body on a Python method is reported as "dropp
 
 **Status:** open
 
+**Fix (advice only):** committed in `0e1073e13` (patch-id `77e03a9222e115de427255e29b34ae3229c208f1`), 2026-11-11. The verdict is unchanged, by design: an unresolved path is blocked conservatively. A clause that only writes such a path now gets write advice (`create_file`, or the path written out) and not "use read_file". The regression question is settled by the code: the block is intended.
+
 The `il3_shell_on_source` gate refuses scratchpad writes whose path starts with an unexpanded `$VAR`. 96 rows, 36 sessions, 2026-10-13 to 2026-11-09, which is after the closing of the bug of 2026-09-10 that covered the same mechanism. Example: row 291458, `cat > $S/opt.sh <<EOF`, refused with "this clause contains an unexpanded shell expansion … blocked conservatively". Of 5 sampled rows, 5 recovered on the next call; only 8 of 96 were followed by an `acknowledge_risk` rerun. Whether this is a regression of the fixed bug or a heredoc-only gap is not verified, because no code was read.
 
 **Detail:** [il3-gate-refuses-scratchpad-writes-with-an-unexpanded-variable-path.md](il3-gate-refuses-scratchpad-writes-with-an-unexpanded-variable-path.md)
@@ -333,6 +357,8 @@ The `il3_shell_on_source` gate refuses scratchpad writes whose path starts with 
 **Kind:** discoverability · **Tool:** `semantic_search` · **Severity:** med
 
 **Status:** open
+
+**Checked 2026-11-11, no change:** in a worktree with no index the tool answers with empty results and a hint to run `index(action="build")`, which is a correct negative result. No row shows an agent misled. Every cause of the low use is still a hypothesis.
 
 `semantic_search` has 14 calls in the window, against 9,189 `grep` calls. 4 of the 14 returned "No index for worktree project" with a hint to run `index(action="build")` (rows 199006, 201497, 206247, 207525), all in worktree sessions. The usage data shows no `index` call after any of the four; this was not checked in full. About 4,700 of the 9,189 `grep` patterns are plain multi-word text, by a crude filter, so concept-shaped queries probably go to `grep`. The cause of the avoidance is a hypothesis. The empty result is actionable, but only if it is read.
 
