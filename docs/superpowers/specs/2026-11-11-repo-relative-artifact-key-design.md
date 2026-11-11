@@ -1,6 +1,6 @@
 # Artifact identity and storage: committed files are the only store (design)
 
-**Status:** draft v5, 2026-11-11. The operator accepted the governing principle on
+**Status:** approved by the operator 2026-11-11 (v5). The operator accepted the governing principle on
 2026-11-11; § Decision log records every decision. Source tracker:
 `docs/trackers/temp/artifact-identity-refactor.md`. Session log:
 `docs/trackers/artifact-identity-session-log.md`. The parallel tracker-organization session
@@ -82,7 +82,8 @@ The change fails, even if it works, if any of these is true:
 - A move between folders changes a key or breaks a citation.
 - Two clones at the same commit disagree about a document's identity, state or edges.
 - A tool shows an agent a form of reference that does not survive a move.
-- An older binary and a newer binary sharing a catalog damage each other.
+- An older binary and a newer binary sharing a catalog damage each other. (The migration
+  window in § Cutover is how this is avoided.)
 
 ## Constraints
 
@@ -266,29 +267,35 @@ tables, and the two-shape `entry_cite.dst_ref`.
 
 ### Cutover
 
-1. **Export.** A one-time, idempotent export writes every catalog-only fact into its
-   committed home (§ The store boundary): params entries without markdown (38 today),
-   augmentation shapes, notes, verdicts, intents, observations and manual links. It is
-   re-runnable, so writes made by an older binary after the first run are picked up by a
-   later one.
-2. **Rename.** Non-canonical filenames and key collisions are renamed, with citations
-   rewritten.
+Migration is second priority; the design is what matters. The operator's plan:
+
+- After the design is built, the binary is released, and `codescout-37` has finished its
+  side, there is one **migration window**. Every session is stopped for it, so no older
+  binary runs against the catalog during the switch.
+- Inside the window, recovery is **best effort**: recover as much as can be recovered from
+  the old catalog and files, report what could not be recovered, then switch to the new
+  setup. Nothing has to run against both setups at once.
+
+The recovery steps, in order:
+
+1. **Export** every catalog-only fact into its committed home (§ The store boundary):
+   params entries without markdown (38 today), augmentation shapes, notes, verdicts,
+   intents, observations and manual links.
+2. **Rename** non-canonical filenames and key collisions.
 3. **Rewrite citations.** Resolvable `<stem>:TOKEN`, path links to catalogued documents,
    16-hex ids, and bare tokens cited outside their own document become grammar forms. A
    bare cross-document token is rewritten to `[[owner-key:TOKEN]]` when it has exactly one
    owner today; one with several owners (most bare `F-n`/`W-n`) is reported, not guessed.
    An entry migrated into its own file keeps its legacy heading under the ledger folder, so
-   `[[ledger-key:TOKEN]]` resolves by ownership in either migration order. Stale hex ids that git history recovers
-   (`sha256(<root>/<old path>)[:16]`: 160 of 335 distinct) are rewritten too; the rest are
-   reported.
-4. **New catalog file.** The new binary builds a new catalog file from the files, so an
-   older binary keeps its own file and the two never share a schema.
+   `[[ledger-key:TOKEN]]` resolves by ownership in either migration order. Stale hex ids
+   that git history recovers (`sha256(<root>/<old path>)[:16]`: 160 of 335 distinct) are
+   rewritten too; the rest are reported.
+4. **Build** the new catalog from the files, in a new catalog file. The old file is kept,
+   read-only, as the recovery source until the operator retires it.
 
 ## Open for the operator
 
-- **When older binaries stop.** The export is re-runnable, so no write is lost while it is
-  rerun. What remains is the rule for when the old catalog file may be deleted: after every
-  session has restarted onto the new binary, or after a fixed date.
+None. The cutover question was answered on 2026-11-11 (§ Cutover).
 
 ## Left to the builder
 
@@ -316,6 +323,9 @@ Operator, 2026-11-11:
 - The current state of trackers and ledgers does not constrain the design; files may be
   rewritten.
 - **Committed files are the only store; the catalog is a derived index.**
+- Spec v5 approved. Cutover: one migration window after the build and `codescout-37`'s
+  implementation, with every session stopped; best-effort recovery from the old setup,
+  then the switch. Migration is second priority to the design.
 
 Designer's calls, open to correction:
 
