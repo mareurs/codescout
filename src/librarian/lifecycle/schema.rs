@@ -56,11 +56,21 @@ pub enum FieldType {
     Enum(Vec<String>),
     List,
 }
+
 impl std::fmt::Display for FieldType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FieldType::Scalar => f.write_str("scalar"),
-            FieldType::Enum(values) => write!(f, "one of {}", values.join(", ")),
+            FieldType::Enum(values) => {
+                f.write_str("one of ")?;
+                for (i, value) in values.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{value:?}")?;
+                }
+                Ok(())
+            }
             FieldType::List => f.write_str("list of scalars"),
         }
     }
@@ -91,7 +101,7 @@ pub enum SchemaError {
     MissingKey(&'static str),
     #[error("`{key}` is malformed: {detail}")]
     Malformed { key: &'static str, detail: String },
-    #[error("status word `{word}` has class `{class}`, which is not one of open, blocked, deferred, terminal")]
+    #[error("status word {word:?} has class {class:?}, which is not one of open, blocked, deferred, terminal")]
     UnknownClass { word: String, class: String },
     #[error("no status word has class `terminal`")]
     NoTerminalStatus,
@@ -206,7 +216,7 @@ fn parse_statuses(
             },
             None => errs.push(malformed(
                 "statuses",
-                format!("the class of `{word}` must be a string"),
+                format!("the class of {word:?} must be a string"),
             )),
         }
     }
@@ -239,10 +249,10 @@ fn parse_fields(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> BTreeMap<Strin
             Some("enum") => match spec.get("values") {
                 None => errs.push(malformed(
                     "fields",
-                    format!("enum field `{name}` needs `values`"),
+                    format!("enum field {name:?} needs `values`"),
                 )),
                 Some(vals) => {
-                    let what = format!("`values` of `{name}`");
+                    let what = format!("`values` of {name:?}");
                     if let Some(w) = string_list(vals, "fields", &what, errs) {
                         out.insert(name.clone(), FieldType::Enum(w));
                     }
@@ -250,11 +260,11 @@ fn parse_fields(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> BTreeMap<Strin
             },
             Some(other) => errs.push(malformed(
                 "fields",
-                format!("field `{name}` has unknown type `{other}` (scalar, enum or list)"),
+                format!("field {name:?} has unknown type {other:?} (scalar, enum or list)"),
             )),
             None => errs.push(malformed(
                 "fields",
-                format!("field `{name}` needs a `type` (scalar, enum or list)"),
+                format!("field {name:?} needs a `type` (scalar, enum or list)"),
             )),
         }
     }

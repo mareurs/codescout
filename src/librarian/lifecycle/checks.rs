@@ -19,6 +19,7 @@
 //!   is not Markdown, a name that is no key. Archived or not, it is a data-integrity finding.
 
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 
 use chrono::{Days, NaiveDate};
 use serde::Serialize;
@@ -56,8 +57,8 @@ pub enum CollectionProblem {
     #[error("{0}")]
     Schema(SchemaError),
     /// The frontmatter block of a readme or an entry file does not parse; the detail is the
-    /// parser's message.
-    #[error("frontmatter does not parse: {0}")]
+    /// parser's message, which already names the frontmatter (`malformed frontmatter YAML: ..`).
+    #[error("{0}")]
     Frontmatter(String),
     /// The file sits at or below a subfolder that holds its own `readme.md`.
     #[error("sits below a subfolder that holds its own readme.md")]
@@ -142,6 +143,7 @@ pub enum Finding {
     /// or a file directly in a lifecycle folder.
     OrphanEntry { rel_path: String },
 }
+
 impl Finding {
     /// The check this finding belongs to: one of [`CHECK_NAMES`], and the `check` tag of its JSON.
     pub fn check_name(&self) -> &'static str {
@@ -156,49 +158,43 @@ impl Finding {
             Finding::OrphanEntry { .. } => CHECK_NAMES[7],
         }
     }
-}
 
-/// One line: `<check_name>: <subject> — <detail>`, the subject being the entry key, the collection
-/// key or the path.
-impl std::fmt::Display for Finding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: ", self.check_name())?;
-        match self {
-            Finding::EntryInvalid { entry, problem } => write!(f, "{entry} — {problem}"),
+    /// The line of [`Display`](std::fmt::Display) before control characters are escaped.
+    fn unescaped_line(&self) -> String {
+        let detail = match self {
+            Finding::EntryInvalid { entry, problem } => format!("{entry} — {problem}"),
             Finding::RevisitDue { entry, revisit_by } => {
-                write!(f, "{entry} — revisit_by {revisit_by} has passed")
+                format!("{entry} — revisit_by {revisit_by} has passed")
             }
             Finding::CitedTargetClosed {
                 entry,
                 target,
                 closed,
-            } => write!(
-                f,
+            } => format!(
                 "{entry} — cites {target}, which closed {closed}, after this entry's status_since"
             ),
             Finding::StreamAllTerminal { collection } => {
-                write!(f, "{collection} — every entry is terminal")
+                format!("{collection} — every entry is terminal")
             }
-            Finding::CollectionInvalid { subject, problem } => write!(f, "{subject} — {problem}"),
+            Finding::CollectionInvalid { subject, problem } => format!("{subject} — {problem}"),
             Finding::LedgerQuiet {
                 collection,
                 last_activity: Some(last),
-            } => write!(f, "{collection} — no entry created or closed since {last}"),
+            } => format!("{collection} — no entry created or closed since {last}"),
             Finding::LedgerQuiet {
                 collection,
                 last_activity: None,
-            } => write!(f, "{collection} — the ledger has no entries"),
+            } => format!("{collection} — no parsed entry has a created or closed date"),
             Finding::TerminalInLiveDir { entry, closed } => {
-                write!(f, "{entry} — terminal since {closed} but not archived")
+                format!("{entry} — terminal since {closed} but not archived")
             }
             Finding::OrphanEntry { rel_path } => {
-                write!(f, "{rel_path} — no collection readme above this file")
+                format!("{rel_path} — no collection readme above this file")
             }
-        }
+        };
+        format!("{}: {detail}", self.check_name())
     }
-}
 
-impl Finding {
     /// Variant position, then the identifying keys: the sort order of `check`'s output.
     fn sort_key(&self) -> (u8, &str, String) {
         match self {
@@ -217,6 +213,28 @@ impl Finding {
             Finding::TerminalInLiveDir { entry, closed } => (6, entry.as_str(), closed.to_string()),
             Finding::OrphanEntry { rel_path } => (7, rel_path.as_str(), String::new()),
         }
+    }
+}
+
+/// One line: `<check_name>: <subject> — <detail>`, the subject being the entry key, the collection
+/// key or the path.
+///
+/// The line is one line whatever the finding holds: text that comes from outside the crate (a
+/// YAML status word, a file name git lists) may carry a control character, and each one is
+/// escaped here, in the one place every `Finding` is rendered (`\n` prints as `\n`).
+impl std::fmt::Display for Finding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let line = self.unescaped_line();
+        // `escape_default` is `\n`, `\r`, `\t`, or `\u{..}` for any other control character.
+        // U+2028 and U+2029 are not control characters but end a line in some viewers.
+        for c in line.chars() {
+            if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
+                write!(f, "{}", c.escape_default())?;
+            } else {
+                f.write_char(c)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -741,6 +759,7 @@ mod tests {
             }]
         );
     }
+
     #[test]
     fn a_readme_with_two_schema_errors_gives_one_finding_per_error_in_parse_order() {
         // `parse_schema` pushes `MissingKey("initial_status")` before it checks `exit_when`.
@@ -830,6 +849,45 @@ mod tests {
         assert_eq!(
             invalid.to_string(),
             "entry_invalid: 2026-10-01-bad — status \"x\" is not declared in the collection readme"
+        );
+    }
+
+    #[test]
+    fn display_escapes_control_characters_from_outside_text() {
+        // A quoted YAML key and class with a real newline reach `UnknownClass` as-is.
+        let readme = "---\ntitle: S\nentry_kinds: [f]\nstatuses: {open: open, done: terminal, \"a\\nb\": \"c\\nd\"}\ninitial_status: open\nexit_when: it ships\n---\n";
+        let f = run(vec![doc("docs/trackers/streams/s/readme.md", readme)]);
+        assert_eq!(f.len(), 1, "{f:?}");
+        let Finding::CollectionInvalid {
+            problem: CollectionProblem::Schema(SchemaError::UnknownClass { word, class }),
+            ..
+        } = &f[0]
+        else {
+            panic!("{:?}", f[0]);
+        };
+        // The finding keeps the raw text (JSON is unaffected) ...
+        assert_eq!((word.as_str(), class.as_str()), ("a\nb", "c\nd"));
+        // ... and the one-line rendering escapes it.
+        let line = f[0].to_string();
+        assert!(!line.contains('\n') && !line.contains('\r'), "{line:?}");
+        assert!(line.contains("a\\nb") && line.contains("c\\nd"), "{line}");
+
+        let path = Finding::OrphanEntry {
+            rel_path: "docs/trackers/streams/x/a\nb\t\r\u{1b}.md".into(),
+        };
+        let line = path.to_string();
+        assert!(!line.chars().any(char::is_control), "{line:?}");
+        assert!(line.contains("a\\nb\\t\\r\\u{1b}.md"), "{line}");
+    }
+
+    #[test]
+    fn display_leaves_ordinary_text_and_non_ascii_unescaped() {
+        let finding = Finding::OrphanEntry {
+            rel_path: "docs/trackers/streams/é/x.md".into(),
+        };
+        assert_eq!(
+            finding.to_string(),
+            "orphan_entry: docs/trackers/streams/é/x.md — no collection readme above this file"
         );
     }
 
@@ -966,6 +1024,24 @@ mod tests {
             assert_eq!(value["check"], finding.check_name());
         }
     }
+
+    #[test]
+    fn a_ledger_quiet_with_no_parsed_entry_serializes_null_and_says_why() {
+        let quiet = Finding::LedgerQuiet {
+            collection: k("l"),
+            last_activity: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&quiet).unwrap(),
+            r#"{"check":"ledger_quiet","collection":"l","last_activity":null}"#
+        );
+        // Entries may exist and all fail to parse, so the line must not say there are none.
+        assert_eq!(
+            quiet.to_string(),
+            "ledger_quiet: l — no parsed entry has a created or closed date"
+        );
+    }
+
     #[test]
     fn nested_problems_serialize_in_snake_case_with_default_tagging() {
         let problem = EntryProblem::FieldType {
