@@ -137,6 +137,13 @@ where
     return future.await;
     #[cfg(unix)]
     {
+        // Bug d291b97d9e69edef: nothing under a missing root can be fenced, and
+        // `workspace(action="activate")` (a write) is the call every write refusal
+        // prescribes. Fencing it on the removed active root would fail it with a bare
+        // `No such file or directory`, so it runs unfenced.
+        if writing && name == "workspace" && matches!(root.try_exists(), Ok(false)) {
+            return future.await;
+        }
         // Cwd does not confine a shell's write targets. A per-user coordination
         // lease closes effects from another checkout or server/profile as well.
         let domain = super::native_provenance_fence::coordination_root()?;

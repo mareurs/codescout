@@ -80,6 +80,51 @@ async fn readers_do_not_claim_the_provenance_write_fence() {
     .await
     .unwrap();
 }
+/// Bug d291b97d9e69edef: `workspace(action="activate")` is a write, and the fence is taken on the
+/// ACTIVE root. When that root has been removed there is nothing to fence, and activation is the
+/// call every refusal prescribes, so it must run.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_workspace_write_on_a_missing_root_runs_unfenced() {
+    let dir = checkout();
+    let path = dir.path().to_path_buf();
+    drop(dir);
+    assert!(!path.exists());
+    let ran = AtomicBool::new(false);
+    let result = scope_root(
+        &path,
+        true,
+        "workspace",
+        &json!({"action": "activate"}),
+        None,
+        None,
+        async {
+            ran.store(true, Ordering::SeqCst);
+            Ok(Vec::new())
+        },
+    )
+    .await;
+    assert!(result.is_ok(), "got: {result:?}");
+    assert!(ran.load(Ordering::SeqCst));
+}
+
+/// The pass-through is for `workspace` only: any other write on a missing root is still refused.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_non_workspace_write_on_a_missing_root_is_still_refused() {
+    let dir = checkout();
+    let path = dir.path().to_path_buf();
+    drop(dir);
+    assert!(!path.exists());
+    let ran = AtomicBool::new(false);
+    let result = scope_root(&path, true, "create_file", &json!({}), None, None, async {
+        ran.store(true, Ordering::SeqCst);
+        Ok(Vec::new())
+    })
+    .await;
+    assert!(result.is_err());
+    assert!(!ran.load(Ordering::SeqCst));
+}
 
 #[tokio::test]
 async fn run_command_participates_even_when_effect_is_declared_read() {

@@ -970,6 +970,35 @@ async fn a_refused_pin_does_not_recreate_a_deleted_default_root() {
         "recording must not re-create the deleted default root"
     );
 }
+/// Bug d291b97d9e69edef: the session's active root was removed (a worktree taken away under a
+/// live server). `workspace(action="activate")` is the call every refusal prescribes, so it must
+/// get past the provenance fence, which is taken on the (missing) active root.
+#[cfg(unix)]
+#[tokio::test]
+async fn activation_proceeds_after_the_default_root_was_deleted() {
+    let (home, server) = make_server().await;
+    let target = tempdir().unwrap();
+    let target_root = std::fs::canonicalize(target.path()).unwrap();
+    let root = std::fs::canonicalize(home.path()).unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
+
+    let args = serde_json::json!({
+        "action": "activate",
+        "path": target_root.to_string_lossy(),
+    });
+    let req = CallToolRequestParams::new("workspace".to_string())
+        .with_arguments(serde_json::from_value(args).unwrap());
+    let result = server
+        .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+        .await
+        .unwrap();
+    let text = all_text(&result);
+    assert_ne!(result.is_error, Some(true), "activation failed: {text}");
+    assert!(
+        !text.contains("No such file or directory"),
+        "activation must not trip over the removed root; got: {text}"
+    );
+}
 
 /// L3: recording the refusal is best-effort and bounded. With `usage.db` exclusively locked, the
 /// recorder waits out SQLite's 5 s busy timeout; the caller must not.
