@@ -59,17 +59,24 @@ impl KeySpace {
         .with_context(|| format!("parsing {KEY_SPACE_FILE_REL}"))
     }
 
-    /// Compile `patterns`. A blank pattern or an invalid glob is an error.
+    /// Compile `patterns`. Each pattern is normalised the way [`KeySpace::is_outside`]
+    /// normalises a path (`\` read as `/`; empty and `.` components dropped), so `./contrib`,
+    /// `/contrib`, `contrib/` and `contrib` are one pattern. A pattern with no component left
+    /// (blank, `./`, `/`) or an invalid glob is an error naming [`KEY_SPACE_FILE_REL`].
     pub fn from_patterns(patterns: &[&str]) -> anyhow::Result<KeySpace> {
         let mut builder = GlobSetBuilder::new();
         for &p in patterns {
-            // A trailing `/` is the usual way to write a directory; the glob has none.
-            let bare = p.trim().trim_end_matches('/');
-            anyhow::ensure!(!bare.is_empty(), "blank exclude pattern {p:?}");
-            builder.add(Glob::new(bare).with_context(|| format!("exclude pattern {p:?}"))?);
+            let bare = normalise(p.trim());
+            anyhow::ensure!(
+                !bare.is_empty(),
+                "{KEY_SPACE_FILE_REL}: exclude pattern {p:?} names no path"
+            );
+            let glob = |g: &str| {
+                Glob::new(g).with_context(|| format!("{KEY_SPACE_FILE_REL}: exclude pattern {p:?}"))
+            };
+            builder.add(glob(&bare)?);
             if !bare.ends_with("/**") {
-                let subtree = format!("{bare}/**");
-                builder.add(Glob::new(&subtree).with_context(|| format!("exclude pattern {p:?}"))?);
+                builder.add(glob(&format!("{bare}/**"))?);
             }
         }
         Ok(KeySpace {
@@ -78,19 +85,25 @@ impl KeySpace {
         })
     }
 
-    /// True when `rel_path` (git-root-relative) lies in an excluded subtree.
+    /// True when `rel_path` (git-root-relative) lies in an excluded subtree. The path is
+    /// normalised exactly as `key_of` reads it: `\` is `/`, empty and `.` components are
+    /// dropped, `..` stays an ordinary component.
     pub fn is_outside(&self, rel_path: &str) -> bool {
         if self.patterns.is_empty() {
             return false;
         }
-        let normalised = rel_path.replace('\\', "/");
-        self.matchers.is_match(&normalised)
+        self.matchers.is_match(normalise(rel_path))
     }
 
     /// The exclude patterns as written, in file order.
     pub fn patterns(&self) -> &[String] {
         &self.patterns
     }
+}
+
+/// A path or pattern as `key_of` reads a path: the same `components`, joined with `/`.
+fn normalise(s: &str) -> String {
+    super::key::components(s).join("/")
 }
 
 /// Load `.codescout/key-space.toml` under `root`. An absent file is [`KeySpace::empty`]; an
@@ -167,6 +180,60 @@ mod tests {
         assert!(ks.is_outside("docs\\evals\\a.md"));
         assert!(!ks.is_outside("contribution.md"));
         assert!(!ks.is_outside("docs\\other\\a.md"));
+    }
+
+    #[test]
+    fn a_path_is_normalised_the_way_key_of_reads_it() {
+        let ks = KeySpace::from_patterns(&["contrib"]).unwrap();
+        for p in [
+            "./contrib/x.md",
+            "/contrib/x.md",
+            "contrib//x.md",
+            "./contrib\\x.md",
+            ".\\contrib\\x.md",
+        ] {
+            assert!(ks.is_outside(p), "{p}");
+            // The same path gets a key, so the rule must exclude it.
+            assert!(crate::librarian::identity::key::key_of(p).is_ok(), "{p}");
+        }
+        // `..` is an ordinary component, as in key_of.
+        assert!(!ks.is_outside("../contrib/x.md"));
+        assert!(!ks.is_outside("contribution/x.md"));
+    }
+
+    #[test]
+    fn a_pattern_is_normalised_like_a_path() {
+        for pat in [
+            "./contrib",
+            "/contrib",
+            "contrib/",
+            "./contrib/",
+            "contrib//",
+            ".\\contrib",
+        ] {
+            let ks = KeySpace::from_patterns(&[pat]).unwrap();
+            assert!(ks.is_outside("contrib/pi/AGENTS.md"), "{pat}");
+            assert!(!ks.is_outside("contribution.md"), "{pat}");
+            assert_eq!(ks.patterns(), [pat], "patterns() keeps the text as written");
+        }
+        let ks = KeySpace::from_patterns(&["docs//evals/**", "/docs/./x"]).unwrap();
+        assert!(ks.is_outside("docs/evals/a.md"));
+        assert!(ks.is_outside("docs/x/a.md"));
+        let from_file =
+            KeySpace::from_text("exclude = [\"./contrib\", \"/docs/evals\"]\n").unwrap();
+        assert!(from_file.is_outside("contrib/pi/AGENTS.md"));
+        assert!(from_file.is_outside("docs/evals/a.md"));
+    }
+
+    #[test]
+    fn a_pattern_that_names_no_path_is_an_error_naming_the_file() {
+        for pat in ["", "  ", "./", "/", ".", "//", "./."] {
+            let err = format!("{:#}", KeySpace::from_patterns(&[pat]).unwrap_err());
+            assert!(err.contains(KEY_SPACE_FILE_REL), "{pat:?}: {err}");
+            let text = format!("exclude = [{pat:?}]\n");
+            let err = format!("{:#}", KeySpace::from_text(&text).unwrap_err());
+            assert!(err.contains(KEY_SPACE_FILE_REL), "{pat:?}: {err}");
+        }
     }
 
     #[test]
