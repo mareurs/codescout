@@ -3,8 +3,10 @@
 //! Pure: `check` reads the tree, `today` and the policy, nothing else. No git, no clock, no
 //! filesystem, so no check can read a commit date (anti-goal 2).
 //!
-//! Which entries each check looks at: `StatusUndeclared` looks at every entry, archived or not
-//! (data integrity). `RevisitDue`, `CitedTargetClosed` and `TerminalInLiveDir` look at
+//! Which entries each check looks at: `EntryInvalid` (spec `entry_invalid`, one finding per
+//! problem `validate_entry` returns, which generalises the former `status_undeclared`) looks
+//! at every entry, archived or not (data integrity). `RevisitDue`, `CitedTargetClosed` and
+//! `TerminalInLiveDir` look at
 //! un-archived entries only: an archived entry is done and does not nag. `StreamAllTerminal`
 //! and `LedgerQuiet` look at un-archived collections only; `LedgerQuiet` counts every entry of
 //! such a ledger, archived ones too, as activity.
@@ -39,8 +41,8 @@ impl Default for CheckPolicy {
 /// One thing `doctor` reports. The variants are listed in the order `check` returns them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Finding {
-    /// An entry's status is not in its collection's `statuses`.
-    StatusUndeclared { entry: Key, status: String },
+    /// An entry breaks its collection's schema: one finding per problem `validate_entry` returns.
+    EntryInvalid { entry: Key, problem: EntryProblem },
     /// A blocked or deferred entry's `revisit_by` has passed.
     RevisitDue { entry: Key, revisit_by: NaiveDate },
     /// A live entry cites a target closed after the entry's `status_since`.
@@ -68,7 +70,9 @@ impl Finding {
     /// Variant position, then the identifying keys: the sort order of `check`'s output.
     fn sort_key(&self) -> (u8, &str, String) {
         match self {
-            Finding::StatusUndeclared { entry, status } => (0, entry.as_str(), status.clone()),
+            // The third element is empty: one entry's problems keep the order `validate_entry`
+            // returned them in (a fixed order), because `check` sorts stably.
+            Finding::EntryInvalid { entry, .. } => (0, entry.as_str(), String::new()),
             Finding::RevisitDue { entry, revisit_by } => {
                 (1, entry.as_str(), revisit_by.to_string())
             }
@@ -106,12 +110,10 @@ fn check_entry(
 ) {
     let meta = &entry.meta;
     for problem in validate_entry(&collection.schema, meta) {
-        if let EntryProblem::StatusUndeclared(status) = problem {
-            out.push(Finding::StatusUndeclared {
-                entry: entry.key.clone(),
-                status,
-            });
-        }
+        out.push(Finding::EntryInvalid {
+            entry: entry.key.clone(),
+            problem,
+        });
     }
     if entry.archived {
         return;
@@ -229,6 +231,7 @@ pub fn check(tree: &LifecycleTree, today: NaiveDate, policy: &CheckPolicy) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::librarian::lifecycle::schema::FieldType;
     use crate::librarian::lifecycle::testkit::{d, doc, entry, k, LEDGER, STREAM};
     use crate::librarian::lifecycle::tree::{DocInput, LifecycleTree};
 
@@ -353,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn an_archived_entry_does_not_nag_but_an_undeclared_status_is_found_wherever_it_sits() {
+    fn an_archived_entry_does_not_nag_but_an_invalid_entry_is_found_wherever_it_sits() {
         let f = run(vec![
             doc("docs/trackers/ledgers/l/readme.md", LEDGER),
             // Archived and blocked with a passed revisit_by: no RevisitDue.
@@ -370,15 +373,26 @@ mod tests {
                 "docs/trackers/ledgers/l/archive/2026-10-01-odd.md",
                 &entry("mystery", "", ""),
             ),
+            // Archived and terminal with no `closed`: still found.
+            doc(
+                "docs/trackers/ledgers/l/archive/2026-10-01-open-ended.md",
+                &entry("fixed", "", ""),
+            ),
             doc("docs/issues/2026-10-05-the-bug.md", BUG),
         ]);
         assert!(!f.iter().any(|x| matches!(
             x,
             Finding::RevisitDue { .. } | Finding::CitedTargetClosed { .. }
         )));
-        assert!(f.contains(&Finding::StatusUndeclared {
+        assert!(f.contains(&Finding::EntryInvalid {
             entry: k("2026-10-01-odd"),
-            status: "mystery".into()
+            problem: EntryProblem::StatusUndeclared("mystery".into())
+        }));
+        assert!(f.contains(&Finding::EntryInvalid {
+            entry: k("2026-10-01-open-ended"),
+            problem: EntryProblem::ClosedMissing {
+                status: "fixed".into()
+            }
         }));
     }
 
@@ -672,6 +686,173 @@ mod tests {
                 collection: k("l"),
                 last_activity: Some(d("2026-10-05"))
             }]
+        );
+    }
+
+    // ---- entry_invalid: one finding per `validate_entry` problem, for every entry ----
+
+    /// A ledger readme that also declares an enum field `severity`.
+    const LEDGER_TYPED: &str = "---\ntitle: L\nentry_kinds: [f]\nstatuses: {open: open, waiting: blocked, fixed: terminal}\ninitial_status: open\nfields:\n  severity: {type: enum, values: [low, high]}\n---\n";
+
+    fn is_entry_invalid(f: &Finding) -> bool {
+        matches!(f, Finding::EntryInvalid { .. })
+    }
+
+    /// The `EntryInvalid` findings for one entry at `path` under the given readme.
+    fn invalid_findings(readme: &str, path: &str, text: &str) -> Vec<Finding> {
+        let f = run(vec![
+            doc("docs/trackers/ledgers/l/readme.md", readme),
+            doc(path, text),
+        ]);
+        f.into_iter().filter(is_entry_invalid).collect()
+    }
+
+    fn invalid(entry_key: &str, problem: EntryProblem) -> Finding {
+        Finding::EntryInvalid {
+            entry: k(entry_key),
+            problem,
+        }
+    }
+
+    const E: &str = "docs/trackers/ledgers/l/2026-10-01-e.md";
+
+    #[test]
+    fn entry_invalid_reports_an_undeclared_kind() {
+        let text = entry("open", "", "").replace("entry_kind: f", "entry_kind: g");
+        assert_eq!(
+            invalid_findings(LEDGER, E, &text),
+            [invalid(
+                "2026-10-01-e",
+                EntryProblem::KindUndeclared("g".into())
+            )]
+        );
+    }
+
+    #[test]
+    fn entry_invalid_reports_an_undeclared_status() {
+        assert_eq!(
+            invalid_findings(LEDGER, E, &entry("mystery", "", "")),
+            [invalid(
+                "2026-10-01-e",
+                EntryProblem::StatusUndeclared("mystery".into())
+            )]
+        );
+    }
+
+    #[test]
+    fn entry_invalid_reports_a_blocked_entry_with_no_revisit_by() {
+        assert_eq!(
+            invalid_findings(LEDGER, E, &entry("waiting", "", "")),
+            [invalid(
+                "2026-10-01-e",
+                EntryProblem::RevisitMissing {
+                    status: "waiting".into()
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn entry_invalid_reports_a_terminal_entry_with_no_closed() {
+        assert_eq!(
+            invalid_findings(LEDGER, E, &entry("fixed", "", "")),
+            [invalid(
+                "2026-10-01-e",
+                EntryProblem::ClosedMissing {
+                    status: "fixed".into()
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn entry_invalid_reports_a_hand_reopened_entry_that_still_carries_closed() {
+        assert_eq!(
+            invalid_findings(LEDGER, E, &entry("open", "closed: 2026-10-02\n", "")),
+            [invalid(
+                "2026-10-01-e",
+                EntryProblem::ClosedOnNonTerminal {
+                    status: "open".into()
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn entry_invalid_reports_an_undeclared_field() {
+        assert_eq!(
+            invalid_findings(LEDGER, E, &entry("open", "bogus: 1\n", "")),
+            [invalid(
+                "2026-10-01-e",
+                EntryProblem::FieldUndeclared("bogus".into())
+            )]
+        );
+    }
+
+    #[test]
+    fn entry_invalid_reports_a_field_of_the_wrong_type() {
+        assert_eq!(
+            invalid_findings(LEDGER_TYPED, E, &entry("open", "severity: medium\n", "")),
+            [invalid(
+                "2026-10-01-e",
+                EntryProblem::FieldType {
+                    field: "severity".into(),
+                    expected: FieldType::Enum(vec!["low".into(), "high".into()])
+                }
+            )]
+        );
+        // A value the field accepts is not a problem.
+        assert!(
+            invalid_findings(LEDGER_TYPED, E, &entry("open", "severity: low\n", "")).is_empty()
+        );
+    }
+
+    #[test]
+    fn a_clean_entry_has_no_entry_invalid_finding() {
+        let f = check(&tree(), today(), &CheckPolicy::default());
+        assert!(!f.iter().any(is_entry_invalid), "{f:?}");
+    }
+
+    #[test]
+    fn every_problem_of_one_entry_is_a_finding_in_the_order_validate_entry_gives() {
+        // Wrong kind, then a terminal status with no `closed`: two problems, one entry.
+        let text = entry("fixed", "", "").replace("entry_kind: f", "entry_kind: g");
+        assert_eq!(
+            invalid_findings(LEDGER, E, &text),
+            [
+                invalid("2026-10-01-e", EntryProblem::KindUndeclared("g".into())),
+                invalid(
+                    "2026-10-01-e",
+                    EntryProblem::ClosedMissing {
+                        status: "fixed".into()
+                    }
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn each_entry_is_validated_against_its_own_collections_schema() {
+        // `waiting` is declared by the ledger but not by the stream.
+        let f = run(vec![
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-in-ledger.md",
+                &entry("waiting", "revisit_by: 2026-12-01\n", ""),
+            ),
+            doc("docs/trackers/streams/s/readme.md", STREAM),
+            doc(
+                "docs/trackers/streams/s/2026-10-01-in-stream.md",
+                &entry("waiting", "revisit_by: 2026-12-01\n", ""),
+            ),
+        ]);
+        let got: Vec<&Finding> = f.iter().filter(|x| is_entry_invalid(x)).collect();
+        assert_eq!(
+            got,
+            [&invalid(
+                "2026-10-01-in-stream",
+                EntryProblem::StatusUndeclared("waiting".into())
+            )]
         );
     }
 }
