@@ -1,11 +1,14 @@
 ---
 id: '762b5810f84398cf'
 kind: bug
-status: open
+status: fixed
 title: 'run_command: a filtered `cargo test` of a failed build is typed `test` with exit_code 0, passed 0 and an empty stdout'
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
+closed: 2026-11-11
 opened: 2026-11-09
+severity: low-medium
+unverified: Not checked on a rebuilt server. The study runs used the pinned commit f9b0fc9f8 and a likely linker failure; the repro here is a long compile_error line.
 ---
 
 ## Summary
@@ -22,7 +25,7 @@ The agent spends an extra call (a `grep` over the `@cmd_*` buffer) to discover t
 
 ## Reproduction
 
-Observed in transcripts, not minimised. The simple case `cargo test --manifest-path /nonexistent/Cargo.toml 2>&1 | tail -5` returns `exit_code: 0`, the error line in `stdout` and `producer_exit_code: 101` (checked 2026-11-09), so the field split is documented behaviour and works. The empty-stdout, `type: test` shape appears when the producer is a failed `cargo test` whose last lines carry no test summary: the summariser still types the reply as a test run and reports `passed: 0`. Not yet reproduced outside the study transcripts.
+Observed in transcripts, not minimised. The simple case `cargo test --manifest-path /nonexistent/Cargo.toml 2>&1 | tail -5` returns `exit_code: 0`, the error line in `stdout` and `producer_exit_code: 101` (checked 2026-11-09), so the field split is documented behaviour and works. The empty-stdout, `type: test` shape appears when the producer is a failed `cargo test` whose last lines carry no test summary: the summariser still types the reply as a test run and reports `passed: 0`. Reproduced 2026-11-12 outside the study transcripts: see § Hypotheses tried.
 
 ## Environment
 
@@ -30,7 +33,9 @@ Codescout at the pinned study commit f9b0fc9f8 (`/opt/sab/bin/codescout start --
 
 ## Root cause
 
-Unknown — under investigation. Hypothesis (not verified): the test-output summariser is chosen from the producer's command text (`cargo test`) and is run over the filtered stream, not over the producer's stream.
+Verified 2026-11-12. The buffered-summary arm of `handle_successful_output_with` (`src/tools/run_command/output.rs`) chose its summarizer from `detect_command_type(original_command)` alone. A piped `cargo test` matches `Test`. `summarize_test_output_within` counts libtest result lines. With none in the text, it reports `passed: 0` and leaves `stdout` out. `exit_code` is the filter's, so it is 0, and the failure sits only in `producer_exit_code`.
+
+The arm is reached only when the filtered text is over the inline budget. A filtered text under the budget is returned raw and carries no `type`. That is why the simple cases below did not reproduce it. The first hypothesis (the summarizer is chosen from the command text and run over the filtered stream) is true in effect: the filtered stream is the only text it has.
 
 ## Evidence
 
@@ -38,15 +43,30 @@ Unknown — under investigation. Hypothesis (not verified): the test-output summ
 
 ## Hypotheses tried
 
-None yet.
+Each run used a scratch crate with the real `cargo test`, on the running server, 2026-11-12.
+
+- A compile error, `2>&1 | tail -5`: not reproduced. The reply is raw, with the errors in `stdout`.
+- The same crate with no `2>&1`: not reproduced. The compiler text is in `stderr`.
+- 40 compile errors (323 lines), `--lib -- f0 f1 2>&1 | tail -40`: not reproduced. The filtered text is under the inline budget.
+- One `compile_error!` line of 20,000 bytes, `--lib -- t 2>&1 | tail -40`: reproduced. The reply was `{"type":"test","exit_code":0,"output_id":…,"passed":0,"stdout":"","unfiltered_output":…,"producer_exit_code":101}`, the shape in the study transcript. A linker failure prints very long lines, which is the likely route in the study runs. Not checked there.
 
 ## Fix
 
-Open. Candidates: when `producer_exit_code` is non-zero and differs from `exit_code`, put it first in the reply and do not type the reply `test` with `passed: 0`; or report the filter's frame under a name that says so.
+In the `Test` arm, when `producer_exit_code` is non-zero and the test summary states no verdict, the reply takes the generic summary: the head and tail of the text, bounded by bytes, with `output_id` and `producer_exit_code` as before. `states_a_test_verdict` (`src/tools/command_summary.rs`) is true when the summary counted a pass, counted a failure, or carries a failures section.
+
+Unchanged: a run that states a verdict, and a producer that succeeded, are typed `test`. An unpiped `cargo test` with a failed build still answers `type: test`, `exit_code: 101`, `passed: 0`, with the compiler text in `stderr`. Its `exit_code` is the command's own, so it is not the frame mismatch this bug names.
+
+## Fix provenance
+
+- **SHA:** `5a8064845` (`experiments`)
+- **patch-id:** `e7e3d149036ae352fa6ccdbf7e2b5739f6beaa0a`
 
 ## Tests added
 
-N/A — not fixed yet; a regression test is part of the fix.
+- `a_failed_producer_with_no_test_verdict_is_not_typed_as_a_test_run` (`src/tools/run_command/tests.rs`): red before the change with exactly the reply above, green after. It also pins two controls: a run with a verdict stays `test`, and a producer that exited 0 stays `test`.
+- `a_test_summary_states_a_verdict_only_when_it_counted_something` (`src/tools/command_summary.rs`): the predicate on an empty text, a compile error, a result line of zeros, and two counted results.
+
+Gate on 2026-11-12: clippy, LEAN and DEFAULT green in one run. The format lane was red in that run because a peer's file was transiently unformatted. A separate `./scripts/fmt-mine.sh --check` was green afterwards.
 
 ## Workarounds
 
@@ -54,7 +74,7 @@ Run the producer bare and query the `@cmd_*` buffer, as the guide advises.
 
 ## Resume
 
-Reproduce the empty-stdout shape with a real link failure, find where the reply type is chosen, then decide the fix.
+Fixed and committed. One check is left: after a rebuild and `/mcp`, rerun the 20,000-byte `compile_error!` crate from § Hypotheses tried. The reply should be `type: generic` with the text in `stdout` and `producer_exit_code: 101`. Then clear the `unverified` field.
 
 ## References
 
