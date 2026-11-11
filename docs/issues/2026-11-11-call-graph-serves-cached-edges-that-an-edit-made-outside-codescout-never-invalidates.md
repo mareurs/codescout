@@ -13,7 +13,7 @@ related:
 - '58a45860b802a477'
 - '4e7ec7bfc047ac7b'
 severity: medium
-unverified: Measured by hand in one scratch crate (callers direction, mux transport, before the fix) and by test in the callees direction with tree-sitter edges and a mock LSP, after it. The callers direction was not re-run after the fix and no test covers it. A caller added in a file the cached result does not mention is NOT fixed and has no test. A git checkout, a second session and other languages were not run. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity is my proposal.
+unverified: Measured by hand in two scratch crates (callers direction, rust-analyzer, default transport; before and after the fix) and by test in the callees direction with tree-sitter edges and a mock LSP. The residual (a caller added in a file the cached result does not name) is NOT fixed, was reproduced by hand and has no automated test. A git checkout, a second session and other languages were not run. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity is my proposal.
 ---
 
 # BUG: call_graph serves cached edges that an edit made outside codescout never invalidates
@@ -46,6 +46,21 @@ Scratch crate `stale5` (rust-analyzer, default mux transport), session `5f715d8f
 Step 4 shows that the stale answer comes from the cache file and not from the language server. Step 6 shows that codescout's own writes do invalidate it. Steps 2 and 3 show no self-healing: the answer stayed the same after `references` and `symbols` had refreshed everything else.
 
 The spurious edge in step 2 is consistent with a stale line (7, which was the line `pub fn imported_caller` in the old file) being attributed to the enclosing function in the NEW symbol ranges (`full_path_caller`, L6-8). That mechanism is my inference from the output; I did not trace it.
+
+### Re-run with the rebuilt binary (commit `5a7936984`, release binary of 23:01, `signatures_json` present in the binary)
+
+New scratch crate `stale6` (callers direction, same layout as `stale5`, plus `unrelated.rs` that holds no call at first), default transport, `workspace=<crate>` on every call. Every state read from the files.
+
+| # | Step | `call_graph(target_fn, callers)` |
+|---|---|---|
+| 1 | Baseline | 3 edges: `lib.rs:6`, `other.rs:4`, `other.rs:8` (`ts`, the server was still starting) |
+| 2 | External rewrite of `other.rs`: 3 lines prepended | 3 edges at the CURRENT lines: `lib.rs:6`, `other.rs:7`, `other.rs:11`, now from `lsp`. No spurious edge. (Before the fix: lines `4` and `8` and an invented `full_path_caller → imported_caller`.) |
+| 3 | External append of `late_caller` (line 15) to `other.rs` | 4 edges, `15: late_caller → target_fn` present. (Before the fix: missing.) |
+| 4 | External rewrite of `unrelated.rs`, a file the cached result does not name: `sneaky` calls `target_fn` on line 6 | still 4 edges, **`sneaky` missing**; `references` lists `unrelated.rs:6`. **The residual, reproduced by hand.** |
+| 5 | Control: external change to a NAMED file (`other.rs`, one blank line) | 5 edges, `unrelated.rs:6: sneaky → target_fn` now present |
+| 6 | Migration on a real old database: `call_graph` on `stale5`, whose `call_edges.db` was written by the previous binary | works; `call_edge_resolutions` now has `signatures_json`; the one row was recomputed and signed |
+
+Steps 2, 3 and 6 confirm the fix on a real server. Step 4 against step 5 shows the limit exactly: the entry is invalidated by a change in a file that it names and not by a change in a file that it does not.
 
 ## Environment
 
@@ -99,7 +114,7 @@ In `src/tools/symbol/call_edges/cache.rs`, six unit tests on `EdgeCache`: hit wh
 
 Verified 2026-11-11: `cargo test --lib -- tools::symbol::call_edges tools::symbol::call_graph` 113 passed, 0 failed, 0 ignored; clippy with `-D warnings` clean; `./scripts/gate.sh` green (9442 tests, FMT, CLIPPY, LEAN, DEFAULT all 0).
 
-Not covered: the residual above (a caller in an unmentioned file); the `callers` direction (measured by hand only, before the fix; not re-run after it); a second session through a real process boundary; a language other than Rust; the new binary was not run against the scratch crate.
+Not covered by an automated test: the residual above (reproduced by hand in step 4); the `callers` direction (re-run by hand after the fix, steps 1 to 5 above); a second session through a real process boundary; a language other than Rust.
 
 ## Workarounds
 
@@ -109,7 +124,7 @@ Delete `.codescout/call_edges.db`, or write to the changed file with a codescout
 
 Partly fixed by `5a7936984` (see `## Fix provenance`). Status stays `open` because the residual case (a caller added in a file the cached result does not mention) is not fixed, and it is the case that started this investigation.
 
-Next: (1) re-run the manual `callers` sequence of the table with the rebuilt binary (steps 2, 3 and 5 should now show current lines and `late_caller`); (2) with the owner, choose among the residual options and write the red test for it (a mock LSP that reports a caller in a new file on the second call); (3) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established.
+Next: (1) with the owner, choose among the residual options and write the red test for it (a mock LSP that reports a caller in a new file on the second call); (2) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established. The manual `callers` re-run is done (see Reproduction, steps 1 to 6 of the re-run).
 
 Related: `a73c49456056fb92`, `58a45860b802a477`, `bug-fix-session-log:F-236`.
 
