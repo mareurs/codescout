@@ -3,6 +3,7 @@
 
 pub mod entry;
 pub mod layout;
+pub mod relations;
 pub mod schema;
 #[cfg(test)]
 pub(crate) mod testkit;
