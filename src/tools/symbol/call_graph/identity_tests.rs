@@ -463,5 +463,46 @@ async fn call_graph_reports_a_caller_added_in_a_file_the_cached_result_does_not_
 async fn call_graph_reports_a_new_caller_once_a_write_invalidates_the_cached_edges() {
     callers_after_a_caller_appears_in_an_unnamed_file(true).await;
 }
+/// The epoch only stats and hashes the source files, where the workspace scan parses them, so it
+/// has a cap of its own. A tree with more source files than the workspace-scan cap must still get
+/// an epoch: its resolutions are stored under one, and are not left without any (bug
+/// `489e013ddfd6c3fc`, measured on a 5096-file Rust tree).
+#[tokio::test]
+async fn a_tree_above_the_workspace_scan_cap_still_stores_its_resolutions_under_an_epoch() {
+    let dir = write_project(&[(
+        "src/lib.rs",
+        "pub fn entry() {\n    first();\n}\npub fn first() {}\n",
+    )]);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir_all(root.join("src/bulk")).unwrap();
+    for i in 0..=super::MAX_WORKSPACE_FILES_SCAN {
+        std::fs::write(root.join(format!("src/bulk/f{i}.rs")), "").unwrap();
+    }
+    let ask = json!({"symbol":"entry","path":"src/lib.rs",
+        "direction":"callees","max_depth":1,"detail_level":"full"});
+
+    let ctx = context(&root, &["src/lib.rs"]).await;
+    let out = CallGraph.call(ask, &ctx).await.unwrap();
+    assert_eq!(
+        rows(&out, &root),
+        vec!["entry>first@src/lib.rs:2#1"],
+        "{out}"
+    );
+
+    let conn = rusqlite::Connection::open(root.join(".codescout/call_edges.db")).unwrap();
+    let (stored, under_an_epoch): (i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*), COUNT(epoch) FROM call_edge_resolutions",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert!(stored > 0, "the call must have stored a resolution");
+    assert_eq!(
+        under_an_epoch, stored,
+        "every stored resolution must carry an epoch although the tree has more than {} source files",
+        super::MAX_WORKSPACE_FILES_SCAN
+    );
+}
 
 mod review;

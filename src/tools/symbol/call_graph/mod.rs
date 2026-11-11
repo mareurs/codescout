@@ -91,6 +91,13 @@ struct CachedResolver {
 /// stays; what a walk it stops must do is say so ([`WorkspaceScan::Incomplete`]).
 // cap-class: RESULT_CAP call_graph.workspace_files_scan — probed
 const MAX_WORKSPACE_FILES_SCAN: usize = 5_000;
+/// File cap for the walk that fingerprints a language's source files (`language_epoch`). It
+/// has its own cap because that walk only stats and hashes: measured 2026-11-12, it costs
+/// about 4 to 6 microseconds per walked file, 51 ms for a 5096-file Rust tree, where the
+/// workspace walk above parses files. Past the cap the epoch is unknown, so no cached
+/// resolution is reused or stored for that call (bug `489e013ddfd6c3fc`).
+// cap-class: NOT_A_CAP — bounds the walk that fingerprints a language's source files; past it the epoch is unknown and no cached resolution is reused, so the answer is computed afresh and nothing is shortened or presented as complete
+const MAX_EPOCH_FILES_SCAN: usize = 20_000;
 
 /// Outcome of the Phase B workspace walk. The walk used to return `Option`, whose `None`
 /// carried both "no file defines it" and "the walk did not look everywhere".
@@ -781,7 +788,7 @@ impl Tool for CallGraph {
                 crate::tools::symbol::scan_budget::language_epoch(
                     &walk_root,
                     &seed_lang,
-                    MAX_WORKSPACE_FILES_SCAN,
+                    MAX_EPOCH_FILES_SCAN,
                 )
             })
             .await
