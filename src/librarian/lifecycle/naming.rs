@@ -343,5 +343,13 @@ mod tests {
             archive_rel_path("docs/trackers/temp/t/archive/2026-01-01-r.md", &gone),
             None
         );
+        // An empty or `.` component is dropped before the file name is taken, so a trailing
+        // `/.` still names the file.
+        let dotted = "docs/trackers/ledgers/frictions/a.md/.";
+        let p = place(dotted).unwrap().unwrap();
+        assert_eq!(
+            archive_rel_path(dotted, &p).as_deref(),
+            Some("docs/trackers/ledgers/frictions/archive/a.md")
+        );
     }
 }

@@ -443,6 +443,7 @@ mod tests {
             }
         )));
     }
+
     #[test]
     fn a_readme_without_the_key_is_missing_key() {
         let base = "title: T\nentry_kinds: [k]\nstatuses: {open: open, done: terminal}\ninitial_status: open\n";

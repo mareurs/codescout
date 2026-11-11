@@ -218,6 +218,7 @@ pub enum EntryProblem {
     #[error("frontmatter is not an entry: {}", joined(.0))]
     Unparsed(Vec<EntryError>),
 }
+
 /// The messages of `errors`, `; `-separated.
 fn joined(errors: &[EntryError]) -> String {
     errors

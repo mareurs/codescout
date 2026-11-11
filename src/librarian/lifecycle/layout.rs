@@ -103,7 +103,8 @@ fn collection_depth(segs: &[String]) -> Option<(usize, bool)> {
 }
 
 /// Place a repo-relative path. `None` when it is not below `docs/trackers/<lifecycle>/`
-/// (legacy flat trackers, other docs). `\` is read as `/`.
+/// (legacy flat trackers, other docs). `\` is read as `/`. A path with a trailing separator
+/// below a lifecycle folder names a directory, so it is `PlacementError::NotMarkdown`.
 pub fn place(rel_path: &str) -> Option<Result<Placement, PlacementError>> {
     let segs = components(rel_path);
     let lifecycle = lifecycle_of(&segs)?;
@@ -233,6 +234,7 @@ mod tests {
             "frictions"
         );
     }
+
     #[test]
     fn a_trailing_separator_is_not_a_tracker_file() {
         for path in [
