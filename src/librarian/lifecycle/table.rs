@@ -96,7 +96,15 @@ fn date_cell(d: Option<NaiveDate>) -> String {
 }
 
 /// The rows as a GFM table with the columns `Entry | Kind | Status | Created | Closed`. The
-/// entry cell is `[[<key>]] <title>`, so the table cites every entry it lists and nothing else.
+/// entry cell is `[[<key>]] <title>`.
+///
+/// Guaranteed: each row cites its own entry key once, as a wiki link; a title (or any other
+/// text cell) cannot add a wiki-link citation or break its row, because `|` and `[` are
+/// escaped and a newline becomes a space.
+///
+/// Not guaranteed: a bare token in a title (`R-91`) is still read as a bare token by
+/// `grammar::extract`, and a bare token resolves only inside the document that hosts the table.
+/// A caller that writes the table into a file must decide whether to neutralise bare tokens first.
 pub fn render_markdown(rows: &[EntryRow]) -> String {
     let mut out =
         String::from("| Entry | Kind | Status | Created | Closed |\n|---|---|---|---|---|\n");
@@ -267,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn rows_of_one_day_sort_by_key_and_the_table_prints_the_closed_date() {
+    fn the_table_prints_the_closed_date_and_cites_each_row() {
         let tree = LifecycleTree::build([
             doc("docs/trackers/ledgers/l/readme.md", LEDGER),
             doc(
@@ -280,12 +288,76 @@ mod tests {
             ),
         ]);
         let r = rows(&tree, &k("l"), false).unwrap();
-        let keys: Vec<&str> = r.iter().map(|r| r.key.as_str()).collect();
-        assert_eq!(keys, ["2026-10-01-a", "2026-10-01-b"]);
         let md = render_markdown(&r);
         assert!(md.contains("| [[2026-10-01-a]] t | f | open | 2026-10-01 |  |"));
         assert!(md.contains("| [[2026-10-01-b]] t | f | fixed | 2026-10-01 | 2026-10-04 |"));
         assert_eq!(grammar::extract(&md).len(), 2);
+    }
+
+    /// The keys of `rows`, in order.
+    fn keys(rows: &[EntryRow]) -> Vec<&str> {
+        rows.iter().map(|r| r.key.as_str()).collect()
+    }
+
+    #[test]
+    fn rows_of_one_day_sort_by_key_not_by_path() {
+        // Path order puts `...-a-b.md` before `...-a.md` (`-` is 0x2D, `.` is 0x2E); key order is the opposite.
+        let tree = LifecycleTree::build([
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-a-b.md",
+                &entry_created("open", "2026-10-01", ""),
+            ),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-a.md",
+                &entry_created("open", "2026-10-01", ""),
+            ),
+        ]);
+        let r = rows(&tree, &k("l"), false).unwrap();
+        assert_eq!(keys(&r), ["2026-10-01-a", "2026-10-01-a-b"]);
+    }
+
+    #[test]
+    fn a_live_and_an_archived_entry_of_one_day_sort_by_key_not_by_path() {
+        // Path order puts the live `l/2026-...` before `l/archive/2026-...`; key order is the opposite.
+        let tree = LifecycleTree::build([
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-z.md",
+                &entry_created("open", "2026-10-01", ""),
+            ),
+            doc(
+                "docs/trackers/ledgers/l/archive/2026-10-01-a.md",
+                &entry_created("fixed", "2026-10-01", "closed: 2026-10-02\n"),
+            ),
+        ]);
+        let r = rows(&tree, &k("l"), true).unwrap();
+        assert_eq!(keys(&r), ["2026-10-01-a", "2026-10-01-z"]);
+        assert_eq!((r[0].archived, r[1].archived), (true, false));
+    }
+
+    #[test]
+    fn two_nodes_with_one_collection_key_both_contribute_and_each_keeps_its_own_classes() {
+        // The same word `parked` is `blocked` in the ledger `c` and `deferred` in the stream `c`.
+        let ledger = "---\ntitle: L\nentry_kinds: [f]\nstatuses: {open: open, parked: blocked, fixed: terminal}\ninitial_status: open\nreview_every: 30d\n---\n";
+        let stream = "---\ntitle: S\nentry_kinds: [f]\nstatuses: {open: open, parked: deferred, fixed: terminal}\ninitial_status: open\nexit_when: it ships\n---\n";
+        let tree = LifecycleTree::build([
+            doc("docs/trackers/ledgers/c/readme.md", ledger),
+            doc(
+                "docs/trackers/ledgers/c/2026-10-01-p.md",
+                &entry_created("parked", "2026-10-01", "revisit_by: 2026-12-01\n"),
+            ),
+            doc("docs/trackers/streams/c/readme.md", stream),
+            doc(
+                "docs/trackers/streams/c/2026-10-02-q.md",
+                &entry_created("parked", "2026-10-02", "revisit_by: 2026-12-01\n"),
+            ),
+        ]);
+        assert_eq!(tree.collections.len(), 2);
+        let r = rows(&tree, &k("c"), false).unwrap();
+        assert_eq!(keys(&r), ["2026-10-02-q", "2026-10-01-p"]);
+        assert_eq!(r[0].class, Some(StatusClass::Deferred));
+        assert_eq!(r[1].class, Some(StatusClass::Blocked));
     }
 
     #[test]
@@ -396,7 +468,11 @@ mod tests {
             .current_dir(root)
             .output()
             .expect("git ls-files runs");
-        assert!(listed.status.success(), "git ls-files failed");
+        assert!(
+            listed.status.success(),
+            "git ls-files failed: {}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
         let paths: Vec<String> = String::from_utf8_lossy(&listed.stdout)
             .split('\0')
             .filter(|p| !p.is_empty())
