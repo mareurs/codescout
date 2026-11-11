@@ -199,6 +199,12 @@ enum Commands {
     /// against `master`/PR docs to catch drift.
     AuditDocRefs(codescout::cli::audit_doc_refs::AuditArgs),
 
+    /// Check that no markdown document's key (its lowercase filename stem) is invalid or
+    /// shared, in the staged index (`--staged`: only the problems the staged changes add
+    /// relative to HEAD) or in the whole index. Reads git only; needs no catalog. Exits 0
+    /// when clean, 1 on problems, 2 and prints `NOT CHECKED — <reason>` when it cannot ask.
+    KeyGate(codescout::cli::key_gate::KeyGateArgs),
+
     /// Scan the librarian catalog for invariant violations — path form, ADS
     /// colons, `..` segments, missing files, worktree-scoped rows, entry
     /// validity, claim liveness and more. Read-only by default; `--fix=<repair>`
@@ -505,6 +511,9 @@ async fn main() -> Result<()> {
         }
         Commands::AuditDocRefs(args) => {
             codescout::cli::audit_doc_refs::run(args).await?;
+        }
+        Commands::KeyGate(args) => {
+            codescout::cli::key_gate::run(args).await?;
         }
         Commands::Doctor(args) => {
             codescout::cli::doctor::run(args).await?;

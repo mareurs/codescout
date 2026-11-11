@@ -96,7 +96,7 @@ pub(super) fn components(rel_path: &str) -> Vec<String> {
 }
 
 /// The stem of a file name when its extension is `md` (any case); `None` otherwise.
-fn markdown_stem(file_name: &str) -> Option<&str> {
+pub(crate) fn markdown_stem(file_name: &str) -> Option<&str> {
     let (stem, ext) = file_name.rsplit_once('.')?;
     ext.eq_ignore_ascii_case("md").then_some(stem)
 }
