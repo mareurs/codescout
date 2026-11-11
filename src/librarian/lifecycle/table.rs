@@ -31,7 +31,8 @@ pub struct EntryRow {
     pub closed: Option<NaiveDate>,
     pub revisit_by: Option<NaiveDate>,
     pub archived: bool,
-    /// The entry's schema-declared extra fields, as read.
+    /// Every non-reserved extra frontmatter key of the entry, as read: declared in the
+    /// collection schema or not.
     pub fields: BTreeMap<String, Value>,
 }
 

@@ -56,7 +56,8 @@ pub struct EntryMeta {
     pub revisit_by: Option<NaiveDate>,
     pub valid: Option<Validity>,
     pub tags: Vec<String>,
-    /// Every `extra` key that is not one of the reserved entry keys.
+    /// Every `extra` key that is not one of the reserved entry keys, declared in the schema or
+    /// not. A null value is kept as `Value::Null`; `validate_entry` skips null values.
     pub fields: BTreeMap<String, Value>,
 }
 
@@ -191,11 +192,23 @@ pub fn parse_entry(fm: &Frontmatter) -> Result<EntryMeta, Vec<EntryError>> {
 pub enum EntryProblem {
     KindUndeclared(String),
     StatusUndeclared(String),
-    RevisitMissing { status: String },
-    ClosedMissing { status: String },
-    ClosedOnNonTerminal { status: String },
+    RevisitMissing {
+        status: String,
+    },
+    ClosedMissing {
+        status: String,
+    },
+    ClosedOnNonTerminal {
+        status: String,
+    },
     FieldUndeclared(String),
-    FieldType { field: String, expected: FieldType },
+    FieldType {
+        field: String,
+        expected: FieldType,
+    },
+    /// The entry's frontmatter does not parse as an entry, so there is no meta to check
+    /// against the schema: every parse error, as `parse_entry` reported them.
+    Unparsed(Vec<EntryError>),
 }
 
 /// The class the schema gives this entry's status word, if it declares one.
@@ -308,6 +321,25 @@ mod tests {
             }]
         );
         assert_eq!(class_of(&s, &reopened), Some(StatusClass::Open));
+    }
+
+    #[test]
+    fn a_deferred_entry_without_revisit_by_is_revisit_missing() {
+        let y = "title: F\nentry_kinds: [friction]\nstatuses: {open: open, parked: deferred, fixed: terminal}\ninitial_status: open\n";
+        let s = parse_schema(Lifecycle::Ledger, &fm(y)).unwrap();
+        let parked = parse_entry(&fm(&format!("{BASE}status: parked\n"))).unwrap();
+        assert_eq!(class_of(&s, &parked), Some(StatusClass::Deferred));
+        assert_eq!(
+            validate_entry(&s, &parked),
+            vec![EntryProblem::RevisitMissing {
+                status: "parked".into()
+            }]
+        );
+        let dated = parse_entry(&fm(&format!(
+            "{BASE}status: parked\nrevisit_by: 2026-12-01\n"
+        )))
+        .unwrap();
+        assert_eq!(validate_entry(&s, &dated), vec![]);
     }
 
     #[test]

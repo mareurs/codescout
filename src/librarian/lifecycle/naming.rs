@@ -29,7 +29,21 @@ pub enum StemError {
 impl std::fmt::Display for StemError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StemError::BadKey(e) => write!(f, "{e}"),
+            // `Key::parse` puts the stem it was given in the error. The fix is a different
+            // TITLE: no file exists yet, so `KeyError`'s own text ("rename the file") would
+            // send the author to the wrong place.
+            StemError::BadKey(e) => {
+                let stem = match e {
+                    KeyError::NotMarkdown(s) => s,
+                    KeyError::NonCanonical { key, .. } | KeyError::HexShaped { key, .. } => key,
+                };
+                write!(
+                    f,
+                    "the title gives the stem {stem:?}, which must match \
+                     ^[a-z0-9]+(-[a-z0-9]+)*$ and must not be 16 hex characters; \
+                     choose another title"
+                )
+            }
             StemError::ReservedName(n) => write!(
                 f,
                 "the name {n:?} is reserved for a collection's folder-index file; \
@@ -196,6 +210,32 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_bad_stem_message_gives_the_stem_and_advises_a_title_not_a_rename() {
+        for slug_text in ["Bad_Stem", "a--b"] {
+            let err = entry_stem(KeyStyle::Name, d("2026-11-11"), slug_text).unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains(slug_text), "{msg}");
+            assert!(msg.contains("choose another title"), "{msg}");
+            assert!(!msg.contains("rename the file"), "{msg}");
+        }
+        // A dated style names the whole stem, date included.
+        let msg = entry_stem(KeyStyle::Dated, d("2026-11-11"), "")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("2026-11-11-"), "{msg}");
+        assert!(!msg.contains("rename the file"), "{msg}");
+        // 16 hex characters is refused as the shape of a repo id.
+        let msg = entry_stem(KeyStyle::Name, d("2026-11-11"), "deadbeefcafe1234")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            msg.contains("deadbeefcafe1234") && msg.contains("16 hex"),
+            "{msg}"
+        );
+        assert!(!msg.contains("rename the file"), "{msg}");
     }
 
     #[test]

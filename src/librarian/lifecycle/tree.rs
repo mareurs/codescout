@@ -23,7 +23,7 @@ pub struct DocInput {
 }
 
 /// One tracker entry that parsed.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EntryNode {
     pub rel_path: String,
     pub key: Key,
@@ -34,7 +34,7 @@ pub struct EntryNode {
 }
 
 /// One collection whose readme gave a valid schema, with the entries found below it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CollectionNode {
     pub key: Key,
     pub lifecycle: Lifecycle,
@@ -43,10 +43,14 @@ pub struct CollectionNode {
     pub archived: bool,
     pub schema: CollectionSchema,
     pub entries: Vec<EntryNode>,
+    /// Repo-relative paths of the entries placed in this collection (archived part included)
+    /// whose frontmatter failed `parse_entry`, in path order. They are in no `entries`, so a
+    /// check that reasons about the whole stream must know they exist.
+    pub unparsed: Vec<String>,
 }
 
 /// Something wrong with the tree that is not a lifecycle check on a field.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TreeProblem {
     /// A file below a lifecycle folder has no valid place (or an entry file name is no key).
     Placement(PlacementError),
@@ -59,9 +63,11 @@ pub enum TreeProblem {
         collection: Key,
         errors: Vec<SchemaError>,
     },
-    /// An entry whose frontmatter does not parse as an entry; it is left out.
+    /// An entry whose frontmatter does not parse as an entry; it is left out of `entries`
+    /// and its path is listed in its collection's `unparsed`.
     Entry {
         rel_path: String,
+        key: Key,
         errors: Vec<EntryError>,
     },
     /// A tracker file whose frontmatter block does not parse; it is left out.
@@ -69,7 +75,7 @@ pub enum TreeProblem {
 }
 
 /// The placed, parsed tracker tree.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LifecycleTree {
     pub collections: Vec<CollectionNode>,
     pub problems: Vec<TreeProblem>,
@@ -163,6 +169,7 @@ impl LifecycleTree {
                                 archived: placement.archived,
                                 schema,
                                 entries: Vec::new(),
+                                unparsed: Vec::new(),
                             });
                     }
                     Err(errors) => {
@@ -186,7 +193,10 @@ impl LifecycleTree {
             let key = match key_of(&doc.rel_path) {
                 Ok(key) => key,
                 Err(e) => {
-                    problems.push(TreeProblem::Placement(PlacementError::BadKey(e)));
+                    problems.push(TreeProblem::Placement(PlacementError::BadKey {
+                        rel_path: doc.rel_path.clone(),
+                        error: e,
+                    }));
                     continue;
                 }
             };
@@ -198,10 +208,14 @@ impl LifecycleTree {
                     meta,
                     relations: relations(&doc.text),
                 }),
-                Err(errors) => problems.push(TreeProblem::Entry {
-                    rel_path: doc.rel_path.clone(),
-                    errors,
-                }),
+                Err(errors) => {
+                    collection.unparsed.push(doc.rel_path.clone());
+                    problems.push(TreeProblem::Entry {
+                        rel_path: doc.rel_path.clone(),
+                        key,
+                        errors,
+                    });
+                }
             }
         }
 
@@ -313,9 +327,8 @@ mod tests {
         assert_eq!(forward.collections.len(), 2);
         assert_eq!(forward.problems.len(), 2);
         assert_eq!(forward.closed_dates.len(), 2);
-        // `LifecycleTree` has no `PartialEq` (its problems hold `SchemaError`, which has no
-        // `Clone`); `Debug` text is a whole-tree comparison all the same.
-        assert_eq!(format!("{forward:?}"), format!("{backward:?}"));
+        // `LifecycleTree` is `PartialEq`: a whole-tree comparison, not a rendering of it.
+        assert_eq!(forward, backward);
     }
 
     #[test]
@@ -348,9 +361,11 @@ mod tests {
         assert!(placement
             .iter()
             .any(|e| matches!(e, PlacementError::OutsideCollection(p) if p == "docs/trackers/ledgers/loose.md")));
-        assert!(placement
-            .iter()
-            .any(|e| matches!(e, PlacementError::BadKey(_))));
+        assert!(placement.iter().any(|e| matches!(
+            e,
+            PlacementError::BadKey { rel_path, .. }
+                if rel_path == "docs/trackers/ledgers/Bad_Name/readme.md"
+        )));
     }
 
     #[test]
@@ -431,9 +446,78 @@ mod tests {
         assert!(t.collections[0].entries.is_empty());
         assert!(matches!(
             t.problems.as_slice(),
-            [TreeProblem::Entry { rel_path, errors }]
-                if rel_path == "docs/trackers/ledgers/l/2026-10-01-a.md" && !errors.is_empty()
+            [TreeProblem::Entry { rel_path, key, errors }]
+                if rel_path == "docs/trackers/ledgers/l/2026-10-01-a.md"
+                    && key.as_str() == "2026-10-01-a"
+                    && !errors.is_empty()
         ));
+    }
+
+    #[test]
+    fn a_bad_key_names_the_file_for_a_collection_folder_and_for_an_entry_stem() {
+        let t = LifecycleTree::build([
+            doc("docs/trackers/ledgers/Bad_Name/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/Bad_Name/2026-10-01-a.md",
+                &entry("open", "", ""),
+            ),
+            doc("docs/trackers/ledgers/c/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/c/Bad_Stem.md",
+                &entry("open", "", ""),
+            ),
+        ]);
+        let mut got: Vec<&str> = t
+            .problems
+            .iter()
+            .filter_map(|p| match p {
+                TreeProblem::Placement(PlacementError::BadKey { rel_path, error }) => {
+                    // The error carries the offending NAME; the problem carries the FILE.
+                    assert!(
+                        rel_path.ends_with(".md") && rel_path.starts_with("docs/trackers/"),
+                        "{rel_path} {error:?}"
+                    );
+                    Some(rel_path.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        got.sort_unstable();
+        assert_eq!(
+            got,
+            [
+                "docs/trackers/ledgers/Bad_Name/2026-10-01-a.md",
+                "docs/trackers/ledgers/Bad_Name/readme.md",
+                "docs/trackers/ledgers/c/Bad_Stem.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unparsed_entry_is_listed_in_its_collection_archived_part_included() {
+        let t = LifecycleTree::build([
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/archive/2026-10-01-z.md",
+                "---\nentry_kind: f\n---\n",
+            ),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-a.md",
+                "---\nentry_kind: f\n---\n",
+            ),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-02-ok.md",
+                &entry("open", "", ""),
+            ),
+        ]);
+        assert_eq!(
+            t.collections[0].unparsed,
+            [
+                "docs/trackers/ledgers/l/2026-10-01-a.md",
+                "docs/trackers/ledgers/l/archive/2026-10-01-z.md"
+            ]
+        );
+        assert_eq!(t.collections[0].entries.len(), 1);
     }
 
     #[test]

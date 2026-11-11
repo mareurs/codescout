@@ -4,7 +4,8 @@
 //! filesystem, so no check can read a commit date (anti-goal 2).
 //!
 //! Which entries each check looks at: `EntryInvalid` (spec `entry_invalid`, one finding per
-//! problem `validate_entry` returns, which generalises the former `status_undeclared`) looks
+//! problem `validate_entry` returns, which generalises the former `status_undeclared`; an entry
+//! that does not parse gives one finding with every parse error) looks
 //! at every entry, archived or not (data integrity). `RevisitDue`, `CitedTargetClosed` and
 //! `TerminalInLiveDir` look at
 //! un-archived entries only: an archived entry is done and does not nag. `StreamAllTerminal`
@@ -16,7 +17,7 @@ use std::collections::BTreeSet;
 use chrono::{Days, NaiveDate};
 
 use super::entry::{class_of, validate_entry, EntryProblem};
-use super::layout::Lifecycle;
+use super::layout::{Lifecycle, PlacementError};
 use super::relations::Relation;
 use super::schema::{SchemaError, StatusClass};
 use super::tree::{CollectionNode, EntryNode, LifecycleTree, TreeProblem};
@@ -41,7 +42,9 @@ impl Default for CheckPolicy {
 /// One thing `doctor` reports. The variants are listed in the order `check` returns them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Finding {
-    /// An entry breaks its collection's schema: one finding per problem `validate_entry` returns.
+    /// An entry breaks its collection's schema: one finding per problem `validate_entry`
+    /// returns, or one `EntryProblem::Unparsed` carrying every error of an entry whose
+    /// frontmatter does not parse at all.
     EntryInvalid { entry: Key, problem: EntryProblem },
     /// A blocked or deferred entry's `revisit_by` has passed.
     RevisitDue { entry: Key, revisit_by: NaiveDate },
@@ -51,7 +54,7 @@ pub enum Finding {
         target: Key,
         closed: NaiveDate,
     },
-    /// Every entry of a live stream or temp collection is terminal.
+    /// Every entry of a live stream or temp collection is terminal, and none failed to parse.
     StreamAllTerminal { collection: Key },
     /// A stream or temp collection declares no `exit_when`.
     StreamWithoutExit { collection: Key },
@@ -62,7 +65,8 @@ pub enum Finding {
     },
     /// A terminal entry stayed outside `archive/` past the grace period.
     TerminalInLiveDir { entry: Key, closed: NaiveDate },
-    /// An entry file with no collection readme above it.
+    /// An entry file with no collection readme above it: an entry in a folder with no readme,
+    /// or a file directly in a lifecycle folder.
     OrphanEntry { rel_path: String },
 }
 
@@ -121,7 +125,7 @@ fn check_entry(
     let Some(class) = class_of(&collection.schema, meta) else {
         return;
     };
-    if matches!(class, StatusClass::Blocked | StatusClass::Deferred) {
+    if class.needs_revisit() {
         if let Some(revisit_by) = meta.revisit_by.filter(|r| *r < today) {
             out.push(Finding::RevisitDue {
                 entry: entry.key.clone(),
@@ -163,6 +167,7 @@ fn check_collection(collection: &CollectionNode, today: NaiveDate, out: &mut Vec
     match collection.lifecycle {
         Lifecycle::Stream | Lifecycle::Temp => {
             let all_terminal = !collection.entries.is_empty()
+                && collection.unparsed.is_empty()
                 && collection
                     .entries
                     .iter()
@@ -209,10 +214,23 @@ pub fn check(tree: &LifecycleTree, today: NaiveDate, policy: &CheckPolicy) -> Ve
         }
         check_collection(collection, today, &mut out);
     }
+    let mut orphans: BTreeSet<&str> = BTreeSet::new();
     for problem in &tree.problems {
         match problem {
-            TreeProblem::OrphanEntry(rel_path) => out.push(Finding::OrphanEntry {
-                rel_path: rel_path.clone(),
+            // A file under a lifecycle folder with no collection readme above it arrives in
+            // one of two ways: an entry whose collection folder has no readme, or a file that
+            // sits directly in the lifecycle folder (`place` refuses it). One path, one finding.
+            TreeProblem::OrphanEntry(rel_path)
+            | TreeProblem::Placement(PlacementError::OutsideCollection(rel_path)) => {
+                if orphans.insert(rel_path.as_str()) {
+                    out.push(Finding::OrphanEntry {
+                        rel_path: rel_path.clone(),
+                    });
+                }
+            }
+            TreeProblem::Entry { key, errors, .. } => out.push(Finding::EntryInvalid {
+                entry: key.clone(),
+                problem: EntryProblem::Unparsed(errors.clone()),
             }),
             TreeProblem::Schema { collection, errors }
                 if errors.contains(&SchemaError::ExitRequired) =>
@@ -231,6 +249,7 @@ pub fn check(tree: &LifecycleTree, today: NaiveDate, policy: &CheckPolicy) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::librarian::lifecycle::entry::EntryError;
     use crate::librarian::lifecycle::schema::FieldType;
     use crate::librarian::lifecycle::testkit::{d, doc, entry, k, LEDGER, STREAM};
     use crate::librarian::lifecycle::tree::{DocInput, LifecycleTree};
@@ -393,6 +412,95 @@ mod tests {
             problem: EntryProblem::ClosedMissing {
                 status: "fixed".into()
             }
+        }));
+    }
+
+    #[test]
+    fn an_unparsed_open_entry_keeps_its_stream_from_reading_as_all_terminal() {
+        let f = run(vec![
+            doc("docs/trackers/streams/s/readme.md", STREAM),
+            doc(
+                "docs/trackers/streams/s/2026-10-01-done.md",
+                &entry("done", "closed: 2026-10-03\n", ""),
+            ),
+            // Open, but its `created` is malformed, so it is in no `entries`.
+            doc(
+                "docs/trackers/streams/s/2026-10-02-open.md",
+                &entry("open", "", "").replace("created: 2026-10-01", "created: 2026-8-1"),
+            ),
+        ]);
+        assert!(
+            !f.iter()
+                .any(|x| matches!(x, Finding::StreamAllTerminal { .. })),
+            "{f:?}"
+        );
+        assert!(f.contains(&Finding::EntryInvalid {
+            entry: k("2026-10-02-open"),
+            problem: EntryProblem::Unparsed(vec![EntryError::BadDate {
+                field: "created",
+                value: "2026-8-1".into()
+            }])
+        }));
+    }
+
+    #[test]
+    fn an_unparsed_entry_in_the_archive_also_keeps_its_stream_from_reading_as_all_terminal() {
+        let f = run(vec![
+            doc("docs/trackers/streams/s/readme.md", STREAM),
+            doc(
+                "docs/trackers/streams/s/2026-10-01-done.md",
+                &entry("done", "closed: 2026-10-03\n", ""),
+            ),
+            doc(
+                "docs/trackers/streams/s/archive/2026-10-02-odd.md",
+                "---\nentry_kind: f\n---\n",
+            ),
+        ]);
+        assert!(!f
+            .iter()
+            .any(|x| matches!(x, Finding::StreamAllTerminal { .. })));
+    }
+
+    #[test]
+    fn a_loose_file_or_a_readme_in_a_lifecycle_folder_is_an_orphan_entry_once() {
+        let f = run(vec![
+            doc("docs/trackers/temp/loose.md", &entry("open", "", "")),
+            doc("docs/trackers/ledgers/readme.md", LEDGER),
+            doc(
+                "docs/trackers/streams/no-readme/2026-10-01-lost.md",
+                &entry("open", "", ""),
+            ),
+        ]);
+        let mut orphans: Vec<&str> = f
+            .iter()
+            .filter_map(|x| match x {
+                Finding::OrphanEntry { rel_path } => Some(rel_path.as_str()),
+                _ => None,
+            })
+            .collect();
+        orphans.sort_unstable();
+        assert_eq!(
+            orphans,
+            [
+                "docs/trackers/ledgers/readme.md",
+                "docs/trackers/streams/no-readme/2026-10-01-lost.md",
+                "docs/trackers/temp/loose.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn an_entry_with_no_status_since_is_an_invalid_entry_finding() {
+        let f = run(vec![
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-undated.md",
+                "---\nentry_kind: f\ntitle: t\nstatus: open\ncreated: 2026-10-01\n---\n",
+            ),
+        ]);
+        assert!(f.contains(&Finding::EntryInvalid {
+            entry: k("2026-10-01-undated"),
+            problem: EntryProblem::Unparsed(vec![EntryError::Missing("status_since")])
         }));
     }
 

@@ -78,8 +78,10 @@ pub enum PlacementError {
     /// The file sits in a subfolder that holds its own `readme.md`. `place` cannot see
     /// siblings, so [`has_nested_readme`] is how a caller finds this case.
     NestedCollection(String),
-    /// The collection folder name is not a valid key.
-    BadKey(KeyError),
+    /// A name that must be a key is not one: the collection folder name, or an entry file's
+    /// stem. `rel_path` is the FILE's repo-relative path in both cases, so a problem names the
+    /// file to fix; `error` carries the offending name.
+    BadKey { rel_path: String, error: KeyError },
 }
 
 fn segments(rel_path: &str) -> Vec<String> {
@@ -126,7 +128,12 @@ pub fn place(rel_path: &str) -> Option<Result<Placement, PlacementError>> {
     };
     let collection = match Key::parse(&segs[depth - 1]) {
         Ok(k) => k,
-        Err(e) => return Some(Err(PlacementError::BadKey(e))),
+        Err(error) => {
+            return Some(Err(PlacementError::BadKey {
+                rel_path: rel_path.to_string(),
+                error,
+            }))
+        }
     };
     let role = if segs.len() == depth + 1 && is_folder_index(file) {
         Role::CollectionReadme
@@ -223,7 +230,8 @@ mod tests {
         ));
         assert!(matches!(
             place("docs/trackers/ledgers/Bad_Name/readme.md"),
-            Some(Err(PlacementError::BadKey(_)))
+            Some(Err(PlacementError::BadKey { rel_path, .. }))
+                if rel_path == "docs/trackers/ledgers/Bad_Name/readme.md"
         ));
         assert!(matches!(
             place("docs/trackers/ledgers/x/data.json"),

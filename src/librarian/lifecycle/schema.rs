@@ -72,7 +72,7 @@ pub struct CollectionSchema {
 }
 
 /// One problem in a collection schema.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SchemaError {
     MissingTitle,
     MissingKey(&'static str),
