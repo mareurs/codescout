@@ -31,6 +31,18 @@ pub struct Relation {
     /// 1-indexed line in the whole document, the numbering `extract` reports.
     pub line: u32,
 }
+/// Labels that point back at what an entry came from, never forward at what it waits on. A
+/// citation under one of these is provenance: the cited document closing later changes nothing
+/// for this entry, so `cited_target_closed` ignores it. Any other label counts as forward.
+// cap-class: NOT_A_CAP — a closed vocabulary of relation labels, not a limit on any result
+pub const BACKWARD_LABELS: [&str; 2] = ["Promoted from", "Supersedes"];
+
+/// Whether `label` is one of the `BACKWARD_LABELS`, ignoring ASCII case.
+pub fn is_backward(label: &str) -> bool {
+    BACKWARD_LABELS
+        .iter()
+        .any(|b| b.eq_ignore_ascii_case(label))
+}
 
 /// The label of a declaring line: one that starts at column 0 with `**<Label>:**`. An indented or
 /// listed `**Rests on:**` is prose under a list item, not a declaration (as in `statements.rs`).
@@ -118,6 +130,15 @@ mod tests {
         assert_eq!(rs[0].label, "Rests on");
         assert_eq!(rs[2].label, "Promoted to");
         assert_eq!(rs[2].line, 7);
+    }
+
+    #[test]
+    fn backward_labels_are_exactly_promoted_from_and_supersedes() {
+        assert!(is_backward("Promoted from"));
+        assert!(is_backward("supersedes"));
+        assert!(!is_backward("Rests on"));
+        assert!(!is_backward("Promoted to"));
+        assert!(!is_backward("Blocks"));
     }
 
     #[test]

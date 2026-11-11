@@ -18,7 +18,7 @@ use chrono::{Days, NaiveDate};
 
 use super::entry::{class_of, validate_entry, EntryProblem};
 use super::layout::{Lifecycle, PlacementError};
-use super::relations::Relation;
+use super::relations::{is_backward, Relation};
 use super::schema::{SchemaError, StatusClass};
 use super::tree::{CollectionNode, EntryNode, LifecycleTree, TreeProblem};
 use crate::librarian::identity::grammar::Reference;
@@ -135,7 +135,8 @@ fn check_entry(
     }
     if class != StatusClass::Terminal {
         let mut seen: BTreeSet<&Key> = BTreeSet::new();
-        for target in entry.relations.iter().filter_map(local_target) {
+        let forward = entry.relations.iter().filter(|r| !is_backward(&r.label));
+        for target in forward.filter_map(local_target) {
             if let Some(closed) = tree.closed_dates.get(target).copied() {
                 if closed > meta.status_since && seen.insert(target) {
                     out.push(Finding::CitedTargetClosed {
@@ -761,6 +762,20 @@ mod tests {
                 closed: d("2026-10-06")
             }]
         );
+    }
+
+    #[test]
+    fn a_backward_relation_to_a_closed_target_never_fires() {
+        let cited = |label: &str| {
+            cited_findings(
+                "2026-10-01",
+                &format!("**{label}:** [[2026-10-05-the-bug]]\n"),
+            )
+        };
+        assert!(cited("Promoted from").is_empty());
+        assert!(cited("Supersedes").is_empty());
+        assert_eq!(cited("Rests on").len(), 1);
+        assert_eq!(cited("Blocks").len(), 1);
     }
 
     /// One live ledger entry created on `created`, plus extra documents; the `LedgerQuiet`
