@@ -10,7 +10,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 1
-entry_high_water_W: 2
+entry_high_water_W: 3
 ---
 # Session Log — Tracker Organization
 
@@ -119,6 +119,7 @@ entry_high_water_W: 2
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-11-11 | med | read the gate before writing the surface | guide naming docs/templates/ would fail no_guide_names_a_path_or_field_only_this_repo_has | validated |
 | W-2 | 2026-11-11 | med | measure the repo under the new model with an ignored census test before building tools on it | a migration sized from the estimate of about 76 trackers would have missed 81 flat files plus 261 in subfolders, and the loose temp tracker would surface only at migration time | validated |
+| W-3 | 2026-11-11 | med | measure the ledger before ruling on two spec ambiguities | a 14-day default grace would have made doctor report 69 stale terminal entries on day one against a ledger swept about monthly | validated |
 | W-<n> | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
 
 ---
@@ -365,6 +366,23 @@ be reshaped after the plan was written.
 **Rests on:** a design is checked against the real corpus before tools are built on it.
 
 ---
+
+## W-3 — Measuring the ledger before ruling on two spec ambiguities gave the grace default a number
+
+**Valid:** dated 2026-11-11
+
+**Observed:** Plan L-B left two ambiguities for the operator: whether `terminal_in_live_dir` fires for terminal entries of a live stream, and whether `cited_target_closed` fires for blocked and deferred entries. Asked to "measure first", a throwaway script read `docs/issues` (1,641 files) as a ledger on 2026-11-11, with `fixed`, `wontfix`, `done`, `superseded` and `archived` as terminal.
+
+- 212 terminal entries sit outside `archive/`, all with a `closed:` date. 69 are older than 14 days, 1 older than 30, 0 older than 90.
+- No terminal entry lacks `closed:`.
+- 135 `mitigated` entries carry `closed:` and 50 sit in `archive/`. In this ledger `mitigated` is a finished state, so a readme mapping it to `terminal` removes them. 16 entries with `zombie`, `investigating`, `open` or `taken` plus `closed:` are real `ClosedOnNonTerminal` inconsistencies.
+- No stream collection exists yet, so the stream question has no data. Only 3 files in `docs/issues` have a `**Rests on:**` line and none is in `[[link]]` form, so the relation question has no data either.
+
+**Ruling:** the default grace becomes 30 days (69 findings at 14 days against 1 at 30). `terminal_in_live_dir` applies to ledgers only, because a stream is archived whole and `stream_all_terminal` covers it. `cited_target_closed` keeps covering blocked and deferred entries, because a closed target is the signal to unblock. The spec was amended in `1ad993e5a`; the code follows in the next commit.
+
+**Counterfactual:** keeping the 14-day default would have made `doctor` report 69 stale terminal entries on day one against a ledger that is already swept about monthly, and the first migration would have trained everyone to ignore the check.
+
+**Limits:** one corpus, one date, and a status-word mapping chosen by hand. The two spec rulings rest on the spec text, not on data.
 
 ## Template for new entries
 
