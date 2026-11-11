@@ -1,11 +1,12 @@
 ---
 id: '489e013ddfd6c3fc'
 kind: bug
-status: open
+status: fixed
 title: call_graph serves cached edges that an edit made outside codescout never invalidates
 tags:
 - cluster/unclassified
 - navigation
+closed: 2026-11-11
 opened: 2026-11-11
 owner: marius
 related:
@@ -13,7 +14,7 @@ related:
 - '58a45860b802a477'
 - '4e7ec7bfc047ac7b'
 severity: medium
-unverified: Measured by hand in two scratch crates (callers direction, rust-analyzer, default transport) before the first fix, and by test in both directions with a mock LSP. The epoch (second fix) is verified by unit tests and by the mock-LSP callers test only; the manual callers sequence was NOT re-run against a binary that contains the epoch. The epoch cost is a proxy (git ls-files plus a stat pass); the real walker (scan_walk) was not timed on a large repository. A git checkout, a second session and languages other than Rust were not run. The epoch covers only files of the seed's language family, so a caller written in another language family is not detected. A walk cut short by its cap makes the epoch unknown, which turns the cache off for that call; this was tested but its frequency on real repositories was not measured. The shared-tree gate was red because of another session's uncommitted edits to edit_code.rs and tests.rs; the verdict below comes from a clean HEAD extract with my four files overlaid. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity is my proposal.
+unverified: 'Measured by hand in two scratch crates (callers direction, rust-analyzer, default transport) before the first fix, and by test in both directions with a mock LSP. The epoch (second fix) is verified by unit tests and by the mock-LSP callers test only; the manual callers sequence was NOT re-run against a binary that contains the epoch. The epoch cost is a proxy (git ls-files plus a stat pass); the real walker (scan_walk) was not timed on a large repository. A git checkout, a second session and languages other than Rust were not run. The epoch covers only files of the seed''s language family, so a caller written in another language family is not detected. A walk cut short by its cap makes the epoch unknown, which turns the cache off for that call; this was tested but its frequency on real repositories was not measured. The shared-tree gate was red because of another session''s uncommitted edits to edit_code.rs and tests.rs; the test verdict in ## Tests added comes from a clean HEAD extract with my four source files overlaid. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity and the status fixed are my proposal; the owner may reopen it.'
 ---
 
 # BUG: call_graph serves cached edges that an edit made outside codescout never invalidates
@@ -111,10 +112,12 @@ Limits, all deliberate: any edit to a same-language file invalidates every cache
 
 ## Fix provenance
 
-This is a partial fix: the record stays `open` for the residual case in `## Fix`.
+Fixed in two commits. The limits that remain are listed in `## Fix` and in the `unverified` field.
 
-- **SHA:** `5a7936984` (`experiments`)
+- **SHA:** `5a7936984` (`experiments`): the signatures of the files a resolution names.
 - **patch-id:** `ae42b2606d11`
+- **SHA:** `702a0f737` (`experiments`): the project-level epoch; closes the residual case.
+- **patch-id:** `1a8c59aee0d6`
 
 ## Tests added
 
