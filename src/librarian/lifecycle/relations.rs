@@ -31,6 +31,7 @@ pub struct Relation {
     /// 1-indexed line in the whole document, the numbering `extract` reports.
     pub line: u32,
 }
+
 /// Labels that point back at what an entry came from, never forward at what it waits on. A
 /// citation under one of these is provenance: the cited document closing later changes nothing
 /// for this entry, so `cited_target_closed` ignores it. Any other label counts as forward.

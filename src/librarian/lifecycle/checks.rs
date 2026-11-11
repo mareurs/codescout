@@ -6,7 +6,8 @@
 //! Which entries each check looks at: `EntryInvalid` (spec `entry_invalid`, one finding per
 //! problem `validate_entry` returns, which generalises the former `status_undeclared`; an entry
 //! that does not parse gives one finding with every parse error) looks
-//! at every entry, archived or not (data integrity). `RevisitDue`, `CitedTargetClosed` and
+//! at every entry, archived or not (data integrity), and also reports a non-terminal archived
+//! entry (`NonTerminalArchived`: archiving is for finished work). `RevisitDue`, `CitedTargetClosed` and
 //! `TerminalInLiveDir` look at
 //! un-archived entries only: an archived entry is done and does not nag. `StreamAllTerminal`
 //! and `LedgerQuiet` look at un-archived collections only; `LedgerQuiet` counts every entry of
@@ -48,7 +49,8 @@ pub enum Finding {
     EntryInvalid { entry: Key, problem: EntryProblem },
     /// A blocked or deferred entry's `revisit_by` has passed.
     RevisitDue { entry: Key, revisit_by: NaiveDate },
-    /// A live entry cites a target closed after the entry's `status_since`.
+    /// A live entry cites a target closed after the entry's `status_since`. Only forward
+    /// relation labels count: a backward label (`relations::BACKWARD_LABELS`) never fires.
     CitedTargetClosed {
         entry: Key,
         target: Key,
@@ -120,6 +122,16 @@ fn check_entry(
         });
     }
     if entry.archived {
+        // An undeclared status already gave `StatusUndeclared`; only a declared one can be
+        // non-terminal.
+        if class_of(&collection.schema, meta).is_some_and(|c| c != StatusClass::Terminal) {
+            out.push(Finding::EntryInvalid {
+                entry: entry.key.clone(),
+                problem: EntryProblem::NonTerminalArchived {
+                    status: meta.status.clone(),
+                },
+            });
+        }
         return;
     }
     let Some(class) = class_of(&collection.schema, meta) else {
@@ -1011,6 +1023,71 @@ mod tests {
             [&invalid(
                 "2026-10-01-in-stream",
                 EntryProblem::StatusUndeclared("waiting".into())
+            )]
+        );
+    }
+
+    #[test]
+    fn a_non_terminal_entry_in_archive_is_entry_invalid() {
+        let path = "docs/trackers/ledgers/l/archive/2026-10-01-x.md";
+        let f = run(vec![
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(path, &entry("open", "", "")),
+        ]);
+        let got: Vec<&Finding> = f.iter().filter(|x| is_entry_invalid(x)).collect();
+        assert_eq!(
+            got,
+            [&invalid(
+                "2026-10-01-x",
+                EntryProblem::NonTerminalArchived {
+                    status: "open".into()
+                }
+            )]
+        );
+        // The same file, terminal and closed, is fine.
+        let f = run(vec![
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(path, &entry("fixed", "closed: 2026-10-02\n", "")),
+        ]);
+        assert!(!f.iter().any(is_entry_invalid), "{f:?}");
+    }
+
+    #[test]
+    fn an_open_entry_of_a_stream_moved_to_streams_archive_is_reported() {
+        let f = run(vec![
+            doc("docs/trackers/streams/archive/s/readme.md", STREAM),
+            doc(
+                "docs/trackers/streams/archive/s/2026-10-01-x.md",
+                &entry("open", "", ""),
+            ),
+        ]);
+        let got: Vec<&Finding> = f.iter().filter(|x| is_entry_invalid(x)).collect();
+        assert_eq!(
+            got,
+            [&invalid(
+                "2026-10-01-x",
+                EntryProblem::NonTerminalArchived {
+                    status: "open".into()
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn an_archived_entry_with_an_undeclared_status_gives_only_status_undeclared() {
+        let f = run(vec![
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/archive/2026-10-01-x.md",
+                &entry("mystery", "", ""),
+            ),
+        ]);
+        let got: Vec<&Finding> = f.iter().filter(|x| is_entry_invalid(x)).collect();
+        assert_eq!(
+            got,
+            [&invalid(
+                "2026-10-01-x",
+                EntryProblem::StatusUndeclared("mystery".into())
             )]
         );
     }

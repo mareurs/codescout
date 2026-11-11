@@ -201,6 +201,11 @@ pub enum EntryProblem {
     ClosedOnNonTerminal {
         status: String,
     },
+    /// The entry sits under an `archive/` folder but its status is not terminal: archiving is for
+    /// finished work.
+    NonTerminalArchived {
+        status: String,
+    },
     FieldUndeclared(String),
     FieldType {
         field: String,
