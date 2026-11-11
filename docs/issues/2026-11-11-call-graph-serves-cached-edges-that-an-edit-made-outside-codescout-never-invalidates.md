@@ -14,7 +14,7 @@ related:
 - '58a45860b802a477'
 - '4e7ec7bfc047ac7b'
 severity: medium
-unverified: 'Measured by hand in two scratch crates (callers direction, rust-analyzer, default transport) before the first fix, and by test in both directions with a mock LSP. The epoch (second fix) is verified by unit tests, by the mock-LSP callers test and by a manual re-run on the live server (crate stale7: a caller added in an unnamed file and a caller in a file created after the entry was cached are both reported; the schema shows the epoch column). That re-run did not show that an unchanged tree is still served from the cache; only the unit tests show that. The epoch cost is a proxy (git ls-files plus a stat pass); the real walker (scan_walk) was not timed on a large repository. A git checkout, a second session and languages other than Rust were not run. The epoch covers only files of the seed''s language family, so a caller written in another language family is not detected. A walk cut short by its cap makes the epoch unknown, which turns the cache off for that call; this was tested but its frequency on real repositories was not measured. The shared-tree gate was red because of another session''s uncommitted edits to edit_code.rs and tests.rs; the test verdict in ## Tests added comes from a clean HEAD extract with my four source files overlaid. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity and the status fixed are my proposal; the owner may reopen it.'
+unverified: 'Measured by hand in two scratch crates (callers direction, rust-analyzer, default transport) before the first fix, and by test in both directions with a mock LSP. The epoch (second fix) is verified by unit tests, by the mock-LSP callers test and by a manual re-run on the live server (crate stale7: a caller added in an unnamed file and a caller in a file created after the entry was cached are both reported; the schema shows the epoch column). That re-run did not show that an unchanged tree is still served from the cache; only the unit tests show that. The epoch cost was timed with the real function in a release build, once, on one machine (btrfs, warm page cache, 9 calls per case): see the table in ## Fix. A cold cache, another filesystem, a loaded machine and a second session were not measured, and the 131 to 280 ms first-call penalty is attributed to a cold inode cache without that being verified. The saving of a cache hit was not measured, so there is no figure for whether 18 to 52 ms per call pays for itself. The probe lives only in a scratch copy and is not committed. A git checkout and languages other than Rust, Python and TypeScript (timing only; the behavior was tested on Rust only) were not run. The epoch covers only files of the seed''s language family, so a caller written in another language family is not detected. A walk cut short by its cap makes the epoch unknown, which turns the cache off for that call: measured to happen for a tree with 5096 Rust files (codex). The shared-tree gate was red because of another session''s uncommitted edits to edit_code.rs and tests.rs; the test verdict in ## Tests added comes from a clean HEAD extract with my four source files overlaid. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity and the status fixed are my proposal; the owner may reopen it.'
 ---
 
 # BUG: call_graph serves cached edges that an edit made outside codescout never invalidates
@@ -110,7 +110,7 @@ Partly done 2026-11-11, commit `5a7936984` (see `## Fix provenance`), by candida
 
 **Residual (fixed by the project-level epoch, see below):** an entry is valid while the files it NAMES are unchanged. A caller added in a file that the result does not mention (a new file, or an existing file with no call of the symbol) does not change any signed file, so the entry is still served and the caller is missing. That is the case that first showed the problem (`other.rs` did not exist when the entry was written). It had a red test (see `## Tests added`). Options considered: (a) a project-level epoch (implemented, below): a hash of `(relative path, len, mtime)` over the source files of the seed's language, computed once per `call_graph` call and stored with each resolution; (b) do not reuse a `callers` resolution across calls; (c) a file watcher in codescout, which does not exist today (`mark_file_dirty` marks only codescout's own writes).
 
-Cost of (a), measured 2026-11-11 on this repo (`epoch-cost.py`, tracked plus untracked files minus ignored): 547 `.rs` files; one `stat` pass over them 1.5 ms (warm cache, 5 runs); over 4226 files of four languages 14 ms; `git ls-files` for the 7283 listed files 22 ms. That is a proxy: the real walk would use the same walker as the `callers` fallback and was not timed. Every codescout write already deletes ALL resolutions of the project (`invalidate_file`'s second statement), so an epoch adds invalidation only for edits made outside codescout. A hash, not "newest mtime and count", because a replaced file with an older mtime (`cp -p`, `rsync -t`) would not raise the newest mtime. If the walk hits its scan cap the epoch is unknown and the resolution should not be reused.
+Cost of (a), measured 2026-11-11 on this repo (`epoch-cost.py`, tracked plus untracked files minus ignored): 547 `.rs` files; one `stat` pass over them 1.5 ms (warm cache, 5 runs); over 4226 files of four languages 14 ms; `git ls-files` for the 7283 listed files 22 ms. That was a proxy; the real function is timed in the next section. Every codescout write already deletes ALL resolutions of the project (`invalidate_file`'s second statement), so an epoch adds invalidation only for edits made outside codescout. A hash, not "newest mtime and count", because a replaced file with an older mtime (`cp -p`, `rsync -t`) would not raise the newest mtime. If the walk hits its scan cap the epoch is unknown and the resolution should not be reused.
 
 Small accepted window: the signatures are read after the analysis, so a file that changes while one analysis runs is stored with its new signature beside edges from its old content.
 
@@ -121,6 +121,25 @@ Small accepted window: the signatures are read after the analysis, so a file tha
 - `CallGraph::call` computes the epoch once, before the direction loop, on a blocking thread, and passes it to `CachedResolver`.
 
 Limits, all deliberate: any edit to a same-language file invalidates every cached resolution of that language, not only the ones that name it. A caller in another language family is not detected. When the walk is cut short the cache is off for that call, so the answer is correct but slow.
+
+**Measured cost of the epoch, 2026-11-12.** The real `language_epoch` (so the real `scan_walk`, stat and SHA-256), release build, one run of an `#[ignore]` probe in a scratch copy (not committed): 9 calls per case, warm page cache, btrfs on this machine, single-threaded walk. `files walked` is every file the walk visits; `family` is the files of the seed's language family.
+
+| Tree | Seed | Files walked | Family | Cap 5000 | Median | First call |
+|---|---|---|---|---|---|---|
+| codescout | rust | 7073 | 562 | Some | 29.9 ms | 29.9 ms |
+| codescout | python | 7073 | 423 | Some | 28.9 ms | 28.8 ms |
+| claude-code | typescript | 2455 | 2360 | Some | 18.6 ms | 146.9 ms |
+| opencode | typescript | 4559 | 1607 | Some | 25.2 ms | 131.0 ms |
+| hermes-agent | typescript | 10114 | 2708 | Some | 46.7 ms | 173.3 ms |
+| hermes-agent | python | 10114 | 4586 | Some | 51.2 ms | 258.1 ms |
+| codex | rust | 8777 | 5096 | **None** | 47.7 ms | 279.5 ms |
+| `~/.cargo/registry/src` | rust | 156679 | 72310 | **None** | 48.7 ms | 82.7 ms |
+
+Without the cap the same two `None` cases give `Some` in 50.9 ms (codex) and 986 ms median, 2012 ms first call (cargo registry). The cost is about 4 to 6 microseconds per walked file.
+
+What this shows: a typical project pays 18 to 52 ms per `call_graph` call, once per call, on every call (the epoch is computed before the cache is consulted, so a hit pays it too). The cap decides the rest: with `MAX_WORKSPACE_FILES_SCAN = 5000` a tree with more than 5000 files of the seed's language gets `None`, so the cache is off for it. `codex` (5096 Rust files) is one such tree, on this machine. The cap was written for the `callers` fallback, which parses files; the epoch only stats and hashes them, and its cost without the cap is 51 ms for `codex`. Whether the epoch should have its own cap is an owner decision; I did not change it.
+
+Two more observations, not acted on. The epoch is applied to both directions (`one_hop_at` calls `with_epoch` for every resolution), but only `callers` results depend on files they do not name; a `callees` resolution is invalidated by an unrelated same-language edit without needing to be. And the first call on a tree that had not been touched recently took 131 to 280 ms against a 19 to 52 ms median: I attribute that to a cold inode cache (the file `stat` calls), which I did not verify, because dropping the caches needs root.
 
 ## Fix provenance
 
@@ -156,7 +175,7 @@ Delete `.codescout/call_edges.db`, or write to the changed file with a codescout
 
 Fixed in two commits (see `## Fix provenance`): named-file signatures (`5a7936984`) and the project-level epoch for the residual case. The record keeps its limits in `## Fix`: any same-language edit invalidates the language's cache, callers in another language family are not detected, and a capped walk turns the cache off for that call.
 
-Next, if the owner wants more: (1) time the real `scan_walk` on a large repository, because the cost measured above is a proxy; (2) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established.
+Next, if the owner wants more: (1) decide whether the epoch should keep the `MAX_WORKSPACE_FILES_SCAN` cap and whether `callees` resolutions should ignore the epoch (both in `## Fix`, measured 2026-11-12); (2) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established.
 
 Related: `a73c49456056fb92`, `58a45860b802a477`, `bug-fix-session-log:F-236`.
 
