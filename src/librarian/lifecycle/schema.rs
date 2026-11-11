@@ -49,11 +49,21 @@ pub enum KeyStyle {
 }
 
 /// The type of one declared entry field.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FieldType {
     Scalar,
     Enum(Vec<String>),
     List,
+}
+impl std::fmt::Display for FieldType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FieldType::Scalar => f.write_str("scalar"),
+            FieldType::Enum(values) => write!(f, "one of {}", values.join(", ")),
+            FieldType::List => f.write_str("list of scalars"),
+        }
+    }
 }
 
 /// A collection's parsed schema.
@@ -72,16 +82,26 @@ pub struct CollectionSchema {
 }
 
 /// One problem in a collection schema.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SchemaError {
+    #[error("`title` is missing or empty")]
     MissingTitle,
+    #[error("required key `{0}` is missing")]
     MissingKey(&'static str),
+    #[error("`{key}` is malformed: {detail}")]
     Malformed { key: &'static str, detail: String },
+    #[error("status word `{word}` has class `{class}`, which is not one of open, blocked, deferred, terminal")]
     UnknownClass { word: String, class: String },
+    #[error("no status word has class `terminal`")]
     NoTerminalStatus,
+    #[error("`initial_status` {0:?} is not of class `open`")]
     InitialNotOpen(String),
+    #[error("`initial_status` {0:?} is not a declared status")]
     InitialUndeclared(String),
+    #[error("`exit_when` is required for a stream or temp collection")]
     ExitRequired,
+    #[error("`exit_when` is not allowed on a ledger")]
     ExitRefused,
 }
 

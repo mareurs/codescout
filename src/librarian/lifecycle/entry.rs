@@ -62,10 +62,14 @@ pub struct EntryMeta {
 }
 
 /// Why a frontmatter block is not an entry.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EntryError {
+    #[error("required field `{0}` is missing")]
     Missing(&'static str),
+    #[error("field `{field}` is not an ISO date: {value:?}")]
     BadDate { field: &'static str, value: String },
+    #[error("`valid` is not a validity: {0:?}")]
     BadValidity(String),
 }
 
@@ -188,32 +192,39 @@ pub fn parse_entry(fm: &Frontmatter) -> Result<EntryMeta, Vec<EntryError>> {
 }
 
 /// A way an otherwise well-formed entry breaks its collection's schema.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EntryProblem {
+    #[error("entry_kind {0:?} is not declared in the collection readme")]
     KindUndeclared(String),
+    #[error("status {0:?} is not declared in the collection readme")]
     StatusUndeclared(String),
-    RevisitMissing {
-        status: String,
-    },
-    ClosedMissing {
-        status: String,
-    },
-    ClosedOnNonTerminal {
-        status: String,
-    },
+    #[error("status {status:?} needs a revisit_by date")]
+    RevisitMissing { status: String },
+    #[error("status {status:?} is terminal but the entry has no closed date")]
+    ClosedMissing { status: String },
+    #[error("status {status:?} is not terminal but the entry has a closed date")]
+    ClosedOnNonTerminal { status: String },
     /// The entry sits under an `archive/` folder but its status is not terminal: archiving is for
     /// finished work.
-    NonTerminalArchived {
-        status: String,
-    },
+    #[error("archived entry has status {status:?}, which is not terminal")]
+    NonTerminalArchived { status: String },
+    #[error("field {0:?} is not declared in the collection readme")]
     FieldUndeclared(String),
-    FieldType {
-        field: String,
-        expected: FieldType,
-    },
+    #[error("field {field:?} does not fit its declared type ({expected})")]
+    FieldType { field: String, expected: FieldType },
     /// The entry's frontmatter does not parse as an entry, so there is no meta to check
     /// against the schema: every parse error, as `parse_entry` reported them.
+    #[error("frontmatter is not an entry: {}", joined(.0))]
     Unparsed(Vec<EntryError>),
+}
+/// The messages of `errors`, `; `-separated.
+fn joined(errors: &[EntryError]) -> String {
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// The class the schema gives this entry's status word, if it declares one.

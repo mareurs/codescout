@@ -14,18 +14,20 @@
 //!   only: an archived entry is done and does not nag.
 //! - `StreamAllTerminal` and `LedgerQuiet` look at un-archived collections only. `LedgerQuiet`
 //!   counts every entry of such a ledger, archived ones too, as activity.
-//! - `CollectionInvalid` (the eighth check) reports every tree-level problem: a readme whose
+//! - `CollectionInvalid` (the eighth check) reports every collection-level problem: a readme whose
 //!   schema fails, a frontmatter block that does not parse, a nested collection, a file that
 //!   is not Markdown, a name that is no key. Archived or not, it is a data-integrity finding.
 
 use std::collections::BTreeSet;
 
 use chrono::{Days, NaiveDate};
+use serde::Serialize;
 
 use super::entry::{class_of, validate_entry, EntryProblem};
 use super::layout::{Lifecycle, PlacementError};
 use super::relations::{is_backward, Relation};
 use super::schema::{SchemaError, StatusClass};
+use super::table::key_as_str;
 use super::tree::{CollectionNode, EntryNode, LifecycleTree, TreeProblem};
 use crate::librarian::identity::grammar::Reference;
 use crate::librarian::identity::key::Key;
@@ -47,41 +49,76 @@ impl Default for CheckPolicy {
 
 /// What `Finding::CollectionInvalid` found wrong. One variant per way a tracker file can fail
 /// before any entry field is read.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CollectionProblem {
     /// One problem in a collection readme's schema (a readme with several gives several).
+    #[error("{0}")]
     Schema(SchemaError),
     /// The frontmatter block of a readme or an entry file does not parse; the detail is the
     /// parser's message.
+    #[error("frontmatter does not parse: {0}")]
     Frontmatter(String),
     /// The file sits at or below a subfolder that holds its own `readme.md`.
+    #[error("sits below a subfolder that holds its own readme.md")]
     NestedCollection,
     /// A file below a lifecycle folder that is not Markdown.
+    #[error("is not a Markdown file")]
     NotMarkdown,
     /// A collection folder name or an entry file stem is no key: the `Display` text of the
     /// `KeyError`, which has no serializer.
+    #[error("name is not a valid key: {0}")]
     BadName(String),
 }
 
+/// The eight check names, in the variant order of [`Finding`]; `Finding::check_name` returns one.
+pub const CHECK_NAMES: [&str; 8] = [
+    "entry_invalid",
+    "revisit_due",
+    "cited_target_closed",
+    "stream_all_terminal",
+    "collection_invalid",
+    "ledger_quiet",
+    "terminal_in_live_dir",
+    "orphan_entry",
+];
+
 /// One thing `doctor` reports. The variants are listed in the order `check` returns them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Serialized with an internal `check` tag (the check name) beside the variant's fields; keys
+/// serialize as strings. Plan L-B2 and the identity session read this JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "check", rename_all = "snake_case")]
 pub enum Finding {
     /// An entry breaks its collection's schema: one finding per problem `validate_entry`
     /// returns (including `EntryProblem::NonTerminalArchived`, an archived entry whose status
     /// is not terminal), or one `EntryProblem::Unparsed` carrying every error of an entry whose
     /// frontmatter does not parse at all.
-    EntryInvalid { entry: Key, problem: EntryProblem },
+    EntryInvalid {
+        #[serde(serialize_with = "key_as_str")]
+        entry: Key,
+        problem: EntryProblem,
+    },
     /// A blocked or deferred entry's `revisit_by` has passed.
-    RevisitDue { entry: Key, revisit_by: NaiveDate },
+    RevisitDue {
+        #[serde(serialize_with = "key_as_str")]
+        entry: Key,
+        revisit_by: NaiveDate,
+    },
     /// A live entry cites a target closed after the entry's `status_since`. Only forward
     /// relation labels count: a backward label (`relations::BACKWARD_LABELS`) never fires.
     CitedTargetClosed {
+        #[serde(serialize_with = "key_as_str")]
         entry: Key,
+        #[serde(serialize_with = "key_as_str")]
         target: Key,
         closed: NaiveDate,
     },
     /// Every entry of a live stream or temp collection is terminal, and none failed to parse.
-    StreamAllTerminal { collection: Key },
+    StreamAllTerminal {
+        #[serde(serialize_with = "key_as_str")]
+        collection: Key,
+    },
     /// Something wrong at collection level, not on one entry's fields. `subject` is the
     /// collection key for `CollectionProblem::Schema`, otherwise the repo-relative path of the
     /// file at fault.
@@ -91,14 +128,74 @@ pub enum Finding {
     },
     /// A ledger with `review_every` has had no entry created or closed in that period.
     LedgerQuiet {
+        #[serde(serialize_with = "key_as_str")]
         collection: Key,
         last_activity: Option<NaiveDate>,
     },
     /// A terminal entry stayed outside `archive/` past the grace period.
-    TerminalInLiveDir { entry: Key, closed: NaiveDate },
+    TerminalInLiveDir {
+        #[serde(serialize_with = "key_as_str")]
+        entry: Key,
+        closed: NaiveDate,
+    },
     /// An entry file with no collection readme above it: an entry in a folder with no readme,
     /// or a file directly in a lifecycle folder.
     OrphanEntry { rel_path: String },
+}
+impl Finding {
+    /// The check this finding belongs to: one of [`CHECK_NAMES`], and the `check` tag of its JSON.
+    pub fn check_name(&self) -> &'static str {
+        match self {
+            Finding::EntryInvalid { .. } => CHECK_NAMES[0],
+            Finding::RevisitDue { .. } => CHECK_NAMES[1],
+            Finding::CitedTargetClosed { .. } => CHECK_NAMES[2],
+            Finding::StreamAllTerminal { .. } => CHECK_NAMES[3],
+            Finding::CollectionInvalid { .. } => CHECK_NAMES[4],
+            Finding::LedgerQuiet { .. } => CHECK_NAMES[5],
+            Finding::TerminalInLiveDir { .. } => CHECK_NAMES[6],
+            Finding::OrphanEntry { .. } => CHECK_NAMES[7],
+        }
+    }
+}
+
+/// One line: `<check_name>: <subject> — <detail>`, the subject being the entry key, the collection
+/// key or the path.
+impl std::fmt::Display for Finding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: ", self.check_name())?;
+        match self {
+            Finding::EntryInvalid { entry, problem } => write!(f, "{entry} — {problem}"),
+            Finding::RevisitDue { entry, revisit_by } => {
+                write!(f, "{entry} — revisit_by {revisit_by} has passed")
+            }
+            Finding::CitedTargetClosed {
+                entry,
+                target,
+                closed,
+            } => write!(
+                f,
+                "{entry} — cites {target}, which closed {closed}, after this entry's status_since"
+            ),
+            Finding::StreamAllTerminal { collection } => {
+                write!(f, "{collection} — every entry is terminal")
+            }
+            Finding::CollectionInvalid { subject, problem } => write!(f, "{subject} — {problem}"),
+            Finding::LedgerQuiet {
+                collection,
+                last_activity: Some(last),
+            } => write!(f, "{collection} — no entry created or closed since {last}"),
+            Finding::LedgerQuiet {
+                collection,
+                last_activity: None,
+            } => write!(f, "{collection} — the ledger has no entries"),
+            Finding::TerminalInLiveDir { entry, closed } => {
+                write!(f, "{entry} — terminal since {closed} but not archived")
+            }
+            Finding::OrphanEntry { rel_path } => {
+                write!(f, "{rel_path} — no collection readme above this file")
+            }
+        }
+    }
 }
 
 impl Finding {
@@ -316,7 +413,7 @@ mod tests {
     use super::*;
     use crate::librarian::lifecycle::entry::EntryError;
     use crate::librarian::lifecycle::schema::FieldType;
-    use crate::librarian::lifecycle::testkit::{d, doc, entry, k, LEDGER, STREAM};
+    use crate::librarian::lifecycle::testkit::{d, doc, entry, k, LEDGER, STREAM, STREAM_NO_EXIT};
     use crate::librarian::lifecycle::tree::{DocInput, LifecycleTree};
 
     const BUG: &str = "---\nkind: bug\nstatus: fixed\nclosed: 2026-10-06\n---\n";
@@ -486,6 +583,7 @@ mod tests {
             }
         }));
     }
+
     #[test]
     fn an_archived_deferred_entry_is_entry_invalid_too() {
         let f = run(vec![
@@ -631,14 +729,267 @@ mod tests {
 
     #[test]
     fn a_stream_readme_without_exit_when_is_collection_invalid() {
-        let no_exit = "---\ntitle: S\nentry_kinds: [f]\nstatuses: {open: open, done: terminal}\ninitial_status: open\n---\n";
-        let f = run(vec![doc("docs/trackers/streams/s/readme.md", no_exit)]);
+        let f = run(vec![doc(
+            "docs/trackers/streams/s/readme.md",
+            STREAM_NO_EXIT,
+        )]);
         assert_eq!(
             f,
             [Finding::CollectionInvalid {
                 subject: "s".into(),
                 problem: CollectionProblem::Schema(SchemaError::ExitRequired)
             }]
+        );
+    }
+    #[test]
+    fn a_readme_with_two_schema_errors_gives_one_finding_per_error_in_parse_order() {
+        // `parse_schema` pushes `MissingKey("initial_status")` before it checks `exit_when`.
+        let two_errors = STREAM_NO_EXIT.replace("initial_status: open\n", "");
+        let f = run(vec![doc("docs/trackers/streams/s/readme.md", &two_errors)]);
+        assert_eq!(
+            f,
+            [
+                Finding::CollectionInvalid {
+                    subject: "s".into(),
+                    problem: CollectionProblem::Schema(SchemaError::MissingKey("initial_status"))
+                },
+                Finding::CollectionInvalid {
+                    subject: "s".into(),
+                    problem: CollectionProblem::Schema(SchemaError::ExitRequired)
+                }
+            ]
+        );
+    }
+
+    /// One finding of each variant, in variant order.
+    fn one_of_each() -> [Finding; 8] {
+        [
+            Finding::EntryInvalid {
+                entry: k("2026-10-01-bad"),
+                problem: EntryProblem::StatusUndeclared("x".into()),
+            },
+            Finding::RevisitDue {
+                entry: k("2026-10-01-waits"),
+                revisit_by: d("2026-11-01"),
+            },
+            Finding::CitedTargetClosed {
+                entry: k("2026-10-01-cites"),
+                target: k("2026-10-05-the-bug"),
+                closed: d("2026-10-06"),
+            },
+            Finding::StreamAllTerminal { collection: k("s") },
+            Finding::CollectionInvalid {
+                subject: "s".into(),
+                problem: CollectionProblem::Schema(SchemaError::ExitRequired),
+            },
+            Finding::LedgerQuiet {
+                collection: k("l"),
+                last_activity: Some(d("2026-10-02")),
+            },
+            Finding::TerminalInLiveDir {
+                entry: k("2026-10-01-old"),
+                closed: d("2026-10-02"),
+            },
+            Finding::OrphanEntry {
+                rel_path: "docs/trackers/streams/no-readme/2026-10-01-lost.md".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn check_names_are_the_eight_of_the_spec_and_each_variant_reports_one() {
+        let distinct: BTreeSet<&str> = CHECK_NAMES.iter().copied().collect();
+        assert_eq!(distinct.len(), 8);
+        let hit: BTreeSet<&str> = one_of_each().iter().map(Finding::check_name).collect();
+        assert_eq!(hit, distinct);
+    }
+
+    #[test]
+    fn display_is_one_line_naming_the_subject() {
+        let subjects = [
+            "2026-10-01-bad",
+            "2026-10-01-waits",
+            "2026-10-01-cites",
+            "s",
+            "s",
+            "l",
+            "2026-10-01-old",
+            "docs/trackers/streams/no-readme/2026-10-01-lost.md",
+        ];
+        for (finding, subject) in one_of_each().iter().zip(subjects) {
+            let text = finding.to_string();
+            assert!(!text.contains('\n'), "{text}");
+            let prefix = format!("{}: {subject} — ", finding.check_name());
+            assert!(text.starts_with(&prefix), "{text}");
+        }
+        let [invalid, due, ..] = one_of_each();
+        assert_eq!(
+            due.to_string(),
+            "revisit_due: 2026-10-01-waits — revisit_by 2026-11-01 has passed"
+        );
+        assert_eq!(
+            invalid.to_string(),
+            "entry_invalid: 2026-10-01-bad — status \"x\" is not declared in the collection readme"
+        );
+    }
+
+    #[test]
+    fn every_problem_message_names_the_offending_word_field_or_date() {
+        let cases: Vec<(String, &str)> = vec![
+            (SchemaError::MissingTitle.to_string(), "title"),
+            (
+                SchemaError::MissingKey("entry_kinds").to_string(),
+                "entry_kinds",
+            ),
+            (
+                SchemaError::Malformed {
+                    key: "fields",
+                    detail: "not a map".into(),
+                }
+                .to_string(),
+                "fields",
+            ),
+            (
+                SchemaError::UnknownClass {
+                    word: "open-ish".into(),
+                    class: "half".into(),
+                }
+                .to_string(),
+                "half",
+            ),
+            (SchemaError::NoTerminalStatus.to_string(), "terminal"),
+            (
+                SchemaError::InitialNotOpen("done".into()).to_string(),
+                "done",
+            ),
+            (
+                SchemaError::InitialUndeclared("nope".into()).to_string(),
+                "nope",
+            ),
+            (SchemaError::ExitRequired.to_string(), "exit_when"),
+            (SchemaError::ExitRefused.to_string(), "exit_when"),
+            (EntryError::Missing("created").to_string(), "created"),
+            (
+                EntryError::BadDate {
+                    field: "closed",
+                    value: "2026-8-1".into(),
+                }
+                .to_string(),
+                "2026-8-1",
+            ),
+            (EntryError::BadValidity("soon".into()).to_string(), "soon"),
+            (EntryProblem::KindUndeclared("zz".into()).to_string(), "zz"),
+            (
+                EntryProblem::RevisitMissing {
+                    status: "waiting".into(),
+                }
+                .to_string(),
+                "waiting",
+            ),
+            (
+                EntryProblem::ClosedMissing {
+                    status: "fixed".into(),
+                }
+                .to_string(),
+                "fixed",
+            ),
+            (
+                EntryProblem::ClosedOnNonTerminal {
+                    status: "open".into(),
+                }
+                .to_string(),
+                "open",
+            ),
+            (
+                EntryProblem::NonTerminalArchived {
+                    status: "later".into(),
+                }
+                .to_string(),
+                "later",
+            ),
+            (
+                EntryProblem::FieldUndeclared("sev".into()).to_string(),
+                "sev",
+            ),
+            (
+                EntryProblem::FieldType {
+                    field: "sev".into(),
+                    expected: FieldType::Enum(vec!["low".into(), "high".into()]),
+                }
+                .to_string(),
+                "high",
+            ),
+            (
+                EntryProblem::Unparsed(vec![
+                    EntryError::Missing("created"),
+                    EntryError::BadValidity("soon".into()),
+                ])
+                .to_string(),
+                "soon",
+            ),
+            (
+                CollectionProblem::Frontmatter("bad yaml".into()).to_string(),
+                "bad yaml",
+            ),
+            (
+                CollectionProblem::BadName("Bad_Stem".into()).to_string(),
+                "Bad_Stem",
+            ),
+        ];
+        for (text, needle) in cases {
+            assert!(text.contains(needle), "{text:?} lacks {needle:?}");
+            assert!(!text.contains('\n'), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn serialized_findings_have_this_exact_json() {
+        let [invalid, due, ..] = one_of_each();
+        assert_eq!(
+            serde_json::to_string(&due).unwrap(),
+            r#"{"check":"revisit_due","entry":"2026-10-01-waits","revisit_by":"2026-11-01"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&invalid).unwrap(),
+            r#"{"check":"entry_invalid","entry":"2026-10-01-bad","problem":{"status_undeclared":"x"}}"#
+        );
+        let collection_invalid = Finding::CollectionInvalid {
+            subject: "s".into(),
+            problem: CollectionProblem::Schema(SchemaError::ExitRequired),
+        };
+        assert_eq!(
+            serde_json::to_string(&collection_invalid).unwrap(),
+            r#"{"check":"collection_invalid","subject":"s","problem":{"schema":"exit_required"}}"#
+        );
+        for finding in one_of_each() {
+            let value = serde_json::to_value(&finding).unwrap();
+            assert_eq!(value["check"], finding.check_name());
+        }
+    }
+    #[test]
+    fn nested_problems_serialize_in_snake_case_with_default_tagging() {
+        let problem = EntryProblem::FieldType {
+            field: "sev".into(),
+            expected: FieldType::Enum(vec!["low".into()]),
+        };
+        assert_eq!(
+            serde_json::to_string(&problem).unwrap(),
+            r#"{"field_type":{"field":"sev","expected":{"enum":["low"]}}}"#
+        );
+        let unparsed = EntryProblem::Unparsed(vec![
+            EntryError::Missing("created"),
+            EntryError::BadDate {
+                field: "closed",
+                value: "x".into(),
+            },
+        ]);
+        assert_eq!(
+            serde_json::to_string(&unparsed).unwrap(),
+            r#"{"unparsed":[{"missing":"created"},{"bad_date":{"field":"closed","value":"x"}}]}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&CollectionProblem::NestedCollection).unwrap(),
+            r#""nested_collection""#
         );
     }
 
@@ -680,11 +1031,10 @@ mod tests {
 
     #[test]
     fn every_tree_problem_kind_is_reported() {
-        let no_exit = "---\ntitle: S\nentry_kinds: [f]\nstatuses: {open: open, done: terminal}\ninitial_status: open\n---\n";
         let f = run(vec![
             doc("docs/trackers/ledgers/l/readme.md", LEDGER),
             // Schema: one error (ExitRequired).
-            doc("docs/trackers/streams/noexit/readme.md", no_exit),
+            doc("docs/trackers/streams/noexit/readme.md", STREAM_NO_EXIT),
             // Frontmatter: a block that is not YAML.
             doc(
                 "docs/trackers/ledgers/l/2026-10-01-broken.md",

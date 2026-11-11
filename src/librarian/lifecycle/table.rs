@@ -36,7 +36,7 @@ pub struct EntryRow {
     pub fields: BTreeMap<String, Value>,
 }
 
-fn key_as_str<S: Serializer>(key: &Key, s: S) -> Result<S::Ok, S::Error> {
+pub(super) fn key_as_str<S: Serializer>(key: &Key, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(key.as_str())
 }
 

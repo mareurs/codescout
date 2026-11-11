@@ -36,6 +36,10 @@ pub(crate) const LEDGER: &str = "---\ntitle: L\nentry_kinds: [f]\nstatuses: {ope
 /// A stream readme: one entry kind `f`, an exit condition.
 pub(crate) const STREAM: &str = "---\ntitle: S\nentry_kinds: [f]\nstatuses: {open: open, done: terminal}\ninitial_status: open\nexit_when: it ships\n---\n";
 
+/// A stream readme with no `exit_when`: a stream must declare one, so its schema fails with
+/// `SchemaError::ExitRequired`.
+pub(crate) const STREAM_NO_EXIT: &str = "---\ntitle: S\nentry_kinds: [f]\nstatuses: {open: open, done: terminal}\ninitial_status: open\n---\n";
+
 /// An entry of kind `f` (status since and created 2026-10-01); `extra` is more frontmatter lines.
 pub(crate) fn entry(status: &str, extra: &str, body: &str) -> String {
     format!("---\nentry_kind: f\ntitle: t\nstatus: {status}\nstatus_since: 2026-10-01\ncreated: 2026-10-01\n{extra}---\n{body}")
