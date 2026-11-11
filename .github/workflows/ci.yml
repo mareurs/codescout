@@ -236,6 +236,9 @@ jobs:
           git config --global user.name  CI
           git config --global init.defaultBranch master
       - run: bash tests/pre-commit-dead-artifact-ids.sh
+      # The key-space hook's discriminators, same job and same reason: stub binary, throwaway
+      # git repos, no Rust toolchain. It asks `codescout key-gate`, which has its own Rust tests.
+      - run: bash tests/pre-commit-key-space.sh
       # Same job, deliberately: this suite also builds throwaway git repos and needs the
       # committer identity configured above. It guards the worktree/index divergence note
       # in `pre-commit-ledger-counts.py` -- see

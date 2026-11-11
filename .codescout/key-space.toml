@@ -1,0 +1,36 @@
+# Which subtrees of this repo have no artifact key.
+#
+# A document outside the key space has no key (its lowercase filename stem) and takes no part
+# in uniqueness; it also has no key-based identity, so only material that needs neither is
+# listed. Exclusion is by whole subtree: a folder whose `readme.md` is excluded is excluded
+# whole (the gate reports PartialFolderExclusion otherwise). The rule and its parser:
+# src/librarian/identity/key_space.rs. The pre-commit check: scripts/pre-commit-key-space.sh.
+#
+# Each entry was chosen by listing the files it excludes (`codescout key-gate` prints them
+# under "outside the key space") and finding every one of them to be fixture, evidence or
+# another project's notes. A problem left in scope is a real document the key migration
+# renames, not something to hide here.
+exclude = [
+    # Example integration files shipped for other tools (pi's AGENTS.md and README.md, a
+    # systemd unit's README). Their names are dictated by the tool that reads them.
+    "contrib",
+    # Evaluation write-ups and the raw run data behind them (review transcripts named
+    # `s1-claude-cold-0.review.md`, rule-tell runs, base-rate tables).
+    "docs/evals",
+    # Test inputs: prompt-surface snapshots, and sample repositories the librarian tests index.
+    "tests/fixtures",
+    "tests/librarian/fixtures",
+    "tests/librarian/audit_doc_refs/fixtures",
+    # Replayed agent instructions and skills captured as evidence of one dogfood run
+    # (AGENTS.md, CLAUDE.md, fourteen SKILL.md files). The sibling `evidence.md` tracker is
+    # not under this folder and keeps its key.
+    "docs/trackers/ecc-integration/evidence",
+    # Per-project and per-profile memory stores: each project under `.codescout/projects/`
+    # carries its own `architecture.md`, `conventions.md`, ... , and this checkout's own
+    # memories use the same topic names. They are keyed by topic inside their own store.
+    ".codescout/projects",
+    ".codescout/memories",
+    # Agent-harness configuration and persona memory, not repository documents.
+    ".claude",
+    ".buddy",
+]

@@ -211,6 +211,12 @@ run "rustfmt --check (committed bytes)" scripts/pre-commit-cargo-fmt.sh
 run "refuse a commit citing an artifact id nothing resolves" \
     scripts/pre-commit-dead-artifact-ids.sh
 
+# Self-gating (exits 0 unless the commit stages a markdown file or the key-space scope file),
+# read-only, and it never compiles: it asks an existing `codescout key-gate --staged`, which
+# reads the index and HEAD from git alone and refuses only problems this commit ADDS. It
+# degrades open and loudly on a missing or stale binary and on a gate that cannot ask.
+run "key-space" scripts/pre-commit-key-space.sh
+
 # Self-gating (exits 0 when the commit stages no rename), and it WARNS rather than refuses.
 # Placed here, not folded into the foreign-index guard, because that guard has five early
 # `exit 0` paths and builds its rename maps after all of them -- `215a5cad` was a pathspec
