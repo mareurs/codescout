@@ -1,6 +1,8 @@
 //! The repo name: the human-readable first segment of a document key.
 //!
-//! A repo names itself in `.codescout/repo.toml` (`name = "<name>"`). The name
+//! A repo names itself in `.codescout/repo.toml` (`name = "<name>"`) at the repo's git root, or
+//! at the project root when there is no git. Keys are repo-relative paths, so every project in
+//! one repo shares one key space and one name. The name
 //! is lowercase `[a-z0-9]` runs joined by single `-`, and is never exactly 16
 //! hex characters, so it cannot be mistaken for a 16-hex repo id.
 
@@ -184,10 +186,27 @@ pub fn write(root: &Path, name: &RepoName) -> anyhow::Result<PathBuf> {
 ///
 /// A linked worktree offers what its main checkout would: `workspace.toml` is gitignored, so a
 /// worktree never has one, and a worktree's folder name is not the repo's name. Both lookups use
-/// the main checkout's root there.
+/// the main checkout's root there. Only a linked worktree is redirected (the gate every other
+/// librarian caller uses): a submodule's `.git` file has no `worktrees` component, so a submodule
+/// keeps its own root, name and `workspace.toml`. A relative `gitdir:` pointer is relative to
+/// `root`, never to the process's working directory.
 pub fn suggest(root: &Path) -> RepoName {
-    let root =
-        crate::util::path_security::worktree_main_root(root).unwrap_or_else(|| root.to_path_buf());
+    use crate::util::path_security::{is_linked_worktree, worktree_main_root};
+
+    let root = if is_linked_worktree(root) {
+        worktree_main_root(root)
+            .map(|main| {
+                let main = if main.is_relative() {
+                    root.join(main)
+                } else {
+                    main
+                };
+                std::fs::canonicalize(&main).unwrap_or(main)
+            })
+            .unwrap_or_else(|| root.to_path_buf())
+    } else {
+        root.to_path_buf()
+    };
     let root = root.as_path();
     let workspace_file = root.join(WORKSPACE_FILE_REL);
     let from_workspace = crate::librarian::read_door::for_project(root)
@@ -332,7 +351,6 @@ mod tests {
         assert_eq!(suggest(&main).as_str(), "myrepo");
     }
 
-    // A worktree's own workspace.toml still wins over the main checkout's.
     // The repo's name belongs to the repo, so the main checkout's workspace name is used even when
     // the worktree has a workspace.toml of its own.
     #[test]
@@ -360,6 +378,73 @@ mod tests {
         let main = tmp.path().join("Main_Dir");
         std::fs::create_dir_all(main.join(".git")).unwrap();
         assert_eq!(suggest(&main).as_str(), "main-dir");
+    }
+
+    /// `<tmp>/super` (a `.git` directory) holding the submodule `<tmp>/super/lib`, whose `.git`
+    /// file carries `gitdir`. The submodule's own `.git` file has no `worktrees` component.
+    fn submodule(gitdir: impl Fn(&Path) -> String) -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let sup = tmp.path().join("super");
+        let lib = sup.join("lib");
+        std::fs::create_dir_all(sup.join(".git/modules/lib")).unwrap();
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(lib.join(".git"), format!("gitdir: {}\n", gitdir(&sup))).unwrap();
+        (tmp, lib)
+    }
+
+    // A submodule is not a linked worktree: its `.git` file points into `.git/modules/`, and the
+    // superproject's name is not the submodule's.
+    #[test]
+    fn suggest_in_a_submodule_is_the_submodules_own_basename() {
+        let (_tmp, lib) = submodule(|_| "../.git/modules/lib".to_string());
+        assert_eq!(suggest(&lib).as_str(), "lib");
+        let (_tmp, lib) = submodule(|sup| sup.join(".git/modules/lib").display().to_string());
+        assert_eq!(suggest(&lib).as_str(), "lib");
+    }
+
+    #[test]
+    fn suggest_in_a_submodule_uses_its_own_workspace_name() {
+        for relative in [true, false] {
+            let (_tmp, lib) = submodule(|sup| {
+                if relative {
+                    "../.git/modules/lib".to_string()
+                } else {
+                    sup.join(".git/modules/lib").display().to_string()
+                }
+            });
+            let sup = lib.parent().unwrap();
+            for (root, name) in [(sup, "Super Name"), (lib.as_path(), "Own Lib")] {
+                std::fs::create_dir_all(root.join(".codescout")).unwrap();
+                std::fs::write(
+                    root.join(".codescout/workspace.toml"),
+                    format!("[workspace]\nname = \"{name}\"\n"),
+                )
+                .unwrap();
+            }
+            assert_eq!(suggest(&lib).as_str(), "own-lib", "relative={relative}");
+        }
+    }
+
+    // A relative `gitdir:` pointer is relative to the worktree, not to the process's working
+    // directory: `../MyRepo/.git/worktrees/wt` from `<tmp>/wt` is `<tmp>/MyRepo`.
+    #[test]
+    fn a_relative_worktree_pointer_resolves_against_the_worktree_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("MyRepo");
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(main.join(".git/worktrees/wt")).unwrap();
+        std::fs::create_dir_all(main.join(".codescout")).unwrap();
+        std::fs::write(
+            main.join(".codescout/workspace.toml"),
+            "[workspace]\nname = \"Code Scout\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), "gitdir: ../MyRepo/.git/worktrees/wt\n").unwrap();
+        // The test process runs elsewhere, so a read through its working directory cannot see
+        // `../MyRepo/.codescout/workspace.toml`.
+        assert_ne!(std::env::current_dir().unwrap(), tmp.path());
+        assert_eq!(suggest(&wt).as_str(), "code-scout");
     }
 
     // ASCII-only, like `key_of`: U+212A KELVIN SIGN lowercases to `k` under Unicode rules, but it

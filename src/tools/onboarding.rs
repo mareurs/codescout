@@ -467,7 +467,7 @@ impl Tool for Onboarding {
                 },
                 "repo_name": {
                     "type": "string",
-                    "description": "Confirm the repo name (lowercase letters, digits and single hyphens). Writes .codescout/repo.toml."
+                    "description": "Confirm the repo name (lowercase letters, digits, hyphens). Writes .codescout/repo.toml at the git root."
                 }
             }
         })
@@ -480,12 +480,14 @@ impl Tool for Onboarding {
 
         // A name the caller confirmed is recorded and answered on its own: the call is the
         // confirmation the earlier response asked for, not a request to onboard again.
+        // The name file belongs to the repo, so it lives at the repo root, found once per call.
+        let repo_root = repo_root_of(&root);
         if let Some(raw) = input["repo_name"].as_str() {
-            return set_repo_name(&root, raw);
+            return set_repo_name(&repo_root, raw);
         }
 
         let mut result = onboarding_branch(&input, ctx, root.clone()).await?;
-        result["repo_name"] = repo_name_block(ctx, &root).await;
+        result["repo_name"] = repo_name_block(ctx, &repo_root).await;
         Ok(result)
     }
 
@@ -795,8 +797,18 @@ fn repo_name_outcome(
     }
 }
 
+/// The root the repo-name file lives under: the git root of `project_root` (the nearest ancestor
+/// holding `.git`, a directory or a file, as `CurrentProject` finds it), else `project_root`
+/// itself when no git is above it. Keys are repo-relative paths, so every project in one repo
+/// shares this root and the one name kept there.
+fn repo_root_of(project_root: &std::path::Path) -> std::path::PathBuf {
+    crate::librarian::current_project::lookup_git_root(project_root)
+        .unwrap_or_else(|| project_root.to_path_buf())
+}
+
 /// The `repo_name` block of an `onboarding` response. Reads the file once, asks the user
-/// only when it is absent, and writes only a validated answer to an absent file.
+/// only when it is absent, and writes only a validated answer to an absent file. `root` is the
+/// repo root.
 async fn repo_name_block(ctx: &ToolContext, root: &std::path::Path) -> Value {
     let existing = repo_name::read(root);
     let suggestion = repo_name::suggest(root);
@@ -869,7 +881,8 @@ fn names_repo_file(msg: String) -> String {
     }
 }
 
-/// `onboarding(repo_name=...)`: record the name the user confirmed. A valid name replaces an
+/// `onboarding(repo_name=...)`: record the name the user confirmed at the repo root `root`. A
+/// valid name replaces an
 /// existing valid one; a file that cannot be read is reported and left as it is.
 fn set_repo_name(root: &std::path::Path, raw: &str) -> anyhow::Result<Value> {
     let name = RepoName::parse(raw.trim()).map_err(|e| {
@@ -1912,6 +1925,65 @@ mod tests {
         assert_eq!(
             again["repo_name"],
             json!({"name": "codescout", "confirmed": true})
+        );
+    }
+
+    // Keys are repo-relative paths, so two projects in one repo share one key space and one
+    // name: the name file lives at the git root, not at each project's root.
+    #[tokio::test]
+    async fn the_repo_name_lives_at_the_git_root_of_a_nested_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        let sub = repo.join("crates/sub");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(sub.join(".codescout")).unwrap();
+        std::fs::write(sub.join("main.rs"), "fn main() {}").unwrap();
+        let ctx = ctx_over(&sub).await;
+
+        // Before any name: the suggestion comes from the repo root, not the project's folder.
+        let first = Onboarding.call(json!({}), &ctx).await.unwrap();
+        assert_eq!(first["repo_name"]["suggested"], "repo", "{first}");
+
+        let out = Onboarding
+            .call(json!({"repo_name": "myname"}), &ctx)
+            .await
+            .unwrap();
+        let written = out["repo_name"]["written"].as_str().unwrap();
+        assert_eq!(
+            std::fs::canonicalize(written).unwrap(),
+            std::fs::canonicalize(repo.join(REPO_FILE_REL)).unwrap(),
+            "{out}"
+        );
+        assert!(repo.join(REPO_FILE_REL).is_file());
+        assert!(!sub.join(REPO_FILE_REL).exists());
+
+        // A call without the parameter reads the same file.
+        let again = Onboarding.call(json!({}), &ctx).await.unwrap();
+        assert_eq!(
+            again["repo_name"],
+            json!({"name": "myname", "confirmed": true}),
+            "{again}"
+        );
+        assert!(!sub.join(REPO_FILE_REL).exists());
+    }
+
+    // With no git above the project, the project root is the repo root.
+    #[tokio::test]
+    async fn without_git_the_repo_name_lives_at_the_project_root() {
+        let (dir, ctx) = repo_name_ctx().await;
+        assert!(
+            crate::librarian::current_project::lookup_git_root(dir.path()).is_none(),
+            "the temp dir sits under a git checkout"
+        );
+        let out = Onboarding
+            .call(json!({"repo_name": "plain"}), &ctx)
+            .await
+            .unwrap();
+        let written = out["repo_name"]["written"].as_str().unwrap();
+        assert_eq!(
+            std::fs::canonicalize(written).unwrap(),
+            std::fs::canonicalize(dir.path().join(REPO_FILE_REL)).unwrap(),
+            "{out}"
         );
     }
 
