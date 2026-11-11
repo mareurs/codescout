@@ -12,7 +12,7 @@
 //! commit introduces: a collision between two files that were already colliding at `HEAD`
 //! is not new.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::index::{DocInput, IndexProblem, KeyIndex};
 use super::key::{components, is_folder_index, Key, KeyError};
@@ -45,29 +45,27 @@ pub enum GateProblem {
     PartialFolderExclusion { folder: String },
 }
 
-/// What makes two problems the same problem across two reports.
+/// What makes two problems the same problem across two reports, for the problems that one
+/// value identifies. A collision is not one of them: see [`GateReport::new_since`].
 #[derive(PartialEq, Eq, Hash)]
 enum Identity<'a> {
     /// An invalid key is identified by its path; the path fixes the error.
     Invalid(&'a str),
-    /// A collision is identified by its key and its exact path set (`rel_paths` is sorted), so
-    /// a collision that gains a member is a different problem.
-    Duplicate(&'a Key, &'a [String]),
     /// A partial exclusion is identified by its folder.
     Folder(&'a str),
 }
 
 impl GateProblem {
-    fn identity(&self) -> Identity<'_> {
+    fn identity(&self) -> Option<Identity<'_>> {
         match self {
-            GateProblem::InvalidKey(e) => Identity::Invalid(match e {
+            GateProblem::InvalidKey(e) => Some(Identity::Invalid(match e {
                 KeyError::NotMarkdown(p) => p,
                 KeyError::NonCanonical { rel_path, .. } | KeyError::HexShaped { rel_path, .. } => {
                     rel_path
                 }
-            }),
-            GateProblem::DuplicateKey { key, rel_paths } => Identity::Duplicate(key, rel_paths),
-            GateProblem::PartialFolderExclusion { folder } => Identity::Folder(folder),
+            })),
+            GateProblem::DuplicateKey { .. } => None,
+            GateProblem::PartialFolderExclusion { folder } => Some(Identity::Folder(folder)),
         }
     }
 
@@ -108,16 +106,35 @@ impl From<IndexProblem> for GateProblem {
 }
 
 impl GateReport {
-    /// The problems in `self` that `before` does not have. A problem is the same across the two
-    /// reports when it is the same invalid path, the same key with the same set of paths, or
-    /// the same folder. A collision that gains a member is therefore new, and so is one that
-    /// loses a member while two or more remain: the path set is compared exactly.
+    /// The problems in `self` that `before` does not have.
+    ///
+    /// An invalid key is the same problem when it is the same path; a partial exclusion, when
+    /// it is the same folder. A collision is not new when every path it lists already collided
+    /// under that key in `before`, so a collision that is equal or smaller (a member deleted or
+    /// renamed away) is unchanged. It is new when it lists a path that was not in that
+    /// collision before: a collision that gains a member, or swaps one in, or appears.
     pub fn new_since(&self, before: &GateReport) -> Vec<&GateProblem> {
-        let known: HashSet<Identity<'_>> =
-            before.problems.iter().map(GateProblem::identity).collect();
+        let mut known: HashSet<Identity<'_>> = HashSet::new();
+        let mut collided: HashMap<&Key, HashSet<&str>> = HashMap::new();
+        for p in &before.problems {
+            match p {
+                GateProblem::DuplicateKey { key, rel_paths } => {
+                    collided
+                        .entry(key)
+                        .or_default()
+                        .extend(rel_paths.iter().map(String::as_str));
+                }
+                other => known.extend(other.identity()),
+            }
+        }
         self.problems
             .iter()
-            .filter(|p| !known.contains(&p.identity()))
+            .filter(|p| match p {
+                GateProblem::DuplicateKey { key, rel_paths } => !collided
+                    .get(key)
+                    .is_some_and(|was| rel_paths.iter().all(|path| was.contains(path.as_str()))),
+                other => other.identity().is_none_or(|id| !known.contains(&id)),
+            })
             .collect()
     }
 }
@@ -322,6 +339,24 @@ mod tests {
         assert_eq!(
             after.new_since(&before),
             vec![&dup("x", &["a/x.md", "b/x.md", "c/x.md"])]
+        );
+    }
+    #[test]
+    fn new_since_ignores_a_collision_that_loses_a_member() {
+        let before = check(&[], &["a/x.md", "b/x.md", "c/x.md"]);
+        let after = check(&[], &["a/x.md", "b/x.md"]);
+        assert_eq!(before.problems.len(), 1);
+        assert_eq!(after.problems.len(), 1, "still a collision, only smaller");
+        assert_eq!(after.new_since(&before), Vec::<&GateProblem>::new());
+    }
+
+    #[test]
+    fn new_since_reports_a_collision_that_swaps_in_a_new_path() {
+        let before = check(&[], &["a/x.md", "b/x.md"]);
+        let after = check(&[], &["a/x.md", "c/x.md"]);
+        assert_eq!(
+            after.new_since(&before),
+            vec![&dup("x", &["a/x.md", "c/x.md"])]
         );
     }
 
