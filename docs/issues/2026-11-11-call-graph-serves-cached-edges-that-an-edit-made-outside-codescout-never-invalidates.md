@@ -13,7 +13,7 @@ related:
 - '58a45860b802a477'
 - '4e7ec7bfc047ac7b'
 severity: medium
-unverified: Measured by hand in two scratch crates (callers direction, rust-analyzer, default transport; before and after the fix) and by test in the callees direction with tree-sitter edges and a mock LSP. The residual (a caller added in a file the cached result does not name) is NOT fixed, was reproduced by hand and has no automated test. A git checkout, a second session and other languages were not run. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity is my proposal.
+unverified: 'Measured by hand in two scratch crates (callers direction, rust-analyzer, default transport; before and after the fix) and by test in both directions with a mock LSP. The residual (a caller added in a file the cached result does not name) is NOT fixed; it has a red #[ignore] test and was reproduced by hand. The cost of option (a) is a proxy (git ls-files plus a stat pass), not the real walker. A git checkout, a second session and other languages were not run. The mechanism of the spurious ts edge is inferred, not traced. The link to 4e7ec7bfc047ac7b is a lead, not a finding. Severity is my proposal.'
 ---
 
 # BUG: call_graph serves cached edges that an edit made outside codescout never invalidates
@@ -95,7 +95,9 @@ Partly done 2026-11-11, commit `5a7936984` (see `## Fix provenance`), by candida
 - `apply_schema` adds the column to a database that already has the table (`ALTER TABLE`, tolerating a second process that added it first).
 - Codescout's own write tools keep invalidating through `invalidate_file`; nothing about them changed.
 
-**Residual, not fixed:** an entry is valid while the files it NAMES are unchanged. A caller added in a file that the result does not mention (a new file, or an existing file with no call of the symbol) does not change any signed file, so the entry is still served and the caller is missing. That is the case that first showed the problem (`other.rs` did not exist when the entry was written). It is not covered by a test. Options, none tried: (a) a project-level epoch (for example the newest mtime and the count of the source files, one walk per call), at a cost per call and with unrelated edits invalidating entries; (b) do not reuse a `callers` resolution across calls; (c) a file watcher in codescout, which does not exist today (`mark_file_dirty` marks only codescout's own writes).
+**Residual, not fixed:** an entry is valid while the files it NAMES are unchanged. A caller added in a file that the result does not mention (a new file, or an existing file with no call of the symbol) does not change any signed file, so the entry is still served and the caller is missing. That is the case that first showed the problem (`other.rs` did not exist when the entry was written). It has a red test (see `## Tests added`). Options, none tried: (a) a project-level epoch: a hash of `(relative path, len, mtime)` over the source files of the seed's language, computed once per `call_graph` call and stored with each resolution; (b) do not reuse a `callers` resolution across calls; (c) a file watcher in codescout, which does not exist today (`mark_file_dirty` marks only codescout's own writes).
+
+Cost of (a), measured 2026-11-11 on this repo (`epoch-cost.py`, tracked plus untracked files minus ignored): 547 `.rs` files; one `stat` pass over them 1.5 ms (warm cache, 5 runs); over 4226 files of four languages 14 ms; `git ls-files` for the 7283 listed files 22 ms. That is a proxy: the real walk would use the same walker as the `callers` fallback and was not timed. Every codescout write already deletes ALL resolutions of the project (`invalidate_file`'s second statement), so an epoch adds invalidation only for edits made outside codescout. A hash, not "newest mtime and count", because a replaced file with an older mtime (`cp -p`, `rsync -t`) would not raise the newest mtime. If the walk hits its scan cap the epoch is unknown and the resolution should not be reused.
 
 Small accepted window: the signatures are read after the analysis, so a file that changes while one analysis runs is stored with its new signature beside edges from its old content.
 
@@ -114,7 +116,9 @@ In `src/tools/symbol/call_edges/cache.rs`, six unit tests on `EdgeCache`: hit wh
 
 Verified 2026-11-11: `cargo test --lib -- tools::symbol::call_edges tools::symbol::call_graph` 113 passed, 0 failed, 0 ignored; clippy with `-D warnings` clean; `./scripts/gate.sh` green (9442 tests, FMT, CLIPPY, LEAN, DEFAULT all 0).
 
-Not covered by an automated test: the residual above (reproduced by hand in step 4); the `callers` direction (re-run by hand after the fix, steps 1 to 5 above); a second session through a real process boundary; a language other than Rust.
+Not covered by an automated test: the `callers` direction against a real language server (re-run by hand after the fix, steps 1 to 5 of the re-run); a second session through a real process boundary; a language other than Rust.
+
+**The residual has a red test**, added 2026-11-11 in the same file, direction `callers`, with a mock whose scripted `references` reports a new caller on the second call (as rust-analyzer does for a file it sees by its own watcher): `call_graph_reports_a_caller_added_in_a_file_the_cached_result_does_not_name` (`#[ignore]`, red: the second answer is `["a_caller"]` and lacks `b_caller`) and its control `call_graph_reports_a_new_caller_once_a_write_invalidates_the_cached_edges` (passes). The test file's `context` helper was split into `symbols_client` and `tool_context` so a test can script `references`; its behavior is unchanged (`tools::symbol::call_graph`: 58 passed, 1 ignored).
 
 ## Workarounds
 
@@ -124,7 +128,7 @@ Delete `.codescout/call_edges.db`, or write to the changed file with a codescout
 
 Partly fixed by `5a7936984` (see `## Fix provenance`). Status stays `open` because the residual case (a caller added in a file the cached result does not mention) is not fixed, and it is the case that started this investigation.
 
-Next: (1) with the owner, choose among the residual options and write the red test for it (a mock LSP that reports a caller in a new file on the second call); (2) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established. The manual `callers` re-run is done (see Reproduction, steps 1 to 6 of the re-run).
+Next: (1) choose among the residual options with the owner (my recommendation is (a), cost above), then implement it and remove the `#[ignore]` of the red test in the same commit; (2) check whether this explains the label/bytes mismatch in `4e7ec7bfc047ac7b`, a lead I have not established. The manual `callers` re-run is done (see Reproduction, steps 1 to 6 of the re-run).
 
 Related: `a73c49456056fb92`, `58a45860b802a477`, `bug-fix-session-log:F-236`.
 

@@ -3,8 +3,7 @@ use super::CallGraph;
 use crate::tools::{Tool, ToolContext};
 use serde_json::{json, Value};
 
-async fn context(root: &std::path::Path, files: &[&str]) -> ToolContext {
-    use std::sync::{Arc, Mutex};
+fn symbols_client(root: &std::path::Path, files: &[&str]) -> crate::lsp::mock::MockLspClient {
     let mut client = crate::lsp::mock::MockLspClient::new();
     for file in files {
         let path = root.join(file);
@@ -17,6 +16,14 @@ async fn context(root: &std::path::Path, files: &[&str]) -> ToolContext {
         .unwrap();
         client = client.with_symbols(path, syms);
     }
+    client
+}
+
+async fn tool_context(
+    root: &std::path::Path,
+    client: crate::lsp::mock::MockLspClient,
+) -> ToolContext {
+    use std::sync::{Arc, Mutex};
     ToolContext {
         agent: crate::agent::Agent::new(Some(root.to_path_buf()))
             .await
@@ -31,6 +38,10 @@ async fn context(root: &std::path::Path, files: &[&str]) -> ToolContext {
         guide_hints_emitted: Arc::new(parking_lot::Mutex::new(Default::default())),
         workspace_override: None,
     }
+}
+
+async fn context(root: &std::path::Path, files: &[&str]) -> ToolContext {
+    tool_context(root, symbols_client(root, files)).await
 }
 
 fn write_project(files: &[(&str, &str)]) -> tempfile::TempDir {
@@ -337,6 +348,121 @@ async fn call_graph_does_not_serve_stale_edges_after_a_file_changed_outside_code
 #[tokio::test]
 async fn call_graph_is_current_once_a_write_invalidates_the_cached_edges() {
     callees_after_a_change_made_outside_codescout(true).await;
+}
+
+// ── The residual of the same bug: a caller added in a file the cached result does not name ──
+//
+// The cached resolution is revalidated against the files it names (`files_behind`). A caller
+// added in another file changes none of them, so the entry is served and the caller is
+// missing. Here the "language server" is the mock's scripted `references`: it reports the new
+// caller on the second call, as rust-analyzer does for a file it sees by its own watcher.
+
+fn file_uri(path: &std::path::Path) -> lsp_types::Uri {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let uri = if text.starts_with('/') {
+        format!("file://{text}")
+    } else {
+        format!("file:///{text}")
+    };
+    uri.parse().unwrap()
+}
+
+/// A context whose mock reports `references` for the symbol in `seed_file`: each entry of
+/// `refs` is `(file, 0-based line, 0-based column)` of one call.
+async fn context_with_references(
+    root: &std::path::Path,
+    files: &[&str],
+    seed_file: &str,
+    refs: &[(&str, u32, u32)],
+) -> ToolContext {
+    let client = symbols_client(root, files);
+    let locations: Vec<lsp_types::Location> = refs
+        .iter()
+        .map(|(file, line, col)| lsp_types::Location {
+            uri: file_uri(&root.join(file)),
+            range: lsp_types::Range {
+                start: lsp_types::Position {
+                    line: *line,
+                    character: *col,
+                },
+                end: lsp_types::Position {
+                    line: *line,
+                    character: *col + 6,
+                },
+            },
+        })
+        .collect();
+    client
+        .references_results
+        .lock()
+        .unwrap()
+        .insert(root.join(seed_file), locations);
+    tool_context(root, client).await
+}
+
+fn caller_names(out: &Value) -> Vec<String> {
+    let mut names: Vec<String> = out["callers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["caller"].as_str().unwrap().to_string())
+        .collect();
+    names.sort();
+    names
+}
+
+/// Resolve the callers of `target` once, add a caller in `src/b.rs` (a file the first answer does
+/// not name; `lib.rs` and `a.rs` stay as they were), then resolve again from a new context whose
+/// mock also reports the new call.
+async fn callers_after_a_caller_appears_in_an_unnamed_file(invalidate_like_a_write_tool: bool) {
+    let dir = write_project(&[
+        ("src/lib.rs", "pub mod a;\npub mod b;\npub fn target() {}\n"),
+        ("src/a.rs", "pub fn a_caller() {\n    crate::target();\n}\n"),
+        ("src/b.rs", "pub fn nothing() {}\n"),
+    ]);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let files = ["src/lib.rs", "src/a.rs", "src/b.rs"];
+    let ask = json!({"symbol":"target","path":"src/lib.rs",
+        "direction":"callers","max_depth":1,"detail_level":"full"});
+
+    let ctx = context_with_references(&root, &files, "src/lib.rs", &[("src/a.rs", 1, 11)]).await;
+    let out = CallGraph.call(ask.clone(), &ctx).await.unwrap();
+    assert_eq!(caller_names(&out), vec!["a_caller"], "baseline: {out}");
+
+    let b = root.join("src/b.rs");
+    std::fs::write(
+        &b,
+        "pub fn nothing() {}\npub fn b_caller() {\n    crate::target();\n}\n",
+    )
+    .unwrap();
+    if invalidate_like_a_write_tool {
+        ctx.agent.invalidate_call_edges_for(None, &b).await;
+    }
+
+    let ctx = context_with_references(
+        &root,
+        &files,
+        "src/lib.rs",
+        &[("src/a.rs", 1, 11), ("src/b.rs", 2, 11)],
+    )
+    .await;
+    let out = CallGraph.call(ask, &ctx).await.unwrap();
+    assert_eq!(
+        caller_names(&out),
+        vec!["a_caller", "b_caller"],
+        "the caller added in src/b.rs must be reported: {out}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "red on purpose: bug 489e013ddfd6c3fc, a caller added in a file the cached result does not name is not reported; remove this attribute with the fix"]
+async fn call_graph_reports_a_caller_added_in_a_file_the_cached_result_does_not_name() {
+    callers_after_a_caller_appears_in_an_unnamed_file(false).await;
+}
+
+#[tokio::test]
+async fn call_graph_reports_a_new_caller_once_a_write_invalidates_the_cached_edges() {
+    callers_after_a_caller_appears_in_an_unnamed_file(true).await;
 }
 
 mod review;
