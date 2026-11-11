@@ -13,9 +13,9 @@ strings, and unrelated identifiers.
   makes it an exact name-path lookup; a bare name is a substring search,
   and `exact=true` forces an exact lookup on one.
 - **Find across the project, then read the body:**
-  `symbols(name="edit_code")` to locate it, then
-  `symbols(name="ToolName/edit_code", include_body=true)` for the body.
-- **Kind filter on a name search:** `symbols(name="X", path="src/tools/", kind="struct")`.
+  `symbols(name="parse_config")` to locate it, then
+  `symbols(name="Config/parse_config", include_body=true)` for the body.
+- **Kind filter on a name search:** `symbols(name="X", path="src/models/", kind="struct")`.
   `kind` filters name searches only: a file or directory overview ignores it. `kind` is one of
   `function`, `class`, `struct`, `interface`, `type`, `enum`, `module`, `constant`; which one your
   language's symbols carry varies (see table below).

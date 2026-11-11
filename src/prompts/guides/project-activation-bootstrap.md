@@ -41,11 +41,10 @@ VERIFY.**
 
 ## Before you plan or touch a contract — run reconnaissance
 
-If you will write a plan, change a struct / function signature / API contract,
-or verify claims against `docs/trackers`, invoke the reconnaissance skill FIRST.
+If you will write a plan or change a struct / function signature / API contract,
+read the real symbols and tool output first, and record any gap you find.
 
-- Claude Code: `/codescout-companion:reconnaissance`.
-- Other harnesses: follow `docs/templates/session-log.md`.
+- Claude Code: `/codescout-companion:reconnaissance` does this.
 
 ## When you dispatch subagents — brief them
 

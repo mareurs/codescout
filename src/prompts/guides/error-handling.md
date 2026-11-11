@@ -42,10 +42,3 @@ The MCP response has an `isError` field.
 - `isError: false` → recoverable; read the message + guidance field
   (`hint` / `warning` / `must_follow`) and adapt the next call. The body starts
   `"ok": false`, so read that field: the harness may not show you `isError`.
-
-For tool authors: return `RecoverableError::new(message)` — or the
-`RecoverableError::with_hint(message, hint)` / `with_warning` /
-`with_must_follow` constructors to attach severity-tagged guidance, then
-chain `.with_extra(key, value)` for structured fields — when the failure
-is the model's fault, bad input it can self-correct. Return
-`anyhow::bail!` when it isn't.

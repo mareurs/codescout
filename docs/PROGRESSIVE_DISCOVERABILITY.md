@@ -168,7 +168,9 @@ Good:
 ```
 
 This pattern is already established in the codebase (`RecoverableError::with_hint`). Extend it to
-every recoverable failure.
+every recoverable failure. Which constructor to use, and when to return `anyhow::bail!` instead,
+is in `docs/conventions/error-handling-derivations.md`; `get_guide("error-handling")` is the
+caller's side of the same contract.
 
 ### Pattern 5a: Severity-Tagged Guidance — `hint` / `warning` / `must_follow`
 

@@ -20,7 +20,7 @@ The laws for reading a green or red result → [`docs/conventions/testing-discip
 
 ## Bug Tracking
 
-Every bug noticed during work gets its own file in `docs/issues/`, copied from [`docs/issues/_TEMPLATE.md`](docs/issues/_TEMPLATE.md), which holds the procedure. It alone holds bug-file rules; `get_guide("tracker-conventions")` stays repo-neutral (a test enforces it).
+Every bug noticed during work gets its own file in `docs/issues/`, copied from [`docs/issues/_TEMPLATE.md`](docs/issues/_TEMPLATE.md), which holds the procedure. It alone holds bug-file rules; `get_guide` guides stay repo-neutral (a test enforces it; repo text goes to `docs/conventions/<topic>-derivations.md`).
 
 ## Session Intelligence Trackers
 
@@ -44,7 +44,7 @@ The rule and its corollary for recorded history → [`docs/conventions/parsers-o
 
 ## Design Principles
 
-Conventions and architecture → memories `conventions` and `architecture`. Before adding or modifying a tool, read [`docs/PROGRESSIVE_DISCOVERABILITY.md`](docs/PROGRESSIVE_DISCOVERABILITY.md), and for one that can return a negative result, [`docs/adrs/2026-08-27-negative-results-name-their-scope.md`](docs/adrs/2026-08-27-negative-results-name-their-scope.md). Errors → `get_guide("error-handling")`; test isolation → [`docs/conventions/test-env-isolation.md`](docs/conventions/test-env-isolation.md).
+Conventions and architecture → memories `conventions` and `architecture`. Before adding or modifying a tool, read [`docs/PROGRESSIVE_DISCOVERABILITY.md`](docs/PROGRESSIVE_DISCOVERABILITY.md), and for one that can return a negative result, [`docs/adrs/2026-08-27-negative-results-name-their-scope.md`](docs/adrs/2026-08-27-negative-results-name-their-scope.md). Test isolation → [`docs/conventions/test-env-isolation.md`](docs/conventions/test-env-isolation.md).
 
 ## Prompt Surface Consistency
 

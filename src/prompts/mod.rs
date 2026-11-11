@@ -468,8 +468,9 @@ pub const PULL_ONLY_GUIDE_TOPICS: &[(&str, &str)] = &[
     ),
     (
         "error-handling",
-        "Authoring guidance for contributors writing a new tool — RecoverableError vs \
-         anyhow::bail — not runtime guidance a caller acts on. No tool call implies it.",
+        "How a caller reads the two error paths: `isError: false` is recoverable and \
+         carries its own guidance, `isError: true` is fatal. No tool call implies it, \
+         and the error body already says how to recover.",
     ),
     (
         "iron-laws-detail",
@@ -2737,6 +2738,48 @@ mod tests {
                  procedure belongs in that repo's own template (codescout: \
                  docs/issues/_TEMPLATE.md), not in a guide every repo and every session reads"
             );
+        }
+    }
+    /// Every guide is served to every repo that runs codescout, so none may name a path,
+    /// file or Rust field that exists only in codescout's own checkout. Such a name dangles
+    /// in another repo, and the session that reads it cannot tell it from a real instruction.
+    ///
+    /// What belongs to this repo goes to `docs/conventions/<topic>-derivations.md`, with the
+    /// removed wording kept verbatim. A path the server itself defines is not repo-specific
+    /// (`docs/trackers/` and `docs/augmentations`, both constants in `src/librarian`), and
+    /// neither is the product manual, so none of those is a needle.
+    ///
+    /// The list names the places this repo's own text leaked from, not every possible leak.
+    /// When a new leak is found, add its token here and move the text out.
+    #[test]
+    fn no_guide_names_a_path_or_field_only_this_repo_has() {
+        const NEEDLES: &[&str] = &[
+            "docs/conventions/",
+            "docs/templates/",
+            "docs/issues",
+            "docs/adrs/",
+            "docs/superpowers/",
+            "docs/research/",
+            "src/tools/",
+            "src/librarian/",
+            "src/util/",
+            "src/main.rs",
+            "src/server.rs",
+            "src/prompts/",
+            "sidecar_write_through",
+            "path_note_emitted_since_activation",
+            "code-explorer",
+        ];
+        for &topic in crate::prompts::GUIDE_TOPICS {
+            let body = crate::prompts::topic_body(topic).expect("guide registered");
+            for needle in NEEDLES {
+                assert!(
+                    !body.contains(needle),
+                    "guide `{topic}` names `{needle}`, which exists only in codescout's own \
+                     checkout. Move the text to docs/conventions/{topic}-derivations.md and \
+                     keep the generic rule in the guide"
+                );
+            }
         }
     }
 

@@ -6,9 +6,7 @@ specs, plans and ADRs. The librarian indexes them all: find with
 `doc(action="find", kind=…)`, read with `doc(action="get", id=...)`. Never edit a tracker
 file by raw path lookup — go through the catalog.
 
-This guide holds the mechanics every repo shares and keeps each rule with its trap. The full
-wording, the derivations and a pointer to every other page that states the same thing are in
-`docs/conventions/tracker-conventions-derivations.md`, under the same headings. A repo's own
+This guide holds the mechanics every repo shares and keeps each rule with its trap. A repo's own
 procedure for one artifact kind (its template, its directory, when it archives) lives in that
 repo, not here.
 
@@ -147,7 +145,7 @@ expects_augmentation: docs/augmentations/docs-trackers-tool-usage-patterns.yaml
 The sidecar carries the shape (`prompt`, `params_schema`, `render_template`,
 `entry_collection`, `append_mode`, `history_cap`), never `params`. Write it with
 `librarian(action="doctor", fix="export_augmentations")`, which exports only rows THIS catalog
-holds. Restore procedure: `docs/conventions/cross-machine-catalog-resume.md` § 7.
+holds.
 
 ### Declaring an augmentation — why the sidecar exists, and the check's remedy
 <!-- serves: doc.augment(path~docs/trackers/) -->
@@ -320,7 +318,7 @@ The ladder is **live body → archived section (heading kept) → nothing furthe
 ### Make the tracker guarded
 <!-- serves: doc.create(path~docs/trackers/) -->
 
-**Declare `entry_prefix`.** That alone guards a ledger (`src/util/librarian_guard.rs`), because
+**Declare `entry_prefix`.** That alone guards a ledger, because
 only the server may advance the `PREFIX-N` counter. **Do NOT stamp `id: <16-hex>` into a
 tracker's frontmatter to guard it:** that guards on catalog membership, which would refuse
 `docs/RELEASE.md` and every ADR. An artifact that owns no id namespace needs no guard.
@@ -343,7 +341,7 @@ doc(action="get", id="<id>", heading="## Foo")
 
 **Filterable trackers:** pass `entry_filter={…}` (same AST as `filter`) to `doc(action="get")`
 once the augmentation declares an `entry_collection`. Prose trackers need retrofit first.
-Deeper mechanics: `get_guide("librarian")`; the session-passover pattern:
+Deeper mechanics: `get_guide("librarian")`; trackers that carry cross-session behavior:
 `get_guide("librarian-runtime")` § *Trackers as cross-session behavior*.
 
 ## Cross-linking (edges are derived — cite in prose)

@@ -23,6 +23,17 @@ Each block has three parts:
   `tracker_conventions_names_no_repo_specific_artifact_kind` fails if the guide names
   `docs/issues`, `_TEMPLATE`, `kind: bug`, `bug file` or `Bug files`. To document another
   repo-specific kind, put it in that repo's template and leave a pointer in `CLAUDE.md`.
+  `no_guide_names_a_path_or_field_only_this_repo_has` covers every guide the same way
+  (`src/prompts/README.md` rule 10).
+- **Pointers removed on 2026-11-11.** The guide named three things that exist only in this
+  checkout. They were: this file, in the intro ("The full wording, the derivations and a
+  pointer to every other page that states the same thing are in
+  `docs/conventions/tracker-conventions-derivations.md`, under the same headings."); the restore
+  procedure after `export_augmentations` ("Restore procedure:
+  `docs/conventions/cross-machine-catalog-resume.md` § 7."); and the guard source after
+  "Declare `entry_prefix`." ("(`src/util/librarian_guard.rs`)"). The Querying section also
+  said "the session-passover pattern:" where it now says "trackers that carry cross-session
+  behavior:", because that pattern moved to `docs/conventions/librarian-derivations.md`.
 - **Headings.** `SECTION_WAIVERS` and the routing tests in `src/prompts/mod.rs`,
   `src/prompts/guide_index.rs` and `src/server.rs` key on the exact heading text, and other pages
   cite sections as `§ *Heading*`. Rename none. The three archive headings start `Archive —`:

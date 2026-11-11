@@ -60,18 +60,13 @@ Activation's effect on these per-session sets:
 
 | State | Behavior |
 |---|---|
-| `guide_hints_emitted` | With a companion rendezvous active, a **same-project re-activation keeps the ledger** — nothing is cleared, so nothing re-emits. A **genuine project switch re-arms only the project-scoped topic** (`project-activation-bootstrap`), leaving the tool-contract guides the model already holds in place. **Without a rendezvous, every activation still clears the whole ledger** — that blunt behaviour is retained deliberately: absent the companion hook a `/clear` is invisible to the server, and being surgical would silently starve the new conversation of guides it has never seen. It is also cleared on `workspace(post_compact=true)` (compaction re-arm) — unless the companion recorded that the conversation's last `SessionStart` was not a compaction (a plain `/mcp` inherits that record), in which case the call keeps it and reports `"ledger": "kept"`; **persisted per session**, so most topics survive `/mcp` restarts within one conversation instead of re-injecting guide bodies the conversation already holds — with one deliberate exception: server construction re-arms the session-opening topic alone on any non-empty reloaded ledger, so that one guide body is re-sent on every `/mcp` reconnect regardless of project. Written by **both** an explicit `get_guide(topic)` fetch and the first-touch auto-inject of a hint-carrying tool — one shared keyspace, so either path suppresses the other's re-emit. After a full clear or a scoped re-arm, the next touch of an affected topic re-emits. |
+| `guide_hints_emitted` | The guide topics already delivered to this conversation. With the companion hook, a **same-project re-activation keeps it**, and a **project switch re-arms only `project-activation-bootstrap`**. Without the hook, every activation clears the whole set, because the server cannot see a `/clear`. `workspace(post_compact=true)` clears it too, and reports `"ledger": "kept"` when the companion shows the last `SessionStart` was not a compaction. It persists per session, so most topics survive `/mcp` restarts; the session-opening topic is re-sent on every reconnect. An explicit `get_guide(topic)` and the first-touch auto-inject both write it, so either path suppresses the other's re-emit. After a clear or a re-arm, the next touch of an affected topic re-emits. |
 | path-relative banner | Cleared on every activation. The activation's own response re-emits it; later responses in the same window omit it. |
 | section-read tracking | NOT cleared. Persists across activations. |
 | Output buffers (`@tool_*`, `@cmd_*`) | NOT cleared. Buffers from before the switch remain readable. |
 
 
-**Identity behind `guide_hints_emitted`.** The ledger the table row above describes is keyed by **conversation identity**, not by project — it follows the conversation across activations and workspace switches within one MCP session, not whichever project happens to be active.
-
-- **Keyed tier** — when a conversation id is obtainable (Claude Code's `CLAUDE_CODE_SESSION_ID`, today), the ledger persists to disk under that id and survives `/mcp` reconnects within the same conversation, other than the session-opening-topic exception noted above.
-- **Anonymous tier** — when no identity is obtainable (every other client, or Claude Code before the companion hook has run), the ledger lives in-process only, is never persisted, and re-arms automatically after an idle interval — so a second conversation in a long-lived process isn't starved of guides forever.
-
-A companion hook (Claude Code only) can refresh the keyed tier's id mid-process through a pid-keyed rendezvous slot the server publishes at construction. That is how the server detects `/clear`, which mints a new conversation id without restarting the MCP subprocess. The server stays fully correct without the hook: absent it, the ledger degrades to the anonymous tier's idle-TTL behavior rather than silently suppressing guides the new conversation has never seen. This is the same flag the table above checks — a keyed conversation id on its own is not enough for the surgical re-arm; the hook must actually have stamped the slot at least once.
+The set is keyed by **conversation identity**, not by project. Where no identity is available, it lives in process memory only and re-arms after an idle interval, so a second conversation is not starved of guides.
 
 ## Path-relative annotation
 
@@ -93,7 +88,7 @@ When you need to work in a sibling project briefly:
 ```
 1. workspace(activate, path="/home/user/other-project")
 2. <do the work — any number of tool calls>
-3. workspace(activate, path="/home/user/code-explorer")   # restore home
+3. workspace(activate, path="/home/user/home-project")   # restore home
 ```
 
 Skip step 3 and the server stays pointed at the foreign project. The
@@ -122,7 +117,7 @@ Subagents that share the parent's MCP server share:
   unstamped**. With the codescout-companion hook (Claude Code) each
   subagent is its own principal with its own ledger, so hints you
   triggered still fire for it
-- The same `path_note_emitted_since_activation` flag
+- The same path-relative banner flag
 
 A subagent that needs the workspace pointed at a different root must
 itself call `workspace(action="activate")` — and then restore the parent's home

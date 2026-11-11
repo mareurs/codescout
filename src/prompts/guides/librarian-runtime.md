@@ -86,8 +86,7 @@ The catalog is a single SQLite DB. Its path is resolved at server start:
 - **Default:** `dirs::data_local_dir()/librarian/catalog.db` — on Linux
   `~/.local/share/librarian/catalog.db` (falls back to
   `/tmp/librarian/catalog.db` if no data dir).
-- **Override:** set the `LIBRARIAN_DB` env var to point elsewhere
-  (the test suite does this per-test for isolation).
+- **Override:** set the `LIBRARIAN_DB` env var to point elsewhere.
 
 **The DB is machine-local and git-ignored — it is *not* in the repo and
 *not* shared with teammates.** A teammate who clones the project gets the
@@ -107,7 +106,7 @@ filterable `params`):
 - **An augment produces no git diff *to the `.md` body*.** `doc(action="augment")`
   writes the catalog row and leaves the body untouched. `git status` is not
   clean afterwards, though: a call that changes the *shape* writes through to the
-  artifact's committed sidecar (`sidecar_write_through`, `augment.rs`), so
+  artifact's committed sidecar, so
   read `git diff` on `docs/augmentations/` as you would for any generated file.
   A params-only merge does leave the sidecar byte-identical.
 - **Augmentations survive `reindex`** (even `force=true`). Reindex
@@ -158,7 +157,7 @@ rule tag is appended to (not replaced by) any frontmatter tags, deduped.
 This makes `tags` the right tool for flagging a *family* of files by
 path without disturbing per-file metadata.
 
-Example — flag everything codescout produces under its source tree, and
+Example — flag every markdown file under the source tree, and
 rescue embedded template files that would otherwise classify as
 `unknown`:
 
@@ -166,13 +165,13 @@ rescue embedded template files that would otherwise classify as
 [[rule]]
 glob = "src/**/*.md"
 kind = "doc"
-tags = ["codescout"]
+tags = ["embedded-docs"]
 ```
 
 Query the family back with array-membership (`contains`, not `in`):
 
 ```
-doc(action="find", filter={"tags": {"contains": "codescout"}})
+doc(action="find", filter={"tags": {"contains": "embedded-docs"}})
 ```
 ## Event authorship discipline
 
@@ -192,42 +191,9 @@ doc(action="find", filter={"tags": {"contains": "codescout"}})
 
 ## Trackers as cross-session behavior
 
-A skill tells an agent how to *act*. An augmented tracker — a standing
-`prompt` + `params` that travel with the artifact — tells an agent how to
-*maintain durable state*. The two are complementary: a skill shapes a
-single session's behavior; an augmented tracker shapes every session's
-behavior toward one artifact.
-
-A **reflective tracker** takes this further: its body *is* a behavioral
-script. The body is not prose about what to do — it is the executable
-specification the next session reads and follows. The tracker carries
-cross-session behavior the way a skill carries per-session behavior.
-
-### Session-passover tracker
-
-The session-passover tracker is the canonical worked example. It is a
-reflective tracker tagged `passover` whose body encodes the handoff
-protocol: what state was in flight, what the next session must verify,
-and what to do first.
-
-**Discovery** — at the start of a new session, find any active passover
-tracker with:
-
-```
-doc(action="find", kind="tracker", filter={"and":[
-  {"tags": {"in": ["passover"]}},
-  {"status": {"eq": "active"}}
-]})
-```
-
-**Resume protocol** — read the full body
-(`doc(action="get", id="<id>", full=true)`), work through its
-`## Next actions` checklist, verify the state claims, and resume the
-prior thread. The tracker *is* the cross-session behavior: following it
-is what continuity means.
-
-**Maintenance** — update the body at session end to reflect the current
-state and the next handoff. The `passover` tag + `active` status keeps
-it discoverable; archive it when the work-stream completes.
+An augmented tracker — a standing `prompt` + `params` that travel with the
+artifact — tells an agent how to *maintain durable state* in every session,
+where a skill shapes one session. A **reflective tracker** goes further: its
+body *is* the executable specification the next session reads and follows.
 
 See `get_guide("tracker-conventions")` for frontmatter shape and status vocabulary.

@@ -259,7 +259,7 @@ heading-addressed items (`heading`+`action`) and plain items
 path is used** — an augmented artifact (its `params` live in the catalog),
 or a declared ledger (frontmatter `entry_prefix`). A file whose frontmatter
 only carries an `id:` is refused for frontmatter writes, not body writes; the
-path alone (for example `docs/trackers/`) decides nothing. *Every*
+path alone decides nothing. *Every*
 `edit_file` write path refuses
 those: a direct write bypasses the catalog, so no `field_patch` event
 is recorded, the body-shrink guard never runs, and `updated_at` goes
@@ -290,16 +290,12 @@ underbriefed. A subagent calling `get_guide(topic)` is **not** that
 symptom; it is the prescribed behaviour (see the last two bullets
 below), because the auto-inject cannot reach it.
 
-**Substrate fact this compensates for:** without the companion stamp, the
-`guide_hints_emitted` ledger is shared across the parent and its subagents,
-persisted per session so most topics survive `/mcp` restarts (the
-session-opening topic is a deliberate exception — server construction
-re-arms it on every reconnect; see `get_guide("workspace-state")`).
-In that case, once the parent triggers a topic hint, NO subagent receives that
-hint independently — the ledger says "already delivered." With the stamp, each
+**Why a brief is needed:** without the companion stamp, the `guide_hints_emitted`
+ledger is shared across the parent and its subagents. Once the parent triggers a
+topic hint, no subagent receives that hint independently. With the stamp, each
 subagent has its own ledger and its own auto-injects. A brief cannot know which
 case applies, so Iron Law 6 is the only channel that always delivers parent-known
-context to subagents.
+context to subagents. The ledger itself is in `get_guide("workspace-state")`.
 
 **Recursion:** applies at every spawn boundary. Grandparent →
 parent → child each pass context downward; intermediate agents do
@@ -326,7 +322,7 @@ not relay automatically.
   already loaded, and never tell it to skip a fetch as redundant** — nothing
   is redundant in a context window that never received it.
 - **An explicit `get_guide(topic)` always returns the full body**, ledger
-  state notwithstanding — `src/tools/guide.rs` never withholds it. So the
+  state notwithstanding — the server never withholds it. So the
   fetch above costs one call and cannot come back empty. What the ledger
   changes is only the accompanying *note*, which is phrased for a re-fetching
   parent; a subagent reading it should trust the body it just received.

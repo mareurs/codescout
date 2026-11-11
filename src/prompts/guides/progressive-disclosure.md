@@ -173,7 +173,7 @@ in that activation window omits it, because the same fact lives in the
 `Active project` line of `server_instructions`. The gate also fires on the
 first eligible response after **server start**, not only after an explicit
 `workspace(action="activate")` call — launching codescout with `--project <path>`
-(`src/main.rs:23-25`) activates a project before any tool call, so that
+activates a project before any tool call, so that
 first response carries the banner too.
 
 Relativization is **field-aware and allowlist-driven**: only keys in a
