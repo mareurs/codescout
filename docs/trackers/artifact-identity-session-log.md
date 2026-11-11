@@ -10,7 +10,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 11
-entry_high_water_W: 6
+entry_high_water_W: 7
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
 
@@ -122,6 +122,7 @@ entry_high_water_W: 6
 | W-1 | 2026-11-11 | high | builder check against the code | repo name in librarian.toml breaks every older binary | validated |
 | W-5 | 2026-11-11 | med | merge the base into the branch, then ff-only | a merge commit in the shared checkout would capture six other sessions' staged files | validated |
 | W-6 | 2026-11-11 | high | independent Opus review of a scout report | a split built on "retire catalog_audit ships alone", a two-signal guard and four missed consumers | validated |
+| W-7 | 2026-11-11 | high | independent Opus review of a plan before execution | a gate that refuses every commit editing a file already in a collision; a cache that diverges from a rebuild after a rename | validated |
 
 ---
 
@@ -646,6 +647,18 @@ Codified so the Index column means the same thing across sessions.
 **Cost:** the scout took about 25 minutes and 495k subagent tokens; the review about 13 minutes and 312k.
 
 **Limit:** my own spot-check covered five of the scout's claims and three of the reviewer's. The rest of the review is reported, not verified. Before F-11 is closed, the reported items need one pass of their own.
+
+## W-7 — An independent Opus review of Plans B1 and B2 found a gate that would refuse every edit to a colliding file, and five compile errors
+
+**Valid:** dated 2026-11-11
+
+**Pattern:** before a plan is executed, an independent Opus reviewer reads it against the spec and the real code, with no conclusions of the author, and names the test that goes red.
+
+**Counterfactual:** the review of Plans B1 and B2 found a design flaw in my own gate and several errors in cited code. I re-checked three of them in the code and they hold: five `ProjectSection { … }` struct literals (three in `src/tools/run_command/tests.rs`, one in `config/project.rs:1000`, one in `onboarding.rs:1359`) would fail to compile with E0063 when a field is added, and my file list named only some; `grammar::Citation` has only `reference` and `line`, so the planned `raw` edge column could not be filled; and the model `open_db` for the new SQLite file is at `call_edges/cache.rs:115` and sets only the journal mode. The reviewer also reported, and I accepted from the plan text rather than from a run: the gate as written (`--diff-filter=ACMR`) would refuse any commit that edits a file already in a collision (33 duplicate keys and 18 bad names remain in this repo after the planned exclusions); the parse cache keyed by content and rules only would give a different result after a rename than a rebuild; 444 lines in `docs/trackers` repeat one token on a line, which breaks an edge key on `(line, raw)`; and the builder read the repo name and key-space file from the working tree, which defeats the two-clone goal.
+
+**Fixes made:** the gate compares the staged index with `HEAD` and refuses only problems that are new; the cache key is `(sha256, rel_path, rules_hash, PARSER_VERSION)`; edges are keyed by their position in the document; the builder reads every input from the commit's blobs; shallow clones are `unverified`, not collisions; the onboarding scan runs only when a name is being chosen and only with an interactive client; B1 runs before B2.
+
+**Limit:** the plans are not yet run. This review is reported work; the first execution will show what it missed.
 
 ## Template for new entries
 
