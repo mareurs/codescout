@@ -62,14 +62,97 @@ pub(crate) async fn resolve_read_path_for(
         &security,
     )?;
     if !full.exists() {
+        let mut hint = String::from(
+            "Use tree to explore the directory structure, \
+                 or symbols(path) to list symbols in a file or directory.",
+        );
+        if let Some(neighbours) = describe_neighbours_of_missing(&full) {
+            hint.push(' ');
+            hint.push_str(&neighbours);
+        }
         return Err(RecoverableError::with_hint(
             format!("path not found: {}", full.display()),
-            "Use tree to explore the directory structure, \
-             or symbols(path) to list symbols in a file or directory.",
+            hint,
         )
         .into());
     }
     Ok(full)
+}
+/// What exists next to a path that does not exist, named so the caller can correct the path
+/// without a second call. It says only what it found: the nearest existing directory and, in
+/// it, the entries that share a stem with the first missing component (a file that became a
+/// directory, or the reverse) or that share a long name prefix with it (a guessed slug).
+/// It returns `None` when no ancestor is a directory.
+pub(crate) fn describe_neighbours_of_missing(missing: &Path) -> Option<String> {
+    // cap-class: NOT_A_CAP — bounds the directory scan that builds a hint sentence; the error is the same with or without a neighbour named
+    const MAX_SCANNED: usize = 20_000;
+    // cap-class: NOT_A_CAP — bounds how many neighbour names the hint lists; the sentence says "closest", so it never claims a complete list
+    const MAX_NAMED: usize = 3;
+    const MIN_SHARED_PREFIX: usize = 6;
+
+    let mut first_missing = missing;
+    let mut ancestor = missing.parent()?;
+    while !ancestor.is_dir() {
+        first_missing = ancestor;
+        ancestor = ancestor.parent()?;
+    }
+    let wanted = first_missing.file_name()?.to_string_lossy().into_owned();
+    let wanted_stem = first_missing
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| wanted.clone());
+
+    let mut same_stem: Vec<String> = Vec::new();
+    let mut close: Vec<(usize, String)> = Vec::new();
+    for entry in std::fs::read_dir(ancestor)
+        .ok()?
+        .take(MAX_SCANNED)
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == wanted {
+            continue;
+        }
+        let shown = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            format!("{name}/")
+        } else {
+            name.clone()
+        };
+        let stem = Path::new(&name)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| name.clone());
+        if stem == wanted_stem || name == wanted_stem {
+            same_stem.push(shown);
+            continue;
+        }
+        let shared = name
+            .chars()
+            .zip(wanted.chars())
+            .take_while(|(a, b)| a == b)
+            .count();
+        if shared >= MIN_SHARED_PREFIX {
+            close.push((shared, shown));
+        }
+    }
+    same_stem.sort();
+    close.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+
+    let mut out = format!("Nearest existing directory: {}.", ancestor.display());
+    if !same_stem.is_empty() {
+        same_stem.truncate(MAX_NAMED);
+        out.push_str(&format!(
+            " It holds {} with the same stem as `{wanted}`.",
+            same_stem.join(", ")
+        ));
+    } else if !close.is_empty() {
+        let names: Vec<String> = close.into_iter().take(MAX_NAMED).map(|(_, n)| n).collect();
+        out.push_str(&format!(
+            " The names in it closest to `{wanted}` are {}.",
+            names.join(", ")
+        ));
+    }
+    Some(out)
 }
 
 /// What a write tool must hold of the file a LEAF symlink resolves to.
@@ -643,6 +726,68 @@ mod tests {
             resolved.ends_with("only_in_a.rs"),
             "got: {}",
             resolved.display()
+        );
+    }
+    /// FR-7: a `.rs` file that became a directory, a wrong name in a real directory, and a
+    /// path with no existing directory below the root each name what is there, and nothing
+    /// else.
+    #[test]
+    fn a_missing_path_names_what_exists_next_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = dir.path().join("src/tools");
+        std::fs::create_dir_all(tools.join("run_command")).unwrap();
+        std::fs::write(tools.join("grep.rs"), "").unwrap();
+        std::fs::create_dir_all(dir.path().join("agent")).unwrap();
+        std::fs::write(dir.path().join("agent/external.py"), "").unwrap();
+
+        // A file that became a directory.
+        let said = describe_neighbours_of_missing(&tools.join("run_command.rs")).unwrap();
+        assert!(said.contains("run_command/"), "got: {said}");
+        assert!(said.contains("same stem"), "got: {said}");
+        assert!(said.contains("Nearest existing directory"), "got: {said}");
+
+        // A wrong name beside the real one: the shared prefix names it.
+        let said =
+            describe_neighbours_of_missing(&dir.path().join("agent/external_entry.py")).unwrap();
+        assert!(said.contains("external.py"), "got: {said}");
+        assert!(said.contains("closest"), "got: {said}");
+
+        // No neighbour shares a stem or a long prefix: the directory alone is named.
+        let said = describe_neighbours_of_missing(&tools.join("zzz.rs")).unwrap();
+        assert!(said.contains("Nearest existing directory"), "got: {said}");
+        assert!(
+            !said.contains("grep.rs"),
+            "must not list unrelated files: {said}"
+        );
+
+        // Several levels missing: the nearest existing ancestor is named, and the first
+        // missing component is the one compared.
+        std::fs::create_dir_all(dir.path().join("agent_lifecycle")).unwrap();
+        let said =
+            describe_neighbours_of_missing(&dir.path().join("agent_lifecycles/a/b.py")).unwrap();
+        assert!(
+            said.contains(&format!("{}", dir.path().display())),
+            "got: {said}"
+        );
+        assert!(said.contains("agent_lifecycle/"), "got: {said}");
+    }
+
+    /// The read-path error carries the neighbour sentence in its hint.
+    #[tokio::test]
+    async fn a_path_not_found_error_hint_names_the_neighbour() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir.path().join("src/run_command")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let err = resolve_read_path_for(&agent, None, "src/run_command.rs")
+            .await
+            .unwrap_err();
+        let rec = err.downcast_ref::<RecoverableError>().expect("recoverable");
+        let hint = rec.hint().unwrap_or_default().to_string();
+        assert!(hint.contains("run_command/"), "got: {hint}");
+        assert!(
+            hint.contains("Use tree"),
+            "the generic advice stays: {hint}"
         );
     }
 
