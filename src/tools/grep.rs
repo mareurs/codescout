@@ -242,7 +242,7 @@ impl Tool for Grep {
             project_root.as_deref(),
             &security,
         )?;
-        let max = optional_u64_param(&input, "limit").unwrap_or(50) as usize;
+        let max = requested_limit(&input);
         let context_lines = optional_u64_param(&input, "context_lines")
             .unwrap_or(0)
             .min(20) as usize;
@@ -781,11 +781,29 @@ pub(crate) fn path_candidate(file: &str, tally: &str) -> String {
     format!("path={} ({tally})", crate::util::text::json_quote(file))
 }
 
+/// How many matching lines this call returns.
+///
+/// `limit` is `grep`'s own parameter and wins. Without it, a positive `head_limit` — the native
+/// `Grep` spelling, passed in 816 calls on this machine — caps
+/// the result the same way. Dropping it was not harmless: `head_limit: 12` got up to 50 lines and
+/// `head_limit: 80` got 50 where more were asked for. `head_limit: 0` means "no cap" natively, which
+/// `grep` cannot give (the cap is what keeps a result inside the output budget), so it keeps the
+/// default.
+fn requested_limit(input: &Value) -> usize {
+    if let Some(limit) = optional_u64_param(input, "limit") {
+        return limit as usize;
+    }
+    match optional_u64_param(input, "head_limit") {
+        Some(n) if n > 0 => n as usize,
+        _ => 50,
+    }
+}
+
 /// Refuse the two native-Grep keys that `grep` cannot honour AND that change the answer.
 ///
 /// An undeclared key used to be dropped without a word. Most of those drops are
-/// harmless (`-n`, `-o` and `head_limit` return a superset or a slightly longer
-/// list; `output_mode: "content"` IS the default shape), so refusing every unknown
+/// harmless (`-n` and `-o` return a slightly longer list; `output_mode: "content"` IS the
+/// default shape; `head_limit` is honoured by `requested_limit`), so refusing every unknown
 /// key would break the common call. These two are different: the caller asked for a
 /// result `grep` does not produce, and got a confident answer about something else.
 ///
@@ -1218,7 +1236,7 @@ fn unsatisfiable_absolute_glob(globs: &[String], search_path: &std::path::Path) 
 async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
     let pattern = super::require_str_param_or(input, "pattern", &["query", "regex"])?;
     let raw_path = input["path"].as_str().unwrap_or_default();
-    let max = optional_u64_param(input, "limit").unwrap_or(50) as usize;
+    let max = requested_limit(input);
     let context_lines = optional_u64_param(input, "context_lines")
         .unwrap_or(0)
         .min(20) as usize;
@@ -2554,6 +2572,108 @@ mod tests {
         assert!(
             hint.contains("true total is unknown"),
             "the buffer hint must say the total is unknown, got: {hint}"
+        );
+    }
+    /// How many matching lines a simple-mode result carries.
+    fn shown_lines(res: &serde_json::Value) -> usize {
+        res["file_groups"]
+            .as_array()
+            .expect("simple mode returns file_groups")
+            .iter()
+            .map(|g| g["items"].as_array().map_or(0, |m| m.len()))
+            .sum()
+    }
+
+    /// The native `Grep` spelling of the cap is honoured, not dropped. It was dropped on the
+    /// reasoning that the answer is then "a superset", which is false in both directions:
+    /// `head_limit: 4` got the default 50 lines, and `head_limit: 60` got 50 where 60 were asked for.
+    #[tokio::test]
+    async fn head_limit_caps_the_result_when_limit_is_absent() {
+        use serde_json::json;
+        let dir = tempdir().unwrap();
+        let many: String = (0..60).map(|i| format!("target_{i}\n")).collect();
+        std::fs::write(dir.path().join("hot.txt"), many).unwrap();
+        let path = dir.path().to_str().unwrap();
+        let ctx = test_ctx().await;
+
+        // Below the default: the cap is what was asked for, not 50.
+        let small = Grep
+            .call(
+                json!({"pattern": "target_", "path": path, "head_limit": 4}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            shown_lines(&small),
+            4,
+            "head_limit 4 must cap at 4, got: {small}"
+        );
+
+        // Above the default: the cap is what was asked for, not 50.
+        let large = Grep
+            .call(
+                json!({"pattern": "target_", "path": path, "head_limit": 60}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            shown_lines(&large),
+            60,
+            "head_limit 60 over 60 matches must return all 60, got: {large}"
+        );
+
+        // The control that matters: `0` is "no cap" natively and grep cannot give that, so it
+        // must NOT become a cap of zero. It keeps the default.
+        let zero = Grep
+            .call(
+                json!({"pattern": "target_", "path": path, "head_limit": 0}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            shown_lines(&zero),
+            50,
+            "head_limit 0 must keep the default cap, not return nothing, got: {zero}"
+        );
+
+        // grep's own parameter wins when both are present.
+        let both = Grep
+            .call(
+                json!({"pattern": "target_", "path": path, "limit": 7, "head_limit": 30}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            shown_lines(&both),
+            7,
+            "limit wins over head_limit, got: {both}"
+        );
+    }
+
+    /// The buffer path reads the cap through the same helper.
+    #[tokio::test]
+    async fn head_limit_caps_a_buffer_search_too() {
+        use serde_json::json;
+        let ctx = test_ctx().await;
+        let body: String = (0..20).map(|i| format!("target_{i}\n")).collect();
+        let raw = json!({ "id": "abc", "body": body }).to_string();
+        let buf_id = ctx.output_buffer.store_tool("artifact", raw);
+
+        let res = Grep
+            .call(
+                json!({"pattern": "target_", "path": buf_id, "head_limit": 3}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            shown_lines(&res),
+            3,
+            "head_limit 3 must cap a buffer search, got: {res}"
         );
     }
 

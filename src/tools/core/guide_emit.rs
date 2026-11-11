@@ -62,9 +62,10 @@ pub(crate) enum GuideDeliveryShape {
 /// (`TOOL_OUTPUT_BUFFER_THRESHOLD`, ~10 KB) still sits below that floor:
 /// 16 KiB + 10 KB = ~26 KB < 29.4 KB. A guide over this is not delivered; a
 /// pointer to `get_guide(topic)` ships instead and the topic stays unstamped.
-/// No whole-topic guide in the corpus exceeds it today: `tracker-conventions` (~60 KB)
-/// is the one that did, and it now declares `serves:` sections and ships those; the
-/// largest guide still shipped whole (`iron-laws-detail`) is ~14.7 KB.
+/// Of the guides that declare no `serves:` section, only `iron-laws-detail` is over it
+/// (18,127 B, measured 2026-11-11). It is pull-only (`PULL_ONLY_GUIDE_TOPICS`), so no call
+/// triggers it and only an explicit `get_guide` returns it. The next largest, `workspace-state`,
+/// is 12,164 B. `tracker-conventions` and `librarian` declare `serves:` sections and ship those.
 // cap-class: RESULT_CAP guide_emit.auto_inject_bound — probed
 pub(crate) const MAX_AUTO_INJECT_GUIDE_BYTES: usize = 16 * 1024;
 

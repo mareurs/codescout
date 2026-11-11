@@ -2,7 +2,7 @@
 id: '6d16009652c88e57'
 kind: spec
 status: draft
-title: 'Tracker lifecycle: entries as files, collections as folders, four lifecycle folders'
+title: 'Tracker lifecycle: entries as files, collections as folders, three lifecycle folders'
 tags:
 - trackers
 - lifecycle
@@ -299,6 +299,7 @@ A collection declares its own status words and maps each to a class. `doc(create
 title: <title>
 entry_kinds: [friction, win, note]
 statuses: {open: open, investigating: open, parked: deferred, fixed: terminal, wontfix: terminal}
+initial_status: open        # REQUIRED: the status a new entry starts in
 key_style: dated            # or name
 fields:                     # optional typed extra entry fields
   binding: {type: enum, values: [hard, soft]}
@@ -321,16 +322,30 @@ into a new entry.
 
 | Check | Fires when |
 |---|---|
-| `status_undeclared` | an entry's status is not in its collection's `statuses` |
+| `entry_invalid` | an entry breaks its collection's rules: a status, kind or field the readme does not declare, a field of the wrong type, a blocked or deferred entry with no `revisit_by`, a terminal entry with no `closed`, a non-terminal entry that carries `closed`, or a non-terminal entry that sits in `archive/` |
 | `revisit_due` | a blocked or deferred entry's `revisit_by` has passed |
 | `cited_target_closed` | an open entry has a relation line to a target whose `closed` date is after the entry's `status_since` |
 | `stream_all_terminal` | every entry of a stream is terminal but the stream is not archived |
-| `stream_without_exit` | a collection under `streams/` or `temp/` has no `exit_when` |
+| `collection_invalid` | a collection's readme breaks the rules: a schema that does not parse or lacks a required key, `exit_when` missing under `streams/` or `temp/` or present under `ledgers/`, a nested collection, a non-Markdown file in the collection, a file whose frontmatter block does not parse, or a file name that is no key |
 | `ledger_quiet` | a ledger with `review_every` has had no entry created or closed in that period |
 | `terminal_in_live_dir` | a terminal entry has stayed outside `archive/` past a grace period |
 | `orphan_entry` | a file under a lifecycle folder has no collection readme above it |
 
 Every check reads frontmatter dates and statuses. None reads git commit dates (anti-goal 2).
+`entry_invalid` exists because committed files are the only store: a hand edit, a merge or a
+pull bypasses the write-time validation in `doc(update)`, and an entry that lacks `revisit_by`
+or `closed` would silently switch off `revisit_due` and `terminal_in_live_dir`. It reports one
+finding per problem and covers every entry, archived or not.
+`collection_invalid` exists for the same reason at collection level: without it, a broken readme
+would make its whole collection invisible to every other check. An entry whose frontmatter
+parses but breaks the entry rules is reported by `entry_invalid`; a file whose frontmatter block
+does not parse is reported by `collection_invalid`, by path. Either way it counts as non-terminal
+for `stream_all_terminal`.
+
+Only forward relation labels (`Rests on:`, `Depends on:`) feed `cited_target_closed`. Backward
+labels (`Promoted from:`, `Supersedes:`) record history, so a closed target there is expected
+and never fires. The label vocabulary belongs to the builder; this rule fixes only which
+direction counts.
 `doctor` reports; it never moves or edits. Re-confirming that an open entry is still open
 is a `doc(update)` that rewrites the same status, which advances `status_since` and silences
 `cited_target_closed` until the target changes again.
@@ -345,7 +360,7 @@ to it, only a folder without a readme.
 
 - **`doc(create)` for an entry:** given a collection key, an `entry_kind`, a title and a body,
   the server builds the path (`<collection>/<stem>.md` from `key_style`), fills the frontmatter
-  from the schema (`status` defaults to the first `open`-class word, `status_since` and
+  from the schema (`status` defaults to the collection's `initial_status`, `status_since` and
   `created` to today) and the body from `## Entry template`. No allocation, so it works in a
   worktree.
 - **`doc(create)` for a collection:** under a lifecycle folder, with the schema; refuses a

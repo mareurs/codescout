@@ -79,7 +79,7 @@ async fn resolve_markdown_source(
                     path,
                     resolved.display()
                 ),
-                crate::tools::read_file::FILE_NOT_FOUND_HINT,
+                crate::tools::read_file::not_found_hint(&resolved),
             )
             .into(),
             _ => anyhow::anyhow!("failed to read {}: {}", resolved.display(), e),

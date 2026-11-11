@@ -884,7 +884,7 @@ pub fn topic_body(topic: &str) -> Option<&'static str> {
 /// is what prevents the next one.
 ///
 /// Not a guide body — a **predicate**. `iron-laws-detail` holds the full text and
-/// is 9.9 KB; these are ~150 bytes each and state the rule *and its exceptions*,
+/// is 18,127 B (measured 2026-11-11); these are ~150 bytes each and state the rule *and its exceptions*,
 /// which is the part a refused caller cannot infer from the refusal itself.
 ///
 /// **Why this exists.** Measured 2026-08-16 over codescout's own `usage.db`
@@ -2767,6 +2767,9 @@ mod tests {
             "src/server.rs",
             "src/prompts/",
             "sidecar_write_through",
+            "docs/manual/",
+            "docs/RELEASE.md",
+            "resume-*",
             "path_note_emitted_since_activation",
             "code-explorer",
         ];
@@ -3387,8 +3390,8 @@ mod tests {
     }
 
     /// The gate's four commands must stay in their documented order, because the
-    /// order is load-bearing: the lean lane leaves a librarian-less binary in the
-    /// shared `target/`, so ending on it arms a trap for the next session. See
+    /// order is load-bearing: the lean lane leaves a binary built without the default
+    /// features in the shared `target/`, so ending on it arms a trap for the next session. See
     /// CLAUDE.md § Development Commands and
     /// `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`.
     ///

@@ -99,12 +99,29 @@ Control rows (no pin), all six present:
    **Verdict:** supported that the drops come with slow statements on the same file; NOT shown: (a) who holds the lock: a hold line's `ms` is statement time and includes waiting for the lock, so a line cannot tell wait from work; (b) the cause of any single drop; (c) why a sweep that deletes nothing takes seconds (cold cache remains a hypothesis from hypothesis 10); (d) anything about processes that run builds without the lock-hold log: about 40 servers still run older binaries, and the 11:05:34 drop has no hold in any instrumented process, so its holder is either uninstrumented or not one of the three measured statements. The kill of three servers did not stop the drops.
 
 ## Fix
-Not started. Two obligations whatever the cause:
+Partly started. The cause of the drops is still not proven, so the bug stays `investigating`. Two obligations whatever the cause:
 - A failed write must leave a trace (a counter in a table that survives, or a log line), because a silent gap makes every rate over `tool_calls` wrong. That is the property this recorder's other refusal rows already keep.
 - A pinned call must resolve its project for recording the same way the tool body did, or the row lands in the wrong project's database (see `docs/issues/archive/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md`, finding 4).
 
+**Candidate mechanism removed, 2026-11-11 (hypothesis 10): the retention sweep is now served by an index.** `write_record` ran `DELETE FROM tool_calls WHERE called_at < datetime('now','-30 days')` after every insert, and the plan was `SCAN tool_calls`. `open_db` now creates `idx_tool_calls_called_at ON tool_calls(called_at)` with `IF NOT EXISTS`, next to the two backfill indexes. The two sweep statements are named constants (`RETENTION_SWEEP_SQL`, `RETENTION_SWEEP_SPARING_PIKA_SQL`) so the test plans the SQL that runs.
+
+Measured on a `.backup` copy of the live file (295 MB), with the `DELETE` inside a rolled-back transaction, 0 rows matched, pages evicted with `dd iflag=nocache count=0`:
+
+| Case | Time |
+|---|---|
+| No index, cold | 2,025 ms |
+| No index, warm | 53.5 ms |
+| With the index, cold | 0.69 ms |
+| Building the index (once per file, cold) | 2,356 ms |
+
+A file created by an older build pays the 2.4 s build once, on its first open, while it holds the write lock. Later opens find the index.
+
+What this does NOT show: that the sweep was the lock holder for the dropped rows (the NOT SHOWN list in hypothesis 10 still stands), or that any drop goes away. The check is `usage-lock-holds.log` after the new build runs: its `retention_sweep` lines of 250 ms or more should stop. Each insert still takes one write transaction for the sweep after its own; with the index that second transaction is held for well under a millisecond. Skipping it with a read-only "is anything due" check was considered and not done, because the measurement gives no reason for it yet.
+
 ## Tests added
-None yet. A regression test should issue N concurrent pinned calls through `dispatch_tool_call` and assert N rows.
+`usage::db::tests::the_retention_sweeps_are_served_by_the_called_at_index` (2026-11-11). It plans both sweep statements, with and without a `pika_observations` table, on a fresh database and again after dropping the index and reopening. It was red first: `plan: SCAN tool_calls`. It is green with the index. `cargo test --lib -- usage::` passes (114 tests).
+
+Still missing: the regression test for the dropped rows themselves. It should issue N concurrent pinned calls through `dispatch_tool_call` and assert N rows.
 
 ## Workarounds
 Do not pass `workspace=` on concurrent read calls when the usage rows matter. Treat per-tool counts from pinned subagent sessions as lower bounds.

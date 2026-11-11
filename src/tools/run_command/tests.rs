@@ -1741,6 +1741,39 @@ async fn run_command_commit_backtick_gate_honours_acknowledge_risk() {
         .await;
     assert!(ok.is_ok(), "acknowledge_risk must bypass the gate: {ok:?}");
 }
+/// FR-14: the wait-loop gate refuses before anything is spawned, names the pid route, and
+/// keeps `acknowledge_risk` as the escape. Both calls are inert: `false &&` stops the loop
+/// from ever running, while the shape is still what the gate reads.
+#[tokio::test]
+async fn run_command_refuses_a_self_matching_pgrep_loop_and_honours_acknowledge_risk() {
+    let (_dir, ctx) = project_ctx().await;
+    let cmd = "false && while pgrep -f zzz_marker; do sleep 1; done";
+
+    let err = RunCommand
+        .call(json!({"command": cmd}), &ctx)
+        .await
+        .expect_err("the loop can never end, so it is refused");
+    let msg = err.to_string();
+    assert!(msg.contains("never ends"), "got: {msg}");
+    let hint = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .and_then(|e| e.hint())
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        hint.contains("tail --pid"),
+        "the refusal must name the pid route: {hint}"
+    );
+    assert!(
+        hint.contains("[e]val_run"),
+        "and the bracket-class route: {hint}"
+    );
+
+    let ok = RunCommand
+        .call(json!({"command": cmd, "acknowledge_risk": true}), &ctx)
+        .await;
+    assert!(ok.is_ok(), "acknowledge_risk must bypass the gate: {ok:?}");
+}
 
 /// End-to-end regression for the heredoc pipe-rewrite corruption: write a file through a
 /// heredoc whose body contains pipes, then read the bytes back.
@@ -1865,6 +1898,12 @@ async fn run_in_background_returns_bg_handle() {
     assert!(
         hint.contains(output_id),
         "hint should reference the handle, got: {hint}"
+    );
+    // The end wake is not unconditional: the watcher ends at 30 minutes, and the
+    // hint is the one text every caller reads at spawn, so it must say so.
+    assert!(
+        hint.contains("30 minutes") && hint.contains("no end wake arrives"),
+        "the spawn hint must state the 30-minute limit and its consequence, got: {hint}"
     );
 }
 /// Two background calls started at the same time each get the handle of THEIR OWN command.

@@ -247,15 +247,18 @@ fn guard_with_oracle(
         // only it reaches here successfully.
         // docs/issues/archive/2026-09-03-librarian-guard-refuses-text-grammar-while-promising-it-works.md
         format!(
-            "Frontmatter on this file is catalog-indexed, so edit it through the catalog:\n\
+            "This call is refused because it cannot prove its edit stays out of the \
+             frontmatter, which is catalog-indexed. To change the BODY of this file:\n\
              {find_step}\
-             • doc(action=\"update\", {id_arg}, patch={{status: \"...\", tags: [...]}})\n\
-             Reads and BODY edits are allowed directly, but only via a call that can prove \
-             it stays in the body: read_file always works; for edit_file, only the markdown \
-             heading grammar (`heading` + `action`) does — its plain text grammar \
-             (`old_string`/`new_string`, `insert`, or a non-heading `edits[]` item) cannot \
-             bound its own extent and is refused here even with no `frontmatter` param. Use \
-             doc(action=\"update\", patch={{body_edits: [...]}}) for that shape instead."
+             • doc(action=\"update\", {id_arg}, patch={{body_edits: [{{heading: \"## X\", \
+             action: \"edit\", old_string: \"...\", new_string: \"...\"}}]}})\n\
+             • or edit_file with the markdown heading grammar (`heading` + `action`), which is \
+             scoped to one section. Its plain text grammar (`old_string`/`new_string`, \
+             `insert`, or a non-heading `edits[]` item) cannot bound its own extent and is \
+             refused here even with no `frontmatter` param.\n\
+             To change the FRONTMATTER: doc(action=\"update\", {id_arg}, \
+             patch={{status: \"...\", tags: [...]}}).\n\
+             Reads are never refused on this file: read_file works."
         )
     } else {
         format!(
@@ -967,6 +970,53 @@ mod tests {
                 || hint.to_lowercase().contains("old_string"),
             "the hint must name the plain text grammar as the one that is refused, so a \
              caller who used it learns why: {hint}"
+        );
+    }
+    /// FR-8: a caller who sent plain `old_string`/`new_string` for body text reads the hint
+    /// to learn what to send instead. The hint must name the refusal first and give the body
+    /// route before the frontmatter route; opening on the frontmatter route made 14 refused
+    /// plain edits come back as the same call.
+    #[test]
+    fn the_stamped_hint_gives_the_body_route_before_the_frontmatter_route() {
+        struct NothingIsAugmented;
+        impl AugmentedArtifactOracle for NothingIsAugmented {
+            fn is_augmented(&self, _: &std::path::Path) -> bool {
+                false
+            }
+        }
+
+        let text = "---\nid: '23421bbc5b226368'\nkind: doc\n---\n\n## A\n\nprose\n";
+        let abs = std::path::Path::new("/repo/docs/TEAM-ONBOARDING.md");
+        let err = guard_with_oracle(
+            "docs/TEAM-ONBOARDING.md",
+            text,
+            Some(abs),
+            Some(&NothingIsAugmented),
+            Access::FrontmatterWrite,
+        )
+        .expect_err("a plain-text edit on a stamped file is refused");
+        let hint = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap()
+            .hint()
+            .unwrap_or_default()
+            .to_string();
+
+        assert!(
+            hint.starts_with("This call is refused"),
+            "the hint must open on the refusal, not on a route: {hint}"
+        );
+        let body = hint.find("body_edits").expect("names the body route");
+        let frontmatter = hint
+            .find("patch={status")
+            .expect("names the frontmatter route");
+        assert!(
+            body < frontmatter,
+            "the body route must come before the frontmatter route: {hint}"
+        );
+        assert!(
+            hint.contains("old_string: \"...\""),
+            "the body route must show the shape a plain edit maps to: {hint}"
         );
     }
 

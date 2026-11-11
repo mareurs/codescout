@@ -1167,6 +1167,36 @@ A `zombie` hit is a "has this recurred?" check, not a task (see § Bug frontmatt
 vocabulary). Add `include_archived=true` to surface archived rows. Read a tracker with:
 ~~~~~~
 
+## Moved out: repo-specific references (second guard pass)
+
+The guard test `no_guide_names_a_path_or_field_only_this_repo_has` gained three needles
+(`docs/manual/`, `docs/RELEASE.md`, `resume-*`). `docs/plans/` is not a needle: the `librarian`
+guide uses it as a generic example `rel_path`, and the first run of the test refused it for that. A read of the live
+guide on 2026-11-11 found the text below still in `get_guide("tracker-conventions")`. It names
+this repo's artifacts, so it left the guide verbatim and lives here.
+
+- **`draft` on a plan.** Was under "Frontmatter shape", after the status table:
+
+  > **`draft` means the opposite on a plan:** in `docs/plans/` it means *shipped, deliberately
+  > unarchived because a named residual is open*. Before reading a `draft` as "not started",
+  > check whether a `resume-*` tracker names it.
+
+- **Concept pages for ledgers.** Was at the end of "Declaring a ledger":
+  "Concept pages: `docs/manual/src/concepts/entry-citations.md`, `link-scan.md`,
+  `statement-validity.md`."
+- **Valid detail.** Was at the end of the `**Valid:**` bullet:
+  "Detail: `docs/manual/src/concepts/statement-validity.md`."
+- **Link-scan detail.** Was at the end of the `link_scan` bullet under "Cross-linking":
+  "Detail: `docs/manual/src/concepts/link-scan.md`."
+- **The guarded-tracker example.** The sentence read "which would refuse `docs/RELEASE.md` and
+  every ADR". The guide now says "every plain doc and ADR". The two repo files that carry no
+  namespace are `docs/RELEASE.md` and `CONTRIBUTING.md`; the guard's own comment says so
+  (`src/util/librarian_guard.rs`).
+- **The sidecar example.** The `expects_augmentation:` example named
+  `docs/augmentations/docs-trackers-tool-usage-patterns.yaml`. That name is this repo's
+  (`src/librarian/augmentation_sidecar.rs`, the injective-name test). The guide now shows
+  `docs/augmentations/<slug>.yaml`.
+
 ## Size ledger
 
 | Date | Bytes | Measured by |

@@ -7560,6 +7560,112 @@ async fn a_replace_whose_body_renames_is_told_to_use_rename() {
         "a refused replace must restore the file; got:\n{content}"
     );
 }
+/// FR-13: one Python METHOD replaced by a body that holds SEVERAL methods, none under the
+/// target's name. Two rows (2026-10-28 and 2026-10-29) were told "dropped the symbol
+/// definition ... not just body statements", which is false: the body was all declarations.
+/// A single renamed method already gets the rename message (pinned for Rust above and
+/// checked for Python while reproducing this); the several-names shape did not.
+#[tokio::test]
+async fn a_python_replace_whose_body_declares_several_methods_is_told_so() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("tests")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let canonical_root = std::fs::canonicalize(dir.path()).unwrap();
+    let file = canonical_root.join("tests").join("test_integrity.py");
+    std::fs::write(
+        &file,
+        "class IntegrityTest:\n    def test_keeper(self):\n        assert True\n\n    def test_errored_run_is_invalid(self):\n        assert 1 == 1\n",
+    )
+    .unwrap();
+
+    let target = SymbolInfo {
+        name: "test_errored_run_is_invalid".to_string(),
+        name_path: "IntegrityTest/test_errored_run_is_invalid".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 4,
+        end_line: 5,
+        start_col: 4,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let keeper = SymbolInfo {
+        name: "test_keeper".to_string(),
+        name_path: "IntegrityTest/test_keeper".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 1,
+        end_line: 2,
+        start_col: 4,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let class = SymbolInfo {
+        name: "IntegrityTest".to_string(),
+        name_path: "IntegrityTest".to_string(),
+        kind: SymbolKind::Class,
+        file: file.clone(),
+        start_line: 0,
+        end_line: 5,
+        start_col: 0,
+        children: vec![keeper, target],
+        range_start_line: None,
+        detail: None,
+    };
+
+    let lsp = MockLspProvider::with_client(MockLspClient::new().with_symbols(&file, vec![class]));
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let err = EditCode
+        .call(
+            json!({
+                "action": "replace",
+                "symbol": "IntegrityTest/test_errored_run_is_invalid",
+                "path": "tests/test_integrity.py",
+                "body": "    def test_errored_run_with_no_model_work_is_invalid(self):\n        assert 2 == 2\n\n    def test_errored_run_after_real_work_is_scored(self):\n        assert 3 == 3",
+            }),
+            &ctx,
+        )
+        .await
+        .expect_err("replace must refuse a body that never declares the target")
+        .to_string();
+
+    assert!(
+        err.contains("declares 2 symbols")
+            && err.contains("test_errored_run_with_no_model_work_is_invalid")
+            && err.contains("test_errored_run_after_real_work_is_scored"),
+        "the refusal must say how many symbols the body declares and name them; got: {err}"
+    );
+    assert!(
+        err.contains(r#"position=\"after\""#) || err.contains(r#"position="after""#),
+        "the refusal must route the extra methods to insert, in callable form; got: {err}"
+    );
+    assert!(
+        !err.contains("not just body statements"),
+        "the old message diagnosed an incomplete body, which is false here; got: {err}"
+    );
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        content.contains("test_errored_run_is_invalid") && !content.contains("with_no_model_work"),
+        "a refused replace must restore the file; got:\n{content}"
+    );
+}
 
 /// gap 2 of `docs/issues/archive/2026-08-11-edit-code-cannot-remove-nonempty-module.md`:
 /// removing a non-empty module reported the module's OWN children as "dropped

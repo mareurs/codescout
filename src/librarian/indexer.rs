@@ -6746,6 +6746,58 @@ kind = "memory"
             "a surviving file lost its vectors"
         );
     }
+    /// Reproduction for `docs/issues/2026-11-11-reindex-deletes-local-history-of-a-file-moved-outside-this-catalog.md`.
+    ///
+    /// A plain rename stands in for a move another host made and a `git pull` brought here: the
+    /// artifact id is `sha256(abs_path)`, so the old row is `gone` at the next reindex. The row
+    /// carries an event that exists nowhere else, and the `has_history` guard is consulted only for
+    /// ESCAPING rows. The assertion states the behaviour the guard's own comment promises.
+    #[test]
+    #[ignore = "red by design: measures docs/issues/2026-11-11-reindex-deletes-local-history-of-a-file-moved-outside-this-catalog.md; the identity-spec owner decides the fix"]
+    fn a_vanished_file_with_history_keeps_its_events() {
+        use crate::librarian::catalog::events::{timeline_for_artifact, TestEventRowBuilder};
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        std::fs::write(root.join("docs/specs/a.md"), "# a\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = crate::librarian::classify::load_rules(
+            "[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n",
+        )
+        .unwrap();
+        let ignore = globset::GlobSet::empty();
+        index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
+
+        let old_id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/a.md"));
+        crate::librarian::catalog::events::insert(
+            &cat,
+            &TestEventRowBuilder::new(&old_id, "note")
+                .with_id("e-history")
+                .with_payload("{\"text\":\"local history\"}")
+                .build(),
+        )
+        .unwrap();
+        assert_eq!(
+            timeline_for_artifact(&cat, &old_id, None, None, 10)
+                .unwrap()
+                .len(),
+            1,
+            "setup: the event must exist before the move"
+        );
+
+        // The move this catalog did not make.
+        std::fs::rename(root.join("docs/specs/a.md"), root.join("docs/specs/a2.md")).unwrap();
+        index_repo_sync(&cat, &rules, root, &ignore, false, false, false).unwrap();
+
+        let kept = timeline_for_artifact(&cat, &old_id, None, None, 10).unwrap();
+        assert_eq!(
+            kept.len(),
+            1,
+            "reindex hard-deleted a vanished row that carried an event; the cascade took the history"
+        );
+    }
 
     #[tokio::test]
     async fn concurrent_embed_queue_completes_all() {

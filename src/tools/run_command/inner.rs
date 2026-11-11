@@ -167,9 +167,11 @@ async fn spawn_background_command(
     // emitted at spawn time rather than five seconds later.
     let mut hint = format!(
         "Started; outcome not yet observed. If the codescout-companion hook is active, end your \
-         turn: a wake message arrives when the job ends. Otherwise read the job with \
+         turn: a wake message arrives when the job ends. If the job runs past 30 minutes, a \
+         \"still running\" wake ends that watcher: then run one run_command that names {} \
+         (for example tail -1), or no end wake arrives. Otherwise read the job with \
          run_command(\"tail -50 {}\") — that response carries this job's state.",
-        ref_id
+        ref_id, ref_id
     );
     let mut response = serde_json::json!({ "output_id": ref_id });
     match first_write {
@@ -637,6 +639,30 @@ pub(crate) async fn run_command_inner(
                  cat > /tmp/msg <<'EOF'\n  <message>\n  EOF\n  git commit -F /tmp/msg\n\
                  Otherwise escape each backtick as \\`, or drop the backticks. Pass \
                  acknowledge_risk=true if the substitution is genuinely intended.",
+            )
+            .into());
+        }
+    }
+
+    // --- Step 2.7: Self-matching `pgrep -f` wait loop ---
+    // The loop can never end: `pgrep -f` finds the shell that carries its own pattern.
+    // A policy gate like 2.6, so it sits after the ones that refuse on a command's content.
+    // FR-14, docs/trackers/frictions/run-command-wait-loops-are-two-thirds-of-the-slowest-calls.md
+    if !buffer_only && !acknowledge_risk {
+        if let Some(clause) = crate::util::path_security::self_matching_pgrep_loop(resolved_command)
+        {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "`{clause}` inside a wait loop never ends: `pgrep -f` matches the whole \
+                     command line, and that includes the shell that runs this loop"
+                ),
+                "Wait on the process id instead: run_command(\"tail --pid=<pid> -f /dev/null\", \
+                 run_in_background=true) ends when that process ends and wakes you. To find the \
+                 pid by name, write one character of the pattern as a bracket class, for \
+                 example pgrep -f \"[e]val_run\": the class does not match its own text. For \
+                 work this call can start, use run_in_background=true and end the turn. A \
+                 subagent gets no wake: give it a foreground timeout_secs. Pass \
+                 acknowledge_risk=true if the loop is intended.",
             )
             .into());
         }

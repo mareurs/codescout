@@ -9,8 +9,8 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 4
-entry_high_water_W: 2
+entry_high_water_F: 11
+entry_high_water_W: 7
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
 
@@ -104,13 +104,25 @@ entry_high_water_W: 2
 | F-2 | 2026-11-11 | med | self-friction | fixed-verified | **Claimed rekey.rs could re-key artifact keys without reading it** — it re-keys entry prefixes |
 | F-3 | 2026-11-11 | med | subagent | fixed-verified | **Slug-drift estimate scoped to one repo; the unique index spans the machine** — suffix depends on other repos' index order |
 | F-4 | 2026-11-11 | high | architectural | promoted-to-bug-tracker | **Reindex deletes a moved file's local history** — has_history guards escaping rows only |
+| F-5 | 2026-11-11 | med | plan-prose | fixed-verified | **Plan A Task 1 missed everything a removed cargo feature drags along** — required-features, install commands, memories; found by scout + review |
+| F-6 | 2026-11-11 | med | self-friction | fixed-verified | **Ran the plan on the shared checkout until the operator asked for a worktree** — 33 files edited, restored from a saved patch |
+| F-7 | 2026-11-11 | med | subagent | fixed-verified | **The worktree-aware repo-name suggestion mishandles a submodule** — `worktree_main_root` was ungated; found by the re-review, fixed in wave 2 |
+| F-8 | 2026-11-11 | med | plan-prose | open | **A spec requirement is built by no plan: "onboarding says when another checkout uses the name"** — plus two open spec-level questions |
+| F-9 | 2026-11-11 | med | self-friction | fixed-verified | **Told the operator a peer held three dirty files; they were my own stopped implementer's leftovers** — attributed by adjacency; a transcript search found the real author |
+| F-10 | 2026-11-11 | low | plan-prose | fixed-verified | **Task 1 left a stale "librarian feature" message in `tests/cli_doc.rs` and a "librarian-less" comment in `src/prompts/mod.rs`** — passed both reviews; fixed in 6671e2ce8 |
+| F-11 | 2026-11-11 | high | architectural | open | **The spec and the old catalog code disagree in about a dozen places a plan must settle** — a third guard signal, the entry-id race guard, four consumers, G5, vectors; 3 verified, the rest reported |
 
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-2 | 2026-11-11 | high | cross-session design review | path fallback would change keys on folder moves | validated |
+| W-3 | 2026-11-11 | high | per-task review with named risks | a Kelvin-sign key, a write through a dangling link, a 60 s-bound dialog under a write lock — all with a green gate | validated |
+| W-4 | 2026-11-11 | high | census with the real code | Plan E sized from the 895-id estimate; measured 45 renames, 37 duplicate-key groups, 144 `[[F-16]]` rewrites | validated |
 | W-1 | 2026-11-11 | high | builder check against the code | repo name in librarian.toml breaks every older binary | validated |
+| W-5 | 2026-11-11 | med | merge the base into the branch, then ff-only | a merge commit in the shared checkout would capture six other sessions' staged files | validated |
+| W-6 | 2026-11-11 | high | independent Opus review of a scout report | a split built on "retire catalog_audit ships alone", a two-signal guard and four missed consumers | validated |
+| W-7 | 2026-11-11 | high | independent Opus review of a plan before execution | a gate that refuses every commit editing a file already in a collision; a cache that diverges from a rebuild after a rename | validated |
 
 ---
 
@@ -420,6 +432,233 @@ Codified so the Index column means the same thing across sessions.
 **Status:** validated
 
 **Rests on:** a design that serves another design must be reviewed by the session that owns the other one.
+
+## F-5 — Plan A Task 1 missed everything a removed cargo feature drags along
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, scouting Plan A Task 1 before the first subagent dispatch.
+
+**When:** executing the plan with subagents; the task said "remove 112 gates in 23 files" and the Cargo.toml feature.
+
+**Expected:** the task text lists what removing the `librarian` feature changes.
+
+**Got:** the task text missed four `required-features = ["librarian"]` lines on test targets, `tests/feature_lanes.rs`, install commands that pass `--features …,librarian` (`cargo install` would reject them), CONTRIBUTING.md, ROADMAP.md, `docs/conventions/gate-ordering.md`, CI comments, a gate test that matched a printed line, and — found only by the task review — six agent-facing codescout memories (`development-commands` is the one CLAUDE.md points every session at), `attribution.rs:643` and `test-env-isolation.md`. A grep for the cfg attribute alone finds 112 sites and none of these.
+
+**Probable cause:** the task was sized from the one grep that measured the code gates; the references to the feature as a name (docs, memories, commands, test targets) were never measured.
+
+**Workaround:** the controller added the scope items to the implementer's dispatch; the review loop found the memories on round 1.
+
+**Severity:** med
+
+**Status:** fixed-verified
+
+**Rests on:** when a plan removes a named switch, measure every spelling of its name (`--features`, `required-features`, prose, memories), not only the attribute.
+
+**Fix idea / Pointer:** commits `f383136a7`, `d03b67e35` on `feat/artifact-identity-plan-a-20261111`.
+
+## F-6 — Ran the plan on the shared checkout until the operator asked for a worktree
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, at the start of executing Plan A.
+
+**When:** I read the project rules about shared-checkout commits, chose to run the plan on the shared `experiments` checkout with pathspec commits, and recorded it as a ruling.
+
+**Expected:** a plan whose first task rewrites Cargo.toml and 23 source files, in a checkout with other live sessions and uncommitted peer edits, runs in an isolated workspace.
+
+**Got:** the first implementer had edited 33 files in the shared tree when the operator said "wait, no! lets do an worktree". I stopped it, saved its diff, restored exactly those 33 paths (verified clean of peer edits first, nothing staged), and created `.worktrees/artifact-identity-plan-a`. A peer's edits to `src/prompts/mod.rs`, `tests/cli_doc.rs` and `attribution.rs` appeared in the main tree meanwhile; the branch overlaps two of them, so the merge now needs that peer to commit first.
+
+**Probable cause:** I weighed the commit rules, which allow a shared tree, and did not weigh the blast radius of a task that changes build configuration for every session.
+
+**Workaround:** worktree; pinned codescout calls (`workspace=<path>`) in every subagent brief; `append_entry` refuses a worktree session, so ledger entries are written from the main checkout.
+
+**Severity:** med
+
+**Status:** fixed-verified
+
+**Rests on:** isolation is the default for a change that every session builds; the commit rules say how to share a tree, not whether to.
+
+**Fix idea / Pointer:** the SDD skill's setup step says to isolate; follow it before the first dispatch.
+
+## F-7 — The worktree-aware repo-name suggestion mishandles a submodule
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, scoped re-review of the final fix wave on Plan A (commit `ae8228b96`).
+
+**When:** the whole-branch review found that `suggest` offered the worktree folder's name inside a linked worktree; the fix called `path_security::worktree_main_root(root)` to use the main checkout.
+
+**Expected:** a fix for the worktree case leaves every non-worktree case as it was (the brief said so).
+
+**Got:** `worktree_main_root` does not distinguish a submodule from a linked worktree (`is_linked_worktree` does, by requiring a `worktrees` path component; every other librarian caller gates on it first). In a submodule `.git` holds `gitdir: ../.git/modules/x`; the helper returns `Some("..")`, so `suggest` offers `repo` instead of the submodule's name and reads `../.codescout/workspace.toml` against the server's working directory. With an absolute gitdir it offers the superproject's name, the very name collision the fix was meant to remove. The same happens for a linked worktree created with relative gitdir pointers.
+
+**Probable cause:** the fix reused a helper whose name says "worktree" without reading its gate; the implementer verified the linked-worktree case and the plain-directory case, not the third `.git`-file shape.
+
+**Workaround:** none at the time. The final-review process allows no second fix wave, so it was surfaced to the operator, who authorised wave 2 (commit `be094b671`, re-reviewed clean, full gate green): `suggest` calls `worktree_main_root` only when `is_linked_worktree(root)`, resolves a relative main root against the root, and has submodule and relative-pointer tests. call `worktree_main_root` only when `is_linked_worktree(root)`, resolve a relative main root against `root`, and add a submodule-shaped test. `src/agent/mod.rs:794,815` has the same ungated call (older code).
+
+**Severity:** med
+
+**Status:** fixed-verified
+
+**Rests on:** a fix that reuses a helper inherits its gate; read the callers' guards, not only its signature.
+
+**Fix idea / Pointer:** `src/librarian/identity/repo_name.rs:189-191`; re-review report in the Plan A ledger (final fix wave).
+
+## F-8 — A spec requirement is built by no plan
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, final whole-branch review of Plan A.
+
+**When:** comparing the branch with the spec's § Identity.
+
+**Expected:** every requirement of the spec is built by a task or named in a plan that will build it.
+
+**Got:** the spec (§ Identity, about L170-172) says onboarding "says when another checkout in the catalog uses" the repo name. Task 3 does not build it and no plan file schedules it: Plan A is the only plan written for this spec, and Plans B-E are only named in its header. Two further spec-level questions surfaced with it and are open: whether `.codescout/repo.toml` lives at the codescout project root (a workspace sub-project) or at the git root, and how already-onboarded projects, which rarely call `onboarding`, ever get a confirmed name.
+
+**Probable cause:** the split into five plans moved requirements to later plans in the header only; no check mapped each spec sentence to a task.
+
+**Workaround:** ticketed for Plan B (which has the catalog): the "another checkout uses this name" check, a `doctor` check or prompt for already-onboarded projects, remembering a declined dialog (`declined: true` in the block), and the root-versus-git-root ruling.
+
+**Severity:** med
+
+**Status:** open
+
+**Rests on:** a split plan needs a spec-coverage table across all its parts, written when the split is made.
+
+**Fix idea / Pointer:** write the Plan B requirement list from the spec's requirement sentences before dispatching anything.
+
+## W-3 — Per-task review with named risks caught eight defects a green gate passed
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, executing Plan A with one implementer, one Opus task review and one scoped re-review per task, then a whole-branch review.
+
+**Pattern:** every task review read the diff against named risks (each risk named from what the diff changes), and the reviewer was allowed to probe the parser or the filesystem in a scratch copy, never in the repo.
+
+**Counterfactual:** the reviews found, before any merge: (1) the document key lowercased with Unicode rules, so a Kelvin sign in a filename became `k` and a non-ASCII name got a valid key (Task 4); (2) `repo.toml` read as "absent" when it was a dangling symlink, and written through links, so onboarding's read-then-write could create a file outside the repo from a cloned repository (Task 2); (3) an elicitation with no timeout inside a 60 s tool call that holds the write guard (Task 3; a slow answer would lose the whole onboarding response and refuse peers' writes); (4) a labelled wiki link in a table cell that could never be valid (Task 5); (5) a YAML block scalar containing a fence that swallowed the whole body and gave zero citations (Task 5); (6) a broken folder index silently handing its descendants' tokens to a far ancestor (Task 6, a flaw in my own ruling); (7) `[[text]](url)` read as a citation, 32 times in this repo (final review); (8) the worktree folder's name offered as the repo name (final review). A green gate, which every task had, caught none of these. The re-review of the last fix also caught a regression the fix introduced (F-7).
+
+**Confirming data points:** 7 tasks, 7 task reviews, 7 re-reviews (six fix rounds and the final fix wave); every task but Task 7 needed one fix round; 1 Critical-grade defect class (write through a link) and 2 spec-level corrections (Tasks 4, 6).
+
+**Impact:** high
+
+**Promote-when:** a plan runs without per-task review and ships one of these classes, or the review cost per task exceeds the cost of the defects it finds.
+
+**Status:** validated
+
+**Rests on:** a green gate shows the tests that exist pass; only a reader who names the input that is missing finds the defect.
+
+## W-4 — The census sized Plan E from the corpus: 45 renames, 37 duplicate groups, 144 token links
+
+**Valid:** dated 2026-11-11
+
+**Observed:** 2026-11-11, Plan A Task 7: an ignored test (`census_of_this_repo_under_the_new_identity_model`, `src/librarian/identity/census.rs` on the Plan A branch) ran the new key, grammar and index over every tracked `*.md` file at commit `c503c587a`. The repo name it used was the worktree directory name (`artifact-identity-plan-a`, source `suggested`; no `repo.toml` is tracked), so a citation `[[<that-name>/key]]` would resolve locally; none exists. The numbers are comparable only between runs that print the same name.
+
+**Pattern:** measure the corpus under the new rules with the real code before planning the migration, and print the counts by cause, not only the total.
+
+**Counterfactual:** without the census, Plan E would be sized from the old estimate (about 895 stamped ids) and from the idea that few files fail the key rule. Measured: 2704 tracked documents, 0 skipped as non-UTF-8; 45 `InvalidKey`, all `NonCanonical` (19 contain `_`, 25 contain a second `.`, 1 has a double hyphen), so about 45 renames; 82 of 86 uppercase-stem files have valid keys (uppercase alone is not an error); 37 duplicate-key groups covering 127 documents, only 1 involving a folder-index README, mostly fixture and evidence trees (14 `SKILL.md`, 10 `onboarding.md`, 10 `architecture.md` copies) and dated plan/spec pairs, so Plan B needs a key-space scope rule before it enforces uniqueness; 20 folder-index documents, 18 usable (the descendants of the 2 broken ones get no owner); 12,824 citations in total, of which 263 are grammar-form (File 68, Entry 2, CrossRepo 4, UnknownKey 11, Malformed 178), 7,947 are bare tokens not defined locally (`NotLocal`, expected noise) and 4,614 are `Local`. Of the 178 Malformed: 144 are the existing organic `[[F-16]]`-style entry-token links in `docs/trackers` (the largest rewrite for Plan E), 32 are Markdown links whose text starts with `[` (`[[arXiv]](url)`, fixed in the final fix wave by the rule that a wiki link directly followed by `(` is not a citation), and 2 are relative paths. The 4 CrossRepo are memory links `[[research/topic]]` that collide with the `repo/key` form; at least 5 of 10 sampled UnknownKey are TOML names written in prose (`[[roots]]`, `[[slug]]`). The census covers tracked files only; an indexer that walks the filesystem sees more.
+
+**Confirming data points:** one run; the arithmetic was re-summed by the task reviewer (19 + 25 + 1 = 45; 144 + 2 + 32 = 178; 127 documents in 37 groups).
+
+**Impact:** high
+
+**Promote-when:** Plan E sizing is replaced by a measured migration run, or a second census on another repo disagrees with this one.
+
+**Status:** validated
+
+**Rests on:** a migration is sized by running the new rules over the real corpus, never by an estimate made before the rules existed.
+
+## F-9 — Told the operator a peer held three dirty files; they were my own stopped implementer's leftovers
+
+**Valid:** dated 2026-11-11
+
+**Observed:** For several turns I told the operator that "a peer" held uncommitted edits in `src/prompts/mod.rs`, `src/tools/run_command/attribution.rs` and `tests/cli_doc.rs`, and the merge waited on that peer. I also tried to message a peer name (`codescout-37`) that no longer resolved. The edits were the leftovers of the first Task 1 implementer (agent `ac57719078e6dde19`), which I stopped after it edited the shared checkout (F-6). When I restored its 33 paths I left these three out, because I assumed a peer owned them.
+
+**Evidence:** the new wording in all three diffs appears in that agent's transcript and in no peer's transcript. I searched both account profiles; one transcript over 64 MiB was searched with `rg` and had no match, and three large kat files were over the grep tool's size cap and were not searched, so the absence is strong but not proven. The diff was wording-only and byte-identical across two reads.
+
+**Cost:** several turns waiting for an owner who did not exist, one false statement to the operator, and a real gap (F-10) that stayed hidden until I read the stray diff.
+
+**Fix:** saved the diff, ported the two missing hunks onto the branch (commit `6671e2ce8`, now in `experiments`), then discarded the dirty files. A second dirty file later (`src/util/path_security.rs`) was attributed by the same transcript search and confirmed by asking its owner, who agreed.
+
+**Lesson:** a dirty file in a shared checkout is not evidence of a peer author. Before telling the operator who holds it, search the transcripts for the exact new text, or ask. After any restore of "exactly these paths", list what is still dirty and test each remaining file against your own subagents' transcripts first.
+
+## F-10 — Task 1 left a stale "librarian feature" message in tests/cli_doc.rs and a "librarian-less" comment in src/prompts/mod.rs
+
+**Valid:** dated 2026-11-11
+
+**Observed:** After Task 1 removed the `librarian` cargo feature, `tests/cli_doc.rs:91` still said the binary "was built WITHOUT the librarian feature", and a doc comment at `src/prompts/mod.rs:3390` still described a "librarian-less binary". The per-task review, the final review and the gate all passed with these in place. I found them only by comparing the stray edits of the first Task 1 implementer (F-9), which had already fixed both.
+
+**Cost:** a stale failure message that would have sent a reader to rebuild a binary "with the librarian feature", which no longer exists. Nothing failed.
+
+**Fix:** commit `6671e2ce8` rewrites both texts (the message now says the binary cannot run `doc --help`; the comment says a binary built without the default features). `gate.sh --check` was green, and the commit is in `experiments`.
+
+**Cause:** not established. The two phrasings are "WITHOUT the librarian feature" and "librarian-less". Same class as F-5: prose that names a removed feature's effect, not its name.
+
+**Lesson:** after removing a feature, search string literals and comments for the feature's effect as well as its name, and treat a stray implementer diff as a second opinion worth reading.
+
+## W-5 — Merging the base into the branch in the worktree, then ff-only, kept six peers' staged files out of the merge
+
+**Valid:** dated 2026-11-11
+
+**Pattern:** to land a gated branch on a shared checkout whose base keeps moving, merge the base into the feature branch inside its own worktree, gate that tree, then run `git merge --ff-only <branch>` in the shared checkout.
+
+**Counterfactual:** a real `git merge` in the shared checkout makes a merge commit from the index. The index held six files that other sessions had staged (a bug-triage memory, a 2026-11-04 issue, a research note, two data archives and a plan), so the merge commit would have swept all six in. The merge would also have refused over a peer's uncommitted `src/util/path_security.rs`. `experiments` moved four times while the gates ran. The last three moves were peer commits (`librarian_guard.rs`, a plan file, `path_security.rs`); the worktree absorbed each move without touching a peer's files.
+
+**Evidence:** `git merge --ff-only` updated 59 files with the six staged files still staged afterwards. I checked for an overlap before the fast-forward, found `src/util/path_security.rs` dirty in the shared checkout, and did not run it until its owner had committed. I did not run the fast-forward while the file was dirty, so I did not observe git's refusal; I expect git would have refused.
+
+**Limit:** the fast-forward only works while `experiments` is an ancestor of the branch. Each new peer commit costs another merge and, for Rust changes, another seven-minute gate.
+
+## F-11 — The spec and the old catalog code disagree in about a dozen places a plan must settle
+
+**Valid:** dated 2026-11-11
+
+**Observed:** A scout of the old catalog code (Sonnet, read-only) and an independent Opus review of its report found places where the approved spec and the code disagree, or where the spec is silent. A plan written from the spec alone would have missed them. Status of each: V = I re-checked it in the code; R = reported by the scout or reviewer and not re-run by me.
+
+**In the spec's Removed list but with a hidden dependant:**
+- The `id:` stamp and params-as-store are two of THREE signals in `src/util/librarian_guard.rs`. The third is a declared `entry_prefix` (V, `librarian_guard.rs:141`). The guard has four call sites (V: `read_file.rs:200`, `edit_file/mod.rs:862`, `edit_markdown.rs:1572`, `read_markdown.rs:891`). Removing the stamp leaves no replacement for the other two signals' job.
+- `entry_reservation` is the race guard for entry-id allocation (R, `augmentation.rs:1831-1975`); removing it needs per-entry files or a file lock.
+- `catalog_meta` holds gc settings, reindex progress, audit watermarks and a backfill cursor, none rebuildable from files (R). Goal G1 needs a carve-out.
+
+**Not mentioned in the spec:**
+- `doc(graft)`, `rekey_prefix`, `fix=prune_missing` and `scope=repo|umbrella|all` (R).
+- A third citation grammar on the write path, `resolve_cite_ref` (R).
+- Consumers of hex ids or `catalog.db`: the companion `goal-stop-hook`, the `constitution-check` CLI, `scripts/file-provenance.py` (used by `fmt-mine.sh` in the gate, a companion hook and CI), and `audit_doc_refs` with its own resolver (R).
+- Classification rules and the walk's ignore set come partly from the machine-global `~/.config/librarian/workspace.toml` and the untracked `.codescout/project.toml`, so goal G5 does not hold and a two-clone test would fail (R).
+
+**Where the spec's premise is wrong about today's code:**
+- Embedding vectors are not a content-hash cache; reuse is within one artifact only (R, `catalog/chunk.rs:416`).
+- The indexer refuses linked worktrees (V, `indexer.rs:385`), so "a worktree is a checkout" needs that guard removed.
+- "Frontmatter holds scalars only" contradicts `tags`, `owners` and `entry_prefix: [F, W]` (R).
+- `AGENTS.md` and `contrib/pi/AGENTS.md` collide on key `agents`, and neither can be renamed (R).
+
+**Cost if unaddressed:** plans C to E argue from a spec that omits a guard, a race guard and four consumers; the gate itself (`fmt-mine.sh` via `file-provenance.py`) would break at the flip.
+
+**Fix:** open. Plan B amends the spec's "Open for the operator" section with a recommended answer for each item, then plans from the amended spec. The scout and review reports are the evidence.
+
+## W-6 — An independent Opus review of the scout report corrected the guard, the entry points and the slice order
+
+**Valid:** dated 2026-11-11
+
+**Pattern:** before planning from a subagent's map of old code, send its report to an independent reviewer on a stronger model. Give the reviewer the report, the spec and the code, and no conclusion of the controller's.
+
+**Counterfactual:** the scout (Sonnet) said the guard's two signals were the whole story, that `Catalog::open` writes on every open, that `reindex_cli` is a production entry point, that the guard has three call sites, and that retiring `catalog_audit` ships alone. The Opus review said otherwise. I re-checked three of its corrections in the code and they hold: a third guard signal (`librarian_guard.rs:141`), four guard call sites (`edit_markdown.rs:1572` was missed), and `reindex_cli` is `#[cfg(test)]` (`librarian/mod.rs:598`). The review also reported, and I did not re-run, that retiring `catalog_audit` does not ship alone (older binaries re-create the audit triggers on open), that the cutover export must precede the read flip, and four consumers the scout missed, one of which (`scripts/file-provenance.py`) the gate uses. A plan from the scout alone would have split the work with S2 first and without those edges.
+
+**Cost:** the scout took about 25 minutes and 495k subagent tokens; the review about 13 minutes and 312k.
+
+**Limit:** my own spot-check covered five of the scout's claims and three of the reviewer's. The rest of the review is reported, not verified. Before F-11 is closed, the reported items need one pass of their own.
+
+## W-7 — An independent Opus review of Plans B1 and B2 found a gate that would refuse every edit to a colliding file, and five compile errors
+
+**Valid:** dated 2026-11-11
+
+**Pattern:** before a plan is executed, an independent Opus reviewer reads it against the spec and the real code, with no conclusions of the author, and names the test that goes red.
+
+**Counterfactual:** the review of Plans B1 and B2 found a design flaw in my own gate and several errors in cited code. I re-checked three of them in the code and they hold: five `ProjectSection { … }` struct literals (three in `src/tools/run_command/tests.rs`, one in `config/project.rs:1000`, one in `onboarding.rs:1359`) would fail to compile with E0063 when a field is added, and my file list named only some; `grammar::Citation` has only `reference` and `line`, so the planned `raw` edge column could not be filled; and the model `open_db` for the new SQLite file is at `call_edges/cache.rs:115` and sets only the journal mode. The reviewer also reported, and I accepted from the plan text rather than from a run: the gate as written (`--diff-filter=ACMR`) would refuse any commit that edits a file already in a collision (33 duplicate keys and 18 bad names remain in this repo after the planned exclusions); the parse cache keyed by content and rules only would give a different result after a rename than a rebuild; 444 lines in `docs/trackers` repeat one token on a line, which breaks an edge key on `(line, raw)`; and the builder read the repo name and key-space file from the working tree, which defeats the two-clone goal.
+
+**Fixes made:** the gate compares the staged index with `HEAD` and refuses only problems that are new; the cache key is `(sha256, rel_path, rules_hash, PARSER_VERSION)`; edges are keyed by their position in the document; the builder reads every input from the commit's blobs; shallow clones are `unverified`, not collisions; the onboarding scan runs only when a name is being chosen and only with an interactive client; B1 runs before B2.
+
+**Limit:** the plans are not yet run. This review is reported work; the first execution will show what it missed.
 
 ## Template for new entries
 

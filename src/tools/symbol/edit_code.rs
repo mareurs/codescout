@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use crate::tools::{
-    guard_worktree_write, optional_bool_param, RecoverableError, Tool, ToolContext,
+    guard_worktree_write_for_target, optional_bool_param, RecoverableError, Tool, ToolContext,
+    WorktreeWriteTarget,
 };
 use crate::util::text::{
     convert_indent_unit, file_indent, indent_unit_conflict, reindent_to, UnitConflict,
@@ -157,7 +158,7 @@ impl Tool for EditCode {
                 "body": {
                     "type": "string",
                     "description": format!(
-                        "{} 'replace': the new symbol body. 'insert': the code to insert. Spelled `body`, not code/new_body. \
+                        "{} 'replace': the new symbol body. 'insert': the code to insert. Spelled `body`. \
              Not read by 'rename' or 'remove'.",
                         required_for(BODY_REQUIRED_ACTIONS)
                     )
@@ -196,6 +197,12 @@ impl Tool for EditCode {
             ("file", "path"),
             ("name_path", "symbol"),
             ("content", "body"),
+            // FR-11: the spellings agents sent for the replacement code in 34 failed calls
+            // (29 sessions, 2026-10-12..11-10); the schema text "not code/new_body" did not stop them.
+            ("code", "body"),
+            ("new_body", "body"),
+            ("new_code", "body"),
+            ("new_source", "body"),
         ]
     }
 
@@ -236,7 +243,11 @@ impl Tool for EditCode {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        guard_worktree_write(ctx).await?;
+        // The target decides whether the project-selection guard applies: a path outside
+        // every project, linked worktree and workspace member is not a project-selection
+        // question. Same rule as create_file, edit_file and approve_write.
+        // docs/trackers/frictions/edit-code-worktree-guard-ignores-the-write-target.md
+        guard_worktree_write_for_target(ctx, &input, WorktreeWriteTarget::File).await?;
         // `name_path` is an accepted alias, primarily via `Tool::param_aliases()`
         // below (`("name_path", "symbol")`), which `call_content` rewrites before
         // `call()` runs. This `require_str_param_or_hint` fallback is a SECOND,
@@ -1163,6 +1174,7 @@ impl EditCode {
             // removal replaces the target with nothing, so no name can appear.
             CorruptionVerdict::TargetDropped
             | CorruptionVerdict::TargetRenamed(_)
+            | CorruptionVerdict::TargetReplacedBySeveral(_)
             | CorruptionVerdict::Clean
             | CorruptionVerdict::Unverified => None,
         };
@@ -1499,6 +1511,23 @@ impl EditCode {
                     "To rename: edit_code(action=\"rename\", symbol=..., new_name=...) — then \
                  replace the body in a second call if it also changed. To replace only the \
                  body, keep the declared name identical to `symbol`.",
+                )),
+                CorruptionVerdict::TargetReplacedBySeveral(new_names) => Some((
+                    format!(
+                        "edit_code replace('{name_path}') was given a body that declares {} \
+                     symbols ({}) and none of them is `{name_path}`. `replace` swaps one \
+                     symbol for one symbol and keeps its name. File restored.",
+                        new_names.len(),
+                        new_names
+                            .iter()
+                            .map(|n| format!("`{n}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    "Replace `symbol` with a body that declares only that symbol, under its own \
+                 name, then add the others with edit_code(action=\"insert\", symbol=..., \
+                 position=\"after\", body=...). To rename it, use edit_code(action=\"rename\", \
+                 symbol=..., new_name=...).",
                 )),
                 CorruptionVerdict::TargetDropped => Some((
                     format!(

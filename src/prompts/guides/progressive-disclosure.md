@@ -133,7 +133,10 @@ status calls.
    `codescout background job @bg_N ended: exited 0 after 20s. Read it with run_command("tail -50 @bg_N").`
    `exited` carries the exit code; `terminated by signal` means the job was killed; `failed` means
    it could not be started or tracked. After 30 minutes a still-running job wakes you once with
-   `is still running`. Reading it again keeps the wait going.
+   `is still running`, and that wake ends the watcher. Then run one `run_command` that names the
+   handle (for example `run_command("tail -1 @bg_N")`) and end the turn: that read starts a new
+   30-minute watcher. Without it no wake arrives when the job ends. Repeat after each
+   `is still running`. The plugin also reports a job that ended unannounced at your next prompt.
 3. **After the wake, read the job:** `run_command("tail -50 @bg_N")`. That response carries the
    job's state and its output. The exit code in the wake is the last command's. For `cargo test | tail`
    that is `tail`'s `0`, even when cargo failed, so start the job without the pipe and search its
@@ -159,7 +162,8 @@ loop. `pgrep -f` and `pkill -f` match the whole command line, and that includes 
 carries the pattern. So the loop finds itself and never ends, and `pkill -f` kills your own shell,
 which returns `exit_code: -1`. Wait on the pid instead:
 `run_command("tail --pid=<pid> -f /dev/null", run_in_background=true)`. It ends when that process
-ends, and as a `@bg_N` job it gets a record and a wake. Its exit code is `0` whatever the waited
+ends, and as a `@bg_N` job it gets a record and a wake. The 30-minute rule above applies to it
+too. Its exit code is `0` whatever the waited
 process did, so read that process's own output or result file after the wake. To find the pid by
 name, write one character of the pattern as a bracket class, for example `pgrep -f "[e]val_run"`.
 The class does not match its own text in the command line.

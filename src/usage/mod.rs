@@ -59,6 +59,9 @@ pub struct UsageRecorder {
     /// The `claudecode/toolUseId` the server read from this request's `_meta`, if any.
     /// Record-only — see `db::MeasurementLinkage`.
     tool_use_id: Option<String>,
+    /// The `clientInfo.name` of the MCP client that made the call, set by the server through
+    /// `with_client`. Record-only; `None` when the caller did not set it.
+    client_name: Option<String>,
 }
 
 impl UsageRecorder {
@@ -77,7 +80,16 @@ impl UsageRecorder {
             cc_session_id,
             agent_id,
             tool_use_id,
+            client_name: None,
         }
+    }
+    /// Name the MCP client that made this call (`clientInfo.name` from the `initialize`
+    /// handshake), so the row says which harness produced it. A builder method, not a `new`
+    /// argument: the client is known only at the server's call site, and `new` has many other
+    /// callers that have no handshake.
+    pub fn with_client(mut self, client_name: Option<String>) -> Self {
+        self.client_name = client_name;
+        self
     }
 
     /// Record a tool call's telemetry against the project named by
@@ -344,6 +356,10 @@ impl UsageRecorder {
         // Resolved once by the server, not re-derived here — see the field doc.
         let cc_session_id = Some(self.cc_session_id.as_str()).filter(|s| !s.is_empty());
 
+        // Facts about the result, recorded with or without `--debug`: the size of what the
+        // caller received and, for `run_command`, its stated exit code and timeout.
+        let facts = result_facts(tool_name, result);
+
         db::write_record(
             &conn,
             tool_name,
@@ -394,6 +410,10 @@ impl UsageRecorder {
                 // behind `self.debug`, for the same reason: a column, not a debug-only fact.
                 attribution_outcome: attribution.map(|r| r.outcome.as_column()),
                 attribution_ms: attribution.map(|r| r.elapsed_ms),
+                output_bytes: facts.output_bytes,
+                command_exit: facts.command_exit,
+                command_timed_out: facts.command_timed_out,
+                client_name: self.client_name.as_deref(),
             },
         )?;
         Ok(())
@@ -479,6 +499,49 @@ fn extract_overflow_tokens(result: &Result<Vec<Content>>) -> Option<i64> {
     let v: Value = serde_json::from_str(text).ok()?;
     let bytes = v.get("buffered_bytes").and_then(Value::as_i64)?;
     Some(bytes / 4)
+}
+/// What a call's result says about itself, recorded on every row with or without `--debug`
+/// (the `output_bytes` migration in `db::open_db` says what each field means).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ResultFacts {
+    output_bytes: Option<i64>,
+    command_exit: Option<i64>,
+    command_timed_out: Option<bool>,
+}
+
+/// The size of the text the caller received, and, for `run_command`, the `exit_code` and
+/// `timed_out` its result states.
+///
+/// `outcome` records that the tool answered, so a failed build, a failed test and a timeout
+/// all read `success`; these fields are where a reader finds the difference. Read from the
+/// first text block only, which is where `run_command` puts its result object. A result with no
+/// such key (a background start, a refusal) leaves the field `None`, never a guessed value.
+fn result_facts(tool_name: &str, result: &Result<Vec<Content>>) -> ResultFacts {
+    let output_bytes: i64 = match result {
+        Ok(blocks) => blocks
+            .iter()
+            .filter_map(|c| c.as_text())
+            .map(|t| t.text.len() as i64)
+            .sum(),
+        Err(e) => e.to_string().len() as i64,
+    };
+    let mut facts = ResultFacts {
+        output_bytes: Some(output_bytes),
+        ..Default::default()
+    };
+    if tool_name == "run_command" {
+        let parsed = result
+            .as_ref()
+            .ok()
+            .and_then(|blocks| blocks.first())
+            .and_then(|c| c.as_text())
+            .and_then(|t| serde_json::from_str::<Value>(&t.text).ok());
+        if let Some(v) = parsed {
+            facts.command_exit = v.get("exit_code").and_then(Value::as_i64);
+            facts.command_timed_out = v.get("timed_out").and_then(Value::as_bool);
+        }
+    }
+    facts
 }
 
 /// The symbol/path a call addressed, for friction attribution. Priority order:
@@ -806,6 +869,80 @@ mod content_tests {
 
         let err: Result<Vec<Content>> = Err(anyhow::anyhow!("boom"));
         assert_eq!(extract_overflow_tokens(&err), None);
+    }
+    /// FR-2/FR-3: the facts a row records about its own result. A `run_command` answer states
+    /// `exit_code` and `timed_out`; every other shape leaves them unrecorded (`None`), which is
+    /// a different claim from "passed".
+    #[test]
+    fn result_facts_reads_what_a_run_command_result_states() {
+        let text = |s: &str| Ok(vec![Content::text(s.to_string())]);
+
+        let failed = r#"{"exit_code":101,"stdout":"test failed"}"#;
+        assert_eq!(
+            result_facts("run_command", &text(failed)),
+            ResultFacts {
+                output_bytes: Some(failed.len() as i64),
+                command_exit: Some(101),
+                command_timed_out: None,
+            }
+        );
+
+        let timed_out = r#"{"exit_code":0,"timed_out":true}"#;
+        let f = result_facts("run_command", &text(timed_out));
+        assert_eq!((f.command_exit, f.command_timed_out), (Some(0), Some(true)));
+
+        let passed = r#"{"exit_code":0,"timed_out":false}"#;
+        let f = result_facts("run_command", &text(passed));
+        assert_eq!(
+            (f.command_exit, f.command_timed_out),
+            (Some(0), Some(false))
+        );
+
+        // A command killed by a signal says `exit_code: null`: not recorded, not zero.
+        let killed = r#"{"exit_code":null,"stdout":""}"#;
+        assert_eq!(
+            result_facts("run_command", &text(killed)).command_exit,
+            None
+        );
+
+        // A background start and a refusal carry no exit code.
+        let bg = r#"{"output_id":"@bg_00000001","hint":"Started"}"#;
+        let f = result_facts("run_command", &text(bg));
+        assert_eq!((f.command_exit, f.command_timed_out), (None, None));
+        assert_eq!(f.output_bytes, Some(bg.len() as i64));
+
+        // Text that is not JSON still has a size.
+        let f = result_facts("run_command", &text("plain text, no json"));
+        assert_eq!(
+            (f.output_bytes, f.command_exit),
+            (Some("plain text, no json".len() as i64), None)
+        );
+    }
+
+    /// The control for the test above: the command fields are read only from `run_command`.
+    /// Another tool's result may carry an `exit_code` of its own, and that is not a command's.
+    /// The size is every text block's, and an error is sized by its text.
+    #[test]
+    fn result_facts_reads_command_fields_only_for_run_command_and_sizes_every_block() {
+        let body = r#"{"exit_code":2}"#;
+        let f = result_facts("grep", &Ok(vec![Content::text(body.to_string())]));
+        assert_eq!(
+            (f.command_exit, f.command_timed_out, f.output_bytes),
+            (None, None, Some(body.len() as i64))
+        );
+
+        let two = Ok(vec![
+            Content::text("aaaa".to_string()),
+            Content::text("bbbbbb".to_string()),
+        ]);
+        assert_eq!(result_facts("read_file", &two).output_bytes, Some(10));
+
+        let err: Result<Vec<Content>> = Err(anyhow::anyhow!("boom"));
+        let f = result_facts("run_command", &err);
+        assert_eq!(
+            (f.output_bytes, f.command_exit, f.command_timed_out),
+            (Some(4), None, None)
+        );
     }
 
     #[test]
@@ -1881,6 +2018,92 @@ mod content_tests {
             tool_use_id.as_deref(),
             Some("toolu_01X"),
             "the tool_use_id must be recorded even though debug is off"
+        );
+    }
+    /// Wiring, not logic (`result_facts` is pinned on its own): through `record_content`, with
+    /// debug OFF, a `run_command` result's exit code and size and the client the server named
+    /// all land in their columns while `output_json` stays NULL. A recorder nobody told about
+    /// a client records NULL, never a stand-in name.
+    #[tokio::test]
+    async fn record_content_records_result_facts_and_the_client_with_debug_off() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let named = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            None,
+        )
+        .with_client(Some("codex".to_string()));
+        let unnamed = UsageRecorder::new(
+            agent.clone(),
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            None,
+        );
+
+        let body = r#"{"exit_code":7,"stdout":"nope"}"#;
+        let input = json!({"command": "false"});
+        let _ = named
+            .record_content("run_command", &input, None, || async {
+                Ok(vec![Content::text(body)])
+            })
+            .await;
+        let _ = unnamed
+            .record_content("grep", &json!({"pattern": "x"}), None, || async {
+                Ok(vec![Content::text("ok")])
+            })
+            .await;
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        type Row = (
+            String,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        );
+        let rows: Vec<Row> = conn
+            .prepare(
+                "SELECT tool_name, client_name, command_exit, command_timed_out, \
+                     output_bytes, output_json FROM tool_calls ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "run_command".to_string(),
+                    Some("codex".to_string()),
+                    Some(7),
+                    None,
+                    Some(body.len() as i64),
+                    None,
+                ),
+                ("grep".to_string(), None, None, None, Some(2), None),
+            ]
         );
     }
 

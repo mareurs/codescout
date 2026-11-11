@@ -50,7 +50,9 @@ a worktree and a second machine all reduce to "index this commit".
 ## Goals
 
 - **G1. One store.** Every durable fact about a document lives in committed files. The
-  catalog holds nothing that cannot be rebuilt from a commit.
+  derived catalog holds nothing that cannot be rebuilt from a commit. Operational state
+  (progress rows, cursors, gc settings) lives in a separate machine-state file whose loss
+  costs no fact about a document.
 - **G2. One identity.** A document's identity is its **key**: its filename stem, or its
   folder's name for a folder-index file. The key is canonical and unique within its repo.
 - **G3. Location-free.** Moving a file between folders, archiving it, relocating the
@@ -60,7 +62,8 @@ a worktree and a second machine all reduce to "index this commit".
   document or an entry is written. A rename can therefore rewrite every citation
   mechanically and completely.
 - **G5. Identical catalogs.** Two clones at the same commit hold catalogs that answer every
-  query the same way.
+  query the same way. The index's inputs are the commit's files only (§ Index inputs, guard,
+  machine state and entry ids).
 - **G6. Tool output shows only keys and grammar forms.** Agents copy what tools show, so
   tools never show an id, a hash or a path for a document reference.
 
@@ -94,7 +97,8 @@ The change fails, even if it works, if any of these is true:
 - **Concurrent writers.** Several sessions write one checkout at once. Committed files turn
   their concurrent writes into git merges, so formats must keep merges trivial.
 - **Search needs embeddings.** Vectors are derived data but are expensive to rebuild; they
-  are a cache keyed by content hash, never state.
+  are a cache keyed by content hash, never state. (Today reuse is within one artifact only,
+  and vectors die with their artifact row; the content-keyed cache is Plan C work.)
 
 ## Approaches
 
@@ -145,7 +149,8 @@ writer owns (an entry file, a session's own log). Two sessions appending at the 
 same section of a shared document produce an add/add conflict, which breaks contract
 requirement 2. Anything appended to a shared document becomes a document of its own.
 
-**Frontmatter holds scalars only** (status, dates, kind, `entry_kind`). Every relation is a
+**Frontmatter holds scalars and lists of scalars** (status, dates, kind, `entry_kind`, tags,
+owners, a ledger's `entry_prefix`). Every relation is a
 labelled grammar line in the body, for example `**Rests on:** [[key]]`. `link_scan` parses
 bodies, never frontmatter, because `[[foo]]` in YAML is a nested list, not text.
 
@@ -166,13 +171,24 @@ bodies, never frontmatter, because `[[foo]]` in YAML is a nested list, not text.
   and `doc(move)` refuse a collision and name the other file; `doctor` and a pre-commit check
   catch one that arrives another way. There is no `Ambiguous` outcome for a key.
 - **A key of exactly 16 hex characters is refused,** so no key is mistaken for a legacy id.
-- **Repo name.** `.codescout/repo.toml` holds `name = "<name>"`, same charset as a key. It
-  is a label: it qualifies cross-repo citations and appears in tool output. Onboarding
+- **Repo name.** `.codescout/repo.toml`, at the git root of the project (the nearest enclosing `.git`
+  ancestor; the project root when there is no git), holds `name = "<name>"`, same charset as
+  a key. The git root is where repo-relative paths and keys are measured from, so every
+  project in one repository shares one name. It is a label: it qualifies cross-repo
+  citations and appears in tool output. Onboarding
   suggests one (the `.codescout/workspace.toml` name if present, else the directory name),
-  says when another checkout in the catalog uses it, and asks the user to confirm: through
+  says when another checkout uses it (below), and asks the user to confirm: through
   MCP elicitation when the client supports it
   (`src/tools/run_command/interactive.rs:36-98`), otherwise through the agent and a new
-  `onboarding` parameter.
+  `onboarding` parameter. A project that is already onboarded is asked on its next
+  `onboarding` call, and `workspace(activate)` says when its name is unconfirmed.
+  *Another checkout uses it:* onboarding scans the `.codescout/project.toml` files under the
+  user's folders (bounded depth and time; build and worktree directories skipped) and reads
+  `<git root>/.codescout/repo.toml` next to each. A match whose repository has the same first
+  commit (`git rev-list --max-parents=0 HEAD`) is another checkout of this repository (a
+  worktree or a clone) and is reported as that. A match with a different first commit is a
+  name collision: onboarding warns and the user decides. Once the catalog holds checkouts (its
+  checkout row carries the repo name), the catalog is the source and the scan is the fallback.
 
 ### The citation grammar
 
@@ -244,6 +260,10 @@ Every write tool writes files, then reindexes what it wrote:
 - The `append_entry` refusal in a worktree has no remaining cause once the ledger format
   merges cleanly (per-entry files, or a format `codescout-37` shows to merge).
 - A second machine or a fresh clone indexes the same commit and gets the same catalog.
+- The indexer's refusal to index a linked worktree is removed; a worktree is indexed from its
+  own files. Retiring the catalog audit tables is the last step, because an older binary
+  re-creates the audit triggers when it opens the shared file, and the elision of escaping
+  files must stay until the migration window.
 
 ### Contract with ledger formats
 
@@ -255,6 +275,43 @@ What this design requires of any ledger format `codescout-37` defines:
 3. An entry's citations are written in the grammar.
 4. Archiving an entry keeps it under its ledger's key (an `archive/` subfolder without an
    index, or the format's own equivalent).
+
+### Index inputs, guard, machine state and entry ids
+
+Five things the old code does that the first version of this spec did not name (found by the
+catalog scout and its review; session log F-11):
+
+- **Index inputs.** The index reads the commit's files and nothing else. Classification
+  rules, the walk's ignore set and `force_include` live in committed `.codescout/` config.
+  Machine-global config (`~/.config/librarian/workspace.toml`) is a default for a checkout
+  that has no committed rules and is ignored for one that has them; the catalog records
+  which source applied. Without this, two clones at one commit can disagree (G5).
+- **Key space.** `contrib/**`, fixture trees, evidence trees and dated plan and spec pairs
+  lie outside the key space by a committed scope rule (Plan B). `AGENTS.md` and
+  `contrib/pi/AGENTS.md` both map to the key `agents` today, and neither can be renamed;
+  the scope rule resolves it.
+- **Guard.** `librarian_guard` keeps one signal: a declared `entry_prefix`, because the
+  server owns that file's id counters. The `id:` stamp and the augmentation table stop
+  being signals when their stores go, so a bug file or an ordinary tracker is edited like
+  any markdown file.
+- **Machine state.** Reindex progress rows, gc settings, the embed-error marker and the
+  chunk backfill cursor move to a small machine-state file next to the derived catalog. It
+  is not derived and holds no fact about a document, so losing it is harmless. Audit
+  watermarks go with the audit tables.
+- **Entry ids.** Until `codescout-37`'s format makes ids collision-free, `append_entry`
+  takes an advisory lock on the ledger file and allocates `max(body, frontmatter
+  high-water) + 1`. The `entry_reservation` table is removed.
+
+### Tools that change meaning
+
+- `doc(graft)`, `fix=prune_missing` and `fix=rehome` are removed: no rows exist to graft,
+  prune or rehome.
+- `rekey_prefix` stays as a file rewrite of one prefix's headings and `[[…]]` citations.
+- `scope=repo|umbrella|all` stays, resolved over the checkouts that the name scan finds.
+- Consumers that read hex ids or `catalog.db` move with the read flip: the companion
+  `goal-stop-hook`, the `constitution-check` CLI and its hooks, `scripts/file-provenance.py`
+  (used by `fmt-mine.sh`, a companion hook and CI), and `audit_doc_refs` with its own
+  resolver.
 
 ### Removed
 
@@ -293,9 +350,14 @@ The recovery steps, in order:
 4. **Build** the new catalog from the files, in a new catalog file. The old file is kept,
    read-only, as the recovery source until the operator retires it.
 
+The export and the citation rewrite run before the read flip is activated, so the flip never
+reads a half-migrated tree. The cutover tool needs a read-only open of the old file: today's
+`Catalog::open` runs migrations whenever the opener's schema differs from the file's.
+
 ## Open for the operator
 
-None. The cutover question was answered on 2026-11-11 (§ Cutover).
+None. The cutover question was answered on 2026-11-11 (§ Cutover), and the amendments from
+the catalog scout were approved the same day (§ Decision log).
 
 ## Left to the builder
 
@@ -311,6 +373,15 @@ None. The cutover question was answered on 2026-11-11 (§ Cutover).
   at one commit give identical query results; a folder move changes no key and breaks no
   citation; a rename leaves no `[[old-key…]]` anywhere; no tool output contains a hex id,
   a path or a row id as a document reference; a worktree write merges through git alone.
+- Plan B owns: the "another checkout uses this name" check above, the `workspace(activate)`
+  nudge for an unconfirmed name, remembering a declined confirmation, and a key-space scope
+  rule (which trees lie outside the key space, for example fixture and evidence trees and
+  dated plan and spec pairs) that must exist before uniqueness is enforced.
+- Plan order: B (key-space gate, the name checks, the derived builder in a new file, the
+  grammar in shadow mode), C (store writes into files as dual-write, and the content-keyed
+  vector cache), D (the cutover tool), E (the read and write flip, `doc(move)` as a rename,
+  overlay removal, guard replacement, the consumers above, audit retirement and the
+  deletion tail). The cutover tool runs before the flip is activated.
 
 ## Decision log
 
@@ -329,6 +400,19 @@ Operator, 2026-11-11:
 - The librarian is an integral part of codescout: the `librarian` cargo feature is removed,
   and the librarian is on even when no semantic search is available (2026-11-11, during
   planning; Plan A Task 1).
+- The repo name file lives at the git root of the project, falling back to the project root
+  when there is no git (2026-11-11, after Plan A's final review; recommended by the
+  executing session, accepted by the operator).
+- Projects that are already onboarded are asked for the name on their next `onboarding`
+  call (2026-11-11).
+- "Another checkout uses this name" is found by scanning the `.codescout/project.toml`
+  files under the user's folders; the same first commit means the same repository
+  (2026-11-11; the first-commit rule is the executing session's proposal).
+- The amendments from the catalog scout (session log F-11) and the plan order B, C, D
+  (cutover tool), E (the flip), approved on 2026-11-11: one guard signal, a separate
+  machine-state file, a lock plus the high-water mark for entry ids, committed config as
+  the index's inputs, `contrib/**` outside the key space, scalars and lists of scalars in
+  frontmatter, and the tool changes under § Tools that change meaning.
 
 Designer's calls, open to correction:
 
@@ -349,6 +433,10 @@ Designer's calls, open to correction:
 - The cutover rewrites bare cross-document tokens that have one owner (from
   `codescout-37`'s v4 review).
 - The cutover builds a new catalog file.
+- Machine-global classification config is a default for a checkout without committed rules,
+  not an addition to committed rules, so two clones still agree. This refines the operator's
+  approved wording ("the machine config may only add"), which would still let clones differ;
+  open to correction.
 
 Superseded by v4: the internal ULID, `.codescout/aliases.tsv`, the normalization layer, the
 collision tolerance, the rebind-by-key rules, and the legacy-id alias map (all v3).

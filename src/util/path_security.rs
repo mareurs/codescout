@@ -1832,6 +1832,64 @@ pub fn commit_message_backtick_hazard(command: &str) -> Option<String> {
     }
     None
 }
+/// The `pgrep -f` clause of a wait loop that can never end, or `None`.
+///
+/// `run_command` hands its input to `sh -c`, so the shell's own command line carries the whole
+/// command, pattern included. `pgrep -f` matches against full command lines, finds that shell,
+/// and the loop sees a process that never exits (`while pgrep -f X`), or one that was always
+/// there (`until pgrep -f X`). `pgrep` excludes only itself. The documented remedy is to wait on
+/// a pid, or to write one pattern character as a bracket class, which does not match its own
+/// text (`get_guide("progressive-disclosure")`, § waiting on another process).
+///
+/// **Scoped by what is wrong, not by what looks similar:**
+///
+/// - The loop keyword must START a command (`while`/`until` after `;`, `&`, `|`, `(`, `{` or a
+///   newline), so `echo while; pgrep -f x` is not a loop.
+/// - Only a full-command-line match is flagged: `-f`, a flag cluster holding `f` (`-af`), or
+///   `--full`. Plain `pgrep name` matches process names and does not see the shell.
+/// - `-x` / `--exact` is skipped: the shell's line is the whole command, so an exact match
+///   against a shorter pattern cannot hit it.
+/// - A clause with a bracket class, a variable or a substitution is skipped: the pattern text
+///   is then not what the shell's command line holds.
+/// - Heredoc bodies are stripped first: a script written to a file is not run here.
+///
+/// 29 `run_command` calls in `usage.db` ran such a loop; 15 ran 25 s or longer, the mean was
+/// 615 s and the longest 3,000 s (FR-14, `docs/trackers/frictions/`).
+pub fn self_matching_pgrep_loop(command: &str) -> Option<String> {
+    static LOOP_START: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    static PGREP: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let loop_start = LOOP_START.get_or_init(|| {
+        Regex::new(r"(?:^|[;&|({\n])\s*(?:while|until)\s").expect("LOOP_START regex compiles")
+    });
+    let pgrep = PGREP.get_or_init(|| Regex::new(r"\bpgrep\b").expect("PGREP regex compiles"));
+
+    let stripped = strip_heredoc_bodies(command);
+    let s: &str = stripped.as_ref();
+    let loop_at = loop_start.find(s)?.start();
+
+    for found in pgrep.find_iter(s) {
+        if found.start() < loop_at {
+            continue;
+        }
+        let rest = &s[found.start()..];
+        let end = rest.find([';', '&', '|', '\n', ')']).unwrap_or(rest.len());
+        let clause = rest[..end].trim();
+        if clause.contains(['[', '$', '`']) {
+            continue;
+        }
+        let tokens: Vec<&str> = clause.split_whitespace().skip(1).collect();
+        let short = |t: &&str, letter: char| {
+            t.starts_with('-') && !t.starts_with("--") && t.contains(letter)
+        };
+        let full = tokens.iter().any(|t| *t == "--full" || short(t, 'f'));
+        let exact = tokens.iter().any(|t| *t == "--exact" || short(t, 'x'));
+        let has_pattern = tokens.iter().any(|t| !t.starts_with('-'));
+        if full && !exact && has_pattern {
+            return Some(clause.chars().take(60).collect());
+        }
+    }
+    None
+}
 
 /// Split a command into independently-piped segments at top-level `;`, `&&`, `||`.
 ///
@@ -2913,6 +2971,23 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
 
     let rerun_note = rerun_without_offenders(command, &stripped, &runs, &offending_runs);
 
+    // A clause that only WRITES an unresolved path reads no source, so "use read_file" is the
+    // wrong advice for it. The verdict is unchanged: only the text that goes with it differs.
+    // docs/trackers/frictions/il3-gate-refuses-scratchpad-writes-with-an-unexpanded-variable-path.md
+    let (unresolved_note, remedy) = if clause_only_writes_an_unresolved_path(&blocked, ext_re) {
+        (
+            "",
+            "this clause only WRITES a file whose path starts with an unexpanded shell \
+             expansion, so the gate cannot resolve where it points and blocked it \
+             conservatively; it does not read source. Create the file with \
+             create_file(path, content), or write the path out literally (an absolute path \
+             outside the project is checked and allowed). \
+             Re-run with acknowledge_risk: true if you need raw shell access."
+                .to_string(),
+        )
+    } else {
+        (unresolved_note, remedy)
+    };
     Some(format!(
         "{clause_note}{rerun_note}{unresolved_note}{stdin_note}{remedy}"
     ))
@@ -3151,6 +3226,42 @@ fn segment_reads_project_source(seg: &str, ext_re: &Regex, project_root: &Path, 
 /// gate.
 fn has_unexpanded_expansion(tok: &str) -> bool {
     tok.contains('$') || tok.contains('`')
+}
+/// The length of the output-redirection operator `tok` starts with (`>`, `>>`, `2>`, `&>`),
+/// or `None` when it starts with none.
+fn redirect_operator_len(tok: &str) -> Option<usize> {
+    let rest = tok.trim_start_matches(|c: char| c.is_ascii_digit() || c == '&');
+    let arrows = rest.chars().take_while(|c| *c == '>').count();
+    (1..=2)
+        .contains(&arrows)
+        .then(|| tok.len() - rest.len() + arrows)
+}
+
+/// Whether `tokens[i]` is the file an output redirection writes: the token after a bare
+/// operator (`> f`), or a token with the operator attached (`>f`).
+fn is_redirect_target(tokens: &[String], i: usize) -> bool {
+    if let Some(n) = redirect_operator_len(&tokens[i]) {
+        return n < tokens[i].len();
+    }
+    i > 0 && redirect_operator_len(&tokens[i - 1]).is_some_and(|n| n == tokens[i - 1].len())
+}
+
+/// True when the blocked `clause` names no source file to READ: every token that matches
+/// `ext_re` or carries an unexpanded expansion is the target of an output redirection, and at
+/// least one carries an expansion. Such a clause (`cat > $S/opt.sh <<EOF`) is refused only
+/// because the gate cannot resolve where the written path points. It judges the advice that
+/// accompanies the refusal, never the refusal, so it cannot open the gate.
+fn clause_only_writes_an_unresolved_path(clause: &str, ext_re: &Regex) -> bool {
+    let tokens = shell_tokens(clause);
+    let mut saw_expansion = false;
+    for (i, tok) in tokens.iter().enumerate() {
+        let expands = has_unexpanded_expansion(tok);
+        if (expands || ext_re.is_match(tok)) && !is_redirect_target(&tokens, i) {
+            return false;
+        }
+        saw_expansion |= expands;
+    }
+    saw_expansion
 }
 
 /// Whether a path token resolves inside `project_root`, given the shell's
@@ -4840,6 +4951,102 @@ mod tests {
             check_source_file_access_at_root("cat `pwd`/probe.sh").is_some(),
             "so is a backtick substitution"
         );
+    }
+    /// FR-15: `cat > $S/opt.sh <<EOF` reads nothing, but its written path starts with an
+    /// expansion the gate cannot resolve, so it is refused. The refusal stands; the advice
+    /// must not tell the caller to `read_file` a file they are creating.
+    #[test]
+    fn a_clause_that_only_writes_an_unresolved_path_gets_write_advice() {
+        for cmd in [
+            "cat > $S/opt.sh <<EOF\nx=1\nEOF",
+            "cat >> $S/opt.sh <<EOF\nx=1\nEOF",
+            "cat >$S/opt.sh <<EOF\nx=1\nEOF",
+            "cat 2>/dev/null > ${S}/opt.sh <<EOF\nx=1\nEOF",
+        ] {
+            let hint = check_source_file_access_at_root(cmd)
+                .unwrap_or_else(|| panic!("the verdict must not move for {cmd:?}"));
+            assert!(hint.contains("only WRITES"), "{cmd:?}: {hint}");
+            assert!(hint.contains("create_file"), "{cmd:?}: {hint}");
+            assert!(
+                !hint.contains("use read_file(path"),
+                "{cmd:?}: advice to read a file the clause is writing: {hint}"
+            );
+        }
+    }
+
+    /// The control that makes the test above discriminate: a clause that READS an
+    /// unresolved path, alone or beside a redirect, keeps the read advice.
+    #[test]
+    fn a_clause_that_reads_an_unresolved_path_keeps_the_read_advice() {
+        for cmd in [
+            "cat $S/opt.sh",
+            "cat $S/a.sh > $S/b.sh",
+            "cat src/main.rs > $S/copy.sh",
+            "cat > $S/opt.sh $T/other.sh",
+        ] {
+            let hint = check_source_file_access_at_root(cmd)
+                .unwrap_or_else(|| panic!("{cmd:?} must still block"));
+            assert!(!hint.contains("only WRITES"), "{cmd:?}: {hint}");
+            assert!(hint.contains("read_file"), "{cmd:?}: {hint}");
+        }
+    }
+
+    /// What the write advice promises must be true: the same path written out literally, outside
+    /// the project, is allowed.
+    #[test]
+    fn a_literal_write_outside_the_project_is_allowed() {
+        let root = Path::new("/home/u/work/myproj");
+        assert!(check_source_file_access("cat > /tmp/s/opt.sh <<EOF\nx=1\nEOF", root).is_none());
+    }
+    /// FR-14: a `pgrep -f` wait loop finds the shell that carries its own pattern, so it
+    /// never ends (`while`) or never waits (`until`). Each shape is a distinct way to write it.
+    #[test]
+    fn a_wait_loop_on_a_literal_pgrep_f_pattern_is_flagged() {
+        for cmd in [
+            "while pgrep -f \"cargo test --lib\"; do sleep 10; done",
+            "until ! pgrep -af eval_run >/dev/null 2>&1; do sleep 5; done",
+            "while [ -n \"$(pgrep -f foo)\" ]; do sleep 1; done",
+            "sleep 1; while pgrep -fl foo; do sleep 1; done",
+            "while pgrep --full foo; do sleep 1; done",
+            "false && while pgrep -f foo; do sleep 1; done",
+        ] {
+            assert!(
+                self_matching_pgrep_loop(cmd).is_some(),
+                "must be flagged: {cmd:?}"
+            );
+        }
+    }
+
+    /// The controls that make the test above discriminate: each is a loop or a `pgrep` that
+    /// works, and flagging any of them would punish the documented remedy.
+    #[test]
+    fn a_pgrep_loop_that_can_end_or_is_not_run_here_is_not_flagged() {
+        for cmd in [
+            // The documented remedy: a bracket class does not match its own text.
+            "while pgrep -f \"[e]val_run\"; do sleep 1; done",
+            // A variable or substitution: the text in the shell's line is not the pattern.
+            "while pgrep -f \"$PAT\"; do sleep 1; done",
+            // Process-name match, not the full command line.
+            "while pgrep eval_run; do sleep 1; done",
+            // An exact match against the whole line cannot hit the longer shell line.
+            "while pgrep -fx 'eval_run --flag'; do sleep 1; done",
+            // Waiting on a pid.
+            "while kill -0 1234; do sleep 1; done",
+            // `pgrep -f` outside a loop returns at once.
+            "pgrep -f foo",
+            // `while` is an argument here, not a loop.
+            "echo while; pgrep -f foo",
+            // A script written to a file is not run by this call.
+            "cat > w.sh <<'EOF'\nwhile pgrep -f foo; do sleep 1; done\nEOF",
+            // A loop with no `pgrep`.
+            "while true; do sleep 1; done",
+        ] {
+            assert_eq!(
+                self_matching_pgrep_loop(cmd),
+                None,
+                "must not be flagged: {cmd:?}"
+            );
+        }
     }
 
     #[test]
