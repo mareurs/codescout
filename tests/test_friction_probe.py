@@ -218,6 +218,36 @@ class CommandFailureTests(unittest.TestCase):
     def test_no_readable_rows_gives_no_rate(self):
         db = self.make_db([("run_command", "success", None)])
         self.assertIsNone(self.failures(db)["pct_of_readable"])
+    def test_result_fact_columns_are_read_without_any_stored_output(self):
+        # A server without --debug stores no output_json; its rows still carry the facts.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Path(tmp.name) / "usage.db"
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None, microsecond=0)
+        with sqlite3.connect(db) as conn:
+            conn.execute("""CREATE TABLE tool_calls (
+                id INTEGER PRIMARY KEY, tool_name TEXT, called_at TEXT, outcome TEXT,
+                err_family TEXT, error_msg TEXT, session_id TEXT, cc_session_id TEXT,
+                codescout_sha TEXT, codescout_dirty INTEGER, output_json TEXT,
+                command_exit INTEGER, command_timed_out INTEGER)""")
+            rows = [
+                ("run_command", "success", 0, 0),      # passed
+                ("run_command", "success", 101, None), # failed
+                ("run_command", "success", 0, 1),      # timed out
+                ("run_command", "success", None, None),  # not recorded: not "passed"
+                ("run_command", "error", 1, None),     # outcome already says it failed
+                ("grep", "success", 2, None),          # another tool
+            ]
+            for i, (tool, outcome, code, timed_out) in enumerate(rows, 1):
+                conn.execute(
+                    "INSERT INTO tool_calls VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (i, tool, now.isoformat(" "), outcome, None, None, "A", "c", "b", 0,
+                     None, code, timed_out))
+        r = self.failures(db)
+        self.assertEqual(r["readable"], 0)
+        self.assertEqual(r["from_columns"], {
+            "success_rows": 4, "recorded": 3, "nonzero_exit": 1, "timed_out": 1,
+            "failed": 2, "pct_of_recorded": 66.7})
 
 
 if __name__ == "__main__":

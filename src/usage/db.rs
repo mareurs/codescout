@@ -294,6 +294,37 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN attribution_ms INTEGER;")?;
     }
 
+    // `output_bytes`, `command_exit`, `command_timed_out` — facts about the RESULT a call
+    // delivered, recorded on every row with or without `--debug` (unlike `output_json`, the
+    // large half, which stays debug-only). `outcome` says the tool answered, never that a
+    // command passed, so a failed build, a failed test and a timeout all read `success`
+    // (docs/trackers/frictions/run-command-timeouts-and-nonzero-exits-are-recorded-as-success.md).
+    // Record-only: nothing reads them back into behaviour.
+    // - `output_bytes` is the size of the text the caller received: the sum of the text blocks
+    //   of an answer, or the length of the error text. NULL only on a row written before this
+    //   migration or by an older build.
+    // - `command_exit` is the `exit_code` of a `run_command` result. NULL for every other tool,
+    //   for a `run_command` answer that carries none (a background start, a refusal) and for a
+    //   command killed by a signal, whose result says `exit_code: null`.
+    // - `command_timed_out` is the `timed_out` of a `run_command` result: 1 or 0 when the result
+    //   has the key, NULL when it has none.
+    // A command failed when `command_exit` is non-zero or `command_timed_out` is 1. NULL is
+    // "not recorded", never "passed".
+    for (column, kind) in [
+        ("output_bytes", "INTEGER"),
+        ("command_exit", "INTEGER"),
+        ("command_timed_out", "INTEGER"),
+    ] {
+        let present = conn
+            .prepare(&format!("SELECT {column} FROM tool_calls LIMIT 0"))
+            .is_ok();
+        if !present {
+            conn.execute_batch(&format!(
+                "ALTER TABLE tool_calls ADD COLUMN {column} {kind};"
+            ))?;
+        }
+    }
+
     // The two statements of `backfill_legacy_rows` look for work that is normally absent: rows
     // with no `project_root`, and error rows with no family. Builds with different taxonomy
     // fingerprints share one file and each re-runs the backfill when it finds another build's
@@ -426,6 +457,15 @@ pub struct MeasurementLinkage<'a> {
     /// Wall time of that engine run in milliseconds. `Some` exactly when `attribution_outcome`
     /// is.
     pub attribution_ms: Option<i64>,
+    /// Bytes of text the caller received: the sum of the answer's text blocks, or the length
+    /// of the error text. Recorded with or without `--debug`. See the `output_bytes`
+    /// migration in `open_db`.
+    pub output_bytes: Option<i64>,
+    /// The `exit_code` of a `run_command` result; `None` for every other tool and for a result
+    /// that carries none. `None` is "not recorded", never "passed".
+    pub command_exit: Option<i64>,
+    /// The `timed_out` of a `run_command` result; `None` when the result has no such key.
+    pub command_timed_out: Option<bool>,
 }
 
 /// The current UTC instant in the exact textual shape `write_record`'s
@@ -541,8 +581,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
         // lexicographic compare against a `datetime()`-shaped literal, and the shared
         // prefix is fixed-width, so a `.SSS` suffix always sorts after the same second
         // and before the next one.
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class, tool_use_id, deliveries_json, observed_changed, attribution_outcome, attribution_ms)
-                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class, tool_use_id, deliveries_json, observed_changed, attribution_outcome, attribution_ms, output_bytes, command_exit, command_timed_out)
+                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
         params![
             tool_name,
             latency_ms,
@@ -570,6 +610,9 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             measurement.observed_changed.map(i64::from),
             measurement.attribution_outcome,
             measurement.attribution_ms,
+            measurement.output_bytes,
+            measurement.command_exit,
+            measurement.command_timed_out.map(i64::from),
             ],
     )?;
     note_lock_hold(
@@ -2216,6 +2259,106 @@ mod tests {
                 ("row3".to_string(), s("tooling_failure"), Some(103)),
                 ("row4".to_string(), s("spawn_failed"), Some(104)),
                 ("row5".to_string(), None, None),
+            ]
+        );
+
+        drop(conn);
+        open_db(dir.path()).expect("a second open on a migrated file must not fail");
+    }
+    /// `output_bytes`, `command_exit` and `command_timed_out` (FR-2/FR-3): a real pre-migration
+    /// table gains all three, an old row reads NULL in each, written values survive a
+    /// `write_record` round-trip, a row with none stays NULL (a different claim from `0`, `0`
+    /// and `false`), and a second `open_db` on the migrated file must not fail.
+    #[test]
+    fn open_db_adds_the_result_fact_columns_and_they_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join(".codescout").join("usage.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        {
+            let pre = Connection::open(&db_path).unwrap();
+            pre.execute_batch(
+                "CREATE TABLE tool_calls (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tool_name  TEXT NOT NULL,
+                    called_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+                    latency_ms INTEGER NOT NULL,
+                    outcome    TEXT NOT NULL,
+                    overflowed INTEGER NOT NULL DEFAULT 0,
+                    error_msg  TEXT
+                );
+                INSERT INTO tool_calls (tool_name, latency_ms, outcome)
+                    VALUES ('legacy', 1, 'success');",
+            )
+            .unwrap();
+        }
+
+        let conn = open_db(dir.path()).unwrap();
+
+        let written = [
+            // A failed command: non-zero exit, no timeout key.
+            ("failed", Some(120), Some(101), None),
+            // A timeout: exit 0 is not the claim, the key is.
+            ("timed_out", Some(80), Some(0), Some(true)),
+            // A command that passed and says it did not time out.
+            ("passed", Some(5), Some(0), Some(false)),
+            // Another tool: only the size is known.
+            ("other", Some(7), None, None),
+            // Nothing recorded at all.
+            ("none", None, None, None),
+        ];
+        for (name, bytes, exit, timed_out) in written {
+            write_record(
+                &conn,
+                name,
+                1,
+                "success",
+                false,
+                None,
+                "unknown",
+                None,
+                "s",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Default::default(),
+                None,
+                MeasurementLinkage {
+                    output_bytes: bytes,
+                    command_exit: exit,
+                    command_timed_out: timed_out,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+
+        type Row = (String, Option<i64>, Option<i64>, Option<i64>);
+        let got: Vec<Row> = conn
+            .prepare(
+                "SELECT tool_name, output_bytes, command_exit, command_timed_out \
+                 FROM tool_calls ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let row = |n: &str, b, e, t| (n.to_string(), b, e, t);
+        assert_eq!(
+            got,
+            vec![
+                row("legacy", None, None, None),
+                row("failed", Some(120), Some(101), None),
+                row("timed_out", Some(80), Some(0), Some(1)),
+                row("passed", Some(5), Some(0), Some(0)),
+                row("other", Some(7), None, None),
+                row("none", None, None, None),
             ]
         );
 

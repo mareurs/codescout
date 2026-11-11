@@ -313,6 +313,19 @@ def command_failures(db: Path, days: int | None):
             where += " AND called_at >= datetime('now', ?)"
             params.append(f"-{days} days")
         rows = conn.execute(f"SELECT output_json FROM tool_calls WHERE {where}", params).fetchall()
+        # Rows written by a build that records the result facts (`command_exit`,
+        # `command_timed_out`, see the `output_bytes` migration in `src/usage/db.rs`) are read
+        # from the columns: no output is needed, so a server without `--debug` is counted too.
+        # NULL is "not recorded", never "passed".
+        columns = None
+        if {"command_exit", "command_timed_out"} <= cols:
+            columns = conn.execute(
+                "SELECT COUNT(*), "
+                "SUM(command_exit IS NOT NULL OR command_timed_out IS NOT NULL), "
+                "SUM(command_exit IS NOT NULL AND command_exit <> 0), "
+                "SUM(command_timed_out = 1), "
+                "SUM((command_exit IS NOT NULL AND command_exit <> 0) OR command_timed_out = 1) "
+                f"FROM tool_calls WHERE {where}", params).fetchone()
     finally:
         conn.close()
 
@@ -336,6 +349,13 @@ def command_failures(db: Path, days: int | None):
     out["pct_of_readable"] = (
         round(100.0 * out["failed"] / out["readable"], 1) if out["readable"] else None
     )
+    if columns is not None:
+        total, recorded, nonzero, timed_out, failed = (v or 0 for v in columns)
+        out["from_columns"] = {
+            "success_rows": total, "recorded": recorded, "nonzero_exit": nonzero,
+            "timed_out": timed_out, "failed": failed,
+            "pct_of_recorded": round(100.0 * failed / recorded, 1) if recorded else None,
+        }
     return out
 
 
@@ -632,6 +652,12 @@ def main() -> int:
               f"({cf['pct_of_readable']}%)   non-zero exit: {cf['nonzero_exit']}   "
               f"timed out: {cf['timed_out']}")
         print("  rows with no stored output are not judged: the real count is higher.")
+        fc = cf.get("from_columns")
+        if fc is not None:
+            print(f"  from the result-fact columns (rows of a build that records them, with or "
+                  f"without --debug): recorded {fc['recorded']} of {fc['success_rows']}   "
+                  f"failed: {fc['failed']} ({fc['pct_of_recorded']}%)   "
+                  f"non-zero exit: {fc['nonzero_exit']}   timed out: {fc['timed_out']}")
 
     if args.calibrate:
         print("\n=== calibration vs TU-7 (2026-08-15, 13-project corpus) ===")
