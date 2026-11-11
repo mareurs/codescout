@@ -310,6 +310,19 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
              WHERE err_family IS NULL AND error_msg IS NOT NULL;",
     )?;
 
+    // `write_record` runs the retention sweep after every insert, and the sweep looks for work
+    // that is normally absent: a row older than 30 days. Without an index on `called_at` it is a
+    // full table scan inside a write transaction, on every call, from every server process that
+    // shares the file. Measured in `usage-lock-holds.log`: 879 sweeps of 250 ms or more in 26
+    // hours (p50 2.7 s, max 20 s), nearly all with `deleted=0`, and none of it appears in
+    // `latency_ms`. With the index a sweep that finds nothing is one seek to the oldest row.
+    // Unconditional and `IF NOT EXISTS` like the indexes above: a file created by a build
+    // without it gets it on the next open, at the price of one scan to build it.
+    // docs/issues/2026-11-09-concurrent-pinned-calls-leave-no-usage-row.md
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_tool_calls_called_at ON tool_calls(called_at);",
+    )?;
+
     backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
 
     Ok(conn)
@@ -584,16 +597,9 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
     let sweep_started_at = now_timestamp();
     let sweep_timer = std::time::Instant::now();
     let deleted = if has_pika_observations {
-        conn.execute(
-            "DELETE FROM tool_calls WHERE called_at < datetime('now', '-30 days') \
-             AND id NOT IN (SELECT tool_call_id FROM pika_observations)",
-            [],
-        )?
+        conn.execute(RETENTION_SWEEP_SPARING_PIKA_SQL, [])?
     } else {
-        conn.execute(
-            "DELETE FROM tool_calls WHERE called_at < datetime('now', '-30 days')",
-            [],
-        )?
+        conn.execute(RETENTION_SWEEP_SQL, [])?
     };
     note_lock_hold(
         conn,
@@ -1198,6 +1204,19 @@ const BACKFILL_FILL_ROOT_SQL: &str =
 /// The statement of `backfill_legacy_rows` that finds rows with no error family.
 const BACKFILL_UNCLASSIFIED_SQL: &str = "SELECT id, tool_name, error_msg FROM tool_calls \
      WHERE err_family IS NULL AND error_msg IS NOT NULL";
+
+/// The retention sweep that `write_record` runs after every insert, on a database that has no
+/// `pika_observations` table. A named constant, so
+/// `the_retention_sweeps_are_served_by_the_called_at_index` plans exactly the SQL that runs.
+const RETENTION_SWEEP_SQL: &str =
+    "DELETE FROM tool_calls WHERE called_at < datetime('now', '-30 days')";
+
+/// The same sweep when the buddy plugin's `pika_observations` table exists: a row an
+/// observation still points at is spared, because usage.db never enables foreign keys and its
+/// `ON DELETE CASCADE` would not fire.
+const RETENTION_SWEEP_SPARING_PIKA_SQL: &str =
+    "DELETE FROM tool_calls WHERE called_at < datetime('now', '-30 days') \
+     AND id NOT IN (SELECT tool_call_id FROM pika_observations)";
 
 /// One-time, idempotent repair of rows written before the friction columns were
 /// populated. Gated on `PRAGMA user_version` so it runs once per DB and is a
@@ -4674,6 +4693,58 @@ mod tests {
         drop(conn);
         let conn = open_db(dir.path()).unwrap();
         assert_both_use_an_index(&conn, "after re-opening a file that lacks them");
+    }
+
+    /// `write_record` runs the retention sweep after EVERY insert, and the sweep looks for work
+    /// that is normally absent: a row older than 30 days. With no index on `called_at` it is a
+    /// full `SCAN tool_calls`. On a 295 MB, 120,562-row file the same predicate as a `SELECT
+    /// count(*)` took 5.6 s, 2.4 s, 0.51 s and 0.05 s on four runs in a row (cold to warm), and
+    /// `usage-lock-holds.log` shows 879 sweeps of 250 ms or more in 26 hours (p50 2.7 s, max
+    /// 20 s, 2,478 s in total), nearly all with `deleted=0`. A scan that holds the write lock
+    /// for seconds across ~35 server processes is the mechanism the bug names for dropped rows.
+    /// Both statements must be served by the index, with and without the pika exemption.
+    /// (docs/issues/2026-11-09-concurrent-pinned-calls-leave-no-usage-row.md, hypothesis 10)
+    #[test]
+    fn the_retention_sweeps_are_served_by_the_called_at_index() {
+        fn plan(conn: &Connection, sql: &str) -> String {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let rows = stmt.query_map([], |r| r.get::<_, String>(3)).unwrap();
+            rows.map(|r| r.unwrap()).collect::<Vec<_>>().join(" | ")
+        }
+        fn assert_both_use_the_index(conn: &Connection, when: &str) {
+            for (label, sql) in [
+                ("without a pika_observations table", RETENTION_SWEEP_SQL),
+                (
+                    "sparing rows pika_observations points at",
+                    RETENTION_SWEEP_SPARING_PIKA_SQL,
+                ),
+            ] {
+                let plan = plan(conn, sql);
+                assert!(
+                    plan.contains("idx_tool_calls_called_at"),
+                    "{when}: the retention sweep {label} must be served by the called_at \
+                     index, so a call does not scan the whole table while it holds the write \
+                     lock; plan: {plan}"
+                );
+            }
+        }
+
+        let dir = TempDir::new().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        // The plugin owns this table; only its name and `tool_call_id` matter to the plan.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS pika_observations \
+                 (id INTEGER PRIMARY KEY, tool_call_id INTEGER NOT NULL);",
+        )
+        .unwrap();
+        assert_both_use_the_index(&conn, "on a fresh database");
+
+        // A file created by a build without the index gets it on the next open.
+        conn.execute_batch("DROP INDEX IF EXISTS idx_tool_calls_called_at;")
+            .unwrap();
+        drop(conn);
+        let conn = open_db(dir.path()).unwrap();
+        assert_both_use_the_index(&conn, "after re-opening a file that lacks it");
     }
 
     /// BL-4. The classifier's emittable families existed only as return values in
