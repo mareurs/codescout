@@ -213,6 +213,12 @@ pub async fn run(
     if crate::lsp::init_options::wants_progress(server_command) {
         init_request["params"]["capabilities"]["window"] = json!({"workDoneProgress": true});
     }
+    // The same call-hierarchy declaration `LspClient::start` sends (typescript-language-server
+    // only): without it that server leaves `callHierarchyProvider` out of its capabilities.
+    if crate::lsp::init_options::wants_call_hierarchy(server_command) {
+        init_request["params"]["capabilities"]["textDocument"]["callHierarchy"] =
+            json!({ "dynamicRegistration": false });
+    }
     // The same options `LspClient::start` sends for a server it spawns itself, so a workspace
     // behaves alike with and without the mux. Omitted, not `null`, when there are none.
     if let Some(options) = crate::lsp::init_options::for_workspace(server_command, workspace_root) {

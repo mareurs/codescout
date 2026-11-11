@@ -834,6 +834,7 @@ impl LspClient {
             .initialize(
                 crate::lsp::init_options::for_workspace(&config.command, &config.workspace_root),
                 crate::lsp::init_options::wants_progress(&config.command),
+                crate::lsp::init_options::wants_call_hierarchy(&config.command),
             )
             .await?;
 
@@ -1174,6 +1175,7 @@ impl LspClient {
         &self,
         initialization_options: Option<Value>,
         advertise_progress: bool,
+        advertise_call_hierarchy: bool,
     ) -> Result<()> {
         let root_uri = path_to_uri(&self.workspace_root)?;
 
@@ -1200,6 +1202,11 @@ impl LspClient {
                         prepare_support: Some(true),
                         ..Default::default()
                     }),
+                    call_hierarchy: advertise_call_hierarchy.then_some(
+                        lsp_types::CallHierarchyClientCapabilities {
+                            dynamic_registration: Some(false),
+                        },
+                    ),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -2319,6 +2326,26 @@ struct Point {
         assert!(
             params["capabilities"].get("window").is_none(),
             "initialize params were: {params}"
+        );
+    }
+    /// `typescript-language-server` leaves `callHierarchyProvider` out of its capabilities unless the
+    /// client declares `textDocument.callHierarchy`, and without it `call_graph` never asks the
+    /// server. Another server keeps the capabilities it has always seen.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn initialize_declares_call_hierarchy_to_typescript_language_server_only() {
+        let ts = initialize_params_seen_by_a_fake_server("typescript-language-server").await;
+        assert_eq!(
+            ts["capabilities"]["textDocument"]["callHierarchy"]["dynamicRegistration"],
+            serde_json::json!(false),
+            "initialize params were: {ts}"
+        );
+        let other = initialize_params_seen_by_a_fake_server("some-other-server").await;
+        assert!(
+            other["capabilities"]["textDocument"]
+                .get("callHierarchy")
+                .is_none(),
+            "initialize params were: {other}"
         );
     }
 
