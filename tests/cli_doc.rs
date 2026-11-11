@@ -88,15 +88,14 @@ fn pinned_binary() -> &'static std::path::Path {
             .expect("the pinned codescout binary must be runnable");
         assert!(
             out.status.success(),
-            "the binary at {src:?} does not advertise `doc`, so it was built WITHOUT the \
-             librarian feature. THIS IS ALMOST CERTAINLY NOT YOUR DIFF.\n\
-             `target/` is shared across every session in this checkout, and cargo releases its \
-             build lock before running tests, so a peer's `cargo test --no-default-features` \
-             replaced the binary between this lane's build and this pin.\n\
-             REPAIR, which you can perform alone and which is also the cheapest discriminator: \
-             re-run `cargo nextest run --test cli_doc`. The window is minutes. If it reds a second \
-             time with this message, the binary on disk really is librarian-less — rebuild it \
-             with `cargo nextest run --workspace`.\n\
+            "the binary at {src:?} cannot run `doc --help`. It may not be a build of this tree: \
+              `target/` is shared across every session in this checkout, and cargo releases its \
+              build lock before running tests, so a peer's build can replace the binary between \
+              this lane's build and this pin.\n\
+              REPAIR, which you can perform alone and which is also the cheapest discriminator: \
+              re-run `cargo nextest run --test cli_doc`. The window is minutes. If it reds a second \
+              time with this message, the binary on disk is broken or stale: rebuild it \
+              with `cargo nextest run --workspace`.\n\
              binary stderr: {}",
             String::from_utf8_lossy(&out.stderr).trim()
         );

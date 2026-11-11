@@ -3387,8 +3387,8 @@ mod tests {
     }
 
     /// The gate's four commands must stay in their documented order, because the
-    /// order is load-bearing: the lean lane leaves a librarian-less binary in the
-    /// shared `target/`, so ending on it arms a trap for the next session. See
+    /// order is load-bearing: the lean lane leaves a binary built without the default
+    /// features in the shared `target/`, so ending on it arms a trap for the next session. See
     /// CLAUDE.md § Development Commands and
     /// `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`.
     ///
