@@ -11,7 +11,10 @@
 //!   integrity), and also reports a non-terminal archived entry (`NonTerminalArchived`:
 //!   archiving is for finished work).
 //! - `RevisitDue`, `CitedTargetClosed` and `TerminalInLiveDir` look at un-archived entries
-//!   only: an archived entry is done and does not nag.
+//!   only: an archived entry is done and does not nag. `CitedTargetClosed` covers every
+//!   non-terminal entry, blocked and deferred ones included. `TerminalInLiveDir` looks at
+//!   entries of ledgers only (default grace 30 days): a stream or temp collection is archived
+//!   whole, and `StreamAllTerminal` judges it.
 //! - `StreamAllTerminal` and `LedgerQuiet` look at un-archived collections only. `LedgerQuiet`
 //!   counts every entry of such a ledger, archived ones too, as activity.
 //! - `CollectionInvalid` (the eighth check) reports every collection-level problem: a readme whose
@@ -36,14 +39,16 @@ use crate::librarian::identity::key::Key;
 /// Thresholds the checks cannot read from a document.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckPolicy {
-    /// Days a terminal entry may stay outside `archive/` after its `closed` date.
+    /// Days a terminal ledger entry may stay outside `archive/` after its `closed` date. The
+    /// default is 30: on this repo's `docs/issues` ledger, 69 of 212 terminal entries outside
+    /// `archive/` were older than 14 days and 1 older than 30.
     pub terminal_grace_days: u32,
 }
 
 impl Default for CheckPolicy {
     fn default() -> Self {
         CheckPolicy {
-            terminal_grace_days: 14,
+            terminal_grace_days: 30,
         }
     }
 }
@@ -106,8 +111,9 @@ pub enum Finding {
         entry: Key,
         revisit_by: NaiveDate,
     },
-    /// A live entry cites a target closed after the entry's `status_since`. Only forward
-    /// relation labels count: a backward label (`relations::BACKWARD_LABELS`) never fires.
+    /// A live non-terminal entry (open, blocked or deferred) cites a target closed after the
+    /// entry's `status_since`. Only forward relation labels count: a backward label
+    /// (`relations::BACKWARD_LABELS`) never fires.
     CitedTargetClosed {
         #[serde(serialize_with = "key_as_str")]
         entry: Key,
@@ -133,7 +139,9 @@ pub enum Finding {
         collection: Key,
         last_activity: Option<NaiveDate>,
     },
-    /// A terminal entry stayed outside `archive/` past the grace period.
+    /// A terminal entry of a ledger stayed outside `archive/` past the grace period. Streams
+    /// and temp collections are archived whole, so this check does not look at their entries;
+    /// `StreamAllTerminal` judges them.
     TerminalInLiveDir {
         #[serde(serialize_with = "key_as_str")]
         entry: Key,
@@ -303,16 +311,20 @@ fn check_entry(
                 }
             }
         }
-    } else if let Some(closed) = meta.closed {
-        let grace = Days::new(u64::from(policy.terminal_grace_days));
-        if closed
-            .checked_add_days(grace)
-            .is_some_and(|due| due < today)
-        {
-            out.push(Finding::TerminalInLiveDir {
-                entry: entry.key.clone(),
-                closed,
-            });
+    } else if collection.lifecycle == Lifecycle::Ledger {
+        // A stream or temp collection is archived whole and judged by `StreamAllTerminal`, so a
+        // terminal entry of one is never late by itself.
+        if let Some(closed) = meta.closed {
+            let grace = Days::new(u64::from(policy.terminal_grace_days));
+            if closed
+                .checked_add_days(grace)
+                .is_some_and(|due| due < today)
+            {
+                out.push(Finding::TerminalInLiveDir {
+                    entry: entry.key.clone(),
+                    closed,
+                });
+            }
         }
     }
 }
@@ -1270,11 +1282,115 @@ mod tests {
             .iter()
             .any(|x| matches!(x, Finding::TerminalInLiveDir { .. }))
         };
-        // closed 2026-10-28 + 14 days = 2026-11-11: not before today.
+        // An explicit policy of 14 days (not the default, which is 30): closed 2026-10-28 + 14
+        // days = 2026-11-11, which is not before today.
         assert!(!late("2026-10-28", 14));
         assert!(late("2026-10-27", 14));
         assert!(late("2026-10-28", 13));
-        assert_eq!(CheckPolicy::default().terminal_grace_days, 14);
+    }
+
+    /// The `TerminalInLiveDir` findings for one terminal, un-archived entry of the collection at
+    /// `readme_path`, with the entry closed on `closed` and the default policy.
+    fn terminal_in_live_dir_findings(
+        readme_path: &str,
+        readme: &str,
+        status: &str,
+        closed: &str,
+    ) -> Vec<Finding> {
+        let entry_path = readme_path.replace("readme.md", "2026-08-01-e.md");
+        run(vec![
+            doc(readme_path, readme),
+            doc(
+                &entry_path,
+                &entry(status, &format!("closed: {closed}\n"), "")
+                    .replace("created: 2026-10-01", "created: 2026-08-01")
+                    .replace("status_since: 2026-10-01", "status_since: 2026-08-01"),
+            ),
+        ])
+        .into_iter()
+        .filter(|x| matches!(x, Finding::TerminalInLiveDir { .. }))
+        .collect()
+    }
+
+    #[test]
+    fn a_terminal_entry_of_a_live_stream_is_not_terminal_in_live_dir() {
+        // A stream is archived whole and judged by `stream_all_terminal`; only a ledger's
+        // terminal entries are expected to move to `archive/` one by one.
+        let stream = terminal_in_live_dir_findings(
+            "docs/trackers/streams/s/readme.md",
+            STREAM,
+            "done",
+            "2026-09-01",
+        );
+        assert!(stream.is_empty(), "{stream:?}");
+        let temp = terminal_in_live_dir_findings(
+            "docs/trackers/temp/t/readme.md",
+            STREAM,
+            "done",
+            "2026-09-01",
+        );
+        assert!(temp.is_empty(), "{temp:?}");
+        // The same entry in a ledger fires, so the two assertions above are not vacuous.
+        let ledger = terminal_in_live_dir_findings(
+            "docs/trackers/ledgers/l/readme.md",
+            LEDGER,
+            "fixed",
+            "2026-09-01",
+        );
+        assert_eq!(
+            ledger,
+            [Finding::TerminalInLiveDir {
+                entry: k("2026-08-01-e"),
+                closed: d("2026-09-01")
+            }]
+        );
+    }
+
+    #[test]
+    fn the_default_grace_is_thirty_days() {
+        assert_eq!(CheckPolicy::default().terminal_grace_days, 30);
+        let ledger = |closed: &str| {
+            terminal_in_live_dir_findings(
+                "docs/trackers/ledgers/l/readme.md",
+                LEDGER,
+                "fixed",
+                closed,
+            )
+        };
+        // today is 2026-11-11: 2026-10-12 is exactly 30 days back, 2026-10-11 is 31.
+        let on_the_boundary = ledger("2026-10-12");
+        assert!(on_the_boundary.is_empty(), "{on_the_boundary:?}");
+        assert_eq!(ledger("2026-10-11").len(), 1);
+    }
+
+    #[test]
+    fn cited_target_closed_covers_blocked_and_deferred_entries() {
+        // A live non-terminal entry of any class: its `revisit_by` is still in the future,
+        // so only the citation fires (`LedgerQuiet` is a separate check, filtered out). The bug
+        // closed 2026-10-06, after `status_since`.
+        let cite = "**Rests on:** [[2026-10-05-the-bug]]\n";
+        for (readme, status) in [(LEDGER, "waiting"), (LEDGER_DEFERRED, "later")] {
+            let f: Vec<Finding> = run(vec![
+                doc("docs/trackers/ledgers/l/readme.md", readme),
+                doc(
+                    "docs/trackers/ledgers/l/2026-10-01-e.md",
+                    &entry(status, "revisit_by: 2026-12-01\n", cite),
+                ),
+                doc("docs/issues/2026-10-05-the-bug.md", BUG),
+            ])
+            .into_iter()
+            .filter(|x| !matches!(x, Finding::LedgerQuiet { .. }))
+            .collect();
+            assert_eq!(
+                f,
+                [Finding::CitedTargetClosed {
+                    entry: k("2026-10-01-e"),
+                    target: k("2026-10-05-the-bug"),
+                    closed: d("2026-10-06")
+                }],
+                "status {status}"
+            );
+        }
     }
 
     #[test]

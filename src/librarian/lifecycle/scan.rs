@@ -703,7 +703,7 @@ mod tests {
             closed: d("2026-11-05"),
         };
 
-        // The default grace is 14 days: six days is not late.
+        // The default grace is 30 days: six days is not late.
         let default = findings(dir.path(), today, &CheckPolicy::default()).unwrap();
         assert!(!default.findings.contains(&late), "{:?}", default.findings);
 
