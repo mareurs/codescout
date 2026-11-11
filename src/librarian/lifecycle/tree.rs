@@ -216,7 +216,7 @@ impl LifecycleTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::lifecycle::testkit::{d, doc, entry, k, LEDGER};
+    use crate::librarian::lifecycle::testkit::{d, doc, entry, k, LEDGER, STREAM};
 
     const BUG: &str = "---\nkind: bug\nstatus: fixed\nclosed: 2026-10-06\n---\n";
 
@@ -286,20 +286,36 @@ mod tests {
                 "docs/trackers/ledgers/l/2026-10-02-b.md",
                 &entry("open", "", ""),
             ),
+            doc("docs/trackers/streams/s/readme.md", STREAM),
+            doc(
+                "docs/trackers/streams/s/2026-10-01-c.md",
+                &entry("open", "", ""),
+            ),
+            doc(
+                "docs/trackers/streams/s/2026-10-02-d.md",
+                &entry("done", "closed: 2026-10-03\n", ""),
+            ),
+            // Two problems (two orphans) and one closed date, so no part of the comparison is empty.
+            doc(
+                "docs/trackers/temp/lost-one/2026-10-01-e.md",
+                &entry("open", "", ""),
+            ),
+            doc(
+                "docs/trackers/temp/lost-two/2026-10-01-f.md",
+                &entry("open", "", ""),
+            ),
+            doc("docs/issues/2026-10-05-the-bug.md", BUG),
         ];
         let mut rev = docs.clone();
         rev.reverse();
-        let keys = |t: &LifecycleTree| -> Vec<String> {
-            t.collections[0]
-                .entries
-                .iter()
-                .map(|e| e.rel_path.clone())
-                .collect()
-        };
-        assert_eq!(
-            keys(&LifecycleTree::build(docs)),
-            keys(&LifecycleTree::build(rev))
-        );
+        let forward = LifecycleTree::build(docs);
+        let backward = LifecycleTree::build(rev);
+        assert_eq!(forward.collections.len(), 2);
+        assert_eq!(forward.problems.len(), 2);
+        assert_eq!(forward.closed_dates.len(), 2);
+        // `LifecycleTree` has no `PartialEq` (its problems hold `SchemaError`, which has no
+        // `Clone`); `Debug` text is a whole-tree comparison all the same.
+        assert_eq!(format!("{forward:?}"), format!("{backward:?}"));
     }
 
     #[test]

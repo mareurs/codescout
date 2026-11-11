@@ -484,4 +484,194 @@ mod tests {
             .collect();
         assert_eq!(cited, ["2026-10-01-blocked", "2026-10-01-twice"]);
     }
+
+    // ---- defining conditions of each check ----
+
+    /// A ledger readme with a `deferred`-class word, reviewed every 30 days.
+    const LEDGER_DEFERRED: &str = "---\ntitle: L\nentry_kinds: [f]\nstatuses: {open: open, waiting: blocked, later: deferred, fixed: terminal}\ninitial_status: open\nreview_every: 30d\n---\n";
+
+    fn of_kind(f: &[Finding], pick: fn(&Finding) -> bool) -> Vec<&Finding> {
+        f.iter().filter(|x| pick(x)).collect()
+    }
+
+    fn is_revisit_due(f: &Finding) -> bool {
+        matches!(f, Finding::RevisitDue { .. })
+    }
+
+    /// The findings for one ledger entry with `status` and a `revisit_by` date.
+    fn revisit_findings(readme: &str, status: &str, revisit_by: &str) -> Vec<Finding> {
+        run(vec![
+            doc("docs/trackers/ledgers/l/readme.md", readme),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-e.md",
+                &entry(status, &format!("revisit_by: {revisit_by}\n"), ""),
+            ),
+        ])
+    }
+
+    #[test]
+    fn stream_all_terminal_needs_every_entry_terminal() {
+        let f = run(vec![
+            doc("docs/trackers/streams/s/readme.md", STREAM),
+            doc(
+                "docs/trackers/streams/s/2026-10-01-done.md",
+                &entry("done", "closed: 2026-11-10\n", ""),
+            ),
+            doc(
+                "docs/trackers/streams/s/2026-10-02-open.md",
+                &entry("open", "", ""),
+            ),
+        ]);
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn stream_all_terminal_needs_at_least_one_entry() {
+        let f = run(vec![doc("docs/trackers/streams/s/readme.md", STREAM)]);
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn revisit_due_is_strictly_before_today() {
+        let on_the_day = revisit_findings(LEDGER, "waiting", "2026-11-11");
+        assert!(
+            of_kind(&on_the_day, is_revisit_due).is_empty(),
+            "{on_the_day:?}"
+        );
+        let day_before = revisit_findings(LEDGER, "waiting", "2026-11-10");
+        assert_eq!(
+            of_kind(&day_before, is_revisit_due),
+            [&Finding::RevisitDue {
+                entry: k("2026-10-01-e"),
+                revisit_by: d("2026-11-10")
+            }]
+        );
+    }
+
+    #[test]
+    fn revisit_due_is_for_blocked_and_deferred_classes_only() {
+        let f = revisit_findings(LEDGER, "open", "2026-11-01");
+        assert!(of_kind(&f, is_revisit_due).is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn a_deferred_entry_with_a_passed_revisit_by_is_due() {
+        let f = revisit_findings(LEDGER_DEFERRED, "later", "2026-11-01");
+        assert_eq!(
+            of_kind(&f, is_revisit_due),
+            [&Finding::RevisitDue {
+                entry: k("2026-10-01-e"),
+                revisit_by: d("2026-11-01")
+            }]
+        );
+    }
+
+    /// An open ledger entry whose `status_since` is `since`, citing `body`, and the bug file
+    /// (closed 2026-10-06); the `CitedTargetClosed` findings of that tree.
+    fn cited_findings(since: &str, body: &str) -> Vec<Finding> {
+        let f = run(vec![
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-e.md",
+                &entry("open", "", body).replace(
+                    "status_since: 2026-10-01",
+                    &format!("status_since: {since}"),
+                ),
+            ),
+            doc("docs/issues/2026-10-05-the-bug.md", BUG),
+        ]);
+        f.into_iter()
+            .filter(|x| matches!(x, Finding::CitedTargetClosed { .. }))
+            .collect()
+    }
+
+    #[test]
+    fn cited_target_closed_needs_the_target_closed_strictly_after_status_since() {
+        let cite = "**Rests on:** [[2026-10-05-the-bug]]\n";
+        assert!(cited_findings("2026-10-06", cite).is_empty());
+        assert_eq!(cited_findings("2026-10-05", cite).len(), 1);
+    }
+
+    #[test]
+    fn a_solo_entry_form_citation_is_a_relation_to_its_key() {
+        let f = cited_findings("2026-10-01", "**Rests on:** [[2026-10-05-the-bug:F-3]]\n");
+        assert_eq!(
+            f,
+            [Finding::CitedTargetClosed {
+                entry: k("2026-10-01-e"),
+                target: k("2026-10-05-the-bug"),
+                closed: d("2026-10-06")
+            }]
+        );
+    }
+
+    /// One live ledger entry created on `created`, plus extra documents; the `LedgerQuiet`
+    /// findings (today is 2026-11-11, `review_every` 30d, so the cutoff is 2026-10-12).
+    fn quiet_findings(extra: Vec<DocInput>) -> Vec<Finding> {
+        let mut docs = vec![doc("docs/trackers/ledgers/l/readme.md", LEDGER)];
+        docs.extend(extra);
+        run(docs)
+            .into_iter()
+            .filter(|x| matches!(x, Finding::LedgerQuiet { .. }))
+            .collect()
+    }
+
+    fn created_on(created: &str) -> String {
+        entry("open", "", "").replace("created: 2026-10-01", &format!("created: {created}"))
+    }
+
+    #[test]
+    fn ledger_quiet_is_strictly_older_than_the_review_window() {
+        // 2026-11-11 minus 30 days is 2026-10-12: activity on that day is not yet quiet.
+        let on_the_cutoff = quiet_findings(vec![doc(
+            "docs/trackers/ledgers/l/2026-10-12-a.md",
+            &created_on("2026-10-12"),
+        )]);
+        assert!(on_the_cutoff.is_empty(), "{on_the_cutoff:?}");
+        let day_before = quiet_findings(vec![doc(
+            "docs/trackers/ledgers/l/2026-10-11-a.md",
+            &created_on("2026-10-11"),
+        )]);
+        assert_eq!(
+            day_before,
+            [Finding::LedgerQuiet {
+                collection: k("l"),
+                last_activity: Some(d("2026-10-11"))
+            }]
+        );
+    }
+
+    #[test]
+    fn an_archived_entry_counts_toward_ledger_activity() {
+        // The live entry is older than the cutoff; the archived one was closed inside the window.
+        let recent_archived = quiet_findings(vec![
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-live.md",
+                &created_on("2026-10-01"),
+            ),
+            doc(
+                "docs/trackers/ledgers/l/archive/2026-10-01-old.md",
+                &entry("fixed", "closed: 2026-11-05\n", ""),
+            ),
+        ]);
+        assert!(recent_archived.is_empty(), "{recent_archived:?}");
+        // The archived entry is the latest activity, though still outside the window.
+        let latest_archived = quiet_findings(vec![
+            doc(
+                "docs/trackers/ledgers/l/2026-09-01-live.md",
+                &created_on("2026-09-01"),
+            ),
+            doc(
+                "docs/trackers/ledgers/l/archive/2026-10-01-old.md",
+                &entry("fixed", "closed: 2026-10-05\n", ""),
+            ),
+        ]);
+        assert_eq!(
+            latest_archived,
+            [Finding::LedgerQuiet {
+                collection: k("l"),
+                last_activity: Some(d("2026-10-05"))
+            }]
+        );
+    }
 }
