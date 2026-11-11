@@ -1,17 +1,18 @@
 ---
 id: a73c49456056fb92
 kind: bug
-status: open
+status: fixed
 title: A file changed outside codescout stays stale in the LSP server unless a documentSymbol call resyncs that same file (symbol_at, and references into other open files)
 tags:
 - cluster/unclassified
 - navigation
+closed: 2026-11-11
 opened: 2026-11-11
 owner: marius
 related:
 - '4e7ec7bfc047ac7b'
 severity: medium
-unverified: Measured on two tiny crates (one per transport), rust-analyzer only, one run per case. Both transports were checked in the process tree. The tests cover stdio only. The rename write path is measured in 58a45860b802a477. prepare_call_hierarchy with a raw position was not run. Whether the server can notice a changed file by itself was not examined. call_graph omitting other.rs::use_it was not investigated. The fix is not designed or tried.
+unverified: 'Measured on two tiny crates (one per transport), rust-analyzer only, one run per case. The automated tests cover stdio only; the mux transport was verified once end to end with a driver script that is not in the repo. Not done or not measured: hover / goto_definition on the changed file have no client-level test; prepare_call_hierarchy with a raw position was not run; the cost of the per-request stat and how often a rename after a resync is cancelled by the server are not measured; call_graph omitting other.rs::use_it was not investigated; whether the server can notice a changed file by itself was not examined; a language other than Rust.'
 ---
 
 # BUG: a file changed outside codescout stays stale in the LSP server unless a documentSymbol call resyncs that same file (symbol_at, and references into other open files)
@@ -120,7 +121,7 @@ Tool outputs in the table above, copied from the session. The blind-spot probe i
 
 ## Fix
 
-Done 2026-11-11 in `src/lsp/client.rs`, commit pending (see `## Fix provenance` once it lands). `LspClient::request` now calls `resync_all_drifted` before every request except `initialize` and `shutdown`. It replaces `resync_if_drifted`, which had one caller (`document_symbols`). `resync_all_drifted` asks `SyncedSignatures::drifted` for every recorded file whose `(len, mtime)` differs from the last delivered bytes and sends each one a `didChange`. `document_symbols` still calls it before `did_open`, so its ordering rule (check before the open) is unchanged.
+Done 2026-11-11 in `src/lsp/client.rs`, commit `43c4ca9df` (see `## Fix provenance`). `LspClient::request` now calls `resync_all_drifted` before every request except `initialize` and `shutdown`. It replaces `resync_if_drifted`, which had one caller (`document_symbols`). `resync_all_drifted` asks `SyncedSignatures::drifted` for every recorded file whose `(len, mtime)` differs from the last delivered bytes and sends each one a `didChange`. `document_symbols` still calls it before `did_open`, so its ordering rule (check before the open) is unchanged.
 
 Two details that carry the correctness:
 
@@ -134,6 +135,11 @@ Decision record (architecture-snow-lion):
 - **Costs:** one `stat` per recorded file on every request (not measured; rust-analyzer's own request time dominates), and a `didChange` right before a request, which can make the server cancel a non-idempotent request such as rename. The client does not retry that and returns a `RecoverableError` asking the caller to re-issue it. I saw one such cancellation in a 468 s full-suite run under heavy load (see Tests added); I did not measure how often it happens in real use.
 - **Revisit when:** `didChangeWatchedFiles` support is added to the client, or the per-request `stat` shows up in a profile.
 - **Confidence:** medium-high for the read side; the transports are verified below.
+
+## Fix provenance
+
+- **SHA:** `43c4ca9df` (`experiments`)
+- **patch-id:** `0e4db3459478`
 
 ## Tests added
 
@@ -151,7 +157,13 @@ Call `symbols(path)` on the file after any edit made outside codescout, then use
 
 ## Resume
 
-Fixed in the working tree, commit pending. After the commit: add `## Fix provenance` (SHA and patch-id), set `fixed`, and decide with the owner whether `4e7ec7bfc047ac7b` (the `symbols` report, never reproduced for `symbols`) can be closed as not reproducible. Open questions, none blocking: the cost of the per-request `stat` on a large session; how often a rename right after an external edit is cancelled by the server; `prepare_call_hierarchy` with a raw position was not run; a language other than Rust. Link: `58a45860b802a477`, `bug-fix-session-log:F-235`.
+Fixed by `43c4ca9df` (see `## Fix provenance`). Archive after the owner confirms, with the fix verified on `experiments`: the gate was green at that tree and the tests above are the regression tests.
+
+Decide with the owner whether `4e7ec7bfc047ac7b` (the `symbols` report, never reproduced for `symbols` itself) can be closed as not reproducible.
+
+Open questions, none blocking: the cost of the per-request `stat` on a large session; how often a rename right after an external edit is cancelled by the server; `prepare_call_hierarchy` with a raw position was not run; a language other than Rust; `hover` / `goto_definition` on the changed file have no client-level test.
+
+Link: `58a45860b802a477`, `bug-fix-session-log:F-235`.
 
 ## References
 

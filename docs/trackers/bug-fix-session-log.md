@@ -18342,7 +18342,7 @@ Also seen, not a gap: background children run in their own process group (`proce
 
 **Limits:** Two tiny crates (one per transport), rust-analyzer, one run per case. Both transports were confirmed in the process tree: the first crate under `codescout mux` (socket), the second under `codescout start` (stdio), and the cross-file `references` staleness reproduced on both. On stdio `symbol_at` on the changed file raised a raw `-32603 Invalid offset … (line index length: 51)`, the old file's byte length. A same-length rewrite of a second file was not run for `references`. `call_graph` never listed `other.rs::use_it` in either state, so it neither shows nor rules out the staleness; that omission was not investigated.
 
-**Fix idea / Pointer:** bug `a73c49456056fb92` (open, `unverified` set). The same staleness reaches a write: `edit_code rename` overwrote the wrong bytes of a second file and returned `ok` (bug `58a45860b802a477`, measured later the same day on both transports, with a control). Related: `4e7ec7bfc047ac7b`, F-232, archived `2026-08-11-symbols-stale-after-external-git-checkout`.
+**Fix idea / Pointer:** bug `a73c49456056fb92` (fixed by `43c4ca9df`; `unverified` still set for what the tests do not cover). The same staleness reaches a write: `edit_code rename` overwrote the wrong bytes of a second file and returned `ok` (bug `58a45860b802a477`, measured later the same day on both transports, with a control, fixed by the same commit). Related: `4e7ec7bfc047ac7b`, F-232, archived `2026-08-11-symbols-stale-after-external-git-checkout`.
 
 ---
 

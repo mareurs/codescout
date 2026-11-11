@@ -1,11 +1,12 @@
 ---
 id: '58a45860b802a477'
 kind: bug
-status: open
+status: fixed
 title: edit_code rename writes a stale LSP range into the wrong bytes of another file and reports ok
 tags:
 - cluster/unclassified
 - edit-code
+closed: 2026-11-11
 opened: 2026-11-11
 owner: marius
 related:
@@ -80,11 +81,16 @@ The `diff` output of each case against its snapshot, taken in the session; the r
 
 ## Fix
 
-Done 2026-11-11, commit pending, by the fix of `a73c49456056fb92`: `LspClient::request` resyncs every recorded file whose signature drifted before every request (`resync_all_drifted`, `src/lsp/client.rs`), so the server's copy of every file is current when it computes the rename edit. Cases B, C and E no longer reproduce (client-level tests, and an end-to-end run of the new binary on the mux transport). Design and rejected alternatives are in `a73c49456056fb92` `## Fix`.
+Done 2026-11-11, commit `43c4ca9df` (see `## Fix provenance`), by the fix of `a73c49456056fb92`: `LspClient::request` resyncs every recorded file whose signature drifted before every request (`resync_all_drifted`, `src/lsp/client.rs`), so the server's copy of every file is current when it computes the rename edit. Cases B, C and E no longer reproduce (client-level tests, and an end-to-end run of the new binary on the mux transport). Design and rejected alternatives are in `a73c49456056fb92` `## Fix`.
 
 **Not done, on purpose:** a range check in `do_rename` (refuse an edit whose range does not cover the old name). It would also catch a stale copy for a cause I have not seen, and it sits at the write site. Rejected for now because other languages' servers may return edit ranges that are not the bare old name (for example for an import alias or a constructor), so the check could refuse a legitimate rename; I did not measure that. The `corruption_warning` heuristic is unchanged and still misses a landing after a non-alphanumeric character.
 
 **Cost seen:** the `didChange` that now precedes a rename can make the server cancel it; the client does not retry a non-idempotent request, so the caller gets a `RecoverableError` and re-issues. Seen once in a 468 s full-suite run under load; not measured in real use.
+
+## Fix provenance
+
+- **SHA:** `43c4ca9df` (`experiments`)
+- **patch-id:** `0e4db3459478`
 
 ## Tests added
 
@@ -107,13 +113,13 @@ Call `symbols(path)` on each file that may have changed outside codescout before
 
 ## Resume
 
-Fixed in the working tree, commit pending. After the commit: add `## Fix provenance` (SHA and patch-id) and set `fixed`.
+Fixed by `43c4ca9df` (see `## Fix provenance`); the same commit fixes the read side, `a73c49456056fb92`.
 
 Severity `high` is my proposal: a successful-looking write put text in the wrong bytes of the user's source, and case E changed program behavior while the build stayed green. The owner decides.
 
 Open, none blocking: whether to add the `do_rename` range check as a second guard (it needs a measurement across languages first); a stale landing inside a string literal; how often the server cancels a rename that follows a resync.
 
-Related: `a73c49456056fb92` (read side), `4e7ec7bfc047ac7b`, `bug-fix-session-log:F-235`.
+Related: `a73c49456056fb92`, `4e7ec7bfc047ac7b`, `bug-fix-session-log:F-235`.
 
 ## References
 
