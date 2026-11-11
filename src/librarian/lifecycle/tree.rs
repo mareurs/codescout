@@ -16,11 +16,8 @@ use crate::librarian::frontmatter::{self, Frontmatter};
 use crate::librarian::identity::key::{is_folder_index, key_of, Key};
 
 /// One document handed to [`LifecycleTree::build`]: its repo-relative path and its text.
-#[derive(Clone, Debug)]
-pub struct DocInput {
-    pub rel_path: String,
-    pub text: String,
-}
+/// The identity index's input type, shared so both models read one document set.
+pub use crate::librarian::identity::index::DocInput;
 
 /// One tracker entry that parsed.
 #[derive(Clone, Debug, PartialEq)]
@@ -245,7 +242,7 @@ impl LifecycleTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::lifecycle::testkit::{d, doc, entry, k, LEDGER, STREAM};
+    use crate::librarian::lifecycle::testkit::{d, doc, entry, k, LEDGER, STREAM, STREAM_NO_EXIT};
 
     const BUG: &str = "---\nkind: bug\nstatus: fixed\nclosed: 2026-10-06\n---\n";
 
@@ -427,9 +424,8 @@ mod tests {
 
     #[test]
     fn a_failing_schema_is_reported_once_and_its_entries_are_skipped_silently() {
-        let no_exit = "---\ntitle: S\nentry_kinds: [f]\nstatuses: {open: open, done: terminal}\ninitial_status: open\n---\n";
         let t = LifecycleTree::build([
-            doc("docs/trackers/streams/s/readme.md", no_exit),
+            doc("docs/trackers/streams/s/readme.md", STREAM_NO_EXIT),
             doc(
                 "docs/trackers/streams/s/2026-10-01-a.md",
                 &entry("open", "", ""),

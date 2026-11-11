@@ -6,6 +6,7 @@ pub mod entry;
 pub mod layout;
 pub mod naming;
 pub mod relations;
+pub mod scan;
 pub mod schema;
 pub mod table;
 #[cfg(test)]
