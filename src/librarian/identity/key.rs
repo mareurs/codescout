@@ -86,7 +86,7 @@ impl fmt::Display for Key {
 }
 
 /// The path's components with `\` read as `/`; empty and `.` components dropped.
-fn components(rel_path: &str) -> Vec<String> {
+pub(super) fn components(rel_path: &str) -> Vec<String> {
     rel_path
         .replace('\\', "/")
         .split('/')
