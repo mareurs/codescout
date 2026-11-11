@@ -9,8 +9,8 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 10
-entry_high_water_W: 5
+entry_high_water_F: 11
+entry_high_water_W: 6
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
 
@@ -110,6 +110,7 @@ entry_high_water_W: 5
 | F-8 | 2026-11-11 | med | plan-prose | open | **A spec requirement is built by no plan: "onboarding says when another checkout uses the name"** — plus two open spec-level questions |
 | F-9 | 2026-11-11 | med | self-friction | fixed-verified | **Told the operator a peer held three dirty files; they were my own stopped implementer's leftovers** — attributed by adjacency; a transcript search found the real author |
 | F-10 | 2026-11-11 | low | plan-prose | fixed-verified | **Task 1 left a stale "librarian feature" message in `tests/cli_doc.rs` and a "librarian-less" comment in `src/prompts/mod.rs`** — passed both reviews; fixed in 6671e2ce8 |
+| F-11 | 2026-11-11 | high | architectural | open | **The spec and the old catalog code disagree in about a dozen places a plan must settle** — a third guard signal, the entry-id race guard, four consumers, G5, vectors; 3 verified, the rest reported |
 
 ## Wins Index
 
@@ -120,6 +121,7 @@ entry_high_water_W: 5
 | W-4 | 2026-11-11 | high | census with the real code | Plan E sized from the 895-id estimate; measured 45 renames, 37 duplicate-key groups, 144 `[[F-16]]` rewrites | validated |
 | W-1 | 2026-11-11 | high | builder check against the code | repo name in librarian.toml breaks every older binary | validated |
 | W-5 | 2026-11-11 | med | merge the base into the branch, then ff-only | a merge commit in the shared checkout would capture six other sessions' staged files | validated |
+| W-6 | 2026-11-11 | high | independent Opus review of a scout report | a split built on "retire catalog_audit ships alone", a two-signal guard and four missed consumers | validated |
 
 ---
 
@@ -605,6 +607,45 @@ Codified so the Index column means the same thing across sessions.
 **Evidence:** `git merge --ff-only` updated 59 files with the six staged files still staged afterwards. I checked for an overlap before the fast-forward, found `src/util/path_security.rs` dirty in the shared checkout, and did not run it until its owner had committed. I did not run the fast-forward while the file was dirty, so I did not observe git's refusal; I expect git would have refused.
 
 **Limit:** the fast-forward only works while `experiments` is an ancestor of the branch. Each new peer commit costs another merge and, for Rust changes, another seven-minute gate.
+
+## F-11 — The spec and the old catalog code disagree in about a dozen places a plan must settle
+
+**Valid:** dated 2026-11-11
+
+**Observed:** A scout of the old catalog code (Sonnet, read-only) and an independent Opus review of its report found places where the approved spec and the code disagree, or where the spec is silent. A plan written from the spec alone would have missed them. Status of each: V = I re-checked it in the code; R = reported by the scout or reviewer and not re-run by me.
+
+**In the spec's Removed list but with a hidden dependant:**
+- The `id:` stamp and params-as-store are two of THREE signals in `src/util/librarian_guard.rs`. The third is a declared `entry_prefix` (V, `librarian_guard.rs:141`). The guard has four call sites (V: `read_file.rs:200`, `edit_file/mod.rs:862`, `edit_markdown.rs:1572`, `read_markdown.rs:891`). Removing the stamp leaves no replacement for the other two signals' job.
+- `entry_reservation` is the race guard for entry-id allocation (R, `augmentation.rs:1831-1975`); removing it needs per-entry files or a file lock.
+- `catalog_meta` holds gc settings, reindex progress, audit watermarks and a backfill cursor, none rebuildable from files (R). Goal G1 needs a carve-out.
+
+**Not mentioned in the spec:**
+- `doc(graft)`, `rekey_prefix`, `fix=prune_missing` and `scope=repo|umbrella|all` (R).
+- A third citation grammar on the write path, `resolve_cite_ref` (R).
+- Consumers of hex ids or `catalog.db`: the companion `goal-stop-hook`, the `constitution-check` CLI, `scripts/file-provenance.py` (used by `fmt-mine.sh` in the gate, a companion hook and CI), and `audit_doc_refs` with its own resolver (R).
+- Classification rules and the walk's ignore set come partly from the machine-global `~/.config/librarian/workspace.toml` and the untracked `.codescout/project.toml`, so goal G5 does not hold and a two-clone test would fail (R).
+
+**Where the spec's premise is wrong about today's code:**
+- Embedding vectors are not a content-hash cache; reuse is within one artifact only (R, `catalog/chunk.rs:416`).
+- The indexer refuses linked worktrees (V, `indexer.rs:385`), so "a worktree is a checkout" needs that guard removed.
+- "Frontmatter holds scalars only" contradicts `tags`, `owners` and `entry_prefix: [F, W]` (R).
+- `AGENTS.md` and `contrib/pi/AGENTS.md` collide on key `agents`, and neither can be renamed (R).
+
+**Cost if unaddressed:** plans C to E argue from a spec that omits a guard, a race guard and four consumers; the gate itself (`fmt-mine.sh` via `file-provenance.py`) would break at the flip.
+
+**Fix:** open. Plan B amends the spec's "Open for the operator" section with a recommended answer for each item, then plans from the amended spec. The scout and review reports are the evidence.
+
+## W-6 — An independent Opus review of the scout report corrected the guard, the entry points and the slice order
+
+**Valid:** dated 2026-11-11
+
+**Pattern:** before planning from a subagent's map of old code, send its report to an independent reviewer on a stronger model. Give the reviewer the report, the spec and the code, and no conclusion of the controller's.
+
+**Counterfactual:** the scout (Sonnet) said the guard's two signals were the whole story, that `Catalog::open` writes on every open, that `reindex_cli` is a production entry point, that the guard has three call sites, and that retiring `catalog_audit` ships alone. The Opus review said otherwise. I re-checked three of its corrections in the code and they hold: a third guard signal (`librarian_guard.rs:141`), four guard call sites (`edit_markdown.rs:1572` was missed), and `reindex_cli` is `#[cfg(test)]` (`librarian/mod.rs:598`). The review also reported, and I did not re-run, that retiring `catalog_audit` does not ship alone (older binaries re-create the audit triggers on open), that the cutover export must precede the read flip, and four consumers the scout missed, one of which (`scripts/file-provenance.py`) the gate uses. A plan from the scout alone would have split the work with S2 first and without those edges.
+
+**Cost:** the scout took about 25 minutes and 495k subagent tokens; the review about 13 minutes and 312k.
+
+**Limit:** my own spot-check covered five of the scout's claims and three of the reviewer's. The rest of the review is reported, not verified. Before F-11 is closed, the reported items need one pass of their own.
 
 ## Template for new entries
 
