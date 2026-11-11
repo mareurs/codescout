@@ -2913,6 +2913,23 @@ pub fn check_source_file_access(command: &str, project_root: &Path) -> Option<St
 
     let rerun_note = rerun_without_offenders(command, &stripped, &runs, &offending_runs);
 
+    // A clause that only WRITES an unresolved path reads no source, so "use read_file" is the
+    // wrong advice for it. The verdict is unchanged: only the text that goes with it differs.
+    // docs/trackers/frictions/il3-gate-refuses-scratchpad-writes-with-an-unexpanded-variable-path.md
+    let (unresolved_note, remedy) = if clause_only_writes_an_unresolved_path(&blocked, ext_re) {
+        (
+            "",
+            "this clause only WRITES a file whose path starts with an unexpanded shell \
+             expansion, so the gate cannot resolve where it points and blocked it \
+             conservatively; it does not read source. Create the file with \
+             create_file(path, content), or write the path out literally (an absolute path \
+             outside the project is checked and allowed). \
+             Re-run with acknowledge_risk: true if you need raw shell access."
+                .to_string(),
+        )
+    } else {
+        (unresolved_note, remedy)
+    };
     Some(format!(
         "{clause_note}{rerun_note}{unresolved_note}{stdin_note}{remedy}"
     ))
@@ -3151,6 +3168,42 @@ fn segment_reads_project_source(seg: &str, ext_re: &Regex, project_root: &Path, 
 /// gate.
 fn has_unexpanded_expansion(tok: &str) -> bool {
     tok.contains('$') || tok.contains('`')
+}
+/// The length of the output-redirection operator `tok` starts with (`>`, `>>`, `2>`, `&>`),
+/// or `None` when it starts with none.
+fn redirect_operator_len(tok: &str) -> Option<usize> {
+    let rest = tok.trim_start_matches(|c: char| c.is_ascii_digit() || c == '&');
+    let arrows = rest.chars().take_while(|c| *c == '>').count();
+    (1..=2)
+        .contains(&arrows)
+        .then(|| tok.len() - rest.len() + arrows)
+}
+
+/// Whether `tokens[i]` is the file an output redirection writes: the token after a bare
+/// operator (`> f`), or a token with the operator attached (`>f`).
+fn is_redirect_target(tokens: &[String], i: usize) -> bool {
+    if let Some(n) = redirect_operator_len(&tokens[i]) {
+        return n < tokens[i].len();
+    }
+    i > 0 && redirect_operator_len(&tokens[i - 1]).is_some_and(|n| n == tokens[i - 1].len())
+}
+
+/// True when the blocked `clause` names no source file to READ: every token that matches
+/// `ext_re` or carries an unexpanded expansion is the target of an output redirection, and at
+/// least one carries an expansion. Such a clause (`cat > $S/opt.sh <<EOF`) is refused only
+/// because the gate cannot resolve where the written path points. It judges the advice that
+/// accompanies the refusal, never the refusal, so it cannot open the gate.
+fn clause_only_writes_an_unresolved_path(clause: &str, ext_re: &Regex) -> bool {
+    let tokens = shell_tokens(clause);
+    let mut saw_expansion = false;
+    for (i, tok) in tokens.iter().enumerate() {
+        let expands = has_unexpanded_expansion(tok);
+        if (expands || ext_re.is_match(tok)) && !is_redirect_target(&tokens, i) {
+            return false;
+        }
+        saw_expansion |= expands;
+    }
+    saw_expansion
 }
 
 /// Whether a path token resolves inside `project_root`, given the shell's
@@ -4840,6 +4893,52 @@ mod tests {
             check_source_file_access_at_root("cat `pwd`/probe.sh").is_some(),
             "so is a backtick substitution"
         );
+    }
+    /// FR-15: `cat > $S/opt.sh <<EOF` reads nothing, but its written path starts with an
+    /// expansion the gate cannot resolve, so it is refused. The refusal stands; the advice
+    /// must not tell the caller to `read_file` a file they are creating.
+    #[test]
+    fn a_clause_that_only_writes_an_unresolved_path_gets_write_advice() {
+        for cmd in [
+            "cat > $S/opt.sh <<EOF\nx=1\nEOF",
+            "cat >> $S/opt.sh <<EOF\nx=1\nEOF",
+            "cat >$S/opt.sh <<EOF\nx=1\nEOF",
+            "cat 2>/dev/null > ${S}/opt.sh <<EOF\nx=1\nEOF",
+        ] {
+            let hint = check_source_file_access_at_root(cmd)
+                .unwrap_or_else(|| panic!("the verdict must not move for {cmd:?}"));
+            assert!(hint.contains("only WRITES"), "{cmd:?}: {hint}");
+            assert!(hint.contains("create_file"), "{cmd:?}: {hint}");
+            assert!(
+                !hint.contains("use read_file(path"),
+                "{cmd:?}: advice to read a file the clause is writing: {hint}"
+            );
+        }
+    }
+
+    /// The control that makes the test above discriminate: a clause that READS an
+    /// unresolved path, alone or beside a redirect, keeps the read advice.
+    #[test]
+    fn a_clause_that_reads_an_unresolved_path_keeps_the_read_advice() {
+        for cmd in [
+            "cat $S/opt.sh",
+            "cat $S/a.sh > $S/b.sh",
+            "cat src/main.rs > $S/copy.sh",
+            "cat > $S/opt.sh $T/other.sh",
+        ] {
+            let hint = check_source_file_access_at_root(cmd)
+                .unwrap_or_else(|| panic!("{cmd:?} must still block"));
+            assert!(!hint.contains("only WRITES"), "{cmd:?}: {hint}");
+            assert!(hint.contains("read_file"), "{cmd:?}: {hint}");
+        }
+    }
+
+    /// What the write advice promises must be true: the same path written out literally, outside
+    /// the project, is allowed.
+    #[test]
+    fn a_literal_write_outside_the_project_is_allowed() {
+        let root = Path::new("/home/u/work/myproj");
+        assert!(check_source_file_access("cat > /tmp/s/opt.sh <<EOF\nx=1\nEOF", root).is_none());
     }
 
     #[test]
