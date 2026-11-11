@@ -326,6 +326,9 @@ Operator, 2026-11-11:
 - Spec v5 approved. Cutover: one migration window after the build and `codescout-37`'s
   implementation, with every session stopped; best-effort recovery from the old setup,
   then the switch. Migration is second priority to the design.
+- The librarian is an integral part of codescout: the `librarian` cargo feature is removed,
+  and the librarian is on even when no semantic search is available (2026-11-11, during
+  planning; Plan A Task 1).
 
 Designer's calls, open to correction:
 
