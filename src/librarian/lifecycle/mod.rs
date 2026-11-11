@@ -3,6 +3,7 @@
 
 pub mod entry;
 pub mod layout;
+pub mod naming;
 pub mod relations;
 pub mod schema;
 #[cfg(test)]

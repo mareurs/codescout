@@ -1,0 +1,206 @@
+//! Naming a new entry and finding where an archived one goes.
+//!
+//! Pure string logic: no filesystem access. Plan L-B calls [`entry_stem`] and
+//! [`archive_rel_path`]; neither decides *whether* to create or archive anything.
+
+use chrono::NaiveDate;
+
+use crate::librarian::identity::key::{Key, KeyError};
+use crate::librarian::lifecycle::layout::{Placement, Role, ARCHIVE_DIR, TRACKERS_DIR};
+use crate::librarian::lifecycle::schema::KeyStyle;
+
+/// The longest slug, in bytes (a slug is ASCII, so bytes are characters).
+pub const SLUG_MAX: usize = 60;
+
+/// A canonical key fragment from a free-text title.
+///
+/// The title is ASCII-lowercased, and every run of characters outside `[a-z0-9]` (every
+/// non-ASCII character included) becomes one `-`. Leading and trailing `-` are dropped. A
+/// result over [`SLUG_MAX`] is cut at the last `-` inside the first [`SLUG_MAX`] bytes, or
+/// hard at [`SLUG_MAX`] when there is none. `None` when no letter or digit is left.
+pub fn slug(title: &str) -> Option<String> {
+    let mut out = String::with_capacity(title.len());
+    let mut pending_dash = false;
+    for c in title.chars() {
+        let c = c.to_ascii_lowercase();
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            if pending_dash && !out.is_empty() {
+                out.push('-');
+            }
+            pending_dash = false;
+            out.push(c);
+        } else {
+            pending_dash = true;
+        }
+    }
+    if out.len() > SLUG_MAX {
+        // `out` is pure ASCII, so every byte index is a char boundary.
+        let cut = if out.as_bytes()[SLUG_MAX] == b'-' {
+            SLUG_MAX
+        } else {
+            out[..SLUG_MAX].rfind('-').unwrap_or(SLUG_MAX)
+        };
+        out.truncate(cut);
+        out.truncate(out.trim_end_matches('-').len());
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// The filename stem (and so the key) of a new entry.
+///
+/// `Dated` gives `<YYYY-MM-DD>-<slug>`, `Name` gives `<slug>`. The result goes through
+/// [`Key::parse`], so an empty or non-canonical `slug` is an error for both styles: a dated
+/// stem built from an empty slug ends in `-`, and a date prefix cannot make a bad tail valid.
+pub fn entry_stem(style: KeyStyle, created: NaiveDate, slug: &str) -> Result<Key, KeyError> {
+    match style {
+        KeyStyle::Dated => Key::parse(&format!("{}-{slug}", created.format("%Y-%m-%d"))),
+        KeyStyle::Name => Key::parse(slug),
+    }
+}
+
+/// The repo-relative path of an entry directly in `collection_dir`.
+pub fn entry_rel_path(collection_dir: &str, stem: &Key) -> String {
+    format!("{collection_dir}/{}.md", stem.as_str())
+}
+
+/// Where an un-archived file moves when it is archived; `None` when it is already archived.
+///
+/// An entry goes to `<collection_dir>/archive/<file name>`: grouping subfolders flatten. A
+/// collection readme stands for its whole folder, which moves to
+/// `docs/trackers/<lifecycle>/archive/<collection>`.
+pub fn archive_rel_path(rel_path: &str, placement: &Placement) -> Option<String> {
+    if placement.archived {
+        return None;
+    }
+    match placement.role {
+        Role::Entry => {
+            let file = rel_path.replace('\\', "/");
+            let file = file.rsplit('/').next().unwrap_or_default();
+            Some(format!("{}/{ARCHIVE_DIR}/{file}", placement.collection_dir))
+        }
+        Role::CollectionReadme => Some(format!(
+            "{TRACKERS_DIR}/{}/{ARCHIVE_DIR}/{}",
+            placement.lifecycle.dir_name(),
+            placement.collection.as_str()
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::librarian::lifecycle::layout::place;
+    use crate::librarian::lifecycle::schema::KeyStyle;
+    use crate::librarian::lifecycle::testkit::d;
+
+    #[test]
+    fn slugs_are_canonical_or_absent() {
+        assert_eq!(
+            slug("frictions/ is NOT one file per entry!").as_deref(),
+            Some("frictions-is-not-one-file-per-entry")
+        );
+        assert_eq!(slug("???"), None);
+        assert_eq!(slug("Ünïcode"), Some("n-code".into()));
+        assert_eq!(slug("ÜÏ"), None);
+        let long = slug(&"word ".repeat(30)).unwrap();
+        assert!(long.len() <= SLUG_MAX && !long.ends_with('-'));
+    }
+
+    #[test]
+    fn slugs_cut_at_a_word_boundary_or_hard_at_the_cap() {
+        let long = slug(&"word ".repeat(30)).unwrap();
+        assert_eq!(long, ["word"; 12].join("-"));
+        // No `-` inside the first SLUG_MAX bytes: hard cut.
+        let solid = slug(&"a".repeat(100)).unwrap();
+        assert_eq!(solid, "a".repeat(SLUG_MAX));
+        // A boundary exactly at the cap keeps every whole word.
+        let exact = format!("{} tail", "b".repeat(SLUG_MAX));
+        assert_eq!(slug(&exact).unwrap(), "b".repeat(SLUG_MAX));
+        // Runs collapse and the ends are trimmed.
+        assert_eq!(slug("  --A__b  ").as_deref(), Some("a-b"));
+        assert_eq!(slug(""), None);
+    }
+
+    #[test]
+    fn stems_follow_the_key_style() {
+        assert_eq!(
+            entry_stem(KeyStyle::Dated, d("2026-11-11"), "a-friction")
+                .unwrap()
+                .as_str(),
+            "2026-11-11-a-friction"
+        );
+        assert_eq!(
+            entry_stem(KeyStyle::Name, d("2026-11-11"), "declared-not-wired")
+                .unwrap()
+                .as_str(),
+            "declared-not-wired"
+        );
+        assert!(entry_stem(KeyStyle::Name, d("2026-11-11"), "deadbeefcafe1234").is_err());
+    }
+
+    #[test]
+    fn a_stem_refuses_an_empty_or_non_canonical_slug() {
+        for style in [KeyStyle::Dated, KeyStyle::Name] {
+            for bad in ["", "-", "-a", "a-", "a--b", "A", "a b", "ü"] {
+                assert!(
+                    entry_stem(style, d("2026-11-11"), bad).is_err(),
+                    "{style:?} {bad:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn entry_paths_join_the_collection_dir_and_stem() {
+        let stem = entry_stem(KeyStyle::Dated, d("2026-11-11"), "x").unwrap();
+        assert_eq!(
+            entry_rel_path("docs/trackers/ledgers/frictions", &stem),
+            "docs/trackers/ledgers/frictions/2026-11-11-x.md"
+        );
+    }
+
+    #[test]
+    fn archive_paths_are_the_nearest_sibling_archive() {
+        let e = place("docs/trackers/ledgers/frictions/reports/2026-01-01-r.md")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            archive_rel_path(
+                "docs/trackers/ledgers/frictions/reports/2026-01-01-r.md",
+                &e
+            )
+            .as_deref(),
+            Some("docs/trackers/ledgers/frictions/archive/2026-01-01-r.md")
+        );
+        let c = place("docs/trackers/streams/x/readme.md").unwrap().unwrap();
+        assert_eq!(
+            archive_rel_path("docs/trackers/streams/x/readme.md", &c).as_deref(),
+            Some("docs/trackers/streams/archive/x")
+        );
+        let done = place("docs/trackers/streams/archive/x/readme.md")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            archive_rel_path("docs/trackers/streams/archive/x/readme.md", &done),
+            None
+        );
+    }
+
+    #[test]
+    fn archive_paths_normalise_backslashes_and_skip_archived_entries() {
+        let e = place("docs/trackers/temp/t/a/b/2026-01-01-r.md")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            archive_rel_path("docs\\trackers\\temp\\t\\a\\b\\2026-01-01-r.md", &e).as_deref(),
+            Some("docs/trackers/temp/t/archive/2026-01-01-r.md")
+        );
+        let gone = place("docs/trackers/temp/t/archive/2026-01-01-r.md")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            archive_rel_path("docs/trackers/temp/t/archive/2026-01-01-r.md", &gone),
+            None
+        );
+    }
+}
