@@ -1898,6 +1898,10 @@ pub(crate) async fn handle_successful_output_with(
 
             let cmd_type = detect_command_type(original_command);
             let tee_present = unfiltered_ref.is_some();
+            // A producer that failed behind a filter that did not (`cargo test | tail`): the reply's
+            // `exit_code` is the filter's, so a summary typed `test` with `passed: 0` would read as a
+            // clean run of nothing. See `states_a_test_verdict`.
+            let producer_failed = late_keys.producer_exit_code.is_some_and(|code| code != 0);
             // The summary is built by `fit_summary` against the SERIALIZED response it will be:
             // each render is the final object, handle and late keys included, so what is measured is
             // what is returned. The streams are bounded in escaped bytes there, from the raw text,
@@ -1906,7 +1910,21 @@ pub(crate) async fn handle_successful_output_with(
             super::super::command_summary::fit_summary(|budget| {
                 let cmd_summary = match cmd_type {
                     CommandType::Test => {
-                        summarize_test_output_within(&raw_stdout, &raw_stderr, exit_code, budget)
+                        let summary = summarize_test_output_within(
+                            &raw_stdout,
+                            &raw_stderr,
+                            exit_code,
+                            budget,
+                        );
+                        // The text is the only news when the producer failed and the text holds no
+                        // verdict: typed from what it is, with its head and tail.
+                        if producer_failed
+                            && !super::super::command_summary::states_a_test_verdict(&summary)
+                        {
+                            summarize_generic_within(&raw_stdout, &raw_stderr, exit_code, budget)
+                        } else {
+                            summary
+                        }
                     }
                     CommandType::Build => {
                         summarize_build_output_within(&raw_stdout, &raw_stderr, exit_code, budget)

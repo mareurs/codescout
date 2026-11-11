@@ -6626,6 +6626,52 @@ async fn a_pipe_reports_the_producers_exit_code_beside_the_filters() {
         );
     }
 }
+/// A piped `cargo test` whose build fails ends in a producer status of 101 and a filter status of 0.
+/// When the filtered text is over the inline budget and holds no libtest verdict, the reply was
+/// typed `test` and said `exit_code: 0, passed: 0, stdout: ""`: read at a glance, a clean run with
+/// nothing in it. The text is the only news there is, so such a reply is typed from its content and
+/// keeps the head and tail of that text. The two controls keep the scope: a run that does state a
+/// verdict, and a producer that succeeded, are still typed `test`.
+/// BUG docs/issues/2026-11-09-run-command-test-summary-shows-exit-0-passed-0-after-a-failed-build.md
+#[cfg(unix)]
+#[tokio::test]
+async fn a_failed_producer_with_no_test_verdict_is_not_typed_as_a_test_run() {
+    let (_dir, ctx) = project_ctx().await;
+    // `cargo test` sits inside the quotes so the command is typed `test` without running cargo.
+    let no_verdict =
+        "sh -c 'echo cargo test >/dev/null; yes x | head -c 20000; exit 101' | tail -c 20000";
+    let result = RunCommand
+        .call(json!({ "command": no_verdict }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["producer_exit_code"], 101, "{result}");
+    assert_ne!(result["type"], "test", "{result}");
+    assert!(result.get("passed").is_none(), "{result}");
+    assert!(
+        result["stdout"].as_str().is_some_and(|s| s.contains('x')),
+        "the head and tail of the text must be in the reply: {result}"
+    );
+    assert!(result["output_id"].is_string(), "{result}");
+
+    let with_verdict = "sh -c 'echo cargo test >/dev/null; yes x | head -c 20000; echo \"test result: FAILED. 2 passed; 1 failed; 0 ignored\"; exit 101' | tail -c 20000";
+    let result = RunCommand
+        .call(json!({ "command": with_verdict }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["type"], "test", "{result}");
+    assert_eq!(result["passed"], 2, "{result}");
+    assert_eq!(result["failed"], 1, "{result}");
+    assert_eq!(result["producer_exit_code"], 101, "{result}");
+
+    let producer_passed =
+        "sh -c 'echo cargo test >/dev/null; yes x | head -c 20000; exit 0' | tail -c 20000";
+    let result = RunCommand
+        .call(json!({ "command": producer_passed }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["type"], "test", "{result}");
+    assert_eq!(result["producer_exit_code"], 0, "{result}");
+}
 
 /// The status is a bonus and never costs the capture: a producer that cannot be wrapped, or a
 /// compound command whose wrapped text the shell rejects, runs as written with its capture and no
