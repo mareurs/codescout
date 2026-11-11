@@ -505,6 +505,42 @@ mod tests {
     }
 
     #[test]
+    fn a_stream_with_an_unreadable_entry_file_is_never_all_terminal() {
+        let done = doc(
+            "docs/trackers/streams/s/2026-10-01-done.md",
+            &entry("done", "closed: 2026-10-03\n", ""),
+        );
+        let all_terminal = |docs: Vec<DocInput>| {
+            run(docs)
+                .iter()
+                .any(|x| matches!(x, Finding::StreamAllTerminal { .. }))
+        };
+        // The guard is not always on: only valid terminal entries still read as all terminal.
+        assert!(all_terminal(vec![
+            doc("docs/trackers/streams/s/readme.md", STREAM),
+            done.clone(),
+        ]));
+        // (i) an open entry file whose name is no key.
+        assert!(!all_terminal(vec![
+            doc("docs/trackers/streams/s/readme.md", STREAM),
+            done.clone(),
+            doc(
+                "docs/trackers/streams/s/Bad_Stem.md",
+                &entry("open", "", "")
+            ),
+        ]));
+        // (ii) an open entry file whose frontmatter does not parse.
+        assert!(!all_terminal(vec![
+            doc("docs/trackers/streams/s/readme.md", STREAM),
+            done,
+            doc(
+                "docs/trackers/streams/s/2026-10-02-broken.md",
+                "---\nentry_kind: [unclosed\n---\n",
+            ),
+        ]));
+    }
+
+    #[test]
     fn a_stream_without_exit_is_a_finding_from_its_schema_problem() {
         let no_exit = "---\ntitle: S\nentry_kinds: [f]\nstatuses: {open: open, done: terminal}\ninitial_status: open\n---\n";
         let f = run(vec![doc("docs/trackers/streams/s/readme.md", no_exit)]);

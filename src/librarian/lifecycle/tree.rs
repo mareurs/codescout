@@ -43,9 +43,10 @@ pub struct CollectionNode {
     pub archived: bool,
     pub schema: CollectionSchema,
     pub entries: Vec<EntryNode>,
-    /// Repo-relative paths of the entries placed in this collection (archived part included)
-    /// whose frontmatter failed `parse_entry`, in path order. They are in no `entries`, so a
-    /// check that reasons about the whole stream must know they exist.
+    /// Repo-relative paths of the entry files placed in this collection (archived part
+    /// included) that did not become an `entries` node, in path order: frontmatter that fails
+    /// `parse_entry`, a frontmatter block that does not parse, or a file name that is no key.
+    /// A check that reasons about the whole stream must know they exist.
     pub unparsed: Vec<String>,
 }
 
@@ -121,7 +122,9 @@ impl LifecycleTree {
         let mut collections: BTreeMap<String, CollectionNode> = BTreeMap::new();
         // Collections whose readme failed: their entries are skipped, not orphaned.
         let mut failed: BTreeSet<String> = BTreeSet::new();
-        let mut pending: Vec<(&DocInput, Placement, Frontmatter)> = Vec::new();
+        // An entry file is queued with its frontmatter, or with `None` when the frontmatter
+        // block did not parse: the second pass still has to count it against its collection.
+        let mut pending: Vec<(&DocInput, Placement, Option<Frontmatter>)> = Vec::new();
 
         for doc in &docs {
             let parsed = frontmatter::parse(&doc.text);
@@ -150,14 +153,17 @@ impl LifecycleTree {
                         rel_path: doc.rel_path.clone(),
                         detail: e.to_string(),
                     });
-                    if placement.role == Role::CollectionReadme {
-                        failed.insert(placement.collection_dir);
+                    match placement.role {
+                        Role::CollectionReadme => {
+                            failed.insert(placement.collection_dir);
+                        }
+                        Role::Entry => pending.push((doc, placement, None)),
                     }
                     continue;
                 }
             };
             match placement.role {
-                Role::Entry => pending.push((doc, placement, fm)),
+                Role::Entry => pending.push((doc, placement, Some(fm))),
                 Role::CollectionReadme => match parse_schema(placement.lifecycle, &fm) {
                     Ok(schema) => {
                         collections
@@ -185,14 +191,23 @@ impl LifecycleTree {
 
         for (doc, placement, fm) in pending {
             let Some(collection) = collections.get_mut(&placement.collection_dir) else {
-                if !failed.contains(&placement.collection_dir) {
+                // A file with broken frontmatter already has its `Frontmatter` problem: no
+                // orphan on top of it.
+                if fm.is_some() && !failed.contains(&placement.collection_dir) {
                     problems.push(TreeProblem::OrphanEntry(doc.rel_path.clone()));
                 }
+                continue;
+            };
+            // Whatever keeps a file from becoming an `EntryNode` lists it in `unparsed`, so no
+            // collection-level check judges the stream without it.
+            let Some(fm) = fm else {
+                collection.unparsed.push(doc.rel_path.clone());
                 continue;
             };
             let key = match key_of(&doc.rel_path) {
                 Ok(key) => key,
                 Err(e) => {
+                    collection.unparsed.push(doc.rel_path.clone());
                     problems.push(TreeProblem::Placement(PlacementError::BadKey {
                         rel_path: doc.rel_path.clone(),
                         error: e,
@@ -540,6 +555,58 @@ mod tests {
                 if rel_path == "docs/trackers/ledgers/l/2026-10-01-a.md"
         ));
         assert!(t.closed_dates.is_empty());
+    }
+
+    #[test]
+    fn an_entry_file_the_tree_cannot_read_is_listed_unparsed_and_keeps_its_problem_once() {
+        let t = LifecycleTree::build([
+            doc("docs/trackers/streams/s/readme.md", STREAM),
+            doc(
+                "docs/trackers/streams/s/2026-10-01-done.md",
+                &entry("done", "closed: 2026-10-03\n", ""),
+            ),
+            doc(
+                "docs/trackers/streams/s/Bad_Stem.md",
+                &entry("open", "", ""),
+            ),
+            doc(
+                "docs/trackers/streams/s/2026-10-02-broken.md",
+                "---\nentry_kind: [unclosed\n---\n",
+            ),
+        ]);
+        assert_eq!(
+            t.collections[0].unparsed,
+            [
+                "docs/trackers/streams/s/2026-10-02-broken.md",
+                "docs/trackers/streams/s/Bad_Stem.md"
+            ]
+        );
+        assert_eq!(t.collections[0].entries.len(), 1);
+        // Each file keeps its one problem and gains no second one (no orphan, no entry error).
+        assert_eq!(t.problems.len(), 2, "{:?}", t.problems);
+        assert!(t.problems.iter().any(|p| matches!(
+            p,
+            TreeProblem::Placement(PlacementError::BadKey { rel_path, .. })
+                if rel_path == "docs/trackers/streams/s/Bad_Stem.md"
+        )));
+        assert!(t.problems.iter().any(|p| matches!(
+            p,
+            TreeProblem::Frontmatter { rel_path, .. }
+                if rel_path == "docs/trackers/streams/s/2026-10-02-broken.md"
+        )));
+    }
+
+    #[test]
+    fn a_broken_entry_in_a_folder_with_no_readme_is_still_only_a_frontmatter_problem() {
+        let t = LifecycleTree::build([doc(
+            "docs/trackers/streams/no-readme/2026-10-02-broken.md",
+            "---\nentry_kind: [unclosed\n---\n",
+        )]);
+        assert!(t.collections.is_empty());
+        assert!(matches!(
+            t.problems.as_slice(),
+            [TreeProblem::Frontmatter { .. }]
+        ));
     }
 
     #[test]
