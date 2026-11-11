@@ -23,6 +23,7 @@ pub mod artifact_store;
 pub mod embedding;
 pub mod entry_token;
 pub mod freshness;
+pub mod identity;
 pub mod indexer;
 pub mod preview;
 pub(crate) mod read_door;
