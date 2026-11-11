@@ -286,24 +286,29 @@ pub const MAX_DECLARED_SECTION_BYTES: usize = 2500;
 /// left under the ceilings below are 120, 122, 126 and 127 B. The block-seam fix (every section
 /// block now opens with `\n`, `trailing_block`) adds 1 B per section block; how the drift above
 /// splits between that and earlier edits was not measured for these shapes. The constants below
-/// still read the 2026-10-17 figures on purpose: the ceilings were not raised.
+/// read the 2026-11-11 figures (next paragraph), not these.
+/// RE-MEASURED 2026-11-11 after `tracker-conventions.md` was cut from 55,261 B to 21,928 B (the
+/// guide returned 56.6 KB to a direct `get_guide` call and the harness saved it to disk). Wrapped
+/// delivery, computed from the section bodies and the `section_block` wrapper; the computation
+/// read 8,501 B for `append_entry` and 3,339 B for `augment` where the end-to-end test measured
+/// 8,517 B and 3,343 B, so it runs 4-16 B low: `append_entry` ~5,394 B, `update_entry` ~4,104 B,
+/// `augment` ~2,092 B, `link` ~1,315 B. The ceilings below are those plus 128 B. `update_entry`
+/// and `link` were computed, not read from a throwaway `eprintln!`; the test fails with the
+/// measured figure if one is low.
 #[cfg(test)]
-pub(crate) const WRITE_CEILING_APPEND_ENTRY: usize = 12_928 + 128;
+pub(crate) const WRITE_CEILING_APPEND_ENTRY: usize = 5_394 + 128;
 #[cfg(test)]
-pub(crate) const WRITE_CEILING_UPDATE_ENTRY: usize = 9_077 + 128;
+pub(crate) const WRITE_CEILING_UPDATE_ENTRY: usize = 4_104 + 128;
 #[cfg(test)]
-pub(crate) const WRITE_CEILING_AUGMENT: usize = 5_261 + 128;
+pub(crate) const WRITE_CEILING_AUGMENT: usize = 2_092 + 128;
 #[cfg(test)]
-pub(crate) const WRITE_CEILING_LINK: usize = 2_591 + 128;
+pub(crate) const WRITE_CEILING_LINK: usize = 1_315 + 128;
 /// A floor for `append_entry`, between its section BODIES and what it delivers wrapped: it fails
-/// a delivered-bytes measure that forgot the wrappers. On 2026-10-17 bodies were 10,641 B and the
-/// wrapped delivery 12,928 B (12,936 B on 2026-10-18), a 2,287 B wrapper share. On 2026-11-08 the
-/// stale "not while the ledger's own commits are unpushed" bullet left tracker-conventions §Entry
-/// ids (the refusal was removed 2026-09-11), and the wrapped delivery measured 11,631 B; the same
-/// wrapper share puts the bodies near 9,344 B. The floor moved from 12,000 to 10,500 B to stay
-/// between the two; the ceilings above were not raised.
+/// a delivered-bytes measure that forgot the wrappers. On 2026-11-11 the bodies were 3,100 B and
+/// the wrapped delivery ~5,394 B, a ~2,300 B wrapper share (2026-10-17: bodies 10,641 B, wrapped
+/// 12,928 B). The floor moved from 10,500 to 4,000 B to stay between the two.
 #[cfg(test)]
-pub(crate) const WRITE_FLOOR_APPEND_ENTRY: usize = 10_500;
+pub(crate) const WRITE_FLOOR_APPEND_ENTRY: usize = 4_000;
 
 /// A guide section with its declarations resolved.
 #[derive(Debug, Clone)]

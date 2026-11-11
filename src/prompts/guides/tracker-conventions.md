@@ -1,14 +1,15 @@
 # Tracker Conventions
 
-codescout distinguishes three long-lived markdown surfaces. **Bugs** live
-in `docs/issues/` — single-file, one-incident, opened and archived per
-fix. **Trackers** live in `docs/trackers/` — multi-entry living state
-(session logs, observation tables, ADR indexes) maintained across many
-sessions. **Specs / plans / ADRs** live in `docs/specs/`, `docs/plans/`,
-`docs/adrs/` — design artifacts. All three are indexed by the librarian:
-discover them with `doc(action="find", kind="bug" | "tracker" | …)`
-and read them with `doc(action="get", id=...)`. Never edit a
-tracker file by raw path lookup — go through the catalog.
+codescout keeps three long-lived markdown surfaces: **bugs** (`docs/issues/`, one file per
+incident), **trackers** (`docs/trackers/`, multi-entry living state — session logs,
+observation tables, ADR indexes) and **specs / plans / ADRs** (`docs/specs/`,
+`docs/plans/`, `docs/adrs/`). The librarian indexes all three: find with
+`doc(action="find", kind="bug" | "tracker" | …)`, read with `doc(action="get", id=...)`.
+Never edit a tracker file by raw path lookup — go through the catalog.
+
+This guide keeps each rule and its trap. The full wording, the derivations and a pointer to
+every other page that states the same thing are in
+`docs/conventions/tracker-conventions-derivations.md`, under the same headings.
 
 ## Bug files (docs/issues/)
 <!-- serves: doc.create(path~docs/issues/) -->
@@ -27,9 +28,7 @@ One file per bug.
 **Frontmatter:** every bug file has `kind: bug` plus a `status:` field.
 The librarian classifier auto-recognizes the file on next reindex.
 
-**Status vocabulary** (`status:` field on bug files):
-
-| Value | Meaning |
+| Status | Meaning |
 |---|---|
 | `open` | Logged, investigation not started or paused |
 | `taken` | A **live** session holds this right now. Requires `claimed_by: <sessionId>`; `doctor`'s `claim_liveness` resolves it |
@@ -42,8 +41,8 @@ The librarian classifier auto-recognizes the file on next reindex.
 ### Claiming and releasing a bug
 <!-- serves: doc.get(path~docs/issues/), doc.find(path~docs/issues/) -->
 
-**Claiming a bug.** Set `taken` together with your own sessionId, through the catalog —
-a raw frontmatter edit does not reach it:
+**Claiming a bug.** Set `taken` with your own sessionId through the catalog — a raw
+frontmatter edit does not reach it:
 
 ```
 doc(action="update", id=…,
@@ -51,114 +50,47 @@ doc(action="update", id=…,
                 "extra": {"claimed_by": "<sessionId>", "claimed_at": "YYYY-MM-DD"}})
 ```
 
-You already know your sessionId without any API call: the harness makes it a path
-component of your scratchpad directory, `$TMPDIR/claude-<uid>/<project>/<SESSION-ID>/scratchpad`.
-
-**Store the sessionId and nothing else.** Not the session name — that is registry-minted
-with `nameSource: "derived"` and re-minted by compaction, resume, or a restart under
-another profile, so a name frozen into frontmatter decays silently while the sessionId
-does not. Not the pid or socket path either; both are derived at read time.
-
-**Releasing** is the same call with `status: "investigating"` and
-`extra: {"claimed_by": null, "claimed_at": null}` (a null value deletes the key).
-Release to `investigating`, not `open` — work probably happened and the body records it.
-
-`claimed_at` is informational. Liveness is decided by resolving `claimed_by`, never by
-the age of the claim.
-
-`closed:` stays empty at creation — fill in `YYYY-MM-DD` only when
-status flips to `fixed` / `mitigated` / `wontfix`.
+Store the sessionId and nothing else (your scratchpad path carries it). **Release** with
+the same call: `status: "investigating"` and `extra: {"claimed_by": null, "claimed_at": null}`.
+`closed:` stays empty until the bug is `fixed` / `mitigated` / `wontfix`. The procedure
+also lives in `docs/issues/_TEMPLATE.md`.
 
 ### The unverified caveat, made queryable
 <!-- serves: doc.get(path~docs/issues/), doc.find(path~docs/issues/) -->
 
-**`unverified:` — the caveat, made queryable.** Add it whenever the `status` overstates
-what was actually established: no regression test, root cause not addressed, a claim not
-re-checked since a rebuild, a fix applied only to a gitignored file, or a blocker that has
-since become an obsolete rule. **Absence means nothing outstanding — never add it empty**,
-because presence is what a query filters on.
-
-**A settled doubt keeps its text — open the caveat with a DISCHARGE MARKER.** `CLEARED`,
-`REFUTED`, `RESOLVED` or `WITHDRAWN` as the first word, uppercase:
-`unverified: 'CLEARED <date>. Was: the selector still ignored scope.'` `doctor`'s
-`terminal_status_with_caveat` reads that as answered and stops reporting the record, so
-silencing a settled caveat keeps the sentence recording what was doubted and how it
-resolved.
-
-**Leading and uppercase are both required**, because prose and field share a vocabulary:
-*"resolved the crash by widening the lock"* is a sentence, not a declaration. **And do not
-use a marker to record an ESCALATION** — a caveat that got worse must keep reporting, which
-is why `MEASURED` is deliberately not one. An unmarked caveat keeps reporting.
+**`unverified:` — the caveat, made queryable.** Add it when `status` overstates what was
+established. Absence means nothing outstanding, so never add it empty. A settled doubt keeps
+its text under a DISCHARGE MARKER as the first word, uppercase: `CLEARED`, `REFUTED`,
+`RESOLVED` or `WITHDRAWN`. Never mark an escalation: a caveat that got worse must keep
+reporting. Examples: `docs/issues/_TEMPLATE.md`.
 
 ### Settled caveats — STANDING and TRACKED
 
-**Two more first words, and they are opposites.** `STANDING` marks a limit NO action can
-settle — a property no test can observe, a cause that will never be established — and
-silences the record like the four verbs: this check is a worklist, and a permanent limit is
-not work. `TRACKED <16-hex id>` is for remaining WORK — a second half, a guard not built:
-move the work into an artifact whose own status a query reads (usually an open bug file) and
-cite it, `unverified: 'TRACKED <id of the open bug> — the progress surface.'` `doctor` stays
-silent only while that artifact exists and is not terminal; when it closes, or a move re-keys
-it, the record reports again, saying the work lost its home. **Never write `STANDING` over
-work** — it deletes the only surface still reporting it.
-
-A blocker stated only in prose is unreachable by a query, so
-`doc(action="find", kind="bug", status="open")` — the triage query — hides a `fixed`
-record whose own body admits it has no test and does not prevent recurrence.
-
-The system's scarce resource is not candour; it is **legibility**. Authors already write
-the caveat. Write it where a query can read it.
+`STANDING` marks a limit NO action can settle; it silences the record. `TRACKED <16-hex id>`
+marks remaining WORK moved into an artifact whose status a query reads, and stays silent only
+while that artifact is open. **Never write `STANDING` over work** — it deletes the only
+surface still reporting it.
 
 ### Trigger rules and capture discipline
 <!-- serves: doc.create(path~docs/issues/) -->
 
-**Trigger rules — open a bug file for ANY bug noticed during work:**
+**Trigger rules — open a bug file for ANY bug noticed during work:** the moment you notice
+it. The cases that do and do not qualify are listed in `docs/issues/_TEMPLATE.md`.
 
-- ✓ User explicitly asks ("log this", "open a tracker")
-- ✓ Bug blocking the current task (fix-now or parking-lot)
-- ✓ Incidental bug we won't fix in the current session
-- ✓ Just-fixed bug whose investigation is worth preserving
-- ✓ Tool quirks / misbehaviors
-- ✗ Pure typos / one-token corrections — commit message is enough
-- ✗ Feature ideas / refactors — those go in `docs/trackers/` or `docs/plans/`
-- ✗ Subjective dislikes that aren't bugs
-
-**Capture discipline:** add the file the moment the bug is noticed —
-don't wait until task end.
-
-**Archive trigger:** move the file into `docs/issues/archive/` once the fix is
-verified on `experiments` — gate green (`./scripts/gate.sh`, which `CLAUDE.md` § *Development
-Commands* prescribes) and a regression test in place. Reaching `master` is **not** required:
-`experiments` is never deleted, so an unmerged fix is not at risk of being lost, and
-holding the file back only grows a pile of `fixed`-but-unarchived bugs that no query
-ever surfaces (`doc(action="find", kind="bug", status="open")` filters on
-`status`, not on path).
-
-The file MUST carry the fix SHA when archived experiments-only, because nothing
-re-reads `archive/`: label it **`experiments`**, since an `experiments` SHA orphans on
-rebase and an unlabelled one in `archive/` becomes an untraceable string.
+**Archive trigger:** move the file into `docs/issues/archive/` once the fix is verified on
+`experiments` — gate green and a regression test in place. Archived experiments-only, the
+file MUST carry the fix SHA labelled **`experiments`**.
 
 ### Closing a bug — patch-id and fix provenance
 
-**And record a `patch-id` next to it, because the sentence above describes a wound with
-no remedy.** `git show <sha> | git patch-id --stable` is a content hash of the commit's
-diff: it is invariant under rebase and cherry-pick, so it still finds the change after the
-SHA dies. Resolve one with redirects, not
-pipes — a pipe from an unbounded `git log -p` into a trimmer is refused by Iron Law 3 when the
-capture cannot be kept (always in the background), and a capture keeps at most 4 MiB of it:
+**Record a `patch-id` beside the SHA:** `git show <sha> | git patch-id --stable` hashes the
+diff, so it survives rebase and cherry-pick. Redirect to a file, not a pipe (Iron Law 3);
+the recipe is in `docs/RELEASE.md` § *Citing a fix: SHA + patch-id*.
 
-```
-git log --all -p > /tmp/all.patch
-git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
-grep <first-12-of-patch-id> /tmp/patch-ids.txt
-```
-
-**Write the pair as a `## Fix provenance` section — the SHAPE is what `doctor` reads, and
-prose does not discharge it.** `librarian(action="doctor")`'s
-`terminal_status_without_fix_anchor` refuses a `fixed` or `mitigated` record that declares
-no pointer, and its sharpest measurement is that a loose hash in prose is **worse than
-none**: a record carrying one does not merely lack an anchor, it *reads as* anchored, so a
-reader scanning for provenance finds the commit the bug was OBSERVED at and stops looking.
+**Write the pair as a `## Fix provenance` section.** `doctor`'s
+`terminal_status_without_fix_anchor` reads the SHAPE and refuses a `fixed` or `mitigated`
+record without it. A loose hash in prose is worse than none: the record then reads as
+anchored.
 
 ````markdown
 ## Fix provenance
@@ -167,107 +99,41 @@ reader scanning for provenance finds the commit the bug was OBSERVED at and stop
 - **patch-id:** `e9f8df63b911`
 ````
 
-**Plural, because a fix is not always one commit.** Repeat the pair; each `- **patch-id:**`
-binds to the `- **SHA:**` above it, not to the first in the file. Do not use a table: it
-is invisible to every check, so anchors recorded in one are verified by nothing.
+- **Plural:** repeat the pair; each `- **patch-id:**` binds to the `- **SHA:**` above it.
+  No tables — no check reads one.
+- **Another repository:** `<repo>:<sha>`; the dead-pointer check skips it.
+- **A fenced example is a quotation, not a declaration.**
+- **No commit at all:** put `no_fix_commit: "<reason>"` in frontmatter. An empty value does
+  not discharge it.
 
-**A fix that landed in another repository takes the `<repo>:<sha>` prefix** —
-`- **SHA:** `codescout-companion:b8ffa8b`` — which the dead-pointer check skips rather than
-reporting unresolvable, since it cannot see that repo's object DB.
-
-**A fenced example is a quotation, not a declaration** — including the one just above, which
-is why quoting the shape here costs nothing. The corollary is the trap: a block you fence
-inside your own bug file declares *nothing*, and the record still reads as anchored to a
-human.
-
-**If the record genuinely closed with no commit** — a mitigation that was a doc note, a
-defect that turned out to be environmental — say so in frontmatter rather than leaving the
-section absent, which is indistinguishable from forgetting:
-
-```yaml
-no_fix_commit: "mitigation was a doc note; nothing was committed"
-```
-
-An empty value does not discharge it. The check wants the reason, not the field.
-
-**A merge commit's patch-id is never citable — but it is not always EMPTY, and the
-difference decides whether you notice.** For a **clean** merge `git show <merge>` emits
-the message with no diff (the tree is derivable from the parents, so there is nothing to
-print), and `git patch-id` given no patch prints **nothing and exits 0** — the pipeline
-returns empty, with no error. For a merge that **resolved a conflict**, the tree is *not*
-derivable from the parents, so `git show` emits a **combined diff** and the pipeline
-returns a well-formed 40-hex value that hashes only the resolution hunks — not the change
-the merge delivers, matching no constituent commit, and not stable across a different but
-equally valid resolution of the same conflict.
-
-**Both outcomes mean the same thing: cite the merged branch's constituent commits** by
-SHA + patch-id; each has an ordinary patch-id that survives rebase normally. Never record
-an empty patch-id field, never substitute the SHA for it, and never record the value a
-conflicted merge hands you — the empty case you would have noticed, and that one you
-would not. Nor manufacture one from `git diff <first-parent>..<merge>`: it hashes, but not to
-the object a cherry-pick would reproduce, so it is a plausible value in a field that means
-something else.
-
-The fix commit carries the citation; name the merge separately as an event — *"Fixed
-at `<sha>`, merged to `experiments` at `<merge-sha>`"*.
-
-**There is no promotion path to check and no pending-master-SHA `## Resume` line.**
-Recording the SHA *and* its patch-id replaces both. Whichever way the fix reaches
-`master` — fast-forward or cherry-pick — the pair stays resolvable, so nothing is owed
-later and no session has to come back and reconcile.
-
-Check where a SHA currently lives with `git branch --contains <fix-sha>`.
-
-An archived bug file that promises a master-side SHA "still to be recorded" is a stale
-instruction, not open debt — do not sweep it.
-
-When `doc(action="update")` sets a bug to `fixed` or `mitigated` and the file as written has no recoverable pair, the response carries `fix_anchor_advisory` naming what is missing. The write still happens; the advisory informs, and archiving stays refused until the pair or `no_fix_commit:` is present.
+**Never cite a merge commit's patch-id** — it is empty for a clean merge and a hash of only
+the resolution hunks for a conflicted one. Cite the merged branch's commits, and name the
+merge as an event. `doc(action="update")` to `fixed` or `mitigated` without a recoverable
+pair returns `fix_anchor_advisory`; archiving stays refused until the pair or
+`no_fix_commit:` is present.
 
 ### Archiving a bug or tracker — through the catalog, never git mv
 <!-- serves: doc.move(path~docs/issues/), doc.move(path~docs/trackers/) -->
 
-Archive through the catalog — `doc(action="move", id=…,
-new_rel_path="docs/issues/archive/…")` — never a bare `git mv`: `id =
-sha256(abs_path)`, so a hand-move orphans the catalog row.
-
-**The move mints a new id, and reports it.** Because the id is derived from the
-path, archiving necessarily re-keys the artifact; `move` grafts its events, links,
-observations and augmentation onto the new id in the same call and returns
-`{"id": <new>, "previous_id": <old>, "id_changed": true}`. Read the new id from the
-response — the old one stops resolving immediately, and a later call with it
-returns `unknown id`.
+Archive through the catalog — `doc(action="move", id=…, new_rel_path="docs/issues/archive/…")`
+— never a bare `git mv`: the id is `sha256(abs_path)`, so a hand-move orphans the catalog
+row. The move re-keys the artifact. Read the new id from the response (`id`, `previous_id`,
+`id_changed`); the old one stops resolving.
 
 ### Archiving a bug or tracker — stage both halves of the move
 <!-- serves: doc.move(path~docs/issues/), doc.move(path~docs/trackers/) -->
 
-**And stage BOTH halves of the move together — `git add -- <old> <new>`.** At the
-catalog layer the move is atomic; on disk it is a tracked *deletion* plus an untracked
-*addition*, so every selector defined over index entries — `git add -u`, `git commit
--a` — enumerates only the deletion and commits an archive that silently un-happened.
-There is no count of what was missed, because an untracked file is never a skipped
-candidate: it is never enumerated. The positive confirmation is that **both halves are lettered in column 1** of `git
-status --short` — either one `R` line, or a `D` plus an `A`; a leading space (` D`) or a
-`??` is half-staged. **Do not confirm on the `R` alone.** `R` is git's *similarity*
-verdict, so it is monotone in both directions and has failed in each: it can vanish
-when the archive is most correct — writing the outcome, fix SHA and patch-id into a bug
-file before moving it drops similarity below git's 50% default —
-and it appears identically when the destination holds a **stale** copy of its source
-(similar enough to pair — a broken move then renders the same as a good one).
-**The threshold is straddled, not merely approached:** the same flow lands on either side
-of 50%, so a present `R` is not evidence the archive was shallow. It answers
-neither *"are both halves staged"* nor *"does the destination hold the bytes I just
-wrote"*; for the second, check the destination for a token you wrote just before the
-move. The `move`
-response carries `stage_together` and `stage_hint` saying exactly this.
+**And stage BOTH halves of the move together — `git add -- <old> <new>`.** `git add -u` and
+`git commit -a` stage only the deletion and commit an archive that silently un-happened.
+Confirm both halves are lettered in column 1 of `git status --short`: one `R`, or a `D` plus
+an `A`. **Do not confirm on `R` alone** — it is a similarity verdict that can vanish, or pair
+over a stale destination copy. The `move` response carries `stage_hint`.
 
 ### Archiving a bug or tracker — re-point the citations
 <!-- serves: doc.move(path~docs/issues/), doc.move(path~docs/trackers/) -->
 
-**Then re-point the citations, in the same commit as the move —
-paths *and* ids.** The move changes both, and archiving is a bug file's *normal*
-end state — so every citation of `docs/issues/<slug>.md`, and every citation of
-that artifact's 16-hex id, is a scheduled break, and the move is the moment it
-fires.
+**Then re-point the citations, in the same commit as the move — paths *and* 16-hex ids.**
+Every citation of `docs/issues/<slug>.md` and of its id is a scheduled break.
 
 ```
 grep -rn 'docs/issues/<slug>.md' . \
@@ -275,109 +141,48 @@ grep -rn 'docs/issues/<slug>.md' . \
   --include='*.yml' --include='*.toml' --include='.env*'
 ```
 
-**The `--include` list is itself a hypothesis about where citations live, and it is the
-part that fails silently** — a filter that misses a file type returns a clean zero, which
-reads exactly like "no citations to fix". Non-`.md`/`.rs` surfaces cite `docs/issues/`
-too — `.github/workflows/ci.yml`,
-`docker-compose.yml`, `scripts/build-windows.sh`, `scripts/fetch-models.sh`,
-`scripts/friction-probe.py`, and a `tests/fixtures` `.toml`. If you are unsure, drop the
-filters entirely and read the extension histogram; `.jsonl` and `.diff` hits are session
-artefacts under `.buddy/` and `.superpowers/` and are not surfaces.
-
-Fix the **live** surfaces — the manual, `CHANGELOG.md`, `README`s, active trackers, CI
-workflows, `scripts/`, `.env*` templates, source doc comments. **Leave `docs/issues/archive/**` and
-superseded session-log rounds alone**: those are historical snapshots, and
-`apply_drops`' `archive_drop` exists precisely so a retired document citing a moved
-path does not gate. Rewriting them would falsify the record to satisfy a linter that
-is already ignoring them.
-
-Note the gate only catches the subset that lands in a full-severity surface, so the grep
-is the check — not a green CI run.
+A filter that misses a file type returns a clean zero that reads as "none to fix"; when unsure,
+drop the filters. Fix the **live** surfaces. **Leave `docs/issues/archive/**` and superseded
+session-log rounds alone** — they are historical. The grep is the check, not a green CI run.
 
 ### Verifying the citation sweep
 <!-- serves: doc.move(path~docs/issues/) -->
 
-**Verifying the sweep afterward needs a different pattern than the sweep itself — grepping the
-slug is the mistake to avoid.** An archive move keeps the filename and changes only the
-directory, so the slug — the part everyone reaches for, because it is the memorable half — is
-invariant under exactly the change being verified: `docs/issues/YYYY-MM-DD-<slug>.md` and
-`docs/issues/archive/YYYY-MM-DD-<slug>.md` both contain `<slug>`, so a slug grep returns the same
-hit whether a citation was fixed or not.
-
-- **Verify with the full old path, never the slug.** `docs/issues/<name>.md` as a literal prefix
-  cannot match the archive form; it is the only pattern that answers "is anything still
-  dangling?"
-- **Always pair it with the archive-form control.** `git grep -F 'docs/issues/archive/<name>.md'`
-  must return non-zero, or a `0` from the first grep is indistinguishable from a typo'd pattern
-  matching nothing.
-- **Move before you write the citation, not after.** A Members line, tracker row or
-  cross-reference written after the move already names the new path, so a slug-only
-  verification has nothing to hide — the same zero is honest either way.
+**Verifying the sweep afterward needs a different pattern than the sweep — never the slug.**
+A move changes only the directory, so a slug grep returns the same hit either way. Grep the
+full old path `docs/issues/<name>.md`, and pair it with the control
+`git grep -F 'docs/issues/archive/<name>.md'`, which must return non-zero. Move before you
+write a citation, not after.
 
 ### Reading move's inbound_path_citations
 <!-- serves: doc.move(path~docs/issues/) -->
 
-- **`doc(action="move")`'s `inbound_path_citations` sees BOTH forms, and tells you which is
-  which.** A bare-slug citation — every `**Members:**` line in `docs/trackers/issue-clusters/`
-  is one — is included, so do not grep the slug yourself to cover it.
-
-  What the response separates, because the two forms take **opposite** remedies:
-
-  | field | meaning |
-  |---|---|
-  | `inbound_path_citations` | the union, capped at 20, `null` if the scan could not run |
-  | `inbound_citations_cleared` | the subset of those same entries that **cannot** cite the old path |
-  | `citation_stem_preserved` | `false` ⇒ nothing is cleared, and why |
-
-  **`cleared` is sound; its complement is not a verdict.** An entry is cleared when the file
-  never mentions the old *dated* stem — and since every citation of `docs/issues/<dated>.md`
-  contains that substring, such a file cannot hold one. Nothing is owed; editing it would
-  convert a slug citation into a path one. An entry **not** cleared may hold a dead path
-  citation *or* a bare dated stem that survives untouched, because a move changes only the
-  directory. Look at those; the scan deliberately over-reports and will not guess for you.
-
-  **`citation_stem_preserved: false` clears nothing, deliberately.** A slug citation survives
-  a move only because the slug does, so a move that *renames* the stem breaks slug and path
-  citations alike. The flag is why the list is empty, which is a different fact from "checked
-  and found none".
+`doc(action="move")`'s `inbound_path_citations` sees BOTH forms, and tells you which is
+which. `inbound_citations_cleared` lists entries that cannot cite the old path: nothing is
+owed there. An entry **not** cleared may hold a dead path citation or a surviving bare stem —
+look at those. `citation_stem_preserved: false` clears nothing: the empty list then means
+"not checked".
 
 ### Citing an archive path — where the file is, not where it will go
 
-**Cite where the file IS, never where the archive flow will put it.** The sweep above
-repairs citations that *were* correct when written; it can never reach one that was wrong
-on the day it was written. A citation is authored at **fix** time; the archive move is a
-separate, **later** event — `fixed` is terminal, archiving is a manual
-`doc(action="move")`, and a *partial* fix cancels it outright. So writing
-`docs/issues/archive/<slug>.md` for a bug still sitting in `docs/issues/` schedules no
-repair at all: no archive event ever fires, therefore no sweep is ever triggered and no
-procedure owns the fix — it survives until a reader follows the link.
+**Cite where the file IS, never where the archive flow will put it.** Archiving is a later,
+manual move, and a partial fix cancels it, so a citation of `docs/issues/archive/<slug>.md`
+for a bug still in `docs/issues/` is never repaired by the sweep.
 
 ### Why a green gate proves nothing about the sweep
 <!-- serves: doc.move(path~docs/issues/) -->
 
-`DEFAULT_AUDIT_GLOBS` lists both `CHANGELOG.md` and `CONTRIBUTING.md`. Refs inside
-already-released `CHANGELOG.md` sections are capped by `released_history_boundary`, so a
-shipped section cannot be "corrected" into falsehood.
-
-Be precise about *why* a green run proves nothing here, because the plausible reason is
-the wrong one. `audit_doc_refs` **does** scan source files, shell scripts included —
-`DEFAULT_AUDIT_CODE_GLOBS` in `src/librarian/tools/audit_doc_refs/mod.rs` lists `**/*.sh`,
-and `bash` has a grammar, so the citation *is* found. It is reported at **`Med`**, on
-purpose: `scan_code_comments` forces that severity so someone archiving a bug file cannot
-break the build via a comment they never touched. `--fail-on high` then passes, correctly.
-So the finding exists and the gate is silent by design — which is exactly why the grep is
-the check.
+Be precise about *why* a green run proves nothing here: `audit_doc_refs` finds the citation,
+but reports it at `Med` on purpose, so `--fail-on high` passes. The gate is silent by design;
+the grep is the check.
 
 ## Tracker artifacts (docs/trackers/)
 <!-- serves: doc.create(path~docs/trackers/) -->
 
-Trackers are living state — multi-entry tables, observation logs, ADR
-indexes — that grow across many sessions. They are full librarian
-artifacts: backed by markdown on disk, indexed by the catalog,
-optionally augmented with a persistent prompt that refreshes their
-body.
+Trackers are living state — multi-entry tables, observation logs, ADR indexes — indexed by
+the catalog and optionally augmented with a persistent prompt.
 
-**Frontmatter shape** (required for new trackers):
+**Frontmatter shape** (required for new trackers; `id:` is optional):
 
 ```yaml
 ---
@@ -390,169 +195,81 @@ tags:
 ---
 ```
 
-The catalog derives the id (`id = sha256(abs_path)`, `src/librarian/ids.rs`) on the next
-`librarian(action="reindex")` if `id:` is omitted; a frontmatter `id:` is optional.
-
-**Status vocabulary** (frontmatter `status:` field for trackers):
-
-| Value | Meaning | Visibility |
+| Status | Meaning | Visibility |
 |---|---|---|
 | `active` | Living tracker, actively appended to | visible |
 | `draft` | Scoped / watching, not yet active | visible |
 | `archived` | Terminal — work-stream wrapped | **hidden by default** |
 | `superseded` | Replaced by a successor artifact | **hidden by default** |
 
-`done`, `in-progress`, etc. are NOT special-cased — they appear as
-active. The frontmatter status drives librarian visibility.
-
-**`draft` means the opposite thing on a plan, and one catalog column holds both.** The
-row above defines it for **trackers**: *scoped / watching, not yet active*. In
-`docs/plans/` this repo uses it to mean *shipped, deliberately unarchived because a named
-residual is still open* — a plan says so in its own text (*"this plan stays active (do NOT
-ARCHIVE) while 4b is open"*) and the residual lives in a companion `resume-*` tracker.
-Both surfaces are catalogued with the same `status` column, so `doc(action="find")`
-returns them side by side with nothing marking which vocabulary a row speaks.
-
-The disambiguator is a `resume-*` tracker naming the plan, but the pointer runs one
-way only, tracker → plan, so the plan is the row a query returns and the tracker is the row
-that would correct it. **Before reading a `draft` as "not started", check whether a
-`resume-*` tracker names it.**
+**`draft` means the opposite on a plan:** in `docs/plans/` it means *shipped, deliberately
+unarchived because a named residual is open*. Before reading a `draft` as "not started",
+check whether a `resume-*` tracker names it.
 
 ### Archiving a tracker
 
-**Archiving a tracker:** preferred path is in-place archival via the
-catalog:
+**Preferred:** in-place archival through the catalog:
 
 ```
 doc(action="update", id="<id>", patch={"status": "archived"})
 ```
 
-If you must also move the file on disk, use `doc(action="move",
-id="<id>", new_rel_path="docs/trackers/archive/foo.md")` — never a bare
-`git mv`, which orphans the catalog record.
-
+To also move the file on disk, use `doc(action="move", id="<id>",
+new_rel_path="docs/trackers/archive/foo.md")` — never a bare `git mv`.
 
 ### A `## Resume` states its own currency
 <!-- serves: doc.get(path~docs/trackers/) -->
 
-A tracker that accumulates review passes by *appending* leaves its oldest navigational
-section — the one saying "start here / do this next" — at the **bottom**, below every
-later correction, with nothing marking which is current. A reader told to start there
-starts at the stalest text in the file.
-
-**So a `## Resume` either dates its heading, or opens with a banner naming what
-superseded it and where the current state lives.**
+A tracker that accumulates review passes by *appending* leaves its oldest "start here"
+section at the bottom. **A `## Resume` either dates its heading or opens with a banner naming
+what superseded it:**
 
     ## Resume — state at compaction, <date>
 
-    ## Resume — where this stands (<date>)
+    > **CLOSED <date> — merged at `<sha>`.** Read § *Integration* for the current state.
 
-    > **CLOSED <date> — merged at `<sha>`.** Everything below this line is the
-    > historical record. Read § *Integration* for the current state.
+The marker makes staleness legible; it does not prevent it.
 
-**The marker does not prevent staleness; it makes staleness legible** — and that is the
-whole of it. A dated Resume whose facts have since moved is still doing its job, because
-the reader can see the date and check. That is also why this is a convention rather than
-a `doctor` check: no check can separate "old and still right" from "old and wrong", and
-one keyed on age would fire on every correctly-dated section while catching nothing the
-marker does not already cover.
-
-**The device generalises past `Resume`.** Any section a
-later one falsifies has the same problem: sections carry no dependency edges, so the falsifying
-edit produces no diff hunk, no broken link and no check naming the section it falsifies — and
-that section keeps reading as settled prose. Same repair, applied where you notice it: a
-banner naming what superseded it. The blind party is the author adding the new section,
-since nothing in the act of appending points backwards.
 ## Declaring an augmentation
 <!-- serves: doc.augment(path~docs/trackers/) -->
 
-**Before you augment: `merge=false` resets every field you omit, and under `merge=true` a `params`
-array replaces the WHOLE collection** — a patch holding one row deletes the others, and the catalog
-is not in git. Add and change rows with `append_entry` / `update_entry`, never by patching `params`.
+**Before you augment: `merge=false` resets every field you omit, and under `merge=true` a
+`params` array replaces the WHOLE collection** — a one-row patch deletes the other rows, and
+the catalog is not in git. Change rows with `append_entry` / `update_entry`, never by
+patching `params`.
 
-If an artifact is meant to carry an augmentation, say so in **frontmatter** — and name
-the committed sidecar holding its shape:
+If an artifact is meant to carry an augmentation, say so in frontmatter and name the
+committed sidecar:
 
 ```yaml
 expects_augmentation: docs/augmentations/docs-trackers-tool-usage-patterns.yaml
 ```
 
-`expects_augmentation: true` is valid and means "declared, shape not
-recorded". Anything else — a typo, an empty value, a bare word — is **reported** as
-`augmentation_declaration_unparseable` rather than read as absent, because a
-declaration that silently does not count is worse than none: its author believes they
-are covered.
-
-**What travels and what does not.** The sidecar carries `prompt`, `params_schema`,
-`render_template`, `entry_collection`, `append_mode`, `history_cap` — the *shape*.
-`params` deliberately stay catalog-only: they are live state that churns, and
-committing them recreates params-vs-body drift. So
-a restored tracker comes back **working and empty**, never holding another machine's
-rows.
-
-Write the sidecar with `librarian(action="doctor", fix="export_augmentations")`, which
-also stamps the declaration. It can only export rows **this** catalog holds, so run it
-on a machine that still has them.
-
-**Export CREATES; it never refreshes.** It skips an artifact whose sidecar already
-exists — that is what makes it idempotent — so it is not the way to update one after a
-shape change. `doc(action="augment")` handles that itself: a call that changes `prompt`,
-`params_schema`, `render_template`, `entry_collection`, `append_mode` or `history_cap`
-writes through to an existing sidecar, and a params-only merge leaves the file
-byte-identical. The catalog is authoritative and the sidecar is its committed
-projection, so a shape change made locally is what gets published — read `git diff` on
-`docs/augmentations/` before committing, as with any generated file.
+The sidecar carries the shape (`prompt`, `params_schema`, `render_template`,
+`entry_collection`, `append_mode`, `history_cap`), never `params`. Write it with
+`librarian(action="doctor", fix="export_augmentations")`, which exports only rows THIS catalog
+holds. Restore procedure: `docs/conventions/cross-machine-catalog-resume.md` § 7.
 
 ### Declaring an augmentation — why the sidecar exists, and the check's remedy
 <!-- serves: doc.augment(path~docs/trackers/) -->
 
-Without that wiring, export skipping, `reindex` attaching only when a row is *absent*, and
-`doc(action="augment")` not touching the file would compose into a **one-way door**: after
-the first export, no path
-could update a sidecar, and a fresh clone's `reindex` would restore the old shape and report
-success. **A stale sidecar is worse than
-an absent one**: absence is reported by `augmentation_declared_but_absent`, staleness
-restores clean.
+The catalog is machine-local and git-ignored, so the sidecar is the only on-disk form of an
+augmentation, and its loss is silent. **A stale sidecar is worse than an absent one:**
+`augmentation_declared_but_absent` reports absence, while staleness restores clean. If the
+declared sidecar exists, run `reindex`. If it does not, export it on the machine that holds
+the rows, or re-author it with `doc(action="augment", …)`.
 
-**Why any of this is needed.** Augmentation is the one artifact state with no on-disk
-form apart from the sidecar: rows, frontmatter and body all rebuild from disk on `reindex`,
-but the catalog is machine-local and git-ignored. Its
-absence is silent in every direction — `reindex` preserves augmentation keyed by id
-rather than regenerating it, so it reports healthy after a loss and repairs nothing;
-`doc(get)` returns `augmentation: null` without comment; the documented
-`append_entry` / `update_entry` / `entry_filter` calls fail only at use, one caller at
-a time.
-
-`reindex` re-attaches a declared sidecar **whenever the row is absent, and never
-overwrites a live one** — repair, not sync, because params move on independently of
-the committed shape. It reports `augmentations_restored` so a run that repaired
-nothing is distinguishable from one with nothing to repair.
-
-The declaration is also what `doctor`'s `augmentation_declared_but_absent` reads. Like
-`entry_prefix` it is **declared, never inferred**: guides, specs, plans and bug files
-mention `[LIVE]` while *describing* the mechanism. Intent is not recoverable from prose.
-
-The check splits by remedy. A declared sidecar that exists means run `reindex`. No
-sidecar means the shape survives only in some other machine's catalog — export it
-there and commit the result, or re-author with `doc(action="augment", id=…, augment={prompt: …, …})`.
 ## Entry-level standard — the shape INSIDE a tracker
 <!-- serves: doc.append_entry(path~docs/trackers/), doc.update_entry(path~docs/trackers/) -->
 
-The rules above govern the tracker *file*. These govern its **entries** (`F-3`,
-`R-91`, `HY-11`, `BUG-40`). They are not style preferences: the first three are
-enforced by the citation resolver, and violating them silently breaks the link
-graph.
+These rules govern a tracker's **entries** (`F-3`, `R-91`, `HY-11`, `BUG-40`). The citation
+resolver enforces them; breaking them silently breaks the link graph.
 
 ### Declaring a ledger
 <!-- serves: doc.create(path~docs/trackers/) -->
 
-A **ledger** is an artifact that owns an id namespace. It is a much narrower thing
-than a tracker: most trackers under
-`docs/trackers/` are design docs,
-research notes and finished session logs, which own no ids and must stay directly
-editable.
-
-Declare one in **frontmatter**, never only in the catalog:
+A **ledger** owns an id namespace; most trackers own none and stay directly editable. Declare
+it in **frontmatter**, because the catalog is machine-local and git-ignored:
 
 ```yaml
 entry_prefix: R          # or a sequence, for a ledger owning two namespaces:
@@ -561,130 +278,54 @@ entry_prefix:            #   a session log carries both F-N frictions and W-N wi
   - W
 ```
 
-Set it with `doc(action="update", id=…, patch={extra: {"entry_prefix": "R"}})`.
-
-**Frontmatter, because the catalog is machine-local and git-ignored.** A
-declaration stored in the augmentation is absent in a fresh clone, so every
-`append_entry` there fails. **The counter has to travel with the repo too** — see
-*Entry ids* below for `entry_high_water_<PREFIX>`. A catalog-local mark is not safe even
-though the allocator re-reads the committed body each time: the body's maximum is not
-monotonic, because compaction moves entries out to an archive companion. Identity *and*
-the counter travel; only the within-machine race guard stays local.
-
-A ledger is **declared, never inferred**. A design doc that quotes `## R-4` in
-prose is not a namespace, and inferring one from content would make every such doc
-allocatable.
+Set it with `doc(action="update", id=…, patch={extra: {"entry_prefix": "R"}})`. A ledger is
+declared, never inferred: a design doc that quotes `## R-4` is not a namespace. Concept pages:
+`docs/manual/src/concepts/entry-citations.md`, `link-scan.md`, `statement-validity.md`.
 
 ### A prefix has one owner per repository
 <!-- serves: doc.create(path~docs/trackers/) -->
 
-A bare `PREFIX-N` citation resolves to whichever ledger defines `PREFIX-N`, so two
-ledgers owning one prefix bind each other's citations **silently** as wrong edges.
-Longer prefixes do not prevent this, since
-two authors thinking "TEST" collide at four letters too. Uniqueness does, so the librarian
-enforces it:
-
-- `doc(action="create")`, `doc(action="update")` and `rekey_prefix` **refuse** a prefix
-  another artifact in the same repository already owns. The refusal names the owner and
-  offers free alternatives. Nothing is written.
-- **Both declarations own a prefix**: `entry_prefix` (a ledger allocating ids) and
-  `external_prefix` (ids owned by a file outside markdown, e.g. a benchmark suite).
-- **Archived ledgers still own theirs.** Citations of their entries still resolve to them.
-- **`F` and `W` are the one shared family.** Every session log carries them, and they are
-  cited qualified by file stem (`bug-fix-session-log:F-97`). No other prefix is shared.
-- A hand-edited frontmatter bypasses all three write paths. `doctor`'s
-  `entry_prefix_declared_twice` reports it after the fact.
-
-Choosing one: prefer a distinctive two- or three-letter mnemonic, and **never more than
-three**. The citation grammar is `[A-Z]{1,3}-\d+`, so a four-letter prefix allocates ids
-nobody can cite.
+Two ledgers owning one prefix bind each other's citations silently, so the librarian refuses
+it: `doc(action="create")`, `doc(action="update")` and `rekey_prefix` name the owner and write
+nothing. `entry_prefix` and `external_prefix` both own a prefix, and archived ledgers still
+own theirs. `F` and `W` are the one shared family, cited qualified by file stem. A hand-edited
+frontmatter bypasses the refusal; `doctor`'s `entry_prefix_declared_twice` reports it. Use two
+or three letters, **never more than three** (the grammar is `[A-Z]{1,3}-\d+`).
 
 ### Entry ids
 <!-- serves: doc.append_entry(path~docs/trackers/) -->
 
-The resolver's token grammar is `\b[A-Z]{1,3}-\d+\b` — one to three uppercase
-letters, a hyphen, digits, and **nothing else**.
+**Never suffix an id.** `R-72b` can never be defined or cited; give a clash a **fresh** id.
+**Let the server allocate and write the section:** `doc(action="append_entry", id_prefix="R",
+anchor_heading="## Template for new entries", title=…, body=…, index_row="| {id} | … |")`
+writes `## R-N — <title>` (the only shape that defines a citable token) and the index row in
+one write. Omit `anchor_heading`, `title` or `body` and it only reserves the id. Hand-allocating:
+scan **every** entry format in the file.
 
-- **Never suffix an id.** `R-72b`, `F-6a` are not valid tokens at all: digit→letter
-  is not a word boundary, so a suffixed id can never be defined *or* cited. A
-  collision-resolution scheme built on `a`/`b` suffixes produces ids the graph
-  cannot represent. If two entries share a number, give the later one a **fresh**
-  id.
-- **Let the server allocate, and let it write the section too.**
-  `doc(action="append_entry", id_prefix="R", anchor_heading="## Template for
-  new entries", title=…, body=…, index_row="| {id} | … |")` assigns the next id atomically **and** writes
-  `## R-N — <title>` — the only shape that defines a citable token — in the same
-  file write. Passing `anchor_heading` + `title` + `body` together is what selects
-  that path; omit any of the three and the call only reserves the id, leaving the
-  section yours to write and a reserved-but-unwritten id as a live failure mode.
-  This holds for an **augmented** ledger too, as long as it declares no
-  `entry_collection` (its entries being body sections, not params rows).
-  Hand-allocation races: a peer session in the same checkout can take the id
-  between your scan and your write.
-- **Put the index row in the same call, never before it.** `index_row` (`{id}` is
-  filled in by the server; `index_after_line` or a declared `snapshot_anchor` says
-  where it goes) lands in the same write as the section, so no commit can capture one
-  without the other — a second write is the window this closes. And the allocator
-  counts an id already claimed by an index row, so a row written ahead of its
-  section consumes the number it names.
-- If you must hand-allocate, scan **every** entry format the file uses, and re-scan
-  in the same breath as the write — a max-id is a fact about an instant.
 ### Entry ids — refusals: main checkout only (prose ledgers)
 <!-- serves: doc.append_entry(path~docs/trackers/) -->
 
-- **From the MAIN checkout only.** `append_entry` refuses id allocation from a
-  worktree session, on the same grounds it refuses `cites`: an entry id is
-  ledger-wide state and must key to the main tracker. Left unguarded, the worktree's
-  shadow row is a different `artifact_id`, so both trees issue the same number — and
-  nothing repairs it at merge, because the renumber only covers params rows. If a
-  worktree session must record something, write it to a worktree-local file and fold
-  it into the ledger from the main checkout after the merge.
-- **Unpushed ledger commits do not block allocation.** `append_entry` allocates
-  optimistically. A peer at origin can still issue the same number: `pre-push`
-  catches it on the merge commit that resolves a rejected push
-  (`scripts/pre-push-foreign-session-guard.sh`). A ledger declaring an
-  `entry_collection` takes the params path and is unguarded.
+`append_entry` refuses id allocation from a worktree session: write to a worktree-local file
+and fold it in from the main checkout. `pre-push` catches a peer's duplicate id.
 
 ### Entry ids — where the counter lives
 <!-- serves: doc.append_entry(path~docs/trackers/) -->
 
-**Where the counter lives.** A ledger carries its own high-water mark in committed
-frontmatter, one key per namespace, written by the allocator:
+A ledger keeps its high-water mark in committed frontmatter, one key per namespace:
 
 ```yaml
 entry_prefix: HY
 entry_high_water_HY: 11
 ```
 
-Do not hand-edit it downward, and do not delete it when compacting. It is the only
-one of the allocator's three inputs that survives a fresh clone, an
-`doc(action="move")`, and compaction — the live body's maximum *drops* when
-entries move to an archive companion, and the machine-local reservation does not
-travel. Without the committed mark, a compacted-and-archived ledger reissues `HY-1`,
-and because the resolver binds a token to its sole **active** definer, every
-historical citation silently re-points to the new entry with no dangling or ambiguous
-count moving. Compaction is safe because a body edit preserves the frontmatter block
-byte for byte; a hand-rewritten file does not.
+Never hand-edit it downward or delete it when compacting: it survives a fresh clone, a move
+and compaction.
 
 ### Entry ids — when two hosts allocate anyway
 
-**When two hosts allocate anyway.** The mark is committed, so two clones that have
-diverged each hold a valid one and each issues the same next id; the merge then
-lands two `## PREFIX-N` sections in one file, and every citation of that token
-binds to whichever heading comes **first** in file order — silently, with no
-dangling or ambiguous count moving, because the extractor de-duplicates and the
-second definition is discarded before any consumer sees it.
-`librarian(action="doctor")` reports this as `entry_defined_twice`, naming the
-token and every line that defines it. It is a **detector, not a guard**: the state
-it finds is already merged. It excludes a sub-heading that repeats its own entry's
-token — `### A-28` nested inside `## A-28` is one entry with sub-sections, not a
-collision — because a real cross-host merge lands both headings at the *same*
-level, the allocator taking the level from the ledger's existing entries. Nothing
-repairs it automatically, and the commonest cause is not the only one: a hand-edit
-or a bad cherry-pick reach the same shape, so establish which definition is stale
-before renumbering anything. Like the refusal above, it reads `## PREFIX-N`
-headings only — a params ledger whose entries live as index-table rows is covered
-by neither.
+Diverged clones can issue the same id, and the merge then holds two `## PREFIX-N` sections.
+`doctor` reports `entry_defined_twice`. It is a detector, not a guard: establish which
+definition is stale before renumbering.
 
 ### Entry headings — the definition rule
 <!-- serves: doc.append_entry(path~docs/trackers/) -->
@@ -695,314 +336,136 @@ An entry is defined by a heading of exactly this shape:
 ## <ID> — <title>          token, whitespace, dash (— – -), whitespace, text
 ```
 
-Anything else defines nothing:
-
 | Heading | Defines? |
 |---|---|
 | `## R-91 — the scout ran too late` | yes |
 | `## R-91` (no title) | **no** |
-| `### A-9 Addendum` (no dash) | **no** — a section *about* A-9 |
-| ``### `A-9` — title`` (code-first) | **no** |
+| `### A-9 Addendum` (no dash) | **no** |
 | `\| R-91 \| … \|` (table row) | **no** — rows never define |
 
-An undefined-but-cited id becomes a **dangling** citation.
-
-**Heading level is not the discriminator** in the table above — `### D-6 — …` and
-`#### S-1 — …` both define. `### A-9 Addendum` fails on the missing dash, not the
-level.
+An undefined-but-cited id is **dangling**.
 
 ### Entry headings — a prefix with no definer, or owned outside markdown
 
-**A prefix with no definer ANYWHERE is a third state, distinct from dangling.**
-Dangling means the prefix is known (something, somewhere, defines a sibling
-entry or declares `entry_prefix`) but this specific id isn't. A prefix nobody
-has ever defined or declared is not a citation candidate at all in the
-resolver's terms, so it resolves as prose noise — the same gate that keeps
-`UTF-8`/`SHA-256` silent — and is reported by neither `link_scan`'s
-dangling/ambiguous buckets nor a ledger-scoped `doctor` check. `doctor`'s
-`cited_prefix_with_no_definer` check exists specifically for this state: it
-starts from the citation graph rather than a known ledger's claimed entries,
-and fires only above a citation-volume threshold to stay quiet on incidental
-prose.
-
-**A prefix owned OUTSIDE markdown is a fourth state, and neither ledger remedy
-fits it.** A benchmark suite, a JSON fixture or a code constant can own a
-`PREFIX-N` namespace — `TC-N` is `scripts/tc-suites/legacy-natural.json`'s case
-ids. Adding headings hands that namespace's allocation to the librarian *and*
-makes the prefix known, so every cited id the authority lacks turns **dangling**.
-`entry_prefix` is wrong too: it locks id allocation
-to the librarian's allocator. Declare it instead, in any artifact:
+A prefix nothing defines or declares resolves as prose noise; `doctor`'s
+`cited_prefix_with_no_definer` reports it above a citation-volume threshold. A prefix owned
+OUTSIDE markdown (a benchmark suite, a JSON fixture) takes neither ledger remedy; declare it:
 
 ```yaml
 external_prefix:
   TC: scripts/tc-suites/legacy-natural.json   # path relative to the repo root
 ```
 
-`cited_prefix_with_no_definer` then stays silent **only while that file exists
-and holds a `TC-<n>` id** — the silence is re-checked every run, so a deleted or
-rewritten suite re-arms the finding and names the stale declaration. `link_scan`
-does not read the key and keeps treating the tokens as prose, which is the point.
-
+The check stays silent only while that file exists and holds a `TC-<n>` id.
 
 ### Citing an entry — bare, or qualified
 <!-- serves: doc.update_entry(path~docs/trackers/) -->
 
-Cite by **bare token** when the prefix has exactly one ledger: `R-98`, `HY-10`,
-`CAP-5`.
-
-Cite **qualified by file stem** when several files share a prefix. `F-N` and `W-N`
-are namespaced per work stream, so each session log owns its own counter and
-`F-1…F-5` are defined in every live log:
+Cite by **bare token** when the prefix has one ledger: `R-98`, `HY-10`. Cite **qualified by
+file stem** when several files share it:
 
 ```
 bug-fix-session-log:F-33      → resolves to that log's F-33
 F-33                          → several definers, Ambiguous, resolves to nothing
 ```
 
-The qualifier is the **file stem**, deliberately not `artifact.slug`: slugs are
-lazily minted from `slugify(title)` with `-2` dedup, so they neither exist for most
-artifacts nor can be predicted from the filename — and a citation an author cannot
-predict is not a citation.
-
-A qualifier naming no file in this repo is still a cross-repo reference
-(`codescout:A-11`): reported, never turned into an edge, because edges cannot span
-workspaces. A qualifier that *does* name a file which lacks that entry is
-**dangling**, not ambiguous — the two need different fixes, so they are reported
-separately.
+A qualifier naming no file in this repo is a cross-repo reference (`codescout:A-11`): reported,
+never an edge. One naming a file that lacks the entry is **dangling**, not ambiguous.
 
 ### Citing an entry — a third shape, and mentioning without citing
 <!-- serves: doc.update_entry(path~docs/trackers/) -->
 
-**A third shape — `<repo>:<file-stem>:<TOKEN>`, naming a file inside a *different*
-repo — has no supported grammar at all.** `link_scan` treats any citation with 2+
-qualifier segments before the token uniformly: it is retracted (never silently
-collapsed to the inner `<file-stem>:<TOKEN>` form) and reported, never resolved —
-same as the two-part cross-repo form above, it can never become an edge, edges
-cannot span workspaces. Write it anyway when you mean it —
-`claude-plugins:roster-audit-session-log:F-5` in a `## References` section is
-understood by a human reader even though the resolver will not chase it — but know
-it is prose only, permanently, not a gap waiting to be filled. To keep the report
-legible, these land in their own `cross_repo_file_qualified` bucket rather than
-the generic `malformed_qualifier` one whenever the outer segment does not match
-the citing artifact's own repo name. A citation whose outer segment *is* the
-citing repo's own name (`codescout:foo:F-2` cited from inside codescout itself)
-is genuinely redundant, not cross-repo — that one stays in `malformed_qualifier`;
-strip the prefix instead of writing it.
-
-**Mentioning an id without citing it.** `link_scan` derives an edge from any entry
-token in prose, and **inline backticks do not escape it** — inline code is scanned,
-because that is how most real citations are written. A fenced code block is the only
-place a token is a literal: use one when the sentence is about the identifier itself
-(an id-allocation collision, say) rather than the entry it names. Left in prose, the
-token becomes a `cites` edge, and `librarian(action="link_scan", write=true)` materializes it.
-
-Why this matters: unqualified `F`/`W` citations from the **durable** ledgers are
-ambiguous, so the permanent record loses the links to its own evidence.
+`<repo>:<file-stem>:<TOKEN>` has no grammar: `link_scan` reports it and never resolves it.
+**Mentioning an id without citing it:** `link_scan` derives a `cites` edge from any entry token
+in prose, inline backticks included. Only a fenced code block is literal.
 
 ### One entry format, never two
 
-Do not hand-maintain an index table *alongside* body sections. Two formats for one
-entry is the defect that generates the rest: the index falls behind, and ids allocated
-by scanning one format collide with the other.
-
-**The headings are the index.** That is the shape — not one of two. It is also the only
-shape in which entries are citable, because `link_scan` derives a definition from a
-`## <ID> — <title>` heading and from nothing else. A table row defines no token, so a
-ledger whose entries live only in rows has entries that **nothing can cite, ever**.
-
-Do not render the index from `params` via `render_template` instead:
-
-- **No `render_template` writes a body.** `render_params` has three callers: `context.rs`
-  projects into the `librarian(action="context")` bundle, `legibility_scan` renders one
-  compiled-in template keyed by file/symbol rather than by `PREFIX-N`, and a test. A
-  template attached in the hope of a table writes nothing to the file.
-- **Rows are uncitable**, as stated above.
-
-Keeping a rendered row table *in addition to* headings is fine — a table is a good
-reading surface. Just write it knowing it is hand-maintained and that the heading, not the
-row, is what makes the entry reachable.
-
-You do not have to take this on trust. `librarian(action="doctor")` reports
-`entry_without_definition` and `ledger_defines_nothing` per artifact, and
-`append_entry` / `update_entry` return `undefined_in_body` for an entry they just wrote
-that no heading defines.
+Do not keep an index table beside body sections. **The headings are the index:** `link_scan`
+derives a definition from a `## <ID> — <title>` heading and nothing else, so a row defines
+nothing. `render_template` projects into `librarian(action="context")` only and writes no
+body. A hand-maintained row table *in addition to* headings is fine.
 
 ### Required fields
 <!-- serves: doc.append_entry(path~docs/trackers/), doc.update_entry(path~docs/trackers/) -->
 
-- **`**Status:**` is not optional.** It is the disposition field, and the only thing
-  that makes a fired `Promote-when` harvestable. Without it, criteria go unharvested
-  indefinitely.
-- **When a criterion fires, update the Status line.** Recording the firing only in
-  prose leaves it invisible to every field-presence sweep.
-- Give the tracker a `params_schema` with `required` and `enum` where the shape has
-  settled. A schema is what stops each author inventing their own entry shape.
-- **`**Valid:**` declares a decay class.** Declaring one is what makes an entry a
-  *Statement* — a claim that can be true or false and owes a proof. Declaring NONE
-  is **not** an exemption — absence means decay, so an undeclared entry already
-  means `dated <its last commit>` by default. What actually decides whether an
-  undeclared entry gets flagged today is exposure:
-  `entry_cited_from_outside_but_undeclared` only fires above the citation
-  threshold, so an uncited entry is left alone because nothing rests on it. A
-  section the server writes is stamped `**Valid:** dated <today>` unless the
-  caller passes a class. Three forms, no fourth: `invariant` (a law), `dated
-  YYYY-MM-DD` (true of an instant), `conditional — <event>` (true until that
-  fires). A bare `conditional` with no event, an unknown value, or a
-  calendar-invalid date (`dated 2026-02-30`) is refused — `conditionally
-  speaking` does not parse as the class it starts with, on a word-boundary
-  check — and caught by `librarian(action="doctor")`'s `validity_unparseable`
-  check if one already landed. The first declaration in a section wins if there
-  is more than one.
+- **`**Status:**` is not optional:** it is the only thing that makes a fired `Promote-when`
+  harvestable. Update it when a criterion fires.
+- **`**Valid:**` declares a decay class:** `invariant`, `dated YYYY-MM-DD` or
+  `conditional — <event>`, no fourth form; a malformed one is refused. Absence means
+  `dated <its last commit>`. Detail: `docs/manual/src/concepts/statement-validity.md`.
+
 ### Required fields — Rests on, and detecting the lines
 <!-- serves: doc.append_entry(path~docs/trackers/), doc.update_entry(path~docs/trackers/) -->
 
-- **`**Rests on:**` is the durable route back to the proof.** Code rots and
-  `path:line` rots with it; an ADR, a decision, or a principle does not. The ADR shape
-  matches it — `Decision` is the claim, `Confidence` the evidence, `Revisit-when` the
-  condition, and `Sites (initial)` labels the rotting pointers as rotting in its own
-  heading. It is parsed; nothing consumes it yet.
-- Both fields are detected **line-anchored**, and a line inside a fenced code block
-  is skipped — a worked example teaching the syntax is never mistaken for a
-  declaration, including the examples on this page. `librarian(action="doctor")`
-  reports `entry_conditional_past_due`, `entry_dated_stale`, and
-  `entry_cited_from_outside_but_undeclared` — read-only worklists, never verdicts,
-  each gated on cross-file citation exposure so an entry nothing depends on never
-  generates work. The third names an entry "load-bearing and undeclared," never
-  "promoted" — that judgement stays with the reader.
+- **`**Rests on:**` is the durable route back to the proof** — an ADR, decision or principle,
+  not a `path:line`. Both fields are detected **line-anchored**; a fenced line is skipped.
 
 ### Detecting these fields
 <!-- serves: doc.append_entry(path~docs/trackers/), doc.update_entry(path~docs/trackers/) -->
 
 Anchor detection on **structure** — line-start, a key prefix — never on a keyword.
-Prose and field share a vocabulary by construction, so `grep -c 'Status:'` also
-counts sentences *about* Status, and a `/fired/` probe matches "the tell that should
-have fired".
 
 ### Compaction and archival
 
 The ladder is **live body → archived section (heading kept) → nothing further.**
 
-- **Never reduce an entry to a bare row to "compact" it.** That destroys its
-  definition and dangles every citation of it. Row-reduction is what created the
-  dangling population described above.
-- **Archival is safe for citations.** A unique definer resolves even when its
-  artifact is `archived` — archived is not nonexistent. Where two artifacts define
-  one token, the sole *active* one wins.
-- **Archive into the ledger's existing archive artifact.** Check first —
+- **Never reduce an entry to a bare row to "compact" it.** That destroys its definition and
+  dangles every citation of it.
+- A unique definer resolves even when its artifact is `archived`; of two definers, the sole
+  *active* one wins.
+- **Archive into the ledger's existing archive artifact** — find it first with
   `doc(action="find", filter={"rel_path": {"contains": "archive/<ledger>"}},
-  include_archived=true)`. Forking a second archive for one ledger splits the
-  definitions and creates ambiguous tokens.
+  include_archived=true)`. A second archive splits the definitions.
 
 ### Make the tracker guarded
 <!-- serves: doc.create(path~docs/trackers/) -->
 
-**Declare `entry_prefix`.** A ledger is guarded by that declaration alone — the guard
-treats a declared `entry_prefix` as one of three independent reasons a file is
-off-limits (`src/util/librarian_guard.rs`: augmented, stamped, or ledger), because the
-`PREFIX-N` counter is state only the server may advance. Nothing else is needed, and any
-YAML form works: `entry_prefix: R`, a block sequence, or `[F, W]`.
-
-**Do NOT stamp `id: <16-hex>` into a tracker's frontmatter to guard it.**
-
-- It guards on **catalog membership**, the axis the guard's own pinned test rejects.
-  `a_catalogued_but_unaugmented_file_stays_directly_editable` argues that membership-
-  guarding would refuse `docs/RELEASE.md`, `CONTRIBUTING.md` and every ADR — all catalog
-  rows — and it names a prose tracker that `CLAUDE.md` documents direct heading-addressed
-  editing for.
-  Stamping an id converts a file by hand into the case that test exists to forbid.
-- It breaks a documented workflow: a stamped `id:` in `reconnaissance-patterns.md`
-  silently disables `docs/TAXONOMY.md`'s heading-addressed append path for R-N.
-
-The guard reads the file's **own
-text**, so a registered tracker whose frontmatter says nothing is invisible to it. The
-remedy is the declaration, not the stamp. And **an artifact that owns no id namespace
-needs no guard**: a convention doc, an ADR, a finished session log has nothing a hand-edit
-can corrupt, and guarding it only makes routine edits ceremony.
+**Declare `entry_prefix`.** That alone guards a ledger (`src/util/librarian_guard.rs`), because
+only the server may advance the `PREFIX-N` counter. **Do NOT stamp `id: <16-hex>` into a
+tracker's frontmatter to guard it:** that guards on catalog membership, which would refuse
+`docs/RELEASE.md` and every ADR. An artifact that owns no id namespace needs no guard.
 
 ## Querying with the librarian
 <!-- serves: doc.find(path~docs/trackers/), doc.find(path~docs/issues/), doc.get(path~docs/trackers/) -->
 
-The canonical "what's live right now" query — archived rows are hidden
-by the default scope:
+The canonical "what's live right now" query — archived rows are hidden by default:
 
 ```
 doc(action="find", kind="tracker")
 ```
 
-For bugs, swap the kind. **Constrain on all four non-terminal states, not just `open`**
-— `status="open"` alone hides `taken` (a live session is on it — do not duplicate the
-work), `investigating` (worked, no live owner) and `zombie` (recurring-but-unconfirmed,
-kept open in case it comes back). `zombie` sits between "no longer observed" and "closed"
-precisely because no other status fits — which is what makes it unreachable if the
-canonical triage query omits it too:
+For bugs, constrain on all four non-terminal states, not just `open` — `status="open"` alone
+hides `taken`, `investigating` and `zombie`:
 
 ```
 doc(action="find", kind="bug",
          filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})
 ```
 
-A `zombie` hit in that query is a "has this recurred?" check, not a task to pick up —
-most zombie records have no available work by design (see § Bug frontmatter and status vocabulary). Filter
-it back out explicitly (`{"status": {"in": ["open", "taken", "investigating"]}}`) when you
-specifically want only the actionable three.
-
-`status="open"` alone remains right when you specifically mean *not yet started*.
-
-Surface archived rows when needed:
-
-```
-doc(action="find", kind="tracker", include_archived=true)
-```
-
-Read a tracker's full body or one section:
+A `zombie` hit is a "has this recurred?" check, not a task (see § Bug frontmatter and status
+vocabulary). Add `include_archived=true` to surface archived rows. Read a tracker with:
 
 ```
 doc(action="get", id="<id>", full=true)
 doc(action="get", id="<id>", heading="## Foo")
 ```
 
-**Filterable trackers** — augmented trackers that store structured rows in a params array
-can be queried at entry grain via `entry_filter`. Call `doc(action="augment")` with
-`augment={entry_collection: "<array-key>"}` to enable it, then pass `entry_filter={…}` (same AST as
-`filter`) to `doc(action="get")`. Prose trackers need retrofit first.
-
-For deeper artifact / augmentation / event mechanics see
-`get_guide("librarian")`. For how augmented trackers carry cross-session
-behavior — including the session-passover pattern — see
+**Filterable trackers:** pass `entry_filter={…}` (same AST as `filter`) to `doc(action="get")`
+once the augmentation declares an `entry_collection`. Prose trackers need retrofit first.
+Deeper mechanics: `get_guide("librarian")`; the session-passover pattern:
 `get_guide("librarian-runtime")` § *Trackers as cross-session behavior*.
 
 ## Cross-linking (edges are derived — cite in prose)
 <!-- serves: doc.link(path~docs/trackers/), doc.link(path~docs/issues/) -->
 
-How artifacts reference each other, and who maintains the link graph:
-
-- **Cite by ID in prose.** Entry IDs in their ledger's namespace
-  (`A-11`, `F-3`, `BUG-40`), artifact ids (16-hex) or rel_paths across
-  files, `<repo>:<ID>` across repos. Prose is the ONLY write surface for
-  citations — never hand-create `cites` edges.
-  **Entry IDs are stable; artifact ids are not.** A 16-hex artifact id is
-  `sha256(abs_path)`, so it changes whenever the file moves — archiving one is
-  the common case. Prefer an entry ID or a rel_path when the target is likely to
-  be archived, and re-point 16-hex citations in the same commit as the move —
-  `inbound_id_citations` in the move response names the files to fix, so this is
-  a list to work through rather than a sweep to remember.
-- **`link_scan` derives the edges.** `librarian(action="link_scan")` parses
-  artifact bodies, resolves citations (entry tokens by their defining
-  heading; archived definers lose ties to active ones; ambiguous tokens are
-  reported, never guessed), and materializes/prunes scanner-owned
-  `rel="cites"` edges. `write=false` (default) reports; `write=true`
-  applies. Idempotent — safe to re-run any time, and the repair path after
-  reindex. `doc(action="move")` grafts an artifact's links onto its
-  new id itself; the scan is what heals the
-  cases that bypass it — a bare `git mv`, or any other route that leaves a row
-  whose id does not match its path for the abs_path pre-clean to cascade-drop.
-- **Manual rels are few and deliberate:** `evidence-for`, `promoted-to`,
-  `refutes` via `doc(action="link")` — use sparingly; a wrong edge
-  pollutes context packing. `supersedes` is side-effectful (flips dst
-  status, emits an event): archiving a tracker that has a successor
-  REQUIRES a supersedes edge — created through `doc(action="link")`,
-  never a bare status edit.
-- **Where links pay off:** `doc(action="get", include_links=true)`,
-  `doc(action="graph", depth=1-3)`, and
-  `librarian(action="context", anchor_id=…)` all read the graph — a
-  well-cited tracker gets neighborhood packing for free.
+- **Cite by ID in prose.** Entry IDs (`A-11`, `F-3`, `BUG-40`), artifact ids (16-hex) or
+  rel_paths, `<repo>:<ID>` across repos. Prose is the ONLY write surface for citations — never
+  hand-create `cites` edges. **Entry IDs are stable; artifact ids are not** (a 16-hex id changes
+  when the file moves), so prefer an entry ID or rel_path for a target likely to be archived.
+- **`link_scan` derives the edges:** `librarian(action="link_scan")` reports, `write=true`
+  applies. It is idempotent and heals what bypasses `doc(action="move")`. Detail:
+  `docs/manual/src/concepts/link-scan.md`.
+- **Manual rels are few and deliberate:** `evidence-for`, `promoted-to`, `refutes`.
+  `supersedes` flips the destination's status: archiving a tracker that has a successor
+  REQUIRES a `supersedes` edge through `doc(action="link")`, never a bare status edit.

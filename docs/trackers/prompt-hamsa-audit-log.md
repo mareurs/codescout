@@ -83,6 +83,7 @@ Audit IDs are `A-N`, monotonic, never reused.
 | A-45 | 2026-11-04 | OP-1's wording; arms a2-verify-prose and b2-imperative-only re-run, b5-claim-bound new | A-44 found OP-1 at 3/10 on today's sonnet vs 7/10 in A-34: model or wording? Does a claim-bound wording (A-40) recover it? | Measure only, n=35/arm, A-44's harness and anchors | Frozen E-1..E-5 in the section; point: E-1 (model), E-3 low | Medium on E-1, low on E-3 | **E-1 held:** a2 4/10, b2 3/10 — the fall from 7/10 is the model, not the wording. **E-5 held:** b5-claim-bound 1/10, worse than OP-1 (3/10). No rewording supported |
 | A-46 | 2026-11-04 | OP-6, OP-3, OP-4 (all `unmeasured`); instruments `prompt-engineering/scenarios/operator-rules/` | Never measured (spec Phase 3); OP-6's entry names its own test | Measure only, runs=10/cell, child tools fenced off the real profiles | Frozen tables in the section; point: all three WORK | OP-6 medium, OP-3 low, OP-4 medium | **OP-6 redundant here** (bare 0.95, +op6 1.00; single-skill harness, production untested). **OP-3 works** (V 1.0→0.0) but the agent then stores the fact nowhere. **OP-4 works** on wording (F 0→1.0); 5 bare real-profile reads, all denied |
 | A-47 | 2026-11-09 | Current call_graph surfaces; Codex gpt-6.1-sol/high | Current accuracy and transitive routing need verification; old Sonnet proposal result is not current Codex behavior | Inventory actual delivery; preregistered base first; conditional contrastive fold | Base>=9/10 chain +3/3 direct => no routing edit; else entry thresholds | Bounded native-tool fixture | **Satisfactory base:**10/10 completed correct-scope call_graph + exact answer; direct3/3. No routing edit; treatment skipped. Fresh private profile, not default plugins or no-ECC repair replay. One independently probed factual write-response rule corrected |
+| A-49 | 2026-11-11 | `src/prompts/guides/tracker-conventions.md` | A direct `get_guide` returned 56.6 KB; the harness saved it to disk and the model saw a 2 KB preview | Subtract rationale, keep every rule, heading, `serves:` line and test-pinned opener, point to the pages that already state the rest: 55,261 B to 21,928 B in three passes | After a rebuild a direct fetch returns inline; behaviour unchanged (unverified, N=0) | medium | **size held:** after the final rebuild a direct `get_guide` returned the full 21,928 B inline (2026-11-11); behaviour unverified (N=0) |
 ## Protocol — subtract-and-measure (P-1..P-8)
 
 Codified 2026-07-07 (fable-tuning FT-11) from what A-1..A-14 actually validated. Binding for any change to a codescout prompt surface (the three `source.md`-derived surfaces, `builders.rs`, guides, CLAUDE.md, companion hook text). Worked example: A-14; reusable template: `prompt-engineering/scenarios/fable-tidying/`. P-3's base-arm-first rule is promoted to cross-repo craft as **prompt-hamsa Heuristic 12** (claude-plugins:`5202cca`, 2026-07-07) — the skill now demands it on every snippet-addition audit, in any repo. **P-2a's observable table is cross-repo too, and for a sharper reason: the failure that produced it happened in `claude-plugins`, outside this protocol's stated binding.** A gate only works where the form is filled in, so the table travels with the pre-registration rather than with this repo — mirrored at `claude-plugins:docs/templates/eval-pre-registration.md`.
@@ -115,6 +116,28 @@ Codified 2026-07-07 (fable-tuning FT-11) from what A-1..A-14 actually validated.
 - **P-8 — Ship only on the ship branch; fill the outcome either way.** The A-N row gets its outcome the day evidence lands — ceilings and refutations are recorded with the same care as wins (they are the majority result: 6 of 9 intervention audits to date landed no-ship). A shipped change gets a follow-up measurement window before the row closes.
 
 **Baseline note (P-8a):** "original Fable captures" = the early-Fable JSONL corpus (~130 sessions, Jun 13–Jul 6, `~/.claude-sdd`) — a *stimulus source* (real transcripts → scenario fixtures), not an executable fixture. Executable baselines are prompt-tdd scenarios; `--compare` against `.prompt-tdd/baselines/` tags where regression tracking is needed.
+## A-49 — tracker-conventions guide: a direct get_guide overflowed the harness, so the guide never arrived
+
+**Valid:** dated 2026-11-11
+
+**Status:** shipped; size prediction HELD (2026-11-11). The 29,942 B version and the final 21,928 B version each returned inline, in full, from a direct `get_guide("tracker-conventions")` on a rebuilt server. Gate: Python 1,827 passed, formatting, both `nextest` lanes and `clippy --no-default-features` green; `clippy --features local-embed` red for a host reason (system OpenSSL 4.1.0, which `openssl-sys 0.9.112` rejects), unrelated to this change. The behaviour claim is UNVERIFIED (N=0).
+
+**Symptom:** a direct `get_guide("tracker-conventions")` returned 56.6 KB (body 55,261 B). The harness saved the result to `tool-results/*.json` and the model saw a 2 KB preview. `get_guide("librarian")` (25,195 B) returned inline in the same session, so the base arm shows the failure. Auto-injection was never affected: the guide declares `serves:` sections of at most 2.5 KB.
+
+**Read-as-stranger gap:** the file mixed rules an agent acts on with derivations, incident history and doctor-check rationale. Nothing bounded its size except tests on each served section.
+
+**Decoration cut:** rationale, restated rules, field tables, file-type lists, and every passage that another page already states (`docs/issues/_TEMPLATE.md`, `docs/RELEASE.md`, the manual concept pages, `cross-machine-catalog-resume.md`, the `move` response's `stage_hint`, the `entry_defined_twice` finding). The guide went from 55,261 B to 21,928 B in three passes. **Kept:** every rule, every heading, every `serves:` line and the section openers that server tests pin as proof of delivery. The removed wording is stored verbatim, under the guide's headings, in `docs/conventions/tracker-conventions-derivations.md`; the pre-cut text is blob `8df4fd692a`.
+
+**Eval status:** behaviour absent (N=0 graded examples). Structure present: the library tests and six integration tests pass. The cut found one kind of coupling: tests that pin the first words of a section.
+
+**Limit:** each call must deliver under a quarter of the whole guide (`tracker_write_shapes_ship_their_sections_and_only_theirs`). After the third pass `append_entry` delivers about 5.4 KB, so the whole guide cannot go much below 22 KB without shrinking that group too.
+
+**Recommended next move:** none open for size. For behaviour, run a model eval of the bug-close, archive and entry-id rules against the pre-cut blob `8df4fd692a`.
+
+**Prediction (held for size):** a direct fetch is inline. It was inline at 29,942 B and at 21,928 B. Agents follow the bug-close, archive and entry-id rules as before: not tested.
+
+**Confidence:** medium. The harness threshold lies between 29.9 KB (inline) and 56.6 KB (saved) and is not pinned further.
+
 ## A-47 — Current call_graph prompt delivery and Codex routing
 
 **Status:** measured — satisfactory base; no routing edit
