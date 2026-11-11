@@ -20,6 +20,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use crate::librarian::identity::grammar::{extract, Reference};
+use crate::util::markdown_fence::FenceState;
 
 /// One `File` or `Entry` citation on a labelled line.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,11 +42,6 @@ fn label_of(line: &str) -> Option<String> {
     re.captures(line).map(|c| c[1].trim().to_string())
 }
 
-/// A line that opens a code fence (backtick or tilde), after leading whitespace.
-fn is_fence_delimiter(trimmed: &str) -> bool {
-    trimmed.starts_with("```") || trimmed.starts_with("~~~")
-}
-
 /// Whether `line` starts the next bold field (`**Valid:**`, `**Status:**`), which ends a paragraph.
 fn is_bold_field_label(line: &str) -> bool {
     line.strip_prefix("**").is_some_and(|r| r.contains(":**"))
@@ -58,16 +54,17 @@ pub fn relations(doc: &str) -> Vec<Relation> {
     // text, frontmatter included, counting `\n`; so does `str::lines` (it also drops a `\r`).
     let mut labels: HashMap<u32, String> = HashMap::new();
     let mut current: Option<String> = None;
-    let mut in_fence = false;
+    // CommonMark fence rules, the same tracker `statements.rs` uses for the same field.
+    let mut fence = FenceState::new();
     for (i, line) in doc.lines().enumerate() {
         let n = i as u32 + 1;
         let trimmed = line.trim_start();
-        if is_fence_delimiter(trimmed) {
-            in_fence = !in_fence;
+        let is_delim = fence.feed(trimmed);
+        if is_delim {
             current = None;
             continue;
         }
-        if in_fence {
+        if fence.in_fence() {
             continue;
         }
         if current.is_some() {
@@ -130,9 +127,6 @@ mod tests {
         assert!(relations("Note: **rests on:** [[x-doc]]\n").is_empty());
     }
 
-    // The code-span case above is empty only because the grammar drops the link, not because the
-    // label is missed: pin that the label line itself is recognised, so a label-regex bug cannot
-    // hide behind the grammar and a regex-over-lines implementation could not pass.
     // The code-span case above is empty only because the grammar drops the link, not because the
     // label is missed: pin that the label line itself is recognised, so a label-regex bug cannot
     // hide behind the grammar and a regex-over-lines implementation could not pass.
@@ -240,5 +234,49 @@ mod tests {
     #[test]
     fn inline_code_in_a_wrapped_paragraph_is_still_no_relation() {
         assert!(relations("**Rests on:** `[[x-doc]]`\n  `[[y-doc]]`\n").is_empty());
+    }
+
+    #[test]
+    fn a_non_relation_bold_field_ends_the_paragraph_and_is_not_one() {
+        // `**Note 1:**` fails the label regex (a digit), so it declares nothing; the `[[b]]` below
+        // it must not inherit the Rests on label.
+        assert_eq!(
+            lines_and_labels("**Rests on:** [[a]]\n**Note 1:** x\n[[b]]\n"),
+            vec![l(1, "Rests on")]
+        );
+    }
+
+    #[test]
+    fn a_target_only_on_a_continuation_line_is_a_relation() {
+        assert_eq!(
+            lines_and_labels("**Rests on:** see\n  [[b]]\n"),
+            vec![l(2, "Rests on")]
+        );
+    }
+
+    #[test]
+    fn a_shorter_run_inside_a_longer_fence_does_not_close_it() {
+        // CommonMark: line 3 is content, line 4 closes the fence, line 5 is outside it.
+        assert_eq!(
+            lines_and_labels("````\n```\n````\n**Rests on:** [[a]]\n"),
+            vec![l(4, "Rests on")]
+        );
+    }
+
+    #[test]
+    fn a_mismatched_fence_character_does_not_close_it() {
+        assert_eq!(
+            lines_and_labels("~~~\n```\n~~~\n**Rests on:** [[a]]\n"),
+            vec![l(4, "Rests on")]
+        );
+    }
+
+    #[test]
+    fn a_backtick_info_string_is_not_a_fence_opener() {
+        // An opener whose backtick info string contains a backtick is prose; the paragraph goes on.
+        assert_eq!(
+            lines_and_labels("**Rests on:** [[a]]\n```x`y [[b]]\n"),
+            vec![l(1, "Rests on"), l(2, "Rests on")]
+        );
     }
 }
