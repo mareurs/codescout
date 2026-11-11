@@ -382,9 +382,9 @@ fn archive_paths_are_the_nearest_sibling_archive() {
   - `pub struct LifecycleTree { pub collections: Vec<CollectionNode>, pub problems: Vec<TreeProblem>, pub closed_dates: std::collections::BTreeMap<Key, chrono::NaiveDate> }` with `pub fn build(docs: impl IntoIterator<Item = DocInput>) -> LifecycleTree`. `closed_dates` holds the frontmatter `closed:` date of EVERY input document that has one (lifecycle entries and others, for example bug files), keyed by `key_of`. An entry with no collection readme above it is `OrphanEntry`; a collection whose schema fails is reported once and its entries are skipped.
 - Produces (`checks.rs`):
   - `pub struct CheckPolicy { pub terminal_grace_days: u32 }` with `Default` = `14`.
-  - `pub enum Finding { StatusUndeclared { entry: Key, status: String }, RevisitDue { entry: Key, revisit_by: NaiveDate }, CitedTargetClosed { entry: Key, target: Key, closed: NaiveDate }, StreamAllTerminal { collection: Key }, StreamWithoutExit { collection: Key }, LedgerQuiet { collection: Key, last_activity: Option<NaiveDate> }, TerminalInLiveDir { entry: Key, closed: NaiveDate }, OrphanEntry { rel_path: String } }`.
+  - `pub enum Finding { EntryInvalid { entry: Key, problem: EntryProblem }, RevisitDue { entry: Key, revisit_by: NaiveDate }, CitedTargetClosed { entry: Key, target: Key, closed: NaiveDate }, StreamAllTerminal { collection: Key }, StreamWithoutExit { collection: Key }, LedgerQuiet { collection: Key, last_activity: Option<NaiveDate> }, TerminalInLiveDir { entry: Key, closed: NaiveDate }, OrphanEntry { rel_path: String } }`.
   - `pub fn check(tree: &LifecycleTree, today: NaiveDate, policy: &CheckPolicy) -> Vec<Finding>` — rules:
-    - `StatusUndeclared`: from `validate_entry`.
+    - `EntryInvalid`: one finding per problem that `validate_entry` returns, for EVERY entry, archived or not (spec: `entry_invalid`, which generalises the former `status_undeclared`; ruling of 2026-11-11). `EntryProblem` must derive `Clone`.
     - `RevisitDue`: class `Blocked`/`Deferred` and `revisit_by < today`.
     - `CitedTargetClosed`: class not `Terminal`, a relation targets key `t` (File or Entry form), `closed_dates[t] > meta.status_since`.
     - `StreamAllTerminal`: un-archived `Stream`/`Temp` collection with at least one entry, every entry `Terminal`.

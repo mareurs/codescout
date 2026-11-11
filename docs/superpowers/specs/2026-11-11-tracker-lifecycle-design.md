@@ -321,7 +321,7 @@ into a new entry.
 
 | Check | Fires when |
 |---|---|
-| `status_undeclared` | an entry's status is not in its collection's `statuses` |
+| `entry_invalid` | an entry breaks its collection's rules: a status, kind or field the readme does not declare, a field of the wrong type, a blocked or deferred entry with no `revisit_by`, a terminal entry with no `closed`, or a non-terminal entry that carries `closed` |
 | `revisit_due` | a blocked or deferred entry's `revisit_by` has passed |
 | `cited_target_closed` | an open entry has a relation line to a target whose `closed` date is after the entry's `status_since` |
 | `stream_all_terminal` | every entry of a stream is terminal but the stream is not archived |
@@ -331,6 +331,10 @@ into a new entry.
 | `orphan_entry` | a file under a lifecycle folder has no collection readme above it |
 
 Every check reads frontmatter dates and statuses. None reads git commit dates (anti-goal 2).
+`entry_invalid` exists because committed files are the only store: a hand edit, a merge or a
+pull bypasses the write-time validation in `doc(update)`, and an entry that lacks `revisit_by`
+or `closed` would silently switch off `revisit_due` and `terminal_in_live_dir`. It reports one
+finding per problem and covers every entry, archived or not.
 `doctor` reports; it never moves or edits. Re-confirming that an open entry is still open
 is a `doc(update)` that rewrites the same status, which advances `status_since` and silences
 `cited_target_closed` until the target changes again.
