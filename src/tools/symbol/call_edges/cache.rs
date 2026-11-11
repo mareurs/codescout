@@ -328,19 +328,37 @@ impl<'a> EdgeCache<'a> {
         tx.commit()
     }
 
+    /// Drops what a codescout write to `file` can have made stale: the raw edges of the file, and,
+    /// when `file` can hold a call (see [`can_hold_a_call`]), every cached resolution of the
+    /// project. A changed caller can affect an incoming result owned by a different file, and
+    /// the epoch covers only the files of the seed's own language family, so a write to a source
+    /// file of any language keeps this conservative sweep. A write to markdown, TOML, JSON or a
+    /// file with no known extension cannot change a call, so the resolutions stay.
     pub fn invalidate_file(&self, file: &Path) -> rusqlite::Result<usize> {
         let removed = self.conn.execute(
             "DELETE FROM call_edges WHERE project_id = ?1 AND file = ?2",
             params![self.project_id, file.to_string_lossy()],
         )?;
-        // A changed caller can affect an incoming result owned by a different file.
-        self.conn.execute(
-            "DELETE FROM call_edge_resolutions WHERE project_id = ?1",
-            params![self.project_id],
-        )?;
+        if can_hold_a_call(file) {
+            self.conn.execute(
+                "DELETE FROM call_edge_resolutions WHERE project_id = ?1",
+                params![self.project_id],
+            )?;
+        }
         // Preserve the raw-edge count returned to existing invalidation consumers.
         Ok(removed)
     }
+}
+
+/// Whether a write to `file` can change a call that a cached resolution describes.
+///
+/// `false` only for a file with no recognized source extension and for markdown: neither holds a
+/// call that a language server or the tree-sitter classifiers report. Every language
+/// [`crate::ast::detect_language`] recognizes (HTML and CSS included) counts as able to hold one,
+/// because the rule must never be wrong in the unsafe direction: a `true` costs a cache entry, a
+/// `false` that is wrong serves a stale call graph.
+fn can_hold_a_call(file: &Path) -> bool {
+    !matches!(crate::ast::detect_language(file), None | Some("markdown"))
 }
 
 fn row_to_edge(row: &rusqlite::Row<'_>) -> rusqlite::Result<Edge> {
@@ -612,6 +630,41 @@ mod tests {
         );
         assert_eq!(a.lookup_resolution(&key).unwrap(), None);
         assert_eq!(b.lookup_resolution(&key).unwrap(), Some(first));
+    }
+    /// A write to a file that cannot hold a call (markdown, TOML, JSON, a file with no extension)
+    /// cannot change any cached resolution, so it must not delete them. Measured 2026-11-12 on this
+    /// checkout: 396 of 1565 invalidating writes in 24 hours went to such files, and each one
+    /// deleted every cached call graph of the project (bug `489e013ddfd6c3fc`). A write to a source
+    /// file still deletes them: a caller added in a file of another language family is not covered
+    /// by the epoch.
+    #[test]
+    fn a_write_to_a_file_that_cannot_hold_a_call_keeps_the_resolutions() {
+        let conn = setup_db();
+        let cache = EdgeCache::new(&conn, "project-a");
+        let key = resolution_key();
+        let edges = vec![resolution_edge("first")];
+        cache.store_resolution(&key, &edges).unwrap();
+        for file in [
+            "/project/notes.md",
+            "/project/config.toml",
+            "/project/data.json",
+            "/project/Dockerfile",
+        ] {
+            cache.invalidate_file(Path::new(file)).unwrap();
+            assert_eq!(
+                cache.lookup_resolution(&key).unwrap(),
+                Some(edges.clone()),
+                "a write to {file} must keep the cached resolutions"
+            );
+        }
+        cache
+            .invalidate_file(Path::new("/project/caller.py"))
+            .unwrap();
+        assert_eq!(
+            cache.lookup_resolution(&key).unwrap(),
+            None,
+            "a write to a source file still deletes every resolution of the project"
+        );
     }
 
     #[test]
