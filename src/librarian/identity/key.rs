@@ -36,12 +36,13 @@ impl fmt::Display for KeyError {
             KeyError::NonCanonical { rel_path, key } => write!(
                 f,
                 "{rel_path:?} gives the key {key:?}, which must match ^[a-z0-9]+(-[a-z0-9]+)*$ \
-                 (lowercase letters and digits, single '-' between runs); rename the file"
+                 (lowercase letters and digits, single '-' between runs); rename the file, \
+                 or its folder when the file is a readme"
             ),
             KeyError::HexShaped { rel_path, key } => write!(
                 f,
                 "{rel_path:?} gives the key {key:?}, which is exactly 16 hex characters, the \
-                 shape of a repo id; rename the file"
+                 shape of a repo id; rename the file, or its folder when the file is a readme"
             ),
         }
     }
@@ -108,18 +109,27 @@ pub fn is_folder_index(rel_path: &str) -> bool {
 }
 
 /// The key of the markdown document at `rel_path`.
+///
+/// The caller passes a normalised path relative to the repo root with no `..`
+/// component; `..` is read as an ordinary component, not resolved. A path whose
+/// last character is `/` or `\` names a directory and is `NotMarkdown`. Only
+/// ASCII lowercasing is applied, so a non-ASCII letter stays in the key and is
+/// refused as `NonCanonical`.
 pub fn key_of(rel_path: &str) -> Result<Key, KeyError> {
+    if rel_path.ends_with(['/', '\\']) {
+        return Err(KeyError::NotMarkdown(rel_path.to_string()));
+    }
     let parts = components(rel_path);
     let Some(stem) = parts
         .last()
         .and_then(|name| markdown_stem(name))
-        .map(str::to_lowercase)
+        .map(str::to_ascii_lowercase)
     else {
         return Err(KeyError::NotMarkdown(rel_path.to_string()));
     };
     let key = if is_folder_index(rel_path) {
         match parts.len().checked_sub(2).and_then(|i| parts.get(i)) {
-            Some(folder) => folder.to_lowercase(),
+            Some(folder) => folder.to_ascii_lowercase(),
             None => stem,
         }
     } else {
@@ -198,6 +208,48 @@ mod tests {
             key_of("docs/Bad_Folder/readme.md"),
             Err(KeyError::NonCanonical { .. })
         ));
+        // U+212A KELVIN SIGN lowercases to ASCII `k` under Unicode lowercasing; only ASCII
+        // lowercasing is applied, so a non-ASCII letter is refused and never folded into a key.
+        assert!(matches!(
+            key_of("docs/\u{212A}ey.md"),
+            Err(KeyError::NonCanonical { .. })
+        ));
+        assert!(matches!(
+            key_of("docs/\u{130}.md"),
+            Err(KeyError::NonCanonical { .. })
+        ));
+        assert!(matches!(
+            key_of("docs/\u{1C5}.md"),
+            Err(KeyError::NonCanonical { .. })
+        ));
+        // The same holds for the folder name a readme takes; the error keeps the rel path as given.
+        match key_of("docs/\u{212A}/readme.md") {
+            Err(KeyError::NonCanonical { rel_path, .. }) => {
+                assert_eq!(rel_path, "docs/\u{212A}/readme.md")
+            }
+            other => panic!("expected NonCanonical, got {other:?}"),
+        }
+    }
+    #[test]
+    fn a_trailing_separator_names_a_directory_not_a_markdown_file() {
+        // A path ending in `/` or `\` names a directory, whatever its last component looks like.
+        for p in ["docs/x.md/", "docs/README.md/", r"docs\x.md\"] {
+            assert!(matches!(key_of(p), Err(KeyError::NotMarkdown(_))), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn a_dot_dot_component_is_an_ordinary_component() {
+        // Documents current behaviour, not an endorsement: `key_of` is pure and does not resolve
+        // `..`; the caller passes a normalised path.
+        assert_eq!(key_of("docs/../x.md").unwrap().as_str(), "x");
+    }
+
+    #[test]
+    fn the_error_advice_covers_a_readme_whose_folder_is_the_key() {
+        // The key of a readme comes from its folder, so the advice must not name only the file.
+        let msg = key_of("docs/Bad_Folder/README.md").unwrap_err().to_string();
+        assert!(msg.contains("or its folder"), "{msg}");
     }
 
     #[test]
@@ -283,6 +335,11 @@ mod tests {
         assert!(matches!(
             Key::parse("deadbeefcafe1234"),
             Err(KeyError::HexShaped { .. })
+        ));
+        // Uppercase hex is a charset error first, because `parse` does not lowercase.
+        assert!(matches!(
+            Key::parse("DEADBEEFCAFE1234"),
+            Err(KeyError::NonCanonical { .. })
         ));
         assert!(matches!(Key::parse(""), Err(KeyError::NonCanonical { .. })));
     }
