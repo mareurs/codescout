@@ -8,7 +8,7 @@ tags:
 opened: 2026-11-11
 owner: marius
 severity: medium
-unverified: 'The deletion path is read from code and the cascade from the live schema; no reproduction was run. Not checked: what reindex re-attaches afterwards from an expects_augmentation sidecar (shape only, never params).'
+unverified: 'Measured for the events table only (in-memory catalog, one event, plain rename). Not measured: loss of augmentation, observations, links and entry_reservation rows; what reindex re-attaches afterwards from an expects_augmentation sidecar (shape only, never params); behaviour on the live catalog.'
 ---
 
 # BUG: reindex deletes a moved file's local history when the move was not made in this catalog
@@ -35,7 +35,7 @@ the unguarded branch a repair, so the documentation reinforces the gap instead o
 
 ## Symptom (Effect)
 
-Not observed at runtime. From the code: reindex reports the row under `removed: N`, and the
+Observed in an in-memory catalog test (2026-11-11); not observed on the live catalog. From the code: reindex reports the row under `removed: N`, and the
 row's history is gone. The convention quotes such a run:
 
 ```
@@ -45,7 +45,7 @@ files the other host had fixed and archived the same day.*
 
 ## Reproduction
 
-Not yet reproduced — best lead, all read-only except the scratch catalog:
+Reproduced 2026-11-11 by `librarian::indexer::tests::a_vanished_file_with_history_keeps_its_events` (`src/librarian/indexer.rs`, marked `#[ignore]` because it is red by design). Run it with `scripts/with-slot.sh cargo test --lib a_vanished_file_with_history_keeps_its_events -- --ignored`; it fails with `left: 0, right: 1` at the final assertion, after its setup assertion confirmed the event existed. The test automates these steps:
 
 1. In a scratch catalog, create an artifact and add one event (`doc(action="event_create")`).
 2. Rename its file with plain `git mv` (simulating a move pulled from another host).
@@ -70,7 +70,7 @@ Linux, `experiments` at `53b3e9d75`, catalog `~/.local/share/librarian/catalog.d
   are `REFERENCES artifact(id) ON DELETE CASCADE`
   (`sqlite3 -readonly … "SELECT name FROM sqlite_master WHERE … sql LIKE '%REFERENCES artifact(id) ON DELETE CASCADE%'"`).
 
-Inferred from the code; not measured at runtime.
+The deletion is measured for the `events` table (the test above). The other cascade tables are inferred from the schema and not measured.
 
 ## Evidence
 
@@ -97,7 +97,7 @@ Two candidates; not decided.
 
 ## Tests added
 
-None yet; the bug is open.
+`librarian::indexer::tests::a_vanished_file_with_history_keeps_its_events` (`#[ignore]`, red by design). Remove the `#[ignore]` in the commit that fixes the bug; it then guards the fix.
 
 ## Workarounds
 
@@ -107,8 +107,7 @@ risk at the next reindex.
 
 ## Resume
 
-Run the reproduction above in a scratch catalog to turn the inferred mechanism into a
-measured one; then decide between the two fix candidates with the identity spec's owner.
+The mechanism is measured for events. The fix is left to the identity-spec owner: the short-term candidate changes how rows without a file are treated, which the identity design decides. `src/librarian/catalog/gc.rs` already holds `reconcile_missing_since` (never deletes) and move detection; check how they interact with the delete in `index_repo_sync` before choosing.
 
 ## References
 
