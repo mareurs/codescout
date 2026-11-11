@@ -359,6 +359,56 @@ def command_failures(db: Path, days: int | None):
     return out
 
 
+def by_client(db: Path, days: int | None):
+    """Calls grouped by the MCP client that made them (`tool_calls.client_name`).
+
+    The harness decides how a server was launched, and `output_json` is written only by a
+    server started with `--debug`, so a per-client split is what shows which harness leaves
+    the gap (FR-3). It reads whatever names appear and assumes none: the name a client sends
+    in its handshake is a fact of that client, not of this script. `<null>` is a row written by
+    a build without the column, by a call that never reached the recorder, or by a refused pin.
+
+    Per client: `calls`; `with_output` (a stored `output_json`); `with_facts` (an
+    `output_bytes`, written by a build that records the result facts); and, over its
+    `run_command` successes that carry a fact, `recorded` and `failed` (non-zero exit or
+    timeout). `failed` is a floor over `recorded`, never over `calls`.
+    """
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(tool_calls)")}
+        if "client_name" not in cols:
+            return {"available": False, "reason": "tool_calls has no client_name column"}
+        facts = {"output_bytes", "command_exit", "command_timed_out", "output_json"} <= cols
+        where = "1=1"
+        params: list = []
+        if days is not None:
+            where += " AND called_at >= datetime('now', ?)"
+            params.append(f"-{days} days")
+        extra = (
+            ", SUM(COALESCE(output_json, '') <> '')"
+            ", SUM(output_bytes IS NOT NULL)"
+            ", SUM(tool_name = 'run_command' AND outcome = 'success' AND "
+            "(command_exit IS NOT NULL OR command_timed_out IS NOT NULL))"
+            ", SUM(tool_name = 'run_command' AND outcome = 'success' AND "
+            "((command_exit IS NOT NULL AND command_exit <> 0) OR command_timed_out = 1))"
+            if facts else ""
+        )
+        rows = conn.execute(
+            f"SELECT COALESCE(client_name, '<null>'), COUNT(*){extra} "
+            f"FROM tool_calls WHERE {where} GROUP BY 1 ORDER BY 2 DESC, 1", params).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for row in rows:
+        entry = {"client": row[0], "calls": row[1]}
+        if facts:
+            entry.update(with_output=row[2] or 0, with_facts=row[3] or 0,
+                         recorded=row[4] or 0, failed=row[5] or 0)
+        out.append(entry)
+    return {"available": True, "clients": out}
+
+
+
 def calibrate(repeat_rows):
     by_fam = {r["err_family"]: r for r in repeat_rows}
     out = []
@@ -590,6 +640,7 @@ def main() -> int:
         "calls_to_recovery": calls_to_recovery(rows),
         "error_runs": error_runs(rows),
         "run_command_failures_recorded_as_success": command_failures(args.db, args.days),
+        "by_client": by_client(args.db, args.days),
     }
     if args.calibrate:
         report["calibration_vs_TU7"] = calibrate(report["immediate_repeat"])
@@ -658,6 +709,18 @@ def main() -> int:
                   f"without --debug): recorded {fc['recorded']} of {fc['success_rows']}   "
                   f"failed: {fc['failed']} ({fc['pct_of_recorded']}%)   "
                   f"non-zero exit: {fc['nonzero_exit']}   timed out: {fc['timed_out']}")
+
+    bc = r["by_client"]
+    print("\n=== calls by MCP client (FR-3; `<null>` = no client recorded) ===")
+    if not bc["available"]:
+        print(f"  not measured: {bc['reason']}")
+    else:
+        for c in bc["clients"]:
+            line = f"  {c['client']:<24}{c['calls']:>8} calls"
+            if "with_output" in c:
+                line += (f"   with output: {c['with_output']}   with facts: {c['with_facts']}"
+                         f"   run_command recorded: {c['recorded']}   failed: {c['failed']}")
+            print(line)
 
     if args.calibrate:
         print("\n=== calibration vs TU-7 (2026-08-15, 13-project corpus) ===")
