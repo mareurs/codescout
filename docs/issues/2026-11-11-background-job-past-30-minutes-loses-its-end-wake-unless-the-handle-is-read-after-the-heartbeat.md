@@ -10,7 +10,7 @@ tags:
 closed: 2026-11-11
 opened: 2026-11-11
 severity: high
-unverified: 'No live repro was run, before or after the fix (CODESCOUT_WAKE_DEADLINE_SECS=45, a 150 s job, no read). The cliff is not removed: without a read after the heartbeat the end wake is still lost; the fix tells the model so and reports the missed end at the next prompt. The plugin fix (claude-plugins c93a23b) is committed but not version-bumped, so installed copies do not have it. Whether the 125 unarmed ended records are a second defect is still not measured.'
+unverified: 'The safety net was run by hand (node wake-missed-jobs.mjs with this session''s id), not by the harness: whether Claude Code runs it at UserPromptSubmit and SessionStart in a session launched with 1.21.4 is not measured. The cliff is not removed: without a read after the heartbeat the end wake is still lost (measured 2026-11-11, see Live repro). 1.21.4 is committed locally in claude-plugins and not pushed. Whether the 125 unarmed ended records are a second defect is still not measured.'
 ---
 
 # BUG: a background job that runs past 30 minutes loses its end wake unless the session reads its handle after the heartbeat
@@ -47,6 +47,22 @@ A third path, same session: a foreground `run_command` with `timeout_secs=600` w
 ## Reproduction
 
 Not reproduced live in this investigation. The mechanism follows from the hook code and from the transcripts (Evidence 2 to 4). Shortest recipe, from the design spec's own measurement (`docs/superpowers/specs/2026-10-29-background-job-wake-design.md:39`): with the companion plugin active, set `CODESCOUT_WAKE_DEADLINE_SECS=45`, start `run_command("sleep 150", run_in_background=true)`, end the turn, and when the heartbeat wake arrives do NOT run any command that names the `@bg_N` handle. End the turn again. Expected by this issue: no wake when the job ends at 150 s.
+
+### Live repro, 2026-11-11 (measured)
+
+Session `14053904-5577-4ad4-9053-0a7fb3f09d04`, job `@bg_00000014` (`sleep 1860`), default 1800 s deadline.
+
+```
+12:32:30Z  spawn; .wake-owner.json, .watch and the session map exist (the hook armed itself)
+13:02:34Z  heartbeat wake, with the NEW text from claude-plugins 1.21.4 ("This watcher has ended ... no end wake arrives")
+           no run_command naming the handle was run; only a foreground sleep and a path-based ls
+13:03:30Z  record: state exited, finished_at 13:03:30Z; no .delivered, no .watch
+13:04:18Z  no end wake had arrived
+```
+
+So the mechanism holds: with no read after the heartbeat, the end wake is lost. The safety net, run by hand with this session's id on the real state directory, then reported the job once (`ended: exited 0 after 31m 0s`) and wrote `.delivered`.
+
+Observed, not explained: the heartbeat of this session carried the 1.21.4 text although the session was started before the release. The cache of the profile was replaced in place by `release.sh` at 14:3x local time. Not checked whether a resumed session resolves the plugin root at each call.
 
 ## Environment
 
