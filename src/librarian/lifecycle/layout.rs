@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::librarian::identity::key::{is_folder_index, Key, KeyError};
+use crate::librarian::identity::key::{components, is_folder_index, Key, KeyError};
 
 /// The tracker root, repo-relative.
 pub const TRACKERS_DIR: &str = "docs/trackers";
@@ -81,18 +81,9 @@ pub enum PlacementError {
     BadKey { rel_path: String, error: KeyError },
 }
 
-fn segments(rel_path: &str) -> Vec<String> {
-    rel_path
-        .replace('\\', "/")
-        .split('/')
-        .filter(|s| !s.is_empty() && *s != ".")
-        .map(str::to_string)
-        .collect()
-}
-
 /// The lifecycle when `segs` is below `docs/trackers/<lifecycle>/`; `None` otherwise.
 fn lifecycle_of(segs: &[String]) -> Option<Lifecycle> {
-    let root = segments(TRACKERS_DIR);
+    let root = components(TRACKERS_DIR);
     if segs.len() < 4 || segs[..root.len()] != root[..] {
         return None;
     }
@@ -103,7 +94,7 @@ fn lifecycle_of(segs: &[String]) -> Option<Lifecycle> {
 /// sits under `<lifecycle>/archive/`. `None` when no file lies below a collection folder.
 /// `segs` must already be below `docs/trackers/<lifecycle>/`.
 fn collection_depth(segs: &[String]) -> Option<(usize, bool)> {
-    let first_below_lifecycle = segments(TRACKERS_DIR).len() + 1;
+    let first_below_lifecycle = components(TRACKERS_DIR).len() + 1;
     let archived = segs
         .get(first_below_lifecycle)
         .is_some_and(|s| s == ARCHIVE_DIR);
@@ -114,10 +105,11 @@ fn collection_depth(segs: &[String]) -> Option<(usize, bool)> {
 /// Place a repo-relative path. `None` when it is not below `docs/trackers/<lifecycle>/`
 /// (legacy flat trackers, other docs). `\` is read as `/`.
 pub fn place(rel_path: &str) -> Option<Result<Placement, PlacementError>> {
-    let segs = segments(rel_path);
+    let segs = components(rel_path);
     let lifecycle = lifecycle_of(&segs)?;
     let file = segs.last()?;
-    if !file.to_ascii_lowercase().ends_with(".md") {
+    // A trailing separator names a directory, as in `is_folder_index`, never a tracker file.
+    if rel_path.ends_with(['/', '\\']) || !file.to_ascii_lowercase().ends_with(".md") {
         return Some(Err(PlacementError::NotMarkdown(rel_path.to_string())));
     }
     let Some((depth, collection_archived)) = collection_depth(&segs) else {
@@ -156,8 +148,8 @@ pub fn has_nested_readme(rel_path: &str, readme_dirs: &BTreeSet<String>) -> bool
     let Some(Ok(placement)) = place(rel_path) else {
         return false;
     };
-    let segs = segments(rel_path);
-    let depth = segments(&placement.collection_dir).len();
+    let segs = components(rel_path);
+    let depth = components(&placement.collection_dir).len();
     (depth + 1..segs.len()).any(|k| readme_dirs.contains(&segs[..k].join("/")))
 }
 
@@ -240,6 +232,22 @@ mod tests {
                 .as_str(),
             "frictions"
         );
+    }
+    #[test]
+    fn a_trailing_separator_is_not_a_tracker_file() {
+        for path in [
+            "docs/trackers/ledgers/frictions/2026-01-01-a.md/",
+            r"docs\trackers\ledgers\frictions\2026-01-01-a.md\",
+            "docs/trackers/ledgers/frictions/readme.md/",
+        ] {
+            assert_eq!(
+                place(path),
+                Some(Err(PlacementError::NotMarkdown(path.to_string()))),
+                "{path}"
+            );
+        }
+        // Outside the tree a path is still `None`, trailing separator or not.
+        assert!(place("docs/issues/2026-01-01-x.md/").is_none());
     }
 
     #[test]

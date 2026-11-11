@@ -433,6 +433,24 @@ mod tests {
             }
         )));
     }
+    #[test]
+    fn a_readme_without_the_key_is_missing_key() {
+        let base = "title: T\nentry_kinds: [k]\nstatuses: {open: open, done: terminal}\ninitial_status: open\n";
+        assert!(parse_schema(Lifecycle::Ledger, &fm(base)).is_ok());
+        for key in ["entry_kinds", "statuses", "initial_status"] {
+            let without: String = base
+                .lines()
+                .filter(|l| !l.starts_with(&format!("{key}:")))
+                .map(|l| format!("{l}\n"))
+                .collect();
+            let errs = parse_schema(Lifecycle::Ledger, &fm(&without)).unwrap_err();
+            assert!(
+                errs.iter()
+                    .any(|e| matches!(e, SchemaError::MissingKey(k) if *k == key)),
+                "{key}: {errs:?}"
+            );
+        }
+    }
 
     #[test]
     fn the_initial_status_must_be_open_class() {

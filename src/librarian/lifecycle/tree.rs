@@ -13,7 +13,7 @@ use super::layout::{has_nested_readme, place, Lifecycle, Placement, PlacementErr
 use super::relations::{relations, Relation};
 use super::schema::{parse_schema, CollectionSchema, SchemaError};
 use crate::librarian::frontmatter::{self, Frontmatter};
-use crate::librarian::identity::key::{is_folder_index, key_of, Key};
+use crate::librarian::identity::key::{components, is_folder_index, key_of, Key};
 
 /// One document handed to [`LifecycleTree::build`]: its repo-relative path and its text.
 /// The identity index's input type, shared so both models read one document set.
@@ -85,10 +85,7 @@ pub struct LifecycleTree {
 /// The folder of `rel_path`, `/`-separated, read the way `layout::place` reads a path
 /// (`\` is `/`; empty and `.` components are dropped).
 fn parent_dir(rel_path: &str) -> String {
-    let segs: Vec<&str> = rel_path
-        .split(['/', '\\'])
-        .filter(|s| !s.is_empty() && *s != ".")
-        .collect();
+    let segs = components(rel_path);
     segs[..segs.len().saturating_sub(1)].join("/")
 }
 

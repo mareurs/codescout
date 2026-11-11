@@ -5,7 +5,7 @@
 
 use chrono::NaiveDate;
 
-use crate::librarian::identity::key::{Key, KeyError};
+use crate::librarian::identity::key::{components, Key, KeyError};
 use crate::librarian::lifecycle::layout::{Placement, Role, ARCHIVE_DIR, TRACKERS_DIR};
 use crate::librarian::lifecycle::schema::KeyStyle;
 
@@ -134,8 +134,7 @@ pub fn archive_rel_path(rel_path: &str, placement: &Placement) -> Option<String>
     }
     match placement.role {
         Role::Entry => {
-            let file = rel_path.replace('\\', "/");
-            let file = file.rsplit('/').next().unwrap_or_default();
+            let file = components(rel_path).pop().unwrap_or_default();
             Some(format!("{}/{ARCHIVE_DIR}/{file}", placement.collection_dir))
         }
         Role::CollectionReadme => Some(format!(
