@@ -62,17 +62,17 @@ pub struct ScanReport {
 /// boundary commit counts as parentless; [`scan`] checks `is_shallow` before it trusts the list.
 pub fn first_commits(git_root: &Path) -> anyhow::Result<Vec<String>> {
     // Without a deadline the walk always completes.
-    Ok(first_commits_until(git_root, None)?.unwrap_or_default())
+    Ok(first_commits_until(git_root, &|| false)?.unwrap_or_default())
 }
 
 /// How many commits the walk takes between two looks at the clock.
 const CLOCK_EVERY: usize = 512;
 
-/// [`first_commits`] that gives up at `until`: `Ok(None)` is "ran out of time", never a partial
+/// [`first_commits`] that gives up once `expired()`: `Ok(None)` is "ran out of time", never a partial
 /// list (a partial root set would read as a collision).
 fn first_commits_until(
     git_root: &Path,
-    until: Option<Instant>,
+    expired: &dyn Fn() -> bool,
 ) -> anyhow::Result<Option<Vec<String>>> {
     let repo = git2::Repository::open(git_root)
         .with_context(|| format!("opening the repository at {}", git_root.display()))?;
@@ -87,7 +87,7 @@ fn first_commits_until(
     walk.push_head()?;
     let mut roots = Vec::new();
     for (i, oid) in walk.enumerate() {
-        if i % CLOCK_EVERY == 0 && until.is_some_and(|u| Instant::now() >= u) {
+        if i % CLOCK_EVERY == 0 && expired() {
             return Ok(None);
         }
         let oid = oid?;
@@ -112,7 +112,7 @@ enum Inspected {
     TimedOut,
 }
 
-fn inspect(git_root: &Path, until: Option<Instant>) -> anyhow::Result<Inspected> {
+fn inspect(git_root: &Path, expired: &dyn Fn() -> bool) -> anyhow::Result<Inspected> {
     let repo = match git2::Repository::open(git_root) {
         Ok(repo) => repo,
         // A project that is not in a git repository has no history to compare.
@@ -126,7 +126,7 @@ fn inspect(git_root: &Path, until: Option<Instant>) -> anyhow::Result<Inspected>
         return Ok(Inspected::Shallow);
     }
     drop(repo);
-    Ok(match first_commits_until(git_root, until)? {
+    Ok(match first_commits_until(git_root, expired)? {
         Some(roots) => Inspected::Roots(roots),
         None => Inspected::TimedOut,
     })
@@ -177,15 +177,25 @@ struct Scan<'a> {
     this_canonical: PathBuf,
     /// `None` until a same-named candidate needs it; computed once.
     this_side: Option<Result<Inspected, String>>,
-    until: Option<Instant>,
+    /// Whether the deadline has passed.
+    expired: &'a dyn Fn() -> bool,
     /// Canonical git roots already judged, so a monorepo with several projects counts once.
     judged: BTreeSet<PathBuf>,
     report: ScanReport,
 }
 
 impl Scan<'_> {
+    /// Record a bound. `Dirs` and `Deadline` mean even the depth-bounded set was not fully
+    /// examined, so they replace a recorded `Depth`; between those two, and for `Depth` itself,
+    /// the first one hit stays.
     fn note(&mut self, bound: Bound) {
-        self.report.bounded_by.get_or_insert(bound);
+        match (self.report.bounded_by, bound) {
+            (None, _) => self.report.bounded_by = Some(bound),
+            (Some(Bound::Depth), Bound::Dirs | Bound::Deadline) => {
+                self.report.bounded_by = Some(bound);
+            }
+            (Some(_), _) => {}
+        }
     }
 
     /// Judge the project at `dir`, when `dir` is one.
@@ -215,10 +225,10 @@ impl Scan<'_> {
 
     /// `git_root` uses this repo's name: a clone, a collision, or not decidable.
     fn judge(&mut self, git_root: PathBuf) {
-        let (this_root, until) = (self.this_git_root, self.until);
+        let (this_root, expired) = (self.this_git_root, self.expired);
         let this = self
             .this_side
-            .get_or_insert_with(|| inspect(this_root, until).map_err(|e| format!("{e:#}")));
+            .get_or_insert_with(|| inspect(this_root, expired).map_err(|e| format!("{e:#}")));
         let this = match this {
             Ok(this) => this,
             Err(e) => {
@@ -227,7 +237,7 @@ impl Scan<'_> {
                 return;
             }
         };
-        let other = match inspect(&git_root, until) {
+        let other = match inspect(&git_root, expired) {
             Ok(other) => other,
             Err(e) => {
                 self.report.unreadable.push((git_root, format!("{e:#}")));
@@ -260,6 +270,20 @@ pub fn scan(
     limits: &ScanLimits,
 ) -> ScanReport {
     let started = Instant::now();
+    scan_with(name, this_git_root, roots, limits, &|| {
+        started.elapsed() >= limits.deadline
+    })
+}
+
+/// [`scan`] with the clock injected: `expired()` is asked once per directory and every few
+/// hundred commits of a root-commit walk. A test drives it by call count instead of by sleeping.
+fn scan_with(
+    name: &RepoName,
+    this_git_root: &Path,
+    roots: &[PathBuf],
+    limits: &ScanLimits,
+    expired: &dyn Fn() -> bool,
+) -> ScanReport {
     let mut given: Vec<PathBuf> = roots.to_vec();
     given.sort();
     given.dedup();
@@ -268,7 +292,7 @@ pub fn scan(
         this_git_root,
         this_canonical: canonical(this_git_root),
         this_side: None,
-        until: started.checked_add(limits.deadline),
+        expired,
         judged: BTreeSet::new(),
         report: ScanReport {
             roots: given.clone(),
@@ -293,7 +317,7 @@ pub fn scan(
             state.note(Bound::Dirs);
             break;
         }
-        if started.elapsed() >= limits.deadline {
+        if expired() {
             state.note(Bound::Deadline);
             break;
         }
@@ -367,8 +391,12 @@ pub fn render_scope(report: &ScanReport) -> String {
     let bound = match report.bounded_by {
         None => "no bound was hit",
         Some(Bound::Depth) => "not exhaustive: directories below the depth limit were not entered",
-        Some(Bound::Dirs) => "not exhaustive: the scan stopped at the directory limit",
-        Some(Bound::Deadline) => "not exhaustive: the scan stopped at the time limit",
+        Some(Bound::Dirs) => {
+            "not exhaustive: the directory limit stopped the scan, so some directories were not examined"
+        }
+        Some(Bound::Deadline) => {
+            "not exhaustive: time ran out, so some directories or repositories were not examined"
+        }
     };
     format!(
         "scanned {roots}: {} directories visited; {bound}",
@@ -665,15 +693,74 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let this = tmp.path().join("this");
         make_repo(&this, Some("alpha"), "a");
-        // A monorepo: the repo file is at the git root, two projects live below it.
+        // A monorepo: the repo file is at the git root, which is NOT a project itself; only two
+        // nested projects below it are. Found through either, the repo must be the git root, read
+        // there; with the project directory used instead, `svc1` and `svc2` hold no repo file.
         let mono = tmp.path().join("work/mono");
         make_repo(&mono, Some("alpha"), "b");
+        std::fs::remove_file(mono.join(".codescout/project.toml")).unwrap();
         for p in ["svc1", "svc2"] {
             std::fs::create_dir_all(mono.join(p).join(".codescout")).unwrap();
             std::fs::write(mono.join(p).join(".codescout/project.toml"), "").unwrap();
         }
         let r = scan_default("alpha", &this, &[tmp.path()]);
         assert_eq!(r.collisions, vec![mono], "{r:?}");
+        assert!(r.unreadable.is_empty(), "{r:?}");
+    }
+
+    #[test]
+    fn the_directory_limit_outranks_the_depth_limit_in_the_scope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_repo(&this, Some("alpha"), "a");
+        let root = tmp.path().join("scan");
+        for d in ["x", "y"] {
+            std::fs::create_dir_all(root.join(d).join("sub")).unwrap();
+        }
+        // `z` is reached after the limit: it is not examined, and the scope must say so rather
+        // than blame depth (x and y, visited first, already hit the depth limit).
+        let z = root.join("z");
+        make_repo(&z, Some("alpha"), "b");
+        std::fs::create_dir_all(z.join("sub")).unwrap();
+        let limits = ScanLimits {
+            max_depth: 1,
+            max_dirs: 3,
+            ..ScanLimits::default()
+        };
+        let r = scan(&n("alpha"), &this, &[root], &limits);
+        assert_eq!(r.dirs_visited, 3, "{r:?}");
+        assert!(r.collisions.is_empty(), "z was never examined: {r:?}");
+        assert_eq!(r.bounded_by, Some(Bound::Dirs), "{r:?}");
+    }
+
+    #[test]
+    fn a_root_commit_walk_timeout_outranks_the_depth_limit_in_the_scope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_repo(&this, Some("alpha"), "a");
+        let root = tmp.path().join("scan");
+        std::fs::create_dir_all(root.join("a/sub")).unwrap();
+        let z = root.join("z");
+        make_repo(&z, Some("alpha"), "b");
+        let limits = ScanLimits {
+            max_depth: 1,
+            ..ScanLimits::default()
+        };
+        // No sleeping: the injected clock reads "expired" from its 4th question on. The scan asks
+        // once per directory (`scan`, `a`, `z`: three, and `a` hits the depth limit), then the
+        // first commit of this repository's root-commit walk asks the 4th time.
+        let asked = std::cell::Cell::new(0usize);
+        let expired = || {
+            asked.set(asked.get() + 1);
+            asked.get() > 3
+        };
+        let r = scan_with(&n("alpha"), &this, &[root], &limits, &expired);
+        assert_eq!(
+            r.dirs_visited, 3,
+            "the timeout came after the directories: {r:?}"
+        );
+        assert_eq!(r.unverified, vec![z], "the walk timed out on z: {r:?}");
+        assert_eq!(r.bounded_by, Some(Bound::Deadline), "{r:?}");
     }
 
     #[test]
