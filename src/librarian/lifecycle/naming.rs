@@ -10,6 +10,7 @@ use crate::librarian::lifecycle::layout::{Placement, Role, ARCHIVE_DIR, TRACKERS
 use crate::librarian::lifecycle::schema::KeyStyle;
 
 /// The longest slug, in bytes (a slug is ASCII, so bytes are characters).
+// cap-class: NOT_A_CAP — a deterministic bound on the length of a generated file-name slug; the full title is kept in the entry's own title field, so no result is presented as complete
 pub const SLUG_MAX: usize = 60;
 
 /// The stem of a collection's folder-index file (`readme.md`); no entry may take it, or its
