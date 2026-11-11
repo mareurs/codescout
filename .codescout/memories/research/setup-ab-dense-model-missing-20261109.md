@@ -1,0 +1,11 @@
+# Setup A/B fresh tasks: onboarding RA-22992 blocked, the dense embedder model file is gone from disk (2026-11-09)
+
+Onboarding RA-22992 for the cs/full arms (driver prepare_live_onb.py, bundle tag f9b0fc9f8-v2onb, root setup-ab-data/fresh-tasks-v2-onb, job tmp scripts not in git) stopped at `stack.stack_up`: the study dense embedder `sab-dense` (a copy of the live `codescout-dense-amd` run, mounting the host dir /home/marius/models as /models) could not load `/models/CodeRankEmbed-Q4_K_M.gguf`.
+
+Verified: /home/marius/models holds only `.glm_download.log` (directory mtime 2026-11-06 09:56, the disk-space crisis day); the model file is gone from disk. The live container `codescout-dense-amd` (started 2026-10-02, restart policy unless-stopped, 0 restarts) mounts the same directory and still serves because the model was loaded before the deletion: if it restarts, the daily dense embedder fails to start.
+
+Tried and ruled out: the repo copy /home/marius/work/claude/codescout/models/CodeRankEmbed-Q4_K_M.gguf (90118048 bytes, 2026-07-25, sha256 3bcd656e...c259, gitignored) opens but llama.cpp b6652 in the dense image rejects it: `key not found in model: nomic-bert.pooling_type`. It is NOT the file the live container loaded. The model's documented source nomic-ai/CodeRankEmbed-GGUF is dead (archived bug 2026-07-25-coderankembed-gguf-source-404). No hash of the lost file is recorded anywhere (setup-manifest.json names the file only).
+
+Not done, needs the operator: (a) recover the lost file from the running container (root, read-only, from /proc/<pid>/map_files if llama.cpp still maps it; sudo is passwordless on this host but I did not use it), (b) convert a new gguf from the repo's models/CodeRankEmbed HF directory with a current llama.cpp (new bytes, so embeddings differ slightly from earlier study indexes), or (c) use another embedder for the new indexes (changes the arm). Also restore /home/marius/models so a restart of the live container works.
+
+Side effects cleaned: sab-qdrant, sab-dense, sab-sparse and volume sab-qv-index removed by exact name; no sab container or template volume left. A copy of the unusable repo gguf sits in fresh-tasks-v2-onb/models with NOTE.txt (can be deleted).
