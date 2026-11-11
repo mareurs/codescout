@@ -3,18 +3,23 @@
 You just activated a project. Orient before you explore or edit — the cheapest
 bug is the one you never re-investigate because the project already documented it.
 
+## How to decide — read first
+
+Work from evidence, not from permission-seeking.
+
+- Before you choose, read the data and measure it yourself; if measuring is cheap, do it before you assume.
+- Trackers and memories are your working memory: read them first, record what you learn.
+- Ask the user only before an irreversible or outward-facing action, or when the repo, the trackers and a measurement cannot answer. Say what you checked.
+
 ## Phase 0 — load what the project already knows (do FIRST)
 
 - `memory(action="list")`, then read the topics matching your task.
   `architecture`, `gotchas`, and `conventions` usually pay off.
 - Bug or regression work:
   `doc(action="find", kind="bug", filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})` —
-  `status="open"` alone hides `taken` (a live session holds it — check before starting),
-  `investigating` (worked, no live owner) and
-  `zombie` (recurring-but-unconfirmed — a "has this come back?" check, not a
-  task to pick up) —
-  the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery
-  KNOWN and cite the ledger path.
+  the known-bug ledger. `open` alone hides `taken` (a live session holds it),
+  `investigating` (no live owner) and `zombie` (a recurrence check, not a task).
+  Don't re-file a filed bug as new; mark a rediscovery KNOWN and cite the ledger path.
 - If a `get_guide` topic matches your area (`error-handling`,
   `progressive-disclosure`, `workspace-state`, `librarian`,
   `tracker-conventions`, `untrusted-content`), read it — it states the contract whose violations you
@@ -48,20 +53,13 @@ If you will write a plan, change a struct / function signature / API contract,
 or verify claims against `docs/trackers`, invoke the reconnaissance skill FIRST.
 
 - Claude Code: `/codescout-companion:reconnaissance`.
-- Other harnesses: follow `docs/templates/session-log.md` (any agent that reads
-  markdown can use the template — no plugin required).
-
-It forces the doc-vs-code reconciliation and logs frictions (F-N) and wins (W-N)
-so the next session inherits them.
+- Other harnesses: follow `docs/templates/session-log.md`.
 
 ## When you dispatch subagents — brief them
 
 Pass what you already loaded: memories read, open bugs, prior results. For
-guides, pass the *instruction to fetch*, not a "these are loaded" note — your
-context is not theirs, and unless the companion hook gives each subagent its
-own guide ledger, a topic you triggered will not auto-inject for them. Name
-the topics and tell them to call `get_guide` on the ones their task needs; an
-explicit fetch always
-returns the full body. A subagent re-discovering what you already knew is a
-dispatch defect (Iron Law 6), not the subagent's fault — but a subagent fetching
-its own guide is doing exactly what it should.
+guides, pass the *instruction to fetch* (name the topics; the subagent calls
+`get_guide`), not a "these are loaded" note: your context is not theirs, and a
+topic you triggered will not auto-inject for them unless the companion hook
+gives each subagent its own ledger. A subagent that re-discovers what you knew is a dispatch defect (Iron Law 6);
+one that fetches its own guide is doing right.
