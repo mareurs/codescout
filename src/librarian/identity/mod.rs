@@ -3,6 +3,7 @@
 pub mod grammar;
 pub mod index;
 pub mod key;
+pub mod key_space;
 pub mod repo_name;
 
 #[cfg(test)]

@@ -1224,6 +1224,15 @@ fn repository_config_files_are_read_only_through_the_door() {
             },
         ),
         (
+            ".codescout/key-space.toml",
+            "exclude = [\"contrib\"]\n".to_string(),
+            |p| {
+                crate::librarian::identity::key_space::load(p)
+                    .map(|k| k.is_outside("contrib/x.md"))
+                    .unwrap_or(false)
+            },
+        ),
+        (
             ".codescout/workspace.toml",
             "[[umbrella]]\nname = \"fromconfig\"\nmembers = []\n".to_string(),
             |p| !crate::librarian::current_project::load_project_umbrellas(p).is_empty(),
