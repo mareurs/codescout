@@ -754,7 +754,6 @@ async fn make_debug_server() -> (tempfile::TempDir, CodeScoutServer) {
     std::fs::create_dir_all(&codescout_dir).unwrap();
     let ws_path = codescout_dir.join("librarian-workspace.toml");
     std::fs::write(&ws_path, "").unwrap();
-    #[cfg(feature = "librarian")]
     let env = ServerEnv {
         librarian: crate::librarian::LibrarianEnv {
             workspace: Some(ws_path),
@@ -763,8 +762,6 @@ async fn make_debug_server() -> (tempfile::TempDir, CodeScoutServer) {
         },
         ..test_support::test_env(dir.path())
     };
-    #[cfg(not(feature = "librarian"))]
-    let env = test_support::test_env(dir.path());
     let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
     let server =
         CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), true, env).await;

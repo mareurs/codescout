@@ -13,9 +13,8 @@ pub use crate::prompts::guide_index::Shape as Selector;
 
 /// Strip a leading YAML frontmatter block, returning the body.
 ///
-/// Local rather than `librarian::frontmatter::parse`: that module is behind
-/// `#[cfg(feature = "librarian")]` (`src/lib.rs:32`) and this parser discards the
-/// frontmatter, so depending on it would gate the compiler on a feature it does
+/// Local rather than `librarian::frontmatter::parse`: this parser discards the
+/// frontmatter, so depending on it would couple the compiler to a module it does
 /// not use.
 ///
 /// Bounded (X5): a leading `---` is treated as the *open* of a frontmatter block

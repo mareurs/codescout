@@ -96,7 +96,6 @@ pub struct ServerEnv {
     #[cfg(unix)]
     pub peer_enabled: Option<String>,
     /// Inputs for the librarian runtime (workspace/db/embed/cwd).
-    #[cfg(feature = "librarian")]
     pub librarian: crate::librarian::LibrarianEnv,
 }
 
@@ -152,7 +151,6 @@ impl ServerEnv {
             guide_rearm_dir: None,
             #[cfg(unix)]
             peer_enabled: std::env::var("CODESCOUT_PEER_ENABLED").ok(),
-            #[cfg(feature = "librarian")]
             librarian: crate::librarian::LibrarianEnv::from_env(),
         }
     }
@@ -390,7 +388,6 @@ impl CodeScoutServer {
     ) -> Self {
         let status = agent.project_status().await;
         let instructions = crate::prompts::build_server_instructions(status.as_ref());
-        #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
         let mut tools: Vec<Arc<dyn Tool>> = vec![
             // File tools (fully implemented)
             Arc::new(ReadFile),
@@ -436,7 +433,6 @@ impl CodeScoutServer {
                  (debug-only; ~8.8KB description with sentinel markers)"
             );
         }
-        #[cfg(feature = "librarian")]
         if librarian_enabled_at_runtime(
             std::env::var("LIBRARIAN_ENABLED").ok().as_deref(),
             status.as_ref().map(|s| s.path.as_str()),
@@ -1647,13 +1643,8 @@ impl CodeScoutServer {
     /// Drive [`poll_rendezvous`](Self::poll_rendezvous) without routing a tool
     /// call through the whole request path.
     ///
-    /// Gated with its only callers, not with a bare `#[cfg(test)]`: all three live
-    /// in `guide_hint_tests`, which is `#[cfg(feature = "librarian")]`. A bare test
-    /// gate compiles this under `--no-default-features --all-targets`, where
-    /// nothing can call it, and `dead_code` fires. Same shape as
-    /// [`os_random_auth_token`] and [`ct_eq`], which are gated with the `http` arm
-    /// they serve.
-    #[cfg(all(test, feature = "librarian"))]
+    /// Test-only; its callers live in `guide_hint_tests`.
+    #[cfg(test)]
     pub(crate) fn rendezvous_poll_for_test(&self) {
         self.poll_rendezvous();
     }
@@ -2637,7 +2628,6 @@ mod project_toml_enabled_tests {
     /// `project.toml` leaves the default (enabled) and does not hang; an ordinary file sets it;
     /// the env override wins over the file; one byte over the limit is ignored (the padding is
     /// whitespace, so a plain read would honour `enabled = false`).
-    #[cfg(feature = "librarian")]
     #[test]
     fn librarian_enabled_at_runtime_reads_project_toml_bounded_and_keeps_its_layers() {
         for linked in [false, true] {
@@ -2698,7 +2688,6 @@ mod project_toml_enabled_tests {
 /// over the config limit: the bounded loader read the same path first, but a path swapped since
 /// would hold a plain read), does not parse, or does not set the key. The caller supplies the
 /// default, exactly as it did when a failed read fell through.
-#[cfg(any(feature = "librarian", unix))]
 fn project_toml_enabled(root: &str, section: &str) -> Option<bool> {
     let cfg = std::path::Path::new(root)
         .join(".codescout")
@@ -2722,7 +2711,6 @@ fn project_toml_enabled(root: &str, section: &str) -> Option<bool> {
 /// `env_override` is the value of `LIBRARIAN_ENABLED`; the one production caller reads the
 /// variable and passes it, so the layers behave as before and a test can supply the value
 /// without touching the process environment (as for [`peer_enabled_at_runtime`]).
-#[cfg(feature = "librarian")]
 fn librarian_enabled_at_runtime(env_override: Option<&str>, project_path: Option<&str>) -> bool {
     if let Some(v) = env_override {
         let v = v.trim().to_ascii_lowercase();
@@ -4086,11 +4074,8 @@ mod tests {
     /// The raised cap is a property of multi-action dispatchers, not a convenience.
     /// Pin the set so a third tool cannot raise its own cap without appearing here.
     ///
-    /// Gated on `librarian` because `artifact` and `librarian` are only registered with the
-    /// feature on: under `--no-default-features` neither tool exists, so `raised` is empty and
-    /// the assert reads as a regression in the registry rather than as a build config in which
-    /// the two tools are correctly absent.
-    #[cfg(feature = "librarian")]
+    /// `doc` and `librarian` are registered in every build, so the same two tools are expected
+    /// in every lane.
     #[tokio::test]
     async fn only_the_two_dispatchers_raise_the_description_cap() {
         let (_dir, server) = make_server().await;
@@ -4218,10 +4203,8 @@ mod tests {
     /// (17 calls in `usage.db`) and `memory` omitted `refresh_anchors` (35 calls). Both
     /// descriptions are fixed in the same commit that adds this test.
     ///
-    /// Feature-gate note: the lean lane (`--no-default-features`) advertises no librarian
-    /// tools, so this loop simply sees fewer members. That is why the population is
-    /// derived from `server.tools` rather than from `action_contract`'s arms — a declared
-    /// tool that is absent must not be a failure.
+    /// A declared tool that is absent from `server.tools` must not be a failure, so the
+    /// population is derived from `server.tools` rather than from `action_contract`'s arms.
     ///
     /// **Extended 2026-09-26 to also check `long_docs()`**, not just `description()` —
     /// the archived `memory` fix above patched only the short description, leaving
@@ -4446,7 +4429,6 @@ mod tests {
     /// `artifact.rs`); this is completeness: every param carries a well-formed label and
     /// every action has at least one param labelled for it. Measured 2026-09-02 before the
     /// rewrite: `delete` had zero and four params had no label at all.
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_doc_param_is_labelled_and_every_action_has_a_param() {
         let (_dir, server) = make_server().await;
@@ -4627,7 +4609,6 @@ mod tests {
     /// Inventory plus runtime evidence: every registered content writer needs a
     /// fixture that refuses a shrink, permits a proportionate edit, and allows an
     /// explicitly forced reduction. Future tools cannot inherit a textual claim.
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_content_bearing_tool_runs_its_shrink_guard_before_writing() {
         use crate::lsp::{MockLspClient, MockLspProvider, SymbolInfo, SymbolKind};
@@ -5042,18 +5023,6 @@ mod tests {
         ("symbols", 3),
     ];
 
-    /// `doc` is the one entry in the two tables above (and below, in
-    /// `EXPECTED_ALIAS_PAIRS`) that is not unconditionally registered: it is added to
-    /// `server.tools` only `#[cfg(feature = "librarian")]` (this file, ~L89), so the
-    /// lean gate lane (`cargo nextest run --workspace --no-default-features`) never sees it
-    /// at all — `server.tools` simply has no tool named `"doc"`. Both consuming tests
-    /// below filter the expected tables through this before comparing against the
-    /// live registry, so the lean lane skips exactly the rows it could never satisfy
-    /// rather than failing on a tool the feature flags never intended it to have.
-    fn alias_table_row_is_registered_here(tool: &str) -> bool {
-        cfg!(feature = "librarian") || tool != "doc"
-    }
-
     /// The honesty gate, inverted. A name in `param_aliases()` must NOT also be a
     /// property: advertising it re-creates the ambiguity the collapse removed, and
     /// makes `required` unstateable again — which is what produced the API-illegal
@@ -5088,11 +5057,7 @@ mod tests {
                 }
             }
         }
-        let expected_counts: Vec<(&str, usize)> = EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL
-            .iter()
-            .copied()
-            .filter(|(tool, _)| alias_table_row_is_registered_here(tool))
-            .collect();
+        let expected_counts: Vec<(&str, usize)> = EXPECTED_ALIAS_PAIR_COUNTS_BY_TOOL.to_vec();
         assert_eq!(
             counted.len(),
             expected_counts.len(),
@@ -5381,13 +5346,6 @@ mod tests {
         let (_dir, server) = make_server().await;
         let mut offenders = Vec::new();
         for (tool_name, received, canonical) in EXPECTED_ALIAS_PAIRS {
-            if !alias_table_row_is_registered_here(tool_name) {
-                // See `alias_table_row_is_registered_here`'s doc comment: `doc` does
-                // not exist in `server.tools` under `--no-default-features`, by
-                // design (feature-gated registration), not by a regression this
-                // gate should catch.
-                continue;
-            }
             let Some(t) = server.tools.iter().find(|t| t.name() == *tool_name) else {
                 offenders.push(format!("{tool_name}: not found in the registry"));
                 continue;
@@ -6133,6 +6091,8 @@ mod tests {
     /// about this constant. It is `CLAUDE.md` § *Testing Discipline*'s loudness law
     /// at lane granularity: an alarm nothing reaches is exactly as informative as no
     /// alarm, and here the unreached lane is the one that would have spoken.
+    /// (Since 2026-11-11 the librarian is compiled into every lane, so the lean lane measures
+    /// the same surface as the default one; the paragraph above records the failure as it was.)
     ///
     /// Ratcheted DOWN to 55_421 on 2026-09-03 by Task 8, which folded `edit_markdown`
     /// into `edit_file`: **22 tools -> 21**, and the sum fell 57_644 -> 55_421. The
@@ -6742,12 +6702,7 @@ mod tests {
     ///
     /// `docs/issues/archive/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`
     ///
-    /// Gated on `librarian` because the `artifact` tool IS that feature: under
-    /// `--no-default-features` — CI's `no-features` and `local-embed` lanes — it is never
-    /// registered, and the `expect` below asserts about a tool that does not exist. Failing
-    /// there said "artifact tool is registered", which reads as a regression in the
-    /// registry rather than as a build config in which the tool is correctly absent.
-    #[cfg(feature = "librarian")]
+    /// The `doc` tool is registered in every build, so this runs in every lane.
     #[tokio::test]
     async fn artifact_advertises_the_append_entry_section_writer() {
         let (_dir, server) = make_server().await;
@@ -6901,10 +6856,10 @@ mod tests {
         // — `call()`, `call_content()` — legitimately and by its whole purpose.
         //
         // Kept OUT of `allowlist_entries` for a reason that is not style: the two-way
-        // tripwire counts bare-form hits only, and this pass is behind
-        // `cfg!(feature = "librarian")`. An entry that appears ONLY in call form would
-        // therefore score zero hits in BOTH lanes and be reported as an unused allowlist
-        // entry — redding the lean lane on a token that is present and correct. The
+        // tripwire counts bare-form hits only, and the call-form pass does not touch it.
+        // An entry that appears ONLY in call form would
+        // therefore score zero hits and be reported as an unused allowlist
+        // entry — redding the gate on a token that is present and correct. The
         // original comment predicted exactly this ("if one ever does ... the tripwire
         // still reports it unused"); this is that day.
         //
@@ -6937,33 +6892,23 @@ mod tests {
                      it to the allowlist in this test if it's a non-tool token"
                 ));
             }
-            // Default-features only, and the reason is a real asymmetry rather than a
-            // convenience: `real_tools` comes from the live registry, which
-            // `--no-default-features` shrinks by every librarian tool, while the surfaces
-            // are ONE `include_str!`'d constant that does not vary by feature. So in the
-            // lean lane the denominator is a strict subset of what the prose describes,
-            // and `doc(` / `librarian(` are reported as drift when the prose is correct.
-            // Measured 2026-09-05: 4 such false findings, 0 true ones.
-            //
             // The same hole sits under the bare-form pass above — it simply never trips,
             // because the surfaces write `doc` and `librarian` only in call form. Left as
             // it is rather than widened here: nothing is currently wrong there, and a
             // guard that is only exercised by hypotheticals is worse than the gap.
-            if cfg!(feature = "librarian") {
-                for cap in call_re.captures_iter(body) {
-                    let ident = cap.get(1).unwrap().as_str();
-                    if real_tools.contains(ident)
-                        || allowlist.contains(ident)
-                        || call_form_non_tools.contains(ident)
-                    {
-                        continue;
-                    }
-                    drift.push(format!(
-                        "{surface}: `{ident}(` is written as a tool CALL but names no \
-                         registered tool — that is an instruction to invoke something \
-                         that does not exist. Rename it to the live tool."
-                    ));
+            for cap in call_re.captures_iter(body) {
+                let ident = cap.get(1).unwrap().as_str();
+                if real_tools.contains(ident)
+                    || allowlist.contains(ident)
+                    || call_form_non_tools.contains(ident)
+                {
+                    continue;
                 }
+                drift.push(format!(
+                    "{surface}: `{ident}(` is written as a tool CALL but names no \
+                     registered tool — that is an instruction to invoke something \
+                     that does not exist. Rename it to the live tool."
+                ));
             }
         }
 
@@ -7241,170 +7186,165 @@ mod tests {
             }
         }
 
-        // Registry-dependent, so librarian-only. `--no-default-features` drops every
-        // librarian tool from `server.tools` while these two files do not vary by feature, so
-        // the lean lane would report `doc` as drift when the probe is correct — the same
-        // asymmetry documented in prompt_surfaces_reference_only_real_tools above.
-        if cfg!(feature = "librarian") {
-            let (_dir, server) = make_server().await;
-            let real: HashSet<&str> = server.tools.iter().map(|t| t.name()).collect();
+        // Registry-dependent: `real` comes from the live registry.
+        let (_dir, server) = make_server().await;
+        let real: HashSet<&str> = server.tools.iter().map(|t| t.name()).collect();
 
-            for (surface, body) in surfaces {
-                for line in body.lines() {
-                    if line.contains("legacy") {
+        for (surface, body) in surfaces {
+            for line in body.lines() {
+                if line.contains("legacy") {
+                    continue;
+                }
+                for cap in re.captures_iter(line) {
+                    let ident = cap.get(1).unwrap().as_str();
+                    if real.contains(ident) {
                         continue;
                     }
-                    for cap in re.captures_iter(line) {
-                        let ident = cap.get(1).unwrap().as_str();
-                        if real.contains(ident) {
-                            continue;
-                        }
-                        problems.push(format!(
-                            "{surface}: `mcp__codescout__{ident}` names no registered tool. \
-                             Point it at the live tool, or — if the probe must keep matching \
-                             it for older transcripts — mark that line `legacy`."
-                        ));
-                    }
-                }
-            }
-
-            for tool in write_capable {
-                if !real.contains(tool) {
                     problems.push(format!(
-                        "write_capable names `{tool}`, which is not a registered tool — this \
-                         list has drifted and is asserting about something that no longer \
-                         exists"
+                        "{surface}: `mcp__codescout__{ident}` names no registered tool. \
+                         Point it at the live tool, or — if the probe must keep matching \
+                         it for older transcripts — mark that line `legacy`."
                     ));
                 }
             }
-
-            // BARE-NAME FORM — every module-level `*_TOOLS` constant under scripts/.
-            let scripts_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts");
-            let decl = regex::Regex::new(r"^[A-Z][A-Z_0-9]*_TOOLS\s*=").unwrap();
-            let lit = regex::Regex::new("\"([A-Za-z][A-Za-z_0-9]*)\"").unwrap();
-            let (mut blocks, mut names) = (0usize, 0usize);
-            // (file, block-ordinal, name). A successor declared by a `legacy ->` marker must
-            // appear as a live name in the SAME block — block-scoped, because a successor
-            // present in a different constant does not make this one non-blind.
-            let mut successors_required: Vec<(String, usize, String)> = Vec::new();
-            let mut live_in_block: Vec<(String, usize, String)> = Vec::new();
-
-            let mut entries: Vec<_> = std::fs::read_dir(scripts_dir)
-                .expect("scripts/ must exist — this gate is defined over it")
-                .filter_map(Result::ok)
-                .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|x| x == "py"))
-                .collect();
-            entries.sort();
-
-            for path in entries {
-                let Ok(body) = std::fs::read_to_string(&path) else {
-                    continue;
-                };
-                let file = path.file_name().unwrap().to_string_lossy().into_owned();
-                let mut depth = 0i32;
-                for line in body.lines() {
-                    let opening = depth == 0 && decl.is_match(line);
-                    if opening {
-                        blocks += 1;
-                    }
-                    if opening || depth > 0 {
-                        // Track bracket depth so a multi-line tuple is one block and the
-                        // statement after it is not swept in.
-                        for ch in line.chars() {
-                            match ch {
-                                '(' | '[' | '{' => depth += 1,
-                                ')' | ']' | '}' => depth -= 1,
-                                _ => {}
-                            }
-                        }
-                        // `legacy` is line-scoped, so a retired name can sit beside a live one
-                        // without exempting it — which is why these lists are written one name
-                        // per line.
-                        //
-                        // A marker may name the retired tool's SUCCESSOR — `# legacy -> doc:` —
-                        // and that turns the escape into the positive check. Without it this
-                        // half is negative-only, and negative-only is satisfied BY the defect:
-                        // deleting `"doc"` from a block leaves every remaining name live-or-
-                        // legacy, so the gate passes while the probe goes blind. Measured — the
-                        // first version of this scan SURVIVED exactly that mutation on two
-                        // separate probes.
-                        if let Some(succ) = line
-                            .split("legacy ->")
-                            .nth(1)
-                            .and_then(|t| t.split(':').next())
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                        {
-                            successors_required.push((file.clone(), blocks, succ.to_string()));
-                        }
-                        if !line.contains("legacy") {
-                            for cap in lit.captures_iter(line) {
-                                let ident = cap.get(1).unwrap().as_str();
-                                if ident.starts_with(char::is_uppercase) {
-                                    continue; // host-harness tool
-                                }
-                                // A `*_TOOLS` block may hold either form: `file-provenance.py`
-                                // reads transcripts, which carry the qualified name, while the
-                                // usage.db probes carry the bare one. Normalise rather than
-                                // splitting the population — caught by this gate's own first
-                                // run, which reported three live tools as unregistered.
-                                let ident = ident.strip_prefix("mcp__codescout__").unwrap_or(ident);
-                                names += 1;
-                                if !real.contains(ident) {
-                                    problems.push(format!(
-                                        "scripts/{file}: a `*_TOOLS` constant names `{ident}`, \
-                                         which is not a registered tool. Point it at the live \
-                                         name, or mark that line `legacy -> <successor>:` if \
-                                         the corpus it reads still contains the retired one."
-                                    ));
-                                }
-                                live_in_block.push((file.clone(), blocks, ident.to_string()));
-                            }
-                        }
-                        if depth <= 0 {
-                            depth = 0;
-                        }
-                    }
-                }
-            }
-
-            assert!(
-                blocks > 0 && names > 0,
-                "scanned {blocks} `*_TOOLS` blocks and {names} bare names under scripts/ — \
-                 the extraction is broken and the bare-form half would pass on nothing"
-            );
-
-            // THE POSITIVE HALF, and the one that reds on a rename. A retired name whose
-            // successor is missing from its own block is the exact shape that blinded three
-            // probes to `doc` for six days: the block stays internally consistent, every check
-            // above passes, and the probe silently reports a shrinking share of reality.
-            for (file, block, succ) in &successors_required {
-                let present = live_in_block
-                    .iter()
-                    .any(|(f, b, n)| f == file && b == block && n == succ);
-                if !present {
-                    problems.push(format!(
-                        "scripts/{file}: a `*_TOOLS` constant marks a name `legacy -> {succ}` \
-                         but never lists `{succ}` itself. The retired name is matched and its \
-                         live successor is not, so every call through the current tool is \
-                         invisible to this probe — which is the 2026-09-02 rename defect \
-                         exactly. Add `{succ}` to that same constant."
-                    ));
-                }
-                if !real.contains(succ.as_str()) {
-                    problems.push(format!(
-                        "scripts/{file}: `legacy -> {succ}` names a successor that is not a \
-                         registered tool — the marker itself has gone stale."
-                    ));
-                }
-            }
-            assert!(
-                !successors_required.is_empty(),
-                "no `legacy -> <successor>` marker found under scripts/ — the positive half \
-                 has nothing to check and would pass on any amount of drift"
-            );
         }
+
+        for tool in write_capable {
+            if !real.contains(tool) {
+                problems.push(format!(
+                    "write_capable names `{tool}`, which is not a registered tool — this \
+                     list has drifted and is asserting about something that no longer \
+                     exists"
+                ));
+            }
+        }
+
+        // BARE-NAME FORM — every module-level `*_TOOLS` constant under scripts/.
+        let scripts_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts");
+        let decl = regex::Regex::new(r"^[A-Z][A-Z_0-9]*_TOOLS\s*=").unwrap();
+        let lit = regex::Regex::new("\"([A-Za-z][A-Za-z_0-9]*)\"").unwrap();
+        let (mut blocks, mut names) = (0usize, 0usize);
+        // (file, block-ordinal, name). A successor declared by a `legacy ->` marker must
+        // appear as a live name in the SAME block — block-scoped, because a successor
+        // present in a different constant does not make this one non-blind.
+        let mut successors_required: Vec<(String, usize, String)> = Vec::new();
+        let mut live_in_block: Vec<(String, usize, String)> = Vec::new();
+
+        let mut entries: Vec<_> = std::fs::read_dir(scripts_dir)
+            .expect("scripts/ must exist — this gate is defined over it")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "py"))
+            .collect();
+        entries.sort();
+
+        for path in entries {
+            let Ok(body) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let file = path.file_name().unwrap().to_string_lossy().into_owned();
+            let mut depth = 0i32;
+            for line in body.lines() {
+                let opening = depth == 0 && decl.is_match(line);
+                if opening {
+                    blocks += 1;
+                }
+                if opening || depth > 0 {
+                    // Track bracket depth so a multi-line tuple is one block and the
+                    // statement after it is not swept in.
+                    for ch in line.chars() {
+                        match ch {
+                            '(' | '[' | '{' => depth += 1,
+                            ')' | ']' | '}' => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                    // `legacy` is line-scoped, so a retired name can sit beside a live one
+                    // without exempting it — which is why these lists are written one name
+                    // per line.
+                    //
+                    // A marker may name the retired tool's SUCCESSOR — `# legacy -> doc:` —
+                    // and that turns the escape into the positive check. Without it this
+                    // half is negative-only, and negative-only is satisfied BY the defect:
+                    // deleting `"doc"` from a block leaves every remaining name live-or-
+                    // legacy, so the gate passes while the probe goes blind. Measured — the
+                    // first version of this scan SURVIVED exactly that mutation on two
+                    // separate probes.
+                    if let Some(succ) = line
+                        .split("legacy ->")
+                        .nth(1)
+                        .and_then(|t| t.split(':').next())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        successors_required.push((file.clone(), blocks, succ.to_string()));
+                    }
+                    if !line.contains("legacy") {
+                        for cap in lit.captures_iter(line) {
+                            let ident = cap.get(1).unwrap().as_str();
+                            if ident.starts_with(char::is_uppercase) {
+                                continue; // host-harness tool
+                            }
+                            // A `*_TOOLS` block may hold either form: `file-provenance.py`
+                            // reads transcripts, which carry the qualified name, while the
+                            // usage.db probes carry the bare one. Normalise rather than
+                            // splitting the population — caught by this gate's own first
+                            // run, which reported three live tools as unregistered.
+                            let ident = ident.strip_prefix("mcp__codescout__").unwrap_or(ident);
+                            names += 1;
+                            if !real.contains(ident) {
+                                problems.push(format!(
+                                    "scripts/{file}: a `*_TOOLS` constant names `{ident}`, \
+                                     which is not a registered tool. Point it at the live \
+                                     name, or mark that line `legacy -> <successor>:` if \
+                                     the corpus it reads still contains the retired one."
+                                ));
+                            }
+                            live_in_block.push((file.clone(), blocks, ident.to_string()));
+                        }
+                    }
+                    if depth <= 0 {
+                        depth = 0;
+                    }
+                }
+            }
+        }
+
+        assert!(
+            blocks > 0 && names > 0,
+            "scanned {blocks} `*_TOOLS` blocks and {names} bare names under scripts/ — \
+             the extraction is broken and the bare-form half would pass on nothing"
+        );
+
+        // THE POSITIVE HALF, and the one that reds on a rename. A retired name whose
+        // successor is missing from its own block is the exact shape that blinded three
+        // probes to `doc` for six days: the block stays internally consistent, every check
+        // above passes, and the probe silently reports a shrinking share of reality.
+        for (file, block, succ) in &successors_required {
+            let present = live_in_block
+                .iter()
+                .any(|(f, b, n)| f == file && b == block && n == succ);
+            if !present {
+                problems.push(format!(
+                    "scripts/{file}: a `*_TOOLS` constant marks a name `legacy -> {succ}` \
+                     but never lists `{succ}` itself. The retired name is matched and its \
+                     live successor is not, so every call through the current tool is \
+                     invisible to this probe — which is the 2026-09-02 rename defect \
+                     exactly. Add `{succ}` to that same constant."
+                ));
+            }
+            if !real.contains(succ.as_str()) {
+                problems.push(format!(
+                    "scripts/{file}: `legacy -> {succ}` names a successor that is not a \
+                     registered tool — the marker itself has gone stale."
+                ));
+            }
+        }
+        assert!(
+            !successors_required.is_empty(),
+            "no `legacy -> <successor>` marker found under scripts/ — the positive half \
+             has nothing to check and would pass on any amount of drift"
+        );
 
         assert!(
             problems.is_empty(),
@@ -8052,11 +7992,8 @@ mod tests {
             "tree",
             "workspace",
         ];
-        // `doc` and `librarian` register only with the feature, so the lean lane pins a
-        // 19-tool surface and the default lane a 21-tool one. Gating the EXPECTATION rather
-        // than the test keeps both lanes checking membership; skipping under `--no-default-
-        // features` would leave the lean surface unpinned entirely.
-        #[cfg(feature = "librarian")]
+        // `doc` and `librarian` are registered in every build, so the surface is 21 tools in
+        // every lane.
         expected.extend(["doc", "librarian"]);
         expected.sort();
 
@@ -8080,7 +8017,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn the_document_tool_is_named_doc() {
         let (_dir, server) = make_server().await;
@@ -8159,10 +8095,7 @@ mod tests {
         for n in ["read_file", "edit_file", "memory", "grep"] {
             assert!(pinnable.contains(n), "{n} must be pinnable");
         }
-        // `artifact` / `librarian` are only registered with the feature on, so
-        // asserting them unconditionally fails the `--no-default-features` and
-        // `--features local-embed` configs.
-        #[cfg(feature = "librarian")]
+        // `doc` and `librarian` are registered in every build.
         for n in ["doc", "librarian"] {
             assert!(pinnable.contains(n), "{n} must be pinnable");
         }
@@ -8458,7 +8391,6 @@ mod tests {
     ///
     /// Blind to any shape the census does not hold: it was recorded before
     /// `doc.rekey_prefix`, `doc.state_at`, `doc.graft` and `librarian.audit_log` existed.
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_observed_shape_of_a_declaring_topic_has_a_section() {
         // Gate 2. Finite because call shapes are: 88 distinct across 170,465 observed
@@ -8562,7 +8494,6 @@ mod tests {
         }
     }
     /// The (tool, topic) pairs Gate 2 has judged, with how many probes each took.
-    #[cfg(feature = "librarian")]
     type JudgedPairs = std::collections::BTreeMap<(String, String), usize>;
 
     /// Gate 2's decision, on its own so it can be tested: a call shape that routes to declaring
@@ -8575,7 +8506,6 @@ mod tests {
     /// condition but the gate: forcing it to `false`, or either operand to `true`, left every test
     /// green, so the gate could not fail on a coverage gap. Measured 2026-10-17 by mutation.
     /// docs/issues/2026-10-16-observed-shapes-gate-skips-every-doc-shape.md
-    #[cfg(feature = "librarian")]
     fn shape_is_served_or_waived(topic: &str, shape: &str, probe: &serde_json::Value) -> bool {
         use crate::prompts::guide_index::GUIDE_INDEX;
         let served = !GUIDE_INDEX
@@ -8587,7 +8517,6 @@ mod tests {
     /// Judge one (shape, topic, probe) the router reached: count the pair as judged, and record the
     /// shape in `uncovered` when [`shape_is_served_or_waived`] refuses it. The counter and the
     /// decision live in this one function, so a pair can never be counted without being decided.
-    #[cfg(feature = "librarian")]
     fn judge_shape(
         tool_name: &str,
         topic: &str,
@@ -8611,7 +8540,6 @@ mod tests {
     /// Only `doc.list_stale` differs: its result carries `threshold_hours` (a key no other
     /// librarian result has, `refresh_stale.rs`), which is what `names_tracker_path` reads to
     /// keep it off `tracker-conventions`. Every other shape is probed as given.
-    #[cfg(feature = "librarian")]
     fn probe_as_the_shape_returns(shape: &str, probe: &serde_json::Value) -> serde_json::Value {
         let mut probe = probe.clone();
         if shape == "doc.list_stale" {
@@ -8621,7 +8549,6 @@ mod tests {
     }
 
     /// How a `shape_census.txt` row stands against the tool registry today.
-    #[cfg(feature = "librarian")]
     #[derive(Debug, PartialEq, Eq)]
     enum CensusRow {
         /// Resolves to a registered tool; carries the shape under today's name.
@@ -8633,7 +8560,6 @@ mod tests {
     }
 
     /// Exact census shapes whose tool AND action both changed in a rename.
-    #[cfg(feature = "librarian")]
     const CENSUS_RENAMED_SHAPES: &[(&str, &str)] = &[
         // The 2026-09-02 collapse folded the sibling `artifact_*` tools into `doc` actions.
         ("artifact_augment", "doc.augment"),
@@ -8644,14 +8570,12 @@ mod tests {
     ];
 
     /// Census tool names that were renamed, the action keeping its spelling: `old.x` is `new.x`.
-    #[cfg(feature = "librarian")]
     const CENSUS_RENAMED_TOOLS: &[(&str, &str)] = &[("artifact", "doc")];
 
     /// Census tool names the registry does not have and `RETIRED_TOOL_NAMES` does not cover:
     /// stray transcript rows with no successor, each with its reason. The 2026-09-02 collapse
     /// retirements (`read_markdown`, `edit_markdown`, ...) are deliberately NOT repeated here;
     /// they come from `RETIRED_TOOL_NAMES`, the one table of dead tool names.
-    #[cfg(feature = "librarian")]
     const CENSUS_STRAY_TOOLS: &[(&str, &str)] = &[
         (
             "Edit",
@@ -8677,7 +8601,6 @@ mod tests {
     /// A name the rename tables map to a live tool never gets retired here (it resolves through
     /// the rename), so an unknown action under a renamed prefix (`artifact_refresh.other`) stays
     /// `Unresolved` rather than being retired by `RETIRED_TOOL_NAMES`'s entry for the old name.
-    #[cfg(feature = "librarian")]
     fn census_retirement(tool: &str) -> Option<&'static str> {
         if let Some((_, why)) = CENSUS_STRAY_TOOLS.iter().find(|(t, _)| *t == tool) {
             return Some(why);
@@ -8697,7 +8620,6 @@ mod tests {
 
     /// Resolve one census row against the registered tool names. Never skips: a row is
     /// `Live`, `Retired` with a recorded reason, or `Unresolved`, which callers must fail on.
-    #[cfg(feature = "librarian")]
     fn resolve_census_row(shape: &str, registered: &[&str]) -> CensusRow {
         let current = CENSUS_RENAMED_SHAPES
             .iter()
@@ -8729,7 +8651,6 @@ mod tests {
     }
 
     /// The census rows, comments and blanks removed, each as the shape it names.
-    #[cfg(feature = "librarian")]
     fn census_shapes() -> Vec<&'static str> {
         include_str!("prompts/shape_census.txt")
             .lines()
@@ -8751,7 +8672,6 @@ mod tests {
     /// 16 resolving to `doc`, 9 to `librarian`) and census rows are never added without
     /// regenerating it, so they never need revising upward.
     /// docs/issues/2026-10-16-observed-shapes-gate-skips-every-doc-shape.md
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_census_row_resolves_to_a_live_tool_or_a_recorded_retirement() {
         let (_dir, server) = make_server().await;
@@ -8798,7 +8718,6 @@ mod tests {
     /// way Gate 6 checks a declared shape), since a renamed shape naming an action `doc` does not
     /// have is judged against a call no one can make. And the resolver must fail an unknown name
     /// rather than skip it.
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn census_renames_and_retirements_are_not_stale() {
         let (_dir, server) = make_server().await;
@@ -8935,7 +8854,6 @@ mod tests {
     ///
     /// The precondition asserts matter as much as the verdicts: "served without a waiver" is only a
     /// test of the served arm if no waiver names the shape, and likewise the other way round.
-    #[cfg(feature = "librarian")]
     #[test]
     fn gate_two_refuses_a_gap_and_accepts_a_served_or_a_waived_shape() {
         use crate::prompts::guide_index::GUIDE_INDEX;
@@ -9012,7 +8930,6 @@ mod tests {
     /// The same decision through the gate's own loop body: a gap is recorded as uncovered and the pair
     /// is counted either way, in the one function the gate calls. Fails if the recording is dropped
     /// (`if false`), if the count is dropped, or if the verdict is not the one above.
-    #[cfg(feature = "librarian")]
     #[test]
     fn judge_shape_counts_every_pair_and_records_only_the_gaps() {
         let tracker = serde_json::json!({"abs_path": "docs/trackers/x.md"});
@@ -9104,7 +9021,6 @@ mod tests {
     /// `librarian.audit_log` is declared, real, and absent from the census. A
     /// census-based gate would have demanded a waiver for a correct declaration, which
     /// trains authors to waive rather than to fix.
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_declared_shape_names_a_live_tool_and_action() {
         use crate::prompts::guide_index::GUIDE_INDEX;
@@ -9390,8 +9306,8 @@ mod tests {
              regression that annotated the destructive tools would not red here"
         );
 
-        // Anti-vacuity floor, not an equality: 19 is the lean lane's count and the
-        // librarian family only adds to it, so this never needs revising upward.
+        // Anti-vacuity floor, not an equality: 19 is the count of the non-librarian tools, and
+        // the librarian family only adds to it, so this never needs revising upward.
         assert!(
             checked >= 19,
             "the gate scanned only {checked} tools — it is reading a truncated registry \
@@ -9957,7 +9873,6 @@ mod tests {
     /// establishes that a declared shape is well-formed against the registry, which reads
     /// as the thorough answer precisely because it is exact. It says nothing about whether
     /// any call arrives. That is this gate's whole subject.
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_declaring_topic_has_a_live_route_to_a_declared_section() {
         use crate::prompts::guide_index::GUIDE_INDEX;
@@ -10055,7 +9970,6 @@ mod tests {
     /// `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`
     /// still applies to them and needs a running `Server` to probe `relevant_guide_topic`,
     /// which is why it lives here rather than next to the reason-length checks.
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_guide_topic_is_triggered_xor_declared_pull_only() {
         use crate::prompts::{GUIDE_TOPICS, PULL_ONLY_GUIDE_TOPICS};
@@ -11179,10 +11093,8 @@ mod tests {
     /// tool names. `memory` is not among them, so step 2 would reach the tool body
     /// and write the topic.
     ///
-    /// `memory` rather than `doc` on purpose: the librarian is off under
-    /// `--no-default-features`, so a `doc`-based probe would silently not exist in
-    /// the lean lane — the vacuity `docs/conventions/gate-ordering.md` warns about.
-    /// `memory` is core, so this runs in both.
+    /// `memory` rather than `doc` on purpose: `memory` is a core tool, so this probe does not
+    /// depend on the librarian runtime being registered.
     ///
     /// Step 2 sends VALID params. An invalid call would be refused either way and
     /// the two outcomes would be indistinguishable; with valid params, a gate that
@@ -11622,8 +11534,6 @@ mod tests {
         assert!(!target.exists(), "nothing may have been written");
     }
 
-    // `artifact` only registers with the librarian feature on.
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn artifact_find_honors_workspace_pin() {
         // BUG (docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md): the
@@ -11728,8 +11638,6 @@ mod tests {
         );
     }
 
-    // `artifact` only registers with the librarian feature on.
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn artifact_create_honors_workspace_pin() {
         // Whole-family pin (docs/issues/archive/2026-07-17-artifact-find-ignores-workspace-pin.md):
@@ -12834,10 +12742,9 @@ mod tests {
     /// Discipline*): drop any single action from a read set below, or add any
     /// single action to one, and this fires naming that action.
     ///
-    /// Feature-gate note: the lean lane (`--no-default-features`) advertises no
-    /// librarian tools, so this test is **inert** there by construction — it
-    /// reaches no tool and asserts nothing. Do not credit it with coverage on
-    /// that lane; the `covered` count below is what makes the difference legible.
+    /// A read-set tool that `server.tools` does not advertise is skipped in the loop, and the
+    /// `covered` count at the end fails the test unless every read-set tool was reached, so a
+    /// registration change cannot turn this test inert.
     ///
     /// docs/issues/archive/2026-09-02-is-write-omits-five-mutating-actions-so-the-write-guard-never-fires.md
     #[tokio::test]
@@ -12890,7 +12797,7 @@ mod tests {
 
         for &(tool, reads) in read_sets {
             let Some(t) = server.tools.iter().find(|t| t.name() == tool) else {
-                continue; // lean lane — tool not advertised
+                continue; // not advertised; the `covered` assert below fails on it
             };
             covered += 1;
             let schema = t.input_schema();
@@ -12973,15 +12880,12 @@ mod tests {
             ));
         }
 
-        // Not vacuous on the default lane. Without this, a registration change
-        // that stopped advertising the librarian tools would turn every
-        // assertion above into a no-op and still read green.
-        #[cfg(feature = "librarian")]
+        // Not vacuous. Without this, a registration change that stopped advertising the
+        // librarian tools would turn every assertion above into a no-op and still read green.
         assert_eq!(
             covered,
             read_sets.len(),
-            "expected every read-set tool to be advertised with the `librarian` \
-             feature on; reached {covered} of {}",
+            "expected every read-set tool to be advertised; reached {covered} of {}",
             read_sets.len()
         );
     }
@@ -13157,9 +13061,8 @@ pub(crate) mod test_support {
     /// ubuntu CI run, and they passed or failed by the order a file-creating test ran in. An empty
     /// file is a valid workspace (`WorkspaceConfig` is all `#[serde(default)]`).
     ///
-    /// Every test that builds a server with the librarian on should take its `LibrarianEnv` from
+    /// Every test that builds a server should take its `LibrarianEnv` from
     /// here, not write the literal.
-    #[cfg(feature = "librarian")]
     pub(crate) fn librarian_env(dir: &std::path::Path) -> crate::librarian::LibrarianEnv {
         let workspace = dir.join("librarian-workspace.toml");
         std::fs::write(&workspace, "").expect("write the empty librarian workspace file");
@@ -13209,10 +13112,6 @@ pub(crate) mod test_support {
             std::fs::write(codescout_dir.join("project.toml"), project_toml).unwrap();
         }
 
-        // `ServerEnv::librarian` only exists with the `librarian` feature on;
-        // without the gate this helper fails to compile under
-        // `--no-default-features` / `--features local-embed`.
-        #[cfg(feature = "librarian")]
         let env = ServerEnv {
             librarian: crate::librarian::LibrarianEnv {
                 workspace: Some(ws_path),
@@ -13221,8 +13120,6 @@ pub(crate) mod test_support {
             },
             ..test_env(&root)
         };
-        #[cfg(not(feature = "librarian"))]
-        let env = test_env(&root);
 
         let agent = Agent::new(Some(root)).await.unwrap();
         let lsp = LspManager::new_arc();
@@ -13312,13 +13209,6 @@ pub(crate) mod test_support {
     /// guide blocks `call_content` appends, whether that is the single
     /// whole-topic block (non-declaring topic) or N section-slice blocks
     /// (declaring topic).
-    ///
-    /// `#[cfg(feature = "librarian")]`-gated: `guide_hint_tests`, its only
-    /// consumer, is itself librarian-gated. Ungated, this compiled under
-    /// `--no-default-features` with no caller, producing a permanent
-    /// dead-code warning on the lean lane that this attribute exists to
-    /// prevent (`bug-fix-session-log`-adjacent finding, fix round 1).
-    #[cfg(feature = "librarian")]
     pub(crate) fn guide_blocks(content: &[rmcp::model::Content]) -> Vec<String> {
         content
             .iter()
@@ -13328,7 +13218,6 @@ pub(crate) mod test_support {
     }
 }
 
-#[cfg(feature = "librarian")]
 #[cfg(test)]
 mod guide_hint_tests {
     use super::test_support::{call_tool_checked, guide_blocks, shared_ctx, warm_ledger};
@@ -17431,7 +17320,6 @@ mod guide_hint_tests {
     /// `librarian.*` shape, and `no_two_topics_declare_an_overlapping_shape` enforces it. Their
     /// overflow gets the preamble, or the librarian section first
     /// (`a_doc_overflow_ships_its_librarian_section_before_the_overflow_preamble`).
-    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_tool_that_routes_an_overflow_to_progressive_disclosure_is_served_a_core_section()
     {
@@ -19490,9 +19378,7 @@ mod guide_hint_tests {
 
 /// Gated `#[cfg(test)]` — the mock below has no non-test user, and until
 /// 2026-09-09 it sat at file scope with an `#[allow(dead_code)]` silencing the
-/// warning that said so. Deliberately NOT `#[cfg(feature = "librarian")]` like
-/// `guide_hint_tests` above: `ResilientStdin` is not feature-gated, so this has
-/// to run in the lean lane too.
+/// warning that said so.
 #[cfg(test)]
 #[path = "server/config_reload_tests.rs"]
 mod config_reload_tests;

@@ -1,17 +1,12 @@
-//! Path-shape queries over librarian tool responses, on the **ungated** side of
-//! the `librarian` feature.
+//! Path-shape queries over librarian tool responses, kept in `util` rather than under
+//! `src/librarian/`.
 //!
-//! The scan is pure `serde_json` and needs no librarian type, but its two callers
-//! sit on opposite sides of the feature gate: `librarian::adapter` (gated) and
-//! `prompts::guide_index` (unconditional). Defined in `librarian::adapter` it broke
-//! `cargo check --no-default-features` with `E0433` — a break the documented local
-//! gate cannot see, because `fmt`/`clippy`/`test` all run with default features.
+//! The scan is pure `serde_json` and needs no librarian type, and its two callers sit in
+//! different layers: `librarian::adapter` and `prompts::guide_index`. Keeping it in `util`
+//! lets both reach it without `prompts` depending on the librarian tree.
 //!
 //! Same resolution as [`super::librarian_guard`], which reached this shape first: the
-//! half with no librarian dependency lives in `util`, reachable from either side of
-//! the gate. Gating the *call* instead was rejected — a `path~` shape would then match
-//! on tool+action alone in the lean build, which is precisely the silent mismatch the
-//! predicate exists to prevent.
+//! half with no librarian dependency lives in `util`.
 //!
 //! `docs/issues/archive/2026-08-27-experiments-head-fails-the-lean-build-and-the-local-gate-cannot-see-it.md`
 
@@ -90,9 +85,9 @@ mod tests {
         assert!(names_path_containing(&viol, "docs/issues/"));
     }
 
-    /// The move must not have carried a `librarian`-feature dependency with it: this
-    /// module is compiled unconditionally, so this test runs in the lean build too and
-    /// is the thing that fails if someone reaches back across the gate from here.
+    /// This module must not depend on the librarian tree: it lives in `util` so that `prompts`
+    /// can reach it, and this test is what fails if someone reaches back into `src/librarian/`
+    /// from here.
     #[test]
     fn scans_every_documented_shape_without_a_librarian_dependency() {
         // Absent needle in each shape — the negative half the separators test omits

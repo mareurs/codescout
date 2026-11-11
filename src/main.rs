@@ -181,7 +181,6 @@ enum Commands {
 
     /// Read and mutate artifacts (find, get, graph, state-at, create, event,
     /// augment, refresh, …).
-    #[cfg(feature = "librarian")]
     Doc {
         // Boxed: `Verb` folds 11 subcommands (find/get/graph/state-at/create/
         // update/move/link/event/augment/refresh) into one enum, so it is now
@@ -198,7 +197,6 @@ enum Commands {
     /// line refs, link targets, module paths). Surfaces broken references
     /// against the current filesystem + LSP symbol index. Used by CI gates
     /// against `master`/PR docs to catch drift.
-    #[cfg(feature = "librarian")]
     AuditDocRefs(codescout::cli::audit_doc_refs::AuditArgs),
 
     /// Scan the librarian catalog for invariant violations — path form, ADS
@@ -213,7 +211,6 @@ enum Commands {
     /// them, which read as the whole set, and the drift is tracked as
     /// `docs/issues/archive/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`.
     /// Run the command for the live list rather than trusting a count here.
-    #[cfg(feature = "librarian")]
     Doctor(codescout::cli::doctor::DoctorArgs),
 
     /// Give every artifact with no chunk rows a chunked, embedded
@@ -224,13 +221,11 @@ enum Commands {
     /// `content_unchanged` is true and the embed is skipped forever. Resumable;
     /// safe to interrupt. Run it from a shell, never from the MCP server — it
     /// holds the catalog lock for the whole run.
-    #[cfg(feature = "librarian")]
     BackfillChunks(codescout::cli::backfill_chunks::BackfillChunksArgs),
 
     /// Read-only query: which active constitution rules apply to a given
     /// path. Used by codescout-companion's PreToolUse hook — not meant for
     /// interactive use. Always exits 0; prints `[]` on any internal error.
-    #[cfg(feature = "librarian")]
     ConstitutionCheck(codescout::cli::constitution_check::ConstitutionCheckArgs),
 
     /// Compile operator rules into each Claude Code profile's CLAUDE.md, or check for drift.
@@ -505,23 +500,18 @@ async fn main() -> Result<()> {
             tracing::info!("Launching dashboard for {}", root.display());
             codescout::dashboard::serve(root, host, port, !no_open).await?;
         }
-        #[cfg(feature = "librarian")]
         Commands::Doc { verb } => {
             codescout::cli::doc::dispatch(*verb).await?;
         }
-        #[cfg(feature = "librarian")]
         Commands::AuditDocRefs(args) => {
             codescout::cli::audit_doc_refs::run(args).await?;
         }
-        #[cfg(feature = "librarian")]
         Commands::Doctor(args) => {
             codescout::cli::doctor::run(args).await?;
         }
-        #[cfg(feature = "librarian")]
         Commands::BackfillChunks(args) => {
             codescout::cli::backfill_chunks::run(args).await?;
         }
-        #[cfg(feature = "librarian")]
         Commands::ConstitutionCheck(args) => {
             codescout::cli::constitution_check::run(args).await;
         }

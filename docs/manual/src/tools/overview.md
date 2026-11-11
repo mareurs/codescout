@@ -103,8 +103,8 @@ Project setup, shell execution, and server configuration.
 ## Knowledge & Guides
 
 Just-in-time guidance, and the document catalog the librarian maintains.
-`doc` and `librarian` are registered only when the `librarian` feature is
-enabled, which it is by default; the base server is 19 tools without them.
+`doc` and `librarian` are compiled into every build and registered unless the librarian is
+opted out at runtime (`LIBRARIAN_ENABLED=0`); the base server is 19 tools without them.
 
 | Tool | Description |
 |------|-------------|

@@ -992,7 +992,6 @@ fn attach_workspace_notice_to_content_handles_object_and_text_blocks() {
 }
 
 /// The destructive first-use hold is a response too (`executed: false`).
-#[cfg(feature = "librarian")]
 #[tokio::test]
 async fn the_failed_reload_notice_rides_a_held_destructive_response() {
     // A keyed (conversation-bound) ledger, so the pre-call gate is live (as `gate_server`).

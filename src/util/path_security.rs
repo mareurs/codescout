@@ -447,10 +447,7 @@ pub fn validate_read_path(
 /// as the caller's own lifetime: one tool call or one walk, not the process.
 /// docs/issues/2026-10-30-librarian-doctor-makes-twelve-passes-over-the-corpus-and-caches-no-file-read.md
 #[derive(Debug)]
-// Built only by the librarian's read door (src/librarian/read_door.rs). Under
-// `--no-default-features` that module is not compiled, and an unused item fails `-D warnings`,
-// so the type exists with the feature, and in tests, which build it in every feature set.
-#[cfg(any(feature = "librarian", test))]
+// Built by the librarian's read door (src/librarian/read_door.rs).
 pub(crate) struct ReadDenyList(Vec<PathBuf>);
 
 // How many times [`ReadDenyList::resolve`] ran on this thread. Thread-local so a test counts its
@@ -460,7 +457,6 @@ thread_local! {
     pub(crate) static RESOLVES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(any(feature = "librarian", test))]
 impl ReadDenyList {
     /// Resolve the deny list as [`validate_read_path`] would for this call.
     pub(crate) fn resolve() -> Self {
@@ -1196,8 +1192,8 @@ pub fn list_git_worktrees(project_root: &Path) -> Vec<PathBuf> {
 /// `worktrees` path component — skipping a submodule root would be wrong.
 ///
 /// Lives here, beside [`list_git_worktrees`], so worktree *detection* and
-/// worktree *enumeration* share a home and neither depends on the optional
-/// `librarian` feature. `librarian::current_project` re-exports it.
+/// worktree *enumeration* share a home and the core tools need not depend on
+/// `librarian`. `librarian::current_project` re-exports it.
 pub fn is_linked_worktree(root: &Path) -> bool {
     let dot_git = root.join(".git");
     let Ok(meta) = std::fs::symlink_metadata(&dot_git) else {

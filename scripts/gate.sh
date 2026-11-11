@@ -12,8 +12,8 @@
 #   three `cli_doc` processes alive). So a peer's `--no-default-features` build can
 #   replace `target/debug/codescout` inside YOUR OWN lane's run phase, however either
 #   session orders its lanes. A peer following the gate perfectly still writes a
-#   librarian-less binary to the shared path once, mid-sequence. Their compliance cannot
-#   help you and neither can yours — which is what makes "provided both lanes actually
+#   binary built with a different feature set to the shared path once, mid-sequence. Their
+#   compliance cannot help you and neither can yours — which is what makes "provided both lanes actually
 #   run" a condition every party satisfies while the guarantee fails.
 #
 # WHAT THIS DOES NOT TOUCH, deliberately: `cargo rb`. That builds `--release`, and
@@ -230,10 +230,10 @@ fi
 T_FMT=$((SECONDS - T_PREV)); T_PREV=$SECONDS
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 CLIPPY=$?
-# The lean set (`--no-default-features`) is linted in the same lane. The librarian is off there, so an
-# item that only `src/librarian/` uses is dead code, and `-D warnings` makes that an error. Until
-# 2026-11-09 no clippy command anywhere ran this set, and it was red on `ReadDenyList`
-# (docs/issues/archive/2026-11-09-no-lane-runs-clippy-on-the-lean-feature-set-and-it-is-red-on-readdenylist.md).
+# The lean set (`--no-default-features`) is linted in the same lane. No default feature is on
+# there, so an item that only a default-feature path uses is dead code, and `-D warnings` makes
+# that an error. Until 2026-11-09 no clippy command anywhere ran this set, and it was red on
+# `ReadDenyList` (docs/issues/archive/2026-11-09-no-lane-runs-clippy-on-the-lean-feature-set-and-it-is-red-on-readdenylist.md).
 # The lane is red when EITHER command is, and `;` and `||` only, never `&&`: both always run.
 cargo clippy --workspace --all-targets --no-default-features -- -D warnings
 CLIPPY_LEAN=$?
@@ -291,7 +291,6 @@ fi
 echo "gate.sh: green here does not cover:"
 echo "  - the three heavy Python suites: install requirements-python-heavy.txt and run python3 scripts/python-tests.py --lane heavy (CI job python-heavy)"
 echo "  - server-stack, which cargo rb ships and no lane compiles: read CI job test-server-stack (kept alive by every_declared_feature_has_a_lane_or_a_reason)"
-echo "  - librarian code in LEAN: the librarian is off there, so only DEFAULT runs its tests"
 echo "  - the local ONNX path (local-embed): clippy compiles it but no test lane here runs it, the two weight tests included: CI's local-embed job runs them"
 
 if [ "$FMT" -ne 0 ]; then

@@ -162,7 +162,8 @@ even without `local-embed`, the binary always speaks HTTP to the stack via
 | `server-stack` | Compiles in the Qdrant client + hybrid sparse/rerank query path (the [server stack](../concepts/retrieval-stack.md)) | Only if you run Qdrant; omit for the default daemon-free [lite stack](../concepts/lite-stack.md) |
 | `local-embed` | In-process CPU embeddings via fastembed-rs + ONNX Runtime | **Opt-in — not in the default features.** Air-gapped machines, or any host with no embedding endpoint. **Requires building from source** and skips the network rerank/sparse pipeline. Without it, a project with no `[embeddings].url` cannot use the built-in default model |
 | `http` (default) | HTTP/SSE MCP transport (vs stdio-only) | Always — used by `codescout dashboard` and remote MCP clients |
-| `librarian` (default) | Embeds the librarian doc/spec/plan indexer (formerly librarian-mcp, now dissolved into `src/librarian/`) | Always — runtime-enabled by default; opt out via `LIBRARIAN_ENABLED=0` |
+
+The librarian (the doc/spec/plan indexer, `src/librarian/`) is not a feature: it is compiled into every build. It is runtime-enabled by default; opt out via `LIBRARIAN_ENABLED=0`.
 
 > **Want free, local embeddings without running docker?** Two options:
 >
@@ -186,7 +187,7 @@ To use it you must build from source:
 ```bash
 git clone https://github.com/mareurs/codescout.git
 cd codescout
-cargo install --path . --no-default-features --features local-embed,http,librarian
+cargo install --path . --no-default-features --features local-embed,http
 ```
 
 **Why this is opt-in, and what you see if you skip it.** With `local-embed` a stripped
@@ -215,7 +216,7 @@ If you only want LSP-backed symbol navigation and git tools and do not need sema
 can build without any embedding feature:
 
 ```bash
-cargo install codescout --no-default-features --features http,librarian
+cargo install codescout --no-default-features --features http
 ```
 
 Semantic search tools (`semantic_search`, `index`) will return a clear error if called

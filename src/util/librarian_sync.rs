@@ -18,9 +18,8 @@
 //!
 //! ## Why a hook rather than a call
 //!
-//! `edit_file` is a core tool; the catalog lives behind `#[cfg(feature = "librarian")]`.
-//! A direct call would compile here and fail CI's `--no-default-features` lane, which is the
-//! failure mode `CLAUDE.md` names explicitly. So this mirrors
+//! `edit_file` is a core tool; the catalog belongs to the librarian (`crate::librarian`).
+//! A direct call would couple the core tool to the catalog's types and lifetime. So this mirrors
 //! [`super::librarian_guard`]'s oracle: a trait, a process-wide slot the librarian runtime
 //! fills at startup, and a no-op when unset. The two modules are siblings on purpose —
 //! same resolution, same lifetime, opposite directions (the guard reads the catalog to
@@ -141,7 +140,7 @@ mod tests {
         );
     }
 
-    /// `--no-default-features`, and every test binary that never builds a librarian
+    /// Every test binary that never builds a librarian
     /// runtime. A missing hook is the normal case there, not an error.
     #[test]
     fn no_installed_hook_is_a_silent_no_op() {

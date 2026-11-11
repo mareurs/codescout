@@ -7,22 +7,14 @@
 pub mod format;
 pub mod observations;
 
-#[cfg(feature = "librarian")]
 pub mod audit_doc_refs;
-#[cfg(feature = "librarian")]
 pub mod backfill_chunks;
-#[cfg(feature = "librarian")]
 pub mod constitution_check;
-#[cfg(feature = "librarian")]
 pub mod doc;
-#[cfg(feature = "librarian")]
 pub mod doc_augment;
-#[cfg(feature = "librarian")]
 pub mod doc_event;
-#[cfg(feature = "librarian")]
 pub mod doc_refresh;
 
-#[cfg(feature = "librarian")]
 pub mod doctor;
 
 use anyhow::{anyhow, Context, Result};
@@ -65,7 +57,6 @@ impl CommonOpts {
 /// threads. The codescout binary runs one command per process, so the racy
 /// window does not exist in practice. If a future refactor moves CLI dispatch
 /// into a long-running context (e.g. a REPL), this must change.
-#[cfg(feature = "librarian")]
 pub async fn open_ctx(opts: &CommonOpts) -> Result<crate::librarian::tools::ToolContext> {
     if let Some(p) = opts.project.as_ref() {
         std::env::set_var("LIBRARIAN_CWD", p);

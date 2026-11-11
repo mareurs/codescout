@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use crate::librarian::workspace::{Umbrella, WorkspaceConfig};
 /// Worktree detection lives beside worktree enumeration in `util::path_security`
-/// so neither depends on the optional `librarian` feature — `tools::config` needs
+/// so the core tools reach it without depending on `librarian` — `tools::config` needs
 /// the same two facts to report a worktree activation.
 pub(crate) use crate::util::path_security::{is_linked_worktree, worktree_main_root};
 

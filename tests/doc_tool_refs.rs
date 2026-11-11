@@ -924,12 +924,12 @@ const ANCHOR_FALSE_POSITIVES: &[AnchorFalsePositive] = &[
         tool: "for",
         snippet: "for(i=3;i<=n;i++)",
     },
-    // "a test that reaches a `#[cfg(feature = \"librarian\")]` item" — a Rust attribute
+    // "a test that reaches a `#[cfg(feature = \"http\")]` item" — a Rust attribute
     // quoted in prose, not a call.
     AnchorFalsePositive {
         file: "CONTRIBUTING.md",
         tool: "cfg",
-        snippet: "#[cfg(feature = \"librarian\")]",
+        snippet: "#[cfg(feature = \"http\")]",
     },
     // "`sorted(x, key=f)` counts" — Python's builtin, quoted as a worked example of a callback
     // shape in a probe's own doc row. The row is hundreds of characters long, which is why the
@@ -1686,11 +1686,9 @@ fn a_documented_json_payload_names_real_parameters() {
 // ─────────────────────────────────────────────────────────────────────────────
 // The YAML surface: `docs/augmentations/*.yaml` `prompt:` fields.
 //
-// Everything below is `cfg(feature = "librarian")` because it reads the sidecar through the
-// production reader, which is librarian-gated. The markdown guards above stay ungated, so the
-// lean lane keeps them; what the lean lane loses is THIS half, and it loses it silently. Read
-// the default lane (`cargo nextest run --workspace`) before trusting a change here — the same caveat
-// `docs/conventions/gate-ordering.md` already states for librarian code generally.
+// This half reads the sidecar through the production reader (the librarian's sidecar loader).
+// The markdown guards above do not.
+// See `docs/conventions/gate-ordering.md` for the lanes.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Every committed augmentation sidecar.
@@ -1711,7 +1709,6 @@ fn a_documented_json_payload_names_real_parameters() {
 /// Kept OUT of [`present_tense_surfaces`] deliberately. That walk yields `.md` paths whose lines
 /// are file lines, and every consumer of it prints `file:line`. A prompt's line numbering
 /// belongs to the YAML scalar, not to the file — see [`prompt_cites_from`].
-#[cfg(feature = "librarian")]
 fn augmentation_sidecars() -> Vec<PathBuf> {
     let dir = repo_root().join("docs/augmentations");
     let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -1727,7 +1724,6 @@ fn augmentation_sidecars() -> Vec<PathBuf> {
 }
 
 /// The marker token this scanner answers to. Deliberately NOT `audit-doc-refs:ignore`.
-#[cfg(feature = "librarian")]
 const PROMPT_IGNORE_TOKEN: &str = "doc-tool-refs:ignore";
 
 /// What a `<!-- doc-tool-refs:ignore … -->` marker on a prompt line suppresses.
@@ -1753,14 +1749,12 @@ const PROMPT_IGNORE_TOKEN: &str = "doc-tool-refs:ignore";
 /// the 24 sidecars write `prompt:` as a single-quoted flow scalar — one line holding the whole
 /// prompt. A bare marker there suppresses that entire prompt. On a flow scalar use the scoped
 /// form; the bare form is only safe inside a `|` / `|-` literal block.
-#[cfg(feature = "librarian")]
 enum PromptIgnore {
     None,
     All,
     Only(Vec<String>),
 }
 
-#[cfg(feature = "librarian")]
 impl PromptIgnore {
     fn blocks(&self, tool: &str) -> bool {
         match self {
@@ -1772,7 +1766,6 @@ impl PromptIgnore {
 }
 
 /// Read one prompt line's marker, if it carries one.
-#[cfg(feature = "librarian")]
 fn prompt_ignore(line: &str) -> PromptIgnore {
     let Some(at) = line.find("<!--") else {
         return PromptIgnore::None;
@@ -1809,7 +1802,6 @@ fn prompt_ignore(line: &str) -> PromptIgnore {
 /// bug that motivated this whole surface IS a scan whose scope quietly excluded a population
 /// while reporting green. A reader that declines a file satisfies every `is_empty()` assertion
 /// downstream of it, so the refused set has to be as visible as the read one.
-#[cfg(feature = "librarian")]
 #[derive(Default)]
 struct PromptScan {
     cites: Vec<Cite>,
@@ -1854,7 +1846,6 @@ struct PromptScan {
 /// `build_system_prompt_draft()`, a Rust function, and billing zero-arg calls would report it as
 /// a dead tool. The cost is a real blind spot: `some_dead_tool()` written with no arguments
 /// goes unseen here, exactly as it does on the markdown surfaces.
-#[cfg(feature = "librarian")]
 fn prompt_cites_from(paths: &[PathBuf], root: &std::path::Path) -> PromptScan {
     let actions = tool_actions();
     let mut scan = PromptScan::default();
@@ -1927,7 +1918,6 @@ fn prompt_cites_from(paths: &[PathBuf], root: &std::path::Path) -> PromptScan {
 /// Because the real corpus can no longer produce the RED, the wiring is proved by
 /// [`a_dead_tool_call_in_a_sidecar_prompt_is_reported`] against a seeded fixture read through
 /// this same reader — and separately by a mutation on the production path, not on a fixture.
-#[cfg(feature = "librarian")]
 #[test]
 fn an_augmentation_prompt_names_only_live_tools() {
     let root = repo_root();
@@ -1979,7 +1969,6 @@ fn an_augmentation_prompt_names_only_live_tools() {
 ///
 /// `artifact_augment` is a real fixture, not a synthetic one: it is the tool this bug found 6
 /// prompts still calling, deleted by Task 5 of the tool-surface-collapse plan.
-#[cfg(feature = "librarian")]
 #[test]
 fn a_dead_tool_call_in_a_sidecar_prompt_is_reported() {
     let names = tool_names();
@@ -2043,7 +2032,6 @@ fn a_dead_tool_call_in_a_sidecar_prompt_is_reported() {
 ///
 /// Both YAML escapes of the flow form are in the fixture: `''` for a literal apostrophe, and
 /// `\n` written as a real newline inside the quotes.
-#[cfg(feature = "librarian")]
 #[test]
 fn a_flow_scalar_prompt_is_read_not_refused() {
     let tmp = tempfile::tempdir().unwrap();
@@ -2098,7 +2086,6 @@ fn a_flow_scalar_prompt_is_read_not_refused() {
 ///
 /// The fixture is malformed the way a real one would be — an unclosed flow scalar, which is what
 /// a hand-edit of a quoted `prompt:` produces — not by writing bytes that are not YAML at all.
-#[cfg(feature = "librarian")]
 #[test]
 fn an_unreadable_sidecar_is_refused_loudly_not_skipped_silently() {
     let tmp = tempfile::tempdir().unwrap();
@@ -2141,7 +2128,6 @@ fn an_unreadable_sidecar_is_refused_loudly_not_skipped_silently() {
 ///
 /// Paired with its opposite direction throughout: every suppression assertion here is monotone
 /// under the scan going dead, so each is worthless without the un-suppressed contrast beside it.
-#[cfg(feature = "librarian")]
 #[test]
 fn the_prompt_ignore_marker_is_the_documented_escape() {
     let names = tool_names();
@@ -2230,7 +2216,6 @@ fn the_prompt_ignore_marker_is_the_documented_escape() {
 /// citations, derived 2026-09-20 by running this test's own floor against an impossible value
 /// and reading the number out of its panic) — they exist to catch a collapse, not to ratchet a
 /// number that grows with the corpus.
-#[cfg(feature = "librarian")]
 #[test]
 fn the_sidecar_prompt_scan_is_not_reading_an_empty_corpus() {
     let root = repo_root();

@@ -1,14 +1,10 @@
 //! The shared half of the action-labelled schema-key probe (`IC-15`).
 //!
 //! **Why this lives under `src/tools/` rather than beside its first caller.** It was written in
-//! `src/librarian/tools/mod.rs`, which is `#[cfg(feature = "librarian")]`. Every consolidated tool
-//! outside that tree — `workspace`, `index`, `library`, `edit_file` — dispatches on a string
-//! `action` over a shared schema and is therefore exposed to `IC-15`, but none of them depends on
-//! the librarian feature. Reaching the probe from there would have meant gating a `workspace` test
-//! on `feature = "librarian"`, which makes the guard vanish from the lean lane
-//! (`cargo nextest run --workspace --no-default-features`) for tools that have nothing to do with the
-//! librarian — a feature-gated test reads as "filtered out", never as a failure. So the probe is
-//! feature-independent and both lanes compile it.
+//! `src/librarian/tools/mod.rs`. Every consolidated tool outside that tree — `workspace`,
+//! `index`, `library`, `edit_file` — dispatches on a string `action` over a shared schema and is
+//! therefore exposed to `IC-15`, but none of them belongs to the librarian. So the probe is
+//! tool-independent and every consolidated tool's test can call it.
 //!
 //! **Why this exists at all.** A consolidated tool takes one schema for many actions and
 //! dispatches on `action`. Each sub-action deserialises the *same* args blob into its own

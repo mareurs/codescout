@@ -45,11 +45,9 @@ const KNOWN_DELEGATION_ONLY: &[&str] = &[
 /// Every `.rs` file under `src/`, as `(path, contents)`.
 ///
 /// Deliberately reads FILES rather than compiled items, and scans both sides of the
-/// diff the same way. That is what makes the guard feature-independent: `src/librarian/**`
-/// is behind `#[cfg(feature = "librarian")]`, so a scan that collected declarations from
-/// that subtree but not constructions would report every librarian tool unreachable under
-/// `cargo test --no-default-features` — gate command three, where it would look like a
-/// real regression.
+/// diff the same way. That is what makes the guard independent of how items are cfg-gated:
+/// a scan that collected declarations from `src/librarian/**` but not constructions would
+/// report every librarian tool unreachable.
 fn rust_sources() -> Vec<(PathBuf, String)> {
     let mut out = Vec::new();
     collect_rs(&repo_root().join("src"), &mut out);

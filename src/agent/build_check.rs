@@ -15,16 +15,12 @@
 //! sessions had paid. Full record:
 //! `docs/issues/archive/2026-09-08-the-author-of-a-tree-reddening-write-is-the-one-party-never-told.md`
 //!
-//! WHY IT IS NOT `SessionRegistry`-SHAPED
-//! -------------------------------------
-//! `crate::librarian::session_registry` sits behind `#[cfg(feature = "librarian")]`
-//! (`src/lib.rs:39-40`) while `pub mod agent` (`src/lib.rs:24`) is ungated. Depending on
-//! it here would delete this feature from a `--no-default-features` build **and** make
-//! every test below invisible to the lean lane — the vacuity CLAUDE.md § Testing
-//! Discipline measures. So the *rules* ([`checkout_is_shared`], [`errors_naming`],
-//! [`render_notice`]) are pure, ungated, and run in both lanes; only the row *loader* is
-//! gated. Consequence, stated rather than discovered later: **a lean build never emits
-//! the notice**, because it can enumerate no sessions.
+//! WHY THE RULES ARE PURE
+//! -----------------------
+//! The *rules* ([`checkout_is_shared`], [`errors_naming`], [`render_notice`]) are pure
+//! functions of their inputs, so a test can drive every branch without touching the
+//! session registry (`crate::librarian::session_registry`). Only the row *loader*
+//! ([`live_sessions`]) reads the registry.
 //!
 //! COST AND COMMAND, MEASURED — re-derive rather than cite, both track the crate
 //! ----------------------------------------------------------------------------
@@ -62,7 +58,6 @@
 //! * **Rust only.** The trigger is `.rs` + `cargo check`.
 //! * A **deliberate mutation** trips this, and mutation runs are routine in this repo.
 //!   `CODESCOUT_NO_BUILD_CHECK=1` is the escape.
-//! * A **lean build** emits nothing (see above).
 //! * **`check`, not `test` — and this is the one ceiling the header above used to present
 //!   as MET.** An uncommitted edit that COMPILES and reds a TEST produces nothing here.
 //!   Same distinction `docs/conventions/gate-ordering.md` already draws for the gate
@@ -488,11 +483,7 @@ pub(crate) async fn run_once(
 
 /// Live sessions sharing this machine, reduced to the field the predicate reads.
 ///
-/// **This is the only gated part of the module.** With `librarian` off it returns empty,
-/// so [`checkout_is_shared`] is false and no notice is ever emitted — stated in the module
-/// header rather than left to be discovered. Everything else here compiles and is tested
-/// in both lanes.
-#[cfg(feature = "librarian")]
+/// **This is the only part of the module that reads the session registry.**
 pub(crate) fn live_sessions() -> Vec<LiveSession> {
     use crate::librarian::session_registry::{
         default_profile_dirs, RealProcProbe, SessionRegistry,
@@ -508,11 +499,6 @@ pub(crate) fn live_sessions() -> Vec<LiveSession> {
             cwd: cwd.map(PathBuf::from),
         })
         .collect()
-}
-
-#[cfg(not(feature = "librarian"))]
-pub(crate) fn live_sessions() -> Vec<LiveSession> {
-    Vec::new()
 }
 
 /// The synchronous decision half of [`on_source_write`]: does this write start a check,

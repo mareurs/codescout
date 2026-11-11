@@ -1335,9 +1335,8 @@ fn unclassified_decls(decls: &[CapDecl]) -> Vec<String> {
 /// of `cap_probe.rs`'s source TEXT — never a compiled import. `cap_probe`
 /// is `#[cfg(test)]`-gated and its items are `pub(crate)`, neither of which
 /// this integration-test binary can `use` at all; and even if it could, a
-/// compiled read would see `PROBE_ROWS` change shape across
-/// `--no-default-features` the moment a row moves behind
-/// `#[cfg(feature = "librarian")]` — the same asymmetry `cap_constants`
+/// compiled read would see `PROBE_ROWS` change shape the moment a row moves behind
+/// a cfg gate — the same asymmetry `cap_constants`
 /// reads around for the `RESULT_CAP` side. A line only contributes an id
 /// when it starts (after trimming) with the literal `id:` — a `pub id:
 /// &'static str,` field declaration doesn't match (it starts with `pub`),

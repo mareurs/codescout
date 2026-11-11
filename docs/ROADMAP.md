@@ -19,7 +19,7 @@ surviving design records live under `docs/superpowers/plans/`.
 
 See [`FEATURES.md`](FEATURES.md) for the full feature reference. Summary:
 
-- **21 tools** across 7 categories (file, workflow, symbol, semantic, memory, config/nav, knowledge) — 19 core plus `doc` and `librarian` under the default `librarian` feature
+- **21 tools** across 7 categories (file, workflow, symbol, semantic, memory, config/nav, knowledge) — 19 core plus `doc` and `librarian` (the librarian is compiled into every build)
 - **LSP client** — transport, lifecycle, document symbols, references, definition, hover, rename + text sweep
 - **Tree-sitter AST** — symbol extraction + docstrings for Rust, Python, TypeScript, Go, Java, Kotlin
 - **Semantic search** — Qdrant + TEI hybrid retrieval (dense + BM25 sparse, RRF fusion); see [benchmark](research/2026-05-06-retrieval-stack-benchmark.md). Memory storage and recall still run on the in-process sqlite-vec path; see [legacy-removal tracker](trackers/2026-05-07-legacy-retrieval-removal.md) ([concepts](manual/src/concepts/semantic-search.md), [backends](manual/src/configuration/embedding-backends.md))
@@ -93,9 +93,10 @@ memory `research/loadbearing-mcp-guidance`.
 pre-commit line (`cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`) covers
 **one of nine** CI test cells — the `default` config on the host OS. CI runs a 3x3
 matrix (ubuntu/macos/windows x default/local-embed/no-features), and feature-gate rot
-is invisible to a default-features build **by construction**: a test file that uses
-`codescout::librarian` without `#[cfg(feature = "librarian")]` compiles and passes
-locally while failing six matrix cells. That happened twice in one cohort — once at
+is invisible to a default-features build **by construction**: a test file that uses an item
+gated behind a default feature, without gating itself, compiles and passes
+locally while failing six matrix cells. That happened twice in one cohort, when the librarian was
+still a Cargo feature — once at
 compile time (`tests/link_scan.rs`, `src/server.rs`'s `make_server`, fixed `7938d68b`)
 and once at behaviour time (three `server::tests` asserting the `artifact` tool is
 registered, fixed `be75e705`) — and kept CI red for roughly three weeks because the

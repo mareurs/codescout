@@ -2,8 +2,8 @@
 //! extension as a SQLite auto-extension. Once registered, every rusqlite
 //! `Connection` opened afterwards has `vec0` available.
 //!
-//! This lives outside `src/librarian/` (which is `cfg(feature = "librarian")`)
-//! so the always-compiled retrieval code store can register it too. `vec0` is
+//! This lives outside `src/librarian/` so the code store, the memory store and the librarian
+//! catalog all register it from one place. `vec0` is
 //! **statically linked** into the binary — no runtime DLL, so nothing for an
 //! EDR like CrowdStrike to quarantine (unlike the `onnxruntime.dll` of WIN-22).
 //! That static-linking is what makes the daemon-free "lite" stack viable on a

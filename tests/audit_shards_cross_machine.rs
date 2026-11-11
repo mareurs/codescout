@@ -1,9 +1,3 @@
-// The whole corpus exercises `codescout::librarian`, which is gated behind the
-// `librarian` feature. Without this the file fails to compile under
-// `--no-default-features` / `--features local-embed` (CI's other two configs)
-// — same reasoning as tests/link_scan.rs.
-#![cfg(feature = "librarian")]
-
 //! Task 5 acceptance test for `2026-09-01-committed-audit-shards`.
 //!
 //! Consumes ONLY the shipped `librarian(action="audit_log", ...)` surface

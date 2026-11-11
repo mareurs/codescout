@@ -3544,8 +3544,8 @@ mod tests {
     /// `CLAUDE.md` § Development Commands on 2026-10-04, where it had been the fix for
     /// docs/issues/archive/2026-09-06-the-documented-gate-never-compiles-the-feature-set-that-ships.md.
     ///
-    /// Scoped to `echo` lines: the script's comments also name ONNX, `local-embed` and the
-    /// librarian, so a file-wide `contains` would pass with every printed line deleted. Each
+    /// Scoped to `echo` lines: the script's comments also name ONNX and `local-embed`, so a
+    /// file-wide `contains` would pass with every printed line deleted. Each
     /// needle belongs to one printed line, so deleting any one of those lines reds here.
     ///
     /// The other direction is kept from the test this replaces: the guard the script names
@@ -3561,18 +3561,12 @@ mod tests {
             .collect();
 
         const GUARD_FN: &str = "every_declared_feature_has_a_lane_or_a_reason";
-        for needle in [
-            "server-stack",
-            "test-server-stack",
-            GUARD_FN,
-            "librarian",
-            "local-embed",
-        ] {
+        for needle in ["server-stack", "test-server-stack", GUARD_FN, "local-embed"] {
             assert!(
                 printed.iter().any(|l| l.contains(needle)),
                 "scripts/gate.sh no longer PRINTS {needle:?}.\n\n\
              Green from the four lanes says nothing about server-stack (cargo rb ships it, \
-             no lane compiles it), about librarian code in LEAN, or about the local ONNX \
+             no lane compiles it), or about the local ONNX \
              path (clippy compiles it, no test lane runs it). The gate's own output is \
              where a session reads \"green\", so that is where the bound must stay. If you \
              move it, move it somewhere a session running the gate sees, and update this \

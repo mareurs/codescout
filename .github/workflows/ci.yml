@@ -380,10 +380,10 @@ jobs:
       # default-features build (no `local` module); this second pass is
       # what actually reaches local.rs and its tests.
       - run: cargo clippy --workspace --all-targets --features local-embed -- -D warnings
-      # The lean set, `--no-default-features`: the librarian is off there, so an item only
-      # `src/librarian/` uses is dead code, and `-D warnings` makes that an error. No lane linted
-      # this set until 2026-11-09, and it was red on `ReadDenyList`. The `no-features` test lane
-      # builds it but denies no warnings, and every clippy line above runs with default features.
+      # The lean set, `--no-default-features`: no feature is on, and the librarian is compiled
+      # in every set. The `no-features` test lane builds this set but denies no warnings, and
+      # every clippy line above runs with default features, so this line is the one that denies
+      # warnings on it.
       # docs/issues/archive/2026-11-09-no-lane-runs-clippy-on-the-lean-feature-set-and-it-is-red-on-readdenylist.md
       - run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
 
@@ -416,8 +416,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest@0.9.149
-      # Tests with the librarian feature on (default + local-embed configs)
-      # construct CodeScoutServer instances which try to build_tool_context.
+      # Tests in every config (default, local-embed, lean) construct CodeScoutServer instances
+      # which try to build_tool_context.
       # That call requires a librarian workspace file; seed an empty one so
       # the relevant tools register on fresh CI runners. Use LIBRARIAN_WORKSPACE
       # env var (per src/librarian/mod.rs:32) to point at a fixed path, avoiding
@@ -559,8 +559,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest@0.9.149
-      # server-stack sits on top of the default feature set, so `librarian` is on and
-      # build_tool_context needs a workspace file — same seeding as the matrix job.
+      # server-stack sits on top of the default feature set, and the librarian is compiled in every
+      # set, so build_tool_context needs a workspace file — same seeding as the matrix job.
       - name: Seed empty librarian workspace
         shell: bash
         run: |
@@ -617,10 +617,10 @@ jobs:
       # static backend out of it.
       # Dropping the rest of `default` costs nothing here: every root-crate site gated on
       # this feature (retrieval/client.rs, hardware.rs, server.rs, tools/config) compiles
-      # without `librarian`, which is what the lean lane already proves. Do NOT restore the
-      # default set by listing it: naming `librarian` in a `--features` flag trips
-      # tests/feature_lanes.rs `the_guard_is_not_vacuous`, whose canary is precisely that
-      # `librarian` is reached through `default` and never through a flag.
+      # with only this feature on, which the lean lane also proves. Do NOT restore the
+      # default set by listing it: `librarian` is not a feature, so `--features librarian`
+      # fails in cargo, and tests/feature_lanes.rs `the_guard_is_not_vacuous` pins that no
+      # flag names it.
       - run: cargo check --no-default-features --features local-embed-dynamic --all-targets
       # `retrieval-e2e` is EXEMPT (tests/feature_lanes.rs) from *running* — it needs a
       # live Qdrant + TEI/Ollama stack no CI runner has. That justifies not running

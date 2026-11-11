@@ -48,7 +48,6 @@ pub mod hardware;
 pub mod heartbeat;
 pub mod legibility;
 
-#[cfg(feature = "librarian")]
 pub mod librarian;
 pub mod library;
 pub mod logging;

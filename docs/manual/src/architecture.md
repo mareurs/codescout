@@ -106,8 +106,8 @@ across all tool calls and, in HTTP mode, across all connections. Calling
 **Source:** `src/server.rs`
 
 All 21 tools are registered at startup in `CodeScoutServer::from_parts()` as
-a `Vec<Arc<dyn Tool>>` — 19 core, plus `doc` and `librarian` from the default
-`librarian` feature. (`peer` is opt-in and is not registered unless enabled.)
+a `Vec<Arc<dyn Tool>>` — 19 core, plus `doc` and `librarian`, which are compiled into every
+build and registered unless the librarian is opted out at runtime. (`peer` is opt-in and is not registered unless enabled.)
 Dispatch is by name: `call_tool()` iterates the vector
 and matches on `tool.name()`.
 

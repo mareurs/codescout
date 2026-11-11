@@ -311,14 +311,24 @@ fn the_guard_is_not_vacuous() {
 
     let via_default = default_closure(&features);
     assert!(
-        via_default.contains("librarian"),
-        "expected `librarian` to be reached transitively through `default`; \
+        via_default.contains("remote-embed") && via_default.contains("http"),
+        "expected `remote-embed` and `http` to be reached through `default`; \
          closure was {via_default:?}"
     );
-    // ...and specifically NOT because the string appears somewhere in a workflow.
+    // `librarian` is not a feature: it is compiled into every build, and cargo rejects
+    // `--features librarian`. A re-declared feature of that name would let a lane switch the
+    // librarian off again, so its absence is pinned.
+    assert!(
+        !features.contains_key("librarian"),
+        "`librarian` is declared as a Cargo feature; the librarian is compiled into \
+         every build and `crate::librarian` must not depend on a feature"
+    );
+    // ...and no workflow passes it as a --features argument (cargo would fail on it). The CI
+    // workflow also has a step NAME containing "librarian" ("Seed empty librarian
+    // workspace"), so this still proves the scan reads `--features` flags, not substrings.
     assert!(
         !via_workflow.contains("librarian"),
-        "`librarian` was matched as a --features argument; the workflow scan has \
+        "`librarian` was matched as a --features argument, or the workflow scan has \
          widened and can now mark features covered by accident"
     );
 }

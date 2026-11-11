@@ -384,7 +384,7 @@ If you cannot run the stack (air-gapped, embedded environment), build with
 `local-embed`:
 
 ```bash
-cargo install codescout --no-default-features --features local-embed,http,librarian
+cargo install codescout --no-default-features --features local-embed,http
 ```
 
 This restores the in-process ONNX + fastembed path. Note: the network

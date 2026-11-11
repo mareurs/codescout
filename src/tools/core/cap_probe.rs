@@ -4,11 +4,7 @@
 //! `tests/result_caps.rs` scans this file as TEXT — via `probe_row_ids` — to
 //! cross-check the `id` field of every [`ProbeRow`] against the `RESULT_CAP`
 //! ids declared in `src/`, in both directions. A text scan, not a compiled
-//! import: `librarian` is a default Cargo feature, so an id gated behind
-//! `#[cfg(feature = "librarian")]` still compiles out under
-//! `--no-default-features`, and a gate that read this module as compiled
-//! Rust would red the lean lane while passing the default one — a failure
-//! reached by FOLLOWING `CLAUDE.md`'s gate order.
+//! import, so a gate that reads this module does not depend on how any `src/` item is cfg-gated.
 //!
 //! Every row's `id` matches exactly one `cap-class: RESULT_CAP <id>`
 //! annotation in tracked `src/`. A row records what evidence exists for

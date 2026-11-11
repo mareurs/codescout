@@ -155,9 +155,10 @@ reaches `#[test]` code and `codescout-embed`'s feature-gated `local` module. CI 
 (`.github/workflows/ci.yml:50` and `:61`), so the first passing proves nothing about the
 second.
 
-A third invocation, with `--no-default-features`, lints the lean set. The librarian is off there, so
-an item that only `src/librarian/` uses is dead code, and `-D warnings` makes that an error; no other
-clippy invocation can see it. The gate and CI's `clippy` job both run it.
+A third invocation, with `--no-default-features`, lints the lean set. A test or item that reaches
+code gated behind a default feature (`http`, `remote-embed`) without gating itself compiles under
+default features and fails here, and `-D warnings` turns an item that only a gated path uses into
+dead-code errors; no other clippy invocation can see that. The gate and CI's `clippy` job both run it.
 
 ```bash
 python3 -m pip install -r requirements-python-light.txt
@@ -177,13 +178,13 @@ The two test lanes follow the same logic as the two clippy ones. Each is a `carg
 `cargo test --doc` step, because nextest does not run doctests; `./scripts/gate.sh` runs all four and
 needs nextest installed. CI's test matrix is
 three configs — `default`, `local-embed`, `no-features` (`.github/workflows/ci.yml:70`) — and
-the lean lane is what mirrors `no-features`. A test that reaches a `#[cfg(feature = "librarian")]`
+the lean lane is what mirrors `no-features`. A test that reaches a `#[cfg(feature = "http")]`
 item without gating itself compiles and passes under default features, so the default lane
 cannot see it by construction.
 
 Run them in that order. Both lanes share one `target/`, and `tests/cli_doc.rs` resolves
-`target/debug/codescout` by path at run time, so the lean lane leaves a librarian-less binary
-sitting there; ending on the default lane puts it back.
+`target/debug/codescout` by path at run time, so the lean lane leaves a binary built without the
+default features sitting there; ending on the default lane puts it back.
 
 This block is a deliberate second copy, kept because a contributor should not have to read an
 internal agent contract to find out how to verify a patch. **[`CLAUDE.md`](CLAUDE.md) §

@@ -1,11 +1,10 @@
 # Librarian (embedded in codescout)
 
 `librarian-mcp` is no longer a standalone MCP server. It is embedded inside
-the codescout binary as an optional subsystem behind the `librarian` cargo
-feature, which is on by default in dev builds and off in `--no-default-features`
-production builds.
+the codescout binary as a subsystem that is compiled into every build, with
+no Cargo feature to turn it off.
 
-When active, the two librarian tools — `doc` and `librarian` — are
+The two librarian tools — `doc` and `librarian` — are
 advertised alongside codescout's core toolset, and the librarian server instructions block is
 appended to codescout's MCP `instructions` field. (`workspace_state_at` was
 folded into `librarian(action="workspace_state_at")`; see
@@ -13,25 +12,28 @@ folded into `librarian(action="workspace_state_at")`; see
 
 ## Build-time control
 
+There is none: the librarian is compiled into every build, including
+`--no-default-features`. The `default` feature list names only the transports and the
+embedder client:
+
 ```toml
 # Cargo.toml
 [features]
-default = ["remote-embed", "http", "librarian"]
-librarian = []  # module compilation gate (formerly dep:librarian-mcp)
+default = ["remote-embed", "http"]
 ```
 
 ```bash
-# Dev build — librarian on
+# Any build includes the librarian
 cargo build --release
 
-# Production build — librarian compiled out, zero runtime cost
+# Lean build — still includes the librarian
 cargo build --release --no-default-features \
   --features remote-embed,http
 ```
 
 ## Runtime override
 
-Even with the feature compiled in, librarian registration is **enabled by
+Librarian registration is **enabled by
 default**. Opt out per session via env var, or per project via `project.toml`.
 
 | Knob | Value | Effect |

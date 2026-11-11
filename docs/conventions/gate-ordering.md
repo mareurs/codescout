@@ -40,6 +40,13 @@ which command they justify.
 
 ## Why the order is load-bearing — the shared `target/` trap
 
+**Current state.** The librarian is compiled into every feature set, so a lean binary still has
+the `artifact` and `doc` subcommands, and the failure below (`unrecognized subcommand`) cannot
+occur. What stays true is that the lanes build different feature sets into one
+`target/debug/codescout`, and `tests/cli_doc.rs` resolves it by path at run time. The measurements
+below were taken while the librarian was a Cargo feature; read "librarian-less" in them as "built
+without that feature".
+
 We share one `target/`, and `tests/cli_doc.rs` resolves `target/debug/codescout` **by path at
 run time** — so the lean lane leaves a librarian-less binary there, and a concurrent
 default-features run then execs it and dies with `unrecognized subcommand 'artifact'` on 10 of 11
@@ -142,7 +149,7 @@ Measured 2026-08-27: ten task gates, ten task reviews and a whole-branch review 
 
 The lean `cargo nextest run --workspace --no-default-features` is there for the same reason one command
 over: every other gate command runs **with** default features, so an unconditional module reaching a
-`#[cfg(feature = "librarian")]` one compiles clean locally and fails only in CI's `no-features`
+`#[cfg(feature = "http")]` one (any default feature) compiles clean locally and fails only in CI's `no-features`
 *test-matrix* lane — the slow 3-OS job, not the fast clippy job, which did not run that config at
 all until 2026-11-09. The `clippy` job and the gate's clippy lane now lint it too
 (`cargo clippy --workspace --all-targets --no-default-features -- -D warnings`), after it was found red
@@ -150,6 +157,12 @@ on a dead `ReadDenyList`; the test lane still builds it and still denies no warn
 HEAD failing the lean build, so every session that merged inherited the break.
 
 ## The lean lane is VACUOUS for librarian code — the same gate, a second consequence
+
+**Current state.** The librarian is compiled into every feature set, so the lean lane compiles
+and runs the librarian's tests, and this section's claim no longer holds. The section stays as the
+record of a measured failure mode, and of the rule it taught: a total over a lane is not evidence
+about one member, so read your own test names out of the log, whichever lane produced it. The text
+below describes the lane as it was while the librarian was a Cargo feature.
 
 The section above says why the lean lane exists. This says what it cannot tell you, and the two
 are one fact read in opposite directions.

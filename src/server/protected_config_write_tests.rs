@@ -339,7 +339,6 @@ async fn a_memory_topic_cannot_reach_project_toml() {
 /// stays Default, writes are disabled with a notice). What the guard alone prevents is that
 /// outcome: a model replacing a fresh `.codescout/project.toml` with an unparseable file. So the
 /// assertion is that the file is not created at all, which only the guard causes.
-#[cfg(feature = "librarian")]
 #[tokio::test]
 async fn doc_create_cannot_write_a_security_section_into_a_fresh_project_toml() {
     let (dir, server) = make_server_with_project_toml(None).await;
@@ -365,7 +364,6 @@ async fn doc_create_cannot_write_a_security_section_into_a_fresh_project_toml() 
 /// whose body is valid TOML could be moved onto `.codescout/project.toml` without a byte
 /// passing through `atomic_write`. A project with no `project.toml` yet is the case where the
 /// destination is free.
-#[cfg(feature = "librarian")]
 #[tokio::test]
 async fn doc_move_cannot_turn_a_markdown_file_into_a_security_config() {
     let (dir, server) = make_server_with_project_toml(None).await;

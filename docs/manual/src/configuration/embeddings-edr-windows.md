@@ -23,7 +23,7 @@ the local ONNX runtime is never compiled or downloaded.
 The **default** feature set already excludes local ONNX:
 
 ```bash
-cargo build --release        # default features = remote-embed, http, librarian
+cargo build --release        # default features = remote-embed, http
 ```
 
 Do **not** pass `--features local-embed` or `--features local-embed-dynamic`.
