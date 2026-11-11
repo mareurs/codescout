@@ -1480,14 +1480,22 @@ impl EditCode {
         )?;
 
         let pre_ast = crate::ast::extract_symbols(&full_path).ok();
-        let pre_count = pre_ast
-            .as_ref()
-            .map(|syms| count_symbols_by_name_path(syms, &sym.name_path))
-            .unwrap_or(0);
         let pre_set = pre_ast.as_ref().map(|s| collect_all_name_paths(s));
         let target_ast_name_path = pre_ast
             .as_ref()
             .and_then(|s| find_ast_name_path(s, &sym.name, sym.start_line));
+        // Count the target in the AST's own dialect. `sym.name_path` is the LSP's, and the two
+        // differ for a method inside a Rust `impl` block (LSP `impl Agent/old`, AST `Agent/old`),
+        // so counting by it gave 0 and switched off every target-gone verdict behind
+        // `pre_count > 0`: such a method could be renamed or replaced by several declarations
+        // under `status: ok`. Falls back to the LSP path when the AST has no match (a
+        // backtick-quoted Kotlin name, a range the AST places elsewhere), which is the old
+        // behaviour. Bug 78a926d62d663912.
+        let counted_name_path: &str = target_ast_name_path.as_deref().unwrap_or(&sym.name_path);
+        let pre_count = pre_ast
+            .as_ref()
+            .map(|syms| count_symbols_by_name_path(syms, counted_name_path))
+            .unwrap_or(0);
 
         // bug 7dc6ea026d9881e6: `replace` overwrites the symbol's WHOLE range, so a
         // caller who supplied a partial body — having read only the top of the
@@ -1566,7 +1574,7 @@ impl EditCode {
             pre_count,
             pre_set.as_ref(),
             target_ast_name_path.as_deref(),
-            &sym.name_path,
+            counted_name_path,
             post_ast.as_deref(),
             syntax_regressed,
         );
