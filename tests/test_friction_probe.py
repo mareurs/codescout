@@ -248,6 +248,72 @@ class CommandFailureTests(unittest.TestCase):
         self.assertEqual(r["from_columns"], {
             "success_rows": 4, "recorded": 3, "nonzero_exit": 1, "timed_out": 1,
             "failed": 2, "pct_of_recorded": 66.7})
+    def by_client(self, db):
+        result = subprocess.run(
+            [sys.executable, "-I", str(PROBE), "--db", str(db), "--json"],
+            capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)["by_client"]
+
+    def make_client_db(self, with_facts):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Path(tmp.name) / "usage.db"
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None, microsecond=0)
+        facts = ", output_json TEXT, output_bytes INTEGER, command_exit INTEGER, " \
+                "command_timed_out INTEGER" if with_facts else ""
+        with sqlite3.connect(db) as conn:
+            conn.execute(f"""CREATE TABLE tool_calls (
+                id INTEGER PRIMARY KEY, tool_name TEXT, called_at TEXT, outcome TEXT,
+                err_family TEXT, error_msg TEXT, session_id TEXT, cc_session_id TEXT,
+                codescout_sha TEXT, codescout_dirty INTEGER, client_name TEXT{facts})""")
+            # (tool, outcome, client, output_json, bytes, exit, timed_out)
+            rows = [
+                ("run_command", "success", "alpha", "{}", 5, 0, None),
+                ("run_command", "success", "alpha", None, 5, 101, None),
+                ("run_command", "success", "beta", None, 7, None, 1),
+                ("grep", "success", "beta", None, 3, None, None),
+                ("run_command", "success", None, None, None, None, None),  # an older build
+            ]
+            for i, (tool, outcome, client, out, nbytes, code, timed_out) in enumerate(rows, 1):
+                values = [i, tool, now.isoformat(" "), outcome, None, None, "A", "c", "b", 0, client]
+                if with_facts:
+                    values += [out, nbytes, code, timed_out]
+                conn.execute(
+                    f"INSERT INTO tool_calls VALUES ({','.join('?' * len(values))})", values)
+        return db
+
+    def test_calls_are_grouped_by_the_client_that_made_them(self):
+        r = self.by_client(self.make_client_db(with_facts=True))
+        self.assertEqual(r, {"available": True, "clients": [
+            {"client": "alpha", "calls": 2, "with_output": 1, "with_facts": 2,
+             "recorded": 2, "failed": 1},
+            {"client": "beta", "calls": 2, "with_output": 0, "with_facts": 2,
+             "recorded": 1, "failed": 1},
+            {"client": "<null>", "calls": 1, "with_output": 0, "with_facts": 0,
+             "recorded": 0, "failed": 0},
+        ]})
+
+    def test_a_client_column_without_the_fact_columns_still_counts_calls(self):
+        r = self.by_client(self.make_client_db(with_facts=False))
+        self.assertEqual([(c["client"], c["calls"]) for c in r["clients"]],
+                         [("alpha", 2), ("beta", 2), ("<null>", 1)])
+        self.assertNotIn("with_output", r["clients"][0])
+
+    def test_a_corpus_with_no_client_column_says_so(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Path(tmp.name) / "usage.db"
+        with sqlite3.connect(db) as conn:
+            conn.execute("""CREATE TABLE tool_calls (
+                id INTEGER PRIMARY KEY, tool_name TEXT, called_at TEXT, outcome TEXT,
+                err_family TEXT, error_msg TEXT, session_id TEXT, cc_session_id TEXT,
+                codescout_sha TEXT, codescout_dirty INTEGER)""")
+            conn.execute("INSERT INTO tool_calls VALUES (1,'grep',datetime('now'),'success',"
+                         "NULL,NULL,'A','c','b',0)")
+        r = self.by_client(db)
+        self.assertFalse(r["available"])
+        self.assertIn("client_name", r["reason"])
 
 
 if __name__ == "__main__":

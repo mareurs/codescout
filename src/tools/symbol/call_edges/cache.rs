@@ -31,23 +31,26 @@ pub fn apply_schema(conn: &Connection) {
             direction       TEXT NOT NULL,
             edges_json      TEXT NOT NULL,
             signatures_json TEXT,
+            epoch           TEXT,
             PRIMARY KEY (project_id, symbol, definition_file, definition_line, definition_col, direction)
         );",
     )
     .expect("apply_schema: DDL failed");
-    add_signatures_column_if_missing(conn);
+    add_resolution_column_if_missing(conn, "signatures_json");
+    add_resolution_column_if_missing(conn, "epoch");
 }
 
-/// A database created before `call_edge_resolutions.signatures_json` existed keeps its table, so
-/// `CREATE TABLE IF NOT EXISTS` does not add the column. Add it once. Two processes can open the
-/// same file at the same time (the MCP server and the dashboard), so "the column is already
-/// there" after our own check is not an error.
-fn add_signatures_column_if_missing(conn: &Connection) {
+/// A database created before a column of `call_edge_resolutions` existed (`signatures_json`,
+/// `epoch`) keeps its table, so `CREATE TABLE IF NOT EXISTS` does not add the column. Add it once.
+/// Two processes can open the same file at the same time (the MCP server and the dashboard), so
+/// "the column is already there" after our own check is not an error.
+///
+/// `column` is one of the literals above, never input.
+fn add_resolution_column_if_missing(conn: &Connection, column: &str) {
     let present: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('call_edge_resolutions') \
-             WHERE name = 'signatures_json'",
-            [],
+            "SELECT COUNT(*) FROM pragma_table_info('call_edge_resolutions') WHERE name = ?1",
+            [column],
             |row| row.get(0),
         )
         .expect("apply_schema: reading the table info failed");
@@ -55,12 +58,12 @@ fn add_signatures_column_if_missing(conn: &Connection) {
         return;
     }
     match conn.execute(
-        "ALTER TABLE call_edge_resolutions ADD COLUMN signatures_json TEXT",
+        &format!("ALTER TABLE call_edge_resolutions ADD COLUMN {column} TEXT"),
         [],
     ) {
         Ok(_) => {}
         Err(e) if e.to_string().contains("duplicate column") => {}
-        Err(e) => panic!("apply_schema: adding signatures_json failed: {e}"),
+        Err(e) => panic!("apply_schema: adding {column} failed: {e}"),
     }
 }
 
@@ -141,20 +144,50 @@ pub struct ResolutionKey<'a> {
     pub direction: &'a Direction,
 }
 
+/// How a lookup or a store treats the project-level epoch of a resolution
+/// (`crate::tools::symbol::scan_budget::language_epoch`). A resolution is validated against the
+/// files it names (`signatures_json`) and, with an epoch, against the whole tree of the seed's
+/// language, which also catches a caller added in a file the resolution does not name.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum EpochCheck {
+    /// The epoch is not consulted and none is stored. For callers that do not take part.
+    #[default]
+    Off,
+    /// The epoch could not be computed (the walk was cut short): no resolution is a hit, and
+    /// what is stored carries no epoch.
+    Unknown,
+    /// The epoch of the tree now: a resolution is a hit only if it was stored under the same one.
+    Known(String),
+}
+
 pub struct EdgeCache<'a> {
     conn: &'a Connection,
     project_id: &'a str,
+    epoch: EpochCheck,
 }
 
 impl<'a> EdgeCache<'a> {
     pub fn new(conn: &'a Connection, project_id: &'a str) -> Self {
-        Self { conn, project_id }
+        Self {
+            conn,
+            project_id,
+            epoch: EpochCheck::Off,
+        }
     }
+
+    /// The same cache, taking part in the epoch check (see [`EpochCheck`]).
+    pub fn with_epoch(mut self, epoch: EpochCheck) -> Self {
+        self.epoch = epoch;
+        self
+    }
+
     /// Only completed results for this exact definition and direction are cache hits, and only
-    /// while every file the result names (`files_behind`) still has the `(len, mtime)` it had when
-    /// the result was stored. A file changed by anything but a codescout write tool, which
-    /// invalidates by itself (`invalidate_file`), makes the entry a miss and the caller resolves
-    /// again. An entry stored before the signatures existed has none and is a miss too.
+    /// while (1) every file the result names (`files_behind`) still has the `(len, mtime)` it had
+    /// when the result was stored, and (2) the project-level epoch agrees (see [`EpochCheck`]),
+    /// which also covers a file the result does not name. A file changed by anything but a
+    /// codescout write tool, which invalidates by itself (`invalidate_file`), makes the entry a
+    /// miss and the caller resolves again. An entry stored before the signatures existed has none
+    /// and is a miss too.
     pub fn lookup_resolution(
         &self,
         key: &ResolutionKey<'_>,
@@ -163,13 +196,13 @@ impl<'a> EdgeCache<'a> {
             Direction::Callers => "callers",
             Direction::Callees => "callees",
         };
-        let row: Option<(String, Option<String>)> = self.conn.query_row(
-            "SELECT edges_json, signatures_json FROM call_edge_resolutions WHERE project_id = ?1 AND symbol = ?2 \
+        let row: Option<(String, Option<String>, Option<String>)> = self.conn.query_row(
+            "SELECT edges_json, signatures_json, epoch FROM call_edge_resolutions WHERE project_id = ?1 AND symbol = ?2 \
              AND definition_file = ?3 AND definition_line = ?4 AND definition_col = ?5 AND direction = ?6",
             params![self.project_id, key.symbol, key.file.to_string_lossy(), key.line, key.col, direction],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).optional()?;
-        let Some((payload, signatures)) = row else {
+        let Some((payload, signatures, stored_epoch)) = row else {
             return Ok(None);
         };
         let Some(signatures) = signatures else {
@@ -185,6 +218,16 @@ impl<'a> EdgeCache<'a> {
         {
             return Ok(None);
         }
+        match &self.epoch {
+            EpochCheck::Off => {}
+            // Nothing can vouch for the tree now: no stored result is a hit.
+            EpochCheck::Unknown => return Ok(None),
+            EpochCheck::Known(current) => {
+                if stored_epoch.as_deref() != Some(current.as_str()) {
+                    return Ok(None);
+                }
+            }
+        }
         serde_json::from_str(&payload).map(Some).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
                 0,
@@ -197,10 +240,12 @@ impl<'a> EdgeCache<'a> {
     /// Replace a successful adjacency; empty/recoverable analyses remain retryable.
     ///
     /// Stores, with the edges, the signature of every file the result names (`files_behind`) as
-    /// they are NOW. They are read after the analysis, so a file that changed while the analysis
-    /// ran is stored with its new signature next to edges computed from its old content; that
-    /// window is the length of one analysis and is accepted, where before the entry was never
-    /// revalidated at all.
+    /// they are NOW, and the epoch when the cache takes part in it (see [`EpochCheck`]; `Off` and
+    /// `Unknown` store none). The signatures are read after the analysis, so a file that changed
+    /// while the analysis ran is stored with its new signature next to edges computed from its old
+    /// content; that window is the length of one analysis and is accepted, where before the entry
+    /// was never revalidated at all. The epoch is computed once per tool call, BEFORE the analysis,
+    /// so a change during it makes the stored epoch older than the tree and the next call a miss.
     pub fn store_resolution(
         &self,
         key: &ResolutionKey<'_>,
@@ -217,11 +262,15 @@ impl<'a> EdgeCache<'a> {
             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         let signatures = serde_json::to_string(&current_signatures(&files_behind(key, edges)))
             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+        let epoch: Option<&str> = match &self.epoch {
+            EpochCheck::Known(epoch) => Some(epoch.as_str()),
+            EpochCheck::Off | EpochCheck::Unknown => None,
+        };
         self.conn.execute(
             "INSERT OR REPLACE INTO call_edge_resolutions \
-             (project_id, symbol, definition_file, definition_line, definition_col, direction, edges_json, signatures_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![self.project_id, key.symbol, key.file.to_string_lossy(), key.line, key.col, direction, payload, signatures],
+             (project_id, symbol, definition_file, definition_line, definition_col, direction, edges_json, signatures_json, epoch) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![self.project_id, key.symbol, key.file.to_string_lossy(), key.line, key.col, direction, payload, signatures, epoch],
         )?;
         Ok(())
     }
@@ -726,15 +775,17 @@ mod tests {
         .unwrap();
         apply_schema(&conn);
         apply_schema(&conn); // idempotent: the column is added once
-        let present: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('call_edge_resolutions') \
-                 WHERE name = 'signatures_json'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(present, 1);
+        for column in ["signatures_json", "epoch"] {
+            let present: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('call_edge_resolutions') \
+                     WHERE name = ?1",
+                    [column],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(present, 1, "column {column} must exist after apply_schema");
+        }
         assert_eq!(
             EdgeCache::new(&conn, "project")
                 .lookup_resolution(&resolution_key())
@@ -742,5 +793,74 @@ mod tests {
             None,
             "a row stored before the signatures existed must be resolved again"
         );
+    }
+
+    // ── The project-level epoch: a result is also valid only for the tree it was stored under ──
+
+    fn store_under(conn: &Connection, epoch: EpochCheck, file: &Path) {
+        EdgeCache::new(conn, "project")
+            .with_epoch(epoch)
+            .store_resolution(&key_for(file), &[call_site_edge(file)])
+            .unwrap();
+    }
+
+    fn lookup_under(conn: &Connection, epoch: EpochCheck, file: &Path) -> Option<Vec<Edge>> {
+        EdgeCache::new(conn, "project")
+            .with_epoch(epoch)
+            .lookup_resolution(&key_for(file))
+            .unwrap()
+    }
+
+    fn known(epoch: &str) -> EpochCheck {
+        EpochCheck::Known(epoch.to_string())
+    }
+
+    fn a_real_file() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.rs");
+        std::fs::write(&file, "fn call() {}\n").unwrap();
+        (dir, file)
+    }
+
+    #[test]
+    fn a_resolution_is_a_hit_only_under_the_epoch_it_was_stored_under() {
+        let (_dir, a) = a_real_file();
+        let conn = setup_db();
+        store_under(&conn, known("tree-1"), &a);
+        assert_eq!(
+            lookup_under(&conn, known("tree-1"), &a),
+            Some(vec![call_site_edge(&a)]),
+            "the same tree"
+        );
+        assert_eq!(
+            lookup_under(&conn, known("tree-2"), &a),
+            None,
+            "a file of the tree changed, which the signatures of the named files cannot see"
+        );
+    }
+
+    #[test]
+    fn an_unknown_epoch_is_never_a_hit_and_stores_none() {
+        let (_dir, a) = a_real_file();
+        let conn = setup_db();
+        store_under(&conn, EpochCheck::Unknown, &a);
+        assert_eq!(lookup_under(&conn, EpochCheck::Unknown, &a), None);
+        assert_eq!(
+            lookup_under(&conn, known("tree-1"), &a),
+            None,
+            "what an Unknown cache stored carries no epoch, so a Known one cannot vouch for it"
+        );
+        assert!(
+            lookup_under(&conn, EpochCheck::Off, &a).is_some(),
+            "an Off cache does not consult the epoch, and the entry itself is valid"
+        );
+    }
+
+    #[test]
+    fn a_resolution_stored_without_an_epoch_is_a_miss_under_a_known_epoch() {
+        let (_dir, a) = a_real_file();
+        let conn = setup_db();
+        store_under(&conn, EpochCheck::Off, &a);
+        assert_eq!(lookup_under(&conn, known("tree-1"), &a), None);
     }
 }
