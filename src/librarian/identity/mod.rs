@@ -4,3 +4,6 @@ pub mod grammar;
 pub mod index;
 pub mod key;
 pub mod repo_name;
+
+#[cfg(test)]
+mod census;
