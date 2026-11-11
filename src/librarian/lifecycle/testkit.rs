@@ -12,13 +12,12 @@ pub(crate) fn fm(yaml: &str) -> Frontmatter {
 }
 
 /// An ISO `YYYY-MM-DD` date.
-#[allow(dead_code)] // used by later lifecycle tasks
 pub(crate) fn d(s: &str) -> chrono::NaiveDate {
     chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
 }
 
 /// A valid identity `Key`.
-#[allow(dead_code)] // used by later lifecycle tasks
+#[expect(dead_code)] // used by later lifecycle tasks
 pub(crate) fn k(s: &str) -> Key {
     Key::parse(s).unwrap()
 }
