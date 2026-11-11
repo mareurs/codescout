@@ -508,6 +508,18 @@ pub(super) async fn displaced_default_notice(
     ctx.agent.displaced_default_notice(caller.as_deref()).await
 }
 
+/// How long past an elicitation's own deadline [`ToolContext::elicit_with_timeout`] waits before
+/// it gives up on rmcp's timeout and cancel notification.
+const ELICIT_BACKSTOP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// `fut`'s output, or `None` once `limit` has passed without it completing.
+pub(crate) async fn bounded<F: std::future::Future>(
+    limit: std::time::Duration,
+    fut: F,
+) -> Option<F::Output> {
+    tokio::time::timeout(limit, fut).await.ok()
+}
+
 /// The notice that this call's project failed to load its last `project.toml` edit, riding
 /// the same `_workspace_notice` channel as the two above. Unlike them it is NOT one-shot and
 /// NOT suppressed by a pin: it describes the policy this very call ran under, which a
@@ -946,20 +958,54 @@ impl ToolContext {
     where
         T: rmcp::service::ElicitationSafe + for<'de> serde::Deserialize<'de>,
     {
+        self.elicit_inner(message, None).await
+    }
+
+    /// [`elicit`](Self::elicit) with a deadline: no answer within `limit` is `Ok(None)`, the
+    /// same as a client without elicitation. Everything else maps as in `elicit`.
+    ///
+    /// rmcp's own timeout runs first and cancels the pending request at the client (a
+    /// `notifications/cancelled`, so the dialog closes). The outer [`bounded`] wait is a
+    /// backstop that keeps the deadline even if that cancellation cannot be sent.
+    pub async fn elicit_with_timeout<T>(
+        &self,
+        message: impl Into<String>,
+        limit: std::time::Duration,
+    ) -> anyhow::Result<Option<T>>
+    where
+        T: rmcp::service::ElicitationSafe + for<'de> serde::Deserialize<'de>,
+    {
+        bounded(
+            limit + ELICIT_BACKSTOP_GRACE,
+            self.elicit_inner(message, Some(limit)),
+        )
+        .await
+        .unwrap_or(Ok(None))
+    }
+
+    async fn elicit_inner<T>(
+        &self,
+        message: impl Into<String>,
+        limit: Option<std::time::Duration>,
+    ) -> anyhow::Result<Option<T>>
+    where
+        T: rmcp::service::ElicitationSafe + for<'de> serde::Deserialize<'de>,
+    {
         let Some(ref peer) = self.peer else {
             return Ok(None);
         };
-        match peer.elicit::<T>(message).await {
+        match peer.elicit_with_timeout::<T>(message, limit).await {
             Ok(data) => Ok(data),
             Err(rmcp::service::ElicitationError::CapabilityNotSupported) => Ok(None),
             Err(rmcp::service::ElicitationError::NoContent) => Ok(None),
-            Err(rmcp::service::ElicitationError::UserDeclined) => {
-                Err(RecoverableError::with_hint(
-                    "User declined the elicitation request",
-                    "Re-issue the call with a more specific argument to avoid the disambiguation prompt",
-                )
-                .into())
-            }
+            Err(rmcp::service::ElicitationError::Service(
+                rmcp::service::ServiceError::Timeout { .. },
+            )) => Ok(None),
+            Err(rmcp::service::ElicitationError::UserDeclined) => Err(RecoverableError::with_hint(
+                "User declined the elicitation request",
+                "Re-issue the call with a more specific argument to avoid the disambiguation prompt",
+            )
+            .into()),
             Err(rmcp::service::ElicitationError::UserCancelled) => {
                 Err(RecoverableError::with_hint(
                     "User cancelled the elicitation request",

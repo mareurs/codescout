@@ -464,12 +464,12 @@ impl Tool for Onboarding {
                 "refresh_prompt": {
                     "type": "boolean",
                     "description": "Regenerate system prompt from current templates without re-exploring (default: false)"
-                    },
-                    "repo_name": {
+                },
+                "repo_name": {
                     "type": "string",
                     "description": "Confirm the repo name (lowercase letters, digits and single hyphens). Writes .codescout/repo.toml."
-                    }
-                    }
+                }
+            }
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
@@ -744,6 +744,11 @@ async fn onboarding_branch(
     Ok(result)
 }
 
+/// How long `onboarding` waits for the user to name the repo before it returns the suggestion
+/// for the agent to ask in chat. The call holds the project's write guard and runs inside the
+/// server's tool timeout, so the wait stays well under it.
+const ONBOARDING_ELICIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// What the user is asked for when the repo has no name yet.
 #[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 struct RepoNameInput {
@@ -775,14 +780,7 @@ fn repo_name_outcome(
     suggestion: &RepoName,
 ) -> RepoNameOutcome {
     match existing {
-        Err(e) => {
-            let msg = format!("{e:#}");
-            RepoNameOutcome::Unreadable(if msg.contains("repo.toml") {
-                msg
-            } else {
-                format!("{REPO_FILE_REL}: {msg}")
-            })
-        }
+        Err(e) => RepoNameOutcome::Unreadable(names_repo_file(format!("{e:#}"))),
         Ok(Some(name)) => RepoNameOutcome::Confirmed(name),
         Ok(None) => match elicited.as_deref().map(str::trim) {
             None | Some("") => RepoNameOutcome::Unconfirmed(suggestion.clone()),
@@ -804,13 +802,16 @@ async fn repo_name_block(ctx: &ToolContext, root: &std::path::Path) -> Value {
     let suggestion = repo_name::suggest(root);
     let elicited = if matches!(existing, Ok(None)) {
         let prompt = format!(
-            "Confirm the name of this repo. Suggested: `{s}`. Use lowercase letters, digits \
-             and single hyphens. The name labels this repo in citations of the form \
+            "Confirm the name of the repo at {root}. Suggested: `{s}`. Use lowercase letters, \
+             digits and single hyphens. The name labels this repo in citations of the form \
              [[repo/key]].",
+            root = root.display(),
             s = suggestion
         );
-        // A declined, cancelled or unsupported prompt is the same as no answer.
-        ctx.elicit::<RepoNameInput>(prompt)
+        // A declined, cancelled, unanswered or unsupported prompt is the same as no answer.
+        // The wait is bounded: this call holds the project's write guard and runs inside the
+        // server's tool timeout, and an answer that arrives too late is lost with the response.
+        ctx.elicit_with_timeout::<RepoNameInput>(prompt, ONBOARDING_ELICIT_TIMEOUT)
             .await
             .ok()
             .flatten()
@@ -818,6 +819,17 @@ async fn repo_name_block(ctx: &ToolContext, root: &std::path::Path) -> Value {
     } else {
         None
     };
+    repo_name_block_for(root, existing, elicited, &suggestion)
+}
+
+/// The block for what `read` found and what the user answered: writes a valid answer to an
+/// absent file and maps every outcome to its response shape.
+fn repo_name_block_for(
+    root: &std::path::Path,
+    existing: anyhow::Result<Option<RepoName>>,
+    elicited: Option<String>,
+    suggestion: &RepoName,
+) -> Value {
     let unconfirmed = |s: &RepoName| {
         json!({
             "suggested": s.as_str(),
@@ -828,7 +840,7 @@ async fn repo_name_block(ctx: &ToolContext, root: &std::path::Path) -> Value {
             ),
         })
     };
-    match repo_name_outcome(existing, elicited, &suggestion) {
+    match repo_name_outcome(existing, elicited, suggestion) {
         RepoNameOutcome::Confirmed(n) => json!({"name": n.as_str(), "confirmed": true}),
         RepoNameOutcome::Write(n) => match repo_name::write(root, &n) {
             Ok(path) => json!({
@@ -836,15 +848,24 @@ async fn repo_name_block(ctx: &ToolContext, root: &std::path::Path) -> Value {
                 "confirmed": true,
                 "written": path.display().to_string(),
             }),
-            Err(e) => json!({"error": format!("{e:#}"), "confirmed": false}),
+            Err(e) => json!({"error": names_repo_file(format!("{e:#}")), "confirmed": false}),
         },
         RepoNameOutcome::Unconfirmed(s) => unconfirmed(&s),
         RepoNameOutcome::Unreadable(msg) => json!({"error": msg, "confirmed": false}),
         RepoNameOutcome::Invalid { input, error } => {
-            let mut block = unconfirmed(&suggestion);
+            let mut block = unconfirmed(suggestion);
             block["error"] = json!(format!("repo name `{input}` is not canonical: {error}"));
             block
         }
+    }
+}
+
+/// `msg`, prefixed with the file's path when it does not already name `repo.toml`.
+fn names_repo_file(msg: String) -> String {
+    if msg.contains("repo.toml") {
+        msg
+    } else {
+        format!("{REPO_FILE_REL}: {msg}")
     }
 }
 
@@ -865,7 +886,15 @@ fn set_repo_name(root: &std::path::Path, raw: &str) -> anyhow::Result<Value> {
             ),
         )
     })?;
-    let written = repo_name::write(root, &name)?;
+    let written = repo_name::write(root, &name).map_err(|e| {
+        super::RecoverableError::with_hint(
+            names_repo_file(format!("{e:#}")),
+            format!(
+                "Check that {REPO_FILE_REL} and its directory are writable, then call \
+                 onboarding(repo_name=\"{name}\") again."
+            ),
+        )
+    })?;
     Ok(json!({
         "repo_name": {
             "name": name.as_str(),
@@ -1762,14 +1791,11 @@ mod tests {
         assert!(matches!(out, RepoNameOutcome::Unreadable(m) if m.contains("repo.toml")));
     }
 
-    async fn repo_name_ctx() -> (tempfile::TempDir, ToolContext) {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
-        std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
-        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+    async fn ctx_over(root: &std::path::Path) -> ToolContext {
+        let agent = crate::agent::Agent::new(Some(root.to_path_buf()))
             .await
             .unwrap();
-        let ctx = ToolContext {
+        ToolContext {
             agent,
             lsp: crate::lsp::LspManager::new_arc(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
@@ -1780,7 +1806,14 @@ mod tests {
             )),
             guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
             workspace_override: None,
-        };
+        }
+    }
+
+    async fn repo_name_ctx() -> (tempfile::TempDir, ToolContext) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        let ctx = ctx_over(dir.path()).await;
         (dir, ctx)
     }
 
@@ -1862,12 +1895,15 @@ mod tests {
         );
         assert!(!dir.path().join(REPO_FILE_REL).exists());
 
-        // The already-onboarded branch carries it too, and the wire text shows it.
+        // A second call: the project has no `onboarding` memory and no stamped version, so it
+        // does not reach the plain already-onboarded text. It answers with the subagent-prompt
+        // JSON, and the wire text of that response carries the block.
         let blocks = Onboarding.call_content(json!({}), &ctx).await.unwrap();
         let text = blocks
             .iter()
             .filter_map(|c| c.as_text().map(|t| t.text.clone()))
             .collect::<String>();
+        assert!(text.contains("\"prompt_path\""), "{text}");
         assert!(text.contains("\"suggested\""), "{text}");
 
         // With the file present, the block confirms the stored name and writes nothing.
@@ -1894,6 +1930,112 @@ mod tests {
             "{out}"
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "name = [not toml");
+    }
+
+    /// The plain already-onboarded text: a project with a stamped current version and an
+    /// `onboarding` memory, so `handle_already_onboarded` answers with its `message`.
+    #[tokio::test]
+    async fn the_already_onboarded_text_carries_the_repo_name_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let cs = dir.path().join(".codescout");
+        std::fs::create_dir_all(cs.join("memories")).unwrap();
+        std::fs::write(
+            cs.join("project.toml"),
+            format!("[project]\nname = \"t\"\nonboarding_version = {ONBOARDING_VERSION}\n"),
+        )
+        .unwrap();
+        std::fs::write(cs.join("memories").join("onboarding.md"), "x").unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        let ctx = ctx_over(dir.path()).await;
+
+        let blocks = Onboarding.call_content(json!({}), &ctx).await.unwrap();
+        let text = blocks[0].as_text().unwrap().text.clone();
+        assert!(text.contains("Onboarding already performed"), "{text}");
+        assert!(text.contains("\nrepo_name: {"), "{text}");
+        assert!(text.contains("\"suggested\""), "{text}");
+        assert!(!dir.path().join(REPO_FILE_REL).exists());
+    }
+
+    fn for_block(dir: &std::path::Path, elicited: Option<&str>) -> Value {
+        let suggestion = RepoName::parse("suggested").unwrap();
+        repo_name_block_for(dir, Ok(None), elicited.map(String::from), &suggestion)
+    }
+
+    #[test]
+    fn an_elicited_name_is_written_and_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let block = for_block(dir.path(), Some("codescout"));
+        assert_eq!(block["name"], "codescout");
+        assert_eq!(block["confirmed"], true);
+        assert!(block["written"].as_str().unwrap().ends_with("repo.toml"));
+        let on_disk = repo_name::read(dir.path()).unwrap().unwrap();
+        assert_eq!(on_disk.as_str(), "codescout");
+    }
+
+    #[test]
+    fn an_elicited_name_that_is_not_canonical_is_reported_and_nothing_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let block = for_block(dir.path(), Some("Code Scout"));
+        assert_eq!(block["confirmed"], false);
+        assert_eq!(block["suggested"], "suggested");
+        assert!(block["instruction"]
+            .as_str()
+            .unwrap()
+            .contains("`suggested`"));
+        let error = block["error"].as_str().unwrap();
+        assert!(error.contains("Code Scout"), "{error}");
+        assert!(!dir.path().join(REPO_FILE_REL).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_write_that_fails_is_reported_as_an_error_block() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let cs = dir.path().join(".codescout");
+        std::fs::create_dir_all(&cs).unwrap();
+        std::fs::set_permissions(&cs, std::fs::Permissions::from_mode(0o500)).unwrap();
+        // Root ignores directory permissions: nothing to observe then.
+        let probe = cs.join("probe");
+        if std::fs::File::create(&probe).is_ok() {
+            std::fs::remove_file(&probe).unwrap();
+            std::fs::set_permissions(&cs, std::fs::Permissions::from_mode(0o700)).unwrap();
+            return;
+        }
+        let block = for_block(dir.path(), Some("codescout"));
+        std::fs::set_permissions(&cs, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(block["confirmed"], false, "{block}");
+        assert!(
+            block["error"].as_str().unwrap().contains("repo.toml"),
+            "{block}"
+        );
+        assert!(block.get("written").is_none(), "{block}");
+        assert!(!dir.path().join(REPO_FILE_REL).exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_repo_name_parameter_reports_a_failed_write_as_a_recoverable_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, ctx) = repo_name_ctx().await;
+        let cs = dir.path().join(".codescout");
+        std::fs::set_permissions(&cs, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let probe = cs.join("probe");
+        if std::fs::File::create(&probe).is_ok() {
+            std::fs::remove_file(&probe).unwrap();
+            std::fs::set_permissions(&cs, std::fs::Permissions::from_mode(0o700)).unwrap();
+            return;
+        }
+        let err = Onboarding
+            .call(json!({"repo_name": "codescout"}), &ctx)
+            .await
+            .unwrap_err();
+        std::fs::set_permissions(&cs, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("a RecoverableError");
+        assert!(rec.message.contains("repo.toml"), "{}", rec.message);
+        assert!(rec.hint().is_some());
     }
 }
 

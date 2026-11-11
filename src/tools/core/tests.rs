@@ -2469,6 +2469,38 @@ async fn elicit_returns_none_when_no_peer() {
     assert!(result.unwrap().is_none());
 }
 
+#[tokio::test]
+async fn bounded_is_none_when_the_future_does_not_finish_in_time() {
+    use crate::tools::core::types::bounded;
+    let started = std::time::Instant::now();
+    let out = bounded(
+        std::time::Duration::from_millis(30),
+        std::future::pending::<Option<u8>>(),
+    )
+    .await;
+    assert!(out.is_none(), "a never-completing answer is no answer");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "it returned at the limit, not when the future ended"
+    );
+}
+
+#[tokio::test]
+async fn bounded_passes_through_an_answer_that_arrives_in_time() {
+    use crate::tools::core::types::bounded;
+    let out = bounded(std::time::Duration::from_secs(5), async { 7u8 }).await;
+    assert_eq!(out, Some(7));
+}
+
+#[tokio::test]
+async fn elicit_with_timeout_returns_none_when_no_peer() {
+    let ctx = bare_ctx().await;
+    let result = ctx
+        .elicit_with_timeout::<TestConfirm>("Test?", std::time::Duration::from_millis(30))
+        .await;
+    assert!(result.unwrap().is_none());
+}
+
 #[test]
 fn elicit_user_declined_is_recoverable_error() {
     // UserDeclined must produce a RecoverableError (isError: false at MCP level),
