@@ -280,4 +280,64 @@ async fn lsp_same_file_same_line_helpers_preserve_columns_and_cached_target_meta
         }
     }
 }
+
+// ── A file changed outside codescout must not be answered from the call-edge cache ──
+//
+// `one_hop_at` returns a cached resolution keyed by the target's position, and the cache is
+// invalidated only by codescout's own write tools (`Agent::invalidate_call_edges_for`).
+// Bug `489e013ddfd6c3fc`. The control twin makes the same change and then invalidates the way a
+// write tool does, so a failure of the red test is the missing invalidation and not the fixture.
+
+/// Resolve the callees of `entry` once, change `src/lib.rs` outside codescout in a way that
+/// leaves `entry` where it was, then resolve again from a new context (a new session over the
+/// same cache file). The second answer must hold the call that the edit added.
+async fn callees_after_a_change_made_outside_codescout(invalidate_like_a_write_tool: bool) {
+    let dir = write_project(&[(
+        "src/lib.rs",
+        "pub fn entry() {\n    first();\n}\npub fn first() {}\npub fn second() {}\n",
+    )]);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let ask = json!({"symbol":"entry","path":"src/lib.rs",
+        "direction":"callees","max_depth":1,"detail_level":"full"});
+
+    let ctx = context(&root, &["src/lib.rs"]).await;
+    let out = CallGraph.call(ask.clone(), &ctx).await.unwrap();
+    assert_eq!(
+        rows(&out, &root),
+        vec!["entry>first@src/lib.rs:2#1"],
+        "baseline: {out}"
+    );
+
+    // The edit does not move `entry`, so the cache key (symbol, file, line, column, direction)
+    // is the same as before it.
+    let path = root.join("src/lib.rs");
+    std::fs::write(
+        &path,
+        "pub fn entry() {\n    first();\n    second();\n}\npub fn first() {}\npub fn second() {}\n",
+    )
+    .unwrap();
+    if invalidate_like_a_write_tool {
+        ctx.agent.invalidate_call_edges_for(None, &path).await;
+    }
+
+    let ctx = context(&root, &["src/lib.rs"]).await;
+    let out = CallGraph.call(ask, &ctx).await.unwrap();
+    assert_eq!(
+        rows(&out, &root),
+        vec!["entry>first@src/lib.rs:2#1", "entry>second@src/lib.rs:3#1"],
+        "the call added to src/lib.rs after the first answer must be reported: {out}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "red on purpose: bug 489e013ddfd6c3fc, call_graph serves cached edges after a file changed outside codescout; remove this attribute with the fix"]
+async fn call_graph_does_not_serve_stale_edges_after_a_file_changed_outside_codescout() {
+    callees_after_a_change_made_outside_codescout(false).await;
+}
+
+#[tokio::test]
+async fn call_graph_is_current_once_a_write_invalidates_the_cached_edges() {
+    callees_after_a_change_made_outside_codescout(true).await;
+}
+
 mod review;

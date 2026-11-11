@@ -13,7 +13,7 @@ related:
 - '58a45860b802a477'
 - '4e7ec7bfc047ac7b'
 severity: medium
-unverified: Measured in one scratch crate, rust-analyzer, mux transport, callers direction only, one run per step. The callees direction, a git checkout, a second session and other languages were not run. The mechanism of the spurious ts edge is inferred, not traced. Whether invalidate_file clears completed-resolution entries was not read. The link to 4e7ec7bfc047ac7b is a lead, not a finding. No fix designed or tried. Severity is my proposal.
+unverified: Measured in one scratch crate (callers direction, mux transport) and, as a test, in the callees direction with tree-sitter edges and a mock LSP. The callers direction has no test. A git checkout, a second session and other languages were not run. The mechanism of the spurious ts edge is inferred, not traced. Whether invalidate_file clears completed-resolution entries was not read (the control test shows the effect for invalidate_call_edges_for, not the mechanism). The link to 4e7ec7bfc047ac7b is a lead, not a finding. No fix designed or tried. Severity is my proposal.
 ---
 
 # BUG: call_graph serves cached edges that an edit made outside codescout never invalidates
@@ -77,7 +77,18 @@ Pending, for the owner. Candidates, none tried: (1) store, with each cached reso
 
 ## Tests added
 
-None.
+Added 2026-11-11 in `src/tools/symbol/call_graph/identity_tests.rs`, after `lsp_same_file_same_line_helpers_preserve_columns_and_cached_target_metadata`. The harness is the file's own: real parser, real edge cache, the real `CallGraph` tool; only the LSP wire is a mock. Direction `callees`, tree-sitter edges, not the `callers` direction of the manual run.
+
+The shared body `callees_after_a_change_made_outside_codescout` resolves the callees of `entry` once, rewrites `src/lib.rs` from the test (outside codescout) so that `entry` stays where it was and a second call is added, then resolves again from a new context over the same cache file. The second answer must hold the added call.
+
+| Test | State |
+|---|---|
+| `call_graph_does_not_serve_stale_edges_after_a_file_changed_outside_codescout` | `#[ignore]`, red: the second answer is `["entry>first@src/lib.rs:2#1"]` and lacks `entry>second@src/lib.rs:3#1` |
+| `call_graph_is_current_once_a_write_invalidates_the_cached_edges` | control, passes: the same change followed by `Agent::invalidate_call_edges_for`, which the write tools call |
+
+The control differs from the red test only by that one call, so the red test fails because nothing invalidates, not because of the fixture. Default run: `tools::symbol::call_graph` 56 passed, 0 failed, 1 ignored. `--ignored` run: the red test fails with the message above. The `#[ignore]` carries this bug's id; remove it with the fix.
+
+Not covered: the `callers` direction (measured by hand), a file edited between two calls of the SAME context, a second session through a real process boundary, a language other than Rust.
 
 ## Workarounds
 
