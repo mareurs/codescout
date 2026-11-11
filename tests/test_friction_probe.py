@@ -143,6 +143,81 @@ class FrictionProbeTests(unittest.TestCase):
                            capture_output=True, text=True, timeout=15)
         self.assertEqual(r.returncode, 0)
         self.assertIn("recoverable_error", r.stdout)
+class CommandFailureTests(unittest.TestCase):
+    """FR-2: `outcome='success'` on a `run_command` row says the tool answered, not that the
+    command passed. The probe reads the result's own `exit_code` and `timed_out`."""
+
+    def make_db(self, rows, with_output_column=True):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Path(tmp.name) / "usage.db"
+        extra = ", output_json TEXT" if with_output_column else ""
+        with sqlite3.connect(db) as conn:
+            conn.execute(f"""CREATE TABLE tool_calls (
+                id INTEGER PRIMARY KEY, tool_name TEXT, called_at TEXT, outcome TEXT,
+                err_family TEXT, error_msg TEXT, session_id TEXT, cc_session_id TEXT,
+                codescout_sha TEXT, codescout_dirty INTEGER{extra})""")
+            now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None, microsecond=0)
+            for i, (tool, outcome, output) in enumerate(rows, 1):
+                if isinstance(output, dict):
+                    # The shape `usage.db` really stores: an MCP content list whose text is
+                    # the result JSON, pretty-printed.
+                    output = json.dumps([{"type": "text", "text": json.dumps(output, indent=2)}])
+                values = [i, tool, now.isoformat(" "), outcome, None, None, "A", "c", "b", 0]
+                if with_output_column:
+                    values.append(output)
+                conn.execute(
+                    f"INSERT INTO tool_calls VALUES ({','.join('?' * len(values))})", values)
+        return db
+
+    def failures(self, db):
+        result = subprocess.run(
+            [sys.executable, "-I", str(PROBE), "--db", str(db), "--json"],
+            capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)["run_command_failures_recorded_as_success"]
+
+    def test_a_failed_command_and_a_timeout_are_counted_from_the_result(self):
+        db = self.make_db([
+            ("run_command", "success", {"exit_code": 0, "stdout": "ok"}),
+            ("run_command", "success", {"exit_code": 101, "stdout": "failed"}),
+            ("run_command", "success", {"timed_out": True, "exit_code": None}),
+            ("run_command", "success", {"exit_code": 1, "timed_out": True}),
+            ("run_command", "success", None),
+            ("run_command", "success", "not json at all"),
+            # A bare result object, not wrapped in a content list, is read as well.
+            ("run_command", "success", json.dumps({"exit_code": 3})),
+            # Not judged: another tool, and a row whose OUTCOME already says it failed.
+            ("grep", "success", {"exit_code": 2}),
+            ("run_command", "error", {"exit_code": 1}),
+        ])
+        self.assertEqual(self.failures(db), {
+            "available": True, "success_rows": 7, "with_output": 6, "unreadable": 1,
+            "readable": 5, "nonzero_exit": 3, "timed_out": 2, "failed": 4,
+            "pct_of_readable": 80.0})
+    def test_a_cut_off_result_is_unreadable_not_guessed(self):
+        whole = json.dumps([{"type": "text", "text": json.dumps({"exit_code": 101})}])
+        db = self.make_db([("run_command", "success", whole[:-8])])
+        r = self.failures(db)
+        self.assertEqual((r["with_output"], r["unreadable"], r["failed"]), (1, 1, 0))
+
+    def test_a_command_that_only_prints_exit_code_is_not_a_failure(self):
+        # The text-pattern count of FR-2 (1,734 rows) cannot tell these apart; parsed JSON can.
+        db = self.make_db([
+            ("run_command", "success",
+             {"exit_code": 0, "stdout": "\"exit_code\": 101 timed_out: true"}),
+        ])
+        self.assertEqual(self.failures(db)["failed"], 0)
+
+    def test_a_corpus_with_no_output_column_says_so_instead_of_failing(self):
+        db = self.make_db([("run_command", "success", None)], with_output_column=False)
+        r = self.failures(db)
+        self.assertFalse(r["available"])
+        self.assertIn("output_json", r["reason"])
+
+    def test_no_readable_rows_gives_no_rate(self):
+        db = self.make_db([("run_command", "success", None)])
+        self.assertIsNone(self.failures(db)["pct_of_readable"])
 
 
 if __name__ == "__main__":

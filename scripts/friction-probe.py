@@ -273,6 +273,70 @@ def null_detail(rows):
         a["msg"] = (r["error_msg"] or "")[:110]
     out = [{"count": a["n"], "tool": a["tool"], "msg": a["msg"]} for a in agg.values()]
     return sorted(out, key=lambda d: -d["count"])
+def result_object(raw):
+    """The `run_command` result object inside a stored `output_json`, or None.
+
+    The stored shape is an MCP content list, `[{"type":"text","text":"<result JSON>"}]`, so the
+    object is one parse deeper. A bare object is accepted as well. A text that is cut off or
+    is not JSON gives None: the row is reported as unreadable, never guessed at.
+    """
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, list) and obj and isinstance(obj[0], dict) and obj[0].get("type") == "text":
+            obj = json.loads(obj[0].get("text") or "")
+    except (TypeError, ValueError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+def command_failures(db: Path, days: int | None):
+    """`run_command` calls recorded as `success` whose RESULT says the command failed.
+
+    `outcome` records whether the tool delivered a result, not whether the command passed
+    (FR-2, docs/trackers/frictions/run-command-timeouts-and-nonzero-exits-are-recorded-as-
+    success.md), so the error counts above never see a failed build, a failed test or a
+    timeout. The result carries `exit_code` and `timed_out`; this reads them from
+    `output_json` as parsed JSON, not as a text pattern that also matches a command which
+    merely prints "exit_code".
+
+    A FLOOR, never a total. `output_json` is empty on a share of rows (FR-3), so only rows
+    with a readable object are judged; `success_rows`, `with_output` and `unreadable` say how
+    many were not. A failure rate is `failed / readable`, over rows that could be read.
+    """
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(tool_calls)")}
+        if "output_json" not in cols:
+            return {"available": False, "reason": "tool_calls has no output_json column"}
+        where = "tool_name = 'run_command' AND outcome = 'success'"
+        params: list = []
+        if days is not None:
+            where += " AND called_at >= datetime('now', ?)"
+            params.append(f"-{days} days")
+        rows = conn.execute(f"SELECT output_json FROM tool_calls WHERE {where}", params).fetchall()
+    finally:
+        conn.close()
+
+    out = {"available": True, "success_rows": len(rows), "with_output": 0, "unreadable": 0,
+           "readable": 0, "nonzero_exit": 0, "timed_out": 0, "failed": 0}
+    for (raw,) in rows:
+        if not raw:
+            continue
+        out["with_output"] += 1
+        obj = result_object(raw)
+        if obj is None:
+            out["unreadable"] += 1
+            continue
+        out["readable"] += 1
+        code = obj.get("exit_code")
+        bad_exit = isinstance(code, int) and not isinstance(code, bool) and code != 0
+        timed_out = obj.get("timed_out") is True
+        out["nonzero_exit"] += bad_exit
+        out["timed_out"] += timed_out
+        out["failed"] += bad_exit or timed_out
+    out["pct_of_readable"] = (
+        round(100.0 * out["failed"] / out["readable"], 1) if out["readable"] else None
+    )
+    return out
 
 
 def calibrate(repeat_rows):
@@ -505,6 +569,7 @@ def main() -> int:
         "immediate_repeat": immediate_repeat(rows),
         "calls_to_recovery": calls_to_recovery(rows),
         "error_runs": error_runs(rows),
+        "run_command_failures_recorded_as_success": command_failures(args.db, args.days),
     }
     if args.calibrate:
         report["calibration_vs_TU7"] = calibrate(report["immediate_repeat"])
@@ -555,6 +620,18 @@ def main() -> int:
     print(f"  errors inside a run of >=2: {er['errors_inside_runs_ge_2']}/"
           f"{er['errors_total']} ({er['pct_errors_in_a_run']}%)")
     print(f"  length histogram: {er['run_length_histogram']}")
+
+    cf = r["run_command_failures_recorded_as_success"]
+    print("\n=== run_command failures recorded as success (FR-2; a floor) ===")
+    if not cf["available"]:
+        print(f"  not measured: {cf['reason']}")
+    else:
+        print(f"  success rows: {cf['success_rows']}   with output: {cf['with_output']}   "
+              f"unreadable: {cf['unreadable']}   readable: {cf['readable']}")
+        print(f"  failed: {cf['failed']} of {cf['readable']} readable "
+              f"({cf['pct_of_readable']}%)   non-zero exit: {cf['nonzero_exit']}   "
+              f"timed out: {cf['timed_out']}")
+        print("  rows with no stored output are not judged: the real count is higher.")
 
     if args.calibrate:
         print("\n=== calibration vs TU-7 (2026-08-15, 13-project corpus) ===")
