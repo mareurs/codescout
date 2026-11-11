@@ -224,6 +224,8 @@ Next, if the owner wants more: (1) skipping the epoch for `callees` was checked 
 
 Related: `a73c49456056fb92`, `58a45860b802a477`, `bug-fix-session-log:F-236`.
 
+**Merge note, 2026-11-12.** Three other branches change the same files and conflict with `experiments` (`git merge-tree --write-tree`, nothing written to any tree): `fix/ecc-bfs-identity-20261110` (`identity_tests.rs`, `mod.rs`), `feat/ecc-callgraph-identity-20261109` (`cache.rs`, `mod.rs`) and `feat/ecc-navigation-truth-20261109` (`mod.rs`). Only the first conflict is caused by my commits: merged against `78729bfb3~1` it is clean, the other two conflict there too. For that first branch the three files are byte-identical to `dc769e430` ("integrate declaration-aware traversal") on `experiments`, and its tip `537fa820d` is not an ancestor of `experiments`, so it is the pre-integration source of an already integrated commit and has nothing to add on those files. Its conflict is one hunk in the `use` block of `mod.rs` and an add/add of `identity_tests.rs` (my helpers and tests against the copy that was identical). Its commits carry `Session-Id: codex:01a1bf68-e650-7f20-911e-b53f86597c27`, a thread that was not among the 5 loaded Codex threads at 2026-11-11T23:02Z, so no message was sent. Not checked: the detached review and mutation copies of these worktrees, and whether the other two branches are also pre-integration sources of `4776e44bd` and `3fe613bdd`.
+
 ## References
 
 - `src/tools/symbol/call_graph/mod.rs`: `one_hop_at`
