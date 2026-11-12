@@ -177,7 +177,7 @@ Fixed by `43c4ca9df` (see `## Fix provenance`). Archive after the owner confirms
 
 Open questions, none blocking: the cost of the per-request `stat` on a large session; how often a rename right after an external edit is cancelled by the server; a language other than Rust; a second client on the same mux.
 
-Link: `58a45860b802a477`, `bug-fix-session-log:F-235`.
+Link: `58a45860b802a477`, `bug-fix-session-log:F-235`. Found on the way to the mux test: `fd0e9c149c74c1a8` (the ignored `coherence_rust` test asserted the removed contract and never ran the mux).
 
 ## References
 
