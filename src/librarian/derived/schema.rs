@@ -1,5 +1,6 @@
 //! The derived index's SQLite file: its schema, how it is opened, and a canonical dump.
 
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -12,7 +13,9 @@ pub const SCHEMA_VERSION: i64 = 1;
 const BUSY_TIMEOUT_MS: i64 = 5000;
 
 /// Every table of schema version 1. All rows are deterministic: no default is a clock or a random
-/// value, and a natural key (not a generated id) names each row.
+/// value. Every table except `checkout` (one row) and `problem` (a rowid table) has a natural key
+/// naming its rows, not a generated id; `dump_all` sorts the rows of every table it dumps, so no
+/// dump depends on a rowid or an insert order.
 ///
 /// `skipped` is keyed on `(rel_path, reason)`: a lossy `not_utf8` path (U+FFFD is valid UTF-8) can
 /// equal a real path's `rel_path`, so `rel_path` alone is not unique.
@@ -104,10 +107,14 @@ CREATE TABLE parse_cache (
 ) WITHOUT ROWID;
 "#;
 
-/// Columns the dump leaves out: a path and a sha identify the clone, not the content.
+/// Columns the dump leaves out. The root is a path: two clones of one commit lie at different
+/// paths and must dump equal. The commit sha is not what two clones differ in (they share it); it
+/// is what one tree committed twice differs in, and that tree must dump equal too.
+#[cfg(test)]
 const DUMP_EXCLUDED_COLUMNS: [(&str, &str); 2] = [("checkout", "root"), ("checkout", "commit_sha")];
 
 /// The one table the dump leaves out: a cache of parse products, not an answer.
+#[cfg(test)]
 const DUMP_EXCLUDED_TABLE: &str = "parse_cache";
 
 /// Open (creating the file and its parent directories) the derived index at `path`, with WAL, a
@@ -218,12 +225,14 @@ pub fn open_in_memory() -> rusqlite::Result<Connection> {
 /// A row is its columns, in table order, each rendered with a type tag so that values of different
 /// SQLite types never compare equal (a missing title and the text `NULL`, the integer 1 and the
 /// text `1`): `N` for NULL, `I:<n>` for an integer, `R:<f>` for a real (Rust `{:?}`), `T:<text>`
-/// for text, `B:<hex>` for a blob. `checkout.root` and `checkout.commit_sha` are left out (a path
-/// and a sha identify the clone, not the content). The rows of a table are sorted by their
-/// rendered text, so the dump reads no rowid and no insert order. A table with no rows is present
-/// with an empty list. A database that cannot be read panics: this is a test and gate instrument,
-/// not a production path.
-pub fn dump_all(conn: &Connection) -> BTreeMap<String, Vec<Vec<String>>> {
+/// for text, `B:<hex>` for a blob. `checkout.root` and `checkout.commit_sha` are left out (two
+/// clones of one commit differ in the path, and one tree committed twice differs in the sha; the
+/// dump of each pair must be equal). The rows of a table are sorted by their rendered text, so
+/// the dump reads no rowid and no insert order. A table with no rows is present with an empty
+/// list. A database that cannot be read panics: this is a test instrument, compiled only for
+/// tests, not a production path.
+#[cfg(test)]
+pub(crate) fn dump_all(conn: &Connection) -> BTreeMap<String, Vec<Vec<String>>> {
     let tables: Vec<String> = conn
         .prepare(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
@@ -266,6 +275,7 @@ pub fn dump_all(conn: &Connection) -> BTreeMap<String, Vec<Vec<String>>> {
 }
 
 /// Render one SQLite value with its type tag (see [`dump_all`]).
+#[cfg(test)]
 fn render(value: rusqlite::types::ValueRef<'_>) -> String {
     use rusqlite::types::ValueRef;
     match value {
@@ -515,7 +525,8 @@ mod tests {
         let two = dump_all(&make("/clone/two", "2222"));
         assert_eq!(
             one, two,
-            "root and commit_sha identify the clone, not the content"
+            "root and commit_sha are left out of the dump: two clones differ in the root, and one \
+             tree committed twice differs in the commit_sha"
         );
         assert_eq!(
             one["checkout"],

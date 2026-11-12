@@ -58,8 +58,10 @@ pub fn diff_tree_to_tree(
     // rename flag is left unset, and `diff.renameLimit` (default 1000) when `rename_limit` is 0;
     // that limit caps how many deleted files it compares with each added one, so a low value in
     // some repo's config turned renames into an add plus a delete. Renames only (no copies, no
-    // break-rewrites), at git's own 50% similarity, and a limit above the number of tracked files
-    // of any repo this runs on.
+    // break-rewrites), at git's own 50% similarity, and a fixed limit (`RENAME_LIMIT`, sized for
+    // this repository: see its doc). A diff that deletes more files than the limit is compared
+    // against only the first `limit + 1` deleted files per added file, so a rename can then show
+    // as an add plus a delete; the work grows with added files x min(deleted files, limit + 1).
     let mut find_opts = git2::DiffFindOptions::new();
     find_opts
         .renames(true)

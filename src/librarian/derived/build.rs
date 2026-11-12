@@ -98,8 +98,11 @@ pub struct BuildReport {
 }
 
 /// The `.md` files a git diff between two commits reports, by kind of change. A rename counts
-/// once, as a rename, and not as an addition and a deletion. The counts depend on the two trees
-/// alone: the diff sets its rename options itself, so a repo's or the machine's git config
+/// once, as a rename, and not as an addition and a deletion, as long as the commit deletes at most
+/// `RENAME_LIMIT` files of any kind (a constant in `crate::git`): past that, git compares each
+/// added file with only the first `RENAME_LIMIT + 1` deleted ones, and a rename whose old file is
+/// not among them counts as an addition and a deletion. The counts depend on the two trees alone:
+/// the diff sets its rename options itself, so a repo's or the machine's git config
 /// (`diff.renameLimit`, `diff.renames`) changes nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ChangeCounts {

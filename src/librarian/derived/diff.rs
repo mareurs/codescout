@@ -32,9 +32,10 @@
 //! sets (the derived index stores them sorted and keeps duplicates from the frontmatter; the old
 //! catalog keeps author order); chunks as a count per document (`chunk` rows against
 //! `artifact_chunk` rows). The old `file_sha256` is the working-tree file's hash and the derived
-//! one is the committed blob's: a difference means the working tree differs from the commit, and
-//! is reported as `changed` on the field `file_sha256` with cause [`DiffCause::Unexplained`]
-//! (this module never reads the working tree to classify it).
+//! one is the committed blob's: a difference means the working tree differs from the commit, or
+//! the old row is stale (as `FileSetWalkVsCommit` below admits for a file set), and is reported
+//! as `changed` on the field `file_sha256` with cause [`DiffCause::Unexplained`] (this module
+//! never reads the working tree to classify it).
 //!
 //! # Edges
 //!
@@ -135,7 +136,9 @@
 //! refused with `attempt to write a readonly database`. The old catalog is a WAL database, so
 //! [`open_old_read_only`] alone can leave two new files beside it; `cli::derive_shadow` refuses
 //! that case before it opens anything. A WAL database that another process holds open already
-//! has both files, and is read without writing.
+//! has both files; reading it writes nothing to the catalog or its `-wal`, but SQLite updates
+//! read marks in the `-shm` file (measured: a `mode=ro` reader ran BEGIN, a count and ROLLBACK;
+//! the main file and the `-wal` were byte-identical afterwards and the `-shm` was not).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Component, Path};
@@ -341,6 +344,9 @@ impl OldCatalog {
     /// Wrap a connection the caller opened read-only (or, in a test, an in-memory one) after
     /// checking that every table and column the diff reads is there. A file that is not a
     /// database, a missing table and a missing column are errors that name SQLite's reason.
+    ///
+    /// Nothing here checks how the connection was opened, and a writable one is accepted: Plan D
+    /// must pass a connection opened read-only.
     pub fn from_connection(conn: Connection) -> anyhow::Result<OldCatalog> {
         conn.busy_timeout(BUSY_TIMEOUT)
             .context("setting the old catalog's busy timeout")?;
@@ -845,8 +851,9 @@ type Triple = (String, String, String);
 struct OldEdges {
     file: BTreeSet<Pair>,
     entry: BTreeMap<Triple, BTreeSet<String>>,
-    /// Every `entry_cite.dst_ref` recorded for a `(src, dst)` pair, at either grain: the only
-    /// record of how a citation named its target.
+    /// Every `entry_cite.dst_ref` recorded for a `(src, dst)` pair, at either grain. These are the
+    /// scanner's rebuilt texts (see `link_scan::entry_dst_ref`): a 16-hex id or a
+    /// `<dst_slug>:<TOKEN>`, not what the author wrote.
     texts: BTreeMap<Pair, BTreeSet<String>>,
 }
 

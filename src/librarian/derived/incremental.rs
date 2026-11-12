@@ -733,6 +733,83 @@ mod tests {
         assert_eq!(count(&conn, "parse_cache"), report.documents);
     }
 
+    /// An update reads the repo name and the key space from the commit it indexes. Every other
+    /// fixture here shares `REPO_TOML` and has no key-space file, so none of them could tell an
+    /// update that reused the previous build's `checkout.repo_name` or `skipped` rows from one that
+    /// reads the new commit. Here the second commit renames the repo and adds a key-space file
+    /// that excludes one existing document, and the documents that cite across the change do not
+    /// change at all.
+    #[test]
+    fn update_across_a_changed_repo_name_and_key_space_dumps_equal_to_a_full_rebuild() {
+        let a = "# A\n\nCites [[beta/b]], [[b]] and [[c]].\n";
+        let b = "# B\n";
+        let c = "# C\n";
+        let h = history(&[
+            &[
+                (".codescout/repo.toml", "name = \"alpha\"\n"),
+                ("docs/a.md", a),
+                ("docs/b.md", b),
+                ("contrib/c.md", c),
+            ],
+            &[
+                (".codescout/repo.toml", "name = \"beta\"\n"),
+                (".codescout/key-space.toml", "exclude = [\"contrib\"]\n"),
+                ("docs/a.md", a),
+                ("docs/b.md", b),
+                ("contrib/c.md", c),
+            ],
+        ]);
+
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        let before = dump_all(&conn);
+        // The premises: the first commit is named `alpha`, skips nothing, and `c` is a document.
+        assert_eq!(before["checkout"][0][0], "T:alpha");
+        assert!(before["skipped"].is_empty(), "{:?}", before["skipped"]);
+        assert_eq!(
+            doc_paths(&conn),
+            strings(&["contrib/c.md", "docs/a.md", "docs/b.md"])
+        );
+        let before_edges = edges(&conn, "docs/a.md");
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 1, PARSER_VERSION);
+
+        // Every document that remains is byte-identical to the first commit's: nothing is parsed,
+        // and what changed in `a.md` is only how its citations resolve.
+        assert!(parsed.is_empty(), "{parsed:?}");
+        let rebuilt = fresh_dump(&h, 1);
+        assert_eq!(
+            dump_all(&conn),
+            rebuilt,
+            "an update must dump byte-equal to a rebuild at the same commit"
+        );
+        assert_ne!(before, rebuilt, "the two commits really differ");
+        assert_eq!(rebuilt["checkout"][0][0], "T:beta", "the new repo name");
+        assert_eq!(
+            rebuilt["skipped"],
+            [["T:contrib/c.md", "T:outside_key_space"]],
+            "the new key space's skipped row"
+        );
+        assert_eq!(doc_paths(&conn), strings(&["docs/a.md", "docs/b.md"]));
+        assert_eq!(
+            before_edges,
+            [
+                edge("cross_repo", "b", None),
+                edge("file", "b", Some("b")),
+                edge("file", "c", Some("c"))
+            ]
+        );
+        assert_eq!(
+            edges(&conn, "docs/a.md"),
+            [
+                edge("file", "b", Some("b")),
+                edge("file", "b", Some("b")),
+                edge("unknown_key", "c", None)
+            ],
+            "the unchanged `a.md` resolves its citations against the new name and key space"
+        );
+    }
+
     /// Review Focus 3, first half.
     #[test]
     fn a_new_document_resolves_an_old_unknown_key_edge() {
@@ -1267,6 +1344,33 @@ mod tests {
                     "delta ".repeat(500)
                 ),
             ),
+            // Inline code is an escape: the wiki link and the bare token inside the span are not
+            // citations, the two outside it are.
+            (
+                "docs/specs/inline.md",
+                "# Inline\n\nWrite `[[in-code]]` and `F-4` as code, then cite [[outside]] and F-5.\n"
+                    .to_owned(),
+            ),
+            // CRLF line ends: the lines still count from one, and the entry's section spans them.
+            (
+                "docs/specs/crlf.md",
+                "# Crlf\r\n\r\n## C-1 — a crlf entry\r\n\r\nSee [[two]] and C-1.\r\n\r\nlast line\r\n"
+                    .to_owned(),
+            ),
+            // A `###` entry inside a `##` entry: the child's section lies inside its parent's, and
+            // a sibling `##` entry closes both.
+            (
+                "docs/specs/nested.md",
+                "# Nested\n\n## N-1 — parent\n\nparent text citing [[two]]\n\n\
+                 ### N-2 — child\n\nchild text citing [[two:F-2]]\n\n## N-3 — sibling\n\nafter\n"
+                    .to_owned(),
+            ),
+            // A bare token that another document defines, with no wiki link: the parse records it
+            // as it records any bare token, and resolving it is the build's work, not the parse's.
+            (
+                "docs/specs/bare.md",
+                "# Bare\n\nThe decision in R-43 settles this, and so does R-44.\n".to_owned(),
+            ),
         ]
     }
 
@@ -1325,7 +1429,7 @@ mod tests {
     /// The pinned digest of the corpus's parse. When this fails, the parse of some text changed
     /// (or the shape the cache stores did): bump `PARSER_VERSION`, so that no cached row from
     /// the old logic is read, and then set this to the new digest.
-    const CORPUS_DIGEST: &str = "a76c89d82dd8cfeb74ae310c7382ac550d24f2b8195324d82e203ff790e0721c";
+    const CORPUS_DIGEST: &str = "bab4fcc753c9e9275f19651b1b5f87e728ed77cf6bc1703522d83f61a0c01556";
 
     #[test]
     fn the_parse_of_a_pinned_corpus_is_tied_to_parser_version() {

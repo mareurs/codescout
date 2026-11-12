@@ -63,12 +63,22 @@ pub fn blob_text(
         return Ok(None);
     };
     let refuse_link = |entry: &git2::TreeEntry, upto: usize| {
-        anyhow::ensure!(
-            entry.filemode() != SYMLINK_MODE,
-            "{rel_path} in {} is a symlink ({} is a link in the commit)",
-            commit.id(),
-            parts[..=upto].join("/")
-        );
+        if entry.filemode() == SYMLINK_MODE {
+            // `upto` is the component that is the link: the leaf is `rel_path` itself, any
+            // other one is a directory the file would be read through.
+            if upto == dirs.len() {
+                anyhow::bail!(
+                    "{rel_path} in {} is a symlink ({} is a link in the commit)",
+                    commit.id(),
+                    parts[..=upto].join("/")
+                );
+            }
+            anyhow::bail!(
+                "{rel_path} in {} lies under a symlinked directory {}",
+                commit.id(),
+                parts[..=upto].join("/")
+            );
+        }
         Ok(())
     };
     let mut tree = commit.tree()?;
@@ -383,7 +393,10 @@ mod tests {
             let deep_id = deep.write().unwrap();
             sub.insert("inner", deep_id, 0o040000).unwrap();
             let sub_id = sub.write().unwrap();
-            // `d\xFFr/`: not UTF-8, so no real path is spelled `d\u{FFFD}r/x.md`.
+            // `d\xFFr/` is not UTF-8, so its children can only be named by the lossy spelling
+            // `d\u{FFFD}r/x.md`. A real directory `d\u{FFFD}r` is valid UTF-8 and can exist, so
+            // that spelling is not a trustworthy `rel_path`: the children are reported `NotUtf8`
+            // and their bytes are never read as text (see the `skipped` key in `schema.rs`).
             root.insert(&b"d\xffr"[..], sub_id, 0o040000).unwrap();
             root.insert("a.md", blob, FILE as i32).unwrap();
         });
@@ -437,20 +450,35 @@ mod tests {
 
     #[test]
     fn blob_text_refuses_a_path_under_a_symlinked_directory() {
-        let dir = tempfile::tempdir().unwrap();
-        // `.codescout` itself is a link in the commit.
-        let repo = repo_with(dir.path(), &[(".codescout", LINK, b"../shared")]);
-        let commit = open_commit(&repo, "HEAD").unwrap();
-        let err = blob_text(&repo, &commit, ".codescout/repo.toml").unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(
-            msg.contains(".codescout/repo.toml") && msg.contains("symlink"),
-            "got: {msg}"
-        );
-        assert!(
-            msg.contains(&commit.id().to_string()),
-            "names the commit: {msg}"
-        );
+        // The message names the directory that is the link, not the file read through it.
+        // `.codescout` itself is a link in the commit; in the second case the link is the
+        // second component, so naming the first one (or the whole path) would be wrong.
+        type Case<'a> = (&'a [(&'a str, u32, &'a [u8])], &'a str, &'a str);
+        let cases: [Case; 2] = [
+            (
+                &[(".codescout", LINK, b"../shared")],
+                ".codescout/repo.toml",
+                ".codescout",
+            ),
+            (
+                &[("docs/shared", LINK, b"../x"), ("docs/a.md", FILE, b"a")],
+                "docs/shared/repo.toml",
+                "docs/shared",
+            ),
+        ];
+        for (entries, rel_path, link) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            let repo = repo_with(dir.path(), entries);
+            let commit = open_commit(&repo, "HEAD").unwrap();
+            let err = blob_text(&repo, &commit, rel_path).unwrap_err();
+            assert_eq!(
+                format!("{err:#}"),
+                format!(
+                    "{rel_path} in {} lies under a symlinked directory {link}",
+                    commit.id()
+                )
+            );
+        }
     }
 
     #[test]

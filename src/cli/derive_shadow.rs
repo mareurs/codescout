@@ -85,10 +85,18 @@ fn is_wal_database(path: &Path) -> Option<bool> {
 
 /// Refuse to open a WAL database that has no `-wal` and `-shm` beside it. SQLite does not refuse
 /// a read-only open of one in a writable directory: it creates both files, and a command that
-/// promises to write nothing beside the catalog must not do that. The case is a catalog no
+/// promises to create nothing beside the catalog must not do that. The case is a catalog no
 /// process has open (a process that has it open keeps both files). Measured with the bundled
 /// SQLite: the open succeeds and leaves `catalog.db-wal` and `catalog.db-shm` behind; in a
 /// read-only directory it is refused with `attempt to write a readonly database`.
+///
+/// With both files present the open writes nothing to the catalog or its `-wal`, but SQLite
+/// updates read marks in the `-shm` (see `derived::diff`), so "writes nothing beside the
+/// catalog" is not what this command can promise.
+///
+/// The guard is best-effort. It checks that both files exist and then the caller opens: if the
+/// last server closes the catalog between the two steps, SQLite removes the side files and the
+/// read-only open creates them again. Plan D must not rely on this guard alone.
 fn refuse_if_open_would_write(path: &Path) -> Result<()> {
     if is_wal_database(path) != Some(true) {
         return Ok(());
@@ -98,7 +106,7 @@ fn refuse_if_open_would_write(path: &Path) -> Result<()> {
     }
     bail!(
         "{path} is a WAL database and {path}-wal and {path}-shm are not both beside it (no \
-         process has it open): SQLite would create them to read it, and this command writes \
+         process has it open): SQLite would create them to read it, and this command creates \
          nothing beside the catalog. Run it while a codescout server has the catalog open",
         path = path.display()
     )
@@ -568,6 +576,8 @@ mod tests {
             "the premise: a live WAL database has both side files"
         );
         let main_bytes = std::fs::read(&path).unwrap();
+        let wal_path = f.old_dir.path().join("catalog.db-wal");
+        let wal_bytes = std::fs::read(&wal_path).unwrap();
 
         let out = eval(&f, &args(Some(path.clone()), false), None);
 
@@ -578,11 +588,18 @@ mod tests {
             "{}",
             out.stdout
         );
+        // What is pinned: no new file, and the catalog and its `-wal` are byte-identical. The
+        // `-shm` is deliberately not compared: SQLite updates read marks there (`derived::diff`).
         assert_eq!(listing(f.old_dir.path()), before);
         assert_eq!(
             std::fs::read(&path).unwrap(),
             main_bytes,
             "the main file changed"
+        );
+        assert_eq!(
+            std::fs::read(&wal_path).unwrap(),
+            wal_bytes,
+            "the -wal file changed"
         );
         let rows: i64 = holder
             .query_row("SELECT count(*) FROM artifact", [], |r| r.get(0))

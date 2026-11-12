@@ -234,8 +234,11 @@ enum Commands {
     /// the old catalog READ-ONLY (it is never created, migrated or written) and prints counts
     /// and the first rows of each cause (`--json`: every row). Reads git objects, not the
     /// working tree. Exits 0 whenever it compared, 2 and prints `NOT COMPARED — <reason>` when
-    /// it could not (no old catalog, one it cannot read, none of whose rows lies under this
-    /// repository, no git repository).
+    /// it could not: no old catalog, one it cannot read, none of whose rows lies under this
+    /// repository, no git repository, a `--rev` that names no commit, a scratch directory that
+    /// would lie inside the repository (point TMPDIR elsewhere), or a WAL catalog that no
+    /// codescout server holds open (the usual case when no session is running: run it while one
+    /// does).
     DeriveShadow(codescout::cli::derive_shadow::DeriveShadowArgs),
 
     /// Read-only query: which active constitution rules apply to a given
