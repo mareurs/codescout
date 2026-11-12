@@ -6,6 +6,7 @@
 #
 # Usage:
 #   scripts/worktree-remove.sh [--stop] [--wait SECS] <worktree path>
+#   scripts/worktree-remove.sh -h | --help      print the usage and exit 0; removes nothing
 #
 # Output:
 #   stdout  one row per holder, `PID<TAB>KIND<TAB>CMDLINE`, ordered mux first, then the
@@ -18,11 +19,15 @@
 #           2 refused (usage, unregistered path, main checkout, caller's cwd inside, no /proc,
 #             or the first process scan timed out: nothing was changed)
 #           3 holders exist and --stop was not given
-#           4 --stop, but a blocker exists (nothing was signalled)
+#           4 --stop, but a blocker exists, in the scan before the stop or in the first scan
+#             of the stop loop (nothing was signalled)
 #           5 --stop, but a holder survived the stop, or a rescan timed out so the holders
 #             could not be established (nothing was removed)
-#           6 git refused to remove the worktree (untracked files, a lock): never forced
-#           7 git removed it but the directory is still there: listed, never deleted
+#           6 git refused to remove the worktree and still lists it (untracked files, a lock):
+#             never forced
+#           7 the directory is still there: git removed the worktree (it may have exited
+#             non-zero after deregistering it) but something wrote to the path again; its
+#             contents are listed, never deleted
 #
 # WHY THIS EXISTS
 #   A worktree that served `symbols` on a Rust file keeps a live
@@ -52,21 +57,33 @@
 #   `git worktree remove` after one.
 #
 # HOW IT STOPS
-#   SIGTERM only, never SIGKILL. The mux holders first (a graceful mux exit kills the
-#   language server's process group), then, after a pause of at most one second or until
-#   the mux is gone, the other stoppable holders. A pid is signalled only if the latest scan
-#   still lists it as a stoppable holder (a pid can be recycled during the pause). Liveness is a RESCAN of the holders, never
-#   `kill -0` (a zombie answers it). The rescan runs about every 0.5 s for up to --wait
+#   SIGTERM only, never SIGKILL to a holder (the scan child runs under `timeout -k 1`, which
+#   may SIGKILL the script's own scan). The mux holders first (a graceful mux exit kills the
+#   language server's process group), then, after a pause or until the mux is gone, the
+#   other stoppable holders. The pause is up to ten rounds of a 0.1 s sleep plus one scan:
+#   about one second on a small /proc, up to about 5 s on a busy real /proc (a scan takes
+#   about 0.4 s there), and it is not counted in --wait. A blocker (an `other` row, or this
+#   script's parent) found by the first scan of the stop loop ends the run with exit 4
+#   before any signal, as a blocker found before it does. A pid is signalled only if the
+#   latest scan still lists it as a stoppable holder (a pid can be recycled during the
+#   pause). Liveness is a RESCAN of the holders, never `kill -0` (a zombie answers it). The
+#   rescan runs about every 0.5 s for up to --wait
 #   seconds in all (default 30) and signals what is new, at most three times, because a
 #   dying `cargo` can start children. A holder still listed afterwards is a survivor:
 #   exit 5, nothing removed. A signal that fails because the process is already gone is
 #   not an error; if the rescan still lists it, it is a survivor like any other.
 #
 # HOW IT REMOVES
-#   `git -C <main checkout> worktree remove <path>` without --force (exit 6 when git
-#   refuses, with `git status --porcelain --ignored -uall` printed), then
-#   `git worktree prune`, then a check that the path is gone (exit 7 when it is not: the
-#   contents are listed, never deleted). The branch is not deleted.
+#   `git -C <main checkout> worktree remove <path>` without --force. When git fails, the
+#   script asks `git worktree list` whether the worktree is still registered. Still listed:
+#   exit 6, with git's message and `git status --porcelain -uall` (first 50 lines, run only
+#   when <path>/.git exists; ignored files never block git and are not listed). No longer
+#   listed: git deleted the work tree and then failed (the bug: `rmdir target/` loses to a
+#   live `cargo check`), so the script goes on as after a success. Then `git worktree
+#   prune`, then a check that the path is gone (exit 7 when it is not: the contents are
+#   listed, never deleted; exit 0 when it is, even if git exited non-zero). Git deletes the
+#   worktree's ignored files with it (`target/`, `.superpowers/`, `.codescout/`); copy out
+#   what you keep first. The branch is not deleted.
 #
 # HOW A PROCESS IS MATCHED
 #   Holder   its cwd is the worktree or below it, OR an element of its command line
@@ -92,7 +109,9 @@
 #     worktree through a symlink is not matched.
 #   * It needs Linux /proc, like scripts/stale-servers.sh; without it the script refuses.
 #   * Between the last scan and `git worktree remove`, a new process can start in the
-#     worktree; that surfaces as git's refusal or as exit 7, not as a signal.
+#     worktree; that may show up as exit 6 or 7, or not at all (a late process that writes
+#     nothing lets git succeed, and exit 0 then leaves a process whose cwd is deleted). It
+#     is never signalled.
 #
 # TEST SEAM
 #   WORKTREE_REMOVE_SCAN_TIMEOUT (whole seconds, default 10) bounds each scan.
@@ -116,7 +135,7 @@ die() {
 }
 
 usage() {
-    echo "usage: worktree-remove.sh [--stop] [--wait SECS] <worktree path>" >&2
+    echo "usage: worktree-remove.sh [--stop] [--wait SECS] <worktree path>   (-h, --help: this text, exit 0)" >&2
 }
 
 # resolve_worktree PATH: print the canonical path of a registered linked worktree, or
@@ -283,8 +302,10 @@ list_holders() {
             kind=other
             cmd="(empty command line)"
         fi
-        cmd=${cmd//$'\t'/ }
-        cmd=${cmd//$'\n'/ }
+        # Every control character (tab, newline, CR, ESC, ...) becomes a space: the row is
+        # one line of a table an operator decides on, and a command line must not be able to
+        # move the cursor, recolour or overwrite it.
+        cmd=${cmd//[[:cntrl:]]/ }
         rows+=("$(kind_rank "$kind")"$'\t'"$pid"$'\t'"$kind"$'\t'"$cmd")
     done
     if [ "${#rows[@]}" -gt 0 ]; then
@@ -333,6 +354,29 @@ scan_failed() {
     echo "worktree-remove: the holders could not be established: a process scan timed out or failed (limit ${SCAN_TIMEOUT}s). Nothing was removed; SIGTERM may already have been sent." >&2
 }
 
+# blockers_of ROWS: print one line per blocker among ROWS (`PID<TAB>KIND<TAB>CMDLINE`): a holder
+# of kind `other`, and this script's parent whatever its kind (the kind comes from
+# kind_of_argv like any row; the parent is a blocker because its pid is $PPID). Print nothing
+# when there is none.
+blockers_of() {
+    local pid kind cmd
+    while IFS=$'\t' read -r pid kind cmd; do
+        if [ "$kind" = other ]; then
+            printf '  %s  %s\n' "$pid" "$cmd"
+        elif [ "$pid" = "$PPID" ]; then
+            printf '  %s  %s  (the parent of this script)\n' "$pid" "$cmd"
+        fi
+    done <<<"$1"
+}
+
+# refuse_blockers BLOCKERS: the exit-4 message; nothing was signalled.
+refuse_blockers() {
+    {
+        echo "worktree-remove: --stop refused; these holders are not stoppable (nothing was signalled):"
+        printf '%s\n' "$1"
+    } >&2
+}
+
 # send_term PID: SIGTERM, never to this script, its subshell or its parent. A failed signal (the
 # process is already gone) is not an error and prints nothing; the rescan decides whether the
 # holder is still there.
@@ -345,7 +389,11 @@ send_term() {
 
 # stop_holders PATH WAIT: SIGTERM the stoppable holders of PATH, the mux first, and rescan until
 # none is left. Return 0 when none remains, 5 when something does (the survivors are printed
-# on stderr) or when a scan fails. Liveness is the rescan through scan_holders, never `kill -0`.
+# on stderr) or when a scan fails, 4 when the first scan holds a blocker (nothing signalled).
+# Liveness is the rescan through scan_holders, never `kill -0`.
+#   * The first scan of the loop may show a blocker that appeared after `main`'s scan: an
+#     `other` row, or the parent. Then nothing is signalled and the return is 4, as `main`'s
+#     own refusal. A blocker that appears in a later round is a survivor.
 #   * A pid is signalled once. A holder that appears in a later round (a dying `cargo` can
 #     start children) is signalled in that round; at most three rounds signal anything.
 #   * A holder of kind `other` is never signalled; one that appears later is a survivor.
@@ -354,7 +402,7 @@ send_term() {
 #     recycled inside that pause.
 #   * The wait is WAIT seconds in all, polled about every 0.5 s.
 stop_holders() {
-    local wt=$1 wait_s=$2 rows pid kind cmd round=0 signalled=" " deadline i found fresh
+    local wt=$1 wait_s=$2 rows pid kind cmd round=0 signalled=" " deadline i found fresh blockers
     local -a mux_pids other_pids
     set_now_ms
     deadline=$((NOW_MS + wait_s * 1000))
@@ -362,6 +410,13 @@ stop_holders() {
         scan_holders "$wt" || { scan_failed; return 5; }
         rows=$HOLDERS
         [ -n "$rows" ] || return 0
+        if [ "$round" -eq 0 ]; then
+            blockers=$(blockers_of "$rows")
+            if [ -n "$blockers" ]; then
+                refuse_blockers "$blockers"
+                return 4
+            fi
+        fi
         mux_pids=()
         other_pids=()
         while IFS=$'\t' read -r pid kind cmd; do
@@ -380,7 +435,9 @@ stop_holders() {
                 send_term "$pid"
             done
             if [ "${#mux_pids[@]}" -gt 0 ]; then
-                # Give a graceful mux exit up to one second to take its language server with it.
+                # Give a graceful mux exit time to take its language server with it: up to ten
+                # rounds of a 0.1 s sleep plus one scan. A scan on a busy real /proc takes about
+                # 0.4 s, so this can last about 5 s, and it is not counted in the --wait deadline.
                 for i in 1 2 3 4 5 6 7 8 9 10; do
                     sleep 0.1
                     scan_holders "$wt" || { scan_failed; return 5; }
@@ -421,19 +478,62 @@ stop_holders() {
     return 5
 }
 
+# worktree_listed ROOT PATH: succeed when `git worktree list` of ROOT still names PATH (whole-path
+# match on the `worktree <path>` lines, each canonicalised as resolve_worktree does). A failing
+# `git worktree list` counts as listed: when git cannot say, assume the registration is still
+# there.
+worktree_listed() {
+    local root=$1 wt=$2 porcelain line p
+    porcelain=$(git -C "$root" worktree list --porcelain 2>/dev/null) || return 0
+    while IFS= read -r line; do
+        case $line in
+            "worktree "*)
+                p=$(realpath -m -- "${line#worktree }" 2>/dev/null) || continue
+                [ "$p" = "$wt" ] && return 0
+                ;;
+        esac
+    done <<<"$porcelain"
+    return 1
+}
+
 # remove_worktree ROOT PATH: `git worktree remove` without --force, `git worktree prune`, then check
-# that PATH is gone. Return 0 when it is, 6 when git refuses, 7 when the directory is still
-# there. It never deletes anything itself.
+# that PATH is gone. Return 0 when it is, 6 when git refuses and still lists the worktree, 7 when
+# the directory is still there. It never deletes anything itself.
+#
+# When `git worktree remove` fails, the bug this script exists for looks like this: git deletes
+# the work tree, `.git` file included, then cannot `rmdir target/` (a live `cargo check` rewrites
+# it) and exits non-zero after it deregistered the worktree. So a failure is told apart by
+# `git worktree list`: still listed is a refusal (exit 6); no longer listed is the removal having
+# happened, and the path is verified like after a success.
 remove_worktree() {
-    local root=$1 wt=$2 out
+    local root=$1 wt=$2 out failed=0 st n
     if ! out=$(git -C "$root" worktree remove "$wt" 2>&1); then
+        if worktree_listed "$root" "$wt"; then
+            {
+                echo "worktree-remove: git refused to remove $wt; nothing was forced:"
+                printf '%s\n' "$out" | sed 's/^/  /'
+                # Ignored files never block `git worktree remove`: they are not listed.
+                if [ -e "$wt/.git" ]; then
+                    echo "  git -C $wt status --porcelain -uall:"
+                    st=$(git -C "$wt" status --porcelain -uall 2>&1)
+                    if [ -z "$st" ]; then
+                        echo "    (nothing listed)"
+                    else
+                        n=$(printf '%s\n' "$st" | wc -l)
+                        printf '%s\n' "$st" | head -n 50 | sed 's/^/    /'
+                        [ "$n" -le 50 ] || echo "    ... and $((n - 50)) more"
+                    fi
+                else
+                    echo "  ($wt/.git does not exist: git status skipped)"
+                fi
+            } >&2
+            return 6
+        fi
+        failed=1
         {
-            echo "worktree-remove: git refused to remove $wt; nothing was forced:"
+            echo "worktree-remove: git exited non-zero, but it no longer lists $wt (it deleted the work tree and then failed, often on a directory a live process rewrote). Its message:"
             printf '%s\n' "$out" | sed 's/^/  /'
-            echo "  git -C $wt status --porcelain --ignored -uall:"
-            git -C "$wt" status --porcelain --ignored -uall 2>&1 | sed 's/^/    /'
         } >&2
-        return 6
     fi
     git -C "$root" worktree prune >/dev/null || true
     if [ -e "$wt" ] || [ -L "$wt" ]; then
@@ -443,12 +543,16 @@ remove_worktree() {
         } >&2
         return 7
     fi
-    echo "worktree-remove: removed $wt" >&2
+    if [ "$failed" -eq 1 ]; then
+        echo "worktree-remove: removed $wt (git reported a failure after removing it; the path is gone and unregistered)" >&2
+    else
+        echo "worktree-remove: removed $wt" >&2
+    fi
     return 0
 }
 
 main() {
-    local path="" wt root holders count blockers row pid kind cmd rc
+    local path="" wt root holders count blockers rc
     # Internal: a bounded scan, run by scan_holders as `timeout ... bash <this file> --internal-scan PATH`.
     if [ "${1:-}" = --internal-scan ]; then
         list_holders "${2:?}"
@@ -480,7 +584,7 @@ main() {
         [ -z "$path" ] && [ $# -eq 1 ] || { usage; die "only one worktree path may be given"; }
         path=$1
     fi
-    [[ $WAIT_SECS =~ ^[0-9]+$ ]] || { usage; die "--wait needs a whole number of seconds, got [$WAIT_SECS]"; }
+    [[ $WAIT_SECS =~ ^(0|[1-9][0-9]*)$ ]] || { usage; die "--wait needs a whole number of seconds without leading zeros (bash would read 08 as octal), got [$WAIT_SECS]"; }
     [ -n "$path" ] || { usage; die "no worktree path given"; }
     [ -d "$PROC" ] || die "cannot scan processes: [$PROC] is not a directory; this script needs Linux /proc"
     [[ $SCAN_TIMEOUT =~ ^[1-9][0-9]*$ ]] || die "WORKTREE_REMOVE_SCAN_TIMEOUT needs a whole number of seconds above 0, got [$SCAN_TIMEOUT]"
@@ -505,21 +609,11 @@ main() {
         echo "  stopping anything."
     } >&2
 
-    blockers=""
-    while IFS=$'\t' read -r pid kind cmd; do
-        if [ "$kind" = other ]; then
-            blockers+="  $pid  $cmd"$'\n'
-        elif [ "$pid" = "$PPID" ]; then
-            blockers+="  $pid  $cmd  (the parent of this script)"$'\n'
-        fi
-    done <<<"$holders"
+    blockers=$(blockers_of "$holders")
 
     if [ "$STOP" -eq 1 ]; then
         if [ -n "$blockers" ]; then
-            {
-                echo "worktree-remove: --stop refused; these holders are not stoppable (nothing was signalled):"
-                printf '%s' "$blockers"
-            } >&2
+            refuse_blockers "$blockers"
             exit 4
         fi
         stop_holders "$wt" "$WAIT_SECS"

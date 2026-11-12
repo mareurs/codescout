@@ -55,8 +55,8 @@
 # so a hang in the script fails a case instead of stalling the gate.
 #
 # WORKTREE_REMOVE_SCRIPT may name a copy of the script to run instead of
-# scripts/worktree-remove.sh; the mutation checks in docs/PROBES.md use it so the real
-# file is never edited.
+# scripts/worktree-remove.sh, so that a mutation check (a narrowed classifier arm, a dropped
+# guard) can run this suite against an edited copy and the real file is never edited.
 
 set -uo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
@@ -214,9 +214,18 @@ case_lists_every_holder_kind() {
     fake 5091003 "$C" cargo check --manifest-path "$WT/Cargo.toml"
     fake 5091004 "$WT" rust-analyzer
     fake 5091005 "$WT" codescout mux --cwd "$WT"
+    # The other stoppable kinds: rust-analyzer is a prefix (its proc-macro server is another
+    # binary), rustc and sccache are matched by name. Their pids are placed so that rank, not
+    # pid, decides the order: sccache (rank 5) has a lower pid than rustc (rank 4).
+    fake 5091006 "$WT" rust-analyzer-proc-macro-srv
+    fake 5091007 "$C" sccache rustc --edition 2021 "$WT/src/lib.rs"
+    fake 5091008 "$C" rustc --edition 2021 "$WT/src/lib.rs"
     run "$WT"
     eq "exit 3" 3 "$RC"
-    eq "kinds, mux first and blocker last" "mux,rust-analyzer,cargo,build-output,other" "$(kinds)"
+    eq "kinds, mux first and blocker last" \
+        "mux,rust-analyzer,rust-analyzer,cargo,rustc,sccache,build-output,other" "$(kinds)"
+    eq "order is by kind rank, then pid" \
+        "5091005,5091004,5091006,5091003,5091008,5091007,5091002,5091001" "$(pids)"
     eq "first row is PID TAB KIND TAB CMDLINE" \
         "5091005${TAB}mux${TAB}codescout mux --cwd $WT" "$(printf '%s\n' "$OUT" | sed -n 1p)"
     eq "last row is the blocker" "5091001${TAB}other${TAB}vim notes.txt" \
@@ -407,6 +416,28 @@ case_bad_arguments_refuse() {
     eq "two paths: exit 2" 2 "$RC"
     run --wait 5 "$WT"
     eq "a valid --wait is accepted" 0 "$RC"
+    new_case args_zero
+    run --wait 0 "$WT"
+    eq "--wait 0 is accepted" 0 "$RC"
+    new_case args_octal
+    # Bash reads 08 and 09 as bad octal (an abort with exit 1) and 010 as 8: leading zeros
+    # are refused up front, for the spaced and the `=` spelling alike.
+    run --wait 08 "$WT"
+    eq "--wait 08: exit 2" 2 "$RC"
+    contains "--wait 08 names the reason" "leading zeros" "$ERR"
+    run --wait 09 "$WT"
+    eq "--wait 09: exit 2" 2 "$RC"
+    run --wait 010 "$WT"
+    eq "--wait 010: exit 2, not eight seconds" 2 "$RC"
+    run --wait=010 "$WT"
+    eq "--wait=010: exit 2" 2 "$RC"
+    eq "the worktree is untouched" present "$(present "$WT")"
+    run -h
+    eq "-h: exit 0" 0 "$RC"
+    contains "-h prints the usage" "usage: worktree-remove.sh" "$ERR"
+    run --help "$WT"
+    eq "--help: exit 0" 0 "$RC"
+    eq "--help removes nothing" present "$(present "$WT")"
 }
 
 # run_with_fake_parent CWD_OF_PARENT ARG_FOR_PARENT_CMDLINE: run the script as a NON-exec child
@@ -634,9 +665,17 @@ case_untracked_files_make_git_refuse() {
     echo "untracked_files_make_git_refuse"
     new_case untracked
     echo data >"$WT/notes.txt"
+    # An ignored file does not block git, so it must not be listed (the mutant that adds
+    # --ignored back lists it).
+    echo 'ignored.log' >>"$REPO/.git/info/exclude"
+    echo data >"$WT/ignored.log"
     run "$WT"
     eq "exit 6" 6 "$RC"
+    lacks "ignored files are not listed" "ignored.log" "$ERR"
     contains "the status listing is printed" "?? notes.txt" "$ERR"
+    contains "the header names the command, without --ignored" \
+        "git -C $WT status --porcelain -uall:" "$ERR"
+    lacks "a short listing has no remainder line" "... and" "$ERR"
     eq "the directory is still there, not forced" present "$(present "$WT/notes.txt")"
     contains "git still lists the worktree" "$WT" "$(G "$REPO" worktree list --porcelain)"
 }
@@ -693,6 +732,170 @@ case_a_scan_that_blocks_is_bounded() {
     eq "the worktree is untouched" present "$(present "$WT")"
 }
 
+case_the_exit_6_listing_is_capped_and_omits_ignored_files() {
+    echo "the_exit_6_listing_is_capped_and_omits_ignored_files"
+    new_case cap
+    # Ignored files never block `git worktree remove`; listing them buries the cause. The
+    # ignore rule lives in the main repository's exclude file, shared by its worktrees.
+    echo 'ignored.log' >>"$REPO/.git/info/exclude"
+    echo data >"$WT/ignored.log"
+    local i
+    for i in $(seq 1 60); do echo data >"$WT/u$i.txt"; done
+    run "$WT"
+    eq "exit 6" 6 "$RC"
+    contains "the header names the command, without --ignored" \
+        "git -C $WT status --porcelain -uall:" "$ERR"
+    lacks "--ignored is not used" "--ignored" "$ERR"
+    lacks "the ignored file is not listed" "ignored.log" "$ERR"
+    eq "fifty untracked files are listed" 50 "$(printf '%s\n' "$ERR" | grep -c '^    ?? ')"
+    contains "the rest is counted" "    ... and 10 more" "$ERR"
+    eq "nothing was deleted" present "$(present "$WT/ignored.log")"
+}
+
+# git_shim DIR: a `git` that behaves as git except for `worktree remove`, which SHIM_MODE changes:
+#   leave   the real remove succeeds, then a live process rewrites target/ and git fails with
+#           `Directory not empty` after it deregistered the worktree (the bug itself, exit 255)
+#   gone    the real remove succeeds, then git exits 255 anyway; nothing is left behind
+#   dotgit  git deletes the worktree's .git file and exits 255, still registered
+git_shim() {
+    mkdir -p "$1"
+    cat >"$1/git" <<'EOF'
+#!/usr/bin/env bash
+prev=""
+for a in "$@"; do
+    if [ "$prev" = worktree ] && [ "$a" = remove ]; then
+        case $SHIM_MODE in
+            leave)
+                "$SHIM_REAL_GIT" "$@" >/dev/null 2>&1
+                mkdir -p "$SHIM_WT/target"
+                echo data >"$SHIM_WT/target/rewritten"
+                echo "error: failed to delete '$SHIM_WT': Directory not empty" >&2
+                exit 255
+                ;;
+            gone)
+                "$SHIM_REAL_GIT" "$@" >/dev/null 2>&1
+                echo "error: failed to delete '$SHIM_WT': Directory not empty" >&2
+                exit 255
+                ;;
+            dotgit)
+                rm -f "$SHIM_WT/.git"
+                echo "error: failed to delete '$SHIM_WT/.git'" >&2
+                exit 255
+                ;;
+        esac
+    fi
+    prev=$a
+done
+exec "$SHIM_REAL_GIT" "$@"
+EOF
+    chmod +x "$1/git"
+}
+
+case_a_git_that_fails_after_removing_the_worktree_is_not_a_refusal() {
+    echo "a_git_that_fails_after_removing_the_worktree_is_not_a_refusal"
+    new_case gitfail
+    # The case directory is itself a repository, as a checkout enclosing a worktree path is: with
+    # the worktree's .git gone, a `git status` run inside it would report THIS repository.
+    git init -q -b main "$C" >/dev/null 2>&1 || { echo "setup failed: git init enclosing" >&2; exit 1; }
+    echo data >"$C/enclosing-marker.txt"
+    git_shim "$C/shim"
+    local real
+    real="$(command -v git)"
+
+    # The bug: git deleted the work tree and deregistered it, then failed on a rewritten target/.
+    SHIM_MODE=leave SHIM_REAL_GIT="$real" SHIM_WT="$WT" PATH="$C/shim:$PATH" run "$WT"
+    eq "exit 7, not 6: the directory is left behind" 7 "$RC"
+    contains "git's own message is shown" "Directory not empty" "$ERR"
+    contains "the leftover is listed" "  target" "$ERR"
+    lacks "it is not called a refusal" "refused" "$ERR"
+    lacks "no other repository's status is printed" "enclosing-marker.txt" "$ERR"
+    eq "the leftover is not deleted" present "$(present "$WT/target/rewritten")"
+    lacks "git no longer lists it" "$WT" "$(G "$REPO" worktree list --porcelain)"
+
+    # Git failed after removing everything: the path is gone and unregistered, so exit 0.
+    rm -rf "$WT"
+    G "$REPO" worktree add -q "$WT" wt-gitfail >/dev/null 2>&1 \
+        || { echo "setup failed: worktree add again" >&2; exit 1; }
+    SHIM_MODE=gone SHIM_REAL_GIT="$real" SHIM_WT="$WT" PATH="$C/shim:$PATH" run "$WT"
+    eq "exit 0: the path is absent and unregistered" 0 "$RC"
+    contains "it says git failed after removing" "git reported a failure after removing it" "$ERR"
+    eq "the directory is gone" absent "$(present "$WT")"
+    lacks "git no longer lists it" "$WT" "$(G "$REPO" worktree list --porcelain)"
+
+    # Git failed and still lists the worktree, whose .git file is gone: exit 6, and no `git status`
+    # (it would climb to the enclosing repository).
+    G "$REPO" worktree add -q "$WT" wt-gitfail >/dev/null 2>&1 \
+        || { echo "setup failed: worktree add third time" >&2; exit 1; }
+    SHIM_MODE=dotgit SHIM_REAL_GIT="$real" SHIM_WT="$WT" PATH="$C/shim:$PATH" run "$WT"
+    eq "exit 6: git still lists it" 6 "$RC"
+    contains "it says why there is no status" "does not exist: git status skipped" "$ERR"
+    lacks "no other repository's status is printed" "enclosing-marker.txt" "$ERR"
+    contains "git still lists the worktree" "$WT" "$(G "$REPO" worktree list --porcelain)"
+}
+
+case_control_characters_in_a_command_line_are_scrubbed() {
+    echo "control_characters_in_a_command_line_are_scrubbed"
+    new_case cntrl
+    # CR would overwrite the start of the row, ESC starts a terminal control sequence: a command
+    # line must not be able to forge the table an operator decides on.
+    fake 5091001 "$WT" vim $'evil\rFORGED' $'\e[2Jwiped' $'tab\there'
+    run "$WT"
+    eq "exit 3" 3 "$RC"
+    lacks "stdout has no CR" $'\r' "$OUT"
+    lacks "stdout has no ESC" $'\e' "$OUT"
+    contains "the text stays, the controls became spaces" "vim evil FORGED  [2Jwiped tab here" "$OUT"
+    eq "still one row" 1 "$(printf '%s\n' "$OUT" | wc -l)"
+    run --stop "$WT"
+    eq "with --stop: exit 4" 4 "$RC"
+    contains "the blocker is listed" "5091001" "$ERR"
+    lacks "the blocker list has no CR" $'\r' "$ERR"
+    lacks "the blocker list has no ESC" $'\e' "$ERR"
+    new_case cntrl_survivor
+    fake 5091001 "$WT" cargo $'check\r\e[31mred'
+    run --stop --wait 1 "$WT"
+    eq "a survivor: exit 5" 5 "$RC"
+    contains "the survivor is listed" "5091001${TAB}cargo${TAB}cargo check  [31mred" "$ERR"
+    lacks "the survivor list has no CR" $'\r' "$ERR"
+    lacks "the survivor list has no ESC" $'\e' "$ERR"
+}
+
+case_a_blocker_that_appears_after_the_first_scan_exits_4_before_any_signal() {
+    echo "a_blocker_that_appears_after_the_first_scan_exits_4_before_any_signal"
+    new_case late_blocker
+    # A stoppable fixture holder (a pid above pid_max: a signal to it is always ESRCH). Main's scan
+    # sees only it. A `timeout` shim adds a blocker, a `vim` in the worktree, to the fixture just
+    # before the SECOND scan, the first one of the stop loop. The script must refuse with exit 4
+    # and signal nothing; one that signalled the cargo anyway would wait out --wait and end in
+    # exit 5.
+    fake 5091001 "$WT" cargo check
+    mkdir "$C/shim"
+    cat >"$C/shim/timeout" <<'EOF'
+#!/usr/bin/env bash
+case " $* " in
+    *" --internal-scan "*)
+        n=$(cat "$SHIM_COUNT" 2>/dev/null || echo 0)
+        n=$((n + 1))
+        echo "$n" >"$SHIM_COUNT"
+        if [ "$n" -eq 2 ]; then
+            mkdir -p "$SHIM_PROC/5091002"
+            ln -s "$SHIM_WT" "$SHIM_PROC/5091002/cwd"
+            printf '%s\0' vim >"$SHIM_PROC/5091002/cmdline"
+        fi
+        ;;
+esac
+exec "$SHIM_REAL_TIMEOUT" "$@"
+EOF
+    chmod +x "$C/shim/timeout"
+    SHIM_COUNT="$C/count" SHIM_PROC="$PROCD" SHIM_WT="$WT" SHIM_REAL_TIMEOUT="$(command -v timeout)" \
+        PATH="$C/shim:$PATH" run --stop --wait 1 "$WT"
+    eq "exit 4: the blocker is found before any signal" 4 "$RC"
+    contains "the late blocker is named" "5091002  vim" "$ERR"
+    contains "nothing was signalled" "nothing was signalled" "$ERR"
+    lacks "it did not go on to a survivor report" "still there after SIGTERM" "$ERR"
+    eq "two scans only: main's and the stop loop's first" 2 "$(cat "$C/count")"
+    eq "the worktree is untouched" present "$(present "$WT")"
+}
+
 case_a_parent_whose_cwd_is_inside_is_a_holder
 case_a_scan_that_blocks_is_bounded
 case_the_parent_that_is_stoppable_by_kind_is_a_blocker
@@ -707,6 +910,10 @@ case_a_holder_that_ignores_sigterm_is_a_survivor
 case_a_holder_that_exits_before_the_signal_is_not_an_error
 case_untracked_files_make_git_refuse
 case_a_leftover_directory_is_reported_not_deleted
+case_the_exit_6_listing_is_capped_and_omits_ignored_files
+case_a_git_that_fails_after_removing_the_worktree_is_not_a_refusal
+case_control_characters_in_a_command_line_are_scrubbed
+case_a_blocker_that_appears_after_the_first_scan_exits_4_before_any_signal
 
 echo
 echo "passed=$PASS failed=$FAIL"
