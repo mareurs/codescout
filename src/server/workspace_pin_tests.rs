@@ -970,6 +970,7 @@ async fn a_refused_pin_does_not_recreate_a_deleted_default_root() {
         "recording must not re-create the deleted default root"
     );
 }
+
 /// Bug d291b97d9e69edef: the session's active root was removed (a worktree taken away under a
 /// live server). `workspace(action="activate")` is the call every refusal prescribes, so it must
 /// get past the provenance fence, which is taken on the (missing) active root.

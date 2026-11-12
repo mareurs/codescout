@@ -80,6 +80,7 @@ async fn readers_do_not_claim_the_provenance_write_fence() {
     .await
     .unwrap();
 }
+
 /// Bug d291b97d9e69edef: `workspace(action="activate")` is a write, and the fence is taken on the
 /// ACTIVE root. When that root has been removed there is nothing to fence, and activation is the
 /// call every refusal prescribes, so it must run.
@@ -121,6 +122,34 @@ async fn a_non_workspace_write_on_a_missing_root_is_still_refused() {
         ran.store(true, Ordering::SeqCst);
         Ok(Vec::new())
     })
+    .await;
+    assert!(result.is_err());
+    assert!(!ran.load(Ordering::SeqCst));
+}
+
+/// The pass-through is for activation only: a workspace write that is not `activate` (none exists
+/// today; `Workspace::is_write` is true only for `activate`) is still fenced, and refused on a
+/// missing root.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_workspace_write_that_is_not_activation_on_a_missing_root_is_still_refused() {
+    let dir = checkout();
+    let path = dir.path().to_path_buf();
+    drop(dir);
+    assert!(!path.exists());
+    let ran = AtomicBool::new(false);
+    let result = scope_root(
+        &path,
+        true,
+        "workspace",
+        &json!({"action": "something_else"}),
+        None,
+        None,
+        async {
+            ran.store(true, Ordering::SeqCst);
+            Ok(Vec::new())
+        },
+    )
     .await;
     assert!(result.is_err());
     assert!(!ran.load(Ordering::SeqCst));
