@@ -171,5 +171,13 @@ State on 2026-11-03: the three items left open under Resume were triaged. None i
 
 The reopen condition this record gave for the ceiling, any `timed_out` row, has now fired once. What is not known: whether that session ran an engine with CIW-10 (`c754e00b3` at 12:31 and `d8f3512c8` at 12:36 UTC; the engine script appears to be extracted from the binary, as the tests use an extraction directory, so it depends on whether that session's binary was rebuilt after them, which I did not check); what the machine load was at 14:35 UTC. It was not the load of the session that wrote this read: its busy-loop run started at 14:39:52 UTC, four minutes later. One row is one row. The choice among the options (a lean red-only path, a higher default, or leaving it) is still the operator's, and the scan still blocks the response, so a higher ceiling lengthens the wait and does not speed the scan.
 
+## Read of usage.db, 2026-11-12 (item 3 date reached)
+
+Same query on `/home/marius/work/claude/codescout/.codescout/usage.db`, read 2026-11-12. `timed_out` rows: 1 on 11-04 (30,012 ms), 2 on 11-11 (30,204 ms max) and 3 on 11-12 (30,003 ms max), 6 in all. `hinted` rows above 15,000 ms (the trigger from item 1) by day: 11-04 1, 11-05 1, 11-07 2, 11-08 5, 11-09 12, 11-10 1, 11-11 28, 11-12 30. Longest `hinted` per day: 11-09 29,859 ms, 11-11 27,642 ms, 11-12 28,438 ms. No `tooling_failure` or `spawn_failed` row. Hints did not stop: `hinted` rows exist on every day except 11-06.
+
+So the reopen trigger is no longer a single row. On 11-11 and 11-12, 58 of 174 `hinted` rows took more than half the ceiling, and the longest took 94% of it. The table has no command text, no load figure and no binary id. So these rows do not show why the scan is slow on those days (a corpus that grew, a cold cache after a deploy, or machine load). Not checked: whether those rows came from one session or several, and whether their binaries held CIW-10 (`c754e00b3`).
+
+The choice among the options (a lean red-only path, a higher default, leaving it) is still the operator's. A higher default lengthens the wait of a red whose scan is already slow. Next read, to separate the causes: group the `hinted` rows above 15,000 ms and the `timed_out` rows by `session_id` and by hour, and compare with the load at those times.
+
 ## References
 - `docs/issues/2026-10-31-a-timed-out-filter-test-fails-in-the-loaded-gate-and-passes-alone.md`
