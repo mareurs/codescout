@@ -1,14 +1,15 @@
 ---
 id: '99a4d0be1318c3c1'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: reindex deletes a moved file''s local history when the move was not made in this catalog'
 tags:
 - cluster/guard-narrower-than-its-name
+closed: 2026-11-12
 opened: 2026-11-11
 owner: marius
 severity: medium
-unverified: 'Measured for the events table only (in-memory catalog, one event, plain rename). Not measured: loss of augmentation, observations, links and entry_reservation rows; what reindex re-attaches afterwards from an expects_augmentation sidecar (shape only, never params); behaviour on the live catalog.'
+unverified: Not run on a rebuilt server after a real git pull. The external vector-store drop for kept rows is written (reindex tool and CLI path) but no test drives an external store with a kept vanished row; the in-memory chunk drop is tested. Whether any tool restores a catalog_audit image to the live tables was not checked. The number of kept rows a real pull produces was not measured.
 ---
 
 # BUG: reindex deletes a moved file's local history when the move was not made in this catalog
@@ -18,7 +19,11 @@ unverified: 'Measured for the events table only (in-memory catalog, one event, p
 When a catalogued file's path disappears and `doc(action="move")` did not run in **this**
 catalog, `librarian(action="reindex")` hard-deletes the old row in the same pass. Seven
 tables cascade from that delete, so the row's events, augmentation, observations, links and
-entry reservation are lost on this machine. The routine trigger is a `git pull` that brings
+entry reservation left the live catalog on this machine. The append-only `catalog_audit` trail keeps
+full images of the deleted `artifact`, `artifact_augmentation`, `events`, `artifact_link` and
+`entry_cite` rows (the live catalog held 303 event and 15 augmentation delete images on
+2026-11-12); observations, `entry_reservation` and `event_edges` are not in it. Reading or restoring
+from the trail was not checked. The routine trigger is a `git pull` that brings
 a move another host made, for example a bug file archived there.
 `docs/conventions/cross-machine-catalog-resume.md` names this reindex "the repair" and does
 not say that it deletes anything.
@@ -87,27 +92,36 @@ another host archives most often.
 
 ## Fix
 
-Two candidates; not decided.
+Option A, chosen by the operator on 2026-11-12, implemented in `b53baf521`: `index_repo_sync` keeps a vanished row that carries an augmentation or events and whose stored path is not risky (`stored_path_is_risky`). The row is cleared of everything its file supplied (`clear_kept_row`, renamed from `clear_escaping_row`, so a former escaping row whose link was removed leaks nothing), its chunk rows are dropped, and the report names it in `vanished_kept_ids` and `vanished_kept_paths`. The reindex response carries both plus `vanished_kept_note`, and the external vector store drops the kept rows' vectors. A kept row is not counted in `removed`.
 
-- Short term: do not hard-delete a `gone` row that `has_history`; stamp `missing_since` and
-  report it, as the escaping branch already keeps such rows.
-- Structural: `docs/superpowers/specs/2026-11-11-repo-relative-artifact-key-design.md`
-  (draft v3) gives rows a uid that survives moves and rebinds a pulled move by key or through
-  `.codescout/aliases.tsv`, which removes the trigger for folder moves and archives.
+The indexer does not stamp `missing_since`: the reconcile pass owns that column, stamps the row on its own schedule, and `find` hides it after the grace window. Nothing deletes a kept row. A file that returns is read again and the row recovers.
+
+Not changed: a vanished row with no history is still removed; a row with a risky stored path (a dangling link, a lossy name) is still removed with its trail elided; a skipped duplicate is still removed. Not chosen: option B, which re-attaches the history to a row with the same content hash. The approved identity spec (`docs/superpowers/specs/2026-11-11-repo-relative-artifact-key-design.md`) owns that rule.
+
+The gate was green on 2026-11-12: FMT, CLIPPY, LEAN and DEFAULT lanes exit 0, Python 1836 passed.
 
 ## Tests added
 
-`librarian::indexer::tests::a_vanished_file_with_history_keeps_its_events` (`#[ignore]`, red by design). Remove the `#[ignore]` in the commit that fixes the bug; it then guards the fix.
+- `librarian::indexer::tests::a_vanished_file_with_history_keeps_its_events` (the reproduction; `#[ignore]` removed)
+- `librarian::indexer::tests::a_kept_vanished_row_is_reported_cleared_and_kept_on_the_next_run`
+- `librarian::indexer::tests::a_vanished_row_with_only_an_augmentation_is_kept`
+- `librarian::indexer::tests::a_vanished_row_without_history_is_still_removed` (control)
+- `librarian::indexer::tests::a_kept_vanished_row_recovers_when_its_file_returns`
+- `librarian::tools::reindex::tests::reindex_response_reports_a_kept_vanished_row`
+- `librarian::tools::reindex::tests::reindex_response_has_no_vanished_note_when_nothing_vanished` (control)
+
+## Fix provenance
+
+- **SHA:** `b53baf521` (`experiments`)
+- **patch-id:** `221fadba5fa8bec085e486ea7b0c51186c519037`
 
 ## Workarounds
 
-Make moves through `doc(action="move")` on every host whose catalog holds history for the
-file. After a pull that brings a move, the local history of the moved file is already at
-risk at the next reindex.
+Not needed on a build that contains `b53baf521`. On an older server binary, make moves through `doc(action="move")` on every host whose catalog holds history for the file: after a pull that brings a move, the moved file's local history is already at risk at the next reindex.
 
 ## Resume
 
-The mechanism is measured for events. The fix is left to the identity-spec owner: the short-term candidate changes how rows without a file are treated, which the identity design decides. `src/librarian/catalog/gc.rs` already holds `reconcile_missing_since` (never deletes) and move detection; check how they interact with the delete in `index_repo_sync` before choosing.
+Fixed in `b53baf521`. Open follow-ups: a live reindex after a real `git pull` on a rebuilt server; the external vector-store drop for kept rows, which no test drives; whether a tool can restore a `catalog_audit` image. Kept rows are never deleted, so they accumulate until the identity cutover exports them or an operator folds them into the moved file's row with `doc(action="graft")`.
 
 ## References
 
