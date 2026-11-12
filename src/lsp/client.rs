@@ -4314,6 +4314,50 @@ struct Point {
         );
         client.shutdown().await.unwrap();
     }
+    /// The same write, asked with `prepare_call_hierarchy` at the raw position of the call. This is
+    /// the entry point of `call_graph` and `references`. After the write the call sits three lines
+    /// lower, so the position must resolve to the item for `target_fn`, not to nothing and not to an
+    /// error from a server that still holds the old file.
+    #[tokio::test]
+    async fn prepare_call_hierarchy_follows_a_write_made_outside_codescout() {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        create_two_file_project(dir.path());
+        let (client, _lib_rs, other_rs) = synced_two_file_client(dir.path()).await;
+
+        // Baseline, polled while the server may still be loading the crate.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let before = loop {
+            let item = client
+                .prepare_call_hierarchy(&other_rs, 1, 11, "rust")
+                .await
+                .unwrap();
+            if item.is_some() || std::time::Instant::now() >= deadline {
+                break item;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        };
+        assert_eq!(
+            before.as_ref().map(|i| i.name.as_str()),
+            Some("target_fn"),
+            "baseline: the call resolves to target_fn, got {before:?}"
+        );
+
+        let original = std::fs::read_to_string(&other_rs).unwrap();
+        std::fs::write(&other_rs, format!("// a\n// b\n// c\n{original}")).unwrap();
+
+        let after =
+            retrying_on_error(|| client.prepare_call_hierarchy(&other_rs, 4, 11, "rust")).await;
+        assert_eq!(
+            after.as_ref().map(|i| i.name.as_str()),
+            Some("target_fn"),
+            "the call's new position must resolve to target_fn, got {after:?}"
+        );
+        client.shutdown().await.unwrap();
+    }
 
     /// Verify that prepare_call_hierarchy returns a CallHierarchyItem for a known function.
     ///

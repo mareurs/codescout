@@ -72,14 +72,29 @@ pub struct IndexReport {
     pub reclaimed_escaping_ids: Vec<String>,
     /// Escaping rows that were KEPT because they carry an augmentation or events, which exist
     /// nowhere else. Reported on every run until the link is removed or re-pointed (the file
-    /// then no longer exists and the row is reclaimed as an ordinary vanished one). Each is
-    /// cleared of everything its file supplied (`clear_escaping_row`).
+    /// then no longer exists and the row, still carrying its history, is kept as a vanished one:
+    /// see `vanished_kept_ids`). Each is cleared of everything its file supplied
+    /// (`clear_kept_row`).
     pub escaping_kept_ids: Vec<String>,
     /// The PATHS of `reclaimed_escaping_ids` and `escaping_kept_ids`, in the same order: an id of
     /// a deleted row resolves to nothing afterwards, and the path is what a reader can act on.
     /// Uncapped for the reason `reclaimed_escaping_ids` is.
     pub reclaimed_escaping_paths: Vec<String>,
     pub escaping_kept_paths: Vec<String>,
+    /// Vanished rows (the file no longer exists at the stored path) that were KEPT because they
+    /// carry an augmentation or events, which exist nowhere else on this machine. The artifact id
+    /// is `sha256(abs_path)`, so a move this catalog did not make (a `git pull` that brings another
+    /// host's rename or archive) leaves the old row without a file, and deleting it would cascade
+    /// away its events and augmentation. Cleared of everything its file supplied
+    /// (`clear_kept_row`) and reported on every run while the file stays gone. The reconcile pass
+    /// (`catalog::gc::reconcile_missing_since`) stamps it and `find` hides it after the grace
+    /// window; nothing deletes it. Not counted in `removed` or listed in `removed_ids`. A vanished
+    /// row whose stored path is risky (`stored_path_is_risky`) is not kept: it is removed with its
+    /// trail elided.
+    pub vanished_kept_ids: Vec<String>,
+    /// The PATHS of `vanished_kept_ids`, in the same order. Uncapped, for the reason
+    /// `reclaimed_escaping_ids` is.
+    pub vanished_kept_paths: Vec<String>,
     /// Paths THIS walk reached and refused to read because the read door refuses them (a link
     /// out of the repository, a file below a directory link out, a deny-listed location), whether
     /// or not a row existed for them. The reported form of what used to be a silent omission (or,
@@ -813,18 +828,32 @@ pub fn index_repo_sync(
             !gone && (skipped_escaping_ids.contains(cand_id) || escapes_root(cand_abs_path));
         // An escaping row is reclaimed for a POLICY reason, with augmentation params and events
         // that may exist nowhere else. One that carries any is KEPT and reported (every run, until
-        // the link is removed or re-pointed, after which the file is gone and it goes as an
-        // ordinary vanished row); one that carries none is reclaimed and reported. A kept row is
-        // CLEARED of everything its file supplied (`clear_escaping_row`), so it shows its id,
+        // the link is removed or re-pointed, after which the file is gone and it is kept as a
+        // vanished row, below); one that carries none is reclaimed and reported. A kept row is
+        // CLEARED of everything its file supplied (`clear_kept_row`), so it shows its id,
         // path, augmentation and events and nothing read from the file behind the link.
         if escaping && has_history(cand_id) {
             in_savepoint(&cat.conn, || {
                 let plan = plan_risky_audit(cat, cand_id)?;
-                clear_escaping_row(cat, cand_id)?;
+                clear_kept_row(cat, cand_id)?;
                 elide_risky_audit(cat, &plan)
             })?;
             report.escaping_kept_ids.push(cand_id.clone());
             report.escaping_kept_paths.push(cand_abs_path.clone());
+            continue;
+        }
+        // A row whose file is gone and which carries history is KEPT too. The artifact id is
+        // `sha256(abs_path)`, so a move this catalog did not make (a pulled rename or archive) is a
+        // new row, and the old row, without a file, would take its events and augmentation with it
+        // through the `ON DELETE CASCADE` foreign keys. A risky stored path (a dangling link, a
+        // lossy name) is not kept here: that row is removed below with its trail elided.
+        if gone
+            && !door.stored_path_is_risky(std::path::Path::new(cand_abs_path))
+            && has_history(cand_id)
+        {
+            in_savepoint(&cat.conn, || clear_kept_row(cat, cand_id))?;
+            report.vanished_kept_ids.push(cand_id.clone());
+            report.vanished_kept_paths.push(cand_abs_path.clone());
             continue;
         }
         // Two disjoint reasons a row must go, and `exists()` can only see the first:
@@ -990,8 +1019,11 @@ fn chunk_grain_for_file(
     grain
 }
 
-/// Clear a KEPT escaping row of everything its file supplied (decision D4 of
+/// Clear a KEPT row, an escaping one or a vanished one, of everything its file supplied (decision
+/// D4 of
 /// `docs/issues/2026-10-17-the-librarian-applies-no-read-deny-list-to-a-catalogued-outward-link.md`).
+/// A vanished row is cleared by the same rule because it may be a former escaping row whose link
+/// was removed: the file behind the link is outside the repository whatever the row's path is now.
 ///
 /// Dropped: the chunk rows, which hold the TEXT (the delete cascades to `artifact_vec_v2` through
 /// its trigger; the reindex tool drops an external store's vectors for every kept id), the title,
@@ -1001,7 +1033,7 @@ fn chunk_grain_for_file(
 /// history it is kept for, which nothing read from the file produced), and the slug, which is
 /// immutable once minted and is the key entry citations hang on. Idempotent: a row already
 /// cleared is not rewritten, so `updated_at` does not move on every reindex.
-fn clear_escaping_row(cat: &Catalog, id: &str) -> Result<()> {
+fn clear_kept_row(cat: &Catalog, id: &str) -> Result<()> {
     cat.conn.execute(
         "DELETE FROM artifact_chunk WHERE artifact_id = ?1",
         rusqlite::params![id],
@@ -2119,7 +2151,7 @@ pub async fn index_repo(
     // the plausible-sounding version invites a future reader to preserve it for a
     // reason that was never true.
     if let Some(s) = store {
-        for id in &report.removed_ids {
+        for id in report.removed_ids.iter().chain(&report.vanished_kept_ids) {
             s.delete(id).await?;
         }
     }
@@ -6750,10 +6782,9 @@ kind = "memory"
     ///
     /// A plain rename stands in for a move another host made and a `git pull` brought here: the
     /// artifact id is `sha256(abs_path)`, so the old row is `gone` at the next reindex. The row
-    /// carries an event that exists nowhere else, and the `has_history` guard is consulted only for
-    /// ESCAPING rows. The assertion states the behaviour the guard's own comment promises.
+    /// carries an event that exists nowhere else, and the `has_history` guard used to be consulted
+    /// only for ESCAPING rows. The assertion states the behaviour the guard's own comment promises.
     #[test]
-    #[ignore = "red by design: measures docs/issues/2026-11-11-reindex-deletes-local-history-of-a-file-moved-outside-this-catalog.md; the identity-spec owner decides the fix"]
     fn a_vanished_file_with_history_keeps_its_events() {
         use crate::librarian::catalog::events::{timeline_for_artifact, TestEventRowBuilder};
 
@@ -6797,6 +6828,178 @@ kind = "memory"
             1,
             "reindex hard-deleted a vanished row that carried an event; the cascade took the history"
         );
+    }
+    /// Walk `root` with a rule that classifies `docs/specs/*.md`, embeddings wanted (so the walk
+    /// writes chunk rows), and return the report.
+    fn walk_specs(cat: &Catalog, root: &std::path::Path) -> IndexReport {
+        let rules = crate::librarian::classify::load_rules(
+            "[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n",
+        )
+        .unwrap();
+        let ignore = globset::GlobSet::empty();
+        index_repo_sync(cat, &rules, root, &ignore, true, false, false)
+            .unwrap()
+            .0
+    }
+
+    fn spec_chunk_count(cat: &Catalog, id: &str) -> i64 {
+        cat.conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_chunk WHERE artifact_id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    fn spec_event_count(cat: &Catalog, id: &str) -> usize {
+        crate::librarian::catalog::events::timeline_for_artifact(cat, id, None, None, 10)
+            .unwrap()
+            .len()
+    }
+
+    /// A temp repository holding one classified file, `docs/specs/a.md`, already walked into a catalog.
+    fn one_spec_catalog() -> (tempfile::TempDir, Catalog, String) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs/specs")).unwrap();
+        std::fs::write(
+            tmp.path().join("docs/specs/a.md"),
+            "---\ntitle: Alpha\n---\nbody text\n",
+        )
+        .unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        walk_specs(&cat, tmp.path());
+        let id = crate::librarian::ids::artifact_id_from_abs(&tmp.path().join("docs/specs/a.md"));
+        assert!(
+            spec_chunk_count(&cat, &id) > 0,
+            "setup: the walk must have chunked the file"
+        );
+        (tmp, cat, id)
+    }
+
+    fn give_spec_an_event(cat: &Catalog, id: &str) {
+        use crate::librarian::catalog::events::TestEventRowBuilder;
+        crate::librarian::catalog::events::insert(
+            cat,
+            &TestEventRowBuilder::new(id, "note")
+                .with_id("e-history")
+                .with_payload("{\"text\":\"local history\"}")
+                .build(),
+        )
+        .unwrap();
+    }
+
+    /// The kept row is a stated state, not a silent one: the report names it, it is not counted as
+    /// removed, it is cleared of what its file supplied (title, kind, chunks), its history stays, and
+    /// the next run keeps it again.
+    #[test]
+    fn a_kept_vanished_row_is_reported_cleared_and_kept_on_the_next_run() {
+        let (tmp, cat, old_id) = one_spec_catalog();
+        let root = tmp.path();
+        give_spec_an_event(&cat, &old_id);
+        std::fs::rename(root.join("docs/specs/a.md"), root.join("docs/specs/a2.md")).unwrap();
+
+        let report = walk_specs(&cat, root);
+        assert_eq!(report.vanished_kept_ids, vec![old_id.clone()]);
+        assert_eq!(report.vanished_kept_paths.len(), 1);
+        assert!(
+            report.vanished_kept_paths[0].ends_with("docs/specs/a.md"),
+            "{:?}",
+            report.vanished_kept_paths
+        );
+        assert_eq!(report.removed, 0, "a kept row is not a removal");
+        assert!(report.removed_ids.is_empty());
+        assert_eq!(report.added, 1, "the renamed file is a new row");
+
+        let row = artifact::get(&cat, &old_id)
+            .unwrap()
+            .expect("the vanished row is kept");
+        assert_eq!(row.title, None, "nothing its file supplied stays");
+        assert_eq!(row.kind, "unknown");
+        assert_eq!(row.file_sha256, "");
+        assert_eq!(spec_chunk_count(&cat, &old_id), 0, "its chunks are dropped");
+        assert_eq!(spec_event_count(&cat, &old_id), 1, "its history stays");
+
+        let again = walk_specs(&cat, root);
+        assert_eq!(again.vanished_kept_ids, vec![old_id.clone()]);
+        assert_eq!(again.removed, 0);
+        assert_eq!(spec_event_count(&cat, &old_id), 1);
+    }
+
+    /// `has_history` has two arms, an augmentation and events. The event arm is covered above; this
+    /// pins the other, so a guard that read only `events` would fail here.
+    #[test]
+    fn a_vanished_row_with_only_an_augmentation_is_kept() {
+        let (tmp, cat, old_id) = one_spec_catalog();
+        let root = tmp.path();
+        crate::librarian::catalog::augmentation::upsert(
+            &cat,
+            &crate::librarian::catalog::augmentation::AugmentationRow {
+                artifact_id: old_id.clone(),
+                prompt: "p".into(),
+                params: "{\"mine\":true}".into(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-08-01T00:00:00Z".into(),
+                updated_at: "2026-08-01T00:00:00Z".into(),
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: None,
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+        std::fs::remove_file(root.join("docs/specs/a.md")).unwrap();
+
+        let report = walk_specs(&cat, root);
+        assert_eq!(report.vanished_kept_ids, vec![old_id.clone()]);
+        assert_eq!(report.removed, 0);
+        let aug = crate::librarian::catalog::augmentation::get(&cat, &old_id).unwrap();
+        assert!(
+            aug.is_some_and(|a| a.params.contains("mine")),
+            "the augmentation stays"
+        );
+    }
+
+    /// The control. Without it, "keep every vanished row" passes the tests above too. A row with no
+    /// history is still reclaimed and its id still reaches the caller that drops the vectors.
+    #[test]
+    fn a_vanished_row_without_history_is_still_removed() {
+        let (tmp, cat, old_id) = one_spec_catalog();
+        std::fs::remove_file(tmp.path().join("docs/specs/a.md")).unwrap();
+
+        let report = walk_specs(&cat, tmp.path());
+        assert_eq!(report.removed, 1);
+        assert_eq!(report.removed_ids, vec![old_id.clone()]);
+        assert!(report.vanished_kept_ids.is_empty());
+        assert!(artifact::get(&cat, &old_id).unwrap().is_none());
+    }
+
+    /// A kept row is not a tombstone. When the file comes back, the walk reads it again: the row has
+    /// its title and kind back, is no longer reported, and still holds its history.
+    #[test]
+    fn a_kept_vanished_row_recovers_when_its_file_returns() {
+        let (tmp, cat, old_id) = one_spec_catalog();
+        let root = tmp.path();
+        give_spec_an_event(&cat, &old_id);
+        std::fs::rename(root.join("docs/specs/a.md"), root.join("docs/specs/a2.md")).unwrap();
+        walk_specs(&cat, root);
+        assert_eq!(
+            artifact::get(&cat, &old_id).unwrap().expect("kept").title,
+            None,
+            "setup: the row was cleared"
+        );
+
+        std::fs::rename(root.join("docs/specs/a2.md"), root.join("docs/specs/a.md")).unwrap();
+        let report = walk_specs(&cat, root);
+        assert!(report.vanished_kept_ids.is_empty(), "{:?}", report);
+        let row = artifact::get(&cat, &old_id).unwrap().expect("row");
+        assert_eq!(row.title.as_deref(), Some("Alpha"));
+        assert_eq!(row.kind, "spec");
+        assert!(spec_chunk_count(&cat, &old_id) > 0);
+        assert_eq!(spec_event_count(&cat, &old_id), 1);
     }
 
     #[tokio::test]

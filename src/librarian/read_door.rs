@@ -336,7 +336,7 @@ pub(crate) fn holds_file_values(row: &crate::librarian::catalog::artifact::Artif
         || row.kind != "unknown"
         || row.status != "unknown"
 }
-/// Is `row` exactly what `indexer::clear_escaping_row` leaves: no file values, no content hash, no
+/// Is `row` exactly what `indexer::clear_kept_row` leaves: no file values, no content hash, no
 /// mtime? A walk always records a hash and an mtime for a file it read, so an indexed row is never
 /// mistaken for a cleared one.
 pub(crate) fn cleared_by_the_read_door(
@@ -1724,7 +1724,7 @@ fn after() -> &'static str { std::fs::File::open(q); "" }
             );
         }
     }
-    /// Review round 4, R4-3: only what `clear_escaping_row` leaves counts as cleared by the read
+    /// Review round 4, R4-3: only what `clear_kept_row` leaves counts as cleared by the read
     /// door; a row with no file values that a walk read (a hash, an mtime) does not.
     #[test]
     fn only_a_row_the_read_door_cleared_counts_as_cleared() {
