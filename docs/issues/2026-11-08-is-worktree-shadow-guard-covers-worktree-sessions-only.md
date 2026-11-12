@@ -1,7 +1,7 @@
 ---
 id: ee030095cae1cf76
 kind: bug
-status: mitigated
+status: fixed
 title: is_worktree_shadow guards worktree sessions only, so other callers can still allocate an entry id on a worktree shadow
 owners:
 - marius
@@ -15,7 +15,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-11-05-append-entry-worktree-override-bypasses-main-only-rule.md
 severity: low-medium
-unverified: Case (iii) has no test. The params-ledger branch was read, not run. Only the lean build was tested; the default-feature suite and the mutation probe were not run.
+unverified: 'The params-ledger branch was read (graft::fold_entries renumbers on merge), not run on a shadow-named call. Tested: the lean and default-feature librarian::tools:: suites (1656 and 1657 passed), clippy lean and default (exit 0). The whole gate.sh was not run. A legacy shadow with neither fork record cannot be recognised.'
 ---
 
 # BUG: is_worktree_shadow guards worktree sessions only, so other callers can still allocate an entry id on a worktree shadow
@@ -88,15 +88,16 @@ Implemented 2026-11-12 for the prose-ledger branch (option from the earlier text
 
 The params-ledger branch is unchanged. Reading `graft::fold_entries` (`src/librarian/catalog/graft.rs`, near line 403) shows `merge_worktree` renumbers a colliding id on merge-back, and `graft.rs` has tests for it. This was read, not measured on a shadow-named call.
 
-Not covered: case (iii) has no test of its own; the new check does not depend on the session, so by code it is caught. A legacy shadow with neither record cannot be recognised.
+A legacy shadow with neither fork record cannot be recognised. All three cases have a test; see Tests added.
 
 ## Tests added
 
 In `src/librarian/tools/append_entry.rs`:
 - `prose_allocation_is_refused_on_a_shadow_with_no_current_project` (case ii)
 - `prose_allocation_is_refused_on_a_shadow_from_a_main_checkout_session` (case i)
+- `prose_allocation_is_refused_on_another_worktrees_shadow_outside_main_root` (case iii; added in `4a39b3001`)
 
-Both were red before the change: the same bodies, run as probes, returned `Ok` with `HY-11`. After the change, `cargo test --lib --no-default-features librarian::tools::` passes (1656 passed, 0 failed, 1 ignored). Clippy lean exits 0. No mutation probe was run on `has_fork_record`.
+Cases (i) and (ii) were red before the change: the same bodies, run as probes, returned `Ok` with `HY-11`. With the new check disabled (`if false && has_fork_record(..)`), all three tests failed and the four other `prose_allocation_is_refused` tests passed; the mutant is reverted. With the check, `cargo test --lib librarian::tools::` passes: 1656 (lean) and 1657 (default features). Clippy lean and default exit 0. Case (iii) was not run red before the fix; its red phase is the mutant.
 
 ## Fix provenance
 
@@ -109,7 +110,7 @@ Allocate entry ids from the main checkout against the main row's id, never again
 
 ## Resume
 
-Mitigated in `86e15c988`. To move to `fixed`: add a test for case (iii) (worktree A names worktree B's shadow, B outside `main_root`), and run the default-feature suite.
+Fixed in `86e15c988`, with the case (iii) test in `4a39b3001`. Open only: run the params-ledger branch against a shadow-named call, if the owner wants the read of `fold_entries` replaced by a measurement.
 
 ## References
 
