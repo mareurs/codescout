@@ -158,10 +158,33 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     let found = user_version(&tx)?;
     refuse_if_newer(found)?;
     if found == 0 {
+        refuse_if_foreign(&tx, conn.path())?;
         tx.execute_batch(SCHEMA_SQL)?;
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     tx.commit()
+}
+
+/// `user_version` 0 is the state of every SQLite file, so a version-0 file that already holds a
+/// table is somebody else's database (the old `catalog.db`, say): the schema is not applied over it.
+fn refuse_if_foreign(conn: &Connection, path: Option<&str>) -> rusqlite::Result<()> {
+    let tables: i64 = conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table'",
+        [],
+        |r| r.get(0),
+    )?;
+    if tables > 0 {
+        return Err(failure(
+            rusqlite::ffi::SQLITE_NOTADB,
+            format!(
+                "{} is not a derived index: it has user_version 0 and already holds {tables} \
+                 table(s); refusing to apply the schema over it",
+                path.filter(|p| !p.is_empty())
+                    .unwrap_or("this in-memory database")
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// An in-memory derived index with the same schema, for tests.
@@ -169,7 +192,17 @@ pub fn open_in_memory() -> rusqlite::Result<Connection> {
     configure_and_init(Connection::open_in_memory()?)
 }
 
-/// Every table but `parse_cache`, one entry per table, rows rendered as strings and sorted.
+/// Every table except `parse_cache`, as `table -> rows`; the one oracle for "these two indexes
+/// are the same".
+///
+/// A row is its columns, in table order, each rendered with a type tag so that values of different
+/// SQLite types never compare equal (a missing title and the text `NULL`, the integer 1 and the
+/// text `1`): `N` for NULL, `I:<n>` for an integer, `R:<f>` for a real (Rust `{:?}`), `T:<text>`
+/// for text, `B:<hex>` for a blob. `checkout.root` and `checkout.commit_sha` are left out (a path
+/// and a sha identify the clone, not the content). The rows of a table are sorted by their
+/// rendered text, so the dump reads no rowid and no insert order. A table with no rows is present
+/// with an empty list. A database that cannot be read panics: this is a test and gate instrument,
+/// not a production path.
 pub fn dump_all(conn: &Connection) -> BTreeMap<String, Vec<Vec<String>>> {
     let tables: Vec<String> = conn
         .prepare(
@@ -212,15 +245,20 @@ pub fn dump_all(conn: &Connection) -> BTreeMap<String, Vec<Vec<String>>> {
     dump
 }
 
-/// Render one SQLite value as text; `NULL` is rendered as the word `NULL`.
+/// Render one SQLite value with its type tag (see [`dump_all`]).
 fn render(value: rusqlite::types::ValueRef<'_>) -> String {
     use rusqlite::types::ValueRef;
     match value {
-        ValueRef::Null => "NULL".to_owned(),
-        ValueRef::Integer(i) => i.to_string(),
-        ValueRef::Real(f) => format!("{f:?}"),
-        ValueRef::Text(t) => String::from_utf8_lossy(t).into_owned(),
-        ValueRef::Blob(b) => b.iter().map(|byte| format!("{byte:02x}")).collect(),
+        ValueRef::Null => "N".to_owned(),
+        ValueRef::Integer(i) => format!("I:{i}"),
+        ValueRef::Real(f) => format!("R:{f:?}"),
+        ValueRef::Text(t) => format!("T:{}", String::from_utf8_lossy(t)),
+        ValueRef::Blob(b) => format!(
+            "B:{}",
+            b.iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        ),
     }
 }
 
@@ -415,11 +453,11 @@ mod tests {
 
         // Sorted: document rows by their rendered text, edge rows likewise.
         let docs: Vec<&str> = a["document"].iter().map(|r| r[0].as_str()).collect();
-        assert_eq!(docs, ["docs/a.md", "docs/b.md", "docs/c.md"]);
+        assert_eq!(docs, ["T:docs/a.md", "T:docs/b.md", "T:docs/c.md"]);
         let mut sorted = a["edge"].clone();
         sorted.sort();
         assert_eq!(a["edge"], sorted);
-        assert_eq!(a["edge"][0][..3], ["docs/a.md", "0", "3"]);
+        assert_eq!(a["edge"][0][..3], ["T:docs/a.md", "I:0", "I:3"]);
         // Every table but parse_cache is present, empty ones included.
         let tables: Vec<&str> = a.keys().map(String::as_str).collect();
         assert_eq!(
@@ -449,47 +487,74 @@ mod tests {
         );
         assert_eq!(
             one["checkout"],
-            [["repo-x", "committed", "committed+builtin"]]
+            [["T:repo-x", "T:committed", "T:committed+builtin"]]
         );
     }
 
     #[test]
     fn no_table_has_a_timestamp_or_random_default() {
         let conn = open_in_memory().unwrap();
-        let banned = ["datetime", "random", "uuid", "current_timestamp"];
         let mut found = Vec::new();
 
-        // Column defaults, table by table.
+        // Strong form: the schema has no default and no generated column at all, so nothing in a
+        // row can come from a clock or a random source. `table_xinfo` (not `table_info`) lists
+        // generated columns too.
         for table in table_names(&conn) {
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT name, dflt_value FROM pragma_table_info('{table}')"
+                    "SELECT name, dflt_value, hidden FROM pragma_table_xinfo('{table}')"
                 ))
                 .unwrap();
-            let cols: Vec<(String, Option<String>)> = stmt
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            let cols: Vec<(String, Option<String>, i64)> = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
                 .unwrap()
                 .map(Result::unwrap)
                 .collect();
-            for (col, dflt) in cols {
-                let Some(dflt) = dflt else { continue };
-                if banned.iter().any(|b| dflt.to_lowercase().contains(b)) {
-                    found.push(format!("{table}.{col} DEFAULT {dflt}"));
+            for (col, dflt, hidden) in cols {
+                if let Some(dflt) = dflt {
+                    found.push(format!("{table}.{col} has DEFAULT {dflt}"));
+                }
+                if hidden != 0 {
+                    found.push(format!("{table}.{col} is hidden or generated ({hidden})"));
                 }
             }
         }
-        // Trigger bodies.
+        // No trigger at all.
         let mut stmt = conn
-            .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger'")
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'")
             .unwrap();
-        let triggers: Vec<(String, String)> = stmt
+        let triggers: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        found.extend(triggers.into_iter().map(|t| format!("trigger {t}")));
+
+        // Second check: no clock or random function named anywhere in the stored schema text.
+        let banned = [
+            "datetime",
+            "random",
+            "uuid",
+            "current_timestamp",
+            "current_date",
+            "current_time",
+            "strftime",
+            "julianday",
+            "unixepoch",
+            "'now'",
+        ];
+        let mut stmt = conn
+            .prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL")
+            .unwrap();
+        let objects: Vec<(String, String)> = stmt
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        for (name, sql) in triggers {
-            if banned.iter().any(|b| sql.to_lowercase().contains(b)) {
-                found.push(format!("trigger {name}"));
+        for (name, sql) in objects {
+            let sql = sql.to_lowercase();
+            if let Some(word) = banned.iter().find(|b| sql.contains(**b)) {
+                found.push(format!("{name} mentions {word}"));
             }
         }
         assert!(
@@ -508,5 +573,95 @@ mod tests {
             .expect_err("the same (rel_path, reason) twice is a duplicate");
         assert!(err.to_string().contains("UNIQUE"), "{err}");
         assert_eq!(dump_all(&conn)["skipped"].len(), 2);
+    }
+    /// A document row whose only variable column is `title` (nullable TEXT).
+    fn document_with_title(title: Option<&str>) -> Connection {
+        let conn = open_in_memory().unwrap();
+        insert_document(&conn, "docs/a.md", "k-a");
+        conn.execute("UPDATE document SET title = ?1", params![title])
+            .unwrap();
+        conn
+    }
+
+    #[test]
+    fn the_dump_tells_a_missing_value_from_the_text_null() {
+        let missing = dump_all(&document_with_title(None));
+        let text_null = dump_all(&document_with_title(Some("NULL")));
+        let empty = dump_all(&document_with_title(Some("")));
+        assert_ne!(
+            missing, text_null,
+            "NULL and the text NULL must dump differently"
+        );
+        assert_ne!(missing, empty);
+        assert_ne!(text_null, empty);
+        assert_eq!(missing["document"][0][5], "N");
+        assert_eq!(text_null["document"][0][5], "T:NULL");
+    }
+
+    #[test]
+    fn the_dump_tells_every_sqlite_type_apart() {
+        use rusqlite::types::ValueRef;
+        // No column of the schema keeps integer 1 and text "1" apart (type affinity converts
+        // one into the other on insert), so the renderer is checked directly.
+        let rendered = [
+            render(ValueRef::Null),
+            render(ValueRef::Integer(1)),
+            render(ValueRef::Real(1.0)),
+            render(ValueRef::Text(b"1")),
+            render(ValueRef::Text(b"NULL")),
+            render(ValueRef::Blob(&[1])),
+        ];
+        let distinct: std::collections::BTreeSet<&String> = rendered.iter().collect();
+        assert_eq!(distinct.len(), rendered.len(), "{rendered:?}");
+        assert_eq!(rendered, ["N", "I:1", "R:1.0", "T:1", "T:NULL", "B:01"]);
+    }
+
+    #[test]
+    fn open_refuses_a_foreign_database_by_name_and_leaves_it_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.db");
+        {
+            let raw = Connection::open(&path).unwrap();
+            raw.execute_batch("CREATE TABLE chunks (id TEXT); INSERT INTO chunks VALUES ('x');")
+                .unwrap();
+        }
+
+        let err = open(&path).expect_err("a foreign database must be refused");
+        let text = err.to_string();
+        assert!(
+            text.contains(&path.display().to_string()) && text.contains("not a derived index"),
+            "the refusal names the file: {text}"
+        );
+        let raw = Connection::open(&path).unwrap();
+        assert_eq!(table_names(&raw), ["chunks"], "no derived table was added");
+        assert_eq!(user_version(&raw), 0);
+        let rows: i64 = raw
+            .query_row("SELECT count(*) FROM chunks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn a_fresh_file_and_an_empty_existing_file_still_open() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let fresh = dir.path().join("fresh.db");
+        assert_eq!(user_version(&open(&fresh).unwrap()), SCHEMA_VERSION);
+
+        // A zero-byte file.
+        let zero = dir.path().join("zero.db");
+        std::fs::write(&zero, b"").unwrap();
+        assert_eq!(user_version(&open(&zero).unwrap()), SCHEMA_VERSION);
+
+        // A real SQLite file with no table (one was created and dropped).
+        let emptied = dir.path().join("emptied.db");
+        {
+            let raw = Connection::open(&emptied).unwrap();
+            raw.execute_batch("CREATE TABLE t (x); DROP TABLE t;")
+                .unwrap();
+        }
+        let conn = open(&emptied).unwrap();
+        assert_eq!(user_version(&conn), SCHEMA_VERSION);
+        assert_eq!(table_names(&conn).len(), 8);
     }
 }
