@@ -134,7 +134,8 @@ pub fn load(root: &Path) -> anyhow::Result<KeySpace> {
             return Err(e.into_anyhow()).with_context(|| format!("reading {}", path.display()));
         }
     };
-    KeySpace::from_text(&text).with_context(|| format!("reading {}", path.display()))
+    // `from_text` already names the file (relative to its root); this says which repository.
+    KeySpace::from_text(&text).with_context(|| format!("in the repository at {}", root.display()))
 }
 
 #[cfg(test)]
@@ -257,6 +258,16 @@ mod tests {
         let err = format!("{:#}", load(dir.path()).unwrap_err());
         assert!(err.contains(KEY_SPACE_FILE_REL), "{err}");
         assert!(KeySpace::from_text("exclud = []\n").is_err());
+    }
+
+    #[test]
+    fn a_parse_error_from_load_names_the_file_once() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(dir.path(), "exclude = [\n");
+        let err = format!("{:#}", load(dir.path()).unwrap_err());
+        assert_eq!(err.matches("key-space.toml").count(), 1, "{err}");
+        // It still says which repository, because the file is named relative to its root.
+        assert!(err.contains(&dir.path().display().to_string()), "{err}");
     }
 
     #[test]

@@ -288,6 +288,23 @@ eq   "15 the next candidate is still used" "$RC" "0"
 has  "15 and the dead \$CODESCOUT_BIN is named" "$OUT" "/nonexistent/codescout"
 has  "15 as not live" "$OUT" "not a live"
 
+# --- 16. Probe order with two LIVE candidates: $CODESCOUT_BIN wins over target/release ----------
+# Case 11 and 12 make the earlier candidates dead; none has two that are live, so the order itself
+# was never asserted. The second stub logs a marker line on every call, probe included, so the
+# marker is absent exactly when it was never even probed.
+R=$(newrepo docs/a/readme.md)
+mkdir -p "$R/target/release"
+{ head -1 "$STUB"; echo 'echo "second stub was called" >> "${STUB_LOG:-/dev/null}"'; tail -n +2 "$STUB"; } > "$R/target/release/codescout"
+chmod +x "$R/target/release/codescout"
+: > "$LOG"
+OUT=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    PATH="$SYSPATH" CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" \
+    STUB_RC=1 STUB_OUT="$PROBLEM" bash "$CHECK" 2>&1); RC=$?
+eq    "16 a live \$CODESCOUT_BIN is used" "$RC" "1"
+has   "16 the first candidate was the one asked" "$(cat "$LOG")" "argv:"
+lacks "16 the second candidate was never probed" "$(cat "$LOG")" "second stub was called"
+
 echo
 echo "key-space: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

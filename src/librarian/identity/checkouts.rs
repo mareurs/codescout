@@ -86,6 +86,14 @@ fn first_commits_until(
 ) -> anyhow::Result<Option<Vec<String>>> {
     let repo = git2::Repository::open(git_root)
         .with_context(|| format!("opening the repository at {}", git_root.display()))?;
+    first_commits_in(&repo, expired)
+}
+
+/// [`first_commits_until`] on a repository that is already open.
+fn first_commits_in(
+    repo: &git2::Repository,
+    expired: &dyn Fn() -> bool,
+) -> anyhow::Result<Option<Vec<String>>> {
     let mut walk = repo.revwalk()?;
     // `push_head` on an unborn branch reports a generic error, not a code to match on; `head`
     // reports `UnbornBranch`.
@@ -135,8 +143,7 @@ fn inspect(git_root: &Path, expired: &dyn Fn() -> bool) -> anyhow::Result<Inspec
     if repo.is_shallow() {
         return Ok(Inspected::Shallow);
     }
-    drop(repo);
-    Ok(match first_commits_until(git_root, expired)? {
+    Ok(match first_commits_in(&repo, expired)? {
         Some(roots) => Inspected::Roots(roots),
         None => Inspected::TimedOut,
     })
@@ -287,6 +294,10 @@ pub fn scan(
     })
 }
 
+/// Directories a scan never enters, by name: dependency and build output hold no checkout of the
+/// user's, only vendored or generated trees that can be very large.
+const SKIPPED_DIRS: [&str; 2] = ["node_modules", "target"];
+
 /// The nearest directory at or above `dir` that holds `.git`, looking no higher than `top`.
 /// `None` when there is none: the project owns no repository of its own inside the scan.
 fn git_root_within(dir: &Path, top: &Path) -> Option<PathBuf> {
@@ -359,7 +370,9 @@ fn scan_with(
                 Ok(entry) => match entry.file_type() {
                     Ok(t) if t.is_dir() => {
                         let child = entry.file_name();
-                        if !child.to_string_lossy().starts_with('.') {
+                        if !child.to_string_lossy().starts_with('.')
+                            && !SKIPPED_DIRS.contains(&child.to_string_lossy().as_ref())
+                        {
                             children.push(child);
                         }
                     }
@@ -859,6 +872,35 @@ mod tests {
         assert!(r.collisions.is_empty() && r.same_repo.is_empty(), "{r:?}");
         assert_eq!(r.unverified.len(), 1, "{r:?}");
     }
+    #[test]
+    fn dependency_and_build_directories_are_not_scanned() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_repo(&this, Some("alpha"), "a");
+        let work = tmp.path().join("work");
+        // Same name, different history: scanned, each would be a collision.
+        make_repo(&work.join("node_modules/p"), Some("alpha"), "b");
+        make_repo(&work.join("target/q"), Some("alpha"), "c");
+        make_repo(&work.join("real"), Some("alpha"), "d");
+        let r = scan_default("alpha", &this, &[&work]);
+        assert_eq!(r.collisions, vec![work.join("real")], "{r:?}");
+    }
+
+    #[test]
+    fn a_same_named_unborn_repo_is_unverified_through_a_scan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_repo(&this, Some("alpha"), "a");
+        let fresh = tmp.path().join("work/fresh");
+        std::fs::create_dir_all(fresh.join(".codescout")).unwrap();
+        git(&fresh, &["init", "-q", "-b", "main"]);
+        std::fs::write(fresh.join(".codescout/project.toml"), "").unwrap();
+        std::fs::write(fresh.join(".codescout/repo.toml"), "name = \"alpha\"\n").unwrap();
+        let r = scan_default("alpha", &this, &[&tmp.path().join("work")]);
+        assert!(r.collisions.is_empty() && r.same_repo.is_empty(), "{r:?}");
+        assert_eq!(r.unverified, vec![fresh], "{r:?}");
+    }
+
     #[test]
     fn a_git_less_project_under_an_ancestor_repo_is_judged_as_itself() {
         let tmp = tempfile::tempdir().unwrap();

@@ -1387,7 +1387,7 @@ fn format_activate_project(result: &Value) -> String {
         let suggested = note.get("suggested").and_then(|v| v.as_str()).unwrap_or("");
         let action = note.get("action").and_then(|v| v.as_str()).unwrap_or("");
         Some(format!(
-            "⚠ REPO NAME UNCONFIRMED (suggested `{suggested}`; confirm it with the user): {action}"
+            "⚠ REPO NAME UNCONFIRMED (suggested `{suggested}`; confirm it with the user, the call writes the committed .codescout/repo.toml): {action}"
         ))
     } else {
         result["repo_name_error"]

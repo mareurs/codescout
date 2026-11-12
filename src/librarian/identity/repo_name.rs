@@ -184,7 +184,9 @@ pub fn write(root: &Path, name: &RepoName) -> anyhow::Result<PathBuf> {
 /// `.codescout/workspace.toml`, else the root's basename, else `repo`. Each
 /// goes through [`canonicalize`].
 ///
-/// A linked worktree offers what its main checkout would: `workspace.toml` is gitignored, so a
+/// A linked worktree offers what its main checkout would, and first of all the name in the main
+/// checkout's `repo.toml` when it has one (a worktree branched before that file was committed has
+/// none of its own). Otherwise `workspace.toml` is gitignored, so a
 /// worktree never has one, and a worktree's folder name is not the repo's name. Both lookups use
 /// the main checkout's root there. Only a linked worktree is redirected (the gate every other
 /// librarian caller uses): a submodule's `.git` file has no `worktrees` component, so a submodule
@@ -194,7 +196,7 @@ pub fn suggest(root: &Path) -> RepoName {
     use crate::util::path_security::{is_linked_worktree, worktree_main_root};
 
     let root = if is_linked_worktree(root) {
-        worktree_main_root(root)
+        let main = worktree_main_root(root)
             .map(|main| {
                 let main = if main.is_relative() {
                     root.join(main)
@@ -203,7 +205,13 @@ pub fn suggest(root: &Path) -> RepoName {
                 };
                 std::fs::canonicalize(&main).unwrap_or(main)
             })
-            .unwrap_or_else(|| root.to_path_buf())
+            .unwrap_or_else(|| root.to_path_buf());
+        // A worktree branched before `repo.toml` was committed has none; the main checkout's name is
+        // the repo's name, so it goes ahead of a guess.
+        if let Ok(Some(name)) = read(&main) {
+            return name;
+        }
+        main
     } else {
         root.to_path_buf()
     };
@@ -342,6 +350,26 @@ mod tests {
         .unwrap();
         assert_eq!(suggest(&wt).as_str(), "code-scout");
         assert_eq!(suggest(&main).as_str(), "code-scout");
+    }
+
+    // A worktree branched before `repo.toml` was committed has none of its own, but its main checkout
+    // may: the name the repo already has is the one to offer, ahead of a guess from `workspace.toml`
+    // or a folder name.
+    #[test]
+    fn suggest_in_a_linked_worktree_prefers_the_main_checkouts_repo_name() {
+        let (_tmp, main, wt) = main_and_linked_worktree();
+        std::fs::create_dir_all(main.join(".codescout")).unwrap();
+        std::fs::write(
+            main.join(".codescout/workspace.toml"),
+            "[workspace]\nname = \"Code Scout\"\n",
+        )
+        .unwrap();
+        write(&main, &RepoName::parse("the-real-name").unwrap()).unwrap();
+        assert!(
+            read(&wt).unwrap().is_none(),
+            "the worktree has no repo.toml"
+        );
+        assert_eq!(suggest(&wt).as_str(), "the-real-name");
     }
 
     #[test]
