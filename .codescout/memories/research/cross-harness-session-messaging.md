@@ -81,7 +81,7 @@ mode with only `codex queue` allowed; Codex credentials by symlink. All of it wa
   (https://github.com/anthropics/claude-code/issues/44380 says it does not for chat plugins).
 - codescout pins `rmcp` 1.3.0. Its capability type is `BTreeMap<String, JsonObject>` and it has
   `CustomNotification::new(method, params)`, so codescout can probably declare and send a channel
-  notification. Not compiled. `src/server.rs:2253` declares only tools today.
+  notification. Not compiled. `get_info` (src/server.rs:2774) declares tools, tool_list_changed and resources, plus the unix-only experimental `codescout/nativeExecutionFence`; it declares no `claude/channel` capability.
 - The socket is documented, needs no flag, and was measured. Prefer it.
 
 ## Hooks under the Bash deny (MEASURED)

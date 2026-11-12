@@ -42,6 +42,9 @@ fn key_gate(dir: &Path, extra: &[&str]) -> Output {
         .arg("--project")
         .arg(dir)
         .args(extra)
+        // The same isolation `git()` above has: the user's git config must not change a verdict.
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")

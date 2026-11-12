@@ -14,7 +14,7 @@ src/
   agent/             — Agent, ActiveProject, project state, write locking, per-project config
   tools/
     mod.rs           — the module list; read this first, it is the authoritative index
-    core/            — Tool trait, ToolContext (types.rs), OutputGuard (guards.rs),
+    core/            — Tool trait, ToolContext (types.rs), guards.rs (worktree-write guards; `OutputGuard` lives in `tools/output.rs`),
                        RecoverableError, params.rs, path_strip.rs (PATH_KEYS/ROOT_KEYS
                        allowlist walker), write_ack.rs, param_alias.rs,
                        response_fit.rs, guide_emit.rs, cap_probe.rs
@@ -88,7 +88,7 @@ a path source.
 
 ## Tool Registry / Count
 
-`CodeScoutServer::from_parts_with_env` (`src/server.rs:379`) builds the tool list. **19 tools
+`CodeScoutServer::from_parts_with_env` (`src/server.rs`) builds the tool list. **19 tools
 are always registered** (`ReadFile`, `Tree`, `Grep`, `CreateFile`, `EditFile`, `RunCommand`,
 `Onboarding`, `ApproveWrite`, `Symbols`, `References`, `SymbolAt`, `CallGraph`, `EditCode`,
 `Memory`, `SemanticSearch`, `Index`, `Workspace`, `Library`, `GetGuide`), plus **`doc` and
@@ -96,14 +96,14 @@ are always registered** (`ReadFile`, `Tree`, `Grep`, `CreateFile`, `EditFile`, `
 runtime (it is compiled into every build) — bringing the default advertised surface to
 **21 tools**. Two more are runtime-conditional and NOT part of the baseline count: `peer`
 (Unix-only, opt-in via `CODESCOUT_PEER_ENABLED`) and the debug-only `__probe_description_cap__`
-(`CODESCOUT_PROBE=1`). Re-verified 2026-10-19 against `src/server.rs:379-597` (the 19-entry `vec!`, then the `peer`, probe and librarian additions).
+(`CODESCOUT_PROBE=1`). Re-verified 2026-10-19 against `src/server.rs` (the 19-entry `vec!`, then the `peer`, probe and librarian additions).
 
 A 2026-09-02 "tool-surface collapse" retired several call forms that must never reappear in a
 prompt surface: `find_symbol`, `list_symbols`, `replace_symbol`, `insert_code`, `rename_symbol`,
 `search_pattern`, `read_markdown`, `edit_markdown`, `artifact_augment`, `artifact_event`,
 `artifact_refresh`, and the tool name `artifact` **when written as a call form with an opening
 paren** — the bare noun is still correct prose, which is why the canonical list carries that one
-entry with its paren attached. Canonical list: `DEPRECATED_TOOL_NAMES`, `src/prompts/mod.rs:2322`.
+entry with its paren attached. Canonical list: `DEPRECATED_TOOL_NAMES`, `src/prompts/mod.rs`.
 
 Do not "improve" the sentence above by writing the paren form literally. `reader_docs_contain_no_retired_call_forms`
 scans `.codescout/` and cannot tell a mention from an invocation claim, so naming the retired
@@ -112,14 +112,14 @@ form exactly is what trips it — writing it without the paren is the documented
 ## Key Abstractions
 
 - **`CodeScoutServer`** (`server.rs`) — MCP `ServerHandler` impl; owns the tool registry;
-  all `CallToolRequest`s flow through `call_tool_inner()` (`src/server.rs:1349`)
-- **`Tool` trait** (`tools/core/types.rs:1368`) **+ `ToolContext`** (`tools/core/types.rs:293`) —
+  all `CallToolRequest`s flow through `call_tool_inner()` (`src/server.rs`)
+- **`Tool` trait** (`tools/core/types.rs`) **+ `ToolContext`** (`tools/core/types.rs:293`) —
   every tool implements `call()`; `call_content()` is the MCP entry point (handles output
   buffer routing, and — since the 2026-08-09 field-aware-path-strip work — the
   `PATH_KEYS`/`ROOT_KEYS` allowlist walk over the typed `Value`, strictly before
   buffering/formatting)
 - **`Agent` / `ActiveProject`** (`agent/mod.rs`) — project state (config, memory, write lock);
-  tools access it via `with_project(|p| ...)` (`agent/mod.rs:1541`); `with_project_at` /
+  tools access it via `with_project(|p| ...)` (`agent/mod.rs`); `with_project_at` /
   `with_project_at_mut` are the workspace-override variants
 - **`OutputGuard`** (`tools/output.rs`) — enforces two-mode progressive disclosure:
   Exploring (compact, capped at 200 items) / Focused (full detail, paginated)
@@ -131,7 +131,7 @@ form exactly is what trips it — writing it without the paren is the documented
 ## Data Flow: MCP Tool Call
 
 1. `ServerHandler::call_tool()` receives `CallToolRequest`
-2. `call_tool_inner()` (`src/server.rs:1349`) resolves tool by name, checks access, parses JSON
+2. `call_tool_inner()` (`src/server.rs`) resolves tool by name, checks access, parses JSON
 3. Builds `ToolContext` (Agent, LspManager, output buffer, progress reporter)
 4. Acquires write guard if mutating
 5. Calls `tool.call_content()` → `tool.call()`, then the `PATH_KEYS`/`ROOT_KEYS` allowlist

@@ -1,7 +1,7 @@
 ---
 id: '6d16009652c88e57'
 kind: spec
-status: draft
+status: active
 title: 'Tracker lifecycle: entries as files, collections as folders, three lifecycle folders'
 tags:
 - trackers
@@ -12,7 +12,9 @@ tags:
 
 # Tracker lifecycle: entries as files, collections as folders, three lifecycle folders (design)
 
-**Status:** draft 2026-11-11. Approach and decisions D1–D5 approved by the operator in the
+**Status:** active since 2026-11-12. Plans L-A (core) and L-B (core completion) are merged into
+`experiments`; Plan L-B2 (tools) waits for identity Plan C, and Plan L-E (migration) is not
+written. Drafted 2026-11-11. Approach and decisions D1–D5 approved by the operator in the
 brainstorm; leaf archives and three lifecycle folders approved after the builder check;
 repo scope (§ Repo scope) taken as option a, the recommended one. Work-stream log:
 `docs/trackers/tracker-organization-session-log.md`. Measurements:
@@ -326,7 +328,7 @@ into a new entry.
 | `revisit_due` | a blocked or deferred entry's `revisit_by` has passed |
 | `cited_target_closed` | a non-terminal entry has a relation line to a target whose `closed` date is after the entry's `status_since` |
 | `stream_all_terminal` | every entry of a stream is terminal but the stream is not archived |
-| `collection_invalid` | a collection's readme breaks the rules: a schema that does not parse or lacks a required key, `exit_when` missing under `streams/` or `temp/` or present under `ledgers/`, a nested collection, a non-Markdown file in the collection, a file whose frontmatter block does not parse, or a file name that is no key |
+| `collection_invalid` | a collection's readme breaks the rules: a schema that does not parse or lacks a required key, `exit_when` missing under `streams/` or `temp/` or present under `ledgers/`, a nested collection, a second readme in one collection folder (the first in path order is the readme), a non-Markdown file in the collection, a file whose frontmatter block does not parse, or a file name that is no key |
 | `ledger_quiet` | a ledger with `review_every` has had no entry created or closed in that period |
 | `terminal_in_live_dir` | a terminal entry of a ledger has stayed outside `archive/` for more than 30 days after its `closed` date (the default grace; a stream is archived whole, see § D3, and `stream_all_terminal` covers it) |
 | `orphan_entry` | a file under a lifecycle folder has no collection readme above it |

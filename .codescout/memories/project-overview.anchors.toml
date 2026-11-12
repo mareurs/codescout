@@ -3,24 +3,24 @@
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "f3ed3d1b56f16e11720fbe0da4d3cbc7e4c44462ec93048dc910a8f548e37f21"
+hash = "e7dd79a8adc030e72a71f97c34b21d2aa7b63ce611ee8391fb8656952a523e87"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "a04f9e9f31705dffc1fbbd0cc3ad85c5678c993e5a83c5b8e62ce58e7e531784"
+hash = "cce80cadc38211a6736729eb6d9d488364ec27e382fda4b726f65ee25068007a"
 
 [[anchors]]
 path = "src/librarian/tools/mod.rs"
-hash = "de00ce2c69111e3686bcab2bbe21e89afe0880423a2c010a2dc6e95c432efbb0"
+hash = "6872c9a357041f5d88ccab8a74cd9e83c39c4f705b46036516587e399b88b477"
 
 [[anchors]]
 path = "src/tools/guide.rs"
-hash = "0a1bbaf2a73d625748ffd74113b074f28ff919b7cc2fd64f19b053f044015df2"
+hash = "8e63b6a42ccc78ac46a5ecf60248ffe497affe7a9a374c38a33a84bcf3c88170"
 
 [[anchors]]
 path = "src/lib.rs"
-hash = "9b18986bee3d2fe5ebe76e8269eab313771b6f64d0353f16d3cb9df552718b5f"
+hash = "ed54b3f52ba4f817e1946d0ebdde211127aaa8c5780b86f2f704c280727c118f"
 
 [[anchors]]
 path = "src/main.rs"
-hash = "91ef20cb34ad1dd0091d0c92a28a4e19098eb4212990a7842efcf33736cf28bd"
+hash = "0393bdd42de9410f35a9428acaacd1ccb9da3832db58f2adc956015ce5f7ce50"

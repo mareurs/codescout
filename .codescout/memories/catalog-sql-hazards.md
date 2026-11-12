@@ -36,9 +36,10 @@ escape char, with an explicit `ESCAPE` clause — else `%`/`_` in the input act 
 and pair it with an `ESCAPE` clause; never re-inline the triple-replace. The helper carries
 5 unit tests plus a DRY gate, `like_escape_idiom_is_not_inlined_outside_helper`, that fails
 if the Rust idiom appears anywhere but the helper itself. Live callers:
-`src/librarian/filter.rs` (`compile_leaf`, 4 call sites), `src/librarian/catalog/augmentation.rs`
-(`resolve_cite_ref`), `src/librarian/catalog/gc.rs` (`detect_move_candidates`,
-`plan_rehome`, `rehome_commits`) and `src/librarian/reindex_progress.rs` (`read_all`). The
+`src/librarian/filter.rs` (`compile_leaf`, 4 call sites), `src/librarian/catalog/gc.rs` (`detect_move_candidates`,
+`plan_rehome`, `rehome_commits`) and `src/librarian/reindex_progress.rs` (`read_all`). `resolve_cite_ref`
+(`src/librarian/catalog/augmentation.rs`) no longer uses the helper: its last step matches `rel_path`
+byte-exact with `substr`, because LIKE folds ASCII case. The
 extraction and its gate **shipped**, and the bug file that asked for them is closed —
 `docs/issues/archive/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md`. Earlier
 point fixes: `4b922ac4` (worktree `covering()`), and the Stage-2 `resolve_cite_ref` bug that

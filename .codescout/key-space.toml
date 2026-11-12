@@ -16,7 +16,8 @@
 # migration renames, not something to hide here. Re-check an entry by dropping it and running
 # `codescout key-gate` in full mode: each entry below except `.claude`, removed alone, adds a
 # key problem (an invalid key, a new duplicate-key group) or enlarges an existing group.
-# `.claude` holds one skill today and is listed on the principle, for the second skill.
+# `.claude` holds one tracked SKILL.md (and a tracked symlink to another skill) today and is
+# listed on the principle, for the second skill.
 exclude = [
     # Names dictated by the tool that reads them: pi's AGENTS.md and README.md, a systemd
     # unit's README.md. Example integration files for other tools, not repository documents.

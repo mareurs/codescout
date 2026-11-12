@@ -6,6 +6,15 @@
 //! (a collision). The two are told apart by root commits: a clone shares at least one parentless
 //! commit with its source. The walk is bounded (depth, directory count, wall clock) and a result
 //! always says what was examined.
+//!
+//! A shared root commit is evidence, not proof. A repository that vendors another's history shares
+//! its root commits and is told `Same` although it is a different project, and a history rewrite
+//! gives a real clone no shared root, so it is told `Collision`. A caller must not present
+//! `same_repo` as a certainty.
+//!
+//! A project is judged against the repository found at or below the scan root that holds it. A
+//! project with no `.git` of its own inside the scan is judged as itself, never as a repository
+//! above the scan root.
 
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -14,7 +23,6 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 
 use super::repo_name::{self, RepoName};
-use crate::librarian::current_project::lookup_git_root;
 
 /// The bounds of one scan.
 #[derive(Debug, Clone)]
@@ -78,6 +86,14 @@ fn first_commits_until(
 ) -> anyhow::Result<Option<Vec<String>>> {
     let repo = git2::Repository::open(git_root)
         .with_context(|| format!("opening the repository at {}", git_root.display()))?;
+    first_commits_in(&repo, expired)
+}
+
+/// [`first_commits_until`] on a repository that is already open.
+fn first_commits_in(
+    repo: &git2::Repository,
+    expired: &dyn Fn() -> bool,
+) -> anyhow::Result<Option<Vec<String>>> {
     let mut walk = repo.revwalk()?;
     // `push_head` on an unborn branch reports a generic error, not a code to match on; `head`
     // reports `UnbornBranch`.
@@ -127,8 +143,7 @@ fn inspect(git_root: &Path, expired: &dyn Fn() -> bool) -> anyhow::Result<Inspec
     if repo.is_shallow() {
         return Ok(Inspected::Shallow);
     }
-    drop(repo);
-    Ok(match first_commits_until(git_root, expired)? {
+    Ok(match first_commits_in(&repo, expired)? {
         Some(roots) => Inspected::Roots(roots),
         None => Inspected::TimedOut,
     })
@@ -200,8 +215,10 @@ impl Scan<'_> {
         }
     }
 
-    /// Judge the project at `dir`, when `dir` is one.
-    fn visit_project(&mut self, dir: &Path) {
+    /// Judge the project at `dir`, when `dir` is one. `top` is the scan root that holds `dir`:
+    /// the search for the project's git root stops there, so a git-less project is not read as
+    /// the repository (a dotfiles repo in `$HOME`, say) that happens to sit above the scan.
+    fn visit_project(&mut self, dir: &Path, top: &Path) {
         let project_file = dir.join(".codescout/project.toml");
         // Existence only: the file is never read.
         match std::fs::metadata(&project_file) {
@@ -213,7 +230,7 @@ impl Scan<'_> {
                 return;
             }
         }
-        let git_root = lookup_git_root(dir).unwrap_or_else(|| dir.to_path_buf());
+        let git_root = git_root_within(dir, top).unwrap_or_else(|| dir.to_path_buf());
         let git_canonical = canonical(&git_root);
         if git_canonical == self.this_canonical || !self.judged.insert(git_canonical) {
             return;
@@ -277,6 +294,19 @@ pub fn scan(
     })
 }
 
+/// Directories a scan never enters, by name: dependency and build output hold no checkout of the
+/// user's, only vendored or generated trees that can be very large.
+const SKIPPED_DIRS: [&str; 2] = ["node_modules", "target"];
+
+/// The nearest directory at or above `dir` that holds `.git`, looking no higher than `top`.
+/// `None` when there is none: the project owns no repository of its own inside the scan.
+fn git_root_within(dir: &Path, top: &Path) -> Option<PathBuf> {
+    dir.ancestors()
+        .take_while(|a| a.starts_with(top))
+        .find(|a| a.join(".git").exists())
+        .map(Path::to_path_buf)
+}
+
 /// [`scan`] with the clock injected: `expired()` is asked once per directory and every few
 /// hundred commits of a root-commit walk. A test drives it by call count instead of by sleeping.
 fn scan_with(
@@ -302,16 +332,16 @@ fn scan_with(
         },
     };
 
-    // (path as the caller spelled it, canonical path, depth below its root)
-    let mut queue: VecDeque<(PathBuf, PathBuf, usize)> = VecDeque::new();
+    // (path as the caller spelled it, canonical path, depth below its root, that root as spelled)
+    let mut queue: VecDeque<(PathBuf, PathBuf, usize, PathBuf)> = VecDeque::new();
     for root in &given {
         match std::fs::canonicalize(root) {
-            Ok(canon) => queue.push_back((root.clone(), canon, 0)),
+            Ok(canon) => queue.push_back((root.clone(), canon, 0, root.clone())),
             Err(e) => state.report.unreadable.push((root.clone(), e.to_string())),
         }
     }
     let mut visited: BTreeSet<PathBuf> = BTreeSet::new();
-    while let Some((shown, canon, depth)) = queue.pop_front() {
+    while let Some((shown, canon, depth, top)) = queue.pop_front() {
         if !visited.insert(canon.clone()) {
             continue;
         }
@@ -324,7 +354,7 @@ fn scan_with(
             break;
         }
         state.report.dirs_visited += 1;
-        state.visit_project(&shown);
+        state.visit_project(&shown, &top);
 
         let entries = match std::fs::read_dir(&shown) {
             Ok(entries) => entries,
@@ -340,7 +370,9 @@ fn scan_with(
                 Ok(entry) => match entry.file_type() {
                     Ok(t) if t.is_dir() => {
                         let child = entry.file_name();
-                        if !child.to_string_lossy().starts_with('.') {
+                        if !child.to_string_lossy().starts_with('.')
+                            && !SKIPPED_DIRS.contains(&child.to_string_lossy().as_ref())
+                        {
                             children.push(child);
                         }
                     }
@@ -361,7 +393,12 @@ fn scan_with(
             continue;
         }
         for child in children {
-            queue.push_back((shown.join(&child), canon.join(&child), depth + 1));
+            queue.push_back((
+                shown.join(&child),
+                canon.join(&child),
+                depth + 1,
+                top.clone(),
+            ));
         }
     }
 
@@ -400,10 +437,11 @@ pub fn render_scope(report: &ScanReport) -> String {
             "not exhaustive: time ran out, so some directories or repositories were not examined"
         }
     };
-    format!(
-        "scanned {roots}: {} directories visited; {bound}",
-        report.dirs_visited
-    )
+    let visited = match report.dirs_visited {
+        1 => "1 directory visited".to_string(),
+        n => format!("{n} directories visited"),
+    };
+    format!("scanned {roots}: {visited}; {bound}")
 }
 
 #[cfg(test)]
@@ -830,14 +868,92 @@ mod tests {
         std::fs::create_dir_all(plain.join(".codescout")).unwrap();
         std::fs::write(plain.join(".codescout/project.toml"), "").unwrap();
         std::fs::write(plain.join(".codescout/repo.toml"), "name = \"alpha\"\n").unwrap();
-        // The walk-up must not find a stray `.git` above the tempdir, or this is another case.
-        if crate::librarian::current_project::lookup_git_root(&plain).is_some() {
-            eprintln!("skipped: the temp dir lies inside a git work tree");
-            return;
-        }
         let r = scan_default("alpha", &this, &[&tmp.path().join("work")]);
         assert!(r.collisions.is_empty() && r.same_repo.is_empty(), "{r:?}");
         assert_eq!(r.unverified.len(), 1, "{r:?}");
+    }
+    #[test]
+    fn dependency_and_build_directories_are_not_scanned() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_repo(&this, Some("alpha"), "a");
+        let work = tmp.path().join("work");
+        // Same name, different history: scanned, each would be a collision.
+        make_repo(&work.join("node_modules/p"), Some("alpha"), "b");
+        make_repo(&work.join("target/q"), Some("alpha"), "c");
+        make_repo(&work.join("real"), Some("alpha"), "d");
+        let r = scan_default("alpha", &this, &[&work]);
+        assert_eq!(r.collisions, vec![work.join("real")], "{r:?}");
+    }
+
+    #[test]
+    fn a_same_named_unborn_repo_is_unverified_through_a_scan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_repo(&this, Some("alpha"), "a");
+        let fresh = tmp.path().join("work/fresh");
+        std::fs::create_dir_all(fresh.join(".codescout")).unwrap();
+        git(&fresh, &["init", "-q", "-b", "main"]);
+        std::fs::write(fresh.join(".codescout/project.toml"), "").unwrap();
+        std::fs::write(fresh.join(".codescout/repo.toml"), "name = \"alpha\"\n").unwrap();
+        let r = scan_default("alpha", &this, &[&tmp.path().join("work")]);
+        assert!(r.collisions.is_empty() && r.same_repo.is_empty(), "{r:?}");
+        assert_eq!(r.unverified, vec![fresh], "{r:?}");
+    }
+
+    #[test]
+    fn a_git_less_project_under_an_ancestor_repo_is_judged_as_itself() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_repo(&this, Some("alpha"), "a");
+        // An ancestor repo ABOVE the scan root that carries the same name (a dotfiles repo in
+        // `$HOME` is the real case). The project below it has no `.git` of its own.
+        let ancestor = tmp.path().join("ancestor");
+        make_repo(&ancestor, Some("alpha"), "b");
+        let plain = ancestor.join("work/plain");
+        std::fs::create_dir_all(plain.join(".codescout")).unwrap();
+        std::fs::write(plain.join(".codescout/project.toml"), "").unwrap();
+        std::fs::write(plain.join(".codescout/repo.toml"), "name = \"alpha\"\n").unwrap();
+        let r = scan_default("alpha", &this, &[&ancestor.join("work")]);
+        assert!(r.collisions.is_empty() && r.same_repo.is_empty(), "{r:?}");
+        assert_eq!(r.unverified, vec![plain], "{r:?}");
+    }
+
+    #[test]
+    fn render_scope_says_not_exhaustive_for_every_bound_and_for_none() {
+        let report = ScanReport {
+            roots: vec![PathBuf::from("/a")],
+            dirs_visited: 3,
+            ..ScanReport::default()
+        };
+        let none = render_scope(&report);
+        assert!(none.contains("no bound was hit"), "{none}");
+        assert!(!none.contains("not exhaustive"), "{none}");
+        for bound in [Bound::Depth, Bound::Dirs, Bound::Deadline] {
+            let line = render_scope(&ScanReport {
+                bounded_by: Some(bound),
+                ..report.clone()
+            });
+            assert!(line.contains("not exhaustive"), "{line}");
+            assert!(!line.contains("no bound was hit"), "{line}");
+        }
+    }
+
+    #[test]
+    fn render_scope_counts_one_directory_in_the_singular() {
+        let one = ScanReport {
+            roots: vec![PathBuf::from("/a")],
+            dirs_visited: 1,
+            ..ScanReport::default()
+        };
+        let line = render_scope(&one);
+        assert!(line.contains("1 directory visited"), "{line}");
+        assert!(!line.contains("1 directories"), "{line}");
+        let many = render_scope(&ScanReport {
+            dirs_visited: 0,
+            ..one
+        });
+        assert!(many.contains("0 directories visited"), "{many}");
     }
 
     #[test]

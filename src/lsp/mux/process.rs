@@ -1605,6 +1605,72 @@ mod tests {
         assert_eq!(forwarded["id"], "a:3", "{forwarded}");
         assert!(to_client.is_empty(), "nothing is answered locally");
     }
+    /// Two clients on one shared server each count document versions from their own `didOpen`, so
+    /// their `didChange` versions collide and run backwards (client `a` is at 5, client `b` at 2).
+    /// The mux must forward ONE strictly increasing sequence per URI, or the server drops the later
+    /// change as stale and keeps answering from the earlier text. Nothing else covers this rewrite:
+    /// the `DocumentState` unit tests call `next_version` directly, and no other test sends a
+    /// `didChange` through `handle_client_message`.
+    #[tokio::test]
+    async fn did_change_versions_from_two_clients_reach_the_server_as_one_increasing_sequence() {
+        let h = client_harness();
+        let change = |version: i64, uri: &str, text: &str| {
+            json!({
+                "jsonrpc": "2.0", "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": {"uri": uri, "version": version},
+                    "contentChanges": [{"text": text}]
+                }
+            })
+        };
+        // (sender, the version the client itself chose, uri, text)
+        let sent = [
+            ("a", 5, "file:///x.rs", "from a, first"),
+            ("b", 2, "file:///x.rs", "from b"),
+            ("a", 6, "file:///x.rs", "from a, second"),
+            ("b", 1, "file:///y.rs", "other file"),
+        ];
+        for (tag, version, uri, text) in sent {
+            let mut msg = change(version, uri, text);
+            handle_client_message(tag, &mut msg, &h.server_writer, &h.state)
+                .await
+                .unwrap();
+        }
+        let (to_server, to_client) = h.finish().await;
+        assert!(to_client.is_empty(), "a notification is not answered");
+
+        let mut reader = BufReader::new(&to_server[..]);
+        let mut seen = Vec::new();
+        for _ in 0..sent.len() {
+            let m = read_message(&mut reader).await.unwrap();
+            seen.push((
+                m["params"]["textDocument"]["uri"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+                m["params"]["textDocument"]["version"].as_i64().unwrap(),
+                m["params"]["contentChanges"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            ));
+        }
+        let expected = [
+            ("file:///x.rs", 1, "from a, first"),
+            ("file:///x.rs", 2, "from b"),
+            ("file:///x.rs", 3, "from a, second"),
+            ("file:///y.rs", 1, "other file"),
+        ];
+        let expected: Vec<(String, i64, String)> = expected
+            .iter()
+            .map(|(u, v, t)| (u.to_string(), *v, t.to_string()))
+            .collect();
+        assert_eq!(
+            seen, expected,
+            "versions are per URI and strictly increasing"
+        );
+    }
+
     /// The mux tags every request id with the client (`"a:3"`) before forwarding, so the server
     /// only knows tagged ids. A `$/cancelRequest` carrying the client's own id names no request the
     /// server has, and is ignored: the abandoned query keeps running. The cancel's `params.id` must

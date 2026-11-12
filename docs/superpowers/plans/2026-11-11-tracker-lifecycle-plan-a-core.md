@@ -1,7 +1,7 @@
 ---
 id: '5f4d250e4bc826b5'
 kind: plan
-status: draft
+status: done
 title: Tracker Lifecycle Plan L-A — Lifecycle Core
 tags:
 - trackers
@@ -378,10 +378,10 @@ fn archive_paths_are_the_nearest_sibling_archive() {
   - `pub struct DocInput { pub rel_path: String, pub text: String }` (same shape as identity Plan A's; a separate type so this module does not depend on `identity::index`).
   - `pub struct EntryNode { pub rel_path: String, pub key: Key, pub archived: bool, pub meta: EntryMeta, pub relations: Vec<Relation> }`.
   - `pub struct CollectionNode { pub key: Key, pub lifecycle: Lifecycle, pub dir: String, pub archived: bool, pub schema: CollectionSchema, pub entries: Vec<EntryNode> }`.
-  - `pub enum TreeProblem { Placement(PlacementError), NestedCollection(String), OrphanEntry(String), Schema { collection: Key, errors: Vec<SchemaError> }, Entry { rel_path: String, errors: Vec<EntryError> }, Frontmatter { rel_path: String, detail: String } }`.
+  - `pub enum TreeProblem { Placement(PlacementError), NestedCollection(String), OrphanEntry(String), Schema { collection: Key, errors: Vec<SchemaError> } *(shipped as `Schema { rel_path, errors }`; a second readme in one folder is `DuplicateReadme(String)`, see the lifecycle cleanup plan)*, Entry { rel_path: String, errors: Vec<EntryError> }, Frontmatter { rel_path: String, detail: String } }`.
   - `pub struct LifecycleTree { pub collections: Vec<CollectionNode>, pub problems: Vec<TreeProblem>, pub closed_dates: std::collections::BTreeMap<Key, chrono::NaiveDate> }` with `pub fn build(docs: impl IntoIterator<Item = DocInput>) -> LifecycleTree`. `closed_dates` holds the frontmatter `closed:` date of EVERY input document that has one (lifecycle entries and others, for example bug files), keyed by `key_of`. An entry with no collection readme above it is `OrphanEntry`; a collection whose schema fails is reported once and its entries are skipped.
 - Produces (`checks.rs`):
-  - `pub struct CheckPolicy { pub terminal_grace_days: u32 }` with `Default` = `14`.
+  - `pub struct CheckPolicy { pub terminal_grace_days: u32 }` with `Default` = `14`. *(Superseded: the shipped default is 30 days, measured 2026-11-11 as W-3 in `tracker-organization-session-log`.)*
   - `pub enum Finding { EntryInvalid { entry: Key, problem: EntryProblem }, RevisitDue { entry: Key, revisit_by: NaiveDate }, CitedTargetClosed { entry: Key, target: Key, closed: NaiveDate }, StreamAllTerminal { collection: Key }, StreamWithoutExit { collection: Key }, LedgerQuiet { collection: Key, last_activity: Option<NaiveDate> }, TerminalInLiveDir { entry: Key, closed: NaiveDate }, OrphanEntry { rel_path: String } }`.
   - `pub fn check(tree: &LifecycleTree, today: NaiveDate, policy: &CheckPolicy) -> Vec<Finding>` — rules:
     - `EntryInvalid`: one finding per problem that `validate_entry` returns, for EVERY entry, archived or not (spec: `entry_invalid`, which generalises the former `status_undeclared`; ruling of 2026-11-11). `EntryProblem` must derive `Clone`.

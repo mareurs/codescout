@@ -19,7 +19,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::grammar::Reference;
-use super::key::{components, is_folder_index, key_of, Key, KeyError};
+use super::key::{components, folder_of, is_folder_index, key_of, Key, KeyError};
 use super::repo_name::RepoName;
 use crate::librarian::tools::link_scan::extract::entry_sections;
 
@@ -149,10 +149,6 @@ impl KeyIndex {
         // `Some(key)` for a usable one, `None` for one whose key is invalid or collides.
         let usable = |d: &Doc| by_key.contains_key(&d.key);
         let mut folder_index: HashMap<String, Option<&Key>> = HashMap::new();
-        let folder_of = |rel_path: &str| {
-            let parts = components(rel_path);
-            parts[..parts.len() - 1].join("/")
-        };
         for d in valid.iter().filter(|d| is_folder_index(&d.rel_path)) {
             let offered = usable(d).then_some(&d.key);
             let slot = folder_index

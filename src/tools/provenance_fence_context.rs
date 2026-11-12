@@ -1,6 +1,13 @@
 //! Request-scoped provenance protection. This is not run_command's telemetry effect.
+//
+// `scope_root` returns before any fence work on `not(unix)`, so the helpers only its Unix
+// arm calls have no reader on that target (bug 17fa244491a90b49). The allow is scoped to
+// this module and to `not(unix)`: dead code on Unix is still an error.
+#![cfg_attr(not(unix), allow(dead_code))]
 use super::core::types::ToolContext;
-use super::native_provenance_fence::{canonical_checkout, Fence};
+#[cfg(unix)]
+use super::native_provenance_fence::canonical_checkout;
+use super::native_provenance_fence::Fence;
 use super::{ClientIdentity, RecoverableError};
 use rmcp::model::Content;
 use serde_json::{json, Map, Value};
@@ -134,7 +141,11 @@ where
         return future.await;
     }
     #[cfg(not(unix))]
-    return future.await;
+    {
+        // Nothing can be fenced on this target; the arguments exist for the Unix arm.
+        let _ = (root, input, meta, client);
+        future.await
+    }
     #[cfg(unix)]
     {
         // Bug d291b97d9e69edef: nothing under a missing root can be fenced, and

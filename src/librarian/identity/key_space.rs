@@ -62,7 +62,8 @@ impl KeySpace {
     /// Compile `patterns`. Each pattern is normalised the way [`KeySpace::is_outside`]
     /// normalises a path (`\` read as `/`; empty and `.` components dropped), so `./contrib`,
     /// `/contrib`, `contrib/` and `contrib` are one pattern. A pattern with no component left
-    /// (blank, `./`, `/`) or an invalid glob is an error naming [`KEY_SPACE_FILE_REL`].
+    /// (blank, `./`, `/`) or an invalid glob is an error naming [`KEY_SPACE_FILE_REL`]. A backslash is a
+    /// separator, never a glob escape, so a literal `*` or `?` in a name is written as `[*]` or `[?]`.
     pub fn from_patterns(patterns: &[&str]) -> anyhow::Result<KeySpace> {
         let mut builder = GlobSetBuilder::new();
         for &p in patterns {
@@ -87,7 +88,8 @@ impl KeySpace {
 
     /// True when `rel_path` (git-root-relative) lies in an excluded subtree. The path is
     /// normalised exactly as `key_of` reads it: `\` is `/`, empty and `.` components are
-    /// dropped, `..` stays an ordinary component.
+    /// dropped, `..` stays an ordinary component. A `..` is never resolved, so a caller passes the
+    /// repo-relative paths git lists, which have none (the contract `key_of` states).
     pub fn is_outside(&self, rel_path: &str) -> bool {
         if self.patterns.is_empty() {
             return false;
@@ -132,7 +134,8 @@ pub fn load(root: &Path) -> anyhow::Result<KeySpace> {
             return Err(e.into_anyhow()).with_context(|| format!("reading {}", path.display()));
         }
     };
-    KeySpace::from_text(&text).with_context(|| format!("reading {}", path.display()))
+    // `from_text` already names the file (relative to its root); this says which repository.
+    KeySpace::from_text(&text).with_context(|| format!("in the repository at {}", root.display()))
 }
 
 #[cfg(test)]
@@ -258,6 +261,16 @@ mod tests {
     }
 
     #[test]
+    fn a_parse_error_from_load_names_the_file_once() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(dir.path(), "exclude = [\n");
+        let err = format!("{:#}", load(dir.path()).unwrap_err());
+        assert_eq!(err.matches("key-space.toml").count(), 1, "{err}");
+        // It still says which repository, because the file is named relative to its root.
+        assert!(err.contains(&dir.path().display().to_string()), "{err}");
+    }
+
+    #[test]
     fn from_text_parses_what_load_reads() {
         let text = "exclude = [\"contrib\", \"docs/evals/**\"]\n";
         let dir = tempfile::tempdir().unwrap();
@@ -271,6 +284,38 @@ mod tests {
         }
         // An empty file is a valid, empty rule.
         assert!(KeySpace::from_text("").unwrap().patterns().is_empty());
+    }
+
+    #[test]
+    fn a_star_crosses_a_slash_and_matching_is_anchored_and_case_sensitive() {
+        let star = KeySpace::from_patterns(&["a*"]).unwrap();
+        assert!(star.is_outside("a/b.md"), "`*` crosses `/`");
+        assert!(star.is_outside("abc/d.md"));
+        assert!(
+            !star.is_outside("x/a/b.md"),
+            "a pattern is anchored at the repo root"
+        );
+        let cased = KeySpace::from_patterns(&["Contrib"]).unwrap();
+        assert!(cased.is_outside("Contrib/x.md"));
+        assert!(
+            !cased.is_outside("contrib/x.md"),
+            "matching is case-sensitive"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_codescout_dir_linked_out_of_the_repo_is_an_error_not_absent() {
+        let repo = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(
+            outside.path().join("key-space.toml"),
+            "exclude = [\"contrib\"]\n",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(outside.path(), repo.path().join(".codescout")).unwrap();
+        let err = load(repo.path()).expect_err("a link that leaves the repo must not be read");
+        assert!(format!("{err:#}").contains("key-space.toml"), "{err:#}");
     }
 
     #[cfg(unix)]

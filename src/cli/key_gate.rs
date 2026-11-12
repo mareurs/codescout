@@ -30,7 +30,9 @@ use crate::librarian::identity::repo_name::{self, RepoName};
 
 #[derive(Debug, Args)]
 pub struct KeyGateArgs {
-    /// Project root override (defaults to cwd). The git root at or above it is checked.
+    /// Project root override (defaults to cwd). The git root at or above it is checked. An inherited
+    /// absolute `GIT_INDEX_FILE` still applies to every git call, so with a `--project` that is
+    /// another repository, unset it first or it names the wrong index.
     #[arg(long)]
     pub project: Option<PathBuf>,
     /// Judge only the problems the staged index has that HEAD did not (what a commit would
@@ -148,11 +150,9 @@ fn head_exists(root: &Path) -> Result<bool> {
     }
 }
 
-/// The markdown paths of `HEAD`'s tree. An unborn `HEAD` has none.
+/// The markdown paths of `HEAD`'s tree. `HEAD` must exist: the caller (`side`) has already asked
+/// `head_exists`, so this does not ask a second time.
 fn list_md_at_head(root: &Path) -> Result<Listing> {
-    if !head_exists(root)? {
-        return Ok(Listing::default());
-    }
     Ok(parse_listing(&git_stdout(
         root,
         &["ls-tree", "-r", "-z", "--name-only", "HEAD"],
@@ -185,8 +185,15 @@ fn key_space_from(root: &Path, rev: Rev) -> Result<(KeySpace, bool)> {
     let text = String::from_utf8(blob)
         .map_err(|_| anyhow!("{KEY_SPACE_FILE_REL} in {} is not valid UTF-8", rev.label()))?;
     let space = KeySpace::from_text(&text).map_err(|e| {
+        // A malformed file at HEAD stops every staged check, because the comparison needs HEAD's
+        // scope; full mode reads only the index, so it still works.
+        let way_on = if rev == Rev::Head {
+            "; fix it in a commit first, or run without --staged (that reads only the index)"
+        } else {
+            ""
+        };
         anyhow!(
-            "{KEY_SPACE_FILE_REL} in {} is malformed: {e:#}",
+            "{KEY_SPACE_FILE_REL} in {} is malformed: {e:#}{way_on}",
             rev.label()
         )
     })?;
@@ -325,11 +332,16 @@ fn one_line(e: &anyhow::Error) -> String {
         .join(" ")
 }
 
-fn not_checked(json: bool, reason: &str) -> Outcome {
+fn not_checked(json: bool, staged: bool, reason: &str) -> Outcome {
     let stdout = if json {
         format!(
             "{}\n",
-            json!({"checked": false, "exit_code": 2, "not_checked": reason})
+            json!({
+                "checked": false,
+                "mode": if staged { "staged" } else { "index" },
+                "exit_code": 2,
+                "not_checked": reason,
+            })
         )
     } else {
         format!("NOT CHECKED — {reason}\n")
@@ -344,7 +356,7 @@ fn not_checked(json: bool, reason: &str) -> Outcome {
 /// Decide the outcome of `args`, resolving `--project` against `cwd`. It returns no error:
 /// whatever stops it from asking becomes a `NOT CHECKED` outcome with code 2.
 pub fn evaluate(args: &KeyGateArgs, cwd: &Path) -> Outcome {
-    check(args, cwd).unwrap_or_else(|e| not_checked(args.json, &one_line(&e)))
+    check(args, cwd).unwrap_or_else(|e| not_checked(args.json, args.staged, &one_line(&e)))
 }
 
 fn check(args: &KeyGateArgs, cwd: &Path) -> Result<Outcome> {
@@ -861,6 +873,34 @@ mod tests {
         );
         assert!(out.stdout.contains("1 markdown"), "inside count: {out:?}");
         assert!(out.stdout.contains(KS), "names the key-space file: {out:?}");
+    }
+
+    #[test]
+    fn a_not_checked_json_object_names_its_mode() {
+        let r = Repo::new();
+        r.stage(&[("a/notes.md", "# a\n")]);
+        r.commit();
+        r.stage(&[(KS, "exclude = [\n")]);
+        for (staged, mode) in [(false, "index"), (true, "staged")] {
+            let out = evaluate(&r.args(staged, true), r.path());
+            let v: serde_json::Value = serde_json::from_str(&out.stdout).expect("stdout is JSON");
+            assert_eq!(v["checked"], false, "{out:?}");
+            assert_eq!(v["mode"], mode, "{out:?}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_key_space_file_at_head_says_how_to_go_on() {
+        let r = Repo::new();
+        r.stage(&[("a/notes.md", "# a\n"), (KS, "exclude = [\n")]);
+        r.commit();
+        r.stage(&[(KS, "exclude = []\n")]);
+        let staged = r.staged();
+        assert_eq!(staged.code, 2, "{staged:?}");
+        assert!(
+            staged.stdout.contains("run without --staged"),
+            "no way forward named: {staged:?}"
+        );
     }
 
     #[test]

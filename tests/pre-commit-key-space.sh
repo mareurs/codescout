@@ -43,6 +43,18 @@ eq() { # eq <label> <actual> <expected>
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
+# The PATH every hook run gets: only the directories that hold the commands the hook needs. It is
+# built from where those commands are on THIS machine, because `/usr/bin:/bin` holds none of them
+# on NixOS, and a hard-coded list there fails every case instead of skipping. It still leaves out
+# any other directory, so a real `codescout` the developer installed is not found by the third
+# probe. `codescout` itself is left out on purpose.
+SYSPATH=""
+for c in git bash mktemp env sed cat rm; do
+    p=$(command -v "$c") || { echo "key-space: cannot run the tests: no \`$c\` on PATH" >&2; exit 2; }
+    d=$(dirname "$p")
+    case ":$SYSPATH:" in *":$d:"*) ;; *) SYSPATH="${SYSPATH:+$SYSPATH:}$d" ;; esac
+done
+
 # Every git call this script makes goes through here: no global or system config, and none of
 # the variables a surrounding hook would have exported.
 g() {
@@ -88,13 +100,13 @@ run() { # run <repo> [VAR=value ...] -> sets OUT (stdout+stderr) and RC; the stu
     local repo="$1"; shift
     : > "$LOG"
     OUT=$(cd "$repo" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
-        GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null PATH=/usr/bin:/bin \
+        GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null PATH="$SYSPATH" \
         CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" "$@" bash "$CHECK" 2>&1); RC=$?
     CALLS=$(cat "$LOG")
 }
 
 PROBLEM='key-gate: 1 new key problem in the staged changes (index vs HEAD)
-  - the key `readme` is used by 2 documents: docs/a/readme.md, docs/b/readme.md
+  - the key `notes` is used by 2 documents: docs/a/notes.md, docs/b/notes.md
 scope: 2 markdown files in the key space, 0 outside; no .codescout/key-space.toml in the index (nothing is excluded)'
 NOTCHECKED='NOT CHECKED — .codescout/key-space.toml in the index is malformed: unknown field `exlcude`'
 
@@ -104,7 +116,7 @@ NOTCHECKED='NOT CHECKED — .codescout/key-space.toml in the index is malformed:
 R=$(newrepo docs/a/readme.md)
 OUT=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-    PATH=/usr/bin:/bin CODESCOUT_BIN=/nonexistent/codescout bash "$CHECK" 2>&1); RC=$?
+    PATH="$SYSPATH" CODESCOUT_BIN=/nonexistent/codescout bash "$CHECK" 2>&1); RC=$?
 eq   "1 no live binary passes open" "$RC" "0"
 has  "1 and says NOT CHECKED" "$OUT" "NOT CHECKED"
 has  "1 and names where it looked" "$OUT" "CODESCOUT_BIN"
@@ -114,16 +126,16 @@ has  "1 and says why passing open is right" "$OUT" "cannot ask its question"
 R=$(newrepo docs/a/readme.md)
 run "$R" STUB_RC=1 STUB_OUT="$PROBLEM"
 eq   "2 key-gate exit 1 refuses the commit" "$RC" "1"
-has  "2 prints the problem line" "$OUT" "the key \`readme\` is used by 2 documents"
+has  "2 prints the problem line" "$OUT" "the key \`notes\` is used by 2 documents"
 has  "2 prints the scope line" "$OUT" "scope: 2 markdown files in the key space"
 has  "2 says REFUSED" "$OUT" "REFUSED"
 # The refusal must reach STDERR: a hook's stdout is not shown to the committer by every
 # front end, and this test reads stderr alone to prove it.
 ERR_ONLY=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-    PATH=/usr/bin:/bin CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" STUB_RC=1 STUB_OUT="$PROBLEM" \
+    PATH="$SYSPATH" CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" STUB_RC=1 STUB_OUT="$PROBLEM" \
     bash "$CHECK" 2>&1 >/dev/null)
-has  "2 the problem lines are on stderr, not only stdout" "$ERR_ONLY" "docs/a/readme.md, docs/b/readme.md"
+has  "2 the problem lines are on stderr, not only stdout" "$ERR_ONLY" "docs/a/notes.md, docs/b/notes.md"
 
 # --- 3. key-gate exit 2: it could not ask — pass open, print NOT CHECKED --------------------
 run "$R" STUB_RC=2 STUB_OUT="$NOTCHECKED"
@@ -131,7 +143,7 @@ eq   "3 key-gate exit 2 passes open" "$RC" "0"
 has  "3 prints the NOT CHECKED line" "$OUT" "NOT CHECKED — .codescout/key-space.toml in the index is malformed"
 ERR_ONLY=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-    PATH=/usr/bin:/bin CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" STUB_RC=2 STUB_OUT="$NOTCHECKED" \
+    PATH="$SYSPATH" CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" STUB_RC=2 STUB_OUT="$NOTCHECKED" \
     bash "$CHECK" 2>&1 >/dev/null)
 has  "3 the NOT CHECKED line is on stderr, where a committer sees it" "$ERR_ONLY" "NOT CHECKED"
 lacks "3 a cannot-ask is not a REFUSAL" "$OUT" "REFUSED"
@@ -211,7 +223,7 @@ cp "$STUB" "$R/target/release/codescout"
 : > "$LOG"
 OUT=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-    PATH=/usr/bin:/bin CODESCOUT_BIN=/nonexistent/codescout STUB_LOG="$LOG" \
+    PATH="$SYSPATH" CODESCOUT_BIN=/nonexistent/codescout STUB_LOG="$LOG" \
     STUB_RC=1 STUB_OUT="$PROBLEM" bash "$CHECK" 2>&1); RC=$?
 eq   "11 target/release/codescout is used when CODESCOUT_BIN is dead" "$RC" "1"
 has  "11 and it was the one asked" "$(cat "$LOG")" "key-gate"
@@ -224,7 +236,7 @@ STUBDIR="$WORK/pathdir"; mkdir -p "$STUBDIR"; cp "$STUB" "$STUBDIR/codescout"
 : > "$LOG"
 OUT=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-    PATH="$STUBDIR:/usr/bin:/bin" CODESCOUT_BIN=/nonexistent/codescout STUB_LOG="$LOG" \
+    PATH="$STUBDIR:$SYSPATH" CODESCOUT_BIN=/nonexistent/codescout STUB_LOG="$LOG" \
     STUB_RC=1 STUB_OUT="$PROBLEM" bash "$CHECK" 2>&1); RC=$?
 eq   "12 codescout on PATH is used when CODESCOUT_BIN and target/release are dead" "$RC" "1"
 has  "12 and it was the one asked" "$(cat "$LOG")" "key-gate"
@@ -232,11 +244,66 @@ has  "12 and it was the one asked" "$(cat "$LOG")" "key-gate"
 : > "$LOG"
 OUT=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-    PATH="$STUBDIR:/usr/bin:/bin" CODESCOUT_BIN=/nonexistent/codescout STUB_LOG="$LOG" \
+    PATH="$STUBDIR:$SYSPATH" CODESCOUT_BIN=/nonexistent/codescout STUB_LOG="$LOG" \
     STUB_HELP_RC=2 STUB_RC=1 STUB_OUT="$PROBLEM" bash "$CHECK" 2>&1); RC=$?
 eq   "12 a stale codescout on PATH passes open" "$RC" "0"
 has  "12 and says NOT CHECKED" "$OUT" "NOT CHECKED"
 eq   "12 and was never asked" "$(cat "$LOG")" ""
+
+# --- 13. key-gate exit 2 with nothing on stdout: its stderr is shown -------------------------
+# An argument-parser usage error exits 2 and writes only to stderr.
+R=$(newrepo docs/a/readme.md)
+run "$R" STUB_RC=2 STUB_OUT="" STUB_ERR="error: unexpected argument '--bogus' found"
+eq   "13 exit 2 with an empty stdout still passes open" "$RC" "0"
+has  "13 the stderr of key-gate is shown" "$OUT" "unexpected argument '--bogus' found"
+has  "13 and it is still said to be NOT CHECKED" "$OUT" "NOT CHECKED"
+
+# --- 14. A git that fails is not a silent pass -----------------------------------------------
+# Passing open is right, but it must say so: a silent exit 0 looks identical to "nothing staged".
+R=$(newrepo docs/a/readme.md)
+printf 'not an index' > "$R/.git/index"
+run "$R" STUB_RC=1 STUB_OUT="$PROBLEM"
+eq   "14 a git that cannot list the staged files passes open" "$RC" "0"
+has  "14 and says NOT CHECKED" "$OUT" "NOT CHECKED"
+has  "14 naming the failing command" "$OUT" "git diff --cached"
+eq   "14 and the binary is never asked" "$CALLS" ""
+NOREPO="$WORK/norepo"; mkdir -p "$NOREPO"
+OUT=$(cd "$NOREPO" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CEILING_DIRECTORIES="$WORK" \
+    PATH="$SYSPATH" CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" bash "$CHECK" 2>&1); RC=$?
+eq   "14 a directory git cannot place passes open" "$RC" "0"
+has  "14 and says NOT CHECKED" "$OUT" "NOT CHECKED"
+has  "14 naming the failing command" "$OUT" "git rev-parse"
+
+# --- 15. A dead $CODESCOUT_BIN says so before the next candidate is used ---------------------
+R=$(newrepo docs/a/readme.md)
+mkdir -p "$R/target/release"
+cp "$STUB" "$R/target/release/codescout"
+: > "$LOG"
+OUT=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    PATH="$SYSPATH" CODESCOUT_BIN=/nonexistent/codescout STUB_LOG="$LOG" \
+    STUB_RC=0 bash "$CHECK" 2>&1); RC=$?
+eq   "15 the next candidate is still used" "$RC" "0"
+has  "15 and the dead \$CODESCOUT_BIN is named" "$OUT" "/nonexistent/codescout"
+has  "15 as not live" "$OUT" "not a live"
+
+# --- 16. Probe order with two LIVE candidates: $CODESCOUT_BIN wins over target/release ----------
+# Case 11 and 12 make the earlier candidates dead; none has two that are live, so the order itself
+# was never asserted. The second stub logs a marker line on every call, probe included, so the
+# marker is absent exactly when it was never even probed.
+R=$(newrepo docs/a/readme.md)
+mkdir -p "$R/target/release"
+{ head -1 "$STUB"; echo 'echo "second stub was called" >> "${STUB_LOG:-/dev/null}"'; tail -n +2 "$STUB"; } > "$R/target/release/codescout"
+chmod +x "$R/target/release/codescout"
+: > "$LOG"
+OUT=$(cd "$R" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    PATH="$SYSPATH" CODESCOUT_BIN="$STUB" STUB_LOG="$LOG" \
+    STUB_RC=1 STUB_OUT="$PROBLEM" bash "$CHECK" 2>&1); RC=$?
+eq    "16 a live \$CODESCOUT_BIN is used" "$RC" "1"
+has   "16 the first candidate was the one asked" "$(cat "$LOG")" "argv:"
+lacks "16 the second candidate was never probed" "$(cat "$LOG")" "second stub was called"
 
 echo
 echo "key-space: $PASS passed, $FAIL failed"

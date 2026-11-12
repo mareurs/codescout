@@ -3785,9 +3785,10 @@ pub async fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{
-        make_server, make_server_in_root, make_server_no_project, make_server_with_project_toml,
-    };
+    use super::test_support::{make_server, make_server_no_project, make_server_with_project_toml};
+    // Only the `cfg(unix)` test on a backslash root name reads this one.
+    #[cfg(unix)]
+    use super::test_support::make_server_in_root;
     use super::*;
     // `test_env` and `Agent` reach exactly four consumers in this module — the
     // `#[cfg(unix)]` `peer_tool_*` tests below — because `peer` delegation is

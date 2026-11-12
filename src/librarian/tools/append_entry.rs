@@ -270,6 +270,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
             }
         }
+        // The shadow guard above only covers a WORKTREE session. A main-checkout session,
+        // a call with no current project, or a session in another worktree can still name
+        // a shadow's id, and the allocation then misses main's reservation. The fork
+        // records belong to the row, so ask them without a session.
+        // docs/issues/2026-11-08-is-worktree-shadow-guard-covers-worktree-sessions-only.md
+        if let Some(row) = artifact::get(&cat, &a.id)? {
+            if super::worktree::has_fork_record(&cat, &row)? {
+                return Err(LibrarianRecoverableError::with_hint(
+                    "append_entry: id allocation is not supported on a worktree's copy of a \
+                     ledger"
+                        .to_string(),
+                    "This id names a worktree shadow of a main ledger. An entry id is \
+                     ledger-wide state and must key to the main tracker: pass the main \
+                     row's id from the main checkout."
+                        .to_string(),
+                ));
+            }
+        }
         // SIBLING of the worktree guard above, deliberately NOT nested inside the
         // `current_project` block: this refusal does not depend on a current project
         // (the majority of callers, and every test built on `mk_ctx()`, have none), so
@@ -1453,6 +1471,143 @@ mod tests {
         .unwrap();
         assert_eq!(out["id"], "HY-11");
     }
+
+    /// Fork main's ledger into the worktree overlay and return `(ctx, main_id, shadow_id)`,
+    /// with `ctx` already holding the shadow. Shared by the residual-case probes below.
+    fn forked_shadow() -> (tempfile::TempDir, ToolContext, String, String) {
+        use crate::librarian::ids;
+
+        let (dir, ctx, main_abs, _wt_abs) = worktree_prose_fixture();
+        let main_id = ids::artifact_id_from_abs(&main_abs);
+        catalogue_ledger(&ctx, &main_id, &main_abs);
+        let shadow_id = {
+            let mut cat = ctx.catalog.lock();
+            crate::librarian::tools::worktree::resolve_write_target(&mut cat, &ctx, &main_id)
+                .unwrap()
+        };
+        assert_ne!(shadow_id, main_id, "the fork must have produced a shadow");
+        (dir, ctx, main_id, shadow_id)
+    }
+
+    /// `docs/issues/2026-11-08-is-worktree-shadow-guard-covers-worktree-sessions-only.md`,
+    /// case (ii): a call with no current project names the worktree shadow. The worktree
+    /// guard sits inside `if let Some(cp)`, so it cannot catch this call.
+    #[tokio::test]
+    async fn prose_allocation_is_refused_on_a_shadow_with_no_current_project() {
+        let (_dir, mut ctx, _main_id, shadow_id) = forked_shadow();
+        ctx.current_project = None;
+        let out = call(
+            &ctx,
+            json!({
+                "id": shadow_id, "id_prefix": "HY",
+                "title": "no project", "body": "b", "anchor_heading": "# Ledger"
+            }),
+        )
+        .await;
+        let err = out.expect_err("allocated on a worktree shadow");
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
+        assert!(
+            err.to_string().contains("worktree"),
+            "expected the shadow guard, got: {err}"
+        );
+    }
+
+    /// Same bug, case (i): a main-checkout session (`main_root: None`) names the worktree
+    /// shadow.
+    #[tokio::test]
+    async fn prose_allocation_is_refused_on_a_shadow_from_a_main_checkout_session() {
+        use crate::librarian::current_project::CurrentProject;
+        use std::sync::Arc;
+
+        let (dir, mut ctx, _main_id, shadow_id) = forked_shadow();
+        let main_root = dir.path().join("repo");
+        ctx.current_project = Some(Arc::new(CurrentProject {
+            abs_path: main_root.clone(),
+            git_root: main_root,
+            main_root: None,
+            umbrella: None,
+        }));
+        let out = call(
+            &ctx,
+            json!({
+                "id": shadow_id, "id_prefix": "HY",
+                "title": "from main", "body": "b", "anchor_heading": "# Ledger"
+            }),
+        )
+        .await;
+        let err = out.expect_err("allocated on a worktree shadow");
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
+        assert!(
+            err.to_string().contains("worktree"),
+            "expected the shadow guard, got: {err}"
+        );
+    }
+
+    /// Same bug, case (iii): a session in worktree A names the shadow that worktree B forked,
+    /// where B lies OUTSIDE `main_root` (a sibling directory, like `~/.codex/worktrees/...`).
+    /// B's shadow is not under `main_root`, so `is_main_checkout_artifact` is false, and it
+    /// is not under A's root, so the session-bound shadow test is false too.
+    #[tokio::test]
+    async fn prose_allocation_is_refused_on_another_worktrees_shadow_outside_main_root() {
+        use crate::librarian::current_project::CurrentProject;
+        use crate::librarian::ids;
+        use std::sync::Arc;
+
+        let (dir, mut ctx, main_abs, _wt_abs) = worktree_prose_fixture();
+        let main_root = dir.path().join("repo");
+        let main_id = ids::artifact_id_from_abs(&main_abs);
+        catalogue_ledger(&ctx, &main_id, &main_abs);
+
+        // Worktree B, outside `main_root`, forks main's ledger.
+        let wt_b = dir.path().join("wt-b");
+        std::fs::create_dir_all(wt_b.join("docs/trackers")).unwrap();
+        std::fs::copy(&main_abs, wt_b.join("docs/trackers/ledger.md")).unwrap();
+        ctx.current_project = Some(Arc::new(CurrentProject {
+            abs_path: wt_b.clone(),
+            git_root: wt_b.clone(),
+            main_root: Some(main_root.clone()),
+            umbrella: None,
+        }));
+        let shadow_id = {
+            let mut cat = ctx.catalog.lock();
+            crate::librarian::tools::worktree::resolve_write_target(&mut cat, &ctx, &main_id)
+                .unwrap()
+        };
+        assert_ne!(shadow_id, main_id, "the fork must have produced a shadow");
+        let shadow_abs = artifact::get(&ctx.catalog.lock(), &shadow_id)
+            .unwrap()
+            .unwrap()
+            .abs_path;
+        assert!(
+            shadow_abs.starts_with(&wt_b) && !shadow_abs.starts_with(&main_root),
+            "B's shadow must lie outside main_root: {shadow_abs:?}"
+        );
+
+        // A session in worktree A (also outside `main_root`) names B's shadow.
+        let wt_a = dir.path().join("wt-a");
+        std::fs::create_dir_all(&wt_a).unwrap();
+        ctx.current_project = Some(Arc::new(CurrentProject {
+            abs_path: wt_a.clone(),
+            git_root: wt_a,
+            main_root: Some(main_root),
+            umbrella: None,
+        }));
+        let out = call(
+            &ctx,
+            json!({
+                "id": shadow_id, "id_prefix": "HY",
+                "title": "from worktree A", "body": "b", "anchor_heading": "# Ledger"
+            }),
+        )
+        .await;
+        let err = out.expect_err("allocated on another worktree's shadow");
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
+        assert!(
+            err.to_string().contains("worktree"),
+            "expected the shadow guard, got: {err}"
+        );
+    }
+
     /// Prose allocation on `wt_id` must be refused by the worktree guard and leave the
     /// file untouched. Shared by the two single-record shadow tests below.
     async fn assert_prose_allocation_refused_as_shadow(

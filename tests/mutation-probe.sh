@@ -260,14 +260,24 @@ R=$(newrepo)
 run "$R" "$SID" --shared --file src/lib.rs --find 'guard();' --replace '' \
     -- sh -c 'echo "running 2 tests"; echo "test result: ok. 2 passed"; exit 0'
 has  "10 tests ran and passed -> SURVIVED" "$OUT" "SURVIVED"
-has  "10 names how many ran" "$OUT" "2 test(s) ran"
+has  "10 names how many were selected" "$OUT" "2 test(s) selected over 1 'running' line(s)"
+
+# 10b. The count is a SUM over every `running N tests` line, and the label says so.
+#      A nested harness or an ignored test is in the sum, so "ran" would overstate it
+#      (docs/issues/2026-11-10-mutation-probe-counts-nested-and-ignored-tests-as-executed.md).
+R=$(newrepo)
+run "$R" "$SID" --shared --file src/lib.rs --find 'guard();' --replace '' \
+    -- sh -c 'echo "running 2 tests"; echo "running 1 test"; echo "test result: ok. 2 passed; 0 failed; 1 ignored"; exit 0'
+has  "10b the sum names the lines it covers" "$OUT" "3 test(s) selected over 2 'running' line(s)"
+has  "10b the note says what the sum includes" "$OUT" "ignored and nested-harness tests are in it"
+hasnt "10b nothing claims the tests ran" "$OUT" "test(s) ran"
 
 # 11. Runner ran tests and failed -> KILLED
 R=$(newrepo)
 run "$R" "$SID" --shared --file src/lib.rs --find 'guard();' --replace '' \
     -- sh -c 'echo "running 2 tests"; echo "test result: FAILED. 1 passed; 1 failed"; exit 101'
 has  "11 tests ran and failed -> KILLED" "$OUT" "KILLED"
-has  "11 count rules out a compile failure" "$OUT" "2 test(s) ran"
+has  "11 count rules out a compile failure" "$OUT" "2 test(s) selected"
 
 # 12. Runner started, selected nothing -> INCONCLUSIVE, not SURVIVED.
 #     This is the measured original: `SURVIVED (rc=0)` printed over `running 0 tests`

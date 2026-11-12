@@ -19,7 +19,7 @@ hash = "a192d7fa4e53ab98d864e4e21ec4c6915254a550a947fcd90ef9f3bc8807ac03"
 
 [[anchors]]
 path = "src/librarian/tools/augment.rs"
-hash = "9045026927ef9a8474bfdd23c4fac8fb7c830583f3cbdb7547cc658531aa391c"
+hash = "a4b6e1ae6f0f8e06dd75f95971130adb60c897de46a30d828c5d728d5fabd4b5"
 
 [[anchors]]
 path = "docs/issues/archive/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md"
@@ -27,7 +27,7 @@ hash = "fd84edd410013b963e0ef5a0a99e428b8909268a8d37b9493a2f7e61ff0d0a8a"
 
 [[anchors]]
 path = "src/librarian/tools/append_entry.rs"
-hash = "f78f363b5b710bbf5aceec4f74d8613fb479fd918c61bb1ad953aefc18f315c8"
+hash = "d782fa38d6723d4cde9cf0c79530f3fd62b671423e3502c354186ab0bc593dad"
 
 [[anchors]]
 path = "docs/issues/archive/2026-09-10-append-entry-refuses-on-unpushed-commits-with-a-remedy-no-session-may-perform.md"
@@ -47,4 +47,5 @@ hash = "c1f513b625b52eb491e34c2076ce0fe31c0b5e05bf17deb895f071c73ccb45b2"
 
 [[anchors]]
 path = "src/librarian/util.rs"
-hash = "213754a85fc9a3220dd000b0d12799710eafcb3fb4c17e864886a7e35b5366fd"
+hash = "97c6c4f8cd654640de965e3bb80fabd791065002eb308e6c162948b2b76d0e81"
+

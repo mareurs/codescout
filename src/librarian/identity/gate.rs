@@ -15,7 +15,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::index::{DocInput, IndexProblem, KeyIndex};
-use super::key::{components, is_folder_index, Key, KeyError};
+use super::key::{components, folder_of, is_folder_index, Key, KeyError};
 use super::key_space::{KeySpace, KEY_SPACE_FILE_REL};
 use super::repo_name::RepoName;
 
@@ -47,20 +47,32 @@ pub enum GateProblem {
 }
 
 impl GateProblem {
-    /// For an invalid key, the file name it is counted under in [`GateReport::new_since`]: the
-    /// last component of the offending path, normalised as `key::components` reads a path.
-    fn invalid_file_name(&self) -> Option<String> {
+    /// The path an invalid key was reported for, as the error carries it.
+    fn invalid_path(&self) -> Option<&str> {
         match self {
-            GateProblem::InvalidKey(e) => {
-                let path = match e {
-                    KeyError::NotMarkdown(p) => p,
-                    KeyError::NonCanonical { rel_path, .. }
-                    | KeyError::HexShaped { rel_path, .. } => rel_path,
-                };
-                components(path).pop()
-            }
+            GateProblem::InvalidKey(e) => Some(match e {
+                KeyError::NotMarkdown(p) => p,
+                KeyError::NonCanonical { rel_path, .. } | KeyError::HexShaped { rel_path, .. } => {
+                    rel_path
+                }
+            }),
             GateProblem::DuplicateKey { .. } | GateProblem::PartialFolderExclusion { .. } => None,
         }
+    }
+
+    /// For an invalid key, the name it is counted under in [`GateReport::new_since`]: the last
+    /// component of the offending path, normalised as `key::components` reads a path. A folder
+    /// index (`readme.md`) is counted under its folder's name instead, because that name is its key.
+    fn invalid_file_name(&self) -> Option<String> {
+        let path = self.invalid_path()?;
+        let mut parts = components(path);
+        let last = parts.pop()?;
+        if is_folder_index(path) {
+            if let Some(folder) = parts.pop() {
+                return Some(folder);
+            }
+        }
+        Some(last)
     }
 
     /// One line that names what is wrong and how to fix it.
@@ -106,15 +118,17 @@ impl GateReport {
     /// - A collision is new when its key does not collide in `before`, or when it has more
     ///   members than that collision had. Equal or fewer (a member deleted, renamed away,
     ///   swapped for another, or moved) is unchanged.
-    /// - An invalid key is counted under its file name (the last path component). It is new
-    ///   only when `self` has more invalid keys with that file name than `before` has: a pure
-    ///   move keeps the count, a second file of that name raises it, and a different file name
-    ///   is a different problem. When the count grows, the later problems in report order
-    ///   are the new ones.
+    /// - An invalid key is counted under its file name (the last path component), or under its
+    ///   folder's name for a folder index. It is new only when `self` has more invalid keys with
+    ///   that name than `before` has: a pure move keeps the count, a second file of that name
+    ///   raises it, and a different name is a different problem. When the count grows, the
+    ///   problems whose path `before` did not have are the new ones, so the refusal names the
+    ///   added file and not an older one that happens to sort later.
     /// - A partial exclusion is the same problem when it is the same folder.
     pub fn new_since(&self, before: &GateReport) -> Vec<&GateProblem> {
         let mut members_before: HashMap<&Key, usize> = HashMap::new();
         let mut invalid_before: HashMap<String, usize> = HashMap::new();
+        let mut invalid_paths_before: HashSet<String> = HashSet::new();
         let mut folders_before: HashSet<&str> = HashSet::new();
         for p in &before.problems {
             match p {
@@ -128,10 +142,20 @@ impl GateReport {
                     if let Some(name) = p.invalid_file_name() {
                         *invalid_before.entry(name).or_default() += 1;
                     }
+                    if let Some(path) = p.invalid_path() {
+                        invalid_paths_before.insert(components(path).join("/"));
+                    }
                 }
             }
         }
-        let mut invalid_seen: HashMap<String, usize> = HashMap::new();
+        // How many invalid keys of each name `self` gained over `before`.
+        let mut invalid_now: HashMap<String, usize> = HashMap::new();
+        for p in &self.problems {
+            if let Some(name) = p.invalid_file_name() {
+                *invalid_now.entry(name).or_default() += 1;
+            }
+        }
+        let mut granted: HashMap<String, usize> = HashMap::new();
         self.problems
             .iter()
             .filter(|p| match p {
@@ -143,21 +167,25 @@ impl GateReport {
                 }
                 GateProblem::InvalidKey(_) => match p.invalid_file_name() {
                     Some(name) => {
-                        let seen = invalid_seen.entry(name.clone()).or_default();
-                        *seen += 1;
-                        *seen > invalid_before.get(&name).copied().unwrap_or(0)
+                        let gained = invalid_now[&name]
+                            .saturating_sub(invalid_before.get(&name).copied().unwrap_or(0));
+                        let path = p
+                            .invalid_path()
+                            .map(|p| components(p).join("/"))
+                            .unwrap_or_default();
+                        let given = granted.entry(name).or_default();
+                        if *given < gained && !invalid_paths_before.contains(&path) {
+                            *given += 1;
+                            true
+                        } else {
+                            false
+                        }
                     }
                     None => true,
                 },
             })
             .collect()
     }
-}
-
-/// The folder of a path, normalised as `key_of` reads it (`""` is the repo root).
-fn folder_of(rel_path: &str) -> String {
-    let parts = components(rel_path);
-    parts[..parts.len().saturating_sub(1)].join("/")
 }
 
 /// The folders whose folder index is outside the key space while a document the index would
@@ -185,6 +213,8 @@ fn partial_exclusions(outside: &[&str], inside: &[&str]) -> BTreeSet<String> {
 /// Check the keys of `md_files`, the git-root-relative `.md` paths of one tree.
 ///
 /// The result does not depend on the order of `md_files`, and a path listed twice counts once.
+/// "Twice" means the same string: the paths must already be normalised, because `a/x.md` and
+/// `./a/x.md` are two entries that name one file and are reported as a duplicate of each other.
 pub fn check_tree(this_repo: RepoName, space: &KeySpace, md_files: &[String]) -> GateReport {
     let files: BTreeSet<&str> = md_files.iter().map(String::as_str).collect();
     let (outside, inside): (Vec<&str>, Vec<&str>) =
@@ -347,6 +377,49 @@ mod tests {
     }
 
     #[test]
+    fn a_whole_subtree_exclusion_reports_every_excluded_path() {
+        let paths = [
+            "docs/readme.md",
+            "docs/x/readme.md",
+            "docs/x/a.md",
+            "docs/x/sub/b.md",
+        ];
+        let r = check(&["docs/x"], &paths);
+        assert_eq!(r.problems, vec![]);
+        assert_eq!(
+            r.outside,
+            vec!["docs/x/a.md", "docs/x/readme.md", "docs/x/sub/b.md"]
+        );
+        assert_eq!(r.in_space, 1);
+    }
+
+    #[test]
+    fn two_excluded_folder_indexes_in_one_folder_are_one_partial_exclusion() {
+        let paths = ["docs/x/README.md", "docs/x/readme.md", "docs/x/a.md"];
+        // Both indexes and the file are excluded: clean.
+        assert_eq!(check(&["docs/x"], &paths).problems, vec![]);
+        // Only the two indexes are excluded: one problem for the folder, not one per index.
+        let r = check(&["docs/x/README.md", "docs/x/readme.md"], &paths);
+        assert_eq!(
+            r.problems,
+            vec![GateProblem::PartialFolderExclusion {
+                folder: "docs/x".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn two_spellings_of_one_path_are_two_entries_that_collide() {
+        // `check_tree` dedupes by the exact string, so a caller must normalise first.
+        let r = check(&[], &["a/x.md", "./a/x.md"]);
+        assert!(
+            matches!(r.problems.as_slice(), [GateProblem::DuplicateKey { rel_paths, .. }] if rel_paths.len() == 2),
+            "{:?}",
+            r.problems
+        );
+    }
+
+    #[test]
     fn an_excluded_folder_index_with_its_whole_subtree_excluded_is_clean() {
         let paths = [
             "docs/readme.md",
@@ -413,6 +486,42 @@ mod tests {
         assert_eq!(new.len(), 2, "{new:?}");
         assert!(new.iter().any(|l| l.contains("Other Bad.md")), "{new:?}");
         assert!(new.iter().any(|l| l.contains("docs/z")), "{new:?}");
+    }
+
+    #[test]
+    fn new_since_counts_a_folder_index_under_its_folder_not_under_its_file_name() {
+        // A readme's key is its folder's name, so two readmes in two bad folders are two problems
+        // even though both files are called `readme.md`.
+        let before = check(&[], &["docs/Bad A/readme.md"]);
+        assert_eq!(before.problems.len(), 1, "{:?}", before.problems);
+        // Fixing one bad folder while adding another is a new problem.
+        let renamed_to_another_bad = check(&[], &["docs/Bad B/readme.md"]);
+        assert_eq!(
+            renamed_to_another_bad.new_since(&before).len(),
+            1,
+            "{:?}",
+            renamed_to_another_bad.problems
+        );
+        // A pure move of the same bad folder introduces nothing.
+        let moved = check(&[], &["other/Bad A/readme.md"]);
+        assert_eq!(moved.new_since(&before), Vec::<&GateProblem>::new());
+    }
+
+    #[test]
+    fn new_since_names_the_added_file_not_an_older_one_that_sorts_later() {
+        let before = check(&[], &["b/Bad Name.md"]);
+        // `a/Bad Name.md` is the new file and sorts before the old one.
+        let after = check(&[], &["a/Bad Name.md", "b/Bad Name.md"]);
+        let new: Vec<String> = after
+            .new_since(&before)
+            .iter()
+            .map(|p| p.render())
+            .collect();
+        assert_eq!(new.len(), 1, "{new:?}");
+        assert!(
+            new[0].contains("a/Bad Name.md"),
+            "named the wrong file: {new:?}"
+        );
     }
 
     #[test]

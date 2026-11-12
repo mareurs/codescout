@@ -907,12 +907,37 @@ fn tilde(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
     }
 }
 
-/// `text` with every spelling of the home directory shortened to `~`.
+/// `text` with the home directory shortened to `~` wherever it is a whole path component: `/home/ma`
+/// does not shorten `/home/marius`, and it is not read inside `/other/home/ma`.
 fn scrub_home(text: &str, home: Option<&std::path::Path>) -> String {
-    match home.and_then(|h| h.to_str()) {
-        Some(h) if !h.is_empty() && h != "/" => text.replace(h, "~"),
-        _ => text.to_string(),
+    let Some(h) = home
+        .and_then(|h| h.to_str())
+        .filter(|h| !h.is_empty() && *h != "/")
+    else {
+        return text.to_string();
+    };
+    // A character that would make the match part of a longer name.
+    let word = |c: char| c.is_alphanumeric() || matches!(c, '.' | '_' | '-');
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut before: Option<char> = None;
+    while let Some(i) = rest.find(h) {
+        let (head, tail) = rest.split_at(i);
+        let after = &tail[h.len()..];
+        let prev = head.chars().next_back().or(before);
+        let starts_a_component = !prev.is_some_and(word);
+        let ends_a_component = !after.chars().next().is_some_and(word);
+        out.push_str(head);
+        out.push_str(if starts_a_component && ends_a_component {
+            "~"
+        } else {
+            h
+        });
+        before = h.chars().next_back();
+        rest = after;
     }
+    out.push_str(rest);
+    out
 }
 
 /// The folders to look in for other checkouts: the folder that holds this repository, each
@@ -944,10 +969,19 @@ fn scan_roots_for(
     roots
 }
 
+/// Where the librarian's global workspace config lives: the file `LIBRARIAN_WORKSPACE` names, or
+/// the default location. The environment is read once, by the caller, into `env`.
+fn machine_workspace_path(env: &crate::librarian::LibrarianEnv) -> Option<std::path::PathBuf> {
+    match &env.workspace {
+        Some(path) => Some(path.clone()),
+        None => crate::librarian::workspace::default_config_path().ok(),
+    }
+}
+
 /// The librarian's global workspace config, or `None` when it is absent or unreadable (the scan
 /// then covers the folder that holds the repository).
 fn machine_workspace() -> Option<crate::librarian::workspace::WorkspaceConfig> {
-    let path = crate::librarian::workspace::default_config_path().ok()?;
+    let path = machine_workspace_path(&crate::librarian::LibrarianEnv::from_env())?;
     crate::librarian::workspace::load(&path).ok()
 }
 
@@ -1160,6 +1194,10 @@ async fn repo_name_block(
 /// is being chosen the block also reports the other checkouts that use it. A user who declined
 /// to name the repo is not asked again and nothing is scanned: the block says so and returns
 /// without a `checkouts` field.
+///
+/// The dialog is asked before the scan, so a collision with another checkout is reported only after
+/// the typed name has been written; the instruction then asks for a different name, and
+/// `onboarding(repo_name=...)` replaces the file. That order is deliberate: the scan needs the name.
 fn repo_name_block_for(
     root: &std::path::Path,
     existing: anyhow::Result<Option<RepoName>>,
@@ -1189,20 +1227,31 @@ fn repo_name_block_for(
     let (mut block, chosen) = match repo_name_outcome(existing, elicited, suggestion) {
         RepoNameOutcome::Confirmed(n) => return json!({"name": n.as_str(), "confirmed": true}),
         RepoNameOutcome::Unreadable(msg) => return json!({"error": msg, "confirmed": false}),
-        RepoNameOutcome::Write(n) => match repo_name::write(root, &n) {
-            Ok(path) => {
-                forget_decline(&edge.project_toml);
-                let block = json!({
-                    "name": n.as_str(),
-                    "confirmed": true,
-                    "written": path.display().to_string(),
-                });
-                (block, n)
+        RepoNameOutcome::Write(n) => {
+            // The dialog waited for the user. A name another session wrote meanwhile still wins,
+            // as `repo_name_outcome` promises, so look again right before the write.
+            match repo_name::read(root) {
+                Ok(None) => {}
+                Ok(Some(found)) => return json!({"name": found.as_str(), "confirmed": true}),
+                Err(e) => {
+                    return json!({"error": names_repo_file(format!("{e:#}")), "confirmed": false})
+                }
             }
-            Err(e) => {
-                return json!({"error": names_repo_file(format!("{e:#}")), "confirmed": false})
+            match repo_name::write(root, &n) {
+                Ok(path) => {
+                    forget_decline(&edge.project_toml);
+                    let block = json!({
+                        "name": n.as_str(),
+                        "confirmed": true,
+                        "written": tilde(&path, edge.home.as_deref()),
+                    });
+                    (block, n)
+                }
+                Err(e) => {
+                    return json!({"error": names_repo_file(format!("{e:#}")), "confirmed": false})
+                }
             }
-        },
+        }
         RepoNameOutcome::Unconfirmed(s) if edge.declined => return declined(&s, true),
         RepoNameOutcome::Unconfirmed(s) => (unconfirmed(&s), s),
         RepoNameOutcome::Declined(s) => {
@@ -1215,7 +1264,8 @@ fn repo_name_block_for(
                 Err(e) => {
                     let mut block = declined(&s, false);
                     block["remembered"] = json!(false);
-                    block["remember_error"] = json!(format!("{e:#}"));
+                    block["remember_error"] =
+                        json!(scrub_home(&format!("{e:#}"), edge.home.as_deref()));
                     block
                 }
             };
@@ -2446,6 +2496,18 @@ mod tests {
     }
 
     #[test]
+    fn a_name_written_while_the_dialog_waited_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        // `existing` was read as absent before the dialog; another session wrote the file while the
+        // user was typing. The existing name wins, as `repo_name_outcome` promises.
+        repo_name::write(dir.path(), &RepoName::parse("theirs").unwrap()).unwrap();
+        let block = for_block(dir.path(), Some("mine"));
+        assert_eq!(block, json!({"name": "theirs", "confirmed": true}));
+        let on_disk = repo_name::read(dir.path()).unwrap().unwrap();
+        assert_eq!(on_disk.as_str(), "theirs");
+    }
+
+    #[test]
     fn an_elicited_name_is_written_and_reported() {
         let dir = tempfile::tempdir().unwrap();
         let block = for_block(dir.path(), Some("codescout"));
@@ -2946,7 +3008,7 @@ mod tests {
         let scope = c["scope"].as_str().expect("a scope");
         assert!(scope.contains("~/work"), "{scope}");
         assert!(!scope.contains(tmp.path().to_str().unwrap()), "{scope}");
-        assert!(scope.contains("1 directories visited"), "{scope}");
+        assert!(scope.contains("1 directory visited"), "{scope}");
         assert!(scope.contains("no bound was hit"), "{scope}");
         assert_eq!(c["same_repo"], json!([]), "{c}");
         assert_eq!(c["collisions"], json!([]), "{c}");
@@ -3213,6 +3275,64 @@ mod tests {
         assert_eq!(listed[CHECKOUTS_LISTED_MAX], "... and 2 more", "{block}");
         // The instruction still fires: the cap hides entries, not the collision.
         assert!(block["checkouts"]["instruction"].is_string(), "{block}");
+    }
+
+    #[test]
+    fn the_scan_reads_the_workspace_file_named_by_librarian_workspace() {
+        let named = std::path::PathBuf::from("/somewhere/else/workspace.toml");
+        let env = crate::librarian::LibrarianEnv {
+            workspace: Some(named.clone()),
+            ..Default::default()
+        };
+        assert_eq!(machine_workspace_path(&env), Some(named));
+        // Without the variable the default location is used, as the rest of the librarian does.
+        assert_eq!(
+            machine_workspace_path(&crate::librarian::LibrarianEnv::default()),
+            crate::librarian::workspace::default_config_path().ok()
+        );
+    }
+
+    #[test]
+    fn scrub_home_shortens_only_a_whole_path_component() {
+        let home = P::new("/home/ma");
+        assert_eq!(scrub_home("/home/marius/x", Some(home)), "/home/marius/x");
+        assert_eq!(
+            scrub_home("cannot read /home/ma/x: denied", Some(home)),
+            "cannot read ~/x: denied"
+        );
+        assert_eq!(scrub_home("/home/ma", Some(home)), "~");
+        assert_eq!(
+            scrub_home("/other/home/ma/x", Some(home)),
+            "/other/home/ma/x"
+        );
+        assert_eq!(scrub_home("/home/ma/a /home/ma/b", Some(home)), "~/a ~/b");
+    }
+
+    #[test]
+    fn a_decline_that_cannot_be_remembered_names_the_file_without_the_home_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_toml = dir.path().join(PROJECT_TOML_REL);
+        std::fs::create_dir_all(project_toml.parent().unwrap()).unwrap();
+        let broken = "this is = = not toml\n";
+        std::fs::write(&project_toml, broken).unwrap();
+        let mut edge = edge_for(dir.path());
+        edge.home = Some(dir.path().to_path_buf());
+        let block = repo_name_block_for(
+            dir.path(),
+            Ok(None),
+            ElicitAnswer::Declined,
+            &RepoName::parse("suggested").unwrap(),
+            &edge,
+        );
+        assert_eq!(block["remembered"], false, "{block}");
+        let why = block["remember_error"].as_str().unwrap();
+        assert!(
+            !why.contains(&dir.path().display().to_string()),
+            "the home directory leaked: {why}"
+        );
+        assert!(why.contains('~'), "{why}");
+        // Nothing was changed on the way.
+        assert_eq!(std::fs::read_to_string(&project_toml).unwrap(), broken);
     }
 
     #[test]

@@ -9,7 +9,7 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 14
+entry_high_water_F: 15
 entry_high_water_W: 8
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
@@ -114,6 +114,7 @@ entry_high_water_W: 8
 | F-12 | 2026-11-12 | low | review-gap | fixed-verified | **No review ran tests/result_caps, so an unannotated cap constant reached the first full gate** — `CHECKOUTS_LISTED_MAX`; fixed in 6eef416c2 |
 | F-13 | 2026-11-12 | med | shared-checkout | promoted-to-bug-tracker | **Landing Plan B1 took four gates because the base moved twice and a peer's LSP external-write tests fail intermittently** — branch 2 of 6 lane runs, clean `experiments` 1 of 6; cause not found |
 | F-14 | 2026-11-12 | med | plan-prose | open | **Key-space census after the B1 exclusions: 26 duplicate-key groups (54 files), 17 invalid-key files, 9 of them not renamable** — 14 groups are plan and spec pairs kept in scope; the spec does not yet say so |
+| F-15 | 2026-11-12 | med | architectural | open | **Shadow diff of experiments HEAD: the closed grammar sees 26 of the old catalog's 3812 file-grain edges; the rest is migration work, not a builder defect** — 4764 of 4770 only-old edge rows have a text form the grammar does not read; 4924 Unexplained of 5678 rows |
 
 ## Wins Index
 
@@ -781,6 +782,43 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 **Fix idea / Pointer:** Record the plan-and-spec-pair decision in `docs/superpowers/specs/2026-11-11-repo-relative-artifact-key-design.md`, and carry the 9 unrenamable files into the Plan D design.
 
 ---
+
+## F-15 — Shadow diff of experiments HEAD: the closed grammar sees 26 of the old catalog's 3812 file-grain edges; the rest is migration work, not a builder defect
+
+**Observed:** Plan B2 Task 7 ran `codescout derive-shadow --project <main checkout> --rev HEAD --json` from the B2 worktree binary (commit 2c66232d4 plus the ignored test 74c13818b) against the live machine-global catalog. The compared commit was `experiments` HEAD 1c92b2aa7. The command read git objects only. It wrote nothing to the catalog or to the main checkout. Full report: `.superpowers/sdd/2026-11-11-artifact-identity-plan-b2-derived-index-builder/task-7-report.md` in the B2 worktree.
+
+**Valid:** dated 2026-11-12
+
+**Derived index of that commit.** 2587 documents, 2231 entries, 4886 edges, 46872 chunks, 43 problems, 176 skipped (all `outside_key_space`; no `not_utf8`, no symlink).
+- Edges by kind: local 4683, malformed 144, file 43, unknown_key 14, entry 2.
+- Problems: duplicate_key 26 (plan and spec pairs that share a file stem: 52 documents), invalid_key 17 (underscore in the file name).
+- Two documents carry `parse_note = frontmatter_error`.
+
+**Old catalog, same scope** (3099 in-scope artifacts at the diff, 3100 a minute later: the catalog is live). `artifact_link` rows with both ends in scope 3820 (3810 `cites`). `entry_cite` rows whose `src_slug` is in scope 3583. Chunk rows of in-scope artifacts 51724. Excluded: 5066 rows under other roots, 2 worktree copies, 0 `missing_since`.
+
+**Diff.** old 3099, new 2587, matched 2582. Only-old 5517, only-new 52, changed 109 rows. By cause: unexplained 4924, file_set_walk_vs_commit 466, closed_grammar_drops_edge 230, key_outside_space 56, parse_rule 2.
+
+**The six rulings, measured on this repo.**
+1. Listing (tracked `*.md`, symlinks skipped): 461 only-old documents are untracked or staged-new files (458 `??`, 1 `A `, 2 `AM`); all 461 checked by script. 5 only-new documents are in the commit and absent from the old catalog (the old walk does not hold `.codescout/measurements/**`; reason not opened).
+2. One frontmatter rule: 2 documents indexed as `frontmatter_error`, both show as `parse_rule` title rows. No `not_utf8` file.
+3. Key space: 176 skipped plus 56 only-old documents with cause `key_outside_space`.
+4. Committed inputs only: 25 `kind` rows and about 10 `status` rows differ because machine-global `~/.config/librarian/workspace.toml` rules (`**/CLAUDE.md`, `**/README.md`, `**/docs/plans/**/*.md`, `**/*-tracker.md`) are not applied. Verified: each of the 25 paths matches the glob that gives the old kind.
+5. Deferred to Plan C: 26 `chunk_count` rows. 11 are dirty files. The other 15 have working-tree sha equal to the old `file_sha256`, but the old chunks come from another text (never embedded, or edited since). Verified by query for all 26.
+6. Commit-only reads: 13 `file_sha256` rows are the 13 tracked files that carry uncommitted edits. For all 13 the working-tree hash equals the old catalog hash, so the old row holds the working text and the derived row holds the committed text. Tags (8), title (8), kind (8) and status (9) rows on the same 13 paths are the same gap.
+
+**The finding.** 4764 of the 4770 only-old edge rows (3406 file grain, 1364 entry grain) have a committed-text form that the closed grammar does not read: relative path links (563), 16-hex ids (720), bare tokens (849 in prose, 860 only in inline code or headings), `stem:TOKEN` (383), and tokens in inline code or headings. The old scanner reads those forms. It does not enable wiki links. The derived index holds 43 `file` edges and 2 `entry` edges of the `[[...]]` form in the whole repo, and 26 file-grain edges were compared against the old 3812. Verified: one sample row per group, both sides opened (old catalog row by read-only query; derived row and committed blob), and the mechanism in `link_scan/extract.rs` and `identity/grammar.rs`. Per-form row counts come from a script over the committed blobs, not from a replay of the old scanner. A flip to the derived index loses these edges unless the migration rewrites the text to `[[key]]` or the grammar admits more forms. This is a Plan D and Plan E decision. No builder or diff defect was found.
+
+**Not established (suspected only).**
+- 4 file rows and 2 entry rows have no text support in the commit or the working tree (8 old `cites` rows from `src/prompts/guides/tracker-conventions.md`; `pre-T-4` and `post-T-4`). They may be stale rows or hand-written `cites` links; `artifact_link` has no origin column.
+- 23 only-new entry rows, all same-document `local` edges in ledgers. In the sample, the old catalog holds no `entry_cite` row from the source ledger at all. Why is not known.
+- 24 only-new file rows are `[[key]]` links the old scanner cannot read (verified for one).
+- 11 only-old file rows name a bare token that has several definers (indicator only).
+
+**Follow-up (open, not done here).** Do not widen the causes to hide these rows.
+- Ruling for the user: whether the diff gains derived-side cause rules. 64 rows are the same citation recorded as a derived `malformed` edge (`[[R-79]]` style): 16 file-grain, 19 cross-document entry, 29 same-document entry. Evidence exists (source blob, `edge.line`, malformed edges). Verified for one sample.
+- Plan D: the migration must emit `[[entry-key]]` for each token that becomes an entry, and must size the 3406 plus 1364 rewrites. Compare W-4 (144 `[[F-16]]` rewrites).
+- 26 duplicate-key groups and 17 invalid-key documents exclude those documents from key resolution (see F-14).
+- Resolve the six suspected items above before Plan E reads from the derived index.
 
 ## Template for new entries
 

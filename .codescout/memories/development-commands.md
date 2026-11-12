@@ -60,13 +60,13 @@ asserts Clap's own "unrecognized subcommand" error text for `artifact find`. Ver
 
 - **The long clippy form is the gate, not garnish.** Bare `cargo clippy -- -D warnings`
   lints only the root package's *non-test* targets with default features, so it passes trees
-  CI fails. CI runs BOTH (`ci.yml:369` narrow, `:380` wide — verified 2026-10-19); only the
+  CI fails. CI runs BOTH (the `clippy` job in `ci.yml`: narrow at `:374`, wide at `:385`, and a lean `--no-default-features` line at `:391` — verified 2026-11-12); only the
   second reaches `#[test]` code and `codescout-embed`'s feature-gated `local` module.
 - **The lean lane is `test`, not `check`.** A `check` compiles the lean test targets and
   never runs them, so a lean-only *runtime* failure is invisible to it. It is also the only
   gate command that runs *without* default features, so an unconditional module reaching a
   `#[cfg(feature = "http")]` one (any default feature) compiles clean locally and fails only in CI's slow
-  3-OS `no-features` test-matrix lane (`ci.yml:394`), never in the fast clippy job.
+  3-OS `no-features` test-matrix lane (the `test` job in `ci.yml`, from `:393`; its `--no-default-features` entry is at `:406`), never in the fast clippy job.
 - **Both test lanes carry `--workspace`.** Bare `cargo test` builds only the **root
   package's** targets, so every test in a workspace member is invisible to it — not a
   `tests/`-directory quirk, an inline `#[cfg(test)]` module is equally unreachable.

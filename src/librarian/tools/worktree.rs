@@ -38,10 +38,27 @@ pub(crate) fn is_main_checkout_artifact(
     under(&row, &main_s) && !under(&row, &wt_s)
 }
 
+/// True iff the catalog records `row` as a fork of a main-checkout artifact: a
+/// `worktree_of` lineage link, or a `worktree_fork` event ([`resolve_write_target`] writes
+/// both). Needs no session: the records belong to the row, not to the caller.
+pub(crate) fn has_fork_record(cat: &Catalog, row: &artifact::ArtifactRow) -> Result<bool> {
+    if links::outgoing(cat, &row.id)?
+        .iter()
+        .any(|l| l.rel == LINEAGE_REL)
+    {
+        return Ok(true);
+    }
+    let forked: i64 = cat.conn.query_row(
+        "SELECT COUNT(*) FROM events WHERE artifact_id = ?1 AND kind = ?2",
+        rusqlite::params![row.id, FORK_EVENT_KIND],
+        |r| r.get(0),
+    )?;
+    Ok(forked > 0)
+}
+
 /// True iff `row` is this worktree session's OVERLAY SHADOW of a main-checkout artifact:
 /// the session is a worktree, the row sits under the worktree root, and the catalog
-/// records its fork — a `worktree_of` lineage link to a main row, or a `worktree_fork`
-/// event ([`resolve_write_target`] writes both).
+/// records its fork ([`has_fork_record`]).
 ///
 /// [`is_main_checkout_artifact`] is false for such a row (its path is under the worktree),
 /// so a guard that only asks that question lets a caller who names the shadow's id past a
@@ -49,10 +66,9 @@ pub(crate) fn is_main_checkout_artifact(
 /// has no main twin to collide with, and is not a shadow.
 ///
 /// Scope: only WORKTREE sessions are covered (`cp.main_root` is `Some`); for any other
-/// session this returns `false` without looking at the row. A main-checkout session that
-/// names a worktree shadow's id, and a call with no current project at all, are therefore
-/// NOT caught by this predicate. That is deliberate: this widens nothing beyond the
-/// worktree-session guard it serves.
+/// session this returns `false` without looking at the row. Callers that must refuse a
+/// shadow whatever the session (a main-checkout session, a call with no current project)
+/// ask [`has_fork_record`] directly.
 pub(crate) fn is_worktree_shadow(
     cat: &Catalog,
     cp: &CurrentProject,
@@ -66,18 +82,7 @@ pub(crate) fn is_worktree_shadow(
     if !under(&row_s, &wt_s) {
         return Ok(false);
     }
-    if links::outgoing(cat, &row.id)?
-        .iter()
-        .any(|l| l.rel == LINEAGE_REL)
-    {
-        return Ok(true);
-    }
-    let forked: i64 = cat.conn.query_row(
-        "SELECT COUNT(*) FROM events WHERE artifact_id = ?1 AND kind = ?2",
-        rusqlite::params![row.id, FORK_EVENT_KIND],
-        |r| r.get(0),
-    )?;
-    Ok(forked > 0)
+    has_fork_record(cat, row)
 }
 
 /// Best-effort branch name: worktree `.git` file → gitdir → `<gitdir>/HEAD`

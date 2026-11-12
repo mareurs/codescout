@@ -365,6 +365,17 @@ restored=$(count_lit "$TARGET" "$FIND")
 # three lines of output; one confident wrong cause costs a hunt.
 ran_lines=$(grep -cE '^running [0-9]+ tests?$' "$RUNLOG" || true)
 executed=$(grep -oE '^running [0-9]+ tests?$' "$RUNLOG" | awk '{s+=$2} END {print s+0}')
+# WHAT `executed` MEANS, and why the verdict lines say "selected" and not "ran".
+# It is the SUM of every anchored `running N tests` line, so it counts (a) each
+# harness cargo started, (b) tests cargo marked ignored — `running N` includes
+# them — and (c) a child harness whose stdout a test captured and the runner
+# printed back at column 0. Measured 2026-11-10: it read 21 over a top-level summary
+# of 17 passed, 2 failed, 1 ignored. A caller needs the top-level figure from the
+# runner's own final `test result:` line; this script cannot select that harness
+# without a format it does not control. The number still serves the one job the
+# verdict gives it — telling zero from non-zero — and nothing finer.
+# Case 10b pins the label and the sum.
+count_note="The count sums every 'running N tests' line: ignored and nested-harness tests are in it. For the top-level figure read the runner's last 'test result:' line."
 
 inconclusive=0
 if [ "$ran_lines" -eq 0 ]; then
@@ -393,11 +404,13 @@ elif [ "$executed" -eq 0 ]; then
     echo "  Since 2026-09-16 an uncommitted test is NOT a cause here: the isolated worktree" >&2
     echo "  carries your whole working tree, tracked and untracked, not only the mutated file." >&2
 elif [ "$rc" -eq 0 ]; then
-    echo "mutation-probe: SURVIVED (rc=0, $executed test(s) ran) — no test caught the mutation." >&2
+    echo "mutation-probe: SURVIVED (rc=0, $executed test(s) selected over $ran_lines 'running' line(s)) — no test caught the mutation." >&2
+    echo "  $count_note" >&2
     echo "  Two readings, and they take opposite repairs: the line is UNTESTED (write the test)," >&2
     echo "  or it is UNREACHABLE by any test you could write (the code needs a seam first)." >&2
 else
-    echo "mutation-probe: KILLED (rc=$rc, $executed test(s) ran) — a test caught it." >&2
+    echo "mutation-probe: KILLED (rc=$rc, $executed test(s) selected over $ran_lines 'running' line(s)) — a test caught it." >&2
+    echo "  $count_note" >&2
     echo "  Applied-ness needs no further audit: a red cannot be produced by a mutation that" >&2
     echo "  never applied, and the count above rules out a compile failure wearing this verdict." >&2
 fi

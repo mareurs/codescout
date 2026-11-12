@@ -24,7 +24,7 @@ This document keeps what the Plan B1 subagent-driven run recorded in its scratch
 
 ## Open findings
 
-Each row is a deferred Minor finding that no later commit closed. "Task N" is the Plan B1 task that raised it. All items are small unless the note says otherwise.
+Each row was a deferred Minor finding that no later commit had closed when the run ended. On 2026-11-12 each row was checked against the code; read § Triage of 2026-11-12 for what that found, because several rows below are now fixed. "Task N" is the Plan B1 task that raised it. All items are small unless the note says otherwise.
 
 | Task | Finding |
 |---|---|
@@ -77,8 +77,42 @@ Each row is a deferred Minor finding that no later commit closed. "Task N" is th
 
 ## Questions for the migration (Plans D and E)
 
-- Nine files in the key space have an invalid key and cannot simply be renamed: 3 GitHub templates (GitHub dictates the names) and 6 prompt templates under `src/` and `scripts/measure`. Decide for each: rename or exclude.
-- 14 of the 26 duplicate-key groups are plan and spec pairs that share a stem. They stay in scope. This departs from the spec's named example, and the spec does not yet record the decision. See session-log entry F-14.
+- Seventeen files in the key space have an invalid key. Nine of them cannot simply be renamed: 3 GitHub templates (GitHub dictates the names) and 6 prompt templates under `src/` and `scripts/measure`. Decide for each of the nine: rename or exclude. The other eight can be renamed: `docs/PROGRESSIVE_DISCOVERABILITY.md`, `docs/issues/_TEMPLATE.md`, four archived issues with underscores in the name, one issue with an uppercase `A`, and one file with a dot in the stem (`...phase1.5.md`). An earlier version of this section said nine files in all.
+- 14 of the 26 duplicate-key groups contain a plan. Only 6 of them are a plan and a spec that share a stem (the 2026-10-27 group is a triple with a review). 7 are `ecc-integration` plans against reports, and 1 is a research note against a plan. All stay in scope. This departs from the spec's named example, and the spec does not yet record the decision. See session-log entry F-14.
+- The counts above were taken on 2026-11-12 with a script that replicates the key rules over `git ls-files` (2,755 `.md` files, 2,578 in the key space), because the built `target/release/codescout` predates the `key-gate` command. The 26 groups match the earlier figure. The 17 have not been confirmed with `key-gate` itself.
+
+## Triage of 2026-11-12
+
+Every row of § Open findings was read against the code that day by four read-only reviewers, and the claims that mattered most were read again at the source. Row numbers below are the Task column of that table. Two commits closed most of it: `6292766cf` and `a6f8712dd`.
+
+**Fixed in `6292766cf`, each behaviour change with a test that failed first:**
+- Task 5: a project with no `.git` inside the scan is judged as itself, not as an ancestor repository above the scan root (`visit_project` now stops at the scan root). This was the only row that could give a wrong verdict in production.
+- Task 6: the dialog no longer overwrites a name another session wrote while it waited. `scrub_home` shortens only a whole path component, and `remember_error` and `written` pass through it. The scan reads the workspace file that `LIBRARIAN_WORKSPACE` names.
+- Task 4: a failing `git rev-parse` or `git diff --cached` says NOT CHECKED. Exit 2 with an empty stdout shows key-gate's stderr. A dead `$CODESCOUT_BIN` is named. The stub `PROBLEM` text no longer uses a readme pair. The tests build `PATH` from where `git`, `bash` and `sed` are. The `.claude` comment says one tracked SKILL.md.
+- Task 3: `key_gate()` in `tests/cli_key_gate.rs` sets `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM`.
+- Task 2: `folder_of` is one function in `key.rs`. `check_tree` documents that paths must be normalised, with a test. Tests cover two excluded readmes and `r.outside`.
+- Task 1: tests for glob semantics and for a `.codescout` directory linked outward. Doc lines for the no-dotdot contract and for the backslash.
+- Task 5: the module doc states that `same_repo` is not proof. `render_scope` says "1 directory visited" and its test asserts the "not exhaustive" wording.
+
+**Fixed in `a6f8712dd`:**
+- Final R15 (a) and (b): `new_since` counts a folder index under its folder's name, and a refusal names the file that was added, not an older one that sorts later. Both tests failed first.
+- Task 5: a scan does not enter `node_modules` or `target`, and `inspect` opens the repository once. The unborn-HEAD case is tested through a scan. The skip test failed first.
+- Task 1: a parse error from `load` names the file once. The test failed first.
+- Task 7: a linked worktree offers its main checkout's `repo.toml` name ahead of a guess. The test failed first. The compact `REPO NAME UNCONFIRMED` banner says the call writes the committed file, and the manual page lists the repo-name fields.
+- Task 3: the JSON NOT CHECKED object has a `mode`; a malformed `key-space.toml` at HEAD says how to go on; `head_exists` is asked once; the doc names the `GIT_INDEX_FILE` caveat for `--project`. The `mode` and HEAD-message tests were written together with the fix and were not run red first.
+- Task 4: a case with two live candidates asserts the probe order.
+- Task 6: a doc line says the dialog is asked before the scan, which is why a collision is reported after the name is written.
+
+**Found already fixed, no change needed:** the blank-pattern and trailing-slash tests (Task 1); the revwalk-timeout path and the per-directory deadline check (Task 5); duplicated unmerged paths (Task 3 and 4), which `check_tree` collapses in a `BTreeSet`. `repo_name_note` no longer recomputes `to_forward_slash` (Task 7).
+
+**Still open:**
+- Task 2: `render` of `InvalidKey(NotMarkdown)` has no remedy text (probably not worth fixing, the case is unreachable). The partial-exclusion warning for two readmes is accepted.
+- Task 4: the hook is dormant until a binary is built, by design.
+- Task 5: linked worktrees outside `.worktrees` are still entered; the Depth bound wording; the "a repo counts once" assertion cannot fail, because the report is deduplicated at the end.
+- Task 6: no test drives the live dialog with a peer present (an in-process duplex harness exists at `src/server/native_context_tests.rs`).
+- Final: whether `ScanLimits::default()` needs a `RESULT_CAP` row. That is a decision, not a fix.
+
+The reviewers read the code; they did not run it. The fixes above were run: see the commit messages for the gate.
 
 ## Closed by a later commit
 

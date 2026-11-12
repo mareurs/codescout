@@ -77,7 +77,7 @@ incompatibility is exactly the swapped field. `fable-tuning-findings`
 
 **The escape is one atomic call, and it is a designed affordance rather than a
 bypass.** `validate_merged_against_schema` (`src/librarian/tools/augment.rs:36-52`,
-called at `:397`, comment-tagged `F-5`) validates merged params against *the schema
+called at `:424`, comment-tagged `F-5`) validates merged params against *the schema
 this call supplies*. So a single `doc(action="augment", merge=true, …)` carrying params and
 `params_schema` together is fully validated against the target schema — not slipped
 past a guard. The three-call alternative (permissive schema → params → real schema)
@@ -187,3 +187,4 @@ change from a branch, make that commit with plumbing: verify `git diff-tree -r -
 $(git write-tree)` lists only that file and the blob equals the target rev's, then `git commit-tree`
 and `git update-ref <branch> <new> <old>`. Do not use `CODESCOUT_INDEX_ACK`: its trailer names the
 peer as co-author of text that is yours.
+

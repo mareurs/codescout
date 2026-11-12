@@ -171,5 +171,46 @@ State on 2026-11-03: the three items left open under Resume were triaged. None i
 
 The reopen condition this record gave for the ceiling, any `timed_out` row, has now fired once. What is not known: whether that session ran an engine with CIW-10 (`c754e00b3` at 12:31 and `d8f3512c8` at 12:36 UTC; the engine script appears to be extracted from the binary, as the tests use an extraction directory, so it depends on whether that session's binary was rebuilt after them, which I did not check); what the machine load was at 14:35 UTC. It was not the load of the session that wrote this read: its busy-loop run started at 14:39:52 UTC, four minutes later. One row is one row. The choice among the options (a lean red-only path, a higher default, or leaving it) is still the operator's, and the scan still blocks the response, so a higher ceiling lengthens the wait and does not speed the scan.
 
+## Read of usage.db, 2026-11-12 (item 3 date reached)
+
+Same query on `/home/marius/work/claude/codescout/.codescout/usage.db`, read 2026-11-12. `timed_out` rows: 1 on 11-04 (30,012 ms), 2 on 11-11 (30,204 ms max) and 3 on 11-12 (30,003 ms max), 6 in all. `hinted` rows above 15,000 ms (the trigger from item 1) by day: 11-04 1, 11-05 1, 11-07 2, 11-08 5, 11-09 12, 11-10 1, 11-11 28, 11-12 30. Longest `hinted` per day: 11-09 29,859 ms, 11-11 27,642 ms, 11-12 28,438 ms. No `tooling_failure` or `spawn_failed` row. Hints did not stop: `hinted` rows exist on every day except 11-06.
+
+So the reopen trigger is no longer a single row. On 11-11 and 11-12, 58 of 174 `hinted` rows took more than half the ceiling, and the longest took 94% of it. The table has no command text, no load figure and no binary id. So these rows do not show why the scan is slow on those days (a corpus that grew, a cold cache after a deploy, or machine load). Not checked: whether those rows came from one session or several, and whether their binaries held CIW-10 (`c754e00b3`).
+
+The choice among the options (a lean red-only path, a higher default, leaving it) is still the operator's. A higher default lengthens the wait of a red whose scan is already slow. Next read, to separate the causes: group the `hinted` rows above 15,000 ms and the `timed_out` rows by `session_id` and by hour, and compare with the load at those times.
+
+## Decision of 2026-11-12: the ceiling is 60 s
+
+The operator chose the higher ceiling, against the recommendation above to keep 30 s and read the slow rows by session and hour first. `ATTRIBUTION_TIMEOUT_DEFAULT` is now 60 s (`src/tools/run_command/attribution.rs`).
+
+- Fix SHA (on `experiments`): `31d138b1a8ef797d735cfee7cf1df3bb22a2d259`
+- patch-id: `f6297dfb5d5926be4764a22f4eaf8a74143c0d6f`
+
+What it does: a scan that took 30 to 60 s now returns its hint, where it returned `timed_out` and no hint. The longest answered scan so far took 28.4 s, so 60 s is about twice that.
+
+What it costs: the scan blocks the red's response, so a red whose scan is slow can now wait up to 60 s before the answer comes back. Nothing makes the scan faster, and the cause of the slow scans on 11-11 and 11-12 is still unknown.
+
+Checked: `cargo test --lib --no-default-features tools::run_command::` passed (499 passed, 0 failed). No test pins the default value. Not checked: the default-feature suite, whether a 60 s response exceeds a client-side tool timeout, and the companion hook text, which says the scan takes about 20 s (plugin repo, not read here).
+
+Still open: why the scans are slow, and a distribution after the change. Re-read the same query after a few days: `timed_out` rows should fall to zero if the ceiling was the only limit. A `hinted` row above 45,000 ms, or any `timed_out` row at the 60 s ceiling, reopens the choice of a lean red-only path.
+
+## Read of usage.db by session and hour, 2026-11-12 (session `5f715d8f`)
+
+Same table, read at 12:30 UTC with `sqlite3 -readonly`: rows with `attribution_outcome` `hinted` or `timed_out`, grouped by `coalesce(cc_session_id, session_id)` and by hour. This was the "next read" named in the section above. The time column is the time of recording, so a row's call started up to `attribution_ms` earlier.
+
+- **Quiet floor.** Eight hours had a single scanning session. In seven of them (2026-11-11 07h, 08h, 11h, 17h, 18h; 2026-11-12 06h, 12h; one to four scans each) the average scan took 8.1 to 13.7 s. The eighth, 2026-11-12 10h, averaged 22.2 s over five scans (see "Not explained").
+- **All three `timed_out` rows of 2026-11-12 fall inside a window in which I ran `burn.py`** (64 busy processes, one per core; the windows are the start time and length of my own `run_command` calls, read from this session's transcript): 08:18:21 and 08:21:38 inside 08:17:11 to 08:24:11, and 09:28:17 inside 09:26:03 to 09:32:43. All three belong to session `e4a747a2`. My first window was 08:11:50 to 08:16:30 and my fourth 12:23 to 12:28; the fourth produced no row. A further row inside a window is my own, 08:16:08, `hinted`, 24,565 ms. The load was mine, on the shared host, and the scans of other sessions ran under it. I did not run those scans without my load, so "my load caused the timeouts" is not shown, only that the timing is the same. The two `timed_out` rows of 2026-11-11 (22:08:19 and 22:12:05, also session `e4a747a2`) are not mine, but they also coincide with load: the background-job records show at least four `gate.sh` runs of other sessions overlapping them (22:05 to 22:13, 22:09 to 22:16, 22:09 to 22:18, 22:14 to 22:23) and docker builds, and this session's transcript holds no `burn.py` call that day. The `timed_out` row of 2026-11-04 is outside this session's transcript (it starts 2026-11-11 11:53), so I say nothing about it.
+- **Not explained by my load.** From 09:36 to 09:58 session `e4a747a2` scanned at a steady 20.1 to 25.5 s (11 rows, no timeout); from 10:20 to 10:35 five rows of 21.1 to 25.2 s, in an hour with one scanning session. From 11h the scans are back near the floor: the 11h and 12h averages are 12.8 s and 10.9 s, the longest 15.8 s. Background-job records show gate runs in 09:14 to 09:32 (mine and a peer's) and 11:33 to 11:45, none that cover 09:36 to 10:35. The cause of that stretch is unknown.
+- **Concentration.** Since 2026-11-11, session `e4a747a2` has 39 of the 63 rows above 15 s and 80 of 179 rows in all, with 49% slow; the other sessions with five rows or more are at 8 to 40% slow. Every one of them averages 11.8 to 16.3 s a scan, so the scan is slow in every session, not in one.
+- **Effect on the decision above.** The 60 s decision was made on a read that counted six `timed_out` rows: three inside my load windows, two beside four concurrent gate runs of other sessions, and one (2026-11-04) that I did not check. So at least five of the six happened while the host ran a known heavy job. That does not reverse the decision. It lowers how much those rows say about the ceiling being the limit under normal use. A later read should leave out, or mark, the time of any deliberate load. The windows are recoverable: every `run_command` background job leaves a record with `started_at`, `finished_at` and `command` in `~/.cache/cc-tmp/codescout-bg/`. I read my four `burn.py` runs there and they match this session's transcript to the second. But nothing joins those records with `usage.db` rows, the rows carry no load figure, and a foreground command leaves no record.
+
+Not checked: whether the scans of `e4a747a2` in those windows would have finished under 30 s without my load; machine load at any other time (the table holds no load figure); the load of sessions that run foreground commands, which leave no background-job record; whether the 20 s stretch is a cache refill after a script change (the cache key covers `write_targets.py`).
+
+## Addendum, 2026-11-12 (session `5566e8a8`): a second load source in the 09:28 window
+
+The `timed_out` row at 09:28:17 UTC (`usage.db` times are UTC: the newest row, 12:41:23, matched `date -u` at 12:41:28) lies inside the `burn.py` window above, 09:26:03 to 09:32:43. It also lies inside a run of mine: a loop of eight full lean test suites, `run-2.log` of that loop finished at 09:30:39 UTC (11:30:39 +0200, by file mtime) and `run-1.log` at 09:26:32. So two sessions loaded the host in that window, not one. My suites ran under no busy processes, so their load is smaller than `burn.py`'s; I did not measure either. The same loop's four earlier rename-test runs under 64 busy loops finished between 09:02 and 09:23 UTC and match no `timed_out` row.
+
+This changes nothing in the section above. It adds that at least one of the six `timed_out` rows coincides with load that was not the author's of the read, so the rows say even less about the ceiling under normal use. The same limit holds: coincidence is not cause, and I did not re-run the scans without load.
+
 ## References
 - `docs/issues/2026-10-31-a-timed-out-filter-test-fails-in-the-loaded-gate-and-passes-alone.md`

@@ -49,24 +49,45 @@
 # Only exit 1 refuses. Exit 0 is silent.
 set -uo pipefail
 
-root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "key-space: NOT CHECKED — \`git rev-parse --show-toplevel\` failed, so the repository could not be located." >&2
+    echo "  Passing open: a failing git is not grounds to refuse your commit." >&2
+    exit 0
+}
 cd "$root" || exit 0
+
+list="$(mktemp)" || exit 0
+errf="$(mktemp)" || exit 0
+trap 'rm -f "$list" "$errf"' EXIT
 
 # Is a markdown file or the scope file part of this commit? `-z` and a `case` on the name
 # rather than a pathspec: a git pathspec is case-sensitive and `README.MD` is a document.
-# `--no-renames` lists the old path of a rename as well as the new one.
+# `--no-renames` lists the old path of a rename as well as the new one. The list goes through a
+# file, not a process substitution: a failing git must be seen, and a null-separated list cannot
+# be held in a shell variable.
+if ! git diff --cached --name-only --no-renames -z >"$list" 2>"$errf"; then
+    echo "key-space: NOT CHECKED — \`git diff --cached\` failed, so the staged files are not known." >&2
+    [ ! -s "$errf" ] || sed 's/^/  stderr: /' "$errf" >&2
+    echo "  Passing open: a failing git is not grounds to refuse your commit." >&2
+    exit 0
+fi
 relevant=0
 while IFS= read -r -d '' p; do
     case "$p" in
         .codescout/key-space.toml | *.[mM][dD]) relevant=1; break ;;
     esac
-done < <(git diff --cached --name-only --no-renames -z 2>/dev/null)
+done <"$list"
 [ "$relevant" -eq 1 ] || exit 0
 
 bin=""
 for cand in "${CODESCOUT_BIN:-}" "$root/target/release/codescout" "$(command -v codescout 2>/dev/null || true)"; do
     [ -n "$cand" ] && [ -x "$cand" ] && "$cand" key-gate --help >/dev/null 2>&1 && { bin="$cand"; break; }
 done
+# A named binary that is not live is the operator's mistake, so say so; the next candidate is
+# still used.
+if [ -n "$bin" ] && [ -n "${CODESCOUT_BIN:-}" ] && [ "$bin" != "$CODESCOUT_BIN" ]; then
+    echo "key-space: note — \$CODESCOUT_BIN ($CODESCOUT_BIN) is not a live codescout with a \`key-gate\` command; using $bin." >&2
+fi
 if [ -z "$bin" ]; then
     echo "key-space: NOT CHECKED — no live codescout binary with a \`key-gate\` command." >&2
     echo "  Looked at \$CODESCOUT_BIN, target/release/codescout, and codescout on PATH." >&2
@@ -75,8 +96,7 @@ if [ -z "$bin" ]; then
     exit 0
 fi
 
-errf="$(mktemp)" || exit 0
-trap 'rm -f "$errf"' EXIT
+: > "$errf"
 
 out="$("$bin" key-gate --staged --project "$root" 2>"$errf")"
 rc=$?
@@ -110,8 +130,14 @@ case "$rc" in
         exit 1
         ;;
     2)
-        # `NOT CHECKED — <reason>` is on stdout, one line.
-        printf 'key-space: %s\n' "$out" >&2
+        # `NOT CHECKED — <reason>` is on stdout, one line. An argument-parser usage error exits 2
+        # too, and writes only to stderr, so print that as well.
+        if [ -n "$out" ]; then
+            printf 'key-space: %s\n' "$out" >&2
+        else
+            echo "key-space: NOT CHECKED — \`codescout key-gate\` exited 2 and printed no reason." >&2
+        fi
+        [ ! -s "$errf" ] || sed 's/^/  stderr: /' "$errf" >&2
         echo "  Passing open: the key-gate could not ask its question, which is not a reason to" >&2
         echo "  refuse your commit." >&2
         exit 0

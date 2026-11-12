@@ -52,14 +52,20 @@ pub struct CollectionNode {
 pub enum TreeProblem {
     /// A file below a lifecycle folder has no valid place (or an entry file name is no key).
     Placement(PlacementError),
-    /// A file sits at or below a subfolder that holds its own `readme.md`.
+    /// A file sits at or below a subfolder that holds its own readme (`README.md`, `readme.md`:
+    /// the name is matched without regard to case).
     NestedCollection(String),
+    /// A second readme in one collection folder (a name `is_folder_index` reads as a readme,
+    /// whatever its case). Only the first in path order is the collection's readme, parsed as
+    /// its schema whether that succeeds or not; every later one is not read as a schema or an
+    /// entry, so it gives no `Schema` or `Frontmatter` problem of its own. The payload is the
+    /// skipped file's repo-relative path, never the kept readme's.
+    DuplicateReadme(String),
     /// An entry with no collection readme above it.
     OrphanEntry(String),
     /// A collection readme whose schema fails; the collection and its entries are left out.
     /// `rel_path` is the readme's repo-relative path.
     Schema {
-        collection: Key,
         rel_path: String,
         errors: Vec<SchemaError>,
     },
@@ -100,7 +106,9 @@ fn closed_of(fm: &Frontmatter) -> Option<NaiveDate> {
 }
 
 impl LifecycleTree {
-    /// Place and parse `docs`. The result does not depend on the order of `docs`.
+    /// Place and parse `docs`. The result does not depend on the order of `docs`: they are read
+    /// in the raw byte order of `rel_path`, and in a folder with several readmes the first in
+    /// that order is the readme (see `TreeProblem::DuplicateReadme`).
     pub fn build(docs: impl IntoIterator<Item = DocInput>) -> LifecycleTree {
         let mut docs: Vec<DocInput> = docs.into_iter().collect();
         docs.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
@@ -118,6 +126,10 @@ impl LifecycleTree {
         let mut collections: BTreeMap<String, CollectionNode> = BTreeMap::new();
         // Collections whose readme failed: their entries are skipped, not orphaned.
         let mut failed: BTreeSet<String> = BTreeSet::new();
+        // Collection folders whose readme has been met: the first in path order is the readme,
+        // whether it parses or not, and a later one is a `DuplicateReadme`. Keyed by folder, not
+        // by collection key: `streams/s` and `streams/archive/s` are two collections.
+        let mut readme_seen: BTreeSet<String> = BTreeSet::new();
         // An entry file is queued with its frontmatter, or with `None` when the frontmatter
         // block did not parse: the second pass still has to count it against its collection.
         let mut pending: Vec<(&DocInput, Placement, Option<Frontmatter>)> = Vec::new();
@@ -138,6 +150,15 @@ impl LifecycleTree {
                 }
                 Some(Ok(p)) => p,
             };
+            if placement.role == Role::CollectionReadme
+                && !readme_seen.insert(placement.collection_dir.clone())
+            {
+                // Not read as a schema or an entry: no schema or frontmatter problem, nothing but
+                // the duplicate. Its frontmatter was parsed above, so a `closed:` value still
+                // counts for `closed_dates`, as for every other file.
+                problems.push(TreeProblem::DuplicateReadme(doc.rel_path.clone()));
+                continue;
+            }
             if placement.role == Role::Entry && has_nested_readme(&doc.rel_path, &readme_dirs) {
                 problems.push(TreeProblem::NestedCollection(doc.rel_path.clone()));
                 continue;
@@ -176,7 +197,6 @@ impl LifecycleTree {
                     }
                     Err(errors) => {
                         problems.push(TreeProblem::Schema {
-                            collection: placement.collection,
                             rel_path: doc.rel_path.clone(),
                             errors,
                         });
@@ -439,7 +459,6 @@ mod tests {
         assert_eq!(
             t.problems,
             [TreeProblem::Schema {
-                collection: k("s"),
                 rel_path: "docs/trackers/streams/s/readme.md".into(),
                 errors: vec![SchemaError::ExitRequired]
             }]
@@ -623,6 +642,109 @@ mod tests {
             t.problems.as_slice(),
             [TreeProblem::Frontmatter { .. }]
         ));
+    }
+
+    #[test]
+    fn a_second_readme_in_one_folder_is_a_problem_and_the_first_in_path_order_decides() {
+        // `README.md` sorts before `readme.md` (raw bytes), so `README.md` is the readme. The
+        // second one is broken, and still gives only the duplicate: it is not read at all.
+        let docs = vec![
+            doc("docs/trackers/ledgers/l/README.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/readme.md",
+                "---\ntitle: [unclosed\n---\n",
+            ),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-a.md",
+                &entry("open", "", ""),
+            ),
+        ];
+        let mut rev = docs.clone();
+        rev.reverse();
+        for input in [docs, rev] {
+            let t = LifecycleTree::build(input);
+            assert_eq!(
+                t.problems,
+                [TreeProblem::DuplicateReadme(
+                    "docs/trackers/ledgers/l/readme.md".into()
+                )]
+            );
+            assert_eq!(t.collections.len(), 1);
+            assert_eq!(t.collections[0].entries.len(), 1);
+        }
+    }
+
+    #[test]
+    fn the_first_readme_decides_even_when_it_is_broken() {
+        let t = LifecycleTree::build([
+            doc(
+                "docs/trackers/ledgers/l/README.md",
+                "---\ntitle: [unclosed\n---\n",
+            ),
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-a.md",
+                &entry("open", "", ""),
+            ),
+        ]);
+        // The good second readme does not rescue the collection, and its entry is no orphan.
+        assert!(t.collections.is_empty(), "{:?}", t.collections);
+        assert!(matches!(
+            t.problems.as_slice(),
+            [
+                TreeProblem::Frontmatter { rel_path, .. },
+                TreeProblem::DuplicateReadme(dup),
+            ] if rel_path == "docs/trackers/ledgers/l/README.md"
+                && dup == "docs/trackers/ledgers/l/readme.md"
+        ));
+    }
+
+    #[test]
+    fn a_second_readme_in_an_archived_collection_is_a_problem() {
+        let t = LifecycleTree::build([
+            doc("docs/trackers/streams/archive/s/README.md", STREAM),
+            doc("docs/trackers/streams/archive/s/readme.md", STREAM),
+        ]);
+        assert_eq!(
+            t.problems,
+            [TreeProblem::DuplicateReadme(
+                "docs/trackers/streams/archive/s/readme.md".into()
+            )]
+        );
+        assert_eq!(t.collections.len(), 1);
+        assert!(t.collections[0].archived);
+    }
+
+    #[test]
+    fn three_readmes_in_one_folder_give_two_problems() {
+        // Input order is not path order; path order is `README.md`, `Readme.md`, `readme.md`.
+        let t = LifecycleTree::build([
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc("docs/trackers/ledgers/l/README.md", LEDGER),
+            doc("docs/trackers/ledgers/l/Readme.md", LEDGER),
+        ]);
+        assert_eq!(
+            t.problems,
+            [
+                TreeProblem::DuplicateReadme("docs/trackers/ledgers/l/Readme.md".into()),
+                TreeProblem::DuplicateReadme("docs/trackers/ledgers/l/readme.md".into()),
+            ]
+        );
+        assert_eq!(t.collections.len(), 1);
+    }
+
+    #[test]
+    fn the_same_collection_key_in_two_folders_is_not_a_duplicate() {
+        // `s` is a collection key twice (live and archived folder), `x` in two lifecycles:
+        // the duplicate test is per folder, not per key.
+        let t = LifecycleTree::build([
+            doc("docs/trackers/streams/s/readme.md", STREAM),
+            doc("docs/trackers/streams/archive/s/readme.md", STREAM),
+            doc("docs/trackers/ledgers/x/readme.md", LEDGER),
+            doc("docs/trackers/streams/x/readme.md", STREAM),
+        ]);
+        assert!(t.problems.is_empty(), "{:?}", t.problems);
+        assert_eq!(t.collections.len(), 4);
     }
 
     #[test]

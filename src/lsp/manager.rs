@@ -3070,7 +3070,7 @@ sys.exit(1)
 
     #[cfg(unix)]
     #[test]
-    #[ignore = "spawns a python3 fcntl holder; gated like the rust-analyzer mux test"]
+    #[ignore = "spawns a python3 fcntl holder; no CI job or gate lane runs it"]
     fn posix_write_lock_is_held_true_when_another_process_holds_it() {
         // fcntl(F_SETLK) locks are per-process, so a same-process holder wouldn't
         // conflict with the probe. Spawn a SEPARATE python3 process that takes the
@@ -3115,7 +3115,7 @@ sys.exit(1)
     /// before "held" is printed, so the barrier read can never race the lock.
     #[cfg(unix)]
     #[tokio::test]
-    #[ignore = "spawns a python3 flock holder + drives the mux connect path; gated like the posix_write_lock tests"]
+    #[ignore = "spawns a python3 flock holder + drives the mux connect path; no CI job or gate lane runs it"]
     async fn get_or_start_via_mux_surfaces_wedged_error_when_flock_held_socket_absent() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
@@ -4969,7 +4969,7 @@ sys.exit(1)
 
     #[cfg(unix)]
     #[tokio::test]
-    #[ignore = "spawns a python3 fcntl holder; gated like posix_write_lock tests"]
+    #[ignore = "spawns a python3 fcntl holder; no CI job or gate lane runs it"]
     async fn reap_holders_of_lock_kills_an_orphan_holder() {
         use std::io::Read;
         let dir = tempfile::tempdir().unwrap();
