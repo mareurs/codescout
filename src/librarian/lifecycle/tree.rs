@@ -57,9 +57,9 @@ pub enum TreeProblem {
     NestedCollection(String),
     /// A second readme in one collection folder (a name `is_folder_index` reads as a readme,
     /// whatever its case). Only the first in path order is the collection's readme, parsed as
-    /// its schema whether that succeeds or not; every later one is skipped unread, so it gives
-    /// no `Schema` or `Frontmatter` problem of its own. The payload is the skipped file's
-    /// repo-relative path, never the kept readme's.
+    /// its schema whether that succeeds or not; every later one is not read as a schema or an
+    /// entry, so it gives no `Schema` or `Frontmatter` problem of its own. The payload is the
+    /// skipped file's repo-relative path, never the kept readme's.
     DuplicateReadme(String),
     /// An entry with no collection readme above it.
     OrphanEntry(String),
@@ -153,7 +153,9 @@ impl LifecycleTree {
             if placement.role == Role::CollectionReadme
                 && !readme_seen.insert(placement.collection_dir.clone())
             {
-                // Skipped unread: no schema, no frontmatter problem, nothing but the duplicate.
+                // Not read as a schema or an entry: no schema or frontmatter problem, nothing but
+                // the duplicate. Its frontmatter was parsed above, so a `closed:` value still
+                // counts for `closed_dates`, as for every other file.
                 problems.push(TreeProblem::DuplicateReadme(doc.rel_path.clone()));
                 continue;
             }

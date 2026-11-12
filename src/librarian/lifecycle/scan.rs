@@ -602,6 +602,9 @@ mod tests {
         let ceiling = plain.path().parent().unwrap().canonicalize().unwrap();
         let outside = |dir: &Path| {
             let mut cmd = hermetic(dir);
+            // Ask git for German on top of `hermetic`: only the `LC_ALL=C` it sets keeps the
+            // message English. The pin bites only where git's German catalog and the
+            // `en_US.UTF-8` locale are installed; elsewhere git falls back to English.
             cmd.env("GIT_CEILING_DIRECTORIES", &ceiling)
                 .env("LANGUAGE", "de")
                 .env("LANG", "en_US.UTF-8");

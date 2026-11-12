@@ -70,7 +70,7 @@ pub enum CollectionProblem {
     Frontmatter(String),
     /// The file sits at or below a subfolder that holds its own readme (`README.md`, `readme.md`:
     /// the name is matched without regard to case).
-    #[error("sits below a subfolder that holds its own readme.md")]
+    #[error("sits below a subfolder that holds its own readme")]
     NestedCollection,
     /// The file is a second readme in its collection folder (a name `is_folder_index` reads as a
     /// readme: `README.md`, `Readme.md`, `readme.md`); the first one in path order is the readme.
