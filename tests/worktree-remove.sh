@@ -1068,6 +1068,69 @@ case_a_stoppable_ancestor_of_the_script_makes_no_child() {
     lacks "no failed-signal line" "worktree-remove: could not signal " "$ERR"
 }
 
+case_a_stoppable_grandparent_of_the_script_is_a_blocker() {
+    echo "a_stoppable_grandparent_of_the_script_is_a_blocker"
+    new_case anc_grand
+    # G, a cargo in the worktree, is the parent of the script's parent, which is not a holder.
+    # An ancestor of the script is what runs it: signalling it would end the script's own run.
+    fake 5096001 "$WT" cargo build
+    PARENT_PPID=5096001 run_with_fake_parent "$C" x --stop
+    eq "exit 4: an ancestor is a blocker" 4 "$RC"
+    contains "G is listed" "5096001" "$ERR"
+    contains "G is marked as an ancestor" "(an ancestor of this script)" "$ERR"
+    lacks "no signal line" "worktree-remove: signalled " "$ERR"
+    lacks "no failed-signal line" "worktree-remove: could not signal " "$ERR"
+    eq "G keeps its kind" "cargo" "$(kinds)"
+}
+
+case_a_stoppable_ancestor_three_levels_up_is_a_blocker() {
+    echo "a_stoppable_ancestor_three_levels_up_is_a_blocker"
+    new_case anc_three
+    # P2, a shell that is not a holder, sits between the script's parent and G.
+    FAKE_PPID=5096012 fake 5096011 "$C" sh x
+    fake 5096012 "$WT" cargo build
+    PARENT_PPID=5096011 run_with_fake_parent "$C" x --stop
+    eq "exit 4: an ancestor is a blocker" 4 "$RC"
+    contains "G is listed" "5096012" "$ERR"
+    contains "G is marked as an ancestor" "(an ancestor of this script)" "$ERR"
+    lacks "no signal line" "worktree-remove: signalled " "$ERR"
+    lacks "no failed-signal line" "worktree-remove: could not signal " "$ERR"
+    eq "G keeps its kind" "cargo" "$(kinds)"
+}
+
+case_an_ancestor_blocks_the_whole_stop() {
+    echo "an_ancestor_blocks_the_whole_stop"
+    new_case anc_whole
+    fake 5096001 "$WT" cargo build
+    fake 5096021 "$WT" rustc main.rs
+    PARENT_PPID=5096001 run_with_fake_parent "$C" x --stop
+    eq "exit 4: the ancestor blocks every signal" 4 "$RC"
+    lacks "no signal line" "worktree-remove: signalled " "$ERR"
+    lacks "no failed-signal line" "worktree-remove: could not signal " "$ERR"
+    eq "both holders are listed" "cargo,rustc" "$(kinds)"
+}
+
+case_without_stop_an_ancestor_is_listed_unchanged() {
+    echo "without_stop_an_ancestor_is_listed_unchanged"
+    new_case anc_nostop
+    fake 5096001 "$WT" cargo build
+    PARENT_PPID=5096001 run_with_fake_parent "$C" x
+    eq "exit 3: holders are listed" 3 "$RC"
+    eq "G keeps its kind" "cargo" "$(kinds)"
+    eq "the stdout row is unchanged" "5096001${TAB}cargo${TAB}cargo build" "$OUT"
+}
+
+case_a_holder_that_is_not_an_ancestor_is_still_stopped() {
+    echo "a_holder_that_is_not_an_ancestor_is_still_stopped"
+    new_case anc_control
+    # The same cargo, but not in the parent's chain (the parent has no status): it is signalled.
+    fake 5096031 "$WT" cargo build
+    run_with_fake_parent "$C" x "--stop --wait 1"
+    eq "exit 5: a fixture pid cannot be signalled, so it stays listed" 5 "$RC"
+    contains "the script reached the signal step" "worktree-remove: could not signal 5096031 cargo" "$ERR"
+    lacks "not marked as an ancestor" "(an ancestor of this script)" "$ERR"
+}
+
 case_a_codescout_server_under_a_stoppable_holder_stays_a_blocker() {
     echo "a_codescout_server_under_a_stoppable_holder_stays_a_blocker"
     new_case server_child
@@ -1166,6 +1229,11 @@ case_an_ancestor_walk_that_cannot_finish_leaves_other
 case_the_script_parent_never_makes_a_child
 case_a_descendant_that_is_not_a_holder_is_not_listed
 case_a_stoppable_ancestor_of_the_script_makes_no_child
+case_a_stoppable_grandparent_of_the_script_is_a_blocker
+case_a_stoppable_ancestor_three_levels_up_is_a_blocker
+case_an_ancestor_blocks_the_whole_stop
+case_without_stop_an_ancestor_is_listed_unchanged
+case_a_holder_that_is_not_an_ancestor_is_still_stopped
 case_a_codescout_server_under_a_stoppable_holder_stays_a_blocker
 case_the_ancestor_walk_cap_is_exactly_64
 case_stop_ends_a_c_compile_child_and_removes

@@ -16,7 +16,9 @@
 #           a stop sends (`worktree-remove: signalled <pid> <kind> with SIGTERM`, or
 #           `worktree-remove: could not signal <pid> <kind> (already gone, or not permitted)`),
 #           the holders that survive a stop (rows in the same format as stdout), and what git
-#           or the verification found
+#           or the verification found. A blocker is listed there as `  <pid>  <cmdline>`, with
+#           `(the parent of this script)` or `(an ancestor of this script)` after an ancestor
+#           that is not of kind `other`
 #   exit    0 the worktree is removed and verified gone
 #           2 refused (usage, unregistered path, main checkout, caller's cwd inside, no /proc,
 #             or the first process scan timed out: nothing was changed)
@@ -48,9 +50,11 @@
 #   Only the processes a worktree's own rust tooling leaves behind, and what they start, are
 #   stoppable. Any other holder (an editor, a shell, a test run) is a blocker: with `--stop`
 #   the script prints it and exits 4 without signalling anything, unless it descends from a
-#   stoppable holder (then it is a `child`, below). So is this script's own parent
-#   when its cwd is inside the worktree, whatever its kind: the script never signals its
-#   own pid, its subshells or its parent.
+#   stoppable holder (then it is a `child`, below). So is any ancestor of this script (its
+#   parent and the parent's ancestors: they are what runs the script) that holds the worktree,
+#   whatever its kind, a `cargo` too: the script prints it with `(the parent of this script)`
+#   or `(an ancestor of this script)` and exits 4 before any signal. The script never signals
+#   its own pid, its subshells or an ancestor.
 #   A `child` is a process that would be `other` by its command line but descends from a
 #   holder of a stoppable kind: a cold build's C compiler chain (`make`, `cc`, `cc1`, `as`,
 #   `sh configure`) runs under the `cargo` that runs a build script, and ends with it. It is
@@ -75,8 +79,8 @@
 #   is gone, the other stoppable holders (a `child` too: see WHY IT CLASSIFIES). The pause is
 #   up to ten rounds of a 0.1 s sleep plus one scan:
 #   about one second on a small /proc, up to about 5 s on a busy real /proc (a scan takes
-#   about 0.4 s there), and it is not counted in --wait. A blocker (an `other` row, or this
-#   script's parent) found by the first scan of the stop loop ends the run with exit 4
+#   about 0.4 s there), and it is not counted in --wait. A blocker (an `other` row, or an
+#   ancestor of this script) found by the first scan of the stop loop ends the run with exit 4
 #   before any signal, as a blocker found before it does. A pid is signalled only if the
 #   latest scan still lists it as a stoppable holder (a pid can be recycled during the
 #   pause). Liveness is a RESCAN of the holders, never `kill -0` (a zombie answers it). The
@@ -112,7 +116,8 @@
 #            `build-output`. An `other` row becomes `child` when an ancestor of it is a holder of
 #            one of those kinds (the kinds are the ones by argv[0], never a `child` result). Two
 #            things never become `child` and never count as that ancestor: this script's own
-#            ancestry (its parent and the parent's ancestors, found by the same walk), and a
+#            ancestry (its parent and the parent's ancestors, found by the same walk, which is
+#            also what makes an ancestor holder a blocker), and a
 #            `codescout` whatever its arguments (it is never promoted). The walk reads
 #            `PPid:` from `<proc>/<pid>/status`, also through processes that are not holders,
 #            and ends at pid 1 or 0, at a repeated pid, at a missing or unreadable `status`,
@@ -134,6 +139,9 @@
 #   * A descendant that was re-parented to the nearest subreaper or to pid 1 after its
 #     ancestor exited has no stoppable ancestor in the rescan, so it is `other`: it is never
 #     signalled for that reason, and if it survives, the run ends in exit 5.
+#   * The script's own ancestry is known only as far as `PPid:` can be read (`<proc>/<pid>/
+#     status`, the walk of HOW A PROCESS IS MATCHED). An ancestor above a process whose
+#     `status` is unreadable is not seen, so a holder there is not marked as an ancestor.
 #   * Between the last scan and `git worktree remove`, a new process can start in the
 #     worktree; that may show up as exit 6 or 7, or not at all (a late process that writes
 #     nothing lets git succeed, and exit 0 then leaves a process whose cwd is deleted). It
@@ -277,6 +285,28 @@ ppid_of() {
     [ "$UP" -gt 1 ]
 }
 
+# ancestry_of START sets ANCESTRY to a space-padded list of pids: START, then each ancestor found
+# through ppid_of (" 4100 4090 "). The walk follows `PPid:` upward and ends at pid 1 or 0, at a
+# repeated pid, at a missing or unreadable `status`, at a `PPid:` that is not a number, and after
+# 64 steps. An empty or non-numeric START gives " ". It returns 0.
+ancestry_of() {
+    local cur=$1 steps=0 seen
+    case $cur in '' | *[!0-9]*)
+        ANCESTRY=" "
+        return 0
+        ;;
+    esac
+    seen=" $cur "
+    while [ "$steps" -lt 64 ] && ppid_of "$cur"; do
+        steps=$((steps + 1))
+        case $seen in *" $UP "*) break ;; esac
+        seen+="$UP "
+        cur=$UP
+    done
+    ANCESTRY=$seen
+    return 0
+}
+
 # list_holders PATH: print one `PID<TAB>KIND<TAB>CMDLINE` row per holder of the worktree.
 # An entry whose cmdline cannot be read, or that has neither a cwd nor a path in its
 # command line, is skipped. The script's own pid and its subshell are never holders. Its
@@ -288,7 +318,7 @@ list_holders() {
     local self=" $$ $BASHPID ${WR_SCAN_SELF-} "
     local -a argv rows=() hpids=() child_pids=()
     local -A cwds=() hkind=() hcmd=() is_codescout=()
-    local cur steps seen ancestry=""
+    local cur steps seen anc_done=0
     # Run as a bounded scan (scan_holders), the process above this one is `timeout`, not a
     # holder, and the parent that matters is the main script's, passed in WR_SCAN_PARENT.
     if [ -n "${WR_SCAN_PARENT-}" ]; then
@@ -357,25 +387,17 @@ list_holders() {
     # a `codescout` whatever its arguments (one that is not a mux is a peer session's MCP
     # server), and any ancestor of this script (its parent and the parent's ancestors: they
     # are what runs the script), which also never counts as the stoppable ancestor. The walk
-    # follows `PPid:` upward, one `sed` per step (ppid_of), over processes that are not holders
+    # follows `PPid:` upward, one `sed` per step (ancestry_of, ppid_of), over processes that are not holders
     # too, and ends at pid 1 or 0, at a repeated pid, at a missing or unreadable `status`, at a
     # `PPid:` that is not a number, and after 64 steps: then the row stays `other`.
     for pid in "${hpids[@]+"${hpids[@]}"}"; do
         [ "${hkind[$pid]}" = other ] || continue
         [ -z "${is_codescout[$pid]-}" ] || continue
-        if [ -z "$ancestry" ]; then
-            cur=$parent
-            seen=" $parent "
-            steps=0
-            while [ "$steps" -lt 64 ] && ppid_of "$cur"; do
-                steps=$((steps + 1))
-                case $seen in *" $UP "*) break ;; esac
-                seen+="$UP "
-                cur=$UP
-            done
-            ancestry=$seen
+        if [ "$anc_done" -eq 0 ]; then
+            ancestry_of "$parent"
+            anc_done=1
         fi
-        case $ancestry in *" $pid "*) continue ;; esac
+        case $ANCESTRY in *" $pid "*) continue ;; esac
         cur=$pid
         seen=" $pid "
         steps=0
@@ -383,7 +405,7 @@ list_holders() {
             steps=$((steps + 1))
             case $seen in *" $UP "*) break ;; esac
             seen+="$UP "
-            case $ancestry in *" $UP "*) break ;; esac
+            case $ANCESTRY in *" $UP "*) break ;; esac
             if [ -n "${hkind[$UP]-}" ] && [ "${hkind[$UP]}" != other ]; then
                 child_pids+=("$pid")
                 break
@@ -449,11 +471,16 @@ scan_failed() {
 # when there is none.
 blockers_of() {
     local pid kind cmd
+    [ -n "${ANCESTRY-}" ] || ancestry_of "$PPID"
     while IFS=$'\t' read -r pid kind cmd; do
         if [ "$kind" = other ]; then
             printf '  %s  %s\n' "$pid" "$cmd"
         elif [ "$pid" = "$PPID" ]; then
             printf '  %s  %s  (the parent of this script)\n' "$pid" "$cmd"
+        else
+            case $ANCESTRY in
+                *" $pid "*) printf '  %s  %s  (an ancestor of this script)\n' "$pid" "$cmd" ;;
+            esac
         fi
     done <<<"$1"
 }
@@ -473,6 +500,8 @@ refuse_blockers() {
 send_term() {
     local pid=$1 kind=$2
     case $pid in "$$" | "$BASHPID" | "$PPID") return 0 ;; esac
+    [ -n "${ANCESTRY-}" ] || ancestry_of "$PPID"
+    case $ANCESTRY in *" $pid "*) return 0 ;; esac
     if kill -TERM "$pid" 2>/dev/null; then
         echo "worktree-remove: signalled $pid $kind with SIGTERM" >&2
     else
@@ -499,6 +528,7 @@ stop_holders() {
     local wt=$1 wait_s=$2 rows pid kind cmd round=0 signalled=" " deadline i found fresh blockers
     local -a mux_pids other_pids
     local -A kind_of=()
+    [ -n "${ANCESTRY-}" ] || ancestry_of "$PPID"
     set_now_ms
     deadline=$((NOW_MS + wait_s * 1000))
     while :; do
@@ -518,6 +548,7 @@ stop_holders() {
         while IFS=$'\t' read -r pid kind cmd; do
             case $signalled in *" $pid "*) continue ;; esac
             case $pid in "$$" | "$BASHPID" | "$PPID") continue ;; esac
+            case $ANCESTRY in *" $pid "*) continue ;; esac
             kind_of[$pid]=$kind
             case $kind in
                 other) ;;

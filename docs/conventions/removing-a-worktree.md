@@ -32,7 +32,7 @@ when another project is activated or when the worktree is removed (bug `3dde1548
    session is a client. Ask the occupant first
    ([`reaching-a-peer-session.md`](reaching-a-peer-session.md), Step 4 of its skill).
 4. If every holder is one of the stoppable kinds (`mux`, `rust-analyzer`, `cargo`, `rustc`,
-   `sccache`, `build-output`, `child`), run `scripts/worktree-remove.sh --stop <path>`. It sends
+   `sccache`, `build-output`, `child`) and none is an ancestor of the script, run `scripts/worktree-remove.sh --stop <path>`. It sends
    SIGTERM and
    prints one stderr line per signal (`worktree-remove: signalled <pid> <kind> with SIGTERM`, or
    `worktree-remove: could not signal <pid> <kind> (already gone, or not permitted)`), so the
@@ -82,11 +82,14 @@ parent's ancestors), and a `codescout` that is not a mux.
 A `codescout` process that is not a mux (for example `codescout start`, a live session's MCP
 server) has kind `other` and stays one, even when it runs from `<worktree>/target/` or under a
 stoppable holder. So has any editor, shell or test run that has no stoppable holder among its
-ancestors, and any such process whose only stoppable ancestor is an ancestor of the script. The
-script's own parent is a blocker too when its cwd is inside the worktree: its kind
-comes from the command line like any row (it can be `cargo` or `rust-analyzer`), and it is a
-blocker because the script compares each row's pid with its own parent's, whatever the kind. With
-`--stop`, a blocker makes the script exit 4 and signal nothing, whether it was there at the first
+ancestors, and any such process whose only stoppable ancestor is an ancestor of the script. Any
+holder that is an ancestor of the script (its parent, or a higher one such as the `cargo` that
+runs the script) is a blocker too, whatever its kind: its kind comes from the command line like
+any row (it can be `cargo` or `rust-analyzer`), and it is a blocker because the script compares
+each row's pid with the pids of its own ancestry, and never signals one. The script prints it
+with `(the parent of this script)` or `(an ancestor of this script)`. The ancestry is known as far
+as `/proc/<pid>/status` can be read: an ancestor above a process whose `status` is unreadable is
+not seen. With `--stop`, a blocker makes the script exit 4 and signal nothing, whether it was there at the first
 scan or appeared before the stop loop's first scan. Stop that session by hand.
 
 ## Exit codes
