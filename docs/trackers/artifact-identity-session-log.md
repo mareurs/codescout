@@ -9,8 +9,8 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 11
-entry_high_water_W: 7
+entry_high_water_F: 14
+entry_high_water_W: 8
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
 
@@ -111,6 +111,9 @@ entry_high_water_W: 7
 | F-9 | 2026-11-11 | med | self-friction | fixed-verified | **Told the operator a peer held three dirty files; they were my own stopped implementer's leftovers** — attributed by adjacency; a transcript search found the real author |
 | F-10 | 2026-11-11 | low | plan-prose | fixed-verified | **Task 1 left a stale "librarian feature" message in `tests/cli_doc.rs` and a "librarian-less" comment in `src/prompts/mod.rs`** — passed both reviews; fixed in 6671e2ce8 |
 | F-11 | 2026-11-11 | high | architectural | open | **The spec and the old catalog code disagree in about a dozen places a plan must settle** — a third guard signal, the entry-id race guard, four consumers, G5, vectors; 3 verified, the rest reported |
+| F-12 | 2026-11-12 | low | review-gap | fixed-verified | **No review ran tests/result_caps, so an unannotated cap constant reached the first full gate** — `CHECKOUTS_LISTED_MAX`; fixed in 6eef416c2 |
+| F-13 | 2026-11-12 | med | shared-checkout | promoted-to-bug-tracker | **Landing Plan B1 took four gates because the base moved twice and a peer's LSP external-write tests fail intermittently** — branch 2 of 6 lane runs, clean `experiments` 1 of 6; cause not found |
+| F-14 | 2026-11-12 | med | plan-prose | open | **Key-space census after the B1 exclusions: 26 duplicate-key groups (54 files), 17 invalid-key files, 9 of them not renamable** — 14 groups are plan and spec pairs kept in scope; the spec does not yet say so |
 
 ## Wins Index
 
@@ -123,6 +126,7 @@ entry_high_water_W: 7
 | W-5 | 2026-11-11 | med | merge the base into the branch, then ff-only | a merge commit in the shared checkout would capture six other sessions' staged files | validated |
 | W-6 | 2026-11-11 | high | independent Opus review of a scout report | a split built on "retire catalog_audit ships alone", a two-signal guard and four missed consumers | validated |
 | W-7 | 2026-11-11 | high | independent Opus review of a plan before execution | a gate that refuses every commit editing a file already in a collision; a cache that diverges from a rebuild after a rename | validated |
+| W-8 | 2026-11-12 | high | whole-branch Opus review after per-task reviews | a hook that refuses pure moves of colliding files; a dismissed dialog stored as a permanent decline; a nudge on read-only activations | validated |
 
 ---
 
@@ -659,6 +663,124 @@ Codified so the Index column means the same thing across sessions.
 **Fixes made:** the gate compares the staged index with `HEAD` and refuses only problems that are new; the cache key is `(sha256, rel_path, rules_hash, PARSER_VERSION)`; edges are keyed by their position in the document; the builder reads every input from the commit's blobs; shallow clones are `unverified`, not collisions; the onboarding scan runs only when a name is being chosen and only with an interactive client; B1 runs before B2.
 
 **Limit:** the plans are not yet run. This review is reported work; the first execution will show what it missed.
+
+## F-12 — No review ran tests/result_caps, so an unannotated cap constant reached the first full gate
+
+**Observed:** 2026-11-12, Plan B1 final gate.
+
+**When:** The first full `./scripts/gate.sh` on the finished Plan B1 branch (`38b328d61`).
+
+**Expected:** Every task review and the whole-branch review had passed, so the gate should be green.
+
+**Got:** The gate failed on `result_caps every_cap_constant_is_classified`. The constant `CHECKOUTS_LISTED_MAX` in `src/tools/onboarding.rs` had no `// cap-class:` annotation and no probe row in `src/tools/core/cap_probe.rs`.
+
+**Probable cause:** No implementer and no reviewer ran `tests/result_caps.rs`. The controller had ruled (R6) that implementers run targeted checks only, and the new bound sits in a file whose own tests do not include the cap gate.
+
+**Workaround:** Commit `6eef416c2` annotated the constant and added the probe row `onboarding.checkouts_listed`. The second full gate was green.
+
+**Severity:** low
+
+**Status:** fixed-verified
+
+**Valid:** dated 2026-11-12
+
+**Rests on:** A green targeted run is evidence only for the tests it ran. The whole-suite gate exists for the rules that nobody thinks to run.
+
+**Fix idea / Pointer:** A brief for a task that adds a result-shaping bound should name `tests/result_caps.rs` as a required targeted run.
+
+---
+
+## F-13 — Landing Plan B1 took four gates because the base moved twice and a peer's LSP external-write tests fail intermittently
+
+**Observed:** 2026-11-12, landing Plan B1 on `experiments`.
+
+**When:** Following the W-5 route: merge `experiments` into the branch, gate that tree, then `git merge --ff-only` in the shared checkout.
+
+**Expected:** One gate, then the fast-forward.
+
+**Got:** Four gate runs and three merges, because `experiments` moved twice during the gates (`c7b80749d`, then `56b3eb525`) and a peer's LSP tests failed intermittently:
+
+- Gate A (branch `ec51112f0`): green. FMT, CLIPPY, LEAN and DEFAULT exited 0, and Python passed 1836 tests.
+- Gate B (after the second merge): the lean lane failed `lsp::client::tests::goto_definition_follows_a_write_made_outside_codescout` and `hover_follows_a_write_made_outside_codescout`. The default lane passed 9735 tests. The two tests passed 3 of 3 when run alone.
+- Gate C (after the third merge): the lean lane passed. The default lane failed `goto_definition_follows_a_write_made_outside_codescout` and passed 9742 tests.
+- A clean checkout of `experiments` at `56b3eb525`, with none of the branch's commits, ran each lane three times. The lean lane passed 3 of 3. The default lane passed 2 of 3 and failed `rename_edit_does_not_land_on_another_callee_after_a_same_size_write_outside_codescout` once.
+
+The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which this sample size cannot tell apart. The failing test was not the same one on `experiments`. All failing tests belong to the same group: the external-write tests in `src/lsp/client.rs`.
+
+**Probable cause:** Not found. The failures are fast (about 0.6 s) and look like a race between an external write and the language server's view of the file. A peer was changing `src/lsp/client.rs` during the gates. This is a hypothesis, not a measurement.
+
+**Workaround:** The operator said "land it if experiments fails too". The fast-forward landed `a79985050` on `experiments`, with nothing pushed. The peers' staged and modified paths were identical before and after.
+
+**Severity:** med
+
+**Status:** promoted-to-bug-tracker
+
+**Valid:** dated 2026-11-12
+
+**Rests on:** A gate result is evidence about the tree it ran on. An intermittent test needs a rate on the base tree before a branch can be blamed for it or cleared of it.
+
+**Fix idea / Pointer:** `docs/issues/2026-11-12-lsp-external-write-tests-fail-intermittently-in-the-full-suite.md`
+
+---
+
+## W-8 — A whole-branch Opus review found four defects that passed every per-task review
+
+**Observed:** 2026-11-12, Plan B1 whole-branch review.
+
+**Pattern:** A fresh Opus reviewer reads the whole branch once, after every per-task review has passed, and reports defects that cross task boundaries. The controller then fixes them in one wave through the resumed implementer, with a ruling in the ledger for each choice.
+
+**Counterfactual:** Without it, four defects would have landed. Each had passed its own task review:
+
+- The gate compared collisions by path set, so a pure move or swap of a colliding file was refused as a new problem (R11). The pre-commit hook would have blocked ordinary renames.
+- A dismissed repo-name dialog was written as a permanent decline (R12). The repo would never have been named, and the only way back is a call that nobody knows.
+- The `repo_name_unconfirmed` note appeared on read-only activations (R13). It pushed agents to write into repos that the user was only browsing.
+- The remembered-decline block still told the agent to ask the user (R14).
+
+**Confirming data points:** The same review also found that no task had run `tests/result_caps.rs` (see F-12). The earlier Task 2 and Task 7 reviews found shape-level defects in single tasks. Only the whole-branch view found the cross-task contradiction between R12 and the plan text.
+
+**Impact:** high
+
+**Promote-when:** A second plan in this work stream shows the same pattern, a defect that passed its task review and failed only the whole-branch review. Then add it to the subagent-driven-development notes in `docs/conventions/`.
+
+**Status:** validated
+
+**Valid:** dated 2026-11-12
+
+**Rests on:** A per-task review checks a task against its brief. Only a whole-branch review checks the tasks against each other.
+
+---
+
+## F-14 — Key-space census after the B1 exclusions: 26 duplicate-key groups, 17 invalid-key files, 9 not renamable
+
+**Observed:** 2026-11-12, Plan B1 Task 4, which authored `.codescout/key-space.toml` and ran the gate over the repo.
+
+**When:** Sizing the migration (Plans D and E) against the key space that B1 committed.
+
+**Expected:** W-4 measured 45 renames, 37 duplicate-key groups and 144 `[[F-16]]` rewrites over the whole tree, before any exclusions.
+
+**Got:** With the committed exclusions, the census reads:
+
+- 2566 markdown files are inside the key space, and 176 are outside it.
+- The gate reports 43 problems: 26 duplicate-key groups covering 54 files, and 17 invalid-key files.
+- No folder index is partly excluded.
+- Of the 17 invalid-key files, 9 cannot be renamed: 3 GitHub templates and 6 prompt templates. Their names are dictated from outside, so the migration must exclude them or accept a rename.
+- 14 of the 26 duplicate-key groups are plan and spec pairs that share a stem. They stay in scope, which departs from the spec's named example. The decision is not yet recorded in the spec.
+
+**Probable cause:** The W-4 counts came before the exclusion rules existed. R7 and R8 moved whole subtrees out of the key space.
+
+**Workaround:** None needed for B1. Plans D and E must size their work from these counts and settle the 9 files and the 14 pairs.
+
+**Severity:** med
+
+**Status:** open
+
+**Valid:** dated 2026-11-12
+
+**Rests on:** A migration is sized from the key space it will run against, not from a count taken before the scope was set.
+
+**Fix idea / Pointer:** Record the plan-and-spec-pair decision in `docs/superpowers/specs/2026-11-11-repo-relative-artifact-key-design.md`, and carry the 9 unrenamable files into the Plan D design.
+
+---
 
 ## Template for new entries
 
