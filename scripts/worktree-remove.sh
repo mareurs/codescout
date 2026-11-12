@@ -15,10 +15,12 @@
 #           survive a stop (rows in the same format as stdout), and what git or the
 #           verification found
 #   exit    0 the worktree is removed and verified gone
-#           2 refused (usage, unregistered path, main checkout, caller's cwd inside, no /proc)
+#           2 refused (usage, unregistered path, main checkout, caller's cwd inside, no /proc,
+#             or the first process scan timed out: nothing was changed)
 #           3 holders exist and --stop was not given
 #           4 --stop, but a blocker exists (nothing was signalled)
-#           5 --stop, but a holder survived the stop (nothing was removed)
+#           5 --stop, but a holder survived the stop, or a rescan timed out so the holders
+#             could not be established (nothing was removed)
 #           6 git refused to remove the worktree (untracked files, a lock): never forced
 #           7 git removed it but the directory is still there: listed, never deleted
 #
@@ -42,10 +44,18 @@
 #   when its cwd is inside the worktree, whatever its kind: the script never signals its
 #   own pid, its subshells or its parent.
 #
+# HOW IT SCANS
+#   Every scan runs in a child under `timeout -k 1 $WORKTREE_REMOVE_SCAN_TIMEOUT` (default
+#   10 s): reading another process's /proc/<pid>/cmdline waits for that process's memory-map
+#   lock, so one scan can block for as long as that process holds it. A scan that times out
+#   or fails means the holders are UNKNOWN, never "none": the script never goes on to
+#   `git worktree remove` after one.
+#
 # HOW IT STOPS
 #   SIGTERM only, never SIGKILL. The mux holders first (a graceful mux exit kills the
 #   language server's process group), then, after a pause of at most one second or until
-#   the mux is gone, the other stoppable holders. Liveness is a RESCAN of the holders, never
+#   the mux is gone, the other stoppable holders. A pid is signalled only if the latest scan
+#   still lists it as a stoppable holder (a pid can be recycled during the pause). Liveness is a RESCAN of the holders, never
 #   `kill -0` (a zombie answers it). The rescan runs about every 0.5 s for up to --wait
 #   seconds in all (default 30) and signals what is new, at most three times, because a
 #   dying `cargo` can start children. A holder still listed afterwards is a survivor:
@@ -85,6 +95,7 @@
 #     worktree; that surfaces as git's refusal or as exit 7, not as a signal.
 #
 # TEST SEAM
+#   WORKTREE_REMOVE_SCAN_TIMEOUT (whole seconds, default 10) bounds each scan.
 #   WORKTREE_REMOVE_PROC (default /proc) points the scan at a fixture tree:
 #   `<dir>/<pid>/cwd` (a symlink) and `<dir>/<pid>/cmdline` (NUL-separated arguments),
 #   so tests/worktree-remove.sh needs no real process.
@@ -94,6 +105,8 @@ export LC_ALL=C
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 PROC="${WORKTREE_REMOVE_PROC:-/proc}"
+SCAN_TIMEOUT="${WORKTREE_REMOVE_SCAN_TIMEOUT:-10}"
+SELF=$(realpath -- "${BASH_SOURCE[0]}")
 STOP=0
 WAIT_SECS=30
 
@@ -214,9 +227,16 @@ kind_rank() {
 # because it launched this script), never from the cwd test: a launcher that sits inside
 # the worktree and starts the script from elsewhere holds the worktree like any other.
 list_holders() {
-    local wt=$1 d pid cwd a hit kind cmd argv_exempt rec
+    local wt=$1 d pid cwd a hit kind cmd argv_exempt rec parent=$PPID
+    local self=" $$ $BASHPID ${WR_SCAN_SELF-} "
     local -a argv rows=()
     local -A cwds=()
+    # Run as a bounded scan (scan_holders), the process above this one is `timeout`, not a
+    # holder, and the parent that matters is the main script's, passed in WR_SCAN_PARENT.
+    if [ -n "${WR_SCAN_PARENT-}" ]; then
+        self+="$PPID "
+        parent=$WR_SCAN_PARENT
+    fi
     # On the real /proc one `find` reads every cwd link at once: a `readlink` per process is a
     # fork per process, seconds on a busy machine, and the stop loop rescans. The kernel
     # reports a canonical path, which is what `readlink -f` yields. A process that has no entry
@@ -231,11 +251,9 @@ list_holders() {
         [ -d "$d" ] || continue
         pid=${d##*/}
         case $pid in *[!0-9]*) continue ;; esac
-        if [ "$pid" = "$$" ] || [ "$pid" = "$BASHPID" ]; then
-            continue
-        fi
+        case $self in *" $pid "*) continue ;; esac
         argv_exempt=0
-        [ "$pid" = "$PPID" ] && argv_exempt=1
+        [ "$pid" = "$parent" ] && argv_exempt=1
         [ -r "$d/cmdline" ] || continue
         if [ "$PROC" = /proc ]; then
             cwd=${cwds["$d"]-}
@@ -295,6 +313,26 @@ set_now_ms() {
     NOW_MS=$((t / 1000))
 }
 
+# scan_holders PATH: run list_holders in a child under `timeout`, so a scan that blocks (a read of
+# a /proc/<pid>/cmdline waits on the target's mmap lock) cannot hang this script. Sets HOLDERS to
+# the rows and returns 0; on a timeout or any failure sets HOLDERS to "" and returns 1, which
+# means the holders are UNKNOWN, never "none". The child is this script run in its internal scan
+# mode; it is told which pids are this script and its parent so it does not list them.
+scan_holders() {
+    local rc
+    HOLDERS=$(WR_SCAN_SELF="$$ $BASHPID" WR_SCAN_PARENT="$PPID" \
+        timeout -k 1 "$SCAN_TIMEOUT" bash "$SELF" --internal-scan "$1")
+    rc=$?
+    [ "$rc" -eq 0 ] && return 0
+    HOLDERS=""
+    return 1
+}
+
+# scan_failed: the message for a scan that timed out or failed once signals may have been sent.
+scan_failed() {
+    echo "worktree-remove: the holders could not be established: a process scan timed out or failed (limit ${SCAN_TIMEOUT}s). Nothing was removed; SIGTERM may already have been sent." >&2
+}
+
 # send_term PID: SIGTERM, never to this script, its subshell or its parent. A failed signal (the
 # process is already gone) is not an error and prints nothing; the rescan decides whether the
 # holder is still there.
@@ -307,18 +345,22 @@ send_term() {
 
 # stop_holders PATH WAIT: SIGTERM the stoppable holders of PATH, the mux first, and rescan until
 # none is left. Return 0 when none remains, 5 when something does (the survivors are printed
-# on stderr). Liveness is the rescan through list_holders, never `kill -0`.
+# on stderr) or when a scan fails. Liveness is the rescan through scan_holders, never `kill -0`.
 #   * A pid is signalled once. A holder that appears in a later round (a dying `cargo` can
 #     start children) is signalled in that round; at most three rounds signal anything.
 #   * A holder of kind `other` is never signalled; one that appears later is a survivor.
+#   * A pid is signalled only if the most recent scan lists it as a stoppable holder: the
+#     others are checked against the scan taken after the mux pause, because a pid can be
+#     recycled inside that pause.
 #   * The wait is WAIT seconds in all, polled about every 0.5 s.
 stop_holders() {
-    local wt=$1 wait_s=$2 rows row pid kind cmd round=0 signalled=" " deadline i found
+    local wt=$1 wait_s=$2 rows pid kind cmd round=0 signalled=" " deadline i found fresh
     local -a mux_pids other_pids
     set_now_ms
     deadline=$((NOW_MS + wait_s * 1000))
     while :; do
-        rows=$(list_holders "$wt")
+        scan_holders "$wt" || { scan_failed; return 5; }
+        rows=$HOLDERS
         [ -n "$rows" ] || return 0
         mux_pids=()
         other_pids=()
@@ -341,7 +383,8 @@ stop_holders() {
                 # Give a graceful mux exit up to one second to take its language server with it.
                 for i in 1 2 3 4 5 6 7 8 9 10; do
                     sleep 0.1
-                    rows=$(list_holders "$wt")
+                    scan_holders "$wt" || { scan_failed; return 5; }
+                    rows=$HOLDERS
                     found=0
                     for pid in "${mux_pids[@]}"; do
                         case $'\n'"$rows" in *$'\n'"$pid"$'\t'*) found=1 ;; esac
@@ -349,9 +392,18 @@ stop_holders() {
                     [ "$found" -eq 1 ] || break
                 done
             fi
+            # `rows` is the latest scan. Signal only what it still lists as stoppable.
+            fresh=" "
+            while IFS=$'\t' read -r pid kind cmd; do
+                [ -n "$pid" ] && [ "$kind" != other ] && fresh+="$pid "
+            done <<<"$rows"
             for pid in "${other_pids[@]+"${other_pids[@]}"}"; do
-                signalled+="$pid "
-                send_term "$pid"
+                case $fresh in
+                    *" $pid "*)
+                        signalled+="$pid "
+                        send_term "$pid"
+                        ;;
+                esac
             done
         fi
         set_now_ms
@@ -359,7 +411,8 @@ stop_holders() {
         sleep 0.5
     done
     # The last scan may predate the last signals: look once more before calling anything a survivor.
-    rows=$(list_holders "$wt")
+    scan_holders "$wt" || { scan_failed; return 5; }
+    rows=$HOLDERS
     [ -n "$rows" ] || return 0
     {
         echo "worktree-remove: these holders are still there after SIGTERM and ${wait_s}s (nothing was removed; SIGKILL is never used):"
@@ -396,6 +449,11 @@ remove_worktree() {
 
 main() {
     local path="" wt root holders count blockers row pid kind cmd rc
+    # Internal: a bounded scan, run by scan_holders as `timeout ... bash <this file> --internal-scan PATH`.
+    if [ "${1:-}" = --internal-scan ]; then
+        list_holders "${2:?}"
+        exit $?
+    fi
     while [ $# -gt 0 ]; do
         case $1 in
             --stop) STOP=1 ;;
@@ -425,11 +483,13 @@ main() {
     [[ $WAIT_SECS =~ ^[0-9]+$ ]] || { usage; die "--wait needs a whole number of seconds, got [$WAIT_SECS]"; }
     [ -n "$path" ] || { usage; die "no worktree path given"; }
     [ -d "$PROC" ] || die "cannot scan processes: [$PROC] is not a directory; this script needs Linux /proc"
+    [[ $SCAN_TIMEOUT =~ ^[1-9][0-9]*$ ]] || die "WORKTREE_REMOVE_SCAN_TIMEOUT needs a whole number of seconds above 0, got [$SCAN_TIMEOUT]"
 
     wt=$(resolve_worktree "$path") || exit 2
     root=$(main_checkout_of "$wt") || die "cannot find the main checkout of $wt"
 
-    holders=$(list_holders "$wt")
+    scan_holders "$wt" || die "the process scan timed out or failed (limit ${SCAN_TIMEOUT}s); nothing was changed"
+    holders=$HOLDERS
     if [ -z "$holders" ]; then
         echo "no holders under $wt" >&2
         remove_worktree "$root" "$wt"

@@ -17,8 +17,11 @@
 # The script reads `WORKTREE_REMOVE_PROC` (default `/proc`). Each case points it at a
 # fixture tree: `<fixture>/<pid>/cwd` (a symlink to a real directory) and
 # `<fixture>/<pid>/cmdline` (NUL-separated arguments). The scan and refusal cases start no
-# real process, so they cannot depend on what else runs on the machine, and none of them
-# can signal a real process. The stop cases start real processes inside their own temp
+# real process, so they cannot depend on what else runs on the machine. Every fixture pid is
+# above the kernel's `pid_max` (`fake` refuses anything else), so a `kill` of one is always
+# ESRCH and no fixture case can signal a real process; the one exception is the entry for
+# the script's own parent in `run_with_fake_parent`, which the script never signals. The
+# stop cases start real processes inside their own temp
 # worktrees (see `spawn`) and scan the real /proc. The script under test is run as a child
 # (`bash <script>`), the same way an operator runs it, so the exit codes asserted here are
 # the ones an operator sees.
@@ -33,8 +36,10 @@
 # ----------------------
 #   * Signals to a process another session owns: the cases that signal start their own
 #     processes inside the suite's temp worktrees and scan the real /proc, where only those
-#     can match. The one case that signals a fixture pid uses a pid that is dead (reaped),
-#     so only a recycled pid could reach a stranger.
+#     can match; fixture pids are above `pid_max`, so they cannot be anyone's process.
+#   * That the stop loop signals only pids its latest scan still lists (a pid recycled
+#     inside the pause after the mux signal): no case can make a pid change owner inside
+#     that window, so that guard is covered by reading the code, not by a case.
 #   * What a real kernel puts in /proc for a process owned by another user: an unreadable
 #     entry is modelled here by a missing `cmdline` file, which is not the same failure.
 #   * Peers: nothing here can say whether a listed mux has a live client.
@@ -45,6 +50,9 @@
 #
 # Usage:
 #   tests/worktree-remove.sh        # non-zero exit on any failure
+#
+# Every invocation of the script runs under an outer `timeout` (RUN_TIMEOUT, default 120 s),
+# so a hang in the script fails a case instead of stalling the gate.
 #
 # WORKTREE_REMOVE_SCRIPT may name a copy of the script to run instead of
 # scripts/worktree-remove.sh; the mutation checks in docs/PROBES.md use it so the real
@@ -58,6 +66,13 @@ SRC="${WORKTREE_REMOVE_SCRIPT:-$ROOT/scripts/worktree-remove.sh}"
 PASS=0
 FAIL=0
 TAB=$'\t'
+# Fixture pids are above the kernel's pid_max, where `kill` is always ESRCH.
+FIXTURE_PID_BASE=5000001
+PID_MAX=$(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 4194304)
+if [ "$FIXTURE_PID_BASE" -le "$PID_MAX" ]; then
+    echo "refusing: pid_max ($PID_MAX) reaches the fixture pids ($FIXTURE_PID_BASE and up)" >&2
+    exit 1
+fi
 
 T="$(mktemp -d "${TMPDIR:-/tmp}/worktree-remove-test.XXXXXX")" || exit 1
 T="$(cd "$T" && pwd -P)"
@@ -117,6 +132,7 @@ new_case() {
 fake() {
     local pid=$1 cwd=$2 base comm
     shift 2
+    [ "$pid" -gt "$PID_MAX" ] || { echo "setup failed: fixture pid $pid is not above pid_max" >&2; exit 1; }
     mkdir -p "$PROCD/$pid"
     ln -s "$cwd" "$PROCD/$pid/cwd"
     printf '%s\0' "$@" > "$PROCD/$pid/cmdline"
@@ -128,8 +144,8 @@ fake() {
 # run ARGS...: run the script from RUN_CWD (default the case dir) against the fixture proc
 # (or PROC_OVERRIDE). Sets RC, OUT (stdout), ERR (stderr).
 run() {
-    ( cd "${RUN_CWD:-$C}" && WORKTREE_REMOVE_PROC="${PROC_OVERRIDE:-$PROCD}" bash "$SRC" "$@" ) \
-        >"$C/out" 2>"$C/err"
+    ( cd "${RUN_CWD:-$C}" && WORKTREE_REMOVE_PROC="${PROC_OVERRIDE:-$PROCD}" \
+        timeout "${RUN_TIMEOUT:-120}" bash "$SRC" "$@" ) >"$C/out" 2>"$C/err"
     RC=$?
     OUT="$(<"$C/out")"
     ERR="$(<"$C/err")"
@@ -183,12 +199,9 @@ spawn() {
     return 1
 }
 
-# dead_pid: print the pid of a process that has exited and been reaped.
+# dead_pid: print a pid no process can have (above pid_max): a `kill` of it is always ESRCH.
 dead_pid() {
-    sleep 0 &
-    local p=$!
-    wait "$p"
-    echo "$p"
+    echo "$FIXTURE_PID_BASE"
 }
 
 case_lists_every_holder_kind() {
@@ -196,17 +209,17 @@ case_lists_every_holder_kind() {
     new_case kinds
     # Pids are scrambled against the expected order, so a listing that is merely sorted by
     # pid cannot pass.
-    fake 91001 "$WT" vim notes.txt
-    fake 91002 "$C" "$WT/target/debug/build/x/build-script-build"
-    fake 91003 "$C" cargo check --manifest-path "$WT/Cargo.toml"
-    fake 91004 "$WT" rust-analyzer
-    fake 91005 "$WT" codescout mux --cwd "$WT"
+    fake 5091001 "$WT" vim notes.txt
+    fake 5091002 "$C" "$WT/target/debug/build/x/build-script-build"
+    fake 5091003 "$C" cargo check --manifest-path "$WT/Cargo.toml"
+    fake 5091004 "$WT" rust-analyzer
+    fake 5091005 "$WT" codescout mux --cwd "$WT"
     run "$WT"
     eq "exit 3" 3 "$RC"
     eq "kinds, mux first and blocker last" "mux,rust-analyzer,cargo,build-output,other" "$(kinds)"
     eq "first row is PID TAB KIND TAB CMDLINE" \
-        "91005${TAB}mux${TAB}codescout mux --cwd $WT" "$(printf '%s\n' "$OUT" | sed -n 1p)"
-    eq "last row is the blocker" "91001${TAB}other${TAB}vim notes.txt" \
+        "5091005${TAB}mux${TAB}codescout mux --cwd $WT" "$(printf '%s\n' "$OUT" | sed -n 1p)"
+    eq "last row is the blocker" "5091001${TAB}other${TAB}vim notes.txt" \
         "$(printf '%s\n' "$OUT" | sed -n '$p')"
     contains "the occupancy warning goes to stderr" occupant "$ERR"
     lacks "the warning is not on stdout" occupant "$OUT"
@@ -215,7 +228,7 @@ case_lists_every_holder_kind() {
 case_a_codescout_server_is_not_a_mux() {
     echo "a_codescout_server_is_not_a_mux"
     new_case server
-    fake 91001 "$WT" codescout start --cwd "$WT"
+    fake 5091001 "$WT" codescout start --cwd "$WT"
     run "$WT"
     eq "exit 3" 3 "$RC"
     eq "a server is other, never mux" other "$(kinds)"
@@ -225,9 +238,9 @@ case_a_sibling_prefix_is_not_a_holder() {
     echo "a_sibling_prefix_is_not_a_holder"
     new_case sibling
     mkdir "$WT-other" "${WT}2"
-    fake 91001 "$WT-other" vim
-    fake 91002 "${WT}2" vim
-    fake 91003 "$C" vim "$WT-other/notes.txt"
+    fake 5091001 "$WT-other" vim
+    fake 5091002 "${WT}2" vim
+    fake 5091003 "$C" vim "$WT-other/notes.txt"
     run "$WT"
     eq "exit 0: lookalikes are not holders" 0 "$RC"
     eq "no rows" "" "$OUT"
@@ -237,15 +250,15 @@ case_a_sibling_prefix_is_not_a_holder() {
         G "$REPO" worktree add -q "$WT" wt-sibling >/dev/null 2>&1 \
             || { echo "setup failed: worktree add again" >&2; exit 1; }
     fi
-    fake 91004 "$WT" vim
+    fake 5091004 "$WT" vim
     run "$WT"
-    eq "the real holder is still found beside the lookalikes" 91004 "$(pids)"
+    eq "the real holder is still found beside the lookalikes" 5091004 "$(pids)"
 }
 
 case_a_path_with_a_space_resolves() {
     echo "a_path_with_a_space_resolves"
     new_case space "my wt"
-    fake 91001 "$WT" codescout mux --cwd "$WT"
+    fake 5091001 "$WT" codescout mux --cwd "$WT"
     run "$WT"
     eq "exit 3" 3 "$RC"
     eq "the row is listed" mux "$(kinds)"
@@ -255,7 +268,7 @@ case_a_path_with_a_space_resolves() {
 case_relative_trailing_slash_and_symlink_spellings_resolve() {
     echo "relative_trailing_slash_and_symlink_spellings_resolve"
     new_case spellings
-    fake 91001 "$WT" rust-analyzer
+    fake 5091001 "$WT" rust-analyzer
     run "$WT"
     local want="$OUT"
     eq "baseline exit" 3 "$RC"
@@ -274,7 +287,7 @@ case_relative_trailing_slash_and_symlink_spellings_resolve() {
 case_refusals() {
     echo "refuses_an_unregistered_path / refuses_the_main_checkout / refuses_when_the_callers_cwd_is_inside"
     new_case refuse
-    fake 91001 "$WT" vim
+    fake 5091001 "$WT" vim
     mkdir "$C/plain" "$REPO/sub"
 
     run "$C/plain"
@@ -317,24 +330,24 @@ case_refuses_without_proc() {
 case_stop_with_a_blocker_refuses_before_any_signal() {
     echo "stop_with_a_blocker_refuses_before_any_signal"
     new_case blocker
-    fake 91001 "$WT" codescout mux --cwd "$WT"
-    fake 91002 "$WT" vim notes.txt
+    fake 5091001 "$WT" codescout mux --cwd "$WT"
+    fake 5091002 "$WT" vim notes.txt
     run --stop "$WT"
     eq "exit 4" 4 "$RC"
-    contains "the blocker row is printed" "91002${TAB}other${TAB}vim notes.txt" "$OUT"
+    contains "the blocker row is printed" "5091002${TAB}other${TAB}vim notes.txt" "$OUT"
     contains "stderr says nothing was signalled" "nothing was signalled" "$ERR"
 }
 
 case_kind_comes_from_argv0_not_comm() {
     echo "kind_comes_from_argv0_not_comm"
     new_case comm
-    FAKE_COMM=rust-analyzer fake 91001 "$WT" vim notes.txt
-    FAKE_COMM=vim fake 91002 "$WT" rust-analyzer
-    FAKE_COMM=codescout fake 91003 "$WT" /usr/bin/env codescout mux
+    FAKE_COMM=rust-analyzer fake 5091001 "$WT" vim notes.txt
+    FAKE_COMM=vim fake 5091002 "$WT" rust-analyzer
+    FAKE_COMM=codescout fake 5091003 "$WT" /usr/bin/env codescout mux
     run "$WT"
     eq "exit 3" 3 "$RC"
     eq "by argv[0]: a vim whose comm says rust-analyzer is other, and the reverse" \
-        "91002${TAB}rust-analyzer${TAB}rust-analyzer" "$(printf '%s\n' "$OUT" | sed -n 1p)"
+        "5091002${TAB}rust-analyzer${TAB}rust-analyzer" "$(printf '%s\n' "$OUT" | sed -n 1p)"
     eq "the other two are blockers" "rust-analyzer,other,other" "$(kinds)"
 }
 
@@ -342,34 +355,34 @@ case_whole_component_matching() {
     echo "whole_component_matching"
     new_case component
     # cwd elsewhere in every case: only the command line can match.
-    fake 92001 "$C" tool "$WT"
-    fake 92002 "$C" tool --cwd "$WT"
-    fake 92003 "$C" tool "--cwd=$WT"
-    fake 92004 "$C" tool "--manifest-path=$WT/Cargo.toml"
-    fake 92005 "$C" tool "$WT/"
-    fake 92101 "$C" tool "$WT-other"
-    fake 92102 "$C" tool "${WT}2/x"
-    fake 92103 "$C" tool "/x$WT"
-    fake 92104 "$C" tool "${WT}.bak/Cargo.toml"
+    fake 5092001 "$C" tool "$WT"
+    fake 5092002 "$C" tool --cwd "$WT"
+    fake 5092003 "$C" tool "--cwd=$WT"
+    fake 5092004 "$C" tool "--manifest-path=$WT/Cargo.toml"
+    fake 5092005 "$C" tool "$WT/"
+    fake 5092101 "$C" tool "$WT-other"
+    fake 5092102 "$C" tool "${WT}2/x"
+    fake 5092103 "$C" tool "/x$WT"
+    fake 5092104 "$C" tool "${WT}.bak/Cargo.toml"
     run "$WT"
     eq "exit 3" 3 "$RC"
-    eq "exactly the whole-component spellings match" "92001,92002,92003,92004,92005" "$(pids)"
+    eq "exactly the whole-component spellings match" "5092001,5092002,5092003,5092004,5092005" "$(pids)"
 }
 
 case_unreadable_and_non_pid_entries_are_skipped() {
     echo "unreadable_and_non_pid_entries_are_skipped"
     new_case skips
-    mkdir -p "$PROCD/self" "$PROCD/sys" "$PROCD/92001"
-    ln -s "$WT" "$PROCD/92001/cwd"                       # no cmdline file: unreadable
-    mkdir -p "$PROCD/92002"
-    printf '%s\0' vim > "$PROCD/92002/cmdline"           # no cwd: cannot place it
-    mkdir -p "$PROCD/92003"
-    ln -s "$C/gone" "$PROCD/92003/cwd"                   # dangling cwd
-    printf '%s\0' vim > "$PROCD/92003/cmdline"
-    fake 92004 "$WT" vim
+    mkdir -p "$PROCD/self" "$PROCD/sys" "$PROCD/5092001"
+    ln -s "$WT" "$PROCD/5092001/cwd"                       # no cmdline file: unreadable
+    mkdir -p "$PROCD/5092002"
+    printf '%s\0' vim > "$PROCD/5092002/cmdline"           # no cwd: cannot place it
+    mkdir -p "$PROCD/5092003"
+    ln -s "$C/gone" "$PROCD/5092003/cwd"                   # dangling cwd
+    printf '%s\0' vim > "$PROCD/5092003/cmdline"
+    fake 5092004 "$WT" vim
     run "$WT"
     eq "exit 3" 3 "$RC"
-    eq "only the readable holder" 92004 "$(pids)"
+    eq "only the readable holder" 5092004 "$(pids)"
 }
 
 case_no_holders_exits_zero() {
@@ -405,7 +418,7 @@ case_bad_arguments_refuse() {
 run_with_fake_parent() {
     rm -f "$C/parent-done"
     ( cd "$C" && F="$PROCD" PCWD="$1" PARG="$2" SFLAGS="${3:-}" PARGV0="${4:-bash}" WT="$WT" S="$SRC" OUTDIR="$C" \
-        WORKTREE_REMOVE_PROC="$PROCD" bash -c '
+        WORKTREE_REMOVE_PROC="$PROCD" timeout "${RUN_TIMEOUT:-120}" bash -c '
             mkdir -p "$F/$$"
             ln -s "$PCWD" "$F/$$/cwd"
             printf "%s\0-c\0%s\0" "$PARGV0" "$PARG" >"$F/$$/cmdline"
@@ -505,7 +518,7 @@ case_a_detached_head_worktree_is_removed() {
 case_holders_without_stop_signal_nothing() {
     echo "holders_without_stop_signal_nothing"
     new_case nostop
-    spawn "$WT" rust-analyzer sleep 300 || return
+    spawn "$WT" rust-analyzer sleep 300 || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
     local p=$SP
     run_real "$WT"
     eq "exit 3" 3 "$RC"
@@ -517,7 +530,7 @@ case_holders_without_stop_signal_nothing() {
 case_stop_ends_a_stoppable_holder_and_removes() {
     echo "stop_ends_a_stoppable_holder_and_removes"
     new_case stop
-    spawn "$WT" rust-analyzer sleep 300 || return
+    spawn "$WT" rust-analyzer sleep 300 || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
     local p=$SP
     run_real --stop --wait 5 "$WT"
     eq "exit 0" 0 "$RC"
@@ -529,9 +542,9 @@ case_stop_ends_a_stoppable_holder_and_removes() {
 case_stop_with_a_blocker_leaves_the_stoppable_alive() {
     echo "stop_with_a_blocker_leaves_the_stoppable_alive"
     new_case blocker_real
-    spawn "$WT" rust-analyzer sleep 300 || return
+    spawn "$WT" rust-analyzer sleep 300 || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
     local ra=$SP
-    spawn "$WT" sleep sleep 300 || return
+    spawn "$WT" sleep sleep 300 || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
     local pl=$SP
     run_real --stop --wait 2 "$WT"
     eq "exit 4" 4 "$RC"
@@ -555,7 +568,7 @@ case_a_codescout_server_under_target_stays_a_blocker() {
 case_stop_signals_the_mux_before_the_other_holders() {
     echo "stop_signals_the_mux_before_the_other_holders"
     new_case order
-    mkfifo "$C/fifo" || return
+    mkfifo "$C/fifo" || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
     mkdir "$C/muxdir"
     export FIFO="$C/fifo" LOG="$C/order.log" MUX_READY="$C/mux.ready" CARGO_READY="$C/cargo.ready"
     # The mux takes 0.4 s to finish its SIGTERM handler, then writes `mux`. A cargo that was
@@ -570,9 +583,9 @@ trap 'echo cargo >>"$LOG"; exit 0' TERM
 : >"$CARGO_READY"
 while :; do read -t 1 x <>"$FIFO"; done
 EOF
-    spawn "$C/muxdir" codescout bash mux --cwd "$WT" || return
+    spawn "$C/muxdir" codescout bash mux --cwd "$WT" || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
     local pm=$SP
-    spawn "$WT" cargo bash "$C/cargo-stub" || return
+    spawn "$WT" cargo bash "$C/cargo-stub" || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
     local pc=$SP
     wait_file "$MUX_READY" && wait_file "$CARGO_READY" || { bad "stubs are ready" ready "not ready"; return; }
     run_real --stop --wait 5 "$WT"
@@ -587,11 +600,11 @@ EOF
 case_a_holder_that_ignores_sigterm_is_a_survivor() {
     echo "a_holder_that_ignores_sigterm_is_a_survivor"
     new_case ignore
-    mkfifo "$C/fifo" || return
+    mkfifo "$C/fifo" || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
     # `read -t` rather than `sleep 1` in the loop: a `sleep` child would inherit the worktree as
     # its cwd and be listed as a second holder, of kind other, which is a blocker.
     spawn "$WT" cargo bash -c 'trap "" TERM; : >"$1"; while :; do read -t 1 x <>"$2"; done' \
-        cargo "$C/ready" "$C/fifo" || return
+        cargo "$C/ready" "$C/fifo" || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
     local p=$SP
     wait_file "$C/ready" || { bad "the holder is ready" ready "not ready"; return; }
     run_real --stop --wait 2 "$WT"
@@ -656,7 +669,32 @@ EOF
     lacks "git no longer lists it" "$WT" "$(G "$REPO" worktree list --porcelain)"
 }
 
+case_a_scan_that_blocks_is_bounded() {
+    echo "a_scan_that_blocks_is_bounded"
+    new_case blockscan
+    # An entry whose cmdline is a FIFO nobody writes to: opening it for reading blocks, as a
+    # read of a /proc/<pid>/cmdline blocks on a process that holds its memory-map lock. The
+    # scan runs in a child that `timeout` kills together with whatever it blocked in, so no
+    # blocked reader outlives the case.
+    mkdir -p "$PROCD/5099001"
+    mkfifo "$PROCD/5099001/cmdline" || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
+    ln -s "$WT" "$PROCD/5099001/cwd"
+    local t0=$SECONDS
+    WORKTREE_REMOVE_SCAN_TIMEOUT=1 RUN_TIMEOUT=20 run "$WT"
+    local took=$((SECONDS - t0))
+    eq "exit 2: the script's own code, not the outer timeout's 124" 2 "$RC"
+    contains "says the scan timed out" "timed out" "$ERR"
+    contains "says nothing was changed" "nothing was changed" "$ERR"
+    eq "bounded: done within 10 s" yes "$([ "$took" -lt 10 ] && echo yes || echo no)"
+    eq "the worktree is untouched" present "$(present "$WT")"
+    contains "git still lists it" "$WT" "$(G "$REPO" worktree list --porcelain)"
+    WORKTREE_REMOVE_SCAN_TIMEOUT=1 RUN_TIMEOUT=20 run --stop "$WT"
+    eq "with --stop too: exit 2, nothing signalled or removed" 2 "$RC"
+    eq "the worktree is untouched" present "$(present "$WT")"
+}
+
 case_a_parent_whose_cwd_is_inside_is_a_holder
+case_a_scan_that_blocks_is_bounded
 case_the_parent_that_is_stoppable_by_kind_is_a_blocker
 case_no_holders_removes_cleanly
 case_a_detached_head_worktree_is_removed
