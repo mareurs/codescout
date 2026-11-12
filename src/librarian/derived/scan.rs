@@ -209,6 +209,32 @@ mod tests {
         assert_eq!(files[1].text, Ok("a".to_string()));
     }
 
+    /// Git lists a tree by raw bytes; `rel_path` is the lossy spelling. Here the two orders
+    /// differ, so the sort in `scan_commit` is what puts the list in path order: `\xfe` reads
+    /// U+FFFD (EF BF BD), which sorts before U+FFFF (EF BF BF), while in the tree the byte FE
+    /// sorts after EF. (For any valid UTF-8 names git's order is already the path order, which
+    /// is why `lists_only_md_blobs_sorted_by_path` cannot tell a sort from no sort.)
+    #[test]
+    fn the_list_is_in_path_order_where_git_lists_the_names_in_another_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_with_raw_tree(dir.path(), |repo, root| {
+            let blob = repo.blob(b"x").unwrap();
+            root.insert(&b"\xfe.md"[..], blob, FILE as i32).unwrap();
+            root.insert("\u{ffff}.md", blob, FILE as i32).unwrap();
+        });
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        let tree = commit.tree().unwrap();
+        let git_order: Vec<Vec<u8>> = tree.iter().map(|e| e.name_bytes().to_vec()).collect();
+        assert_eq!(
+            git_order,
+            ["\u{ffff}.md".as_bytes().to_vec(), b"\xfe.md".to_vec()],
+            "the premise: git's own order is not the path order"
+        );
+        let files = scan(&repo, &KeySpace::empty());
+        let paths: Vec<&str> = files.iter().map(|f| f.rel_path.as_str()).collect();
+        assert_eq!(paths, ["\u{fffd}.md", "\u{ffff}.md"]);
+    }
+
     #[test]
     fn a_non_utf8_file_is_skipped_with_a_reason() {
         let dir = tempfile::tempdir().unwrap();
