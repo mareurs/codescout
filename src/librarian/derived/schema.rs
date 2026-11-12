@@ -111,19 +111,25 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
             )
         })?;
     }
-    let conn = Connection::open(path)?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
-    configure_and_init(conn)
+    configure_and_init(Connection::open(path)?, Some(path))
 }
 
 fn failure(code: i32, message: String) -> rusqlite::Error {
     rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), Some(message))
 }
 
-fn configure_and_init(conn: Connection) -> rusqlite::Result<Connection> {
+/// Set the pragmas, apply or refuse the schema, and only then switch a file to WAL.
+///
+/// WAL is recorded in the file header, so it is set after every refusal: a database that is
+/// refused is left byte-for-byte as it was found. `path` is the path the caller gave (`None` for
+/// an in-memory database, which has no journal mode to set).
+fn configure_and_init(conn: Connection, path: Option<&Path>) -> rusqlite::Result<Connection> {
     conn.pragma_update(None, "busy_timeout", BUSY_TIMEOUT_MS)?;
     conn.pragma_update(None, "foreign_keys", true)?;
-    init_schema(&conn)?;
+    init_schema(&conn, path)?;
+    if path.is_some() {
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+    }
     Ok(conn)
 }
 
@@ -148,7 +154,7 @@ fn refuse_if_newer(found: i64) -> rusqlite::Result<()> {
 ///
 /// The check is repeated inside an immediate transaction, so two processes opening a new file
 /// cannot both create the tables.
-fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
+fn init_schema(conn: &Connection, path: Option<&Path>) -> rusqlite::Result<()> {
     let found = user_version(conn)?;
     refuse_if_newer(found)?;
     if found == SCHEMA_VERSION {
@@ -158,7 +164,7 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     let found = user_version(&tx)?;
     refuse_if_newer(found)?;
     if found == 0 {
-        refuse_if_foreign(&tx, conn.path())?;
+        refuse_if_foreign(&tx, path)?;
         tx.execute_batch(SCHEMA_SQL)?;
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
@@ -167,20 +173,23 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
 
 /// `user_version` 0 is the state of every SQLite file, so a version-0 file that already holds a
 /// table is somebody else's database (the old `catalog.db`, say): the schema is not applied over it.
-fn refuse_if_foreign(conn: &Connection, path: Option<&str>) -> rusqlite::Result<()> {
+fn refuse_if_foreign(conn: &Connection, path: Option<&Path>) -> rusqlite::Result<()> {
     let tables: i64 = conn.query_row(
         "SELECT count(*) FROM sqlite_master WHERE type = 'table'",
         [],
         |r| r.get(0),
     )?;
     if tables > 0 {
+        // The path the caller gave, not `conn.path()`: SQLite resolves symlinks in the latter.
+        let name = path.map_or_else(
+            || "this in-memory database".to_owned(),
+            |p| p.display().to_string(),
+        );
         return Err(failure(
             rusqlite::ffi::SQLITE_NOTADB,
             format!(
-                "{} is not a derived index: it has user_version 0 and already holds {tables} \
-                 table(s); refusing to apply the schema over it",
-                path.filter(|p| !p.is_empty())
-                    .unwrap_or("this in-memory database")
+                "{name} is not a derived index: it has user_version 0 and already holds {tables} \
+                 table(s); refusing to apply the schema over it"
             ),
         ));
     }
@@ -189,7 +198,7 @@ fn refuse_if_foreign(conn: &Connection, path: Option<&str>) -> rusqlite::Result<
 
 /// An in-memory derived index with the same schema, for tests.
 pub fn open_in_memory() -> rusqlite::Result<Connection> {
-    configure_and_init(Connection::open_in_memory()?)
+    configure_and_init(Connection::open_in_memory()?, None)
 }
 
 /// Every table except `parse_cache`, as `table -> rows`; the one oracle for "these two indexes
@@ -390,12 +399,19 @@ mod tests {
     fn a_newer_user_version_is_refused_by_name() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("derived.db");
-        drop(open(&path).unwrap());
+        // Built by a plain connection (rollback journal, the SQLite default), so that a refused
+        // `open` that switched the file to WAL would change its bytes.
         let newer = SCHEMA_VERSION + 6;
         {
             let raw = Connection::open(&path).unwrap();
             raw.pragma_update(None, "user_version", newer).unwrap();
         }
+        let before = std::fs::read(&path).unwrap();
+        assert_eq!(
+            before[18..20],
+            [1, 1],
+            "a rollback-journal file to start from"
+        );
 
         let err = open(&path).expect_err("a newer schema must be refused");
         let text = err.to_string();
@@ -409,6 +425,11 @@ mod tests {
             user_version(&raw),
             newer,
             "the refused file is left as it was"
+        );
+        drop(raw);
+        assert!(
+            std::fs::read(&path).unwrap() == before,
+            "a refused open leaves the file byte-for-byte unchanged"
         );
     }
 
@@ -625,12 +646,22 @@ mod tests {
             raw.execute_batch("CREATE TABLE chunks (id TEXT); INSERT INTO chunks VALUES ('x');")
                 .unwrap();
         }
+        let before = std::fs::read(&path).unwrap();
+        assert_eq!(
+            before[18..20],
+            [1, 1],
+            "a rollback-journal file to start from"
+        );
 
         let err = open(&path).expect_err("a foreign database must be refused");
         let text = err.to_string();
         assert!(
             text.contains(&path.display().to_string()) && text.contains("not a derived index"),
             "the refusal names the file: {text}"
+        );
+        assert!(
+            std::fs::read(&path).unwrap() == before,
+            "a refused open leaves the file byte-for-byte unchanged"
         );
         let raw = Connection::open(&path).unwrap();
         assert_eq!(table_names(&raw), ["chunks"], "no derived table was added");
@@ -639,6 +670,29 @@ mod tests {
             .query_row("SELECT count(*) FROM chunks", [], |r| r.get(0))
             .unwrap();
         assert_eq!(rows, 1);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn the_refusal_names_the_path_as_the_caller_spelled_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        {
+            let raw = Connection::open(real.join("catalog.db")).unwrap();
+            raw.execute_batch("CREATE TABLE chunks (id TEXT);").unwrap();
+        }
+
+        // SQLite reports the resolved path (`real/catalog.db`); the message must not.
+        let spelled = link.join("catalog.db");
+        let err = open(&spelled).expect_err("a foreign database must be refused");
+        let text = err.to_string();
+        assert!(
+            text.contains(&spelled.display().to_string()),
+            "the refusal names the path the caller gave ({}): {text}",
+            spelled.display()
+        );
     }
 
     #[test]
