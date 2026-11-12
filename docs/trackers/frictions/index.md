@@ -152,7 +152,7 @@ Not admitted as entries, because the evidence is one sequence, a sample, or cann
 
 **Status:** open
 
-**Fix:** committed in `5d0ee2421` (patch-id `655d6d953b36bfcec6582a981e21b51229116bdb`), 2026-11-11. The zero-with-scan-hits warning now names what was proven, not a cause. Not yet seen on a rebuilt server.
+**Fix:** committed in `5d0ee2421` (patch-id `655d6d953b36bfcec6582a981e21b51229116bdb`), 2026-11-11. The zero-with-scan-hits warning now names what was proven, not a cause. Checked live on a rebuilt server (2026-11-12, binary built 13:49 EET), in a scratch Rust crate with rust-analyzer: `unused_helper` defined in `src/lib.rs` and a local of the same name in `src/other.rs` returned `LSP returned 0 references outside the definition file, but \`unused_helper\` appears as a whole word in 1+ other source file(s) (e.g. src/other.rs) — the text scan cannot tell a call site from a same-named local, field or comment, so either the reference index is not complete yet or those hits are not uses.` One call, one language. Not shown: that agents act differently on the new text. Status stays open until `usage.db` shows the effect.
 
 **Confidence:** code path verified, outcomes sampled
 
@@ -322,7 +322,7 @@ Agents pass the parameter name of a sibling tool, 143 rows in all. `edit_code`: 
 
 **Status:** open
 
-**Fix:** committed in `ba299e6bf` (patch-id `70afc992b3b2d4dc4c3bd177475fae5060fcf7f5`), 2026-11-11. The real shape was a body that declares several symbols, not a rename: the refusal now says so and routes the extras to `insert`. The ledger's Python `pre_set` hypothesis did not reproduce.
+**Fix:** committed in `ba299e6bf` (patch-id `70afc992b3b2d4dc4c3bd177475fae5060fcf7f5`), 2026-11-11. The real shape was a body that declares several symbols, not a rename: the refusal now says so and routes the extras to `insert`. The ledger's Python `pre_set` hypothesis did not reproduce. Checked live on a rebuilt server (2026-11-12, binary built 13:49 EET), in a scratch Rust crate: `edit_code(replace, symbol=replace_me, body=<fn alpha + fn beta>)` was refused with `a body that declares 2 symbols (\`alpha\`, \`beta\`) and none of them is \`replace_me\`` and a hint naming `replace` then `insert`, or `rename`; the file's SHA-256 was identical before and after. Rust only: the original rows were Python methods, and no Python crate was run. A body that keeps the target's name and adds one more (`replace_me` + `extra_one`) is not refused: it is written and answered with `also_defined: ["extra_one"]`. Status stays open until `usage.db` shows the effect.
 
 A rename hidden inside a `replace` body on a Python method is reported as "dropped the symbol definition", not as a rename. Two rows are confirmed (223327 on 2026-10-28 and 232089 on 2026-10-29), inside a family of 30 `replace_dropped_sibling` rows (12 sessions). In row 223327 the body declares `def test_errored_run_with_no_model_work_is_invalid` for the symbol `IntegrityTest/test_errored_run_is_invalid`, which is a pure rename. The same cause on Rust gets the right message ("`replace` cannot rename", row 248940). Of 3 sampled rows, 0 recovered with a `replace` on the same symbol: 2 went to remove plus insert and 1 to `edit_file`. The archived bug of 2026-09-13 fixed the rename message, and this Python shape still falls through. The mechanism is a hypothesis, not reproduced.
 
