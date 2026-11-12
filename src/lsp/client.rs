@@ -4462,6 +4462,132 @@ struct Point {
         // Dropping the mux's future drops its server child (`kill_on_drop`).
         mux.abort();
     }
+    /// Kotlin is the language that goes through the mux in production, and `kotlin-lsp` is a JVM
+    /// server: it keeps an open file's text from the last `didOpen`/`didChange` like the others, so a
+    /// write made outside codescout must be resent before the next request. The test runs the mux in
+    /// this process with the production config (`default_config("kotlin")`: the 2 GiB heap cap,
+    /// `--system-path`, the codescout-owned `user.home`), connects the socket client, writes
+    /// `other.kt` outside the client and asks for hover at the call's new position.
+    ///
+    /// It is `#[ignore]`d because `kotlin-lsp` has used 35 GB of native memory on a small project
+    /// (`docs/issues/archive/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`), and no gate lane caps
+    /// memory. Run it by hand, under a cgroup limit so the kernel kills it instead of the host:
+    ///
+    /// ```text
+    /// cargo test --lib --no-run   # note the test binary path
+    /// systemd-run --user --scope -p MemoryMax=6G -p MemorySwapMax=0 \
+    ///     <test binary> --ignored kotlin_hover_follows_a_write_made_outside_codescout_through_the_mux
+    /// ```
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "starts a real kotlin-lsp (a JVM): run it under a memory cap, see the doc comment"]
+    async fn kotlin_hover_follows_a_write_made_outside_codescout_through_the_mux() {
+        if !on_path("kotlin-lsp") {
+            eprintln!("Skipping: kotlin-lsp not installed");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let src = root.join("src/main/kotlin");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            src.join("Lib.kt"),
+            "package demo\n\nfun targetFn(): Int = 1\n",
+        )
+        .unwrap();
+        // `kotlin-lsp` answers nothing for a bare folder (measured: no hover for 240 s), so the project
+        // is a Gradle one, with the plugin and distribution versions that `~/.gradle` already holds.
+        std::fs::write(
+            root.join("settings.gradle.kts"),
+            "rootProject.name = \"demo\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+        root.join("build.gradle.kts"),
+        "plugins {\n    kotlin(\"jvm\") version \"2.1.20\"\n}\n\nrepositories {\n    mavenCentral()\n}\n",
+    )
+    .unwrap();
+        std::fs::create_dir_all(root.join("gradle/wrapper")).unwrap();
+        std::fs::write(
+            root.join("gradle/wrapper/gradle-wrapper.properties"),
+            "distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\n\
+         distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.3-bin.zip\n\
+         zipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n",
+        )
+        .unwrap();
+        let other_kt = src.join("Other.kt");
+        std::fs::write(
+            &other_kt,
+            "package demo\n\nfun caller(): Int {\n    return targetFn()\n}\n",
+        )
+        .unwrap();
+
+        let cfg = crate::lsp::servers::default_config("kotlin", &root).unwrap();
+        let args: Vec<String> = cfg.args.clone();
+        // The production config gives each workspace a fresh `GRADLE_USER_HOME` under the temp dir, which
+        // would download the distribution and the plugin. This manual test reuses `~/.gradle` instead.
+        let gradle_home =
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join(".gradle");
+        let env: Vec<(String, String)> = cfg
+            .env
+            .iter()
+            .map(|(k, v)| match k.as_str() {
+                "GRADLE_USER_HOME" => (k.clone(), gradle_home.to_string_lossy().to_string()),
+                _ => (k.clone(), v.clone()),
+            })
+            .collect();
+        let sock_dir = tempdir().unwrap();
+        let (mux, socket) =
+            in_process_mux_for(&root, sock_dir.path(), &cfg.command, &args, &env, 300).await;
+        let client = retrying_on_error(|| LspClient::connect(&socket, root.clone())).await;
+        client
+            .document_symbols(&src.join("Lib.kt"), "kotlin")
+            .await
+            .unwrap();
+        client.document_symbols(&other_kt, "kotlin").await.unwrap();
+
+        // Baseline, polled while the server imports the Gradle project.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(420);
+        let before = loop {
+            let text = client.hover(&other_kt, 3, 11, "kotlin").await.unwrap();
+            if text.is_some() || std::time::Instant::now() >= deadline {
+                break text;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        };
+
+        let outcome = if before.as_deref().is_some_and(|t| t.contains("targetFn")) {
+            let original = std::fs::read_to_string(&other_kt).unwrap();
+            std::fs::write(&other_kt, format!("// a\n// b\n// c\n{original}")).unwrap();
+            Some(
+                answered_after_a_write(
+                    || client.hover(&other_kt, 6, 11, "kotlin"),
+                    |text| text.is_none(),
+                )
+                .await,
+            )
+        } else {
+            None
+        };
+
+        // Cleanup before asserting, so a failed run does not leave a JVM and its index behind.
+        let _ = client.shutdown().await;
+        mux.abort();
+        let ws_hash = crate::lsp::mux::workspace_hash(&root);
+        let _ = std::fs::remove_dir_all(crate::lsp::servers::kotlin_analyzer_home(&ws_hash));
+        let tmp = std::env::temp_dir();
+        let _ = std::fs::remove_dir_all(tmp.join(format!("codescout-mux-kotlin-lsp-{ws_hash}")));
+
+        assert!(
+            before.as_deref().is_some_and(|t| t.contains("targetFn")),
+            "baseline: hover on the call describes targetFn, got {before:?}"
+        );
+        let after = outcome.unwrap();
+        assert!(
+            after.as_deref().is_some_and(|t| t.contains("targetFn")),
+            "hover through the mux at the call's new position must describe targetFn, got {after:?}"
+        );
+    }
 
     /// Start `mux::process::run` in this process, with a real rust-analyzer behind it, and wait until
     /// it has bound its socket. Aborting the returned task drops the server child (`kill_on_drop`).
@@ -4470,21 +4596,36 @@ struct Point {
         root: &Path,
         sock_dir: &Path,
     ) -> (tokio::task::JoinHandle<Result<()>>, std::path::PathBuf) {
+        in_process_mux_for(root, sock_dir, "rust-analyzer", &[], &[], 30).await
+    }
+
+    /// `in_process_mux` for any server: `bind_secs` is how long the mux may take to start the server
+    /// and bind its socket (a JVM server needs minutes where rust-analyzer needs seconds).
+    #[cfg(unix)]
+    async fn in_process_mux_for(
+        root: &Path,
+        sock_dir: &Path,
+        command: &str,
+        args: &[String],
+        env: &[(String, String)],
+        bind_secs: u64,
+    ) -> (tokio::task::JoinHandle<Result<()>>, std::path::PathBuf) {
         let socket = sock_dir.join("mux.sock");
         let lock = sock_dir.join("mux.lock");
         let handle = {
             let (socket, lock, root) = (socket.clone(), lock.clone(), root.to_path_buf());
+            let (command, args, env) = (command.to_string(), args.to_vec(), env.to_vec());
             tokio::spawn(async move {
-                crate::lsp::mux::process::run(&socket, &lock, &root, 120, "rust-analyzer", &[], &[])
+                crate::lsp::mux::process::run(&socket, &lock, &root, 120, &command, &args, &env)
                     .await
             })
         };
         // The mux binds its socket after it has started the server.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(bind_secs);
         while !socket.exists() {
             assert!(
                 std::time::Instant::now() < deadline,
-                "the mux did not bind {} within 30 s",
+                "the mux did not bind {} within {bind_secs} s",
                 socket.display()
             );
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
