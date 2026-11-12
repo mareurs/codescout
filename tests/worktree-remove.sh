@@ -128,7 +128,9 @@ new_case() {
 }
 
 # fake PID CWD ARGV...: one fixture process. Its `comm` is argv[0]'s basename cut to 15
-# characters, as the kernel does, unless FAKE_COMM overrides it.
+# characters, as the kernel does, unless FAKE_COMM overrides it. With FAKE_PPID=<n> in the
+# environment it also writes `status` (`Name:` and `PPid:`, tab-separated, as the kernel does);
+# without it there is no `status` file, so the process has no readable parent.
 fake() {
     local pid=$1 cwd=$2 base comm
     shift 2
@@ -139,6 +141,9 @@ fake() {
     base="${1##*/}"
     comm="${FAKE_COMM:-${base:0:15}}"
     printf '%s\n' "$comm" > "$PROCD/$pid/comm"
+    if [ -n "${FAKE_PPID-}" ]; then
+        printf 'Name:\t%s\nPPid:\t%s\n' "$comm" "$FAKE_PPID" > "$PROCD/$pid/status"
+    fi
 }
 
 # run ARGS...: run the script from RUN_CWD (default the case dir) against the fixture proc
@@ -448,13 +453,22 @@ case_bad_arguments_refuse() {
 # The script itself runs from the case dir, outside the worktree. Optional 3rd argument: script
 # flags (word-split); optional 4th: the parent's argv[0] (default bash). The parent leaves
 # $C/parent-done when the script returned and it was still running. Sets RC, OUT, ERR, PPID_FAKE.
+# PARENT_SIBLING_PID=<fixture pid> in the environment adds a `vim` in the worktree whose
+# `PPid:` is the parent's pid, written once the parent's pid is known.
 run_with_fake_parent() {
     rm -f "$C/parent-done"
     ( cd "$C" && F="$PROCD" PCWD="$1" PARG="$2" SFLAGS="${3:-}" PARGV0="${4:-bash}" WT="$WT" S="$SRC" OUTDIR="$C" \
+        SIB="${PARENT_SIBLING_PID-}" \
         WORKTREE_REMOVE_PROC="$PROCD" timeout "${RUN_TIMEOUT:-120}" bash -c '
             mkdir -p "$F/$$"
             ln -s "$PCWD" "$F/$$/cwd"
             printf "%s\0-c\0%s\0" "$PARGV0" "$PARG" >"$F/$$/cmdline"
+            if [ -n "$SIB" ]; then
+                mkdir -p "$F/$SIB"
+                ln -s "$WT" "$F/$SIB/cwd"
+                printf "vim\0" >"$F/$SIB/cmdline"
+                printf "Name:\tvim\nPPid:\t%s\n" "$$" >"$F/$SIB/status"
+            fi
             echo "$$" >"$OUTDIR/ppid"
             bash "$S" $SFLAGS "$WT"
             rc=$?
@@ -927,9 +941,146 @@ EOF
     eq "exit 4: the blocker is found before any signal" 4 "$RC"
     contains "the late blocker is named" "5091002  vim" "$ERR"
     contains "nothing was signalled" "nothing was signalled" "$ERR"
+    lacks "no signal line" "worktree-remove: signalled " "$ERR"
+    lacks "no failed-signal line" "worktree-remove: could not signal " "$ERR"
     lacks "it did not go on to a survivor report" "still there after SIGTERM" "$ERR"
     eq "two scans only: main's and the stop loop's first" 2 "$(cat "$C/count")"
     eq "the worktree is untouched" present "$(present "$WT")"
+}
+
+case_a_descendant_of_a_stoppable_holder_is_a_child() {
+    echo "a_descendant_of_a_stoppable_holder_is_a_child"
+    new_case child
+    # A cold build: cargo (a holder) runs a shell (cwd elsewhere, so not a holder) that runs a
+    # compiler (cwd in the worktree, kind other by argv[0]). The compiler is a child of a
+    # stoppable holder, so it is stoppable too.
+    fake 5092001 "$WT" cargo build
+    FAKE_PPID=5092001 fake 5092002 "$C" sh -c build
+    FAKE_PPID=5092002 fake 5092003 "$WT" cc -c x.c
+    run "$WT"
+    eq "exit 3" 3 "$RC"
+    eq "the compiler is a child, the cargo keeps its kind" "cargo,child" "$(kinds)"
+    run --stop --wait 1 "$WT"
+    eq "--stop does not refuse a child: exit 5 (the fixture pids never exit), not 4" 5 "$RC"
+    contains "the child is signalled by kind" "worktree-remove: could not signal 5092003 child (already gone, or not permitted)" "$ERR"
+}
+
+case_without_a_status_file_a_descendant_stays_other() {
+    echo "without_a_status_file_a_descendant_stays_other"
+    new_case child_nostatus
+    fake 5092001 "$WT" cargo build
+    fake 5092002 "$C" sh -c build
+    fake 5092003 "$WT" cc -c x.c
+    run "$WT"
+    eq "exit 3" 3 "$RC"
+    eq "no parent can be read, so the compiler stays other" "cargo,other" "$(kinds)"
+    run --stop --wait 1 "$WT"
+    eq "--stop refuses: exit 4" 4 "$RC"
+    contains "nothing was signalled" "nothing was signalled" "$ERR"
+}
+
+case_an_ancestor_walk_that_cannot_finish_leaves_other() {
+    echo "an_ancestor_walk_that_cannot_finish_leaves_other"
+    local i prev
+    # Each sub-case holds a `cargo` the walk never reaches, so a walk that went wrong in either
+    # direction (a child where there is none, a hang) shows. RUN_TIMEOUT bounds a hang.
+    new_case walk_loop
+    fake 5092003 "$WT" cargo build
+    FAKE_PPID=5092002 fake 5092001 "$WT" cc -c x.c
+    FAKE_PPID=5092001 fake 5092002 "$C" sh -c build
+    RUN_TIMEOUT=30 run "$WT"
+    eq "a loop: exit 3 within the limit" 3 "$RC"
+    eq "a loop: the compiler stays other" "cargo,other" "$(kinds)"
+    lacks "a loop: no shell error" "line " "$ERR"
+
+    new_case walk_nonnumeric
+    fake 5092003 "$WT" cargo build
+    FAKE_PPID=abc fake 5092001 "$WT" cc -c x.c
+    RUN_TIMEOUT=30 run "$WT"
+    eq "a PPid that is not a number: exit 3" 3 "$RC"
+    eq "a PPid that is not a number: the compiler stays other" "cargo,other" "$(kinds)"
+    lacks "a PPid that is not a number: no shell error" "line " "$ERR"
+
+    new_case walk_too_long
+    # 70 shells between the compiler and the cargo: more than the 64 steps the walk takes.
+    fake 5093001 "$WT" cargo build
+    prev=5093001
+    for i in $(seq 2 71); do
+        FAKE_PPID=$prev fake $((5093000 + i)) "$C" sh -c build
+        prev=$((5093000 + i))
+    done
+    FAKE_PPID=$prev fake 5093072 "$WT" cc -c x.c
+    RUN_TIMEOUT=30 run "$WT"
+    eq "70 ancestors: exit 3" 3 "$RC"
+    eq "70 ancestors: the cargo is too far above to count" "cargo,other" "$(kinds)"
+
+    new_case walk_missing_status
+    fake 5092003 "$WT" cargo build
+    FAKE_PPID=5092002 fake 5092001 "$WT" cc -c x.c
+    fake 5092002 "$C" sh -c build
+    RUN_TIMEOUT=30 run "$WT"
+    eq "an ancestor without a status file: exit 3" 3 "$RC"
+    eq "an ancestor without a status file: the compiler stays other" "cargo,other" "$(kinds)"
+}
+
+case_the_script_parent_never_makes_a_child() {
+    echo "the_script_parent_never_makes_a_child"
+    new_case parent_child
+    # The script's parent is a `cargo` in the worktree (a blocker, whatever its kind). A `vim`
+    # whose parent is that cargo must not become a child because of it: the parent is not an
+    # ancestor that makes a stoppable descendant.
+    PARENT_SIBLING_PID=5092002 run_with_fake_parent "$WT" x --stop cargo
+    eq "exit 4: the parent and the vim are blockers" 4 "$RC"
+    eq "the parent keeps cargo, the vim stays other" "cargo,other" "$(kinds)"
+    contains "the vim is named as a blocker" "5092002  vim" "$ERR"
+    contains "nothing was signalled" "nothing was signalled" "$ERR"
+    lacks "no signal line" "worktree-remove: signalled " "$ERR"
+    lacks "no failed-signal line" "worktree-remove: could not signal " "$ERR"
+}
+
+case_a_descendant_that_is_not_a_holder_is_not_listed() {
+    echo "a_descendant_that_is_not_a_holder_is_not_listed"
+    new_case child_unlisted
+    fake 5092001 "$WT" cargo build
+    FAKE_PPID=5092001 fake 5092002 "$C" sh -c build
+    FAKE_PPID=5092002 fake 5092003 "$WT" cc -c x.c
+    run "$WT"
+    eq "only the holders are rows: the shell is not listed" "5092001,5092003" "$(pids)"
+}
+
+case_stop_ends_a_c_compile_child_and_removes() {
+    echo "stop_ends_a_c_compile_child_and_removes"
+    new_case cchild
+    # A cargo stub that starts a `cc` (a sleep, argv[0] cc) in the worktree, as a build script
+    # starts its C compiler. Without the child kind --stop would refuse with exit 4. The child
+    # is not in SPAWNED when the stub starts it, so its pid goes to SPAWNED as soon as it is
+    # known: a case that fails, or a script that leaves it alive, cannot leak it.
+    export CHILD_PID_FILE="$C/child.pid"
+    cat >"$C/cargo-stub" <<EOF
+trap 'exit 0' TERM
+( cd "$WT"; exec -a cc sleep 300 ) &
+echo \$! >"\$CHILD_PID_FILE"
+wait
+EOF
+    spawn "$WT" cargo bash "$C/cargo-stub" || { bad "setup failed in ${FUNCNAME[0]}" ok failed; unset CHILD_PID_FILE; return; }
+    local pc=$SP pk first="" i
+    wait_file "$CHILD_PID_FILE" || { bad "the child pid is written" written "not written"; unset CHILD_PID_FILE; return; }
+    pk=$(<"$CHILD_PID_FILE")
+    SPAWNED+=("$pk")
+    for i in $(seq 1 60); do
+        first=""
+        IFS= read -r -d '' first <"/proc/$pk/cmdline" 2>/dev/null
+        [ "$first" = cc ] && break
+        sleep 0.05
+    done
+    unset CHILD_PID_FILE
+    eq "the child has exec'd as cc" cc "$first"
+    run_real --stop --wait 5 "$WT"
+    eq "exit 0" 0 "$RC"
+    eq "the cargo is gone" no "$(yesno alive "$pc")"
+    eq "the child is gone" no "$(yesno alive "$pk")"
+    eq "the directory is gone" absent "$(present "$WT")"
+    contains "the child's signal line names its kind" "worktree-remove: signalled ${pk} child with SIGTERM" "$ERR"
 }
 
 case_a_parent_whose_cwd_is_inside_is_a_holder
@@ -951,6 +1102,12 @@ case_the_exit_6_listing_is_capped_and_omits_ignored_files
 case_a_git_that_fails_after_removing_the_worktree_is_not_a_refusal
 case_control_characters_in_a_command_line_are_scrubbed
 case_a_blocker_that_appears_after_the_first_scan_exits_4_before_any_signal
+case_a_descendant_of_a_stoppable_holder_is_a_child
+case_without_a_status_file_a_descendant_stays_other
+case_an_ancestor_walk_that_cannot_finish_leaves_other
+case_the_script_parent_never_makes_a_child
+case_a_descendant_that_is_not_a_holder_is_not_listed
+case_stop_ends_a_c_compile_child_and_removes
 
 echo
 echo "passed=$PASS failed=$FAIL"

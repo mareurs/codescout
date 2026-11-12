@@ -32,7 +32,7 @@ when another project is activated or when the worktree is removed (bug `3dde1548
    session is a client. Ask the occupant first
    ([`reaching-a-peer-session.md`](reaching-a-peer-session.md), Step 4 of its skill).
 4. If every holder is one of the stoppable kinds (`mux`, `rust-analyzer`, `cargo`, `rustc`,
-   `sccache`, `build-output`), run `scripts/worktree-remove.sh --stop <path>`. It sends SIGTERM and
+   `sccache`, `build-output`, `child`), run `scripts/worktree-remove.sh --stop <path>`. It sends SIGTERM and
    prints one stderr line per signal (`worktree-remove: signalled <pid> <kind> with SIGTERM`, or
    `worktree-remove: could not signal <pid> <kind> (already gone, or not permitted)`), so the
    output names each process it signalled. It then rescans, removes the worktree and checks that
@@ -61,6 +61,16 @@ empty), then `rmdir` again. That stub is the one directory you delete by hand. A
 checkout first (step 1) avoids the case.
 
 ## A blocker is not stoppable
+
+A `child` is a process that would be `other` by its command line but has a stoppable holder
+(`mux`, `rust-analyzer`, `cargo`, `rustc`, `sccache`, `build-output`) among its ancestors: the C
+compiler chain of a cargo build script (`make`, `cc`, `cc1`, `as`, `sh configure`) is one. The
+script walks `PPid:` upward (at most 64 steps; it ends at pid 1 or 0, at a loop, and at a
+`status` it cannot read), so it is stoppable and listed with kind `child`. A long-lived process
+that a stoppable holder started (for example `cargo run`) is a `child` too and is signalled. A
+descendant that was re-parented to pid 1 after its ancestor exited is `other` in the rescan: it is
+never signalled for that reason, and if it survives, the run ends in exit 5. The script's own
+parent never makes a `child`.
 
 A `codescout` process that is not a mux (for example `codescout start`, a live session's MCP
 server) has kind `other`, even when it runs from `<worktree>/target/`. So has any editor, shell or
