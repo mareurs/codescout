@@ -3,12 +3,12 @@
 
 [[anchors]]
 path = "src/prompts/mod.rs"
-hash = "644e1056fc0c5d0b5e5140eaff4d4fc8c542cda6b22de8f57c28038ea31685a2"
+hash = "ae38a04616608ac1c4664d7c65d65744d045e4abc7d2bf30b983e46c638fbaee"
 
 [[anchors]]
 path = "src/tools/core/guide_emit.rs"
-hash = "67765cd316c6a8bdaf72fc83aff4216faa60a595b755a27a7929262ab5af5149"
+hash = "d71a71115c19ee14d0466047391b54c213b53599dbb7610daf95ebcd64d43f7a"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "ffa0feca0d7d2b00dcabc5bc835080eaf338be5e636b5459fba21c81874b1c19"
+hash = "cce80cadc38211a6736729eb6d9d488364ec27e382fda4b726f65ee25068007a"

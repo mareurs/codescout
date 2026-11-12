@@ -3,20 +3,20 @@
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "6103081bb9b97576c19aad1a48028f124c03f33eafd8acc9a4cea65cfbec8cbd"
+hash = "c07ee404f54a66f0e254df079f1133c27262eacf8fba68dafb44acfd555eb89b"
 
 [[anchors]]
 path = "docs/conventions/gate-ordering.md"
-hash = "97a81e64a11adb1c0dbfa9453259a44f3242968102eec3e3148c0bd7907492a0"
+hash = "204c5fd9a7b437aad408f1a6c471f2ec9e0d029a774f7ab66cf40e0640094bd2"
 
 [[anchors]]
 path = "docs/conventions/harness-neutral-session-context.md"
-hash = "3cc1b95b5fcb03163bf24e875c96f71e400778996836c4ba9f315f161bb6cf3d"
+hash = "589f9535921e0dc7fe502046e8dc6e7fdd75dbd338c3f41f75995c03a67918ce"
 
 [[anchors]]
 path = "docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md"
-hash = "b514788e957882978d5e17b4831848aa752f4f6bccc5adc4d4edc2488571bf9e"
+hash = "2b8e503ed8380a98543ca019dd8d5c012e91f34bed6c480d74211fad5bde0f59"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "f3ed3d1b56f16e11720fbe0da4d3cbc7e4c44462ec93048dc910a8f548e37f21"
+hash = "e7dd79a8adc030e72a71f97c34b21d2aa7b63ce611ee8391fb8656952a523e87"

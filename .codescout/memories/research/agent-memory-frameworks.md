@@ -22,7 +22,7 @@ Mechanism families: context-compression · retrieval-augmented · reflective/sel
 codescout already spans ALL 3 substrate types:
 - atoms ≈ `ObservationRow` (src/librarian/catalog/observations.rs:8)
 - working tier ≈ `OutputBuffer`/`@ref` (src/tools/output_buffer.rs)
-- vector semantic store: Qdrant with buckets (code/system/preferences/unstructured) + `create_semantic_anchors` (src/tools/memory/mod.rs); `QdrantWrap` (struct in src/retrieval/qdrant.rs; its semantic-memory operations are `impl QdrantWrap` in src/retrieval/memory.rs)
+- vector semantic store: Qdrant with buckets (code/system/preferences/unstructured) + `cross_embed_memory` (src/tools/memory/mod.rs:262) for semantic anchors; `QdrantWrap` (struct in src/retrieval/qdrant.rs; its semantic-memory operations are `impl QdrantWrap` in src/retrieval/memory.rs)
 - structured graph: librarian `Catalog` (ArtifactRow/EdgeRow/EventRow/LinkRow)
 - white-box markdown everywhere
 

@@ -19,7 +19,7 @@ Endorsing hook hints buys compliance for good and bad hints alike. Only endorse 
 - Files: `docs/evals/data/2026-11-04-harness-channel-hints/hint-census/` (incl. `mining-report.md`, a subagent report, 4 figures checked) and `relocation-probe/`.
 
 ## Instrument gotchas paid for here
-- `--setting-sources local` does NOT load the project CLAUDE.md (bug `b8c35dc28bd3e8dd`). Use `project,local`. setup-ab (merged into `experiments`) uses `local` (bare, cs) and `user,local` (full), neither with `project`; checked 2026-11-04 on one task (cs-p01, Sonnet 5.5, 3 arms): the task CLAUDE.md reached the model in 0 of 3, and a positive control (user CLAUDE.md, full arm only) shows the grep can see a loaded one. Effect on setup-ab results not assessed.
+- `--setting-sources local` does NOT load the project CLAUDE.md (bug `b8c35dc28bd3e8dd`). Use `project,local`. setup-ab profile v1 (the default) uses `local` (bare, cs) and `user,local` (full), neither with `project`; profile v2 (`tools/setup-ab-eval/arms.py`) loads `project` in every arm; checked 2026-11-04 on one task (cs-p01, Sonnet 5.5, 3 arms): the task CLAUDE.md reached the model in 0 of 3, and a positive control (user CLAUDE.md, full arm only) shows the grep can see a loaded one. Effect on setup-ab results not assessed.
 - codescout's `references`/`call_graph`/`symbol_at` need `[project] languages` in `.codescout/project.toml` (untracked → missing from `git archive` trees).
 - Agents send `workspace activate` in parallel with the first lookups: no tool-borne hint can precede the first batch; measure after it.
 - PostToolUse `updatedToolOutput` replaces an MCP result (list or string form; verified on 2.1.309 and 2.1.318); `continue: false` ends a `claude -p` session.

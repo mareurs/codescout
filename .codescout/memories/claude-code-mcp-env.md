@@ -38,7 +38,7 @@ not.
 **Claude Code already speaks MCP v2** — inferred from a bug fix that presupposes
 it: 2.1.233 "Fixed MCP v2 connections endlessly reopening the subscriptions/listen
 stream". codescout does not: `ServerCapabilities::builder().enable_tools()
-.enable_tool_list_changed().enable_resources()` (`src/server.rs:1804-1808`, in `get_info`, re-located
+.enable_tool_list_changed().enable_resources()` (`src/server.rs:2774-2778`, in `get_info`, re-located
 2026-10-19 — the `:1385-1389` ref had drifted, and the `:1335-1338` ref before it, and before that the `:867-873` ref
 had already drifted onto unrelated `has_git_remote` code) declares no `extensions`
 block. rmcp is declared `version = "1.3"`, which is a **caret**
@@ -72,7 +72,7 @@ todo tracking — they vanish on 2.1.233. Whether the background-task controls
 backgrounding message still names `TaskStop`. Do not assume either way.
 
 **Still unknown: does CC actually SEND `_meta.progressToken`?** codescout builds a
-`ProgressReporter` only when it receives one (`src/server.rs:1900-1903`, in `call_tool`, re-located
+`ProgressReporter` only when it receives one (`src/server.rs:2881-2885`, in `call_tool`, re-located
 2026-10-19 — the `:1481-1484` ref had drifted, and the `:977-979` ref before it) and logs
 nothing either way. The live `.codescout/diagnostic-*.log` files are tracing
 output, not raw JSON-RPC — their zero hits for `progressToken` are a property of

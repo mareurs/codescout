@@ -1,6 +1,6 @@
 # Rust 1.97.1 -> 1.99.1: findings and decision (2026-11-05)
 
-Tracker that carries the work queue: docs/trackers/rust-toolchain-upgrade.md (id b9a5f911cf1cfcfa). Bug records: docs/issues/2026-11-05-build-rs-watches-shared-refs-so-any-commit-rebuilds-codescout.md (f8d06297d629928e) and docs/issues/2026-11-05-truncated-tool-query-test-failed-once-in-eight-gate-runs.md (649df5b30d126f2b).
+Tracker that carries the work queue: docs/trackers/rust-toolchain-upgrade.md (id b9a5f911cf1cfcfa). Bug records (archived, status fixed): docs/issues/archive/2026-11-05-build-rs-watches-shared-refs-so-any-commit-rebuilds-codescout.md (60d07b752885b353) and docs/issues/archive/2026-11-05-truncated-tool-query-test-failed-once-in-eight-gate-runs.md (99a91afd5d137c59).
 
 NAMING PITFALL: a memory topic name must contain no dot. `research/rust-1.99-upgrade-20261105` was stored as `rust-1.md` (the name was cut at the first dot) and its anchors file kept the full name. This topic replaces it.
 
@@ -26,7 +26,7 @@ The operator decided on 2026-11-05 to move the pin from 1.97.1 to 1.99.1 and sai
 - Observed: runs after commits at 14:49 / 15:00 / 15:07 rebuilt (CLIPPY 72-74 s, LEAN test build ~52 s, DEFAULT ~90 s, about 3.5 minutes per gate); the run after the last commit did not. Time-order match plus the code read; no controlled experiment. Same on the main checkout, where `git add` changes the shared index.
 
 ## Other
-- Flaky test tools::run_command::tests::a_truncated_tool_query_names_a_real_route_on_its_own_handle_and_it_runs failed once (lean and default of one run, 1.97.1) at src/tools/run_command/tests.rs:3243; passed in the other 7 runs. Cause unknown.
+- Flaky test tools::run_command::tests::a_truncated_tool_query_names_a_real_route_on_its_own_handle_and_it_runs failed once (lean and default of one run, 1.97.1) at src/tools/run_command/tests.rs:3243 (the test is at line 3341 now); passed in the other 7 runs. Cause unknown when this was written; the bug record is fixed and archived.
 - pytest-xdist 3.8.0 (only in scratchpad/xdist-site): light Python lane 145 / 135 s serial, 30.9 / 28.6 s with -n 8, 20.2 / 20.0 s with -n 16; 1599 passed, 0 failed in all 6 runs. Not wired into the gate. With the Rust lanes warm at ~119 s the warm TOTAL would fall from ~151 s to about 119 s: arithmetic, not a measured gate run.
 - sccache: wraps rustc via the repo .cargo/config.toml; the 10 GiB cache was full; ~/.config/sccache/config now sets 20 GiB, effective at the next daemon restart. bin and proc-macro crates are not cacheable.
 - lean vs default dependency graphs (cargo tree): 237 vs 431 packages; 219 of the 237 have identical features, so one target dir already shares them. cargo-hakari could fix at most ~16 third-party packages.

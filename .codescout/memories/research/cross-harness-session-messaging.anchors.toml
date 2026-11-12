@@ -3,7 +3,7 @@
 
 [[anchors]]
 path = "docs/issues/2026-10-29-codescout-has-no-background-wait-and-notify-mechanism-and-claude-code-monitor-is-removed-by-the-bash-deny.md"
-hash = "7d94d5acb4456d3e6c0e1984038e1c89eb9bbc41ba6c0d12d4188d0167f47dc2"
+hash = "42ae7f1e4a3a419f0f24aab29d7661bac1d67dd4e9d0c38ecb7b7b57c03867f0"
 
 [[anchors]]
 path = "docs/superpowers/specs/2026-10-29-background-job-wake-design.md"
@@ -11,4 +11,4 @@ hash = "b5ab5f3f0ddb0125652b97ba95ee18d190603b2a7c31641b5ab68bdd831d8c98"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "1db4dbde6218d9a5bf3222ad1037de41c0acb971530a21ae93e9ddc744b92aed"
+hash = "cce80cadc38211a6736729eb6d9d488364ec27e382fda4b726f65ee25068007a"

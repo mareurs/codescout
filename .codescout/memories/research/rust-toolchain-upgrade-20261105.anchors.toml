@@ -3,28 +3,20 @@
 
 [[anchors]]
 path = "docs/trackers/rust-toolchain-upgrade.md"
-hash = "0eacef397f2f3c776941e49c695b47127da576ca4fb12f86b15921a71dfcc805"
-
-[[anchors]]
-path = "docs/issues/2026-11-05-build-rs-watches-shared-refs-so-any-commit-rebuilds-codescout.md"
-hash = "14cc7abfd6d240215ad98b42e30d8694dc0af00835c093a1076a16b79242c672"
-
-[[anchors]]
-path = "docs/issues/2026-11-05-truncated-tool-query-test-failed-once-in-eight-gate-runs.md"
-hash = "53f819aa532f7b35befff7b371e5e529eafc6427330c71ab2d651593ff925117"
+hash = "4e999da787448a140043f6285dbf44c0ecb657f156f085409d846a71944176c4"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "933c5461d73707ae87215ea2cbba9471e6b0c2fbde5f81de3f37ebeaddc6a1b6"
+hash = "cce80cadc38211a6736729eb6d9d488364ec27e382fda4b726f65ee25068007a"
 
 [[anchors]]
 path = "src/tools/core/types.rs"
-hash = "a1c2af598b55030ccea16bfe8fdc78d72fbd967c8dd12f762b51de0c41835c9c"
+hash = "90807ab791918d74c86b922098be8c1fc796537435d79868abca030d56d88eef"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "6e55306f50d14adcccab0c492607e9e60163aad20882ea5fdc6f0d58d9463813"
+hash = "84cd4ea4b0db33a6d72c68a2611fb207b030a727b097f8e25c1e7b07ef425dc6"
 
 [[anchors]]
 path = "src/tools/run_command/tests.rs"
-hash = "6094e07a9bf38d58d91ade338cd3fd7a984bdbe8eabf36d67d929cf4a930336a"
+hash = "94d57db3eea8961fa26c0b42e7d4a12239d0619e707ca91c5947ec54106b9432"

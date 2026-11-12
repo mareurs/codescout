@@ -331,8 +331,8 @@ the real proof.
 
 **No longer true; verified 2026-09-03.** `doc(action="create", augment={...})` accepts the
 full augmentation shape, `entry_collection` included — `src/librarian/tools/create.rs:55`
-declares the field, `:494` propagates it into the written row, and the test
-`create_augment_accepts_the_full_augmentation_shape` (`:1156`) pins it
+declares the field, `:540` propagates it into the written row, and the test
+`create_augment_accepts_the_full_augmentation_shape` (`:1658`) pins it
 (`aug.entry_collection.as_deref() == Some("rows")`). The tool description now states the property
 directly: *"attach the augmentation atomically, so a tracker needs no follow-up call."*
 
