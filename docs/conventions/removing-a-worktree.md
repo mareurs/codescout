@@ -25,7 +25,7 @@ when another project is activated or when the worktree is removed (bug `3dde1548
 ## The order
 
 1. Activate the main checkout, so this session's active project is not the worktree. If the
-   worktree was removed while active, activation still works (bug `d291b97d9e69edef`).
+   worktree was removed while active, see "If the active worktree is already gone" below.
 2. Run `scripts/worktree-remove.sh <path>`. It lists each holder as `PID<TAB>KIND<TAB>CMDLINE`. With
    no holder it removes the worktree at once.
 3. A mux is shared by every session working in that checkout, and the script cannot see which
@@ -37,6 +37,18 @@ when another project is activated or when the worktree is removed (bug `3dde1548
 5. Delete the branch yourself afterwards with `git branch -d`.
 
 The script never uses `--force`, never `rm`, never SIGKILL, and never deletes the branch.
+
+## If the active worktree is already gone
+
+Bug `d291b97d9e69edef`: once the active project's worktree directory was gone,
+`workspace(action="activate")` failed with `No such file or directory (os error 2)` for every
+path, the main checkout included. The fix is in `scope_root`
+(`src/tools/provenance_fence_context.rs`): an activation whose active root no longer exists runs
+without the provenance fence. A server binary built before that fix still shows the symptom until
+it is rebuilt and reconnected (`./scripts/rb.sh`, then `/mcp`). On such a server, `mkdir` the
+removed path, activate the main checkout, then delete that empty directory yourself. That stub is
+the one directory removal this page advises. Activating the main checkout first (step 1) avoids
+the case.
 
 ## A blocker is not stoppable
 
