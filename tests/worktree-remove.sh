@@ -345,6 +345,8 @@ case_stop_with_a_blocker_refuses_before_any_signal() {
     eq "exit 4" 4 "$RC"
     contains "the blocker row is printed" "5091002${TAB}other${TAB}vim notes.txt" "$OUT"
     contains "stderr says nothing was signalled" "nothing was signalled" "$ERR"
+    lacks "no signal line" "worktree-remove: signalled " "$ERR"
+    lacks "no failed-signal line" "worktree-remove: could not signal " "$ERR"
 }
 
 case_kind_comes_from_argv0_not_comm() {
@@ -556,6 +558,8 @@ case_holders_without_stop_signal_nothing() {
     contains "the holder is listed" "${p}${TAB}rust-analyzer${TAB}" "$OUT"
     eq "the holder is still alive" yes "$(yesno alive "$p")"
     eq "the worktree is untouched" present "$(present "$WT")"
+    lacks "no signal line" "worktree-remove: signalled " "$ERR"
+    lacks "no failed-signal line" "worktree-remove: could not signal " "$ERR"
 }
 
 case_stop_ends_a_stoppable_holder_and_removes() {
@@ -628,6 +632,37 @@ EOF
     unset FIFO LOG MUX_READY CARGO_READY
 }
 
+case_stop_prints_each_signal_it_sends() {
+    echo "stop_prints_each_signal_it_sends"
+    new_case sigline
+    mkfifo "$C/fifo" || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
+    mkdir "$C/muxdir"
+    export FIFO="$C/fifo" MUX_READY="$C/mux.ready" CARGO_READY="$C/cargo.ready"
+    cat >"$C/muxdir/mux" <<'EOF'
+trap 'exit 0' TERM
+: >"$MUX_READY"
+while :; do read -t 1 x <>"$FIFO"; done
+EOF
+    cat >"$C/cargo-stub" <<'EOF'
+trap 'exit 0' TERM
+: >"$CARGO_READY"
+while :; do read -t 1 x <>"$FIFO"; done
+EOF
+    spawn "$C/muxdir" codescout bash mux --cwd "$WT" || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
+    local pm=$SP
+    spawn "$WT" cargo bash "$C/cargo-stub" || { bad "setup failed in ${FUNCNAME[0]}" ok failed; return; }
+    local pc=$SP
+    wait_file "$MUX_READY" && wait_file "$CARGO_READY" || { bad "stubs are ready" ready "not ready"; return; }
+    run_real --stop --wait 5 "$WT"
+    eq "exit 0" 0 "$RC"
+    contains "the mux signal is printed" "worktree-remove: signalled ${pm} mux with SIGTERM" "$ERR"
+    contains "the cargo signal is printed" "worktree-remove: signalled ${pc} cargo with SIGTERM" "$ERR"
+    local before_mux=${ERR%%"signalled ${pm} mux"*} before_cargo=${ERR%%"signalled ${pc} cargo"*}
+    eq "the mux line comes before the cargo line" yes \
+        "$([ "${#before_mux}" -lt "${#before_cargo}" ] && echo yes || echo no)"
+    unset FIFO MUX_READY CARGO_READY
+}
+
 case_a_holder_that_ignores_sigterm_is_a_survivor() {
     echo "a_holder_that_ignores_sigterm_is_a_survivor"
     new_case ignore
@@ -658,6 +693,7 @@ case_a_holder_that_exits_before_the_signal_is_not_an_error() {
     eq "exit 5: the entry is still listed, so it is a survivor" 5 "$RC"
     lacks "no shell error text" "No such process" "$ERR"
     contains "the row is listed" "${dp}${TAB}cargo${TAB}cargo check" "$ERR"
+    contains "the failed signal is printed" "worktree-remove: could not signal ${dp} cargo (already gone, or not permitted)" "$ERR"
     eq "the worktree is not removed" present "$(present "$WT")"
 }
 
@@ -906,6 +942,7 @@ case_stop_ends_a_stoppable_holder_and_removes
 case_stop_with_a_blocker_leaves_the_stoppable_alive
 case_a_codescout_server_under_target_stays_a_blocker
 case_stop_signals_the_mux_before_the_other_holders
+case_stop_prints_each_signal_it_sends
 case_a_holder_that_ignores_sigterm_is_a_survivor
 case_a_holder_that_exits_before_the_signal_is_not_an_error
 case_untracked_files_make_git_refuse

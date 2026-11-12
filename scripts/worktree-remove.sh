@@ -12,9 +12,11 @@
 #   stdout  one row per holder, `PID<TAB>KIND<TAB>CMDLINE`, ordered mux first, then the
 #           other stoppable kinds, then `other`. KIND is one of
 #           mux | rust-analyzer | cargo | rustc | sccache | build-output | other
-#   stderr  the occupancy warning, refusals, `no holders under <path>`, the holders that
-#           survive a stop (rows in the same format as stdout), and what git or the
-#           verification found
+#   stderr  the occupancy warning, refusals, `no holders under <path>`, one line per signal
+#           a stop sends (`worktree-remove: signalled <pid> <kind> with SIGTERM`, or
+#           `worktree-remove: could not signal <pid> <kind> (already gone, or not permitted)`),
+#           the holders that survive a stop (rows in the same format as stdout), and what git
+#           or the verification found
 #   exit    0 the worktree is removed and verified gone
 #           2 refused (usage, unregistered path, main checkout, caller's cwd inside, no /proc,
 #             or the first process scan timed out: nothing was changed)
@@ -58,7 +60,9 @@
 #
 # HOW IT STOPS
 #   SIGTERM only, never SIGKILL to a holder (the scan child runs under `timeout -k 1`, which
-#   may SIGKILL the script's own scan). The mux holders first (a graceful mux exit kills the
+#   may SIGKILL the script's own scan). The script prints one stderr line for each signal it
+#   sends, `signalled` or `could not signal` (see Output). The mux holders first (a graceful
+#   mux exit kills the
 #   language server's process group), then, after a pause or until the mux is gone, the
 #   other stoppable holders. The pause is up to ten rounds of a 0.1 s sleep plus one scan:
 #   about one second on a small /proc, up to about 5 s on a busy real /proc (a scan takes
@@ -377,13 +381,18 @@ refuse_blockers() {
     } >&2
 }
 
-# send_term PID: SIGTERM, never to this script, its subshell or its parent. A failed signal (the
-# process is already gone) is not an error and prints nothing; the rescan decides whether the
-# holder is still there.
+# send_term PID KIND: SIGTERM, never to this script, its subshell or its parent. It prints one
+# stderr line for the signal: `signalled <pid> <kind> with SIGTERM`, or `could not signal <pid>
+# <kind> (already gone, or not permitted)`. A failed signal is not an error; the rescan decides
+# whether the holder is still there.
 send_term() {
-    local pid=$1
+    local pid=$1 kind=$2
     case $pid in "$$" | "$BASHPID" | "$PPID") return 0 ;; esac
-    kill -TERM "$pid" 2>/dev/null
+    if kill -TERM "$pid" 2>/dev/null; then
+        echo "worktree-remove: signalled $pid $kind with SIGTERM" >&2
+    else
+        echo "worktree-remove: could not signal $pid $kind (already gone, or not permitted)" >&2
+    fi
     return 0
 }
 
@@ -404,6 +413,7 @@ send_term() {
 stop_holders() {
     local wt=$1 wait_s=$2 rows pid kind cmd round=0 signalled=" " deadline i found fresh blockers
     local -a mux_pids other_pids
+    local -A kind_of=()
     set_now_ms
     deadline=$((NOW_MS + wait_s * 1000))
     while :; do
@@ -419,9 +429,11 @@ stop_holders() {
         fi
         mux_pids=()
         other_pids=()
+        kind_of=()
         while IFS=$'\t' read -r pid kind cmd; do
             case $signalled in *" $pid "*) continue ;; esac
             case $pid in "$$" | "$BASHPID" | "$PPID") continue ;; esac
+            kind_of[$pid]=$kind
             case $kind in
                 other) ;;
                 mux) mux_pids+=("$pid") ;;
@@ -432,7 +444,7 @@ stop_holders() {
             round=$((round + 1))
             for pid in "${mux_pids[@]+"${mux_pids[@]}"}"; do
                 signalled+="$pid "
-                send_term "$pid"
+                send_term "$pid" "${kind_of[$pid]}"
             done
             if [ "${#mux_pids[@]}" -gt 0 ]; then
                 # Give a graceful mux exit time to take its language server with it: up to ten
@@ -458,7 +470,7 @@ stop_holders() {
                 case $fresh in
                     *" $pid "*)
                         signalled+="$pid "
-                        send_term "$pid"
+                        send_term "$pid" "${kind_of[$pid]}"
                         ;;
                 esac
             done

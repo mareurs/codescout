@@ -32,8 +32,11 @@ when another project is activated or when the worktree is removed (bug `3dde1548
    session is a client. Ask the occupant first
    ([`reaching-a-peer-session.md`](reaching-a-peer-session.md), Step 4 of its skill).
 4. If every holder is one of the stoppable kinds (`mux`, `rust-analyzer`, `cargo`, `rustc`,
-   `sccache`, `build-output`), run `scripts/worktree-remove.sh --stop <path>`. It sends SIGTERM,
-   rescans, removes the worktree and checks that the directory is gone.
+   `sccache`, `build-output`), run `scripts/worktree-remove.sh --stop <path>`. It sends SIGTERM and
+   prints one stderr line per signal (`worktree-remove: signalled <pid> <kind> with SIGTERM`, or
+   `worktree-remove: could not signal <pid> <kind> (already gone, or not permitted)`), so the
+   output names each process it signalled. It then rescans, removes the worktree and checks that
+   the directory is gone.
 5. Delete the branch yourself afterwards with `git branch -d`.
 
 Git deletes the worktree's ignored files with it (`target/`, `.superpowers/`, `.codescout/`,
