@@ -1,20 +1,20 @@
 ---
 id: '17fa244491a90b49'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: the windows-gnu clippy lane is red at HEAD on unix-only items in the native provenance fence'
 owners:
 - marius
 tags:
 - cluster/unclassified
-closed: null
+closed: 2026-11-12
 opened: 2026-11-09
 owner: marius
 related:
 - docs/issues/archive/2026-10-24-the-windows-clippy-lane-fails-on-dead-code-and-an-unused-mut-that-exist-only-on-windows.md
 - docs/issues/archive/2026-10-23-the-windows-lib-test-build-fails-because-a-mux-test-reads-constants-that-exist-only-on-unix.md
 severity: medium
-unverified: CI's windows-gnu clippy step was not read live. Red at HEAD aec654c7a is established only by running the CI command locally on a clean extract. Item-by-item reachability on Windows was not judged (only the crate-level probe above). Nothing was run on Windows; the build is a cross-compile from Linux.
+unverified: 'CI''s windows-gnu clippy step was not read live on a head carrying the fix. The exit 0 is a local cross-compile from Linux; nothing ran on Windows. Which items are dead because a unix gate is missing, as opposed to code that should be reachable on Windows, was not judged item by item: the allow covers all of them.'
 ---
 
 ## Summary
@@ -85,16 +85,25 @@ This also upgrades the Root cause: it was verified for one item chain; now the w
 
 ## Fix
 
-Not fixed. Two options, for whoever owns the fence work:
+Option 2 for the three fence modules, option 1 where a cfg is cheap. `0d98dcef2`:
 
-1. Gate the unix-only helpers, fields and imports with `#[cfg(unix)]` at their definitions.
-2. `#[cfg_attr(not(unix), allow(dead_code))]`, as `40f33bad6` did for the 2026-10-24 instance. That fix's own caveat applies: allow attributes hide real dead code in the files they cover.
+- `native_provenance_fence.rs`, `provenance_fence_context.rs`, `trusted_formatter.rs` carry `#![cfg_attr(not(unix), allow(dead_code))]`, scoped to the module and to `not(unix)`. Option 1 on each definition was not chosen: the tests read `SCRIPTS` and `Fence::root`, so a cfg on the definition would cascade into them.
+- `provenance_fence_context.rs`: `canonical_checkout` is imported on Unix only; `scope_root` consumes `root`, `input`, `meta` and `client` on its `not(unix)` stub arm.
+- `invocation_context.rs`: `call_id` and `turn_id` of `NativeInvocation::Codex` carry `#[cfg_attr(not(target_os = "linux"), allow(dead_code))]`. `observations::server` reads them and builds on Linux only (`src/observations/mod.rs:2`). This is the item the 2026-11-11 re-measure added; `c7b38be29` is its commit.
+- `server.rs` and `native_provenance_fence/tests.rs`: the imports that only a `cfg(unix)` test reads are `cfg(unix)`.
 
-Not attempted here: the files are a recent feature of another work stream and outside the change that found this.
+The cost of option 2 is the one the entry named: inside those three modules, dead code on Windows is no longer an error. Dead code on Unix still is.
+
+Measured 2026-11-12 on a tree carrying the change: `scripts/with-slot.sh ./scripts/build-windows.sh clippy --all-targets -- -D warnings` exits 0 (before: exit 101, 20 lib and 18 lib-test errors). `./scripts/gate.sh`: clippy lean and default exit 0; Python 1836 passed; DEFAULT 9756 of 9757 passed.
+
+## Fix provenance
+
+- **SHA:** `0d98dcef2a0815f95336a0cf5cda2ebedf8ed2ce` (`experiments`)
+- **patch-id:** `3fe7a8df1b65868cb5bded6ac50c98f5594933a6`
 
 ## Tests added
 
-N/A — not fixed. The regression check is the lane itself: `scripts/build-windows.sh clippy --all-targets -- -D warnings` must exit 0.
+No new test. The regression check is the lane itself: `scripts/build-windows.sh clippy --all-targets -- -D warnings` must exit 0.
 
 ## Workarounds
 
@@ -102,9 +111,7 @@ None for the lane. `scripts/build-windows.sh check` passes.
 
 ## Resume
 
-1. Choose option 1 or 2 above and apply it.
-2. Run `scripts/build-windows.sh clippy --all-targets -- -D warnings` under `scripts/with-slot.sh`; expect exit 0.
-3. Read CI's windows-gnu clippy step on the current head, to confirm it is red there too (not checked, see `unverified`).
+Mitigated by `0d98dcef2`. Left to do: read CI's windows-gnu clippy step on a head that carries it, which was not checked. The one test failure in the gate lanes (`tools::onboarding::tests::the_block_names_the_scope_it_scanned_even_when_nothing_was_found`) is in `src/tools/onboarding.rs`, which another session has uncommitted; it is not part of this bug.
 
 ## References
 
