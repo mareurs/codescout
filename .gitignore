@@ -56,7 +56,7 @@ crates/*/.codescout/diagnostic-*.log
 crates/*/.codescout/embeddings.db
 crates/*/.codescout/embeddings.db-shm
 crates/*/.codescout/embeddings.db-wal
-crates/*/.codescout/embeddings/
+crates/*/.codescout/embeddings
 crates/*/.codescout/guide_hints/
 crates/*/.codescout/index-state.json
 crates/*/.codescout/librarian.db
@@ -85,7 +85,7 @@ crates/*/.codescout/write.lock.holder
 /.codescout/debug.log*
 /.codescout/diagnostic-*.log
 /.codescout/libraries.json
-.codescout/embeddings/
+.codescout/embeddings
 /com/
 tests/fixtures/*/.codescout/
 /.codescout/workspace.toml
