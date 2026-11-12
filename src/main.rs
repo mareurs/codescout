@@ -229,6 +229,14 @@ enum Commands {
     /// holds the catalog lock for the whole run.
     BackfillChunks(codescout::cli::backfill_chunks::BackfillChunksArgs),
 
+    /// Measure how far a derived index of one commit is from the machine's old catalog.
+    /// Builds the derived index of `--rev` into a scratch file in a temporary directory, opens
+    /// the old catalog READ-ONLY (it is never created, migrated or written) and prints counts
+    /// and the first rows of each cause (`--json`: every row). Reads git objects, not the
+    /// working tree. Exits 0 whenever it compared, 2 and prints `NOT COMPARED — <reason>` when
+    /// it could not (no old catalog, one it cannot read, no git repository).
+    DeriveShadow(codescout::cli::derive_shadow::DeriveShadowArgs),
+
     /// Read-only query: which active constitution rules apply to a given
     /// path. Used by codescout-companion's PreToolUse hook — not meant for
     /// interactive use. Always exits 0; prints `[]` on any internal error.
@@ -520,6 +528,9 @@ async fn main() -> Result<()> {
         }
         Commands::BackfillChunks(args) => {
             codescout::cli::backfill_chunks::run(args).await?;
+        }
+        Commands::DeriveShadow(args) => {
+            codescout::cli::derive_shadow::run(args).await?;
         }
         Commands::ConstitutionCheck(args) => {
             codescout::cli::constitution_check::run(args).await;

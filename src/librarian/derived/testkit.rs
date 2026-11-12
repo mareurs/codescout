@@ -107,3 +107,127 @@ pub(crate) fn repo_with_raw_tree(
     }
     repo
 }
+
+/// The tables of a hand-built "old" catalog, with only the columns the shadow diff reads. The
+/// diff's tests never go through `Catalog::open`: it migrates, and a test that needed it would
+/// not show that the diff reads nothing else.
+pub(crate) const OLD_CATALOG_SCHEMA: &str = r#"
+CREATE TABLE artifact (
+    id            TEXT PRIMARY KEY,
+    abs_path      TEXT NOT NULL UNIQUE,
+    kind          TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    title         TEXT,
+    owners        TEXT NOT NULL DEFAULT '[]',
+    tags          TEXT NOT NULL DEFAULT '[]',
+    file_sha256   TEXT NOT NULL,
+    slug          TEXT,
+    missing_since INTEGER
+);
+CREATE TABLE artifact_link (
+    src_id TEXT NOT NULL,
+    dst_id TEXT NOT NULL,
+    rel    TEXT NOT NULL,
+    PRIMARY KEY (src_id, dst_id, rel)
+);
+CREATE TABLE entry_cite (
+    src_slug  TEXT NOT NULL,
+    src_local TEXT NOT NULL,
+    dst_ref   TEXT NOT NULL,
+    rel       TEXT NOT NULL,
+    PRIMARY KEY (src_slug, src_local, dst_ref, rel)
+);
+CREATE TABLE artifact_chunk (
+    chunk_id    TEXT PRIMARY KEY,
+    artifact_id TEXT NOT NULL,
+    chunk_ix    INTEGER NOT NULL
+);
+"#;
+
+/// One row of the old catalog's `artifact` table.
+#[derive(Clone)]
+pub(crate) struct OldRow {
+    pub id: String,
+    pub abs_path: String,
+    pub kind: String,
+    pub status: String,
+    pub title: Option<String>,
+    /// A JSON array, as the old catalog stores it.
+    pub owners: String,
+    pub tags: String,
+    pub sha: String,
+    pub slug: Option<String>,
+    pub missing: bool,
+}
+
+/// An old row with plain defaults; a test sets the fields it is about.
+pub(crate) fn old_row(id: &str, abs_path: &str) -> OldRow {
+    OldRow {
+        id: id.to_owned(),
+        abs_path: abs_path.to_owned(),
+        kind: "doc".to_owned(),
+        status: "draft".to_owned(),
+        title: Some("T".to_owned()),
+        owners: "[]".to_owned(),
+        tags: "[]".to_owned(),
+        sha: "00".to_owned(),
+        slug: None,
+        missing: false,
+    }
+}
+
+/// Create the old tables in `conn` and fill them: the artifacts, the file-grain links (all
+/// `rel = 'cites'`), the entry cites as `(src_slug, dst_ref)` (all `rel = 'cites'`), and the
+/// chunk rows as `(artifact_id, how many)`.
+pub(crate) fn fill_old_catalog(
+    conn: &rusqlite::Connection,
+    rows: &[OldRow],
+    links: &[(&str, &str)],
+    cites: &[(&str, &str)],
+    chunks: &[(String, usize)],
+) {
+    conn.execute_batch(OLD_CATALOG_SCHEMA).unwrap();
+    for r in rows {
+        conn.execute(
+            "INSERT INTO artifact (id, abs_path, kind, status, title, owners, tags, file_sha256, \
+             slug, missing_since) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                r.id,
+                r.abs_path,
+                r.kind,
+                r.status,
+                r.title,
+                r.owners,
+                r.tags,
+                r.sha,
+                r.slug,
+                r.missing.then_some(1_700_000_000_000_i64)
+            ],
+        )
+        .unwrap();
+    }
+    for (src, dst) in links {
+        conn.execute(
+            "INSERT INTO artifact_link (src_id, dst_id, rel) VALUES (?1, ?2, 'cites')",
+            [src, dst],
+        )
+        .unwrap();
+    }
+    for (src_slug, dst_ref) in cites {
+        conn.execute(
+            "INSERT INTO entry_cite (src_slug, src_local, dst_ref, rel) \
+             VALUES (?1, 'X-1', ?2, 'cites')",
+            [src_slug, dst_ref],
+        )
+        .unwrap();
+    }
+    for (artifact_id, count) in chunks {
+        for ix in 0..*count {
+            conn.execute(
+                "INSERT INTO artifact_chunk (chunk_id, artifact_id, chunk_ix) VALUES (?1, ?2, ?3)",
+                rusqlite::params![format!("{artifact_id}-{ix}"), artifact_id, ix as i64],
+            )
+            .unwrap();
+        }
+    }
+}

@@ -62,8 +62,9 @@ const NAME_UNCONFIRMED: &str = "unconfirmed";
 /// Where the rules came from: the commit's own file, then the compiled-in defaults.
 const RULES_SOURCE: &str = "committed+builtin";
 
-/// `parse_note` of a document whose frontmatter did not parse.
-const PARSE_NOTE_FRONTMATTER_ERROR: &str = "frontmatter_error";
+/// `parse_note` of a document whose frontmatter did not parse. `pub(super)`: the shadow diff
+/// names the documents whose title the first-H1 rule changes by this note.
+pub(super) const PARSE_NOTE_FRONTMATTER_ERROR: &str = "frontmatter_error";
 
 /// The tables a build rewrites. `parse_cache` is not here: it caches parse products and is no
 /// part of the answer.
