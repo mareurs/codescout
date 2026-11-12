@@ -15,7 +15,17 @@
 //! and it does not sit under `<git_root>/.worktrees/` (a shadow copy). Every other row is counted
 //! and then ignored, each in exactly one bucket, tested in this order: `ignored_other_roots` (a
 //! path outside the git root, or one with a `..` component after it), `ignored_worktrees`,
-//! `ignored_missing` (`missing_since IS NOT NULL`: a catalog GC leftover).
+//! `ignored_missing` (`missing_since IS NOT NULL`: a catalog GC leftover). Two live rows that
+//! name one file (`abs_path` is unique only as text: `/root/a.md` and `/root//a.md`) are kept
+//! once: rows are read in `id` order, the lowest id is kept, and the others are counted in
+//! `old_path_collisions`.
+//!
+//! When the catalog has rows but none lies under the git root (every row is in
+//! `ignored_other_roots`), [`diff_with_rules`] returns [`NoOldRowsUnderRoot`] and no diff: the
+//! old indexer stores `abs_path` as its caller held it, so a project indexed through a symlink
+//! looks like this, and a diff would call every derived document new from no evidence. A catalog
+//! with no row at all, or only worktree copies and GC leftovers, is not that case: it compares,
+//! and every derived document is only in the derived index.
 //!
 //! Documents are joined on the git-root-relative path to `document.rel_path`. `kind`, `status`,
 //! `title` and `file_sha256` (the derived `sha256`) are compared exactly; `owners` and `tags` as
@@ -48,8 +58,29 @@
 //! itself), and entry grain `(src, dst, token)` (old `entry_cite` rows whose `dst_ref` is
 //! `<slug>:<TOKEN>`, against the derived `entry` edges and the `local` edges, which are a
 //! document's citations of its own entries: the old catalog records those as entry cites with the
-//! same slug on both sides). The old `src_local` is not compared: a derived edge does not name
-//! the entry it was written in.
+//! same slug on both sides). The grains overlap: the old catalog records a cross-document
+//! citation in both `artifact_link` and `entry_cite`, so one citation present on one side only
+//! gives a `FileEdge` row (the pair) and an `EntryEdge` row (the pair and the token). They are two
+//! rows for one citation, not two citations; the text report says so in its header.
+//!
+//! The old `src_local` is not compared, but the derived index does record where an edge was
+//! written (`edge.line`, and the `entry` table's spans `heading_line..=end_line`), and that
+//! narrows the derived entry-grain edges to the ones the old scanner could have written
+//! (`link_scan::attribute_entry_edge`):
+//!
+//! - a citation outside every entry section of its document (a preamble, an `## Index` row, any
+//!   other prose) gets no `entry_cite` row. A line belongs to the innermost section whose span
+//!   holds it, both ends inclusive, as in `link_scan::extract::entry_section_at`;
+//! - a document citing its own token from inside the entry that defines it (`src == dst` and the
+//!   token is the enclosing entry's) gets none: the scanner refuses a self-reference at entry
+//!   grain. This holds for a `local` edge and for an `entry` edge that names the source document;
+//! - an `entry_cite` row is keyed on the slugs of both documents, so an edge with an end that has
+//!   no slug in the old catalog cannot be one.
+//!
+//! An edge that fails one of these is not listed as a row. It is counted under
+//! `new_edges_not_compared_no_slug`, `new_edges_not_compared_outside_an_entry` and
+//! `new_edges_not_compared_own_entry` (first reason in that order; a distinct `(src, dst, token)`
+//! is counted once, and it stays compared when any one of its citations qualifies).
 //!
 //! Only edges whose source and destination are both documents present on both sides are
 //! compared. The others are a consequence of a file-set difference already listed as a document
@@ -75,16 +106,23 @@
 //!   is a tag of the committed-plus-built-in rule that matches the path (only when the caller
 //!   gives the rules, see [`diff_with_rules`]).
 //! - [`DiffCause::ClosedGrammarDropsEdge`]: an only-old edge for which the old catalog recorded at
-//!   least one target text (the `dst_ref` of an `entry_cite` row naming the same edge) and the
-//!   closed citation grammar rejects every one of them. The exact test is
-//!   `identity::grammar::parse_target(text)` returning `Reference::Malformed`: a 16-hex artifact
-//!   id is refused by `Key::parse` (a key must not be hex-shaped), and `<slug>:<TOKEN>` is refused
-//!   when the slug is not a key or the token is not one to three capitals, a hyphen and digits.
-//!   An `artifact_link` row alone records no target text (its destination is an id by
-//!   construction, so testing it would match every row): it gets the cause only through an
-//!   `entry_cite` row for the same pair. A target the grammar does accept stays `Unexplained`,
-//!   although the old scanner read bare cross-document tokens and path links, which the closed
-//!   grammar does not: the old catalog does not record how a citation was written.
+//!   least one target text and the closed citation grammar rejects every one of them. The text is
+//!   `entry_cite.dst_ref`, and the scanner REBUILDS it (`link_scan::entry_dst_ref`): it is not
+//!   what the author wrote. An artifact-id citation and a relative-path link both become the
+//!   16-hex id of the destination, and a bare or stem-qualified entry token (`R-43`,
+//!   `stem:R-43`) becomes `<dst_slug>:<TOKEN>` with the qualifier dropped. The closed grammar
+//!   (`identity/grammar.rs`) reads wiki links only (`[[key]]`, `[[key:TOKEN]]`; a bare token only
+//!   inside its own document), so a citation that was an id or a path link was never an edge
+//!   there, and a rebuilt `<slug>:<TOKEN>` that the grammar refuses could not have been named by
+//!   any wiki link either. The exact test is `identity::grammar::parse_target(text)` returning
+//!   `Reference::Malformed`: a 16-hex id is refused by `Key::parse` (a key must not be
+//!   hex-shaped), and `<slug>:<TOKEN>` is refused when the slug is not a key or the token is not
+//!   one to three capitals, a hyphen and digits. An `artifact_link` row alone records no target
+//!   text (its destination is an id by construction, so testing it would match every row): it
+//!   gets the cause only through an `entry_cite` row for the same pair. A target the grammar does
+//!   accept stays `Unexplained`, although the old scanner read bare cross-document tokens and
+//!   path links, which the closed grammar does not: the rebuilt text does not say how the
+//!   citation was written.
 //!
 //! # The read-only open
 //!
@@ -128,7 +166,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 /// The four queries the diff runs against the old catalog. [`OldCatalog::from_connection`]
 /// prepares every one of them, so a missing table or column is named before any comparison.
 const OLD_ARTIFACTS_SQL: &str = "SELECT id, abs_path, kind, status, title, owners, tags, \
-     file_sha256, slug, missing_since IS NOT NULL FROM artifact";
+     file_sha256, slug, missing_since IS NOT NULL FROM artifact ORDER BY id";
 const OLD_LINKS_SQL: &str = "SELECT src_id, dst_id FROM artifact_link WHERE rel = 'cites'";
 const OLD_CITES_SQL: &str =
     "SELECT src_slug, dst_ref FROM entry_cite WHERE rel IN ('cites', 'rests-on')";
@@ -230,6 +268,22 @@ pub struct DiffCounts {
     /// on both sides (file and entry grain together).
     pub old_edges_not_compared: usize,
     pub new_edges_not_compared: usize,
+    /// Derived entry-grain edges (distinct `(src, dst, token)`) whose two ends are documents on
+    /// both sides but that the old scanner could not have written as an `entry_cite` row, so
+    /// they are not compared and no row is listed. Each edge is counted under the first reason
+    /// that applies, in this order. An end has no slug in the old catalog (`entry_cite` is keyed
+    /// on the slug) ...
+    pub new_edges_not_compared_no_slug: usize,
+    /// ... none of its citations sits inside an entry section of the source (the scanner writes
+    /// no entry row for a citation in a preamble, an `## Index` row or any prose outside an
+    /// entry) ...
+    pub new_edges_not_compared_outside_an_entry: usize,
+    /// ... or every citation inside an entry is a document citing its own token from inside
+    /// that very entry (the scanner refuses a self-reference at entry grain).
+    pub new_edges_not_compared_own_entry: usize,
+    /// Old catalog rows dropped because another row has the same git-root-relative path (two
+    /// spellings of one file): the row with the lowest `id` is kept.
+    pub old_path_collisions: usize,
     /// Old edge rows (`artifact_link` and `entry_cite`) with an endpoint that is not an in-scope
     /// live document, or an `entry_cite` whose `dst_ref` has neither shape.
     pub ignored_old_edges: usize,
@@ -253,6 +307,35 @@ impl ShadowDiff {
             .chain(&self.changed)
     }
 }
+
+/// The old catalog has rows, and none of them lies under the git root. Every derived document
+/// would then be "only in the derived index", a conclusion drawn from no evidence about this
+/// repository: the usual cause is a root spelled differently on the two sides (the old indexer
+/// stores `abs_path` as the caller held it, possibly through a symlink; the CLI canonicalizes
+/// the root). [`diff_with_rules`] returns it as the error, so the CLI prints it as `NOT
+/// COMPARED`. An old catalog with no rows at all is not this error: it compares, and every
+/// derived document is only in the derived index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoOldRowsUnderRoot {
+    pub git_root: std::path::PathBuf,
+    /// Old rows under some other root.
+    pub other_roots: usize,
+}
+
+impl std::fmt::Display for NoOldRowsUnderRoot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "no old row lies under {} ({} {} under other roots; is the root spelled through a \
+             symlink?)",
+            self.git_root.display(),
+            self.other_roots,
+            if self.other_roots == 1 { "row" } else { "rows" }
+        )
+    }
+}
+
+impl std::error::Error for NoOldRowsUnderRoot {}
 
 impl OldCatalog {
     /// Wrap a connection the caller opened read-only (or, in a test, an in-memory one) after
@@ -306,6 +389,9 @@ pub fn diff(old: &OldCatalog, derived: &Connection, git_root: &Path) -> anyhow::
 /// Compare the old catalog with the derived index `derived`, for the repository at `git_root`.
 /// `rules` are the rules the derived index was built with (`build::rules_from_commit`), used only
 /// to attribute a `tags` difference to a rule.
+///
+/// Errors: [`NoOldRowsUnderRoot`] (downcast it) when the old catalog has rows and none lies under
+/// `git_root`; a SQLite error from either side.
 pub fn diff_with_rules(
     old: &OldCatalog,
     derived: &Connection,
@@ -321,6 +407,16 @@ pub fn diff_with_rules(
     let mut counts = DiffCounts::default();
 
     let old_docs = load_old_documents(&snapshot, git_root, &mut counts)?;
+    // Rows exist, none lies under the root: the root is probably spelled differently on the two
+    // sides, and every derived document would get a cause from no evidence. An old catalog with
+    // no row at all (or only worktree copies and GC leftovers) is not this case.
+    if old_docs.is_empty() && counts.ignored_other_roots > 0 {
+        return Err(NoOldRowsUnderRoot {
+            git_root: git_root.to_path_buf(),
+            other_roots: counts.ignored_other_roots,
+        }
+        .into());
+    }
     let new_docs = load_new_documents(derived)?;
     let skipped = load_skipped(derived)?;
     counts.old_documents = old_docs.len();
@@ -376,7 +472,8 @@ pub fn diff_with_rules(
         .collect();
     let old_edges = load_old_edges(&snapshot, &id_to_rel, &slug_to_rel, &mut counts)?;
     let key_to_rel = key_to_rel(&new_docs);
-    let new_edges = load_new_edges(derived, &key_to_rel)?;
+    let spans = load_entry_spans(derived)?;
+    let new_edges = load_new_edges(derived, &key_to_rel, &spans)?;
     compare_edges(
         &old_edges,
         &new_edges,
@@ -512,7 +609,12 @@ fn load_old_documents(
                     .unwrap_or_else(|| "[]".to_owned()),
             ))
         };
-        docs.entry(rel_path.clone()).or_insert(OldDoc {
+        // Rows come in `id` order, so of two spellings of one file the lowest id is kept.
+        let std::collections::btree_map::Entry::Vacant(slot) = docs.entry(rel_path.clone()) else {
+            counts.old_path_collisions += 1;
+            continue;
+        };
+        slot.insert(OldDoc {
             id: r.get(0)?,
             rel_path,
             kind: r.get(2)?,
@@ -748,11 +850,56 @@ struct OldEdges {
     texts: BTreeMap<Pair, BTreeSet<String>>,
 }
 
-/// The derived index's edges, resolved to paths.
+/// The derived index's edges, resolved to paths. The entry-grain edges carry where their
+/// citations were written, which decides whether the old scanner could have written them.
 #[derive(Default)]
 struct NewEdges {
     file: BTreeSet<Pair>,
-    entry: BTreeSet<Triple>,
+    entry: BTreeMap<Triple, Written>,
+}
+
+/// Where the citations of one derived entry-grain edge sit, over every citation of it.
+#[derive(Default, Clone, Copy)]
+struct Written {
+    /// Some citation lies inside an entry section of the source document.
+    in_an_entry: bool,
+    /// Some citation lies inside an entry section and is not the document citing its own token
+    /// from inside that entry: the old scanner would have written an `entry_cite` row for it.
+    scannable: bool,
+}
+
+/// An entry section of a derived document: the `entry` table's token and its line span.
+struct Span {
+    token: String,
+    heading_line: i64,
+    end_line: i64,
+}
+
+/// The entry section a citation on `line` belongs to: the innermost one whose span, both ends
+/// inclusive, holds the line (the greatest `heading_line`), or `None` for a line outside every
+/// entry. This is `link_scan::extract::entry_section_at` over the stored `entry` rows.
+fn enclosing_entry(spans: &[Span], line: i64) -> Option<&Span> {
+    spans
+        .iter()
+        .filter(|s| line >= s.heading_line && line <= s.end_line)
+        .max_by_key(|s| s.heading_line)
+}
+
+/// The derived `entry` rows by document.
+fn load_entry_spans(derived: &Connection) -> anyhow::Result<HashMap<String, Vec<Span>>> {
+    let mut stmt = derived
+        .prepare("SELECT rel_path, token, heading_line, end_line FROM entry")
+        .context("reading the derived entries")?;
+    let mut rows = stmt.query([])?;
+    let mut spans: HashMap<String, Vec<Span>> = HashMap::new();
+    while let Some(r) = rows.next()? {
+        spans.entry(r.get(0)?).or_default().push(Span {
+            token: r.get(1)?,
+            heading_line: r.get(2)?,
+            end_line: r.get(3)?,
+        });
+    }
+    Ok(spans)
 }
 
 fn load_old_edges(
@@ -833,10 +980,11 @@ fn key_to_rel(docs: &BTreeMap<String, NewDoc>) -> HashMap<String, Option<String>
 fn load_new_edges(
     derived: &Connection,
     key_to_rel: &HashMap<String, Option<String>>,
+    spans: &HashMap<String, Vec<Span>>,
 ) -> anyhow::Result<NewEdges> {
     let mut stmt = derived
         .prepare(
-            "SELECT src_rel_path, kind, dst_key, target_token FROM edge \
+            "SELECT src_rel_path, kind, dst_key, target_token, line FROM edge \
              WHERE kind IN (?1, ?2, ?3) ORDER BY src_rel_path, ord",
         )
         .context("reading the derived edges")?;
@@ -847,6 +995,7 @@ fn load_new_edges(
         let kind: String = r.get(1)?;
         let dst_key: Option<String> = r.get(2)?;
         let token: Option<String> = r.get(3)?;
+        let line: i64 = r.get(4)?;
         let dst = || -> anyhow::Result<String> {
             let key = dst_key
                 .as_deref()
@@ -861,11 +1010,21 @@ fn load_new_edges(
                 .clone()
                 .ok_or_else(|| anyhow!("derived {kind} edge from {src} has no target_token"))
         };
+        let mut entry_edge = |dst: String, token: String| {
+            let enclosing = enclosing_entry(spans.get(&src).map_or(&[], Vec::as_slice), line);
+            // The scanner keeps a self-reference between two entries of one document and
+            // refuses a document citing a token from inside the entry that defines it.
+            let own = |section: &Span| dst == src && section.token == token;
+            let slot = edges.entry.entry((src.clone(), dst.clone(), token.clone()));
+            let written = slot.or_default();
+            written.in_an_entry |= enclosing.is_some();
+            written.scannable |= enclosing.is_some_and(|section| !own(section));
+        };
         match kind.as_str() {
             EDGE_FILE => {
                 let dst = dst()?;
                 if dst != src {
-                    edges.file.insert((src, dst));
+                    edges.file.insert((src.clone(), dst));
                 }
             }
             EDGE_ENTRY => {
@@ -873,12 +1032,9 @@ fn load_new_edges(
                 if dst != src {
                     edges.file.insert((src.clone(), dst.clone()));
                 }
-                edges.entry.insert((src, dst, token));
+                entry_edge(dst, token);
             }
-            _ => {
-                let token = token()?;
-                edges.entry.insert((src.clone(), src, token));
-            }
+            _ => entry_edge(src.clone(), token()?),
         }
     }
     Ok(edges)
@@ -918,6 +1074,13 @@ fn edge_row(subject: Subject, src: &str, dst: String, in_old: bool, cause: DiffC
 }
 
 /// List the edges only one side has, between documents both sides have, and count the rest.
+///
+/// At entry grain the derived edges are first narrowed to the ones the old scanner could have
+/// written (`attribute_entry_edge`): it writes an `entry_cite` row only for a citation inside an
+/// entry section, keys the row on the slugs of both documents, and refuses a document citing its
+/// own token from inside that entry. A derived edge that fails one of these is counted under
+/// `new_edges_not_compared_*` (first reason that applies: no slug, outside an entry, own entry)
+/// and gives no row.
 fn compare_edges(
     old: &OldEdges,
     new: &NewEdges,
@@ -928,6 +1091,7 @@ fn compare_edges(
     only_new: &mut Vec<DiffRow>,
 ) {
     let matched = |path: &str| old_docs.contains_key(path) && new_docs.contains_key(path);
+    let slugged = |path: &str| old_docs.get(path).is_some_and(|d| d.slug.is_some());
     let pair_ok = |(src, dst): &Pair| matched(src) && matched(dst);
     let triple_ok = |(src, dst, _): &Triple| matched(src) && matched(dst);
 
@@ -938,7 +1102,21 @@ fn compare_edges(
     counts.old_edges_not_compared = old.file.iter().filter(|e| !pair_ok(e)).count()
         + old.entry.keys().filter(|e| !triple_ok(e)).count();
     counts.new_edges_not_compared = new.file.iter().filter(|e| !pair_ok(e)).count()
-        + new.entry.iter().filter(|e| !triple_ok(e)).count();
+        + new.entry.keys().filter(|e| !triple_ok(e)).count();
+
+    // The derived entry-grain edges the old scanner could have written.
+    let mut new_entry: BTreeSet<&Triple> = BTreeSet::new();
+    for (triple, written) in new.entry.iter().filter(|(e, _)| triple_ok(e)) {
+        if !slugged(&triple.0) || !slugged(&triple.1) {
+            counts.new_edges_not_compared_no_slug += 1;
+        } else if !written.in_an_entry {
+            counts.new_edges_not_compared_outside_an_entry += 1;
+        } else if !written.scannable {
+            counts.new_edges_not_compared_own_entry += 1;
+        } else {
+            new_entry.insert(triple);
+        }
+    }
 
     for pair in old.file.iter().filter(|e| pair_ok(e)) {
         if !new.file.contains(pair) {
@@ -963,7 +1141,7 @@ fn compare_edges(
         }
     }
     for (triple, texts) in old.entry.iter().filter(|(e, _)| triple_ok(e)) {
-        if !new.entry.contains(triple) {
+        if !new_entry.contains(triple) {
             only_old.push(edge_row(
                 Subject::EntryEdge,
                 &triple.0,
@@ -973,8 +1151,8 @@ fn compare_edges(
             ));
         }
     }
-    for triple in new.entry.iter().filter(|e| triple_ok(e)) {
-        if !old.entry.contains_key(triple) {
+    for triple in &new_entry {
+        if !old.entry.contains_key(*triple) {
             only_new.push(edge_row(
                 Subject::EntryEdge,
                 &triple.0,
@@ -1362,7 +1540,7 @@ mod tests {
         let b = built(&[
             (
                 "a.md",
-                "# A\n\n## R-1 — mine\n\nSee [[b]] and [[b:R-2]] and R-1 here.\n",
+                "# A\n\n## R-0 — other\n\nSee [[b]], [[b:R-2]] and R-1.\n\n## R-1 — mine\n\nbody\n",
             ),
             ("b.md", "# B\n\n## R-2 — theirs\n"),
         ]);
@@ -1404,7 +1582,7 @@ mod tests {
     #[test]
     fn entry_cites_count_for_cites_and_rests_on_and_for_no_other_relation() {
         let b = built(&[
-            ("a.md", "# A\n\nSee [[b:R-2]].\n"),
+            ("a.md", "# A\n\n## R-0 — x\n\nSee [[b:R-2]].\n"),
             ("b.md", "# B\n\n## R-2 — theirs\n"),
         ]);
         let (mut rows, chunks) = mirrors(&b.conn, &[("id-a", "a.md"), ("id-b", "b.md")]);
@@ -1430,11 +1608,159 @@ mod tests {
         assert_eq!(d.counts.old_entry_edges, 1);
     }
 
+    /// The old catalog for `a.md` -> `b.md`: the file-grain link, no entry cite, and the given
+    /// slugs (the scanner keys an `entry_cite` row on both).
+    fn linked_pair(b: &Built, a_slug: Option<&str>, b_slug: Option<&str>) -> OldCatalog {
+        let (mut rows, chunks) = mirrors(&b.conn, &[("id-a", "a.md"), ("id-b", "b.md")]);
+        rows[0].slug = a_slug.map(str::to_owned);
+        rows[1].slug = b_slug.map(str::to_owned);
+        old_with(&rows, &[("id-a", "id-b")], &[], &chunks)
+    }
+
+    const B_WITH_R2: (&str, &str) = ("b.md", "# B\n\n## R-2 — theirs\n");
+
+    #[test]
+    fn a_citation_in_prose_outside_any_entry_gives_no_only_new_entry_row() {
+        let b = built(&[
+            (
+                "a.md",
+                "# A\n\nThe preamble cites [[b:R-2]].\n\n## R-0 — x\n\nbody\n",
+            ),
+            B_WITH_R2,
+        ]);
+        let d = run(&linked_pair(&b, Some("a-slug"), Some("b-slug")), &b);
+        // The file-grain pair agrees. The entry-grain edge sits before the first entry of
+        // a.md, where the old scanner writes no entry_cite row: not a difference.
+        assert!(d.rows().next().is_none(), "{d:#?}");
+        let c = &d.counts;
+        assert_eq!(c.new_entry_edges, 1);
+        assert_eq!(c.new_edges_not_compared_outside_an_entry, 1);
+        assert_eq!(c.new_edges_not_compared_no_slug, 0);
+        assert_eq!(c.new_edges_not_compared_own_entry, 0);
+    }
+
+    #[test]
+    fn a_citation_inside_an_entry_that_the_old_side_lacks_is_an_only_new_entry_edge() {
+        // The citation is on the last line of the entry R-0 (and of the file): a section's
+        // `end_line` is inclusive, as in `entry_section_at`.
+        let b = built(&[
+            ("a.md", "# A\n\n## R-0 — x\n\nbody\nSee [[b:R-2]].\n"),
+            B_WITH_R2,
+        ]);
+        let d = run(&linked_pair(&b, Some("a-slug"), Some("b-slug")), &b);
+        assert_eq!(
+            d.only_new,
+            vec![edge_new(Subject::EntryEdge, "a.md", "b.md:R-2")]
+        );
+        assert!(d.only_old.is_empty() && d.changed.is_empty(), "{d:#?}");
+        let c = &d.counts;
+        assert_eq!(
+            (
+                c.new_edges_not_compared_outside_an_entry,
+                c.new_edges_not_compared_no_slug,
+                c.new_edges_not_compared_own_entry
+            ),
+            (0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn a_local_edge_inside_its_own_tokens_entry_is_dropped() {
+        // R-1 cited inside R-1: the scanner refuses a self-reference. R-3 cited inside R-2 is
+        // an edge between two entries of one ledger, which it keeps.
+        let text = "# A\n\n## R-1 — one\n\nsee R-1 here.\n\n## R-2 — two\n\nsee R-3 there.\n\n\
+                    ## R-3 — three\n\nbody\n";
+        let b = built(&[("a.md", text)]);
+        let (mut rows, chunks) = mirrors(&b.conn, &[("id-a", "a.md")]);
+        rows[0].slug = Some("a-slug".to_owned());
+        let d = run(&old_with(&rows, &[], &[], &chunks), &b);
+        assert_eq!(
+            d.only_new,
+            vec![edge_new(Subject::EntryEdge, "a.md", "a.md:R-3")]
+        );
+        assert!(d.only_old.is_empty() && d.changed.is_empty(), "{d:#?}");
+        assert_eq!(d.counts.new_entry_edges, 2);
+        assert_eq!(d.counts.new_edges_not_compared_own_entry, 1);
+    }
+
+    #[test]
+    fn an_edge_from_a_document_with_no_slug_is_counted_not_compared_and_gives_no_row() {
+        let b = built(&[("a.md", "# A\n\n## R-0 — x\n\nSee [[b:R-2]].\n"), B_WITH_R2]);
+        // Either end without a slug: `entry_cite` cannot hold the row.
+        for (a_slug, b_slug) in [(None, Some("b-slug")), (Some("a-slug"), None)] {
+            let d = run(&linked_pair(&b, a_slug, b_slug), &b);
+            assert!(d.rows().next().is_none(), "{a_slug:?} {b_slug:?}: {d:#?}");
+            assert_eq!(d.counts.new_edges_not_compared_no_slug, 1);
+            assert_eq!(d.counts.new_edges_not_compared_outside_an_entry, 0);
+        }
+    }
+
+    #[test]
+    fn an_old_catalog_whose_rows_all_lie_under_another_root_is_refused_by_name() {
+        let b = built(&[("a.md", "# A\n")]);
+        let rows = [
+            old_row("id-x", "/elsewhere/proj/a.md"),
+            old_row("id-y", "/elsewhere/proj/b.md"),
+        ];
+        let old = old_with(&rows, &[], &[], &[]);
+        let err = diff(&old, &b.conn, Path::new(ROOT)).expect_err("nothing lies under the root");
+        assert_eq!(
+            err.downcast_ref::<NoOldRowsUnderRoot>(),
+            Some(&NoOldRowsUnderRoot {
+                git_root: Path::new(ROOT).to_path_buf(),
+                other_roots: 2
+            })
+        );
+        assert_eq!(
+            err.to_string(),
+            "no old row lies under /work/proj (2 rows under other roots; is the root spelled \
+             through a symlink?)"
+        );
+    }
+
+    #[test]
+    fn an_old_catalog_with_no_row_under_any_other_root_still_compares() {
+        let b = built(&[("a.md", "# A\n"), ("b.md", "# B\n")]);
+        // No rows at all, and rows that are only worktree copies or GC leftovers: nothing says
+        // the root is misspelled, so every derived document is only in the derived index.
+        let mut gone = old_row("id-gone", &format!("{ROOT}/gone.md"));
+        gone.missing = true;
+        let copy = old_row("id-copy", &format!("{ROOT}/.worktrees/w/a.md"));
+        for rows in [vec![], vec![gone, copy]] {
+            let d = run(&old_with(&rows, &[], &[], &[]), &b);
+            assert_eq!(
+                d.only_new,
+                vec![
+                    document("a.md", DiffCause::FileSetWalkVsCommit),
+                    document("b.md", DiffCause::FileSetWalkVsCommit)
+                ]
+            );
+            assert!(d.only_old.is_empty() && d.changed.is_empty(), "{d:#?}");
+            assert_eq!(d.counts.old_documents, 0);
+            assert_eq!(d.counts.ignored_other_roots, 0);
+        }
+    }
+
+    #[test]
+    fn two_old_paths_that_name_one_file_are_kept_once_by_lowest_id_and_counted() {
+        let b = built(&[("a.md", "# A\n")]);
+        let (mut rows, chunks) = mirrors(&b.conn, &[("id-a", "a.md")]);
+        // The same file spelled with a doubled slash, a higher id, and stored FIRST.
+        let mut twin = old_row("id-b", &format!("{ROOT}//a.md"));
+        twin.title = Some("Other".to_owned());
+        rows.insert(0, twin);
+        let d = run(&old_with(&rows, &[], &[], &chunks), &b);
+        // `id-a` is kept whatever the table's row order: no `title` difference.
+        assert!(d.rows().next().is_none(), "{d:#?}");
+        assert_eq!(d.counts.old_path_collisions, 1);
+        assert_eq!(d.counts.old_documents, 1);
+    }
+
     #[test]
     fn an_edge_only_the_derived_index_has_is_only_new_and_a_hand_written_link_rel_is_not_compared()
     {
         let b = built(&[
-            ("a.md", "# A\n\nSee [[b:R-2]].\n"),
+            ("a.md", "# A\n\n## R-0 — x\n\nSee [[b:R-2]].\n"),
             ("b.md", "# B\n\n## R-2 — theirs\n"),
         ]);
         let (mut rows, chunks) = mirrors(&b.conn, &[("id-a", "a.md"), ("id-b", "b.md")]);

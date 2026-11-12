@@ -8,9 +8,10 @@
 //! [`MAX_PRINTED_ROWS_PER_CAUSE`] rows of each cause (`--json`: the whole diff).
 //!
 //! Exit codes: `0` whenever the comparison ran, whatever it found; `2` and `NOT COMPARED —
-//! <reason>` on stdout when it could not run: no old catalog, one that cannot be read, no git
-//! repository, a revision that names no commit. The old catalog is never created, migrated or
-//! written; see `derived::diff` for what SQLite does beside a WAL database, and
+//! <reason>` on stdout when it could not run: no old catalog, one that cannot be read, one with
+//! rows of which none lies under the git root (a root spelled differently on the two sides),
+//! no git repository, a revision that names no commit. The old catalog is never created,
+//! migrated or written; see `derived::diff` for what SQLite does beside a WAL database, and
 //! [`refuse_if_open_would_write`] for the case this command refuses.
 
 use std::io::Read;
@@ -178,22 +179,20 @@ fn compare(
     let space = key_space_from_commit(&repo, &commit)?;
 
     // The scratch index lives in a temporary directory outside the repository and goes with it.
-    let scratch = tempfile::tempdir_in(scratch_parent).with_context(|| {
-        format!(
-            "creating a scratch directory in {}",
-            scratch_parent.display()
-        )
-    })?;
-    let scratch_path = std::fs::canonicalize(scratch.path())
-        .with_context(|| format!("cannot resolve {}", scratch.path().display()))?;
-    if scratch_path.starts_with(&root) {
+    // Where it may go is judged BEFORE anything is created there.
+    let parent = std::fs::canonicalize(scratch_parent)
+        .with_context(|| format!("cannot resolve {}", scratch_parent.display()))?;
+    if parent.starts_with(&root) {
         bail!(
-            "the scratch directory {} would lie inside the repository {}; point TMPDIR elsewhere",
-            scratch_path.display(),
-            root.display()
+            "the scratch directory would lie inside the repository {} (its parent {} does); \
+             point TMPDIR elsewhere",
+            root.display(),
+            parent.display()
         );
     }
-    let mut conn = schema::open(&scratch_path.join("derived.db"))
+    let scratch = tempfile::tempdir_in(&parent)
+        .with_context(|| format!("creating a scratch directory in {}", parent.display()))?;
+    let mut conn = schema::open(&scratch.path().join("derived.db"))
         .context("creating the scratch derived index")?;
     build_full(
         &mut conn,
@@ -268,14 +267,16 @@ fn render_text(report: &Compared) -> String {
         report.old_catalog, report.rev, report.commit, report.git_root
     ));
     out.push_str(&format!(
-        "documents: old {} (in scope), derived {}, on both sides {}\n  only old {}, only derived {}, changed {} (one row per differing field)\n  old rows ignored: {} in other roots, {} under .worktrees, {} with missing_since set\n",
+        "documents: old {} (in scope), derived {}, on both sides {}\n  only old {}, only derived {}, changed {} (one row per differing field)\n  old rows ignored: {} in other roots, {} under .worktrees, {} with missing_since set\n  old paths that collide: {} (two rows naming one file; the lowest id is kept)\n",
         c.old_documents, c.new_documents, c.matched_documents, c.only_old, c.only_new, c.changed,
-        c.ignored_other_roots, c.ignored_worktrees, c.ignored_missing
+        c.ignored_other_roots, c.ignored_worktrees, c.ignored_missing, c.old_path_collisions
     ));
     out.push_str(&format!(
-        "edges, file grain: old {}, derived {}; entry grain: old {}, derived {}\n  not compared, an end is not a document on both sides: old {}, derived {}\n  old edge rows ignored, an end is out of scope: {}\n\n",
+        "edges, file grain: old {}, derived {}; entry grain: old {}, derived {}\n  note: a missing citation gives a file_edge row and an entry_edge row (the grains overlap)\n  not compared, an end is not a document on both sides: old {}, derived {}\n  derived entry-grain edges not compared: no slug {}, outside any entry {}, inside their own entry {}\n  old edge rows ignored, an end is out of scope: {}\n\n",
         c.old_file_edges, c.new_file_edges, c.old_entry_edges, c.new_entry_edges,
-        c.old_edges_not_compared, c.new_edges_not_compared, c.ignored_old_edges
+        c.old_edges_not_compared, c.new_edges_not_compared,
+        c.new_edges_not_compared_no_slug, c.new_edges_not_compared_outside_an_entry,
+        c.new_edges_not_compared_own_entry, c.ignored_old_edges
     ));
     out.push_str("rows by cause:");
     for cause in DiffCause::ALL {
@@ -616,6 +617,109 @@ mod tests {
             listing(&f.root),
             vec![".git".to_owned()],
             "the refused scratch directory is gone"
+        );
+    }
+
+    #[test]
+    fn an_old_catalog_whose_rows_all_lie_under_another_root_is_not_compared() {
+        let f = fixture(&[("a.md", "# A\n")]);
+        let path = old_file(&f, &[old_row("id-x", "/elsewhere/other-repo/a.md")]);
+        let out = eval(&f, &args(Some(path), false), None);
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert_eq!(
+            out.stdout,
+            format!(
+                "NOT COMPARED — no old row lies under {} (1 row under other roots; is the root \
+                 spelled through a symlink?)\n",
+                f.root.display()
+            )
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_project_indexed_through_a_symlink_is_not_compared_instead_of_called_all_new() {
+        let f = fixture(&[("a.md", "# A\n")]);
+        let links = tempfile::tempdir().unwrap();
+        let link = links.path().join("proj");
+        std::os::unix::fs::symlink(&f.root, &link).unwrap();
+        // The old indexer stored the path as its caller held it: through the link.
+        let path = old_file(&f, &[old_row("id-a", &format!("{}/a.md", link.display()))]);
+        let out = eval(&f, &args(Some(path), false), None);
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout
+                .starts_with("NOT COMPARED — no old row lies under "),
+            "{}",
+            out.stdout
+        );
+        assert!(out.stdout.contains("symlink"), "{}", out.stdout);
+    }
+
+    #[test]
+    fn an_empty_old_catalog_still_compares_and_every_document_is_only_derived() {
+        let f = fixture(&[("a.md", "# A\n")]);
+        let path = old_file(&f, &[]);
+        let out = eval(&f, &args(Some(path), false), None);
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        let text = &out.stdout;
+        assert!(
+            text.contains("documents: old 0 (in scope), derived 1, on both sides 0"),
+            "{text}"
+        );
+        assert!(text.contains("file_set_walk_vs_commit (1 rows)"), "{text}");
+        assert!(text.contains("  only_new document a.md"), "{text}");
+    }
+
+    #[test]
+    fn the_text_header_names_the_edge_grains_and_every_not_compared_counter() {
+        let f = fixture(&[("a.md", "# A\n")]);
+        let path = old_file(&f, &[]);
+        let text = eval(&f, &args(Some(path), false), None).stdout;
+        assert!(
+            text.contains("a missing citation gives a file_edge row and an entry_edge row"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "derived entry-grain edges not compared: no slug 0, outside any entry 0, \
+                 inside their own entry 0"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("old paths that collide: 0"), "{text}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_scratch_parent_inside_the_repository_is_refused_before_a_directory_is_made_in_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = fixture(&[("a.md", "# A\n")]);
+        let path = old_file(&f, &[]);
+        let parent = f.root.join("scratch");
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let restore = || {
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        // A process that may write anyway (root) cannot tell the two orders apart.
+        if std::fs::File::create(parent.join("probe")).is_ok() {
+            restore();
+            return;
+        }
+        let out = evaluate(&args(Some(path), false), &f.root, None, &parent);
+        restore();
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        // The refusal is about WHERE, not about a directory that could not be made.
+        assert!(
+            out.stdout.contains("inside the repository"),
+            "{}",
+            out.stdout
+        );
+        assert!(
+            !out.stdout.contains("creating a scratch directory"),
+            "{}",
+            out.stdout
         );
     }
 }

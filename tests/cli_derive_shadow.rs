@@ -108,4 +108,23 @@ fn derive_shadow_exit_codes_through_the_binary() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["compared"], true);
     assert_eq!(v["diff"]["only_new"][0]["path"], "a.md");
+
+    // Rows that all lie under another root (an old catalog that indexed this repository through
+    // a differently spelled path looks like this): not compared, exit 2, and the reason says
+    // why, instead of calling every document new.
+    let conn = rusqlite::Connection::open(&missing).unwrap();
+    conn.execute(
+        "INSERT INTO artifact (id, abs_path, kind, status, title, owners, tags, file_sha256) \
+         VALUES ('x', '/elsewhere/other-repo/a.md', 'doc', 'draft', NULL, '[]', '[]', '00')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let out = derive_shadow(root, &missing, &[]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.starts_with("NOT COMPARED — no old row lies under "),
+        "{text}"
+    );
 }
