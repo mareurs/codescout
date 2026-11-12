@@ -10,6 +10,9 @@
 //! Asserts one thing: the suite exits zero. On failure it prints the suite's own output,
 //! which names the failing case and the values it saw.
 
+// The suite reads Linux /proc and needs GNU `realpath -m` and `timeout`: macOS and Windows have none.
+#![cfg(target_os = "linux")]
+
 use std::path::PathBuf;
 use std::process::Command;
 
