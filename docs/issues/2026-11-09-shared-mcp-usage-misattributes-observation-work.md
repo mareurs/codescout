@@ -167,6 +167,28 @@ The guarded wiring commit records all four mandatory bare stamp IDs and explains
 
 2026-11-12: the cause on the hook side is reproduced with the real code and a real `codex exec`, and the fix is committed in claude-plugins `f41d5aa` (section above). The operator then marked this bug `fixed`, before the companion release and before the live check. That decision, not a measurement, closes it. Still owed: a release of the companion (operator), then a live check on the released build: start a Codex probe under a Claude session and confirm the Claude session's `cc_session_id` in `usage.db` does not move to the thread id. If a stamped row still moves after a release that contains `f41d5aa`, reopen this bug.
 
+## Codex cache re-read, 2026-11-12 (session `5566e8a8`)
+
+Read only; nothing in `~/.codex` was changed.
+
+- `~/.codex/plugins/cache/sdd-misc-plugins/codescout-companion/` still holds only `1.21.0`. `grep -c isCodexProcess` on its `hooks/lib.mjs` prints `0`. So the fix is still not live where a Codex thread runs the hook.
+- `~/.codex/config.toml` declares the marketplace as `[marketplaces.sdd-misc-plugins]` with `source_type = "local"` and `source = "/home/marius/work/claude/claude-plugins"`.
+- `codex plugin marketplace upgrade --help` says it refreshes configured GIT marketplaces. By that text it does not apply to a `local` marketplace; I did not run it. The other commands are `codex plugin add` and `codex plugin remove` (the latter uninstalls a plugin and removes its local cache). Which of them seeds `1.21.5` into the Codex cache was not run, so it is not established.
+- Cost to weigh before any of them: the hook entries in `config.toml` carry `trusted_hash` values for `codescout-companion@sdd-misc-plugins`. A changed hook file may need the operator to trust it again. That was not tested.
+
+Open: the operator's decision on how to refresh the Codex cache, then the live check named under Fix provenance.
+
+## Codex cache refreshed, 2026-11-12 (session `5566e8a8`, on the operator's order)
+
+Ran `codex plugin add codescout-companion@sdd-misc-plugins` against the real `~/.codex`, after a copy of `config.toml` (scratchpad `codex-config.toml.bak`). It printed `Added plugin ... Installed plugin root: /home/marius/.codex/plugins/cache/sdd-misc-plugins/codescout-companion/1.21.5`. `remove` was not needed. `codex plugin marketplace upgrade` was not run.
+
+- The cache directory now holds only `1.21.5` (the `1.21.0` directory is gone). `grep -c isCodexProcess` on its `hooks/lib.mjs` prints `2`, the same as the repo copy.
+- `diff` of `config.toml` before and after is empty: no trust hash was added or removed.
+- Trust: `hooks.json` changed after `1.21.0` was seeded, in claude-plugins `c93a23b` (2026-11-11): it adds two `wake-missed-jobs.mjs` entries, under SessionStart and UserPromptSubmit. They have no `trusted_hash` in `config.toml`, so by the trust rule seen on 2026-11-11 Codex will not run them until they are trusted. The entry that carries the fix, `session_start:0:0` (`session-start.mjs`), is unchanged in `hooks.json`, and its `trusted_hash` is untouched. Not verified: that Codex still lists that entry as trusted. I did not start a Codex session or call `hooks/list`. Also not verified: whether `trusted_hash` covers the script bytes or only the entry.
+- `codex plugin list` timed out after 30 s, so it was not used.
+
+Open: the live check (a Codex probe under a Claude session, then `cc_session_id` in `usage.db`). It uses the real config, so a failed fix would move the probing Claude session's stamp until `/mcp`.
+
 ## Fix provenance
 
 - **SHA:** `claude-plugins:f41d5aa` (`f41d5aaf34149c84bc619e5468341648a7998610`, 2026-11-12, repo `claude-plugins`, path `codescout-companion/hooks/`)

@@ -1,7 +1,7 @@
 ---
 id: fd0e9c149c74c1a8
 kind: bug
-status: mitigated
+status: fixed
 title: 'BUG: the ignored mux coherence test asserted a contract that was removed, and in a test runner it never runs the mux'
 owners:
 - marius
@@ -9,11 +9,12 @@ tags:
 - cluster/assertion-that-cannot-fail
 - lsp
 - tests
+closed: 2026-11-12
 opened: 2026-11-12
 related:
 - a73c49456056fb92
 severity: low
-unverified: 'Set after the second round of measurements (section above). The fallback was shown at the process level (strace), but its warning log was not read in a run. The ''nothing runs it'' claim covers the files of this repository only: .github (hidden files included), scripts/, tools/ was not searched, and a runner-side job or another repository cannot be excluded. The mutation table is one build per row and 3 runs each; the third row combines three mutations in one build, so each alone was not run. The test was run on one machine, 6 passing runs. The two-client test added the same day does not detect a `disconnect` that closes every file (three unit tests in mux/protocol.rs do); the didChange version rewrite it also missed is now pinned by a unit test (commit 068973305), end-to-end effect on rust-analyzer not measured. Whether nextest archive extraction keeps the `deps` directory name was not checked.'
+unverified: 'The removal rests on the mutations listed in the second round of measurements (one build per row, 3 runs each; the third row combines three mutations in one build), not on a proof that the removed test detected nothing else. Not measured: a mutation caught by step 4 and by none of the 7 non-ignored `*_follows_a_write_made_outside_codescout*` tests, and a defect in the direct-fallback branch of `get_or_start` that other tests do not reach. The fallback was shown at the process level (strace) in one run, but its warning log was not read. The ''nothing runs it'' claim covers the files of this repository only: .github (hidden files included) and scripts/ were searched, tools/ was not, and a runner-side job or another repository cannot be excluded. The three ignored tests in manager.rs that were reworded were not run by me. Whether nextest archive extraction keeps the `deps` directory name was not checked. The two-client test added the same day does not detect a `disconnect` that closes every file (three unit tests in mux/protocol.rs do); the didChange version rewrite it also missed is now pinned by a unit test (commit 068973305), end-to-end effect on rust-analyzer not measured.'
 ---
 
 # BUG: the ignored mux coherence test asserted a contract that was removed, and in a test runner it never runs the mux
@@ -81,28 +82,34 @@ That the 0.07 s run time meant a warm shared mux: refuted by the socket probe. T
 
 In `src/lsp/mux/coherence_rust.rs`, step 4 now asserts the current contract (B sees `fresh_symbol` with no notification), and its comment says the test is not a mux test and why. The mux transport is covered by a new test in `src/lsp/client.rs`, `hover_follows_a_write_made_outside_codescout_through_the_mux`, which runs `mux::process::run` in the test process and connects `LspClient::connect` to its socket. Mutation: red with the resync disabled, green with it.
 
-Added later the same day: `two_clients_on_one_mux_follow_a_write_made_outside_codescout` (two clients on one in-process mux). Not fixed: the `#[ignore]` reason, and `coherence_rust.rs` itself is still not a mux test.
+Added later the same day: `two_clients_on_one_mux_follow_a_write_made_outside_codescout` (two clients on one in-process mux).
+
+Then, after the second round of measurements above and the user's approval of the recommendation, the test was removed: `fb72a59bd` deletes `src/lsp/mux/coherence_rust.rs`, `src/lsp/mux/test_support.rs` (its only user), the fixture `tests/fixtures/lsp-mux/rust/` and the two `mod` lines. The three ignored tests in `src/lsp/manager.rs` that said they were "gated like" it now say no CI job or gate lane runs them, and a stale comment in `src/lsp/client.rs` that pointed at the removed file now names the mux tests that file has.
 
 ## Fix provenance
 
-- **SHA:** `b398b53d2` (`experiments`)
+- **SHA:** `b398b53d2` (`experiments`): step 4 asserts the current contract, and the mux tests in `client.rs`
 - **patch-id:** `20afb87a74c8`
+- **SHA:** `fb72a59bd` (`experiments`): removal of the test, its harness and fixture
+- **patch-id:** `df8b958bcee9` (`git show fb72a59bd | git patch-id --stable`)
 
 ## Tests added
 
-`hover_follows_a_write_made_outside_codescout_through_the_mux` (one client, one mux). See `a73c49456056fb92` for its mutation and load results.
+`hover_follows_a_write_made_outside_codescout_through_the_mux` (one client, one mux) and `two_clients_on_one_mux_follow_a_write_made_outside_codescout`. See `a73c49456056fb92` for their mutation and load results. The removed test left no replacement: the mutations I ran show that what it detected is detected by tests that run in every gate.
 
 ## Workarounds
 
-None needed. Do not read `two_agents_coherent_after_edit` as evidence about the mux.
+None needed.
 
 ## Resume
 
-Decide with the owner whether `coherence_rust.rs` should be removed or rewritten as a real mux test now that `two_clients_on_one_mux_follow_a_write_made_outside_codescout` exists in `src/lsp/client.rs`. The second round of measurements shows what the test covers today: `get_or_start` with the mux attempt and its direct fallback, and `document_symbols` resyncing after an outside write when no other resync exists. It does not cover the request-level resync, `notify_file_changed` or a mux. What a rewrite would add over the in-process tests is the `LspManager` layer (`get_or_start_via_mux`, the ownership lock, the ready line, `notify_file_changed` through the manager, `shutdown_all` with mux clients). Two patterns exist for that: `mux::process::run` in the test process, as the `client.rs` tests do, which skips `LspManager`; or a real `codescout` binary started first, as the ignored Kotlin test does, which needs that binary built and skips silently without it. Until the owner decides, it is an ignored test that covers `document_symbols` after an outside write on a direct server.
+Fixed by `fb72a59bd` (see `## Fix provenance`). Archive after the owner confirms, with the fix verified on `experiments`: the gate was green at that tree (FMT, CLIPPY, LEAN 9682 passed, DEFAULT 9776 passed, Python 1836 passed).
+
+Open, none blocking: no test that runs in every gate drives `LspManager::get_or_start` to a mux that exists. The only one, `get_or_start_mux_success_records_lsp_event` in `src/lsp/manager.rs`, is ignored, is for Kotlin, and starts a real `codescout` binary that it silently skips without. Whether that gap needs a test is the owner's decision; two patterns exist (an in-process `mux::process::run`, which skips `LspManager`, or a pre-started real binary). The removal rests on the mutations listed in the second round of measurements, not on a proof that the removed test detects nothing else.
 
 ## References
 
-- `src/lsp/mux/coherence_rust.rs`
+- `src/lsp/mux/coherence_rust.rs` (removed in `fb72a59bd`)
 - `src/lsp/manager.rs`: `get_or_start`, `resolve_mux_binary`
 - `src/lsp/client.rs`: `hover_follows_a_write_made_outside_codescout_through_the_mux`
 - `a73c49456056fb92`

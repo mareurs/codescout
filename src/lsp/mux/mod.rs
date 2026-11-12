@@ -2,11 +2,6 @@
 pub mod process;
 pub mod protocol;
 
-#[cfg(test)]
-mod coherence_rust;
-#[cfg(test)]
-pub(crate) mod test_support;
-
 use std::path::{Path, PathBuf};
 
 use crate::socket_discovery::per_user_runtime_dir as per_user_mux_dir;
