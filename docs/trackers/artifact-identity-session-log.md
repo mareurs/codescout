@@ -107,7 +107,7 @@ entry_high_water_W: 8
 | F-5 | 2026-11-11 | med | plan-prose | fixed-verified | **Plan A Task 1 missed everything a removed cargo feature drags along** — required-features, install commands, memories; found by scout + review |
 | F-6 | 2026-11-11 | med | self-friction | fixed-verified | **Ran the plan on the shared checkout until the operator asked for a worktree** — 33 files edited, restored from a saved patch |
 | F-7 | 2026-11-11 | med | subagent | fixed-verified | **The worktree-aware repo-name suggestion mishandles a submodule** — `worktree_main_root` was ungated; found by the re-review, fixed in wave 2 |
-| F-8 | 2026-11-11 | med | plan-prose | open | **A spec requirement is built by no plan: "onboarding says when another checkout uses the name"** — plus two open spec-level questions |
+| F-8 | 2026-11-11 | med | plan-prose | fixed-verified | **A spec requirement is built by no plan: "onboarding says when another checkout uses the name"** — plus two open spec-level questions |
 | F-9 | 2026-11-11 | med | self-friction | fixed-verified | **Told the operator a peer held three dirty files; they were my own stopped implementer's leftovers** — attributed by adjacency; a transcript search found the real author |
 | F-10 | 2026-11-11 | low | plan-prose | fixed-verified | **Task 1 left a stale "librarian feature" message in `tests/cli_doc.rs` and a "librarian-less" comment in `src/prompts/mod.rs`** — passed both reviews; fixed in 6671e2ce8 |
 | F-11 | 2026-11-11 | high | architectural | open | **The spec and the old catalog code disagree in about a dozen places a plan must settle** — a third guard signal, the entry-id race guard, four consumers, G5, vectors; 3 verified, the rest reported |
@@ -528,7 +528,9 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med
 
-**Status:** open
+**Status:** fixed-verified
+
+**Update 2026-11-12:** the spec's Decision log answered both open questions: the repo name file lives at the git root, and an already-onboarded project is asked for the name on its next `onboarding` call. Plan B1 built the rest; checked in the code on `experiments`: `onboarding(repo_name=...)` returns the name block and records a declined time (`repo_name_declined_at` in `src/tools/onboarding.rs`), and `src/librarian/identity/checkouts.rs` scans for other checkouts by first commit. The doctor check named under Workaround was replaced by the on-next-onboarding rule. Checked by reading the code, not by running the dialog.
 
 **Rests on:** a split plan needs a spec-coverage table across all its parts, written when the split is made.
 
@@ -638,6 +640,8 @@ Codified so the Index column means the same thing across sessions.
 - `AGENTS.md` and `contrib/pi/AGENTS.md` collide on key `agents`, and neither can be renamed (R).
 
 **Cost if unaddressed:** plans C to E argue from a spec that omits a guard, a race guard and four consumers; the gate itself (`fmt-mine.sh` via `file-provenance.py`) would break at the flip.
+
+**Update 2026-11-12:** the spec's Decision log records the amendments as approved on 2026-11-11 (one guard signal, a separate machine-state file, a lock plus the high-water mark for entry ids, committed config as the index's inputs, `contrib/**` outside the key space, scalars in frontmatter, the tool changes). The build side is not done: the guard replacement, the entry-id lock, the consumers and the vector cache belong to Plans C, D and E. Status stays open until those plans build them.
 
 **Fix:** open. Plan B amends the spec's "Open for the operator" section with a recommended answer for each item, then plans from the amended spec. The scout and review reports are the evidence.
 
