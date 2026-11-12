@@ -1,4 +1,21 @@
 //! The incremental update of the derived index, and the parse cache it rests on.
+//!
+//! [`update`] brings the index to a commit by the same write path as a full build
+//! ([`super::build::build_full`]); the only difference is that it may take a document's parse
+//! products from `parse_cache` instead of parsing the document again. The cache is a pure
+//! optimisation, and the index it leaves is the one a full build gives:
+//!
+//! - A row is read only for the exact `(sha256, rel_path, rules_hash, parser_version)` of the
+//!   document being indexed. The path is in the key because classification and chunk ids depend
+//!   on it, so a rename reparses; `rules_hash` covers the rules the build classifies with (the
+//!   committed `librarian.toml` and the built-in defaults); [`PARSER_VERSION`] names the parse
+//!   logic.
+//! - A row that does not read back is a miss, never an error.
+//! - Resolution is not cached. The key index is built over the whole tree and every document's
+//!   citations are resolved against it on every update.
+//! - After each build the cache holds exactly that build's documents.
+//!
+//! [`PARSER_VERSION`]: super::build::PARSER_VERSION
 
 use std::collections::HashSet;
 
@@ -89,12 +106,34 @@ pub(super) struct CacheKey {
     pub(super) parser_version: String,
 }
 
-/// One document's parse products, and whether this build made them (`fresh`) or took them from
-/// the cache.
+/// One document's parse products, and the cache row to write for them when this build made them
+/// (`stored` is `Some`) instead of taking them from the cache. The row is encoded when the
+/// products are made, before the write transaction opens.
 pub(super) struct Parsed {
     pub(super) key: CacheKey,
     pub(super) products: ParsedDocument,
-    pub(super) fresh: bool,
+    stored: Option<Stored>,
+}
+
+impl Parsed {
+    /// Products read from the cache: nothing to write.
+    pub(super) fn cached(key: CacheKey, products: ParsedDocument) -> Parsed {
+        Parsed {
+            key,
+            products,
+            stored: None,
+        }
+    }
+
+    /// Products made by this build: the cache row is encoded now.
+    pub(super) fn fresh(key: CacheKey, products: ParsedDocument) -> serde_json::Result<Parsed> {
+        let stored = Some(encode(&products)?);
+        Ok(Parsed {
+            key,
+            products,
+            stored,
+        })
+    }
 }
 
 /// The columns of a `parse_cache` row that hold the products.
@@ -331,8 +370,10 @@ pub(super) fn sync_cache(tx: &Connection, parsed: &[Parsed]) -> anyhow::Result<(
             key.parser_version
         ])?;
     }
-    for p in parsed.iter().filter(|p| p.fresh) {
-        let stored = encode(&p.products)?;
+    for (key, stored) in parsed
+        .iter()
+        .filter_map(|p| p.stored.as_ref().map(|s| (&p.key, s)))
+    {
         // `OR REPLACE`: a row that was there but did not read back is replaced by the new one.
         tx.prepare_cached(
             "INSERT OR REPLACE INTO parse_cache (sha256, rel_path, rules_hash, parser_version, \
@@ -340,10 +381,10 @@ pub(super) fn sync_cache(tx: &Connection, parsed: &[Parsed]) -> anyhow::Result<(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?
         .execute(params![
-            p.key.sha256,
-            p.key.rel_path,
-            p.key.rules_hash,
-            p.key.parser_version,
+            key.sha256,
+            key.rel_path,
+            key.rules_hash,
+            key.parser_version,
             stored.parse_note,
             stored.metadata_json,
             stored.entries_json,

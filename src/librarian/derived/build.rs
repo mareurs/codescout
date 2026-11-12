@@ -227,16 +227,12 @@ pub(super) fn rebuild(
             None
         };
         parsed.push(match cached {
-            Some(products) => Parsed {
-                key,
-                products,
-                fresh: false,
-            },
-            None => Parsed {
-                products: (parser.parse)(&doc.rel_path, &doc.text, input.rules),
-                key,
-                fresh: true,
-            },
+            Some(products) => Parsed::cached(key, products),
+            None => {
+                let products = (parser.parse)(&doc.rel_path, &doc.text, input.rules);
+                Parsed::fresh(key, products)
+                    .with_context(|| format!("encoding the parse cache row of {}", doc.rel_path))?
+            }
         });
     }
 
