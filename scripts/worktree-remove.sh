@@ -267,12 +267,6 @@ kind_rank() {
     esac
 }
 
-# list_holders PATH: print one `PID<TAB>KIND<TAB>CMDLINE` row per holder of the worktree.
-# An entry whose cmdline cannot be read, or that has neither a cwd nor a path in its
-# command line, is skipped. The script's own pid and its subshell are never holders. Its
-# parent is exempt from the command-line test only (its command line names the worktree
-# because it launched this script), never from the cwd test: a launcher that sits inside
-# the worktree and starts the script from elsewhere holds the worktree like any other.
 # ppid_of PID: sets UP to the parent pid in <proc>/PID/status, one `sed`. Returns 1 when there is
 # no usable parent: no readable status, a `PPid:` that is not a number or has 11 or more digits,
 # or pid 0 or 1. (`sed`, not `awk`: a `$` followed by a digit is rewritten by some harnesses.)
@@ -283,6 +277,12 @@ ppid_of() {
     [ "$UP" -gt 1 ]
 }
 
+# list_holders PATH: print one `PID<TAB>KIND<TAB>CMDLINE` row per holder of the worktree.
+# An entry whose cmdline cannot be read, or that has neither a cwd nor a path in its
+# command line, is skipped. The script's own pid and its subshell are never holders. Its
+# parent is exempt from the command-line test only (its command line names the worktree
+# because it launched this script), never from the cwd test: a launcher that sits inside
+# the worktree and starts the script from elsewhere holds the worktree like any other.
 list_holders() {
     local wt=$1 d pid cwd a hit kind cmd argv_exempt rec parent=$PPID
     local self=" $$ $BASHPID ${WR_SCAN_SELF-} "

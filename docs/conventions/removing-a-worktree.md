@@ -68,7 +68,9 @@ kind (`mux`, `rust-analyzer`, `cargo`, `rustc`, `sccache`, `build-output`) is am
 the C compiler chain of a cargo build script (`make`, `cc`, `cc1`, `as`, `sh configure`) is
 one. The script finds the ancestors by following `PPid:` upward, also through processes that are
 not holders. The walk ends, and the row stays `other`, at pid 1 or 0, at a pid it has seen, at a
-`status` it cannot read, at a `PPid:` that is not a number, and after 64 steps. A long-lived
+`status` it cannot read, at a `PPid:` that is not a number, after 64 steps, and at an ancestor of
+the script: an ancestor of the script never counts as the stoppable ancestor, so a process whose
+only stoppable ancestor is an ancestor of the script stays `other`. A long-lived
 process that a stoppable holder started (for example `cargo run`) is a `child` too and is
 signalled. A descendant that was re-parented to the nearest subreaper or to pid 1 after its
 ancestor exited is `other` in the rescan: it is never signalled for that reason, and if it
@@ -80,7 +82,8 @@ parent's ancestors), and a `codescout` that is not a mux.
 A `codescout` process that is not a mux (for example `codescout start`, a live session's MCP
 server) has kind `other` and stays one, even when it runs from `<worktree>/target/` or under a
 stoppable holder. So has any editor, shell or test run that has no stoppable holder among its
-ancestors. The script's own parent is a blocker too when its cwd is inside the worktree: its kind
+ancestors, and any such process whose only stoppable ancestor is an ancestor of the script. The
+script's own parent is a blocker too when its cwd is inside the worktree: its kind
 comes from the command line like any row (it can be `cargo` or `rust-analyzer`), and it is a
 blocker because the script compares each row's pid with its own parent's, whatever the kind. With
 `--stop`, a blocker makes the script exit 4 and signal nothing, whether it was there at the first
