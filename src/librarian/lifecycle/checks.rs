@@ -18,8 +18,9 @@
 //! - `StreamAllTerminal` and `LedgerQuiet` look at un-archived collections only. `LedgerQuiet`
 //!   counts every entry of such a ledger, archived ones too, as activity.
 //! - `CollectionInvalid` (the eighth check) reports every collection-level problem: a readme whose
-//!   schema fails, a frontmatter block that does not parse, a nested collection, a file that
-//!   is not Markdown, a name that is no key. Archived or not, it is a data-integrity finding.
+//!   schema fails, a frontmatter block that does not parse, a nested collection, a second readme
+//!   in one collection folder (only the first in path order is the readme), a file that is not
+//!   Markdown, a name that is no key. Archived or not, it is a data-integrity finding.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -54,7 +55,9 @@ impl Default for CheckPolicy {
 }
 
 /// What `Finding::CollectionInvalid` found wrong. One variant per way a tracker file can fail
-/// before any entry field is read.
+/// before any entry field is read: a readme whose schema fails, a frontmatter block that does
+/// not parse, a file in a place the layout does not allow (below a nested readme, a second readme
+/// in its folder, not Markdown), a name that is no key.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CollectionProblem {
@@ -65,9 +68,16 @@ pub enum CollectionProblem {
     /// parser's message, which already names the frontmatter (`malformed frontmatter YAML: ..`).
     #[error("{0}")]
     Frontmatter(String),
-    /// The file sits at or below a subfolder that holds its own `readme.md`.
+    /// The file sits at or below a subfolder that holds its own readme (`README.md`, `readme.md`:
+    /// the name is matched without regard to case).
     #[error("sits below a subfolder that holds its own readme.md")]
     NestedCollection,
+    /// The file is a second readme in its collection folder (a name `is_folder_index` reads as a
+    /// readme: `README.md`, `Readme.md`, `readme.md`); the first one in path order is the readme.
+    #[error(
+        "is a second readme in its collection folder; only the first one in path order is read"
+    )]
+    DuplicateReadme,
     /// A file below a lifecycle folder that is not Markdown.
     #[error("is not a Markdown file")]
     NotMarkdown,
@@ -128,7 +138,8 @@ pub enum Finding {
     },
     /// Something wrong at collection level, not on one entry's fields. `subject` is always the
     /// repo-relative path of the file at fault: the collection's readme for a
-    /// `CollectionProblem::Schema`.
+    /// `CollectionProblem::Schema`, the skipped second readme (never the kept one) for a
+    /// `CollectionProblem::DuplicateReadme`.
     CollectionInvalid {
         subject: String,
         problem: CollectionProblem,
@@ -415,6 +426,10 @@ pub fn check(tree: &LifecycleTree, today: NaiveDate, policy: &CheckPolicy) -> Ve
             TreeProblem::NestedCollection(rel_path) => out.push(collection_invalid(
                 rel_path,
                 CollectionProblem::NestedCollection,
+            )),
+            TreeProblem::DuplicateReadme(rel_path) => out.push(collection_invalid(
+                rel_path,
+                CollectionProblem::DuplicateReadme,
             )),
             TreeProblem::Frontmatter { rel_path, detail } => out.push(collection_invalid(
                 rel_path,
@@ -1081,6 +1096,14 @@ mod tests {
             serde_json::to_string(&CollectionProblem::NestedCollection).unwrap(),
             r#""nested_collection""#
         );
+        assert_eq!(
+            serde_json::to_string(&CollectionProblem::DuplicateReadme).unwrap(),
+            r#""duplicate_readme""#
+        );
+        assert_eq!(
+            CollectionProblem::DuplicateReadme.to_string(),
+            "is a second readme in its collection folder; only the first one in path order is read"
+        );
     }
 
     #[test]
@@ -1120,6 +1143,59 @@ mod tests {
     }
 
     #[test]
+    fn a_second_readme_is_collection_invalid_naming_the_skipped_file() {
+        let f = run(vec![
+            doc("docs/trackers/ledgers/l/README.md", LEDGER),
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+        ]);
+        // `check` sorts by `Finding::sort_key`: the variant position first (`CollectionInvalid`
+        // is 4, `LedgerQuiet` is 5), so the duplicate comes before the quiet ledger. The ledger
+        // is quiet because the kept readme (`LEDGER`, `review_every: 30d`) has no entry: the
+        // collection exists, so the first readme was the one read.
+        assert_eq!(
+            f,
+            [
+                Finding::CollectionInvalid {
+                    subject: "docs/trackers/ledgers/l/readme.md".into(),
+                    problem: CollectionProblem::DuplicateReadme,
+                },
+                Finding::LedgerQuiet {
+                    collection: k("l"),
+                    last_activity: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_readme_directly_in_a_lifecycle_folder_is_an_orphan_not_a_duplicate() {
+        // `place` gives a file directly below `docs/trackers/<lifecycle>/` no collection
+        // (`OutsideCollection`), so the two readmes are not in one collection folder.
+        let f = run(vec![
+            doc("docs/trackers/temp/README.md", STREAM),
+            doc("docs/trackers/temp/readme.md", STREAM),
+        ]);
+        assert_eq!(
+            f,
+            [
+                Finding::OrphanEntry {
+                    rel_path: "docs/trackers/temp/README.md".into()
+                },
+                Finding::OrphanEntry {
+                    rel_path: "docs/trackers/temp/readme.md".into()
+                },
+            ]
+        );
+        assert!(!f.iter().any(|x| matches!(
+            x,
+            Finding::CollectionInvalid {
+                problem: CollectionProblem::DuplicateReadme,
+                ..
+            }
+        )));
+    }
+
+    #[test]
     fn every_tree_problem_kind_is_reported() {
         let f = run(vec![
             doc("docs/trackers/ledgers/l/readme.md", LEDGER),
@@ -1149,6 +1225,10 @@ mod tests {
                 &entry("open", "", ""),
             ),
             doc("docs/trackers/ledgers/Bad_Name/readme.md", LEDGER),
+            // DuplicateReadme: a second readme in one folder. The `dup` ledger has no entry, so it
+            // is also a `LedgerQuiet`, which this test does not count.
+            doc("docs/trackers/ledgers/dup/README.md", LEDGER),
+            doc("docs/trackers/ledgers/dup/readme.md", LEDGER),
             // OrphanEntry: no readme above it, and a file directly in a lifecycle folder.
             doc(
                 "docs/trackers/streams/no-readme/2026-10-01-lost.md",
@@ -1195,6 +1275,10 @@ mod tests {
                 "docs/trackers/ledgers/l/Bad_Stem.md"
             ]
         );
+        assert_eq!(
+            subjects_of(|p| matches!(p, CollectionProblem::DuplicateReadme)),
+            ["docs/trackers/ledgers/dup/readme.md"]
+        );
         let mut orphans: Vec<&str> = f
             .iter()
             .filter_map(|x| match x {
@@ -1226,7 +1310,7 @@ mod tests {
             .iter()
             .filter(|x| matches!(x, Finding::CollectionInvalid { .. }))
             .count();
-        assert_eq!(total, 1 + 1 + 2 + 1 + 2, "{f:?}");
+        assert_eq!(total, 1 + 1 + 2 + 1 + 2 + 1, "{f:?}");
     }
 
     #[test]

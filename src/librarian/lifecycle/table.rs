@@ -512,6 +512,7 @@ mod tests {
             let name = match p {
                 TreeProblem::Placement(_) => "Placement",
                 TreeProblem::NestedCollection(_) => "NestedCollection",
+                TreeProblem::DuplicateReadme(_) => "DuplicateReadme",
                 TreeProblem::OrphanEntry(_) => "OrphanEntry",
                 TreeProblem::Schema { .. } => "Schema",
                 TreeProblem::Entry { .. } => "Entry",
