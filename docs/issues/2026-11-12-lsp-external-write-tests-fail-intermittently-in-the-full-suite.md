@@ -81,8 +81,13 @@ Full-suite results, each lane run once per row unless stated:
 | branch after the third merge | default | `goto_definition_…` failed; 9742 passed |
 | `experiments` `56b3eb525`, 3 runs | lean | 3 of 3 green |
 | `experiments` `56b3eb525`, 3 runs | default | 2 of 3 green; `rename_edit_does_not_land_on_another_callee_…` failed once |
+| Plan B2 branch `0bbc6c874` (2026-11-12), full gate | lean | `lsp::client::tests::goto_definition_follows_a_write_made_outside_codescout` failed (`src/lsp/client.rs:4262`, empty result) |
+| Plan B2 branch, same test run alone on that tree | — | passed (3.9 s) |
+| Plan B2 branch `723f5a4d7`, `2c66232d4`, `74c13818b`, full gate each | lean and default | all green (3 of 3 runs) |
 
 The branch failed in 2 of 6 lane runs and `experiments` in 1 of 6. This sample size cannot tell the rates apart. The branch does not touch `src/lsp/client.rs`.
+
+Plan B2 adds a third sample: 1 failing full gate in 4 (the lean lane of `0bbc6c874`), and that test passed when run alone on the same tree. The B2 branch changes no file under `src/lsp/`. This does not prove the test is flaky, and it does not find the cause. It is the same test family as the earlier rows.
 
 ## Hypotheses tried
 
