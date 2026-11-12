@@ -777,10 +777,13 @@ mod tests {
     #[test]
     fn not_a_git_repo_exits_2_and_says_not_checked() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(
-            crate::librarian::current_project::lookup_git_root(dir.path()).is_none(),
-            "the temp dir must not sit inside a git repository"
-        );
+        if crate::librarian::current_project::lookup_git_root(dir.path()).is_some() {
+            eprintln!(
+                "skipped: the temp dir {} lies inside a git work tree, so it is not a non-repo",
+                dir.path().display()
+            );
+            return;
+        }
         let args = KeyGateArgs {
             project: Some(dir.path().to_path_buf()),
             staged: true,
@@ -790,6 +793,45 @@ mod tests {
         assert_eq!(out.code, 2, "{out:?}");
         assert!(out.stdout.starts_with("NOT CHECKED — "), "{out:?}");
         assert!(out.stdout.contains("git"), "{out:?}");
+    }
+
+    #[test]
+    fn an_untracked_colliding_markdown_file_does_not_count_in_staged_mode() {
+        let r = Repo::new();
+        r.stage(&[("a/x.md", "# a\n")]);
+        r.commit();
+        // Written, never `git add`ed: the commit does not carry it.
+        r.write("b/x.md", "# b\n");
+        let out = r.staged();
+        assert_eq!(
+            out.code, 0,
+            "an untracked file is not in the commit: {out:?}"
+        );
+        assert!(!out.stdout.contains("b/x.md"), "{out:?}");
+        // Control: the same file, staged, collides.
+        r.git(&["add", "--", "b/x.md"]);
+        let staged = r.staged();
+        assert_eq!(staged.code, 1, "{staged:?}");
+        assert!(staged.stdout.contains("b/x.md"), "{staged:?}");
+    }
+
+    #[test]
+    fn a_file_removed_from_the_index_but_still_on_disk_does_not_count() {
+        let r = Repo::new();
+        r.stage(&[("a/x.md", "# a\n")]);
+        r.commit();
+        r.stage(&[("b/x.md", "# b\n")]);
+        let with_it = r.staged();
+        assert_eq!(with_it.code, 1, "staged, it collides: {with_it:?}");
+        // Out of the index, still in the working tree.
+        r.git(&["rm", "--cached", "-q", "--", "b/x.md"]);
+        assert!(r.path().join("b/x.md").is_file(), "the file stays on disk");
+        let without_it = r.staged();
+        assert_eq!(
+            without_it.code, 0,
+            "the index is what is judged, not the working tree: {without_it:?}"
+        );
+        assert!(!without_it.stdout.contains("b/x.md"), "{without_it:?}");
     }
 
     #[test]

@@ -37,7 +37,9 @@ impl Default for ScanLimits {
     }
 }
 
-/// The first bound a scan hit.
+/// The strongest bound a scan hit. `Deadline` and `Dirs` outrank `Depth`, because they mean even
+/// the depth-bounded set was not fully examined; between `Dirs` and `Deadline` the first one
+/// hit stays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bound {
     Depth,
@@ -742,6 +744,9 @@ mod tests {
         std::fs::create_dir_all(root.join("a/sub")).unwrap();
         let z = root.join("z");
         make_repo(&z, Some("alpha"), "b");
+        // `z` has a directory below the depth limit too, so the notes arrive in the order Depth
+        // (`a`), Deadline (the walk in `z`), Depth (`z`'s own children): the last must not win.
+        std::fs::create_dir_all(z.join("sub")).unwrap();
         let limits = ScanLimits {
             max_depth: 1,
             ..ScanLimits::default()
