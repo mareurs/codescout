@@ -189,6 +189,20 @@ Ran `codex plugin add codescout-companion@sdd-misc-plugins` against the real `~/
 
 Open: the live check (a Codex probe under a Claude session, then `cc_session_id` in `usage.db`). It uses the real config, so a failed fix would move the probing Claude session's stamp until `/mcp`.
 
+## Live check, 2026-11-12 (session `5566e8a8`, on the operator's order)
+
+One probe, on the real `~/.codex` with the refreshed 1.21.5 cache: `codex exec --skip-git-repo-check -s read-only -C /home/marius/work/claude/codescout "Reply with the single word OK and call no tools."`, started from a `run_command` of this Claude session. Codex thread `01a1d02d-4ec2-78a2-8242-58a0a1d2e103` answered `OK`. Its output lists two `SessionStart` hooks and two `UserPromptSubmit` hooks, each pair with one line `Completed` and one `Failed`, and a `Stop` hook line `Failed`. Which hook failed was not read.
+
+Result, from `usage.db` (read-only): before the probe, this session's rows on server session `0d0fbe15` carried `cc_session_id` `5566e8a8-94fa-481e-82d0-3d2659355a5f`. The probe call recorded at 14:34:01 and the next call at 14:34:06, both after the thread was created, carry the same id. No row of this session carries the thread id. **The stamp did not move.**
+
+What this does and does not show:
+- It is one sample. I ran no control with the old 1.21.0 hook, so this run does not show that the old hook would have moved the stamp here. The incident table in this file shows the stamp moved within about 20 s of a thread's creation (19:56:20 to 19:56:41), and that is the interval this run covers.
+- The Codex thread called no codescout tool. The check is about the SessionStart hook's effect on the slot, which is what the fix targets.
+- Which of the `Completed` and `Failed` hooks was `session-start.mjs` was not read. If the failed `SessionStart` hook is the one that carries the fix, the unchanged stamp would be because it did not run, not because the fix worked. That is not excluded.
+- The rendezvous slot itself was not read.
+
+Open: read why a `SessionStart` hook reports `Failed` under Codex (the two new `wake-missed-jobs.mjs` entries have no trust hash, so they are the first suspects, not verified).
+
 ## Fix provenance
 
 - **SHA:** `claude-plugins:f41d5aa` (`f41d5aaf34149c84bc619e5468341648a7998610`, 2026-11-12, repo `claude-plugins`, path `codescout-companion/hooks/`)
