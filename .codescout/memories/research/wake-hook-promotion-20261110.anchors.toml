@@ -3,12 +3,13 @@
 
 [[anchors]]
 path = "src/tools/run_command/inner.rs"
-hash = "68ebab767fdbaae0426707da40df05775f2ab3587e47e30f0366c824bdf8e414"
+hash = "98ceddbe70fcaa05ca240f92edaffa3f02d75f50c7195d94a2c78fa392a5616d"
 
 [[anchors]]
 path = "src/prompts/guides/project-activation-bootstrap.md"
-hash = "71e8c1dbc6f1e1001f5edbae2e907200f144b09f8e7bd86dc4162c7b50086a7b"
+hash = "61177bfe3d4cecf69bab1230cb0678400452706c7336a17348e0d52f39fa5518"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "8f099e3919cee612d3bf1f77cf14f9452b47b32ae896332c26df9caad7a911e3"
+hash = "c07ee404f54a66f0e254df079f1133c27262eacf8fba68dafb44acfd555eb89b"
+

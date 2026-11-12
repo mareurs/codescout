@@ -1,6 +1,6 @@
 # Setup A/B: fresh-task builder pilot (rust-analyzer PR #23096, 2026-11-04)
 
-Context: the daily-setup arm design (docs/superpowers/specs/2026-11-04-setup-ab-daily-setup-arm-design.md, operator validated D1-D5 on 2026-11-04, "build and control" approved, cost cap soft: the run takes priority over the cap) needs fresh, multi-file Rust tasks. This pilot proves a fresh PR can become a controlled task with NO prebuilt image. No model spend; docker, git, gh, disk, time only. Evidence: `/home/marius/work/claude/setup-ab-data/fresh-pilot-2026-11-04/` (control-main.json, control-rerun8g.json, derived-*.json, gold.patch, test.patch, issue-23090.json, logs/). Scripts were throwaway in the job tmp dir (not in git). Image kept: `sab-fresh-rust-lang__rust-analyzer-23096:pilot`.
+Context: the daily-setup arm design (docs/superpowers/specs/2026-11-04-setup-ab-daily-setup-arm-design.md, operator validated D1-D5 on 2026-11-04, "build and control" approved, cost cap soft: the run takes priority over the cap) needs fresh, multi-file Rust tasks. This pilot proves a fresh PR can become a controlled task with NO prebuilt image. No model spend; docker, git, gh, disk, time only. Evidence: `/home/marius/work/claude/setup-ab-data/fresh-pilot-2026-11-04/` (control-main.json, control-rerun8g.json, derived-*.json, gold.patch, test.patch, issue-23090.json, logs/). Scripts were throwaway in the job tmp dir (not in git). Image `sab-fresh-rust-lang__rust-analyzer-23096:pilot` was kept when the pilot ended; it is no longer in docker (checked 2026-11-12).
 
 ## Why a builder is needed (verified)
 - `SWE-bench-Live/MultiLang` Rust split still has 171 records, newest 2026-07-29; the 68 post-cutoff ones were all controlled in Stage 4. No prebuilt image exists for Aug-Nov 2026.
@@ -29,3 +29,4 @@ About 10 GB disk and about 5 minutes build; control about 8 minutes per state, t
 
 ## Open
 Builder tool not written (this was a throwaway probe). Next: decide the F2P specification rule, pick the repos and tasks, write the builder with the steps above, run controls for the validated candidates (nushell 16, rust-analyzer 6, zellij 7, uv 6 clean PRs; list in memory research/harder-task-benchmarks-20261104).
+

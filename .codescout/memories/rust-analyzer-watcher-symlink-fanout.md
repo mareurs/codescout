@@ -10,6 +10,8 @@ Found 2026-10-31. Bug file: `docs/issues/2026-10-31-rust-analyzer-watcher-walks-
 
 ## Cause on this checkout
 
+Mitigated 2026-10-31: the directory symlinks were moved out (`*.moved` directories under `.codescout/resident-private/`; the restore procedure is `README-RESTORE-SYMLINKS.md`, with `restore-dir-symlinks.sh` and `RESTORE-DIR-SYMLINKS.tsv`). `find -type l -xtype d` finds none there on 2026-11-12. What follows is the record of the cause as measured before that.
+
 `.codescout/resident-private/` (gitignored experiment evidence) holds 32,136 real directories and 109 symlinks to directories. Most links point back into the same tree. rust-analyzer's `notify-rs inoti` thread walks them without end: 1,000,195 `inotify_add_watch` calls with 1,000,191 distinct paths in 87.7 s.
 
 `files.excludeDirs` does NOT stop this walk. It only stops file loading. It cut RSS from about 5.4 GB to 756 MB and changed nothing else. Do not use it as the fix.
@@ -35,3 +37,4 @@ Not verified: that rust-analyzer's `notify` follows symlinks. The evidence is th
 - A killed rust-analyzer also ends its mux (the mux exits with its child). The next request starts a fresh pair that spins again until the tree changes.
 - `earlyoom` runs here with `--prefer ...rust-analyzer`. It did not kill it in this case. Swap was full.
 - Older, same family: `docs/issues/archive/2026-10-23-documentsymbol-null-window-outlasts-the-5s-cold-budget-because-rust-analyzer-scans-the-nested-worktrees.md` (nested worktrees stretched the null window; the exclusion in `src/lsp/init_options.rs` was that fix).
+

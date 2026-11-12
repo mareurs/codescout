@@ -154,11 +154,12 @@ feature-gated and do run, because sqlite-vec needs no daemon.
 **Re-measured 2026-08-31 and the asymmetry has WIDENED, not closed** — the original entry
 said "the only real-Qdrant test" and cited `:422`, which is now `hybrid_query` rather than a
 test at all. Current counts, by symbol rather than by line, since these moved once already:
-`qdrant.rs` holds **4** ignored tests — `qdrant_creates_collection_with_dense_and_sparse`,
+`qdrant.rs` holds **8** ignored real-Qdrant tests (counted 2026-11-12), among them
+`qdrant_creates_collection_with_dense_and_sparse`,
 `qdrant_hybrid_query_excludes_paths`,
-`qdrant_hybrid_rrf_query_excludes_paths_on_both_prefetch_legs`,
-`qdrant_worktree_union_ranks_the_delta_by_relevance_not_by_rank_position` — and **0**
-non-ignored. `src/retrieval/sqlite_code_store.rs` holds **5** `real_vec0_*` tests and **0**
+`qdrant_hybrid_rrf_query_excludes_paths_on_both_prefetch_legs` and
+`qdrant_worktree_union_ranks_the_delta_by_relevance_not_by_rank_position`, plus **5**
+non-ignored pure filter and schema unit tests (`build_query_filter_*` and similar). `src/retrieval/sqlite_code_store.rs` holds **5** `real_vec0_*` tests and **0**
 ignored. So one backend has 4 tests none of which run, the other has 5 that all do. So the backend most
 contributors actually run has no automatic coverage, and the one they mostly don't is
 verified — an asymmetry that is easy to invert in your head and get backwards.
@@ -360,3 +361,4 @@ Ran the suite mid-fix-round, read a predicate at 11-of-12 truth sites, and built
 brief on it. The implementer's `TEMP-MUTATION-6` was applied at the time; on the real
 generator that predicate is 1-of-12 at lift 0.22. Ask for a clean-tree run, or apply the
 mutation yourself — a mid-round suite reads whatever the implementer currently has staged.
+
