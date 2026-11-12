@@ -43,7 +43,7 @@ hash = "30ff0aa1b4aa14154992e63220a0a03ad18894c3c6931324377def53676877bf"
 
 [[anchors]]
 path = "src/workspace.rs"
-hash = "9a19864327dfcf9560d1837a65bbad0da39ab5b26b6892dd10c856fd3352ecb1"
+hash = "961028f39c76b2ea469bbf8a2e841d0815a01b627fcf812ee4449edba9a0d1e5"
 
 [[anchors]]
 path = "src/library/scope.rs"
