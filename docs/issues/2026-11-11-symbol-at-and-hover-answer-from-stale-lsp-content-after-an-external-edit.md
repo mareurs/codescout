@@ -155,7 +155,9 @@ Not covered: the socket transport has no automated test.
 
 **`hover` and `goto_definition` on the changed file, 2026-11-12.** In `src/lsp/client.rs`, stdio transport, real `rust-analyzer`: `goto_definition_follows_a_write_made_outside_codescout` and `hover_follows_a_write_made_outside_codescout`. Each reads a baseline at the call's line 1, prepends three lines to `other.rs` outside codescout, then asks ONCE at the new position (line 4), with no intermediate `document_symbols` and no polling, because rust-analyzer watches files itself and polling could let it mask a stale answer. Only an error is retried (`retrying_on_error`), never an empty answer. Both pass on the fixed code. With the resync in `request` disabled (`if false && ...`, restored afterwards and checked) both fail, each after ten tries, with `LSP error (code -32603): Invalid offset LineCol { line: 4, col: 11 } (line index length: 51)`: the server still held the old 51-byte file. So the stale state shows as an error here and not as an empty answer. One run each, on this machine.
 
-Verified 2026-11-12 on the shared tree: `./scripts/gate.sh` FMT 0, CLIPPY 0, LEAN 0 (9538 passed), DEFAULT 0 (9632 passed), Python light lane 1836 passed.
+**`prepare_call_hierarchy` at a raw position, 2026-11-12.** `prepare_call_hierarchy_follows_a_write_made_outside_codescout`, same file, same setup. The baseline asks at line 1, column 11 and waits for an item named `target_fn`. After the same three-line prepend outside codescout, one ask at line 4, column 11 must again return the item named `target_fn`. Only an error is retried. It passes on the fixed code. With the resync in `request` disabled, it fails after ten tries with `LSP error (code -32603): Invalid offset LineCol { line: 4, col: 11 } (line index length: 51)`, the same error as the other two. The mutation was restored and a grep for `if false &&` in `src/lsp/client.rs` finds nothing. `prepare_call_hierarchy` calls `did_open` and then `request`, and the resync sits in `request`, so this path needed no code change. This is the entry point of `call_graph` and `references`. One run on this machine, stdio, Rust only.
+
+Verified 2026-11-12 on the shared tree, with the three client tests in place: `./scripts/gate.sh` exited 0. LEAN 9547 passed, DEFAULT 9648 passed, Python light lane 1836 passed. I did not read the FMT and CLIPPY lane lines separately, only the exit code of the whole gate.
 
 ## Workarounds
 
@@ -167,7 +169,7 @@ Fixed by `43c4ca9df` (see `## Fix provenance`). Archive after the owner confirms
 
 `4e7ec7bfc047ac7b` (the `symbols` report, never reproduced for `symbols` itself) is now `zombie`, with a re-open trigger.
 
-Open questions, none blocking: the cost of the per-request `stat` on a large session; how often a rename right after an external edit is cancelled by the server; `prepare_call_hierarchy` with a raw position was not run; a language other than Rust.
+Open questions, none blocking: the cost of the per-request `stat` on a large session; how often a rename right after an external edit is cancelled by the server; a language other than Rust; the socket (mux) transport has no automated test.
 
 Link: `58a45860b802a477`, `bug-fix-session-log:F-235`.
 
