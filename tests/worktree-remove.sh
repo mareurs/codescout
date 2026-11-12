@@ -454,15 +454,19 @@ case_bad_arguments_refuse() {
 # flags (word-split); optional 4th: the parent's argv[0] (default bash). The parent leaves
 # $C/parent-done when the script returned and it was still running. Sets RC, OUT, ERR, PPID_FAKE.
 # PARENT_SIBLING_PID=<fixture pid> in the environment adds a `vim` in the worktree whose
-# `PPid:` is the parent's pid, written once the parent's pid is known.
+# `PPid:` is the parent's pid, written once the parent's pid is known. PARENT_PPID=<fixture pid>
+# gives the parent itself a `status` file whose `PPid:` is that pid.
 run_with_fake_parent() {
     rm -f "$C/parent-done"
     ( cd "$C" && F="$PROCD" PCWD="$1" PARG="$2" SFLAGS="${3:-}" PARGV0="${4:-bash}" WT="$WT" S="$SRC" OUTDIR="$C" \
-        SIB="${PARENT_SIBLING_PID-}" \
+        SIB="${PARENT_SIBLING_PID-}" PPP="${PARENT_PPID-}" \
         WORKTREE_REMOVE_PROC="$PROCD" timeout "${RUN_TIMEOUT:-120}" bash -c '
             mkdir -p "$F/$$"
             ln -s "$PCWD" "$F/$$/cwd"
             printf "%s\0-c\0%s\0" "$PARGV0" "$PARG" >"$F/$$/cmdline"
+            if [ -n "$PPP" ]; then
+                printf "Name:\tbash\nPPid:\t%s\n" "$PPP" >"$F/$$/status"
+            fi
             if [ -n "$SIB" ]; then
                 mkdir -p "$F/$SIB"
                 ln -s "$WT" "$F/$SIB/cwd"
@@ -991,7 +995,7 @@ case_an_ancestor_walk_that_cannot_finish_leaves_other() {
     RUN_TIMEOUT=30 run "$WT"
     eq "a loop: exit 3 within the limit" 3 "$RC"
     eq "a loop: the compiler stays other" "cargo,other" "$(kinds)"
-    lacks "a loop: no shell error" "line " "$ERR"
+    lacks "a loop: no shell error" "worktree-remove.sh: line " "$ERR"
 
     new_case walk_nonnumeric
     fake 5092003 "$WT" cargo build
@@ -999,7 +1003,7 @@ case_an_ancestor_walk_that_cannot_finish_leaves_other() {
     RUN_TIMEOUT=30 run "$WT"
     eq "a PPid that is not a number: exit 3" 3 "$RC"
     eq "a PPid that is not a number: the compiler stays other" "cargo,other" "$(kinds)"
-    lacks "a PPid that is not a number: no shell error" "line " "$ERR"
+    lacks "a PPid that is not a number: no shell error" "worktree-remove.sh: line " "$ERR"
 
     new_case walk_too_long
     # 70 shells between the compiler and the cargo: more than the 64 steps the walk takes.
@@ -1046,6 +1050,60 @@ case_a_descendant_that_is_not_a_holder_is_not_listed() {
     FAKE_PPID=5092002 fake 5092003 "$WT" cc -c x.c
     run "$WT"
     eq "only the holders are rows: the shell is not listed" "5092001,5092003" "$(pids)"
+}
+
+case_a_stoppable_ancestor_of_the_script_makes_no_child() {
+    echo "a_stoppable_ancestor_of_the_script_makes_no_child"
+    new_case ancestry
+    # G, a cargo in the worktree, is the parent of the script's parent. A (a vim) is a child of
+    # the script's parent and B (a vim) a child of G. The script's own ancestry never makes a
+    # child: neither the parent nor G is an ancestor that promotes A or B, so both stay blockers.
+    fake 5094001 "$WT" cargo build
+    FAKE_PPID=5094001 fake 5094003 "$WT" vim b.txt
+    PARENT_PPID=5094001 PARENT_SIBLING_PID=5094002 run_with_fake_parent "$C" x --stop
+    eq "exit 4: A and B are blockers" 4 "$RC"
+    eq "G keeps cargo, A and B stay other" "cargo,other,other" "$(kinds)"
+    contains "nothing was signalled" "nothing was signalled" "$ERR"
+    lacks "no signal line" "worktree-remove: signalled " "$ERR"
+    lacks "no failed-signal line" "worktree-remove: could not signal " "$ERR"
+}
+
+case_a_codescout_server_under_a_stoppable_holder_stays_a_blocker() {
+    echo "a_codescout_server_under_a_stoppable_holder_stays_a_blocker"
+    new_case server_child
+    # A `codescout` that is not a mux is a peer session's MCP server: stopping it would break
+    # that session, so it is never a child, whatever runs above it.
+    fake 5093020 "$WT" cargo run
+    FAKE_PPID=5093020 fake 5093021 "$WT" codescout start --cwd "$WT"
+    run --stop --wait 1 "$WT"
+    eq "exit 4" 4 "$RC"
+    eq "the server stays other" "cargo,other" "$(kinds)"
+    lacks "no signal line" "worktree-remove: signalled " "$ERR"
+    lacks "no failed-signal line" "worktree-remove: could not signal " "$ERR"
+}
+
+case_the_ancestor_walk_cap_is_exactly_64() {
+    echo "the_ancestor_walk_cap_is_exactly_64"
+    local n i prev
+    # The walk checks the ancestors at distance 1..64. A cargo at distance 64 (63 shells in
+    # between) makes the compiler a child; at distance 65 (64 shells) it does not.
+    for n in 63 64; do
+        new_case "walk_cap_$n"
+        fake 5095001 "$WT" cargo build
+        prev=5095001
+        for i in $(seq 1 "$n"); do
+            FAKE_PPID=$prev fake $((5095001 + i)) "$C" sh -c build
+            prev=$((5095001 + i))
+        done
+        FAKE_PPID=$prev fake $((5095002 + n)) "$WT" cc -c x.c
+        RUN_TIMEOUT=30 run "$WT"
+        eq "$n shells: exit 3" 3 "$RC"
+        if [ "$n" -eq 63 ]; then
+            eq "the cargo at distance 64 makes a child" "cargo,child" "$(kinds)"
+        else
+            eq "the cargo at distance 65 does not" "cargo,other" "$(kinds)"
+        fi
+    done
 }
 
 case_stop_ends_a_c_compile_child_and_removes() {
@@ -1107,6 +1165,9 @@ case_without_a_status_file_a_descendant_stays_other
 case_an_ancestor_walk_that_cannot_finish_leaves_other
 case_the_script_parent_never_makes_a_child
 case_a_descendant_that_is_not_a_holder_is_not_listed
+case_a_stoppable_ancestor_of_the_script_makes_no_child
+case_a_codescout_server_under_a_stoppable_holder_stays_a_blocker
+case_the_ancestor_walk_cap_is_exactly_64
 case_stop_ends_a_c_compile_child_and_removes
 
 echo

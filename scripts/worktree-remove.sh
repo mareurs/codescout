@@ -45,9 +45,10 @@
 #   this script cannot see which session is a client. So stopping holders is never
 #   implicit: it needs `--stop` and prints an occupancy warning
 #   (docs/conventions/reaching-a-peer-session.md, Step 4: ask the occupant first).
-#   Only the processes a worktree's own rust tooling leaves behind are stoppable. Any
-#   other holder (an editor, a shell, a test run) is a blocker: with `--stop` the script
-#   prints it and exits 4 without signalling anything. So is this script's own parent
+#   Only the processes a worktree's own rust tooling leaves behind, and what they start, are
+#   stoppable. Any other holder (an editor, a shell, a test run) is a blocker: with `--stop`
+#   the script prints it and exits 4 without signalling anything, unless it descends from a
+#   stoppable holder (then it is a `child`, below). So is this script's own parent
 #   when its cwd is inside the worktree, whatever its kind: the script never signals its
 #   own pid, its subshells or its parent.
 #   A `child` is a process that would be `other` by its command line but descends from a
@@ -55,8 +56,9 @@
 #   `sh configure`) runs under the `cargo` that runs a build script, and ends with it. It is
 #   stoppable. The test walks the `PPid:` of its /proc status upward (see HOW A PROCESS IS
 #   MATCHED). A real `other` holder, one with no such ancestor (an editor, a shell, a test
-#   run), still blocks `--stop` with exit 4 before any signal. The script's own parent is
-#   never the ancestor that makes a `child`.
+#   run), still blocks `--stop` with exit 4 before any signal. Never a `child`: any ancestor
+#   of this script (its parent and the parent's ancestors), and a `codescout` that is not a
+#   mux (a peer session's MCP server), wherever it runs.
 #
 # HOW IT SCANS
 #   Every scan runs in a child under `timeout -k 1 $WORKTREE_REMOVE_SCAN_TIMEOUT` (default
@@ -70,7 +72,8 @@
 #   may SIGKILL the script's own scan). The script prints one stderr line for each signal it
 #   sends, `signalled` or `could not signal` (see Output). The mux holders first (a graceful
 #   mux exit kills the language server's process group), then, after a pause or until the mux
-#   is gone, the other stoppable holders (a `child` too: see WHY IT CLASSIFIES). The pause is up to ten rounds of a 0.1 s sleep plus one scan:
+#   is gone, the other stoppable holders (a `child` too: see WHY IT CLASSIFIES). The pause is
+#   up to ten rounds of a 0.1 s sleep plus one scan:
 #   about one second on a small /proc, up to about 5 s on a busy real /proc (a scan takes
 #   about 0.4 s there), and it is not counted in --wait. A blocker (an `other` row, or this
 #   script's parent) found by the first scan of the stop loop ends the run with exit 4
@@ -106,9 +109,11 @@
 #            only when argv[1] is exactly `mux`; any other codescout (an MCP server) is
 #            `other`, wherever its binary lives. `rust-analyzer*`, `cargo`, `rustc` and
 #            `sccache` are themselves. Any other argv[0] under `<worktree>/target/` is
-#            `build-output`. An `other` row that is not this script's parent becomes `child`
-#            when an ancestor of it is a holder of one of those kinds other than this script's
-#            parent (the kinds are the ones by argv[0], never a `child` result). The walk reads
+#            `build-output`. An `other` row becomes `child` when an ancestor of it is a holder of
+#            one of those kinds (the kinds are the ones by argv[0], never a `child` result). Two
+#            things never become `child` and never count as that ancestor: this script's own
+#            ancestry (its parent and the parent's ancestors, found by the same walk), and a
+#            `codescout` whatever its arguments (it is never promoted). The walk reads
 #            `PPid:` from `<proc>/<pid>/status`, also through processes that are not holders,
 #            and ends at pid 1 or 0, at a repeated pid, at a missing or unreadable `status`,
 #            at a `PPid:` that is not a number, and after 64 steps. Then the row stays `other`.
@@ -126,9 +131,9 @@
 #   * A long-lived process that a stoppable holder started (for example `cargo run`) is a
 #     `child` and is signalled with the holder: the script cannot tell a compiler from a
 #     program the build started.
-#   * A descendant that was re-parented to pid 1 after its ancestor exited has no stoppable
-#     ancestor in the rescan, so it is `other`: it is never signalled for that reason, and if
-#     it survives, the run ends in exit 5.
+#   * A descendant that was re-parented to the nearest subreaper or to pid 1 after its
+#     ancestor exited has no stoppable ancestor in the rescan, so it is `other`: it is never
+#     signalled for that reason, and if it survives, the run ends in exit 5.
 #   * Between the last scan and `git worktree remove`, a new process can start in the
 #     worktree; that may show up as exit 6 or 7, or not at all (a late process that writes
 #     nothing lets git succeed, and exit 0 then leaves a process whose cwd is deleted). It
@@ -268,12 +273,22 @@ kind_rank() {
 # parent is exempt from the command-line test only (its command line names the worktree
 # because it launched this script), never from the cwd test: a launcher that sits inside
 # the worktree and starts the script from elsewhere holds the worktree like any other.
+# ppid_of PID: sets UP to the parent pid in <proc>/PID/status, one `sed`. Returns 1 when there is
+# no usable parent: no readable status, a `PPid:` that is not a number or has 11 or more digits,
+# or pid 0 or 1. (`sed`, not `awk`: a `$` followed by a digit is rewritten by some harnesses.)
+ppid_of() {
+    UP=$(sed -n 's/^PPid:[[:space:]]*//p' "$PROC/$1/status" 2>/dev/null)
+    case $UP in '' | *[!0-9]* | ???????????*) return 1 ;; esac
+    UP=$((10#$UP))
+    [ "$UP" -gt 1 ]
+}
+
 list_holders() {
     local wt=$1 d pid cwd a hit kind cmd argv_exempt rec parent=$PPID
     local self=" $$ $BASHPID ${WR_SCAN_SELF-} "
     local -a argv rows=() hpids=() child_pids=()
-    local -A cwds=() hkind=() hcmd=()
-    local cur up steps seen
+    local -A cwds=() hkind=() hcmd=() is_codescout=()
+    local cur steps seen ancestry=""
     # Run as a bounded scan (scan_holders), the process above this one is `timeout`, not a
     # holder, and the parent that matters is the main script's, passed in WR_SCAN_PARENT.
     if [ -n "${WR_SCAN_PARENT-}" ]; then
@@ -322,6 +337,7 @@ list_holders() {
         if [ "${#argv[@]}" -gt 0 ]; then
             kind=$(kind_of_argv "${argv[0]}" "${argv[1]-}" "$wt")
             cmd="${argv[*]}"
+            [ "${argv[0]##*/}" = codescout ] && is_codescout[$pid]=1
         else
             kind=other
             cmd="(empty command line)"
@@ -336,31 +352,43 @@ list_holders() {
     done
     # A row of kind `other` whose ancestor is a holder of a stoppable kind is a `child`: a
     # cold build's C compiler chain (make, cc, cc1, as, sh configure) runs under a cargo that
-    # is itself a holder, and ends with it. The test uses the kinds of the first pass (by argv[0]),
-    # so a `child` never makes another row a child. The script's own parent is never that
-    # ancestor, and a row that is the parent is never made a child (it is a blocker whatever its
-    # kind). The walk follows `PPid:` upward, one `sed` per step, over processes that are not
-    # holders too, and ends at pid 1 or 0, at a repeated pid, at a missing or unreadable `status`,
-    # at a `PPid:` that is not a number, and after 64 steps: then the row stays `other`.
+    # is itself a holder, and ends with it. The test uses the kinds of the first pass (by
+    # argv[0]), so a `child` never makes another row a child. Two things are never made a child:
+    # a `codescout` whatever its arguments (one that is not a mux is a peer session's MCP
+    # server), and any ancestor of this script (its parent and the parent's ancestors: they
+    # are what runs the script), which also never counts as the stoppable ancestor. The walk
+    # follows `PPid:` upward, one `sed` per step (ppid_of), over processes that are not holders
+    # too, and ends at pid 1 or 0, at a repeated pid, at a missing or unreadable `status`, at a
+    # `PPid:` that is not a number, and after 64 steps: then the row stays `other`.
     for pid in "${hpids[@]+"${hpids[@]}"}"; do
         [ "${hkind[$pid]}" = other ] || continue
-        [ "$pid" = "$parent" ] && continue
+        [ -z "${is_codescout[$pid]-}" ] || continue
+        if [ -z "$ancestry" ]; then
+            cur=$parent
+            seen=" $parent "
+            steps=0
+            while [ "$steps" -lt 64 ] && ppid_of "$cur"; do
+                steps=$((steps + 1))
+                case $seen in *" $UP "*) break ;; esac
+                seen+="$UP "
+                cur=$UP
+            done
+            ancestry=$seen
+        fi
+        case $ancestry in *" $pid "*) continue ;; esac
         cur=$pid
         seen=" $pid "
         steps=0
-        while [ "$steps" -lt 64 ]; do
+        while [ "$steps" -lt 64 ] && ppid_of "$cur"; do
             steps=$((steps + 1))
-            up=$(sed -n 's/^PPid:[[:space:]]*//p' "$PROC/$cur/status" 2>/dev/null)
-            case $up in '' | *[!0-9]* | ???????????*) break ;; esac
-            up=$((10#$up))
-            [ "$up" -gt 1 ] || break
-            case $seen in *" $up "*) break ;; esac
-            seen+="$up "
-            if [ "$up" != "$parent" ] && [ -n "${hkind[$up]-}" ] && [ "${hkind[$up]}" != other ]; then
+            case $seen in *" $UP "*) break ;; esac
+            seen+="$UP "
+            case $ancestry in *" $UP "*) break ;; esac
+            if [ -n "${hkind[$UP]-}" ] && [ "${hkind[$UP]}" != other ]; then
                 child_pids+=("$pid")
                 break
             fi
-            cur=$up
+            cur=$UP
         done
     done
     for pid in "${child_pids[@]+"${child_pids[@]}"}"; do
