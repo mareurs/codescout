@@ -788,7 +788,7 @@ impl Tool for SemanticSearch {
         // names a specific collection to search, and redirecting it to main+delta
         // would silently ignore the caller's choice. A library search is skipped for
         // the same reason: `lib:<name>` is a project id of its own, not a worktree's.
-        let explicit_project_id = input.get("project_id").and_then(|v| v.as_str()).is_some();
+        let explicit_project_id = has_explicit_project_id(&input);
         if !explicit_project_id && library_id.is_none() {
             let worktree_main_repo = root
                 .as_deref()
@@ -921,15 +921,16 @@ impl Tool for SemanticSearch {
                 let hint = classify_search_error(&e.to_string(), &project_id, backend);
                 crate::tools::RecoverableError::with_hint(format!("stack search failed: {e}"), hint)
             })?;
-        // A member's chunks are stored relative to the member directory; every other tool
-        // resolves a path against the focused root, so an explicit member id gets its hits
-        // re-rooted. Only an explicit id: the default id is the focused project's own name,
-        // whose paths already resolve there. Not for a library: its chunks are stored relative
-        // to the library directory, which is not a workspace member.
-        if explicit_project_id && library_id.is_none() {
-            lift_explicit_member_hits(ctx, &project_id, root.as_deref(), &mut hits).await;
-        }
-        let mut out = search_response(&hits, limit);
+        let mut out = rooted_search_response(
+            ctx,
+            &input,
+            library_id.is_some(),
+            &project_id,
+            root.as_deref(),
+            &mut hits,
+            limit,
+        )
+        .await;
         if hits.is_empty() && library_id.is_none() {
             // Fail-soft: a failed lookup leaves the empty page as it was, never an error.
             let collection = client.config.collection("code_chunks");
@@ -1062,6 +1063,39 @@ pub(crate) fn lift_member_paths(hits: &mut [crate::retrieval::search::Hit], rela
     for hit in hits {
         hit.file_path = format!("{prefix}/{}", hit.file_path);
     }
+}
+
+/// Whether the caller named a collection with `project_id`. An explicit id names a specific
+/// collection to search, so the worktree overlay does not apply and a member's hits are re-rooted.
+fn has_explicit_project_id(input: &Value) -> bool {
+    input.get("project_id").and_then(|v| v.as_str()).is_some()
+}
+
+/// The page `SemanticSearch::call` returns for the hits of one collection: re-rooted for the
+/// caller, then shaped by `search_response`.
+///
+/// A member's chunks are stored relative to the member directory; every other tool resolves a path
+/// against the focused root, so an explicit member id gets its hits re-rooted. Only an explicit id:
+/// the default id is the focused project's own name, whose paths already resolve there. Not for a
+/// library: its chunks are stored relative to the library directory, which is not a workspace
+/// member.
+///
+/// A function of its own so that a test reaches this decision with hits it supplies:
+/// `SemanticSearch::call` builds its retrieval client from the environment and has no seam for one.
+/// docs/issues/2026-11-08-semantic-search-sibling-member-project-id-returns-member-relative-paths-and-the-call-site-is-untested.md
+pub(crate) async fn rooted_search_response(
+    ctx: &ToolContext,
+    input: &Value,
+    is_library: bool,
+    project_id: &str,
+    root: Option<&std::path::Path>,
+    hits: &mut [crate::retrieval::search::Hit],
+    limit: usize,
+) -> Value {
+    if has_explicit_project_id(input) && !is_library {
+        lift_explicit_member_hits(ctx, project_id, root, hits).await;
+    }
+    search_response(hits, limit)
 }
 
 /// Re-root the hits of an explicit `project_id` that names a workspace member, so their

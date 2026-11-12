@@ -1,12 +1,13 @@
 ---
 id: d291b97d9e69edef
 kind: bug
-status: open
+status: fixed
 title: workspace(activate) fails for every path once the active project's directory is gone
 owners:
 - marius
 tags:
 - cluster/unclassified
+closed: 2026-11-12
 opened: 2026-11-12
 severity: medium
 ---
@@ -43,7 +44,12 @@ codescout on `experiments`, Linux, MCP server connected through Claude Code.
 
 ## Root cause
 
-Unknown. `Agent::activate` (`src/agent/mod.rs`) works on the target root only, so the failing step comes before it. Suspect, not verified: `Fence::try_mode` (`src/tools/native_provenance_fence.rs`) calls `root.canonicalize()?` on the active root for write-class tools, which fails when that root is gone. The first task of the plan in `docs/superpowers/specs/2026-11-12-worktree-removal-helper-design.md` is to verify this.
+Verified by reading the code and by the dispatch test `activation_proceeds_after_the_default_root_was_deleted`.
+
+- `workspace(action="activate")` has `Workspace::is_write` true (`src/tools/config/mod.rs`), so every call runs through `provenance_fence_context::scope_root` (`src/tools/provenance_fence_context.rs`), which fences a write on the active root.
+- At `src/tools/provenance_fence_context.rs:183` the fence runs `canonical_checkout(root).or_else(|_| root.canonicalize())?`. When the active root is gone, both calls fail and the `?` returns `No such file or directory (os error 2)` before `Agent::activate` runs.
+- The earlier suspect `Fence::try_mode` in `src/tools/native_provenance_fence.rs` was wrong: the failing call is in `scope_root`, not in the fence type.
+- A read tool (`grep`) is not a write, so `scope_root` returns early for it. That is why reads gave a warning and not an error.
 
 ## Evidence
 
@@ -52,23 +58,40 @@ Unknown. `Agent::activate` (`src/agent/mod.rs`) works on the target root only, s
 
 ## Hypotheses tried
 
-None yet beyond the suspect above.
+1. Suspect `Fence::try_mode` (`src/tools/native_provenance_fence.rs`): not the failing seam.
+2. Read `scope_root` and its callers: the `?` at `src/tools/provenance_fence_context.rs:183` is the failing call. Confirmed by the dispatch test, which fails before the fix and passes after it.
 
 ## Fix
 
-Activation must not depend on the previous project's directory. The exact seam is decided after the reproducing test shows where the error starts.
+`scope_root` runs a call unfenced when all of these hold: the tool is a write, the tool name is `workspace`, `action` is `activate`, and `root.try_exists()` is `Ok(false)`. Nothing under a missing root can be fenced, and activation is the call that every write refusal prescribes.
+
+The pass-through names only activation. A future workspace write action does not skip the fence by riding on it. A missing root for any other write tool is still refused (`a_non_workspace_write_on_a_missing_root_is_still_refused`).
+
+Applied in `src/tools/provenance_fence_context.rs` (`scope_root`, the `#[cfg(unix)]` block). The gate was green on the merged tree on 2026-11-12: FMT, CLIPPY, LEAN and DEFAULT lanes exit 0, Python 1836 passed. The macOS lane was not compiled locally; the fix is `#[cfg(unix)]`, so CI must confirm it.
 
 ## Tests added
 
-N/A — not fixed. The regression test removes the active project's directory and then activates the main checkout.
+- `a_workspace_write_on_a_missing_root_runs_unfenced` (`src/tools/provenance_fence_context_tests.rs`)
+- `a_non_workspace_write_on_a_missing_root_is_still_refused` (same file)
+- `a_workspace_write_that_is_not_activation_on_a_missing_root_is_still_refused` (same file)
+- `activation_proceeds_after_the_default_root_was_deleted` (`src/server/workspace_pin_tests.rs`): deletes the default root, activates another root, and asserts `status == "ok"` and the new `project_root`.
+
+## Fix provenance
+
+- **SHA:** `c11b3f0f6` (`experiments`)
+- **patch-id:** `855621febdf8`
+- **SHA:** `d730d1800` (`experiments`)
+- **patch-id:** `121783d866c7`
+- **SHA:** `e43843b52` (`experiments`)
+- **patch-id:** `701db11002ff`
 
 ## Workarounds
 
-`mkdir` the removed path, activate the main checkout, then delete the empty directory.
+Not needed on a build that contains the fix. On an older server binary: `mkdir` the removed path, activate the main checkout, then delete the empty directory. The convention page `docs/conventions/removing-a-worktree.md` names this symptom.
 
 ## Resume
 
-Write the reproducing test first, and read where the `os error 2` starts.
+N/A — fixed. Check that CI is green on the macOS lane, and re-test with a server binary built from this fix: remove the active worktree, then `workspace(activate)` the main checkout.
 
 ## References
 

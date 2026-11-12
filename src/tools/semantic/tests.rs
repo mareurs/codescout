@@ -1282,3 +1282,55 @@ fn relative_path_between_climbs_out_of_the_first_directory_and_descends_into_the
     }
     assert_eq!(between(Path::new("rel"), Path::new("/abs")), None);
 }
+/// The page `SemanticSearch::call` returns, for a session focused on member `alpha`, as the
+/// `file_path` of its one hit. The store keeps the hit relative to `crates/beta`.
+/// BUG docs/issues/2026-11-08-semantic-search-sibling-member-project-id-returns-member-relative-paths-and-the-call-site-is-untested.md
+async fn page_path_for_a_beta_hit(input: serde_json::Value, is_library: bool) -> String {
+    let (_host, root) = two_member_workspace();
+    let agent = Agent::new(Some(root.clone())).await.unwrap();
+    agent
+        .activate_within_workspace("alpha", None)
+        .await
+        .unwrap();
+    let ctx = ctx_for(agent, None);
+    let focused = ctx.agent.project_root_for(None).await.unwrap();
+    let mut hits = vec![member_hit("src/lib.rs")];
+    let page = super::semantic_search::rooted_search_response(
+        &ctx,
+        &input,
+        is_library,
+        "beta",
+        Some(&focused),
+        &mut hits,
+        10,
+    )
+    .await;
+    page["results"][0]["file_path"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// The decision `SemanticSearch::call` makes after the search, reached with hits the test supplies:
+/// an explicit `project_id` re-roots the hits, whose page then carries the path that resolves.
+#[tokio::test]
+async fn the_page_of_an_explicit_sibling_member_carries_the_rooted_path() {
+    let path = page_path_for_a_beta_hit(json!({ "query": "q", "project_id": "beta" }), false).await;
+    assert_eq!(path, "../beta/src/lib.rs");
+}
+
+/// Without a `project_id` the id is the focused project's own, whose paths already resolve: the
+/// page keeps the path as the store returned it.
+#[tokio::test]
+async fn the_page_of_a_search_without_a_project_id_keeps_the_stored_path() {
+    let path = page_path_for_a_beta_hit(json!({ "query": "q" }), false).await;
+    assert_eq!(path, "src/lib.rs");
+}
+
+/// A library's chunks are stored relative to the library directory, which is not a workspace
+/// member: an explicit id that names one is not re-rooted.
+#[tokio::test]
+async fn the_page_of_a_library_search_keeps_the_stored_path() {
+    let path = page_path_for_a_beta_hit(json!({ "query": "q", "project_id": "beta" }), true).await;
+    assert_eq!(path, "src/lib.rs");
+}
