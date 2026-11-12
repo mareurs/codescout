@@ -10,7 +10,7 @@ tags:
 closed: 2026-11-12
 opened: 2026-11-12
 severity: medium
-unverified: The --stop path has had no real use (no mux was running at first use). Fix 2 (superpowers brief templates) is open and the .codescout/embeddings symlink rule is not fixed. macOS and Windows CI lanes are not checked.
+unverified: The --stop path has had no real use (no mux was running at first use). Fix 2 (superpowers brief templates) is open. Nothing is known about what creates the .codescout/embeddings symlink. macOS and Windows CI lanes are not checked.
 ---
 
 # BUG: git worktree remove refuses after codescout and agent briefs leave untracked files in a worktree
@@ -52,7 +52,7 @@ Two causes, both verified by the probes in Hypotheses tried.
 
 Other verified facts:
 
-- The untracked `.codescout/embeddings` entry is a symlink to the main checkout's `.codescout/embeddings` directory (seen 2026-11-12 in the worktree of this fix: `embeddings -> /home/marius/work/claude/codescout/.codescout/embeddings`, created at the same minute as `cc_session_id`). The rule `.codescout/embeddings/` (`.gitignore:88`) has a trailing slash and matches only a directory, so git lists the symlink as untracked and refuses a plain removal. What creates the symlink is not identified.
+- The untracked `.codescout/embeddings` entry is a symlink to the main checkout's `.codescout/embeddings` directory (seen 2026-11-12 in the worktree of this fix: `embeddings -> /home/marius/work/claude/codescout/.codescout/embeddings`, created at the same minute as `cc_session_id`). The rule `.codescout/embeddings/` (`.gitignore:88`, before `652f12d88`) had a trailing slash and matches only a directory, so git lists the symlink as untracked and refuses a plain removal. What creates the symlink is not identified.
 
 - Before fix 1, `.gitignore` had no rule for `.codescout/native-provenance-v1.counter` or `.codescout/native-provenance-v1.lock`. The lock name is defined in `src/tools/native_provenance_fence.rs` (`LOCK_NAME`). Both files appeared untracked in all three worktrees.
 - Not a cause: `.superpowers/`, `.codescout/write.lock`, `.codescout/write.lock.holder`, `.codescout/private-memories/`, `scripts/__pycache__/` and `target/` are all ignored, so they do not block removal.
@@ -76,7 +76,7 @@ Not reproduced: a recreated `.codescout` in plan-b (probe 3 recreated only `targ
 
 ## Fix
 
-Item 1 and item 3 are applied; item 2 is open:
+Item 1 and item 3 are applied; item 2 is open. A fourth change, applied 2026-11-12, covers the `.codescout/embeddings` symlink: the two `.gitignore` rules lost their trailing slash (`652f12d88`).
 
 1. **Applied 2026-11-12:** `/.codescout/native-provenance-v1.counter` and `/.codescout/native-provenance-v1.lock` are in `.gitignore`, with the `crates/*/` twin rules that the gate `every_root_codescout_ignore_rule_has_its_crates_twin` requires (find the commit with `git log -S native-provenance-v1 -- .gitignore`). This removes the refusal caused by those two files.
 2. **Open:** brief templates for subagents must name scratch files only under `.superpowers/` (git-ignored). Applies to the superpowers plugin, not to this repo.
@@ -111,6 +111,9 @@ First real use, 2026-11-12, on the worktree of this fix: the first run listed on
 - **SHA:** `2cd58c6d5` (`experiments`)
 - **patch-id:** `617325cce9ec`
 
+- **SHA:** `652f12d88` (`experiments`)
+- **patch-id:** `600069586b7d`
+
 ## Workarounds
 
 Run `scripts/worktree-remove.sh <path>` from outside the worktree and from a session whose cwd is not inside it. Without `--stop` it only lists holders. Ask the occupant before `--stop`. If git refuses, the script lists the untracked files and never forces; for the `.codescout/embeddings` symlink, delete the link itself (`rm <worktree>/.codescout/embeddings`, no trailing slash) and run the script again. Details: `docs/conventions/removing-a-worktree.md`.
@@ -120,7 +123,7 @@ Run `scripts/worktree-remove.sh <path>` from outside the worktree and from a ses
 Open items:
 
 - Fix 2: subagent brief templates in the superpowers plugin (ask the operator before looking there).
-- The `.gitignore` rule for `.codescout/embeddings` has a trailing slash and misses the symlink. Candidate: add `.codescout/embeddings` without the slash, with its `crates/*/` twin rule, and find what creates the symlink.
+- Find what creates the `.codescout/embeddings` symlink in a worktree (unidentified). The `.gitignore` rule is fixed: `.codescout/embeddings` and `crates/*/.codescout/embeddings` have no trailing slash now, so git ignores the symlink too (checked in a scratch repo: the old rule listed it as untracked, the new rule did not).
 - The recreated `.codescout` in plan-b is unexplained.
 - Parked script follow-ups: scrub UTF-8 C1 control characters (U+0080 to U+009F) from printed command lines (one-line fix `cmd=${cmd//$'\xc2'[$'\x80'-$'\x9f']/ }`); a very large `--wait` overflows the deadline arithmetic (the safe direction); the exit-7 `ls -A` listing prints raw file names; the survivor message says "SIGKILL is never used".
 - Check that CI is green on the macOS and Windows lanes (the Rust wrapper is Linux-only; not run locally).
