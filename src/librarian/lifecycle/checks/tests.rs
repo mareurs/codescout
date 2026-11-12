@@ -643,7 +643,7 @@ fn nested_problems_serialize_in_snake_case_with_default_tagging() {
     );
     assert_eq!(
         CollectionProblem::DuplicateReadme.to_string(),
-        "is a second readme in its collection folder; only the first one in path order is read"
+        "is another readme in its collection folder; only the first one in path order is the readme"
     );
 }
 

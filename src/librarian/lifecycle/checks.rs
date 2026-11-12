@@ -72,10 +72,11 @@ pub enum CollectionProblem {
     /// the name is matched without regard to case).
     #[error("sits below a subfolder that holds its own readme")]
     NestedCollection,
-    /// The file is a second readme in its collection folder (a name `is_folder_index` reads as a
-    /// readme: `README.md`, `Readme.md`, `readme.md`); the first one in path order is the readme.
+    /// The file is another readme in its collection folder (a name `is_folder_index` reads as a
+    /// readme in any case, such as `README.md` or `readme.md`); the first one in path order is
+    /// the readme.
     #[error(
-        "is a second readme in its collection folder; only the first one in path order is read"
+        "is another readme in its collection folder; only the first one in path order is the readme"
     )]
     DuplicateReadme,
     /// A file below a lifecycle folder that is not Markdown.
