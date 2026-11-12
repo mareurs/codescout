@@ -3928,11 +3928,14 @@ async fn note_ctx() -> ToolContext {
 }
 
 /// A project root named `my-repo` (so the suggested name is known) with a `.codescout` folder,
-/// under a temp dir that outlives the call.
+/// under a temp dir that outlives the call. The root carries its own `.git`, which pins the repo
+/// root there: `repo_root_of` walks up to the nearest `.git`, so without it the result would
+/// depend on whether the temp dir sits inside some other checkout.
 fn repo_named_my_repo() -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempdir().unwrap();
     let root = std::fs::canonicalize(dir.path()).unwrap().join("my-repo");
     std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    std::fs::create_dir_all(root.join(".git")).unwrap();
     (dir, root)
 }
 
@@ -3965,6 +3968,15 @@ async fn activation_notes_an_unconfirmed_repo_name() {
     assert!(
         !root.join(".codescout/repo.toml").exists(),
         "activation must not write a name"
+    );
+    let instruction = note["instruction"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the note must carry an instruction; got: {result}"));
+    assert!(instruction.contains("Ask the user"), "{instruction}");
+    assert!(instruction.contains("`my-repo`"), "{instruction}");
+    assert!(
+        instruction.contains(".codescout/repo.toml"),
+        "the instruction names the file the call writes: {instruction}"
     );
 }
 
@@ -4032,6 +4044,16 @@ async fn a_read_only_activation_does_not_offer_a_refused_call() {
         .find("onboarding(repo_name=\"my-repo\")")
         .unwrap_or_else(|| panic!("the action must still name the call: {action}"));
     assert!(writable < call, "read-write comes first: {action}");
+    // The ask is the same in a read-only activation: the action leads with the activation, the
+    // instruction still tells the agent to ask before the call writes the file.
+    let instruction = note["instruction"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the note must carry an instruction; got: {result}"));
+    assert!(instruction.contains("Ask the user"), "{instruction}");
+    assert!(
+        instruction.contains(".codescout/repo.toml"),
+        "{instruction}"
+    );
 }
 
 #[tokio::test]

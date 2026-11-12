@@ -956,7 +956,7 @@ pub(crate) async fn check_has_index_cached(
 
 /// What the activation says about the repo name: the one field to add to the response, if any.
 ///
-/// * `repo_name_unconfirmed: {suggested, action}` when no `.codescout/repo.toml` exists at the
+/// * `repo_name_unconfirmed: {suggested, action, instruction}` when no `.codescout/repo.toml` exists at the
 ///   repo root and the user has not declined the dialog. A read-only activation refuses
 ///   `onboarding` (`Onboarding::is_write` is always true), so there `action` leads with the
 ///   read-write activation.
@@ -992,9 +992,20 @@ fn repo_name_note(
             } else {
                 call
             };
+            // The same ask `onboarding` makes of its own caller: the call writes a committed file,
+            // so the user confirms or edits the name first, whatever the activation mode.
+            let instruction = format!(
+                "Ask the user to confirm or edit the repo name `{suggested}`, then call \
+                 onboarding(repo_name=\u{2026}); the call writes the committed file \
+                 .codescout/repo.toml."
+            );
             Some((
                 "repo_name_unconfirmed",
-                json!({"suggested": suggested.as_str(), "action": action}),
+                json!({
+                    "suggested": suggested.as_str(),
+                    "action": action,
+                    "instruction": instruction,
+                }),
             ))
         }
         Err(e) => {
