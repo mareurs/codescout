@@ -4021,39 +4021,45 @@ async fn activation_omits_the_note_after_a_decline() {
 }
 
 #[tokio::test]
-async fn a_read_only_activation_does_not_offer_a_refused_call() {
-    // `Onboarding::is_write` is always true, so a read-only activation refuses the call.
+async fn a_read_only_activation_carries_no_repo_name_note() {
+    // `Onboarding::is_write` is always true, so a read-only activation refuses the call: the
+    // activation carries no note that leads to it.
     assert!(crate::tools::Tool::is_write(
         &crate::tools::onboarding::Onboarding,
         &json!({"repo_name": "my-repo"})
     ));
+    // Control: the same project, read-write, is noted.
+    let (_dir_rw, rw_root) = repo_named_my_repo();
+    let rw = activate_json(&rw_root, false).await;
+    assert!(rw["repo_name_unconfirmed"].is_object(), "control: {rw}");
+
     let (_dir, root) = repo_named_my_repo();
     let result = activate_json(&root, true).await;
     assert_eq!(result["read_only"], true, "{result}");
-    let note = &result["repo_name_unconfirmed"];
-    assert_eq!(note["suggested"], "my-repo", "{result}");
-    let action = note["action"].as_str().expect("an action string");
     assert!(
-        !action.starts_with("onboarding("),
-        "the first call offered must not be the one a read-only activation refuses: {action}"
+        result.get("repo_name_unconfirmed").is_none(),
+        "a read-only activation browses the repo and is not asked to name it: {result}"
     );
-    let writable = action
-        .find("read_only=false")
-        .unwrap_or_else(|| panic!("the action must say to activate read-write first: {action}"));
-    let call = action
-        .find("onboarding(repo_name=\"my-repo\")")
-        .unwrap_or_else(|| panic!("the action must still name the call: {action}"));
-    assert!(writable < call, "read-write comes first: {action}");
-    // The ask is the same in a read-only activation: the action leads with the activation, the
-    // instruction still tells the agent to ask before the call writes the file.
-    let instruction = note["instruction"]
+    assert!(result.get("repo_name_error").is_none(), "{result}");
+    let compact = format_activate_project(&result);
+    assert!(!compact.contains("REPO NAME"), "{compact}");
+    assert!(!compact.contains("onboarding(repo_name"), "{compact}");
+    assert!(
+        !root.join(".codescout/repo.toml").exists(),
+        "activation must not write a name"
+    );
+
+    // An unreadable name file is still reported when the activation is read-only.
+    let (_dir_bad, bad) = repo_named_my_repo();
+    std::fs::write(bad.join(".codescout/repo.toml"), "name = \n[[[").unwrap();
+    let result = activate_json(&bad, true).await;
+    assert!(result.get("repo_name_unconfirmed").is_none(), "{result}");
+    let error = result["repo_name_error"]
         .as_str()
-        .unwrap_or_else(|| panic!("the note must carry an instruction; got: {result}"));
-    assert!(instruction.contains("Ask the user"), "{instruction}");
-    assert!(
-        instruction.contains(".codescout/repo.toml"),
-        "{instruction}"
-    );
+        .unwrap_or_else(|| panic!("no repo_name_error in a read-only activation: {result}"));
+    assert!(error.contains("repo.toml"), "{error}");
+    let compact = format_activate_project(&result);
+    assert!(compact.contains("REPO NAME UNREADABLE"), "{compact}");
 }
 
 #[tokio::test]
@@ -4071,10 +4077,10 @@ async fn the_compact_form_carries_the_note() {
         "the summary line stays: {compact}"
     );
 
-    // Read-only: the banner carries the read-write step too.
+    // Read-only: no banner, the activation does not ask to name a repo it only browses.
     let ro = format_activate_project(&activate_json(&root, true).await);
-    assert!(ro.contains("read_only=false"), "{ro}");
-    assert!(ro.contains("onboarding(repo_name=\"my-repo\")"), "{ro}");
+    assert!(!ro.contains("REPO NAME"), "{ro}");
+    assert!(!ro.contains("onboarding(repo_name"), "{ro}");
 
     // Without the block there is no banner.
     let plain = format_activate_project(&json!({

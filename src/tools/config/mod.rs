@@ -956,13 +956,14 @@ pub(crate) async fn check_has_index_cached(
 
 /// What the activation says about the repo name: the one field to add to the response, if any.
 ///
-/// * `repo_name_unconfirmed: {suggested, action, instruction}` when no `.codescout/repo.toml` exists at the
-///   repo root and the user has not declined the dialog. A read-only activation refuses
-///   `onboarding` (`Onboarding::is_write` is always true), so there `action` leads with the
-///   read-write activation.
-/// * `repo_name_error: "<one line>"` when the file exists and cannot be read: a name that cannot
-///   be read is not an unconfirmed one, so no write is suggested over it.
-/// * nothing when a name exists, or the user declined.
+/// * `repo_name_unconfirmed: {suggested, action, instruction}` when no `.codescout/repo.toml`
+///   exists at the repo root, the user has not declined the dialog, and the activation is
+///   read-write. A read-only activation only browses the repo and `onboarding` refuses there
+///   (`Onboarding::is_write` is always true), so it carries no such note.
+/// * `repo_name_error: "<one line>"` when the file exists and cannot be read, in either mode: a
+///   name that cannot be read is not an unconfirmed one, so no write is suggested over it.
+/// * nothing when a name exists, the user declined, or the activation is read-only and no file
+///   is unreadable.
 ///
 /// Two small reads (`repo.toml`, then `project.toml` only when no name exists) and the suggestion;
 /// no scan of other checkouts, no `elicit`, and a failure reports itself instead of failing the
@@ -977,23 +978,13 @@ fn repo_name_note(
     let repo_root = crate::tools::onboarding::repo_root_of(project_root);
     match repo_name::read(&repo_root) {
         Ok(Some(_)) => None,
+        Ok(None) if read_only => None,
         Ok(None) if crate::tools::onboarding::repo_name_declined_at(project_root) => None,
         Ok(None) => {
             let suggested = repo_name::suggest(&repo_root);
-            let call = format!("onboarding(repo_name=\"{suggested}\")");
-            let action = if read_only {
-                format!(
-                    "this activation is read-only and refuses onboarding: activate read-write \
-                     first with {}, then call {call}",
-                    crate::util::path_security::activate_writable_call(&to_forward_slash(
-                        project_root
-                    )),
-                )
-            } else {
-                call
-            };
+            let action = format!("onboarding(repo_name=\"{suggested}\")");
             // The same ask `onboarding` makes of its own caller: the call writes a committed file,
-            // so the user confirms or edits the name first, whatever the activation mode.
+            // so the user confirms or edits the name first.
             let instruction = format!(
                 "Ask the user to confirm or edit the repo name `{suggested}`, then call \
                  onboarding(repo_name=\u{2026}); the call writes the committed file \

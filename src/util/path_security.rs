@@ -1247,7 +1247,7 @@ pub fn worktree_main_root(root: &Path) -> Option<PathBuf> {
 /// `"`, `'` or `\` in a directory name reads back as the path it names; `read_only` is an argument
 /// assignment with a JSON boolean, which is how the tool takes it. The refusals used to print
 /// `path='<root>', read_only: false`: single quotes JSON does not have, and a colon that is not a call.
-pub(crate) fn activate_writable_call(root: &str) -> String {
+fn activate_writable_call(root: &str) -> String {
     format!(
         "workspace(action='activate', path={}, read_only=false)",
         crate::util::text::json_quote(root)
