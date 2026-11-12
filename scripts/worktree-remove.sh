@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# worktree-remove.sh — find and classify the processes that hold a linked git worktree,
-# before anyone removes it.
+# worktree-remove.sh — remove a linked git worktree safely: find and classify the
+# processes that hold it, stop the ones that are stoppable (only with --stop), remove the
+# worktree, and verify that nothing is left behind.
 #
 # Usage:
 #   scripts/worktree-remove.sh [--stop] [--wait SECS] <worktree path>
@@ -10,9 +11,16 @@
 #   stdout  one row per holder, `PID<TAB>KIND<TAB>CMDLINE`, ordered mux first, then the
 #           other stoppable kinds, then `other`. KIND is one of
 #           mux | rust-analyzer | cargo | rustc | sccache | build-output | other
-#   stderr  the occupancy warning, refusals, and `no holders under <path>`
-#   exit    0 no holders · 2 refused (usage, unregistered path, main checkout, caller's
-#           cwd inside, no /proc) · 3 holders exist · 4 --stop, but a blocker exists
+#   stderr  the occupancy warning, refusals, `no holders under <path>`, the holders that
+#           survive a stop (rows in the same format as stdout), and what git or the
+#           verification found
+#   exit    0 the worktree is removed and verified gone
+#           2 refused (usage, unregistered path, main checkout, caller's cwd inside, no /proc)
+#           3 holders exist and --stop was not given
+#           4 --stop, but a blocker exists (nothing was signalled)
+#           5 --stop, but a holder survived the stop (nothing was removed)
+#           6 git refused to remove the worktree (untracked files, a lock): never forced
+#           7 git removed it but the directory is still there: listed, never deleted
 #
 # WHY THIS EXISTS
 #   A worktree that served `symbols` on a Rust file keeps a live
@@ -30,7 +38,25 @@
 #   (docs/conventions/reaching-a-peer-session.md, Step 4: ask the occupant first).
 #   Only the processes a worktree's own rust tooling leaves behind are stoppable. Any
 #   other holder (an editor, a shell, a test run) is a blocker: with `--stop` the script
-#   prints it and exits 4 without signalling anything.
+#   prints it and exits 4 without signalling anything. So is this script's own parent
+#   when its cwd is inside the worktree, whatever its kind: the script never signals its
+#   own pid, its subshells or its parent.
+#
+# HOW IT STOPS
+#   SIGTERM only, never SIGKILL. The mux holders first (a graceful mux exit kills the
+#   language server's process group), then, after a pause of at most one second or until
+#   the mux is gone, the other stoppable holders. Liveness is a RESCAN of the holders, never
+#   `kill -0` (a zombie answers it). The rescan runs about every 0.5 s for up to --wait
+#   seconds in all (default 30) and signals what is new, at most three times, because a
+#   dying `cargo` can start children. A holder still listed afterwards is a survivor:
+#   exit 5, nothing removed. A signal that fails because the process is already gone is
+#   not an error; if the rescan still lists it, it is a survivor like any other.
+#
+# HOW IT REMOVES
+#   `git -C <main checkout> worktree remove <path>` without --force (exit 6 when git
+#   refuses, with `git status --porcelain --ignored -uall` printed), then
+#   `git worktree prune`, then a check that the path is gone (exit 7 when it is not: the
+#   contents are listed, never deleted). The branch is not deleted.
 #
 # HOW A PROCESS IS MATCHED
 #   Holder   its cwd is the worktree or below it, OR an element of its command line
@@ -55,8 +81,8 @@
 #   * The path is matched in its canonical spelling. A command line that spells the
 #     worktree through a symlink is not matched.
 #   * It needs Linux /proc, like scripts/stale-servers.sh; without it the script refuses.
-#   * This version only lists and refuses. It never signals a process and never removes
-#     anything.
+#   * Between the last scan and `git worktree remove`, a new process can start in the
+#     worktree; that surfaces as git's refusal or as exit 7, not as a signal.
 #
 # TEST SEAM
 #   WORKTREE_REMOVE_PROC (default /proc) points the scan at a fixture tree:
@@ -188,8 +214,19 @@ kind_rank() {
 # because it launched this script), never from the cwd test: a launcher that sits inside
 # the worktree and starts the script from elsewhere holds the worktree like any other.
 list_holders() {
-    local wt=$1 d pid cwd a hit kind cmd argv_exempt
+    local wt=$1 d pid cwd a hit kind cmd argv_exempt rec
     local -a argv rows=()
+    local -A cwds=()
+    # On the real /proc one `find` reads every cwd link at once: a `readlink` per process is a
+    # fork per process, seconds on a busy machine, and the stop loop rescans. The kernel
+    # reports a canonical path, which is what `readlink -f` yields. A process that has no entry
+    # (another user's, or started since) has no readable cwd, as before. A fixture tree
+    # (WORKTREE_REMOVE_PROC) may hold non-canonical symlinks, so it keeps `readlink -f`.
+    if [ "$PROC" = /proc ]; then
+        while IFS= read -r -d '' rec; do
+            cwds["${rec%%$'\t'*}"]=${rec#*$'\t'}
+        done < <(find "$PROC" -mindepth 2 -maxdepth 2 -name cwd -printf '%h\t%l\0' 2>/dev/null)
+    fi
     for d in "$PROC"/[0-9]*; do
         [ -d "$d" ] || continue
         pid=${d##*/}
@@ -200,7 +237,11 @@ list_holders() {
         argv_exempt=0
         [ "$pid" = "$PPID" ] && argv_exempt=1
         [ -r "$d/cmdline" ] || continue
-        cwd=$(readlink -f -- "$d/cwd" 2>/dev/null) || cwd=""
+        if [ "$PROC" = /proc ]; then
+            cwd=${cwds["$d"]-}
+        else
+            cwd=$(readlink -f -- "$d/cwd" 2>/dev/null) || cwd=""
+        fi
         argv=()
         while IFS= read -r -d '' a || [ -n "$a" ]; do
             argv+=("$a")
@@ -233,8 +274,128 @@ list_holders() {
     fi
 }
 
+# main_checkout_of PATH: print the main checkout of the repository PATH belongs to, the first
+# entry of `git worktree list --porcelain`. Git commands that remove a worktree run from
+# there, never from inside the worktree being removed.
+main_checkout_of() {
+    local wt=$1 porcelain
+    if [ -d "$wt" ]; then
+        porcelain=$(git -C "$wt" worktree list --porcelain 2>/dev/null)
+    else
+        porcelain=$(git worktree list --porcelain 2>/dev/null)
+    fi
+    porcelain=${porcelain%%$'\n'*}
+    [ "${porcelain#worktree }" != "$porcelain" ] || return 1
+    printf '%s\n' "${porcelain#worktree }"
+}
+
+# set_now_ms: set NOW_MS to the current time in milliseconds.
+set_now_ms() {
+    local t=${EPOCHREALTIME/./}
+    NOW_MS=$((t / 1000))
+}
+
+# send_term PID: SIGTERM, never to this script, its subshell or its parent. A failed signal (the
+# process is already gone) is not an error and prints nothing; the rescan decides whether the
+# holder is still there.
+send_term() {
+    local pid=$1
+    case $pid in "$$" | "$BASHPID" | "$PPID") return 0 ;; esac
+    kill -TERM "$pid" 2>/dev/null
+    return 0
+}
+
+# stop_holders PATH WAIT: SIGTERM the stoppable holders of PATH, the mux first, and rescan until
+# none is left. Return 0 when none remains, 5 when something does (the survivors are printed
+# on stderr). Liveness is the rescan through list_holders, never `kill -0`.
+#   * A pid is signalled once. A holder that appears in a later round (a dying `cargo` can
+#     start children) is signalled in that round; at most three rounds signal anything.
+#   * A holder of kind `other` is never signalled; one that appears later is a survivor.
+#   * The wait is WAIT seconds in all, polled about every 0.5 s.
+stop_holders() {
+    local wt=$1 wait_s=$2 rows row pid kind cmd round=0 signalled=" " deadline i found
+    local -a mux_pids other_pids
+    set_now_ms
+    deadline=$((NOW_MS + wait_s * 1000))
+    while :; do
+        rows=$(list_holders "$wt")
+        [ -n "$rows" ] || return 0
+        mux_pids=()
+        other_pids=()
+        while IFS=$'\t' read -r pid kind cmd; do
+            case $signalled in *" $pid "*) continue ;; esac
+            case $pid in "$$" | "$BASHPID" | "$PPID") continue ;; esac
+            case $kind in
+                other) ;;
+                mux) mux_pids+=("$pid") ;;
+                *) other_pids+=("$pid") ;;
+            esac
+        done <<<"$rows"
+        if [ $((${#mux_pids[@]} + ${#other_pids[@]})) -gt 0 ] && [ "$round" -lt 3 ]; then
+            round=$((round + 1))
+            for pid in "${mux_pids[@]+"${mux_pids[@]}"}"; do
+                signalled+="$pid "
+                send_term "$pid"
+            done
+            if [ "${#mux_pids[@]}" -gt 0 ]; then
+                # Give a graceful mux exit up to one second to take its language server with it.
+                for i in 1 2 3 4 5 6 7 8 9 10; do
+                    sleep 0.1
+                    rows=$(list_holders "$wt")
+                    found=0
+                    for pid in "${mux_pids[@]}"; do
+                        case $'\n'"$rows" in *$'\n'"$pid"$'\t'*) found=1 ;; esac
+                    done
+                    [ "$found" -eq 1 ] || break
+                done
+            fi
+            for pid in "${other_pids[@]+"${other_pids[@]}"}"; do
+                signalled+="$pid "
+                send_term "$pid"
+            done
+        fi
+        set_now_ms
+        [ "$NOW_MS" -lt "$deadline" ] || break
+        sleep 0.5
+    done
+    # The last scan may predate the last signals: look once more before calling anything a survivor.
+    rows=$(list_holders "$wt")
+    [ -n "$rows" ] || return 0
+    {
+        echo "worktree-remove: these holders are still there after SIGTERM and ${wait_s}s (nothing was removed; SIGKILL is never used):"
+        printf '%s\n' "$rows"
+    } >&2
+    return 5
+}
+
+# remove_worktree ROOT PATH: `git worktree remove` without --force, `git worktree prune`, then check
+# that PATH is gone. Return 0 when it is, 6 when git refuses, 7 when the directory is still
+# there. It never deletes anything itself.
+remove_worktree() {
+    local root=$1 wt=$2 out
+    if ! out=$(git -C "$root" worktree remove "$wt" 2>&1); then
+        {
+            echo "worktree-remove: git refused to remove $wt; nothing was forced:"
+            printf '%s\n' "$out" | sed 's/^/  /'
+            echo "  git -C $wt status --porcelain --ignored -uall:"
+            git -C "$wt" status --porcelain --ignored -uall 2>&1 | sed 's/^/    /'
+        } >&2
+        return 6
+    fi
+    git -C "$root" worktree prune >/dev/null || true
+    if [ -e "$wt" ] || [ -L "$wt" ]; then
+        {
+            echo "worktree-remove: git removed the worktree but $wt is still there (something wrote to it afterwards). Its contents, which this script does not delete:"
+            ls -A -- "$wt" 2>&1 | sed 's/^/  /'
+        } >&2
+        return 7
+    fi
+    echo "worktree-remove: removed $wt" >&2
+    return 0
+}
+
 main() {
-    local path="" wt holders count blockers row pid kind cmd
+    local path="" wt root holders count blockers row pid kind cmd rc
     while [ $# -gt 0 ]; do
         case $1 in
             --stop) STOP=1 ;;
@@ -266,11 +427,13 @@ main() {
     [ -d "$PROC" ] || die "cannot scan processes: [$PROC] is not a directory; this script needs Linux /proc"
 
     wt=$(resolve_worktree "$path") || exit 2
+    root=$(main_checkout_of "$wt") || die "cannot find the main checkout of $wt"
 
     holders=$(list_holders "$wt")
     if [ -z "$holders" ]; then
         echo "no holders under $wt" >&2
-        exit 0
+        remove_worktree "$root" "$wt"
+        exit $?
     fi
 
     printf '%s\n' "$holders"
@@ -286,6 +449,8 @@ main() {
     while IFS=$'\t' read -r pid kind cmd; do
         if [ "$kind" = other ]; then
             blockers+="  $pid  $cmd"$'\n'
+        elif [ "$pid" = "$PPID" ]; then
+            blockers+="  $pid  $cmd  (the parent of this script)"$'\n'
         fi
     done <<<"$holders"
 
@@ -297,7 +462,11 @@ main() {
             } >&2
             exit 4
         fi
-        echo "worktree-remove: --stop: this version does not signal; nothing was signalled." >&2
+        stop_holders "$wt" "$WAIT_SECS"
+        rc=$?
+        [ "$rc" -eq 0 ] || exit "$rc"
+        remove_worktree "$root" "$wt"
+        exit $?
     fi
     exit 3
 }
