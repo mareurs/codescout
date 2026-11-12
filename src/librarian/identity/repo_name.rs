@@ -153,12 +153,16 @@ pub fn read(root: &Path) -> anyhow::Result<Option<RepoName>> {
             return Err(e.into_anyhow()).with_context(|| format!("reading {}", path.display()));
         }
     };
-    let parsed = (|| -> anyhow::Result<RepoName> {
-        let file: RepoFile = toml::from_str(&text)?;
-        Ok(RepoName::parse(&file.name)?)
-    })()
-    .with_context(|| format!("reading {}", path.display()))?;
+    let parsed = parse_text(&text).with_context(|| format!("reading {}", path.display()))?;
     Ok(Some(parsed))
+}
+
+/// Parse the text of a `.codescout/repo.toml`: the one parser behind [`read`] and every loader
+/// that gets the text from elsewhere (a git blob), so they cannot disagree. The caller adds the
+/// file's name to the error.
+pub fn parse_text(text: &str) -> anyhow::Result<RepoName> {
+    let file: RepoFile = toml::from_str(text)?;
+    Ok(RepoName::parse(&file.name)?)
 }
 
 /// Write `.codescout/repo.toml` under `root`, creating `.codescout/` if needed.
@@ -300,6 +304,25 @@ mod tests {
         assert!(err.contains("repo.toml"), "{err}");
         std::fs::write(dir.path().join(REPO_FILE_REL), "name = \n").unwrap();
         assert!(format!("{:#}", read(dir.path()).unwrap_err()).contains("repo.toml"));
+    }
+
+    #[test]
+    fn parse_text_is_the_parser_read_uses() {
+        assert_eq!(
+            parse_text("name = \"codescout\"\nfuture = 1\n")
+                .unwrap()
+                .as_str(),
+            "codescout"
+        );
+        // The same refusals `read` reports, minus the file name the caller adds.
+        for bad in [
+            "name = \"Bad Name\"\n",
+            "name = \n",
+            "",
+            "name = \"deadbeefcafe1234\"\n",
+        ] {
+            assert!(parse_text(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
