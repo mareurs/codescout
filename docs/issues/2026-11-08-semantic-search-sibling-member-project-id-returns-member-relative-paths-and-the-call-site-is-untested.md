@@ -1,7 +1,7 @@
 ---
 id: b4c80abc4f6cd956
 kind: bug
-status: open
+status: mitigated
 title: semantic_search with a sibling member's project_id returns member-relative paths, and the call site of the lift is untested
 owners:
 - marius
@@ -9,11 +9,13 @@ tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
 - semantic-search
 - workspace
+closed: 2026-11-12
 opened: 2026-11-08
 owner: marius
 related:
 - docs/issues/archive/2026-11-05-member-semantic-result-paths-miss-workspace-root.md
 severity: medium
+unverified: 'No live run: a two-member workspace with a built index, focused on one member and searching the other, then read_file on the returned path. Not covered by any test: that SemanticSearch::call passes its own input, library flag, project id and focused root to rooted_search_response (a wrong argument there is not caught). Windows path components were not run.'
 ---
 
 # BUG: semantic_search with a sibling member's project_id returns member-relative paths, and the call site of the lift is untested
@@ -91,6 +93,8 @@ Documentation gap (doc-vs-code), read verbatim:
 
 ## Fix
 
+Decided 2026-11-12 with the owner: option 1, a `../<member>/...` path. It makes the documented sentence true for every session shape, needs no new response field and removes no search that works today. The cost named below stands: the write tools refuse such a path as outside the project root, and the same hit is spelled by the focus of the caller. Gap 2 was closed by moving the decision and the page shape into `rooted_search_response`, which `call` invokes with the hits the search returned; the three tests reach it with hits they supply.
+
 Open design decision, deliberately NOT decided here. Options that exist, with the cost read from the code:
 
 1. Emit a `../beta/...` path. `lift_member_paths` already tolerates `..` segments, so the change is in `lift_explicit_member_hits`: compute a relative path between `member_root` and `focused_root` (today only `strip_prefix` is used, line 1013) instead of skipping. `read_file` can open it: `validate_read_path_with` joins a relative path onto the root, canonicalizes, and checks only a deny-list (`src/util/path_security.rs:501-545`). Cost: the path leaves the focused root, so write-side containment (`validate_write_path`, which reports "is outside the project root", `path_security.rs:931`) will treat it as outside; and the same hit is spelled differently depending on the caller's focus.
@@ -102,11 +106,30 @@ Whichever is chosen, the long_docs (`semantic_search.rs:534-537`) and the manual
 
 Gap 2 plan (not designed in detail): give `SemanticSearch::call` a seam to receive a client (for example split the post-search tail, lines 833-839 onward, into a function that takes the hits, or let a test build a `RetrievalClient::from_config_only` over a fake store), then assert end to end that an explicit member id yields workspace-root-relative paths. Verify the test red by deleting line 838.
 
-Status stays `open`; no fix SHA or patch-id exists.
+Status is `mitigated`; the fix SHAs and patch-ids are in `## Fix provenance`.
 
 ## Tests added
 
-None yet. Justification: the bug is open. The existing `pins_current_limitation_sibling_member_hits_stay_member_relative` (`tests.rs:1181`) pins the defect rather than guarding a wanted behaviour, and there is no test of the call site.
+All in `src/tools/semantic/tests.rs`:
+
+- `sibling_member_hits_resolve_against_the_focused_root` replaces the test that pinned the limitation. It asserts `../beta/src/lib.rs` and that the path is a file under the focused root. Red before the fix (`left: "src/lib.rs"`, `right: "../beta/src/lib.rs"`), green after.
+- `relative_path_between_climbs_out_of_the_first_directory_and_descends_into_the_second` covers the helper: same directory, descendant, sibling, ancestor, no common root.
+- `the_page_of_an_explicit_sibling_member_carries_the_rooted_path`, `the_page_of_a_search_without_a_project_id_keeps_the_stored_path` and `the_page_of_a_library_search_keeps_the_stored_path` reach `rooted_search_response` with hits they supply.
+
+Mutation probe on the committed tree (`scripts/mutation-probe.sh --strict`, `cargo test --lib tools::semantic`, 126 tests): deleting the `lift_explicit_member_hits` call is KILLED by the first page test; dropping `has_explicit_project_id(input) &&` is KILLED by the second; dropping `&& !is_library` is KILLED by the third. Before this change the same deletion SURVIVED (122 tests, 0 failed).
+
+
+## Fix provenance
+
+Gap 1, the sibling path:
+
+- **SHA:** `47a21610a49ce7f5042397935343357bd0c0a504` (`experiments`)
+- **patch-id:** `3e39fa3f82f6348ba97d8ef6a62cb70e1a072735`
+
+Gap 2, the call site:
+
+- **SHA:** `0933ff87d7476758a74c4528bd65b419f838def6` (`experiments`)
+- **patch-id:** `b42b025d8188ee87dd6339a1b5ceab7f5029e84b`
 
 ## Workarounds
 
@@ -114,7 +137,9 @@ Pin the call to the member that owns the files: pass `workspace=<member root>` (
 
 ## Resume
 
-The pin test is confirmed green on the current tip and the call-site gap is measured (see Reproduction and Root cause). Take the design decision among the four options in Fix with the owner. After that: edit `lift_explicit_member_hits` at `src/tools/semantic/semantic_search.rs:1013` (the `strip_prefix` branch), update the pin test at `src/tools/semantic/tests.rs:1181`, and update `src/tools/semantic/semantic_search.rs:534-537` and `docs/manual/src/tools/semantic-search.md:57`. Then close Gap 2 with a seam for the call site.
+Both gaps have a code change and a test that fails without it. What is left is in `unverified` (frontmatter): a live run, and the wiring of `call`'s arguments into `rooted_search_response`. Run the live variant from Reproduction step 2 on a workspace with two built members to move this to `fixed`; the wiring needs a live store or a seam for the retrieval client in `call`.
+
+If a caller needs to write to the sibling's file, it must pin `workspace=<member root>` or activate the member: the write tools refuse a `../beta/...` path.
 
 ## References
 
