@@ -178,6 +178,17 @@ Read only; nothing in `~/.codex` was changed.
 
 Open: the operator's decision on how to refresh the Codex cache, then the live check named under Fix provenance.
 
+## Codex cache refreshed, 2026-11-12 (session `5566e8a8`, on the operator's order)
+
+Ran `codex plugin add codescout-companion@sdd-misc-plugins` against the real `~/.codex`, after a copy of `config.toml` (scratchpad `codex-config.toml.bak`). It printed `Added plugin ... Installed plugin root: /home/marius/.codex/plugins/cache/sdd-misc-plugins/codescout-companion/1.21.5`. `remove` was not needed. `codex plugin marketplace upgrade` was not run.
+
+- The cache directory now holds only `1.21.5` (the `1.21.0` directory is gone). `grep -c isCodexProcess` on its `hooks/lib.mjs` prints `2`, the same as the repo copy.
+- `diff` of `config.toml` before and after is empty: no trust hash was added or removed.
+- Trust: `hooks.json` changed after `1.21.0` was seeded, in claude-plugins `c93a23b` (2026-11-11): it adds two `wake-missed-jobs.mjs` entries, under SessionStart and UserPromptSubmit. They have no `trusted_hash` in `config.toml`, so by the trust rule seen on 2026-11-11 Codex will not run them until they are trusted. The entry that carries the fix, `session_start:0:0` (`session-start.mjs`), is unchanged in `hooks.json`, and its `trusted_hash` is untouched. Not verified: that Codex still lists that entry as trusted. I did not start a Codex session or call `hooks/list`. Also not verified: whether `trusted_hash` covers the script bytes or only the entry.
+- `codex plugin list` timed out after 30 s, so it was not used.
+
+Open: the live check (a Codex probe under a Claude session, then `cc_session_id` in `usage.db`). It uses the real config, so a failed fix would move the probing Claude session's stamp until `/mcp`.
+
 ## Fix provenance
 
 - **SHA:** `claude-plugins:f41d5aa` (`f41d5aaf34149c84bc619e5468341648a7998610`, 2026-11-12, repo `claude-plugins`, path `codescout-companion/hooks/`)
