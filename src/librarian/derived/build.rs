@@ -2136,4 +2136,106 @@ mod tests {
             .unwrap();
         assert_eq!(name, "home", "the committed name, not the edited file's");
     }
+
+    /// A measurement, not a regression test: the derived index of THIS checkout's HEAD, built
+    /// through the entry points `derive-shadow` uses and printed with every count. Run it with
+    /// `cargo test --lib derived_index_of_this_repo -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a measurement of this repository's HEAD: run with --ignored --nocapture"]
+    fn derived_index_of_this_repo() {
+        const KNOWN_EDGE_KINDS: [&str; 9] = [
+            "file",
+            "entry",
+            "local",
+            "unknown_key",
+            "key_collision",
+            "undefined_token",
+            "ambiguous_token",
+            "cross_repo",
+            "malformed",
+        ];
+        const KNOWN_SKIP_REASONS: [&str; 3] = ["not_utf8", "symlink", "outside_key_space"];
+
+        let repo = git2::Repository::discover(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = std::fs::canonicalize(repo.workdir().unwrap()).unwrap();
+        // The index goes to a temp file outside the repository.
+        let scratch = tempfile::tempdir().unwrap();
+        assert!(
+            !std::fs::canonicalize(scratch.path())
+                .unwrap()
+                .starts_with(&root),
+            "the scratch index must lie outside {}",
+            root.display()
+        );
+        let mut conn = open_index(&scratch.path().join("derived.db")).unwrap();
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        let rules = rules_from_commit(&repo, &commit).unwrap();
+        let space = key_space_from_commit(&repo, &commit).unwrap();
+        let report = build_full(
+            &mut conn,
+            &BuildInput {
+                repo: &repo,
+                commit: &commit,
+                root: &root,
+                rules: &rules,
+                space: &space,
+            },
+        )
+        .unwrap();
+        assert_report_matches_tables(&conn, &report);
+
+        let grouped = |sql: &str| -> Vec<(String, usize)> {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as usize)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let edges = grouped("SELECT kind, count(*) FROM edge GROUP BY kind ORDER BY kind");
+        let problems = grouped("SELECT kind, count(*) FROM problem GROUP BY kind ORDER BY kind");
+        let skipped =
+            grouped("SELECT reason, count(*) FROM skipped GROUP BY reason ORDER BY reason");
+        let (name, name_source, rules_source): (String, String, String) = conn
+            .query_row(
+                "SELECT repo_name, name_source, rules_source FROM checkout",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        println!("commit {} in {}", commit.id(), root.display());
+        println!("repo_name {name} ({name_source}), rules_source {rules_source}");
+        println!("{report:?}");
+        println!(
+            "documents {}, entries {}, edges {}, chunks {}, problems {}, skipped {}",
+            report.documents,
+            report.entries,
+            report.edges,
+            report.chunks,
+            report.problems,
+            report.skipped
+        );
+        println!("edges by kind: {edges:?}");
+        println!("problems by kind: {problems:?}");
+        println!("skipped by reason: {skipped:?}");
+
+        assert!(report.documents > 0, "no document in HEAD's tree");
+        assert_eq!(
+            edges.iter().map(|(_, n)| n).sum::<usize>(),
+            report.edges,
+            "the per-kind edge counts sum to the total"
+        );
+        for (kind, _) in &edges {
+            assert!(
+                KNOWN_EDGE_KINDS.contains(&kind.as_str()),
+                "edge kind {kind}"
+            );
+        }
+        for (reason, _) in &skipped {
+            assert!(
+                KNOWN_SKIP_REASONS.contains(&reason.as_str()),
+                "skip reason {reason}"
+            );
+        }
+    }
 }
