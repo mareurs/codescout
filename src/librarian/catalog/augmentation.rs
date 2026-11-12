@@ -1,5 +1,6 @@
 use crate::librarian::catalog::dual_write::{
-    commit_after_file_write, record_written_file, write_entry_into_ledger, FileWrite,
+    commit_after_file_write, find_unrecorded_section, record_written_file, write_entry_into_ledger,
+    FileWrite, RetryRule,
 };
 use crate::librarian::catalog::Catalog;
 use crate::librarian::tools::{schema_validate, LibrarianRecoverableError};
@@ -804,6 +805,11 @@ pub struct AppendOutcome {
     /// unconditionally the second case's opposite — the caller was told to write a section
     /// whether or not they had asked the server to.
     pub section_written: bool,
+    /// Whether the section this call carried was ALREADY in the file (a failed earlier call
+    /// wrote it and persisted no id), so this call recorded that section's id and wrote no
+    /// second one. `section_written` is `true` then: the section is on disk and the caller
+    /// must not write it again. See [`dual_write::find_unrecorded_section`].
+    pub adopted: bool,
 }
 
 /// Atomically assigns the next `<id_prefix>-N` id and appends `entry` to
@@ -898,22 +904,56 @@ pub fn append_entry(
         .unwrap_or_default();
 
     let params_next = next_index(&existing_ids, id_prefix);
-    let next = params_next.max(body_max.map_or(0, |m| m + 1));
+    // A call that carries a section reads the ledger through the WRITE door now, inside the
+    // transaction and before an id is chosen, because a retry of a call that failed after its
+    // section reached disk must find that section instead of numbering a second one. The same
+    // text is the one the section is spliced into below, so the refusal is the door's own
+    // (a link, a path outside the roots) and fails the call with nothing written.
+    let section_doc: Option<String> = match (section, abs_path.as_deref()) {
+        (Some(_), Some(path)) => Some(
+            crate::librarian::read_door::ReadDoor::new(roots.clone())
+                .text_for_write(std::path::Path::new(path))
+                .map_err(|e| match e {
+                    crate::librarian::read_door::ReadError::Refused(r) => r,
+                    crate::librarian::read_door::ReadError::Io(e) => {
+                        LibrarianRecoverableError::new(format!(
+                            "append_entry: cannot read `{path}` to write the section: {e} — no id was \
+                             allocated and nothing was written"
+                        ))
+                    }
+                })?,
+        ),
+        _ => None,
+    };
+    // "Recorded" on this path is exact: params hold `<P>-n`. A section the file has and params
+    // lack is the orphan of a failed call (C1-R3, C1-R4).
+    let adopted_n: Option<u64> = match (section, section_doc.as_deref()) {
+        (Some(s), Some(doc)) => find_unrecorded_section(doc, id_prefix, &s.title, &s.body, &|n| {
+            let token = format!("{id_prefix}-{n}");
+            existing_ids.contains(&token)
+        }),
+        _ => None,
+    };
+    let adopted = adopted_n.is_some();
+    let next = adopted_n.unwrap_or_else(|| params_next.max(body_max.map_or(0, |m| m + 1)));
     let new_id = format!("{id_prefix}-{next}");
 
     // Skipping the collision is only half the repair — params is still missing
     // the rows the body already documents, and nothing else would ever say so.
-    let warning = body_max.filter(|m| m + 1 > params_next).map(|m| {
-        let params_max = match params_next {
-            1 => "none".to_string(),
-            n => format!("{id_prefix}-{}", n - 1),
-        };
-        format!(
-            "params lags body: the body already claims {id_prefix}-{m} but params' highest is \
+    // Not for an adopted section: nothing was renumbered, so there is no collision to name.
+    let warning = body_max
+        .filter(|m| m + 1 > params_next && !adopted)
+        .map(|m| {
+            let params_max = match params_next {
+                1 => "none".to_string(),
+                n => format!("{id_prefix}-{}", n - 1),
+            };
+            format!(
+                "params lags body: the body already claims {id_prefix}-{m} but params' highest is \
              {params_max}. Assigned {new_id} to avoid a collision — backfill the missing params \
              rows from the body so the structured index matches."
-        )
-    });
+            )
+        });
 
     // The mirror direction, and the common one. The warning above fires when the
     // BODY runs ahead of params; this fires when params run ahead of the body —
@@ -1016,45 +1056,39 @@ pub fn append_entry(
     let section_written = match section {
         None => false,
         Some(s) => {
-            let path = abs_path.as_deref().ok_or_else(|| {
-                LibrarianRecoverableError::new(format!(
+            let (Some(path), Some(doc)) = (abs_path.as_deref(), section_doc.as_deref()) else {
+                return Err(LibrarianRecoverableError::new(format!(
                     "append_entry: artifact `{artifact_id}` has no file on disk, so the \
                      section cannot be written — no id was allocated"
-                ))
-            })?;
-            // The write door's refusal BEFORE the read (`ReadDoor::text_for_write`).
-            let doc = crate::librarian::read_door::ReadDoor::new(roots.clone())
-                .text_for_write(std::path::Path::new(path))
-                .map_err(|e| match e {
-                    crate::librarian::read_door::ReadError::Refused(r) => r,
-                    crate::librarian::read_door::ReadError::Io(e) => {
-                        LibrarianRecoverableError::new(format!(
-                            "append_entry: cannot read `{path}` to write the section: {e} — no id was \
-                             allocated and nothing was written"
-                        ))
-                    }
-                })?;
-            // The splice, the guarded write and the row's `record_written_file` are the
-            // dual-write contract's one function. A link or a path outside the roots is refused
-            // with the transaction still open, so no id is consumed and the params row rolls
-            // back. `write_mark: false`: this path folds no frontmatter mark into the write.
-            written_section = Some(write_entry_into_ledger(
-                &tx,
-                &roots,
-                artifact_id,
-                std::path::Path::new(path),
-                &doc,
-                id_prefix,
-                next,
-                Some(s),
-                false,
-                "append_entry",
-            )?);
+                )));
+            };
+            // An adopted section is already in the file, so nothing is written: this path folds
+            // no frontmatter mark into its write (`write_mark: false`), so there is nothing
+            // else to bring up either.
+            if !adopted {
+                // The splice, the guarded write and the row's `record_written_file` are the
+                // dual-write contract's one function. A link or a path outside the roots is
+                // refused with the transaction still open, so no id is consumed and the params
+                // row rolls back.
+                written_section = Some(write_entry_into_ledger(
+                    &tx,
+                    &roots,
+                    artifact_id,
+                    std::path::Path::new(path),
+                    doc,
+                    id_prefix,
+                    next,
+                    Some(s),
+                    false,
+                    "append_entry",
+                )?);
+            }
             // `snapshot_missing` was derived from a body read taken BEFORE this write, so
             // it still lists the id whose row was just added. Reporting it would ask the
             // caller to do by hand the exact thing this call just did — the defect this
-            // change exists to remove, re-introduced one field over.
-            if s.index_row.is_some() {
+            // change exists to remove, re-introduced one field over. An adopted section added
+            // no row in this call, so the body read already says whether it has one.
+            if s.index_row.is_some() && !adopted {
                 snapshot_missing.retain(|m| m != &new_id);
             }
             true
@@ -1062,8 +1096,15 @@ pub fn append_entry(
     };
 
     // NOT a bare `tx.commit()?`: see `commit_after_file_write` for what the commit does when it
-    // fails after the section is already on disk.
-    commit_after_file_write(tx, written_section.as_ref(), &new_id, "append_entry")?;
+    // fails after the section is already on disk. `Adopts`: params' "recorded" test is exact
+    // (params hold the id), so a retry finds the section a failed commit left behind.
+    commit_after_file_write(
+        tx,
+        written_section.as_ref(),
+        &new_id,
+        "append_entry",
+        RetryRule::Adopts,
+    )?;
     // After the commit, deliberately: this reads the body off disk and must never be
     // able to fail a write that already succeeded.
     let undefined_in_body = undefined_in_body_note(cat, artifact_id, &new_id);
@@ -1073,6 +1114,7 @@ pub fn append_entry(
         snapshot_missing,
         undefined_in_body,
         section_written,
+        adopted,
     })
 }
 
@@ -1111,6 +1153,11 @@ pub struct AllocateOutcome {
     /// on disk with a `def_re`-conformant heading and the caller must NOT write it
     /// again.
     pub section_written: bool,
+    /// Whether the section this call carried was ALREADY in the file (a failed earlier call
+    /// wrote it and persisted no id), so this call recorded that section's id and wrote no
+    /// second one. `section_written` is `true` then: the section is on disk and the caller
+    /// must not write it again. See [`dual_write::find_unrecorded_section`].
+    pub adopted: bool,
 }
 
 /// Frontmatter key by which an artifact declares itself a ledger owning an id
@@ -1800,14 +1847,29 @@ pub fn allocate_entry_id(
         .optional()?
         .map(|v| v.max(0) as u64);
 
+    // A section already in the file under this title and body, whose id the reservation table
+    // does not cover, is the orphan of a failed earlier call: that call wrote the file, then lost
+    // the catalog COMMIT, so its id was never persisted. Adopt it instead of numbering a second
+    // section (C1-R3). "Recorded" here is ONE per-prefix maximum, so a peer that reserved a
+    // higher id after our failed commit makes the orphan look recorded and it is not adopted;
+    // the commit below keeps `RetryRule::DeleteFirst` for exactly that case (C1-R22).
+    let adopted_n: Option<u64> = section.and_then(|s| {
+        find_unrecorded_section(&doc, id_prefix, &s.title, &s.body, &|n| {
+            reserved_max.is_some_and(|r| n <= r)
+        })
+    });
+    let adopted = adopted_n.is_some();
+
     // Max of all THREE, so no single input can walk the counter backwards. That is
     // the whole property: each source is unreliable in a different way, and none of
     // them is ever wrong in the *high* direction.
-    let next = body_max
-        .map_or(0, |m| m + 1)
-        .max(reserved_max.map_or(0, |m| m + 1))
-        .max(frontmatter_max.map_or(0, |m| m + 1))
-        .max(1);
+    let next = adopted_n.unwrap_or_else(|| {
+        body_max
+            .map_or(0, |m| m + 1)
+            .max(reserved_max.map_or(0, |m| m + 1))
+            .max(frontmatter_max.map_or(0, |m| m + 1))
+            .max(1)
+    });
 
     tx.execute(
         "INSERT INTO entry_reservation (artifact_id, prefix, max_allocated, updated_at)
@@ -1850,26 +1912,41 @@ pub fn allocate_entry_id(
     // `###` ledger the wrong level while claiming it was the ledger's own.
     let observed_level = body_entry_heading_level(body, id_prefix);
     let id = format!("{id_prefix}-{next}");
+    // An adopted section is already in the file, so only the committed mark can be behind it:
+    // it is written when it is below the adopted id (a mark-only write: a failed commit then says
+    // the retry is safe, because no section was written by this call), and the file is left
+    // alone when the mark already covers it.
+    //
     // `abs_path` is the catalog's, and a row can be an in-root link to a file outside the
     // repository; the write refuses a link. Before the commit, so the reservation
     // inserted above rolls back with the transaction.
-    let written = write_entry_into_ledger(
-        &tx,
-        &roots,
-        artifact_id,
-        std::path::Path::new(&abs_path),
-        &doc,
-        id_prefix,
-        next,
-        section,
-        true,
-        "allocate_entry_id",
-    )?;
+    let written: Option<FileWrite> = if adopted && frontmatter_max.is_some_and(|m| m >= next) {
+        None
+    } else {
+        Some(write_entry_into_ledger(
+            &tx,
+            &roots,
+            artifact_id,
+            std::path::Path::new(&abs_path),
+            &doc,
+            id_prefix,
+            next,
+            if adopted { None } else { section },
+            true,
+            "allocate_entry_id",
+        )?)
+    };
 
     // A commit that fails after the file write restores the file (when it still holds our
     // bytes) and says which remedy applies, instead of leaving the section behind an id that
     // was never persisted.
-    commit_after_file_write(tx, Some(&written), &id, "allocate_entry_id")?;
+    commit_after_file_write(
+        tx,
+        written.as_ref(),
+        &id,
+        "allocate_entry_id",
+        RetryRule::DeleteFirst,
+    )?;
 
     Ok(AllocateOutcome {
         id,
@@ -1878,6 +1955,7 @@ pub fn allocate_entry_id(
         frontmatter_max,
         heading_level: observed_level,
         section_written: section.is_some(),
+        adopted,
     })
 }
 
@@ -5751,6 +5829,230 @@ mod tests {
              because the defect is a SECOND section and `contains` is satisfied by both: {text}"
         );
     }
+    // ---- a retry finds the section it already wrote ------------------------------------------
+    //
+    // The oracle for every test below is the FILE and the catalog's own tables, read back; the
+    // response's `id` alone would be satisfied by the defect (a second section under a new id).
+
+    /// A ledger whose file already holds `## F-1 — first` with the body `prose` (as a failed
+    /// call left it), and whose catalog records nothing: params empty, no reservation. `mark`
+    /// is the committed `entry_high_water_F`, when the file has one.
+    fn orphan_fixture(
+        dir: &std::path::Path,
+        cat: &mut Catalog,
+        mark: Option<u64>,
+    ) -> std::path::PathBuf {
+        let (md, _) = ledger_fixture(dir, cat);
+        let mark_line = mark
+            .map(|m| format!("entry_high_water_F: {m}\n"))
+            .unwrap_or_default();
+        std::fs::write(
+            &md,
+            format!(
+                "---\nkind: tracker\nentry_prefix: F\n{mark_line}---\n\n# Ledger\n\n\
+                 ## F-1 — first\n\n**Valid:** dated 2026-01-01\n\nprose\n\n\
+                 ## Template for new entries\n\nboilerplate\n"
+            ),
+        )
+        .unwrap();
+        md
+    }
+
+    fn params_ids(cat: &Catalog, artifact_id: &str) -> Vec<String> {
+        let row = get(cat, artifact_id).unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        params["failures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["id"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    fn reserved_max(cat: &Catalog, artifact_id: &str, prefix: &str) -> Option<i64> {
+        cat.conn
+            .query_row(
+                "SELECT max_allocated FROM entry_reservation WHERE artifact_id = ?1 AND prefix = ?2",
+                rusqlite::params![artifact_id, prefix],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap()
+    }
+
+    fn append_first(cat: &mut Catalog, section: &PendingSection) -> AppendOutcome {
+        append_entry(cat, "art1", "failures", "F", json!({}), &[], Some(section)).unwrap()
+    }
+
+    fn different_body(title: &str) -> PendingSection {
+        PendingSection {
+            body: "other prose".to_string(),
+            ..pending(title)
+        }
+    }
+
+    #[test]
+    fn a_params_retry_adopts_a_section_the_file_has_and_params_lack() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = orphan_fixture(dir.path(), &mut cat, None);
+        let before = std::fs::read_to_string(&md).unwrap();
+
+        let out = append_first(&mut cat, &pending("first"));
+
+        assert_eq!((out.id.as_str(), out.adopted), ("F-1", true));
+        assert!(out.section_written, "the section is on disk: {out:?}");
+        assert!(
+            out.warning.is_none(),
+            "nothing was renumbered around the body, so there is no collision to warn about: {out:?}"
+        );
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert_eq!(text.matches("## F-").count(), 1, "{text}");
+        assert_eq!(
+            text, before,
+            "the params path writes no mark, so an adoption writes nothing at all"
+        );
+        assert_eq!(params_ids(&cat, "art1"), vec!["F-1"]);
+    }
+    // mutation: skip the adoption lookup on the params path → F-2, two sections.
+    // mutation: drop `&& !adopted` from the `warning` filter → the `warning.is_none()` assertion
+    // red.
+
+    #[test]
+    fn a_params_adoption_writes_the_cites_for_the_adopted_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        orphan_fixture(dir.path(), &mut cat, None);
+        crate::librarian::catalog::artifact::upsert(&cat, &sample_art("0123456789abcdef")).unwrap();
+
+        let out = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &["0123456789abcdef".to_string()],
+            Some(&pending("first")),
+        )
+        .unwrap();
+
+        assert_eq!((out.id.as_str(), out.adopted), ("F-1", true));
+        let src_local: String = cat
+            .conn
+            .query_row(
+                "SELECT src_local FROM entry_cite WHERE rel = 'cites'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("the adopted entry's citation is recorded under its own id");
+        assert_eq!(src_local, "F-1");
+    }
+    // mutation: skip the `entry_cite` insert when the section is adopted → the query finds no row.
+
+    #[test]
+    fn a_prose_retry_with_no_later_reservation_adopts_the_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = orphan_fixture(dir.path(), &mut cat, Some(1));
+        let before = std::fs::read_to_string(&md).unwrap();
+
+        let out = allocate_entry_id(&mut cat, "art1", "F", Some(&pending("first"))).unwrap();
+
+        assert_eq!((out.id.as_str(), out.adopted), ("F-1", true));
+        assert_eq!(reserved_max(&cat, "art1", "F"), Some(1));
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            before,
+            "the committed mark already holds 1, so the adoption has nothing to write"
+        );
+    }
+    // mutation: skip the adoption lookup on the prose path → F-2.
+
+    #[test]
+    fn a_prose_adoption_raises_a_committed_mark_that_is_below_the_adopted_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = orphan_fixture(dir.path(), &mut cat, None);
+
+        let out = allocate_entry_id(&mut cat, "art1", "F", Some(&pending("first"))).unwrap();
+
+        assert_eq!((out.id.as_str(), out.adopted), ("F-1", true));
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(
+            text.contains("entry_high_water_F: 1\n"),
+            "an adopted id must be under the committed mark, or a fresh clone reissues it: {text}"
+        );
+        assert_eq!(
+            text.matches("## F-").count(),
+            1,
+            "a mark-only write: no second section: {text}"
+        );
+        assert_eq!(reserved_max(&cat, "art1", "F"), Some(1));
+        assert_eq!(
+            crate::librarian::catalog::artifact::get(&cat, "art1")
+                .unwrap()
+                .unwrap()
+                .file_sha256,
+            crate::librarian::util::sha_of_bytes(text.as_bytes()),
+            "the row records the bytes the adoption wrote"
+        );
+    }
+    // mutation: skip the mark write when the adopted id is above the committed mark → the
+    // `entry_high_water_F: 1` assertion red.
+
+    #[test]
+    fn a_different_body_under_the_same_title_is_a_new_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = orphan_fixture(dir.path(), &mut cat, None);
+        let out = append_first(&mut cat, &different_body("first"));
+        assert_eq!((out.id.as_str(), out.adopted), ("F-2", false));
+        assert_eq!(
+            std::fs::read_to_string(&md)
+                .unwrap()
+                .matches("## F-")
+                .count(),
+            2
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        orphan_fixture(dir.path(), &mut cat, Some(1));
+        let out = allocate_entry_id(&mut cat, "art1", "F", Some(&different_body("first"))).unwrap();
+        assert_eq!((out.id.as_str(), out.adopted), ("F-2", false));
+    }
+    // mutation: pass `""` as section_body → adopted, red.
+
+    #[test]
+    fn a_recorded_section_is_never_adopted() {
+        // Params path: params hold F-1.
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        orphan_fixture(dir.path(), &mut cat, None);
+        cat.conn
+            .execute(
+                "UPDATE artifact_augmentation SET params = ?1 WHERE artifact_id = 'art1'",
+                [r#"{"failures":[{"id":"F-1"}]}"#],
+            )
+            .unwrap();
+        let out = append_first(&mut cat, &pending("first"));
+        assert_eq!((out.id.as_str(), out.adopted), ("F-2", false));
+
+        // Prose path: the reservation table already covers F-1.
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        orphan_fixture(dir.path(), &mut cat, Some(1));
+        cat.conn
+            .execute(
+                "INSERT INTO entry_reservation (artifact_id, prefix, max_allocated, updated_at)
+                 VALUES ('art1', 'F', 1, '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .unwrap();
+        let out = allocate_entry_id(&mut cat, "art1", "F", Some(&pending("first"))).unwrap();
+        assert_eq!((out.id.as_str(), out.adopted), ("F-2", false));
+    }
+    // mutation: `is_recorded = |_| false` → adopts F-1, red.
 
     /// One file write, or the peer race comes back. `allocate_entry_id` writes the
     /// frontmatter mark inside its `IMMEDIATE` transaction; a caller that wrote the

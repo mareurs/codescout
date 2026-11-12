@@ -386,7 +386,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // A caller told to "write the section" after the server already wrote it would
         // write a duplicate heading — two active definers for one token, which is worse
         // than the dangling case this path exists to prevent.
-        let next_step = if outcome.section_written {
+        let next_step = if outcome.adopted {
+            // The section was already in the file (a failed earlier call wrote it and persisted
+            // no id), so this call wrote none: saying "wrote" would be false and "reserved"
+            // would send the caller to write a duplicate.
+            format!(
+                "{id} was already in the file under this title and body, so it is now \
+                 recorded and nothing new was written. The heading is \
+                 `{heading} {id} — <title>`, so the entry is citable. Do NOT write the section \
+                 again.{compaction_note}",
+                id = outcome.id
+            )
+        } else if outcome.section_written {
             format!(
                 "Wrote {id} and recorded the ledger's high-water mark, in one file write. \
                  The heading is `{heading} {id} — <title>`, which is the shape link_scan \
@@ -406,7 +417,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 id = outcome.id
             )
         };
-        return Ok(json!({
+        let mut out = json!({
             "id": outcome.id,
             "artifact_id": target,
             "reserved": !outcome.section_written,
@@ -415,7 +426,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "reserved_max": outcome.reserved_max,
             "frontmatter_max": outcome.frontmatter_max,
             "next_step": next_step,
-        }));
+        });
+        if outcome.adopted {
+            out["adopted"] = json!(true);
+        }
+        return Ok(out);
     }
 
     let mut cat = ctx.catalog.lock();
@@ -466,6 +481,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     });
     if let Some(w) = outcome.warning {
         out["warning"] = json!(w);
+    }
+    if outcome.adopted {
+        // Present only when set. The params path returns no `next_step` otherwise, so this one
+        // is what tells the caller the section needs no second write.
+        out["adopted"] = json!(true);
+        out["next_step"] = json!(format!(
+            "{id} was already in the file under this title and body, so it is now recorded and \
+             nothing new was written. Do NOT write the section again.",
+            id = outcome.id
+        ));
     }
     if !outcome.snapshot_missing.is_empty() {
         out["snapshot_missing"] = json!(outcome.snapshot_missing);
@@ -2054,6 +2079,133 @@ mod tests {
              must not ask for the row this call just added: {missing:?}"
         );
     }
+    /// A retry of a call that failed after its section reached disk. The oracle is the FILE
+    /// (one section, not two) and the response's own words: `adopted` is present only when set,
+    /// and the `next_step` must not describe an adoption as a write.
+    #[tokio::test]
+    async fn an_adopted_params_retry_says_the_section_was_already_in_the_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "# Q\n\n## F-1 — t\n\n**Valid:** dated 2026-01-01\n\nb\n\n## Template\n",
+            &[],
+        );
+        let args = || {
+            json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"},
+                   "anchor_heading": "## Template", "title": "t", "body": "b"})
+        };
+
+        let result = call(&ctx, args()).await.unwrap();
+
+        assert_eq!(result["id"], "F-1");
+        assert_eq!(result["adopted"], true, "{result}");
+        assert_eq!(result["section_written"], true, "{result}");
+        let step = result["next_step"].as_str().unwrap();
+        assert!(
+            step.contains("already in the file") && step.contains("nothing new was written"),
+            "{step}"
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text.matches("## F-").count(), 1, "{text}");
+
+        // The same call again is no longer an adoption: params now record F-1.
+        let again = call(&ctx, args()).await.unwrap();
+        assert_eq!(again["id"], "F-2");
+        assert!(
+            again.get("adopted").is_none() && again.get("next_step").is_none(),
+            "`adopted` is present only when set: {again}"
+        );
+    }
+    // mutation: never set `out["adopted"]` / `out["next_step"]` on the params path → the first
+    // block red.
+
+    #[tokio::test]
+    async fn an_adopted_prose_retry_says_the_section_was_already_in_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: R\nentry_high_water_R: 1\n---\n\n# Ledger\n\n\
+             ## R-1 — t\n\n**Valid:** dated 2026-01-01\n\nb\n\n## Template\n",
+        )
+        .unwrap();
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "art1", &md);
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "id_prefix": "R", "anchor_heading": "## Template",
+                   "title": "t", "body": "b"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["id"], "R-1");
+        assert_eq!(result["adopted"], true, "{result}");
+        assert_eq!(result["reserved"], false, "{result}");
+        let step = result["next_step"].as_str().unwrap();
+        assert!(
+            step.contains("already in the file")
+                && step.contains("nothing new was written")
+                && !step.contains("Wrote R-1")
+                && !step.contains("Reserved R-1"),
+            "an adoption is neither a write nor a reservation: {step}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&md)
+                .unwrap()
+                .matches("## R-")
+                .count(),
+            1
+        );
+    }
+    // mutation: drop the `outcome.adopted` arm of the prose `next_step` → "Wrote R-1" appears.
+
+    /// An adopted section adds no index row in this call, so `snapshot_missing` keeps naming the
+    /// row the orphan never got: the retry must not claim a row it did not write.
+    #[tokio::test]
+    async fn an_adopted_retry_does_not_claim_an_index_row_it_did_not_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("queue.md");
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &path,
+            "# Q\n\n| ID |\n| F-1 |\n| F-2 |\n| F-3 |\n\n## F-4 — t\n\n\
+             **Valid:** dated 2026-01-01\n\nb\n\n## Template\n",
+            &["F-1", "F-2", "F-3"],
+        );
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"},
+                   "anchor_heading": "## Template", "title": "t", "body": "b",
+                   "index_row": "| {id} |", "index_after_line": "| ID |"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            (result["id"].as_str(), result["adopted"].as_bool()),
+            (Some("F-4"), Some(true))
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !text.contains("| F-4 |"),
+            "an adoption writes nothing, so no row appears: {text}"
+        );
+        let missing: Vec<String> =
+            serde_json::from_value(result["snapshot_missing"].clone()).unwrap_or_default();
+        assert_eq!(missing, vec!["F-4".to_string()], "{result}");
+    }
+    // mutation: drop `&& !adopted` from the `snapshot_missing.retain` guard → `missing` is empty.
 
     /// The point of the whole `snapshot_anchor` mechanism: a caller passes `index_row`
     /// with NO `index_after_line`, and the row lands at the block's TAIL because the

@@ -182,22 +182,123 @@ pub(crate) fn write_entry_into_ledger(
     })
 }
 
+/// What a retry does with a section that a failed call left on disk, and so what the failed
+/// call's hint tells the caller to do about it. Only a SECTION write has such a remedy; a
+/// write that carried only the high-water mark always says "safe to retry".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetryRule {
+    /// The retry finds the section ([`find_unrecorded_section`]) and records it: the caller
+    /// retries with the same title and body and deletes nothing.
+    Adopts,
+    /// The retry cannot be trusted to find it, so the caller deletes the section first. The
+    /// prose path's "recorded" test is one per-prefix maximum, which a peer's later reservation
+    /// can raise past the orphan, so there the orphan can look recorded without being so.
+    DeleteFirst,
+}
+
+/// A section's text with its server-stamped validity line and the blank lines around it
+/// dropped, so a section the server wrote compares equal to the body the caller passed.
+///
+/// `splice_pending_section` stamps `**Valid:** dated <today>` above a body that declares no
+/// class, so the stamp is the one difference between the two that a retry on another day
+/// changes; only that exact leading line is dropped, never a class the caller wrote.
+fn without_validity_stamp(text: &str) -> &str {
+    let text = text.trim();
+    let (first, rest) = text.split_once('\n').unwrap_or((text, ""));
+    let is_stamp = first
+        .trim_end()
+        .strip_prefix("**Valid:** dated ")
+        .is_some_and(|date| {
+            let b = date.as_bytes();
+            b.len() == 10
+                && b.iter().enumerate().all(|(i, c)| {
+                    if i == 4 || i == 7 {
+                        *c == b'-'
+                    } else {
+                        c.is_ascii_digit()
+                    }
+                })
+        });
+    if is_stamp {
+        rest.trim()
+    } else {
+        text
+    }
+}
+
+/// The number `N` of an entry heading line `<#…> <id_prefix>-N — <title>` whose title is
+/// `title`; `None` for any other heading.
+fn heading_number(heading_line: &str, id_prefix: &str, title: &str) -> Option<u64> {
+    let text = heading_line.trim().trim_start_matches('#');
+    // At least one `#`, then a space: a bare `F-1 — x` line is not a heading.
+    if text.len() == heading_line.trim().len() || !text.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let rest = text
+        .trim_start()
+        .strip_prefix(id_prefix)?
+        .strip_prefix('-')?;
+    let digits_end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    let (digits, after) = rest.split_at(digits_end);
+    let n: u64 = digits.parse().ok()?;
+    // `F-01` is a different token from `F-1`; only the spelling the server writes is ours.
+    if n.to_string() != digits {
+        return None;
+    }
+    let after_title = after.trim_start().strip_prefix('—')?;
+    (after_title.trim() == title.trim()).then_some(n)
+}
+
+/// The lowest `N` for which `doc` holds a section headed `<#…> <id_prefix>-N — <title>` whose
+/// text after the heading equals `section_body` (both trimmed, a leading
+/// `**Valid:** dated YYYY-MM-DD` line dropped from each) and which `is_recorded(N)` says the
+/// catalog has not recorded. Pure.
+///
+/// This is how a retry finds the section its failed predecessor already wrote: the failed call
+/// persisted no id, so the section on disk is an orphan, and writing a second one under the next
+/// id is the duplicate the retry exists to avoid. The key is the heading's title and the body
+/// text, with no marker in the committed file (ruling C1-R3), so two entries that are identical
+/// in both become one, and on another machine an identical committed entry is adopted because
+/// "recorded" is machine-local.
+pub(crate) fn find_unrecorded_section(
+    doc: &str,
+    id_prefix: &str,
+    title: &str,
+    section_body: &str,
+    is_recorded: &dyn Fn(u64) -> bool,
+) -> Option<u64> {
+    let wanted = without_validity_stamp(section_body);
+    crate::librarian::tools::link_scan::extract::entry_sections(doc)
+        .into_iter()
+        .filter_map(|s| {
+            let (heading, rest) = s.text.split_once('\n').unwrap_or((s.text.as_str(), ""));
+            let n = heading_number(heading, id_prefix, title)?;
+            (without_validity_stamp(rest) == wanted && !is_recorded(n)).then_some(n)
+        })
+        .min()
+}
+
 /// Commit `tx`. NOT a bare `tx.commit()?`: the commit is the one failure that lands AFTER the
 /// file is already on disk, and the bare error answers "did anything happen?" with silence,
 /// inviting the retry that duplicates the section. On a commit error the file is restored to
 /// `before` only when it still holds `after`, and the returned `LibrarianRecoverableError` names
 /// what reached disk and what did not (the document by [`document_label`]) and which remedy
-/// applies.
+/// applies. `retry` says what a retry does with a section that could not be restored.
 /// docs/issues/archive/2026-09-11-doc-update-writes-the-file-then-fails-the-catalog-and-reports-only-the-failure.md
 pub(crate) fn commit_after_file_write(
     tx: rusqlite::Transaction<'_>,
     written: Option<&FileWrite>,
     token: &str,
     caller: &str,
+    retry: RetryRule,
 ) -> Result<()> {
     match tx.commit() {
         Ok(()) => Ok(()),
-        Err(e) => Err(commit_failed_after_section_write(e, token, written, caller)),
+        Err(e) => Err(commit_failed_after_section_write(
+            e, token, written, caller, retry,
+        )),
     }
 }
 
@@ -284,11 +385,16 @@ fn without_path(text: &str, path: &std::path::Path, label: &str) -> String {
 /// That holds only when a SECTION was written ([`FileWrite::section_written`]). A write that
 /// carried only the high-water mark leaves no section behind, so its remedy is always "safe to
 /// retry": the mark running ahead of the catalog costs one skipped integer.
+///
+/// For a section that stays on disk, `retry` picks the remedy: [`RetryRule::Adopts`] says a
+/// retry with the same title and body finds the section and records it (nothing to delete);
+/// [`RetryRule::DeleteFirst`] keeps "delete it, then retry".
 fn commit_failed_after_section_write(
     e: rusqlite::Error,
     token: &str,
     written: Option<&FileWrite>,
     caller: &str,
+    retry: RetryRule,
 ) -> anyhow::Error {
     let Some(w) = written else {
         return LibrarianRecoverableError::with_hint(
@@ -354,6 +460,21 @@ fn commit_failed_after_section_write(
             ),
         };
     }
+    // What the caller does about a section that is still on disk. Only the SECTION branch reads
+    // it: the mark-only branch above has no section for either remedy to be about.
+    let remedy = match retry {
+        RetryRule::Adopts => format!(
+            "The section is the one this call was writing, so do NOT delete it: retry with the \
+             same title and body, and the call finds `{token}` in the file, records it, and \
+             writes no second section (an edit to the section's title or body since then makes \
+             the retry a new entry)."
+        ),
+        RetryRule::DeleteFirst => format!(
+            "Do NOT retry blind — the next allocation counts the ids already in the body, so a \
+             retry writes a SECOND section under a NEW id. Delete the `{token}` section (and its \
+             index row, if one was written) first, then retry."
+        ),
+    };
     match rollback {
         SectionRollback::Restored => LibrarianRecoverableError::with_hint(
             format!("{caller}: the catalog write failed; the section was rolled back"),
@@ -373,10 +494,7 @@ fn commit_failed_after_section_write(
                 "The section for `{token}` was written to {label} and the catalog COMMIT then \
                  failed, so its id was never persisted. It could NOT be rolled back: the file no \
                  longer holds the bytes this call wrote, so another writer has changed it since \
-                 and restoring would discard their edit. Do NOT retry blind — the next \
-                 allocation counts the ids already in the body, so a retry writes a SECOND \
-                 section under a NEW id. Delete the `{token}` section (and its index row, if \
-                 one was written) first, then retry. Underlying error: {e}"
+                 and restoring would discard their edit. {remedy} Underlying error: {e}"
             ),
         ),
         SectionRollback::Failed(io) => LibrarianRecoverableError::with_hint(
@@ -384,10 +502,7 @@ fn commit_failed_after_section_write(
             format!(
                 "The section for `{token}` was written to {label} and the catalog COMMIT then \
                  failed, so its id was never persisted. Rolling the file back also failed \
-                 ({io}), so the section is still on disk. Do NOT retry blind — the next \
-                 allocation counts the ids already in the body, so a retry writes a SECOND \
-                 section under a NEW id. Delete the `{token}` section (and its index row, if \
-                 one was written) first, then retry. Underlying error: {e}"
+                 ({io}), so the section is still on disk. {remedy} Underlying error: {e}"
             ),
         ),
     }
@@ -734,15 +849,17 @@ mod tests {
         );
     }
 
-    /// The two remedies are OPPOSITE INSTRUCTIONS, not two wordings of one. A retry after a
-    /// successful rollback is correct; the same retry with the section still on disk writes
-    /// a second one under a new id — the defect itself. So this asserts each branch both
-    /// says its own remedy and does NOT say the other's: a suite that only checks the
-    /// predicate leaves the remedy text untested by construction, which is the half that
-    /// sent four sessions the wrong way in this repo's own measured history.
+    /// The remedies are DIFFERENT INSTRUCTIONS, not wordings of one. A retry after a
+    /// successful rollback is correct as-is. With the section still on disk, a retry under
+    /// [`RetryRule::Adopts`] finds that section and records it; under
+    /// [`RetryRule::DeleteFirst`] it could write a second one under a new id — the defect
+    /// itself — so the caller deletes first. So this asserts each branch both says its own
+    /// remedy and does NOT say the others': a suite that only checks the predicate leaves the
+    /// remedy text untested by construction, which is the half that sent four sessions the
+    /// wrong way in this repo's own measured history.
     /// CLAUDE.md § *Testing Discipline*, the remedy-text law.
     #[test]
-    fn the_rolled_back_and_still_on_disk_remedies_point_in_opposite_directions() {
+    fn the_two_remedies_name_their_own_retry() {
         let busy = || {
             rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
@@ -765,34 +882,76 @@ mod tests {
             "F-1",
             Some(&write),
             "append_entry",
+            RetryRule::Adopts,
         ));
 
-        // Still on disk: a third party changed the file, so it was left alone.
+        // Still on disk: a third party changed the file, so it was left alone. The rule says
+        // what a retry does with the section that is still there.
         std::fs::write(&md, "a peer's rewrite\n").unwrap();
-        let still_there = hint_of(commit_failed_after_section_write(
+        let adopts = hint_of(commit_failed_after_section_write(
             busy(),
             "F-1",
             Some(&write),
             "append_entry",
+            RetryRule::Adopts,
+        ));
+        let delete_first = hint_of(commit_failed_after_section_write(
+            busy(),
+            "F-1",
+            Some(&write),
+            "allocate_entry_id",
+            RetryRule::DeleteFirst,
         ));
 
         assert!(
-            restored.contains("safe to retry") && !restored.contains("Do NOT retry"),
+            restored.contains("safe to retry as-is") && !restored.contains("Do NOT retry"),
             "a rolled-back section leaves nothing to clean up, so the hint must invite the \
              retry and must not forbid it: {restored}"
         );
         assert!(
-            still_there.contains("Do NOT retry") && !still_there.contains("safe to retry"),
-            "a section still on disk makes a retry duplicate it, so the hint must forbid \
-             the retry and must not invite it: {still_there}"
+            adopts.contains("retry with the same title and body")
+                && adopts.contains("F-1")
+                && !adopts.contains("safe to retry as-is")
+                && !adopts.contains("Delete the"),
+            "a section still on disk is adopted by a retry with the same title and body, so the \
+             hint says that, names the section, and neither invites a blind retry nor sends the \
+             caller to delete it: {adopts}"
         );
         assert!(
-            still_there.contains("F-1"),
-            "the hint must name the section the caller has to delete, not merely that one \
-             exists — an addressee who cannot act on the message is an untested remedy: \
-             {still_there}"
+            delete_first.contains("Delete the")
+                && delete_first.contains("F-1")
+                && !delete_first.contains("same title")
+                && !delete_first.contains("safe to retry"),
+            "where a peer's reservation can cover the orphan a retry does not adopt it, so the \
+             hint sends the caller to delete the section first and names it: {delete_first}"
         );
     }
+    // mutation: give `Adopts` and `DeleteFirst` one text.
+
+    #[test]
+    fn find_unrecorded_section_ignores_the_validity_stamp_and_skips_recorded_tokens() {
+        let doc = "---\nentry_prefix: F\n---\n\n## F-4 — first\n\n**Valid:** dated 2026-01-01\n\nprose\n\n## Template for new entries\n";
+        assert_eq!(
+            find_unrecorded_section(doc, "F", "first", "prose", &|_| false),
+            Some(4)
+        );
+        assert_eq!(
+            find_unrecorded_section(doc, "F", "first", "prose", &|n| n == 4),
+            None,
+            "a token the catalog records is never adopted"
+        );
+        assert_eq!(
+            find_unrecorded_section(doc, "F", "first", "other prose", &|_| false),
+            None,
+            "the same title over a different body is a different entry"
+        );
+        assert_eq!(
+            find_unrecorded_section(doc, "F", "second", "prose", &|_| false),
+            None,
+            "the same body under a different title is a different entry"
+        );
+    }
+    // mutation: compare titles only → the third assertion red.
 
     fn busy() -> rusqlite::Error {
         rusqlite::Error::SqliteFailure(
@@ -852,6 +1011,7 @@ mod tests {
             "F-1",
             Some(&write),
             "allocate_entry_id",
+            RetryRule::DeleteFirst,
         ));
         let missing = FileWrite {
             path: dir.path().join("never-created.md"),
@@ -862,6 +1022,7 @@ mod tests {
             "F-1",
             Some(&missing),
             "allocate_entry_id",
+            RetryRule::DeleteFirst,
         ));
         for hint in [&foreign, &failed] {
             assert!(
@@ -897,6 +1058,7 @@ mod tests {
                 "F-1",
                 Some(&section(md.clone(), section_written)),
                 "append_entry",
+                RetryRule::DeleteFirst,
             ));
             assert!(hint.contains("`[[ledger]]`"), "{hint}");
             assert!(!hint.contains(&root), "no absolute path in a hint: {hint}");
@@ -911,6 +1073,7 @@ mod tests {
                 "F-1",
                 Some(&section(missing.clone(), section_written)),
                 "append_entry",
+                RetryRule::DeleteFirst,
             ));
             assert!(hint.contains("`[[never-created]]`"), "{hint}");
             assert!(!hint.contains(&root), "no absolute path in a hint: {hint}");
