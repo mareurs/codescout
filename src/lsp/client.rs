@@ -3899,9 +3899,10 @@ struct Point {
     // one `document_symbols` call on the changed file, so a failure of the red test is the
     // stale view and not the fixture.
     //
-    // Scope: stdio transport only. The socket (mux) transport shows the same defect in a
-    // manual run; it has no test here because the mux harness is a different shape
-    // (`mux/coherence_rust.rs`).
+    // Scope: the tests in this block use the stdio transport. The socket (mux) transport has its
+    // own tests further down: `hover_follows_a_write_made_outside_codescout_through_the_mux`,
+    // `two_clients_on_one_mux_follow_a_write_made_outside_codescout` and, ignored and run by
+    // hand, `kotlin_hover_follows_a_write_made_outside_codescout_through_the_mux`.
 
     /// `lib.rs` defines `target_fn` (line 0, name at column 7) and `helper_fn`; `other.rs`
     /// calls `target_fn` on line 1. `target_fn` and `helper_fn` have the same length, so the
