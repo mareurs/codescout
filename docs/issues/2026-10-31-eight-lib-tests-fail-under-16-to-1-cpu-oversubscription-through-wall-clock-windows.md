@@ -206,5 +206,11 @@ Same table, read at 12:30 UTC with `sqlite3 -readonly`: rows with `attribution_o
 
 Not checked: whether the scans of `e4a747a2` in those windows would have finished under 30 s without my load; machine load at any other time (the table holds no load figure); the load of sessions that run foreground commands, which leave no background-job record; whether the 20 s stretch is a cache refill after a script change (the cache key covers `write_targets.py`).
 
+## Addendum, 2026-11-12 (session `5566e8a8`): a second load source in the 09:28 window
+
+The `timed_out` row at 09:28:17 UTC (`usage.db` times are UTC: the newest row, 12:41:23, matched `date -u` at 12:41:28) lies inside the `burn.py` window above, 09:26:03 to 09:32:43. It also lies inside a run of mine: a loop of eight full lean test suites, `run-2.log` of that loop finished at 09:30:39 UTC (11:30:39 +0200, by file mtime) and `run-1.log` at 09:26:32. So two sessions loaded the host in that window, not one. My suites ran under no busy processes, so their load is smaller than `burn.py`'s; I did not measure either. The same loop's four earlier rename-test runs under 64 busy loops finished between 09:02 and 09:23 UTC and match no `timed_out` row.
+
+This changes nothing in the section above. It adds that at least one of the six `timed_out` rows coincides with load that was not the author's of the read, so the rows say even less about the ceiling under normal use. The same limit holds: coincidence is not cause, and I did not re-run the scans without load.
+
 ## References
 - `docs/issues/2026-10-31-a-timed-out-filter-test-fails-in-the-loaded-gate-and-passes-alone.md`
