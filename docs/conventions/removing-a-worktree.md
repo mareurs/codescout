@@ -32,8 +32,8 @@ when another project is activated or when the worktree is removed (bug `3dde1548
    session is a client. Ask the occupant first
    ([`reaching-a-peer-session.md`](reaching-a-peer-session.md), Step 4 of its skill).
 4. If every holder is one of the stoppable kinds (`mux`, `rust-analyzer`, `cargo`, `rustc`,
-   `sccache`, `build-output`, `child`) and none is an ancestor of the script, run `scripts/worktree-remove.sh --stop <path>`. It sends
-   SIGTERM and
+   `sccache`, `build-output`, `child`) and none is an ancestor of the script, run
+   `scripts/worktree-remove.sh --stop <path>`. It sends SIGTERM and
    prints one stderr line per signal (`worktree-remove: signalled <pid> <kind> with SIGTERM`, or
    `worktree-remove: could not signal <pid> <kind> (already gone, or not permitted)`), so the
    output names each process it signalled. It then rescans, removes the worktree and checks that
@@ -89,8 +89,8 @@ any row (it can be `cargo` or `rust-analyzer`), and it is a blocker because the 
 each row's pid with the pids of its own ancestry, and never signals one. The script prints it
 with `(the parent of this script)` or `(an ancestor of this script)`. The ancestry is known as far
 as `/proc/<pid>/status` can be read: an ancestor above a process whose `status` is unreadable is
-not seen. With `--stop`, a blocker makes the script exit 4 and signal nothing, whether it was there at the first
-scan or appeared before the stop loop's first scan. Stop that session by hand.
+not seen. With `--stop`, a blocker makes the script exit 4 and signal nothing, whether it was
+there at the first scan or appeared before the stop loop's first scan. Stop that session by hand.
 
 ## Exit codes
 

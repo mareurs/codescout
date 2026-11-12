@@ -459,7 +459,7 @@ case_bad_arguments_refuse() {
 run_with_fake_parent() {
     rm -f "$C/parent-done"
     ( cd "$C" && F="$PROCD" PCWD="$1" PARG="$2" SFLAGS="${3:-}" PARGV0="${4:-bash}" WT="$WT" S="$SRC" OUTDIR="$C" \
-        SIB="${PARENT_SIBLING_PID-}" PPP="${PARENT_PPID-}" \
+        SIB="${PARENT_SIBLING_PID-}" PPP="${PARENT_PPID-}" ANCESTRY="${PARENT_ENV_ANCESTRY-}" \
         WORKTREE_REMOVE_PROC="$PROCD" timeout "${RUN_TIMEOUT:-120}" bash -c '
             mkdir -p "$F/$$"
             ln -s "$PCWD" "$F/$$/cwd"
@@ -538,6 +538,8 @@ case_the_parent_that_is_stoppable_by_kind_is_a_blocker() {
     eq "exit 4: the parent is a blocker, whatever its kind" 4 "$RC"
     contains "stderr says nothing was signalled" "nothing was signalled" "$ERR"
     contains "the parent is named" "$PPID_FAKE" "$ERR"
+    contains "the parent keeps its own text" "  ${PPID_FAKE}  cargo -c x  (the parent of this script)" "$ERR"
+    lacks "the parent is not marked as another ancestor" "(an ancestor of this script)" "$ERR"
     eq "the parent survived" present "$(present "$C/parent-done")"
     eq "the worktree is untouched" present "$(present "$WT")"
 }
@@ -1120,6 +1122,30 @@ case_without_stop_an_ancestor_is_listed_unchanged() {
     eq "the stdout row is unchanged" "5096001${TAB}cargo${TAB}cargo build" "$OUT"
 }
 
+case_a_mux_ancestor_of_the_script_is_a_blocker() {
+    echo "a_mux_ancestor_of_the_script_is_a_blocker"
+    new_case anc_mux
+    # G is a codescout mux in the worktree, the parent of the script's parent.
+    fake 5096041 "$WT" codescout mux --cwd "$WT"
+    PARENT_PPID=5096041 run_with_fake_parent "$C" x --stop
+    eq "exit 4: a mux that runs the script is a blocker" 4 "$RC"
+    contains "G is listed" "5096041" "$ERR"
+    contains "G is marked as an ancestor" "(an ancestor of this script)" "$ERR"
+    lacks "no signal line" "worktree-remove: signalled " "$ERR"
+}
+
+case_an_inherited_ancestry_variable_does_not_disable_the_guard() {
+    echo "an_inherited_ancestry_variable_does_not_disable_the_guard"
+    new_case anc_env
+    # The fixture of the grandparent case, with ANCESTRY set in the environment of the script run:
+    # the script computes its own ancestry and ignores the inherited value.
+    fake 5096001 "$WT" cargo build
+    PARENT_ENV_ANCESTRY=" 7 " PARENT_PPID=5096001 run_with_fake_parent "$C" x --stop
+    eq "exit 4: an ancestor is a blocker" 4 "$RC"
+    contains "G is marked as an ancestor" "(an ancestor of this script)" "$ERR"
+    lacks "no failed-signal line" "worktree-remove: could not signal " "$ERR"
+}
+
 case_a_holder_that_is_not_an_ancestor_is_still_stopped() {
     echo "a_holder_that_is_not_an_ancestor_is_still_stopped"
     new_case anc_control
@@ -1232,6 +1258,8 @@ case_a_stoppable_ancestor_of_the_script_makes_no_child
 case_a_stoppable_grandparent_of_the_script_is_a_blocker
 case_a_stoppable_ancestor_three_levels_up_is_a_blocker
 case_an_ancestor_blocks_the_whole_stop
+case_a_mux_ancestor_of_the_script_is_a_blocker
+case_an_inherited_ancestry_variable_does_not_disable_the_guard
 case_without_stop_an_ancestor_is_listed_unchanged
 case_a_holder_that_is_not_an_ancestor_is_still_stopped
 case_a_codescout_server_under_a_stoppable_holder_stays_a_blocker

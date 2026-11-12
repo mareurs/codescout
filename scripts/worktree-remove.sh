@@ -287,8 +287,8 @@ ppid_of() {
 
 # ancestry_of START sets ANCESTRY to a space-padded list of pids: START, then each ancestor found
 # through ppid_of (" 4100 4090 "). The walk follows `PPid:` upward and ends at pid 1 or 0, at a
-# repeated pid, at a missing or unreadable `status`, at a `PPid:` that is not a number, and after
-# 64 steps. An empty or non-numeric START gives " ". It returns 0.
+# repeated pid, at a missing or unreadable `status`, at a `PPid:` that is not a number or has
+# 11 or more digits, and after 64 steps. An empty or non-numeric START gives " ". It returns 0.
 ancestry_of() {
     local cur=$1 steps=0 seen
     case $cur in '' | *[!0-9]*)
@@ -387,9 +387,9 @@ list_holders() {
     # a `codescout` whatever its arguments (one that is not a mux is a peer session's MCP
     # server), and any ancestor of this script (its parent and the parent's ancestors: they
     # are what runs the script), which also never counts as the stoppable ancestor. The walk
-    # follows `PPid:` upward, one `sed` per step (ancestry_of, ppid_of), over processes that are not holders
-    # too, and ends at pid 1 or 0, at a repeated pid, at a missing or unreadable `status`, at a
-    # `PPid:` that is not a number, and after 64 steps: then the row stays `other`.
+    # follows `PPid:` upward, one `sed` per step (ancestry_of, ppid_of), over processes that are
+    # not holders too, and ends at pid 1 or 0, at a repeated pid, at a missing or unreadable
+    # `status`, at a `PPid:` that is not a number, and after 64 steps: then the row stays `other`.
     for pid in "${hpids[@]+"${hpids[@]}"}"; do
         [ "${hkind[$pid]}" = other ] || continue
         [ -z "${is_codescout[$pid]-}" ] || continue
@@ -466,12 +466,12 @@ scan_failed() {
 }
 
 # blockers_of ROWS: print one line per blocker among ROWS (`PID<TAB>KIND<TAB>CMDLINE`): a holder
-# of kind `other`, and this script's parent whatever its kind (the kind comes from
-# kind_of_argv like any row; the parent is a blocker because its pid is $PPID). Print nothing
-# when there is none.
+# of kind `other`, this script's parent whatever its kind, and any other holder that is an
+# ancestor of this script whatever its kind (the kind comes from kind_of_argv like any row; an
+# ancestor is a blocker because its pid is in ANCESTRY, which main sets). Print nothing when
+# there is none.
 blockers_of() {
     local pid kind cmd
-    [ -n "${ANCESTRY-}" ] || ancestry_of "$PPID"
     while IFS=$'\t' read -r pid kind cmd; do
         if [ "$kind" = other ]; then
             printf '  %s  %s\n' "$pid" "$cmd"
@@ -493,14 +493,14 @@ refuse_blockers() {
     } >&2
 }
 
-# send_term PID KIND: SIGTERM, never to this script, its subshell or its parent. It prints one
+# send_term PID KIND: SIGTERM, never to this script, its subshell, its parent or any other
+# ancestor of this script (ANCESTRY, set by main). It prints one
 # stderr line for the signal: `signalled <pid> <kind> with SIGTERM`, or `could not signal <pid>
 # <kind> (already gone, or not permitted)`. A failed signal is not an error; the rescan decides
 # whether the holder is still there.
 send_term() {
     local pid=$1 kind=$2
     case $pid in "$$" | "$BASHPID" | "$PPID") return 0 ;; esac
-    [ -n "${ANCESTRY-}" ] || ancestry_of "$PPID"
     case $ANCESTRY in *" $pid "*) return 0 ;; esac
     if kill -TERM "$pid" 2>/dev/null; then
         echo "worktree-remove: signalled $pid $kind with SIGTERM" >&2
@@ -515,8 +515,8 @@ send_term() {
 # on stderr) or when a scan fails, 4 when the first scan holds a blocker (nothing signalled).
 # Liveness is the rescan through scan_holders, never `kill -0`.
 #   * The first scan of the loop may show a blocker that appeared after `main`'s scan: an
-#     `other` row, or the parent. Then nothing is signalled and the return is 4, as `main`'s
-#     own refusal. A blocker that appears in a later round is a survivor.
+#     `other` row, or an ancestor of this script. Then nothing is signalled and the return is 4,
+#     as `main`'s own refusal. A blocker that appears in a later round is a survivor.
 #   * A pid is signalled once. A holder that appears in a later round (a dying `cargo` can
 #     start children) is signalled in that round; at most three rounds signal anything.
 #   * A holder of kind `other` is never signalled; one that appears later is a survivor.
@@ -528,7 +528,6 @@ stop_holders() {
     local wt=$1 wait_s=$2 rows pid kind cmd round=0 signalled=" " deadline i found fresh blockers
     local -a mux_pids other_pids
     local -A kind_of=()
-    [ -n "${ANCESTRY-}" ] || ancestry_of "$PPID"
     set_now_ms
     deadline=$((NOW_MS + wait_s * 1000))
     while :; do
@@ -718,6 +717,9 @@ main() {
     [ -n "$path" ] || { usage; die "no worktree path given"; }
     [ -d "$PROC" ] || die "cannot scan processes: [$PROC] is not a directory; this script needs Linux /proc"
     [[ $SCAN_TIMEOUT =~ ^[1-9][0-9]*$ ]] || die "WORKTREE_REMOVE_SCAN_TIMEOUT needs a whole number of seconds above 0, got [$SCAN_TIMEOUT]"
+    # The ancestry of this script, computed once here: blockers_of, send_term and stop_holders
+    # read it, and an ANCESTRY in the inherited environment must not stand in for it.
+    ancestry_of "$PPID"
 
     wt=$(resolve_worktree "$path") || exit 2
     root=$(main_checkout_of "$wt") || die "cannot find the main checkout of $wt"
