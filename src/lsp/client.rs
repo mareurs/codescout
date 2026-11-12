@@ -4090,23 +4090,36 @@ struct Point {
     }
 
     /// `rename` is deliberately not retried by the client (`is_idempotent_lsp_method`), so a
-    /// server that cancels it while it is busy surfaces as a `RecoverableError`. These tests
-    /// check the CONTENT of the edit, so they ask again on exactly that error and on no other.
-    async fn rename_retrying_when_cancelled(
+    /// server that cancels it while it is busy surfaces as a `RecoverableError`. A server that is
+    /// still working through a file change can also answer `null`, which `LspClient::rename`
+    /// cannot decode (`invalid type: null, expected struct WorkspaceEdit`): measured 2026-11-12,
+    /// 2 of 15 full-suite runs of `rename_edit_does_not_land_on_another_callee_…`, each after
+    /// 0.6 s. These tests check the CONTENT of the edit, so they ask again, for up to 20 s, on
+    /// exactly those two answers and on no other error. The retry does not hide a stale view: a
+    /// stale server answers with an edit whose ranges are wrong, and the caller's assertions
+    /// still fail on it.
+    async fn rename_retrying_while_the_server_is_busy(
         client: &LspClient,
         lib_rs: &Path,
         new_name: &str,
     ) -> lsp_types::WorkspaceEdit {
-        for _ in 0..5 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
             match client.rename(lib_rs, 0, 7, new_name, "rust").await {
                 Ok(edit) => return edit,
-                Err(e) if e.to_string().contains("cancelled non-idempotent request") => {
+                Err(e)
+                    if e.to_string().contains("cancelled non-idempotent request")
+                        || e.to_string().contains("invalid type: null") =>
+                {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "the server gave no rename edit within 20 s: {e:#}"
+                    );
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 Err(e) => panic!("rename failed: {e:#}"),
             }
         }
-        panic!("the server cancelled the rename on every attempt");
     }
 
     /// Change `other.rs` outside codescout, resync the NAMED file, ask for a rename of
@@ -4148,7 +4161,7 @@ struct Point {
         if resync_other {
             client.document_symbols(&other_rs, "rust").await.unwrap();
         }
-        let edit = rename_retrying_when_cancelled(&client, &lib_rs, "renamed_fn").await;
+        let edit = rename_retrying_while_the_server_is_busy(&client, &lib_rs, "renamed_fn").await;
 
         assert!(
             !edit_ranges_in(&edit, "/src/lib.rs").is_empty(),
