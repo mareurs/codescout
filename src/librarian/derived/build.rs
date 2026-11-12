@@ -27,7 +27,7 @@ use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
 use super::incremental::{self, CacheKey, Parsed};
-use super::scan::{blob_text, scan_commit};
+use super::scan::{blob_text, scan_commit, ScannedFile};
 use crate::librarian::catalog::chunk::{build_chunks, ChunkRow};
 use crate::librarian::classify::{
     classify, default_rules, load_rules, CompiledRule, PROJECT_RULES_REL,
@@ -185,11 +185,27 @@ pub(super) fn rebuild(
     reuse_cache: bool,
     changes: Option<ChangeCounts>,
 ) -> anyhow::Result<BuildReport> {
+    rebuild_from(conn, input, parser, reuse_cache, changes, &|| {
+        scan_commit(input.repo, input.commit, input.space)
+    })
+}
+
+/// [`rebuild`] with the scan of the commit passed in, so that a test can hand the build the same
+/// files in another order and see that nothing stored depends on it. `scan` runs once, after the
+/// repo name is read, as the scan always did; production passes [`scan_commit`] and nothing else.
+pub(super) fn rebuild_from(
+    conn: &mut Connection,
+    input: &BuildInput,
+    parser: &Parser,
+    reuse_cache: bool,
+    changes: Option<ChangeCounts>,
+    scan: &dyn Fn() -> anyhow::Result<Vec<ScannedFile>>,
+) -> anyhow::Result<BuildReport> {
     let (name, name_source) = repo_name_of(input.repo, input.commit)?;
 
     let mut documents: Vec<Document> = Vec::new();
     let mut skipped: Vec<(String, &'static str)> = Vec::new();
-    for file in scan_commit(input.repo, input.commit, input.space)? {
+    for file in scan()? {
         match file.text {
             Ok(text) => documents.push(Document {
                 rel_path: file.rel_path,
@@ -650,8 +666,10 @@ fn json_array(items: &[String]) -> String {
 mod tests {
     use super::*;
     use crate::librarian::derived::scan::open_commit;
-    use crate::librarian::derived::schema::{dump_all, open_in_memory};
-    use crate::librarian::derived::testkit::{repo_with, repo_with_raw_tree, FILE, LINK};
+    use crate::librarian::derived::schema::{dump_all, open as open_index, open_in_memory};
+    use crate::librarian::derived::testkit::{
+        repo_with, repo_with_commit, repo_with_raw_tree, FILE, LINK,
+    };
     use rusqlite::types::Value;
     use sha2::{Digest, Sha256};
 
@@ -1614,5 +1632,507 @@ mod tests {
             ]
         );
         assert_eq!(report.skipped, 3, "the repeated pair is one row");
+    }
+
+    // ---- Determinism: nothing a clone's path, name, identity or time can leak into a row ----
+
+    /// Run `git` in `dir` with the machine's own configuration out of the way, so that what a test
+    /// sees does not depend on the developer's git setup (nor on a hook that set `GIT_DIR`).
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .output()
+            .expect("run git");
+        assert!(
+            out.status.success(),
+            "git {args:?} in {}: {}",
+            dir.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    /// `git clone` of `src` into `dst` over a `file://` URL: a second checkout of one repository,
+    /// with its own path, its own working tree and its own local config.
+    fn clone_repo(src: &Path, dst: &Path) {
+        let url = format!("file://{}", src.display());
+        git(
+            dst.parent().unwrap(),
+            &["clone", "--quiet", &url, dst.to_str().unwrap()],
+        );
+    }
+
+    /// `(path, mode, bytes)` of a tree entry, owned.
+    type Entry = (String, u32, Vec<u8>);
+
+    fn borrowed(entries: &[Entry]) -> Vec<(&str, u32, &[u8])> {
+        entries
+            .iter()
+            .map(|(path, mode, bytes)| (path.as_str(), *mode, bytes.as_slice()))
+            .collect()
+    }
+
+    /// A corpus that gives every table rows and every ordering something to decide: a committed
+    /// repo name, key space and rule; a folder index that owns a document; citations of most
+    /// kinds; a broken frontmatter; two invalid keys; five keys that two documents each hold;
+    /// a document of several chunks; and three skipped files (outside the key space, not UTF-8,
+    /// a symlink).
+    fn corpus() -> Vec<Entry> {
+        let text =
+            |path: &str, body: &str| -> Entry { (path.to_owned(), FILE, body.as_bytes().to_vec()) };
+        let bug_log = "---\nkind: tracker\nstatus: archived\ntitle: Bug log\n\
+                       owners: [zed, amy]\ntags: [b, a]\ntopic: bugs\ntime_scope: rolling\n---\n\
+                       # Not the title\n\n## B-1 — a bug\n\nbody\n";
+        let mut entries =
+            vec![
+            text(".codescout/repo.toml", "name = \"home\"\n"),
+            text(".codescout/key-space.toml", "exclude = [\"contrib\"]\n"),
+            text(
+                ".codescout/librarian.toml",
+                "[[rule]]\nglob = \"docs/trackers/**/*.md\"\nkind = \"tracker\"\n\
+                 status = \"active\"\ntags = [\"rule-tag\", \"b\"]\n",
+            ),
+            text(
+                "docs/trackers/README.md",
+                "# Trackers\n\n## T-1 — a tracker token\n",
+            ),
+            text("docs/trackers/bug-log.md", bug_log),
+            text(
+                "docs/a.md",
+                "# A\n\n## F-1 — def\n\nsee F-1, [[b]], [[home/b]], [[elsewhere/x]], [[nokey]], \
+                 [[trackers:T-1]], [[bug-log:B-1]], [[dup1]], [[dup1:D-1]], [[Bad_Name]]\n",
+            ),
+            text("docs/b.md", "# B\n"),
+            text("docs/Bad_Name.md", "# Bad\n\n## F-9 — still indexed\n"),
+            text("docs/0123456789abcdef.md", "# Hex\n"),
+            text("docs/broken.md", "---\nkind: [unterminated\n---\n# Broken\n"),
+            text("contrib/c.md", "# C\n"),
+        ];
+        for i in 1..=5 {
+            for dir in ["x", "y"] {
+                entries.push(text(
+                    &format!("{dir}/dup{i}.md"),
+                    &format!("# Dup {i} in {dir}\n\n## D-{i} — defined in {dir}\n"),
+                ));
+            }
+        }
+        let long: String = (0..60)
+            .map(|i| {
+                format!(
+                    "Paragraph {i} of a long document.\n\n{}\n\n",
+                    "filler ".repeat(12)
+                )
+            })
+            .collect();
+        entries.push(text("docs/long.md", &format!("# Long\n\n{long}")));
+        entries.push(("docs/bad-bytes.md".to_owned(), FILE, vec![0x66, 0xff, 0xfe]));
+        entries.push(("docs/link.md".to_owned(), LINK, b"a.md".to_vec()));
+        entries
+    }
+
+    /// The corpus really exercises what the determinism tests claim to compare: every table has
+    /// rows, the edges cover several kinds, and a document has more than one chunk.
+    fn assert_corpus_is_not_vacuous(dump: &std::collections::BTreeMap<String, Vec<Vec<String>>>) {
+        for table in [
+            "checkout", "document", "entry", "edge", "chunk", "problem", "skipped",
+        ] {
+            assert!(!dump[table].is_empty(), "the corpus gives {table} no rows");
+        }
+        let kinds: std::collections::BTreeSet<&str> =
+            dump["edge"].iter().map(|row| row[3].as_str()).collect();
+        assert!(kinds.len() >= 4, "edge kinds: {kinds:?}");
+        assert!(
+            dump["chunk"].iter().any(|row| row[2] != "I:0"),
+            "no document has a second chunk"
+        );
+    }
+
+    /// Build `sha` of the repository at `clone` (opened by its own path) into a new index file.
+    fn build_clone(clone: &Path, sha: &str, index_file: &Path) -> (Connection, BuildReport) {
+        let repo = git2::Repository::open(clone).unwrap();
+        let commit = open_commit(&repo, sha).unwrap();
+        let rules = rules_from_commit(&repo, &commit).unwrap();
+        let space = key_space_from_commit(&repo, &commit).unwrap();
+        let mut conn = open_index(index_file).unwrap();
+        let report = build_full(
+            &mut conn,
+            &BuildInput {
+                repo: &repo,
+                commit: &commit,
+                root: clone,
+                rules: &rules,
+                space: &space,
+            },
+        )
+        .unwrap();
+        (conn, report)
+    }
+
+    /// The commit a repository's `HEAD` names.
+    fn head_sha(repo_path: &Path) -> String {
+        let repo = git2::Repository::open(repo_path).unwrap();
+        let id = repo.head().unwrap().peel_to_commit().unwrap().id();
+        id.to_string()
+    }
+
+    /// `checkout.root`, the one column that carries a path.
+    fn recorded_root(conn: &Connection) -> String {
+        conn.query_row("SELECT root FROM checkout", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// `problem` rows in the order they were stored, which `dump_all` (it sorts every table)
+    /// cannot see: `problem` is the one derived table with a rowid.
+    fn problems_in_insert_order(conn: &Connection) -> Vec<(String, Option<String>, String)> {
+        conn.prepare("SELECT kind, \"key\", rel_paths FROM problem ORDER BY rowid")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn two_clones_at_one_commit_dump_identically() {
+        let parent = tempfile::tempdir().unwrap();
+        let origin = parent.path().join("origin-5d2e");
+        let alpha = parent.path().join("clone-alpha-7f3a");
+        let beta = parent.path().join("clone-beta-91cc");
+        let entries = corpus();
+        repo_with(&origin, &borrowed(&entries));
+        clone_repo(&origin, &alpha);
+        clone_repo(&origin, &beta);
+        // Two different people at two different machines: each clone has its own identity.
+        for (clone, name, email) in [
+            (&alpha, "Alice Alpha", "alice@alpha.invalid"),
+            (&beta, "Bob Beta", "bob@beta.invalid"),
+        ] {
+            git(clone, &["config", "user.name", name]);
+            git(clone, &["config", "user.email", email]);
+            assert_eq!(git(clone, &["config", "user.email"]).trim(), email);
+        }
+
+        let sha = head_sha(&origin);
+        assert_eq!(head_sha(&alpha), sha, "the clone is at the commit");
+        assert_eq!(head_sha(&beta), sha, "the clone is at the commit");
+        let (conn_a, report_a) = build_clone(&alpha, &sha, &parent.path().join("index-a.sqlite"));
+        let (conn_b, report_b) = build_clone(&beta, &sha, &parent.path().join("index-b.sqlite"));
+
+        let dump_a = dump_all(&conn_a);
+        assert_corpus_is_not_vacuous(&dump_a);
+        assert_eq!(report_a, report_b);
+        assert_eq!(dump_a, dump_all(&conn_b));
+        // The two builds did differ in what the dump leaves out: where each clone lies.
+        assert_ne!(recorded_root(&conn_a), recorded_root(&conn_b));
+    }
+
+    #[test]
+    fn the_same_tree_committed_on_different_days_by_different_identities_dumps_identically() {
+        let entries = corpus();
+        let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        // Author and committer differ within a commit, and the two commits differ in the day,
+        // the time zone, the people and the message.
+        let sig = |name: &str, email: &str, seconds: i64, offset_minutes: i32| {
+            git2::Signature::new(name, email, &git2::Time::new(seconds, offset_minutes)).unwrap()
+        };
+        let repo_a = repo_with_commit(
+            dir_a.path(),
+            &borrowed(&entries),
+            &sig("Alice Early", "alice@early.invalid", 1_262_304_000, 120),
+            &sig("Carol Committer", "carol@early.invalid", 1_262_390_400, 120),
+            "the first message",
+        );
+        let repo_b = repo_with_commit(
+            dir_b.path(),
+            &borrowed(&entries),
+            &sig("Bob Late", "bob@late.invalid", 1_893_456_000, -300),
+            &sig("Dave Deployer", "dave@late.invalid", 1_893_542_400, -300),
+            "a different message entirely",
+        );
+        let tree_of_head =
+            |repo: &git2::Repository| repo.head().unwrap().peel_to_commit().unwrap().tree_id();
+        assert_eq!(tree_of_head(&repo_a), tree_of_head(&repo_b), "one tree");
+        assert_ne!(
+            head_sha(dir_a.path()),
+            head_sha(dir_b.path()),
+            "two commits: the test cannot pass by an accident of identical history"
+        );
+
+        let (conn_a, report_a) = built(&repo_a);
+        let (conn_b, report_b) = built(&repo_b);
+        let dump_a = dump_all(&conn_a);
+        assert_corpus_is_not_vacuous(&dump_a);
+        assert_eq!(report_a, report_b);
+        assert_eq!(dump_a, dump_all(&conn_b));
+        // The commit id is excluded from the dump by design, and it is what differs.
+        let sha_of = |conn: &Connection| -> String {
+            conn.query_row("SELECT commit_sha FROM checkout", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_ne!(sha_of(&conn_a), sha_of(&conn_b));
+    }
+
+    #[test]
+    fn the_checkout_row_is_the_only_place_a_path_appears() {
+        let parent = tempfile::tempdir().unwrap();
+        let origin = parent.path().join("origin-5d2e");
+        let clone = parent.path().join("clone-alpha-7f3a");
+        let entries = corpus();
+        repo_with(&origin, &borrowed(&entries));
+        clone_repo(&origin, &clone);
+        let sha = head_sha(&clone);
+        let (conn, _) = build_clone(&clone, &sha, &parent.path().join("index.sqlite"));
+
+        // What a clone's whereabouts could be spelled as: its own name and path, the directory
+        // that holds it (the one thing two sibling clones share), and the repo it was cloned from.
+        let parent_path = parent.path().to_string_lossy().into_owned();
+        let parent_name = parent
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let clone_path = clone.to_string_lossy().into_owned();
+        let needles = [
+            "clone-alpha-7f3a",
+            clone_path.as_str(),
+            parent_path.as_str(),
+            parent_name.as_str(),
+            "origin-5d2e",
+        ];
+
+        // Every string `dump_all` returns: the table names, then every rendered cell.
+        let dump = dump_all(&conn);
+        assert_corpus_is_not_vacuous(&dump);
+        let mut strings: Vec<&str> = Vec::new();
+        for (table, rows) in &dump {
+            strings.push(table);
+            strings.extend(rows.iter().flatten().map(String::as_str));
+        }
+        let in_dump = strings.len();
+        assert!(in_dump > 500, "the search covers the whole dump: {in_dump}");
+        for needle in needles {
+            for s in &strings {
+                assert!(!s.contains(needle), "{needle:?} is in the dump value {s:?}");
+            }
+        }
+        // The dump leaves `checkout.root` and `checkout.commit_sha` out: the one row it shows has
+        // the other three columns.
+        assert_eq!(dump["checkout"].len(), 1);
+        assert_eq!(dump["checkout"][0].len(), 3);
+
+        // What the dump leaves out is searched too: `parse_cache` and `checkout.commit_sha`.
+        let leftovers: Vec<String> = {
+            let mut out = Vec::new();
+            let mut cache = conn.prepare("SELECT * FROM parse_cache").unwrap();
+            let columns = cache.column_count();
+            let rows = cache
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|i| row.get::<_, Value>(i))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .unwrap();
+            for row in rows {
+                out.extend(row.unwrap().into_iter().map(|v| format!("{v:?}")));
+            }
+            let sha_column: String = conn
+                .query_row("SELECT commit_sha FROM checkout", [], |r| r.get(0))
+                .unwrap();
+            out.push(sha_column);
+            out
+        };
+        assert!(leftovers.len() > 100, "{}", leftovers.len());
+        for needle in needles {
+            for s in &leftovers {
+                assert!(!s.contains(needle), "{needle:?} is in a stored value");
+            }
+        }
+
+        // The column that does carry the path still does, and carries all of it: were the
+        // exclusion in `dump_all` to stop hiding it, the search above would find it.
+        let root = recorded_root(&conn);
+        assert_eq!(root, clone_path);
+        assert!(root.contains("clone-alpha-7f3a"), "{root}");
+    }
+
+    #[test]
+    fn build_order_does_not_change_the_dump() {
+        let dir = tempfile::tempdir().unwrap();
+        let entries = corpus();
+        let repo = repo_with(dir.path(), &borrowed(&entries));
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        let rules = rules_from_commit(&repo, &commit).unwrap();
+        let space = key_space_from_commit(&repo, &commit).unwrap();
+        let input = BuildInput {
+            repo: &repo,
+            commit: &commit,
+            root: Path::new(ROOT),
+            rules: &rules,
+            space: &space,
+        };
+        let natural_order: Vec<String> = scan_commit(&repo, &commit, &space)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.rel_path)
+            .collect();
+
+        // Fixed permutations, not a random shuffle: a failure repeats.
+        type Permute = fn(&mut Vec<ScannedFile>);
+        let permutations: [(&str, Permute); 4] = [
+            ("as scanned", |_| {}),
+            ("reversed", |files| files.reverse()),
+            ("rotated by five", |files| files.rotate_left(5)),
+            ("by blob hash", |files| {
+                files.sort_by(|a, b| a.sha256.cmp(&b.sha256))
+            }),
+        ];
+        let mut builds = Vec::new();
+        for (name, permute) in permutations {
+            let order = std::cell::RefCell::new(Vec::new());
+            let mut conn = open_in_memory().unwrap();
+            let report = rebuild_from(&mut conn, &input, &Parser::PRODUCTION, false, None, &|| {
+                let mut files = scan_commit(&repo, &commit, &space)?;
+                permute(&mut files);
+                *order.borrow_mut() = files.iter().map(|f| f.rel_path.clone()).collect();
+                Ok(files)
+            })
+            .unwrap();
+            let order = order.into_inner();
+            if name == "as scanned" {
+                assert_eq!(order, natural_order);
+            } else {
+                assert_ne!(order, natural_order, "{name} is a different order");
+            }
+            builds.push((name, conn, report));
+        }
+
+        let (_, first, first_report) = &builds[0];
+        let expected_dump = dump_all(first);
+        assert_corpus_is_not_vacuous(&expected_dump);
+        // Stored in a fixed order whatever the scan order was: the invalid keys by path, then the
+        // keys held twice by key. Five of the latter, so that an order taken from a hash map would
+        // not be this one by luck.
+        let mut expected_problems = vec![
+            (
+                "invalid_key".to_owned(),
+                Some("0123456789abcdef".to_owned()),
+                r#"["docs/0123456789abcdef.md"]"#.to_owned(),
+            ),
+            (
+                "invalid_key".to_owned(),
+                Some("bad_name".to_owned()),
+                r#"["docs/Bad_Name.md"]"#.to_owned(),
+            ),
+        ];
+        for i in 1..=5 {
+            expected_problems.push((
+                "duplicate_key".to_owned(),
+                Some(format!("dup{i}")),
+                format!(r#"["x/dup{i}.md","y/dup{i}.md"]"#),
+            ));
+        }
+        for (name, conn, report) in &builds {
+            assert_eq!(report, first_report, "{name}: report");
+            assert_eq!(dump_all(conn), expected_dump, "{name}: dump");
+            assert_eq!(
+                problems_in_insert_order(conn),
+                expected_problems,
+                "{name}: problem rows in the order stored"
+            );
+        }
+    }
+
+    #[test]
+    fn a_working_tree_edit_that_is_not_committed_changes_nothing() {
+        let parent = tempfile::tempdir().unwrap();
+        let origin = parent.path().join("origin-5d2e");
+        let clone = parent.path().join("clone-alpha-7f3a");
+        let entries = corpus();
+        repo_with(&origin, &borrowed(&entries));
+        clone_repo(&origin, &clone);
+        let sha = head_sha(&clone);
+        let (before_conn, before_report) =
+            build_clone(&clone, &sha, &parent.path().join("before.sqlite"));
+        let before = dump_all(&before_conn);
+        assert_corpus_is_not_vacuous(&before);
+
+        // Edit what the commit holds, add what it does not, and change the three config files.
+        // Two of the changes are also staged: the index is not the commit either.
+        let edits = [
+            (
+                "docs/a.md",
+                "# A, edited\n\nnothing of the commit's text is left [[b]]\n",
+            ),
+            (
+                "docs/untracked-note.md",
+                "# Not in any commit\n\n## U-1 — untracked\n",
+            ),
+            (".codescout/repo.toml", "name = \"working-tree-name\"\n"),
+            (".codescout/key-space.toml", "exclude = [\"docs\"]\n"),
+            (
+                ".codescout/librarian.toml",
+                "[[rule]]\nglob = \"**/*.md\"\nkind = \"worktree\"\n",
+            ),
+            (
+                "docs/trackers/bug-log.md",
+                "# Staged, not committed\n\n## S-1 — staged\n",
+            ),
+            ("docs/staged-new.md", "# New and staged\n"),
+        ];
+        for (rel, body) in edits {
+            std::fs::write(clone.join(rel), body).unwrap();
+        }
+        std::fs::remove_file(clone.join("docs/b.md")).unwrap();
+        git(
+            &clone,
+            &["add", "docs/trackers/bug-log.md", "docs/staged-new.md"],
+        );
+        // The edits are on disk, and git sees them as uncommitted changes of the one checkout.
+        for (rel, body) in edits {
+            assert_eq!(
+                std::fs::read_to_string(clone.join(rel)).unwrap(),
+                body,
+                "{rel}"
+            );
+        }
+        assert!(!clone.join("docs/b.md").exists());
+        let status = git(&clone, &["status", "--porcelain"]);
+        for line in [
+            " M docs/a.md",
+            "?? docs/untracked-note.md",
+            " M .codescout/repo.toml",
+            " M .codescout/key-space.toml",
+            " M .codescout/librarian.toml",
+            " D docs/b.md",
+            "M  docs/trackers/bug-log.md",
+            "A  docs/staged-new.md",
+        ] {
+            assert!(
+                status.lines().any(|l| l == line),
+                "{line:?} not in:\n{status}"
+            );
+        }
+        assert_eq!(head_sha(&clone), sha, "nothing was committed");
+
+        let (after_conn, after_report) =
+            build_clone(&clone, &sha, &parent.path().join("after.sqlite"));
+        assert_eq!(before_report, after_report);
+        assert_eq!(
+            before,
+            dump_all(&after_conn),
+            "the working tree changed nothing"
+        );
+        let name: String = after_conn
+            .query_row("SELECT repo_name FROM checkout", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(name, "home", "the committed name, not the edited file's");
     }
 }

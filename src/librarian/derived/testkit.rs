@@ -21,12 +21,24 @@ pub(crate) fn fixed_sig() -> git2::Signature<'static> {
 /// A repo in `dir` with one commit holding `entries` (`path`, `mode`, `bytes`). Built through
 /// the index and an explicit signature: no working tree, no global git config.
 pub(crate) fn repo_with(dir: &std::path::Path, entries: &[(&str, u32, &[u8])]) -> git2::Repository {
+    let sig = fixed_sig();
+    repo_with_commit(dir, entries, &sig, &sig, "fixture")
+}
+
+/// [`repo_with`] with the author, the committer and the message of the one commit chosen by the
+/// caller: two repos with one tree and different histories (and so different commit ids).
+pub(crate) fn repo_with_commit(
+    dir: &std::path::Path,
+    entries: &[(&str, u32, &[u8])],
+    author: &git2::Signature,
+    committer: &git2::Signature,
+    message: &str,
+) -> git2::Repository {
     let repo = git2::Repository::init(dir).unwrap();
     let tree_id = tree_of(&repo, entries);
     {
         let tree = repo.find_tree(tree_id).unwrap();
-        let sig = fixed_sig();
-        repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+        repo.commit(Some("HEAD"), author, committer, message, &tree, &[])
             .unwrap();
     }
     repo
