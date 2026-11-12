@@ -97,7 +97,9 @@ pub struct BuildReport {
 }
 
 /// The `.md` files a git diff between two commits reports, by kind of change. A rename counts
-/// once, as a rename, and not as an addition and a deletion.
+/// once, as a rename, and not as an addition and a deletion. The counts depend on the two trees
+/// alone: the diff sets its rename options itself, so a repo's or the machine's git config
+/// (`diff.renameLimit`, `diff.renames`) changes nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ChangeCounts {
     pub added: usize,

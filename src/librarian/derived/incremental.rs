@@ -1128,6 +1128,52 @@ mod tests {
         assert_eq!(dump_all(&conn), fresh_dump(&h, 0));
     }
 
+    /// The counts depend on the two trees alone. libgit2 reads a repo's own `diff.renameLimit`
+    /// when the caller sets no limit (it then compares only that many deleted files with each
+    /// added one), and `diff.renames` when the caller sets no rename flag; neither may turn
+    /// renames into additions and deletions.
+    #[test]
+    fn the_change_counts_do_not_depend_on_the_repos_git_config() {
+        let text = |i: usize| {
+            format!(
+                "# Doc {i}\n\n{}\n",
+                format!("words that are only in doc {i} ").repeat(20)
+            )
+        };
+        let mut got = Vec::new();
+        let mut expected = Vec::new();
+        for n in [1_usize, 2, 3, 6] {
+            let old: Vec<(String, String)> = (0..n)
+                .map(|i| (format!("docs/old-{i}.md"), text(i)))
+                .collect();
+            let new: Vec<(String, String)> = (0..n)
+                .map(|i| (format!("docs/new-{i}.md"), text(i)))
+                .collect();
+            let old_files: Vec<(&str, &str)> =
+                old.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+            let new_files: Vec<(&str, &str)> =
+                new.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+            let h = history(&[&old_files, &new_files]);
+            let mut config = h.repo.config().unwrap();
+            config.set_i32("diff.renameLimit", 1).unwrap();
+            config.set_str("diff.renames", "false").unwrap();
+            assert_eq!(config.get_i32("diff.renameLimit").unwrap(), 1);
+
+            let mut conn = open_in_memory().unwrap();
+            got.push((n, update_at(&mut conn, &h, 0, 1).changes));
+            expected.push((
+                n,
+                Some(ChangeCounts {
+                    added: 0,
+                    modified: 0,
+                    deleted: 0,
+                    renamed: n,
+                }),
+            ));
+        }
+        assert_eq!(got, expected, "n renames, each with unchanged bytes");
+    }
+
     #[test]
     fn the_parse_cache_is_excluded_from_the_dump() {
         let h = history(&[&[REPO_TOML, ("docs/a.md", "# A\n"), ("docs/b.md", "# B\n")]]);
@@ -1212,6 +1258,15 @@ mod tests {
             ("notes.md", "no heading\n".to_owned()),
             ("docs/specs/long.md", long),
             ("empty.md", String::new()),
+            // One entry whose section is longer than the chunk grain (2048 characters), so the
+            // parse cuts it into several chunks numbered `entry_part` of `entry_parts`.
+            (
+                "docs/specs/entry.md",
+                format!(
+                    "# Entries\n\nintro\n\n## F-7 — a long entry\n\n{}\n",
+                    "delta ".repeat(500)
+                ),
+            ),
         ]
     }
 
@@ -1237,10 +1292,40 @@ mod tests {
         }
     }
 
+    /// The corpus must keep an entry longer than the chunk grain: a change to how `build_chunks`
+    /// numbers the parts of an entry changes the parse only if some pinned text has such an entry.
+    /// If this fails the corpus was edited so that no entry spans chunks; restore one, and the
+    /// digest below keeps covering `entry_part` and `entry_parts`.
+    #[test]
+    fn the_pinned_corpus_has_an_entry_that_spans_several_chunks() {
+        let rules = corpus_rules();
+        let (rel_path, text) = corpus()
+            .into_iter()
+            .find(|(rel_path, _)| *rel_path == "docs/specs/entry.md")
+            .unwrap();
+        let parsed = parse_document(rel_path, &text, &rules);
+        let parts: Vec<(Option<usize>, Option<usize>)> = parsed
+            .chunks
+            .iter()
+            .filter(|c| c.entry_token.as_deref() == Some("F-7"))
+            .map(|c| (c.entry_part, c.entry_parts))
+            .collect();
+        let n = parts.len();
+        assert!(
+            n >= 2,
+            "the F-7 section must be cut into several chunks: {parts:?}"
+        );
+        assert_eq!(
+            parts,
+            (1..=n).map(|i| (Some(i), Some(n))).collect::<Vec<_>>(),
+            "parts are numbered 1..=n of n"
+        );
+    }
+
     /// The pinned digest of the corpus's parse. When this fails, the parse of some text changed
     /// (or the shape the cache stores did): bump `PARSER_VERSION`, so that no cached row from
     /// the old logic is read, and then set this to the new digest.
-    const CORPUS_DIGEST: &str = "9e6f3d7cb1ef28bfadac7d2b128c6d9e1456e7928a935c29b3f3ea22685791c1";
+    const CORPUS_DIGEST: &str = "a76c89d82dd8cfeb74ae310c7382ac550d24f2b8195324d82e203ff790e0721c";
 
     #[test]
     fn the_parse_of_a_pinned_corpus_is_tied_to_parser_version() {

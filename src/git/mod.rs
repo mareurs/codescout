@@ -23,6 +23,17 @@ pub struct DiffEntry {
     pub status: DiffStatus,
 }
 
+/// Minimum similarity (percent) for two files to count as a rename: git's own default.
+// cap-class: NOT_A_CAP — a similarity cutoff that decides whether two files count as a rename; it bounds no result and shortens none
+const RENAME_THRESHOLD: u16 = 50;
+
+/// How many deleted files rename detection compares with each added one. 10,000 is well above
+/// the number of files this repository tracks (about 6,500 when this was set), so no update of it
+/// reaches the limit; the cost of a larger limit falls only on a diff that deletes and adds that
+/// many files.
+// cap-class: NOT_A_CAP — bounds the work of pairing deleted with added files; past it a rename is counted as one addition and one deletion, so every changed file is still counted once, and the counts are reported only (nothing stored or returned as a result list is shortened)
+const RENAME_LIMIT: usize = 10_000;
+
 /// Diff two commits by SHA, returning a list of changed files.
 /// Returns `Err` if either SHA is not found (e.g. after a rebase).
 ///
@@ -42,10 +53,19 @@ pub fn diff_tree_to_tree(
     let mut opts = git2::DiffOptions::new();
     let mut diff = repo.diff_tree_to_tree(Some(&from_tree), Some(&to_tree), Some(&mut opts))?;
 
-    // Rename detection only; copy detection and break-rewrites left off to keep
-    // diff fast and stable for cache-invalidation consumers.
+    // Every option that decides what is a rename is set here, so the answer depends on the two
+    // trees alone. libgit2 reads `diff.renames` from the repo or global git config when the
+    // rename flag is left unset, and `diff.renameLimit` (default 1000) when `rename_limit` is 0;
+    // that limit caps how many deleted files it compares with each added one, so a low value in
+    // some repo's config turned renames into an add plus a delete. Renames only (no copies, no
+    // break-rewrites), at git's own 50% similarity, and a limit above the number of tracked files
+    // of any repo this runs on.
     let mut find_opts = git2::DiffFindOptions::new();
-    find_opts.renames(true);
+    find_opts
+        .renames(true)
+        .copies(false)
+        .rename_threshold(RENAME_THRESHOLD)
+        .rename_limit(RENAME_LIMIT);
     diff.find_similar(Some(&mut find_opts))?;
 
     let mut entries = Vec::new();
