@@ -15,7 +15,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::index::{DocInput, IndexProblem, KeyIndex};
-use super::key::{components, is_folder_index, Key, KeyError};
+use super::key::{components, folder_of, is_folder_index, Key, KeyError};
 use super::key_space::{KeySpace, KEY_SPACE_FILE_REL};
 use super::repo_name::RepoName;
 
@@ -154,12 +154,6 @@ impl GateReport {
     }
 }
 
-/// The folder of a path, normalised as `key_of` reads it (`""` is the repo root).
-fn folder_of(rel_path: &str) -> String {
-    let parts = components(rel_path);
-    parts[..parts.len().saturating_sub(1)].join("/")
-}
-
 /// The folders whose folder index is outside the key space while a document the index would
 /// own is inside it. Below the root that is any inside path under the folder, at any depth: a
 /// document in a subfolder with no index of its own would otherwise fall to the next index up
@@ -185,6 +179,8 @@ fn partial_exclusions(outside: &[&str], inside: &[&str]) -> BTreeSet<String> {
 /// Check the keys of `md_files`, the git-root-relative `.md` paths of one tree.
 ///
 /// The result does not depend on the order of `md_files`, and a path listed twice counts once.
+/// "Twice" means the same string: the paths must already be normalised, because `a/x.md` and
+/// `./a/x.md` are two entries that name one file and are reported as a duplicate of each other.
 pub fn check_tree(this_repo: RepoName, space: &KeySpace, md_files: &[String]) -> GateReport {
     let files: BTreeSet<&str> = md_files.iter().map(String::as_str).collect();
     let (outside, inside): (Vec<&str>, Vec<&str>) =
@@ -344,6 +340,49 @@ mod tests {
             &["docs/x/readme.md", "docs/xylophone/a.md"],
         );
         assert_eq!(r.problems, vec![]);
+    }
+
+    #[test]
+    fn a_whole_subtree_exclusion_reports_every_excluded_path() {
+        let paths = [
+            "docs/readme.md",
+            "docs/x/readme.md",
+            "docs/x/a.md",
+            "docs/x/sub/b.md",
+        ];
+        let r = check(&["docs/x"], &paths);
+        assert_eq!(r.problems, vec![]);
+        assert_eq!(
+            r.outside,
+            vec!["docs/x/a.md", "docs/x/readme.md", "docs/x/sub/b.md"]
+        );
+        assert_eq!(r.in_space, 1);
+    }
+
+    #[test]
+    fn two_excluded_folder_indexes_in_one_folder_are_one_partial_exclusion() {
+        let paths = ["docs/x/README.md", "docs/x/readme.md", "docs/x/a.md"];
+        // Both indexes and the file are excluded: clean.
+        assert_eq!(check(&["docs/x"], &paths).problems, vec![]);
+        // Only the two indexes are excluded: one problem for the folder, not one per index.
+        let r = check(&["docs/x/README.md", "docs/x/readme.md"], &paths);
+        assert_eq!(
+            r.problems,
+            vec![GateProblem::PartialFolderExclusion {
+                folder: "docs/x".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn two_spellings_of_one_path_are_two_entries_that_collide() {
+        // `check_tree` dedupes by the exact string, so a caller must normalise first.
+        let r = check(&[], &["a/x.md", "./a/x.md"]);
+        assert!(
+            matches!(r.problems.as_slice(), [GateProblem::DuplicateKey { rel_paths, .. }] if rel_paths.len() == 2),
+            "{:?}",
+            r.problems
+        );
     }
 
     #[test]

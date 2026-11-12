@@ -95,6 +95,13 @@ pub(crate) fn components(rel_path: &str) -> Vec<String> {
         .collect()
 }
 
+/// The folder of a path, normalised as [`components`] reads it (`""` is the repo root, and also
+/// what a path with no components has).
+pub(crate) fn folder_of(rel_path: &str) -> String {
+    let parts = components(rel_path);
+    parts[..parts.len().saturating_sub(1)].join("/")
+}
+
 /// The stem of a file name when its extension is `md` (any case); `None` otherwise.
 pub(crate) fn markdown_stem(file_name: &str) -> Option<&str> {
     let (stem, ext) = file_name.rsplit_once('.')?;
@@ -143,6 +150,16 @@ pub fn key_of(rel_path: &str) -> Result<Key, KeyError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_folder_of_a_path_is_read_as_the_key_reads_it() {
+        assert_eq!(folder_of("docs/a/x.md"), "docs/a");
+        assert_eq!(folder_of("./docs//a\\x.md"), "docs/a");
+        assert_eq!(folder_of("x.md"), "");
+        // No components at all is the repo root, not an underflow.
+        assert_eq!(folder_of(""), "");
+        assert_eq!(folder_of("./"), "");
+    }
 
     #[test]
     fn the_key_is_the_lowercase_stem() {
