@@ -12,6 +12,7 @@ in memory `gotchas`.
 - **`experiments` is never deleted.** After any merge to `master`, `experiments` continues from the same commit — no recreation, no force-reset.
 - **Before any merge or cherry-pick to `master`**, invoke the Docs Lotus Frog (`/buddy:summon frog`) to: (1) audit experimental features eligible for graduation, and (2) identify documentation gaps in the commits being merged.
 - Never commit directly to `master` for in-progress or exploratory work.
+- Remove a linked worktree with [`scripts/worktree-remove.sh`](../scripts/worktree-remove.sh), never a bare `git worktree remove`; the order and the exit codes are in [`conventions/removing-a-worktree.md`](conventions/removing-a-worktree.md).
 
 ## Release Cycle
 
