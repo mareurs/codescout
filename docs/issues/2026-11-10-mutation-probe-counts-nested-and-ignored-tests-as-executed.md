@@ -1,11 +1,12 @@
 ---
 id: e4b663a4f2145663
 kind: bug
-status: open
+status: mitigated
 title: mutation-probe labels selected parent and nested test counts as tests that ran
 tags:
 - testing
 - cluster/unclassified
+closed: 2026-11-12
 opened: 2026-11-10
 owner: marius
 severity: low
@@ -43,11 +44,20 @@ Independent reviewer explicitly used the last top-level cargo summary rather tha
 
 ## Fix
 
-Pending; outside this cycle's two source files. Define the intended population, then qualify parsing against nested/ignored harness controls before changing the displayed count or any verdict guard.
+The label now says what the number is. The verdict reads `N test(s) selected over M 'running' line(s)` and one more line says the sum includes ignored and nested-harness tests and points to the runner's last `test result:` line for the top-level figure. The parser and the verdict guards are unchanged: zero versus non-zero still decides INCONCLUSIVE. A top-level-only count is not built, because the script cannot select the top-level harness from stdout it does not control.
+
+Case 10b of `tests/mutation-probe.sh` pins the sum (lines `2` and `1` read as `3 over 2`) and the absence of the old wording. Cases 10 and 11 follow the new label.
+
+Unverified: no real `cargo test` run with a nested child harness was made against the new label; case 10b feeds the parser fake runner output.
+
+## Fix provenance
+
+- **SHA:** `b8e79177ea7cdaad82ff2286365e06246980fa1a` (`experiments`)
+- **patch-id:** `7e45b40a57d5182579099814a50f199268820fe9`
 
 ## Tests added
 
-None for this instrument; the actual raw fixture mutation log is retained as a regression seed.
+Case 10b in `tests/mutation-probe.sh` (new). Cases 10 and 11 were reworded to the new label. The raw fixture mutation log stays as a regression seed.
 
 ## Workarounds
 
@@ -55,4 +65,4 @@ Report the final top-level runner summary and exact failure assertions separatel
 
 ## Resume — 2026-11-10
 
-Open, unclaimed instrument follow-up. No script correction in this patch. No effect on the independently inspected three fixture mutation kills.
+Mitigated on 2026-11-12 by `b8e79177e`: the label no longer claims the selected sum is a count of tests that ran. The independently inspected three fixture mutation kills are unaffected.
