@@ -253,7 +253,10 @@ mod tests {
         cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             // Where git looks for its default global ignore file.
-            .env("XDG_CONFIG_HOME", dir);
+            .env("XDG_CONFIG_HOME", dir)
+            // The assertions on git's error text need its English messages; `LC_ALL=C` makes
+            // git ignore `LANGUAGE`, which would otherwise select an installed catalog.
+            .env("LC_ALL", "C");
         cmd
     }
 
@@ -599,7 +602,9 @@ mod tests {
         let ceiling = plain.path().parent().unwrap().canonicalize().unwrap();
         let outside = |dir: &Path| {
             let mut cmd = hermetic(dir);
-            cmd.env("GIT_CEILING_DIRECTORIES", &ceiling);
+            cmd.env("GIT_CEILING_DIRECTORIES", &ceiling)
+                .env("LANGUAGE", "de")
+                .env("LANG", "en_US.UTF-8");
             cmd
         };
         let msg = load_docs_with(plain.path(), &outside)
