@@ -41,8 +41,8 @@ use crate::librarian::identity::key::Key;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckPolicy {
     /// Days a terminal ledger entry may stay outside `archive/` after its `closed` date. The
-    /// default is 30: on this repo's `docs/issues` ledger, 69 of 212 terminal entries outside
-    /// `archive/` were older than 14 days and 1 older than 30.
+    /// default is 30; the measurement behind it is entry W-3 of
+    /// `docs/trackers/tracker-organization-session-log.md`.
     pub terminal_grace_days: u32,
 }
 
@@ -322,20 +322,25 @@ fn check_entry(
                 }
             }
         }
-    } else if collection.lifecycle == Lifecycle::Ledger {
-        // A stream or temp collection is archived whole and judged by `StreamAllTerminal`, so a
-        // terminal entry of one is never late by itself.
-        if let Some(closed) = meta.closed {
-            let grace = Days::new(u64::from(policy.terminal_grace_days));
-            if closed
-                .checked_add_days(grace)
-                .is_some_and(|due| due < today)
-            {
-                out.push(Finding::TerminalInLiveDir {
-                    entry: entry.key.clone(),
-                    closed,
-                });
+    } else {
+        match collection.lifecycle {
+            Lifecycle::Ledger => {
+                if let Some(closed) = meta.closed {
+                    let grace = Days::new(u64::from(policy.terminal_grace_days));
+                    if closed
+                        .checked_add_days(grace)
+                        .is_some_and(|due| due < today)
+                    {
+                        out.push(Finding::TerminalInLiveDir {
+                            entry: entry.key.clone(),
+                            closed,
+                        });
+                    }
+                }
             }
+            // A stream or temp collection is archived whole and judged by `StreamAllTerminal`,
+            // so a terminal entry of one is never late by itself.
+            Lifecycle::Stream | Lifecycle::Temp => {}
         }
     }
 }
