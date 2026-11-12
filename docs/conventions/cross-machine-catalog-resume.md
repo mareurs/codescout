@@ -127,12 +127,21 @@ response's `unindexed_hint` on a prior call is the tell you skipped it.
 **Reindex is also the repair for a move made on the other host.** Any artifact the other
 machine archived or renamed leaves this catalog holding a row keyed on the pre-move path
 (`id = sha256(abs_path)`); the pull brings the rename, not the re-key. The `removed:` count
-is where that shows up. Skip this step and `doctor`'s `missing_file` is what names it —
+(for a row that carries history, `vanished_kept_ids`) is where that shows up. Skip this step and `doctor`'s `missing_file` is what names it —
 re-read that field after every pull, because a reading taken *before* the pull says 0. See
 § *Why a clone is never enough*, fifth mode.
 
 *2026-08-31: 4 added, 8 updated, **2 removed**, 12 embedded — the two removals were bug
 files the other host had fixed and archived the same day.*
+
+**A moved artifact that carries local history is kept, not removed.** `removed:` counts only
+rows with no events and no augmentation. A pulled move of an artifact that carries either
+leaves its old row in the catalog, cleared of everything its file supplied (title, fields,
+chunks, vectors), with its events and augmentation intact. The response lists it in
+`vanished_kept_ids` and `vanished_kept_paths` and does not count it in `removed:`; read those
+two fields after every pull. To carry its history to the file's new path, fold it in with
+`doc(action="graft", from_id=<kept id>, into_id=<new id>)`. Before 2026-11-12 reindex deleted
+such a row, and its events and augmentation survived only as `catalog_audit` images.
 
 ### 3. Repair memory vectors
 

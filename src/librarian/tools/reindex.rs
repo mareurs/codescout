@@ -405,6 +405,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut reclaimed_escaping_paths: Vec<String> = Vec::new();
     let mut escaping_kept_paths: Vec<String> = Vec::new();
     let mut escaping_skipped_paths: Vec<String> = Vec::new();
+    // Vanished rows kept because they carry history: not in `removed`, so a count of removals
+    // alone would hide that a file's row is still in the catalog.
+    let mut vanished_kept_ids: Vec<String> = Vec::new();
+    let mut vanished_kept_paths: Vec<String> = Vec::new();
     let mut backfill_errors: Vec<String> = Vec::new();
     // Roots the walk deliberately did NOT enter, with the reason. Without this the response for
     // such a root is `added: 0, updated: 0, removed: 0, unchanged: 0` and
@@ -487,12 +491,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // computed from bytes the read door now refuses (decision D4). On sqlite the chunk delete
         // already took them through `artifact_vec_v2_cascade_delete`; an external store has no
         // foreign keys, so it is told here. `indexer::index_repo` (the CLI) does the same for
-        // `removed_ids` only; it never tells the store about `escaping_kept_ids`.
+        // `removed_ids` only; it never tells the store about `escaping_kept_ids`. A kept vanished
+        // row has its chunk rows dropped the same way, so its vectors leave the store too.
         if let Some(store) = ctx.artifact_store.as_ref() {
             for id in report
                 .removed_ids
                 .iter()
                 .chain(report.escaping_kept_ids.iter())
+                .chain(report.vanished_kept_ids.iter())
             {
                 if let Err(e) = store.delete(id).await {
                     vector_delete_errors.push(format!("{id}: {e}"));
@@ -504,6 +510,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         reclaimed_escaping_paths.extend(report.reclaimed_escaping_paths);
         escaping_kept_paths.extend(report.escaping_kept_paths);
         escaping_skipped_paths.extend(report.escaping_skipped_paths);
+        vanished_kept_ids.extend(report.vanished_kept_ids);
+        vanished_kept_paths.extend(report.vanished_kept_paths);
 
         if let (Some(svc), Some(store)) = (ctx.embedding.as_ref(), ctx.artifact_store.as_ref()) {
             // project_id = the target being indexed, which IS the project. Still
@@ -863,6 +871,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "escaping_kept_ids": escaping_kept_ids,
         "escaping_kept_paths": escaping_kept_paths,
         "escaping_skipped_paths": escaping_skipped_paths,
+        "vanished_kept_ids": vanished_kept_ids,
+        "vanished_kept_paths": vanished_kept_paths,
+        "vanished_kept_note": if vanished_kept_ids.is_empty() {
+            Value::Null
+        } else {
+            json!("Rows whose file no longer exists but that carry an augmentation or events were \
+                 KEPT (`vanished_kept_ids`, `vanished_kept_paths`), not removed. The artifact id \
+                 is the hash of the path, so a move or archive made outside this catalog (for \
+                 example a `git pull` that brings another host's rename) leaves the old row \
+                 without a file. Each kept row is cleared of everything its file supplied \
+                 (title, fields, chunk text, vectors) and is reported on every reindex while the \
+                 file stays gone. To carry its history to the row of the file's new path, fold it \
+                 in with `doc(action=\"graft\", from_id=<kept id>, into_id=<new id>)`.")
+        },
         "escaping_note": if total_reclaimed_escaping > 0
             || !escaping_kept_ids.is_empty()
             || !escaping_skipped_paths.is_empty()
@@ -875,8 +897,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                  with everything read from the file cleared (title, fields, chunk text, vectors), \
                  and are reported on every reindex while the link stands. Removing or \
                  re-pointing the link makes the file vanish from that path, and the next \
-                 reindex then deletes the kept row WITH its augmentation and events: to keep \
-                 that history, first fold it into the row of the file's real location with \
+                 reindex then keeps the row as a vanished row (`vanished_kept_ids`) with its \
+                 augmentation and events: to carry that history to the row of the file's real \
+                 location, fold it in with \
                  `doc(action=\"graft\", from_id=<kept id>, into_id=<real id>)`. Text an embedder \
                  already received before this was fixed cannot be recalled.")
         } else {
@@ -2514,6 +2537,63 @@ mod tests {
             .as_str()
             .expect("a note when rows were reclaimed or kept");
         assert!(note.contains("doc(action=\"graft\""), "{note}");
+    }
+    /// The kept-vanished report reaches the TOOL response: the ids, the paths, the count of removals
+    /// left at zero, and a note that names `doc(graft)`. Dropping the accumulation or renaming a key
+    /// would leave every indexer-level test green.
+    #[tokio::test]
+    async fn reindex_response_reports_a_kept_vanished_row() {
+        use crate::librarian::catalog::events::TestEventRowBuilder;
+        let tmp = TempDir::new().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        std::fs::write(root.join("docs/specs/a.md"), "# a\n").unwrap();
+        let ctx = mk_ctx(
+            root.clone(),
+            "[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n",
+        );
+        call(&ctx, json!({})).await.unwrap();
+        let id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/a.md"));
+        crate::librarian::catalog::events::insert(
+            &ctx.catalog.lock(),
+            &TestEventRowBuilder::new(&id, "note")
+                .with_id("e-history")
+                .with_payload("{\"text\":\"local history\"}")
+                .build(),
+        )
+        .unwrap();
+        std::fs::rename(root.join("docs/specs/a.md"), root.join("docs/specs/a2.md")).unwrap();
+
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(v["vanished_kept_ids"], json!([id]), "{v}");
+        assert_eq!(v["removed"].as_u64(), Some(0), "{v}");
+        assert!(
+            v["vanished_kept_paths"][0]
+                .as_str()
+                .is_some_and(|p| p.ends_with("docs/specs/a.md")),
+            "{v}"
+        );
+        let note = v["vanished_kept_note"]
+            .as_str()
+            .expect("a note when a vanished row was kept");
+        assert!(note.contains("doc(action=\"graft\""), "{note}");
+    }
+
+    /// The control: a root where nothing vanished has an empty id list and a null note.
+    #[tokio::test]
+    async fn reindex_response_has_no_vanished_note_when_nothing_vanished() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("a.md"), "# a\n").unwrap();
+        let ctx = mk_ctx(
+            tmp.path().to_path_buf(),
+            "[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n",
+        );
+
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(v["vanished_kept_ids"], json!([]), "{v}");
+        assert!(v["vanished_kept_note"].is_null(), "{v}");
     }
 
     /// The control: a root with no escaping rows has a null note and empty id lists.
