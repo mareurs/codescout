@@ -35,7 +35,9 @@ impl Skip {
 pub struct ScannedFile {
     /// Git-root-relative, `/`-separated.
     pub rel_path: String,
-    /// Lower-case hex SHA-256 of the raw blob bytes.
+    /// Lower-case hex SHA-256 of the raw blob bytes. Computed for every listed blob, skipped
+    /// ones included, so a blob missing from the local object database (a partial clone, for
+    /// example) aborts the scan.
     pub sha256: String,
     /// The text, or why there is none.
     pub text: Result<String, Skip>,
@@ -49,19 +51,46 @@ pub fn open_commit<'r>(repo: &'r git2::Repository, rev: &str) -> anyhow::Result<
 }
 
 /// The UTF-8 text of `rel_path` in `commit`'s tree. `None` when the path is absent; an error
-/// when the blob is not UTF-8.
+/// when the blob is not UTF-8, or when the file or any directory on its path is a symlink in
+/// the commit (a symlinked config must be loud, never absent and never a bogus parse).
 pub fn blob_text(
     repo: &git2::Repository,
     commit: &git2::Commit,
     rel_path: &str,
 ) -> anyhow::Result<Option<String>> {
-    let entry = match commit.tree()?.get_path(std::path::Path::new(rel_path)) {
-        Ok(entry) => entry,
-        Err(e) if e.code() == git2::ErrorCode::NotFound => return Ok(None),
-        Err(e) => {
-            return Err(e).with_context(|| format!("looking up {rel_path} in {}", commit.id()))
-        }
+    let parts: Vec<&str> = rel_path.split('/').filter(|p| !p.is_empty()).collect();
+    let Some((leaf, dirs)) = parts.split_last() else {
+        return Ok(None);
     };
+    let refuse_link = |entry: &git2::TreeEntry, upto: usize| {
+        anyhow::ensure!(
+            entry.filemode() != SYMLINK_MODE,
+            "{rel_path} in {} is a symlink ({} is a link in the commit)",
+            commit.id(),
+            parts[..=upto].join("/")
+        );
+        Ok(())
+    };
+    let mut tree = commit.tree()?;
+    for (i, part) in dirs.iter().enumerate() {
+        let next = {
+            let Some(entry) = tree.get_name(part) else {
+                return Ok(None);
+            };
+            refuse_link(&entry, i)?;
+            if entry.kind() != Some(git2::ObjectType::Tree) {
+                return Ok(None);
+            }
+            repo.find_tree(entry.id()).with_context(|| {
+                format!("reading tree {} in {}", parts[..=i].join("/"), commit.id())
+            })?
+        };
+        tree = next;
+    }
+    let Some(entry) = tree.get_name(leaf) else {
+        return Ok(None);
+    };
+    refuse_link(&entry, dirs.len())?;
     let blob = repo
         .find_blob(entry.id())
         .with_context(|| format!("{rel_path} in {} is not a file", commit.id()))?;
@@ -77,7 +106,7 @@ pub fn scan_commit(
     space: &KeySpace,
 ) -> anyhow::Result<Vec<ScannedFile>> {
     let mut files = Vec::new();
-    collect(repo, &commit.tree()?, "", space, &mut files)?;
+    collect(repo, &commit.tree()?, "", true, space, &mut files)?;
     files.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     Ok(files)
 }
@@ -89,6 +118,8 @@ fn collect(
     repo: &git2::Repository,
     tree: &git2::Tree,
     prefix: &str,
+    // False when `prefix` was spelled lossily because a directory name on it is not UTF-8.
+    path_ok: bool,
     space: &KeySpace,
     out: &mut Vec<ScannedFile>,
 ) -> anyhow::Result<()> {
@@ -108,7 +139,14 @@ fn collect(
                 let sub = repo
                     .find_tree(entry.id())
                     .with_context(|| format!("reading tree {rel_path}"))?;
-                collect(repo, &sub, &format!("{rel_path}/"), space, out)?;
+                collect(
+                    repo,
+                    &sub,
+                    &format!("{rel_path}/"),
+                    path_ok && name_ok,
+                    space,
+                    out,
+                )?;
             }
             // Submodules (commit entries) have no blob here.
             Some(git2::ObjectType::Blob) if name.ends_with(".md") => {
@@ -122,7 +160,7 @@ fn collect(
                     Err(Skip::OutsideKeySpace)
                 } else if entry.filemode() == SYMLINK_MODE {
                     Err(Skip::Symlink)
-                } else if !name_ok {
+                } else if !(path_ok && name_ok) {
                     Err(Skip::NotUtf8)
                 } else {
                     std::str::from_utf8(bytes)
@@ -350,5 +388,131 @@ mod tests {
             open_commit(&ra, "HEAD").unwrap().id(),
             open_commit(&rb, "HEAD").unwrap().id()
         );
+    }
+
+    /// A repo whose root tree is built by hand, so an entry name can be raw bytes.
+    fn repo_with_raw_tree(
+        dir: &std::path::Path,
+        build: impl FnOnce(&git2::Repository, &mut git2::TreeBuilder),
+    ) -> git2::Repository {
+        let repo = git2::Repository::init(dir).unwrap();
+        let tree_id = {
+            let mut root = repo.treebuilder(None).unwrap();
+            build(&repo, &mut root);
+            root.write().unwrap()
+        };
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let sig = fixed_sig();
+            repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+                .unwrap();
+        }
+        repo
+    }
+
+    #[test]
+    fn a_non_utf8_directory_name_marks_its_children_not_utf8() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_with_raw_tree(dir.path(), |repo, root| {
+            let blob = repo.blob(b"valid utf-8 text").unwrap();
+            let mut sub = repo.treebuilder(None).unwrap();
+            sub.insert("x.md", blob, FILE as i32).unwrap();
+            let mut deep = repo.treebuilder(None).unwrap();
+            deep.insert("y.md", blob, FILE as i32).unwrap();
+            let deep_id = deep.write().unwrap();
+            sub.insert("inner", deep_id, 0o040000).unwrap();
+            let sub_id = sub.write().unwrap();
+            // `d\xFFr/`: not UTF-8, so no real path is spelled `d\u{FFFD}r/x.md`.
+            root.insert(&b"d\xffr"[..], sub_id, 0o040000).unwrap();
+            root.insert("a.md", blob, FILE as i32).unwrap();
+        });
+        let files = scan(&repo, &KeySpace::empty());
+        let by_path: Vec<(&str, &Result<String, Skip>)> = files
+            .iter()
+            .map(|f| (f.rel_path.as_str(), &f.text))
+            .collect();
+        assert_eq!(
+            by_path,
+            [
+                ("a.md", &Ok("valid utf-8 text".to_string())),
+                ("d\u{fffd}r/inner/y.md", &Err(Skip::NotUtf8)),
+                ("d\u{fffd}r/x.md", &Err(Skip::NotUtf8)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_non_utf8_leaf_name_is_reported_not_utf8() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_with_raw_tree(dir.path(), |repo, root| {
+            let blob = repo.blob(b"valid utf-8 text").unwrap();
+            root.insert(&b"b\xff.md"[..], blob, FILE as i32).unwrap();
+            root.insert("ok.md", blob, FILE as i32).unwrap();
+        });
+        let files = scan(&repo, &KeySpace::empty());
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].rel_path, "b\u{fffd}.md");
+        assert_eq!(files[0].text, Err(Skip::NotUtf8));
+        assert_eq!(files[1].rel_path, "ok.md");
+        assert_eq!(files[1].text, Ok("valid utf-8 text".to_string()));
+    }
+
+    #[test]
+    fn blob_text_refuses_a_symlinked_leaf() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_with(dir.path(), &[("repo.toml", LINK, b"elsewhere.toml")]);
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        let err = blob_text(&repo, &commit, "repo.toml").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("repo.toml") && msg.contains("symlink"),
+            "got: {msg}"
+        );
+        assert!(
+            msg.contains(&commit.id().to_string()),
+            "names the commit: {msg}"
+        );
+    }
+
+    #[test]
+    fn blob_text_refuses_a_path_under_a_symlinked_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        // `.codescout` itself is a link in the commit.
+        let repo = repo_with(dir.path(), &[(".codescout", LINK, b"../shared")]);
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        let err = blob_text(&repo, &commit, ".codescout/repo.toml").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains(".codescout/repo.toml") && msg.contains("symlink"),
+            "got: {msg}"
+        );
+        assert!(
+            msg.contains(&commit.id().to_string()),
+            "names the commit: {msg}"
+        );
+    }
+
+    #[test]
+    fn blob_text_reads_a_regular_file_under_a_directory_and_an_absent_one_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_with(
+            dir.path(),
+            &[
+                (".codescout/repo.toml", FILE, b"id = 'x'\n"),
+                ("plain", FILE, b"p"),
+            ],
+        );
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        assert_eq!(
+            blob_text(&repo, &commit, ".codescout/repo.toml").unwrap(),
+            Some("id = 'x'\n".to_string())
+        );
+        assert_eq!(
+            blob_text(&repo, &commit, ".codescout/librarian.toml").unwrap(),
+            None
+        );
+        assert_eq!(blob_text(&repo, &commit, "nodir/repo.toml").unwrap(), None);
+        // A regular file where a directory is expected is an absent path, not an error.
+        assert_eq!(blob_text(&repo, &commit, "plain/repo.toml").unwrap(), None);
     }
 }
