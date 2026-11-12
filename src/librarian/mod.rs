@@ -20,6 +20,7 @@ pub mod util;
 pub mod augmentation_sidecar;
 
 pub mod artifact_store;
+pub mod derived;
 pub mod embedding;
 pub mod entry_token;
 pub mod freshness;
